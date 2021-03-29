@@ -1,8 +1,20 @@
 use std::ops::Neg;
 use std::cmp::Eq;
 
-trait Literal: Eq + Neg<Output = Self> {}
+pub trait Literal: Eq + Neg<Output = Self> {}
 impl<T> Literal for T where T: Eq + Neg<Output = Self> {}
+
+pub trait ClauseSink {
+    type Lit: Literal;
+    fn add_clause(self, cl: &[Self::Lit]) -> bool;
+}
+
+pub trait LiteralGenerator {
+    type Lit: Literal;
+    fn new_lit(self) -> Self::Lit;
+}
+
+
 
 #[cfg(test)]
 mod tests {
