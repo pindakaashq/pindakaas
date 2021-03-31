@@ -59,7 +59,7 @@ pub trait ClauseSink {
         debug_assert!(lits.len() >= 2);
         // For every pair of literals (i, j) add "¬i ∨ ¬j"
         (0..lits.len()).into_iter().all(|i| {
-            (i+1..lits.len())
+            (i + 1..lits.len())
                 .into_iter()
                 .all(|j| self.add_clause(&[-lits[i], -lits[j]]))
         })
@@ -88,7 +88,7 @@ fn unique_members<T: Hash + Eq>(collection: &[T]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::Lit;
+    use crate::{ClauseSink, Lit};
     use std::cmp::Eq;
     use std::hash::Hash;
     use std::ops::Neg;
@@ -100,5 +100,21 @@ mod tests {
     }
     fn lit_properties<T: Eq + Hash + Neg>(_: T) -> bool {
         true
+    }
+
+    #[test]
+    fn test_naive_amo() {
+        // AMO on two literals
+        let mut two: Vec<Vec<Lit>> = vec![];
+        two.encode_naive_amo(&[1, 2][..]);
+        assert_eq!(two, vec![vec![-1, -2]]);
+        // AMO on a negated literals
+        let mut two: Vec<Vec<Lit>> = vec![];
+        two.encode_naive_amo(&[-1, 2][..]);
+        assert_eq!(two, vec![vec![1, -2]]);
+        // AMO on three literals
+        let mut two: Vec<Vec<Lit>> = vec![];
+        two.encode_naive_amo(&[1, 2, 3][..]);
+        assert_eq!(two, vec![vec![-1, -2], vec![-1, -3], vec![-2, -3]]);
     }
 }
