@@ -37,9 +37,9 @@ type Coeff = i64;
 type PosCoeff = u64;
 
 pub enum Comparator {
-    LessEq,
-    Equal,
-    GreaterEq,
+	LessEq,
+	Equal,
+	GreaterEq,
 }
 
 /// The `ClauseDatabase` trait is the common trait implemented by types that are
@@ -50,40 +50,40 @@ pub enum Comparator {
 /// should have a [`ClauseSink::add_clause`] method. Futhermore, implementers
 /// are required to have a [`Self::new_lit`] method.
 pub trait ClauseDatabase: ClauseSink {
-    /// Method to be used to receive a new (unused) litaral that can be used in
-    /// the encoding of a constraint.
-    fn new_lit(&self) -> Self::Lit;
+	/// Method to be used to receive a new (unused) litaral that can be used in
+	/// the encoding of a constraint.
+	fn new_lit(&self) -> Self::Lit;
 
-    /// Encode the constraint
-    fn encode_pb(&mut self, _pair: &[(Coeff, Self::Lit)], _comp: Comparator, _k: Coeff) -> bool {
-        // TODO: implement encoding
-        unimplemented!()
-    }
+	/// Encode the constraint
+	fn encode_pb(&mut self, _pair: &[(Coeff, Self::Lit)], _comp: Comparator, _k: Coeff) -> bool {
+		// TODO: implement encoding
+		unimplemented!()
+	}
 
-    /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≤ k
-    fn encode_amk(&mut self, _pair: &[(PosCoeff, Self::Lit)], _k: Coeff) -> bool {
-        // TODO: implement encoding
-        unimplemented!()
-    }
+	/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≤ k
+	fn encode_amk(&mut self, _pair: &[(PosCoeff, Self::Lit)], _k: Coeff) -> bool {
+		// TODO: implement encoding
+		unimplemented!()
+	}
 
-    /// Encode that at most on literal in `lits` can be true.
-    ///
-    /// # Required Preprocessing
-    ///
-    /// - The literals in `lits` are assumed to the unique. In an AMO constraint
-    ///   non-unique literals should be preprocessed removed from the problem.
-    ///
-    /// - `lits` is expected to contain at least 2 literals. In cases where an
-    ///   AMO constraint has fewer literals, the literals can either be removed
-    ///   for the problem or the problem is already unsatisfiable
-    fn encode_amo(&mut self, lits: &[Self::Lit]) -> bool {
-        // Precondition: there is no duplicate literals
-        debug_assert!(unique_members(lits));
-        // Precondition: there are multiple literals in the AMO constraint
-        debug_assert!(lits.len() >= 2);
-        // TODO: Pick encoding
-        self.encode_naive_amo(lits)
-    }
+	/// Encode that at most on literal in `lits` can be true.
+	///
+	/// # Required Preprocessing
+	///
+	/// - The literals in `lits` are assumed to the unique. In an AMO constraint
+	///   non-unique literals should be preprocessed removed from the problem.
+	///
+	/// - `lits` is expected to contain at least 2 literals. In cases where an
+	///   AMO constraint has fewer literals, the literals can either be removed
+	///   for the problem or the problem is already unsatisfiable
+	fn encode_amo(&mut self, lits: &[Self::Lit]) -> bool {
+		// Precondition: there is no duplicate literals
+		debug_assert!(unique_members(lits));
+		// Precondition: there are multiple literals in the AMO constraint
+		debug_assert!(lits.len() >= 2);
+		// TODO: Pick encoding
+		self.encode_naive_amo(lits)
+	}
 }
 
 /// Types that abide by the `ClauseSink` trait can be used as the output for the
@@ -93,92 +93,91 @@ pub trait ClauseDatabase: ClauseSink {
 /// To satisfy the trait, the type must implement a
 /// [`Self::add_clause`] method.
 pub trait ClauseSink {
-    /// Type used to represent a Boolean literal in the constraint input and
-    /// generated clauses.
-    type Lit: Literal;
+	/// Type used to represent a Boolean literal in the constraint input and
+	/// generated clauses.
+	type Lit: Literal;
 
-    /// Add a clause to the `ClauseSink`. The sink is allowed to return `false`
-    /// only when the collection of clauses has been *proven* to be
-    /// unsatisfiable. This is used as a signal to the encoder that any
-    /// subsequent encoding effort can be abandoned.
-    fn add_clause(&mut self, cl: &[Self::Lit]) -> bool;
+	/// Add a clause to the `ClauseSink`. The sink is allowed to return `false`
+	/// only when the collection of clauses has been *proven* to be
+	/// unsatisfiable. This is used as a signal to the encoder that any
+	/// subsequent encoding effort can be abandoned.
+	fn add_clause(&mut self, cl: &[Self::Lit]) -> bool;
 
-    /// Adds an encoding for an At Most One constraints to `sink` that for every
-    /// pair of literals from `lits` states that one of the literals has to be
-    /// `false`.
-    ///
-    /// # Required Preprocessing
-    ///
-    /// - The literals in `lits` are assumed to the unique. In an AMO constraint
-    ///   non-unique literals should be preprocessed removed from the problem.
-    ///
-    /// - `lits` is expected to contain at least 2 literals. In cases where an
-    ///   AMO constraint has fewer literals, the literals can either be removed
-    ///   for the problem or the problem is already unsatisfiable
-    fn encode_naive_amo(&mut self, lits: &[Self::Lit]) -> bool {
-        // Precondition: there is no duplicate literals
-        debug_assert!(unique_members(lits));
-        // Precondition: there are multiple literals in the AMO constraint
-        debug_assert!(lits.len() >= 2);
-        // For every pair of literals (i, j) add "¬i ∨ ¬j"
-        (0..lits.len()).into_iter().all(|i| {
-            (i + 1..lits.len())
-                .into_iter()
-                .all(|j| self.add_clause(&[-(lits[i].clone()), -(lits[j].clone())]))
-        })
-    }
+	/// Adds an encoding for an At Most One constraints to `sink` that for every
+	/// pair of literals from `lits` states that one of the literals has to be
+	/// `false`.
+	///
+	/// # Required Preprocessing
+	///
+	/// - The literals in `lits` are assumed to the unique. In an AMO constraint
+	///   non-unique literals should be preprocessed removed from the problem.
+	///
+	/// - `lits` is expected to contain at least 2 literals. In cases where an
+	///   AMO constraint has fewer literals, the literals can either be removed
+	///   for the problem or the problem is already unsatisfiable
+	fn encode_naive_amo(&mut self, lits: &[Self::Lit]) -> bool {
+		// Precondition: there is no duplicate literals
+		debug_assert!(unique_members(lits));
+		// Precondition: there are multiple literals in the AMO constraint
+		debug_assert!(lits.len() >= 2);
+		// For every pair of literals (i, j) add "¬i ∨ ¬j"
+		(0..lits.len()).into_iter().all(|i| {
+			(i + 1..lits.len())
+				.into_iter()
+				.all(|j| self.add_clause(&[-(lits[i].clone()), -(lits[j].clone())]))
+		})
+	}
 }
 
 impl ClauseSink for Vec<Vec<i32>> {
-    type Lit = i32;
-    fn add_clause(&mut self, cl: &[Self::Lit]) -> bool {
-        self.push(cl.into_iter().map(|x| (*x).clone()).collect());
-        true
-    }
+	type Lit = i32;
+	fn add_clause(&mut self, cl: &[Self::Lit]) -> bool {
+		self.push(cl.into_iter().map(|x| (*x).clone()).collect());
+		true
+	}
 }
 
 // ---- Helper Functions ----
 
 /// Checks if all members in a slice are unique
 fn unique_members<T: Hash + Eq>(collection: &[T]) -> bool {
-    // All members of collection are unique if a hash set constructed with the
-    // same elements has the same number of elements.
-    collection
-        .into_iter()
-        .collect::<std::collections::HashSet<_>>()
-        .len()
-        == collection.len()
+	// All members of collection are unique if a hash set constructed with the
+	// same elements has the same number of elements.
+	collection
+		.into_iter()
+		.collect::<std::collections::HashSet<_>>()
+		.len() == collection.len()
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{ClauseSink, Literal};
+	use crate::{ClauseSink, Literal};
 
-    #[test]
-    fn test_int_literals() {
-        assert_eq!(is_lit(1i8), true);
-        assert_eq!(is_lit(1i16), true);
-        assert_eq!(is_lit(1i32), true);
-        assert_eq!(is_lit(1i64), true);
-        assert_eq!(is_lit(1i128), true);
-    }
-    fn is_lit<T: Literal>(_: T) -> bool {
-        true
-    }
+	#[test]
+	fn test_int_literals() {
+		assert_eq!(is_lit(1i8), true);
+		assert_eq!(is_lit(1i16), true);
+		assert_eq!(is_lit(1i32), true);
+		assert_eq!(is_lit(1i64), true);
+		assert_eq!(is_lit(1i128), true);
+	}
+	fn is_lit<T: Literal>(_: T) -> bool {
+		true
+	}
 
-    #[test]
-    fn test_naive_amo() {
-        // AMO on two literals
-        let mut two: Vec<Vec<i32>> = vec![];
-        two.encode_naive_amo(&[1, 2][..]);
-        assert_eq!(two, vec![vec![-1, -2]]);
-        // AMO on a negated literals
-        let mut two: Vec<Vec<i32>> = vec![];
-        two.encode_naive_amo(&[-1, 2][..]);
-        assert_eq!(two, vec![vec![1, -2]]);
-        // AMO on three literals
-        let mut two: Vec<Vec<i32>> = vec![];
-        two.encode_naive_amo(&[1, 2, 3][..]);
-        assert_eq!(two, vec![vec![-1, -2], vec![-1, -3], vec![-2, -3]]);
-    }
+	#[test]
+	fn test_naive_amo() {
+		// AMO on two literals
+		let mut two: Vec<Vec<i32>> = vec![];
+		two.encode_naive_amo(&[1, 2][..]);
+		assert_eq!(two, vec![vec![-1, -2]]);
+		// AMO on a negated literals
+		let mut two: Vec<Vec<i32>> = vec![];
+		two.encode_naive_amo(&[-1, 2][..]);
+		assert_eq!(two, vec![vec![1, -2]]);
+		// AMO on three literals
+		let mut two: Vec<Vec<i32>> = vec![];
+		two.encode_naive_amo(&[1, 2, 3][..]);
+		assert_eq!(two, vec![vec![-1, -2], vec![-1, -3], vec![-2, -3]]);
+	}
 }
