@@ -2,6 +2,8 @@
 name = "pindakaas"
 version = "0.1.0"
 authors = ["Jip J. Dekker <jip@dekker.one>"]
+license = "MPL-2.0"
+
 edition = "2021"
 
 [dependencies]
