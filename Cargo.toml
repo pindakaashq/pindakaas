@@ -2,9 +2,8 @@
 name = "pindakaas"
 version = "0.1.0"
 authors = ["Jip J. Dekker <jip@dekker.one>"]
-edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+edition = "2021"
 
 [dependencies]
-# num = "0.4" TODO: Coefficient
+num = "^0.4"
+itertools = "^0.10"
