@@ -1,0 +1,48 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+use crate::{ClauseSink, Literal, Result};
+
+/// Encode the constraint lits[0] ⊕ ... ⊕ lits[n].
+/// Warning: currently only defined for n ≤ 3
+///
+/// # Example
+///
+/// ```ignore
+/// // private module function
+/// let mut v = vec![];
+/// encode_xor(&mut v, &[1,2]);
+/// assert_eq!(v, vec![vec![1,2], vec![-1,-2]])
+/// ```
+///
+pub fn encode_xor<Lit: Literal, DB: ClauseSink<Lit = Lit> + ?Sized>(
+	db: &mut DB,
+	lits: &[Lit],
+) -> Result {
+	match lits {
+		[a] => db.add_clause(&[a.clone()]),
+		[a, b] => {
+			db.add_clause(&[a.clone(), b.clone()])?;
+			db.add_clause(&[-a.clone(), -b.clone()])
+		}
+		[a, b, c] => {
+			db.add_clause(&[a.clone(), b.clone(), c.clone()])?;
+			db.add_clause(&[a.clone(), -b.clone(), -c.clone()])?;
+			db.add_clause(&[-a.clone(), b.clone(), -c.clone()])?;
+			db.add_clause(&[-a.clone(), -b.clone(), c.clone()])
+		}
+		_ => panic!("Unexpected usage of XOR with more that three arguments"),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	#[test]
+	fn test_xor() {
+		let mut v = vec![];
+		assert!(encode_xor(&mut v, &[1, 2]).is_ok());
+		assert_eq!(v, vec![vec![1, 2], vec![-1, -2]]);
+	}
+}

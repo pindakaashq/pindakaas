@@ -25,6 +25,9 @@ use num::{
 	Integer, PrimInt, Signed, Unsigned,
 };
 
+mod adder;
+mod helpers;
+
 /// Literal is the super-trait for types that can be used to represent boolean
 /// literals in this library.
 ///
@@ -258,173 +261,7 @@ pub trait ClauseDatabase: ClauseSink {
 		comp: Comparator,
 		k: PC,
 	) -> Result {
-		// The number of relevant bits in k
-		let bits = (PC::zero().count_zeros() - k.count_zeros()) as usize;
-		let mut k = (0..bits)
-			.map(|b| k & (PC::one() << b) != PC::zero())
-			.collect::<Vec<bool>>();
-		debug_assert_eq!(k[bits - 1], true);
-
-		// Create structure with which coefficients use which bits
-		let mut bucket = vec![Vec::new(); bits];
-		for b in 0..bits {
-			for (coef, lit) in pair {
-				if *coef & (PC::one() << b) != PC::zero() {
-					bucket[b].push(lit.clone());
-				}
-			}
-		}
-
-		// Functions to create sum and carry literals
-		let sum_lit = |db: &mut Self, lits: &[Self::Lit]| {
-			let sum = db.new_lit();
-			match lits {
-				[a, b, c] => {
-					db.add_clause(&[a.clone(), b.clone(), c.clone(), -sum.clone()])?;
-					db.add_clause(&[a.clone(), -b.clone(), -c.clone(), -sum.clone()])?;
-					db.add_clause(&[-a.clone(), b.clone(), -c.clone(), -sum.clone()])?;
-					db.add_clause(&[-a.clone(), -b.clone(), c.clone(), -sum.clone()])?;
-
-					db.add_clause(&[-a.clone(), -b.clone(), -c.clone(), sum.clone()])?;
-					db.add_clause(&[-a.clone(), b.clone(), c.clone(), sum.clone()])?;
-					db.add_clause(&[a.clone(), -b.clone(), c.clone(), sum.clone()])?;
-					db.add_clause(&[a.clone(), b.clone(), -c.clone(), sum.clone()])?;
-				}
-				_ => unreachable!(),
-			}
-			Ok(sum)
-		};
-		let carry_lit = |db: &mut Self, lits: &[Self::Lit]| {
-			let carry = db.new_lit();
-			match lits {
-				[a, b, c] => {
-					db.add_clause(&[a.clone(), b.clone(), -carry.clone()])?;
-					db.add_clause(&[a.clone(), c.clone(), -carry.clone()])?;
-					db.add_clause(&[b.clone(), c.clone(), -carry.clone()])?;
-
-					db.add_clause(&[-a.clone(), -b.clone(), carry.clone()])?;
-					db.add_clause(&[-a.clone(), -c.clone(), carry.clone()])?;
-					db.add_clause(&[-a.clone(), -b.clone(), carry.clone()])?;
-				}
-				_ => unreachable!(),
-			}
-			Ok(carry)
-		};
-		let force_carry = |db: &mut Self, lits: &[Self::Lit], k: bool| match lits {
-			[a, b, c] => {
-				let neg = |x: Self::Lit| if k { x } else { -x };
-				db.add_clause(&[neg(a.clone()), neg(b.clone())])?;
-				db.add_clause(&[neg(a.clone()), neg(c.clone())])?;
-				db.add_clause(&[neg(b.clone()), neg(c.clone())])
-			}
-			[a, b] => {
-				if k {
-					// TODO: Can we avoid this?
-					db.add_clause(&[a.clone()])?;
-					db.add_clause(&[b.clone()])
-				} else {
-					db.add_clause(&[-a.clone(), -b.clone()])
-				}
-			}
-			_ => unreachable!(),
-		};
-		let force_sum = |db: &mut Self, lits: &[Self::Lit], k: bool| match lits {
-			[a, b, c] => {
-				if k {
-					db.encode_xor3(a, b, c)
-				} else {
-					db.add_clause(&[-a.clone(), -b.clone(), -c.clone()])?;
-					db.add_clause(&[-a.clone(), b.clone(), c.clone()])?;
-					db.add_clause(&[a.clone(), -b.clone(), c.clone()])?;
-					db.add_clause(&[a.clone(), b.clone(), -c.clone()])
-				}
-			}
-			[a, b] => {
-				if k {
-					db.encode_xor(a, b)
-				} else {
-					db.add_clause(&[a.clone(), -b.clone()])?;
-					db.add_clause(&[-a.clone(), b.clone()])
-				}
-			}
-			_ => unreachable!(),
-		};
-
-		// Compute the sums and carries for each bit layer
-		// if comp == Equal, then this is directly enforced (to avoid creating additional literals)
-		// otherwise, sum literals are left in the buckets for further processing
-		let mut sum = vec![None; bits];
-		for b in 0..bits {
-			if bucket[b].is_empty() {
-				if k[b] && comp == Comparator::Equal {
-					return Err(Unsatisfiable);
-				}
-			} else if bucket[b].len() == 1 {
-				let x = bucket[b].pop().unwrap();
-				if k[b] && comp == Comparator::Equal {
-					self.add_clause(&[x])?
-				} else {
-					sum[b] = Some(x);
-				}
-			} else {
-				while bucket[b].len() >= 2 {
-					let last = bucket[b].len() <= 3;
-					let lits = if last {
-						bucket[b].split_off(0)
-					} else {
-						let i = bucket[b].len() - 3;
-						bucket[b].split_off(i)
-					};
-					debug_assert!(lits.len() == 3 || lits.len() == 2);
-
-					// Compute sum
-					if last && comp == Comparator::Equal {
-						// No need to create a new literal, force the sum to equal the result
-						force_sum(self, lits.as_slice(), k[b])?;
-					} else {
-						bucket[b].push(sum_lit(self, lits.as_slice())?);
-					}
-
-					// Compute carry
-					if b + 1 >= bucket.len() {
-						// Carry will bring the sum to be greater than k, force to be false
-						force_carry(self, &lits[..], false)?
-					} else if last && comp == Comparator::Equal && bucket[b + 1].is_empty() {
-						// No need to create a new literal, force the carry to equal the result
-						force_carry(self, &lits[..], k[b + 1])?;
-						// Mark k[b + 1] as false (otherwise next step will fail)
-						k[b + 1] = false;
-					} else {
-						bucket[b + 1].push(carry_lit(self, lits.as_slice())?);
-					}
-				}
-				debug_assert!(
-					(comp == Comparator::Equal && bucket[b].is_empty())
-						|| (comp == Comparator::LessEq && bucket[b].len() == 1)
-				);
-				sum[b] = bucket[b].pop();
-			}
-		}
-		// In case of equality this has been enforced
-		debug_assert!(comp != Comparator::Equal || sum.iter().all(|x| x.is_none()));
-
-		// Enforce less-than constraint
-		if comp == Comparator::LessEq {
-			// For every zero bit in k:
-			// - either the sum bit is also zero, or
-			// - a higher sum bit is zero that was one in k.
-			for i in 0..bits {
-				if !k[i] && sum[i].is_some() {
-					self.add_clause(
-						&(i..bits)
-							.filter_map(|j| if j == i || k[j] { sum[j].clone() } else { None })
-							.map(|lit| -lit)
-							.collect::<Vec<Self::Lit>>(),
-					)?;
-				}
-			}
-		}
-		Ok(())
+		adder::encode_pb_adder(self, pair, comp, k)
 	}
 }
 
@@ -468,19 +305,6 @@ pub trait ClauseSink {
 		}
 		Ok(())
 	}
-
-	/// Adds simple clauses for a binary XOR constraint a ⊻ b.
-	fn encode_xor(&mut self, a: &Self::Lit, b: &Self::Lit) -> Result {
-		self.add_clause(&[a.clone(), b.clone()])?;
-		self.add_clause(&[-a.clone(), -b.clone()])
-	}
-	/// Adds simple clauses for a ternary XOR constraint a ⊻ b ⊻ c
-	fn encode_xor3(&mut self, a: &Self::Lit, b: &Self::Lit, c: &Self::Lit) -> Result {
-		self.add_clause(&[a.clone(), b.clone(), c.clone()])?;
-		self.add_clause(&[a.clone(), -b.clone(), -c.clone()])?;
-		self.add_clause(&[-a.clone(), b.clone(), -c.clone()])?;
-		self.add_clause(&[-a.clone(), -b.clone(), c.clone()])
-	}
 }
 
 impl<Lit: Literal> ClauseSink for Vec<Vec<Lit>> {
@@ -493,7 +317,7 @@ impl<Lit: Literal> ClauseSink for Vec<Vec<Lit>> {
 
 #[cfg(test)]
 mod tests {
-	use crate::{ClauseDatabase, ClauseSink, Literal, Result};
+	use super::*;
 
 	#[test]
 	fn test_int_literals() {
