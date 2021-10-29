@@ -107,7 +107,7 @@ pub trait ClauseDatabase: ClauseSink {
 		for (coef, lit) in pair {
 			let cl = (*lit).clone();
 			let var = if cl.is_negative() { -cl } else { cl };
-			let entry = agg.entry(var).or_insert(C::zero());
+			let entry = agg.entry(var).or_insert_with(C::zero);
 			let mut coef = (*coef).clone();
 			if lit.is_negative() ^ (comp == GreaterEq) {
 				coef *= -C::one()
@@ -153,7 +153,7 @@ pub trait ClauseDatabase: ClauseSink {
 			Err(_) => panic!("Unable to convert coefficient to positive coeffient."),
 		};
 		// Remove pairs with coef higher than k
-		let (impossible, mut considered): (Vec<(PC, Self::Lit)>, Vec<(PC, Self::Lit)>) =
+		let (impossible, mut considered): (Vec<(PC, Self::Lit)>, _) =
 			normalized.drain(..).partition(|(c, _)| c > &k);
 		// Force literals that cannot be activated
 		for (_, lit) in impossible {
@@ -167,7 +167,7 @@ pub trait ClauseDatabase: ClauseSink {
 		if comp == Comparator::LessEq {
 			if total <= k {
 				return Ok(());
-			} else if normalized.len() == 2 {
+			} else if considered.len() == 2 {
 				// Simple decision between 2 literals
 				return self.add_clause(
 					&considered
@@ -179,19 +179,20 @@ pub trait ClauseDatabase: ClauseSink {
 		} else if comp == Comparator::Equal {
 			if total < k {
 				return Err(Unsatisfiable);
-			} else if total == k {
+			}
+			if total == k {
 				for (_, lit) in considered {
 					self.add_clause(&[lit])?
 				}
 				return Ok(());
 			}
 		}
-		debug_assert!(considered.len() > 0);
+		debug_assert!(!considered.is_empty());
 
 		// special case: all coefficients are equal (and can be made one)
 		if considered.iter().all(|(c, _)| c == &considered[0].0) {
 			// trivial case: k cannot be made from the coefficients
-			if comp == Equal && k.clone() % &considered[0].0 != PC::zero() {
+			if comp == Equal && k % considered[0].0 != PC::zero() {
 				return Err(Unsatisfiable);
 			}
 
@@ -310,7 +311,7 @@ pub trait ClauseSink {
 impl<Lit: Literal> ClauseSink for Vec<Vec<Lit>> {
 	type Lit = Lit;
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
-		self.push(cl.into_iter().map(|x| (*x).clone()).collect());
+		self.push(cl.iter().map(|x| (*x).clone()).collect());
 		Ok(())
 	}
 }
@@ -321,11 +322,11 @@ mod tests {
 
 	#[test]
 	fn test_int_literals() {
-		assert_eq!(is_lit(1i8), true);
-		assert_eq!(is_lit(1i16), true);
-		assert_eq!(is_lit(1i32), true);
-		assert_eq!(is_lit(1i64), true);
-		assert_eq!(is_lit(1i128), true);
+		assert!(is_lit(1i8));
+		assert!(is_lit(1i16));
+		assert!(is_lit(1i32));
+		assert!(is_lit(1i64));
+		assert!(is_lit(1i128));
 	}
 	fn is_lit<T: Literal>(_: T) -> bool {
 		true

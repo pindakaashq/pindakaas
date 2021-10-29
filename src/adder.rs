@@ -23,14 +23,14 @@ pub fn encode_pb_adder<
 	let mut k = (0..bits)
 		.map(|b| k & (PC::one() << b) != PC::zero())
 		.collect::<Vec<bool>>();
-	debug_assert_eq!(k[bits - 1], true);
+	debug_assert!(k[bits - 1]);
 
 	// Create structure with which coefficients use which bits
 	let mut bucket = vec![Vec::new(); bits];
-	for b in 0..bits {
+	for (i, bucker) in bucket.iter_mut().enumerate().take(bits) {
 		for (coef, lit) in pair {
-			if *coef & (PC::one() << b) != PC::zero() {
-				bucket[b].push(lit.clone());
+			if *coef & (PC::one() << i) != PC::zero() {
+				bucker.push(lit.clone());
 			}
 		}
 	}
