@@ -106,7 +106,7 @@ pub fn encode_bool_lin_adder<
 				db.add_clause(
 					&(i..bits)
 						.filter_map(|j| if j == i || k[j] { sum[j].clone() } else { None })
-						.map(|lit| -lit)
+						.map(|lit| lit.negate())
 						.collect::<Vec<Lit>>(),
 				)?;
 			}
@@ -126,21 +126,21 @@ fn create_sum_lit<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized>(
 	let sum = db.new_lit();
 	match lits {
 		[a, b] => {
-			db.add_clause(&[-a.clone(), -b.clone(), -sum.clone()])?;
-			db.add_clause(&[-a.clone(), b.clone(), sum.clone()])?;
-			db.add_clause(&[a.clone(), -b.clone(), sum.clone()])?;
-			db.add_clause(&[a.clone(), b.clone(), -sum.clone()])?;
+			db.add_clause(&[a.negate(), b.negate(), sum.negate()])?;
+			db.add_clause(&[a.negate(), b.clone(), sum.clone()])?;
+			db.add_clause(&[a.clone(), b.negate(), sum.clone()])?;
+			db.add_clause(&[a.clone(), b.clone(), sum.negate()])?;
 		}
 		[a, b, c] => {
-			db.add_clause(&[a.clone(), b.clone(), c.clone(), -sum.clone()])?;
-			db.add_clause(&[a.clone(), -b.clone(), -c.clone(), -sum.clone()])?;
-			db.add_clause(&[-a.clone(), b.clone(), -c.clone(), -sum.clone()])?;
-			db.add_clause(&[-a.clone(), -b.clone(), c.clone(), -sum.clone()])?;
+			db.add_clause(&[a.clone(), b.clone(), c.clone(), sum.negate()])?;
+			db.add_clause(&[a.clone(), b.negate(), c.negate(), sum.negate()])?;
+			db.add_clause(&[a.negate(), b.clone(), c.negate(), sum.negate()])?;
+			db.add_clause(&[a.negate(), b.negate(), c.clone(), sum.negate()])?;
 
-			db.add_clause(&[-a.clone(), -b.clone(), -c.clone(), sum.clone()])?;
-			db.add_clause(&[-a.clone(), b.clone(), c.clone(), sum.clone()])?;
-			db.add_clause(&[a.clone(), -b.clone(), c.clone(), sum.clone()])?;
-			db.add_clause(&[a.clone(), b.clone(), -c.clone(), sum.clone()])?;
+			db.add_clause(&[a.negate(), b.negate(), c.negate(), sum.clone()])?;
+			db.add_clause(&[a.negate(), b.clone(), c.clone(), sum.clone()])?;
+			db.add_clause(&[a.clone(), b.negate(), c.clone(), sum.clone()])?;
+			db.add_clause(&[a.clone(), b.clone(), c.negate(), sum.clone()])?;
 		}
 		_ => unreachable!(),
 	}
@@ -159,14 +159,14 @@ fn force_sum<Lit: Literal, DB: ClauseSink<Lit = Lit> + ?Sized>(
 	} else {
 		match lits {
 			[a, b] => {
-				db.add_clause(&[a.clone(), -b.clone()])?;
-				db.add_clause(&[-a.clone(), b.clone()])
+				db.add_clause(&[a.clone(), b.negate()])?;
+				db.add_clause(&[a.negate(), b.clone()])
 			}
 			[a, b, c] => {
-				db.add_clause(&[-a.clone(), -b.clone(), -c.clone()])?;
-				db.add_clause(&[-a.clone(), b.clone(), c.clone()])?;
-				db.add_clause(&[a.clone(), -b.clone(), c.clone()])?;
-				db.add_clause(&[a.clone(), b.clone(), -c.clone()])
+				db.add_clause(&[a.negate(), b.negate(), c.negate()])?;
+				db.add_clause(&[a.negate(), b.clone(), c.clone()])?;
+				db.add_clause(&[a.clone(), b.negate(), c.clone()])?;
+				db.add_clause(&[a.clone(), b.clone(), c.negate()])
 			}
 			_ => unreachable!(),
 		}
@@ -184,18 +184,18 @@ fn create_carry_lit<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized>(
 	let carry = db.new_lit();
 	match lits {
 		[a, b] => {
-			db.add_clause(&[-a.clone(), -b.clone(), carry.clone()])?;
-			db.add_clause(&[a.clone(), -carry.clone()])?;
-			db.add_clause(&[b.clone(), -carry.clone()])?;
+			db.add_clause(&[a.negate(), b.negate(), carry.clone()])?;
+			db.add_clause(&[a.clone(), carry.negate()])?;
+			db.add_clause(&[b.clone(), carry.negate()])?;
 		}
 		[a, b, c] => {
-			db.add_clause(&[a.clone(), b.clone(), -carry.clone()])?;
-			db.add_clause(&[a.clone(), c.clone(), -carry.clone()])?;
-			db.add_clause(&[b.clone(), c.clone(), -carry.clone()])?;
+			db.add_clause(&[a.clone(), b.clone(), carry.negate()])?;
+			db.add_clause(&[a.clone(), c.clone(), carry.negate()])?;
+			db.add_clause(&[b.clone(), c.clone(), carry.negate()])?;
 
-			db.add_clause(&[-a.clone(), -b.clone(), carry.clone()])?;
-			db.add_clause(&[-a.clone(), -c.clone(), carry.clone()])?;
-			db.add_clause(&[-a.clone(), -b.clone(), carry.clone()])?;
+			db.add_clause(&[a.negate(), b.negate(), carry.clone()])?;
+			db.add_clause(&[a.negate(), c.negate(), carry.clone()])?;
+			db.add_clause(&[a.negate(), b.negate(), carry.clone()])?;
 		}
 		_ => unreachable!(),
 	}
@@ -216,14 +216,14 @@ fn force_carry<Lit: Literal, DB: ClauseSink<Lit = Lit> + ?Sized>(
 				db.add_clause(&[a.clone()])?;
 				db.add_clause(&[b.clone()])
 			} else {
-				db.add_clause(&[-a.clone(), -b.clone()])
+				db.add_clause(&[a.negate(), b.negate()])
 			}
 		}
 		[a, b, c] => {
-			let neg = |x: Lit| if k { x } else { -x };
-			db.add_clause(&[neg(a.clone()), neg(b.clone())])?;
-			db.add_clause(&[neg(a.clone()), neg(c.clone())])?;
-			db.add_clause(&[neg(b.clone()), neg(c.clone())])
+			let neg = |x: &Lit| if k { x.clone() } else { x.negate() };
+			db.add_clause(&[neg(a), neg(b)])?;
+			db.add_clause(&[neg(a), neg(c)])?;
+			db.add_clause(&[neg(b), neg(c)])
 		}
 		_ => unreachable!(),
 	}
