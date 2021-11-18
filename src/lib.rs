@@ -156,7 +156,7 @@ pub trait ClauseDatabase: ClauseSink {
 			}
 		}
 
-		return self.encode_bool_lin(&bool_coeff, &bool_vars, cmp, k);
+		self.encode_bool_lin(&bool_coeff, &bool_vars, cmp, k)
 	}
 
 	/// Encode a Boolean linear constraint
@@ -169,7 +169,7 @@ pub trait ClauseDatabase: ClauseSink {
 	) -> Result {
 		let constraint = BoolLin::aggregate(self, coeff, vars, cmp, k)?;
 
-		return self.encode_aggregated_bool_lin(&constraint);
+		self.encode_aggregated_bool_lin(&constraint)
 	}
 
 	fn encode_aggregated_bool_lin<PC: PositiveCoefficient>(
@@ -179,8 +179,8 @@ pub trait ClauseDatabase: ClauseSink {
 		use BoolLin::*;
 		// TODO: Make better educated choices
 		match constraint {
-			LinEqual { terms, k } => self.encode_bool_lin_eq_adder(&terms, *k),
-			LinLessEq { terms, k } => self.encode_bool_lin_le_adder(&terms, *k),
+			LinEqual { terms, k } => self.encode_bool_lin_eq_adder(terms, *k),
+			LinLessEq { terms, k } => self.encode_bool_lin_le_adder(terms, *k),
 			AtMostK { lits, k } => self.encode_bool_lin_le_adder(
 				&lits.iter().map(|l| (l.clone(), PC::one())).collect(),
 				*k,
@@ -189,7 +189,7 @@ pub trait ClauseDatabase: ClauseSink {
 				&lits.iter().map(|l| (l.clone(), PC::one())).collect(),
 				*k,
 			),
-			AtMostOne { lits } => self.encode_amo_pairwise(&lits),
+			AtMostOne { lits } => self.encode_amo_pairwise(lits),
 			Trivial => Ok(()),
 		}
 	}
