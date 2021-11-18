@@ -24,13 +24,13 @@ pub fn encode_xor<Lit: Literal, DB: ClauseSink<Lit = Lit> + ?Sized>(
 		[a] => db.add_clause(&[a.clone()]),
 		[a, b] => {
 			db.add_clause(&[a.clone(), b.clone()])?;
-			db.add_clause(&[-a.clone(), -b.clone()])
+			db.add_clause(&[a.negate(), b.negate()])
 		}
 		[a, b, c] => {
 			db.add_clause(&[a.clone(), b.clone(), c.clone()])?;
-			db.add_clause(&[a.clone(), -b.clone(), -c.clone()])?;
-			db.add_clause(&[-a.clone(), b.clone(), -c.clone()])?;
-			db.add_clause(&[-a.clone(), -b.clone(), c.clone()])
+			db.add_clause(&[a.clone(), b.negate(), c.negate()])?;
+			db.add_clause(&[a.negate(), b.clone(), c.negate()])?;
+			db.add_clause(&[a.negate(), b.negate(), c.clone()])
 		}
 		_ => panic!("Unexpected usage of XOR with more that three arguments"),
 	}

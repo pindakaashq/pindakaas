@@ -41,13 +41,17 @@ pub use aggregate::BoolLin;
 ///
 ///  - [`std::cmp::Eq`] and [`std::hash::Hash`] to allow PB constraints to be
 ///    simplified
-pub trait Literal: fmt::Debug + Clone + Eq + Hash + Neg<Output = Self> {
+pub trait Literal: fmt::Debug + Clone + Eq + Hash {
 	/// Returns `true` when the literal a negated boolean variable.
-	fn is_negative(&self) -> bool;
+	fn is_negated(&self) -> bool;
+	fn negate(&self) -> Self;
 }
 impl<T: Signed + fmt::Debug + Clone + Eq + Hash + Neg<Output = Self>> Literal for T {
-	fn is_negative(&self) -> bool {
+	fn is_negated(&self) -> bool {
 		self.is_negative()
+	}
+	fn negate(&self) -> Self {
+		-(self.clone())
 	}
 }
 
@@ -179,7 +183,7 @@ pub trait ClauseSink {
 		debug_assert!(lits.len() >= 2);
 		// For every pair of literals (i, j) add "¬i ∨ ¬j"
 		for (a, b) in lits.iter().tuple_combinations() {
-			self.add_clause(&[-a.clone(), -b.clone()])?
+			self.add_clause(&[a.negate(), b.negate()])?
 		}
 		Ok(())
 	}

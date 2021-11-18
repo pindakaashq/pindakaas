@@ -34,14 +34,14 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 		// variable.
 		let mut agg = HashMap::with_capacity(coeff.len());
 		for i in 0..coeff.len() {
-			let var = if vars[i].is_negative() {
-				-vars[i].clone()
+			let var = if vars[i].is_negated() {
+				vars[i].negate()
 			} else {
 				vars[i].clone()
 			};
 			let entry = agg.entry(var).or_insert_with(C::zero);
 			let mut coef = coeff[i].clone();
-			if vars[i].is_negative() ^ (cmp == GreaterEq) {
+			if vars[i].is_negated() ^ (cmp == GreaterEq) {
 				coef *= -C::one()
 			}
 			*entry += coef;
@@ -58,7 +58,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 			}
 			if coef.is_negative() {
 				coef = -coef;
-				lit = -lit;
+				lit = lit.negate();
 				k += coef.clone();
 			};
 			let coef = match coef.try_into() {
@@ -75,7 +75,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 		// trivial case: no literals can be activated
 		if k == C::zero() {
 			for (lit, _) in normalized {
-				db.add_clause(&[-lit])?
+				db.add_clause(&[lit.negate()])?
 			}
 			return Ok(Trivial);
 		}
@@ -89,7 +89,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 			normalized.drain().partition(|(_, c)| c > &k);
 		// Force literals that cannot be activated
 		for (lit, _) in impossible {
-			db.add_clause(&[-lit])?
+			db.add_clause(&[lit.negate()])?
 		}
 		// Check whether considered literals can violate / satisfy the constraint
 		let mut total = PC::zero();
