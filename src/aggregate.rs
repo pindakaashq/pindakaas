@@ -40,7 +40,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 				vars[i].clone()
 			};
 			let entry = agg.entry(var).or_insert_with(C::zero);
-			let mut coef = coeff[i].clone();
+			let mut coef = coeff[i];
 			if vars[i].is_negated() ^ (cmp == GreaterEq) {
 				coef *= -C::one()
 			}
@@ -58,7 +58,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 			if coef.is_negative() {
 				coef = -coef;
 				lit = lit.negate();
-				k += coef.clone();
+				k += coef;
 			};
 			let coef = match coef.try_into() {
 				Ok(coef) => coef,
@@ -93,7 +93,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 		// Check whether considered literals can violate / satisfy the constraint
 		let mut total = PC::zero();
 		for (_, c) in &considered {
-			total += c;
+			total += *c;
 		}
 		if cmp == Comparator::LessEq {
 			if total <= k {
@@ -120,11 +120,11 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 		let val = considered.values().nth(0).unwrap();
 		if considered.iter().all(|(_, c)| c == val) {
 			// trivial case: k cannot be made from the coefficients
-			if cmp == Equal && k % val != PC::zero() {
+			if cmp == Equal && k % *val != PC::zero() {
 				return Err(Unsatisfiable);
 			}
 
-			k /= val;
+			k /= *val;
 			let considered = considered
 				.drain()
 				.map(|(lit, _)| lit)
