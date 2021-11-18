@@ -19,10 +19,8 @@ use std::ops::Neg;
 use std::{clone::Clone, collections::HashMap};
 
 use itertools::Itertools;
-use num::{
-	traits::{NumAssignRef, NumRef},
-	Integer, PrimInt, Signed, Unsigned,
-};
+use num::traits::{NumAssignOps, NumOps};
+use num::{PrimInt, Signed, Unsigned};
 
 mod adder;
 mod aggregate;
@@ -69,15 +67,12 @@ pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
 /// Coefficient in PB constraints are represented by types that implement the
 /// `Coefficient` constraint.
-pub trait Coefficient: Clone + Signed + Integer + PrimInt + NumAssignRef + NumRef {}
-impl<T: Clone + Signed + Integer + PrimInt + NumAssignRef + NumRef> Coefficient for T {}
+pub trait Coefficient: Signed + PrimInt + NumAssignOps + NumOps {}
+impl<T: Signed + PrimInt + NumAssignOps + NumOps> Coefficient for T {}
 /// PositiveCoefficient is a trait used for types used for coefficients that
 /// have been simplified.
-pub trait PositiveCoefficient:
-	Clone + Unsigned + Integer + PrimInt + NumAssignRef + NumRef
-{
-}
-impl<T: Clone + Unsigned + Integer + PrimInt + NumAssignRef + NumRef> PositiveCoefficient for T {}
+pub trait PositiveCoefficient: Unsigned + PrimInt + NumAssignOps + NumOps {}
+impl<T: Unsigned + PrimInt + NumAssignOps + NumOps> PositiveCoefficient for T {}
 
 /// IntEncoding is a enumerated type use to represent Boolean encodings of integer variables within
 /// this library
