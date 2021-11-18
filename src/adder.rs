@@ -2,22 +2,25 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use std::collections::HashMap;
+
 use crate::helpers::encode_xor;
 use crate::{
 	ClauseDatabase, ClauseSink, Comparator, Literal, PositiveCoefficient, Result, Unsatisfiable,
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
-pub fn encode_pb_adder<
+pub fn encode_bool_lin_adder<
 	Lit: Literal,
 	DB: ClauseDatabase<Lit = Lit> + ?Sized,
 	PC: PositiveCoefficient,
 >(
 	db: &mut DB,
-	pair: &[(PC, Lit)],
-	comp: Comparator,
+	pair: &HashMap<Lit, PC>,
+	cmp: Comparator,
 	k: PC,
 ) -> Result {
+	debug_assert!(cmp == Comparator::LessEq || cmp == Comparator::Equal);
 	// The number of relevant bits in k
 	let bits = (PC::zero().count_zeros() - k.count_zeros()) as usize;
 	let mut k = (0..bits)
@@ -28,7 +31,7 @@ pub fn encode_pb_adder<
 	// Create structure with which coefficients use which bits
 	let mut bucket = vec![Vec::new(); bits];
 	for (i, bucker) in bucket.iter_mut().enumerate().take(bits) {
-		for (coef, lit) in pair {
+		for (lit, coef) in pair {
 			if *coef & (PC::one() << i) != PC::zero() {
 				bucker.push(lit.clone());
 			}
@@ -41,12 +44,12 @@ pub fn encode_pb_adder<
 	let mut sum = vec![None; bits];
 	for b in 0..bits {
 		if bucket[b].is_empty() {
-			if k[b] && comp == Comparator::Equal {
+			if k[b] && cmp == Comparator::Equal {
 				return Err(Unsatisfiable);
 			}
 		} else if bucket[b].len() == 1 {
 			let x = bucket[b].pop().unwrap();
-			if k[b] && comp == Comparator::Equal {
+			if k[b] && cmp == Comparator::Equal {
 				db.add_clause(&[x])?
 			} else {
 				sum[b] = Some(x);
@@ -63,7 +66,7 @@ pub fn encode_pb_adder<
 				debug_assert!(lits.len() == 3 || lits.len() == 2);
 
 				// Compute sum
-				if last && comp == Comparator::Equal {
+				if last && cmp == Comparator::Equal {
 					// No need to create a new literal, force the sum to equal the result
 					force_sum(db, lits.as_slice(), k[b])?;
 				} else {
@@ -74,7 +77,7 @@ pub fn encode_pb_adder<
 				if b + 1 >= bucket.len() {
 					// Carry will bring the sum to be greater than k, force to be false
 					force_carry(db, &lits[..], false)?
-				} else if last && comp == Comparator::Equal && bucket[b + 1].is_empty() {
+				} else if last && cmp == Comparator::Equal && bucket[b + 1].is_empty() {
 					// No need to create a new literal, force the carry to equal the result
 					force_carry(db, &lits[..], k[b + 1])?;
 					// Mark k[b + 1] as false (otherwise next step will fail)
@@ -84,17 +87,17 @@ pub fn encode_pb_adder<
 				}
 			}
 			debug_assert!(
-				(comp == Comparator::Equal && bucket[b].is_empty())
-					|| (comp == Comparator::LessEq && bucket[b].len() == 1)
+				(cmp == Comparator::Equal && bucket[b].is_empty())
+					|| (cmp == Comparator::LessEq && bucket[b].len() == 1)
 			);
 			sum[b] = bucket[b].pop();
 		}
 	}
 	// In case of equality this has been enforced
-	debug_assert!(comp != Comparator::Equal || sum.iter().all(|x| x.is_none()));
+	debug_assert!(cmp != Comparator::Equal || sum.iter().all(|x| x.is_none()));
 
 	// Enforce less-than constraint
-	if comp == Comparator::LessEq {
+	if cmp == Comparator::LessEq {
 		// For every zero bit in k:
 		// - either the sum bit is also zero, or
 		// - a higher sum bit is zero that was one in k.
@@ -119,7 +122,7 @@ pub fn encode_pb_adder<
 fn create_sum_lit<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized>(
 	db: &mut DB,
 	lits: &[Lit],
-) -> std::result::Result<Lit, Unsatisfiable> {
+) -> Result<Lit> {
 	let sum = db.new_lit();
 	match lits {
 		[a, b] => {
@@ -177,7 +180,7 @@ fn force_sum<Lit: Literal, DB: ClauseSink<Lit = Lit> + ?Sized>(
 fn create_carry_lit<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized>(
 	db: &mut DB,
 	lits: &[Lit],
-) -> std::result::Result<Lit, Unsatisfiable> {
+) -> Result<Lit> {
 	let carry = db.new_lit();
 	match lits {
 		[a, b] => {
