@@ -69,8 +69,8 @@ pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
 /// Coefficient in PB constraints are represented by types that implement the
 /// `Coefficient` constraint.
-pub trait Coefficient: Clone + Signed + Integer + NumAssignRef + NumRef {}
-impl<T: Clone + Signed + Integer + NumAssignRef + NumRef> Coefficient for T {}
+pub trait Coefficient: Clone + Signed + Integer + PrimInt + NumAssignRef + NumRef {}
+impl<T: Clone + Signed + Integer + PrimInt + NumAssignRef + NumRef> Coefficient for T {}
 /// PositiveCoefficient is a trait used for types used for coefficients that
 /// have been simplified.
 pub trait PositiveCoefficient:
@@ -78,6 +78,23 @@ pub trait PositiveCoefficient:
 {
 }
 impl<T: Clone + Unsigned + Integer + PrimInt + NumAssignRef + NumRef> PositiveCoefficient for T {}
+
+/// IntEncoding is a enumerated type use to represent Boolean encodings of integer variables within
+/// this library
+pub enum IntEncoding<'a, Lit: Literal, C: Coefficient> {
+	/// The Domain variant represents a integer variable encoded using domain or direct encoding of
+	/// an integer variable. Each given Boolean literal represents whether the integer takes the
+	/// associated value (i.e., X = (first+i) ↔ vals\[i\]).
+	Domain { first: C, vals: &'a [Lit] },
+	/// The Order variant represents a integer variable using an order encoding. Each given Boolean
+	/// literal represents whether the integer is bigger than the associated value
+	/// (i.e., X > (first+i) ↔ vals\[i\]).
+	Order { first: C, vals: &'a [Lit] },
+	/// The Binary variant represents a integer variable using a two's complement encoding.
+	/// The sum of the Boolean literals multiplied by their associated power of two represents value
+	/// of the integer (i.e., X = ∑ 2ⁱ·bits\[i\]).
+	Binary { signed: bool, bits: &'a [Lit] },
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Comparator {
@@ -97,6 +114,55 @@ pub trait ClauseDatabase: ClauseSink {
 	/// Method to be used to receive a new (unused) litaral that can be used in
 	/// the encoding of a constraint.
 	fn new_lit(&mut self) -> Self::Lit;
+
+	/// Encode an integer linear constraint
+	fn encode_int_lin<C: Coefficient + TryInto<PC>, PC: PositiveCoefficient>(
+		&mut self,
+		coeff: &[C],
+		vars: &[IntEncoding<Self::Lit, C>],
+		cmp: Comparator,
+		k: C,
+	) -> Result {
+		debug_assert_eq!(coeff.len(), vars.len());
+
+		// TODO: Actually deal with the fact that these constraints are integers
+		let mut bool_coeff = Vec::new();
+		let mut bool_vars = Vec::new();
+		let mut k = k;
+
+		for i in 0..coeff.len() {
+			match &vars[i] {
+				IntEncoding::Domain { first, vals } => {
+					let mut counter = *first;
+					for j in 0..vals.len() {
+						bool_coeff.push(coeff[i] * counter);
+						bool_vars.push(vals[j].clone());
+						counter += C::one();
+					}
+				}
+				IntEncoding::Order { first, vals } => {
+					k -= *first * coeff[i];
+					for i in 0..vals.len() {
+						bool_coeff.push(coeff[i]);
+						bool_vars.push(vals[i].clone());
+					}
+				}
+				IntEncoding::Binary { signed, bits } => {
+					let two = C::one() + C::one();
+					for i in 0..bits.len() {
+						bool_coeff.push(coeff[i] * two.pow(i as u32));
+						bool_vars.push(bits[i].clone());
+					}
+					if *signed {
+						let last_coeff = bool_coeff.last_mut().unwrap();
+						*last_coeff = -*last_coeff;
+					}
+				}
+			}
+		}
+
+		return self.encode_bool_lin(&bool_coeff, &bool_vars, cmp, k);
+	}
 
 	/// Encode a Boolean linear constraint
 	fn encode_bool_lin<C: Coefficient + TryInto<PC>, PC: PositiveCoefficient>(

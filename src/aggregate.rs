@@ -48,7 +48,6 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 		}
 		let mut k = if cmp == GreaterEq { -k } else { k };
 		let cmp = if cmp == GreaterEq { LessEq } else { cmp };
-		debug_assert_ne!(cmp, GreaterEq);
 
 		// Convert all negative coefficients
 		let mut normalized = HashMap::with_capacity(agg.len());
