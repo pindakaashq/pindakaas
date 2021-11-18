@@ -91,10 +91,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 			db.add_clause(&[lit.negate()])?
 		}
 		// Check whether considered literals can violate / satisfy the constraint
-		let mut total = PC::zero();
-		for (_, c) in &considered {
-			total += *c;
-		}
+		let total: PC = considered.values().fold(PC::zero(), |acc, val| acc + *val);
 		if cmp == Comparator::LessEq {
 			if total <= k {
 				return Ok(Trivial);
@@ -117,7 +114,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 		debug_assert!(!considered.is_empty());
 
 		// special case: all coefficients are equal (and can be made one)
-		let val = considered.values().nth(0).unwrap();
+		let val = considered.values().next().unwrap();
 		if considered.iter().all(|(_, c)| c == val) {
 			// trivial case: k cannot be made from the coefficients
 			if cmp == Equal && k % *val != PC::zero() {
@@ -132,7 +129,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 			if k == PC::one() {
 				// Encode At Least One constraint
 				if cmp == Equal {
-					db.add_clause(&considered.iter().map(|v| v.clone()).collect::<Vec<Lit>>())?
+					db.add_clause(&considered.iter().cloned().collect::<Vec<Lit>>())?
 				}
 				// Encode At Most One constraint
 				return Ok(AtMostOne { lits: considered });
@@ -153,15 +150,15 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 
 		// Default case: encode pseudo-Boolean linear constraint
 		if cmp == Equal {
-			return Ok(LinEqual {
+			Ok(LinEqual {
 				terms: considered,
 				k,
-			});
+			})
 		} else {
-			return Ok(LinLessEq {
+			Ok(LinLessEq {
 				terms: considered,
 				k,
-			});
+			})
 		}
 	}
 }
