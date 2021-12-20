@@ -9,6 +9,7 @@ edition = "2021"
 [lib]
 name = "pindakaas"
 crate-type = ["cdylib"]
+doc = false
 
 [package.metadata.maturin]
 classifier = [
@@ -23,3 +24,6 @@ classifier = [
 [dependencies]
 pyo3 = { version = "^0.15.1", features = ["extension-module", "abi3", "abi3-py36"] }
 pindakaas = { path = "../pindakaas" }
+
+[build-dependencies]
+pyo3-build-config = "^0.14"
