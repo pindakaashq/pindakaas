@@ -275,7 +275,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_naive_amo() {
+	fn test_amo_pairwise() {
 		// TODO: Fix sorting issue!
 		// AMO on two literals
 		let mut two: Vec<Vec<i32>> = vec![];
