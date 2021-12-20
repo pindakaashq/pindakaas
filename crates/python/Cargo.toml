@@ -1,0 +1,25 @@
+[package]
+name = "pindakaas-py"
+version = "0.1.0"
+authors = ["Jip J. Dekker <jip@dekker.one>"]
+license = "MPL-2.0"
+
+edition = "2021"
+
+[lib]
+name = "pindakaas"
+crate-type = ["cdylib"]
+
+[package.metadata.maturin]
+classifier = [
+	"License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+	"Development Status :: 3 - Alpha",
+	"Intended Audience :: Developers",
+	"Intended Audience :: Science/Research",
+	"Programming Language :: Python",
+	"Programming Language :: Rust",
+]
+
+[dependencies]
+pyo3 = { version = "^0.15.1", features = ["extension-module", "abi3", "abi3-py36"] }
+pindakaas = { path = "../pindakaas" }
