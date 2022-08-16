@@ -123,7 +123,7 @@ fn create_sum_lit<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized>(
 	db: &mut DB,
 	lits: &[Lit],
 ) -> Result<Lit> {
-	let sum = db.new_lit();
+	let sum = db.new_var();
 	match lits {
 		[a, b] => {
 			db.add_clause(&[a.negate(), b.negate(), sum.negate()])?;
@@ -181,7 +181,7 @@ fn create_carry_lit<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized>(
 	db: &mut DB,
 	lits: &[Lit],
 ) -> Result<Lit> {
-	let carry = db.new_lit();
+	let carry = db.new_var();
 	match lits {
 		[a, b] => {
 			db.add_clause(&[a.negate(), b.negate(), carry.clone()])?;

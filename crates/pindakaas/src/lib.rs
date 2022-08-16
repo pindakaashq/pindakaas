@@ -2,13 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! `pindakaas` is a collection of encoders to transform pseudo-Boolean (PB)
-//! constraints into conjunctive normal form (CNF). PB constraint are in the
-//! form ∑ aᵢ·xᵢ ≷ k, where the aᵢ's and k are constant, xᵢ's are boolean
-//! literals, and ≷ can be the relationship ≤, =, or ≥. Two forms of PB
-//! constraints are seen as special forms of PB constraints: ensuring a set of
-//! booleans is *At Most One (AMO)* or *At Most K (AMK)*. There are specialized
-//! algorithms for these cases.
+//! `pindakaas` is a collection of encoders to transform integer and
+//! pseudo-Boolean (PB) constraints into conjunctive normal form (CNF). It
+//! currently considers mostly linear constraints, which are in the form ∑
+//! aᵢ·xᵢ ≷ k, where the aᵢ's and k are constant, xᵢ's are integer variables
+//! or boolean literals, and ≷ can be the relationship ≤, =, or ≥. Two forms
+//! of PB constraints are seen as special forms of PB constraints: ensuring a
+//! set of booleans is *At Most One (AMO)* or *At Most K (AMK)*. Specialised
+//! encodings are used when these cases are detected.
 
 use std::cmp::Eq;
 use std::collections::HashSet;
@@ -104,11 +105,11 @@ pub enum Comparator {
 ///
 /// This trait is a supertrait of [`ClauseSink`], which means that implementers
 /// should have a [`ClauseSink::add_clause`] method. Futhermore, implementers
-/// are required to have a [`Self::new_lit`] method.
+/// are required to have a [`Self::new_var`] method.
 pub trait ClauseDatabase: ClauseSink {
-	/// Method to be used to receive a new (unused) litaral that can be used in
+	/// Method to be used to receive a new Boolean variable that can be used in
 	/// the encoding of a constraint.
-	fn new_lit(&mut self) -> Self::Lit;
+	fn new_var(&mut self) -> Self::Lit;
 
 	/// Encode an integer linear constraint
 	fn encode_int_lin<C: Coefficient + TryInto<PC>, PC: PositiveCoefficient>(
@@ -163,11 +164,11 @@ pub trait ClauseDatabase: ClauseSink {
 	fn encode_bool_lin<C: Coefficient + TryInto<PC>, PC: PositiveCoefficient>(
 		&mut self,
 		coeff: &[C],
-		vars: &[Self::Lit],
+		lits: &[Self::Lit],
 		cmp: Comparator,
 		k: C,
 	) -> Result {
-		let constraint = BoolLin::aggregate(self, coeff, vars, cmp, k)?;
+		let constraint = BoolLin::aggregate(self, coeff, lits, cmp, k)?;
 
 		self.encode_aggregated_bool_lin(&constraint)
 	}
@@ -308,7 +309,7 @@ mod tests {
 	}
 
 	impl ClauseDatabase for TestDB {
-		fn new_lit(&mut self) -> Self::Lit {
+		fn new_var(&mut self) -> Self::Lit {
 			self.nr += 1;
 			self.nr
 		}
