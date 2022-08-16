@@ -52,7 +52,7 @@ impl<T: Signed + fmt::Debug + Clone + Eq + Hash + Neg<Output = Self>> Literal fo
 
 /// Unsatisfiable is a error type to returned when the problem being encoding is found to be
 /// inconsistent.
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Debug, PartialEq, Eq, PartialOrd)]
 pub struct Unsatisfiable;
 impl Error for Unsatisfiable {}
 impl fmt::Display for Unsatisfiable {
