@@ -22,11 +22,11 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 	pub fn aggregate<C: Coefficient + TryInto<PC>, DB: ClauseSink<Lit = Lit> + ?Sized>(
 		db: &mut DB,
 		coeff: &[C],
-		vars: &[Lit],
+		lits: &[Lit],
 		cmp: Comparator,
 		k: C,
 	) -> Result<BoolLin<PC, Lit>> {
-		debug_assert_eq!(coeff.len(), vars.len());
+		debug_assert_eq!(coeff.len(), lits.len());
 		use BoolLin::*;
 		use Comparator::*;
 
@@ -34,14 +34,14 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 		// variable.
 		let mut agg = HashMap::with_capacity(coeff.len());
 		for i in 0..coeff.len() {
-			let var = if vars[i].is_negated() {
-				vars[i].negate()
+			let var = if lits[i].is_negated() {
+				lits[i].negate()
 			} else {
-				vars[i].clone()
+				lits[i].clone()
 			};
 			let entry = agg.entry(var).or_insert_with(C::zero);
 			let mut coef = coeff[i];
-			if vars[i].is_negated() ^ (cmp == GreaterEq) {
+			if lits[i].is_negated() ^ (cmp == GreaterEq) {
 				coef *= -C::one()
 			}
 			*entry += coef;

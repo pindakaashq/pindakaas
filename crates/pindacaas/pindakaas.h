@@ -36,7 +36,7 @@ typedef bool (*AddClauseCB)(void*, const Lit*, size_t);
  * The first argument will always be the `db` pointer given to the encoding function. The return
  * type should be a `Lit` reprenting an unused Boolean Literal.
  */
-typedef Lit (*NewLitCB)(void*);
+typedef Lit (*NewVarCB)(void*);
 
 /**
  * The type used to represent Coefficients in the C Pindakaas library
@@ -52,7 +52,7 @@ typedef int32_t Coeff;
  */
 bool encode_bool_lin(void *db,
                      AddClauseCB add_clause_cb,
-                     NewLitCB new_lit_cb,
+                     NewVarCB new_var_cb,
                      const Coeff *coeff,
                      size_t coeff_len,
                      const Lit *lit,

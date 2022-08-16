@@ -35,7 +35,7 @@ type AddClauseCB = extern "C" fn(*mut c_void, *const Lit, size_t) -> bool;
 ///
 /// The first argument will always be the `db` pointer given to the encoding function. The return
 /// type should be a `Lit` reprenting an unused Boolean Literal.
-type NewLitCB = extern "C" fn(*mut c_void) -> Lit;
+type NewVarCB = extern "C" fn(*mut c_void) -> Lit;
 
 /// Encodes a Boolean linear expressions into Boolean clauses. TODO: ...
 ///
@@ -46,7 +46,7 @@ type NewLitCB = extern "C" fn(*mut c_void) -> Lit;
 pub unsafe extern "C" fn encode_bool_lin(
 	db: *mut c_void,
 	add_clause_cb: AddClauseCB,
-	new_lit_cb: NewLitCB,
+	new_var_cb: NewVarCB,
 	coeff: *const Coeff,
 	coeff_len: size_t,
 	lit: *const Lit,
@@ -57,7 +57,7 @@ pub unsafe extern "C" fn encode_bool_lin(
 	let mut cdb = CClauseDatabase {
 		db,
 		add_clause_cb,
-		new_lit_cb,
+		new_var_cb,
 	};
 
 	// (unsafe) Dereference raw ptr arguments, segmentation fault if given bad arguments.
@@ -75,7 +75,7 @@ pub unsafe extern "C" fn encode_bool_lin(
 struct CClauseDatabase {
 	db: *mut c_void,
 	add_clause_cb: AddClauseCB,
-	new_lit_cb: NewLitCB,
+	new_var_cb: NewVarCB,
 }
 
 impl ClauseSink for CClauseDatabase {
@@ -91,8 +91,8 @@ impl ClauseSink for CClauseDatabase {
 }
 
 impl ClauseDatabase for CClauseDatabase {
-	fn new_lit(&mut self) -> Self::Lit {
-		(self.new_lit_cb)(self.db)
+	fn new_var(&mut self) -> Self::Lit {
+		(self.new_var_cb)(self.db)
 	}
 }
 
