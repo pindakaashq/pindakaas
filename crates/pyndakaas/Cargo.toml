@@ -1,5 +1,6 @@
 [package]
-name = "pindakaas-py"
+name = "pyndakaas"
+description = "Python interface for the to pindakaas crate"
 version = "0.1.0"
 authors = ["Jip J. Dekker <jip@dekker.one>"]
 license = "MPL-2.0"
@@ -22,8 +23,8 @@ classifier = [
 ]
 
 [dependencies]
-pyo3 = { version = "^0.15.1", features = ["extension-module", "abi3", "abi3-py36"] }
+pyo3 = { version = "0.16.5", features = ["extension-module"] }
 pindakaas = { path = "../pindakaas" }
 
 [build-dependencies]
-pyo3-build-config = "^0.14"
+pyo3-build-config = "0.16.5"

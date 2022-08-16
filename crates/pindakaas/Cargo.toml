@@ -1,5 +1,6 @@
 [package]
 name = "pindakaas"
+description = "Encoding Integer and Pseudo Boolean constraints into CNF"
 version = "0.1.0"
 authors = ["Jip J. Dekker <jip@dekker.one>"]
 license = "MPL-2.0"
