@@ -74,18 +74,18 @@ impl<T: Unsigned + PrimInt + NumAssignOps + NumOps + fmt::Debug> PositiveCoeffic
 /// IntEncoding is a enumerated type use to represent Boolean encodings of integer variables within
 /// this library
 pub enum IntEncoding<'a, Lit: Literal, C: Coefficient> {
-	/// The Domain variant represents a integer variable encoded using domain or direct encoding of
+	/// The Direct variant represents a integer variable encoded using domain or direct encoding of
 	/// an integer variable. Each given Boolean literal represents whether the integer takes the
 	/// associated value (i.e., X = (first+i) ↔ vals\[i\]).
-	Domain { first: C, vals: &'a [Lit] },
+	Direct { first: C, vals: &'a [Lit] },
 	/// The Order variant represents a integer variable using an order encoding. Each given Boolean
 	/// literal represents whether the integer is bigger than the associated value
 	/// (i.e., X > (first+i) ↔ vals\[i\]).
 	Order { first: C, vals: &'a [Lit] },
-	/// The Binary variant represents a integer variable using a two's complement encoding.
+	/// The Log variant represents a integer variable using a two's complement encoding.
 	/// The sum of the Boolean literals multiplied by their associated power of two represents value
 	/// of the integer (i.e., X = ∑ 2ⁱ·bits\[i\]).
-	Binary { signed: bool, bits: &'a [Lit] },
+	Log { signed: bool, bits: &'a [Lit] },
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -115,7 +115,7 @@ pub trait ClauseDatabase: ClauseSink {
 		cmp: Comparator,
 		k: C,
 	) -> Result {
-		debug_assert_eq!(coeff.len(), vars.len());
+		assert_eq!(coeff.len(), vars.len());
 
 		// TODO: Actually deal with the fact that these constraints are integers
 		let mut bool_coeff = Vec::new();
@@ -124,7 +124,7 @@ pub trait ClauseDatabase: ClauseSink {
 
 		for i in 0..coeff.len() {
 			match &vars[i] {
-				IntEncoding::Domain { first, vals } => {
+				IntEncoding::Direct { first, vals } => {
 					let mut counter = *first;
 					for j in 0..vals.len() {
 						bool_coeff.push(coeff[i] * counter);
@@ -139,7 +139,7 @@ pub trait ClauseDatabase: ClauseSink {
 						bool_vars.push(vals[i].clone());
 					}
 				}
-				IntEncoding::Binary { signed, bits } => {
+				IntEncoding::Log { signed, bits } => {
 					let two = C::one() + C::one();
 					for i in 0..bits.len() {
 						bool_coeff.push(coeff[i] * two.pow(i as u32));
