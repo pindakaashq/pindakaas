@@ -19,6 +19,7 @@ pub fn encode_bool_lin_adder<
 	debug_assert!(cmp == Comparator::LessEq || cmp == Comparator::Equal);
 	// The number of relevant bits in k
 	let bits = (PC::zero().leading_zeros() - k.leading_zeros()) as usize;
+	let first_zero = k.trailing_ones() as usize;
 	let mut k = (0..bits)
 		.map(|b| k & (PC::one() << b) != PC::zero())
 		.collect::<Vec<bool>>();
@@ -65,14 +66,19 @@ pub fn encode_bool_lin_adder<
 				if last && cmp == Comparator::Equal {
 					// No need to create a new literal, force the sum to equal the result
 					force_sum(db, lits.as_slice(), k[b])?;
-				} else {
+				} else if cmp != Comparator::LessEq || b >= first_zero {
+					// Literal is not used for the less-than constraint unless a zero has been seen first
 					bucket[b].push(create_sum_lit(db, lits.as_slice())?);
 				}
 
 				// Compute carry
-				if b + 1 >= bucket.len() {
+				if b + 1 >= bits {
 					// Carry will bring the sum to be greater than k, force to be false
-					force_carry(db, &lits[..], false)?
+					if lits.len() == 2 && cmp == Comparator::Equal {
+						// Already encoded by the XOR to compute the sum
+					} else {
+						force_carry(db, &lits[..], false)?
+					}
 				} else if last && cmp == Comparator::Equal && bucket[b + 1].is_empty() {
 					// No need to create a new literal, force the carry to equal the result
 					force_carry(db, &lits[..], k[b + 1])?;
@@ -84,7 +90,7 @@ pub fn encode_bool_lin_adder<
 			}
 			debug_assert!(
 				(cmp == Comparator::Equal && bucket[b].is_empty())
-					|| (cmp == Comparator::LessEq && bucket[b].len() == 1)
+					|| (cmp == Comparator::LessEq && (bucket[b].len() == 1 || b < first_zero))
 			);
 			sum[b] = bucket[b].pop();
 		}
