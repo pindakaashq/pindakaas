@@ -7,13 +7,13 @@
 //! set of booleans is *At Most One (AMO)* or *At Most K (AMK)*. Specialised
 //! encodings are used when these cases are detected.
 
+use std::clone::Clone;
 use std::cmp::Eq;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::hash::Hash;
 use std::ops::Neg;
-use std::{clone::Clone, collections::HashMap};
 
 use itertools::Itertools;
 use num::traits::{NumAssignOps, NumOps};
@@ -64,12 +64,12 @@ pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
 /// Coefficient in PB constraints are represented by types that implement the
 /// `Coefficient` constraint.
-pub trait Coefficient: Signed + PrimInt + NumAssignOps + NumOps {}
-impl<T: Signed + PrimInt + NumAssignOps + NumOps> Coefficient for T {}
+pub trait Coefficient: Signed + PrimInt + NumAssignOps + NumOps + fmt::Debug {}
+impl<T: Signed + PrimInt + NumAssignOps + NumOps + fmt::Debug> Coefficient for T {}
 /// PositiveCoefficient is a trait used for types used for coefficients that
 /// have been simplified.
-pub trait PositiveCoefficient: Unsigned + PrimInt + NumAssignOps + NumOps {}
-impl<T: Unsigned + PrimInt + NumAssignOps + NumOps> PositiveCoefficient for T {}
+pub trait PositiveCoefficient: Unsigned + PrimInt + NumAssignOps + NumOps + fmt::Debug {}
+impl<T: Unsigned + PrimInt + NumAssignOps + NumOps + fmt::Debug> PositiveCoefficient for T {}
 
 /// IntEncoding is a enumerated type use to represent Boolean encodings of integer variables within
 /// this library

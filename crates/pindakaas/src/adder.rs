@@ -18,7 +18,7 @@ pub fn encode_bool_lin_adder<
 ) -> Result {
 	debug_assert!(cmp == Comparator::LessEq || cmp == Comparator::Equal);
 	// The number of relevant bits in k
-	let bits = (PC::zero().count_zeros() - k.count_zeros()) as usize;
+	let bits = (PC::zero().leading_zeros() - k.leading_zeros()) as usize;
 	let mut k = (0..bits)
 		.map(|b| k & (PC::one() << b) != PC::zero())
 		.collect::<Vec<bool>>();
@@ -45,8 +45,8 @@ pub fn encode_bool_lin_adder<
 			}
 		} else if bucket[b].len() == 1 {
 			let x = bucket[b].pop().unwrap();
-			if k[b] && cmp == Comparator::Equal {
-				db.add_clause(&[x])?
+			if cmp == Comparator::Equal {
+				db.add_clause(&[if k[b] { x } else { x.negate() }])?
 			} else {
 				sum[b] = Some(x);
 			}
