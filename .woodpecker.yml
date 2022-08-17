@@ -1,9 +1,0 @@
-pipeline:
-  test:
-    image: rust 
-    commands:
-      - rustc --version && cargo --version
-      - cargo test --workspace --verbose
-      - rustup component add rustfmt clippy
-      - cargo clippy
-      - cargo fmt --all -- --check
