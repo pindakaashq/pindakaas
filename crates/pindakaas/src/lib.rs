@@ -22,6 +22,7 @@ use num::{PrimInt, Signed, Unsigned};
 mod adder;
 mod aggregate;
 mod helpers;
+mod totalizer;
 
 pub use aggregate::BoolLin;
 
@@ -68,8 +69,11 @@ pub trait Coefficient: Signed + PrimInt + NumAssignOps + NumOps + fmt::Debug {}
 impl<T: Signed + PrimInt + NumAssignOps + NumOps + fmt::Debug> Coefficient for T {}
 /// PositiveCoefficient is a trait used for types used for coefficients that
 /// have been simplified.
-pub trait PositiveCoefficient: Unsigned + PrimInt + NumAssignOps + NumOps + fmt::Debug {}
-impl<T: Unsigned + PrimInt + NumAssignOps + NumOps + fmt::Debug> PositiveCoefficient for T {}
+pub trait PositiveCoefficient:
+	Unsigned + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug
+{
+}
+impl<T: Unsigned + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug> PositiveCoefficient for T {}
 
 /// IntEncoding is a enumerated type use to represent Boolean encodings of integer variables within
 /// this library
@@ -178,6 +182,7 @@ pub trait ClauseDatabase: ClauseSink {
 		match constraint {
 			LinEqual { terms, k } => self.encode_bool_lin_eq_adder(terms, *k),
 			LinLessEq { terms, k } => self.encode_bool_lin_le_adder(terms, *k),
+			// LinLessEq { terms, k } => self.encode_bool_lin_le_totalizer(terms, *k),  TODO allow for selecting encoder
 			AtMostK { lits, k } => self.encode_bool_lin_le_adder(
 				&lits.iter().map(|l| (l.clone(), PC::one())).collect(),
 				*k,
@@ -207,6 +212,15 @@ pub trait ClauseDatabase: ClauseSink {
 		k: PC,
 	) -> Result {
 		adder::encode_bool_lin_adder(self, terms, Comparator::LessEq, k)
+	}
+
+	/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a totalizer
+	fn encode_bool_lin_le_totalizer<PC: PositiveCoefficient>(
+		&mut self,
+		terms: &HashMap<Self::Lit, PC>,
+		k: PC,
+	) -> Result {
+		totalizer::encode_bool_lin_totalizer(self, terms, Comparator::LessEq, k)
 	}
 }
 
@@ -316,6 +330,20 @@ mod tests {
 		let mut two = TestDB { nr: 3, db: vec![] };
 		assert!(two
 			.encode_bool_lin::<i64, u64>(&[1, 1, 1, 2], &[1, 2, 3, 4], crate::Comparator::LessEq, 1)
+			.is_ok());
+	}
+
+	#[test]
+	fn test_totalizer_encode() {
+		// TODO currently non-functional since we can't select the encoder. Perhaps needs to be moved to totalizer.rs anyways.
+		let mut two = TestDB { nr: 3, db: vec![] };
+		assert!(two
+			.encode_bool_lin::<i64, u64>(
+				&[2, 3, 4, 5, 3, 4, 6, 8],
+				&[1, 2, 3, 4, 5, 6, 7, 8],
+				crate::Comparator::LessEq,
+				10
+			)
 			.is_ok());
 	}
 }
