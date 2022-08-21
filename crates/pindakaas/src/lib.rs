@@ -229,6 +229,14 @@ pub trait ClauseDatabase: ClauseSink {
 	) -> Result {
 		totalizer::encode_bool_lin_le_totalizer(self, &vec![(terms, &None)], Comparator::LessEq, k)
 	}
+
+	fn encode_amo_ladder(&mut self, lits: &HashSet<Self::Lit>) -> Result {
+		let vars: Vec<Self::Lit> = lits.iter().map(|_| self.new_var()).collect();
+		for (a, b) in vars.iter().tuple_windows() {
+			self.add_clause(&[b.negate(), a.clone()])?;
+		}
+		Ok(())
+	}
 }
 
 /// Types that abide by the `ClauseSink` trait can be used as the output for the
@@ -290,6 +298,17 @@ mod tests {
 	}
 	fn is_lit<T: Literal>(_: T) -> bool {
 		true
+	}
+
+	#[test]
+	fn test_amo_ladder() {
+		// TODO: Fix sorting issue!
+		// AMO on two literals
+		let mut two = TestDB { nr: 3, db: vec![] };
+		two.encode_amo_ladder(&HashSet::from_iter([1, 2, 3]))
+			.unwrap();
+		assert_eq!(two.nr, 6);
+		assert_eq!(two.db, vec![vec![-5, 4], vec![-6, 5]]);
 	}
 
 	#[test]
