@@ -92,6 +92,14 @@ pub enum IntEncoding<'a, Lit: Literal, C: Coefficient> {
 	Log { signed: bool, bits: &'a [Lit] },
 }
 
+// TODO just temporary until I find out how to use IntEncodings for this
+#[derive(Debug)]
+pub enum Constraint {
+	AMO,
+	IC, // AMO { lits: &'a [Lit] },
+	    // IC { lits: &'a [Lit] },
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum Comparator {
 	LessEq,
@@ -182,7 +190,6 @@ pub trait ClauseDatabase: ClauseSink {
 		match constraint {
 			LinEqual { terms, k } => self.encode_bool_lin_eq_adder(terms, *k),
 			LinLessEq { terms, k } => self.encode_bool_lin_le_adder(terms, *k),
-			// LinLessEq { terms, k } => self.encode_bool_lin_le_totalizer(terms, *k),  TODO allow for selecting encoder
 			AtMostK { lits, k } => self.encode_bool_lin_le_adder(
 				&lits.iter().map(|l| (l.clone(), PC::one())).collect(),
 				*k,
@@ -220,7 +227,7 @@ pub trait ClauseDatabase: ClauseSink {
 		terms: &HashMap<Self::Lit, PC>,
 		k: PC,
 	) -> Result {
-		totalizer::encode_bool_lin_totalizer(self, terms, Comparator::LessEq, k)
+		totalizer::encode_bool_lin_le_totalizer(self, &vec![(terms, &None)], Comparator::LessEq, k)
 	}
 }
 
@@ -330,20 +337,6 @@ mod tests {
 		let mut two = TestDB { nr: 3, db: vec![] };
 		assert!(two
 			.encode_bool_lin::<i64, u64>(&[1, 1, 1, 2], &[1, 2, 3, 4], crate::Comparator::LessEq, 1)
-			.is_ok());
-	}
-
-	#[test]
-	fn test_totalizer_encode() {
-		// TODO currently non-functional since we can't select the encoder. Perhaps needs to be moved to totalizer.rs anyways.
-		let mut two = TestDB { nr: 3, db: vec![] };
-		assert!(two
-			.encode_bool_lin::<i64, u64>(
-				&[2, 3, 4, 5, 3, 4, 6, 8],
-				&[1, 2, 3, 4, 5, 6, 7, 8],
-				crate::Comparator::LessEq,
-				10
-			)
 			.is_ok());
 	}
 }
