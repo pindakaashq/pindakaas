@@ -230,11 +230,23 @@ pub trait ClauseDatabase: ClauseSink {
 		totalizer::encode_bool_lin_le_totalizer(self, &vec![(terms, &None)], Comparator::LessEq, k)
 	}
 
-	fn encode_amo_ladder(&mut self, lits: &HashSet<Self::Lit>) -> Result {
-		let vars: Vec<Self::Lit> = lits.iter().map(|_| self.new_var()).collect();
-		for (a, b) in vars.iter().tuple_windows() {
-			self.add_clause(&[b.negate(), a.clone()])?;
+	fn encode_amo_ladder(&mut self, xs: &HashSet<Self::Lit>) -> Result {
+		debug_assert!(xs.len() >= 2);
+
+		// TODO could be slightly optimised to not introduce fixed lits
+		let mut a = self.new_var(); // y_v-1
+		self.add_clause(&[a.clone()])?;
+		for x in xs {
+			let b = self.new_var(); // y_v
+			self.add_clause(&[b.negate(), a.clone()])?; // y_v -> y_v-1
+
+			// "Channelling" clauses for x_v <-> (y_v-1 /\ ¬y_v)
+			self.add_clause(&[x.negate(), a.clone()])?; // x_v -> y_v-1
+			self.add_clause(&[x.negate(), b.negate()])?; // x_v -> ¬y_v
+			self.add_clause(&[a.negate(), b.clone(), x.clone()])?; // (y_v-1 /\ ¬y_v) -> x=v
+			a = b;
 		}
+		self.add_clause(&[a.negate()])?;
 		Ok(())
 	}
 }
@@ -302,13 +314,24 @@ mod tests {
 
 	#[test]
 	fn test_amo_ladder() {
-		// TODO: Fix sorting issue!
-		// AMO on two literals
-		let mut two = TestDB { nr: 3, db: vec![] };
-		two.encode_amo_ladder(&HashSet::from_iter([1, 2, 3]))
-			.unwrap();
-		assert_eq!(two.nr, 6);
-		assert_eq!(two.db, vec![vec![-5, 4], vec![-6, 5]]);
+		let mut two = TestDB { nr: 2, db: vec![] };
+		two.encode_amo_ladder(&HashSet::from_iter([1, 2])).unwrap();
+		assert_eq!(
+			two.db,
+			vec![
+				vec![3],
+				vec![-4, 3],
+				vec![-1, 3],
+				vec![-1, -4],
+				vec![-3, 4, 1],
+				vec![-5, 4],
+				vec![-2, 4],
+				vec![-2, -5],
+				vec![-4, 5, 2],
+				vec![-5]
+			]
+		);
+		assert_eq!(two.nr, 5);
 	}
 
 	#[test]
