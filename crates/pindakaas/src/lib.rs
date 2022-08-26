@@ -94,10 +94,16 @@ pub enum IntEncoding<'a, Lit: Literal, C: Coefficient> {
 
 // TODO just temporary until I find out how to use IntEncodings for this
 #[derive(Debug)]
-pub enum Constraint {
-	AMO,
-	IC, // AMO { lits: &'a [Lit] },
-	    // IC { lits: &'a [Lit] },
+pub enum Constraint<'a, Lit> {
+	AMO(HashSet<&'a Lit>),
+	IC(Vec<&'a Lit>),
+}
+
+// TODO add EO, and probably something for Unconstrained
+#[derive(Debug)]
+pub enum Part<Lit, Coefficient> {
+	AMO(HashMap<Lit, Coefficient>),
+	IC(Vec<(Lit, Coefficient)>),
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -165,7 +171,7 @@ pub trait ClauseDatabase: ClauseSink {
 			}
 		}
 
-		self.encode_bool_lin(&bool_coeff, &bool_vars, cmp, k)
+		self.encode_bool_lin(&bool_coeff, &bool_vars, cmp, k, &[])
 	}
 
 	/// Encode a Boolean linear constraint
@@ -175,8 +181,9 @@ pub trait ClauseDatabase: ClauseSink {
 		lits: &[Self::Lit],
 		cmp: Comparator,
 		k: C,
+		cons: &[Constraint<Self::Lit>], // slice
 	) -> Result {
-		let constraint = BoolLin::aggregate(self, coeff, lits, cmp, k)?;
+		let constraint = BoolLin::aggregate(self, coeff, lits, cmp, k, cons)?;
 
 		self.encode_aggregated_bool_lin(&constraint)
 	}
@@ -224,10 +231,10 @@ pub trait ClauseDatabase: ClauseSink {
 	/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a totalizer
 	fn encode_bool_lin_le_totalizer<PC: PositiveCoefficient>(
 		&mut self,
-		terms: &HashMap<Self::Lit, PC>,
+		partition: &[Part<Self::Lit, PC>],
 		k: PC,
 	) -> Result {
-		totalizer::encode_bool_lin_le_totalizer(self, &vec![(terms, &None)], Comparator::LessEq, k)
+		totalizer::encode_bool_lin_le_totalizer(self, partition, Comparator::LessEq, k)
 	}
 
 	fn encode_amo_ladder(&mut self, xs: &HashSet<Self::Lit>) -> Result {
@@ -378,7 +385,13 @@ mod tests {
 	fn test_pb_encode() {
 		let mut two = TestDB { nr: 3, db: vec![] };
 		assert!(two
-			.encode_bool_lin::<i64, u64>(&[1, 1, 1, 2], &[1, 2, 3, 4], crate::Comparator::LessEq, 1)
+			.encode_bool_lin::<i64, u64>(
+				&[1, 1, 1, 2],
+				&[1, 2, 3, 4],
+				crate::Comparator::LessEq,
+				1,
+				&[]
+			)
 			.is_ok());
 	}
 }

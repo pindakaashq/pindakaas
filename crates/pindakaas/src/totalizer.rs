@@ -1,7 +1,8 @@
 #![allow(unused_variables, dead_code, unused_imports)]
 use crate::helpers::encode_xor;
 use crate::{
-	ClauseDatabase, ClauseSink, Comparator, Literal, PositiveCoefficient, Result, Unsatisfiable,
+	ClauseDatabase, ClauseSink, Comparator, Literal, Part, PositiveCoefficient, Result,
+	Unsatisfiable,
 };
 use itertools::Itertools;
 use std::collections::HashMap;
@@ -13,34 +14,33 @@ pub fn encode_bool_lin_le_totalizer<
 	PC: PositiveCoefficient,
 >(
 	db: &mut DB,
-	groups: &Vec<(&HashMap<Lit, PC>, &Option<crate::Constraint>)>,
+	partition: &[Part<Lit, PC>],
 	cmp: Comparator,
 	k: PC,
 ) -> Result {
 	debug_assert!(cmp == Comparator::LessEq);
 
-	// Every layer of the totalizer (binary) tree has nodes containing literals associated with (unique) values (which equal to the sum so far)
+	// Every layer of the totalizer (binary) tree has nodes containing literals associated with (unique) values (which equal the sum so far)
 
 	// TODO assert no duplicate coefs in AMO's (not relevant to handle for the moment)
-	let mut layer: Vec<HashMap<PC, Lit>> = groups
+	let mut layer: Vec<HashMap<PC, Lit>> = partition
 		.iter()
-		.map(|(pairs, constraint)| match constraint {
-			Some(crate::Constraint::AMO) => pairs
+		.map(|part| match part {
+			Part::AMO(terms) => terms
 				.iter()
 				.map(|(lit, coef)| (coef.clone(), lit.clone()))
 				.collect(),
-			Some(crate::Constraint::IC) => {
+			Part::IC(terms) => {
 				let mut acc = PC::zero(); // running sum
-				pairs
+				terms
 					.iter()
-					.sorted_by_key(|x| x.1) // TODO IC lit groups still need to be sorted by the chain, so for now sort by coefficient
+					.sorted_by_key(|x| x.1) // TODO IC lit partition still need to be sorted by the chain, so for now sort by coefficient
 					.map(|(lit, coef)| {
 						acc = acc.clone() + coef.clone();
 						(acc.clone(), lit.clone())
 					})
 					.collect()
 			}
-			None => todo!(),
 		})
 		.collect();
 
@@ -118,15 +118,9 @@ mod tests {
 		let mut db = TestDB { nr: 8, db: vec![] };
 		assert!(encode_bool_lin_le_totalizer(
 			&mut db,
-			&vec![
-				(
-					&HashMap::from_iter([(1, 2), (2, 3), (3, 4), (4, 5)]),
-					&Some(crate::Constraint::AMO)
-				),
-				(
-					&HashMap::from_iter([(5, 3), (6, 4), (7, 6), (8, 8)]),
-					&Some(crate::Constraint::AMO)
-				)
+			&[
+				Part::AMO(HashMap::from_iter([(1, 2), (2, 3), (3, 4), (4, 5)]),),
+				Part::AMO(HashMap::from_iter([(5, 3), (6, 4), (7, 6), (8, 8)]),)
 			],
 			Comparator::LessEq,
 			usize::try_from(10).unwrap()
@@ -138,15 +132,9 @@ mod tests {
 		let mut db = TestDB { nr: 8, db: vec![] };
 		assert!(encode_bool_lin_le_totalizer(
 			&mut db,
-			&vec![
-				(
-					&HashMap::from_iter([(1, 2), (2, 3), (3, 4), (4, 5)]),
-					&Some(crate::Constraint::IC)
-				),
-				(
-					&HashMap::from_iter([(5, 3), (6, 4), (7, 6), (8, 8)]),
-					&Some(crate::Constraint::IC)
-				)
+			&[
+				Part::AMO(HashMap::from_iter([(1, 2), (2, 3), (3, 4), (4, 5)]),),
+				Part::AMO(HashMap::from_iter([(5, 3), (6, 4), (7, 6), (8, 8)]),)
 			],
 			Comparator::LessEq,
 			usize::try_from(10).unwrap()

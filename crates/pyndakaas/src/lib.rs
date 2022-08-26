@@ -35,7 +35,7 @@ fn encode_bool_lin(
 		Comparator::Equal => pindakaas::Comparator::Equal,
 		Comparator::GreaterEq => pindakaas::Comparator::GreaterEq,
 	};
-	let res = db.encode_bool_lin::<Coeff, PosCoeff>(&coeff, &lits, cmp, k);
+	let res = db.encode_bool_lin::<Coeff, PosCoeff>(&coeff, &lits, cmp, k, &[]);
 	Ok((res.is_ok(), db.clause_vec))
 }
 

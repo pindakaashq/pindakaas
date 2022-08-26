@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-	ClauseSink, Coefficient, Comparator, Literal, PositiveCoefficient, Result, Unsatisfiable,
+	ClauseSink, Coefficient, Comparator, Constraint, Literal, Part, PositiveCoefficient, Result,
+	Unsatisfiable,
 };
 
 #[derive(Debug, PartialEq)]
@@ -21,6 +22,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 		lits: &[Lit],
 		cmp: Comparator,
 		k: C,
+		cons: &[Constraint<Lit>],
 	) -> Result<BoolLin<PC, Lit>> {
 		debug_assert_eq!(coeff.len(), lits.len());
 		use BoolLin::*;
@@ -44,6 +46,28 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 		}
 		let mut k = if cmp == GreaterEq { -k } else { k };
 		let cmp = if cmp == GreaterEq { LessEq } else { cmp };
+
+		// partition terms according to side constraints
+		let mut partition = cons
+			.iter()
+			.map(|con| match con {
+				Constraint::AMO(lits) => Part::AMO(HashMap::from_iter(
+					lits.iter()
+						.map(|&lit| (lit.clone(), agg.remove(lit).unwrap())),
+				)),
+				Constraint::IC(lits) => Part::IC(
+					lits.iter()
+						.map(|&lit| (lit.clone(), agg.remove(lit).unwrap()))
+						.collect(),
+				),
+			})
+			.collect::<Vec<Part<Lit, C>>>();
+		partition.append(
+			&mut agg
+				.iter()
+				.map(|(lit, coef)| Part::AMO(HashMap::from_iter([(lit.clone(), coef.clone())])))
+				.collect(),
+		);
 
 		// Convert all negative coefficients
 		let mut normalized = HashMap::with_capacity(agg.len());
@@ -174,7 +198,14 @@ mod tests {
 
 		// Simple aggragation of multiple occurences of the same literal
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 2, 1, 2], &[1, 1, 2, 3], LessEq, 3),
+			BoolLin::<u32, i32>::aggregate(
+				&mut ignore,
+				&[1, 2, 1, 2],
+				&[1, 1, 2, 3],
+				LessEq,
+				3,
+				&[]
+			),
 			Ok(BoolLin::LinLessEq {
 				terms: HashMap::from_iter([(1, 3), (2, 1), (3, 2)]),
 				k: 3
@@ -183,7 +214,14 @@ mod tests {
 
 		// Aggragation of positive and negative occurences of the same literal
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 2, 1, 2], &[1, -1, 2, 3], LessEq, 2),
+			BoolLin::<u32, i32>::aggregate(
+				&mut ignore,
+				&[1, 2, 1, 2],
+				&[1, -1, 2, 3],
+				LessEq,
+				2,
+				&[]
+			),
 			Ok(BoolLin::LinLessEq {
 				terms: HashMap::from_iter([(-1, 1), (2, 1), (3, 2)]),
 				k: 3
@@ -192,7 +230,14 @@ mod tests {
 
 		// Aggragation of positive and negative coefficients of the same literal
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, -2, 1, 2], &[1, 1, 2, 3], LessEq, 2),
+			BoolLin::<u32, i32>::aggregate(
+				&mut ignore,
+				&[1, -2, 1, 2],
+				&[1, 1, 2, 3],
+				LessEq,
+				2,
+				&[]
+			),
 			Ok(BoolLin::LinLessEq {
 				terms: HashMap::from_iter([(-1, 1), (2, 1), (3, 2)]),
 				k: 3
@@ -206,13 +251,13 @@ mod tests {
 
 		// Correctly detect at most one
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 1, 1], &[1, 2, 3], LessEq, 1),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 1, 1], &[1, 2, 3], LessEq, 1, &[]),
 			Ok(BoolLin::AtMostOne {
 				lits: HashSet::from_iter([1, 2, 3]),
 			})
 		);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[2, 2, 2], &[1, 2, 3], LessEq, 2),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[2, 2, 2], &[1, 2, 3], LessEq, 2, &[]),
 			Ok(BoolLin::AtMostOne {
 				lits: HashSet::from_iter([1, 2, 3]),
 			})
@@ -220,14 +265,14 @@ mod tests {
 
 		// Correctly detect at most k
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 1, 1], &[1, 2, 3], LessEq, 2),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 1, 1], &[1, 2, 3], LessEq, 2, &[]),
 			Ok(BoolLin::AtMostK {
 				lits: HashSet::from_iter([1, 2, 3]),
 				k: 2,
 			})
 		);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[3, 3, 3], &[1, 2, 3], LessEq, 7),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[3, 3, 3], &[1, 2, 3], LessEq, 7, &[]),
 			Ok(BoolLin::AtMostK {
 				lits: HashSet::from_iter([1, 2, 3]),
 				k: 2,
@@ -236,14 +281,14 @@ mod tests {
 
 		// Correctly detect equal k
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 1, 1], &[1, 2, 3], Equal, 2),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 1, 1], &[1, 2, 3], Equal, 2, &[]),
 			Ok(BoolLin::EqualK {
 				lits: HashSet::from_iter([1, 2, 3]),
 				k: 2,
 			})
 		);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[3, 3, 3], &[1, 2, 3], Equal, 6),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[3, 3, 3], &[1, 2, 3], Equal, 6, &[]),
 			Ok(BoolLin::EqualK {
 				lits: HashSet::from_iter([1, 2, 3]),
 				k: 2,
@@ -252,7 +297,7 @@ mod tests {
 
 		// Is still normal Boolean linear in-equality
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 2, 2], &[1, 2, 3], LessEq, 2),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 2, 2], &[1, 2, 3], LessEq, 2, &[]),
 			Ok(BoolLin::LinLessEq {
 				terms: HashMap::from_iter([(1, 1), (2, 2), (3, 2)]),
 				k: 2,
@@ -261,7 +306,7 @@ mod tests {
 
 		// Is still normal Boolean linear equality
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 2, 2], &[1, 2, 3], Equal, 2),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 2, 2], &[1, 2, 3], Equal, 2, &[]),
 			Ok(BoolLin::LinEqual {
 				terms: HashMap::from_iter([(1, 1), (2, 2), (3, 2)]),
 				k: 2,
@@ -274,7 +319,7 @@ mod tests {
 		let mut db: Vec<Vec<i32>> = vec![];
 		// An exactly one constraint adds an at most one constraint + a clause for all literals
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 1, 1], &[1, 2, 3], Equal, 1),
+			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 1, 1], &[1, 2, 3], Equal, 1, &[]),
 			Ok(BoolLin::AtMostOne {
 				lits: HashSet::from_iter([1, 2, 3]),
 			})
@@ -289,7 +334,7 @@ mod tests {
 
 		// Correctly convert a negative coefficient
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[2, 3, -2], &[1, 2, 3], LessEq, 2),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[2, 3, -2], &[1, 2, 3], LessEq, 2, &[]),
 			Ok(BoolLin::LinLessEq {
 				terms: HashMap::from_iter([(1, 2), (2, 3), (-3, 2)]),
 				k: 4
@@ -298,13 +343,13 @@ mod tests {
 
 		// Correctly convert multiple negative coefficients
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[-1, -1, -1], &[1, 2, 3], LessEq, -2),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[-1, -1, -1], &[1, 2, 3], LessEq, -2, &[]),
 			Ok(BoolLin::AtMostOne {
 				lits: HashSet::from_iter([-1, -2, -3]),
 			})
 		);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[-1, -2, -3], &[1, 2, 3], LessEq, -2),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[-1, -2, -3], &[1, 2, 3], LessEq, -2, &[]),
 			Ok(BoolLin::LinLessEq {
 				terms: HashMap::from_iter([(-1, 1), (-2, 2), (-3, 3)]),
 				k: 4
@@ -318,21 +363,21 @@ mod tests {
 
 		// Constant cannot be reached
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 2, 2], &[1, 2, 3], Equal, 6),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 2, 2], &[1, 2, 3], Equal, 6, &[]),
 			Err(Unsatisfiable),
 		);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 2, 2], &[1, 2, 3], GreaterEq, 6),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 2, 2], &[1, 2, 3], GreaterEq, 6, &[]),
 			Err(Unsatisfiable),
 		);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 2, 2], &[1, 2, 3], LessEq, -1),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[1, 2, 2], &[1, 2, 3], LessEq, -1, &[]),
 			Err(Unsatisfiable),
 		);
 
 		// Scaled counting constraint with off-scaled Constant
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut ignore, &[4, 4, 4], &[1, 2, 3], Equal, 6),
+			BoolLin::<u32, i32>::aggregate(&mut ignore, &[4, 4, 4], &[1, 2, 3], Equal, 6, &[]),
 			Err(Unsatisfiable),
 		);
 	}
