@@ -26,18 +26,18 @@ pub fn encode_bool_lin_le_totalizer<
 	let mut layer: Vec<HashMap<PC, Lit>> = partition
 		.iter()
 		.map(|part| match part {
-			Part::AMO(terms) => terms
+			Part::Amo(terms) => terms
 				.iter()
-				.map(|(lit, coef)| (coef.clone(), lit.clone()))
+				.map(|(lit, coef)| (*coef, lit.clone()))
 				.collect(),
-			Part::IC(terms) => {
+			Part::Ic(terms) => {
 				let mut acc = PC::zero(); // running sum
 				terms
 					.iter()
 					.sorted_by_key(|x| x.1) // TODO IC lit partition still need to be sorted by the chain, so for now sort by coefficient
 					.map(|(lit, coef)| {
-						acc = acc.clone() + coef.clone();
-						(acc.clone(), lit.clone())
+						acc += *coef;
+						(acc, lit.clone())
 					})
 					.collect()
 			}
@@ -60,7 +60,7 @@ pub fn encode_bool_lin_le_totalizer<
 				// any child lit implies the parent lit with the same value
 				for c in children[0].iter().chain(children[1].iter()) {
 					let w = std::cmp::min(*c.0, k + PC::one()); // not capped in literature, but should be slightly better
-					let p = parent.entry(w).or_insert(db.new_var());
+					let p = parent.entry(w).or_insert_with(|| db.new_var());
 					db.add_clause(&[c.1.negate(), p.clone()]).unwrap();
 				}
 
@@ -69,7 +69,7 @@ pub fn encode_bool_lin_le_totalizer<
 				for l in &children[0] {
 					for r in &children[1] {
 						let w = std::cmp::min(*l.0 + *r.0, k + PC::one());
-						let p = parent.entry(w).or_insert(db.new_var());
+						let p = parent.entry(w).or_insert_with(|| db.new_var());
 						db.add_clause(&[l.1.negate(), r.1.negate(), p.clone()])
 							.unwrap();
 					}
@@ -119,8 +119,8 @@ mod tests {
 		assert!(encode_bool_lin_le_totalizer(
 			&mut db,
 			&[
-				Part::AMO(HashMap::from_iter([(1, 2), (2, 3), (3, 4), (4, 5)]),),
-				Part::AMO(HashMap::from_iter([(5, 3), (6, 4), (7, 6), (8, 8)]),)
+				Part::Amo(HashMap::from_iter([(1, 2), (2, 3), (3, 4), (4, 5)]),),
+				Part::Amo(HashMap::from_iter([(5, 3), (6, 4), (7, 6), (8, 8)]),)
 			],
 			Comparator::LessEq,
 			usize::try_from(10).unwrap()
@@ -133,8 +133,8 @@ mod tests {
 		assert!(encode_bool_lin_le_totalizer(
 			&mut db,
 			&[
-				Part::AMO(HashMap::from_iter([(1, 2), (2, 3), (3, 4), (4, 5)]),),
-				Part::AMO(HashMap::from_iter([(5, 3), (6, 4), (7, 6), (8, 8)]),)
+				Part::Amo(HashMap::from_iter([(1, 2), (2, 3), (3, 4), (4, 5)]),),
+				Part::Amo(HashMap::from_iter([(5, 3), (6, 4), (7, 6), (8, 8)]),)
 			],
 			Comparator::LessEq,
 			usize::try_from(10).unwrap()
