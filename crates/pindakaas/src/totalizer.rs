@@ -87,6 +87,7 @@ pub fn encode_bool_lin_le_totalizer<
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::ClauseSink;
 
 	struct TestDB {
 		nr: i32,
