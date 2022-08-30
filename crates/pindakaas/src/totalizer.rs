@@ -1,9 +1,4 @@
-#![allow(unused_variables, dead_code, unused_imports)]
-use crate::helpers::encode_xor;
-use crate::{
-	ClauseDatabase, ClauseSink, Comparator, Literal, Part, PositiveCoefficient, Result,
-	Unsatisfiable,
-};
+use crate::{ClauseDatabase, Comparator, Literal, Part, PositiveCoefficient, Result};
 use itertools::Itertools;
 use std::collections::HashMap;
 

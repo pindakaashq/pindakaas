@@ -4,7 +4,7 @@
 //! aᵢ·xᵢ ≷ k, where the aᵢ's and k are constant, xᵢ's are integer variables
 //! or boolean literals, and ≷ can be the relationship ≤, =, or ≥. Two forms
 //! of PB constraints are seen as special forms of PB constraints: ensuring a
-//! set of booleans is *At Most One (Amo)* or *At Most K (AMK)*. Specialised
+//! set of booleans is *At Most One (AMO)* or *At Most K (AMK)*. Specialised
 //! encodings are used when these cases are detected.
 
 use std::clone::Clone;
@@ -38,6 +38,7 @@ pub use aggregate::BoolLin;
 ///  - [`std::cmp::Eq`] and [`std::hash::Hash`] to allow PB constraints to be
 ///    simplified
 pub trait Literal: fmt::Debug + Clone + Eq + Hash + Ord {
+	// TODO + Ord trait bound can be removed once we resolve sorting problem in testing
 	/// Returns `true` when the literal a negated boolean variable.
 	fn is_negated(&self) -> bool;
 	fn negate(&self) -> Self;
@@ -332,10 +333,10 @@ pub trait ClauseSink {
 	/// # Required Preprocessing
 	///
 	/// - `lits` is expected to contain at least 2 literals. In cases where an
-	///   Amo constraint has fewer literals, the literals can either be removed
+	///   AMO constraint has fewer literals, the literals can either be removed
 	///   for the problem or the problem is already unsatisfiable
 	fn encode_amo_pairwise(&mut self, lits: &HashSet<Self::Lit>) -> Result {
-		// Precondition: there are multiple literals in the Amo constraint
+		// Precondition: there are multiple literals in the AMO constraint
 		debug_assert!(lits.len() >= 2);
 		// For every pair of literals (i, j) add "¬i ∨ ¬j"
 		for (a, b) in lits.iter().tuple_combinations() {

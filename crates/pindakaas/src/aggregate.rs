@@ -514,7 +514,7 @@ mod tests {
 			})
 		);
 
-		// Correctly identify that the Amo is limiting the LHS ub
+		// Correctly identify that the AMO is limiting the LHS ub
 		assert_eq!(
 			BoolLin::<u32, i32>::aggregate(
 				&mut db,
