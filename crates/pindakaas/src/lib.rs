@@ -357,6 +357,10 @@ impl<Lit: Literal> ClauseSink for Vec<Vec<Lit>> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use splr::{
+		types::{CNFDescription, Instantiate},
+		Config, SatSolverIF, Solver,
+	};
 
 	#[test]
 	fn test_int_literals() {
@@ -394,56 +398,172 @@ mod tests {
 	}
 
 	#[test]
+	fn test_coefficients() {
+		assert!(is_coeff(1i8));
+		assert!(is_coeff(1i16));
+		assert!(is_coeff(1i32));
+		assert!(is_coeff(1i64));
+		assert!(is_coeff(1i128));
+	}
+	fn is_coeff<T: Coefficient>(_: T) -> bool {
+		true
+	}
+
+	#[test]
+	fn test_positive_coefficients() {
+		assert!(is_poscoeff(1u8));
+		assert!(is_poscoeff(1u16));
+		assert!(is_poscoeff(1u32));
+		assert!(is_poscoeff(1u64));
+		assert!(is_poscoeff(1u128));
+	}
+	fn is_poscoeff<T: PositiveCoefficient>(_: T) -> bool {
+		true
+	}
+
+	#[test]
 	fn test_amo_pairwise() {
-		// TODO: Fix sorting issue!
 		// AMO on two literals
-		let mut two: Vec<Vec<i32>> = vec![];
+		let mut two = TestDB::new(2).expect_clauses(vec![vec![-1, -2]]);
 		two.encode_amo_pairwise(&HashSet::from_iter([1, 2]))
 			.unwrap();
-		// assert_eq!(two, vec![vec![-1, -2]]);
+		two.check_complete();
 		// AMO on a negated literals
-		let mut two: Vec<Vec<i32>> = vec![];
+		let mut two = TestDB::new(2).expect_clauses(vec![vec![1, -2]]);
 		two.encode_amo_pairwise(&HashSet::from_iter([-1, 2]))
 			.unwrap();
-		// assert_eq!(two, vec![vec![1, -2]]);
+		two.check_complete();
 		// AMO on three literals
-		let mut two: Vec<Vec<i32>> = vec![];
-		two.encode_amo_pairwise(&HashSet::from_iter([1, 2, 3]))
+		let mut three =
+			TestDB::new(3).expect_clauses(vec![vec![-1, -2], vec![-1, -3], vec![-2, -3]]);
+		three
+			.encode_amo_pairwise(&HashSet::from_iter([1, 2, 3]))
 			.unwrap();
-		// assert_eq!(two, vec![vec![-1, -2], vec![-1, -3], vec![-2, -3]]);
+		three.check_complete();
+	}
+
+	#[test]
+	fn test_pb_encode() {
+		let mut two = TestDB::new(4)
+			.expect_clauses(vec![vec![-4], vec![-3, -1], vec![-2, -1], vec![-3, -2]])
+			.expect_solutions(vec![
+				vec![-1, -2, -3, -4],
+				vec![-1, -2, 3, -4],
+				vec![-1, 2, -3, -4],
+				vec![1, -2, -3, -4],
+			]);
+		assert!(two
+			.encode_bool_lin::<i64, u64>(&[1, 1, 1, 2], &[1, 2, 3, 4], crate::Comparator::LessEq, 1)
+			.is_ok());
+		two.check_complete();
 	}
 
 	struct TestDB {
-		nr: i32,
-		db: Vec<Vec<i32>>,
+		slv: Solver,
+		/// Clauses expected by the test case
+		clauses: Option<Vec<(bool, Vec<i32>)>>,
+		/// Solutions expected by the test case
+		solutions: Option<Vec<Vec<i32>>>,
+	}
+
+	impl TestDB {
+		fn check_complete(&mut self) {
+			if let Some(clauses) = &self.clauses {
+				let missing: Vec<Vec<i32>> = clauses
+					.iter()
+					.filter(|exp| !exp.0)
+					.map(|exp| exp.1.clone())
+					.collect();
+				assert!(
+					missing.is_empty(),
+					"clauses are missing from the encoding: {:?}",
+					missing
+				);
+			}
+			if let Some(solutions) = &self.solutions {
+				let mut from_slv: Vec<Vec<i32>> = self.slv.iter().collect();
+				for sol in &mut from_slv {
+					sol.sort_by(|a, b| a.abs().cmp(&b.abs()));
+				}
+				from_slv.sort();
+				assert_eq!(
+					&from_slv, solutions,
+					"Solutions founds by the solver do not match expected set of solutions"
+				);
+			}
+		}
+
+		fn expect_clauses(mut self, mut clauses: Vec<Vec<i32>>) -> TestDB {
+			for cl in &mut clauses {
+				cl.sort();
+			}
+			clauses.sort();
+			self.clauses = Some(clauses.into_iter().map(|cl| (false, cl)).collect());
+			self
+		}
+
+		fn expect_solutions(mut self, mut solutions: Vec<Vec<i32>>) -> TestDB {
+			for sol in &mut solutions {
+				sol.sort_by(|a, b| a.abs().cmp(&b.abs()));
+			}
+			solutions.sort();
+			self.solutions = Some(solutions);
+			self
+		}
+
+		fn new(num_var: i32) -> TestDB {
+			TestDB {
+				slv: Solver::instantiate(
+					&Config::default(),
+					&CNFDescription {
+						num_of_variables: num_var as usize,
+						..CNFDescription::default()
+					},
+				),
+				clauses: None,
+				solutions: None,
+			}
+		}
 	}
 
 	impl ClauseSink for TestDB {
 		type Lit = i32;
 
 		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
-			self.db.add_clause(cl)
+			let mut cl = Vec::from(cl);
+			cl.sort();
+			if let Some(clauses) = &mut self.clauses {
+				let mut found = false;
+				for exp in clauses {
+					if cl == exp.1 {
+						exp.0 = true;
+						found = true;
+						break;
+					}
+				}
+				assert!(found, "unexpected clause: {:?}", cl);
+			}
+
+			match match cl.len() {
+				0 => return Err(Unsatisfiable),
+				1 => self.slv.add_assignment(cl[0]),
+				_ => self.slv.add_clause(cl),
+			} {
+				Ok(_) => Ok(()),
+				Err(err) => match err {
+					// SolverError::EmptyClause => Ok(()),
+					// SolverError::RootLevelConflict(_) => Err(Unsatisfiable),
+					err => {
+						panic!("unexpected solver error: {:?}", err);
+					}
+				},
+			}
 		}
 	}
 
 	impl ClauseDatabase for TestDB {
 		fn new_var(&mut self) -> Self::Lit {
-			self.nr += 1;
-			self.nr
+			self.slv.add_var() as i32
 		}
-	}
-
-	#[test]
-	fn test_pb_encode() {
-		let mut two = TestDB { nr: 3, db: vec![] };
-		assert!(two
-			.encode_bool_lin::<i64, u64>(
-				&[1, 1, 1, 2],
-				&[1, 2, 3, 4],
-				crate::Comparator::LessEq,
-				1,
-				&[]
-			)
-			.is_ok());
 	}
 }

@@ -13,3 +13,6 @@ edition = "2021"
 [dependencies]
 num = "^0.4"
 itertools = "^0.10"
+
+[dev-dependencies]
+splr = {version = "0.7", features = ["incremental_solver"]}

@@ -1,7 +1,8 @@
 use crate::{ClauseSink, Literal, Result};
 
 /// Encode the constraint lits[0] ⊕ ... ⊕ lits[n].
-/// Warning: currently only defined for n ≤ 3
+/// # Warning
+/// Currently only defined for n ≤ 3.
 ///
 /// # Example
 ///
@@ -12,7 +13,7 @@ use crate::{ClauseSink, Literal, Result};
 /// assert_eq!(v, vec![vec![1,2], vec![-1,-2]])
 /// ```
 ///
-pub fn encode_xor<Lit: Literal, DB: ClauseSink<Lit = Lit> + ?Sized>(
+pub(crate) fn encode_xor<Lit: Literal, DB: ClauseSink<Lit = Lit> + ?Sized>(
 	db: &mut DB,
 	lits: &[Lit],
 ) -> Result {
