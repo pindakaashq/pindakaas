@@ -65,7 +65,8 @@ pub unsafe extern "C" fn encode_bool_lin(
 		Comparator::Equal => pindakaas::Comparator::Equal,
 		Comparator::GreaterEq => pindakaas::Comparator::GreaterEq,
 	};
-	cdb.encode_bool_lin::<i32, u32>(coeff, lit, cmp, k).is_ok()
+	cdb.encode_bool_lin::<i32, u32>(coeff, lit, cmp, k, &[])
+		.is_ok()
 }
 
 struct CClauseDatabase {

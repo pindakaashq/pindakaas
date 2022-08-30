@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use crate::helpers::encode_xor;
 use crate::{
-	ClauseDatabase, ClauseSink, Comparator, Literal, PositiveCoefficient, Result, Unsatisfiable,
+	ClauseDatabase, ClauseSink, Comparator, Literal, Part, PositiveCoefficient, Result,
+	Unsatisfiable,
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
@@ -12,10 +13,15 @@ pub fn encode_bool_lin_adder<
 	PC: PositiveCoefficient,
 >(
 	db: &mut DB,
-	pair: &HashMap<Lit, PC>,
+	partition: &[Part<Lit, PC>],
 	cmp: Comparator,
 	k: PC,
 ) -> Result {
+	let pair = &partition
+		.iter()
+		.flat_map(|part| part.iter().map(|(lit, coef)| (lit.clone(), *coef)))
+		.collect::<HashMap<Lit, PC>>();
+
 	debug_assert!(cmp == Comparator::LessEq || cmp == Comparator::Equal);
 	// The number of relevant bits in k
 	let bits = (PC::zero().leading_zeros() - k.leading_zeros()) as usize;
