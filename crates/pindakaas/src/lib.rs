@@ -22,6 +22,7 @@ use num::{PrimInt, Signed, Unsigned};
 mod adder;
 mod aggregate;
 mod helpers;
+mod totalizer;
 
 pub use aggregate::BoolLin;
 
@@ -36,12 +37,13 @@ pub use aggregate::BoolLin;
 ///
 ///  - [`std::cmp::Eq`] and [`std::hash::Hash`] to allow PB constraints to be
 ///    simplified
-pub trait Literal: fmt::Debug + Clone + Eq + Hash {
+pub trait Literal: fmt::Debug + Clone + Eq + Hash + Ord {
+	// TODO + Ord trait bound can be removed once we resolve sorting problem in testing
 	/// Returns `true` when the literal a negated boolean variable.
 	fn is_negated(&self) -> bool;
 	fn negate(&self) -> Self;
 }
-impl<T: Signed + fmt::Debug + Clone + Eq + Hash + Neg<Output = Self>> Literal for T {
+impl<T: Signed + fmt::Debug + Clone + Eq + Hash + Ord + Neg<Output = Self>> Literal for T {
 	fn is_negated(&self) -> bool {
 		self.is_negative()
 	}
@@ -68,8 +70,11 @@ pub trait Coefficient: Signed + PrimInt + NumAssignOps + NumOps + fmt::Debug {}
 impl<T: Signed + PrimInt + NumAssignOps + NumOps + fmt::Debug> Coefficient for T {}
 /// PositiveCoefficient is a trait used for types used for coefficients that
 /// have been simplified.
-pub trait PositiveCoefficient: Unsigned + PrimInt + NumAssignOps + NumOps + fmt::Debug {}
-impl<T: Unsigned + PrimInt + NumAssignOps + NumOps + fmt::Debug> PositiveCoefficient for T {}
+pub trait PositiveCoefficient:
+	Unsigned + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug
+{
+}
+impl<T: Unsigned + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug> PositiveCoefficient for T {}
 
 /// IntEncoding is a enumerated type use to represent Boolean encodings of integer variables within
 /// this library
@@ -86,6 +91,62 @@ pub enum IntEncoding<'a, Lit: Literal, C: Coefficient> {
 	/// The sum of the Boolean literals multiplied by their associated power of two represents value
 	/// of the integer (i.e., X = ∑ 2ⁱ·bits\[i\]).
 	Log { signed: bool, bits: &'a [Lit] },
+}
+
+// TODO just temporary until I find out how to use IntEncodings for this
+#[derive(Debug)]
+pub enum Constraint<Lit> {
+	Amo(HashSet<Lit>),
+	Ic(Vec<Lit>),
+}
+
+// TODO how can we support both Part(itions) of "terms" ( <Lit, C> for pb constraints) and just lits (<Lit>) for AMK/AMO's?
+// TODO add EO, and probably something for Unconstrained
+#[derive(Debug)]
+pub enum Part<Lit, C> {
+	Amo(HashMap<Lit, C>),
+	Ic(Vec<(Lit, C)>),
+}
+
+// TODO probably should just be Lit: Literal, C: Coefficient? In general, we only need this for testing.
+impl<Lit: Eq + Hash + Ord, C: Eq + Hash + Ord> PartialEq for Part<Lit, C> {
+	fn eq(&self, other: &Self) -> bool {
+		match (self, other) {
+			(Part::Amo(a), Part::Amo(b)) => {
+				let mut a = a.iter().collect::<Vec<(&Lit, &C)>>();
+				let mut b = b.iter().collect::<Vec<(&Lit, &C)>>();
+				a.sort();
+				b.sort();
+				a == b
+			}
+			(Part::Ic(a), Part::Ic(b)) => a == b,
+			_ => false,
+		}
+	}
+}
+
+impl<Lit, C> Part<Lit, C> {
+	fn iter(&self) -> PartIterator<Lit, C> {
+		match self {
+			Part::Amo(terms) => PartIterator::Amo(terms.iter()),
+			Part::Ic(terms) => PartIterator::Ic(terms.iter()),
+		}
+	}
+}
+enum PartIterator<'a, Lit, C> {
+	Amo(std::collections::hash_map::Iter<'a, Lit, C>),
+	Ic(std::slice::Iter<'a, (Lit, C)>),
+}
+
+impl<'a, Lit, C> Iterator for PartIterator<'a, Lit, C> {
+	type Item = (&'a Lit, &'a C);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		match self {
+			Self::Amo(iter) => iter.next(),
+			Self::Ic(iter) => iter.next().map(|(lit, coef)| (lit, coef)),
+		}
+	}
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -153,7 +214,7 @@ pub trait ClauseDatabase: ClauseSink {
 			}
 		}
 
-		self.encode_bool_lin(&bool_coeff, &bool_vars, cmp, k)
+		self.encode_bool_lin(&bool_coeff, &bool_vars, cmp, k, &[])
 	}
 
 	/// Encode a Boolean linear constraint
@@ -163,8 +224,9 @@ pub trait ClauseDatabase: ClauseSink {
 		lits: &[Self::Lit],
 		cmp: Comparator,
 		k: C,
+		cons: &[Constraint<Self::Lit>], // slice
 	) -> Result {
-		let constraint = BoolLin::aggregate(self, coeff, lits, cmp, k)?;
+		let constraint = BoolLin::aggregate(self, coeff, lits, cmp, k, cons)?;
 
 		self.encode_aggregated_bool_lin(&constraint)
 	}
@@ -179,11 +241,19 @@ pub trait ClauseDatabase: ClauseSink {
 			LinEqual { terms, k } => self.encode_bool_lin_eq_adder(terms, *k),
 			LinLessEq { terms, k } => self.encode_bool_lin_le_adder(terms, *k),
 			AtMostK { lits, k } => self.encode_bool_lin_le_adder(
-				&lits.iter().map(|l| (l.clone(), PC::one())).collect(),
+				// &lits.iter().map(|l| (l.clone(), PC::one())).collect(),
+				lits.iter()
+					.map(|l| Part::Amo(HashMap::from_iter([(l.clone(), PC::one())])))
+					.collect::<Vec<_>>()
+					.as_slice(),
 				*k,
 			),
 			EqualK { lits, k } => self.encode_bool_lin_eq_adder(
-				&lits.iter().map(|l| (l.clone(), PC::one())).collect(),
+				// &lits.iter().map(|l| (l.clone(), PC::one())).collect(),
+				lits.iter()
+					.map(|l| Part::Amo(HashMap::from_iter([(l.clone(), PC::one())])))
+					.collect::<Vec<_>>()
+					.as_slice(),
 				*k,
 			),
 			AtMostOne { lits } => self.encode_amo_pairwise(lits),
@@ -194,7 +264,7 @@ pub trait ClauseDatabase: ClauseSink {
 	/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
 	fn encode_bool_lin_eq_adder<PC: PositiveCoefficient>(
 		&mut self,
-		terms: &HashMap<Self::Lit, PC>,
+		terms: &[Part<Self::Lit, PC>],
 		k: PC,
 	) -> Result {
 		adder::encode_bool_lin_adder(self, terms, Comparator::Equal, k)
@@ -203,10 +273,39 @@ pub trait ClauseDatabase: ClauseSink {
 	/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
 	fn encode_bool_lin_le_adder<PC: PositiveCoefficient>(
 		&mut self,
-		terms: &HashMap<Self::Lit, PC>,
+		terms: &[Part<Self::Lit, PC>],
 		k: PC,
 	) -> Result {
 		adder::encode_bool_lin_adder(self, terms, Comparator::LessEq, k)
+	}
+
+	/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a totalizer
+	fn encode_bool_lin_le_totalizer<PC: PositiveCoefficient>(
+		&mut self,
+		partition: &[Part<Self::Lit, PC>],
+		k: PC,
+	) -> Result {
+		totalizer::encode_bool_lin_le_totalizer(self, partition, Comparator::LessEq, k)
+	}
+
+	fn encode_amo_ladder(&mut self, xs: &HashSet<Self::Lit>) -> Result {
+		debug_assert!(xs.len() >= 2);
+
+		// TODO could be slightly optimised to not introduce fixed lits
+		let mut a = self.new_var(); // y_v-1
+		self.add_clause(&[a.clone()])?;
+		for x in xs {
+			let b = self.new_var(); // y_v
+			self.add_clause(&[b.negate(), a.clone()])?; // y_v -> y_v-1
+
+			// "Channelling" clauses for x_v <-> (y_v-1 /\ ¬y_v)
+			self.add_clause(&[x.negate(), a.clone()])?; // x_v -> y_v-1
+			self.add_clause(&[x.negate(), b.negate()])?; // x_v -> ¬y_v
+			self.add_clause(&[a.negate(), b.clone(), x.clone()])?; // (y_v-1 /\ ¬y_v) -> x=v
+			a = b;
+		}
+		self.add_clause(&[a.negate()])?;
+		Ok(())
 	}
 }
 
@@ -271,6 +370,29 @@ mod tests {
 		true
 	}
 
+	#[allow(dead_code)]
+	// TODO fix sorting issue first #[test]
+	fn test_amo_ladder() {
+		let mut two = TestDB { nr: 2, db: vec![] };
+		two.encode_amo_ladder(&HashSet::from_iter([1, 2])).unwrap();
+		assert_eq!(
+			two.db,
+			vec![
+				vec![3],
+				vec![-4, 3],
+				vec![-1, 3],
+				vec![-1, -4],
+				vec![-3, 4, 1],
+				vec![-5, 4],
+				vec![-2, 4],
+				vec![-2, -5],
+				vec![-4, 5, 2],
+				vec![-5]
+			]
+		);
+		assert_eq!(two.nr, 5);
+	}
+
 	#[test]
 	fn test_amo_pairwise() {
 		// TODO: Fix sorting issue!
@@ -315,7 +437,13 @@ mod tests {
 	fn test_pb_encode() {
 		let mut two = TestDB { nr: 3, db: vec![] };
 		assert!(two
-			.encode_bool_lin::<i64, u64>(&[1, 1, 1, 2], &[1, 2, 3, 4], crate::Comparator::LessEq, 1)
+			.encode_bool_lin::<i64, u64>(
+				&[1, 1, 1, 2],
+				&[1, 2, 3, 4],
+				crate::Comparator::LessEq,
+				1,
+				&[]
+			)
 			.is_ok());
 	}
 }
