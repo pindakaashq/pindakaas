@@ -2,7 +2,10 @@
 name = "pyndakaas"
 description = "Python interface for the to pindakaas crate"
 version = "0.1.0"
-authors = ["Jip J. Dekker <jip@dekker.one>"]
+authors = [
+	"Jip J. Dekker <jip.dekker@monash.edu>",
+	"Hendrik 'Henk' Bierlee <hendrik.bierlee@monash.edu>"
+]
 license = "MPL-2.0"
 
 edition = "2021"
