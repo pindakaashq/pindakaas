@@ -106,17 +106,6 @@ pub enum Part<Lit, C> {
 	Ic(Vec<(Lit, C)>),
 }
 
-// TODO probably should just be Lit: Literal, C: Coefficient? In general, we only need this for testing.
-// impl<Lit: Eq + Hash + Ord, C: Eq + Hash + Ord> PartialEq for Part<Lit, C> {
-// 	fn eq(&self, other: &Self) -> bool {
-// 		match (self, other) {
-// 			(Part::Amo(a), Part::Amo(b)) => a == b,
-// 			(Part::Ic(a), Part::Ic(b)) => a == b,
-// 			_ => false,
-// 		}
-// 	}
-// }
-
 impl<Lit, C> Part<Lit, C> {
 	fn iter(&self) -> std::slice::Iter<(Lit, C)> {
 		match self {
@@ -579,19 +568,14 @@ mod tests {
 	) -> bool {
 		assert_eq!(lits.len(), coefs.len());
 		// TODO check side constraints?
-		let val = lits.iter().zip(coefs.iter()).fold(0, |acc, (lit, coef)| {
-			let mut a = None;
-			for x in sol {
-				if x.abs() == lit.abs() {
-					a = Some(x);
-				}
-			}
-			acc + (lit.is_positive() == a.unwrap().is_positive()) as i32 * coef
+		let lhs = lits.iter().zip(coefs.iter()).fold(0, |acc, (lit, coef)| {
+			let a = sol.iter().find(|x| x.abs() == lit.abs());
+			acc + (lit == a.unwrap()) as i32 * coef
 		});
 		match cmp {
-			Comparator::LessEq => val <= k,
-			Comparator::Equal => val == k,
-			Comparator::GreaterEq => val >= k,
+			Comparator::LessEq => lhs <= k,
+			Comparator::Equal => lhs == k,
+			Comparator::GreaterEq => lhs >= k,
 		}
 	}
 }
