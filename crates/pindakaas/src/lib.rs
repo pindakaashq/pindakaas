@@ -399,16 +399,21 @@ mod tests {
 	#[test]
 	fn test_amo_pairwise() {
 		// AMO on two literals
-		let mut two = TestDB::new(2).expect_clauses(vec![vec![-1, -2]]);
+		let mut two = TestDB::new(2)
+			.expect_clauses(vec![vec![-1, -2]])
+			.with_check(|sol| check_pb(&vec![1, 2], &vec![1, 1], Comparator::LessEq, 1, sol));
 		two.encode_amo_pairwise(&vec![1, 2]).unwrap();
 		two.check_complete();
 		// AMO on a negated literals
-		let mut two = TestDB::new(2).expect_clauses(vec![vec![1, -2]]);
+		let mut two = TestDB::new(2)
+			.expect_clauses(vec![vec![1, -2]])
+			.with_check(|sol| check_pb(&vec![-1, 2], &vec![1, 1], Comparator::LessEq, 1, sol));
 		two.encode_amo_pairwise(&vec![-1, 2]).unwrap();
 		two.check_complete();
 		// AMO on three literals
-		let mut three =
-			TestDB::new(3).expect_clauses(vec![vec![-1, -2], vec![-1, -3], vec![-2, -3]]);
+		let mut three = TestDB::new(3)
+			.expect_clauses(vec![vec![-1, -2], vec![-1, -3], vec![-2, -3]])
+			.with_check(|sol| check_pb(&vec![1, 2, 3], &vec![1, 1, 1], Comparator::LessEq, 1, sol));
 		three.encode_amo_pairwise(&vec![1, 2, 3]).unwrap();
 		three.check_complete();
 	}
@@ -441,6 +446,7 @@ mod tests {
 		clauses: Option<Vec<(bool, Vec<i32>)>>,
 		/// Solutions expected by the test case
 		solutions: Option<Vec<Vec<i32>>>,
+		check: Option<fn(&[i32]) -> bool>,
 	}
 
 	impl TestDB {
@@ -455,6 +461,7 @@ mod tests {
 				),
 				clauses: None,
 				solutions: None,
+				check: None,
 			}
 		}
 
@@ -476,6 +483,11 @@ mod tests {
 			self
 		}
 
+		pub fn with_check(mut self, checker: fn(&[i32]) -> bool) -> TestDB {
+			self.check = Some(checker);
+			self
+		}
+
 		pub fn check_complete(&mut self) {
 			if let Some(clauses) = &self.clauses {
 				let missing: Vec<Vec<i32>> = clauses
@@ -490,11 +502,19 @@ mod tests {
 					missing
 				);
 			}
-			if let Some(solutions) = &self.solutions {
-				let mut from_slv: Vec<Vec<i32>> = self.slv.iter().collect();
+			if self.solutions.is_none() && self.check.is_none() {
+				return;
+			}
+			let mut from_slv: Vec<Vec<i32>> = self.slv.iter().collect();
+			for sol in &mut from_slv {
+				sol.sort_by(|a, b| a.abs().cmp(&b.abs()));
+			}
+			if let Some(check) = &self.check {
 				for sol in &mut from_slv {
-					sol.sort_by(|a, b| a.abs().cmp(&b.abs()));
+					assert!(check(sol), "solution {:?} failed check", sol)
 				}
+			}
+			if let Some(solutions) = &self.solutions {
 				from_slv.sort();
 				assert_eq!(
 					&from_slv, solutions,
@@ -546,6 +566,32 @@ mod tests {
 	impl ClauseDatabase for TestDB {
 		fn new_var(&mut self) -> Self::Lit {
 			self.slv.add_var() as i32
+		}
+	}
+
+	pub fn check_pb(
+		lits: &Vec<i32>,
+		coefs: &Vec<i32>,
+		cmp: Comparator,
+		k: i32,
+		// cons: Vec<Constraint<i32>>,
+		sol: &[i32],
+	) -> bool {
+		assert_eq!(lits.len(), coefs.len());
+		// TODO check side constraints?
+		let val = lits.iter().zip(coefs.iter()).fold(0, |acc, (lit, coef)| {
+			let mut a = None;
+			for x in sol {
+				if x.abs() == lit.abs() {
+					a = Some(x);
+				}
+			}
+			acc + (lit.is_positive() == a.unwrap().is_positive()) as i32 * coef
+		});
+		match cmp {
+			Comparator::LessEq => val <= k,
+			Comparator::Equal => val == k,
+			Comparator::GreaterEq => val >= k,
 		}
 	}
 }

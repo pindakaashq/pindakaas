@@ -263,7 +263,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 
 		// Check whether some literals can violate / satisfy the constraint
 		let lhs_ub: PC = partition.iter().fold(PC::zero(), |acc, part| match part {
-			Part::Amo(terms) => acc + terms.iter().map(|tup| tup.1).max().unwrap_or(PC::zero()),
+			Part::Amo(terms) => acc + terms.iter().map(|tup| tup.1).max().unwrap_or_else(PC::zero),
 			Part::Ic(terms) => acc + terms.iter().fold(PC::zero(), |acc, (_, coef)| acc + *coef),
 		});
 
@@ -345,7 +345,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 			if k == PC::one() {
 				// Encode At Least One constraint
 				if cmp == Equal {
-					db.add_clause(&partition.iter().cloned().collect::<Vec<Lit>>())?
+					db.add_clause(&partition.to_vec())?
 				}
 				// Encode At Most One constraint
 				return Ok(AtMostOne { lits: partition });

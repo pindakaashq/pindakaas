@@ -91,7 +91,17 @@ mod tests {
 
 	#[test]
 	fn test_totalizer_encode_amo() {
-		let mut db = TestDB::new(8);
+		let mut db = TestDB::new(8)
+		// .with_check(|sol| {
+		// 	check_pb(
+		// 		&vec![2, 3, 4, 5, 3, 4, 6, 8],
+		// 		&vec![1, 2, 3, 4, 5, 6, 7, 8],
+		// 		Comparator::LessEq,
+		// 		10,
+		// 		sol,
+		// 	)
+		// })
+		;
 		assert!(encode_bool_lin_le_totalizer(
 			&mut db,
 			&[
@@ -106,7 +116,17 @@ mod tests {
 	}
 	#[test]
 	fn test_totalizer_encode_ic() {
-		let mut db = TestDB::new(8);
+		let mut db = TestDB::new(8)
+		// .with_check(|sol| {
+		// 	check_pb(
+		// 		&vec![2, 3, 4, 5, 3, 4, 6, 8],
+		// 		&vec![1, 2, 3, 4, 5, 6, 7, 8],
+		// 		Comparator::LessEq,
+		// 		10,
+		// 		sol,
+		// 	)
+		// })
+		;
 		assert!(encode_bool_lin_le_totalizer(
 			&mut db,
 			&[
