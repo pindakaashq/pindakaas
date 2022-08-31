@@ -39,21 +39,21 @@ pub fn encode_bool_lin_le_totalizer<
 		})
 		.collect();
 
-	// TODO perhaps this single leaf node case should be detected as trivial as well
-	// Fix case of one leaf node; by adding an empty right-hand node, we will get a correct root node
-	if layer.len() == 1 {
-		layer.push(HashMap::new());
-	}
+	loop {
+		// Fix case of odd number of leaf nodes; by adding an empty right-hand node, we will get a correct parent node
+		if layer.len() % 2 == 1 {
+			layer.push(HashMap::new());
+		}
 
-	while layer.len() > 1 {
 		// merge two adjacent nodes of the current layer into one parent node
 		layer = layer
 			.chunks(2)
 			.map(|children| {
 				let mut parent = HashMap::new();
+				let (left, right) = (&children[0], &children[1]);
 
 				// any child lit implies the parent lit with the same value
-				for c in children[0].iter().chain(children[1].iter()) {
+				for c in left.iter().chain(right.iter()) {
 					let w = std::cmp::min(*c.0, k + PC::one()); // not capped in literature, but should be slightly better
 					let p = parent.entry(w).or_insert_with(|| db.new_var());
 					db.add_clause(&[c.1.negate(), p.clone()]).unwrap();
@@ -61,8 +61,8 @@ pub fn encode_bool_lin_le_totalizer<
 
 				// two lits together imply the parent lit with the sum of their values
 				// TODO can be optimised if by sorting both children by value
-				for l in &children[0] {
-					for r in &children[1] {
+				for l in left {
+					for r in right {
 						let w = std::cmp::min(*l.0 + *r.0, k + PC::one());
 						let p = parent.entry(w).or_insert_with(|| db.new_var());
 						db.add_clause(&[l.1.negate(), r.1.negate(), p.clone()])
@@ -73,6 +73,10 @@ pub fn encode_bool_lin_le_totalizer<
 				parent
 			})
 			.collect();
+
+		if layer.len() == 1 {
+			break;
+		}
 	}
 
 	// Set root node lit with value k+1 to false
