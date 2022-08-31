@@ -9,7 +9,6 @@
 
 use std::clone::Clone;
 use std::cmp::Eq;
-use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::hash::Hash;
@@ -37,13 +36,12 @@ pub use aggregate::BoolLin;
 ///
 ///  - [`std::cmp::Eq`] and [`std::hash::Hash`] to allow PB constraints to be
 ///    simplified
-pub trait Literal: fmt::Debug + Clone + Eq + Hash + Ord {
-	// TODO + Ord trait bound can be removed once we resolve sorting problem in testing
+pub trait Literal: fmt::Debug + Clone + Eq + Hash {
 	/// Returns `true` when the literal a negated boolean variable.
 	fn is_negated(&self) -> bool;
 	fn negate(&self) -> Self;
 }
-impl<T: Signed + fmt::Debug + Clone + Eq + Hash + Ord + Neg<Output = Self>> Literal for T {
+impl<T: Signed + fmt::Debug + Clone + Eq + Hash + Neg<Output = Self>> Literal for T {
 	fn is_negated(&self) -> bool {
 		self.is_negative()
 	}
@@ -96,7 +94,7 @@ pub enum IntEncoding<'a, Lit: Literal, C: Coefficient> {
 // TODO just temporary until I find out how to use IntEncodings for this
 #[derive(Debug)]
 pub enum Constraint<Lit> {
-	Amo(HashSet<Lit>),
+	Amo(Vec<Lit>),
 	Ic(Vec<Lit>),
 }
 
@@ -104,47 +102,15 @@ pub enum Constraint<Lit> {
 // TODO add EO, and probably something for Unconstrained
 #[derive(Debug)]
 pub enum Part<Lit, C> {
-	Amo(HashMap<Lit, C>),
+	Amo(Vec<(Lit, C)>),
 	Ic(Vec<(Lit, C)>),
 }
 
-// TODO probably should just be Lit: Literal, C: Coefficient? In general, we only need this for testing.
-impl<Lit: Eq + Hash + Ord, C: Eq + Hash + Ord> PartialEq for Part<Lit, C> {
-	fn eq(&self, other: &Self) -> bool {
-		match (self, other) {
-			(Part::Amo(a), Part::Amo(b)) => {
-				let mut a = a.iter().collect::<Vec<(&Lit, &C)>>();
-				let mut b = b.iter().collect::<Vec<(&Lit, &C)>>();
-				a.sort();
-				b.sort();
-				a == b
-			}
-			(Part::Ic(a), Part::Ic(b)) => a == b,
-			_ => false,
-		}
-	}
-}
-
 impl<Lit, C> Part<Lit, C> {
-	fn iter(&self) -> PartIterator<Lit, C> {
+	fn iter(&self) -> std::slice::Iter<(Lit, C)> {
 		match self {
-			Part::Amo(terms) => PartIterator::Amo(terms.iter()),
-			Part::Ic(terms) => PartIterator::Ic(terms.iter()),
-		}
-	}
-}
-enum PartIterator<'a, Lit, C> {
-	Amo(std::collections::hash_map::Iter<'a, Lit, C>),
-	Ic(std::slice::Iter<'a, (Lit, C)>),
-}
-
-impl<'a, Lit, C> Iterator for PartIterator<'a, Lit, C> {
-	type Item = (&'a Lit, &'a C);
-
-	fn next(&mut self) -> Option<Self::Item> {
-		match self {
-			Self::Amo(iter) => iter.next(),
-			Self::Ic(iter) => iter.next().map(|(lit, coef)| (lit, coef)),
+			Part::Amo(terms) => terms.iter(),
+			Part::Ic(terms) => terms.iter(),
 		}
 	}
 }
@@ -243,7 +209,7 @@ pub trait ClauseDatabase: ClauseSink {
 			AtMostK { lits, k } => self.encode_bool_lin_le_adder(
 				// &lits.iter().map(|l| (l.clone(), PC::one())).collect(),
 				lits.iter()
-					.map(|l| Part::Amo(HashMap::from_iter([(l.clone(), PC::one())])))
+					.map(|l| Part::Amo(vec![(l.clone(), PC::one())]))
 					.collect::<Vec<_>>()
 					.as_slice(),
 				*k,
@@ -251,7 +217,7 @@ pub trait ClauseDatabase: ClauseSink {
 			EqualK { lits, k } => self.encode_bool_lin_eq_adder(
 				// &lits.iter().map(|l| (l.clone(), PC::one())).collect(),
 				lits.iter()
-					.map(|l| Part::Amo(HashMap::from_iter([(l.clone(), PC::one())])))
+					.map(|l| Part::Amo(vec![(l.clone(), PC::one())]))
 					.collect::<Vec<_>>()
 					.as_slice(),
 				*k,
@@ -288,7 +254,8 @@ pub trait ClauseDatabase: ClauseSink {
 		totalizer::encode_bool_lin_le_totalizer(self, partition, Comparator::LessEq, k)
 	}
 
-	fn encode_amo_ladder(&mut self, xs: &HashSet<Self::Lit>) -> Result {
+	fn encode_amo_ladder(&mut self, xs: &Vec<Self::Lit>) -> Result {
+		debug_assert!(xs.iter().duplicates().count() == 0);
 		debug_assert!(xs.len() >= 2);
 
 		// TODO could be slightly optimised to not introduce fixed lits
@@ -335,8 +302,9 @@ pub trait ClauseSink {
 	/// - `lits` is expected to contain at least 2 literals. In cases where an
 	///   AMO constraint has fewer literals, the literals can either be removed
 	///   for the problem or the problem is already unsatisfiable
-	fn encode_amo_pairwise(&mut self, lits: &HashSet<Self::Lit>) -> Result {
+	fn encode_amo_pairwise(&mut self, lits: &Vec<Self::Lit>) -> Result {
 		// Precondition: there are multiple literals in the AMO constraint
+		debug_assert!(lits.iter().duplicates().count() == 0);
 		debug_assert!(lits.len() >= 2);
 		// For every pair of literals (i, j) add "¬i ∨ ¬j"
 		for (a, b) in lits.iter().tuple_combinations() {
@@ -357,6 +325,10 @@ impl<Lit: Literal> ClauseSink for Vec<Vec<Lit>> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use splr::{
+		types::{CNFDescription, Instantiate},
+		Config, SatSolverIF, Solver, SolverError,
+	};
 
 	#[test]
 	fn test_int_literals() {
@@ -370,72 +342,81 @@ mod tests {
 		true
 	}
 
-	#[allow(dead_code)]
-	// TODO fix sorting issue first #[test]
+	#[test]
 	fn test_amo_ladder() {
-		let mut two = TestDB { nr: 2, db: vec![] };
-		two.encode_amo_ladder(&HashSet::from_iter([1, 2])).unwrap();
-		assert_eq!(
-			two.db,
-			vec![
-				vec![3],
-				vec![-4, 3],
-				vec![-1, 3],
-				vec![-1, -4],
-				vec![-3, 4, 1],
-				vec![-5, 4],
-				vec![-2, 4],
-				vec![-2, -5],
-				vec![-4, 5, 2],
-				vec![-5]
-			]
-		);
-		assert_eq!(two.nr, 5);
+		let mut two = TestDB::new(2).expect_clauses(vec![
+			vec![-1, 3],
+			vec![1, -3, 4],
+			vec![-1, -4],
+			vec![-2, -5],
+			vec![-2, 4],
+			vec![3],
+			vec![-4, 3],
+			vec![-4, 5, 2],
+			vec![-5, 4],
+			vec![-5],
+		]);
+		two.encode_amo_ladder(&vec![1, 2]).unwrap();
+		two.check_complete();
+		assert_eq!(two.num_var(), 5);
+	}
+
+	#[test]
+	fn test_coefficients() {
+		assert!(is_coeff(1i8));
+		assert!(is_coeff(1i16));
+		assert!(is_coeff(1i32));
+		assert!(is_coeff(1i64));
+		assert!(is_coeff(1i128));
+	}
+	fn is_coeff<T: Coefficient>(_: T) -> bool {
+		true
+	}
+
+	#[test]
+	fn test_positive_coefficients() {
+		assert!(is_poscoeff(1u8));
+		assert!(is_poscoeff(1u16));
+		assert!(is_poscoeff(1u32));
+		assert!(is_poscoeff(1u64));
+		assert!(is_poscoeff(1u128));
+	}
+	fn is_poscoeff<T: PositiveCoefficient>(_: T) -> bool {
+		true
 	}
 
 	#[test]
 	fn test_amo_pairwise() {
-		// TODO: Fix sorting issue!
 		// AMO on two literals
-		let mut two: Vec<Vec<i32>> = vec![];
-		two.encode_amo_pairwise(&HashSet::from_iter([1, 2]))
-			.unwrap();
-		// assert_eq!(two, vec![vec![-1, -2]]);
+		let mut two = TestDB::new(2)
+			.expect_clauses(vec![vec![-1, -2]])
+			.with_check(|sol| check_pb(&vec![1, 2], &vec![1, 1], Comparator::LessEq, 1, sol));
+		two.encode_amo_pairwise(&vec![1, 2]).unwrap();
+		two.check_complete();
 		// AMO on a negated literals
-		let mut two: Vec<Vec<i32>> = vec![];
-		two.encode_amo_pairwise(&HashSet::from_iter([-1, 2]))
-			.unwrap();
-		// assert_eq!(two, vec![vec![1, -2]]);
+		let mut two = TestDB::new(2)
+			.expect_clauses(vec![vec![1, -2]])
+			.with_check(|sol| check_pb(&vec![-1, 2], &vec![1, 1], Comparator::LessEq, 1, sol));
+		two.encode_amo_pairwise(&vec![-1, 2]).unwrap();
+		two.check_complete();
 		// AMO on three literals
-		let mut two: Vec<Vec<i32>> = vec![];
-		two.encode_amo_pairwise(&HashSet::from_iter([1, 2, 3]))
-			.unwrap();
-		// assert_eq!(two, vec![vec![-1, -2], vec![-1, -3], vec![-2, -3]]);
-	}
-
-	struct TestDB {
-		nr: i32,
-		db: Vec<Vec<i32>>,
-	}
-
-	impl ClauseSink for TestDB {
-		type Lit = i32;
-
-		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
-			self.db.add_clause(cl)
-		}
-	}
-
-	impl ClauseDatabase for TestDB {
-		fn new_var(&mut self) -> Self::Lit {
-			self.nr += 1;
-			self.nr
-		}
+		let mut three = TestDB::new(3)
+			.expect_clauses(vec![vec![-1, -2], vec![-1, -3], vec![-2, -3]])
+			.with_check(|sol| check_pb(&vec![1, 2, 3], &vec![1, 1, 1], Comparator::LessEq, 1, sol));
+		three.encode_amo_pairwise(&vec![1, 2, 3]).unwrap();
+		three.check_complete();
 	}
 
 	#[test]
 	fn test_pb_encode() {
-		let mut two = TestDB { nr: 3, db: vec![] };
+		let mut two = TestDB::new(4)
+			.expect_clauses(vec![vec![-4], vec![-3, -1], vec![-2, -1], vec![-3, -2]])
+			.expect_solutions(vec![
+				vec![-1, -2, -3, -4],
+				vec![-1, -2, 3, -4],
+				vec![-1, 2, -3, -4],
+				vec![1, -2, -3, -4],
+			]);
 		assert!(two
 			.encode_bool_lin::<i64, u64>(
 				&[1, 1, 1, 2],
@@ -445,5 +426,156 @@ mod tests {
 				&[]
 			)
 			.is_ok());
+		two.check_complete();
+	}
+
+	pub struct TestDB {
+		slv: Solver,
+		/// Clauses expected by the test case
+		clauses: Option<Vec<(bool, Vec<i32>)>>,
+		/// Solutions expected by the test case
+		solutions: Option<Vec<Vec<i32>>>,
+		check: Option<fn(&[i32]) -> bool>,
+	}
+
+	impl TestDB {
+		pub fn new(num_var: i32) -> TestDB {
+			TestDB {
+				slv: Solver::instantiate(
+					&Config::default(),
+					&CNFDescription {
+						num_of_variables: num_var as usize,
+						..CNFDescription::default()
+					},
+				),
+				clauses: None,
+				solutions: None,
+				check: None,
+			}
+		}
+
+		pub fn expect_clauses(mut self, mut clauses: Vec<Vec<i32>>) -> TestDB {
+			for cl in &mut clauses {
+				cl.sort_by(|a, b| a.abs().cmp(&b.abs()));
+			}
+			clauses.sort();
+			self.clauses = Some(clauses.into_iter().map(|cl| (false, cl)).collect());
+			self
+		}
+
+		pub fn expect_solutions(mut self, mut solutions: Vec<Vec<i32>>) -> TestDB {
+			for sol in &mut solutions {
+				sol.sort_by(|a, b| a.abs().cmp(&b.abs()));
+			}
+			solutions.sort();
+			self.solutions = Some(solutions);
+			self
+		}
+
+		pub fn with_check(mut self, checker: fn(&[i32]) -> bool) -> TestDB {
+			self.check = Some(checker);
+			self
+		}
+
+		pub fn check_complete(&mut self) {
+			if let Some(clauses) = &self.clauses {
+				let missing: Vec<Vec<i32>> = clauses
+					.iter()
+					.filter(|exp| exp.0 == false)
+					.map(|exp| exp.1.clone())
+					.collect();
+				// assert!(false, "{:?} {:?}", clauses, missing);
+				assert!(
+					missing.is_empty(),
+					"clauses are missing from the encoding: {:?}",
+					missing
+				);
+			}
+			if self.solutions.is_none() && self.check.is_none() {
+				return;
+			}
+			let mut from_slv: Vec<Vec<i32>> = self.slv.iter().collect();
+			for sol in &mut from_slv {
+				sol.sort_by(|a, b| a.abs().cmp(&b.abs()));
+			}
+			if let Some(check) = &self.check {
+				for sol in &mut from_slv {
+					assert!(check(sol), "solution {:?} failed check", sol)
+				}
+			}
+			if let Some(solutions) = &self.solutions {
+				from_slv.sort();
+				assert_eq!(
+					&from_slv, solutions,
+					"solutions founds by the solver do not match expected set of solutions"
+				);
+			}
+		}
+
+		pub fn num_var(&self) -> usize {
+			self.slv.asg.num_vars
+		}
+	}
+
+	impl ClauseSink for TestDB {
+		type Lit = i32;
+
+		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
+			let mut cl = Vec::from(cl);
+			cl.sort_by(|a, b| a.abs().cmp(&b.abs()));
+			if let Some(clauses) = &mut self.clauses {
+				let mut found = false;
+				for exp in clauses {
+					if cl == exp.1 {
+						exp.0 = true;
+						found = true;
+						break;
+					}
+				}
+				assert!(found, "unexpected clause: {:?}", cl);
+			}
+
+			match match cl.len() {
+				0 => return Err(Unsatisfiable),
+				1 => self.slv.add_assignment(cl[0]),
+				_ => self.slv.add_clause(cl),
+			} {
+				Ok(_) => Ok(()),
+				Err(err) => match err {
+					SolverError::EmptyClause => Ok(()),
+					SolverError::RootLevelConflict(_) => Err(Unsatisfiable),
+					err => {
+						panic!("unexpected solver error: {:?}", err);
+					}
+				},
+			}
+		}
+	}
+
+	impl ClauseDatabase for TestDB {
+		fn new_var(&mut self) -> Self::Lit {
+			self.slv.add_var() as i32
+		}
+	}
+
+	pub fn check_pb(
+		lits: &Vec<i32>,
+		coefs: &Vec<i32>,
+		cmp: Comparator,
+		k: i32,
+		// cons: Vec<Constraint<i32>>,
+		sol: &[i32],
+	) -> bool {
+		assert_eq!(lits.len(), coefs.len());
+		// TODO check side constraints?
+		let lhs = lits.iter().zip(coefs.iter()).fold(0, |acc, (lit, coef)| {
+			let a = sol.iter().find(|x| x.abs() == lit.abs());
+			acc + (lit == a.unwrap()) as i32 * coef
+		});
+		match cmp {
+			Comparator::LessEq => lhs <= k,
+			Comparator::Equal => lhs == k,
+			Comparator::GreaterEq => lhs >= k,
+		}
 	}
 }

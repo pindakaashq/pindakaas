@@ -91,54 +91,56 @@ pub fn encode_bool_lin_le_totalizer<
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::ClauseSink;
-
-	struct TestDB {
-		nr: i32,
-		db: Vec<Vec<i32>>,
-	}
-
-	impl ClauseSink for TestDB {
-		type Lit = i32;
-
-		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
-			self.db.add_clause(cl)
-		}
-	}
-
-	impl ClauseDatabase for TestDB {
-		fn new_var(&mut self) -> Self::Lit {
-			self.nr += 1;
-			self.nr
-		}
-	}
+	use crate::tests::TestDB;
 
 	#[test]
 	fn test_totalizer_encode_amo() {
-		let mut db = TestDB { nr: 8, db: vec![] };
+		let mut db = TestDB::new(8)
+		// .with_check(|sol| {
+		// 	check_pb(
+		// 		&vec![2, 3, 4, 5, 3, 4, 6, 8],
+		// 		&vec![1, 2, 3, 4, 5, 6, 7, 8],
+		// 		Comparator::LessEq,
+		// 		10,
+		// 		sol,
+		// 	)
+		// })
+		;
 		assert!(encode_bool_lin_le_totalizer(
 			&mut db,
 			&[
-				Part::Amo(HashMap::from_iter([(1, 2), (2, 3), (3, 4), (4, 5)]),),
-				Part::Amo(HashMap::from_iter([(5, 3), (6, 4), (7, 6), (8, 8)]),)
+				Part::Amo(vec![(1, 2), (2, 3), (3, 4), (4, 5)],),
+				Part::Amo(vec![(5, 3), (6, 4), (7, 6), (8, 8)],)
 			],
 			Comparator::LessEq,
-			usize::try_from(10).unwrap()
+			10 as u32
 		)
 		.is_ok());
+		db.check_complete();
 	}
 	#[test]
 	fn test_totalizer_encode_ic() {
-		let mut db = TestDB { nr: 8, db: vec![] };
+		let mut db = TestDB::new(8)
+		// .with_check(|sol| {
+		// 	check_pb(
+		// 		&vec![2, 3, 4, 5, 3, 4, 6, 8],
+		// 		&vec![1, 2, 3, 4, 5, 6, 7, 8],
+		// 		Comparator::LessEq,
+		// 		10,
+		// 		sol,
+		// 	)
+		// })
+		;
 		assert!(encode_bool_lin_le_totalizer(
 			&mut db,
 			&[
-				Part::Amo(HashMap::from_iter([(1, 2), (2, 3), (3, 4), (4, 5)]),),
-				Part::Amo(HashMap::from_iter([(5, 3), (6, 4), (7, 6), (8, 8)]),)
+				Part::Amo(vec![(1, 2), (2, 3), (3, 4), (4, 5)],),
+				Part::Amo(vec![(5, 3), (6, 4), (7, 6), (8, 8)],)
 			],
 			Comparator::LessEq,
-			usize::try_from(10).unwrap()
+			10 as u32
 		)
 		.is_ok());
+		db.check_complete();
 	}
 }

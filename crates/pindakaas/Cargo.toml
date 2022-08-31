@@ -13,3 +13,7 @@ edition = "2021"
 [dependencies]
 num = "^0.4"
 itertools = "^0.10"
+
+[dev-dependencies]
+# TODO: Replace with 0.16 once released
+splr = { git = "https://github.com/shnarazk/splr.git", branch = "20220830-incremental-solver" }
