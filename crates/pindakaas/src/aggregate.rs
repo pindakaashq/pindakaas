@@ -93,12 +93,12 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 						.collect(),
 				),
 			})
+        .filter(|part| part.iter().next().is_some()) // filter out empty groups
 			.flat_map(|part| { // convert terms with negative coefficients
 				match part {
                     Part::Amo(mut terms) => {
                         // TODO some ugly duplication to handle this, but since data structure will change this is ok for now
                         if terms.len() == 1 {
-                            // TODO construct iterators rather than these fixed length vecs?
                             return vec![Part::Amo(
 							terms
 								.into_iter()
