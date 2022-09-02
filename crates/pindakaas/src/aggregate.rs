@@ -57,12 +57,26 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 			.map(|con| match con {
 				Constraint::Amo(lits) => Part::Amo(
 					lits.iter()
-						.map(|lit| (lit.clone(), agg.remove(lit).unwrap()))
+						.map(|lit| {
+							(
+								lit.clone(),
+								agg.remove(lit).unwrap_or_else(|| {
+									panic!("Lit {:?} was in side constraint but not in PB", lit)
+								}),
+							)
+						})
 						.collect(),
 				),
 				Constraint::Ic(lits) => Part::Ic(
 					lits.iter()
-						.map(|lit| (lit.clone(), agg.remove(lit).unwrap()))
+						.map(|lit| {
+							(
+								lit.clone(),
+								agg.remove(lit).unwrap_or_else(|| {
+									panic!("Lit {:?} was in side constraint but not in PB", lit)
+								}),
+							)
+						})
 						.collect(),
 				),
 			})
@@ -112,7 +126,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 									match coef.try_into() {
 										Ok(coef) => (lit, coef),
 										Err(_) => {
-											panic!("Unable to convert coefficient to positive coeffient.")
+											panic!("Unable to convert coefficient to positive coefficient.")
 										}
 									}
 								}).collect()
@@ -220,7 +234,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 
 		let mut k = match k.try_into() {
 			Ok(k) => k,
-			Err(_) => panic!("Unable to convert coefficient to positive coeffient."),
+			Err(_) => panic!("Unable to convert coefficient to positive coefficient."),
 		};
 
 		// Remove terms with coefs higher than k
