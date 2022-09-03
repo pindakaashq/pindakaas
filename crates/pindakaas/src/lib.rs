@@ -343,6 +343,31 @@ mod tests {
 	}
 
 	#[test]
+	fn test_encoders() {
+		// +7*x1 +10*x2 +4*x3 +4*x4 <= 9
+		let mut two = TestDB::new(4).expect_solutions(vec![
+			vec![-1, -2, -3, -4],
+			vec![1, -2, -3, -4],
+			vec![-1, -2, 3, -4],
+			vec![-1, -2, -3, 4],
+		]);
+		// two.add_clause(&[-5]).unwrap();
+		// TODO encode this if encoder does not support constraint
+		assert!(two.encode_amo_pairwise(&vec![1, 2]).is_ok());
+		assert!(two.encode_amo_pairwise(&vec![3, 4]).is_ok());
+		assert!(two
+			.encode_bool_lin::<i64, u64>(
+				&[7, 10, 4, 4],
+				&[1, 2, 3, 4],
+				crate::Comparator::LessEq,
+				9,
+				&[Constraint::Amo(vec![1, 2]), Constraint::Amo(vec![3, 4])],
+			)
+			.is_ok());
+		two.check_complete();
+	}
+
+	#[test]
 	fn test_amo_ladder() {
 		let mut two = TestDB::new(2).expect_clauses(vec![
 			vec![-1, 3],
