@@ -1,5 +1,4 @@
 use crate::{ClauseDatabase, Comparator, Literal, Part, PositiveCoefficient, Result};
-use itertools::Itertools;
 use std::collections::HashMap;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a totalizer
@@ -16,26 +15,45 @@ pub fn encode_bool_lin_le_totalizer<
 	debug_assert!(cmp == Comparator::LessEq);
 
 	// Every layer of the totalizer (binary) tree has nodes containing literals associated with (unique) values (which equal the sum so far)
-
-	// TODO assert no duplicate coefs in AMO's (not relevant to handle for the moment)
 	let mut layer: Vec<HashMap<PC, Lit>> = partition
 		.iter()
-		.map(|part| match part {
-			Part::Amo(terms) => terms
-				.iter()
-				.map(|(lit, coef)| (*coef, lit.clone()))
-				.collect(),
-			Part::Ic(terms) => {
-				let mut acc = PC::zero(); // running sum
-				terms
+		.map(|part| {
+			let terms: Vec<(PC, Lit)> = match part {
+				Part::Amo(terms) => terms
 					.iter()
-					.sorted_by_key(|x| x.1) // TODO IC lit partition still need to be sorted by the chain, so for now sort by coefficient
-					.map(|(lit, coef)| {
-						acc += *coef;
-						(acc, lit.clone())
-					})
-					.collect()
+					.map(|(lit, coef)| (*coef, lit.clone()))
+					.collect(),
+				Part::Ic(terms) => {
+					let mut acc = PC::zero(); // running sum
+					terms
+						.iter()
+						.map(|(lit, coef)| {
+							acc += *coef;
+							(acc, lit.clone())
+						})
+						.collect()
+				}
+			};
+
+			// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
+			let mut h: HashMap<PC, Vec<Lit>> = HashMap::with_capacity(terms.len());
+			for (coef, lit) in terms {
+				h.entry(coef).or_insert_with(Vec::new).push(lit);
 			}
+
+			h.into_iter()
+				.map(|(coef, lits)| {
+					if lits.len() == 1 {
+						(coef, lits[0].clone())
+					} else {
+						let o = db.new_var();
+						for lit in lits {
+							db.add_clause(&[lit.negate(), o.clone()]).unwrap();
+						}
+						(coef, o)
+					}
+				})
+				.collect()
 		})
 		.collect();
 
