@@ -329,6 +329,7 @@ mod tests {
 		types::{CNFDescription, Instantiate},
 		Config, SatSolverIF, Solver, SolverError,
 	};
+	use std::collections::HashSet;
 
 	#[test]
 	fn test_int_literals() {
@@ -529,7 +530,22 @@ mod tests {
 				}
 			}
 			if let Some(solutions) = &self.solutions {
+				// we are only interested in literals present in the expected solutions (and not in auxiliary variables)
+				let vars = HashSet::<i32>::from_iter(
+					solutions
+						.iter()
+						.flat_map(|sol| sol.iter().map(|lit| lit.abs())),
+				);
+
+				let mut from_slv: Vec<Vec<i32>> = HashSet::<Vec<i32>>::from_iter(
+					from_slv
+						.into_iter()
+						.map(|xs| xs.into_iter().filter(|x| vars.contains(&x.abs())).collect()),
+				)
+				.into_iter()
+				.collect();
 				from_slv.sort();
+
 				assert_eq!(
 					&from_slv, solutions,
 					"solutions founds by the solver do not match expected set of solutions"
