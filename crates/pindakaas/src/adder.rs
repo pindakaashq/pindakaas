@@ -203,7 +203,7 @@ fn create_carry_lit<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized>(
 
 			db.add_clause(&[a.negate(), b.negate(), carry.clone()])?;
 			db.add_clause(&[a.negate(), c.negate(), carry.clone()])?;
-			db.add_clause(&[a.negate(), b.negate(), carry.clone()])?;
+			db.add_clause(&[b.negate(), c.negate(), carry.clone()])?;
 		}
 		_ => unreachable!(),
 	}
