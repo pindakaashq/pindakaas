@@ -92,7 +92,7 @@ pub enum IntEncoding<'a, Lit: Literal, C: Coefficient> {
 }
 
 // TODO just temporary until I find out how to use IntEncodings for this
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Constraint<Lit> {
 	Amo(Vec<Lit>),
 	Ic(Vec<Lit>),
@@ -115,7 +115,7 @@ impl<Lit, C> Part<Lit, C> {
 	}
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Comparator {
 	LessEq,
 	Equal,
