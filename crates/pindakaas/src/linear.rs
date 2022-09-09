@@ -66,6 +66,7 @@ pub type LinearEncoder<'a, Lit, C, PC> = ArbLinEncoder<'a, Lit, C, PC>;
 pub(crate) enum Part<Lit, C> {
 	Amo(Vec<(Lit, C)>),
 	Ic(Vec<(Lit, C)>),
+	Le(Vec<(Lit, C)>),
 }
 
 impl<Lit, C> Part<Lit, C> {
@@ -73,15 +74,17 @@ impl<Lit, C> Part<Lit, C> {
 		match self {
 			Part::Amo(terms) => terms.iter(),
 			Part::Ic(terms) => terms.iter(),
+			Part::Le(terms) => terms.iter(),
 		}
 	}
 }
 
 // TODO just temporary until I find out how to use IntEncodings for this
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Constraint<Lit> {
 	Amo(Vec<Lit>),
 	Ic(Vec<Lit>),
+	Le(Vec<Lit>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -156,6 +159,18 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 						})
 						.collect(),
 				),
+				Constraint::Le(lits) => Part::Le(
+					lits.iter()
+						.map(|lit| {
+							(
+								lit.clone(),
+								agg.remove(lit).unwrap_or_else(|| {
+									panic!("Lit {:?} was in side constraint but not in PB", lit)
+								}),
+							)
+						})
+						.collect(),
+				),
 			})
 			.collect::<Vec<Part<Lit, C>>>();
 
@@ -167,10 +182,25 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 				.collect(),
 		);
 
+		// TODO cannot construct this as a closures due to inner closures problem
+		let convert_term_if_negative = |term: (Lit, C), k: &mut C| -> (Lit, PC) {
+			let (mut lit, mut coef) = term;
+			if coef.is_negative() {
+				coef = -coef;
+				lit = lit.negate();
+				*k += coef;
+			};
+			match coef.try_into() {
+				Ok(coef) => (lit, coef),
+				Err(_) => {
+					panic!("Unable to convert coefficient to positive coefficient.")
+				}
+			}
+		};
+
 		let partition :Vec<Part<Lit, PC>> = partition
 			.into_iter()
 			.map(|part| match part { // filter terms with coefficients of 0
-				// TODO avoid this duplication?
 				Part::Amo(terms) => Part::Amo(
 					terms
 						.into_iter()
@@ -183,30 +213,22 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 						.filter(|(_, coef)| coef != &C::zero())
 						.collect(),
 				),
+				Part::Le(terms) => Part::Ic(
+					terms
+						.into_iter()
+						.filter(|(_, coef)| coef != &C::zero())
+						.collect(),
+				),
 			})
-        .filter(|part| part.iter().next().is_some()) // filter out empty groups
 			.flat_map(|part| { // convert terms with negative coefficients
 				match part {
                     Part::Amo(mut terms) => {
-                        // TODO some ugly duplication to handle this, but since data structure will change this is ok for now
                         if terms.len() == 1 {
                             return vec![Part::Amo(
 							terms
 								.into_iter()
 								.filter(|(_, coef)| coef != &C::zero())
-								.map(|(mut lit, mut coef)| {
-									if coef.is_negative() {
-										coef = -coef;
-										lit = lit.negate();
-										k += coef;
-									};
-									match coef.try_into() {
-										Ok(coef) => (lit, coef),
-										Err(_) => {
-											panic!("Unable to convert coefficient to positive coefficient.")
-										}
-									}
-								}).collect()
+								.map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k)).collect()
                                 )]
                         }
 
@@ -274,25 +296,15 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 						Part::Ic(
 							neg_chain
                             .into_iter()
-								.map(|(mut lit, mut coef)| {
-									if coef.is_negative() {
-										coef = -coef;
-										lit = lit.negate();
-										k += coef;
-									};
-									match coef.try_into() {
-										Ok(coef) => (lit, coef),
-										Err(_) => {
-											panic!("Unable to convert coefficient to positive coefficient.")
-										}
-									}
-								})
+								.map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k))
                                 .rev() // x1 <- x2 <- x3 <- ... becomes ~x1 -> ~x2 -> ~x3 -> ...
 								.collect(),
 						)]
-					}
+					},
+                    Part::Le(terms) => vec![Part::Le(terms.into_iter().map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k)).collect())]
 				}
 			})
+            .filter(|part| part.iter().next().is_some()) // filter out empty groups
             .collect();
 
 		// trivial case: constraint is unsatisfiable
@@ -349,13 +361,16 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 							.collect(),
 					)
 				}
+				Part::Le(terms) => Part::Le(terms),
 			})
 			.collect::<Vec<Part<Lit, PC>>>();
 
 		// Check whether some literals can violate / satisfy the constraint
 		let lhs_ub: PC = partition.iter().fold(PC::zero(), |acc, part| match part {
 			Part::Amo(terms) => acc + terms.iter().map(|tup| tup.1).max().unwrap_or_else(PC::zero),
-			Part::Ic(terms) => acc + terms.iter().fold(PC::zero(), |acc, (_, coef)| acc + *coef),
+			Part::Ic(terms) | Part::Le(terms) => {
+				acc + terms.iter().fold(PC::zero(), |acc, (_, coef)| acc + *coef)
+			}
 		});
 
 		if cmp == Comparator::LessEq {
@@ -389,7 +404,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 								.0
 								.clone()])?;
 						}
-						Part::Ic(terms) => {
+						Part::Ic(terms) | Part::Le(terms) => {
 							for (lit, _) in terms {
 								db.add_clause(&[lit.clone()])?;
 							}
@@ -1014,6 +1029,13 @@ mod tests {
 						false
 					}
 				}
+				Part::Le(terms) => {
+					if let Part::Le(oterms) = other {
+						term_eq(terms, oterms)
+					} else {
+						false
+					}
+				}
 			}
 		}
 	}
@@ -1051,6 +1073,13 @@ mod tests {
 						termcmp(terms, oterms)
 					} else {
 						std::cmp::Ordering::Greater
+					}
+				}
+				Part::Le(terms) => {
+					if let Part::Le(oterms) = other {
+						termcmp(terms, oterms)
+					} else {
+						std::cmp::Ordering::Less
 					}
 				}
 			})
