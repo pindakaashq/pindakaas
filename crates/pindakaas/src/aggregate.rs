@@ -25,7 +25,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 		lits: &[Lit],
 		cmp: Comparator,
 		k: C,
-		cons: &[Constraint<Lit>],
+		cons: &[Constraint<Lit, C>],
 	) -> Result<BoolLin<PC, Lit>> {
 		debug_assert_eq!(coeff.len(), lits.len());
 		use BoolLin::*;
@@ -79,7 +79,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 						})
 						.collect(),
 				),
-				Constraint::Le(lits) => Part::Le(
+				Constraint::Le(lits, k) => Part::Le(
 					lits.iter()
 						.map(|lit| {
 							(
@@ -90,6 +90,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 							)
 						})
 						.collect(),
+					*k,
 				),
 			})
 			.collect::<Vec<Part<Lit, C>>>();
@@ -133,11 +134,12 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 						.filter(|(_, coef)| coef != &C::zero())
 						.collect(),
 				),
-				Part::Le(terms) => Part::Ic(
+				Part::Le(terms,k) => Part::Le(
 					terms
 						.into_iter()
 						.filter(|(_, coef)| coef != &C::zero())
 						.collect(),
+                        k
 				),
 			})
 			.flat_map(|part| { // convert terms with negative coefficients
@@ -221,9 +223,12 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 								.collect(),
 						)]
 					},
-                    Part::Le(terms) => vec![Part::Le(terms.into_iter().map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k)).collect())]
-				}
-			})
+                    Part::Le(terms,le_k) => vec![
+                        Part::Le(terms.into_iter().map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k)).collect(), match le_k.try_into() {
+                                Ok(le_k) => le_k,
+                                Err(_) => { panic!("Unable to convert coefficient to positive coefficient.") }
+				})],
+                }})
             .filter(|part| part.iter().next().is_some()) // filter out empty groups
             .collect();
 
@@ -281,15 +286,16 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 							.collect(),
 					)
 				}
-				Part::Le(terms) => Part::Le(terms),
+				Part::Le(terms, k) => Part::Le(terms, k),
 			})
 			.collect::<Vec<Part<Lit, PC>>>();
 
 		// Check whether some literals can violate / satisfy the constraint
 		let lhs_ub: PC = partition.iter().fold(PC::zero(), |acc, part| match part {
 			Part::Amo(terms) => acc + terms.iter().map(|tup| tup.1).max().unwrap_or_else(PC::zero),
-			Part::Ic(terms) | Part::Le(terms) => {
+			Part::Ic(terms) | Part::Le(terms, _) => {
 				acc + terms.iter().fold(PC::zero(), |acc, (_, coef)| acc + *coef)
+				// TODO max(k, acc + ..)
 			}
 		});
 
@@ -324,7 +330,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 								.0
 								.clone()])?;
 						}
-						Part::Ic(terms) | Part::Le(terms) => {
+						Part::Ic(terms) | Part::Le(terms, _) => {
 							for (lit, _) in terms {
 								db.add_clause(&[lit.clone()])?;
 							}
@@ -589,7 +595,7 @@ mod tests {
 			})
 		);
 
-		// Correctly convert multiple negative coefficients with IC constraints
+		// Correctly convert multiple negative coefficients with side constraints
 		let mut db = TestDB::new(6);
 		assert_eq!(
 			BoolLin::<u32, i32>::aggregate(
@@ -655,9 +661,9 @@ mod tests {
 						false
 					}
 				}
-				Part::Le(terms) => {
-					if let Part::Le(oterms) = other {
-						term_eq(terms, oterms)
+				Part::Le(terms, k) => {
+					if let Part::Le(oterms, ok) = other {
+						term_eq(terms, oterms) && k == ok
 					} else {
 						false
 					}
@@ -701,8 +707,8 @@ mod tests {
 						std::cmp::Ordering::Greater
 					}
 				}
-				Part::Le(terms) => {
-					if let Part::Le(oterms) = other {
+				Part::Le(terms, _) => {
+					if let Part::Le(oterms, _) = other {
 						termcmp(terms, oterms)
 					} else {
 						std::cmp::Ordering::Less
