@@ -66,7 +66,7 @@ pub type LinearEncoder<'a, Lit, C, PC> = ArbLinEncoder<'a, Lit, C, PC>;
 pub(crate) enum Part<Lit, C> {
 	Amo(Vec<(Lit, C)>),
 	Ic(Vec<(Lit, C)>),
-	Le(Vec<(Lit, C)>),
+	Le(Vec<(Lit, C)>, C),
 }
 
 impl<Lit, C> Part<Lit, C> {
@@ -74,17 +74,17 @@ impl<Lit, C> Part<Lit, C> {
 		match self {
 			Part::Amo(terms) => terms.iter(),
 			Part::Ic(terms) => terms.iter(),
-			Part::Le(terms) => terms.iter(),
+			Part::Le(terms, _) => terms.iter(),
 		}
 	}
 }
 
 // TODO just temporary until I find out how to use IntEncodings for this
 #[derive(Debug, Clone)]
-pub enum Constraint<Lit> {
+pub enum Constraint<Lit, C> {
 	Amo(Vec<Lit>),
 	Ic(Vec<Lit>),
-	Le(Vec<Lit>),
+	Le(Vec<Lit>, C),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -106,7 +106,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 		lits: &[Lit],
 		cmp: Comparator,
 		k: C,
-		cons: &[Constraint<Lit>],
+		cons: &[Constraint<Lit, C>],
 	) -> Result<LinVariant<Lit, PC>> {
 		debug_assert_eq!(coeff.len(), lits.len());
 		use Comparator::*;
@@ -159,7 +159,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 						})
 						.collect(),
 				),
-				Constraint::Le(lits) => Part::Le(
+				Constraint::Le(lits, k) => Part::Le(
 					lits.iter()
 						.map(|lit| {
 							(
@@ -170,6 +170,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 							)
 						})
 						.collect(),
+					*k,
 				),
 			})
 			.collect::<Vec<Part<Lit, C>>>();
@@ -213,11 +214,12 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 						.filter(|(_, coef)| coef != &C::zero())
 						.collect(),
 				),
-				Part::Le(terms) => Part::Ic(
+				Part::Le(terms,k) => Part::Le(
 					terms
 						.into_iter()
 						.filter(|(_, coef)| coef != &C::zero())
 						.collect(),
+                        k
 				),
 			})
 			.flat_map(|part| { // convert terms with negative coefficients
@@ -301,9 +303,12 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 								.collect(),
 						)]
 					},
-                    Part::Le(terms) => vec![Part::Le(terms.into_iter().map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k)).collect())]
-				}
-			})
+                    Part::Le(terms,le_k) => vec![
+                        Part::Le(terms.into_iter().map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k)).collect(), match le_k.try_into() {
+                                Ok(le_k) => le_k,
+                                Err(_) => { panic!("Unable to convert coefficient to positive coefficient.") }
+				})],
+                }})
             .filter(|part| part.iter().next().is_some()) // filter out empty groups
             .collect();
 
@@ -361,15 +366,16 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 							.collect(),
 					)
 				}
-				Part::Le(terms) => Part::Le(terms),
+				Part::Le(terms, k) => Part::Le(terms, k),
 			})
 			.collect::<Vec<Part<Lit, PC>>>();
 
 		// Check whether some literals can violate / satisfy the constraint
 		let lhs_ub: PC = partition.iter().fold(PC::zero(), |acc, part| match part {
 			Part::Amo(terms) => acc + terms.iter().map(|tup| tup.1).max().unwrap_or_else(PC::zero),
-			Part::Ic(terms) | Part::Le(terms) => {
+			Part::Ic(terms) | Part::Le(terms, _) => {
 				acc + terms.iter().fold(PC::zero(), |acc, (_, coef)| acc + *coef)
+				// TODO max(k, acc + ..)
 			}
 		});
 
@@ -404,7 +410,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 								.0
 								.clone()])?;
 						}
-						Part::Ic(terms) | Part::Le(terms) => {
+						Part::Ic(terms) | Part::Le(terms, _) => {
 							for (lit, _) in terms {
 								db.add_clause(&[lit.clone()])?;
 							}
@@ -494,7 +500,7 @@ macro_rules! linear_encoder {
 			lits: &'a [Lit],
 			cmp: Comparator,
 			k: C,
-			cons: &'a [Constraint<Lit>],
+			cons: &'a [Constraint<Lit, C>],
 			into: ::std::marker::PhantomData<PC>,
 		}
 
@@ -510,7 +516,7 @@ macro_rules! linear_encoder {
 				lits: &'a [Lit],
 				cmp: Comparator,
 				k: C,
-				cons: &'a [Constraint<Lit>],
+				cons: &'a [Constraint<Lit, C>],
 			) -> Self {
 				Self {
 					coeff,
@@ -882,7 +888,7 @@ mod tests {
 			}))
 		);
 
-		// Correctly convert multiple negative coefficients with IC constraints
+		// Correctly convert multiple negative coefficients with side constraints
 		let mut db = TestDB::new(6);
 		assert_eq!(
 			LinVariant::<i32, u32>::aggregate(
@@ -1029,9 +1035,9 @@ mod tests {
 						false
 					}
 				}
-				Part::Le(terms) => {
-					if let Part::Le(oterms) = other {
-						term_eq(terms, oterms)
+				Part::Le(terms, k) => {
+					if let Part::Le(oterms, ok) = other {
+						term_eq(terms, oterms) && k == ok
 					} else {
 						false
 					}
@@ -1075,8 +1081,8 @@ mod tests {
 						std::cmp::Ordering::Greater
 					}
 				}
-				Part::Le(terms) => {
-					if let Part::Le(oterms) = other {
+				Part::Le(terms, _) => {
+					if let Part::Le(oterms, _) = other {
 						termcmp(terms, oterms)
 					} else {
 						std::cmp::Ordering::Less
