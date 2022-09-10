@@ -14,54 +14,82 @@ pub fn encode_bool_lin_le_totalizer<
 	k: PC,
 ) -> Result {
 	debug_assert!(cmp == Comparator::LessEq);
-
 	// Every layer of the totalizer (binary) tree has nodes containing literals associated with (unique) values (which equal the sum so far)
-	let mut layer: Vec<HashMap<PC, Lit>> = partition
-		.iter()
-		.map(|part| {
-			let terms: Vec<(PC, Lit)> = match part {
-				Part::Amo(terms) => terms
-					.iter()
-					.map(|(lit, coef)| (*coef, lit.clone()))
-					.collect(),
-				Part::Ic(terms) => {
-					let mut acc = PC::zero(); // running sum
-					terms
+	let root = build_totalizer(
+		partition
+			.iter()
+			.map(|part| {
+				let terms: Vec<(PC, Lit)> = match part {
+					Part::Amo(terms) => terms
 						.iter()
-						.map(|(lit, coef)| {
-							acc += *coef;
-							(acc, lit.clone())
-						})
-						.collect()
-				}
-				Part::Le(terms) => terms
-					.iter()
-					.map(|(lit, coef)| (*coef, lit.clone()))
-					.collect(),
-			};
-
-			// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
-			let mut h: HashMap<PC, Vec<Lit>> = HashMap::with_capacity(terms.len());
-			for (coef, lit) in terms {
-				h.entry(coef).or_insert_with(Vec::new).push(lit);
-			}
-
-			h.into_iter()
-				.map(|(coef, lits)| {
-					if lits.len() == 1 {
-						(coef, lits[0].clone())
-					} else {
-						let o = db.new_var();
-						for lit in lits {
-							db.add_clause(&[lit.negate(), o.clone()]).unwrap();
-						}
-						(coef, o)
+						.map(|(lit, coef)| (*coef, lit.clone()))
+						.collect(),
+					Part::Ic(terms) => {
+						let mut acc = PC::zero(); // running sum
+						terms
+							.iter()
+							.map(|(lit, coef)| {
+								acc += *coef;
+								(acc, lit.clone())
+							})
+							.collect()
 					}
-				})
-				.collect()
-		})
-		.collect();
+					Part::Le(terms, k) => {
+						// totalizer root has unique values, so just return
+						return build_totalizer(
+							terms
+								.iter()
+								.map(|(lit, coef)| HashMap::from_iter([(*coef, lit.clone())]))
+								.collect(),
+							db,
+							*k,
+						);
+					}
+				};
 
+				// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
+				let mut h: HashMap<PC, Vec<Lit>> = HashMap::with_capacity(terms.len());
+				for (coef, lit) in terms {
+					h.entry(coef).or_insert_with(Vec::new).push(lit);
+				}
+
+				h.into_iter()
+					.map(|(coef, lits)| {
+						if lits.len() == 1 {
+							(coef, lits[0].clone())
+						} else {
+							let o = db.new_var();
+							for lit in lits {
+								db.add_clause(&[lit.negate(), o.clone()]).unwrap();
+							}
+							(coef, o)
+						}
+					})
+					.collect()
+			})
+			.collect(),
+		db,
+		k,
+	);
+
+	// Set root node lit with value k+1 to false
+	// The k+1 lit is guaranteed to exists, since all node values are capped at k+1, and the constraint is non-trivial
+	let root_gt_k = root.get(&(k+PC::one()))
+                .expect("If no lit exists with value k+1 in the root node of the totalizer, the constraint was trivially satisfiable");
+	db.add_clause(&[root_gt_k.negate()]).unwrap(); // TODO return result from this function?
+	Ok(())
+}
+
+/// Build a totalizer (binary) tree and return the top node
+fn build_totalizer<
+	Lit: Literal,
+	DB: ClauseDatabase<Lit = Lit> + ?Sized,
+	PC: PositiveCoefficient,
+>(
+	mut layer: Vec<HashMap<PC, Lit>>,
+	db: &mut DB,
+	k: PC,
+) -> HashMap<PC, Lit> {
 	loop {
 		// Fix case of odd number of leaf nodes; by adding an empty right-hand node, we will get a correct parent node
 		if layer.len() % 2 == 1 {
@@ -98,17 +126,11 @@ pub fn encode_bool_lin_le_totalizer<
 			.collect();
 
 		if layer.len() == 1 {
-			break;
+			return layer.pop().unwrap();
 		}
 	}
+}
 
-	// Set root node lit with value k+1 to false
-	// The k+1 lit is guaranteed to exists, since all node values are capped at k+1, and the constraint is non-trivial
-	let root_gt_k = layer[0].get(&(k+PC::one()))
-        .expect("If no lit exists with value k+1 in the root node of the totalizer, the constraint was trivially satisfiable");
-	db.add_clause(&[root_gt_k.negate()])?;
-
-	Ok(())
 }
 
 #[cfg(test)]

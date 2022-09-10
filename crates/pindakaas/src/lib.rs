@@ -176,23 +176,166 @@ pub enum IntEncoding<'a, Lit: Literal, C: Coefficient> {
 	Log { signed: bool, bits: &'a [Lit] },
 }
 
-/// The `ClauseDatabase` trait is the common trait implemented by types that are
-/// used to manage the encoding of PB constraints and contain their output. This
-/// trait can be used for all encoding methods in this library.
-///
-/// To satisfy the trait, the type must implement a [`Self::add_clause`] method
-/// and a [`Self::new_var`] method.
-pub trait ClauseDatabase {
-	/// Type used to represent a Boolean literal in the constraint input and
-	/// generated clauses.
-	type Lit: Literal;
-	/// Method to be used to receive a new Boolean variable that can be used in
-	/// the encoding of a constraint.
-	fn new_var(&mut self) -> Self::Lit;
-
 	/// Add a clause to the `ClauseDatabase`. The sink is allowed to return
 	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to
 	/// be unsatisfiable. This is used as a signal to the encoder that any
+	/// Encode an integer linear constraint
+	fn encode_int_lin<C: Coefficient + TryInto<PC>, PC: PositiveCoefficient>(
+		&mut self,
+		coeff: &[C],
+		vars: &[IntEncoding<Self::Lit, C>],
+		cmp: Comparator,
+		k: C,
+	) -> Result {
+		assert_eq!(coeff.len(), vars.len());
+
+		// TODO: Actually deal with the fact that these constraints are integers
+		let mut bool_coeff = Vec::new();
+		let mut bool_vars = Vec::new();
+		let mut k = k;
+
+		for i in 0..coeff.len() {
+			match &vars[i] {
+				IntEncoding::Direct { first, vals } => {
+					let mut counter = *first;
+					for j in 0..vals.len() {
+						bool_coeff.push(coeff[i] * counter);
+						bool_vars.push(vals[j].clone());
+						counter += C::one();
+					}
+				}
+				IntEncoding::Order { first, vals } => {
+					k -= *first * coeff[i];
+					for i in 0..vals.len() {
+						bool_coeff.push(coeff[i]);
+						bool_vars.push(vals[i].clone());
+					}
+				}
+				IntEncoding::Log { signed, bits } => {
+					let two = C::one() + C::one();
+					for i in 0..bits.len() {
+						bool_coeff.push(coeff[i] * two.pow(i as u32));
+						bool_vars.push(bits[i].clone());
+					}
+					if *signed {
+						let last_coeff = bool_coeff.last_mut().unwrap();
+						*last_coeff = -*last_coeff;
+					}
+				}
+			}
+		}
+
+		self.encode_bool_lin(&bool_coeff, &bool_vars, cmp, k, &[])
+	}
+
+	/// Encode a Boolean linear constraint
+	fn encode_bool_lin<C: Coefficient + TryInto<PC>, PC: PositiveCoefficient>(
+		&mut self,
+		coeff: &[C],
+		lits: &[Self::Lit],
+		cmp: Comparator,
+		k: C,
+		cons: &[Constraint<Self::Lit, C>],
+	) -> Result {
+		let constraint = BoolLin::aggregate(self, coeff, lits, cmp, k, cons)?;
+
+		self.encode_aggregated_bool_lin(&constraint)
+	}
+
+	fn encode_aggregated_bool_lin<PC: PositiveCoefficient>(
+		&mut self,
+		constraint: &BoolLin<PC, Self::Lit>,
+	) -> Result {
+		use BoolLin::*;
+		// TODO: Make better educated choices
+		match constraint {
+			LinEqual { terms, k } => self.encode_bool_lin_eq_adder(terms, *k),
+			LinLessEq { terms, k } => self.encode_bool_lin_le_adder(terms, *k),
+			AtMostK { lits, k } => self.encode_bool_lin_le_adder(
+				// &lits.iter().map(|l| (l.clone(), PC::one())).collect(),
+				lits.iter()
+					.map(|l| Part::Amo(vec![(l.clone(), PC::one())]))
+					.collect::<Vec<_>>()
+					.as_slice(),
+				*k,
+			),
+			EqualK { lits, k } => self.encode_bool_lin_eq_adder(
+				// &lits.iter().map(|l| (l.clone(), PC::one())).collect(),
+				lits.iter()
+					.map(|l| Part::Amo(vec![(l.clone(), PC::one())]))
+					.collect::<Vec<_>>()
+					.as_slice(),
+				*k,
+			),
+			AtMostOne { lits } => self.encode_amo_pairwise(lits),
+			Trivial => Ok(()),
+		}
+	}
+
+	/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
+	fn encode_bool_lin_eq_adder<PC: PositiveCoefficient>(
+		&mut self,
+		terms: &[Part<Self::Lit, PC>],
+		k: PC,
+	) -> Result {
+		adder::encode_bool_lin_adder(self, terms, Comparator::Equal, k)
+	}
+
+	/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
+	fn encode_bool_lin_le_adder<PC: PositiveCoefficient>(
+		&mut self,
+		terms: &[Part<Self::Lit, PC>],
+		k: PC,
+	) -> Result {
+		adder::encode_bool_lin_adder(self, terms, Comparator::LessEq, k)
+	}
+
+	/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a totalizer
+	fn encode_bool_lin_le_totalizer<PC: PositiveCoefficient>(
+		&mut self,
+		partition: &[Part<Self::Lit, PC>],
+		k: PC,
+	) -> Result {
+		totalizer::encode_bool_lin_le_totalizer(self, partition, Comparator::LessEq, k)
+	}
+
+	fn encode_amo_ladder(&mut self, xs: &Vec<Self::Lit>) -> Result {
+		debug_assert!(xs.iter().duplicates().count() == 0);
+		debug_assert!(xs.len() >= 2);
+
+		// TODO could be slightly optimised to not introduce fixed lits
+		let mut a = self.new_var(); // y_v-1
+		self.add_clause(&[a.clone()])?;
+		for x in xs {
+			let b = self.new_var(); // y_v
+			self.add_clause(&[b.negate(), a.clone()])?; // y_v -> y_v-1
+
+			// "Channelling" clauses for x_v <-> (y_v-1 /\ ¬y_v)
+			self.add_clause(&[x.negate(), a.clone()])?; // x_v -> y_v-1
+			self.add_clause(&[x.negate(), b.negate()])?; // x_v -> ¬y_v
+			self.add_clause(&[a.negate(), b.clone(), x.clone()])?; // (y_v-1 /\ ¬y_v) -> x=v
+			a = b;
+		}
+		self.add_clause(&[a.negate()])?;
+		Ok(())
+	}
+}
+
+/// Types that abide by the `ClauseSink` trait can be used as the output for the
+/// constraint encodings. This trait also contains basic encodings that never
+/// create nh literals.
+///
+/// To satisfy the trait, the type must implement a
+/// [`Self::add_clause`] method.
+pub trait ClauseSink {
+	/// Type used to represent a Boolean literal in the constraint input and
+	/// generated clauses.
+	type Lit: Literal;
+
+	/// Add a clause to the `ClauseSink`. The sink is allowed to return `false`
+	/// only when the collection of clauses has been *proven* to be
+	/// unsatisfiable. This is used as a signal to the encoder that any
+>>>>>>> 5809902 (Build separate, small nodes for Le constraint groups)
 	/// subsequent encoding effort can be abandoned.
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result;
 }
