@@ -142,21 +142,9 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 			(lit, into_positive_coefficient(coef))
 		};
 
-		let filter_zero_coefficients = |terms: Vec<(Lit, C)>| -> Vec<(Lit, C)> {
-			terms
-				.into_iter()
-				.filter(|(_, coef)| coef != &C::zero())
-				.collect()
-		};
-
 		let partition: Vec<Part<Lit, PC>> = partition
 			.into_iter()
-			.map(|part| match part {
-				// filter terms with coefficients of 0
-				Part::Amo(terms) => Part::Amo(filter_zero_coefficients(terms)),
-				Part::Ic(terms) => Part::Ic(filter_zero_coefficients(terms)),
-				Part::Dom(terms, l, u) => Part::Dom(filter_zero_coefficients(terms), l, u),
-			})
+			.filter(|part| part.iter().next().is_some()) // filter out empty groups
 			.flat_map(|part| {
 				// convert terms with negative coefficients
 				match part {
@@ -249,6 +237,21 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 						into_positive_coefficient(l),
 						into_positive_coefficient(u),
 					)],
+				}
+			})
+			.map(|part| {
+				// This step has to come *after* Amo normalization
+				let filter_zero_coefficients = |terms: Vec<(Lit, PC)>| -> Vec<(Lit, PC)> {
+					terms
+						.into_iter()
+						.filter(|(_, coef)| coef != &PC::zero())
+						.collect()
+				};
+
+				match part {
+					Part::Amo(terms) => Part::Amo(filter_zero_coefficients(terms)),
+					Part::Ic(terms) => Part::Ic(filter_zero_coefficients(terms)),
+					Part::Dom(terms, l, u) => Part::Dom(filter_zero_coefficients(terms), l, u),
 				}
 			})
 			.filter(|part| part.iter().next().is_some()) // filter out empty groups
