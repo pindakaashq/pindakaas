@@ -34,7 +34,7 @@ pub fn encode_bool_lin_le_totalizer<
 							})
 							.collect()
 					}
-					Part::Le(terms, k) => {
+					Part::Dom(terms, l, u) => {
 						// totalizer root has unique values, so just return
 						return build_totalizer(
 							terms
@@ -42,7 +42,8 @@ pub fn encode_bool_lin_le_totalizer<
 								.map(|(lit, coef)| HashMap::from_iter([(*coef, lit.clone())]))
 								.collect(),
 							db,
-							*k,
+							*l,
+							*u,
 						);
 					}
 				};
@@ -69,7 +70,8 @@ pub fn encode_bool_lin_le_totalizer<
 			})
 			.collect(),
 		db,
-		k,
+		PC::zero(),
+		k + PC::one(),
 	);
 
 	// Set root node lit with value k+1 to false
@@ -88,7 +90,8 @@ fn build_totalizer<
 >(
 	mut layer: Vec<HashMap<PC, Lit>>,
 	db: &mut DB,
-	k: PC,
+	l: PC,
+	u: PC,
 ) -> HashMap<PC, Lit> {
 	loop {
 		// Fix case of odd number of leaf nodes; by adding an empty right-hand node, we will get a correct parent node
@@ -100,23 +103,26 @@ fn build_totalizer<
 		layer = layer
 			.chunks(2)
 			.map(|children| {
+				// TODO if !right.is_empty(), return left (or chain left to this iff odd or something  ..)
 				let mut parent = HashMap::new();
 				let (left, right) = (&children[0], &children[1]);
 
 				// any child lit implies the parent lit with the same value
 				for c in left.iter().chain(right.iter()) {
-					let w = std::cmp::min(*c.0, k + PC::one()); // not capped in literature, but should be slightly better
+					let w = std::cmp::min(*c.0, u + PC::one()); // not capped in literature, but should be slightly better
 					let p = parent.entry(w).or_insert_with(|| db.new_var());
+					// TODO we do not need to create nodes where w<l (but current vars need to be passed on)
 					db.add_clause(&[c.1.negate(), p.clone()]).unwrap();
 				}
 
 				// two lits together imply the parent lit with the sum of their values
 				// TODO can be optimised if by sorting both children by value
-				for l in left {
-					for r in right {
-						let w = std::cmp::min(*l.0 + *r.0, k + PC::one());
+				for a in left {
+					for b in right {
+						let w = std::cmp::min(*a.0 + *b.0, u);
 						let p = parent.entry(w).or_insert_with(|| db.new_var());
-						db.add_clause(&[l.1.negate(), r.1.negate(), p.clone()])
+						// TODO figure out what to do if w<l here as well.
+						db.add_clause(&[a.1.negate(), b.1.negate(), p.clone()])
 							.unwrap();
 					}
 				}
