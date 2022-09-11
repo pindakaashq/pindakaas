@@ -66,7 +66,7 @@ pub type LinearEncoder<'a, Lit, C, PC> = ArbLinEncoder<'a, Lit, C, PC>;
 pub(crate) enum Part<Lit, C> {
 	Amo(Vec<(Lit, C)>),
 	Ic(Vec<(Lit, C)>),
-	Le(Vec<(Lit, C)>, C),
+	Dom(Vec<(Lit, C)>, C, C),
 }
 
 impl<Lit, C> Part<Lit, C> {
@@ -74,7 +74,7 @@ impl<Lit, C> Part<Lit, C> {
 		match self {
 			Part::Amo(terms) => terms.iter(),
 			Part::Ic(terms) => terms.iter(),
-			Part::Le(terms, _) => terms.iter(),
+			Part::Dom(terms, _, _) => terms.iter(),
 		}
 	}
 }
@@ -84,7 +84,7 @@ impl<Lit, C> Part<Lit, C> {
 pub enum Constraint<Lit, C> {
 	Amo(Vec<Lit>),
 	Ic(Vec<Lit>),
-	Le(Vec<Lit>, C),
+	Dom(Vec<Lit>, C, C),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -128,8 +128,6 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 			}
 			*entry += coef;
 		}
-		let mut k = if cmp == GreaterEq { -k } else { k };
-		let cmp = if cmp == GreaterEq { LessEq } else { cmp };
 
 		// partition terms according to side constraints
 		let mut partition = cons
@@ -159,8 +157,9 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 						})
 						.collect(),
 				),
-				Constraint::Le(lits, k) => Part::Le(
-					lits.iter()
+				Constraint::Dom(lits, l, u) => {
+					let terms: Vec<(Lit, C)> = lits
+						.iter()
 						.map(|lit| {
 							(
 								lit.clone(),
@@ -169,11 +168,31 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 								}),
 							)
 						})
-						.collect(),
-					*k,
-				),
+						.collect();
+
+					// this constraints assumes PB is coef*(1x1 + 2x2 + 4x3 + ...), where l <= 1x1 + 2x2 + 4x3 + ... <= u
+					// in other words, l and u do not take into account the coefficient yet.
+					let (l, u) = if cmp == GreaterEq {
+						// 0..range can be encoded by the bits multiplied by coef
+						let range = -terms.iter().fold(C::zero(), |acc, (_, coef)| acc + *coef);
+						// this range is inverted if we have flipped the comparator
+						(range - *u, range - *l)
+					} else {
+						// in both cases, l and u now represent the true constraint
+						(terms[0].1 * *l, terms[0].1 * *u)
+					};
+					// debug_assert!(
+					// 	cmp != LessEq
+					// 		|| k <= terms.iter().fold(C::zero(), |acc, (_, coef)| acc + *coef),
+					// 	"The Dom constraint is trivial for {k:?} and {terms:?}"
+					// );
+					Part::Dom(terms, l, u)
+				}
 			})
 			.collect::<Vec<Part<Lit, C>>>();
+
+		let mut k = if cmp == GreaterEq { -k } else { k };
+		let cmp = if cmp == GreaterEq { LessEq } else { cmp };
 
 		// add remaining (unconstrained) terms
 		partition.append(
@@ -183,6 +202,15 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 				.collect(),
 		);
 
+		let into_positive_coefficient = |coef: C| -> PC {
+			match coef.try_into() {
+				Ok(coef) => coef,
+				Err(_) => {
+					panic!("Unable to convert coefficient to positive coefficient.")
+				}
+			}
+		};
+
 		// TODO cannot construct this as a closures due to inner closures problem
 		let convert_term_if_negative = |term: (Lit, C), k: &mut C| -> (Lit, PC) {
 			let (mut lit, mut coef) = term;
@@ -191,52 +219,44 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 				lit = lit.negate();
 				*k += coef;
 			};
-			match coef.try_into() {
-				Ok(coef) => (lit, coef),
-				Err(_) => {
-					panic!("Unable to convert coefficient to positive coefficient.")
-				}
-			}
+			(lit, into_positive_coefficient(coef))
 		};
 
-		let partition :Vec<Part<Lit, PC>> = partition
+		let filter_zero_coefficients = |terms: Vec<(Lit, C)>| -> Vec<(Lit, C)> {
+			terms
+				.into_iter()
+				.filter(|(_, coef)| coef != &C::zero())
+				.collect()
+		};
+
+		let partition: Vec<Part<Lit, PC>> = partition
 			.into_iter()
-			.map(|part| match part { // filter terms with coefficients of 0
-				Part::Amo(terms) => Part::Amo(
-					terms
-						.into_iter()
-						.filter(|(_, coef)| coef != &C::zero())
-						.collect(),
-				),
-				Part::Ic(terms) => Part::Ic(
-					terms
-						.into_iter()
-						.filter(|(_, coef)| coef != &C::zero())
-						.collect(),
-				),
-				Part::Le(terms,k) => Part::Le(
-					terms
-						.into_iter()
-						.filter(|(_, coef)| coef != &C::zero())
-						.collect(),
-                        k
-				),
+			.map(|part| match part {
+				// filter terms with coefficients of 0
+				Part::Amo(terms) => Part::Amo(filter_zero_coefficients(terms)),
+				Part::Ic(terms) => Part::Ic(filter_zero_coefficients(terms)),
+				Part::Dom(terms, l, u) => Part::Dom(filter_zero_coefficients(terms), l, u),
 			})
-			.flat_map(|part| { // convert terms with negative coefficients
+			.flat_map(|part| {
+				// convert terms with negative coefficients
 				match part {
-                    Part::Amo(mut terms) => {
-                        if terms.len() == 1 {
-                            return vec![Part::Amo(
-							terms
-								.into_iter()
-								.filter(|(_, coef)| coef != &C::zero())
-								.map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k)).collect()
-                                )]
-                        }
+					Part::Amo(mut terms) => {
+						if terms.len() == 1 {
+							return vec![Part::Amo(
+								terms
+									.into_iter()
+									.filter(|(_, coef)| coef != &C::zero())
+									.map(|(lit, coef)| {
+										convert_term_if_negative((lit, coef), &mut k)
+									})
+									.collect(),
+							)];
+						}
 
 						// Find most negative coefficient
 						let (min_index, (_, min_coef)) = terms
-							.iter().enumerate()
+							.iter()
+							.enumerate()
 							.min_by(|(_, (_, a)), (_, (_, b))| a.cmp(b))
 							.expect("Partition should not contain constraint on zero terms");
 
@@ -262,7 +282,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 
 							// since y + x1 + x2 + ... = 1 (exactly-one), we have q*y + q*x1 + q*x2 + ... = q
 							// after adding term 0*y, we can add q*y + q*x1 + q*x2 + ... on the LHS, and q on the RHS
-							terms.push((y, C::zero()));  // note: it's fine to add y into the same AMO group
+							terms.push((y, C::zero())); // note: it's fine to add y into the same AMO group
 							terms = terms
 								.iter()
 								.map(|(lit, coef)| (lit.clone(), *coef + q))
@@ -271,46 +291,48 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 						}
 
 						// all coefficients should be positive (since we subtracted the most negative coefficient)
-                        vec![Part::Amo(
+						vec![Part::Amo(
 							terms
 								.into_iter()
-								.map(|(lit, coef)| {
-									(
-										lit,
-										match coef.try_into()  {
-                                            				Ok(coef) => coef,
-                                            				Err(_) => panic!("Unable to convert coefficient to positive coefficient."),
-                                        }
-									)
-								})
+								.map(|(lit, coef)| (lit, into_positive_coefficient(coef)))
 								.collect(),
 						)]
-					},
-					Part::Ic(terms) => { // normalize by splitting up the chain into two chains by coef polarity, inverting the coefs of the neg 
-                        let (pos_chain, neg_chain) : (_, Vec<(Lit,C)>) = terms.into_iter().partition(|(_,coef)| coef.is_positive());
-                        vec![
-                            Part::Ic( pos_chain.into_iter().map(|(lit,coef)| match coef.try_into() {
-                                Ok(coef) => (lit, coef),
-                                Err(_) => {
-                                    panic!("Unable to convert coefficient to positive coefficient.")
-                                }
-                            }).collect()),
-						Part::Ic(
-							neg_chain
-                            .into_iter()
-								.map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k))
-                                .rev() // x1 <- x2 <- x3 <- ... becomes ~x1 -> ~x2 -> ~x3 -> ...
-								.collect(),
-						)]
-					},
-                    Part::Le(terms,le_k) => vec![
-                        Part::Le(terms.into_iter().map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k)).collect(), match le_k.try_into() {
-                                Ok(le_k) => le_k,
-                                Err(_) => { panic!("Unable to convert coefficient to positive coefficient.") }
-				})],
-                }})
-            .filter(|part| part.iter().next().is_some()) // filter out empty groups
-            .collect();
+					}
+					Part::Ic(terms) => {
+						// normalize by splitting up the chain into two chains by coef polarity, inverting the coefs of the neg
+						let (pos_chain, neg_chain): (_, Vec<(Lit, C)>) =
+							terms.into_iter().partition(|(_, coef)| coef.is_positive());
+						vec![
+							Part::Ic(
+								pos_chain
+									.into_iter()
+									.map(|(lit, coef)| (lit, into_positive_coefficient(coef)))
+									.collect(),
+							),
+							Part::Ic(
+								neg_chain
+									.into_iter()
+									.map(|(lit, coef)| {
+										convert_term_if_negative((lit, coef), &mut k)
+									})
+									.rev() // x1 <- x2 <- x3 <- ... becomes ~x1 -> ~x2 -> ~x3 -> ...
+									.collect(),
+							),
+						]
+					}
+					Part::Dom(terms, l, u) => vec![Part::Dom(
+						// TODO actually doesn't work yet if only some of the terms are negative. Eiter fix or omit this constraint in that case
+						terms
+							.into_iter()
+							.map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k))
+							.collect(),
+						into_positive_coefficient(l),
+						into_positive_coefficient(u),
+					)],
+				}
+			})
+			.filter(|part| part.iter().next().is_some()) // filter out empty groups
+			.collect();
 
 		// trivial case: constraint is unsatisfiable
 		if k < C::zero() {
@@ -326,10 +348,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 			return Ok(LinVariant::Trivial);
 		}
 
-		let mut k = match k.try_into() {
-			Ok(k) => k,
-			Err(_) => panic!("Unable to convert coefficient to positive coefficient."),
-		};
+		let mut k = into_positive_coefficient(k);
 
 		// Remove terms with coefs higher than k
 		let partition = partition
@@ -366,14 +385,14 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 							.collect(),
 					)
 				}
-				Part::Le(terms, k) => Part::Le(terms, k),
+				Part::Dom(terms, l, u) => Part::Dom(terms, l, u),
 			})
 			.collect::<Vec<Part<Lit, PC>>>();
 
 		// Check whether some literals can violate / satisfy the constraint
 		let lhs_ub: PC = partition.iter().fold(PC::zero(), |acc, part| match part {
 			Part::Amo(terms) => acc + terms.iter().map(|tup| tup.1).max().unwrap_or_else(PC::zero),
-			Part::Ic(terms) | Part::Le(terms, _) => {
+			Part::Ic(terms) | Part::Dom(terms, _, _) => {
 				acc + terms.iter().fold(PC::zero(), |acc, (_, coef)| acc + *coef)
 				// TODO max(k, acc + ..)
 			}
@@ -410,7 +429,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 								.0
 								.clone()])?;
 						}
-						Part::Ic(terms) | Part::Le(terms, _) => {
+						Part::Ic(terms) | Part::Dom(terms, _, _) => {
 							for (lit, _) in terms {
 								db.add_clause(&[lit.clone()])?;
 							}
@@ -908,6 +927,75 @@ mod tests {
 				k: 11
 			}))
 		);
+
+		// Correctly convert GreaterEq into LessEq with side constrains
+		let mut db = TestDB::new(6);
+		assert_eq!(
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 2, 3, 4, 1, 3],
+				&[1, 2, 3, 4, 5, 6],
+				Comparator::GreaterEq,
+				3,
+				&[
+					Constraint::Amo(vec![1, 2, 3, 4]),
+					Constraint::Amo(vec![5, 6])
+				]
+			),
+			Ok(LinVariant::Linear(Linear {
+				terms: vec![
+					Part::Amo(vec![(1, 3), (2, 2), (3, 1), (7, 4)]),
+					Part::Amo(vec![(5, 2), (8, 3)]),
+				],
+				cmp: LimitComp::LessEq,
+				k: 4 // -3 + 4 + 3
+			}))
+		);
+
+		// Correctly convert GreaterEq into LessEq with side constrains
+		let mut db = TestDB::new(6);
+		assert_eq!(
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 1, 1, 1, 1, 2],
+				&[1, 2, 3, 4, 5, 6],
+				Comparator::GreaterEq,
+				3,
+				&[Constraint::Ic(vec![1, 2, 3, 4]), Constraint::Ic(vec![5, 6])]
+			),
+			Ok(LinVariant::Linear(Linear {
+				terms: vec![
+					Part::Ic(vec![(-4, 1), (-3, 1), (-2, 1), (-1, 1)]),
+					Part::Ic(vec![(-6, 2), (-5, 1)]),
+				],
+				cmp: LimitComp::LessEq,
+				k: 4
+			}))
+		);
+
+		// Correctly convert GreaterEq into LessEq with side constrains
+		let mut db = TestDB::new(5);
+		assert_eq!(
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 2, 4, 3, 6],
+				&[1, 2, 3, 4, 5],
+				Comparator::GreaterEq,
+				3,
+				&[
+					Constraint::Dom(vec![1, 2, 3], 0, 5),
+					Constraint::Dom(vec![4, 5], 0, 2)
+				]
+			),
+			Ok(LinVariant::Linear(Linear {
+				terms: vec![
+					Part::Dom(vec![(-1, 1), (-2, 2), (-3, 4)], 2, 7),
+					Part::Dom(vec![(-4, 3), (-5, 6)], 7, 9),
+				],
+				cmp: LimitComp::LessEq,
+				k: 13
+			}))
+		);
 	}
 
 	#[test]
@@ -1035,9 +1123,9 @@ mod tests {
 						false
 					}
 				}
-				Part::Le(terms, k) => {
-					if let Part::Le(oterms, ok) = other {
-						term_eq(terms, oterms) && k == ok
+				Part::Dom(terms, l, u) => {
+					if let Part::Dom(oterms, ol, ou) = other {
+						term_eq(terms, oterms) && l == ol && u == ou
 					} else {
 						false
 					}
@@ -1081,8 +1169,8 @@ mod tests {
 						std::cmp::Ordering::Greater
 					}
 				}
-				Part::Le(terms, _) => {
-					if let Part::Le(oterms, _) = other {
+				Part::Dom(terms, _, _) => {
+					if let Part::Dom(oterms, _, _) = other {
 						termcmp(terms, oterms)
 					} else {
 						std::cmp::Ordering::Less
