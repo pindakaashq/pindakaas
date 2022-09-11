@@ -1,5 +1,4 @@
 use crate::{ClauseDatabase, Comparator, Literal, Part, PositiveCoefficient, Result};
-use itertools::Itertools;
 use std::collections::HashMap;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a totalizer
@@ -90,7 +89,7 @@ fn build_totalizer<
 >(
 	mut layer: Vec<HashMap<PC, Lit>>,
 	db: &mut DB,
-	l: PC,
+	_l: PC,
 	u: PC,
 ) -> HashMap<PC, Lit> {
 	loop {
@@ -135,8 +134,6 @@ fn build_totalizer<
 			return layer.pop().unwrap();
 		}
 	}
-}
-
 }
 
 #[cfg(test)]
