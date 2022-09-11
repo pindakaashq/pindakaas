@@ -43,7 +43,7 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for TotalizerEncoder<'a,
 								})
 								.collect()
 						}
-						Part::Le(terms, k) => {
+						Part::Dom(terms, k, _) => {
 							// totalizer root has unique values, so just return
 							return build_totalizer(
 								terms
