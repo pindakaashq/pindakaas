@@ -15,16 +15,6 @@ name = "pindakaas"
 crate-type = ["cdylib"]
 doc = false
 
-[package.metadata.maturin]
-classifier = [
-	"License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
-	"Development Status :: 3 - Alpha",
-	"Intended Audience :: Developers",
-	"Intended Audience :: Science/Research",
-	"Programming Language :: Python",
-	"Programming Language :: Rust",
-]
-
 [dependencies]
 pyo3 = { version = "0.16.5", features = ["extension-module"] }
 pindakaas = { path = "../pindakaas" }
