@@ -181,6 +181,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 								&terms
 									.iter()
 									.map(|(lit, _)| lit.negate())
+                                    .chain(std::iter::once(y.clone()))
 									.collect::<Vec<Lit>>(),
 							)
 							.unwrap();
