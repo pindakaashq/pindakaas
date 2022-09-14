@@ -195,4 +195,29 @@ mod tests {
 		.is_ok());
 		db.check_complete();
 	}
+
+	#[test]
+	fn test_totalizer_regression() {
+		let mut db = TestDB::new(3).expect_solutions(vec![
+			vec![-1, -2, -3],
+			vec![1, -2, -3],
+			vec![-1, 2, -3],
+			vec![1, 2, -3],
+			vec![-1, -2, 3],
+			vec![1, -2, 3],
+		]);
+		assert!(encode_bool_lin_le_totalizer(
+			&mut db,
+			&[
+				Part::Amo(vec![(1, 1)],),
+				Part::Amo(vec![(2, 2)],),
+				Part::Amo(vec![(3, 4)],),
+			],
+			Comparator::LessEq,
+			5 as u32
+		)
+		.is_ok());
+
+		db.check_complete();
+	}
 }
