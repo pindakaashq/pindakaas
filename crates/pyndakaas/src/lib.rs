@@ -1,4 +1,4 @@
-use pindakaas::{ClauseDatabase, ClauseSink, Result};
+use pindakaas::{ClauseDatabase, Result};
 use pyo3::{exceptions::PyTypeError, prelude::*};
 
 /// The type used to represent Literals in the Python Pindakaas library
@@ -17,26 +17,27 @@ fn module(_py: Python, m: &PyModule) -> PyResult<()> {
 
 #[pyfunction(new_var = "None")]
 fn encode_bool_lin(
-	coeff: Vec<Coeff>,
+	_coeff: Vec<Coeff>,
 	lits: Vec<Lit>,
 	cmp: Comparator,
-	k: Coeff,
+	_k: Coeff,
 	new_var: Option<NewVarFn>,
 ) -> PyResult<(bool, Vec<Vec<Lit>>)> {
-	let mut db = PyClauseDatabase {
+	let mut _db = PyClauseDatabase {
 		clause_vec: Vec::new(),
 		new_var_fn: match new_var {
 			Some(func) => func,
 			None => NewVarFn::SeqFrom(lits.iter().max().unwrap_or(&0) + 1),
 		},
 	};
-	let cmp = match cmp {
+	let _cmp = match cmp {
 		Comparator::LessEq => pindakaas::Comparator::LessEq,
 		Comparator::Equal => pindakaas::Comparator::Equal,
 		Comparator::GreaterEq => pindakaas::Comparator::GreaterEq,
 	};
-	let res = db.encode_bool_lin::<Coeff, PosCoeff>(&coeff, &lits, cmp, k, &[]);
-	Ok((res.is_ok(), db.clause_vec))
+	unimplemented!()
+	// let res = db.encode_bool_lin::<Coeff, PosCoeff>(&coeff, &lits, cmp, k, &[]);
+	// Ok((res.is_ok(), db.clause_vec))
 }
 
 #[pyclass]
@@ -52,16 +53,14 @@ struct PyClauseDatabase<'a> {
 	new_var_fn: NewVarFn<'a>,
 }
 
-impl<'a> ClauseSink for PyClauseDatabase<'a> {
+impl<'a> ClauseDatabase for PyClauseDatabase<'a> {
 	type Lit = Lit;
 
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
 		self.clause_vec.push(Vec::from_iter(cl.iter().copied()));
 		Ok(())
 	}
-}
 
-impl<'a> ClauseDatabase for PyClauseDatabase<'a> {
 	fn new_var(&mut self) -> Self::Lit {
 		self.new_var_fn.new_var()
 	}
