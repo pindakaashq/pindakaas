@@ -1,5 +1,5 @@
 use libc::size_t;
-use pindakaas::{ClauseDatabase, ClauseSink, Result, Unsatisfiable};
+use pindakaas::{ClauseDatabase, Result, Unsatisfiable};
 use std::{ffi::c_void, slice};
 
 /// The type used to represent Literals in the C Pindakaas library
@@ -48,25 +48,26 @@ pub unsafe extern "C" fn encode_bool_lin(
 	lit: *const Lit,
 	lit_len: size_t,
 	cmp: Comparator,
-	k: Coeff,
+	_k: Coeff,
 ) -> bool {
-	let mut cdb = CClauseDatabase {
+	let mut _cdb = CClauseDatabase {
 		db,
 		add_clause_cb,
 		new_var_cb,
 	};
 
 	// (unsafe) Dereference raw ptr arguments, segmentation fault if given bad arguments.
-	let coeff = slice::from_raw_parts(coeff, coeff_len);
-	let lit = slice::from_raw_parts(lit, lit_len);
+	let _coeff = slice::from_raw_parts(coeff, coeff_len);
+	let _lit = slice::from_raw_parts(lit, lit_len);
 
-	let cmp = match cmp {
+	let _cmp = match cmp {
 		Comparator::LessEq => pindakaas::Comparator::LessEq,
 		Comparator::Equal => pindakaas::Comparator::Equal,
 		Comparator::GreaterEq => pindakaas::Comparator::GreaterEq,
 	};
-	cdb.encode_bool_lin::<i32, u32>(coeff, lit, cmp, k, &[])
-		.is_ok()
+	// cdb.encode_bool_lin::<i32, u32>(coeff, lit, cmp, k, &[])
+	// 	.is_ok()
+	unimplemented!()
 }
 
 struct CClauseDatabase {
@@ -75,7 +76,7 @@ struct CClauseDatabase {
 	new_var_cb: NewVarCB,
 }
 
-impl ClauseSink for CClauseDatabase {
+impl ClauseDatabase for CClauseDatabase {
 	type Lit = Lit;
 
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
@@ -85,9 +86,6 @@ impl ClauseSink for CClauseDatabase {
 			Err(Unsatisfiable)
 		}
 	}
-}
-
-impl ClauseDatabase for CClauseDatabase {
 	fn new_var(&mut self) -> Self::Lit {
 		(self.new_var_cb)(self.db)
 	}

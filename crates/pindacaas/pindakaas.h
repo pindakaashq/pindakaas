@@ -58,6 +58,6 @@ bool encode_bool_lin(void *db,
                      const Lit *lit,
                      size_t lit_len,
                      enum Comparator cmp,
-                     Coeff k);
+                     Coeff _k);
 
 #endif /* pindakaas_h */

@@ -1,34 +1,109 @@
 use std::collections::HashMap;
 
 use crate::{
-	ClauseDatabase, Coefficient, Comparator, Constraint, Literal, Part, PositiveCoefficient,
-	Result, Unsatisfiable,
+	AtMostOne, Cardinality, CheckError, Checker, ClauseDatabase, Coefficient, Literal,
+	PositiveCoefficient, Result, Unsatisfiable,
 };
 
+mod adder;
+mod totalizer;
+
+pub use adder::AdderEncoder;
+pub use totalizer::TotalizerEncoder;
+
 #[derive(Debug)]
-pub enum BoolLin<PC: PositiveCoefficient, Lit: Literal> {
-	LinEqual { terms: Vec<Part<Lit, PC>>, k: PC },
-	LinLessEq { terms: Vec<Part<Lit, PC>>, k: PC },
-	// TODO: Enforce uniquenesss
-	AtMostK { lits: Vec<Lit>, k: PC },
-	// TODO: Enforce uniquenesss
-	EqualK { lits: Vec<Lit>, k: PC },
-	// TODO: Enforce uniquenesss
-	AtMostOne { lits: Vec<Lit> },
+pub enum LinVariant<Lit: Literal, PC: PositiveCoefficient> {
+	Linear(Linear<Lit, PC>),
+	Cardinality(Cardinality<Lit, PC>),
+	AtMostOne(AtMostOne<Lit>),
 	Trivial,
 }
 
-impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
-	pub fn aggregate<C: Coefficient + TryInto<PC>, DB: ClauseDatabase<Lit = Lit> + ?Sized>(
+#[derive(Debug)]
+pub struct Linear<Lit: Literal, PC: PositiveCoefficient> {
+	pub(crate) terms: Vec<Part<Lit, PC>>,
+	pub(crate) cmp: LimitComp,
+	pub(crate) k: PC,
+}
+
+impl<Lit: Literal, PC: PositiveCoefficient> Checker for Linear<Lit, PC> {
+	type Lit = Lit;
+
+	fn check(&self, solution: &[Self::Lit]) -> Result<(), crate::CheckError<Self::Lit>> {
+		let abs = |l: Lit| if l.is_negated() { l.negate() } else { l };
+		let lhs = &self
+			.terms
+			.iter()
+			.flat_map(|part| part.iter().map(|(lit, coef)| (lit.clone(), *coef)))
+			.fold(PC::zero(), |acc, (lit, coef)| {
+				let a = solution
+					.iter()
+					.find(|x| abs((*x).clone()) == abs(lit.clone()));
+				acc + if lit == *a.unwrap() {
+					PC::one()
+				} else {
+					PC::zero()
+				} * coef
+			});
+		if match self.cmp {
+			LimitComp::LessEq => *lhs <= self.k,
+			LimitComp::Equal => *lhs == self.k,
+		} {
+			Ok(())
+		} else {
+			Err(CheckError::Unsatisfiable(Unsatisfiable))
+		}
+	}
+}
+
+// TODO how can we support both Part(itions) of "terms" ( <Lit, C> for pb
+// constraints) and just lits (<Lit>) for AMK/AMO's?
+//
+// TODO add EO, and probably something for Unconstrained
+#[derive(Debug)]
+pub(crate) enum Part<Lit, C> {
+	Amo(Vec<(Lit, C)>),
+	Ic(Vec<(Lit, C)>),
+}
+
+impl<Lit, C> Part<Lit, C> {
+	fn iter(&self) -> std::slice::Iter<(Lit, C)> {
+		match self {
+			Part::Amo(terms) => terms.iter(),
+			Part::Ic(terms) => terms.iter(),
+		}
+	}
+}
+
+// TODO just temporary until I find out how to use IntEncodings for this
+#[derive(Debug)]
+pub enum Constraint<Lit> {
+	Amo(Vec<Lit>),
+	Ic(Vec<Lit>),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum Comparator {
+	LessEq,
+	Equal,
+	GreaterEq,
+}
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum LimitComp {
+	Equal,
+	LessEq,
+}
+
+impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
+	pub fn aggregate<C: Coefficient + TryInto<PC>, DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
 		coeff: &[C],
 		lits: &[Lit],
 		cmp: Comparator,
 		k: C,
 		cons: &[Constraint<Lit>],
-	) -> Result<BoolLin<PC, Lit>> {
+	) -> Result<LinVariant<Lit, PC>> {
 		debug_assert_eq!(coeff.len(), lits.len());
-		use BoolLin::*;
 		use Comparator::*;
 
 		// Convert ≤ to ≥ and aggregate multiple occurrences of the same
@@ -229,7 +304,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 					db.add_clause(&[lit.negate()])?
 				}
 			}
-			return Ok(Trivial);
+			return Ok(LinVariant::Trivial);
 		}
 
 		let mut k = match k.try_into() {
@@ -283,7 +358,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 
 		if cmp == Comparator::LessEq {
 			if lhs_ub <= k {
-				return Ok(Trivial);
+				return Ok(LinVariant::Trivial);
 			}
 
 			// If we have only 2 (unassigned) lits, which together exceed k, then -x1\/-x2
@@ -295,7 +370,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 						.map(|(lit, _)| lit.negate())
 						.collect::<Vec<Lit>>(),
 				)?;
-				return Ok(Trivial);
+				return Ok(LinVariant::Trivial);
 			}
 		} else if cmp == Comparator::Equal {
 			if lhs_ub < k {
@@ -319,7 +394,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 						}
 					};
 				}
-				return Ok(Trivial);
+				return Ok(LinVariant::Trivial);
 			}
 		}
 
@@ -362,28 +437,30 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 					db.add_clause(&partition.to_vec())?
 				}
 				// Encode At Most One constraint
-				return Ok(AtMostOne { lits: partition });
+				return Ok(LinVariant::AtMostOne(AtMostOne { lits: partition }));
 			}
 			// Encode count constraint
-			if cmp == Equal {
-				return Ok(EqualK { lits: partition, k });
-			} else {
-				return Ok(AtMostK { lits: partition, k });
-			}
+			return Ok(LinVariant::Cardinality(Cardinality {
+				lits: partition,
+				cmp: if cmp == Equal {
+					LimitComp::Equal
+				} else {
+					LimitComp::LessEq
+				},
+				k,
+			}));
 		}
 
 		// Default case: encode pseudo-Boolean linear constraint
-		if cmp == Equal {
-			Ok(LinEqual {
-				terms: partition,
-				k,
-			})
-		} else {
-			Ok(LinLessEq {
-				terms: partition,
-				k,
-			})
-		}
+		Ok(LinVariant::Linear(Linear {
+			terms: partition,
+			cmp: if cmp == Equal {
+				LimitComp::Equal
+			} else {
+				LimitComp::LessEq
+			},
+			k,
+		}))
 	}
 }
 
@@ -391,8 +468,9 @@ impl<PC: PositiveCoefficient, Lit: Literal> BoolLin<PC, Lit> {
 mod tests {
 	use itertools::Itertools;
 
-	use crate::tests::TestDB;
-	use crate::{BoolLin, Comparator::*, Constraint, Part, Unsatisfiable};
+	use super::*;
+	use crate::helpers::tests::TestDB;
+	use crate::{AtMostOne, Linear, Unsatisfiable};
 
 	fn construct_terms(terms: &[(i32, u32)]) -> Vec<Part<i32, u32>> {
 		terms
@@ -406,29 +484,53 @@ mod tests {
 		let mut db = TestDB::new(3).expect_clauses(vec![]);
 		// Simple aggregation of multiple occurrences of the same literal
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 2, 1, 2], &[1, 1, 2, 3], LessEq, 3, &[]),
-			Ok(BoolLin::LinLessEq {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 2, 1, 2],
+				&[1, 1, 2, 3],
+				Comparator::LessEq,
+				3,
+				&[]
+			),
+			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(1, 3), (2, 1), (3, 2)]),
+				cmp: LimitComp::LessEq,
 				k: 3
-			})
+			}))
 		);
 
 		// Aggregation of positive and negative occurrences of the same literal
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 2, 1, 2], &[1, -1, 2, 3], LessEq, 2, &[]),
-			Ok(BoolLin::LinLessEq {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 2, 1, 2],
+				&[1, -1, 2, 3],
+				Comparator::LessEq,
+				2,
+				&[]
+			),
+			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(-1, 1), (2, 1), (3, 2)]),
+				cmp: LimitComp::LessEq,
 				k: 3
-			})
+			}))
 		);
 
 		// Aggregation of positive and negative coefficients of the same literal
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, -2, 1, 2], &[1, 1, 2, 3], LessEq, 2, &[]),
-			Ok(BoolLin::LinLessEq {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, -2, 1, 2],
+				&[1, 1, 2, 3],
+				Comparator::LessEq,
+				2,
+				&[]
+			),
+			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(-1, 1), (2, 1), (3, 2)]),
+				cmp: LimitComp::LessEq,
 				k: 3
-			})
+			}))
 		);
 	}
 
@@ -438,79 +540,141 @@ mod tests {
 
 		// Correctly detect at most one
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 1, 1], &[1, 2, 3], LessEq, 1, &[]),
-			Ok(BoolLin::AtMostOne {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 1, 1],
+				&[1, 2, 3],
+				Comparator::LessEq,
+				1,
+				&[]
+			),
+			Ok(LinVariant::AtMostOne(AtMostOne {
 				lits: vec![1, 2, 3],
-			})
+			}))
 		);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[2, 2, 2], &[1, 2, 3], LessEq, 2, &[]),
-			Ok(BoolLin::AtMostOne {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[2, 2, 2],
+				&[1, 2, 3],
+				Comparator::LessEq,
+				2,
+				&[]
+			),
+			Ok(LinVariant::AtMostOne(AtMostOne {
 				lits: vec![1, 2, 3],
-			})
+			}))
 		);
 
 		// Correctly detect at most k
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 1, 1], &[1, 2, 3], LessEq, 2, &[]),
-			Ok(BoolLin::AtMostK {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 1, 1],
+				&[1, 2, 3],
+				Comparator::LessEq,
+				2,
+				&[]
+			),
+			Ok(LinVariant::Cardinality(Cardinality {
 				lits: vec![1, 2, 3],
+				cmp: LimitComp::LessEq,
 				k: 2,
-			})
+			}))
 		);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[3, 3, 3], &[1, 2, 3], LessEq, 7, &[]),
-			Ok(BoolLin::AtMostK {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[3, 3, 3],
+				&[1, 2, 3],
+				Comparator::LessEq,
+				7,
+				&[]
+			),
+			Ok(LinVariant::Cardinality(Cardinality {
 				lits: vec![1, 2, 3],
+				cmp: LimitComp::LessEq,
 				k: 2,
-			})
+			}))
 		);
 
 		// Correctly detect equal k
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 1, 1], &[1, 2, 3], Equal, 2, &[]),
-			Ok(BoolLin::EqualK {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 1, 1],
+				&[1, 2, 3],
+				Comparator::Equal,
+				2,
+				&[]
+			),
+			Ok(LinVariant::Cardinality(Cardinality {
 				lits: vec![1, 2, 3],
+				cmp: LimitComp::Equal,
 				k: 2,
-			})
+			}))
 		);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[3, 3, 3], &[1, 2, 3], Equal, 6, &[]),
-			Ok(BoolLin::EqualK {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[3, 3, 3],
+				&[1, 2, 3],
+				Comparator::Equal,
+				6,
+				&[]
+			),
+			Ok(LinVariant::Cardinality(Cardinality {
 				lits: vec![1, 2, 3],
+				cmp: LimitComp::Equal,
 				k: 2,
-			})
+			}))
 		);
 
 		// Is still normal Boolean linear in-equality
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 2, 2], &[1, 2, 3], LessEq, 2, &[]),
-			Ok(BoolLin::LinLessEq {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 2, 2],
+				&[1, 2, 3],
+				Comparator::LessEq,
+				2,
+				&[]
+			),
+			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(1, 1), (2, 2), (3, 2)]),
+				cmp: LimitComp::LessEq,
 				k: 2,
-			})
+			}))
 		);
 
 		// Is still normal Boolean linear equality
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 2, 2], &[1, 2, 3], Equal, 2, &[]),
-			Ok(BoolLin::LinEqual {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 2, 2],
+				&[1, 2, 3],
+				Comparator::Equal,
+				2,
+				&[]
+			),
+			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(1, 1), (2, 2), (3, 2)]),
+				cmp: LimitComp::Equal,
 				k: 2,
-			})
+			}))
 		);
 
 		// Correctly identify that the AMO is limiting the LHS ub
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(
+			LinVariant::<i32, u32>::aggregate(
 				&mut db,
 				&[-1, -1, -1],
 				&[1, 2, 3],
-				LessEq,
+				Comparator::LessEq,
 				-2,
 				&[Constraint::Amo(vec![1, 2])]
 			),
-			Ok(BoolLin::Trivial)
+			Ok(LinVariant::Trivial)
 		);
 	}
 
@@ -519,10 +683,17 @@ mod tests {
 		let mut db = TestDB::new(3).expect_clauses(vec![vec![1, 2, 3]]);
 		// An exactly one constraint adds an at most one constraint + a clause for all literals
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 1, 1], &[1, 2, 3], Equal, 1, &[]),
-			Ok(BoolLin::AtMostOne {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 1, 1],
+				&[1, 2, 3],
+				Comparator::Equal,
+				1,
+				&[]
+			),
+			Ok(LinVariant::AtMostOne(AtMostOne {
 				lits: vec![1, 2, 3],
-			})
+			}))
 		);
 	}
 
@@ -532,69 +703,94 @@ mod tests {
 
 		// Correctly convert a negative coefficient
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[2, 3, -2], &[1, 2, 3], LessEq, 2, &[]),
-			Ok(BoolLin::LinLessEq {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[2, 3, -2],
+				&[1, 2, 3],
+				Comparator::LessEq,
+				2,
+				&[]
+			),
+			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(1, 2), (2, 3), (-3, 2)]),
+				cmp: LimitComp::LessEq,
 				k: 4
-			})
+			}))
 		);
 
 		// Correctly convert multiple negative coefficients
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[-1, -1, -1], &[1, 2, 3], LessEq, -2, &[]),
-			Ok(BoolLin::AtMostOne {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[-1, -1, -1],
+				&[1, 2, 3],
+				Comparator::LessEq,
+				-2,
+				&[]
+			),
+			Ok(LinVariant::AtMostOne(AtMostOne {
 				lits: vec![-1, -2, -3],
-			})
+			}))
 		);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[-1, -2, -3], &[1, 2, 3], LessEq, -2, &[]),
-			Ok(BoolLin::LinLessEq {
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[-1, -2, -3],
+				&[1, 2, 3],
+				Comparator::LessEq,
+				-2,
+				&[]
+			),
+			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(-1, 1), (-2, 2), (-3, 3)]),
+				cmp: LimitComp::LessEq,
 				k: 4
-			})
+			}))
 		);
 
 		// Correctly convert multiple negative coefficients with AMO constraints
 		let mut db = TestDB::new(6);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(
+			LinVariant::<i32, u32>::aggregate(
 				&mut db,
 				&[-1, -3, -4, -2, -3, -5],
 				&[1, 2, 3, 4, 5, 6],
-				LessEq,
+				Comparator::LessEq,
 				-4,
 				&[
 					Constraint::Amo(vec![1, 2, 3]),
 					Constraint::Amo(vec![4, 5, 6])
 				]
 			),
-			Ok(BoolLin::LinLessEq {
+			Ok(LinVariant::Linear(Linear {
 				terms: vec![
 					Part::Amo(vec![(1, 3), (2, 1), (7, 4)]),
 					Part::Amo(vec![(4, 3), (5, 2), (8, 5)]),
 				],
+				cmp: LimitComp::LessEq,
 				k: 5
-			})
+			}))
 		);
 
 		// Correctly convert multiple negative coefficients with IC constraints
 		let mut db = TestDB::new(6);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(
+			LinVariant::<i32, u32>::aggregate(
 				&mut db,
 				&[1, -3, -2, 2, 5, -3],
 				&[1, 2, 3, 4, 5, 6],
-				LessEq,
+				Comparator::LessEq,
 				3,
 				&[Constraint::Ic(vec![1, 2, 3, 4, 5, 6])]
 			),
-			Ok(BoolLin::LinLessEq {
+			Ok(LinVariant::Linear(Linear {
 				terms: vec![
 					Part::Ic(vec![(1, 1), (4, 2), (5, 5)]),
 					Part::Ic(vec![(-6, 3), (-3, 2), (-2, 3)]),
 				],
+				cmp: LimitComp::LessEq,
 				k: 11
-			})
+			}))
 		);
 	}
 
@@ -604,21 +800,49 @@ mod tests {
 
 		// Constant cannot be reached
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 2, 2], &[1, 2, 3], Equal, 6, &[]),
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 2, 2],
+				&[1, 2, 3],
+				Comparator::Equal,
+				6,
+				&[]
+			),
 			Err(Unsatisfiable),
 		);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 2, 2], &[1, 2, 3], GreaterEq, 6, &[]),
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 2, 2],
+				&[1, 2, 3],
+				Comparator::GreaterEq,
+				6,
+				&[]
+			),
 			Err(Unsatisfiable),
 		);
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[1, 2, 2], &[1, 2, 3], LessEq, -1, &[]),
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[1, 2, 2],
+				&[1, 2, 3],
+				Comparator::LessEq,
+				-1,
+				&[]
+			),
 			Err(Unsatisfiable),
 		);
 
 		// Scaled counting constraint with off-scaled Constant
 		assert_eq!(
-			BoolLin::<u32, i32>::aggregate(&mut db, &[4, 4, 4], &[1, 2, 3], Equal, 6, &[]),
+			LinVariant::<i32, u32>::aggregate(
+				&mut db,
+				&[4, 4, 4],
+				&[1, 2, 3],
+				Comparator::Equal,
+				6,
+				&[]
+			),
 			Err(Unsatisfiable),
 		);
 	}
@@ -686,7 +910,7 @@ mod tests {
 		}
 	}
 
-	impl PartialEq for BoolLin<u32, i32> {
+	impl PartialEq for LinVariant<i32, u32> {
 		fn eq(&self, other: &Self) -> bool {
 			let liteq =
 				|a: &Vec<i32>, b: &Vec<i32>| itertools::equal(a.iter().sorted(), b.iter().sorted());
@@ -701,51 +925,39 @@ mod tests {
 				)
 			};
 			match self {
-				BoolLin::LinEqual { terms, k } => {
-					if let BoolLin::LinEqual {
+				LinVariant::Linear(Linear { terms, cmp, k }) => {
+					if let LinVariant::Linear(Linear {
 						terms: oterms,
+						cmp: oc,
 						k: l,
-					} = other
+					}) = other
 					{
-						k == l && parteq(terms, oterms)
+						cmp == oc && k == l && parteq(terms, oterms)
 					} else {
 						false
 					}
 				}
-				BoolLin::LinLessEq { terms, k } => {
-					if let BoolLin::LinLessEq {
-						terms: oterms,
+				LinVariant::Cardinality(Cardinality { lits, cmp, k }) => {
+					if let LinVariant::Cardinality(Cardinality {
+						lits: olits,
+						cmp: oc,
 						k: l,
-					} = other
+					}) = other
 					{
-						k == l && parteq(terms, oterms)
+						cmp == oc && k == l && liteq(lits, olits)
 					} else {
 						false
 					}
 				}
-				BoolLin::AtMostK { lits, k } => {
-					if let BoolLin::AtMostK { lits: olits, k: l } = other {
-						k == l && liteq(lits, olits)
+				LinVariant::AtMostOne(amo) => {
+					if let LinVariant::AtMostOne(oamo) = other {
+						liteq(&amo.lits, &oamo.lits)
 					} else {
 						false
 					}
 				}
-				BoolLin::EqualK { lits, k } => {
-					if let BoolLin::EqualK { lits: olits, k: l } = other {
-						k == l && liteq(lits, olits)
-					} else {
-						false
-					}
-				}
-				BoolLin::AtMostOne { lits } => {
-					if let BoolLin::AtMostOne { lits: olits } = other {
-						liteq(lits, olits)
-					} else {
-						false
-					}
-				}
-				BoolLin::Trivial => {
-					if let BoolLin::Trivial = other {
+				LinVariant::Trivial => {
+					if let LinVariant::Trivial = other {
 						true
 					} else {
 						false
