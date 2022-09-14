@@ -113,7 +113,6 @@ fn build_totalizer<
 					for c in left.iter().chain(right.iter()) {
 						let p = parent.entry(*c.0).or_insert_with(|| db.new_var());
 						// TODO we do not need to create nodes where w<l (but current vars need to be passed on)
-						eprintln!("{:?} -> {:?}", c.0, c.0);
 						db.add_clause(&[c.1.negate(), p.clone()]).unwrap();
 					}
 
@@ -122,7 +121,6 @@ fn build_totalizer<
 					for a in left.iter() {
 						for b in right.iter() {
 							let w = std::cmp::min(*a.0 + *b.0, u);
-							eprintln!("{:?} and {:?} -> {:?}", a.0, b.0, w);
 							let p = parent.entry(w.clone()).or_insert_with(|| db.new_var());
 							// TODO figure out what to do if w<l here as well.
 							db.add_clause(&[a.1.negate(), b.1.negate(), p.clone()])
