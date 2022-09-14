@@ -261,7 +261,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 								&terms
 									.iter()
 									.map(|(lit, _)| lit.negate())
-                                    .chain(std::iter::once(y.clone()))
+									.chain(std::iter::once(y.clone()))
 									.collect::<Vec<Lit>>(),
 							)
 							.unwrap();
