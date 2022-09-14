@@ -2,6 +2,11 @@ use crate::{ClauseDatabase, Comparator, Literal, Part, PositiveCoefficient, Resu
 use itertools::Itertools;
 use std::collections::HashMap;
 
+pub enum Structure {
+	Gt,
+	Swc,
+}
+
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a totalizer
 pub fn encode_bool_lin_le_totalizer<
 	Lit: Literal,
@@ -13,41 +18,25 @@ pub fn encode_bool_lin_le_totalizer<
 	cmp: Comparator,
 	k: PC,
 ) -> Result {
+	totalize(db, partition, cmp, k, Structure::Gt)
+}
+
+pub fn totalize<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized, PC: PositiveCoefficient>(
+	db: &mut DB,
+	partition: &[Part<Lit, PC>],
+	cmp: Comparator,
+	k: PC,
+	structure: Structure,
+) -> Result {
 	debug_assert!(cmp == Comparator::LessEq);
 	// Every layer of the totalizer (binary) tree has nodes containing literals associated with (unique) values (which equal the sum so far)
-	let root = build_totalizer(
-		partition
-			.iter()
-			.map(|part| {
-				let terms: Vec<(PC, Lit)> = match part {
-					Part::Amo(terms) => terms
-						.iter()
-						.map(|(lit, coef)| (*coef, lit.clone()))
-						.collect(),
-					Part::Ic(terms) => {
-						let mut acc = PC::zero(); // running sum
-						terms
-							.iter()
-							.map(|(lit, coef)| {
-								acc += *coef;
-								(acc, lit.clone())
-							})
-							.collect()
-					}
-					Part::Dom(terms, l, u) => {
-						// totalizer root has unique values, so just return
-						return build_totalizer(
-							terms
-								.iter()
-								.map(|(lit, coef)| HashMap::from_iter([(*coef, lit.clone())]))
-								.collect(),
-							db,
-							*l,
-							*u,
-						);
-					}
-				};
-
+	let construct_leaf = |part: &Part<Lit, PC>| -> HashMap<PC, Lit> {
+		match part {
+			Part::Amo(terms) => {
+				let terms: Vec<(PC, Lit)> = terms
+					.iter()
+					.map(|(lit, coef)| (*coef, lit.clone()))
+					.collect();
 				// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
 				let mut h: HashMap<PC, Vec<Lit>> = HashMap::with_capacity(terms.len());
 				for (coef, lit) in terms {
@@ -67,12 +56,48 @@ pub fn encode_bool_lin_le_totalizer<
 						}
 					})
 					.collect()
-			})
-			.collect(),
-		db,
-		PC::zero(),
-		k + PC::one(),
-	);
+			}
+			// Leaves built from Ic/Dom groups are guaranteed to have unique values
+			Part::Ic(terms) => {
+				let mut acc = PC::zero(); // running sum
+				terms
+					.iter()
+					.map(|(lit, coef)| {
+						acc += *coef;
+						(acc, lit.clone())
+					})
+					.collect()
+			}
+			Part::Dom(terms, l, u) => {
+				return build_totalizer(
+					terms
+						.iter()
+						.map(|(lit, coef)| HashMap::from_iter([(*coef, lit.clone())]))
+						.collect(),
+					db,
+					*l,
+					*u,
+				);
+			}
+		}
+	};
+
+	let leaves = partition.into_iter().map(construct_leaf).collect();
+	// TODO experiment with adding consistency constraint to totalizer nodes (including on leaves!)
+
+	let root = match structure {
+		Structure::Gt => build_totalizer(leaves, db, PC::zero(), k + PC::one()),
+		Structure::Swc => leaves
+			.into_iter()
+			.fold(HashMap::<PC, Lit>::new(), |acc, leaf| {
+				let acc = build_totalizer(vec![acc, leaf], db, PC::zero(), k + PC::one());
+				acc.keys()
+					.sorted()
+					.tuple_windows()
+					.for_each(|(a, b)| db.add_clause(&[acc[b].negate(), acc[a].clone()]).unwrap());
+				acc
+			}),
+	};
 
 	// Set root node lit with value k+1 to false
 	// The k+1 lit is guaranteed to exists, since all node values are capped at k+1, and the constraint is non-trivial
