@@ -245,4 +245,30 @@ fn force_carry<Lit: Literal, DB: ClauseDatabase<Lit = Lit>>(
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+	// use crate::{helpers::tests::assert_enc_sol, AdderEncoder};
+
+	#[test]
+	fn test_adder_encode() {
+		// assert_enc_sol!(AdderEncoder, 4, )
+
+		// let mut two = TestDB::new(4)
+		// 	.expect_clauses(vec![vec![-4], vec![-3, -1], vec![-2, -1], vec![-3, -2]])
+		// 	.expect_solutions(vec![
+		// 		vec![-1, -2, -3, -4],
+		// 		vec![-1, -2, 3, -4],
+		// 		vec![-1, 2, -3, -4],
+		// 		vec![1, -2, -3, -4],
+		// 	]);
+		// assert!(two
+		// 	.encode_bool_lin::<i64, u64>(
+		// 		&[1, 1, 1, 2],
+		// 		&[1, 2, 3, 4],
+		// 		crate::Comparator::LessEq,
+		// 		1,
+		// 		&[]
+		// 	)
+		// 	.is_ok());
+		// two.check_complete();
+	}
+}

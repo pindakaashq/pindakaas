@@ -42,10 +42,10 @@ mod tests {
 	#[test]
 	fn test_amo_ladder() {
 		assert_enc_sol!(
-			LadderEncoder,
+			LadderEncoder::<i32>,
 			2,
-			&AtMostOne { lits: vec![1, 2] },
-			vec![
+			&AtMostOne { lits: vec![1, 2] }
+			=> vec![
 				vec![-1, 3],
 				vec![1, -3, 4],
 				vec![-1, -4],

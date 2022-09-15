@@ -37,28 +37,28 @@ mod tests {
 	fn test_amo_pairwise() {
 		// AMO on two literals
 		assert_enc_sol!(
-			PairwiseEncoder,
+			PairwiseEncoder::<i32>,
 			2,
-			&AtMostOne { lits: vec![1, 2] },
-			vec![vec![-1, -2]],
+			&AtMostOne { lits: vec![1, 2] }
+			=> vec![vec![-1, -2]],
 			vec![vec![-1, -2], vec![1, -2], vec![-1, 2]]
 		);
 		// AMO on a negated literals
 		assert_enc_sol!(
-			PairwiseEncoder,
+			PairwiseEncoder::<i32>,
 			2,
-			&AtMostOne { lits: vec![-1, 2] },
-			vec![vec![1, -2]],
+			&AtMostOne { lits: vec![-1, 2] }
+			=> vec![vec![1, -2]],
 			vec![vec![1, -2], vec![-1, -2], vec![1, 2]]
 		);
 		// AMO on three literals
 		assert_enc_sol!(
-			PairwiseEncoder,
+			PairwiseEncoder::<i32>,
 			3,
 			&AtMostOne {
 				lits: vec![1, 2, 3]
-			},
-			vec![vec![-1, -2], vec![-1, -3], vec![-2, -3]]
+			}
+			=> vec![vec![-1, -2], vec![-1, -3], vec![-2, -3]]
 		);
 	}
 }
