@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-	AtMostOne, Cardinality, CheckError, Checker, ClauseDatabase, Coefficient, Literal,
-	PositiveCoefficient, Result, Unsatisfiable,
+	AtMostOne, Cardinality, CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal,
+	PairwiseEncoder, PositiveCoefficient, Result, Unsatisfiable,
 };
 
 mod adder;
@@ -56,6 +56,8 @@ impl<Lit: Literal, PC: PositiveCoefficient> Checker for Linear<Lit, PC> {
 	}
 }
 
+pub type LinearEncoder<'a, Lit, C, PC> = ArbLinEncoder<'a, Lit, C, PC>;
+
 // TODO how can we support both Part(itions) of "terms" ( <Lit, C> for pb
 // constraints) and just lits (<Lit>) for AMK/AMO's?
 //
@@ -82,7 +84,7 @@ pub enum Constraint<Lit> {
 	Ic(Vec<Lit>),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Comparator {
 	LessEq,
 	Equal,
@@ -464,12 +466,103 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 	}
 }
 
+macro_rules! linear_encoder {
+	($name:ident, $encode_variant:item) => {
+		#[derive(Debug)]
+		pub struct $name<
+			'a,
+			Lit: $crate::Literal,
+			C: $crate::Coefficient + ::std::convert::TryInto<PC>,
+			PC: $crate::PositiveCoefficient,
+		> {
+			coeff: &'a [C],
+			lits: &'a [Lit],
+			cmp: Comparator,
+			k: C,
+			cons: &'a [Constraint<Lit>],
+			into: ::std::marker::PhantomData<PC>,
+		}
+
+		impl<
+				'a,
+				Lit: $crate::Literal,
+				C: $crate::Coefficient + ::std::convert::TryInto<PC>,
+				PC: $crate::PositiveCoefficient,
+			> $name<'a, Lit, C, PC>
+		{
+			pub fn new(
+				coeff: &'a [C],
+				lits: &'a [Lit],
+				cmp: Comparator,
+				k: C,
+				cons: &'a [Constraint<Lit>],
+			) -> Self {
+				Self {
+					coeff,
+					lits,
+					cmp,
+					k,
+					cons,
+					into: ::std::marker::PhantomData,
+				}
+			}
+
+			$encode_variant
+		}
+
+		impl<
+				'a,
+				Lit: $crate::Literal,
+				C: $crate::Coefficient + ::std::convert::TryInto<PC>,
+				PC: $crate::PositiveCoefficient,
+			> $crate::Encoder for $name<'a, Lit, C, PC>
+		{
+			type Lit = Lit;
+			type Ret = ();
+
+			fn encode<DB: $crate::ClauseDatabase<Lit = Lit>>(
+				&mut self,
+				db: &mut DB,
+			) -> $crate::Result {
+				let lin_var = LinVariant::aggregate(
+					db,
+					self.coeff,
+					self.lits,
+					self.cmp.clone(),
+					self.k,
+					self.cons,
+				)?;
+				self.encode_variant(db, lin_var)
+			}
+		}
+	};
+}
+pub(crate) use linear_encoder;
+
+// This is just a linear encoder that currently makes an arbitrary choice.
+// This is probably not how we would like to do it in the future.
+linear_encoder!(
+	ArbLinEncoder,
+	fn encode_variant<DB: ClauseDatabase<Lit = Lit>>(
+		&self,
+		db: &mut DB,
+		lin_var: LinVariant<Lit, PC>,
+	) -> Result {
+		match lin_var {
+			LinVariant::Linear(lin) => AdderEncoder::new(lin).encode(db),
+			LinVariant::Cardinality(_) => unimplemented!(),
+			LinVariant::AtMostOne(amo) => PairwiseEncoder::new(&amo).encode(db),
+			LinVariant::Trivial => Ok(()),
+		}
+	}
+);
+
 #[cfg(test)]
 mod tests {
 	use itertools::Itertools;
 
 	use super::*;
-	use crate::helpers::tests::TestDB;
+	use crate::helpers::tests::{assert_enc_sol, TestDB};
 	use crate::{AtMostOne, Linear, Unsatisfiable};
 
 	fn construct_terms(terms: &[(i32, u32)]) -> Vec<Part<i32, u32>> {
@@ -532,6 +625,7 @@ mod tests {
 				k: 3
 			}))
 		);
+		db.check_complete()
 	}
 
 	#[test]
@@ -695,6 +789,7 @@ mod tests {
 				lits: vec![1, 2, 3],
 			}))
 		);
+		db.check_complete()
 	}
 
 	#[test]
@@ -845,6 +940,58 @@ mod tests {
 			),
 			Err(Unsatisfiable),
 		);
+	}
+
+	#[test]
+	fn test_pb_encode() {
+		assert_enc_sol!(
+			ArbLinEncoder::<i32,i32,u32>,
+			4,
+			&[1, 1, 1, 2],
+			&[1, 2, 3, 4],
+			crate::Comparator::LessEq,
+			1,
+			&[]
+			=>
+			vec![
+			vec![-4], vec![-3, -1], vec![-2, -1], vec![-3, -2]
+			],
+			vec![
+				vec![-1, -2, -3, -4],
+				vec![-1, -2, 3, -4],
+				vec![-1, 2, -3, -4],
+				vec![1, -2, -3, -4],
+			]
+		);
+	}
+
+	#[test]
+	fn test_encoders() {
+		// +7*x1 +10*x2 +4*x3 +4*x4 <= 9
+		let mut db = TestDB::new(4).expect_solutions(vec![
+			vec![-1, -2, -3, -4],
+			vec![1, -2, -3, -4],
+			vec![-1, -2, 3, -4],
+			vec![-1, -2, -3, 4],
+		]);
+		// two.add_clause(&[-5]).unwrap();
+		// TODO encode this if encoder does not support constraint
+		assert!(PairwiseEncoder::new(&AtMostOne { lits: vec![1, 2] })
+			.encode(&mut db)
+			.is_ok());
+		assert!(PairwiseEncoder::new(&AtMostOne { lits: vec![3, 4] })
+			.encode(&mut db)
+			.is_ok());
+		assert!(ArbLinEncoder::<i32, i32, u32>::new(
+			&[7, 10, 4, 4],
+			&[1, 2, 3, 4],
+			crate::Comparator::LessEq,
+			9,
+			&[Constraint::Amo(vec![1, 2]), Constraint::Amo(vec![3, 4])],
+		)
+		.encode(&mut db)
+		.is_ok());
+		db.check_complete();
 	}
 
 	impl PartialEq for Part<i32, u32> {

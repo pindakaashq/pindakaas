@@ -47,57 +47,53 @@ pub mod tests {
 	};
 	use std::collections::HashSet;
 
-	#[allow(unused_macros)]
 	macro_rules! assert_enc {
-		($enc:ident, $max:expr, $arg:expr, $clauses:expr) => {
+		($enc:ty, $max:expr, $($args:expr),+ => $clauses:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
 			tdb = tdb.expect_clauses($clauses);
-			$enc::new($arg)
+			<$enc>::new($($args),+)
 				.encode(&mut tdb)
 				.expect("Encoding proved to be trivially unsatisfiable");
 			tdb.check_complete()
 		};
 	}
-	#[allow(unused_imports)]
 	pub(crate) use assert_enc;
 
-	#[allow(unused_macros)]
 	macro_rules! assert_sol {
-		($enc:ident, $max:expr, $arg:expr) => {
+		($enc:ty, $max:expr, $arg:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
 			tdb = tdb.with_check(|sol| $arg.check(sol).is_ok);
-			$enc::new($arg)
+			<$enc>::new($arg)
 				.encode(&mut tdb)
 				.expect("Encoding proved to be trivially unsatisfiable");
 			tdb.check_complete()
 		};
-		($enc:ident, $max:expr, $arg:expr, $solns:expr) => {
+		($enc:ty, $max:expr, $($args:expr),+ => $solns:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
 			tdb = tdb.expect_solutions($solns);
-			$enc::new($arg)
+			<$enc>::new($($args),+)
 				.encode(&mut tdb)
 				.expect("Encoding proved to be trivially unsatisfiable");
 			tdb.check_complete()
 		};
 	}
-	#[allow(unused_imports)]
 	pub(crate) use assert_sol;
 
 	macro_rules! assert_enc_sol {
-		($enc:ident, $max:expr, $arg:expr, $clauses:expr) => {
+		($enc:ty, $max:expr, $arg:expr => $clauses:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
 			tdb = tdb.expect_clauses($clauses);
 			tdb = tdb.with_check(|sol| $arg.check(sol).is_ok());
-			$enc::new($arg)
+			<$enc>::new($arg)
 				.encode(&mut tdb)
 				.expect("Encoding proved to be trivially unsatisfiable");
 			tdb.check_complete()
 		};
-		($enc:ident, $max:expr, $arg:expr, $clauses:expr, $solns:expr) => {
+		($enc:ty, $max:expr, $($args:expr),+ => $clauses:expr, $solns:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
 			tdb = tdb.expect_clauses($clauses);
 			tdb = tdb.expect_solutions($solns);
-			$enc::new($arg)
+			<$enc>::new($($args),+)
 				.encode(&mut tdb)
 				.expect("Encoding proved to be trivially unsatisfiable");
 			tdb.check_complete()
@@ -106,15 +102,47 @@ pub mod tests {
 	pub(crate) use assert_enc_sol;
 
 	#[test]
+	fn test_assert_macros() {
+		#[derive(Debug)]
+		struct MakeFalse<'a, Lit: Literal> {
+			lit: &'a Lit,
+		}
+		impl<'a, Lit: Literal> MakeFalse<'a, Lit> {
+			fn new(lit: &'a Lit) -> Self {
+				Self { lit }
+			}
+		}
+		impl<'a, Lit: Literal> Encoder for MakeFalse<'a, Lit> {
+			type Lit = Lit;
+			type Ret = ();
+
+			fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result {
+				db.add_clause(&[self.lit.negate()])
+			}
+		}
+
+		// Test resulting encoding
+		assert_enc!(MakeFalse::<i32>, 1, &1 => vec![vec![-1]]);
+		// Test possible solutions (using specification)
+		// TODO: num_var is really 1, but that crashes SPLR
+		assert_sol!(MakeFalse::<i32>, 2, &1 => vec![vec![-1]]);
+		// Test encoding and possible solutions
+		// TODO: see above
+		assert_enc_sol!(MakeFalse::<i32>, 2, &1 => vec![vec![-1]], vec![vec![-1]]);
+	}
+
+	#[test]
 	fn test_xor() {
 		assert_enc_sol!(
-			XorEncoder,
+			XorEncoder::<i32>,
 			2,
-			&[1, 2],
+			&[1, 2] =>
 			vec![vec![1, 2], vec![-1, -2]],
 			vec![vec![-1, 2], vec![1, -2]]
 		);
 	}
+
+	const OUTPUT_SPLR: bool = false;
 
 	pub(crate) struct TestDB {
 		slv: Solver,
@@ -123,10 +151,14 @@ pub mod tests {
 		/// Solutions expected by the test case
 		solutions: Option<Vec<Vec<i32>>>,
 		check: Option<fn(&[i32]) -> bool>,
+		unchecked: bool,
 	}
 
 	impl TestDB {
 		pub fn new(num_var: i32) -> TestDB {
+			if OUTPUT_SPLR {
+				eprintln!("let slv = Solver::instantiate( &Config::default(), &CNFDescription {{ num_of_variables: {} as usize, ..CNFDescription::default() }});", num_var);
+			}
 			TestDB {
 				slv: Solver::instantiate(
 					&Config::default(),
@@ -138,6 +170,7 @@ pub mod tests {
 				clauses: None,
 				solutions: None,
 				check: None,
+				unchecked: false,
 			}
 		}
 
@@ -147,6 +180,7 @@ pub mod tests {
 			}
 			clauses.sort();
 			self.clauses = Some(clauses.into_iter().map(|cl| (false, cl)).collect());
+			self.unchecked = true;
 			self
 		}
 
@@ -156,15 +190,18 @@ pub mod tests {
 			}
 			solutions.sort();
 			self.solutions = Some(solutions);
+			self.unchecked = true;
 			self
 		}
 
 		pub fn with_check(mut self, checker: fn(&[i32]) -> bool) -> TestDB {
 			self.check = Some(checker);
+			self.unchecked = true;
 			self
 		}
 
 		pub fn check_complete(&mut self) {
+			self.unchecked = false;
 			if let Some(clauses) = &self.clauses {
 				let missing: Vec<Vec<i32>> = clauses
 					.iter()
@@ -180,6 +217,9 @@ pub mod tests {
 			}
 			if self.solutions.is_none() && self.check.is_none() {
 				return;
+			}
+			if OUTPUT_SPLR {
+				eprintln!("let result: Vec<Vec<i32>> = self.slv.iter().collect();");
 			}
 			let mut from_slv: Vec<Vec<i32>> = self.slv.iter().collect();
 			for sol in &mut from_slv {
@@ -215,6 +255,14 @@ pub mod tests {
 		}
 	}
 
+	impl Drop for TestDB {
+		fn drop(&mut self) {
+			if self.unchecked {
+				panic!("TestDB object was dropped without being checked!")
+			}
+		}
+	}
+
 	impl ClauseDatabase for TestDB {
 		type Lit = i32;
 
@@ -231,6 +279,20 @@ pub mod tests {
 					}
 				}
 				assert!(found, "unexpected clause: {:?}", cl);
+			}
+
+			if OUTPUT_SPLR {
+				match cl.len() {
+					0 => {}
+					1 => eprintln!(
+						"slv.add_assignment({}).expect(\"unexpected error from add_assignment\");",
+						cl[0]
+					),
+					_ => eprintln!(
+						"slv.add_clause({:?}).expect(\"unexpected error from add_clause\");",
+						cl
+					),
+				}
 			}
 
 			match match cl.len() {

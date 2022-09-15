@@ -25,7 +25,7 @@ mod linear;
 
 pub use at_most_one::{AtMostOne, LadderEncoder, PairwiseEncoder};
 pub use cardinality::Cardinality;
-pub use linear::{AdderEncoder, Comparator, LinVariant, Linear, TotalizerEncoder};
+pub use linear::{AdderEncoder, Comparator, LinVariant, Linear, LinearEncoder, TotalizerEncoder};
 
 /// Literal is the super-trait for types that can be used to represent boolean
 /// literals in this library.
@@ -234,54 +234,4 @@ mod tests {
 	fn is_poscoeff<T: PositiveCoefficient>(_: T) -> bool {
 		true
 	}
-
-	// #[test]
-	// fn test_encoders() {
-	// 	// +7*x1 +10*x2 +4*x3 +4*x4 <= 9
-	// 	let mut two = TestDB::new(4).expect_solutions(vec![
-	// 		vec![-1, -2, -3, -4],
-	// 		vec![1, -2, -3, -4],
-	// 		vec![-1, -2, 3, -4],
-	// 		vec![-1, -2, -3, 4],
-	// 	]);
-	// 	// two.add_clause(&[-5]).unwrap();
-	// 	// TODO encode this if encoder does not support constraint
-	// 	assert!(two.encode_amo_pairwise(&vec![1, 2]).is_ok());
-	// 	assert!(two.encode_amo_pairwise(&vec![3, 4]).is_ok());
-	// 	assert!(two
-	// 		.encode_bool_lin::<i64, u64>(
-	// 			&[7, 10, 4, 4],
-	// 			&[1, 2, 3, 4],
-	// 			crate::Comparator::LessEq,
-	// 			9,
-	// 			&[
-	// 				linear::Constraint::Amo(vec![1, 2]),
-	// 				linear::Constraint::Amo(vec![3, 4])
-	// 			],
-	// 		)
-	// 		.is_ok());
-	// 	two.check_complete();
-	// }
-
-	// #[test]
-	// fn test_pb_encode() {
-	// 	let mut two = TestDB::new(4)
-	// 		.expect_clauses(vec![vec![-4], vec![-3, -1], vec![-2, -1], vec![-3, -2]])
-	// 		.expect_solutions(vec![
-	// 			vec![-1, -2, -3, -4],
-	// 			vec![-1, -2, 3, -4],
-	// 			vec![-1, 2, -3, -4],
-	// 			vec![1, -2, -3, -4],
-	// 		]);
-	// 	assert!(two
-	// 		.encode_bool_lin::<i64, u64>(
-	// 			&[1, 1, 1, 2],
-	// 			&[1, 2, 3, 4],
-	// 			crate::Comparator::LessEq,
-	// 			1,
-	// 			&[]
-	// 		)
-	// 		.is_ok());
-	// 	two.check_complete();
-	// }
 }
