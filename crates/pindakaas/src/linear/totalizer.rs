@@ -5,17 +5,17 @@ use crate::{
 use std::collections::HashMap;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a totalizer
-pub struct TotalizerEncoder<'a, Lit: Literal, PC: PositiveCoefficient> {
-	lin: &'a Linear<Lit, PC>,
+pub struct TotalizerEncoder<Lit: Literal, PC: PositiveCoefficient> {
+	lin: Linear<Lit, PC>,
 }
 
-impl<'a, Lit: Literal, PC: PositiveCoefficient> TotalizerEncoder<'a, Lit, PC> {
-	pub fn new(lin: &'a Linear<Lit, PC>) -> Self {
+impl<Lit: Literal, PC: PositiveCoefficient> TotalizerEncoder<Lit, PC> {
+	pub fn new(lin: Linear<Lit, PC>) -> Self {
 		Self { lin }
 	}
 }
 
-impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for TotalizerEncoder<'a, Lit, PC> {
+impl<Lit: Literal, PC: PositiveCoefficient> Encoder for TotalizerEncoder<Lit, PC> {
 	type Lit = Lit;
 	type Ret = ();
 
@@ -43,7 +43,7 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for TotalizerEncoder<'a,
 								})
 								.collect()
 						}
-						Part::Dom(terms, k, _) => {
+						Part::Dom(terms, l, u) => {
 							// totalizer root has unique values, so just return
 							return build_totalizer(
 								terms
@@ -51,7 +51,8 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for TotalizerEncoder<'a,
 									.map(|(lit, coef)| HashMap::from_iter([(*coef, lit.clone())]))
 									.collect(),
 								db,
-								*k,
+								*l,
+								*u,
 							);
 						}
 					};
@@ -78,7 +79,8 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for TotalizerEncoder<'a,
 				})
 				.collect(),
 			db,
-			self.lin.k,
+			PC::zero(),
+			self.lin.k+PC::one(),
 		);
 
 		// Set root node lit with value k+1 to false
@@ -96,48 +98,51 @@ fn build_totalizer<
 	DB: ClauseDatabase<Lit = Lit> + ?Sized,
 	PC: PositiveCoefficient,
 >(
-	mut layer: Vec<HashMap<PC, Lit>>,
+	layer: Vec<HashMap<PC, Lit>>,
 	db: &mut DB,
-	k: PC,
+	_l: PC,
+	u: PC,
 ) -> HashMap<PC, Lit> {
-	loop {
-		// Fix case of odd number of leaf nodes; by adding an empty right-hand node, we will get a correct parent node
-		if layer.len() % 2 == 1 {
-			layer.push(HashMap::new());
-		}
-
-		// merge two adjacent nodes of the current layer into one parent node
-		layer = layer
-			.chunks(2)
-			.map(|children| {
-				let mut parent = HashMap::new();
-				let (left, right) = (&children[0], &children[1]);
-
-				// any child lit implies the parent lit with the same value
-				for c in left.iter().chain(right.iter()) {
-					let w = std::cmp::min(*c.0, k + PC::one()); // not capped in literature, but should be slightly better
-					let p = parent.entry(w).or_insert_with(|| db.new_var());
-					db.add_clause(&[c.1.negate(), p.clone()]).unwrap();
-				}
-
-				// two lits together imply the parent lit with the sum of their values
-				// TODO can be optimised if by sorting both children by value
-				for l in left {
-					for r in right {
-						let w = std::cmp::min(*l.0 + *r.0, k + PC::one());
-						let p = parent.entry(w).or_insert_with(|| db.new_var());
-						db.add_clause(&[l.1.negate(), r.1.negate(), p.clone()])
-							.unwrap();
+	if layer.len() == 1 {
+		layer.into_iter().next().unwrap()
+	} else {
+		build_totalizer(
+			layer
+				.chunks(2)
+				.map(|children| {
+					if children.len() == 1 {
+						return children[0].clone();
 					}
-				}
 
-				parent
-			})
-			.collect();
+					let (left, right) = (&children[0], &children[1]);
 
-		if layer.len() == 1 {
-			return layer.pop().unwrap();
-		}
+					// any child lit implies the parent lit with the same value
+					let mut parent = HashMap::<PC, Lit>::new();
+					for c in left.iter().chain(right.iter()) {
+						let p = parent.entry(*c.0).or_insert_with(|| db.new_var());
+						// TODO we do not need to create nodes where w<l (but current vars need to be passed on)
+						db.add_clause(&[c.1.negate(), p.clone()]).unwrap();
+					}
+
+					// two lits together imply the parent lit with the sum of their values
+					// TODO can be optimised if by sorting both children by value
+					for a in left.iter() {
+						for b in right.iter() {
+							let w = std::cmp::min(*a.0 + *b.0, u);
+							let p = parent.entry(w.clone()).or_insert_with(|| db.new_var());
+							// TODO figure out what to do if w<l here as well.
+							db.add_clause(&[a.1.negate(), b.1.negate(), p.clone()])
+								.unwrap();
+						}
+					}
+
+					parent
+				})
+				.collect(),
+			db,
+			_l,
+			u,
+		)
 	}
 }
 
