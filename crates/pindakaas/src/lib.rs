@@ -1,3 +1,4 @@
+#![feature(step_trait)]
 //! `pindakaas` is a collection of encoders to transform integer and
 //! pseudo-Boolean (PB) constraints into conjunctive normal form (CNF). It
 //! currently considers mostly linear constraints, which are in the form ∑
@@ -22,6 +23,7 @@ mod at_most_one;
 mod cardinality;
 pub(crate) mod helpers;
 mod linear;
+use core::iter::Step;
 
 pub use at_most_one::{AtMostOne, LadderEncoder, PairwiseEncoder};
 pub use cardinality::Cardinality;
@@ -152,10 +154,13 @@ impl<T: Signed + PrimInt + NumAssignOps + NumOps + fmt::Debug> Coefficient for T
 /// PositiveCoefficient is a trait used for types used for coefficients that
 /// have been simplified.
 pub trait PositiveCoefficient:
-	Unsigned + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug
+	Unsigned + PrimInt + NumAssignOps + NumOps + Hash + Step + fmt::Debug
 {
 }
-impl<T: Unsigned + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug> PositiveCoefficient for T {}
+impl<T: Unsigned + PrimInt + NumAssignOps + NumOps + Hash + Step + fmt::Debug> PositiveCoefficient
+	for T
+{
+}
 
 /// IntEncoding is a enumerated type use to represent Boolean encodings of
 /// integer variables within this library
