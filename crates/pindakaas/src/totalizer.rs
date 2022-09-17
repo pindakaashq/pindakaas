@@ -1,10 +1,13 @@
 use crate::{ClauseDatabase, Comparator, Literal, Part, PositiveCoefficient, Result};
-use itertools::Itertools;
+use itertools::{Itertools, Position};
 use std::collections::HashMap;
 
+#[allow(dead_code)]
+#[derive(Debug)]
 pub enum Structure {
 	Gt,
 	Swc,
+	Bdd,
 }
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a totalizer
@@ -77,33 +80,84 @@ pub fn totalize<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized, PC: Positi
 					db,
 					*l,
 					*u,
+					None,
 				);
 			}
 		}
 	};
 
-	let leaves = partition.into_iter().map(construct_leaf).collect();
+	let leaves = partition.iter().map(construct_leaf).collect();
 	// TODO experiment with adding consistency constraint to totalizer nodes (including on leaves!)
 
-	let root = match structure {
-		Structure::Gt => build_totalizer(leaves, db, PC::zero(), k + PC::one()),
-		Structure::Swc => leaves
-			.into_iter()
-			.fold(HashMap::<PC, Lit>::new(), |acc, leaf| {
-				let acc = build_totalizer(vec![acc, leaf], db, PC::zero(), k + PC::one());
+	match structure {
+		// Gt = { Tree structure, one false root node, no consistency on partial sum, sparse nodes }
+		Structure::Gt => {
+			// The totalizer encoding constructs a binary tree starting from a layer of leaves
+			let root = build_totalizer(leaves, db, PC::zero(), k + PC::one(), None);
+			// Then, the k+1'th root node variable is set to false
+			db.add_clause(&[root.get(&(k+PC::one()))
+                .expect("If no lit exists with value k+1 in the root node of the totalizer, the constraint was trivially satisfiable").negate()]).unwrap()
+		}
+		// Swc = { Sequential structure, all nodes constrained (/ pushing down clauses?), with consistency on partial sum, full nodes }
+		Structure::Swc => {
+			// Every counter s_i has k outputs, with those of s_0 set to false
+			let f = db.new_var(); // TODO probably avoidable to create a false lit for this initial layer
+			db.add_clause(&[f.negate()])?;
+			// TODO nightly Step trait feature; replace with stable somehow
+			let s_0 = HashMap::<PC, Lit>::from_iter((PC::zero()..=k).map(|k| (k, f.clone())));
+			leaves.into_iter().fold(s_0, |acc, leaf| {
+				for (coef, lit) in leaf.iter() {
+					// TODO currently panicking on underflows for some test cases; normalization should have prevented coef>k+1
+					db.add_clause(&[lit.negate(), acc[&(k + PC::one() - *coef)].negate()])
+						.unwrap();
+				}
+				let acc = build_totalizer(vec![acc, leaf], db, PC::zero(), k, None);
+
+                // every counter has consistency constraints
 				acc.keys()
 					.sorted()
 					.tuple_windows()
 					.for_each(|(a, b)| db.add_clause(&[acc[b].negate(), acc[a].clone()]).unwrap());
 				acc
-			}),
-	};
+			});
+		}
+		// Bdd = { Sequential structure, only root node constrained (in some way), no consistency on partial sum, sparse nodes } + reduction construction algs
+		Structure::Bdd => {
+			let v_r = db.new_var(); // the "root" path node
+			let v_f = db.new_var(); // the 0-terminal node
+			let v_t = db.new_var(); // the 1-terminal node
 
-	// Set root node lit with value k+1 to false
-	// The k+1 lit is guaranteed to exists, since all node values are capped at k+1, and the constraint is non-trivial
-	let root_gt_k = root.get(&(k+PC::one()))
-                .expect("If no lit exists with value k+1 in the root node of the totalizer, the constraint was trivially satisfiable");
-	db.add_clause(&[root_gt_k.negate()]).unwrap(); // TODO return result from this function?
+			// TODO still need to prevent leaf->v
+			// TODO still need to figure out 'long edges'
+
+			leaves.into_iter().with_position().fold(
+				HashMap::<PC, Lit>::from_iter(std::iter::once((PC::zero(), v_r.clone()))),
+				|acc, leaf| {
+					// the last layer should only contain the 0- and 1-terminal nodes
+					let parent = match leaf {
+						Position::Last(_) => Some(HashMap::<PC, Lit>::from_iter(
+							(PC::zero()..=k)
+								.map(|k| (k, v_t.clone()))
+								.chain(std::iter::once((k + PC::one(), v_f.clone()))),
+						)),
+						_ => None,
+					};
+
+					build_totalizer(
+						vec![acc, leaf.into_inner()],
+						db,
+						PC::zero(),
+						k + PC::one(),
+						parent,
+					)
+				},
+			);
+
+			db.add_clause(&[v_r])?;
+			db.add_clause(&[v_f.negate()])?;
+			db.add_clause(&[v_t])?;
+		}
+	};
 	Ok(())
 }
 
@@ -117,6 +171,7 @@ fn build_totalizer<
 	db: &mut DB,
 	l: PC,
 	u: PC,
+	parent: Option<HashMap<PC, Lit>>,
 ) -> HashMap<PC, Lit> {
 	loop {
 		// Fix case of odd number of leaf nodes; by adding an empty right-hand node, we will get a correct parent node
@@ -156,9 +211,40 @@ fn build_totalizer<
 			})
 			.collect();
 
+<<<<<<< HEAD
 		if layer.len() == 1 {
 			return layer.pop().unwrap();
 		}
+=======
+					// any child lit implies the parent lit with the same value
+					let mut parent = parent.clone().unwrap_or_default();
+					for (w, lit) in left.iter().chain(right.iter()) {
+						let p = parent.entry(*w).or_insert_with(|| db.new_var());
+						// TODO we do not need to create nodes where w<l (but current vars need to be passed on)
+						db.add_clause(&[lit.negate(), p.clone()]).unwrap();
+					}
+
+					// two lits together imply the parent lit with the sum of their values
+					// TODO can be optimised if by sorting both children by value
+					for (w_a, l_a) in left.iter() {
+						for (w_b, l_b) in right.iter() {
+							let w = std::cmp::min(*w_a + *w_b, u);
+							let p = parent.entry(w).or_insert_with(|| db.new_var());
+							// TODO figure out what to do if w<l here as well.
+							db.add_clause(&[l_a.negate(), l_b.negate(), p.clone()])
+								.unwrap();
+						}
+					}
+
+					parent
+				})
+				.collect(),
+			db,
+			_l,
+			u,
+			None,
+		)
+>>>>>>> 0d676a7 (Add BDD encoder using totalizers)
 	}
 }
 
