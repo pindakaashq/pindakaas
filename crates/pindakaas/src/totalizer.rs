@@ -98,31 +98,32 @@ pub fn totalize<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized, PC: Positi
 			db.add_clause(&[root.get(&(k+PC::one()))
                 .expect("If no lit exists with value k+1 in the root node of the totalizer, the constraint was trivially satisfiable").negate()]).unwrap()
 		}
-		// Swc = { Sequential structure, all nodes constrained (/ pushing down clauses?), with consistency on partial sum, full nodes }
 		Structure::Swc => {
 			// Every counter s_i has k outputs, with those of s_0 set to false
 			let f = db.new_var(); // TODO probably avoidable to create a false lit for this initial layer
 			db.add_clause(&[f.negate()])?;
 			let s_0 = HashMap::<PC, Lit>::from_iter(
-				num::iter::range_inclusive(PC::zero(), k).map(|k| (k, f.clone())),
+				num::iter::range_inclusive(PC::one(), k).map(|k| (k, f.clone())),
 			);
-			leaves.into_iter().fold(s_0, |acc, leaf| {
+
+			leaves.into_iter().fold(s_0, |prev, leaf| {
+				// x_i reduces limits s_i-1 by K+1-q_i (x_i -> s_i<K+1-q_i)
 				for (coef, lit) in leaf.iter() {
 					// TODO currently panicking on underflows for some test cases; normalization should have prevented coef>k+1
-					db.add_clause(&[lit.negate(), acc[&(k + PC::one() - *coef)].negate()])
-						.unwrap();
+					let w = k + PC::one() - *coef;
+					db.add_clause(&[lit.negate(), prev[&w].negate()]).unwrap();
 				}
-				let acc = build_totalizer(vec![acc, leaf], db, PC::zero(), k, None);
 
-                // every counter has consistency constraints
-				acc.keys()
-					.sorted()
-					.tuple_windows()
-					.for_each(|(a, b)| db.add_clause(&[acc[b].negate(), acc[a].clone()]).unwrap());
-				acc
+				let mut next = HashMap::<PC, Lit>::from_iter(
+					num::iter::range_inclusive(PC::one(), k).map(|j| (j, db.new_var())),
+				);
+
+				ord_le_ord(db, &prev, &mut next); // s_i-1 <= s_i
+				ord_le_ord_full(db, &leaf, &mut next); // forall(j in 0..q_i)( x_i-j <= s_i )
+				ord_plus_ord_le_ord(db, &prev, &leaf, &mut next, k);
+				next
 			});
 		}
-		// Bdd = { Sequential structure, only root node constrained (in some way), no consistency on partial sum, sparse nodes } + reduction construction algs
 		Structure::Bdd => {
 			let v_r = db.new_var(); // the "root" path node
 			let v_f = db.new_var(); // the 0-terminal node
@@ -160,6 +161,56 @@ pub fn totalize<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized, PC: Positi
 		}
 	};
 	Ok(())
+}
+
+fn ord_plus_ord_le_ord<
+	Lit: Literal,
+	DB: ClauseDatabase<Lit = Lit> + ?Sized,
+	PC: PositiveCoefficient,
+>(
+	db: &mut DB,
+	a: &HashMap<PC, Lit>,
+	b: &HashMap<PC, Lit>,
+	c: &mut HashMap<PC, Lit>,
+	u: PC,
+) {
+	for (w_a, l_a) in a.iter() {
+		for (w_b, l_b) in b.iter() {
+			let w = std::cmp::min(*w_a + *w_b, u);
+			let l_c = c.entry(w).or_insert_with(|| db.new_var());
+            // TODO adds redundant clauses for SWC
+			db.add_clause(&[l_a.negate(), l_b.negate(), l_c.clone()])
+				.unwrap();
+		}
+	}
+}
+
+fn ord_le_ord_full<
+	Lit: Literal,
+	DB: ClauseDatabase<Lit = Lit> + ?Sized,
+	PC: PositiveCoefficient,
+>(
+	db: &mut DB,
+	a: &HashMap<PC, Lit>,
+	b: &mut HashMap<PC, Lit>,
+) {
+    // TODO figure out if these two versions can fall under the same inequality coupling
+	for (w_a, l_a) in a.iter() {
+		for (_, l_b) in b.iter().filter(|(w_b, _)| *w_b <= w_a) {
+			db.add_clause(&[l_a.negate(), l_b.clone()]).unwrap();
+		}
+	}
+}
+
+fn ord_le_ord<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized, PC: PositiveCoefficient>(
+	db: &mut DB,
+	a: &HashMap<PC, Lit>,
+	b: &mut HashMap<PC, Lit>,
+) {
+	for (w_a, l_a) in a.iter() {
+		let l_b = b.entry(*w_a).or_insert_with(|| db.new_var());
+		db.add_clause(&[l_a.negate(), l_b.clone()]).unwrap();
+	}
 }
 
 /// Build a totalizer (binary) tree and return the top node
@@ -219,24 +270,9 @@ fn build_totalizer<
 =======
 					// any child lit implies the parent lit with the same value
 					let mut parent = parent.clone().unwrap_or_default();
-					for (w, lit) in left.iter().chain(right.iter()) {
-						let p = parent.entry(*w).or_insert_with(|| db.new_var());
-						// TODO we do not need to create nodes where w<l (but current vars need to be passed on)
-						db.add_clause(&[lit.negate(), p.clone()]).unwrap();
-					}
-
-					// two lits together imply the parent lit with the sum of their values
-					// TODO can be optimised if by sorting both children by value
-					for (w_a, l_a) in left.iter() {
-						for (w_b, l_b) in right.iter() {
-							let w = std::cmp::min(*w_a + *w_b, u);
-							let p = parent.entry(w).or_insert_with(|| db.new_var());
-							// TODO figure out what to do if w<l here as well.
-							db.add_clause(&[l_a.negate(), l_b.negate(), p.clone()])
-								.unwrap();
-						}
-					}
-
+					ord_le_ord(db, &left, &mut parent);
+					ord_le_ord(db, &right, &mut parent);
+					ord_plus_ord_le_ord(db, &left, &right, &mut parent, u);
 					parent
 				})
 				.collect(),
