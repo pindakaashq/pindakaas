@@ -80,7 +80,6 @@ pub fn totalize<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized, PC: Positi
 					db,
 					*l,
 					*u,
-					None,
 				);
 			}
 		}
@@ -93,7 +92,7 @@ pub fn totalize<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized, PC: Positi
 		// Gt = { Tree structure, one false root node, no consistency on partial sum, sparse nodes }
 		Structure::Gt => {
 			// The totalizer encoding constructs a binary tree starting from a layer of leaves
-			let root = build_totalizer(leaves, db, PC::zero(), k + PC::one(), None);
+			let root = build_totalizer(leaves, db, PC::zero(), k + PC::one());
 			// Then, the k+1'th root node variable is set to false
 			db.add_clause(&[root.get(&(k+PC::one()))
                 .expect("If no lit exists with value k+1 in the root node of the totalizer, the constraint was trivially satisfiable").negate()]).unwrap()
@@ -129,29 +128,24 @@ pub fn totalize<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized, PC: Positi
 			let v_f = db.new_var(); // the 0-terminal node
 			let v_t = db.new_var(); // the 1-terminal node
 
-			// TODO still need to prevent leaf->v
 			// TODO still need to figure out 'long edges'
 
 			leaves.into_iter().with_position().fold(
 				HashMap::<PC, Lit>::from_iter(std::iter::once((PC::zero(), v_r.clone()))),
-				|acc, leaf| {
+				|v_i, x_i| {
 					// the last layer should only contain the 0- and 1-terminal nodes
-					let parent = match leaf {
-						Position::Last(_) => Some(HashMap::<PC, Lit>::from_iter(
+					let mut v_j = match x_i {
+						Position::Last(_) => HashMap::<PC, Lit>::from_iter(
 							(num::iter::range_inclusive(PC::zero(), k))
 								.map(|k| (k, v_t.clone()))
 								.chain(std::iter::once((k + PC::one(), v_f.clone()))),
-						)),
-						_ => None,
+						),
+						_ => HashMap::new(),
 					};
 
-					build_totalizer(
-						vec![acc, leaf.into_inner()],
-						db,
-						PC::zero(),
-						k + PC::one(),
-						parent,
-					)
+					ord_le_ord(db, &v_i, &mut v_j); // v_i <= v_j
+					ord_plus_ord_le_ord(db, &v_i, &x_i.into_inner(), &mut v_j, k + PC::one()); // v_i + x_i <= v_j
+					v_j
 				},
 			);
 
@@ -178,7 +172,7 @@ fn ord_plus_ord_le_ord<
 		for (w_b, l_b) in b.iter() {
 			let w = std::cmp::min(*w_a + *w_b, u);
 			let l_c = c.entry(w).or_insert_with(|| db.new_var());
-            // TODO adds redundant clauses for SWC
+			// TODO adds redundant clauses for SWC
 			db.add_clause(&[l_a.negate(), l_b.negate(), l_c.clone()])
 				.unwrap();
 		}
@@ -194,7 +188,7 @@ fn ord_le_ord_full<
 	a: &HashMap<PC, Lit>,
 	b: &mut HashMap<PC, Lit>,
 ) {
-    // TODO figure out if these two versions can fall under the same inequality coupling
+	// TODO figure out if these two versions can fall under the same inequality coupling
 	for (w_a, l_a) in a.iter() {
 		for (_, l_b) in b.iter().filter(|(w_b, _)| *w_b <= w_a) {
 			db.add_clause(&[l_a.negate(), l_b.clone()]).unwrap();
@@ -223,7 +217,6 @@ fn build_totalizer<
 	db: &mut DB,
 	l: PC,
 	u: PC,
-	parent: Option<HashMap<PC, Lit>>,
 ) -> HashMap<PC, Lit> {
 	loop {
 		// Fix case of odd number of leaf nodes; by adding an empty right-hand node, we will get a correct parent node
@@ -269,17 +262,16 @@ fn build_totalizer<
 		}
 =======
 					// any child lit implies the parent lit with the same value
-					let mut parent = parent.clone().unwrap_or_default();
-					ord_le_ord(db, &left, &mut parent);
-					ord_le_ord(db, &right, &mut parent);
-					ord_plus_ord_le_ord(db, &left, &right, &mut parent, u);
+					let mut parent = HashMap::new();
+					ord_le_ord(db, left, &mut parent);
+					ord_le_ord(db, right, &mut parent);
+					ord_plus_ord_le_ord(db, left, right, &mut parent, u);
 					parent
 				})
 				.collect(),
 			db,
 			_l,
 			u,
-			None,
 		)
 >>>>>>> 0d676a7 (Add BDD encoder using totalizers)
 	}
