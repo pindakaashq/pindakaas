@@ -103,8 +103,9 @@ pub fn totalize<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized, PC: Positi
 			// Every counter s_i has k outputs, with those of s_0 set to false
 			let f = db.new_var(); // TODO probably avoidable to create a false lit for this initial layer
 			db.add_clause(&[f.negate()])?;
-			// TODO nightly Step trait feature; replace with stable somehow
-			let s_0 = HashMap::<PC, Lit>::from_iter((PC::zero()..=k).map(|k| (k, f.clone())));
+			let s_0 = HashMap::<PC, Lit>::from_iter(
+				num::iter::range_inclusive(PC::zero(), k).map(|k| (k, f.clone())),
+			);
 			leaves.into_iter().fold(s_0, |acc, leaf| {
 				for (coef, lit) in leaf.iter() {
 					// TODO currently panicking on underflows for some test cases; normalization should have prevented coef>k+1
@@ -136,7 +137,7 @@ pub fn totalize<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized, PC: Positi
 					// the last layer should only contain the 0- and 1-terminal nodes
 					let parent = match leaf {
 						Position::Last(_) => Some(HashMap::<PC, Lit>::from_iter(
-							(PC::zero()..=k)
+							(num::iter::range_inclusive(PC::zero(), k))
 								.map(|k| (k, v_t.clone()))
 								.chain(std::iter::once((k + PC::one(), v_f.clone()))),
 						)),
