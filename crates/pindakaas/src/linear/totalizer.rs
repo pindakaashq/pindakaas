@@ -80,7 +80,7 @@ impl<Lit: Literal, PC: PositiveCoefficient> Encoder for TotalizerEncoder<Lit, PC
 				.collect(),
 			db,
 			PC::zero(),
-			self.lin.k+PC::one(),
+			self.lin.k + PC::one(),
 		);
 
 		// Set root node lit with value k+1 to false
@@ -129,7 +129,7 @@ fn build_totalizer<
 					for a in left.iter() {
 						for b in right.iter() {
 							let w = std::cmp::min(*a.0 + *b.0, u);
-							let p = parent.entry(w.clone()).or_insert_with(|| db.new_var());
+							let p = parent.entry(w).or_insert_with(|| db.new_var());
 							// TODO figure out what to do if w<l here as well.
 							db.add_clause(&[a.1.negate(), b.1.negate(), p.clone()])
 								.unwrap();
