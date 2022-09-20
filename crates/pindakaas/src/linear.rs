@@ -6,9 +6,13 @@ use crate::{
 };
 
 mod adder;
+mod bdd;
+mod swc;
 mod totalizer;
 
 pub use adder::AdderEncoder;
+pub use bdd::BddEncoder;
+pub use swc::SwcEncoder;
 pub use totalizer::TotalizerEncoder;
 
 #[derive(Debug)]
