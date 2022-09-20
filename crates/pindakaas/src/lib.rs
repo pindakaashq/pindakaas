@@ -191,9 +191,9 @@ pub trait ClauseDatabase {
 	/// the encoding of a constraint.
 	fn new_var(&mut self) -> Self::Lit;
 
-	/// Add a clause to the `ClauseSink`. The sink is allowed to return `false`
-	/// only when the collection of clauses has been *proven* to be
-	/// unsatisfiable. This is used as a signal to the encoder that any
+	/// Add a clause to the `ClauseDatabase`. The sink is allowed to return
+	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to
+	/// be unsatisfiable. This is used as a signal to the encoder that any
 	/// subsequent encoding effort can be abandoned.
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result;
 }

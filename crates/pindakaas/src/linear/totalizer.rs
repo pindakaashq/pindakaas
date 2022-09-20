@@ -3,15 +3,13 @@ use crate::{PositiveCoefficient, Result};
 use itertools::{Itertools, Position};
 use std::collections::HashMap;
 
-#[allow(dead_code)]
-#[derive(Debug)]
 pub enum Structure {
 	Gt,
 	Swc,
 	Bdd,
 }
 
-/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a totalizer
+/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized Totalizer (GT)
 pub struct TotalizerEncoder<Lit: Literal, PC: PositiveCoefficient> {
 	lin: Linear<Lit, PC>,
 }
