@@ -309,15 +309,21 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 							),
 						]
 					}
-					Part::Dom(terms, l, u) => vec![Part::Dom(
-						// TODO actually doesn't work yet if only some of the terms are negative. Eiter fix or omit this constraint in that case
-						terms
-							.into_iter()
-							.map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k))
-							.collect(),
-						into_positive_coefficient(l),
-						into_positive_coefficient(u),
-					)],
+					Part::Dom(terms, l, u) => {
+						assert!(
+							terms.iter().all(|(_,coef)| coef.is_positive())
+								|| terms.iter().all(|(_,coef)| coef.is_negative()),
+                                "Normalizing mixed positive/negative coefficients not yet supported for Dom constraint on {:?}", terms
+						);
+						vec![Part::Dom(
+							terms
+								.into_iter()
+								.map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k))
+								.collect(),
+							into_positive_coefficient(l),
+							into_positive_coefficient(u),
+						)]
+					}
 				}
 			})
 			.map(|part| {
