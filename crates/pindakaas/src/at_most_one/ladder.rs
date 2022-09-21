@@ -1,17 +1,17 @@
 use crate::{AtMostOne, ClauseDatabase, Encoder, Literal, Result};
 
 /// An encoder for an At Most One constraints that TODO
-pub struct LadderEncoder<Lit: Literal> {
-	amo: AtMostOne<Lit>,
+pub struct LadderEncoder<'a, Lit: Literal> {
+	amo: &'a AtMostOne<Lit>,
 }
 
-impl<Lit: Literal> LadderEncoder<Lit> {
-	pub fn new(amo: AtMostOne<Lit>) -> Self {
+impl<'a, Lit: Literal> LadderEncoder<'a, Lit> {
+	pub fn new(amo: &'a AtMostOne<Lit>) -> Self {
 		Self { amo }
 	}
 }
 
-impl<Lit: Literal> Encoder for LadderEncoder<Lit> {
+impl<'a, Lit: Literal> Encoder for LadderEncoder<'a, Lit> {
 	type Lit = Lit;
 	type Ret = ();
 
@@ -44,7 +44,7 @@ mod tests {
 		assert_enc_sol!(
 			LadderEncoder::<i32>,
 			2,
-			AtMostOne { lits: vec![1, 2] }
+			&AtMostOne { lits: vec![1, 2] }
 			=> vec![
 				vec![-1, 3],
 				vec![1, -3, 4],

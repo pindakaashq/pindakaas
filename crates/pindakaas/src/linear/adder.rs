@@ -5,17 +5,17 @@ use crate::linear::LimitComp;
 use crate::{ClauseDatabase, Encoder, Linear, Literal, PositiveCoefficient, Result, Unsatisfiable};
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
-pub struct AdderEncoder<Lit: Literal, PC: PositiveCoefficient> {
-	lin: Linear<Lit, PC>,
+pub struct AdderEncoder<'a, Lit: Literal, PC: PositiveCoefficient> {
+	lin: &'a Linear<Lit, PC>,
 }
 
-impl<Lit: Literal, PC: PositiveCoefficient> AdderEncoder<Lit, PC> {
-	pub fn new(lin: Linear<Lit, PC>) -> Self {
+impl<'a, Lit: Literal, PC: PositiveCoefficient> AdderEncoder<'a, Lit, PC> {
+	pub fn new(lin: &'a Linear<Lit, PC>) -> Self {
 		Self { lin }
 	}
 }
 
-impl<Lit: Literal, PC: PositiveCoefficient> Encoder for AdderEncoder<Lit, PC> {
+impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for AdderEncoder<'a, Lit, PC> {
 	type Lit = Lit;
 	type Ret = ();
 
