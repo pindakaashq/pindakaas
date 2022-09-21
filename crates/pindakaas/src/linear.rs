@@ -603,7 +603,7 @@ linear_encoder!(
 		lin_var: LinVariant<Lit, PC>,
 	) -> Result {
 		match lin_var {
-			LinVariant::Linear(lin) => AdderEncoder::new(lin).encode(db),
+			LinVariant::Linear(lin) => AdderEncoder::new(&lin).encode(db),
 			LinVariant::Cardinality(_) => unimplemented!(),
 			LinVariant::AtMostOne(amo) => PairwiseEncoder::new(&amo).encode(db),
 			LinVariant::Trivial => Ok(()),

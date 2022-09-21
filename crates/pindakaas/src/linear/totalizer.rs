@@ -10,28 +10,28 @@ pub enum Structure {
 }
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized Totalizer (GT)
-pub struct TotalizerEncoder<Lit: Literal, PC: PositiveCoefficient> {
-	lin: Linear<Lit, PC>,
+pub struct TotalizerEncoder<'a, Lit: Literal, PC: PositiveCoefficient> {
+	lin: &'a Linear<Lit, PC>,
 }
 
-impl<Lit: Literal, PC: PositiveCoefficient> TotalizerEncoder<Lit, PC> {
-	pub fn new(lin: Linear<Lit, PC>) -> Self {
+impl<'a, Lit: Literal, PC: PositiveCoefficient> TotalizerEncoder<'a, Lit, PC> {
+	pub fn new(lin: &'a Linear<Lit, PC>) -> Self {
 		Self { lin }
 	}
 }
 
-impl<Lit: Literal, PC: PositiveCoefficient> Encoder for TotalizerEncoder<Lit, PC> {
+impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for TotalizerEncoder<'a, Lit, PC> {
 	type Lit = Lit;
 	type Ret = ();
 
 	fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result<Self::Ret> {
-		totalize(db, &mut self.lin, Structure::Gt)
+		totalize(db, &self.lin, Structure::Gt)
 	}
 }
 
 pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoefficient>(
 	db: &mut DB,
-	lin: &mut Linear<Lit, PC>,
+	lin: &Linear<Lit, PC>,
 	structure: Structure,
 ) -> Result<()> {
 	assert!(lin.cmp == LimitComp::LessEq);
