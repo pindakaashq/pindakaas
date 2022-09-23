@@ -94,7 +94,7 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 		}
 	};
 
-    // couple given encodings to the order encoding
+	// couple given encodings to the order encoding
 	let leaves = lin.terms.iter().map(x_le_ord).collect();
 	// TODO experiment with adding consistency constraint to totalizer nodes (including on leaves!)
 
@@ -288,8 +288,13 @@ fn ord_plus_ord_le_ord_sparse_dom<PC: PositiveCoefficient>(
 	u: PC,
 ) -> HashSet<PC> {
 	HashSet::from_iter(a.iter().flat_map(|a| {
-		b.iter()
-			.filter_map(move |b| (*a + *b > l && *a + *b <= u).then_some(*a + *b))
+		b.iter().filter_map(move |b| { // TODO refactor: use then_some when stabilized
+			if *a + *b > l && *a + *b <= u {
+				Some(*a + *b)
+			} else {
+				None
+			}
+		})
 	}))
 }
 
