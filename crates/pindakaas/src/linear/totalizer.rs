@@ -1,7 +1,7 @@
 use crate::linear::{ClauseDatabase, Encoder, LimitComp, Linear, Literal, Part};
 use crate::{PositiveCoefficient, Result};
-use itertools::{Itertools, Position};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::ops::Neg;
 
 pub enum Structure {
 	Gt,
@@ -35,8 +35,7 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 	structure: Structure,
 ) -> Result<()> {
 	assert!(lin.cmp == LimitComp::LessEq);
-	// Every layer of the totalizer (binary) tree has nodes containing literals associated with (unique) values (which equal the sum so far)
-	let construct_leaf = |part: &Part<Lit, PC>| -> HashMap<PC, Lit> {
+	let x_le_ord = |part: &Part<Lit, PC>| -> IntVar<Lit, PC> {
 		match part {
 			Part::Amo(terms) => {
 				let terms: Vec<(PC, Lit)> = terms
@@ -49,115 +48,157 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 					h.entry(coef).or_insert_with(Vec::new).push(lit);
 				}
 
-				h.into_iter()
-					.map(|(coef, lits)| {
-						if lits.len() == 1 {
-							(coef, lits[0].clone())
-						} else {
-							let o = db.new_var();
-							for lit in lits {
-								db.add_clause(&[lit.negate(), o.clone()]).unwrap();
+				IntVar::new(
+					h.into_iter()
+						.map(|(coef, lits)| {
+							if lits.len() == 1 {
+								(coef, lits[0].clone())
+							} else {
+								let o = db.new_var();
+								for lit in lits {
+									db.add_clause(&[lit.negate(), o.clone()]).unwrap();
+								}
+								(coef, o)
 							}
-							(coef, o)
-						}
-					})
-					.collect()
+						})
+						.collect(),
+					PC::zero(),
+					lin.k,
+				)
 			}
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
 			Part::Ic(terms) => {
 				let mut acc = PC::zero(); // running sum
-				terms
-					.iter()
-					.map(|(lit, coef)| {
-						acc += *coef;
-						(acc, lit.clone())
-					})
-					.collect()
-			}
-			Part::Dom(terms, l, u) => {
-				return build_totalizer(
+				IntVar::new(
 					terms
 						.iter()
-						.map(|(lit, coef)| HashMap::from_iter([(*coef, lit.clone())]))
+						.map(|(lit, coef)| {
+							acc += *coef;
+							(acc, lit.clone())
+						})
 						.collect(),
-					db,
-					*l,
-					*u,
-				);
+					PC::zero(),
+					lin.k,
+				)
 			}
+			Part::Dom(terms, _l, u) => build_totalizer(
+				terms
+					.iter()
+					.map(|(lit, coef)| IntVar::new(vec![(*coef, lit.clone())], PC::zero(), lin.k))
+					.collect(),
+				db,
+				PC::zero(), // TODO _l has to be used here, somehow.
+				*u,
+				false,
+			),
 		}
 	};
 
-	let leaves = lin.terms.iter().map(construct_leaf).collect();
+    // couple given encodings to the order encoding
+	let leaves = lin.terms.iter().map(x_le_ord).collect();
 	// TODO experiment with adding consistency constraint to totalizer nodes (including on leaves!)
 
 	match structure {
-		// Gt = { Tree structure, one false root node, no consistency on partial sum, sparse nodes }
 		Structure::Gt => {
 			// The totalizer encoding constructs a binary tree starting from a layer of leaves
-			let root = build_totalizer(leaves, db, PC::zero(), lin.k + PC::one());
-			// Then, the k+1'th root node variable is set to false
-			db.add_clause(&[root.get(&(lin.k+PC::one()))
-                .expect("If no lit exists with value k+1 in the root node of the totalizer, the constraint was trivially satisfiable").negate()]).unwrap()
+			build_totalizer(leaves, db, PC::zero(), lin.k, true);
 		}
 		Structure::Swc => {
-			// Every counter s_i has k outputs, with those of s_0 set to false
-			let f = db.new_var(); // TODO probably avoidable to create a false lit for this initial layer
-			db.add_clause(&[f.negate()])?;
-			let s_0 = HashMap::<PC, Lit>::from_iter(
-				num::iter::range_inclusive(PC::one(), lin.k).map(|k| (k, f.clone())),
-			);
-
-			leaves.into_iter().fold(s_0, |prev, leaf| {
-				// x_i reduces limits s_i-1 by K+1-q_i (x_i -> s_i<K+1-q_i)
-				for (coef, lit) in leaf.iter() {
-					// TODO currently panicking on underflows for some test cases; normalization should have prevented coef>k+1
-					let w = lin.k + PC::one() - *coef;
-					db.add_clause(&[lit.negate(), prev[&w].negate()]).unwrap();
-				}
-
-				let mut next = HashMap::<PC, Lit>::from_iter(
-					num::iter::range_inclusive(PC::one(), lin.k).map(|j| (j, db.new_var())),
+			leaves.into_iter().reduce(|prev, leaf| {
+				let next = IntVar::new(
+					num::iter::range_inclusive(PC::one(), lin.k)
+						.map(|j| (j, db.new_var()))
+						.collect(),
+					PC::zero(),
+					lin.k,
 				);
-
-				ord_le_ord(db, &prev, &mut next); // s_i-1 <= s_i
-				ord_le_ord_full(db, &leaf, &mut next); // forall(j in 0..q_i)( x_i-j <= s_i )
-				ord_plus_ord_le_ord(db, &prev, &leaf, &mut next, lin.k);
+				ord_plus_ord_le_ord(db, &prev, &leaf, &next);
 				next
 			});
 		}
 		Structure::Bdd => {
-			let v_r = db.new_var(); // the "root" path node
-			let v_f = db.new_var(); // the 0-terminal node
-			let v_t = db.new_var(); // the 1-terminal node
-
 			// TODO still need to figure out 'long edges'
-
-			leaves.into_iter().with_position().fold(
-				HashMap::<PC, Lit>::from_iter(std::iter::once((PC::zero(), v_r.clone()))),
-				|v_i, x_i| {
-					// the last layer should only contain the 0- and 1-terminal nodes
-					let mut v_j = match x_i {
-						Position::Last(_) => HashMap::<PC, Lit>::from_iter(
-							(num::iter::range_inclusive(PC::zero(), lin.k))
-								.map(|k| (k, v_t.clone()))
-								.chain(std::iter::once((lin.k + PC::one(), v_f.clone()))),
-						),
-						_ => HashMap::new(),
-					};
-
-					ord_le_ord(db, &v_i, &mut v_j); // v_i <= v_j
-					ord_plus_ord_le_ord(db, &v_i, &x_i.into_inner(), &mut v_j, lin.k + PC::one()); // v_i + x_i <= v_j
-					v_j
-				},
-			);
-
-			db.add_clause(&[v_r])?;
-			db.add_clause(&[v_f.negate()])?;
-			db.add_clause(&[v_t])?;
+			// TODO bdd construction and reduction
+			leaves.into_iter().reduce(|v_i, x_i| {
+				let parent = IntVar::new(
+					ord_plus_ord_le_ord_sparse_dom(
+						v_i.iter().map(|(_, c)| c).collect(),
+						x_i.iter().map(|(_, c)| c).collect(),
+						PC::zero(),
+						lin.k,
+					)
+					.into_iter()
+					.map(|c| (c, db.new_var()))
+					.collect(),
+					PC::zero(),
+					lin.k,
+				);
+				ord_plus_ord_le_ord(db, &v_i, &x_i, &parent);
+				parent
+			});
 		}
 	};
 	Ok(())
+}
+
+#[derive(Clone, Debug)]
+enum LitOrConst<Lit: Literal> {
+	Lit(Lit),
+	Const(bool),
+}
+
+impl<Lit: Literal> Neg for LitOrConst<Lit> {
+	type Output = Self;
+
+	fn neg(self) -> Self {
+		match self {
+			Self::Lit(lit) => Self::Lit(lit.negate()),
+			Self::Const(b) => Self::Const(!b),
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+struct IntVar<Lit: Literal, PC: PositiveCoefficient> {
+	xs: HashMap<PC, Lit>,
+	lb: PC,
+	ub: PC,
+}
+
+impl<Lit: Literal, PC: PositiveCoefficient> IntVar<Lit, PC> {
+	pub fn new(terms: Vec<(PC, Lit)>, lb: PC, ub: PC) -> Self {
+		Self {
+			xs: HashMap::from_iter(terms),
+			lb,
+			ub,
+		}
+	}
+
+	fn lb(&self) -> PC {
+		self.lb
+	}
+
+	fn ub(&self) -> PC {
+		self.ub
+	}
+
+	fn ge(&self, v: PC) -> LitOrConst<Lit> {
+		if v <= self.lb() {
+			LitOrConst::Const(true)
+		} else if v > self.ub() {
+			LitOrConst::Const(false)
+		} else {
+			LitOrConst::Lit(self.xs[&v].clone())
+		}
+	}
+
+	fn iter(&self) -> impl Iterator<Item = (LitOrConst<Lit>, PC)> + '_ {
+		std::iter::once((LitOrConst::Const(true), self.lb)).chain(
+			self.xs
+				.iter()
+				.map(|(c, l)| (LitOrConst::Lit(l.clone()), *c)),
+		)
+	}
 }
 
 fn ord_plus_ord_le_ord<
@@ -166,86 +207,90 @@ fn ord_plus_ord_le_ord<
 	PC: PositiveCoefficient,
 >(
 	db: &mut DB,
-	a: &HashMap<PC, Lit>,
-	b: &HashMap<PC, Lit>,
-	c: &mut HashMap<PC, Lit>,
-	u: PC,
+	a: &IntVar<Lit, PC>,
+	b: &IntVar<Lit, PC>,
+	c: &IntVar<Lit, PC>,
 ) {
-	for (w_a, l_a) in a.iter() {
-		for (w_b, l_b) in b.iter() {
-			let w = std::cmp::min(*w_a + *w_b, u);
-			let l_c = c.entry(w).or_insert_with(|| db.new_var());
-			// TODO adds redundant clauses for SWC
-			db.add_clause(&[l_a.negate(), l_b.negate(), l_c.clone()])
-				.unwrap();
+	for (l_a, c_a) in a.iter() {
+		for (l_b, c_b) in b.iter() {
+			let create_clause = |lits: Vec<LitOrConst<Lit>>| -> std::result::Result<Vec<Lit>, ()> {
+				lits.into_iter()
+					.filter_map(|lit| match lit {
+						LitOrConst::Lit(lit) => Some(Ok(lit)),
+						LitOrConst::Const(true) => Some(Err(())), // clause satisfied
+						LitOrConst::Const(false) => None,         // literal falsified
+					})
+					.collect()
+			};
+
+			if let Ok(cls) = &create_clause(vec![-l_a.clone(), -l_b, c.ge(c_a + c_b)]) {
+				db.add_clause(cls).unwrap();
+			}
 		}
 	}
 }
 
-fn ord_le_ord_full<
-	Lit: Literal,
-	DB: ClauseDatabase<Lit = Lit> + ?Sized,
-	PC: PositiveCoefficient,
->(
-	db: &mut DB,
-	a: &HashMap<PC, Lit>,
-	b: &mut HashMap<PC, Lit>,
-) {
-	// TODO figure out if these two versions can fall under the same inequality coupling
-	for (w_a, l_a) in a.iter() {
-		for (_, l_b) in b.iter().filter(|(w_b, _)| *w_b <= w_a) {
-			db.add_clause(&[l_a.negate(), l_b.clone()]).unwrap();
-		}
-	}
-}
-
-fn ord_le_ord<Lit: Literal, DB: ClauseDatabase<Lit = Lit> + ?Sized, PC: PositiveCoefficient>(
-	db: &mut DB,
-	a: &HashMap<PC, Lit>,
-	b: &mut HashMap<PC, Lit>,
-) {
-	for (w_a, l_a) in a.iter() {
-		let l_b = b.entry(*w_a).or_insert_with(|| db.new_var());
-		db.add_clause(&[l_a.negate(), l_b.clone()]).unwrap();
-	}
-}
-
-/// Build a totalizer (binary) tree and return the top node
 fn build_totalizer<
 	Lit: Literal,
 	DB: ClauseDatabase<Lit = Lit> + ?Sized,
 	PC: PositiveCoefficient,
 >(
-	mut layer: Vec<HashMap<PC, Lit>>,
+	mut layer: Vec<IntVar<Lit, PC>>,
 	db: &mut DB,
-	_l: PC,
+	l: PC,
 	u: PC,
-) -> HashMap<PC, Lit> {
+	limit_root: bool,
+) -> IntVar<Lit, PC> {
 	if layer.len() == 1 {
 		layer.pop().unwrap()
+	} else if limit_root && layer.len() == 2 {
+		let parent = IntVar::new(vec![], u, u);
+		ord_plus_ord_le_ord(db, &layer[0], &layer[1], &parent);
+		parent
 	} else {
 		build_totalizer(
 			layer
 				.chunks(2)
-				.map(|children| {
-					if children.len() == 1 {
-						return children[0].clone();
+				.map(|children| match children {
+					[x] => x.clone(),
+					[left, right] => {
+						let parent = IntVar::new(
+							ord_plus_ord_le_ord_sparse_dom(
+								left.iter().map(|(_, c)| c).collect(),
+								right.iter().map(|(_, c)| c).collect(),
+								l,
+								u,
+							)
+							.into_iter()
+							.map(|c| (c, db.new_var()))
+							.collect(),
+							PC::zero(),
+							u,
+						);
+						ord_plus_ord_le_ord(db, left, right, &parent);
+						parent
 					}
-					// merge two adjacent nodes of the current layer into one parent node
-					// any child lit implies the parent lit with the same value
-					let mut parent = HashMap::new();
-					let (left, right) = (&children[0], &children[1]);
-					ord_le_ord(db, left, &mut parent);
-					ord_le_ord(db, right, &mut parent);
-					ord_plus_ord_le_ord(db, left, right, &mut parent, u);
-					parent
+					_ => panic!(),
 				})
 				.collect(),
 			db,
-			_l,
+			l,
 			u,
+			limit_root,
 		)
 	}
+}
+
+fn ord_plus_ord_le_ord_sparse_dom<PC: PositiveCoefficient>(
+	a: Vec<PC>,
+	b: Vec<PC>,
+	l: PC,
+	u: PC,
+) -> HashSet<PC> {
+	HashSet::from_iter(a.iter().flat_map(|a| {
+		b.iter()
+			.filter_map(move |b| (*a + *b > l && *a + *b <= u).then_some(*a + *b))
+	}))
 }
 
 // #[cfg(test)]
