@@ -5,11 +5,15 @@ use crate::{PositiveCoefficient, Result};
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
 pub struct BddEncoder<'a, Lit: Literal, PC: PositiveCoefficient> {
 	lin: &'a Linear<Lit, PC>,
+	add_consistency: bool,
 }
 
 impl<'a, Lit: Literal, PC: PositiveCoefficient> BddEncoder<'a, Lit, PC> {
-	pub fn new(lin: &'a Linear<Lit, PC>) -> Self {
-		Self { lin }
+	pub fn new(lin: &'a Linear<Lit, PC>, add_consistency: bool) -> Self {
+		Self {
+			lin,
+			add_consistency,
+		}
 	}
 }
 
@@ -18,6 +22,6 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for BddEncoder<'a, Lit, 
 	type Ret = ();
 
 	fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result<Self::Ret> {
-		totalize(db, self.lin, Structure::Bdd)
+		totalize(db, self.lin, Structure::Bdd, self.add_consistency)
 	}
 }
