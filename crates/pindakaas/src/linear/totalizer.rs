@@ -1,5 +1,6 @@
 use crate::linear::{ClauseDatabase, Encoder, LimitComp, Linear, Literal, Part};
 use crate::{PositiveCoefficient, Result};
+use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
 use std::ops::Neg;
 
@@ -12,11 +13,15 @@ pub enum Structure {
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized Totalizer (GT)
 pub struct TotalizerEncoder<'a, Lit: Literal, PC: PositiveCoefficient> {
 	lin: &'a Linear<Lit, PC>,
+	add_consistency: bool,
 }
 
 impl<'a, Lit: Literal, PC: PositiveCoefficient> TotalizerEncoder<'a, Lit, PC> {
-	pub fn new(lin: &'a Linear<Lit, PC>) -> Self {
-		Self { lin }
+	pub fn new(lin: &'a Linear<Lit, PC>, add_consistency: bool) -> Self {
+		Self {
+			lin,
+			add_consistency,
+		}
 	}
 }
 
@@ -25,7 +30,7 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for TotalizerEncoder<'a,
 	type Ret = ();
 
 	fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result<Self::Ret> {
-		totalize(db, self.lin, Structure::Gt)
+		totalize(db, self.lin, Structure::Gt, self.add_consistency)
 	}
 }
 
@@ -33,6 +38,7 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 	db: &mut DB,
 	lin: &Linear<Lit, PC>,
 	structure: Structure,
+	add_consistency: bool,
 ) -> Result<()> {
 	assert!(lin.cmp == LimitComp::LessEq);
 	let x_le_ord = |part: &Part<Lit, PC>| -> IntVar<Lit, PC> {
@@ -90,18 +96,27 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 				PC::zero(), // TODO _l has to be used here, somehow.
 				*u,
 				false,
+				add_consistency,
 			),
 		}
 	};
 
+	let leaves = lin.terms.iter().map(x_le_ord).collect::<Vec<_>>();
+
+	// TODO actually should only be added on new IntVars.. or something.
+	// if add_consistency {
+	// 	for leaf in &leaves {
+	// 		leaf.encode_consistency(db);
+	// 	}
+	// }
+
 	// couple given encodings to the order encoding
-	let leaves = lin.terms.iter().map(x_le_ord).collect();
 	// TODO experiment with adding consistency constraint to totalizer nodes (including on leaves!)
 
 	match structure {
 		Structure::Gt => {
 			// The totalizer encoding constructs a binary tree starting from a layer of leaves
-			build_totalizer(leaves, db, PC::zero(), lin.k, true);
+			build_totalizer(leaves, db, PC::zero(), lin.k, true, add_consistency);
 		}
 		Structure::Swc => {
 			leaves.into_iter().reduce(|prev, leaf| {
@@ -112,6 +127,11 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 					PC::zero(),
 					lin.k,
 				);
+
+				if add_consistency {
+					next.encode_consistency(db);
+				}
+
 				ord_plus_ord_le_ord(db, &prev, &leaf, &next);
 				next
 			});
@@ -133,6 +153,11 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 					PC::zero(),
 					lin.k,
 				);
+
+				if add_consistency {
+					parent.encode_consistency(db);
+				}
+
 				ord_plus_ord_le_ord(db, &v_i, &x_i, &parent);
 				parent
 			});
@@ -199,6 +224,13 @@ impl<Lit: Literal, PC: PositiveCoefficient> IntVar<Lit, PC> {
 				.map(|(c, l)| (LitOrConst::Lit(l.clone()), *c)),
 		)
 	}
+
+	fn encode_consistency<DB: ClauseDatabase<Lit = Lit> + ?Sized>(&self, db: &mut DB) {
+		self.xs.keys().sorted().tuple_windows().for_each(|(a, b)| {
+			db.add_clause(&[self.xs[b].negate(), self.xs[a].clone()])
+				.unwrap();
+		});
+	}
 }
 
 fn ord_plus_ord_le_ord<
@@ -240,6 +272,7 @@ fn build_totalizer<
 	l: PC,
 	u: PC,
 	limit_root: bool,
+	add_consistency: bool,
 ) -> IntVar<Lit, PC> {
 	if layer.len() == 1 {
 		layer.pop().unwrap()
@@ -267,6 +300,11 @@ fn build_totalizer<
 							PC::zero(),
 							u,
 						);
+
+						if add_consistency {
+							parent.encode_consistency(db);
+						}
+
 						ord_plus_ord_le_ord(db, left, right, &parent);
 						parent
 					}
@@ -277,6 +315,7 @@ fn build_totalizer<
 			l,
 			u,
 			limit_root,
+			add_consistency,
 		)
 	}
 }
@@ -288,7 +327,8 @@ fn ord_plus_ord_le_ord_sparse_dom<PC: PositiveCoefficient>(
 	u: PC,
 ) -> HashSet<PC> {
 	HashSet::from_iter(a.iter().flat_map(|a| {
-		b.iter().filter_map(move |b| { // TODO refactor: use then_some when stabilized
+		b.iter().filter_map(move |b| {
+			// TODO refactor: use then_some when stabilized
 			if *a + *b > l && *a + *b <= u {
 				Some(*a + *b)
 			} else {
