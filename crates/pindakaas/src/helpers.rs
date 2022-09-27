@@ -271,6 +271,26 @@ pub mod tests {
 
 		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
 			let mut cl = Vec::from(cl);
+
+			#[cfg(debug_assertions)]
+			{
+				let lit_as_string = |lit: &Self::Lit| -> String {
+					let polarity = if lit.is_positive() { "" } else { "-" };
+					let var = lit.abs();
+					format!(
+						"{}{}, ",
+						polarity,
+						self.labels
+							.get(&var)
+							.unwrap_or(&format!("x_{}", var))
+							.to_string()
+					)
+				};
+
+				let out = cl.iter().map(lit_as_string).collect::<String>();
+				println!("{}\t\t({:?})", out, cl);
+			}
+
 			cl.sort_by(|a, b| a.abs().cmp(&b.abs()));
 			if let Some(clauses) = &mut self.clauses {
 				let mut found = false;
