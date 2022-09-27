@@ -25,7 +25,7 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for TotalizerEncoder<'a,
 	type Ret = ();
 
 	fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result<Self::Ret> {
-		totalize(db, &self.lin, Structure::Gt)
+		totalize(db, self.lin, Structure::Gt)
 	}
 }
 

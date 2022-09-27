@@ -18,6 +18,6 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for BddEncoder<'a, Lit, 
 	type Ret = ();
 
 	fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result<Self::Ret> {
-		totalize(db, &self.lin, Structure::Bdd)
+		totalize(db, self.lin, Structure::Bdd)
 	}
 }
