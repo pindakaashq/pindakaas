@@ -1,5 +1,5 @@
 use crate::linear::{ClauseDatabase, Encoder, LimitComp, Linear, Literal, Part};
-use crate::{PositiveCoefficient, Result};
+use crate::{new_var, PositiveCoefficient, Result};
 use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
 use std::ops::Neg;
@@ -60,7 +60,7 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 							if lits.len() == 1 {
 								(coef, lits[0].clone())
 							} else {
-								let o = db.new_var();
+								let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
 								for lit in lits {
 									db.add_clause(&[lit.negate(), o.clone()]).unwrap();
 								}
@@ -97,13 +97,14 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 				*u,
 				false,
 				add_consistency,
+				0,
 			),
 		}
 	};
 
 	let leaves = lin.terms.iter().map(x_le_ord).collect::<Vec<_>>();
 
-	// TODO actually should only be added on new IntVars.. or something.
+	// TODO add_consistency on coupled leaves (wherever not equal to principal vars)
 	// if add_consistency {
 	// 	for leaf in &leaves {
 	// 		leaf.encode_consistency(db);
@@ -116,30 +117,33 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 	match structure {
 		Structure::Gt => {
 			// The totalizer encoding constructs a binary tree starting from a layer of leaves
-			build_totalizer(leaves, db, PC::zero(), lin.k, true, add_consistency);
+			build_totalizer(leaves, db, PC::zero(), lin.k, true, add_consistency, 0);
 		}
 		Structure::Swc => {
-			leaves.into_iter().reduce(|prev, leaf| {
-				let next = IntVar::new(
-					num::iter::range_inclusive(PC::one(), lin.k)
-						.map(|j| (j, db.new_var()))
-						.collect(),
-					PC::zero(),
-					lin.k,
-				);
+			leaves
+				.into_iter()
+				.enumerate()
+				.reduce(|(i, prev), (_, leaf)| {
+					let next = IntVar::new(
+						num::iter::range_inclusive(PC::one(), lin.k)
+							.map(|j| (j, new_var!(db, format!("w_{}>={:?}", i + 1, j))))
+							.collect(),
+						PC::zero(),
+						lin.k,
+					);
 
-				if add_consistency {
-					next.encode_consistency(db);
-				}
+					if add_consistency {
+						next.encode_consistency(db);
+					}
 
-				ord_plus_ord_le_ord(db, &prev, &leaf, &next);
-				next
-			});
+					ord_plus_ord_le_ord(db, &prev, &leaf, &next);
+					(i + 1, next)
+				});
 		}
 		Structure::Bdd => {
 			// TODO still need to figure out 'long edges'
 			// TODO bdd construction and reduction
-			leaves.into_iter().reduce(|v_i, x_i| {
+			leaves.into_iter().enumerate().reduce(|(i, v_i), (_, x_i)| {
 				let parent = IntVar::new(
 					ord_plus_ord_le_ord_sparse_dom(
 						v_i.iter().map(|(_, c)| c).collect(),
@@ -148,7 +152,7 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 						lin.k,
 					)
 					.into_iter()
-					.map(|c| (c, db.new_var()))
+					.map(|c| (c, new_var!(db, format!("w_{}>={:?}", i + 1, c))))
 					.collect(),
 					PC::zero(),
 					lin.k,
@@ -159,7 +163,7 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 				}
 
 				ord_plus_ord_le_ord(db, &v_i, &x_i, &parent);
-				parent
+				(i + 1, parent)
 			});
 		}
 	};
@@ -273,6 +277,7 @@ fn build_totalizer<
 	u: PC,
 	limit_root: bool,
 	add_consistency: bool,
+	level: u32,
 ) -> IntVar<Lit, PC> {
 	if layer.len() == 1 {
 		layer.pop().unwrap()
@@ -284,7 +289,8 @@ fn build_totalizer<
 		build_totalizer(
 			layer
 				.chunks(2)
-				.map(|children| match children {
+				.enumerate()
+				.map(|(node, children)| match children {
 					[x] => x.clone(),
 					[left, right] => {
 						let parent = IntVar::new(
@@ -295,7 +301,12 @@ fn build_totalizer<
 								u,
 							)
 							.into_iter()
-							.map(|c| (c, db.new_var()))
+							.map(|c| {
+								(
+									c,
+									new_var!(db, format!("w_{}_{}>={c:?}", level + 1, node + 1)),
+								)
+							})
 							.collect(),
 							PC::zero(),
 							u,
@@ -316,6 +327,7 @@ fn build_totalizer<
 			u,
 			limit_root,
 			add_consistency,
+			level + 1,
 		)
 	}
 }
