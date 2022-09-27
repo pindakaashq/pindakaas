@@ -44,6 +44,8 @@ pub mod tests {
 		types::{CNFDescription, Instantiate},
 		Config, SatSolverIF, Solver, SolverError,
 	};
+
+	use std::collections::HashMap;
 	use std::collections::HashSet;
 
 	macro_rules! assert_enc {
@@ -151,6 +153,7 @@ pub mod tests {
 		solutions: Option<Vec<Vec<i32>>>,
 		check: Option<fn(&[i32]) -> bool>,
 		unchecked: bool,
+		labels: HashMap<i32, String>,
 	}
 
 	impl TestDB {
@@ -170,6 +173,7 @@ pub mod tests {
 				solutions: None,
 				check: None,
 				unchecked: false,
+				labels: HashMap::new(),
 			}
 		}
 
@@ -312,6 +316,12 @@ pub mod tests {
 
 		fn new_var(&mut self) -> Self::Lit {
 			self.slv.add_var() as i32
+		}
+
+		fn new_var_with_label(&mut self, label: String) -> Self::Lit {
+			let i = self.new_var();
+			self.labels.insert(i, label);
+			i
 		}
 	}
 }
