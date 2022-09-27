@@ -87,14 +87,15 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 					lin.k,
 				)
 			}
-			Part::Dom(terms, _l, u) => build_totalizer(
+			Part::Dom(terms, l, u) => build_totalizer(
 				terms
 					.iter()
-					.map(|(lit, coef)| IntVar::new(vec![(*coef, lit.clone())], PC::zero(), lin.k))
+					.map(|(lit, coef)| IntVar::new(vec![(*coef, lit.clone())], PC::zero(), *coef))
 					.collect(),
 				db,
-				PC::zero(), // TODO _l has to be used here, somehow.
-				*u,
+				PC::zero(),
+                // multiply the upper bound (u-l) by the binary encoding int var's original coefficient
+				*terms.iter().map(|(_, coef)| coef).min().unwrap() * (*u - *l),
 				false,
 				add_consistency,
 				0,
