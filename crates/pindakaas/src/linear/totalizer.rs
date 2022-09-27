@@ -280,7 +280,13 @@ fn build_totalizer<
 	level: u32,
 ) -> IntVar<Lit, PC> {
 	if layer.len() == 1 {
-		layer.pop().unwrap()
+		let root = layer.pop().unwrap();
+		if limit_root {
+			let zero = IntVar::new(vec![], PC::zero(), PC::zero());
+			let parent = IntVar::new(vec![], u, u);
+			ord_plus_ord_le_ord(db, &root, &zero, &parent);
+		}
+		root
 	} else if limit_root && layer.len() == 2 {
 		let parent = IntVar::new(vec![], u, u);
 		ord_plus_ord_le_ord(db, &layer[0], &layer[1], &parent);
