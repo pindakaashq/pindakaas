@@ -89,6 +89,10 @@ impl ClauseDatabase for CClauseDatabase {
 	fn new_var(&mut self) -> Self::Lit {
 		(self.new_var_cb)(self.db)
 	}
+
+	fn new_var_with_label(&mut self, _label: String) -> Self::Lit {
+		self.new_var()
+	}
 }
 
 #[cfg(test)]

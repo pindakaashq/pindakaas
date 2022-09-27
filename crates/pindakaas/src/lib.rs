@@ -191,6 +191,10 @@ pub trait ClauseDatabase {
 	/// the encoding of a constraint.
 	fn new_var(&mut self) -> Self::Lit;
 
+	fn new_var_with_label(&mut self, _label: String) -> Self::Lit {
+		self.new_var()
+	}
+
 	/// Add a clause to the `ClauseDatabase`. The sink is allowed to return
 	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to
 	/// be unsatisfiable. This is used as a signal to the encoder that any
