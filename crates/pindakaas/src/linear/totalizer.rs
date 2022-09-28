@@ -204,6 +204,14 @@ impl<Lit: Literal, PC: PositiveCoefficient> IntVar<Lit, PC> {
 		}
 	}
 
+	pub fn constant(c: PC) -> Self {
+		Self {
+			xs: HashMap::new(),
+			lb: c,
+			ub: c,
+		}
+	}
+
 	fn lb(&self) -> PC {
 		self.lb
 	}
@@ -283,13 +291,13 @@ fn build_totalizer<
 	if layer.len() == 1 {
 		let root = layer.pop().unwrap();
 		if limit_root {
-			let zero = IntVar::new(vec![], PC::zero(), PC::zero());
-			let parent = IntVar::new(vec![], u, u);
+			let zero = IntVar::constant(PC::zero());
+			let parent = IntVar::constant(u);
 			ord_plus_ord_le_ord(db, &root, &zero, &parent);
 		}
 		root
 	} else if limit_root && layer.len() == 2 {
-		let parent = IntVar::new(vec![], u, u);
+		let parent = IntVar::constant(u);
 		ord_plus_ord_le_ord(db, &layer[0], &layer[1], &parent);
 		parent
 	} else {
