@@ -174,16 +174,21 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 						})
 						.collect();
 
-					// this constraints assumes PB is coef*(1x1 + 2x2 + 4x3 + ...), where l <= 1x1 + 2x2 + 4x3 + ... <= u
-					// in other words, l and u do not take into account the coefficient yet.
+					// TODO assert this Dom was placed on an actual bin encoding (meaning power of 2 times coefficient)
+					// At the moment, this constraints assumes PB is coef*(1x1 + 2x2 + 4x3 + ...), where l <= 1x1 + 2x2 + 4x3 + ... <= u
+					// First, we make those l and u relative to the coefficient the binary encoding was multipled with
+					let mul = terms[0].1.abs();
+					let (l, u) = (mul * *l, mul * *u);
+
+					// If all coefficients were multiplied by negative 1 (b/c of >=), we shift the gap from the upper bound to the lower bound
 					let (l, u) = if cmp == GreaterEq {
 						// 0..range can be encoded by the bits multiplied by coef
+						// (TODO equals 2^n-1, but I can't get that done using C type)
 						let range = -terms.iter().fold(C::zero(), |acc, (_, coef)| acc + *coef);
 						// this range is inverted if we have flipped the comparator
-						(range - *u, range - *l)
+						(range - u, range - l)
 					} else {
-						// in both cases, l and u now represent the true constraint
-						(terms[0].1 * *l, terms[0].1 * *u)
+						(l, u)
 					};
 					// debug_assert!(
 					// 	cmp != LessEq
