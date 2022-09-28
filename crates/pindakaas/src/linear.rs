@@ -410,7 +410,6 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 						.into_iter()
 						.filter(|(lit, coef)| {
 							if coef > &k {
-								println!("REMOVE {:?}", coef);
 								db.add_clause(&[lit.negate()]).unwrap();
 								false
 							} else {
