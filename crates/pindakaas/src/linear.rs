@@ -404,7 +404,30 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 							.collect(),
 					)
 				}
-				Part::Dom(terms, l, u) => Part::Dom(terms, l, u),
+				Part::Dom(terms, l, u) => {
+					// remove terms exceeding k
+					let terms = terms
+						.into_iter()
+						.filter(|(lit, coef)| {
+							if coef > &k {
+								println!("REMOVE {:?}", coef);
+								db.add_clause(&[lit.negate()]).unwrap();
+								false
+							} else {
+								true
+							}
+						})
+						.collect::<Vec<_>>();
+					// the one or more of the most significant bits have been removed, the upper bound could have dropped to a power of 2 (but not beyond)
+					let u = std::cmp::min(
+						u,
+						terms
+							.iter()
+							.map(|(_, coef)| coef)
+							.fold(PC::zero(), |a, b| a + *b),
+					);
+					Part::Dom(terms, l, u)
+				}
 			})
 			.collect::<Vec<Part<Lit, PC>>>();
 
@@ -422,7 +445,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 				return Ok(LinVariant::Trivial);
 			}
 
-			// If we have only 2 (unassigned) lits, which together exceed k, then -x1\/-x2
+			// If we have only 2 (unassigned) lits, which together (but not individually) exceed k, then -x1\/-x2
 			if partition.iter().flat_map(|part| part.iter()).count() == 2 {
 				db.add_clause(
 					&partition
