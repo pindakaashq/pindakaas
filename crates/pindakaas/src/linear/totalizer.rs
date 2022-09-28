@@ -90,12 +90,12 @@ pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoeffic
 			Part::Dom(terms, l, u) => build_totalizer(
 				terms
 					.iter()
+					// .chain(std::iter::once(IntVar::new(vec![], -l, -l); % TODO need neg. coefficients and int addition!
 					.map(|(lit, coef)| IntVar::new(vec![(*coef, lit.clone())], PC::zero(), *coef))
 					.collect(),
 				db,
-				PC::zero(),
-                // multiply the upper bound (u-l) by the binary encoding int var's original coefficient
-				*terms.iter().map(|(_, coef)| coef).min().unwrap() * (*u - *l),
+				*l,
+				std::cmp::min(*u, lin.k),
 				false,
 				add_consistency,
 				0,
@@ -300,6 +300,7 @@ fn build_totalizer<
 				.map(|(node, children)| match children {
 					[x] => x.clone(),
 					[left, right] => {
+						let l = if layer.len() > 2 { PC::zero() } else { l };
 						let parent = IntVar::new(
 							ord_plus_ord_le_ord_sparse_dom(
 								left.iter().map(|(_, c)| c).collect(),
@@ -315,7 +316,7 @@ fn build_totalizer<
 								)
 							})
 							.collect(),
-							PC::zero(),
+							l,
 							u,
 						);
 
