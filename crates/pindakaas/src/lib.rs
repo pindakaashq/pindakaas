@@ -26,8 +26,8 @@ mod linear;
 pub use at_most_one::{AtMostOne, LadderEncoder, PairwiseEncoder};
 pub use cardinality::Cardinality;
 pub use linear::{
-	AdderEncoder, BddEncoder, Comparator, Constraint, LinVariant, Linear, LinearEncoder,
-	SwcEncoder, TotalizerEncoder,
+	AdderEncoder, BddEncoder, Comparator, LinVariant, Linear, LinearEncoder, SwcEncoder,
+	TotalizerEncoder,
 };
 
 /// Literal is the super-trait for types that can be used to represent boolean
@@ -43,9 +43,18 @@ pub use linear::{
 ///  - [`std::cmp::Eq`] and [`std::hash::Hash`] to allow PB constraints to be
 ///    simplified
 pub trait Literal: fmt::Debug + fmt::Display + Clone + Eq + Hash {
+	/// Returns the negation of the literal in its current form
+	fn negate(&self) -> Self;
 	/// Returns `true` when the literal a negated boolean variable.
 	fn is_negated(&self) -> bool;
-	fn negate(&self) -> Self;
+	/// Returns a non-negated version of the literal
+	fn var(&self) -> Self {
+		if self.is_negated() {
+			self.negate()
+		} else {
+			self.clone()
+		}
+	}
 }
 impl<T: Signed + fmt::Debug + fmt::Display + Clone + Eq + Hash + Neg<Output = Self>> Literal for T {
 	fn is_negated(&self) -> bool {
@@ -53,6 +62,9 @@ impl<T: Signed + fmt::Debug + fmt::Display + Clone + Eq + Hash + Neg<Output = Se
 	}
 	fn negate(&self) -> Self {
 		-(self.clone())
+	}
+	fn var(&self) -> Self {
+		self.abs()
 	}
 }
 

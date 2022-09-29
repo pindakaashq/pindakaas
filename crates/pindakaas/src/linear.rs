@@ -1,8 +1,12 @@
-use std::collections::HashMap;
+use std::{
+	collections::{HashMap, VecDeque},
+	marker::PhantomData,
+	ops::{Add, AddAssign, Mul, MulAssign},
+};
 
 use crate::{
-	AtMostOne, Cardinality, CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal,
-	PairwiseEncoder, PositiveCoefficient, Result, Unsatisfiable,
+	AtMostOne, Cardinality, CheckError, Checker, ClauseDatabase, Coefficient, Encoder, IntEncoding,
+	Literal, PairwiseEncoder, PositiveCoefficient, Result, Unsatisfiable,
 };
 
 mod adder;
@@ -28,6 +32,290 @@ pub struct Linear<Lit: Literal, PC: PositiveCoefficient> {
 	pub(crate) terms: Vec<Part<Lit, PC>>,
 	pub(crate) cmp: LimitComp,
 	pub(crate) k: PC,
+}
+
+// TODO how can we support both Part(itions) of "terms" ( <Lit, C> for pb
+// constraints) and just lits (<Lit>) for AMK/AMO's?
+//
+// TODO add EO, and probably something for Unconstrained
+// TODO this can probably follow the same structure as LinExp
+#[derive(Debug)]
+pub(crate) enum Part<Lit, C> {
+	Amo(Vec<(Lit, C)>),
+	Ic(Vec<(Lit, C)>),
+	Dom(Vec<(Lit, C)>, C, C),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum LimitComp {
+	Equal,
+	LessEq,
+}
+
+#[derive(Clone, Debug)]
+pub struct LinExp<Lit: Literal, C: Coefficient> {
+	/// All terms of the pseudo-Boolean linear expression
+	terms: VecDeque<(Lit, C)>,
+	/// Number of unconstrained terms (located at the front of `terms`)
+	num_free: usize,
+	/// Constraints placed on different terms, and the number of terms involved in the constraint
+	constraints: Vec<(Constraint<C>, usize)>,
+	/// Additive constant
+	add: C,
+	/// Multiplicative contant
+	mult: C,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Comparator {
+	LessEq,
+	Equal,
+	GreaterEq,
+}
+
+#[derive(Debug, Clone)]
+enum Constraint<C: Coefficient> {
+	AtMostOne,
+	ImplicationChain,
+	Domain { lb: C, ub: C },
+}
+
+impl<Lit, C> Part<Lit, C> {
+	fn iter(&self) -> std::slice::Iter<(Lit, C)> {
+		match self {
+			Part::Amo(terms) => terms.iter(),
+			Part::Ic(terms) => terms.iter(),
+			Part::Dom(terms, _lb, _ub) => terms.iter(),
+		}
+	}
+}
+
+impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
+	pub fn new() -> Self {
+		Self {
+			..Default::default()
+		}
+	}
+
+	/// Add multiple terms to the linear expression of which at most one
+	/// can be chosen
+	pub fn add_choice(mut self, choice: &[(Lit, C)]) -> Self {
+		if let [term] = choice {
+			self += term.clone();
+		} else {
+			self.terms.extend(choice.iter().cloned());
+			self.constraints.push((Constraint::AtMostOne, choice.len()))
+		}
+		self
+	}
+
+	/// Add multiple terms to the linear expression where the literal
+	/// in each term is implied by the literal in the consecutive term
+	pub fn add_chain(mut self, chain: &[(Lit, C)]) -> Self {
+		if let [term] = chain {
+			self += term.clone();
+		} else {
+			self.terms.extend(chain.iter().cloned());
+			self.constraints
+				.push((Constraint::ImplicationChain, chain.len()))
+		}
+		self
+	}
+
+	pub fn add_constant(mut self, k: C) -> Self {
+		self.add += k;
+		self
+	}
+
+	pub fn add_lit(mut self, lit: Lit) -> Self {
+		self += (lit, C::one());
+		self
+	}
+
+	// TODO I'm not really happy with this interface yet...
+	// Probably makes more sense to use something like int encodings
+	pub fn add_bounded_log_encoding(mut self, terms: &[(Lit, C)], lb: C, ub: C) -> Self {
+		self.constraints
+			.push((Constraint::Domain { lb, ub }, terms.len()));
+		self.terms.extend(terms.iter().cloned());
+		self
+	}
+}
+
+impl<Lit: Literal, C: Coefficient> Default for LinExp<Lit, C> {
+	fn default() -> Self {
+		Self {
+			terms: VecDeque::new(),
+			num_free: 0,
+			constraints: Vec::new(),
+			add: C::zero(),
+			mult: C::one(),
+		}
+	}
+}
+
+impl<Lit: Literal, C: Coefficient> From<Lit> for LinExp<Lit, C> {
+	fn from(lit: Lit) -> Self {
+		Self {
+			terms: VecDeque::from([(lit, C::one())]),
+			num_free: 1,
+			..Default::default()
+		}
+	}
+}
+impl<Lit: Literal, C: Coefficient> From<(Lit, C)> for LinExp<Lit, C> {
+	fn from(term: (Lit, C)) -> Self {
+		Self {
+			terms: VecDeque::from([term]),
+			num_free: 1,
+			..Default::default()
+		}
+	}
+}
+impl<'a, Lit: Literal, C: Coefficient> From<IntEncoding<'a, Lit, C>> for LinExp<Lit, C> {
+	fn from(var: IntEncoding<'a, Lit, C>) -> Self {
+		match var {
+			IntEncoding::Direct { first, vals } => {
+				let mut terms = VecDeque::with_capacity(vals.len());
+				let mut k = first;
+				for lit in vals {
+					terms.push_back((lit.clone(), k));
+					k += C::one();
+				}
+				Self {
+					terms: VecDeque::from(terms),
+					constraints: Vec::from([(Constraint::AtMostOne, vals.len())]),
+					..Default::default()
+				}
+			}
+			IntEncoding::Order { first, vals } => Self {
+				terms: vals.iter().map(|lit| (lit.clone(), C::one())).collect(),
+				constraints: Vec::from([(Constraint::ImplicationChain, vals.len())]),
+				add: first,
+				..Default::default()
+			},
+			IntEncoding::Log { signed, bits } => {
+				let mut terms = VecDeque::with_capacity(bits.len());
+				let two = C::one() + C::one();
+				let mut k = C::one();
+				for lit in bits {
+					terms.push_back((lit.clone(), k));
+					k *= two;
+				}
+				if signed {
+					terms.back_mut().unwrap().1 *= -C::one();
+				}
+				Self {
+					terms: VecDeque::from(terms),
+					num_free: bits.len(),
+					..Default::default()
+				}
+			}
+		}
+	}
+}
+
+impl<Lit: Literal, C: Coefficient> AddAssign<(Lit, C)> for LinExp<Lit, C> {
+	fn add_assign(&mut self, rhs: (Lit, C)) {
+		self.terms.push_front(rhs);
+		self.num_free += 1
+	}
+}
+impl<Lit: Literal, C: Coefficient> Add<(Lit, C)> for LinExp<Lit, C> {
+	type Output = LinExp<Lit, C>;
+	fn add(mut self, rhs: (Lit, C)) -> Self::Output {
+		self += rhs;
+		self
+	}
+}
+impl<'a, Lit: Literal, C: Coefficient> AddAssign<IntEncoding<'a, Lit, C>> for LinExp<Lit, C> {
+	fn add_assign(&mut self, rhs: IntEncoding<'a, Lit, C>) {
+		match rhs {
+			IntEncoding::Direct { first, vals } => {
+				let mut k = first;
+				for lit in vals {
+					self.terms.push_back((lit.clone(), k));
+					k += C::one();
+				}
+				self.constraints.push((Constraint::AtMostOne, vals.len()))
+			}
+			IntEncoding::Order { first, vals } => {
+				for lit in vals {
+					self.terms.push_back((lit.clone(), C::one()))
+				}
+				self.add += first;
+				self.constraints
+					.push((Constraint::ImplicationChain, vals.len()))
+			}
+			IntEncoding::Log { signed, bits } => {
+				let two = C::one() + C::one();
+				let mut k = C::one();
+				for lit in bits {
+					self.terms.push_front((lit.clone(), k));
+					k *= two;
+				}
+				// TODO!
+				if signed {
+					self.terms.front_mut().unwrap().1 *= -C::one();
+				}
+				self.num_free += bits.len();
+			}
+		}
+	}
+}
+
+impl<'a, Lit: Literal, C: Coefficient> Add<IntEncoding<'a, Lit, C>> for LinExp<Lit, C> {
+	type Output = LinExp<Lit, C>;
+	fn add(mut self, rhs: IntEncoding<'a, Lit, C>) -> Self::Output {
+		self += rhs;
+		self
+	}
+}
+impl<Lit: Literal, C: Coefficient> AddAssign<LinExp<Lit, C>> for LinExp<Lit, C> {
+	fn add_assign(&mut self, rhs: LinExp<Lit, C>) {
+		// Multiply the current expression
+		if self.mult != C::one() {
+			self.add *= self.mult;
+			for term in &mut self.terms {
+				term.1 *= self.mult;
+			}
+		}
+		self.mult = C::one();
+		// Add other LinExp
+		self.add += rhs.add * rhs.mult;
+		let mut rh_terms = rhs.terms;
+		self.terms.extend(
+			rh_terms
+				.drain(rhs.num_free..)
+				.map(|(l, c)| (l, c * rhs.mult)),
+		);
+		debug_assert!(rh_terms.len() == rhs.num_free);
+		self.terms
+			.extend(rh_terms.into_iter().map(|(l, c)| (l, c * rhs.mult)));
+		self.terms.rotate_right(rhs.num_free);
+		self.num_free += rhs.num_free;
+		self.constraints.extend(rhs.constraints.into_iter());
+	}
+}
+impl<Lit: Literal, C: Coefficient> Add<LinExp<Lit, C>> for LinExp<Lit, C> {
+	type Output = LinExp<Lit, C>;
+	fn add(mut self, rhs: LinExp<Lit, C>) -> Self::Output {
+		self += rhs;
+		self
+	}
+}
+
+impl<'a, Lit: Literal, C: Coefficient> MulAssign<C> for LinExp<Lit, C> {
+	fn mul_assign(&mut self, rhs: C) {
+		self.mult += rhs;
+	}
+}
+impl<'a, Lit: Literal, C: Coefficient> Mul<C> for LinExp<Lit, C> {
+	type Output = LinExp<Lit, C>;
+	fn mul(mut self, rhs: C) -> Self::Output {
+		self *= rhs;
+		self
+	}
 }
 
 impl<Lit: Literal, PC: PositiveCoefficient> Checker for Linear<Lit, PC> {
@@ -60,156 +348,188 @@ impl<Lit: Literal, PC: PositiveCoefficient> Checker for Linear<Lit, PC> {
 	}
 }
 
-pub type LinearEncoder<'a, Lit, C, PC> = ArbLinEncoder<'a, Lit, C, PC>;
-
-// TODO how can we support both Part(itions) of "terms" ( <Lit, C> for pb
-// constraints) and just lits (<Lit>) for AMK/AMO's?
-//
-// TODO add EO, and probably something for Unconstrained
-#[derive(Debug)]
-pub(crate) enum Part<Lit, C> {
-	Amo(Vec<(Lit, C)>),
-	Ic(Vec<(Lit, C)>),
-	Dom(Vec<(Lit, C)>, C, C),
+pub trait LinVariantEncoder<Lit: Literal, PC: PositiveCoefficient>:
+	Encoder<Lit = Lit, Ret = ()>
+{
+	fn new(variant: LinVariant<Lit, PC>) -> Self;
 }
 
-impl<Lit, C> Part<Lit, C> {
-	fn iter(&self) -> std::slice::Iter<(Lit, C)> {
-		match self {
-			Part::Amo(terms) => terms.iter(),
-			Part::Ic(terms) => terms.iter(),
-			Part::Dom(terms, _, _) => terms.iter(),
+pub struct LinearEncoder<
+	'a,
+	Lit: Literal,
+	C: Coefficient,
+	PC: PositiveCoefficient + TryFrom<C>,
+	Enc: LinVariantEncoder<Lit, PC> = ArbLinEncoder<Lit, PC>,
+> {
+	exp: &'a LinExp<Lit, C>,
+	cmp: Comparator,
+	k: C,
+	_pc: PhantomData<PC>,
+	_enc: PhantomData<Enc>,
+}
+
+impl<
+		'a,
+		Lit: Literal,
+		C: Coefficient,
+		PC: PositiveCoefficient + TryFrom<C>,
+		Enc: LinVariantEncoder<Lit, PC>,
+	> LinearEncoder<'a, Lit, C, PC, Enc>
+{
+	pub fn new(exp: &'a LinExp<Lit, C>, cmp: Comparator, k: C) -> Self {
+		Self {
+			exp,
+			cmp,
+			k,
+			_pc: PhantomData,
+			_enc: PhantomData,
 		}
 	}
 }
 
-// TODO just temporary until I find out how to use IntEncodings for this
-#[derive(Debug, Clone)]
-pub enum Constraint<Lit, C> {
-	Amo(Vec<Lit>),
-	Ic(Vec<Lit>),
-	Dom(Vec<Lit>, C, C),
+impl<
+		'a,
+		Lit: Literal,
+		C: Coefficient,
+		PC: PositiveCoefficient + TryFrom<C>,
+		Enc: LinVariantEncoder<Lit, PC>,
+	> Encoder for LinearEncoder<'a, Lit, C, PC, Enc>
+{
+	type Lit = Lit;
+	type Ret = ();
+
+	fn encode<DB: ClauseDatabase<Lit = Self::Lit>>(&mut self, db: &mut DB) -> Result<Self::Ret> {
+		let variant = LinearAggregator::new(self.exp, self.cmp, self.k).encode(db)?;
+		Enc::new(variant).encode(db)
+	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Comparator {
-	LessEq,
-	Equal,
-	GreaterEq,
+// This is just a linear encoder that currently makes an arbitrary choice.
+// This is probably not how we would like to do it in the future.
+pub struct ArbLinEncoder<Lit: Literal, PC: PositiveCoefficient> {
+	lin: LinVariant<Lit, PC>,
 }
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) enum LimitComp {
-	Equal,
-	LessEq,
+impl<Lit: Literal, PC: PositiveCoefficient> LinVariantEncoder<Lit, PC> for ArbLinEncoder<Lit, PC> {
+	fn new(lin: LinVariant<Lit, PC>) -> Self {
+		Self { lin }
+	}
+}
+impl<Lit: Literal, PC: PositiveCoefficient> Encoder for ArbLinEncoder<Lit, PC> {
+	type Lit = Lit;
+	type Ret = ();
+
+	fn encode<DB: ClauseDatabase<Lit = Self::Lit>>(&mut self, db: &mut DB) -> Result<Self::Ret> {
+		match &self.lin {
+			LinVariant::Linear(lin) => AdderEncoder::new(lin).encode(db),
+			LinVariant::Cardinality(_) => unimplemented!(),
+			LinVariant::AtMostOne(amo) => PairwiseEncoder::new(amo).encode(db),
+			LinVariant::Trivial => Ok(()),
+		}
+	}
+}
+pub struct LinearAggregator<'a, Lit: Literal, C: Coefficient, PC: PositiveCoefficient + TryFrom<C>>
+{
+	exp: &'a LinExp<Lit, C>,
+	cmp: Comparator,
+	k: C,
+	_pc: PhantomData<PC>,
 }
 
-impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
-	pub fn aggregate<C: Coefficient + TryInto<PC>, DB: ClauseDatabase<Lit = Lit>>(
-		db: &mut DB,
-		coeff: &[C],
-		lits: &[Lit],
-		cmp: Comparator,
-		k: C,
-		cons: &[Constraint<Lit, C>],
-	) -> Result<LinVariant<Lit, PC>> {
-		debug_assert_eq!(coeff.len(), lits.len());
-		use Comparator::*;
+impl<'a, Lit: Literal, C: Coefficient, PC: PositiveCoefficient + TryFrom<C>>
+	LinearAggregator<'a, Lit, C, PC>
+{
+	pub fn new(exp: &'a LinExp<Lit, C>, cmp: Comparator, k: C) -> Self {
+		Self {
+			exp,
+			cmp,
+			k,
+			_pc: PhantomData,
+		}
+	}
+}
 
+impl<'a, Lit: Literal, C: Coefficient, PC: PositiveCoefficient + TryFrom<C>> Encoder
+	for LinearAggregator<'a, Lit, C, PC>
+{
+	type Lit = Lit;
+	type Ret = LinVariant<Lit, PC>;
+
+	fn encode<DB: ClauseDatabase<Lit = Self::Lit>>(&mut self, db: &mut DB) -> Result<Self::Ret> {
 		// Convert ≤ to ≥ and aggregate multiple occurrences of the same
 		// variable.
-		// TODO not accounting for IC/AMO groups yet
-		let mut agg = HashMap::with_capacity(coeff.len());
-		for i in 0..coeff.len() {
-			let var = if lits[i].is_negated() {
-				lits[i].negate()
-			} else {
-				lits[i].clone()
-			};
+		let mut agg = HashMap::with_capacity(self.exp.terms.len());
+		for term in &self.exp.terms {
+			let var = term.0.var();
 			let entry = agg.entry(var).or_insert_with(C::zero);
-			let mut coef = coeff[i];
-			if lits[i].is_negated() ^ (cmp == GreaterEq) {
+			let mut coef = term.1 * self.exp.mult;
+			if term.0.is_negated() ^ (self.cmp == Comparator::GreaterEq) {
 				coef *= -C::one()
 			}
 			*entry += coef;
 		}
 
-		// partition terms according to side constraints
-		let mut partition = cons
-			.iter()
-			.map(|con| match con {
-				Constraint::Amo(lits) => Part::Amo(
-					lits.iter()
-						.map(|lit| {
-							(
-								lit.clone(),
-								agg.remove(lit).unwrap_or_else(|| {
-									panic!("Lit {:?} was in side constraint but not in PB", lit)
-								}),
-							)
-						})
-						.collect(),
-				),
-				Constraint::Ic(lits) => Part::Ic(
-					lits.iter()
-						.map(|lit| {
-							(
-								lit.clone(),
-								agg.remove(lit).unwrap_or_else(|| {
-									panic!("Lit {:?} was in side constraint but not in PB", lit)
-								}),
-							)
-						})
-						.collect(),
-				),
-				Constraint::Dom(lits, l, u) => {
-					let terms: Vec<(Lit, C)> = lits
-						.iter()
-						.map(|lit| {
-							(
-								lit.clone(),
-								agg.remove(lit).unwrap_or_else(|| {
-									panic!("Lit {:?} was in side constraint but not in PB", lit)
-								}),
-							)
-						})
-						.collect();
-
-					// TODO assert this Dom was placed on an actual bin encoding (meaning power of 2 times coefficient)
-					// At the moment, this constraints assumes PB is coef*(1x1 + 2x2 + 4x3 + ...), where l <= 1x1 + 2x2 + 4x3 + ... <= u
-					// First, we make those l and u relative to the coefficient the binary encoding was multipled with
-					let mul = terms[0].1.abs();
-					let (l, u) = (mul * *l, mul * *u);
-
-					// If all coefficients were multiplied by negative 1 (b/c of >=), we shift the gap from the upper bound to the lower bound
-					let (l, u) = if cmp == GreaterEq {
-						// 0..range can be encoded by the bits multiplied by coef
-						// (TODO equals 2^n-1, but I can't get that done using C type)
-						let range = -terms.iter().fold(C::zero(), |acc, (_, coef)| acc + *coef);
-						// this range is inverted if we have flipped the comparator
-						(range - u, range - l)
-					} else {
-						(l, u)
-					};
-					// debug_assert!(
-					// 	cmp != LessEq
-					// 		|| k <= terms.iter().fold(C::zero(), |acc, (_, coef)| acc + *coef),
-					// 	"The Dom constraint is trivial for {k:?} and {terms:?}"
-					// );
-					Part::Dom(terms, l, u)
+		let mut partition = Vec::with_capacity(self.exp.constraints.len());
+		// Adjust side constraints when literals are combined (and currently transform to partition structure)
+		let mut iter = self.exp.terms.iter().skip(self.exp.num_free);
+		for con in &self.exp.constraints {
+			let mut terms = Vec::with_capacity(con.1);
+			for _ in 0..con.1 {
+				let term = iter.next().unwrap();
+				let entry = agg.remove_entry(&term.0.var());
+				if let Some(term) = entry {
+					terms.push(term)
 				}
-			})
-			.collect::<Vec<Part<Lit, C>>>();
+			}
+			if !terms.is_empty() {
+				match con.0 {
+					Constraint::AtMostOne => partition.push(Part::Amo(terms)),
+					Constraint::ImplicationChain => partition.push(Part::Ic(terms)),
+					Constraint::Domain { lb, ub } => {
+						let coef = terms[0].1;
+						let still_log = |terms: &Vec<(Lit, C)>| {
+							terms
+								.iter()
+								.enumerate()
+								.all(|(i, (_, c))| c == &(num::pow(C::from(2).unwrap(), i) * coef))
+						};
+						// Domain constraint can only be enforced when PB is coef*(x1 + 2x2 + 4x3 + ...), where l <= x1 + 2*x2 + 4*x3 + ... <= u
+						if terms.len() == con.1 && still_log(&terms) {
+							// Adjust the bounds to account for coef
+							let (lb, ub) = if self.cmp == Comparator::GreaterEq {
+								// 0..range can be encoded by the bits multiplied by coef
+								let range =
+									-terms.iter().fold(C::zero(), |acc, (_, coef)| acc + *coef);
+								// this range is inverted if we have flipped the comparator
+								(range - ub, range - lb)
+							} else {
+								// in both cases, l and u now represent the true constraint
+								(terms[0].1 * lb, terms[0].1 * ub)
+							};
+							partition.push(Part::Dom(terms, lb, ub))
+						} else {
+							for term in terms {
+								partition.push(Part::Amo(vec![term]));
+							}
+						}
+					}
+				}
+			}
+		}
+		// Add remaining (unconstrained) terms
+		debug_assert!(agg.len() <= self.exp.num_free);
+		for term in agg.drain() {
+			partition.push(Part::Amo(vec![term]));
+		}
 
-		let mut k = if cmp == GreaterEq { -k } else { k };
-		let cmp = if cmp == GreaterEq { LessEq } else { cmp };
-
-		// add remaining (unconstrained) terms
-		partition.append(
-			&mut agg
-				.into_iter()
-				.map(|(lit, coef)| Part::Amo(vec![(lit, coef)]))
-				.collect(),
-		);
+		let mut k = if self.cmp == Comparator::GreaterEq {
+			-self.k
+		} else {
+			self.k
+		} - self.exp.add;
+		let cmp = match self.cmp {
+			Comparator::LessEq | Comparator::GreaterEq => LimitComp::LessEq,
+			Comparator::Equal => LimitComp::Equal,
+		};
 
 		let into_positive_coefficient = |coef: C| -> PC {
 			match coef.try_into() {
@@ -439,45 +759,48 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 			}
 		});
 
-		if cmp == Comparator::LessEq {
-			if lhs_ub <= k {
-				return Ok(LinVariant::Trivial);
-			}
-
-			// If we have only 2 (unassigned) lits, which together (but not individually) exceed k, then -x1\/-x2
-			if partition.iter().flat_map(|part| part.iter()).count() == 2 {
-				db.add_clause(
-					&partition
-						.iter()
-						.flat_map(|part| part.iter())
-						.map(|(lit, _)| lit.negate())
-						.collect::<Vec<Lit>>(),
-				)?;
-				return Ok(LinVariant::Trivial);
-			}
-		} else if cmp == Comparator::Equal {
-			if lhs_ub < k {
-				return Err(Unsatisfiable);
-			}
-			if lhs_ub == k {
-				for part in partition {
-					match part {
-						Part::Amo(terms) => {
-							db.add_clause(&[terms
-								.iter()
-								.max_by(|(_, a), (_, b)| a.cmp(b))
-								.unwrap()
-								.0
-								.clone()])?;
-						}
-						Part::Ic(terms) | Part::Dom(terms, _, _) => {
-							for (lit, _) in terms {
-								db.add_clause(&[lit.clone()])?;
-							}
-						}
-					};
+		match cmp {
+			LimitComp::LessEq => {
+				if lhs_ub <= k {
+					return Ok(LinVariant::Trivial);
 				}
-				return Ok(LinVariant::Trivial);
+
+				// If we have only 2 (unassigned) lits, which together (but not individually) exceed k, then -x1\/-x2
+				if partition.iter().flat_map(|part| part.iter()).count() == 2 {
+					db.add_clause(
+						&partition
+							.iter()
+							.flat_map(|part| part.iter())
+							.map(|(lit, _)| lit.negate())
+							.collect::<Vec<Lit>>(),
+					)?;
+					return Ok(LinVariant::Trivial);
+				}
+			}
+			LimitComp::Equal => {
+				if lhs_ub < k {
+					return Err(Unsatisfiable);
+				}
+				if lhs_ub == k {
+					for part in partition {
+						match part {
+							Part::Amo(terms) => {
+								db.add_clause(&[terms
+									.iter()
+									.max_by(|(_, a), (_, b)| a.cmp(b))
+									.unwrap()
+									.0
+									.clone()])?;
+							}
+							Part::Ic(terms) | Part::Dom(terms, _, _) => {
+								for (lit, _) in terms {
+									db.add_clause(&[lit.clone()])?;
+								}
+							}
+						};
+					}
+					return Ok(LinVariant::Trivial);
+				}
 			}
 		}
 
@@ -504,7 +827,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 			.all(|(_, coef)| *coef == *val)
 		{
 			// trivial case: k cannot be made from the coefficients
-			if cmp == Equal && k % *val != PC::zero() {
+			if cmp == LimitComp::Equal && k % *val != PC::zero() {
 				return Err(Unsatisfiable);
 			}
 
@@ -516,7 +839,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 				.collect::<Vec<Lit>>();
 			if k == PC::one() {
 				// Encode At Least One constraint
-				if cmp == Equal {
+				if cmp == LimitComp::Equal {
 					db.add_clause(&partition.to_vec())?
 				}
 				// Encode At Most One constraint
@@ -525,11 +848,7 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 			// Encode count constraint
 			return Ok(LinVariant::Cardinality(Cardinality {
 				lits: partition,
-				cmp: if cmp == Equal {
-					LimitComp::Equal
-				} else {
-					LimitComp::LessEq
-				},
+				cmp,
 				k,
 			}));
 		}
@@ -537,106 +856,11 @@ impl<PC: PositiveCoefficient, Lit: Literal> LinVariant<Lit, PC> {
 		// Default case: encode pseudo-Boolean linear constraint
 		Ok(LinVariant::Linear(Linear {
 			terms: partition,
-			cmp: if cmp == Equal {
-				LimitComp::Equal
-			} else {
-				LimitComp::LessEq
-			},
+			cmp,
 			k,
 		}))
 	}
 }
-
-macro_rules! linear_encoder {
-	($name:ident, $encode_variant:item) => {
-		#[derive(Debug)]
-		pub struct $name<
-			'a,
-			Lit: $crate::Literal,
-			C: $crate::Coefficient + ::std::convert::TryInto<PC>,
-			PC: $crate::PositiveCoefficient,
-		> {
-			coeff: &'a [C],
-			lits: &'a [Lit],
-			cmp: Comparator,
-			k: C,
-			cons: &'a [Constraint<Lit, C>],
-			into: ::std::marker::PhantomData<PC>,
-		}
-
-		impl<
-				'a,
-				Lit: $crate::Literal,
-				C: $crate::Coefficient + ::std::convert::TryInto<PC>,
-				PC: $crate::PositiveCoefficient,
-			> $name<'a, Lit, C, PC>
-		{
-			pub fn new(
-				coeff: &'a [C],
-				lits: &'a [Lit],
-				cmp: Comparator,
-				k: C,
-				cons: &'a [Constraint<Lit, C>],
-			) -> Self {
-				Self {
-					coeff,
-					lits,
-					cmp,
-					k,
-					cons,
-					into: ::std::marker::PhantomData,
-				}
-			}
-
-			$encode_variant
-		}
-
-		impl<
-				'a,
-				Lit: $crate::Literal,
-				C: $crate::Coefficient + ::std::convert::TryInto<PC>,
-				PC: $crate::PositiveCoefficient,
-			> $crate::Encoder for $name<'a, Lit, C, PC>
-		{
-			type Lit = Lit;
-			type Ret = ();
-
-			fn encode<DB: $crate::ClauseDatabase<Lit = Lit>>(
-				&mut self,
-				db: &mut DB,
-			) -> $crate::Result {
-				let lin_var = LinVariant::aggregate(
-					db,
-					self.coeff,
-					self.lits,
-					self.cmp.clone(),
-					self.k,
-					self.cons,
-				)?;
-				self.encode_variant(db, lin_var)
-			}
-		}
-	};
-}
-pub(crate) use linear_encoder;
-
-// This is just a linear encoder that currently makes an arbitrary choice.
-// This is probably not how we would like to do it in the future.
-linear_encoder!(
-	ArbLinEncoder,
-	fn encode_variant<DB: ClauseDatabase<Lit = Lit>>(
-		&self,
-		db: &mut DB,
-		lin_var: LinVariant<Lit, PC>,
-	) -> Result {
-		match lin_var {
-			LinVariant::Linear(lin) => AdderEncoder::new(&lin).encode(db),
-			LinVariant::Cardinality(_) => unimplemented!(),
-			LinVariant::AtMostOne(amo) => PairwiseEncoder::new(&amo).encode(db),
-			LinVariant::Trivial => Ok(()),
-		}
-	}
-);
 
 #[cfg(test)]
 mod tests {
@@ -658,14 +882,12 @@ mod tests {
 		let mut db = TestDB::new(3).expect_clauses(vec![]);
 		// Simple aggregation of multiple occurrences of the same literal
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 2, 1, 2],
-				&[1, 1, 2, 3],
+			LinearAggregator::<i32, i32, u32>::new(
+				&(LinExp::from((1, 1)) + (1, 2) + (2, 1) + (3, 2)),
 				Comparator::LessEq,
-				3,
-				&[]
-			),
+				3
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(1, 3), (2, 1), (3, 2)]),
 				cmp: LimitComp::LessEq,
@@ -675,14 +897,12 @@ mod tests {
 
 		// Aggregation of positive and negative occurrences of the same literal
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 2, 1, 2],
-				&[1, -1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 1)) + (-1, 2) + (2, 1) + (3, 2)),
 				Comparator::LessEq,
-				2,
-				&[]
-			),
+				2
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(-1, 1), (2, 1), (3, 2)]),
 				cmp: LimitComp::LessEq,
@@ -692,14 +912,12 @@ mod tests {
 
 		// Aggregation of positive and negative coefficients of the same literal
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, -2, 1, 2],
-				&[1, 1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 1)) + (1, -2) + (2, 1) + (3, 2)),
 				Comparator::LessEq,
 				2,
-				&[]
-			),
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(-1, 1), (2, 1), (3, 2)]),
 				cmp: LimitComp::LessEq,
@@ -715,27 +933,23 @@ mod tests {
 
 		// Correctly detect at most one
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 1, 1],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 1)) + (2, 1) + (3, 1)),
 				Comparator::LessEq,
-				1,
-				&[]
-			),
+				1
+			)
+			.encode(&mut db),
 			Ok(LinVariant::AtMostOne(AtMostOne {
 				lits: vec![1, 2, 3],
 			}))
 		);
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[2, 2, 2],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 2)) + (2, 2) + (3, 2)),
 				Comparator::LessEq,
-				2,
-				&[]
-			),
+				2
+			)
+			.encode(&mut db),
 			Ok(LinVariant::AtMostOne(AtMostOne {
 				lits: vec![1, 2, 3],
 			}))
@@ -743,14 +957,12 @@ mod tests {
 
 		// Correctly detect at most k
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 1, 1],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 1)) + (2, 1) + (3, 1)),
 				Comparator::LessEq,
-				2,
-				&[]
-			),
+				2
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Cardinality(Cardinality {
 				lits: vec![1, 2, 3],
 				cmp: LimitComp::LessEq,
@@ -758,14 +970,12 @@ mod tests {
 			}))
 		);
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[3, 3, 3],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 3)) + (2, 3) + (3, 3)),
 				Comparator::LessEq,
-				7,
-				&[]
-			),
+				7
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Cardinality(Cardinality {
 				lits: vec![1, 2, 3],
 				cmp: LimitComp::LessEq,
@@ -775,14 +985,12 @@ mod tests {
 
 		// Correctly detect equal k
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 1, 1],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 1)) + (2, 1) + (3, 1)),
 				Comparator::Equal,
-				2,
-				&[]
-			),
+				2
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Cardinality(Cardinality {
 				lits: vec![1, 2, 3],
 				cmp: LimitComp::Equal,
@@ -790,14 +998,12 @@ mod tests {
 			}))
 		);
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[3, 3, 3],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 3)) + (2, 3) + (3, 3)),
 				Comparator::Equal,
-				6,
-				&[]
-			),
+				6
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Cardinality(Cardinality {
 				lits: vec![1, 2, 3],
 				cmp: LimitComp::Equal,
@@ -807,14 +1013,12 @@ mod tests {
 
 		// Is still normal Boolean linear in-equality
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 2, 2],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 1)) + (2, 2) + (3, 2)),
 				Comparator::LessEq,
-				2,
-				&[]
-			),
+				2
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(1, 1), (2, 2), (3, 2)]),
 				cmp: LimitComp::LessEq,
@@ -824,14 +1028,12 @@ mod tests {
 
 		// Is still normal Boolean linear equality
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 2, 2],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 1)) + (2, 2) + (3, 2)),
 				Comparator::Equal,
-				2,
-				&[]
-			),
+				2
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(1, 1), (2, 2), (3, 2)]),
 				cmp: LimitComp::Equal,
@@ -841,14 +1043,12 @@ mod tests {
 
 		// Correctly identify that the AMO is limiting the LHS ub
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[-1, -1, -1],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&LinExp::from((3, -1)).add_choice(&[(1, -1), (2, -1)]),
 				Comparator::LessEq,
 				-2,
-				&[Constraint::Amo(vec![1, 2])]
-			),
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Trivial)
 		);
 	}
@@ -858,14 +1058,12 @@ mod tests {
 		let mut db = TestDB::new(3).expect_clauses(vec![vec![1, 2, 3]]);
 		// An exactly one constraint adds an at most one constraint + a clause for all literals
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 1, 1],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 1)) + (2, 1) + (3, 1)),
 				Comparator::Equal,
-				1,
-				&[]
-			),
+				1
+			)
+			.encode(&mut db),
 			Ok(LinVariant::AtMostOne(AtMostOne {
 				lits: vec![1, 2, 3],
 			}))
@@ -879,14 +1077,12 @@ mod tests {
 
 		// Correctly convert a negative coefficient
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[2, 3, -2],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 2)) + (2, 3) + (3, -2)),
 				Comparator::LessEq,
-				2,
-				&[]
-			),
+				2
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(1, 2), (2, 3), (-3, 2)]),
 				cmp: LimitComp::LessEq,
@@ -896,27 +1092,23 @@ mod tests {
 
 		// Correctly convert multiple negative coefficients
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[-1, -1, -1],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, -1)) + (2, -1) + (3, -1)),
 				Comparator::LessEq,
 				-2,
-				&[]
-			),
+			)
+			.encode(&mut db),
 			Ok(LinVariant::AtMostOne(AtMostOne {
 				lits: vec![-1, -2, -3],
 			}))
 		);
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[-1, -2, -3],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, -1)) + (2, -2) + (3, -3)),
 				Comparator::LessEq,
 				-2,
-				&[]
-			),
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(-1, 1), (-2, 2), (-3, 3)]),
 				cmp: LimitComp::LessEq,
@@ -927,17 +1119,14 @@ mod tests {
 		// Correctly convert multiple negative coefficients with AMO constraints
 		let mut db = TestDB::new(6);
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[-1, -3, -4, -2, -3, -5],
-				&[1, 2, 3, 4, 5, 6],
+			LinearAggregator::new(
+				&LinExp::default()
+					.add_choice(&[(1, -1), (2, -3), (3, -4)])
+					.add_choice(&[(4, -2), (5, -3), (6, -5)]),
 				Comparator::LessEq,
 				-4,
-				&[
-					Constraint::Amo(vec![1, 2, 3]),
-					Constraint::Amo(vec![4, 5, 6])
-				]
-			),
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
 					Part::Amo(vec![(1, 3), (2, 1), (7, 4)]),
@@ -951,14 +1140,12 @@ mod tests {
 		// Correctly convert multiple negative coefficients with side constraints
 		let mut db = TestDB::new(6);
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, -3, -2, 2, 5, -3],
-				&[1, 2, 3, 4, 5, 6],
+			LinearAggregator::new(
+				&LinExp::default().add_chain(&[(1, 1), (2, -3), (3, -2), (4, 2), (5, 5), (6, -3)]),
 				Comparator::LessEq,
-				3,
-				&[Constraint::Ic(vec![1, 2, 3, 4, 5, 6])]
-			),
+				3
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
 					Part::Ic(vec![(1, 1), (4, 2), (5, 5)]),
@@ -972,17 +1159,14 @@ mod tests {
 		// Correctly convert GreaterEq into LessEq with side constrains
 		let mut db = TestDB::new(6);
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 2, 3, 4, 1, 3],
-				&[1, 2, 3, 4, 5, 6],
+			LinearAggregator::new(
+				&LinExp::default()
+					.add_choice(&[(1, 1), (2, 2), (3, 3), (4, 4)])
+					.add_choice(&[(5, 1), (6, 3)]),
 				Comparator::GreaterEq,
 				3,
-				&[
-					Constraint::Amo(vec![1, 2, 3, 4]),
-					Constraint::Amo(vec![5, 6])
-				]
-			),
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
 					Part::Amo(vec![(1, 3), (2, 2), (3, 1), (7, 4)]),
@@ -996,14 +1180,14 @@ mod tests {
 		// Correctly convert GreaterEq into LessEq with side constrains
 		let mut db = TestDB::new(6);
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 1, 1, 1, 1, 2],
-				&[1, 2, 3, 4, 5, 6],
+			LinearAggregator::new(
+				&LinExp::default()
+					.add_chain(&[(1, 1), (2, 1), (3, 1), (4, 1)])
+					.add_chain(&[(5, 1), (6, 2)]),
 				Comparator::GreaterEq,
 				3,
-				&[Constraint::Ic(vec![1, 2, 3, 4]), Constraint::Ic(vec![5, 6])]
-			),
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
 					Part::Ic(vec![(-4, 1), (-3, 1), (-2, 1), (-1, 1)]),
@@ -1017,17 +1201,14 @@ mod tests {
 		// Correctly convert GreaterEq into LessEq with side constrains
 		let mut db = TestDB::new(5);
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 2, 4, 3, 6],
-				&[1, 2, 3, 4, 5],
+			LinearAggregator::new(
+				&LinExp::default()
+					.add_bounded_log_encoding(&[(1, 1), (2, 2), (3, 4)], 0, 5)
+					.add_bounded_log_encoding(&[(4, 3), (5, 6)], 0, 2),
 				Comparator::GreaterEq,
 				3,
-				&[
-					Constraint::Dom(vec![1, 2, 3], 0, 5),
-					Constraint::Dom(vec![4, 5], 0, 2)
-				]
-			),
+			)
+			.encode(&mut db),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
 					Part::Dom(vec![(-1, 1), (-2, 2), (-3, 4)], 2, 7),
@@ -1045,49 +1226,41 @@ mod tests {
 
 		// Constant cannot be reached
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 2, 2],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 1)) + (2, 2) + (3, 2)),
 				Comparator::Equal,
-				6,
-				&[]
-			),
+				6
+			)
+			.encode(&mut db),
 			Err(Unsatisfiable),
 		);
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 2, 2],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 1)) + (2, 2) + (3, 2)),
 				Comparator::GreaterEq,
 				6,
-				&[]
-			),
+			)
+			.encode(&mut db),
 			Err(Unsatisfiable),
 		);
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[1, 2, 2],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 1)) + (2, 2) + (3, 2)),
 				Comparator::LessEq,
-				-1,
-				&[]
-			),
+				-1
+			)
+			.encode(&mut db),
 			Err(Unsatisfiable),
 		);
 
 		// Scaled counting constraint with off-scaled Constant
 		assert_eq!(
-			LinVariant::<i32, u32>::aggregate(
-				&mut db,
-				&[4, 4, 4],
-				&[1, 2, 3],
+			LinearAggregator::new(
+				&(LinExp::from((1, 4)) + (2, 4) + (3, 4)),
 				Comparator::Equal,
-				6,
-				&[]
-			),
+				6
+			)
+			.encode(&mut db),
 			Err(Unsatisfiable),
 		);
 	}
@@ -1095,13 +1268,11 @@ mod tests {
 	#[test]
 	fn test_pb_encode() {
 		assert_enc_sol!(
-			ArbLinEncoder::<i32,i32,u32>,
+			LinearEncoder::<i32,i32,u32>,
 			4,
-			&[1, 1, 1, 2],
-			&[1, 2, 3, 4],
+			&(LinExp::from((1,1)) + (2,1) + (3,1) + (4,2)),
 			crate::Comparator::LessEq,
-			1,
-			&[]
+			1
 			=>
 			vec![
 			vec![-4], vec![-3, -1], vec![-2, -1], vec![-3, -2]
@@ -1132,12 +1303,12 @@ mod tests {
 		assert!(PairwiseEncoder::new(&AtMostOne { lits: vec![3, 4] })
 			.encode(&mut db)
 			.is_ok());
-		assert!(ArbLinEncoder::<i32, i32, u32>::new(
-			&[7, 10, 4, 4],
-			&[1, 2, 3, 4],
+		assert!(LinearEncoder::<i32, i32, u32>::new(
+			&LinExp::default()
+				.add_choice(&[(1, 7), (2, 10)])
+				.add_choice(&[(3, 4), (4, 4)]),
 			crate::Comparator::LessEq,
 			9,
-			&[Constraint::Amo(vec![1, 2]), Constraint::Amo(vec![3, 4])],
 		)
 		.encode(&mut db)
 		.is_ok());
