@@ -44,9 +44,10 @@ pub mod tests {
 		types::{CNFDescription, Instantiate},
 		Config, SatSolverIF, Solver, SolverError,
 	};
-
-	use std::collections::HashMap;
-	use std::collections::HashSet;
+	use std::{
+		collections::{HashMap, HashSet},
+		thread::panicking,
+	};
 
 	macro_rules! assert_enc {
 		($enc:ty, $max:expr, $($args:expr),+ => $clauses:expr) => {
@@ -260,7 +261,7 @@ pub mod tests {
 
 	impl Drop for TestDB {
 		fn drop(&mut self) {
-			if self.unchecked {
+			if self.unchecked && !panicking() {
 				panic!("TestDB object was dropped without being checked!")
 			}
 		}
