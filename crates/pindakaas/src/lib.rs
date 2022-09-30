@@ -26,7 +26,7 @@ mod linear;
 pub use at_most_one::{AtMostOne, LadderEncoder, PairwiseEncoder};
 pub use cardinality::Cardinality;
 pub use linear::{
-	AdderEncoder, BddEncoder, Comparator, LinVariant, Linear, LinearEncoder, SwcEncoder,
+	AdderEncoder, BddEncoder, Comparator, LinExp, LinVariant, Linear, LinearEncoder, SwcEncoder,
 	TotalizerEncoder,
 };
 
