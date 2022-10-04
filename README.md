@@ -1,9 +1,18 @@
-# Pindakaas
+<p align="center">
+  <img
+    src="./assets/logo.svg"
+    alt="pindakaas logo"
+    height="300">
 
-[![crate](https://img.shields.io/crates/v/pindakaas.svg)](https://crates.io/crates/pindakaas)
-[![documentation](https://docs.rs/pindakaas/badge.svg)](https://docs.rs/pindakaas)
+  <p align="center">
+    A library to transform pseudo-Boolean and integer constraints into conjunctive normal form.
+    <br />
+    <br />
+    <a href="https://crates.io/crates/pindakaas"><img src="https://img.shields.io/crates/v/pindakaas.svg"></a>
+    <a href="https://crates.io/crates/pindakaas"><img src="https://docs.rs/pindakaas/badge.svg"></a>
+  </p>
+</p>
 
-A library to transform pseudo-Boolean and integer constraints into conjunctive normal form.
 
 ## Supported Constraints
 
