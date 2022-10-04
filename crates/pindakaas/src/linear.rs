@@ -619,7 +619,7 @@ mod tests {
 	use crate::helpers::tests::{assert_enc_sol, TestDB};
 	use crate::{AtMostOne, Linear, Unsatisfiable};
 
-	fn construct_terms(terms: &[(i32, u32)]) -> Vec<Part<i32, u32>> {
+	pub(crate) fn construct_terms(terms: &[(i32, u32)]) -> Vec<Part<i32, u32>> {
 		terms
 			.iter()
 			.map(|(lit, coef)| Part::Amo(vec![(lit.clone(), coef.clone())]))

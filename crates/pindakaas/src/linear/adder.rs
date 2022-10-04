@@ -51,60 +51,67 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for AdderEncoder<'a, Lit
 		// otherwise, sum literals are left in the buckets for further processing
 		let mut sum = vec![None; bits];
 		for b in 0..bits {
-			if bucket[b].is_empty() {
-				if k[b] && self.lin.cmp == LimitComp::Equal {
-					return Err(Unsatisfiable);
-				}
-			} else if bucket[b].len() == 1 {
-				let x = bucket[b].pop().unwrap();
-				if self.lin.cmp == LimitComp::Equal {
-					db.add_clause(&[if k[b] { x } else { x.negate() }])?
-				} else {
-					sum[b] = Some(x);
-				}
-			} else {
-				while bucket[b].len() >= 2 {
-					let last = bucket[b].len() <= 3;
-					let lits = if last {
-						bucket[b].split_off(0)
-					} else {
-						let i = bucket[b].len() - 3;
-						bucket[b].split_off(i)
-					};
-					debug_assert!(lits.len() == 3 || lits.len() == 2);
-
-					// Compute sum
-					if last && self.lin.cmp == LimitComp::Equal {
-						// No need to create a new literal, force the sum to equal the result
-						force_sum(db, lits.as_slice(), k[b])?;
-					} else if self.lin.cmp != LimitComp::LessEq || b >= first_zero {
-						// Literal is not used for the less-than constraint unless a zero has been seen first
-						bucket[b].push(create_sum_lit(db, lits.as_slice())?);
+			match bucket[b].len() {
+				0 => {
+					if k[b] && self.lin.cmp == LimitComp::Equal {
+						return Err(Unsatisfiable);
 					}
-
-					// Compute carry
-					if b + 1 >= bits {
-						// Carry will bring the sum to be greater than k, force to be false
-						if lits.len() == 2 && self.lin.cmp == LimitComp::Equal {
-							// Already encoded by the XOR to compute the sum
+				}
+				1 => {
+					let x = bucket[b].pop().unwrap();
+					if self.lin.cmp == LimitComp::Equal {
+						db.add_clause(&[if k[b] { x } else { x.negate() }])?
+					} else {
+						sum[b] = Some(x);
+					}
+				}
+				_ => {
+					while bucket[b].len() >= 2 {
+						let last = bucket[b].len() <= 3;
+						let lits = if last {
+							bucket[b].split_off(0)
 						} else {
-							force_carry(db, &lits[..], false)?
+							let i = bucket[b].len() - 3;
+							bucket[b].split_off(i)
+						};
+						debug_assert!(lits.len() == 3 || lits.len() == 2);
+
+						// Compute sum
+						if last && self.lin.cmp == LimitComp::Equal {
+							// No need to create a new literal, force the sum to equal the result
+							force_sum(db, lits.as_slice(), k[b])?;
+						} else if self.lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
+							// Literal is not used for the less-than constraint unless a zero has been seen first
+							bucket[b].push(create_sum_lit(db, lits.as_slice())?);
 						}
-					} else if last && self.lin.cmp == LimitComp::Equal && bucket[b + 1].is_empty() {
-						// No need to create a new literal, force the carry to equal the result
-						force_carry(db, &lits[..], k[b + 1])?;
-						// Mark k[b + 1] as false (otherwise next step will fail)
-						k[b + 1] = false;
-					} else {
-						bucket[b + 1].push(create_carry_lit(db, lits.as_slice())?);
+
+						// Compute carry
+						if b + 1 >= bits {
+							// Carry will bring the sum to be greater than k, force to be false
+							if lits.len() == 2 && self.lin.cmp == LimitComp::Equal {
+								// Already encoded by the XOR to compute the sum
+							} else {
+								force_carry(db, &lits[..], false)?
+							}
+						} else if last
+							&& self.lin.cmp == LimitComp::Equal
+							&& bucket[b + 1].is_empty()
+						{
+							// No need to create a new literal, force the carry to equal the result
+							force_carry(db, &lits[..], k[b + 1])?;
+							// Mark k[b + 1] as false (otherwise next step will fail)
+							k[b + 1] = false;
+						} else {
+							bucket[b + 1].push(create_carry_lit(db, lits.as_slice())?);
+						}
 					}
+					debug_assert!(
+						(self.lin.cmp == LimitComp::Equal && bucket[b].is_empty())
+							|| (self.lin.cmp == LimitComp::LessEq
+								&& (bucket[b].len() == 1 || b < first_zero))
+					);
+					sum[b] = bucket[b].pop();
 				}
-				debug_assert!(
-					(self.lin.cmp == LimitComp::Equal && bucket[b].is_empty())
-						|| (self.lin.cmp == LimitComp::LessEq
-							&& (bucket[b].len() == 1 || b < first_zero))
-				);
-				sum[b] = bucket[b].pop();
 			}
 		}
 		// In case of equality this has been enforced
@@ -246,7 +253,11 @@ fn force_carry<Lit: Literal, DB: ClauseDatabase<Lit = Lit>>(
 
 #[cfg(test)]
 mod tests {
-	// use crate::{helpers::tests::assert_enc_sol, AdderEncoder};
+	use crate::{
+		helpers::tests::assert_sol,
+		linear::{tests::construct_terms, LimitComp},
+		AdderEncoder, Checker, Encoder, Linear,
+	};
 
 	#[test]
 	fn test_adder_encode() {
@@ -270,5 +281,18 @@ mod tests {
 		// 	)
 		// 	.is_ok());
 		// two.check_complete();
+	}
+
+	#[test]
+	fn test_add_reg() {
+		assert_sol!(
+			AdderEncoder<i32,u32>,
+			9,
+			&Linear{
+				terms: construct_terms(&[(-2,3), (-3,6), (-4,0), (-5,1), (-6,2), (-8,3), (9,6)]),
+				cmp: LimitComp::LessEq,
+				k: 19
+			}
+		);
 	}
 }
