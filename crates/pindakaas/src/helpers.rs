@@ -37,9 +37,8 @@ impl<'a, Lit: Literal> Encoder for XorEncoder<'a, Lit> {
 
 #[cfg(test)]
 pub mod tests {
-	use crate::Unsatisfiable;
-
 	use super::*;
+	use crate::Unsatisfiable;
 
 	use splr::{
 		types::{CNFDescription, Instantiate},
@@ -62,7 +61,7 @@ pub mod tests {
 	macro_rules! assert_sol {
 		($enc:ty, $max:expr, $arg:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-			tdb = tdb.with_check(|sol| $arg.check(sol).is_ok);
+			tdb = tdb.with_check(|sol| $arg.check(sol).is_ok());
 			<$enc>::new($arg)
 				.encode(&mut tdb)
 				.expect("Encoding proved to be trivially unsatisfiable");
