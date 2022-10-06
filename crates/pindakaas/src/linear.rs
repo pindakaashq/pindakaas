@@ -81,6 +81,29 @@ impl<Lit: Literal, C: Coefficient> LinearConstraint<Lit, C> {
 	}
 }
 
+impl<Lit: Literal, C: Coefficient> Checker for LinearConstraint<Lit, C> {
+	type Lit = Lit;
+	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
+		let lhs = &self.exp.terms.iter().fold(C::zero(), |acc, (lit, coef)| {
+			let a = solution.iter().find(|x| x.var() == lit.var());
+			acc + if *lit == *a.unwrap() {
+				C::one()
+			} else {
+				C::zero()
+			} * *coef
+		});
+		if match self.cmp {
+			Comparator::LessEq => *lhs <= self.k,
+			Comparator::Equal => *lhs == self.k,
+			Comparator::GreaterEq => *lhs >= self.k,
+		} {
+			Ok(())
+		} else {
+			Err(CheckError::Unsatisfiable(Unsatisfiable))
+		}
+	}
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Comparator {
 	LessEq,
