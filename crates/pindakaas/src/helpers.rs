@@ -1,24 +1,14 @@
-use crate::{ClauseDatabase, Encoder, Literal, Result};
+use crate::{ClauseDatabase, Literal, Result};
 
 /// Encode the constraint lits[0] ⊕ ... ⊕ lits[n].
 /// # Warning
 /// Currently only defined for n ≤ 3.
-pub struct XorEncoder<'a, Lit: Literal> {
-	lits: &'a [Lit],
-}
+#[derive(Default)]
+pub struct XorEncoder {}
 
-impl<'a, Lit: Literal> XorEncoder<'a, Lit> {
-	pub fn new(lits: &'a [Lit]) -> Self {
-		Self { lits }
-	}
-}
-
-impl<'a, Lit: Literal> Encoder for XorEncoder<'a, Lit> {
-	type Lit = Lit;
-	type Ret = ();
-
-	fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result {
-		match self.lits {
+impl XorEncoder {
+	pub fn encode<DB: ClauseDatabase>(&mut self, db: &mut DB, lits: &[DB::Lit]) -> Result {
+		match lits {
 			[a] => db.add_clause(&[a.clone()]),
 			[a, b] => {
 				db.add_clause(&[a.clone(), b.clone()])?;
@@ -50,11 +40,17 @@ pub mod tests {
 	};
 
 	macro_rules! assert_enc {
-		($enc:ty, $max:expr, $($args:expr),+ => $clauses:expr) => {
+		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
 			tdb = tdb.expect_clauses($clauses);
-			<$enc>::new($($args),+)
-				.encode(&mut tdb)
+			$enc.encode(&mut tdb, $arg)
+				.expect("Encoding proved to be trivially unsatisfiable");
+			tdb.check_complete()
+		};
+		($enc:expr, $max:expr, $($args:expr),+ => $clauses:expr) => {
+			let mut tdb = $crate::helpers::tests::TestDB::new($max);
+			tdb = tdb.expect_clauses($clauses);
+			$enc.encode(&mut tdb, ($($args),+))
 				.expect("Encoding proved to be trivially unsatisfiable");
 			tdb.check_complete()
 		};
@@ -62,19 +58,17 @@ pub mod tests {
 	pub(crate) use assert_enc;
 
 	macro_rules! assert_sol {
-		($enc:ty, $max:expr, $arg:expr) => {
+		($enc:expr, $max:expr, $arg:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
 			tdb = tdb.with_check(|sol| $arg.check(sol).is_ok());
-			<$enc>::new($arg)
-				.encode(&mut tdb)
+			$enc.encode(&mut tdb, $arg)
 				.expect("Encoding proved to be trivially unsatisfiable");
 			tdb.check_complete()
 		};
-		($enc:ty, $max:expr, $($args:expr),+ => $solns:expr) => {
+		($enc:expr, $max:expr, $($args:expr),+ => $solns:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
 			tdb = tdb.expect_solutions($solns);
-			<$enc>::new($($args),+)
-				.encode(&mut tdb)
+			$enc.encode(&mut tdb, ($($args),+))
 				.expect("Encoding proved to be trivially unsatisfiable");
 			tdb.check_complete()
 		};
@@ -82,21 +76,19 @@ pub mod tests {
 	pub(crate) use assert_sol;
 
 	macro_rules! assert_enc_sol {
-		($enc:ty, $max:expr, $arg:expr => $clauses:expr) => {
+		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
 			tdb = tdb.expect_clauses($clauses);
 			tdb = tdb.with_check(|sol| $arg.check(sol).is_ok());
-			<$enc>::new($arg)
-				.encode(&mut tdb)
+			$enc.encode(&mut tdb, $arg)
 				.expect("Encoding proved to be trivially unsatisfiable");
 			tdb.check_complete()
 		};
-		($enc:ty, $max:expr, $($args:expr),+ => $clauses:expr, $solns:expr) => {
+		($enc:expr, $max:expr, $($args:expr),+ => $clauses:expr, $solns:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
 			tdb = tdb.expect_clauses($clauses);
 			tdb = tdb.expect_solutions($solns);
-			<$enc>::new($($args),+)
-				.encode(&mut tdb)
+			$enc.encode(&mut tdb, ($($args),+))
 				.expect("Encoding proved to be trivially unsatisfiable");
 			tdb.check_complete()
 		};
@@ -105,38 +97,28 @@ pub mod tests {
 
 	#[test]
 	fn test_assert_macros() {
-		#[derive(Debug)]
-		struct MakeFalse<'a, Lit: Literal> {
-			lit: &'a Lit,
-		}
-		impl<'a, Lit: Literal> MakeFalse<'a, Lit> {
-			fn new(lit: &'a Lit) -> Self {
-				Self { lit }
-			}
-		}
-		impl<'a, Lit: Literal> Encoder for MakeFalse<'a, Lit> {
-			type Lit = Lit;
-			type Ret = ();
-
-			fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result {
-				db.add_clause(&[self.lit.negate()])
+		#[derive(Default)]
+		struct MakeFalse {}
+		impl MakeFalse {
+			fn encode<'a, DB: ClauseDatabase>(&mut self, db: &mut DB, lit: &DB::Lit) -> Result {
+				db.add_clause(&[lit.negate()])
 			}
 		}
 
 		// Test resulting encoding
-		assert_enc!(MakeFalse::<i32>, 1, &1 => vec![vec![-1]]);
+		assert_enc!(MakeFalse::default(), 1, &1 => vec![vec![-1]]);
 		// Test possible solutions (using specification)
 		// TODO: num_var is really 1, but that crashes SPLR
-		assert_sol!(MakeFalse::<i32>, 2, &1 => vec![vec![-1]]);
+		assert_sol!(MakeFalse::default(), 2, &1 => vec![vec![-1]]);
 		// Test encoding and possible solutions
 		// TODO: see above
-		assert_enc_sol!(MakeFalse::<i32>, 2, &1 => vec![vec![-1]], vec![vec![-1]]);
+		assert_enc_sol!(MakeFalse::default(), 2, &1 => vec![vec![-1]], vec![vec![-1]]);
 	}
 
 	#[test]
 	fn test_xor() {
 		assert_enc_sol!(
-			XorEncoder::<i32>,
+			XorEncoder::default(),
 			2,
 			&[1, 2] =>
 			vec![vec![1, 2], vec![-1, -2]],

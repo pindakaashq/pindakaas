@@ -1,14 +1,13 @@
-use crate::linear::{ClauseDatabase, Encoder, LimitComp, Linear, Literal, Part};
-use crate::{PositiveCoefficient, Result};
 use itertools::Itertools;
-use std::collections::{HashMap, HashSet};
-use std::ops::Neg;
+use std::{
+	collections::{HashMap, HashSet},
+	ops::Neg,
+};
 
-pub enum Structure {
-	Gt,
-	Swc,
-	Bdd,
-}
+use crate::{
+	linear::{LimitComp, Part},
+	ClauseDatabase, Encoder, Linear, Literal, PositiveCoefficient, Result,
+};
 
 // TODO
 macro_rules! new_var {
@@ -33,46 +32,55 @@ macro_rules! new_var {
 	};
 }
 
-/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized Totalizer (GT)
-pub struct TotalizerEncoder<'a, Lit: Literal, PC: PositiveCoefficient> {
-	lin: &'a Linear<Lit, PC>,
+/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
+pub struct TotalizerEncoder {
 	add_consistency: bool,
 }
 
-impl<'a, Lit: Literal, PC: PositiveCoefficient> TotalizerEncoder<'a, Lit, PC> {
-	pub fn new(lin: &'a Linear<Lit, PC>, add_consistency: bool) -> Self {
+impl TotalizerEncoder {
+	pub fn add_consistency(&mut self, b: bool) {
+		self.add_consistency = b;
+	}
+}
+
+impl Default for TotalizerEncoder {
+	fn default() -> Self {
 		Self {
-			lin,
-			add_consistency,
+			add_consistency: false,
 		}
 	}
 }
 
-impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for TotalizerEncoder<'a, Lit, PC> {
-	type Lit = Lit;
-	type Ret = ();
-
-	fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result<Self::Ret> {
-		totalize(db, self.lin, Structure::Gt, self.add_consistency)
+impl<DB: ClauseDatabase, PC: PositiveCoefficient> Encoder<DB, Linear<DB::Lit, PC>>
+	for TotalizerEncoder
+{
+	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, PC>) -> Result {
+		totalize(db, lin, Structure::Gt, self.add_consistency)
 	}
 }
 
-pub fn totalize<DB: ClauseDatabase<Lit = Lit>, Lit: Literal, PC: PositiveCoefficient>(
+pub enum Structure {
+	Gt,
+	Swc,
+	Bdd,
+}
+
+pub fn totalize<DB: ClauseDatabase, PC: PositiveCoefficient>(
 	db: &mut DB,
-	lin: &Linear<Lit, PC>,
+	lin: &Linear<DB::Lit, PC>,
 	structure: Structure,
 	add_consistency: bool,
 ) -> Result<()> {
 	assert!(lin.cmp == LimitComp::LessEq);
-	let x_le_ord = |part: &Part<Lit, PC>| -> IntVar<Lit, PC> {
+	let x_le_ord = |part: &Part<DB::Lit, PC>| -> IntVar<DB::Lit, PC> {
 		match part {
 			Part::Amo(terms) => {
-				let terms: Vec<(PC, Lit)> = terms
+				let terms: Vec<(PC, DB::Lit)> = terms
 					.iter()
 					.map(|(lit, coef)| (*coef, lit.clone()))
 					.collect();
 				// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
-				let mut h: HashMap<PC, Vec<Lit>> = HashMap::with_capacity(terms.len());
+				let mut h: HashMap<PC, Vec<DB::Lit>> = HashMap::with_capacity(terms.len());
 				for (coef, lit) in terms {
 					h.entry(coef).or_insert_with(Vec::new).push(lit);
 				}
