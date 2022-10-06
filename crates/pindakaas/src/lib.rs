@@ -38,8 +38,6 @@ pub use linear::{
 ///  - [`std::clone::Clone`] to allow creating a new copy of the literal to
 ///    create clauses.
 ///
-///  - [`std::ops::Neg`] to allow the negation literals.
-///
 ///  - [`std::cmp::Eq`] and [`std::hash::Hash`] to allow PB constraints to be
 ///    simplified
 pub trait Literal: fmt::Debug + fmt::Display + Clone + Eq + Hash {
@@ -82,20 +80,10 @@ impl fmt::Display for Unsatisfiable {
 /// Result is a type alias for [`std::result::Result`] that by default returns
 /// an empty value, or the [`Unsatisfiable`] error type.
 pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
-/// NewVarFn is a type alias for the type of function used by
-/// [`Encoder`] objects to request new (unused) variables when required to
-/// encode the constraint.
-pub type NewVarFn<Lit> = fn() -> Lit;
-/// EmitClauseFn is a type alias for the type of function used by
-/// [`Encoder`] objects to emit the clauses to encode the given constraint.
-pub type EmitClauseFn<Lit> = fn(&[Lit]) -> Result;
 
 /// Encoder is the central trait implemented for all the encoding algorithms
-pub trait Encoder {
-	type Lit: Literal;
-	type Ret;
-
-	fn encode<DB: ClauseDatabase<Lit = Self::Lit>>(&mut self, db: &mut DB) -> Result<Self::Ret>;
+pub trait Encoder<DB: ClauseDatabase, Constraint> {
+	fn encode(&mut self, db: &mut DB, con: &Constraint) -> Result;
 }
 
 /// Checker is a trait implemented by types that represent constraints. The
@@ -169,6 +157,28 @@ pub trait PositiveCoefficient:
 {
 }
 impl<T: Unsigned + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug> PositiveCoefficient for T {}
+
+pub trait AssertPos: Coefficient {
+	type PosType: PositiveCoefficient;
+	fn assert_pos(self) -> Self::PosType;
+}
+macro_rules! try_into_assert_pos {
+	($signed:ty, $unsigned:ty) => {
+		impl $crate::AssertPos for $signed {
+			type PosType = $unsigned;
+			fn assert_pos(self) -> Self::PosType {
+				debug_assert!(self >= 0, "assert_pos called on a negative coefficient");
+				self.try_into()
+					.expect("coeffient could not be converted into specified positive type")
+			}
+		}
+	};
+}
+try_into_assert_pos!(i8, u8);
+try_into_assert_pos!(i16, u16);
+try_into_assert_pos!(i32, u32);
+try_into_assert_pos!(i64, u64);
+// try_into_assert_pos!(num::BigInt, num::BigUint);
 
 /// IntEncoding is a enumerated type use to represent Boolean encodings of
 /// integer variables within this library
