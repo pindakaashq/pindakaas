@@ -135,6 +135,27 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 		}
 	}
 
+	pub fn from_slices(weights: &[C], lits: &[Lit]) -> Self {
+		assert!(weights.len() == lits.len(), "");
+		Self {
+			terms: lits
+				.into_iter()
+				.cloned()
+				.zip(weights.iter().cloned())
+				.collect(),
+			num_free: lits.len(),
+			..Default::default()
+		}
+	}
+
+	pub fn from_terms(terms: &[(Lit, C)]) -> Self {
+		Self {
+			terms: terms.iter().cloned().collect(),
+			num_free: terms.len(),
+			..Default::default()
+		}
+	}
+
 	/// Add multiple terms to the linear expression of which at most one
 	/// can be chosen
 	pub fn add_choice(mut self, choice: &[(Lit, C)]) -> Self {
