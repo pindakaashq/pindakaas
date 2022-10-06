@@ -130,6 +130,8 @@ pub mod tests {
 
 	pub(crate) struct TestDB {
 		slv: Solver,
+		/// Number of variables available when solver is created
+		num_var: i32,
 		/// Clauses expected by the test case
 		clauses: Option<Vec<(bool, Vec<i32>)>>,
 		/// Solutions expected by the test case
@@ -152,6 +154,7 @@ pub mod tests {
 						..CNFDescription::default()
 					},
 				),
+				num_var,
 				clauses: None,
 				solutions: None,
 				check: None,
@@ -205,7 +208,7 @@ pub mod tests {
 				return;
 			}
 			if OUTPUT_SPLR {
-				eprintln!("let result: Vec<Vec<i32>> = self.slv.iter().collect();");
+				eprintln!("let result: Vec<Vec<i32>> = slv.iter().collect();");
 			}
 			let mut from_slv: Vec<Vec<i32>> = self.slv.iter().collect();
 			for sol in &mut from_slv {
@@ -288,15 +291,27 @@ pub mod tests {
 			}
 
 			if OUTPUT_SPLR {
+				let list: Vec<String> = cl
+					.iter()
+					.map(|l| {
+						if l.abs() <= self.num_var {
+							l.to_string()
+						} else {
+							format!("{}x{}", if *l < 0 { "-" } else { "" }, l.abs())
+						}
+					})
+					.collect();
 				match cl.len() {
 					0 => {}
-					1 => eprintln!(
+					1 => {
+						eprintln!(
 						"slv.add_assignment({}).expect(\"unexpected error from add_assignment\");",
-						cl[0]
-					),
+							list[0],
+						)
+					}
 					_ => eprintln!(
-						"slv.add_clause({:?}).expect(\"unexpected error from add_clause\");",
-						cl
+						"slv.add_clause([{}]).expect(\"unexpected error from add_clause\");",
+						list.join(", ")
 					),
 				}
 			}
@@ -318,7 +333,11 @@ pub mod tests {
 		}
 
 		fn new_var(&mut self) -> Self::Lit {
-			self.slv.add_var() as i32
+			let res = self.slv.add_var() as i32;
+			if OUTPUT_SPLR {
+				eprintln!("let x{} = slv.add_var() as i32;", res);
+			}
+			res
 		}
 	}
 }
