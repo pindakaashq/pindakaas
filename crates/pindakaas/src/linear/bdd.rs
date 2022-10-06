@@ -1,27 +1,27 @@
 use crate::linear::totalizer::{totalize, Structure};
-use crate::linear::{ClauseDatabase, Encoder, Linear, Literal};
-use crate::{PositiveCoefficient, Result};
+use crate::{ClauseDatabase, Encoder, Linear, PositiveCoefficient, Result};
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
-pub struct BddEncoder<'a, Lit: Literal, PC: PositiveCoefficient> {
-	lin: &'a Linear<Lit, PC>,
+pub struct BddEncoder {
 	add_consistency: bool,
 }
 
-impl<'a, Lit: Literal, PC: PositiveCoefficient> BddEncoder<'a, Lit, PC> {
-	pub fn new(lin: &'a Linear<Lit, PC>, add_consistency: bool) -> Self {
+impl BddEncoder {
+	pub fn add_consistency(&mut self, b: bool) {
+		self.add_consistency = b;
+	}
+}
+
+impl Default for BddEncoder {
+	fn default() -> Self {
 		Self {
-			lin,
-			add_consistency,
+			add_consistency: false,
 		}
 	}
 }
 
-impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for BddEncoder<'a, Lit, PC> {
-	type Lit = Lit;
-	type Ret = ();
-
-	fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result<Self::Ret> {
-		totalize(db, self.lin, Structure::Bdd, self.add_consistency)
+impl<DB: ClauseDatabase, PC: PositiveCoefficient> Encoder<DB, Linear<DB::Lit, PC>> for BddEncoder {
+	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, PC>) -> Result {
+		totalize(db, lin, Structure::Bdd, self.add_consistency)
 	}
 }

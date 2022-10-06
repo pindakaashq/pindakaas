@@ -5,34 +5,25 @@ use crate::linear::LimitComp;
 use crate::{ClauseDatabase, Encoder, Linear, Literal, PositiveCoefficient, Result, Unsatisfiable};
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
-pub struct AdderEncoder<'a, Lit: Literal, PC: PositiveCoefficient> {
-	lin: &'a Linear<Lit, PC>,
-}
+#[derive(Default)]
+pub struct AdderEncoder {}
 
-impl<'a, Lit: Literal, PC: PositiveCoefficient> AdderEncoder<'a, Lit, PC> {
-	pub fn new(lin: &'a Linear<Lit, PC>) -> Self {
-		Self { lin }
-	}
-}
-
-impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for AdderEncoder<'a, Lit, PC> {
-	type Lit = Lit;
-	type Ret = ();
-
-	fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result<Self::Ret> {
-		let pair = &self
-			.lin
+impl<DB: ClauseDatabase, PC: PositiveCoefficient> Encoder<DB, Linear<DB::Lit, PC>>
+	for AdderEncoder
+{
+	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, PC>) -> Result {
+		let pair = &lin
 			.terms
 			.iter()
 			.flat_map(|part| part.iter().map(|(lit, coef)| (lit.clone(), *coef)))
-			.collect::<HashMap<Lit, PC>>();
+			.collect::<HashMap<DB::Lit, PC>>();
 
-		debug_assert!(self.lin.cmp == LimitComp::LessEq || self.lin.cmp == LimitComp::Equal);
+		debug_assert!(lin.cmp == LimitComp::LessEq || lin.cmp == LimitComp::Equal);
 		// The number of relevant bits in k
-		let bits = (PC::zero().leading_zeros() - self.lin.k.leading_zeros()) as usize;
-		let first_zero = self.lin.k.trailing_ones() as usize;
+		let bits = (PC::zero().leading_zeros() - lin.k.leading_zeros()) as usize;
+		let first_zero = lin.k.trailing_ones() as usize;
 		let mut k = (0..bits)
-			.map(|b| self.lin.k & (PC::one() << b) != PC::zero())
+			.map(|b| lin.k & (PC::one() << b) != PC::zero())
 			.collect::<Vec<bool>>();
 		debug_assert!(k[bits - 1]);
 
@@ -53,13 +44,13 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for AdderEncoder<'a, Lit
 		for b in 0..bits {
 			match bucket[b].len() {
 				0 => {
-					if k[b] && self.lin.cmp == LimitComp::Equal {
+					if k[b] && lin.cmp == LimitComp::Equal {
 						return Err(Unsatisfiable);
 					}
 				}
 				1 => {
 					let x = bucket[b].pop().unwrap();
-					if self.lin.cmp == LimitComp::Equal {
+					if lin.cmp == LimitComp::Equal {
 						db.add_clause(&[if k[b] { x } else { x.negate() }])?
 					} else {
 						sum[b] = Some(x);
@@ -77,10 +68,10 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for AdderEncoder<'a, Lit
 						debug_assert!(lits.len() == 3 || lits.len() == 2);
 
 						// Compute sum
-						if last && self.lin.cmp == LimitComp::Equal {
+						if last && lin.cmp == LimitComp::Equal {
 							// No need to create a new literal, force the sum to equal the result
 							force_sum(db, lits.as_slice(), k[b])?;
-						} else if self.lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
+						} else if lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
 							// Literal is not used for the less-than constraint unless a zero has been seen first
 							bucket[b].push(create_sum_lit(db, lits.as_slice())?);
 						}
@@ -88,15 +79,12 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for AdderEncoder<'a, Lit
 						// Compute carry
 						if b + 1 >= bits {
 							// Carry will bring the sum to be greater than k, force to be false
-							if lits.len() == 2 && self.lin.cmp == LimitComp::Equal {
+							if lits.len() == 2 && lin.cmp == LimitComp::Equal {
 								// Already encoded by the XOR to compute the sum
 							} else {
 								force_carry(db, &lits[..], false)?
 							}
-						} else if last
-							&& self.lin.cmp == LimitComp::Equal
-							&& bucket[b + 1].is_empty()
-						{
+						} else if last && lin.cmp == LimitComp::Equal && bucket[b + 1].is_empty() {
 							// No need to create a new literal, force the carry to equal the result
 							force_carry(db, &lits[..], k[b + 1])?;
 							// Mark k[b + 1] as false (otherwise next step will fail)
@@ -106,8 +94,8 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for AdderEncoder<'a, Lit
 						}
 					}
 					debug_assert!(
-						(self.lin.cmp == LimitComp::Equal && bucket[b].is_empty())
-							|| (self.lin.cmp == LimitComp::LessEq
+						(lin.cmp == LimitComp::Equal && bucket[b].is_empty())
+							|| (lin.cmp == LimitComp::LessEq
 								&& (bucket[b].len() == 1 || b < first_zero))
 					);
 					sum[b] = bucket[b].pop();
@@ -115,10 +103,10 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for AdderEncoder<'a, Lit
 			}
 		}
 		// In case of equality this has been enforced
-		debug_assert!(self.lin.cmp != LimitComp::Equal || sum.iter().all(|x| x.is_none()));
+		debug_assert!(lin.cmp != LimitComp::Equal || sum.iter().all(|x| x.is_none()));
 
 		// Enforce less-than constraint
-		if self.lin.cmp == LimitComp::LessEq {
+		if lin.cmp == LimitComp::LessEq {
 			// For every zero bit in k:
 			// - either the sum bit is also zero, or
 			// - a higher sum bit is zero that was one in k.
@@ -128,7 +116,7 @@ impl<'a, Lit: Literal, PC: PositiveCoefficient> Encoder for AdderEncoder<'a, Lit
 						&(i..bits)
 							.filter_map(|j| if j == i || k[j] { sum[j].clone() } else { None })
 							.map(|lit| lit.negate())
-							.collect::<Vec<Lit>>(),
+							.collect::<Vec<DB::Lit>>(),
 					)?;
 				}
 			}
@@ -177,7 +165,7 @@ fn force_sum<Lit: Literal, DB: ClauseDatabase<Lit = Lit>>(
 	k: bool,
 ) -> Result {
 	if k {
-		XorEncoder::new(lits).encode(db)
+		XorEncoder::default().encode(db, lits)
 	} else {
 		match lits {
 			[a, b] => {
@@ -286,10 +274,18 @@ mod tests {
 	#[test]
 	fn test_add_reg() {
 		assert_sol!(
-			AdderEncoder<i32,u32>,
+			AdderEncoder::default(),
 			9,
-			&Linear{
-				terms: construct_terms(&[(-2,3), (-3,6), (-4,0), (-5,1), (-6,2), (-8,3), (9,6)]),
+			&Linear {
+				terms: construct_terms(&[
+					(-2, 3),
+					(-3, 6),
+					(-4, 0),
+					(-5, 1),
+					(-6, 2),
+					(-8, 3),
+					(9, 6)
+				]),
 				cmp: LimitComp::LessEq,
 				k: 19
 			}
