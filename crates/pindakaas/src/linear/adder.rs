@@ -125,14 +125,59 @@ impl<DB: ClauseDatabase, PC: PositiveCoefficient> Encoder<DB, Linear<DB::Lit, PC
 	}
 }
 
+/// Returns the result, `c`, of adding `a` to `b`, all encoded using the log encoding.
+///
+/// TODO: Should this use the IntEncoding::Log input??
+#[allow(dead_code)]
+pub(crate) fn log_enc_add<DB: ClauseDatabase>(
+	db: &mut DB,
+	a: &[DB::Lit],
+	b: &[DB::Lit],
+	bits: usize,
+) -> Result<Vec<Option<DB::Lit>>> {
+	let mut c = Vec::with_capacity(bits);
+	let mut carry = None;
+	for i in 0..bits {
+		let b = [a.get(i), b.get(i), carry.as_ref()]
+			.into_iter()
+			.flatten()
+			.cloned()
+			.collect::<Vec<DB::Lit>>();
+		match &b[..] {
+			[] => {
+				c.push(None);
+				carry = None;
+			}
+			[x] => {
+				c.push(Some(x.clone()));
+				carry = None;
+			}
+			_ => {
+				debug_assert!(b.len() <= 3);
+				c.push(Some(create_sum_lit(db, &b)?));
+				carry = if i + 1 < bits {
+					Some(create_carry_lit(db, &b)?)
+				} else {
+					force_carry(db, &b, false)?;
+					None
+				};
+			}
+		}
+	}
+	for l in a.iter().skip(bits) {
+		db.add_clause(&[l.negate()])?;
+	}
+	for l in b.iter().skip(bits) {
+		db.add_clause(&[l.negate()])?;
+	}
+	Ok(c)
+}
+
 /// Create a literal that represents the sum bit when adding lits together using an adder
 /// circuit
 ///
 /// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
-fn create_sum_lit<Lit: Literal, DB: ClauseDatabase<Lit = Lit>>(
-	db: &mut DB,
-	lits: &[Lit],
-) -> Result<Lit> {
+fn create_sum_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<DB::Lit> {
 	let sum = db.new_var();
 	match lits {
 		[a, b] => {
@@ -159,11 +204,7 @@ fn create_sum_lit<Lit: Literal, DB: ClauseDatabase<Lit = Lit>>(
 
 /// Force circuit that represents the sum bit when adding lits together using an adder
 /// circuit to take the value k
-fn force_sum<Lit: Literal, DB: ClauseDatabase<Lit = Lit>>(
-	db: &mut DB,
-	lits: &[Lit],
-	k: bool,
-) -> Result {
+fn force_sum<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Result {
 	if k {
 		XorEncoder::default().encode(db, lits)
 	} else {
@@ -187,10 +228,7 @@ fn force_sum<Lit: Literal, DB: ClauseDatabase<Lit = Lit>>(
 /// circuit
 ///
 /// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
-fn create_carry_lit<Lit: Literal, DB: ClauseDatabase<Lit = Lit>>(
-	db: &mut DB,
-	lits: &[Lit],
-) -> Result<Lit> {
+fn create_carry_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<DB::Lit> {
 	let carry = db.new_var();
 	match lits {
 		[a, b] => {
@@ -214,11 +252,7 @@ fn create_carry_lit<Lit: Literal, DB: ClauseDatabase<Lit = Lit>>(
 
 /// Force the circuit that represents the carry bit when adding lits together using an adder
 /// circuit to take the value k
-fn force_carry<Lit: Literal, DB: ClauseDatabase<Lit = Lit>>(
-	db: &mut DB,
-	lits: &[Lit],
-	k: bool,
-) -> Result {
+fn force_carry<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Result {
 	match lits {
 		[a, b] => {
 			if k {
@@ -230,7 +264,7 @@ fn force_carry<Lit: Literal, DB: ClauseDatabase<Lit = Lit>>(
 			}
 		}
 		[a, b, c] => {
-			let neg = |x: &Lit| if k { x.clone() } else { x.negate() };
+			let neg = |x: &DB::Lit| if k { x.clone() } else { x.negate() };
 			db.add_clause(&[neg(a), neg(b)])?;
 			db.add_clause(&[neg(a), neg(c)])?;
 			db.add_clause(&[neg(b), neg(c)])
