@@ -138,11 +138,7 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 	pub fn from_slices(weights: &[C], lits: &[Lit]) -> Self {
 		assert!(weights.len() == lits.len(), "");
 		Self {
-			terms: lits
-				.into_iter()
-				.cloned()
-				.zip(weights.iter().cloned())
-				.collect(),
+			terms: lits.iter().cloned().zip(weights.iter().cloned()).collect(),
 			num_free: lits.len(),
 			..Default::default()
 		}
@@ -242,7 +238,7 @@ impl<'a, Lit: Literal, C: Coefficient> From<IntEncoding<'a, Lit, C>> for LinExp<
 					k += C::one();
 				}
 				Self {
-					terms: VecDeque::from(terms),
+					terms,
 					constraints: Vec::from([(Constraint::AtMostOne, vals.len())]),
 					..Default::default()
 				}
@@ -265,7 +261,7 @@ impl<'a, Lit: Literal, C: Coefficient> From<IntEncoding<'a, Lit, C>> for LinExp<
 					terms.back_mut().unwrap().1 *= -C::one();
 				}
 				Self {
-					terms: VecDeque::from(terms),
+					terms,
 					num_free: bits.len(),
 					..Default::default()
 				}
@@ -364,12 +360,12 @@ impl<Lit: Literal, C: Coefficient> Add<LinExp<Lit, C>> for LinExp<Lit, C> {
 	}
 }
 
-impl<'a, Lit: Literal, C: Coefficient> MulAssign<C> for LinExp<Lit, C> {
+impl<Lit: Literal, C: Coefficient> MulAssign<C> for LinExp<Lit, C> {
 	fn mul_assign(&mut self, rhs: C) {
-		self.mult += rhs;
+		self.mult *= rhs;
 	}
 }
-impl<'a, Lit: Literal, C: Coefficient> Mul<C> for LinExp<Lit, C> {
+impl<Lit: Literal, C: Coefficient> Mul<C> for LinExp<Lit, C> {
 	type Output = LinExp<Lit, C>;
 	fn mul(mut self, rhs: C) -> Self::Output {
 		self *= rhs;
