@@ -7,6 +7,15 @@ pub struct Cardinality<Lit: Literal, PC: PositiveCoefficient> {
 	pub(crate) k: PC,
 }
 
+impl<Lit, PC> From<AtMostOne<Lit>> for Cardinality<Lit, PC> {
+	fn from(amo: AtMostOne<Lit>) -> Self {
+		Self {
+			lits: amo.lits,
+			cmp: LimitComp::LessEq,
+			k: PC::one(),
+		}
+	}
+}
 impl<Lit: Literal, PC: PositiveCoefficient> Checker for Cardinality<Lit, PC> {
 	type Lit = Lit;
 
