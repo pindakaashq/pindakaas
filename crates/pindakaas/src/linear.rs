@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
 	AssertPos, AtMostOne, Cardinality, CheckError, Checker, ClauseDatabase, Coefficient, Encoder,
-	IntEncoding, Literal, PairwiseEncoder, PositiveCoefficient, Result, Unsatisfiable,
+	IntEncoding, LadderEncoder, Literal, PositiveCoefficient, Result, Unsatisfiable,
 };
 
 mod adder;
@@ -35,7 +35,7 @@ pub struct Linear<Lit: Literal, PC: PositiveCoefficient> {
 	pub(crate) k: PC,
 }
 
-impl<Lit, PC> From<Cardinality<Lit, PC>> for Linear<Lit, PC> {
+impl<Lit: Literal, PC: PositiveCoefficient> From<Cardinality<Lit, PC>> for Linear<Lit, PC> {
 	fn from(card: Cardinality<Lit, PC>) -> Self {
 		Self {
 			terms: card
@@ -48,11 +48,29 @@ impl<Lit, PC> From<Cardinality<Lit, PC>> for Linear<Lit, PC> {
 		}
 	}
 }
-impl<Lit, PC> From<AtMostOne<Lit>> for Linear<Lit, PC> {
+impl<Lit: Literal, PC: PositiveCoefficient> From<AtMostOne<Lit>> for Linear<Lit, PC> {
 	fn from(amo: AtMostOne<Lit>) -> Self {
 		Self::from(Cardinality::from(amo))
 	}
 }
+
+// Automatically implement Cardinality encoding when you can encode Linear constraints
+impl<
+		DB: ClauseDatabase,
+		PC: PositiveCoefficient,
+		Enc: Encoder<DB, Linear<DB::Lit, PC>> + LinMarker,
+	> Encoder<DB, Cardinality<DB::Lit, PC>> for Enc
+{
+	fn encode(&mut self, db: &mut DB, con: &Cardinality<DB::Lit, PC>) -> crate::Result {
+		self.encode(db, &Linear::<DB::Lit, PC>::from(con.clone()))
+	}
+}
+// local marker trait, to ensure the previous definition only applies within this crate
+pub(crate) trait LinMarker {}
+impl LinMarker for AdderEncoder {}
+impl LinMarker for BddEncoder {}
+impl LinMarker for SwcEncoder {}
+impl LinMarker for TotalizerEncoder {}
 
 // TODO how can we support both Part(itions) of "terms" ( <Lit, C> for pb
 // constraints) and just lits (<Lit>) for AMK/AMO's?
