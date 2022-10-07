@@ -26,8 +26,8 @@ mod linear;
 pub use at_most_one::{AtMostOne, LadderEncoder, PairwiseEncoder};
 pub use cardinality::Cardinality;
 pub use linear::{
-	AdderEncoder, BddEncoder, Comparator, LinExp, LinVariant, Linear, LinearEncoder, SwcEncoder,
-	TotalizerEncoder,
+	AdderEncoder, BddEncoder, Comparator, LinExp, LinVariant, Linear, LinearConstraint,
+	LinearEncoder, SwcEncoder, TotalizerEncoder,
 };
 
 /// Literal is the super-trait for types that can be used to represent boolean
