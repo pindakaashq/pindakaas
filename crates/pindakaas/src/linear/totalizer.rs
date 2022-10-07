@@ -1,5 +1,5 @@
 use crate::linear::{ClauseDatabase, Encoder, LimitComp, Linear, Literal, Part};
-use crate::{new_var, PositiveCoefficient, Result};
+use crate::{PositiveCoefficient, Result};
 use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
 use std::ops::Neg;
@@ -8,6 +8,29 @@ pub enum Structure {
 	Gt,
 	Swc,
 	Bdd,
+}
+
+// TODO
+macro_rules! new_var {
+	($db:expr) => {
+		$db.new_var()
+	};
+	($db:expr, $lbl:expr) => {
+		// $db.new_var_with_label($lbl)
+		$db.new_var()
+	};
+}
+
+#[cfg(not(debug_assertions))]
+#[macro_export]
+macro_rules! new_var {
+	($db:expr) => {
+		$db.new_var()
+	};
+	($db:expr, $lbl:expr) => {
+		// $db.new_var_with_label($lbl)
+		$db.new_var()
+	};
 }
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized Totalizer (GT)
@@ -305,7 +328,7 @@ fn build_totalizer<
 			layer
 				.chunks(2)
 				.enumerate()
-				.map(|(node, children)| match children {
+				.map(|(_node, children)| match children {
 					[x] => x.clone(),
 					[left, right] => {
 						let l = if layer.len() > 2 { PC::zero() } else { l };
@@ -320,7 +343,7 @@ fn build_totalizer<
 							.map(|c| {
 								(
 									c,
-									new_var!(db, format!("w_{}_{}>={c:?}", level + 1, node + 1)),
+									new_var!(db, format!("w_{}_{}>={c:?}", level + 1, _node + 1)),
 								)
 							})
 							.collect(),
