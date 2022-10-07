@@ -35,6 +35,25 @@ pub struct Linear<Lit: Literal, PC: PositiveCoefficient> {
 	pub(crate) k: PC,
 }
 
+impl<Lit, PC> From<Cardinality<Lit, PC>> for Linear<Lit, PC> {
+	fn from(card: Cardinality<Lit, PC>) -> Self {
+		Self {
+			terms: card
+				.lits
+				.into_iter()
+				.map(|l| Part::Amo(Vec::from([(l, PC::one())])))
+				.collect(),
+			cmp: card.cmp,
+			k: card.k,
+		}
+	}
+}
+impl<Lit, PC> From<AtMostOne<Lit>> for Linear<Lit, PC> {
+	fn from(amo: AtMostOne<Lit>) -> Self {
+		Self::from(Cardinality::from(amo))
+	}
+}
+
 // TODO how can we support both Part(itions) of "terms" ( <Lit, C> for pb
 // constraints) and just lits (<Lit>) for AMK/AMO's?
 //
