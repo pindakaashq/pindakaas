@@ -2,6 +2,7 @@ use crate::linear::totalizer::{totalize, Structure};
 use crate::{ClauseDatabase, Encoder, Linear, PositiveCoefficient, Result};
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
+#[derive(Default)]
 pub struct BddEncoder {
 	add_consistency: bool,
 }
@@ -9,14 +10,6 @@ pub struct BddEncoder {
 impl BddEncoder {
 	pub fn add_consistency(&mut self, b: bool) {
 		self.add_consistency = b;
-	}
-}
-
-impl Default for BddEncoder {
-	fn default() -> Self {
-		Self {
-			add_consistency: false,
-		}
 	}
 }
 

@@ -33,6 +33,7 @@ macro_rules! new_var {
 }
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
+#[derive(Default)]
 pub struct TotalizerEncoder {
 	add_consistency: bool,
 }
@@ -40,14 +41,6 @@ pub struct TotalizerEncoder {
 impl TotalizerEncoder {
 	pub fn add_consistency(&mut self, b: bool) {
 		self.add_consistency = b;
-	}
-}
-
-impl Default for TotalizerEncoder {
-	fn default() -> Self {
-		Self {
-			add_consistency: false,
-		}
 	}
 }
 
