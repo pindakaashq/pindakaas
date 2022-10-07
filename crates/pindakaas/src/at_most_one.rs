@@ -6,7 +6,7 @@ mod pairwise;
 pub use ladder::LadderEncoder;
 pub use pairwise::PairwiseEncoder;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AtMostOne<Lit: Literal> {
 	pub(crate) lits: Vec<Lit>,
 }
