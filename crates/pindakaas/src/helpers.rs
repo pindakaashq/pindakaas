@@ -32,7 +32,7 @@ pub mod tests {
 
 	use splr::{
 		types::{CNFDescription, Instantiate},
-		Config, SatSolverIF, Solver, SolverError,
+		Certificate, Config, SatSolverIF, SolveIF, Solver, SolverError,
 	};
 	use std::{
 		collections::{HashMap, HashSet},
@@ -210,7 +210,25 @@ pub mod tests {
 			if OUTPUT_SPLR {
 				eprintln!("let result: Vec<Vec<i32>> = slv.iter().collect();");
 			}
-			let mut from_slv: Vec<Vec<i32>> = self.slv.iter().collect();
+			let mut from_slv: Vec<Vec<i32>> = Vec::new();
+			while let Ok(Certificate::SAT(model)) = self.slv.solve() {
+				from_slv.push(
+					model
+						.into_iter()
+						.filter(|l| l.abs() <= self.num_var)
+						.collect(),
+				);
+				let nogood: Vec<i32> = from_slv.last().unwrap().iter().map(|l| -l).collect();
+				match self.slv.add_clause(nogood) {
+					Err(SolverError::Inconsistent | SolverError::EmptyClause) => {
+						break;
+					}
+					Err(e) => {
+						panic!("unexpected solver error: {}", e);
+					}
+					Ok(_) => self.slv.reset(),
+				}
+			}
 			for sol in &mut from_slv {
 				sol.sort_by(|a, b| a.abs().cmp(&b.abs()));
 			}
