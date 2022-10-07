@@ -275,54 +275,14 @@ fn force_carry<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Re
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::{
 		helpers::tests::assert_sol,
-		linear::{tests::construct_terms, LimitComp},
-		AdderEncoder, Checker, Encoder, Linear,
+		linear::{
+			tests::{construct_terms, linear_test_suite},
+			LimitComp,
+		},
+		Checker, Encoder,
 	};
-
-	#[test]
-	fn test_adder_encode() {
-		// assert_enc_sol!(AdderEncoder, 4, )
-
-		// let mut two = TestDB::new(4)
-		// 	.expect_clauses(vec![vec![-4], vec![-3, -1], vec![-2, -1], vec![-3, -2]])
-		// 	.expect_solutions(vec![
-		// 		vec![-1, -2, -3, -4],
-		// 		vec![-1, -2, 3, -4],
-		// 		vec![-1, 2, -3, -4],
-		// 		vec![1, -2, -3, -4],
-		// 	]);
-		// assert!(two
-		// 	.encode_bool_lin::<i64, u64>(
-		// 		&[1, 1, 1, 2],
-		// 		&[1, 2, 3, 4],
-		// 		crate::Comparator::LessEq,
-		// 		1,
-		// 		&[]
-		// 	)
-		// 	.is_ok());
-		// two.check_complete();
-	}
-
-	#[test]
-	fn test_add_reg() {
-		assert_sol!(
-			AdderEncoder::default(),
-			9,
-			&Linear {
-				terms: construct_terms(&[
-					(-2, 3),
-					(-3, 6),
-					(-4, 0),
-					(-5, 1),
-					(-6, 2),
-					(-8, 3),
-					(9, 6)
-				]),
-				cmp: LimitComp::LessEq,
-				k: 19
-			}
-		);
-	}
+	linear_test_suite!(AdderEncoder::default());
 }
