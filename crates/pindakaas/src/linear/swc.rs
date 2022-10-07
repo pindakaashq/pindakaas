@@ -2,6 +2,7 @@ use crate::linear::totalizer::{totalize, Structure};
 use crate::{ClauseDatabase, Encoder, Linear, PositiveCoefficient, Result};
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)
+#[derive(Default)]
 pub struct SwcEncoder {
 	add_consistency: bool,
 }
@@ -9,14 +10,6 @@ pub struct SwcEncoder {
 impl SwcEncoder {
 	pub fn add_consistency(&mut self, b: bool) {
 		self.add_consistency = b;
-	}
-}
-
-impl Default for SwcEncoder {
-	fn default() -> Self {
-		Self {
-			add_consistency: false,
-		}
 	}
 }
 
