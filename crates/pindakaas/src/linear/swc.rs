@@ -25,3 +25,18 @@ impl<DB: ClauseDatabase, PC: PositiveCoefficient> Encoder<DB, Linear<DB::Lit, PC
 		totalize(db, lin, Structure::Swc, self.add_consistency)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::{
+		helpers::tests::assert_sol,
+		linear::{
+			tests::{construct_terms, linear_test_suite},
+			LimitComp,
+		},
+		Checker, Encoder,
+	};
+
+	linear_test_suite!(SwcEncoder::default());
+}
