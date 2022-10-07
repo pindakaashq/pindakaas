@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
 	AssertPos, AtMostOne, Cardinality, CheckError, Checker, ClauseDatabase, Coefficient, Encoder,
-	IntEncoding, LadderEncoder, Literal, PositiveCoefficient, Result, Unsatisfiable,
+	IntEncoding, Literal, PairwiseEncoder, PositiveCoefficient, Result, Unsatisfiable,
 };
 
 mod adder;
@@ -84,7 +84,7 @@ pub(crate) enum Part<Lit, C> {
 	Dom(Vec<(Lit, C)>, C, C),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum LimitComp {
 	Equal,
 	LessEq,
@@ -439,14 +439,14 @@ impl<Lit: Literal, PC: PositiveCoefficient> Checker for Linear<Lit, PC> {
 }
 
 #[derive(Default)]
-pub struct LinearEncoder<Enc = ArbLinEncoder> {
+pub struct LinearEncoder<Enc = StaticLinEncoder> {
 	enc: Enc,
 }
 
 impl<
 		DB: ClauseDatabase,
 		C: Coefficient + AssertPos,
-		Enc: Encoder<DB, LinVariant<DB::Lit, C::PosType>> + Default,
+		Enc: Encoder<DB, LinVariant<DB::Lit, C::PosType>>,
 	> Encoder<DB, LinearConstraint<DB::Lit, C>> for LinearEncoder<Enc>
 {
 	fn encode(&mut self, db: &mut DB, lin: &LinearConstraint<DB::Lit, C>) -> Result {
@@ -458,16 +458,41 @@ impl<
 // This is just a linear encoder that currently makes an arbitrary choice.
 // This is probably not how we would like to do it in the future.
 #[derive(Default)]
-pub struct ArbLinEncoder {}
+pub struct StaticLinEncoder<
+	LinEnc = AdderEncoder,
+	CardEnc = AdderEncoder, // TODO: Actual Cardinality encoding
+	AmoEnc = PairwiseEncoder,
+> {
+	lin_enc: LinEnc,
+	card_enc: CardEnc,
+	amo_enc: AmoEnc,
+}
 
-impl<DB: ClauseDatabase, PC: PositiveCoefficient> Encoder<DB, LinVariant<DB::Lit, PC>>
-	for ArbLinEncoder
+impl<LinEnc, CardEnc, AmoEnc> StaticLinEncoder<LinEnc, CardEnc, AmoEnc> {
+	pub fn lin_encoder(&mut self) -> &mut LinEnc {
+		&mut self.lin_enc
+	}
+	pub fn card_encoder(&mut self) -> &mut CardEnc {
+		&mut self.card_enc
+	}
+	pub fn amo_encoder(&mut self) -> &mut AmoEnc {
+		&mut self.amo_enc
+	}
+}
+
+impl<
+		DB: ClauseDatabase,
+		PC: PositiveCoefficient,
+		LinEnc: Encoder<DB, Linear<DB::Lit, PC>>,
+		CardEnc: Encoder<DB, Cardinality<DB::Lit, PC>>,
+		AmoEnc: Encoder<DB, AtMostOne<DB::Lit>>,
+	> Encoder<DB, LinVariant<DB::Lit, PC>> for StaticLinEncoder<LinEnc, CardEnc, AmoEnc>
 {
 	fn encode(&mut self, db: &mut DB, lin: &LinVariant<DB::Lit, PC>) -> Result {
 		match &lin {
-			LinVariant::Linear(lin) => AdderEncoder::default().encode(db, lin),
-			LinVariant::Cardinality(_) => unimplemented!(),
-			LinVariant::AtMostOne(amo) => PairwiseEncoder::default().encode(db, amo),
+			LinVariant::Linear(lin) => self.lin_enc.encode(db, lin),
+			LinVariant::Cardinality(card) => self.card_enc.encode(db, card),
+			LinVariant::AtMostOne(amo) => self.amo_enc.encode(db, amo),
 			LinVariant::Trivial => Ok(()),
 		}
 	}
@@ -476,7 +501,10 @@ impl<DB: ClauseDatabase, PC: PositiveCoefficient> Encoder<DB, LinVariant<DB::Lit
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::helpers::tests::{assert_enc_sol, TestDB};
+	use crate::{
+		helpers::tests::{assert_enc_sol, TestDB},
+		PairwiseEncoder,
+	};
 
 	pub(crate) fn construct_terms(terms: &[(i32, u32)]) -> Vec<Part<i32, u32>> {
 		terms
@@ -488,7 +516,7 @@ mod tests {
 	#[test]
 	fn test_pb_encode() {
 		assert_enc_sol!(
-			LinearEncoder::<ArbLinEncoder>::default(),
+			LinearEncoder::<StaticLinEncoder>::default(),
 			4,
 			&LinearConstraint::<i32,i32>::new(LinExp::from((1,1)) + (2,1) + (3,1) + (4,2),
 			Comparator::LessEq,
@@ -523,7 +551,7 @@ mod tests {
 		assert!(PairwiseEncoder::default()
 			.encode(&mut db, &AtMostOne { lits: vec![3, 4] })
 			.is_ok());
-		assert!(LinearEncoder::<ArbLinEncoder>::default()
+		assert!(LinearEncoder::<StaticLinEncoder<AdderEncoder>>::default()
 			.encode(
 				&mut db,
 				&LinearConstraint::<i32, i32>::new(
