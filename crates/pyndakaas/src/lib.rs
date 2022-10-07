@@ -64,10 +64,6 @@ impl<'a> ClauseDatabase for PyClauseDatabase<'a> {
 	fn new_var(&mut self) -> Self::Lit {
 		self.new_var_fn.new_var()
 	}
-
-	fn new_var_with_label(&mut self, _label: String) -> Self::Lit {
-		self.new_var()
-	}
 }
 
 #[derive(Debug, Clone)]

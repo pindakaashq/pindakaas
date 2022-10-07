@@ -638,28 +638,6 @@ linear_encoder!(
 	}
 );
 
-#[cfg(debug_assertions)]
-#[macro_export]
-macro_rules! new_var {
-	($db:expr) => {
-		$db.new_var()
-	};
-	($db:expr, $lbl:expr) => {
-		$db.new_var_with_label($lbl)
-	};
-}
-
-#[cfg(not(debug_assertions))]
-#[macro_export]
-macro_rules! new_var {
-	($db:expr) => {
-		$db.new_var()
-	};
-	($db:expr, $lbl:expr) => {
-		$db.new_var_with_label($lbl)
-	};
-}
-
 #[cfg(test)]
 mod tests {
 	use itertools::Itertools;
