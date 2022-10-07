@@ -397,59 +397,17 @@ fn ord_plus_ord_le_ord_sparse_dom<PC: PositiveCoefficient>(
 	}))
 }
 
-// #[cfg(test)]
-// mod tests {
-// 	use super::*;
-// 	use crate::tests::TestDB;
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::{
+		helpers::tests::assert_sol,
+		linear::{
+			tests::{construct_terms, linear_test_suite},
+			LimitComp,
+		},
+		Checker, Encoder,
+	};
 
-// 	#[test]
-// 	fn test_totalizer_encode_amo() {
-// 		let mut db = TestDB::new(8)
-// 		// .with_check(|sol| {
-// 		// 	check_pb(
-// 		// 		&vec![2, 3, 4, 5, 3, 4, 6, 8],
-// 		// 		&vec![1, 2, 3, 4, 5, 6, 7, 8],
-// 		// 		Comparator::LessEq,
-// 		// 		10,
-// 		// 		sol,
-// 		// 	)
-// 		// })
-// 		;
-// 		assert!(encode_bool_lin_le_totalizer(
-// 			&mut db,
-// 			&[
-// 				Part::Amo(vec![(1, 2), (2, 3), (3, 4), (4, 5)],),
-// 				Part::Amo(vec![(5, 3), (6, 4), (7, 6), (8, 8)],)
-// 			],
-// 			Comparator::LessEq,
-// 			10 as u32
-// 		)
-// 		.is_ok());
-// 		db.check_complete();
-// 	}
-// 	#[test]
-// 	fn test_totalizer_encode_ic() {
-// 		let mut db = TestDB::new(8)
-// 		// .with_check(|sol| {
-// 		// 	check_pb(
-// 		// 		&vec![2, 3, 4, 5, 3, 4, 6, 8],
-// 		// 		&vec![1, 2, 3, 4, 5, 6, 7, 8],
-// 		// 		Comparator::LessEq,
-// 		// 		10,
-// 		// 		sol,
-// 		// 	)
-// 		// })
-// 		;
-// 		assert!(encode_bool_lin_le_totalizer(
-// 			&mut db,
-// 			&[
-// 				Part::Amo(vec![(1, 2), (2, 3), (3, 4), (4, 5)],),
-// 				Part::Amo(vec![(5, 3), (6, 4), (7, 6), (8, 8)],)
-// 			],
-// 			Comparator::LessEq,
-// 			10 as u32
-// 		)
-// 		.is_ok());
-// 		db.check_complete();
-// 	}
-// }
+	linear_test_suite!(TotalizerEncoder::default());
+}

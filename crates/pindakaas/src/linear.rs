@@ -500,4 +500,29 @@ mod tests {
 			.is_ok());
 		db.check_complete();
 	}
+
+	macro_rules! linear_test_suite {
+		($encoder:expr) => {
+			#[test]
+			fn test_small_gt() {
+				assert_sol!(
+					$encoder,
+					6,
+					&Linear {
+						terms: construct_terms(&[
+							(-1, 3),
+							(-2, 6),
+							(-3, 1),
+							(-4, 2),
+							(-5, 3),
+							(-6, 6)
+						]),
+						cmp: LimitComp::LessEq,
+						k: 19
+					}
+				);
+			}
+		};
+	}
+	pub(crate) use linear_test_suite;
 }
