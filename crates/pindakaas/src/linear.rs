@@ -4,8 +4,8 @@ use std::{
 };
 
 use crate::{
-	AssertPos, AtMostOne, Cardinality, CheckError, Checker, ClauseDatabase, Coefficient, Encoder,
-	IntEncoding, Literal, PairwiseEncoder, PositiveCoefficient, Result, Unsatisfiable,
+	AssertPos, Cardinality, CardinalityOne, CheckError, Checker, ClauseDatabase, Coefficient,
+	Encoder, IntEncoding, Literal, PairwiseEncoder, PositiveCoefficient, Result, Unsatisfiable,
 };
 
 mod adder;
@@ -24,7 +24,7 @@ pub use totalizer::TotalizerEncoder;
 pub enum LinVariant<Lit: Literal, PC: PositiveCoefficient> {
 	Linear(Linear<Lit, PC>),
 	Cardinality(Cardinality<Lit, PC>),
-	AtMostOne(AtMostOne<Lit>),
+	CardinalityOne(CardinalityOne<Lit>),
 	Trivial,
 }
 
@@ -48,8 +48,8 @@ impl<Lit: Literal, PC: PositiveCoefficient> From<Cardinality<Lit, PC>> for Linea
 		}
 	}
 }
-impl<Lit: Literal, PC: PositiveCoefficient> From<AtMostOne<Lit>> for Linear<Lit, PC> {
-	fn from(amo: AtMostOne<Lit>) -> Self {
+impl<Lit: Literal, PC: PositiveCoefficient> From<CardinalityOne<Lit>> for Linear<Lit, PC> {
+	fn from(amo: CardinalityOne<Lit>) -> Self {
 		Self::from(Cardinality::from(amo))
 	}
 }
@@ -485,14 +485,14 @@ impl<
 		PC: PositiveCoefficient,
 		LinEnc: Encoder<DB, Linear<DB::Lit, PC>>,
 		CardEnc: Encoder<DB, Cardinality<DB::Lit, PC>>,
-		AmoEnc: Encoder<DB, AtMostOne<DB::Lit>>,
+		AmoEnc: Encoder<DB, CardinalityOne<DB::Lit>>,
 	> Encoder<DB, LinVariant<DB::Lit, PC>> for StaticLinEncoder<LinEnc, CardEnc, AmoEnc>
 {
 	fn encode(&mut self, db: &mut DB, lin: &LinVariant<DB::Lit, PC>) -> Result {
 		match &lin {
 			LinVariant::Linear(lin) => self.lin_enc.encode(db, lin),
 			LinVariant::Cardinality(card) => self.card_enc.encode(db, card),
-			LinVariant::AtMostOne(amo) => self.amo_enc.encode(db, amo),
+			LinVariant::CardinalityOne(amo) => self.amo_enc.encode(db, amo),
 			LinVariant::Trivial => Ok(()),
 		}
 	}
@@ -546,10 +546,22 @@ mod tests {
 		// two.add_clause(&[-5]).unwrap();
 		// TODO encode this if encoder does not support constraint
 		assert!(PairwiseEncoder::default()
-			.encode(&mut db, &AtMostOne { lits: vec![1, 2] })
+			.encode(
+				&mut db,
+				&CardinalityOne {
+					lits: vec![1, 2],
+					cmp: LimitComp::LessEq
+				}
+			)
 			.is_ok());
 		assert!(PairwiseEncoder::default()
-			.encode(&mut db, &AtMostOne { lits: vec![3, 4] })
+			.encode(
+				&mut db,
+				&CardinalityOne {
+					lits: vec![3, 4],
+					cmp: LimitComp::LessEq
+				}
+			)
 			.is_ok());
 		assert!(LinearEncoder::<StaticLinEncoder<AdderEncoder>>::default()
 			.encode(

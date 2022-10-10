@@ -4,8 +4,8 @@ use num::{One, Zero};
 
 use crate::{
 	linear::{Constraint, LimitComp, Part},
-	AssertPos, AtMostOne, Cardinality, ClauseDatabase, Coefficient, Comparator, LinVariant, Linear,
-	LinearConstraint, Literal, Result, Unsatisfiable,
+	AssertPos, Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, LinVariant,
+	Linear, LinearConstraint, Literal, Result, Unsatisfiable,
 };
 
 #[derive(Default)]
@@ -402,12 +402,11 @@ impl LinearAggregator {
 				.map(|(lit, _)| lit.clone())
 				.collect::<Vec<DB::Lit>>();
 			if k == C::PosType::one() {
-				// Encode At Least One constraint
-				if cmp == LimitComp::Equal {
-					db.add_clause(&partition.to_vec())?
-				}
-				// Encode At Most One constraint
-				return Ok(LinVariant::AtMostOne(AtMostOne { lits: partition }));
+				// Cardinality One constraint
+				return Ok(LinVariant::CardinalityOne(CardinalityOne {
+					lits: partition,
+					cmp,
+				}));
 			}
 			// Encode count constraint
 			return Ok(LinVariant::Cardinality(Cardinality {
@@ -503,8 +502,9 @@ mod tests {
 					1
 				)
 			),
-			Ok(LinVariant::AtMostOne(AtMostOne {
+			Ok(LinVariant::CardinalityOne(CardinalityOne {
 				lits: vec![1, 2, 3],
+				cmp: LimitComp::LessEq
 			}))
 		);
 		assert_eq!(
@@ -516,8 +516,9 @@ mod tests {
 					2
 				)
 			),
-			Ok(LinVariant::AtMostOne(AtMostOne {
+			Ok(LinVariant::CardinalityOne(CardinalityOne {
 				lits: vec![1, 2, 3],
+				cmp: LimitComp::LessEq
 			}))
 		);
 
@@ -635,7 +636,7 @@ mod tests {
 
 	#[test]
 	fn test_equal_one() {
-		let mut db = TestDB::new(3).expect_clauses(vec![vec![1, 2, 3]]);
+		let mut db = TestDB::new(3).expect_clauses(vec![]);
 		// An exactly one constraint adds an at most one constraint + a clause for all literals
 		assert_eq!(
 			LinearAggregator::default().aggregate(
@@ -646,8 +647,9 @@ mod tests {
 					1
 				)
 			),
-			Ok(LinVariant::AtMostOne(AtMostOne {
+			Ok(LinVariant::CardinalityOne(CardinalityOne {
 				lits: vec![1, 2, 3],
+				cmp: LimitComp::Equal
 			}))
 		);
 		db.check_complete()
@@ -684,8 +686,9 @@ mod tests {
 					-2,
 				)
 			),
-			Ok(LinVariant::AtMostOne(AtMostOne {
+			Ok(LinVariant::CardinalityOne(CardinalityOne {
 				lits: vec![-1, -2, -3],
+				cmp: LimitComp::LessEq
 			}))
 		);
 		assert_eq!(
@@ -994,8 +997,8 @@ mod tests {
 						false
 					}
 				}
-				LinVariant::AtMostOne(amo) => {
-					if let LinVariant::AtMostOne(oamo) = other {
+				LinVariant::CardinalityOne(amo) => {
+					if let LinVariant::CardinalityOne(oamo) = other {
 						liteq(&amo.lits, &oamo.lits)
 					} else {
 						false
