@@ -23,14 +23,14 @@ impl<DB: ClauseDatabase, PC: PositiveCoefficient> Encoder<DB, Linear<DB::Lit, PC
 mod tests {
 	use super::*;
 	use crate::{
-		at_most_one::tests::amo_test_suite,
+		cardinality_one::tests::card1_test_suite,
 		helpers::tests::assert_sol,
 		linear::{
 			tests::{construct_terms, linear_test_suite},
 			LimitComp,
 		},
-		AtMostOne, Checker, Encoder,
+		CardinalityOne, Checker, Encoder,
 	};
 	linear_test_suite!(BddEncoder::default());
-	amo_test_suite!(BddEncoder::default());
+	card1_test_suite!(BddEncoder::default());
 }
