@@ -1,4 +1,6 @@
-use crate::{CheckError, Checker, Literal, Unsatisfiable};
+use crate::{
+	linear::LimitComp, CheckError, Checker, ClauseDatabase, Literal, Result, Unsatisfiable,
+};
 
 mod ladder;
 mod pairwise;
@@ -6,13 +8,13 @@ mod pairwise;
 pub use ladder::LadderEncoder;
 pub use pairwise::PairwiseEncoder;
 
-// TODO: Should be changed to support either AMO or ExactlyOne
 #[derive(Debug, Clone)]
-pub struct AtMostOne<Lit: Literal> {
+pub struct CardinalityOne<Lit: Literal> {
 	pub(crate) lits: Vec<Lit>,
+	pub(crate) cmp: LimitComp,
 }
 
-impl<Lit: Literal> Checker for AtMostOne<Lit> {
+impl<Lit: Literal> Checker for CardinalityOne<Lit> {
 	type Lit = Lit;
 
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), crate::CheckError<Self::Lit>> {
@@ -32,17 +34,26 @@ impl<Lit: Literal> Checker for AtMostOne<Lit> {
 	}
 }
 
+pub(crate) fn at_least_one_clause<DB: ClauseDatabase>(
+	db: &mut DB,
+	card1: &CardinalityOne<DB::Lit>,
+) -> Result {
+	debug_assert_eq!(card1.cmp, LimitComp::Equal);
+	db.add_clause(&card1.lits)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
-	macro_rules! amo_test_suite {
+	macro_rules! card1_test_suite {
 		($encoder:expr) => {
 			#[test]
 			fn test_amo_pair() {
 				assert_sol!(
 					$encoder,
 					2,
-					&AtMostOne {
-						lits: vec![1, 2]
+					&CardinalityOne {
+						lits: vec![1, 2],
+						cmp: LimitComp::LessEq
 					}
 					=> vec![vec![-1, -2], vec![1, -2], vec![-1, 2]]
 				);
@@ -52,8 +63,9 @@ pub(crate) mod tests {
 				assert_sol!(
 					$encoder,
 					2,
-					&AtMostOne {
-						lits: vec![1, -2]
+					&CardinalityOne {
+						lits: vec![1, -2],
+						cmp: LimitComp::LessEq
 					}
 					=> vec![vec![-1, -2], vec![-1, 2], vec![1, 2]]
 				);
@@ -63,8 +75,9 @@ pub(crate) mod tests {
 				assert_sol!(
 					$encoder,
 					2,
-					&AtMostOne {
-						lits: vec![-1, -2]
+					&CardinalityOne {
+						lits: vec![-1, -2],
+						cmp: LimitComp::LessEq
 					}
 					=> vec![vec![-1, 2], vec![1, -2], vec![1, 2]]
 				);
@@ -74,8 +87,9 @@ pub(crate) mod tests {
 				assert_sol!(
 					$encoder,
 					3,
-					&AtMostOne {
-						lits: vec![1, 2, 3]
+					&CardinalityOne {
+						lits: vec![1, 2, 3],
+						cmp: LimitComp::LessEq
 					}
 					=> vec![vec![-1, -2, -3], vec![1, -2, -3], vec![-1, 2, -3], vec![-1, -2, 3]]
 				);
@@ -85,8 +99,9 @@ pub(crate) mod tests {
 				assert_sol!(
 					$encoder,
 					50,
-					&AtMostOne {
-						lits: (1..=50).collect::<Vec<i32>>()
+					&CardinalityOne {
+						lits: (1..=50).collect::<Vec<i32>>(),
+						cmp: LimitComp::LessEq
 					}
 				);
 			}
@@ -95,8 +110,9 @@ pub(crate) mod tests {
 				assert_sol!(
 					$encoder,
 					50,
-					&AtMostOne {
-						lits: (-50..=-1).collect::<Vec<i32>>()
+					&CardinalityOne {
+						lits: (-50..=-1).collect::<Vec<i32>>(),
+						cmp: LimitComp::LessEq
 					}
 				);
 			}
@@ -105,12 +121,13 @@ pub(crate) mod tests {
 				assert_sol!(
 					$encoder,
 					50,
-					&AtMostOne {
-						lits: (1..=50).map(|i| if i % 2 != 0 { -i } else { i }).collect::<Vec<i32>>()
+					&CardinalityOne {
+						lits: (1..=50).map(|i| if i % 2 != 0 { -i } else { i }).collect::<Vec<i32>>(),
+						cmp: LimitComp::LessEq
 					}
 				);
 			}
 		};
 	}
-	pub(crate) use amo_test_suite;
+	pub(crate) use card1_test_suite;
 }

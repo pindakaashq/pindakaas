@@ -18,13 +18,13 @@ use itertools::{Itertools, Position};
 use num::traits::{NumAssignOps, NumOps};
 use num::{PrimInt, Signed, Unsigned};
 
-mod at_most_one;
 mod cardinality;
+mod cardinality_one;
 pub(crate) mod helpers;
 mod linear;
 
-pub use at_most_one::{AtMostOne, LadderEncoder, PairwiseEncoder};
 pub use cardinality::Cardinality;
+pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
 pub use linear::{
 	AdderEncoder, BddEncoder, Comparator, LinExp, LinVariant, Linear, LinearConstraint,
 	LinearEncoder, SwcEncoder, TotalizerEncoder,

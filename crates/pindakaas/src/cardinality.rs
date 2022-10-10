@@ -1,6 +1,6 @@
 use crate::{
 	linear::{LimitComp, LinMarker},
-	AtMostOne, CheckError, Checker, ClauseDatabase, Encoder, Literal, PositiveCoefficient,
+	CardinalityOne, CheckError, Checker, ClauseDatabase, Encoder, Literal, PositiveCoefficient,
 	Unsatisfiable,
 };
 
@@ -11,11 +11,11 @@ pub struct Cardinality<Lit: Literal, PC: PositiveCoefficient> {
 	pub(crate) k: PC,
 }
 
-impl<Lit: Literal, PC: PositiveCoefficient> From<AtMostOne<Lit>> for Cardinality<Lit, PC> {
-	fn from(amo: AtMostOne<Lit>) -> Self {
+impl<Lit: Literal, PC: PositiveCoefficient> From<CardinalityOne<Lit>> for Cardinality<Lit, PC> {
+	fn from(card1: CardinalityOne<Lit>) -> Self {
 		Self {
-			lits: amo.lits,
-			cmp: LimitComp::LessEq,
+			lits: card1.lits,
+			cmp: card1.cmp,
 			k: PC::one(),
 		}
 	}
@@ -46,9 +46,9 @@ impl<Lit: Literal, PC: PositiveCoefficient> Checker for Cardinality<Lit, PC> {
 
 // Automatically implement AtMostOne encoding when you can encode Cardinality constraints
 impl<DB: ClauseDatabase, Enc: Encoder<DB, Cardinality<DB::Lit, u8>> + CardMarker>
-	Encoder<DB, AtMostOne<DB::Lit>> for Enc
+	Encoder<DB, CardinalityOne<DB::Lit>> for Enc
 {
-	fn encode(&mut self, db: &mut DB, con: &AtMostOne<DB::Lit>) -> crate::Result {
+	fn encode(&mut self, db: &mut DB, con: &CardinalityOne<DB::Lit>) -> crate::Result {
 		self.encode(db, &Cardinality::<DB::Lit, u8>::from(con.clone()))
 	}
 }
