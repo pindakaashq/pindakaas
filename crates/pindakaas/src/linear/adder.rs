@@ -277,12 +277,14 @@ fn force_carry<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Re
 mod tests {
 	use super::*;
 	use crate::{
+		at_most_one::tests::amo_test_suite,
 		helpers::tests::assert_sol,
 		linear::{
 			tests::{construct_terms, linear_test_suite},
 			LimitComp,
 		},
-		Checker, Encoder,
+		AtMostOne, Checker, Encoder,
 	};
 	linear_test_suite!(AdderEncoder::default());
+	amo_test_suite!(AdderEncoder::default());
 }

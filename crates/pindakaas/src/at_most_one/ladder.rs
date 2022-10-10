@@ -29,6 +29,9 @@ mod tests {
 	use super::*;
 	use crate::{helpers::tests::assert_enc_sol, Checker};
 
+	// TODO: Ladder is ExactlyOne, not AtMostOne
+	// amo_test_suite!(LadderEncoder::default());
+
 	#[test]
 	fn test_amo_ladder() {
 		assert_enc_sol!(
