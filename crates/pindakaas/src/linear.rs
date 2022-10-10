@@ -41,7 +41,7 @@ impl<Lit: Literal, PC: PositiveCoefficient> From<Cardinality<Lit, PC>> for Linea
 			terms: card
 				.lits
 				.into_iter()
-				.map(|l| Part::Amo(Vec::from([(l, PC::one())])))
+				.map(|l| Part::Amo(vec![(l, PC::one())]))
 				.collect(),
 			cmp: card.cmp,
 			k: card.k,
@@ -277,13 +277,13 @@ impl<'a, Lit: Literal, C: Coefficient> From<IntEncoding<'a, Lit, C>> for LinExp<
 				}
 				Self {
 					terms,
-					constraints: Vec::from([(Constraint::AtMostOne, vals.len())]),
+					constraints: vec![(Constraint::AtMostOne, vals.len())],
 					..Default::default()
 				}
 			}
 			IntEncoding::Order { first, vals } => Self {
 				terms: vals.iter().map(|lit| (lit.clone(), C::one())).collect(),
-				constraints: Vec::from([(Constraint::ImplicationChain, vals.len())]),
+				constraints: vec![(Constraint::ImplicationChain, vals.len())],
 				add: first,
 				..Default::default()
 			},
