@@ -46,6 +46,7 @@ pub(crate) fn at_least_one_clause<DB: ClauseDatabase>(
 pub(crate) mod tests {
 	macro_rules! card1_test_suite {
 		($encoder:expr) => {
+			// ------ At Most One testing ------
 			#[test]
 			fn test_amo_pair() {
 				assert_sol!(
@@ -127,6 +128,89 @@ pub(crate) mod tests {
 					}
 				);
 			}
+			// ------ At Most One testing ------
+			#[test]
+			fn test_eo_pair() {
+				assert_sol!(
+					$encoder,
+					2,
+					&CardinalityOne {
+						lits: vec![1, 2],
+						cmp: LimitComp::Equal
+					}
+					=> vec![vec![1, -2], vec![-1, 2]]
+				);
+			}
+			#[test]
+			fn test_eo_one_neg() {
+				assert_sol!(
+					$encoder,
+					2,
+					&CardinalityOne {
+						lits: vec![1, -2],
+						cmp: LimitComp::Equal
+					}
+					=> vec![vec![-1, -2], vec![1, 2]]
+				);
+			}
+			#[test]
+			fn test_eo_neg_only() {
+				assert_sol!(
+					$encoder,
+					2,
+					&CardinalityOne {
+						lits: vec![-1, -2],
+						cmp: LimitComp::Equal
+					}
+					=> vec![vec![-1, 2], vec![1, -2]]
+				);
+			}
+			#[test]
+			fn test_eo_triple() {
+				assert_sol!(
+					$encoder,
+					3,
+					&CardinalityOne {
+						lits: vec![1, 2, 3],
+						cmp: LimitComp::Equal
+					}
+					=> vec![vec![1, -2, -3], vec![-1, 2, -3], vec![-1, -2, 3]]
+				);
+			}
+			#[test]
+			fn test_eo_large() {
+				assert_sol!(
+					$encoder,
+					50,
+					&CardinalityOne {
+						lits: (1..=50).collect::<Vec<i32>>(),
+						cmp: LimitComp::Equal
+					}
+				);
+			}
+			#[test]
+			fn test_eo_large_neg() {
+				assert_sol!(
+					$encoder,
+					50,
+					&CardinalityOne {
+						lits: (-50..=-1).collect::<Vec<i32>>(),
+						cmp: LimitComp::Equal
+					}
+				);
+			}
+			#[test]
+			fn test_eo_large_mix() {
+				assert_sol!(
+					$encoder,
+					50,
+					&CardinalityOne {
+						lits: (1..=50).map(|i| if i % 2 != 0 { -i } else { i }).collect::<Vec<i32>>(),
+						cmp: LimitComp::Equal
+					}
+				);
+			}
+
 		};
 	}
 	pub(crate) use card1_test_suite;
