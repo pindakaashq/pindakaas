@@ -21,7 +21,13 @@ impl<DB: ClauseDatabase> Encoder<DB, AtMostOne<DB::Lit>> for PairwiseEncoder {
 mod tests {
 	use super::*;
 
-	use crate::{helpers::tests::assert_enc_sol, Checker};
+	use crate::{
+		at_most_one::tests::amo_test_suite,
+		helpers::tests::{assert_enc_sol, assert_sol},
+		Checker,
+	};
+
+	amo_test_suite!(PairwiseEncoder::default());
 
 	#[test]
 	fn test_amo_pairwise() {
