@@ -85,6 +85,16 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		part: &Part<Lit, PosCoeff<C>>,
 		ub: PosCoeff<C>,
 	) -> Self {
+		// TODO add_consistency on coupled leaves (wherever not equal to principal vars)
+		// if add_consistency {
+		// 	for leaf in &leaves {
+		// 		leaf.encode_consistency(db);
+		// 	}
+		// }
+
+		// couple given encodings to the order encoding
+		// TODO experiment with adding consistency constraint to totalizer nodes (including on leaves!)
+
 		match part {
 			Part::Amo(terms) => {
 				let terms: Vec<(PosCoeff<C>, DB::Lit)> = terms

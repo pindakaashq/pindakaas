@@ -1,5 +1,7 @@
-use crate::linear::totalizer::{totalize, Structure};
-use crate::{ClauseDatabase, Coefficient, Encoder, Linear, Result};
+use crate::{
+	int::{ord_plus_ord_le_ord, IntVar},
+	new_var, ClauseDatabase, Coefficient, Encoder, Linear, Result,
+};
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)
 #[derive(Clone, Default)]
@@ -16,7 +18,29 @@ impl SwcEncoder {
 
 impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for SwcEncoder {
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
-		totalize(db, lin, Structure::Swc, self.add_consistency)
+		// TODO not possible to fix since both closures use db?
+		#[allow(clippy::needless_collect)]
+		let xs = lin.terms
+			.iter()
+			.map(|part| IntVar::from_part_using_le_ord(db, part, lin.k.clone()))
+			.collect::<Vec<_>>();
+		xs.into_iter().enumerate().reduce(|(i, prev), (_, leaf)| {
+			let next = IntVar::new(
+				num::iter::range_inclusive(C::one(), *lin.k)
+					.map(|j| (j.into(), new_var!(db, format!("w_{}>={:?}", i + 1, j))))
+					.collect(),
+				C::zero().into(),
+				lin.k.clone(),
+			);
+
+			if self.add_consistency {
+				next.encode_consistency(db);
+			}
+
+			ord_plus_ord_le_ord(db, &prev, &leaf, &next);
+			(i + 1, next)
+		});
+		Ok(())
 	}
 }
 

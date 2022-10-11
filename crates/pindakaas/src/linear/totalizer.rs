@@ -19,101 +19,24 @@ impl TotalizerEncoder {
 
 impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for TotalizerEncoder {
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
-		totalize(db, lin, Structure::Gt, self.add_consistency)
+		assert!(lin.cmp == LimitComp::LessEq);
+		let xs = lin
+			.terms
+			.iter()
+			.map(|part| IntVar::from_part_using_le_ord(db, part, lin.k.clone()))
+			.collect::<Vec<_>>();
+		// The totalizer encoding constructs a binary tree starting from a layer of leaves
+		build_totalizer(
+			xs,
+			db,
+			C::zero().into(),
+			lin.k.clone(),
+			true,
+			self.add_consistency,
+			0,
+		);
+		Ok(())
 	}
-}
-
-pub enum Structure {
-	Gt,
-	Swc,
-	Bdd,
-}
-
-pub fn totalize<DB: ClauseDatabase, C: Coefficient>(
-	db: &mut DB,
-	lin: &Linear<DB::Lit, C>,
-	structure: Structure,
-	add_consistency: bool,
-) -> Result<()> {
-	assert!(lin.cmp == LimitComp::LessEq);
-	let leaves = lin
-		.terms
-		.iter()
-		.map(|part| IntVar::<DB::Lit, C>::from_part_using_le_ord(db, part, lin.k.clone()))
-		.collect::<Vec<_>>();
-
-	// TODO add_consistency on coupled leaves (wherever not equal to principal vars)
-	// if add_consistency {
-	// 	for leaf in &leaves {
-	// 		leaf.encode_consistency(db);
-	// 	}
-	// }
-
-	// couple given encodings to the order encoding
-	// TODO experiment with adding consistency constraint to totalizer nodes (including on leaves!)
-
-	match structure {
-		Structure::Gt => {
-			// The totalizer encoding constructs a binary tree starting from a layer of leaves
-			build_totalizer(
-				leaves,
-				db,
-				C::zero().into(),
-				lin.k.clone(),
-				true,
-				add_consistency,
-				0,
-			);
-		}
-		Structure::Swc => {
-			leaves
-				.into_iter()
-				.enumerate()
-				.reduce(|(i, prev), (_, leaf)| {
-					let next = IntVar::new(
-						num::iter::range_inclusive(C::one(), *lin.k)
-							.map(|j| (j.into(), new_var!(db, format!("w_{}>={:?}", i + 1, j))))
-							.collect(),
-						C::zero().into(),
-						lin.k.clone(),
-					);
-
-					if add_consistency {
-						next.encode_consistency(db);
-					}
-
-					ord_plus_ord_le_ord(db, &prev, &leaf, &next);
-					(i + 1, next)
-				});
-		}
-		Structure::Bdd => {
-			// TODO still need to figure out 'long edges'
-			// TODO bdd construction and reduction
-			leaves.into_iter().enumerate().reduce(|(i, v_i), (_, x_i)| {
-				let parent = IntVar::new(
-					ord_plus_ord_le_ord_sparse_dom(
-						v_i.iter().map(|(_, c)| *c).collect(),
-						x_i.iter().map(|(_, c)| *c).collect(),
-						C::zero(),
-						*lin.k,
-					)
-					.into_iter()
-					.map(|c| (c.into(), new_var!(db, format!("w_{}>={:?}", i + 1, c))))
-					.collect(),
-					C::zero().into(),
-					lin.k.clone(),
-				);
-
-				if add_consistency {
-					parent.encode_consistency(db);
-				}
-
-				ord_plus_ord_le_ord(db, &v_i, &x_i, &parent);
-				(i + 1, parent)
-			});
-		}
-	};
-	Ok(())
 }
 
 fn build_totalizer<DB: ClauseDatabase + ?Sized, C: Coefficient>(
