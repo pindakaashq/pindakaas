@@ -1,11 +1,11 @@
 use std::{
 	collections::VecDeque,
-	ops::{Add, AddAssign, Mul, MulAssign},
+	ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign},
 };
 
 use crate::{
-	AssertPos, Cardinality, CardinalityOne, CheckError, Checker, ClauseDatabase, Coefficient,
-	Encoder, IntEncoding, Literal, PairwiseEncoder, PositiveCoefficient, Result, Unsatisfiable,
+	Cardinality, CardinalityOne, CheckError, Checker, ClauseDatabase, Coefficient, Encoder,
+	IntEncoding, Literal, PairwiseEncoder, Result, Unsatisfiable,
 };
 
 mod adder;
@@ -20,49 +20,73 @@ pub use bdd::BddEncoder;
 pub use swc::SwcEncoder;
 pub use totalizer::TotalizerEncoder;
 
+/// PosCoeff is a container used when coefficients that are guaranteed
+/// by the programmer to be 0 or greater.
+///
+/// # Warning
+/// The [`From`] implementation of this type will panic if the  
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+pub struct PosCoeff<C: Coefficient>(C);
+impl<C: Coefficient> From<C> for PosCoeff<C> {
+	fn from(c: C) -> Self {
+		assert!(
+			!c.is_negative(),
+			"could not create PosCoeff, value was found to be negative"
+		);
+		Self(c)
+	}
+}
+impl<C: Coefficient> Deref for PosCoeff<C> {
+	type Target = C;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+impl<C: Coefficient> DerefMut for PosCoeff<C> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0
+	}
+}
 #[derive(Debug)]
-pub enum LinVariant<Lit: Literal, PC: PositiveCoefficient> {
-	Linear(Linear<Lit, PC>),
-	Cardinality(Cardinality<Lit, PC>),
+pub enum LinVariant<Lit: Literal, C: Coefficient> {
+	Linear(Linear<Lit, C>),
+	Cardinality(Cardinality<Lit, C>),
 	CardinalityOne(CardinalityOne<Lit>),
 	Trivial,
 }
 
 #[derive(Debug)]
-pub struct Linear<Lit: Literal, PC: PositiveCoefficient> {
-	pub(crate) terms: Vec<Part<Lit, PC>>,
+pub struct Linear<Lit: Literal, C: Coefficient> {
+	pub(crate) terms: Vec<Part<Lit, PosCoeff<C>>>,
 	pub(crate) cmp: LimitComp,
-	pub(crate) k: PC,
+	pub(crate) k: PosCoeff<C>,
 }
 
-impl<Lit: Literal, PC: PositiveCoefficient> From<Cardinality<Lit, PC>> for Linear<Lit, PC> {
-	fn from(card: Cardinality<Lit, PC>) -> Self {
+impl<Lit: Literal, C: Coefficient> From<Cardinality<Lit, C>> for Linear<Lit, C> {
+	fn from(card: Cardinality<Lit, C>) -> Self {
 		Self {
 			terms: card
 				.lits
 				.into_iter()
-				.map(|l| Part::Amo(vec![(l, PC::one())]))
+				.map(|l| Part::Amo(vec![(l, C::one().into())]))
 				.collect(),
 			cmp: card.cmp,
 			k: card.k,
 		}
 	}
 }
-impl<Lit: Literal, PC: PositiveCoefficient> From<CardinalityOne<Lit>> for Linear<Lit, PC> {
+impl<Lit: Literal, C: Coefficient> From<CardinalityOne<Lit>> for Linear<Lit, C> {
 	fn from(amo: CardinalityOne<Lit>) -> Self {
 		Self::from(Cardinality::from(amo))
 	}
 }
 
 // Automatically implement Cardinality encoding when you can encode Linear constraints
-impl<
-		DB: ClauseDatabase,
-		PC: PositiveCoefficient,
-		Enc: Encoder<DB, Linear<DB::Lit, PC>> + LinMarker,
-	> Encoder<DB, Cardinality<DB::Lit, PC>> for Enc
+impl<DB: ClauseDatabase, C: Coefficient, Enc: Encoder<DB, Linear<DB::Lit, C>> + LinMarker>
+	Encoder<DB, Cardinality<DB::Lit, C>> for Enc
 {
-	fn encode(&mut self, db: &mut DB, con: &Cardinality<DB::Lit, PC>) -> crate::Result {
-		self.encode(db, &Linear::<DB::Lit, PC>::from(con.clone()))
+	fn encode(&mut self, db: &mut DB, con: &Cardinality<DB::Lit, C>) -> crate::Result {
+		self.encode(db, &Linear::<DB::Lit, C>::from(con.clone()))
 	}
 }
 // local marker trait, to ensure the previous definition only applies within this crate
@@ -411,25 +435,25 @@ impl<Lit: Literal, C: Coefficient> Mul<C> for LinExp<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, PC: PositiveCoefficient> Checker for Linear<Lit, PC> {
+impl<Lit: Literal, C: Coefficient> Checker for Linear<Lit, C> {
 	type Lit = Lit;
 
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), crate::CheckError<Self::Lit>> {
 		let lhs = &self
 			.terms
 			.iter()
-			.flat_map(|part| part.iter().map(|(lit, coef)| (lit.clone(), *coef)))
-			.fold(PC::zero(), |acc, (lit, coef)| {
+			.flat_map(|part| part.iter().map(|(lit, coef)| (lit.clone(), **coef)))
+			.fold(C::zero(), |acc, (lit, coef)| {
 				let a = solution.iter().find(|x| x.var() == lit.var());
 				acc + if lit == *a.unwrap() {
-					PC::one()
+					C::one()
 				} else {
-					PC::zero()
+					C::zero()
 				} * coef
 			});
 		if match self.cmp {
-			LimitComp::LessEq => *lhs <= self.k,
-			LimitComp::Equal => *lhs == self.k,
+			LimitComp::LessEq => *lhs <= *self.k,
+			LimitComp::Equal => *lhs == *self.k,
 		} {
 			Ok(())
 		} else {
@@ -443,11 +467,8 @@ pub struct LinearEncoder<Enc = StaticLinEncoder> {
 	enc: Enc,
 }
 
-impl<
-		DB: ClauseDatabase,
-		C: Coefficient + AssertPos,
-		Enc: Encoder<DB, LinVariant<DB::Lit, C::PosType>>,
-	> Encoder<DB, LinearConstraint<DB::Lit, C>> for LinearEncoder<Enc>
+impl<DB: ClauseDatabase, C: Coefficient, Enc: Encoder<DB, LinVariant<DB::Lit, C>>>
+	Encoder<DB, LinearConstraint<DB::Lit, C>> for LinearEncoder<Enc>
 {
 	fn encode(&mut self, db: &mut DB, lin: &LinearConstraint<DB::Lit, C>) -> Result {
 		let variant = LinearAggregator::default().aggregate(db, lin)?;
@@ -482,13 +503,13 @@ impl<LinEnc, CardEnc, AmoEnc> StaticLinEncoder<LinEnc, CardEnc, AmoEnc> {
 
 impl<
 		DB: ClauseDatabase,
-		PC: PositiveCoefficient,
-		LinEnc: Encoder<DB, Linear<DB::Lit, PC>>,
-		CardEnc: Encoder<DB, Cardinality<DB::Lit, PC>>,
+		C: Coefficient,
+		LinEnc: Encoder<DB, Linear<DB::Lit, C>>,
+		CardEnc: Encoder<DB, Cardinality<DB::Lit, C>>,
 		AmoEnc: Encoder<DB, CardinalityOne<DB::Lit>>,
-	> Encoder<DB, LinVariant<DB::Lit, PC>> for StaticLinEncoder<LinEnc, CardEnc, AmoEnc>
+	> Encoder<DB, LinVariant<DB::Lit, C>> for StaticLinEncoder<LinEnc, CardEnc, AmoEnc>
 {
-	fn encode(&mut self, db: &mut DB, lin: &LinVariant<DB::Lit, PC>) -> Result {
+	fn encode(&mut self, db: &mut DB, lin: &LinVariant<DB::Lit, C>) -> Result {
 		match &lin {
 			LinVariant::Linear(lin) => self.lin_enc.encode(db, lin),
 			LinVariant::Cardinality(card) => self.card_enc.encode(db, card),
@@ -506,10 +527,10 @@ mod tests {
 		PairwiseEncoder,
 	};
 
-	pub(crate) fn construct_terms(terms: &[(i32, u32)]) -> Vec<Part<i32, u32>> {
+	pub(crate) fn construct_terms(terms: &[(i32, i32)]) -> Vec<Part<i32, PosCoeff<i32>>> {
 		terms
 			.iter()
-			.map(|(lit, coef)| Part::Amo(vec![(lit.clone(), coef.clone())]))
+			.map(|(lit, coef)| Part::Amo(vec![(lit.clone(), PosCoeff::from(coef.clone()))]))
 			.collect()
 	}
 
@@ -595,7 +616,7 @@ mod tests {
 							(-6, 6)
 						]),
 						cmp: LimitComp::LessEq,
-						k: 19
+						k: 19.into()
 					}
 				);
 			}
