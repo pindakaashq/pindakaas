@@ -467,6 +467,15 @@ pub struct LinearEncoder<Enc = StaticLinEncoder> {
 	enc: Enc,
 }
 
+impl<Enc> LinearEncoder<Enc> {
+	pub fn new(enc: Enc) -> Self {
+		Self { enc }
+	}
+	pub fn variant_encoder(&mut self) -> &mut Enc {
+		&mut self.enc
+	}
+}
+
 impl<DB: ClauseDatabase, C: Coefficient, Enc: Encoder<DB, LinVariant<DB::Lit, C>>>
 	Encoder<DB, LinearConstraint<DB::Lit, C>> for LinearEncoder<Enc>
 {
@@ -490,6 +499,13 @@ pub struct StaticLinEncoder<
 }
 
 impl<LinEnc, CardEnc, AmoEnc> StaticLinEncoder<LinEnc, CardEnc, AmoEnc> {
+	pub fn new(lin_enc: LinEnc, card_enc: CardEnc, amo_enc: AmoEnc) -> Self {
+		Self {
+			lin_enc,
+			card_enc,
+			amo_enc,
+		}
+	}
 	pub fn lin_encoder(&mut self) -> &mut LinEnc {
 		&mut self.lin_enc
 	}
