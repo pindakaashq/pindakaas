@@ -618,7 +618,20 @@ mod tests {
 	macro_rules! linear_test_suite {
 		($encoder:expr) => {
 			#[test]
-			fn test_small_gt() {
+			fn test_small_le_1() {
+				assert_sol!(
+					$encoder,
+					3,
+					&Linear {
+						terms: construct_terms(&[(1, 2), (2, 3), (3, 5),]),
+						cmp: LimitComp::LessEq,
+						k: 6.into()
+					}
+				);
+			}
+
+			#[test]
+			fn test_small_le_2() {
 				assert_sol!(
 					$encoder,
 					6,

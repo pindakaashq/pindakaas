@@ -25,7 +25,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.map(|part| IntVar::from_part_using_le_ord(db, part, lin.k.clone()))
 			.collect::<Vec<_>>();
 		xs.into_iter().enumerate().reduce(|(i, prev), (_, leaf)| {
-			let next = IntVar::new(
+			let next = IntVar::from_terms(
 				num::iter::range_inclusive(C::one(), *lin.k)
 					.map(|j| (j.into(), new_var!(db, format!("w_{}>={:?}", i + 1, j))))
 					.collect(),

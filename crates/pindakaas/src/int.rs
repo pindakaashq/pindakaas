@@ -1,3 +1,4 @@
+use iset::IntervalMap;
 use itertools::Itertools;
 
 use crate::{linear::Part, new_var, ClauseDatabase, Coefficient, Literal, PosCoeff};
@@ -23,17 +24,27 @@ impl<Lit: Literal> Neg for LitOrConst<Lit> {
 	}
 }
 
+// TODO maybe C -> PosCoeff<C>
 #[derive(Debug, Clone)]
 pub(crate) struct IntVar<Lit: Literal, C: Coefficient> {
-	xs: HashMap<C, Lit>,
+	xs: IntervalMap<C, Lit>,
 	lb: PosCoeff<C>,
 	ub: PosCoeff<C>,
 }
 
 impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
-	pub fn new(terms: Vec<(PosCoeff<C>, Lit)>, lb: PosCoeff<C>, ub: PosCoeff<C>) -> Self {
+	pub fn new(xs: IntervalMap<C, Lit>, lb: PosCoeff<C>, ub: PosCoeff<C>) -> Self {
+		Self { xs, lb, ub }
+	}
+
+	pub fn from_terms(terms: Vec<(PosCoeff<C>, Lit)>, lb: PosCoeff<C>, ub: PosCoeff<C>) -> Self {
+		// TODO perhaps lb/ub should always be equal to min/max of terms
 		Self {
-			xs: HashMap::from_iter(terms.into_iter().map(|(c, l)| (*c, l))),
+			xs: IntervalMap::from_sorted(
+				terms
+					.into_iter()
+					.map(|(coef, lit)| (*coef..(*coef + C::one()), lit)),
+			),
 			lb,
 			ub,
 		}
@@ -41,7 +52,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 
 	pub fn constant(c: PosCoeff<C>) -> Self {
 		Self {
-			xs: HashMap::new(),
+			xs: IntervalMap::new(),
 			lb: c.clone(),
 			ub: c,
 		}
@@ -61,28 +72,43 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		} else if v > self.ub() {
 			LitOrConst::Const(false)
 		} else {
-			LitOrConst::Lit(self.xs[&v].clone())
+			match self.xs.overlap(*v).collect::<Vec<_>>()[..] {
+				[(_, x)] => LitOrConst::Lit(x.clone()),
+				_ => panic!(),
+			}
 		}
 	}
+
 	pub fn iter(&self) -> impl Iterator<Item = (LitOrConst<Lit>, PosCoeff<C>)> + '_ {
 		std::iter::once((LitOrConst::Const(true), self.lb.clone())).chain(
 			self.xs
-				.iter()
-				.map(|(c, l)| (LitOrConst::Lit(l.clone()), (*c).into())),
+				.iter(..)
+				.map(|(c, l)| (LitOrConst::Lit(l.clone()), (c.end + C::one()).into())),
 		)
 	}
 
 	pub fn encode_consistency<DB: ClauseDatabase<Lit = Lit> + ?Sized>(&self, db: &mut DB) {
-		self.xs.keys().sorted().tuple_windows().for_each(|(a, b)| {
-			db.add_clause(&[self.xs[b].negate(), self.xs[a].clone()])
-				.unwrap();
-		});
+		self.iter()
+			.tuple_windows()
+			.skip(1)
+			.for_each(|((lit_a, _), (lit_b, _))| {
+				// TODO clean up
+				if let LitOrConst::Lit(a) = lit_a {
+					if let LitOrConst::Lit(b) = lit_b {
+						db.add_clause(&[a.negate(), b]).unwrap();
+					} else {
+						panic!();
+					}
+				} else {
+					panic!();
+				}
+			});
 	}
 
-	/// Constructs IntVar `x` for a set of variables `S` so that `S` ≦ `x` using order encoding
+	/// Constructs IntVar `y` for linear expression `xs` so that ∑ xs ≦ y, using order encoding
 	pub fn from_part_using_le_ord<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
-		part: &Part<Lit, PosCoeff<C>>,
+		xs: &Part<Lit, PosCoeff<C>>,
 		ub: PosCoeff<C>,
 	) -> Self {
 		// TODO add_consistency on coupled leaves (wherever not equal to principal vars)
@@ -95,7 +121,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		// couple given encodings to the order encoding
 		// TODO experiment with adding consistency constraint to totalizer nodes (including on leaves!)
 
-		match part {
+		match xs {
 			Part::Amo(terms) => {
 				let terms: Vec<(PosCoeff<C>, DB::Lit)> = terms
 					.iter()
@@ -104,35 +130,42 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 				// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
 				let mut h: HashMap<C, Vec<DB::Lit>> = HashMap::with_capacity(terms.len());
 				for (coef, lit) in terms {
+					debug_assert!(coef <= ub);
 					h.entry(*coef).or_insert_with(Vec::new).push(lit);
 				}
 
-				IntVar::new(
-					h.into_iter()
-						.map(|(coef, lits)| {
-							if lits.len() == 1 {
-								(coef.into(), lits[0].clone())
-							} else {
-								let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
-								for lit in lits {
-									db.add_clause(&[lit.negate(), o.clone()]).unwrap();
-								}
-								(coef.into(), o)
+				let xs = h
+					.into_iter()
+					.map(|(coef, lits)| {
+						if lits.len() == 1 {
+							(coef.into(), lits[0].clone())
+						} else {
+							let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
+							for lit in lits {
+								db.add_clause(&[lit.negate(), o.clone()]).unwrap();
 							}
-						})
-						.collect(),
-					C::zero().into(),
-					ub,
-				)
+							(coef.into(), o)
+						}
+					})
+					.collect::<Vec<(PosCoeff<C>, _)>>();
+
+				let ub = xs
+					.iter()
+					.map(|(c, _)| (*c.clone()))
+					.max()
+					.unwrap_or(*ub)
+					.into();
+				IntVar::from_terms(xs, C::zero().into(), ub)
 			}
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
 			Part::Ic(terms) => {
 				let mut acc = C::zero(); // running sum
-				IntVar::new(
+				IntVar::from_terms(
 					terms
 						.iter()
 						.map(|(lit, coef)| {
 							acc += **coef;
+							debug_assert!(acc <= *ub);
 							(acc.into(), lit.clone())
 						})
 						.collect(),
@@ -189,8 +222,8 @@ pub(crate) fn ord_plus_ord_le_ord_sparse_dom<C: Coefficient>(
 	b: Vec<C>,
 	l: C,
 	u: C,
-) -> HashSet<C> {
-	HashSet::from_iter(a.iter().flat_map(|a| {
+) -> Vec<C> {
+	HashSet::<C>::from_iter(a.iter().flat_map(|a| {
 		b.iter().filter_map(move |b| {
 			// TODO refactor: use then_some when stabilized
 			if *a + *b > l && *a + *b <= u {
@@ -200,4 +233,7 @@ pub(crate) fn ord_plus_ord_le_ord_sparse_dom<C: Coefficient>(
 			}
 		})
 	}))
+	.into_iter()
+	.sorted()
+	.collect::<Vec<_>>()
 }
