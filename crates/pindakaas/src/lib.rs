@@ -16,7 +16,7 @@ use std::ops::Neg;
 
 use itertools::{Itertools, Position};
 use num::traits::{NumAssignOps, NumOps};
-use num::{PrimInt, Signed, Unsigned};
+use num::{PrimInt, Signed};
 
 mod cardinality;
 mod cardinality_one;
@@ -27,7 +27,7 @@ pub use cardinality::Cardinality;
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
 pub use linear::{
 	AdderEncoder, BddEncoder, Comparator, LinExp, LinVariant, Linear, LinearConstraint,
-	LinearEncoder, SwcEncoder, TotalizerEncoder,
+	LinearEncoder, PosCoeff, SwcEncoder, TotalizerEncoder,
 };
 
 /// Literal is the super-trait for types that can be used to represent boolean
@@ -148,37 +148,8 @@ impl<Lit: Literal> fmt::Display for CheckError<Lit> {
 
 /// Coefficient in PB constraints are represented by types that implement the
 /// `Coefficient` constraint.
-pub trait Coefficient: Signed + PrimInt + NumAssignOps + NumOps + fmt::Debug {}
-impl<T: Signed + PrimInt + NumAssignOps + NumOps + fmt::Debug> Coefficient for T {}
-/// PositiveCoefficient is a trait used for types used for coefficients that
-/// have been simplified.
-pub trait PositiveCoefficient:
-	Unsigned + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug
-{
-}
-impl<T: Unsigned + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug> PositiveCoefficient for T {}
-
-pub trait AssertPos: Coefficient {
-	type PosType: PositiveCoefficient;
-	fn assert_pos(self) -> Self::PosType;
-}
-macro_rules! try_into_assert_pos {
-	($signed:ty, $unsigned:ty) => {
-		impl $crate::AssertPos for $signed {
-			type PosType = $unsigned;
-			fn assert_pos(self) -> Self::PosType {
-				debug_assert!(self >= 0, "assert_pos called on a negative coefficient");
-				self.try_into()
-					.expect("coeffient could not be converted into specified positive type")
-			}
-		}
-	};
-}
-try_into_assert_pos!(i8, u8);
-try_into_assert_pos!(i16, u16);
-try_into_assert_pos!(i32, u32);
-try_into_assert_pos!(i64, u64);
-// try_into_assert_pos!(num::BigInt, num::BigUint);
+pub trait Coefficient: Signed + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug {}
+impl<T: Signed + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug> Coefficient for T {}
 
 /// IntEncoding is a enumerated type use to represent Boolean encodings of
 /// integer variables within this library
@@ -250,13 +221,14 @@ mod tests {
 
 	#[test]
 	fn test_positive_coefficients() {
-		assert!(is_poscoeff(1u8));
-		assert!(is_poscoeff(1u16));
-		assert!(is_poscoeff(1u32));
-		assert!(is_poscoeff(1u64));
-		assert!(is_poscoeff(1u128));
+		assert!(is_poscoeff(1i8));
+		assert!(is_poscoeff(1i16));
+		assert!(is_poscoeff(1i32));
+		assert!(is_poscoeff(1i64));
+		assert!(is_poscoeff(1i128));
 	}
-	fn is_poscoeff<T: PositiveCoefficient>(_: T) -> bool {
+	fn is_poscoeff<T: Coefficient>(c: T) -> bool {
+		let _ = PosCoeff::from(c);
 		true
 	}
 }

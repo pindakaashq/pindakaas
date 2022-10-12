@@ -1,22 +1,20 @@
 use std::collections::HashMap;
 
-use num::{One, Zero};
-
 use crate::{
-	linear::{Constraint, LimitComp, Part},
-	AssertPos, Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, LinVariant,
-	Linear, LinearConstraint, Literal, Result, Unsatisfiable,
+	linear::{Constraint, LimitComp, Part, PosCoeff},
+	Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, LinVariant, Linear,
+	LinearConstraint, Literal, Result, Unsatisfiable,
 };
 
 #[derive(Default)]
 pub struct LinearAggregator {}
 
 impl LinearAggregator {
-	pub fn aggregate<DB: ClauseDatabase, C: Coefficient + AssertPos>(
+	pub fn aggregate<DB: ClauseDatabase, C: Coefficient>(
 		&mut self,
 		db: &mut DB,
 		lin: &LinearConstraint<DB::Lit, C>,
-	) -> Result<LinVariant<DB::Lit, C::PosType>> {
+	) -> Result<LinVariant<DB::Lit, C>> {
 		// Convert ≤ to ≥ and aggregate multiple occurrences of the same
 		// variable.
 		let mut agg = HashMap::with_capacity(lin.exp.terms.len());
@@ -94,17 +92,17 @@ impl LinearAggregator {
 		};
 
 		// TODO cannot construct this as a closures due to inner closures problem
-		let convert_term_if_negative = |term: (DB::Lit, C), k: &mut C| -> (DB::Lit, C::PosType) {
+		let convert_term_if_negative = |term: (DB::Lit, C), k: &mut C| -> (DB::Lit, PosCoeff<C>) {
 			let (mut lit, mut coef) = term;
 			if coef.is_negative() {
 				coef = -coef;
 				lit = lit.negate();
 				*k += coef;
 			};
-			(lit, coef.assert_pos())
+			(lit, coef.into())
 		};
 
-		let partition: Vec<Part<DB::Lit, C::PosType>> = partition
+		let partition: Vec<Part<DB::Lit, PosCoeff<C>>> = partition
 			.into_iter()
 			.filter(|part| part.iter().next().is_some()) // filter out empty groups
 			.flat_map(|part| {
@@ -165,7 +163,7 @@ impl LinearAggregator {
 						vec![Part::Amo(
 							terms
 								.into_iter()
-								.map(|(lit, coef)| (lit, coef.assert_pos()))
+								.map(|(lit, coef)| (lit, coef.into()))
 								.collect(),
 						)]
 					}
@@ -177,7 +175,7 @@ impl LinearAggregator {
 							Part::Ic(
 								pos_chain
 									.into_iter()
-									.map(|(lit, coef)| (lit, coef.assert_pos()))
+									.map(|(lit, coef)| (lit, coef.into()))
 									.collect(),
 							),
 							Part::Ic(
@@ -202,18 +200,18 @@ impl LinearAggregator {
 								.into_iter()
 								.map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k))
 								.collect(),
-							l.assert_pos(),
-							u.assert_pos(),
+							l.into(),
+							u.into(),
 						)]
 					}
 				}
 			})
 			.map(|part| {
 				// This step has to come *after* Amo normalization
-				let filter_zero_coefficients = |terms: Vec<(DB::Lit, C::PosType)>| -> Vec<(DB::Lit, C::PosType)> {
+				let filter_zero_coefficients = |terms: Vec<(DB::Lit, PosCoeff<C>)>| -> Vec<(DB::Lit, PosCoeff<C>)> {
 					terms
 						.into_iter()
-						.filter(|(_, coef)| coef != &C::PosType::zero())
+						.filter(|(_, coef)| **coef != C::zero())
 						.collect()
 				};
 
@@ -240,7 +238,7 @@ impl LinearAggregator {
 			return Ok(LinVariant::Trivial);
 		}
 
-		let mut k = k.assert_pos();
+		let mut k = k.into();
 
 		// Remove terms with coefs higher than k
 		let partition = partition
@@ -261,13 +259,13 @@ impl LinearAggregator {
 				),
 				Part::Ic(terms) => {
 					// for IC, we can compare the running sum to k
-					let mut acc = C::PosType::zero();
+					let mut acc = C::zero();
 					Part::Ic(
 						terms
 							.into_iter()
 							.filter(|(lit, coef)| {
-								acc += *coef;
-								if acc > k {
+								acc += **coef;
+								if acc > *k {
 									db.add_clause(&[lit.negate()]).unwrap();
 									false
 								} else {
@@ -296,32 +294,27 @@ impl LinearAggregator {
 						terms
 							.iter()
 							.map(|(_, coef)| coef)
-							.fold(C::PosType::zero(), |a, b| a + *b),
+							.fold(C::zero(), |a, b| a + **b)
+							.into(),
 					);
 					Part::Dom(terms, l, u)
 				}
 			})
-			.collect::<Vec<Part<DB::Lit, C::PosType>>>();
+			.collect::<Vec<Part<DB::Lit, PosCoeff<C>>>>();
 
 		// Check whether some literals can violate / satisfy the constraint
-		let lhs_ub: C::PosType =
-			partition
-				.iter()
-				.fold(C::PosType::zero(), |acc, part| match part {
-					Part::Amo(terms) => {
-						acc + terms
-							.iter()
-							.map(|tup| tup.1)
-							.max()
-							.unwrap_or_else(C::PosType::zero)
-					}
-					Part::Ic(terms) | Part::Dom(terms, _, _) => {
-						acc + terms
-							.iter()
-							.fold(C::PosType::zero(), |acc, (_, coef)| acc + *coef)
-						// TODO max(k, acc + ..)
-					}
-				});
+		let lhs_ub: PosCoeff<C> = partition
+			.iter()
+			.fold(C::zero(), |acc, part| match part {
+				Part::Amo(terms) => {
+					acc + terms.iter().map(|tup| *tup.1).max().unwrap_or_else(C::zero)
+				}
+				Part::Ic(terms) | Part::Dom(terms, _, _) => {
+					acc + terms.iter().fold(C::zero(), |acc, (_, coef)| acc + **coef)
+					// TODO max(k, acc + ..)
+				}
+			})
+			.into();
 
 		match cmp {
 			LimitComp::LessEq => {
@@ -391,17 +384,17 @@ impl LinearAggregator {
 			.all(|(_, coef)| *coef == *val)
 		{
 			// trivial case: k cannot be made from the coefficients
-			if cmp == LimitComp::Equal && k % *val != C::PosType::zero() {
+			if cmp == LimitComp::Equal && *k % **val != C::zero() {
 				return Err(Unsatisfiable);
 			}
 
-			k /= *val;
+			*k /= **val;
 			let partition = partition
 				.iter()
 				.flat_map(|part| part.iter())
 				.map(|(lit, _)| lit.clone())
 				.collect::<Vec<DB::Lit>>();
-			if k == C::PosType::one() {
+			if *k == C::one() {
 				// Cardinality One constraint
 				return Ok(LinVariant::CardinalityOne(CardinalityOne {
 					lits: partition,
@@ -448,7 +441,7 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(1, 3), (2, 1), (3, 2)]),
 				cmp: LimitComp::LessEq,
-				k: 3
+				k: 3.into()
 			}))
 		);
 
@@ -465,7 +458,7 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(-1, 1), (2, 1), (3, 2)]),
 				cmp: LimitComp::LessEq,
-				k: 3
+				k: 3.into()
 			}))
 		);
 
@@ -482,7 +475,7 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(-1, 1), (2, 1), (3, 2)]),
 				cmp: LimitComp::LessEq,
-				k: 3
+				k: 3.into()
 			}))
 		);
 		db.check_complete()
@@ -535,7 +528,7 @@ mod tests {
 			Ok(LinVariant::Cardinality(Cardinality {
 				lits: vec![1, 2, 3],
 				cmp: LimitComp::LessEq,
-				k: 2,
+				k: 2.into(),
 			}))
 		);
 		assert_eq!(
@@ -550,7 +543,7 @@ mod tests {
 			Ok(LinVariant::Cardinality(Cardinality {
 				lits: vec![1, 2, 3],
 				cmp: LimitComp::LessEq,
-				k: 2,
+				k: 2.into(),
 			}))
 		);
 
@@ -567,7 +560,7 @@ mod tests {
 			Ok(LinVariant::Cardinality(Cardinality {
 				lits: vec![1, 2, 3],
 				cmp: LimitComp::Equal,
-				k: 2,
+				k: 2.into(),
 			}))
 		);
 		assert_eq!(
@@ -582,7 +575,7 @@ mod tests {
 			Ok(LinVariant::Cardinality(Cardinality {
 				lits: vec![1, 2, 3],
 				cmp: LimitComp::Equal,
-				k: 2,
+				k: 2.into(),
 			}))
 		);
 
@@ -599,7 +592,7 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(1, 1), (2, 2), (3, 2)]),
 				cmp: LimitComp::LessEq,
-				k: 2,
+				k: 2.into(),
 			}))
 		);
 
@@ -616,7 +609,7 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(1, 1), (2, 2), (3, 2)]),
 				cmp: LimitComp::Equal,
-				k: 2,
+				k: 2.into(),
 			}))
 		);
 
@@ -672,7 +665,7 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(1, 2), (2, 3), (-3, 2)]),
 				cmp: LimitComp::LessEq,
-				k: 4
+				k: 4.into(),
 			}))
 		);
 
@@ -703,7 +696,7 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(-1, 1), (-2, 2), (-3, 3)]),
 				cmp: LimitComp::LessEq,
-				k: 4
+				k: 4.into(),
 			}))
 		);
 
@@ -722,11 +715,11 @@ mod tests {
 			),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
-					Part::Amo(vec![(1, 3), (2, 1), (7, 4)]),
-					Part::Amo(vec![(4, 3), (5, 2), (8, 5)]),
+					Part::Amo(vec![(1, 3.into()), (2, 1.into()), (7, 4.into())]),
+					Part::Amo(vec![(4, 3.into()), (5, 2.into()), (8, 5.into())]),
 				],
 				cmp: LimitComp::LessEq,
-				k: 5
+				k: 5.into(),
 			}))
 		);
 
@@ -750,11 +743,11 @@ mod tests {
 			),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
-					Part::Ic(vec![(1, 1), (4, 2), (5, 5)]),
-					Part::Ic(vec![(-6, 3), (-3, 2), (-2, 3)]),
+					Part::Ic(vec![(1, 1.into()), (4, 2.into()), (5, 5.into())]),
+					Part::Ic(vec![(-6, 3.into()), (-3, 2.into()), (-2, 3.into())]),
 				],
 				cmp: LimitComp::LessEq,
-				k: 11
+				k: 11.into(),
 			}))
 		);
 
@@ -773,11 +766,16 @@ mod tests {
 			),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
-					Part::Amo(vec![(1, 3), (2, 2), (3, 1), (7, 4)]),
-					Part::Amo(vec![(5, 2), (8, 3)]),
+					Part::Amo(vec![
+						(1, 3.into()),
+						(2, 2.into()),
+						(3, 1.into()),
+						(7, 4.into())
+					]),
+					Part::Amo(vec![(5, 2.into()), (8, 3.into())]),
 				],
 				cmp: LimitComp::LessEq,
-				k: 4 // -3 + 4 + 3
+				k: 4.into(), // -3 + 4 + 3
 			}))
 		);
 
@@ -796,11 +794,16 @@ mod tests {
 			),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
-					Part::Ic(vec![(-4, 1), (-3, 1), (-2, 1), (-1, 1)]),
-					Part::Ic(vec![(-6, 2), (-5, 1)]),
+					Part::Ic(vec![
+						(-4, 1.into()),
+						(-3, 1.into()),
+						(-2, 1.into()),
+						(-1, 1.into()),
+					]),
+					Part::Ic(vec![(-6, 2.into()), (-5, 1.into())]),
 				],
 				cmp: LimitComp::LessEq,
-				k: 4
+				k: 4.into(),
 			}))
 		);
 
@@ -819,11 +822,15 @@ mod tests {
 			),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
-					Part::Dom(vec![(-1, 1), (-2, 2), (-3, 4)], 2, 7),
-					Part::Dom(vec![(-4, 3), (-5, 6)], 7, 9),
+					Part::Dom(
+						vec![(-1, 1.into()), (-2, 2.into()), (-3, 4.into())],
+						2.into(),
+						7.into()
+					),
+					Part::Dom(vec![(-4, 3.into()), (-5, 6.into())], 7.into(), 9.into()),
 				],
 				cmp: LimitComp::LessEq,
-				k: 13
+				k: 13.into(),
 			}))
 		);
 	}
@@ -958,17 +965,17 @@ mod tests {
 		}
 	}
 
-	impl PartialEq for LinVariant<i32, u32> {
+	impl PartialEq for LinVariant<i32, i32> {
 		fn eq(&self, other: &Self) -> bool {
 			let liteq =
 				|a: &Vec<i32>, b: &Vec<i32>| itertools::equal(a.iter().sorted(), b.iter().sorted());
-			let parteq = |a: &Vec<Part<i32, u32>>, b: &Vec<Part<i32, u32>>| {
+			let parteq = |a: &Vec<Part<i32, PosCoeff<i32>>>, b: &Vec<Part<i32, PosCoeff<i32>>>| {
 				itertools::equal(
 					a.iter()
-						.map(|p| p.iter().sorted().collect::<Vec<&(i32, u32)>>())
+						.map(|p| p.iter().sorted().collect::<Vec<&(i32, PosCoeff<i32>)>>())
 						.sorted(),
 					b.iter()
-						.map(|p| p.iter().sorted().collect::<Vec<&(i32, u32)>>())
+						.map(|p| p.iter().sorted().collect::<Vec<&(i32, PosCoeff<i32>)>>())
 						.sorted(),
 				)
 			};

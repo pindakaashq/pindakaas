@@ -2,28 +2,26 @@ use std::collections::HashMap;
 
 use crate::helpers::XorEncoder;
 use crate::linear::LimitComp;
-use crate::{ClauseDatabase, Encoder, Linear, Literal, PositiveCoefficient, Result, Unsatisfiable};
+use crate::{ClauseDatabase, Coefficient, Encoder, Linear, Literal, Result, Unsatisfiable};
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
 #[derive(Default)]
 pub struct AdderEncoder {}
 
-impl<DB: ClauseDatabase, PC: PositiveCoefficient> Encoder<DB, Linear<DB::Lit, PC>>
-	for AdderEncoder
-{
-	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, PC>) -> Result {
+impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for AdderEncoder {
+	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		let pair = &lin
 			.terms
 			.iter()
-			.flat_map(|part| part.iter().map(|(lit, coef)| (lit.clone(), *coef)))
-			.collect::<HashMap<DB::Lit, PC>>();
+			.flat_map(|part| part.iter().map(|(lit, coef)| (lit.clone(), **coef)))
+			.collect::<HashMap<DB::Lit, C>>();
 
 		debug_assert!(lin.cmp == LimitComp::LessEq || lin.cmp == LimitComp::Equal);
 		// The number of relevant bits in k
-		let bits = (PC::zero().leading_zeros() - lin.k.leading_zeros()) as usize;
+		let bits = (C::zero().leading_zeros() - lin.k.leading_zeros()) as usize;
 		let first_zero = lin.k.trailing_ones() as usize;
 		let mut k = (0..bits)
-			.map(|b| lin.k & (PC::one() << b) != PC::zero())
+			.map(|b| *lin.k & (C::one() << b) != C::zero())
 			.collect::<Vec<bool>>();
 		debug_assert!(k[bits - 1]);
 
@@ -31,7 +29,7 @@ impl<DB: ClauseDatabase, PC: PositiveCoefficient> Encoder<DB, Linear<DB::Lit, PC
 		let mut bucket = vec![Vec::new(); bits];
 		for (i, bucker) in bucket.iter_mut().enumerate().take(bits) {
 			for (lit, coef) in pair {
-				if *coef & (PC::one() << i) != PC::zero() {
+				if *coef & (C::one() << i) != C::zero() {
 					bucker.push(lit.clone());
 				}
 			}
