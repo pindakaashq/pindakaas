@@ -25,6 +25,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			.iter()
 			.map(|part| IntVar::from_part_using_le_ord(db, part, lin.k.clone()))
 			.collect::<Vec<_>>();
+
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
 		build_totalizer(
 			xs,
@@ -73,7 +74,7 @@ fn build_totalizer<DB: ClauseDatabase + ?Sized, C: Coefficient>(
 						} else {
 							l.clone()
 						};
-						let parent = IntVar::new(
+						let parent = IntVar::from_terms(
 							ord_plus_ord_le_ord_sparse_dom(
 								left.iter().map(|(_, c)| *c).collect(),
 								right.iter().map(|(_, c)| *c).collect(),
