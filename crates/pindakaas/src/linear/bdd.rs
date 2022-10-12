@@ -1,5 +1,5 @@
 use crate::linear::totalizer::{totalize, Structure};
-use crate::{ClauseDatabase, Encoder, Linear, PositiveCoefficient, Result};
+use crate::{ClauseDatabase, Coefficient, Encoder, Linear, Result};
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
 #[derive(Default)]
@@ -13,8 +13,8 @@ impl BddEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase, PC: PositiveCoefficient> Encoder<DB, Linear<DB::Lit, PC>> for BddEncoder {
-	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, PC>) -> Result {
+impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for BddEncoder {
+	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		totalize(db, lin, Structure::Bdd, self.add_consistency)
 	}
 }
