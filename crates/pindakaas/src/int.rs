@@ -34,11 +34,13 @@ pub(crate) struct IntVar<Lit: Literal, C: Coefficient> {
 
 impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 	pub fn new(xs: IntervalMap<C, Lit>, lb: PosCoeff<C>, ub: PosCoeff<C>) -> Self {
+		debug_assert!(*lb <= *ub);
 		Self { xs, lb, ub }
 	}
 
 	pub fn from_terms(terms: Vec<(PosCoeff<C>, Lit)>, lb: PosCoeff<C>, ub: PosCoeff<C>) -> Self {
 		// TODO perhaps lb/ub should always be equal to min/max of terms
+		debug_assert!(*lb <= *ub);
 		Self {
 			xs: IntervalMap::from_sorted(
 				terms
@@ -74,7 +76,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		} else {
 			match self.xs.overlap(*v).collect::<Vec<_>>()[..] {
 				[(_, x)] => LitOrConst::Lit(x.clone()),
-				_ => panic!(),
+				_ => panic!("No or multiples variables at {v:?} in {self:?}"),
 			}
 		}
 	}
@@ -83,7 +85,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		std::iter::once((LitOrConst::Const(true), self.lb.clone())).chain(
 			self.xs
 				.iter(..)
-				.map(|(c, l)| (LitOrConst::Lit(l.clone()), (c.end + C::one()).into())),
+				.map(|(c, l)| (LitOrConst::Lit(l.clone()), (c.end - C::one()).into())),
 		)
 	}
 

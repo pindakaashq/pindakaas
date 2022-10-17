@@ -1,4 +1,5 @@
 use iset::{interval_set, IntervalMap, IntervalSet};
+use itertools::{Itertools, Position};
 
 use crate::{
 	int::{ord_plus_ord_le_ord, IntVar},
@@ -29,17 +30,16 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 			.map(|part| IntVar::from_part_using_le_ord(db, part, lin.k.clone()))
 			.collect::<Vec<_>>();
 		let ws = construct_bdd(db, xs.iter().map(IntVar::ub).collect(), lin.k.clone());
-		xs.into_iter().zip(ws.into_iter()).fold(
-			IntVar::constant(C::zero().into()),
-			|curr, (x_i, next)| {
-				if self.add_consistency {
-					next.encode_consistency(db);
-				}
+		let mut ws = ws.into_iter();
+		let first = ws.next().unwrap();
+		xs.into_iter().zip(ws).fold(first, |curr, (x_i, next)| {
+			if self.add_consistency {
+				next.encode_consistency(db);
+			}
 
-				ord_plus_ord_le_ord(db, &curr, &x_i, &next);
-				next
-			},
-		);
+			ord_plus_ord_le_ord(db, &curr, &x_i, &next);
+			next
+		});
 
 		Ok(())
 	}
@@ -52,14 +52,15 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 ) -> Vec<IntVar<DB::Lit, C>> {
 	let ubs = ubs.into_iter().map(|ub| *ub).collect::<Vec<_>>();
 	let k = *k;
-	let inf = ubs.iter().fold(C::one(), |a, &b| (a + b));
+	let inf = ubs.iter().fold(C::one() + C::one(), |a, &b| (a + b));
 	let neg_inf = k - inf;
 
 	let mut ws = ubs
 		.iter()
 		.enumerate()
 		.map(|(i, _)| {
-			let lb = neg_inf..(ubs[i..].iter().fold(k + C::one(), |acc, ub| acc - *ub));
+			// TODO optimize
+			let lb = neg_inf..ubs[i..].iter().fold(k + C::one(), |acc, ub| acc - *ub);
 			let ub = (k + C::one())..inf;
 			interval_set! { lb, ub }
 		})
@@ -68,18 +69,27 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 		))
 		.collect();
 	bdd(0, &ubs, C::zero(), &mut ws);
-	ws.pop();
-	for w in &mut ws {
-		w.remove((k + C::one())..(k + C::one() + C::one()));
-	}
-
 	ws.into_iter()
-		.zip(ubs.into_iter())
-		.map(|(w, ub)| {
-			let mut it = w.into_iter(..);
-			let lb = std::cmp::max(C::zero(), it.next().unwrap().end);
-			let xs = IntervalMap::from_sorted(it.map(|interval| (interval, new_var!(db))));
-			IntVar::new(xs, lb.into(), ub.into())
+		.map(|w| {
+			let (mut lb, mut ub) = (-C::one(), -C::one());
+			IntVar::new(
+				IntervalMap::from_iter(w.into_iter(..).with_position().filter_map(|position| {
+					match position {
+						Position::First(interval) => {
+							lb = std::cmp::max(C::zero(), interval.end - C::one());
+							None
+						}
+						Position::Middle(interval) => Some((interval, new_var!(db))),
+						Position::Last(interval) => {
+							ub = interval.start - C::one();
+							None
+						}
+						_ => None,
+					}
+				})),
+				lb.into(),
+				ub.into(),
+			)
 		})
 		.collect()
 }
@@ -96,17 +106,16 @@ fn bdd<C: Coefficient>(
 			let a = bdd(i + 1, ubs, sum, ws);
 			let b = bdd(i + 1, ubs, sum + ub, ws);
 			let ab = if a == b {
-				a.start..a.end.checked_sub(&ub).unwrap_or_else(C::zero)
+				a.start..(a.end - ub)
 			} else {
-				let b = b.start.checked_sub(&ub).unwrap_or_else(C::zero)
-					..b.end.checked_sub(&ub).unwrap_or_else(C::zero);
+				let b = (b.start - ub)..(b.end - ub);
 				std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end)
 			};
 			debug_assert!(ws[i].insert(ab.clone()), "Duplicate interval inserted");
 			ab
 		}
 		[interval] => interval.clone(),
-		_ => panic!(),
+		_ => panic!("ROBDD intervals should be disjoint, but were {:?}", ws[i]),
 	}
 }
 
