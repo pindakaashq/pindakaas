@@ -627,6 +627,13 @@ mod tests {
 						cmp: LimitComp::LessEq,
 						k: 6.into()
 					}
+					=> vec![
+						vec![-1, -2, -3], // 0
+						vec![ 1, -2, -3], // 2
+						vec![-1,  2, -3], // 3
+						vec![ 1,  2, -3], // 5
+						vec![-1, -2,  3], // 5
+					]
 				);
 			}
 
@@ -647,6 +654,27 @@ mod tests {
 						cmp: LimitComp::LessEq,
 						k: 19.into()
 					}
+				);
+			}
+
+			#[test]
+			fn test_small_le_3() {
+				assert_sol!(
+					$encoder,
+					6,
+					&Linear {
+						terms: construct_terms(&[(1, 1), (2, 2), (3, 4),]),
+						cmp: LimitComp::LessEq,
+						k: 5.into()
+					}
+					=> vec![
+						vec![-1, -2, -3],
+						vec![ 1, -2, -3],
+						vec![-1,  2, -3],
+						vec![ 1,  2, -3],
+						vec![-1, -2,  3],
+						vec![ 1, -2,  3],
+					]
 				);
 			}
 		};
