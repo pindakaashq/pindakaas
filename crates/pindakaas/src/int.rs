@@ -97,7 +97,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 				// TODO clean up
 				if let LitOrConst::Lit(a) = lit_a {
 					if let LitOrConst::Lit(b) = lit_b {
-						db.add_clause(&[a.negate(), b]).unwrap();
+						db.add_clause(&[b.negate(), a]).unwrap();
 					} else {
 						panic!();
 					}
@@ -138,7 +138,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 
 				let xs = h
 					.into_iter()
-					.map(|(coef, lits)| {
+					.map(|(coef, lits)| -> (PosCoeff<C>, _) {
 						if lits.len() == 1 {
 							(coef.into(), lits[0].clone())
 						} else {
@@ -149,7 +149,8 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 							(coef.into(), o)
 						}
 					})
-					.collect::<Vec<(PosCoeff<C>, _)>>();
+					.sorted_by(|(a, _), (b, _)| a.cmp(b))
+					.collect::<Vec<(_, _)>>();
 
 				let ub = xs
 					.iter()
