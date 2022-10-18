@@ -7,16 +7,13 @@
 //! set of booleans is *At Most One (AMO)* or *At Most K (AMK)*. Specialised
 //! encodings are used when these cases are detected.
 
-use std::clone::Clone;
-use std::cmp::Eq;
-use std::error::Error;
-use std::fmt;
-use std::hash::Hash;
-use std::ops::Neg;
+use std::{clone::Clone, cmp::Eq, collections::HashMap, error::Error, fmt, hash::Hash, ops::Neg};
 
 use itertools::{Itertools, Position};
-use num::traits::{NumAssignOps, NumOps};
-use num::{PrimInt, Signed};
+use num::{
+	traits::{NumAssignOps, NumOps},
+	PrimInt, Signed,
+};
 
 mod cardinality;
 mod cardinality_one;
