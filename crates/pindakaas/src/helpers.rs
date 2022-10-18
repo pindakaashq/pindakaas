@@ -26,6 +26,7 @@ impl XorEncoder {
 }
 
 // TODO to be incorporated with labels feature
+#[cfg(debug_assertions)]
 #[macro_export]
 macro_rules! new_var {
 	($db:expr) => {
