@@ -23,14 +23,13 @@ impl BddEncoder {
 impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for BddEncoder {
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		assert!(lin.cmp == LimitComp::LessEq);
-		// TODO not possible to fix since both closures use db?
-		#[allow(clippy::needless_collect)]
-		let xs = lin.terms
+		let xs = lin
+			.terms
 			.iter()
 			.map(|part| IntVar::from_part_using_le_ord(db, part, lin.k.clone()))
 			.collect::<Vec<_>>();
-		let ws = construct_bdd(db, xs.iter().map(IntVar::ub).collect(), lin.k.clone());
-		let mut ws = ws.into_iter();
+		let mut ws =
+			construct_bdd(db, xs.iter().map(IntVar::ub).collect(), lin.k.clone()).into_iter();
 		let first = ws.next().unwrap();
 		xs.into_iter().zip(ws).fold(first, |curr, (x_i, next)| {
 			if self.add_consistency {
