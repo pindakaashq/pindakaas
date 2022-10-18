@@ -7,7 +7,18 @@
 //! set of booleans is *At Most One (AMO)* or *At Most K (AMK)*. Specialised
 //! encodings are used when these cases are detected.
 
-use std::{clone::Clone, cmp::Eq, collections::HashMap, error::Error, fmt, hash::Hash, ops::Neg};
+use std::{
+	clone::Clone,
+	cmp::Eq,
+	error::Error,
+	fmt::{self, Display},
+	fs::File,
+	hash::Hash,
+	io::{self, BufRead, BufReader, Write},
+	ops::Neg,
+	path::Path,
+	str::FromStr,
+};
 
 use itertools::{Itertools, Position};
 use num::{
@@ -187,6 +198,164 @@ pub trait ClauseDatabase {
 	/// be unsatisfiable. This is used as a signal to the encoder that any
 	/// subsequent encoding effort can be abandoned.
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result;
+}
+
+/// A representation for CNF formulas.
+///
+/// It can be used to create formulas manually, to store the results from
+/// encoders, read formulas from a file, and writse them to a file
+#[derive(Clone, Debug)]
+pub struct CNF<Lit: PrimInt + Literal = i32> {
+	last_var: Lit,
+	clauses: Vec<Lit>,
+}
+
+impl<Lit: PrimInt + Literal> CNF<Lit> {
+	/// Store CNF formula at given path in DIMACS format
+	///
+	/// File will optionally be prefaced by a given comment
+	pub fn to_file(&self, path: &Path, comment: Option<&str>) -> Result<(), io::Error> {
+		let mut file = File::create(path)?;
+		if let Some(comment) = comment {
+			for line in comment.lines() {
+				writeln!(file, "c {line}")?
+			}
+		}
+		write!(file, "{self}")
+	}
+}
+impl<Lit: PrimInt + Literal> Display for CNF<Lit> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let num_var = self.last_var;
+		let num_clauses = self.iter().count();
+		writeln!(f, "p cnf {num_var} {num_clauses}")?;
+		for cl in self.iter() {
+			for l in cl {
+				write!(f, "{l} ")?
+			}
+			writeln!(f, "0")?
+		}
+		Ok(())
+	}
+}
+
+impl<Lit: PrimInt + Literal + FromStr> CNF<Lit> {
+	/// Read a CNF formula from a file formatted in the DIMACS CNF format
+	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
+		let file = File::open(path)?;
+		let mut had_header = false;
+		let mut cnf = CNF::default();
+		let mut cl: Vec<Lit> = Vec::new();
+		for line in BufReader::new(file).lines() {
+			match line {
+				Ok(line) if line == "" || line.starts_with('c') => (),
+				Ok(line) if had_header => {
+					for seg in line.split(' ') {
+						if let Ok(l) = seg.parse::<Lit>() {
+							if l.var() > cnf.last_var {
+								return Err(io::Error::new(
+									io::ErrorKind::InvalidInput,
+									format!(
+										"unexpected literal {}, only {} variables declared",
+										l, cnf.last_var
+									),
+								));
+							}
+							if l == Lit::zero() {
+								cnf.add_clause(&cl)
+									.expect("CNF::add_clause does not return Unsatisfiable");
+								cl.clear();
+							} else {
+								cl.push(l);
+							}
+						}
+					}
+				}
+				// parse header, expected format: "p cnf {num_var} {num_clauses}"
+				Ok(line) => {
+					let vec: Vec<&str> = line.split_whitespace().collect();
+					// check "p" and "cnf" keyword
+					if vec.len() != 4 || &vec[0..2] != ["p", "cnf"] {
+						return Err(io::Error::new(
+							io::ErrorKind::InvalidInput,
+							"expected DIMACS CNF header formatted \"p cnf {variables} {clauses}\"",
+						));
+					}
+					// parse number of variables
+					cnf.last_var = vec[2].parse().map_err(|_| {
+						io::Error::new(
+							io::ErrorKind::InvalidInput,
+							"unable to parse number of variables",
+						)
+					})?;
+					// parse number of clauses
+					// TODO: can we do more with this information then add space literal and a seperator?
+					let num_clauses: usize = vec[3].parse().map_err(|_| {
+						io::Error::new(
+							io::ErrorKind::InvalidInput,
+							"unable to parse number of clauses",
+						)
+					})?;
+					cnf.clauses.reserve(2 * num_clauses);
+					// parsing header complete
+					had_header = true;
+				}
+				Err(e) => return Err(e),
+			}
+		}
+		Ok(cnf)
+	}
+}
+
+impl<Lit: PrimInt + Literal> Default for CNF<Lit> {
+	fn default() -> Self {
+		Self {
+			last_var: Lit::zero(),
+			clauses: Vec::new(),
+		}
+	}
+}
+impl<Lit: PrimInt + Literal> ClauseDatabase for CNF<Lit> {
+	type Lit = Lit;
+	fn new_var(&mut self) -> Self::Lit {
+		self.last_var = self.last_var + Lit::one();
+		self.last_var
+	}
+
+	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
+		self.clauses.reserve(cl.len() + 1);
+		self.clauses.extend_from_slice(cl);
+		self.clauses.push(Lit::zero());
+		Ok(())
+	}
+}
+
+impl<Lit: PrimInt + Literal> CNF<Lit> {
+	pub fn iter(&self) -> CNFIterator<Lit> {
+		CNFIterator {
+			clauses: &self.clauses,
+			index: 0,
+		}
+	}
+}
+pub struct CNFIterator<'a, Lit: PrimInt + Literal> {
+	clauses: &'a Vec<Lit>,
+	index: usize,
+}
+impl<'a, Lit: PrimInt + Literal + 'a> Iterator for CNFIterator<'a, Lit> {
+	type Item = &'a [Lit];
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let start = self.index;
+		let mut it = self.clauses.iter().skip(start);
+		while let Some(l) = it.next() {
+			self.index += 1;
+			if l.is_zero() {
+				return Some(&self.clauses[start..self.index - 1]);
+			}
+		}
+		None
+	}
 }
 
 #[cfg(test)]
