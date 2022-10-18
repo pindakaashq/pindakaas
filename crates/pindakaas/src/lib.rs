@@ -21,6 +21,7 @@ use num::{PrimInt, Signed};
 mod cardinality;
 mod cardinality_one;
 pub(crate) mod helpers;
+pub(crate) mod int;
 mod linear;
 
 pub use cardinality::Cardinality;

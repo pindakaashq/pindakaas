@@ -25,6 +25,30 @@ impl XorEncoder {
 	}
 }
 
+// TODO to be incorporated with labels feature
+#[macro_export]
+macro_rules! new_var {
+	($db:expr) => {
+		$db.new_var()
+	};
+	($db:expr, $lbl:expr) => {
+		// $db.new_var_with_label($lbl)
+		$db.new_var()
+	};
+}
+
+#[cfg(not(debug_assertions))]
+#[macro_export]
+macro_rules! new_var {
+	($db:expr) => {
+		$db.new_var()
+	};
+	($db:expr, $lbl:expr) => {
+		// $db.new_var_with_label($lbl)
+		$db.new_var()
+	};
+}
+
 #[cfg(test)]
 pub mod tests {
 	use super::*;
