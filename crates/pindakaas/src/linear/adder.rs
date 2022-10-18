@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
-use crate::helpers::XorEncoder;
-use crate::linear::LimitComp;
-use crate::{ClauseDatabase, Coefficient, Encoder, Linear, Literal, Result, Unsatisfiable};
+use crate::{
+	helpers::XorEncoder, linear::LimitComp, ClauseDatabase, Coefficient, Encoder, Linear, Literal,
+	Result, Unsatisfiable,
+};
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
 #[derive(Default)]

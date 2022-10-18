@@ -1,8 +1,7 @@
 use itertools::Itertools;
 
-use crate::{linear::LimitComp, CardinalityOne, ClauseDatabase, Encoder, Literal, Result};
-
 use super::at_least_one_clause;
+use crate::{linear::LimitComp, CardinalityOne, ClauseDatabase, Encoder, Literal, Result};
 
 /// An encoder for an At Most One constraints that for every pair of literals
 /// states that one of the literals has to be `false`.
