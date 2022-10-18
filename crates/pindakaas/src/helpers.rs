@@ -132,11 +132,9 @@ pub mod tests {
 		// Test resulting encoding
 		assert_enc!(MakeFalse::default(), 1, &1 => vec![vec![-1]]);
 		// Test possible solutions (using specification)
-		// TODO: num_var is really 1, but that crashes SPLR
-		assert_sol!(MakeFalse::default(), 2, &1 => vec![vec![-1]]);
+		assert_sol!(MakeFalse::default(), 1, &1 => vec![vec![-1]]);
 		// Test encoding and possible solutions
-		// TODO: see above
-		assert_enc_sol!(MakeFalse::default(), 2, &1 => vec![vec![-1]], vec![vec![-1]]);
+		assert_enc_sol!(MakeFalse::default(), 1, &1 => vec![vec![-1]], vec![vec![-1]]);
 	}
 
 	#[test]
