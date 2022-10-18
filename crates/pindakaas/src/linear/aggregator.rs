@@ -91,7 +91,6 @@ impl LinearAggregator {
 			Comparator::Equal => LimitComp::Equal,
 		};
 
-		// TODO cannot construct this as a closures due to inner closures problem
 		let convert_term_if_negative = |term: (DB::Lit, C), k: &mut C| -> (DB::Lit, PosCoeff<C>) {
 			let (mut lit, mut coef) = term;
 			if coef.is_negative() {
