@@ -67,7 +67,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 			interval_map! { neg_inf..k+C::one() => LitOrConst::Const(true) , k+C::one()..inf => LitOrConst::Const(false) },
 		))
 		.collect();
-	bdd(db, 0, &ubs, C::zero(), &mut ws);
+	bdd(db, 0, &ubs, C::zero(), &mut ws, true);
 	ws.into_iter()
 		.map(|w| {
 			let (mut lb, mut ub) = (-C::one(), -C::one());
@@ -82,7 +82,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 							if let LitOrConst::Lit(lit) = lit {
 								Some((interval, lit))
 							} else {
-								panic!("Fixed middle interval?")
+								None // root
 							}
 						}
 						Position::Last((interval, _)) => {
@@ -105,19 +105,24 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 	ubs: &Vec<C>,
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, LitOrConst<DB::Lit>>>,
+	first: bool,
 ) -> (std::ops::Range<C>, LitOrConst<DB::Lit>) {
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
 			let ub = ubs[i];
-			let (a, lit_a) = bdd(db, i + 1, ubs, sum, ws);
-			let (b, _) = bdd(db, i + 1, ubs, sum + ub, ws);
+			let (a, lit_a) = bdd(db, i + 1, ubs, sum, ws, false);
+			let (b, _) = bdd(db, i + 1, ubs, sum + ub, ws, false);
 			let (ab, lit_ab) = if a == b {
 				(a.start..(a.end - ub), lit_a)
 			} else {
 				let b = (b.start - ub)..(b.end - ub);
 				(
 					std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end),
-					LitOrConst::Lit(new_var!(db)),
+					if first {
+						LitOrConst::Const(true)
+					} else {
+						LitOrConst::Lit(new_var!(db))
+					},
 				)
 			};
 			debug_assert!(
