@@ -27,6 +27,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 			.terms
 			.iter()
 			.map(|part| IntVar::from_part_using_le_ord(db, part, lin.k.clone()))
+			.sorted_by(|a, b| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
 		let mut ws =
 			construct_bdd(db, xs.iter().map(IntVar::ub).collect(), lin.k.clone()).into_iter();
