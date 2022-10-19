@@ -1,8 +1,8 @@
-use iset::{interval_set, IntervalMap, IntervalSet};
+use iset::{interval_map, IntervalMap};
 use itertools::{Itertools, Position};
 
 use crate::{
-	int::{ord_plus_ord_le_ord, IntVar},
+	int::{ord_plus_ord_le_ord, IntVar, LitOrConst},
 	linear::LimitComp,
 	new_var, ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
@@ -61,25 +61,31 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 			// TODO optimize
 			let lb = neg_inf..ubs[i..].iter().fold(k + C::one(), |acc, ub| acc - *ub);
 			let ub = (k + C::one())..inf;
-			interval_set! { lb, ub }
+			interval_map! { lb => LitOrConst::Const(true), ub => LitOrConst::Const(false) }
 		})
 		.chain(std::iter::once(
-			interval_set! { neg_inf..k+C::one(), k+C::one()..inf },
+			interval_map! { neg_inf..k+C::one() => LitOrConst::Const(true) , k+C::one()..inf => LitOrConst::Const(false) },
 		))
 		.collect();
-	bdd(0, &ubs, C::zero(), &mut ws);
+	bdd(db, 0, &ubs, C::zero(), &mut ws);
 	ws.into_iter()
 		.map(|w| {
 			let (mut lb, mut ub) = (-C::one(), -C::one());
 			IntVar::new(
 				IntervalMap::from_iter(w.into_iter(..).with_position().filter_map(|position| {
 					match position {
-						Position::First(interval) => {
+						Position::First((interval, _)) => {
 							lb = std::cmp::max(C::zero(), interval.end - C::one());
 							None
 						}
-						Position::Middle(interval) => Some((interval, new_var!(db))),
-						Position::Last(interval) => {
+						Position::Middle((interval, lit)) => {
+							if let LitOrConst::Lit(lit) = lit {
+								Some((interval, lit))
+							} else {
+								panic!("Fixed middle interval?")
+							}
+						}
+						Position::Last((interval, _)) => {
 							ub = interval.start - C::one();
 							None
 						}
@@ -93,27 +99,34 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 		.collect()
 }
 
-fn bdd<C: Coefficient>(
+fn bdd<DB: ClauseDatabase, C: Coefficient>(
+	db: &mut DB,
 	i: usize,
 	ubs: &Vec<C>,
 	sum: C,
-	ws: &mut Vec<IntervalSet<C>>,
-) -> std::ops::Range<C> {
+	ws: &mut Vec<IntervalMap<C, LitOrConst<DB::Lit>>>,
+) -> (std::ops::Range<C>, LitOrConst<DB::Lit>) {
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
 			let ub = ubs[i];
-			let a = bdd(i + 1, ubs, sum, ws);
-			let b = bdd(i + 1, ubs, sum + ub, ws);
-			let ab = if a == b {
-				a.start..(a.end - ub)
+			let (a, lit_a) = bdd(db, i + 1, ubs, sum, ws);
+			let (b, _) = bdd(db, i + 1, ubs, sum + ub, ws);
+			let (ab, lit_ab) = if a == b {
+				(a.start..(a.end - ub), lit_a)
 			} else {
 				let b = (b.start - ub)..(b.end - ub);
-				std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end)
+				(
+					std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end),
+					LitOrConst::Lit(new_var!(db)),
+				)
 			};
-			debug_assert!(ws[i].insert(ab.clone()), "Duplicate interval inserted");
-			ab
+			debug_assert!(
+				ws[i].insert(ab.clone(), lit_ab.clone()).is_none(),
+				"Duplicate interval inserted"
+			);
+			(ab, lit_ab)
 		}
-		[interval] => interval.clone(),
+		[(a, lit)] => (a.clone(), (*lit).clone()),
 		_ => panic!("ROBDD intervals should be disjoint, but were {:?}", ws[i]),
 	}
 }

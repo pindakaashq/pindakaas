@@ -7,7 +7,7 @@ use std::{
 	ops::Neg,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum LitOrConst<Lit: Literal> {
 	Lit(Lit),
 	Const(bool),
@@ -213,8 +213,11 @@ pub(crate) fn ord_plus_ord_le_ord<DB: ClauseDatabase + ?Sized, C: Coefficient>(
 						.collect()
 				};
 
-			if let Ok(cls) = &create_clause(vec![-l_a.clone(), -l_b, c.ge((*c_a + *c_b).into())]) {
-				db.add_clause(cls).unwrap();
+			let l_c = c.ge((*c_a + *c_b).into());
+			if !(l_a == l_c.clone() || l_b == l_c.clone()) {
+				if let Ok(cls) = &create_clause(vec![-l_a.clone(), -l_b, l_c]) {
+					db.add_clause(cls).unwrap();
+				}
 			}
 		}
 	}
