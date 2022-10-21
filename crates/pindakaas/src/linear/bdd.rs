@@ -132,10 +132,9 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 					LitOrConst::Lit(new_var!(db))
 				},
 			);
-			debug_assert!(
-				ws[i].insert(interval.clone(), lit.clone()).is_none(),
-				"Duplicate interval inserted"
-			);
+
+			let interval_already_exists = ws[i].insert(interval.clone(), lit.clone()).is_some();
+			debug_assert!(!interval_already_exists, "Duplicate interval inserted");
 			(interval, lit)
 		}
 		[(a, lit)] => (a.clone(), (*lit).clone()),
