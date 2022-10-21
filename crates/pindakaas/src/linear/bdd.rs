@@ -82,6 +82,8 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 							if let LitOrConst::Lit(lit) = lit {
 								Some((interval, lit))
 							} else {
+								lb = interval.end - C::one();
+								debug_assert!(matches!(lit, LitOrConst::Const(true)));
 								None // root
 							}
 						}
