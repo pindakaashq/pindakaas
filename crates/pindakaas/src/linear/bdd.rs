@@ -29,8 +29,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 			.map(|part| IntVar::from_part_using_le_ord(db, part, lin.k.clone()))
 			.sorted_by(|a, b| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
-		let mut ws =
-			construct_bdd(db, xs.iter().map(IntVar::ub).collect(), lin.k.clone()).into_iter();
+		let mut ws = construct_bdd(db, &xs, lin.k.clone()).into_iter();
 		let first = ws.next().unwrap();
 		xs.into_iter().zip(ws).fold(first, |curr, (x_i, next)| {
 			if self.add_consistency {
@@ -47,10 +46,10 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 
 fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
-	ubs: Vec<PosCoeff<C>>,
+	xs: &Vec<IntVar<DB::Lit, C>>,
 	k: PosCoeff<C>,
 ) -> Vec<IntVar<DB::Lit, C>> {
-	let ubs = ubs.into_iter().map(|ub| *ub).collect::<Vec<_>>();
+	let ubs = xs.iter().map(|x| *x.ub()).collect::<Vec<_>>();
 	let k = *k;
 	let inf = ubs.iter().fold(C::one() + C::one(), |a, &b| (a + b));
 	let neg_inf = k - inf;
@@ -68,7 +67,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 			interval_map! { neg_inf..k+C::one() => LitOrConst::Const(true) , k+C::one()..inf => LitOrConst::Const(false) },
 		))
 		.collect();
-	bdd(db, 0, &ubs, C::zero(), &mut ws, true);
+	bdd(db, 0, xs, C::zero(), &mut ws, true);
 	ws.into_iter()
 		.map(|w| {
 			let (mut lb, mut ub) = (-C::one(), -C::one());
@@ -103,34 +102,39 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 fn bdd<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	i: usize,
-	ubs: &Vec<C>,
+	xs: &Vec<IntVar<DB::Lit, C>>,
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, LitOrConst<DB::Lit>>>,
 	first: bool,
 ) -> (std::ops::Range<C>, LitOrConst<DB::Lit>) {
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
-			let ub = ubs[i];
-			let (a, lit_a) = bdd(db, i + 1, ubs, sum, ws, false);
-			let (b, _) = bdd(db, i + 1, ubs, sum + ub, ws, false);
-			let (ab, lit_ab) = if a == b {
-				(a.start..(a.end - ub), lit_a)
-			} else {
-				let b = (b.start - ub)..(b.end - ub);
-				(
-					std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end),
-					if first {
-						LitOrConst::Const(true)
-					} else {
-						LitOrConst::Lit(new_var!(db))
-					},
-				)
-			};
+			let (interval, lit) = (
+				xs[i]
+					.iter()
+					.map(|(_, v)| {
+						let (interval, lit) = bdd(db, i + 1, xs, sum + *v, ws, false);
+						((interval.start - *v)..(interval.end - *v), lit)
+					})
+					.reduce(|(a, _), (b, lit_b)| {
+						(
+							std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end),
+							lit_b,
+						)
+					})
+					.unwrap()
+					.0,
+				if first {
+					LitOrConst::Const(true)
+				} else {
+					LitOrConst::Lit(new_var!(db))
+				},
+			);
 			debug_assert!(
-				ws[i].insert(ab.clone(), lit_ab.clone()).is_none(),
+				ws[i].insert(interval.clone(), lit.clone()).is_none(),
 				"Duplicate interval inserted"
 			);
-			(ab, lit_ab)
+			(interval, lit)
 		}
 		[(a, lit)] => (a.clone(), (*lit).clone()),
 		_ => panic!("ROBDD intervals should be disjoint, but were {:?}", ws[i]),
