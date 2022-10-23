@@ -31,6 +31,7 @@ mod cardinality_one;
 pub(crate) mod helpers;
 pub(crate) mod int;
 mod linear;
+pub mod solvers;
 
 pub use cardinality::Cardinality;
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
