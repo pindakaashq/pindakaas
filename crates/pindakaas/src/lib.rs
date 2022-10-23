@@ -200,17 +200,21 @@ pub trait ClauseDatabase {
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result;
 }
 
-/// A representation for CNF formulas.
+/// A representation for Boolean formulas in conjunctive normal form.
 ///
 /// It can be used to create formulas manually, to store the results from
 /// encoders, read formulas from a file, and writse them to a file
 #[derive(Clone, Debug)]
-pub struct CNF<Lit: PrimInt + Literal = i32> {
+pub struct Cnf<Lit: PrimInt + Literal = i32> {
+	/// The last variable created by [`new_var`]
 	last_var: Lit,
-	clauses: Vec<Lit>,
+	/// The literals from *all* clauses
+	lits: Vec<Lit>,
+	/// The size *for each* clause
+	size: Vec<usize>,
 }
 
-impl<Lit: PrimInt + Literal> CNF<Lit> {
+impl<Lit: PrimInt + Literal> Cnf<Lit> {
 	/// Store CNF formula at given path in DIMACS format
 	///
 	/// File will optionally be prefaced by a given comment
@@ -224,27 +228,30 @@ impl<Lit: PrimInt + Literal> CNF<Lit> {
 		write!(file, "{self}")
 	}
 }
-impl<Lit: PrimInt + Literal> Display for CNF<Lit> {
+impl<Lit: PrimInt + Literal> Display for Cnf<Lit> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let num_var = self.last_var;
-		let num_clauses = self.iter().count();
+		let num_clauses = self.size.len();
 		writeln!(f, "p cnf {num_var} {num_clauses}")?;
-		for cl in self.iter() {
-			for l in cl {
-				write!(f, "{l} ")?
+		let mut start = 0;
+		for size in self.size.iter() {
+			let cl = self.lits.iter().skip(start).take(*size);
+			for lit in cl {
+				write!(f, "{lit} ")?
 			}
-			writeln!(f, "0")?
+			writeln!(f, "0")?;
+			start += size;
 		}
 		Ok(())
 	}
 }
 
-impl<Lit: PrimInt + Literal + FromStr> CNF<Lit> {
+impl<Lit: PrimInt + Literal + FromStr> Cnf<Lit> {
 	/// Read a CNF formula from a file formatted in the DIMACS CNF format
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
 		let file = File::open(path)?;
 		let mut had_header = false;
-		let mut cnf = CNF::default();
+		let mut cnf = Cnf::default();
 		let mut cl: Vec<Lit> = Vec::new();
 		for line in BufReader::new(file).lines() {
 			match line {
@@ -289,14 +296,14 @@ impl<Lit: PrimInt + Literal + FromStr> CNF<Lit> {
 						)
 					})?;
 					// parse number of clauses
-					// TODO: can we do more with this information then add space literal and a seperator?
 					let num_clauses: usize = vec[3].parse().map_err(|_| {
 						io::Error::new(
 							io::ErrorKind::InvalidInput,
 							"unable to parse number of clauses",
 						)
 					})?;
-					cnf.clauses.reserve(2 * num_clauses);
+					cnf.lits.reserve(num_clauses);
+					cnf.size.reserve(num_clauses);
 					// parsing header complete
 					had_header = true;
 				}
@@ -307,15 +314,16 @@ impl<Lit: PrimInt + Literal + FromStr> CNF<Lit> {
 	}
 }
 
-impl<Lit: PrimInt + Literal> Default for CNF<Lit> {
+impl<Lit: PrimInt + Literal> Default for Cnf<Lit> {
 	fn default() -> Self {
 		Self {
 			last_var: Lit::zero(),
-			clauses: Vec::new(),
+			lits: Vec::new(),
+			size: Vec::new(),
 		}
 	}
 }
-impl<Lit: PrimInt + Literal> ClauseDatabase for CNF<Lit> {
+impl<Lit: PrimInt + Literal> ClauseDatabase for Cnf<Lit> {
 	type Lit = Lit;
 	fn new_var(&mut self) -> Self::Lit {
 		self.last_var = self.last_var + Lit::one();
@@ -323,38 +331,38 @@ impl<Lit: PrimInt + Literal> ClauseDatabase for CNF<Lit> {
 	}
 
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
-		self.clauses.reserve(cl.len() + 1);
-		self.clauses.extend_from_slice(cl);
-		self.clauses.push(Lit::zero());
+		self.lits.reserve(cl.len());
+		self.lits.extend_from_slice(cl);
+		self.size.push(cl.len());
 		Ok(())
 	}
 }
 
-impl<Lit: PrimInt + Literal> CNF<Lit> {
-	pub fn iter(&self) -> CNFIterator<Lit> {
-		CNFIterator {
-			clauses: &self.clauses,
+impl<Lit: PrimInt + Literal> Cnf<Lit> {
+	pub fn iter(&self) -> CnfIterator<Lit> {
+		CnfIterator {
+			lits: &self.lits,
+			size: self.size.iter(),
 			index: 0,
 		}
 	}
 }
-pub struct CNFIterator<'a, Lit: PrimInt + Literal> {
-	clauses: &'a Vec<Lit>,
+pub struct CnfIterator<'a, Lit: PrimInt + Literal> {
+	lits: &'a Vec<Lit>,
+	size: std::slice::Iter<'a, usize>,
 	index: usize,
 }
-impl<'a, Lit: PrimInt + Literal + 'a> Iterator for CNFIterator<'a, Lit> {
+impl<'a, Lit: PrimInt + Literal + 'a> Iterator for CnfIterator<'a, Lit> {
 	type Item = &'a [Lit];
 
 	fn next(&mut self) -> Option<Self::Item> {
-		let start = self.index;
-		let mut it = self.clauses.iter().skip(start);
-		while let Some(l) = it.next() {
-			self.index += 1;
-			if l.is_zero() {
-				return Some(&self.clauses[start..self.index - 1]);
-			}
+		if let Some(size) = self.size.next() {
+			let start = self.index;
+			self.index += size;
+			Some(&self.lits[start..self.index])
+		} else {
+			None
 		}
-		None
 	}
 }
 
