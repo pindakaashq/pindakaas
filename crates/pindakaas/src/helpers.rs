@@ -242,7 +242,7 @@ pub mod tests {
 						.collect(),
 				);
 				let nogood: Vec<i32> = from_slv.last().unwrap().iter().map(|l| -l).collect();
-				match self.slv.add_clause(nogood) {
+				match SatSolverIF::add_clause(&mut self.slv, nogood) {
 					Err(SolverError::Inconsistent | SolverError::EmptyClause) => {
 						break;
 					}
@@ -360,7 +360,7 @@ pub mod tests {
 			match match cl.len() {
 				0 => return Err(Unsatisfiable),
 				1 => self.slv.add_assignment(cl[0]),
-				_ => self.slv.add_clause(cl),
+				_ => SatSolverIF::add_clause(&mut self.slv, cl),
 			} {
 				Ok(_) => Ok(()),
 				Err(err) => match err {
