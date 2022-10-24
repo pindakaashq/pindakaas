@@ -83,7 +83,7 @@ fn construct_bdd<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 						.into_iter(..)
 						.tuple_windows()
 						.filter_map(|((prev, _), (iv, lit))| {
-							let interval = (prev.end - C::one())..iv.end;
+							let interval = prev.end..iv.end;
 							match lit {
 								LitOrConst::Lit(lit) => Some((interval, Some(lit))),
 								LitOrConst::Const(false) => None,
