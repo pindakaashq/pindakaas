@@ -256,7 +256,7 @@ impl<Lit: PrimInt + Literal + FromStr> Cnf<Lit> {
 		let mut cl: Vec<Lit> = Vec::new();
 		for line in BufReader::new(file).lines() {
 			match line {
-				Ok(line) if line == "" || line.starts_with('c') => (),
+				Ok(line) if line.is_empty() || line.starts_with('c') => (),
 				Ok(line) if had_header => {
 					for seg in line.split(' ') {
 						if let Ok(l) = seg.parse::<Lit>() {
@@ -283,7 +283,7 @@ impl<Lit: PrimInt + Literal + FromStr> Cnf<Lit> {
 				Ok(line) => {
 					let vec: Vec<&str> = line.split_whitespace().collect();
 					// check "p" and "cnf" keyword
-					if vec.len() != 4 || &vec[0..2] != ["p", "cnf"] {
+					if vec.len() != 4 || vec[0..2] != ["p", "cnf"] {
 						return Err(io::Error::new(
 							io::ErrorKind::InvalidInput,
 							"expected DIMACS CNF header formatted \"p cnf {variables} {clauses}\"",
@@ -364,6 +364,13 @@ impl<'a, Lit: PrimInt + Literal + 'a> Iterator for CnfIterator<'a, Lit> {
 		} else {
 			None
 		}
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		self.size.size_hint()
+	}
+	fn count(self) -> usize {
+		self.size.count()
 	}
 }
 

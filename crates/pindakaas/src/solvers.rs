@@ -1,19 +1,24 @@
-use splr::SatSolverIF;
+use itertools::Itertools;
+use num::PrimInt;
 
-use crate::ClauseDatabase;
+use crate::{ClauseDatabase, Literal};
 
 #[cfg(feature = "splr")]
-impl ClauseDatabase for splr::Solver {
+pub use splr::Solver as SplrSolver;
+
+#[cfg(feature = "splr")]
+impl crate::ClauseDatabase for SplrSolver {
 	type Lit = i32;
 
 	fn new_var(&mut self) -> Self::Lit {
+		use splr::SatSolverIF;
 		self.add_var()
 			.try_into()
 			.expect("unable to convert splr variable into literal")
 	}
 
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> crate::Result {
-		use splr::SolverError::*;
+		use splr::{SatSolverIF, SolverError::*};
 		match SatSolverIF::add_clause(self, cl) {
 			Ok(_) => Ok(()),
 			Err(e) => match e {
@@ -25,6 +30,31 @@ impl ClauseDatabase for splr::Solver {
 				}
 			},
 		}
+	}
+}
+#[cfg(feature = "splr")]
+impl<Lit: PrimInt + Literal + Into<i32>> From<crate::Cnf<Lit>> for SplrSolver {
+	fn from(cnf: crate::Cnf<Lit>) -> Self {
+		use splr::{
+			types::{CNFDescription, Instantiate},
+			Config,
+		};
+		let mut slv = SplrSolver::instantiate(
+			&Config::default(),
+			&CNFDescription {
+				num_of_variables: cnf.last_var.into() as usize,
+				..CNFDescription::default()
+			},
+		);
+		for cl in cnf.iter() {
+			if slv
+				.add_clause(&cl.iter().map(|lit| (*lit).into()).collect_vec())
+				.is_err()
+			{
+				// Ignore early detected unsatisfiability
+			};
+		}
+		slv
 	}
 }
 
