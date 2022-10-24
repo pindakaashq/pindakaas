@@ -226,14 +226,15 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			Part::Ic(terms) => {
 				let mut acc = C::zero(); // running sum
 				IntVarOrd::from_terms(
-					terms
-						.iter()
+					std::iter::once(&(terms[0].0.clone(), C::zero().into()))
+						.chain(terms.iter())
 						.map(|(lit, coef)| {
 							acc += **coef;
 							debug_assert!(acc <= *ub);
 							(acc, lit.clone())
 						})
-						.map(|(c, o)| (c..(c + C::one()), o))
+						.tuple_windows()
+						.map(|((prev, _), (coef, lit))| ((prev + C::one())..(coef + C::one()), lit))
 						.collect(),
 				)
 			}
