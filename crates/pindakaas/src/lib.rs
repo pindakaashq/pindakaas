@@ -201,6 +201,28 @@ pub trait ClauseDatabase {
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result;
 }
 
+// TODO: Add usage and think about interface
+pub struct ConditionalDatabase<'a, DB: ClauseDatabase> {
+	db: &'a mut DB,
+	conditions: &'a [DB::Lit],
+}
+impl<'a, DB: ClauseDatabase> ConditionalDatabase<'a, DB> {
+	pub fn new(db: &'a mut DB, conditions: &'a [DB::Lit]) -> Self {
+		Self { db, conditions }
+	}
+}
+impl<'a, DB: ClauseDatabase> ClauseDatabase for ConditionalDatabase<'a, DB> {
+	type Lit = DB::Lit;
+	fn new_var(&mut self) -> Self::Lit {
+		self.db.new_var()
+	}
+	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
+		self.db.add_clause(&Vec::from_iter(
+			self.conditions.iter().chain(cl.iter()).cloned(),
+		))
+	}
+}
+
 /// A representation for Boolean formulas in conjunctive normal form.
 ///
 /// It can be used to create formulas manually, to store the results from
