@@ -81,29 +81,29 @@ fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 					[x] => x.clone(),
 					[left, right] => {
 						let l = if layer.len() > 2 { C::zero() } else { l };
-						let parent = IntVarEnc::Ord(IntVarOrd::from_terms(
-							ord_plus_ord_le_ord_sparse_dom(
-								left.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
-								right
-									.dom()
-									.into_iter(..)
-									.map(|c| c.end - C::one())
-									.collect(),
-								l,
-								u,
+						let dom = ord_plus_ord_le_ord_sparse_dom(
+							left.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
+							right
+								.dom()
+								.into_iter(..)
+								.map(|c| c.end - C::one())
+								.collect(),
+							l,
+							u,
+						)
+						.into_iter(..)
+						.map(|interval| {
+							(
+								interval,
+								Some(new_var!(
+									db,
+									format!("w_{}_{}>={:?}", level + 1, _node + 1, interval)
+								)),
 							)
-							.into_iter(..)
-							.map(|interval| {
-								(
-									interval,
-									new_var!(
-										db,
-										format!("w_{}_{}>={:?}", level + 1, _node + 1, interval)
-									),
-								)
-							})
-							.collect(),
-						));
+						})
+						.collect();
+
+						let parent = IntVarEnc::Ord(IntVarOrd::new(db, dom));
 
 						if add_consistency {
 							encode_consistency(db, &parent);

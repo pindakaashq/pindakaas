@@ -3,6 +3,7 @@ use crate::{
 	trace::new_var,
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
+use iset::IntervalMap;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)
 #[derive(Clone, Default)]
@@ -30,12 +31,15 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.map(|part| IntVarEnc::Ord(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone())))
 			.collect::<Vec<_>>();
 		xs.into_iter().enumerate().reduce(|(i, prev), (_, leaf)| {
-			let next = IntVarEnc::Ord(IntVarOrd::from_terms(
-				num::iter::range_inclusive(C::one(), *lin.k)
-					.map(|j| (j, new_var!(db, format!("w_{}>={:?}", i + 1, j))))
-					.map(|(c, o)| (c..(c + C::one()), o))
-					.collect(),
-			));
+			let dom = num::iter::range_inclusive(C::one(), *lin.k)
+				.map(|j| {
+					(
+						j..(j + C::one()),
+						Some(new_var!(db, format!("w_{}>={:?}", i + 1, j))),
+					)
+				})
+				.collect::<IntervalMap<_, _>>();
+			let next = IntVarEnc::Ord(IntVarOrd::new(db, dom));
 
 			if self.add_consistency {
 				encode_consistency(db, &next);

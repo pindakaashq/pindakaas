@@ -162,16 +162,6 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
-	// TODO can be removed using new
-	pub fn from_terms(terms: IntervalMap<C, Lit>) -> Self {
-		debug_assert!(!terms.is_empty());
-		Self {
-			xs: IntervalMap::from_sorted(
-				terms.into_iter(..).map(|(interval, lit)| (interval, lit)),
-			),
-		}
-	}
-
 	/// Constructs IntVar `y` for linear expression `xs` so that ∑ xs ≦ y, using order encoding
 	pub fn from_part_using_le_ord<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
@@ -202,30 +192,30 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 					h.entry(*coef).or_insert_with(Vec::new).push(lit);
 				}
 
-				IntVarOrd::from_terms(
-					std::iter::once((C::zero(), vec![]))
-						.chain(h.into_iter())
-						.sorted_by(|(a, _), (b, _)| a.cmp(b))
-						.tuple_windows()
-						.map(|((prev, _), (coef, lits))| {
-							let interval = (prev + C::one())..(coef + C::one());
-							if lits.len() == 1 {
-								(interval, lits[0].clone())
-							} else {
-								let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
-								for lit in lits {
-									emit_clause!(db, &[lit.negate(), o.clone()]).unwrap();
-								}
-								(interval, o)
+				let dom = std::iter::once((C::zero(), vec![]))
+					.chain(h.into_iter())
+					.sorted_by(|(a, _), (b, _)| a.cmp(b))
+					.tuple_windows()
+					.map(|((prev, _), (coef, lits))| {
+						let interval = (prev + C::one())..(coef + C::one());
+						if lits.len() == 1 {
+							(interval, Some(lits[0].clone()))
+						} else {
+							let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
+							for lit in lits {
+								db.add_clause(&[lit.negate(), o.clone()]).unwrap();
 							}
-						})
-						.collect(),
-				)
+							(interval, Some(o))
+						}
+					})
+					.collect();
+				IntVarOrd::new(db, dom)
 			}
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
 			Part::Ic(terms) => {
 				let mut acc = C::zero(); // running sum
-				IntVarOrd::from_terms(
+				IntVarOrd::new(
+					db,
 					std::iter::once(&(terms[0].0.clone(), C::zero().into()))
 						.chain(terms.iter())
 						.map(|(lit, coef)| {
@@ -234,7 +224,9 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 							(acc, lit.clone())
 						})
 						.tuple_windows()
-						.map(|((prev, _), (coef, lit))| ((prev + C::one())..(coef + C::one()), lit))
+						.map(|((prev, _), (coef, lit))| {
+							((prev + C::one())..(coef + C::one()), Some(lit))
+						})
 						.collect(),
 				)
 			}
