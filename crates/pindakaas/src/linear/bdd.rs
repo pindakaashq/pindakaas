@@ -117,29 +117,27 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 ) -> (std::ops::Range<C>, LitOrConst<DB::Lit>) {
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
-			let (interval, lit) = (
-				xs[i]
-					.dom()
-					.iter(..)
-					.map(|v| {
-						let v = v.end - C::one();
-						let (interval, lit) = bdd(db, i + 1, xs, sum + v, ws, false);
-						((interval.start - v)..(interval.end - v), lit)
-					})
-					.reduce(|(a, _), (b, lit_b)| {
-						(
-							std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end),
-							lit_b,
-						)
-					})
-					.unwrap()
-					.0,
-				if first {
-					LitOrConst::Const(true)
-				} else {
-					LitOrConst::Lit(new_var!(db))
-				},
-			);
+			let interval = xs[i]
+				.dom()
+				.iter(..)
+				.map(|v| {
+					let v = v.end - C::one();
+					let (interval, lit) = bdd(db, i + 1, xs, sum + v, ws, false);
+					((interval.start - v)..(interval.end - v), lit)
+				})
+				.reduce(|(a, _), (b, lit_b)| {
+					(
+						std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end),
+						lit_b,
+					)
+				})
+				.unwrap()
+				.0;
+			let lit = if first {
+				LitOrConst::Const(true)
+			} else {
+				LitOrConst::Lit(new_var!(db, format!("w_{i}>={interval:?}")))
+			};
 
 			let interval_already_exists = ws[i].insert(interval.clone(), lit.clone()).is_some();
 			debug_assert!(!interval_already_exists, "Duplicate interval inserted");
