@@ -1,7 +1,10 @@
 use crate::{
-	int::{ord_plus_ord_le_ord_sparse_dom, ord_plus_ord_le_x, IntVar},
+	int::{
+		encode_consistency, ord_plus_ord_le_ord_sparse_dom, ord_plus_ord_le_x, Constant, IntVarEnc,
+		IntVarOrd,
+	},
 	linear::LimitComp,
-	new_var, ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
+	new_var, ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized Totalizer (GT)
@@ -17,21 +20,26 @@ impl TotalizerEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for TotalizerEncoder {
+impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<DB::Lit, C>>
+	for TotalizerEncoder
+{
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		assert!(lin.cmp == LimitComp::LessEq);
+
 		let xs = lin
 			.terms
 			.iter()
-			.map(|part| IntVar::from_part_using_le_ord(db, part, lin.k.clone()))
+			.map(|part| -> Box<dyn IntVarEnc<DB, C>> {
+				Box::new(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone()))
+			})
 			.collect::<Vec<_>>();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
 		build_totalizer(
 			xs,
 			db,
-			C::zero().into(),
-			lin.k.clone(),
+			C::zero(),
+			*lin.k.clone(),
 			true,
 			self.add_consistency,
 			0,
@@ -40,25 +48,25 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 	}
 }
 
-fn build_totalizer<DB: ClauseDatabase + ?Sized, C: Coefficient>(
-	mut layer: Vec<IntVar<DB::Lit, C>>,
+fn build_totalizer<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
+	mut layer: Vec<Box<dyn IntVarEnc<DB, C>>>,
 	db: &mut DB,
-	l: PosCoeff<C>,
-	u: PosCoeff<C>,
+	l: C,
+	u: C,
 	limit_root: bool,
 	add_consistency: bool,
 	level: u32,
-) -> IntVar<DB::Lit, C> {
+) -> Box<dyn IntVarEnc<DB, C>> {
 	if layer.len() == 1 {
 		let root = layer.pop().unwrap();
 		if limit_root {
-			let zero = IntVar::constant(C::zero().into());
-			let parent = IntVar::constant(u);
+			let zero: Box<dyn IntVarEnc<DB, C>> = Box::new(Constant::new(C::zero()));
+			let parent: Box<dyn IntVarEnc<DB, C>> = Box::new(Constant::new(u));
 			ord_plus_ord_le_x(db, &root, &zero, &parent);
 		}
 		root
 	} else if limit_root && layer.len() == 2 {
-		let parent = IntVar::constant(u);
+		let parent: Box<dyn IntVarEnc<DB, C>> = Box::new(Constant::new(u));
 		ord_plus_ord_le_x(db, &layer[0], &layer[1], &parent);
 		parent
 	} else {
@@ -69,32 +77,29 @@ fn build_totalizer<DB: ClauseDatabase + ?Sized, C: Coefficient>(
 				.map(|(_node, children)| match children {
 					[x] => x.clone(),
 					[left, right] => {
-						let l = if layer.len() > 2 {
-							C::zero().into()
-						} else {
-							l.clone()
-						};
-						let parent = IntVar::from_terms(
+						let l = if layer.len() > 2 { C::zero() } else { l };
+						let parent: Box<dyn IntVarEnc<DB, C>> = Box::new(IntVarOrd::from_terms(
 							ord_plus_ord_le_ord_sparse_dom(
-								left.iter().map(|(_, c)| *c).collect(),
-								right.iter().map(|(_, c)| *c).collect(),
-								*l,
-								*u,
+								left.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
+								right
+									.dom()
+									.into_iter(..)
+									.map(|c| c.end - C::one())
+									.collect(),
+								l,
+								u,
 							)
-							.into_iter()
-							.map(|c| {
-								(
-									c.into(),
-									new_var!(db, format!("w_{}_{}>={c:?}", level + 1, _node + 1)),
-								)
+							.into_iter(..)
+							.map(|interval| {
+								#[cfg(debug_assertions)]
+								let lbl = format!("w_{}_{}>={:?}", level + 1, _node + 1, interval);
+								(interval, new_var!(db, lbl))
 							})
 							.collect(),
-							l,
-							u.clone(),
-						);
+						));
 
 						if add_consistency {
-							parent.encode_consistency(db);
+							encode_consistency(db, &parent);
 						}
 
 						ord_plus_ord_le_x(db, left, right, &parent);

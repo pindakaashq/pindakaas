@@ -2,7 +2,7 @@ use iset::{interval_map, IntervalMap};
 use itertools::{Itertools, Position};
 
 use crate::{
-	int::{ord_plus_ord_le_x, IntVar, IntVarEnc, LitOrConst},
+	int::{encode_consistency, ord_plus_ord_le_x, Constant, IntVarEnc, IntVarOrd, LitOrConst},
 	linear::LimitComp,
 	new_var, ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
@@ -20,20 +20,24 @@ impl BddEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for BddEncoder {
+impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<DB::Lit, C>>
+	for BddEncoder
+{
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		assert!(lin.cmp == LimitComp::LessEq);
 		let xs = lin
 			.terms
 			.iter()
-			.map(|part| IntVar::from_part_using_le_ord(db, part, lin.k.clone()))
-			.sorted_by(|a, b| b.ub().cmp(a.ub())) // sort by *decreasing* ub
+			.map(|part| -> Box<dyn IntVarEnc<DB, C>> {
+				Box::new(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone()))
+			})
+			.sorted_by(|a, b| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
 		let mut ws = construct_bdd(db, &xs, lin.k.clone()).into_iter();
 		let first = ws.next().unwrap();
 		xs.into_iter().zip(ws).fold(first, |curr, (x_i, next)| {
 			if self.add_consistency {
-				next.encode_consistency(db);
+				encode_consistency(db, &next);
 			}
 
 			ord_plus_ord_le_x(db, &curr, &x_i, &next);
@@ -44,12 +48,12 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 	}
 }
 
-fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
+fn construct_bdd<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 	db: &mut DB,
-	xs: &Vec<IntVar<DB::Lit, C>>,
+	xs: &Vec<Box<dyn IntVarEnc<DB, C>>>,
 	k: PosCoeff<C>,
-) -> Vec<IntVar<DB::Lit, C>> {
-	let ubs = xs.iter().map(|x| *x.ub()).collect::<Vec<_>>();
+) -> Vec<Box<dyn IntVarEnc<DB, C>>> {
+	let ubs = xs.iter().map(|x| x.ub()).collect::<Vec<_>>();
 	let k = *k;
 	let inf = ubs.iter().fold(C::one() + C::one(), |a, &b| (a + b));
 	let neg_inf = k - inf;
@@ -69,42 +73,41 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 		.collect();
 	bdd(db, 0, xs, C::zero(), &mut ws, true);
 	ws.into_iter()
-		.map(|w| {
-			let (mut lb, mut ub) = (-C::one(), -C::one());
-			IntVar::new(
-				IntervalMap::from_iter(w.into_iter(..).with_position().filter_map(|position| {
-					match position {
-						Position::First((interval, _)) => {
-							lb = std::cmp::max(C::zero(), interval.end - C::one());
-							None
-						}
-						Position::Middle((interval, lit)) => {
-							if let LitOrConst::Lit(lit) = lit {
-								Some((interval, lit))
-							} else {
-								lb = interval.end - C::one();
-								debug_assert!(matches!(lit, LitOrConst::Const(true)));
-								None // root
+		.with_position()
+		.filter_map(|w| -> Option<Box<dyn IntVarEnc<DB, C>>> {
+			// TODO refactor by directly converting Const layers into Constants (regardless of position)
+			match w {
+				Position::First(_) => Some(Box::new(Constant::new(C::zero()))),
+				Position::Middle(w) => {
+					let dom: IntervalMap<_, _> = w
+						.into_iter(..)
+						.tuple_windows()
+						.filter_map(|((prev, _), (iv, lit))| {
+							let interval = (prev.end - C::one())..iv.end;
+							match lit {
+								LitOrConst::Lit(lit) => Some((interval, Some(lit))),
+								LitOrConst::Const(false) => None,
+								_ => unreachable!(),
 							}
-						}
-						Position::Last((interval, _)) => {
-							ub = interval.start - C::one();
-							None
-						}
-						_ => None,
+						})
+						.collect();
+					if dom.is_empty() {
+						None
+					} else {
+						Some(Box::new(IntVarOrd::new(db, dom)))
 					}
-				})),
-				lb.into(),
-				ub.into(),
-			)
+				}
+				Position::Last(_) => Some(Box::new(Constant::new(k))),
+				Position::Only(_) => unreachable!(),
+			}
 		})
 		.collect()
 }
 
-fn bdd<DB: ClauseDatabase, C: Coefficient>(
+fn bdd<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 	db: &mut DB,
 	i: usize,
-	xs: &Vec<IntVar<DB::Lit, C>>,
+	xs: &Vec<Box<dyn IntVarEnc<DB, C>>>,
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, LitOrConst<DB::Lit>>>,
 	first: bool,
@@ -113,10 +116,12 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 		[] => {
 			let (interval, lit) = (
 				xs[i]
-					.iter()
-					.map(|(_, v)| {
-						let (interval, lit) = bdd(db, i + 1, xs, sum + *v, ws, false);
-						((interval.start - *v)..(interval.end - *v), lit)
+					.dom()
+					.iter(..)
+					.map(|v| {
+						let v = v.end - C::one();
+						let (interval, lit) = bdd(db, i + 1, xs, sum + v, ws, false);
+						((interval.start - v)..(interval.end - v), lit)
 					})
 					.reduce(|(a, _), (b, lit_b)| {
 						(
