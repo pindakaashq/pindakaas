@@ -208,6 +208,10 @@ pub trait ClauseDatabase {
 	/// be unsatisfiable. This is used as a signal to the encoder that any
 	/// subsequent encoding effort can be abandoned.
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result;
+
+	fn new_var_with_label(&mut self, _: String) -> Self::Lit {
+		self.new_var()
+	}
 }
 
 // TODO: Add usage and think about interface

@@ -66,8 +66,7 @@ macro_rules! new_var {
 		$db.new_var()
 	};
 	($db:expr, $lbl:expr) => {
-		// $db.new_var_with_label($lbl)
-		$db.new_var()
+		$db.new_var_with_label($lbl)
 	};
 }
 
@@ -78,7 +77,6 @@ macro_rules! new_var {
 		$db.new_var()
 	};
 	($db:expr, $lbl:expr) => {
-		// $db.new_var_with_label($lbl)
 		$db.new_var()
 	};
 }
@@ -487,6 +485,12 @@ pub mod tests {
 				eprintln!("let x{} = slv.add_var() as i32;", res);
 			}
 			res
+		}
+
+		fn new_var_with_label(&mut self, label: String) -> Self::Lit {
+			let i = self.new_var();
+			self.labels.insert(i, label);
+			i
 		}
 	}
 }
