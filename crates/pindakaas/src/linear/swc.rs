@@ -1,5 +1,5 @@
 use crate::{
-	int::{ord_plus_ord_le_x, IntVar},
+	int::{encode_consistency, ord_plus_ord_le_x, IntVarEnc, IntVarOrd},
 	trace::new_var,
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
@@ -27,19 +27,18 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 		#[allow(clippy::needless_collect)]
 		let xs = lin.terms
 			.iter()
-			.map(|part| IntVar::from_part_using_le_ord(db, part, lin.k.clone()))
+			.map(|part| IntVarEnc::Ord(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone())))
 			.collect::<Vec<_>>();
 		xs.into_iter().enumerate().reduce(|(i, prev), (_, leaf)| {
-			let next = IntVar::from_terms(
+			let next = IntVarEnc::Ord(IntVarOrd::from_terms(
 				num::iter::range_inclusive(C::one(), *lin.k)
-					.map(|j| (j.into(), new_var!(db, format!("w_{}>={:?}", i + 1, j))))
+					.map(|j| (j, new_var!(db, format!("w_{}>={:?}", i + 1, j))))
+					.map(|(c, o)| (c..(c + C::one()), o))
 					.collect(),
-				C::zero().into(),
-				lin.k.clone(),
-			);
+			));
 
 			if self.add_consistency {
-				next.encode_consistency(db);
+				encode_consistency(db, &next);
 			}
 
 			ord_plus_ord_le_x(db, &prev, &leaf, &next);
@@ -56,14 +55,12 @@ mod tests {
 
 	use super::*;
 	use crate::{
-		// cardinality_one::tests::card1_test_suite, CardinalityOne,
 		helpers::tests::assert_sol,
 		linear::{
 			tests::{construct_terms, linear_test_suite},
 			LimitComp,
 		},
-		Checker,
-		Encoder,
+		Checker, Encoder,
 	};
 
 	linear_test_suite!(SwcEncoder::default());
