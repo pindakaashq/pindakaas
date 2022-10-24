@@ -78,25 +78,25 @@ fn build_totalizer<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 					[x] => x.clone(),
 					[left, right] => {
 						let l = if layer.len() > 2 { C::zero() } else { l };
-						let parent: Box<dyn IntVarEnc<DB, C>> = Box::new(IntVarOrd::from_terms(
-							ord_plus_ord_le_ord_sparse_dom(
-								left.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
-								right
-									.dom()
-									.into_iter(..)
-									.map(|c| c.end - C::one())
-									.collect(),
-								l,
-								u,
-							)
-							.into_iter(..)
-							.map(|interval| {
-								#[cfg(debug_assertions)]
-								let lbl = format!("w_{}_{}>={:?}", level + 1, _node + 1, interval);
-								(interval, new_var!(db, lbl))
-							})
-							.collect(),
-						));
+						let dom = ord_plus_ord_le_ord_sparse_dom(
+							left.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
+							right
+								.dom()
+								.into_iter(..)
+								.map(|c| c.end - C::one())
+								.collect(),
+							l,
+							u,
+						)
+						.into_iter(..)
+						.map(|interval| {
+							#[cfg(debug_assertions)]
+							let lbl = format!("w_{}_{}>={:?}", level + 1, _node + 1, interval);
+							(interval, Some(new_var!(db, lbl)))
+						})
+						.collect();
+
+						let parent: Box<dyn IntVarEnc<DB, C>> = Box::new(IntVarOrd::new(db, dom));
 
 						if add_consistency {
 							encode_consistency(db, &parent);
