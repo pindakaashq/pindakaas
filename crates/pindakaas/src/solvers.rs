@@ -1,6 +1,6 @@
 use itertools::Itertools;
-use num::PrimInt;
-use std::ffi::c_int;
+use num::{One, Zero};
+use std::{ffi::c_int, ops::AddAssign};
 
 use crate::{ClauseDatabase, Cnf, Literal};
 
@@ -31,7 +31,7 @@ impl ClauseDatabase for SplrSolver {
 	}
 }
 #[cfg(feature = "splr")]
-impl<Lit: PrimInt + Literal + Into<i32>> From<Cnf<Lit>> for SplrSolver {
+impl<Lit: Literal + Zero + One + AddAssign + Into<i32>> From<Cnf<Lit>> for SplrSolver {
 	fn from(cnf: Cnf<Lit>) -> Self {
 		use splr::{
 			types::{CNFDescription, Instantiate},
@@ -40,13 +40,13 @@ impl<Lit: PrimInt + Literal + Into<i32>> From<Cnf<Lit>> for SplrSolver {
 		let mut slv = SplrSolver::instantiate(
 			&Config::default(),
 			&CNFDescription {
-				num_of_variables: cnf.last_var.into() as usize,
+				num_of_variables: cnf.last_var.clone().into() as usize,
 				..CNFDescription::default()
 			},
 		);
 		for cl in cnf.iter() {
 			if slv
-				.add_clause(&cl.iter().map(|lit| (*lit).into()).collect_vec())
+				.add_clause(&cl.iter().map(|lit| lit.clone().into()).collect_vec())
 				.is_err()
 			{
 				// Ignore early detected unsatisfiability
@@ -85,19 +85,22 @@ impl ClauseDatabase for IpasirSolver {
 		Ok(())
 	}
 }
-#[cfg(feature = "ipasir")]
-impl<Lit: PrimInt + Literal + Into<c_int>> From<crate::Cnf<Lit>> for IpasirSolver {
+impl<Lit: Literal + Zero + One + AddAssign + Into<c_int>> From<crate::Cnf<Lit>> for IpasirSolver {
 	fn from(cnf: crate::Cnf<Lit>) -> Self {
 		use ipasir::IpasirSolver as SolverProtocol;
 		let mut slv = IpasirSolver {
 			slv: ipasir::ffi::Solver::init(),
-			last_var: Some(ipasir::Lit::try_from(cnf.last_var.into()).unwrap().var()),
+			last_var: Some(
+				ipasir::Lit::try_from(cnf.last_var.clone().into())
+					.unwrap()
+					.var(),
+			),
 		};
 		for cl in cnf.iter() {
 			slv.slv.add_clause(
 				cl.iter()
 					.map(|lit| {
-						let lit: c_int = (*lit).into();
+						let lit: c_int = lit.clone().into();
 						ipasir::Lit::try_from(lit).unwrap()
 					})
 					.collect_vec(),
