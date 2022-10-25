@@ -3,59 +3,6 @@ use num::{One, Zero};
 use std::{ffi::c_int, ops::AddAssign};
 
 use crate::{ClauseDatabase, Cnf, Literal};
-
-#[cfg(feature = "splr")]
-pub use splr::Solver as SplrSolver;
-#[cfg(feature = "splr")]
-impl ClauseDatabase for SplrSolver {
-	type Lit = i32;
-	fn new_var(&mut self) -> Self::Lit {
-		use splr::SatSolverIF;
-		self.add_var()
-			.try_into()
-			.expect("unable to convert splr variable into literal")
-	}
-	fn add_clause(&mut self, cl: &[Self::Lit]) -> crate::Result {
-		use splr::{SatSolverIF, SolverError::*};
-		match SatSolverIF::add_clause(self, cl) {
-			Ok(_) => Ok(()),
-			Err(e) => match e {
-				OutOfRange => panic!("clause referenced a non-existing variable"),
-				RootLevelConflict(_) | EmptyClause | Inconsistent => Err(crate::Unsatisfiable),
-				TimeOut => unreachable!(),
-				SolverBug | UndescribedError | IOError | OutOfMemory => {
-					panic!("an error occured in splr while adding a clause")
-				}
-			},
-		}
-	}
-}
-#[cfg(feature = "splr")]
-impl<Lit: Literal + Zero + One + AddAssign + Into<i32>> From<Cnf<Lit>> for SplrSolver {
-	fn from(cnf: Cnf<Lit>) -> Self {
-		use splr::{
-			types::{CNFDescription, Instantiate},
-			Config,
-		};
-		let mut slv = SplrSolver::instantiate(
-			&Config::default(),
-			&CNFDescription {
-				num_of_variables: cnf.last_var.clone().into() as usize,
-				..CNFDescription::default()
-			},
-		);
-		for cl in cnf.iter() {
-			if slv
-				.add_clause(&cl.iter().map(|lit| lit.clone().into()).collect_vec())
-				.is_err()
-			{
-				// Ignore early detected unsatisfiability
-			};
-		}
-		slv
-	}
-}
-
 pub struct IpasirSolver {
 	slv: ipasir::ffi::Solver,
 	last_var: Option<ipasir::Var>,
@@ -139,6 +86,99 @@ impl ipasir::IpasirSolver for IpasirSolver {
 	}
 	fn set_learn<F: FnMut(ipasir::Clause) + 'static>(&mut self, max_len: usize, callback: F) {
 		self.slv.set_learn(max_len, callback)
+	}
+}
+
+#[cfg(feature = "minisat")]
+pub use minisat::Solver as MiniSatSolver;
+#[cfg(feature = "minisat")]
+impl Literal for minisat::Lit {
+	fn negate(&self) -> Self {
+		!(*self)
+	}
+	fn is_negated(&self) -> bool {
+		minisat::Lit::var(*self).1
+	}
+}
+#[cfg(feature = "minisat")]
+impl ClauseDatabase for MiniSatSolver {
+	type Lit = minisat::Lit;
+	fn new_var(&mut self) -> Self::Lit {
+		self.new_lit()
+	}
+	fn add_clause(&mut self, cl: &[Self::Lit]) -> crate::Result {
+		self.add_clause(cl.iter().cloned());
+		Ok(())
+	}
+}
+#[cfg(feature = "minisat")]
+impl<Lit: Literal + Zero + One + Into<i32>> From<Cnf<Lit>> for MiniSatSolver {
+	fn from(cnf: Cnf<Lit>) -> Self {
+		let mut slv = minisat::Solver::new();
+		let mut map = std::collections::HashMap::new();
+		for cl in cnf.iter() {
+			let cl = cl
+				.iter()
+				.map(|lit| {
+					let ival: i32 = lit.clone().into();
+					*map.entry(ival).or_insert_with(|| slv.new_var())
+				})
+				.collect_vec();
+			slv.add_clause(cl)
+		}
+		slv
+	}
+}
+
+#[cfg(feature = "splr")]
+pub use splr::Solver as SplrSolver;
+#[cfg(feature = "splr")]
+impl ClauseDatabase for SplrSolver {
+	type Lit = i32;
+	fn new_var(&mut self) -> Self::Lit {
+		use splr::SatSolverIF;
+		self.add_var()
+			.try_into()
+			.expect("unable to convert splr variable into literal")
+	}
+	fn add_clause(&mut self, cl: &[Self::Lit]) -> crate::Result {
+		use splr::{SatSolverIF, SolverError::*};
+		match SatSolverIF::add_clause(self, cl) {
+			Ok(_) => Ok(()),
+			Err(e) => match e {
+				OutOfRange => panic!("clause referenced a non-existing variable"),
+				RootLevelConflict(_) | EmptyClause | Inconsistent => Err(crate::Unsatisfiable),
+				TimeOut => unreachable!(),
+				SolverBug | UndescribedError | IOError | OutOfMemory => {
+					panic!("an error occured in splr while adding a clause")
+				}
+			},
+		}
+	}
+}
+#[cfg(feature = "splr")]
+impl<Lit: Literal + Zero + One + Into<i32>> From<Cnf<Lit>> for SplrSolver {
+	fn from(cnf: Cnf<Lit>) -> Self {
+		use splr::{
+			types::{CNFDescription, Instantiate},
+			Config,
+		};
+		let mut slv = SplrSolver::instantiate(
+			&Config::default(),
+			&CNFDescription {
+				num_of_variables: cnf.last_var.clone().into() as usize,
+				..CNFDescription::default()
+			},
+		);
+		for cl in cnf.iter() {
+			if slv
+				.add_clause(&cl.iter().map(|lit| lit.clone().into()).collect_vec())
+				.is_err()
+			{
+				// Ignore early detected unsatisfiability
+			};
+		}
+		slv
 	}
 }
 

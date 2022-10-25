@@ -16,6 +16,7 @@ iset = "0.1.1"
 itertools = "0.10"
 num = "0.4"
 
+minisat = { git = "https://github.com/luteberget/minisat-rs.git", optional = true } # waiting on release for minisat::Lit::var()
 splr = { version = "0.16", optional = true }
 
 [dev-dependencies]
