@@ -23,7 +23,7 @@ use std::{
 use itertools::{Itertools, Position};
 use num::{
 	traits::{NumAssignOps, NumOps},
-	PrimInt, Signed,
+	One, PrimInt, Signed, Zero,
 };
 
 mod cardinality;
@@ -228,7 +228,7 @@ impl<'a, DB: ClauseDatabase> ClauseDatabase for ConditionalDatabase<'a, DB> {
 /// It can be used to create formulas manually, to store the results from
 /// encoders, read formulas from a file, and writse them to a file
 #[derive(Clone, Debug)]
-pub struct Cnf<Lit: PrimInt + Literal = i32> {
+pub struct Cnf<Lit: Literal + Zero + One = i32> {
 	/// The last variable created by [`new_var`]
 	last_var: Lit,
 	/// The literals from *all* clauses
@@ -237,7 +237,7 @@ pub struct Cnf<Lit: PrimInt + Literal = i32> {
 	size: Vec<usize>,
 }
 
-impl<Lit: PrimInt + Literal> Cnf<Lit> {
+impl<Lit: Literal + Zero + One + Display> Cnf<Lit> {
 	/// Store CNF formula at given path in DIMACS format
 	///
 	/// File will optionally be prefaced by a given comment
@@ -251,9 +251,9 @@ impl<Lit: PrimInt + Literal> Cnf<Lit> {
 		write!(file, "{self}")
 	}
 }
-impl<Lit: PrimInt + Literal> Display for Cnf<Lit> {
+impl<Lit: Literal + Zero + One + Display> Display for Cnf<Lit> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let num_var = self.last_var;
+		let num_var = &self.last_var;
 		let num_clauses = self.size.len();
 		writeln!(f, "p cnf {num_var} {num_clauses}")?;
 		let mut start = 0;
@@ -269,12 +269,12 @@ impl<Lit: PrimInt + Literal> Display for Cnf<Lit> {
 	}
 }
 
-impl<Lit: PrimInt + Literal + FromStr> Cnf<Lit> {
+impl<Lit: Literal + Zero + One + FromStr> Cnf<Lit> {
 	/// Read a CNF formula from a file formatted in the DIMACS CNF format
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
 		let file = File::open(path)?;
 		let mut had_header = false;
-		let mut cnf = Cnf::default();
+		let mut cnf = Cnf::<Lit>::default();
 		let mut cl: Vec<Lit> = Vec::new();
 		for line in BufReader::new(file).lines() {
 			match line {
@@ -282,15 +282,6 @@ impl<Lit: PrimInt + Literal + FromStr> Cnf<Lit> {
 				Ok(line) if had_header => {
 					for seg in line.split(' ') {
 						if let Ok(l) = seg.parse::<Lit>() {
-							if l.var() > cnf.last_var {
-								return Err(io::Error::new(
-									io::ErrorKind::InvalidInput,
-									format!(
-										"unexpected literal {}, only {} variables declared",
-										l, cnf.last_var
-									),
-								));
-							}
 							if l == Lit::zero() {
 								cnf.add_clause(&cl)
 									.expect("CNF::add_clause does not return Unsatisfiable");
@@ -337,7 +328,7 @@ impl<Lit: PrimInt + Literal + FromStr> Cnf<Lit> {
 	}
 }
 
-impl<Lit: PrimInt + Literal> Default for Cnf<Lit> {
+impl<Lit: Literal + Zero + One> Default for Cnf<Lit> {
 	fn default() -> Self {
 		Self {
 			last_var: Lit::zero(),
@@ -346,11 +337,11 @@ impl<Lit: PrimInt + Literal> Default for Cnf<Lit> {
 		}
 	}
 }
-impl<Lit: PrimInt + Literal> ClauseDatabase for Cnf<Lit> {
+impl<Lit: Literal + Zero + One> ClauseDatabase for Cnf<Lit> {
 	type Lit = Lit;
 	fn new_var(&mut self) -> Self::Lit {
-		self.last_var = self.last_var + Lit::one();
-		self.last_var
+		self.last_var = self.last_var.clone() + Lit::one();
+		self.last_var.clone()
 	}
 
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
@@ -361,7 +352,7 @@ impl<Lit: PrimInt + Literal> ClauseDatabase for Cnf<Lit> {
 	}
 }
 
-impl<Lit: PrimInt + Literal> Cnf<Lit> {
+impl<Lit: Literal + Zero + One> Cnf<Lit> {
 	pub fn iter(&self) -> CnfIterator<Lit> {
 		CnfIterator {
 			lits: &self.lits,
@@ -370,12 +361,12 @@ impl<Lit: PrimInt + Literal> Cnf<Lit> {
 		}
 	}
 }
-pub struct CnfIterator<'a, Lit: PrimInt + Literal> {
+pub struct CnfIterator<'a, Lit: Literal + Zero + One> {
 	lits: &'a Vec<Lit>,
 	size: std::slice::Iter<'a, usize>,
 	index: usize,
 }
-impl<'a, Lit: PrimInt + Literal + 'a> Iterator for CnfIterator<'a, Lit> {
+impl<'a, Lit: Literal + Zero + One> Iterator for CnfIterator<'a, Lit> {
 	type Item = &'a [Lit];
 
 	fn next(&mut self) -> Option<Self::Item> {

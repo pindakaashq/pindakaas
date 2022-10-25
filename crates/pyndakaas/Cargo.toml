@@ -4,7 +4,7 @@ description = "Python interface for the to pindakaas crate"
 version = "0.1.0"
 authors = [
 	"Jip J. Dekker <jip.dekker@monash.edu>",
-	"Hendrik 'Henk' Bierlee <hendrik.bierlee@monash.edu>"
+	"Hendrik 'Henk' Bierlee <hendrik.bierlee@monash.edu>",
 ]
 license = "MPL-2.0"
 
@@ -16,8 +16,9 @@ crate-type = ["cdylib"]
 doc = false
 
 [dependencies]
-pyo3 = { version = "0.16.5", features = ["extension-module"] }
+num = "0.4"
 pindakaas = { path = "../pindakaas" }
+pyo3 = { version = "0.17.2", features = ["extension-module"] }
 
 [build-dependencies]
-pyo3-build-config = "0.16.5"
+pyo3-build-config = "0.17.2"

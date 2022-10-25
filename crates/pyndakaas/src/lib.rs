@@ -1,110 +1,124 @@
-use pindakaas::{ClauseDatabase, Result};
-use pyo3::{exceptions::PyTypeError, prelude::*};
+use std::{
+	fmt::Display,
+	num::ParseIntError,
+	ops::{Add, DerefMut, Mul},
+	path::PathBuf,
+	str::FromStr,
+};
 
-/// The type used to represent Literals in the Python Pindakaas library
-pub type Lit = i32;
-/// The type used to represent Coefficients in the Python Pindakaas library
-pub type Coeff = i32;
-pub type PosCoeff = u32;
+use base::{Encoder, LinExp, LinearConstraint, LinearEncoder, Literal};
+use num::{One, Zero};
+use pindakaas as base;
+use pyo3::{exceptions::PyArithmeticError, prelude::*};
+
+#[pyclass]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Lit(i32);
+impl Literal for Lit {
+	fn negate(&self) -> Self {
+		Lit(-self.0)
+	}
+	fn is_negated(&self) -> bool {
+		self.0.is_negated()
+	}
+	fn var(&self) -> Self {
+		Lit(self.0.abs())
+	}
+}
+impl Display for Lit {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		self.0.fmt(f)
+	}
+}
+impl FromStr for Lit {
+	type Err = ParseIntError;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Ok(Lit(i32::from_str(s)?))
+	}
+}
+impl Zero for Lit {
+	fn zero() -> Self {
+		Lit(0)
+	}
+	fn is_zero(&self) -> bool {
+		self.0 == 0
+	}
+}
+impl One for Lit {
+	fn one() -> Self {
+		Lit(1)
+	}
+}
+impl Add for Lit {
+	type Output = Lit;
+	fn add(self, rhs: Self) -> Self::Output {
+		Lit(self.0 + rhs.0)
+	}
+}
+impl Mul for Lit {
+	type Output = Lit;
+	fn mul(self, rhs: Self) -> Self::Output {
+		Lit(self.0 * rhs.0)
+	}
+}
+type Clause = Vec<Lit>;
 
 #[pymodule]
 #[pyo3(name = "pindakaas")]
 fn module(_py: Python, m: &PyModule) -> PyResult<()> {
-	m.add_class::<Comparator>()?;
-	m.add_function(wrap_pyfunction!(encode_bool_lin, m)?)?;
+	m.add_class::<Cnf>()?;
+	m.add_function(wrap_pyfunction!(adder_encode, m)?)?;
 	Ok(())
 }
 
-#[pyfunction(new_var = "None")]
-fn encode_bool_lin(
-	_coeff: Vec<Coeff>,
-	lits: Vec<Lit>,
-	cmp: Comparator,
-	_k: Coeff,
-	new_var: Option<NewVarFn>,
-) -> PyResult<(bool, Vec<Vec<Lit>>)> {
-	let mut _db = PyClauseDatabase {
-		clause_vec: Vec::new(),
-		new_var_fn: match new_var {
-			Some(func) => func,
-			None => NewVarFn::SeqFrom(lits.iter().max().unwrap_or(&0) + 1),
-		},
-	};
-	let _cmp = match cmp {
-		Comparator::LessEq => pindakaas::Comparator::LessEq,
-		Comparator::Equal => pindakaas::Comparator::Equal,
-		Comparator::GreaterEq => pindakaas::Comparator::GreaterEq,
-	};
-	unimplemented!()
-	// let res = db.encode_bool_lin::<Coeff, PosCoeff>(&coeff, &lits, cmp, k, &[]);
-	// Ok((res.is_ok(), db.clause_vec))
+#[pyfunction(b = true)]
+fn adder_encode(mut db: PyRefMut<'_, Cnf>, b: bool) -> Result<(), PyErr> {
+	let pref = db.deref_mut();
+	let db = &mut pref.0;
+	let x = LinExp::from_slices(&[1, 2, 3], &[Lit(1), Lit(2), Lit(3)]);
+	let con = LinearConstraint::new(x, base::Comparator::Equal, 2);
+	let mut enc: LinearEncoder = LinearEncoder::default();
+	enc.encode(db, &con)
+		.map_err(|_e| PyArithmeticError::new_err("Unsatisfiable"))
+}
+
+#[pyclass(name = "CNF")]
+struct Cnf(base::Cnf<Lit>);
+
+#[pymethods]
+impl Cnf {
+	#[new]
+	fn new() -> Self {
+		Self(base::Cnf::default())
+	}
+	#[staticmethod]
+	fn from_file(path: PathBuf) -> Result<Self, std::io::Error> {
+		Ok(Self(base::Cnf::from_file(&path)?))
+	}
+
+	fn __str__(&self) -> String {
+		self.0.to_string()
+	}
+
+	fn __iter__(&self) -> ClauseIter {
+		// FIXME: It would be great if this could be made lazily instead of copying everything when creating the iterator
+		ClauseIter {
+			inner: Vec::from_iter(self.0.iter().map(Vec::from)).into_iter(),
+		}
+	}
 }
 
 #[pyclass]
-#[derive(Debug, Eq, PartialEq, Clone)]
-enum Comparator {
-	LessEq,
-	Equal,
-	GreaterEq,
+struct ClauseIter {
+	inner: std::vec::IntoIter<Clause>,
 }
-
-struct PyClauseDatabase<'a> {
-	clause_vec: Vec<Vec<Lit>>,
-	new_var_fn: NewVarFn<'a>,
-}
-
-impl<'a> ClauseDatabase for PyClauseDatabase<'a> {
-	type Lit = Lit;
-
-	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
-		self.clause_vec.push(Vec::from_iter(cl.iter().copied()));
-		Ok(())
+#[pymethods]
+impl ClauseIter {
+	fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+		slf
 	}
-
-	fn new_var(&mut self) -> Self::Lit {
-		self.new_var_fn.new_var()
-	}
-}
-
-#[derive(Debug, Clone)]
-enum NewVarFn<'a> {
-	SeqFrom(i32),
-	Call(&'a PyAny),
-}
-
-impl<'source> FromPyObject<'source> for NewVarFn<'source> {
-	fn extract(obj: &'source PyAny) -> PyResult<Self> {
-		if obj.is_callable() {
-			return Ok(NewVarFn::Call(obj));
-		}
-		if let Ok(x) = obj.extract::<i32>() {
-			return Ok(NewVarFn::SeqFrom(x));
-		}
-		Err(PyTypeError::new_err(
-			"Expected function or int to give the next new literal",
-		))
-	}
-}
-
-impl<'a> NewVarFn<'a> {
-	fn new_var(&mut self) -> i32 {
-		match self {
-			NewVarFn::SeqFrom(next) => {
-				let y = *next;
-				*next += 1;
-				y
-			}
-			NewVarFn::Call(fun) => match fun.call0() {
-				Ok(obj) => match obj.extract() {
-					Ok(next) => next,
-					Err(err) => panic!("New literal function did not return an int: {}", err),
-				},
-				Err(err) => panic!(
-					"New literal function could not be called correctly: {}",
-					err
-				),
-			},
-		}
+	fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<Clause> {
+		slf.inner.next()
 	}
 }
 
