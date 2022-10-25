@@ -661,7 +661,7 @@ mod tests {
 			fn test_small_le_3() {
 				assert_sol!(
 					$encoder,
-					6,
+					3,
 					&Linear {
 						terms: construct_terms(&[(1, 1), (2, 2), (3, 4),]),
 						cmp: LimitComp::LessEq,
