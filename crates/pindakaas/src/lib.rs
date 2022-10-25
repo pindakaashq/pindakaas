@@ -50,7 +50,7 @@ pub use linear::{
 ///
 ///  - [`std::cmp::Eq`] and [`std::hash::Hash`] to allow PB constraints to be
 ///    simplified
-pub trait Literal: fmt::Debug + fmt::Display + Clone + Eq + Hash {
+pub trait Literal: fmt::Debug + Clone + Eq + Hash {
 	/// Returns the negation of the literal in its current form
 	fn negate(&self) -> Self;
 	/// Returns `true` when the literal a negated boolean variable.
@@ -64,7 +64,7 @@ pub trait Literal: fmt::Debug + fmt::Display + Clone + Eq + Hash {
 		}
 	}
 }
-impl<T: Signed + fmt::Debug + fmt::Display + Clone + Eq + Hash + Neg<Output = Self>> Literal for T {
+impl<T: Signed + fmt::Debug + Clone + Eq + Hash + Neg<Output = Self> + LitMarker> Literal for T {
 	fn is_negated(&self) -> bool {
 		self.is_negative()
 	}
@@ -75,6 +75,12 @@ impl<T: Signed + fmt::Debug + fmt::Display + Clone + Eq + Hash + Neg<Output = Se
 		self.abs()
 	}
 }
+pub(crate) trait LitMarker {}
+impl LitMarker for i8 {}
+impl LitMarker for i16 {}
+impl LitMarker for i32 {}
+impl LitMarker for i64 {}
+impl LitMarker for i128 {}
 
 /// Unsatisfiable is an error type returned when the problem being encoded is
 /// found to be inconsistent.
@@ -123,14 +129,14 @@ impl<Lit: Literal> fmt::Display for Incomplete<Lit> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self.missing.len() {
 			0 => write!(f, "Unknown literal is unasssigned"),
-			1 => write!(f, "Literal {} is unasssigned", self.missing[0]),
+			1 => write!(f, "Literal {:?} is unasssigned", self.missing[0]),
 			_ => {
 				write!(f, "Literals")?;
 				for pos in self.missing.iter().with_position() {
 					match pos {
-						Position::First(lit) => write!(f, " {}", lit)?,
-						Position::Middle(lit) => write!(f, ", {}", lit)?,
-						Position::Last(lit) => write!(f, ", and {}", lit)?,
+						Position::First(lit) => write!(f, " {:?}", lit)?,
+						Position::Middle(lit) => write!(f, ", {:?}", lit)?,
+						Position::Last(lit) => write!(f, ", and {:?}", lit)?,
 						_ => unreachable!(),
 					}
 				}
