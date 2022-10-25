@@ -49,6 +49,7 @@ pub(crate) fn at_least_one_clause<DB: ClauseDatabase>(
 pub(crate) mod tests {
 	macro_rules! card1_test_suite {
 		($encoder:expr) => {
+            const LARGE_N: i32 = 50;
 			// ------ At Most One testing ------
 			#[test]
 			fn test_amo_pair() {
@@ -102,9 +103,9 @@ pub(crate) mod tests {
 			fn test_amo_large() {
 				assert_sol!(
 					$encoder,
-					50,
+					LARGE_N,
 					&CardinalityOne {
-						lits: (1..=50).collect::<Vec<i32>>(),
+						lits: (1..=LARGE_N).collect::<Vec<i32>>(),
 						cmp: LimitComp::LessEq
 					}
 				);
@@ -113,9 +114,9 @@ pub(crate) mod tests {
 			fn test_amo_large_neg() {
 				assert_sol!(
 					$encoder,
-					50,
+					LARGE_N,
 					&CardinalityOne {
-						lits: (-50..=-1).collect::<Vec<i32>>(),
+						lits: (-LARGE_N..=-1).collect::<Vec<i32>>(),
 						cmp: LimitComp::LessEq
 					}
 				);
@@ -124,14 +125,14 @@ pub(crate) mod tests {
 			fn test_amo_large_mix() {
 				assert_sol!(
 					$encoder,
-					50,
+					LARGE_N,
 					&CardinalityOne {
-						lits: (1..=50).map(|i| if i % 2 != 0 { -i } else { i }).collect::<Vec<i32>>(),
+						lits: (1..=LARGE_N).map(|i| if i % 2 != 0 { -i } else { i }).collect::<Vec<i32>>(),
 						cmp: LimitComp::LessEq
 					}
 				);
 			}
-			// ------ At Most One testing ------
+			// ------ Exactly One testing ------
 			#[test]
 			fn test_eo_pair() {
 				assert_sol!(
@@ -184,9 +185,9 @@ pub(crate) mod tests {
 			fn test_eo_large() {
 				assert_sol!(
 					$encoder,
-					50,
+					LARGE_N,
 					&CardinalityOne {
-						lits: (1..=50).collect::<Vec<i32>>(),
+						lits: (1..=LARGE_N).collect::<Vec<i32>>(),
 						cmp: LimitComp::Equal
 					}
 				);
@@ -195,9 +196,9 @@ pub(crate) mod tests {
 			fn test_eo_large_neg() {
 				assert_sol!(
 					$encoder,
-					50,
+					LARGE_N,
 					&CardinalityOne {
-						lits: (-50..=-1).collect::<Vec<i32>>(),
+						lits: (-LARGE_N..=-1).collect::<Vec<i32>>(),
 						cmp: LimitComp::Equal
 					}
 				);
@@ -206,9 +207,9 @@ pub(crate) mod tests {
 			fn test_eo_large_mix() {
 				assert_sol!(
 					$encoder,
-					50,
+					LARGE_N,
 					&CardinalityOne {
-						lits: (1..=50).map(|i| if i % 2 != 0 { -i } else { i }).collect::<Vec<i32>>(),
+						lits: (1..=LARGE_N).map(|i| if i % 2 != 0 { -i } else { i }).collect::<Vec<i32>>(),
 						cmp: LimitComp::Equal
 					}
 				);

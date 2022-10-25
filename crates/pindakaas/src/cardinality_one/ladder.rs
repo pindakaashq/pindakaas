@@ -41,7 +41,7 @@ mod tests {
 	card1_test_suite!(LadderEncoder::default());
 
 	#[test]
-	fn test_amo_ladder() {
+	fn test_eo_ladder() {
 		assert_enc_sol!(
 			LadderEncoder::default(),
 			2,

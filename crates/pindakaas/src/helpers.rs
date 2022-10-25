@@ -313,7 +313,7 @@ pub mod tests {
 
 				assert_eq!(
 					&from_slv, solutions,
-					"solutions founds by the solver do not match expected set of solutions"
+					"solutions found by the solver do not match expected set of solutions"
 				);
 			}
 		}
