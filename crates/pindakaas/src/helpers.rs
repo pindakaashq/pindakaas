@@ -123,19 +123,19 @@ pub mod tests {
 	#[test]
 	fn test_assert_macros() {
 		#[derive(Default)]
-		struct MakeFalse {}
-		impl MakeFalse {
+		struct Negate {}
+		impl Negate {
 			fn encode<'a, DB: ClauseDatabase>(&mut self, db: &mut DB, lit: &DB::Lit) -> Result {
 				db.add_clause(&[lit.negate()])
 			}
 		}
 
 		// Test resulting encoding
-		assert_enc!(MakeFalse::default(), 1, &1 => vec![vec![-1]]);
+		assert_enc!(Negate::default(), 1, &1 => vec![vec![-1]]);
 		// Test possible solutions (using specification)
-		assert_sol!(MakeFalse::default(), 1, &1 => vec![vec![-1]]);
+		assert_sol!(Negate::default(), 1, &1 => vec![vec![-1]]);
 		// Test encoding and possible solutions
-		assert_enc_sol!(MakeFalse::default(), 1, &1 => vec![vec![-1]], vec![vec![-1]]);
+		assert_enc_sol!(Negate::default(), 1, &1 => vec![vec![-1]], vec![vec![-1]]);
 	}
 
 	#[test]
