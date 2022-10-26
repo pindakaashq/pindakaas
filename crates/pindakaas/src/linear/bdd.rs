@@ -2,7 +2,7 @@ use iset::{interval_map, IntervalMap};
 use itertools::{Itertools, Position};
 
 use crate::{
-	int::{encode_consistency, ord_plus_ord_le_x, Constant, IntVarEnc, IntVarOrd, LitOrConst},
+	int::{encode_consistency, IntVarEnc, IntVarOrd, LitOrConst, TernLeConstraint, TernLeEncoder},
 	linear::LimitComp,
 	trace::new_var,
 	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
@@ -40,10 +40,12 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 		let first = ws.next().unwrap();
 		xs.into_iter().zip(ws).fold(first, |curr, (x_i, next)| {
 			if self.add_consistency {
-				encode_consistency(db, &next);
+				encode_consistency(db, &next).unwrap();
 			}
 
-			ord_plus_ord_le_x(db, &curr, &x_i, &next);
+			TernLeEncoder::default()
+				.encode(db, &TernLeConstraint::new(&curr, &x_i, &next))
+				.unwrap();
 			next
 		});
 
@@ -80,7 +82,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 		.filter_map(|w| {
 			// TODO refactor by directly converting Const layers into Constants (regardless of position)
 			match w {
-				Position::First(_) => Some(IntVarEnc::Const(Constant::new(C::zero()))),
+				Position::First(_) => Some(IntVarEnc::Const(C::zero())),
 				Position::Middle(w) => {
 					let dom: IntervalMap<_, _> = w
 						.into_iter(..)
@@ -100,7 +102,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 						Some(IntVarEnc::Ord(IntVarOrd::new(db, dom)))
 					}
 				}
-				Position::Last(_) => Some(IntVarEnc::Const(Constant::new(k))),
+				Position::Last(_) => Some(IntVarEnc::Const(k)),
 				Position::Only(_) => unreachable!(),
 			}
 		})

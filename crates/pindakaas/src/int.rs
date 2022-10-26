@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 use crate::{
 	linear::Part,
 	trace::{emit_clause, new_var},
-	ClauseDatabase, Coefficient, Literal, PosCoeff,
+	ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
 };
 use std::{collections::HashSet, hash::BuildHasherDefault, ops::Neg};
 
@@ -23,32 +23,6 @@ impl<Lit: Literal> Neg for LitOrConst<Lit> {
 			Self::Lit(lit) => Self::Lit(lit.negate()),
 			Self::Const(b) => Self::Const(!b),
 		}
-	}
-}
-
-// TODO maybe C -> PosCoeff<C>
-#[derive(Clone, Debug)]
-pub(crate) struct Constant<C: Coefficient> {
-	c: C,
-}
-
-impl<C: Coefficient> Constant<C> {
-	pub fn new(c: C) -> Self {
-		Self { c }
-	}
-}
-
-impl<C: Coefficient> Constant<C> {
-	fn dom(&self) -> IntervalSet<C> {
-		interval_set!(self.c..(self.c + C::one()))
-	}
-
-	fn eq(&self, v: &C) -> bool {
-		self.c == *v
-	}
-
-	fn geq(&self, v: &C) -> bool {
-		self.c >= *v
 	}
 }
 
@@ -203,7 +177,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 						} else {
 							let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
 							for lit in lits {
-								db.add_clause(&[lit.negate(), o.clone()]).unwrap();
+								emit_clause!(db, &[lit.negate(), o.clone()]).unwrap();
 							}
 							(interval, Some(o))
 						}
@@ -240,7 +214,7 @@ pub(crate) enum IntVarEnc<Lit: Literal, C: Coefficient> {
 	Ord(IntVarOrd<Lit, C>),
 	#[allow(dead_code)]
 	Bin(IntVarBin<Lit, C>),
-	Const(Constant<C>),
+	Const(C),
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
@@ -250,7 +224,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 			IntVarEnc::Ord(o) => o.geq(v),
 			IntVarEnc::Bin(b) => b.geq(v),
 			IntVarEnc::Const(c) => {
-				if c.geq(v) {
+				if c >= v {
 					None
 				} else {
 					Some(Vec::new())
@@ -266,7 +240,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 			IntVarEnc::Ord(o) => o.eq(v),
 			IntVarEnc::Bin(b) => b.eq(v),
 			IntVarEnc::Const(c) => {
-				if c.eq(v) {
+				if c == v {
 					None
 				} else {
 					Some(Vec::new())
@@ -280,7 +254,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		match self {
 			IntVarEnc::Ord(o) => o.dom(),
 			IntVarEnc::Bin(b) => b.dom(),
-			IntVarEnc::Const(c) => c.dom(),
+			IntVarEnc::Const(c) => interval_set!(*c..(*c + C::one())),
 		}
 	}
 
@@ -289,7 +263,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		match self {
 			IntVarEnc::Ord(o) => o.lb(),
 			IntVarEnc::Bin(b) => b.lb(),
-			IntVarEnc::Const(c) => c.c,
+			IntVarEnc::Const(c) => *c,
 			// _ => self.dom().range().unwrap().start - C::one(),
 		}
 	}
@@ -298,7 +272,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		match self {
 			IntVarEnc::Ord(o) => o.ub(),
 			IntVarEnc::Bin(b) => b.ub(),
-			IntVarEnc::Const(c) => c.c,
+			IntVarEnc::Const(c) => *c,
 			// _ => self.dom().range().unwrap().end - C::one(),
 		}
 	}
@@ -307,39 +281,59 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 pub(crate) fn encode_consistency<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	x: &IntVarEnc<DB::Lit, C>,
-) {
-	let b = IntVarEnc::Const(Constant::new(-C::one()));
-	ord_plus_ord_le_x(db, x, &b, x);
+) -> Result {
+	let b = IntVarEnc::Const(-C::one());
+	TernLeEncoder::default().encode(db, &TernLeConstraint::new(x, &b, x))
 }
 
-pub(crate) fn ord_plus_ord_le_x<DB: ClauseDatabase, C: Coefficient>(
-	db: &mut DB,
-	a: &IntVarEnc<DB::Lit, C>,
-	b: &IntVarEnc<DB::Lit, C>,
-	c: &IntVarEnc<DB::Lit, C>,
-) {
-	for c_a in a.dom() {
-		for c_b in b.dom() {
-			let neg = |disjunction: Option<Vec<DB::Lit>>| -> Option<Vec<DB::Lit>> {
-				match disjunction {
-					None => Some(vec![]),
-					Some(lits) if lits.is_empty() => None,
-					Some(lits) => Some(lits.into_iter().map(|l| l.negate()).collect()),
-				}
-			};
+pub(crate) struct TernLeConstraint<'a, Lit: Literal, C: Coefficient> {
+	pub(crate) x: &'a IntVarEnc<Lit, C>,
+	pub(crate) y: &'a IntVarEnc<Lit, C>,
+	pub(crate) z: &'a IntVarEnc<Lit, C>,
+}
 
-			let (c_a, c_b) = ((c_a.end - C::one()), (c_b.end - C::one()));
-			let c_c = c_a + c_b;
-			let (l_a, l_b, l_c) = (neg(a.geq(&c_a)), neg(b.geq(&c_b)), c.geq(&c_c));
+impl<'a, Lit: Literal, C: Coefficient> TernLeConstraint<'a, Lit, C> {
+	pub fn new(
+		x: &'a IntVarEnc<Lit, C>,
+		y: &'a IntVarEnc<Lit, C>,
+		z: &'a IntVarEnc<Lit, C>,
+	) -> Self {
+		Self { x, y, z }
+	}
+}
 
-			if let Some(l_a) = l_a {
-				if let Some(l_b) = l_b {
-					if let Some(l_c) = l_c {
-						emit_clause!(db, &[l_a, l_b, l_c].concat()).unwrap();
+#[derive(Default)]
+pub(crate) struct TernLeEncoder {}
+
+impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB::Lit, C>>
+	for TernLeEncoder
+{
+	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
+		let TernLeConstraint { x, y, z } = tern;
+		for c_a in x.dom() {
+			for c_b in y.dom() {
+				let neg = |disjunction: Option<Vec<DB::Lit>>| -> Option<Vec<DB::Lit>> {
+					match disjunction {
+						None => Some(vec![]),
+						Some(lits) if lits.is_empty() => None,
+						Some(lits) => Some(lits.into_iter().map(|l| l.negate()).collect()),
+					}
+				};
+
+				let (c_a, c_b) = ((c_a.end - C::one()), (c_b.end - C::one()));
+				let c_c = c_a + c_b;
+				let (l_a, l_b, l_c) = (neg(x.geq(&c_a)), neg(y.geq(&c_b)), z.geq(&c_c));
+
+				if let Some(l_a) = l_a {
+					if let Some(l_b) = l_b {
+						if let Some(l_c) = l_c {
+							emit_clause!(db, &[l_a, l_b, l_c].concat())?
+						}
 					}
 				}
 			}
 		}
+		Ok(())
 	}
 }
 
@@ -400,19 +394,24 @@ pub mod tests {
 			get_ord_x(&mut db, interval_set!(2..3, 4..5)),
 			get_ord_x(&mut db, interval_set!(0..4, 4..11)),
 		);
-		ord_plus_ord_le_x(&mut db, &x, &y, &z);
+		TernLeEncoder::default()
+			.encode(&mut db, &TernLeConstraint::new(&x, &y, &z))
+			.unwrap();
 		db.expect_clauses(vec![]).check_complete();
 	}
 
 	// #[test]
 	fn ord_plus_ord_leq_bin_test() {
 		let mut db = TestDB::new(0);
+		let (x, y, z) = (
+			get_ord_x(&mut db, interval_set!(1..2, 5..7)),
+			get_ord_x(&mut db, interval_set!(2..3, 4..5)),
+			IntVarEnc::Bin(IntVarBin::_new(&mut db, 12)),
+		);
 
-		let x = get_ord_x(&mut db, interval_set!(1..2, 5..7));
-		let y = get_ord_x(&mut db, interval_set!(2..3, 4..5));
-		let z = IntVarEnc::Bin(IntVarBin::_new(&mut db, 12));
-
-		ord_plus_ord_le_x(&mut db, &x, &y, &z);
+		TernLeEncoder::default()
+			.encode(&mut db, &TernLeConstraint::new(&x, &y, &z))
+			.unwrap();
 		db.expect_clauses(vec![vec![]]).check_complete();
 	}
 
@@ -425,7 +424,9 @@ pub mod tests {
 		let y = bin_12();
 		let z = bin_12();
 
-		ord_plus_ord_le_x(&mut db, &x, &y, &z);
+		TernLeEncoder::default()
+			.encode(&mut db, &TernLeConstraint::new(&x, &y, &z))
+			.unwrap();
 		db.expect_clauses(vec![]).check_complete();
 	}
 }

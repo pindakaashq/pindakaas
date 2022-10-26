@@ -1,7 +1,7 @@
 use crate::{
 	int::{
-		encode_consistency, ord_plus_ord_le_ord_sparse_dom, ord_plus_ord_le_x, Constant, IntVarEnc,
-		IntVarOrd,
+		encode_consistency, ord_plus_ord_le_ord_sparse_dom, IntVarEnc, IntVarOrd, TernLeConstraint,
+		TernLeEncoder,
 	},
 	linear::LimitComp,
 	trace::new_var,
@@ -63,14 +63,18 @@ fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 	if layer.len() == 1 {
 		let root = layer.pop().unwrap();
 		if limit_root {
-			let zero = IntVarEnc::Const(Constant::new(C::zero()));
-			let parent = IntVarEnc::Const(Constant::new(u));
-			ord_plus_ord_le_x(db, &root, &zero, &parent);
+			let zero = IntVarEnc::Const(C::zero());
+			let parent = IntVarEnc::Const(u);
+			TernLeEncoder::default()
+				.encode(db, &TernLeConstraint::new(&root, &zero, &parent))
+				.unwrap();
 		}
 		root
 	} else if limit_root && layer.len() == 2 {
-		let parent = IntVarEnc::Const(Constant::new(u));
-		ord_plus_ord_le_x(db, &layer[0], &layer[1], &parent);
+		let parent = IntVarEnc::Const(u);
+		TernLeEncoder::default()
+			.encode(db, &TernLeConstraint::new(&layer[0], &layer[1], &parent))
+			.unwrap();
 		parent
 	} else {
 		build_totalizer(
@@ -106,10 +110,12 @@ fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 						let parent = IntVarEnc::Ord(IntVarOrd::new(db, dom));
 
 						if add_consistency {
-							encode_consistency(db, &parent);
+							encode_consistency(db, &parent).unwrap();
 						}
 
-						ord_plus_ord_le_x(db, left, right, &parent);
+						TernLeEncoder::default()
+							.encode(db, &TernLeConstraint::new(left, right, &parent))
+							.unwrap();
 						parent
 					}
 					_ => panic!(),
