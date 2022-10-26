@@ -31,7 +31,7 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 		let xs = lin
 			.terms
 			.iter()
-			.map(|part| -> Box<dyn IntVarEnc<DB, C>> {
+			.map(|part| -> Box<dyn IntVarEnc<DB::Lit, C>> {
 				Box::new(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone()))
 			})
 			.sorted_by(|a, b| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
@@ -55,9 +55,9 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 
 fn construct_bdd<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 	db: &mut DB,
-	xs: &Vec<Box<dyn IntVarEnc<DB, C>>>,
+	xs: &Vec<Box<dyn IntVarEnc<DB::Lit, C>>>,
 	k: PosCoeff<C>,
-) -> Vec<Box<dyn IntVarEnc<DB, C>>> {
+) -> Vec<Box<dyn IntVarEnc<DB::Lit, C>>> {
 	let ubs = xs.iter().map(|x| x.ub()).collect::<Vec<_>>();
 	let k = *k;
 	let inf = ubs.iter().fold(C::one() + C::one(), |a, &b| (a + b));
@@ -79,7 +79,7 @@ fn construct_bdd<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 	bdd(db, 0, xs, C::zero(), &mut ws, true);
 	ws.into_iter()
 		.with_position()
-		.filter_map(|w| -> Option<Box<dyn IntVarEnc<DB, C>>> {
+		.filter_map(|w| -> Option<Box<dyn IntVarEnc<DB::Lit, C>>> {
 			// TODO refactor by directly converting Const layers into Constants (regardless of position)
 			match w {
 				Position::First(_) => Some(Box::new(Constant::new(C::zero()))),
@@ -112,7 +112,7 @@ fn construct_bdd<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 fn bdd<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 	db: &mut DB,
 	i: usize,
-	xs: &Vec<Box<dyn IntVarEnc<DB, C>>>,
+	xs: &Vec<Box<dyn IntVarEnc<DB::Lit, C>>>,
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, LitOrConst<DB::Lit>>>,
 	first: bool,

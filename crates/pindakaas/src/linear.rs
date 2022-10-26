@@ -143,10 +143,8 @@ impl<Lit: Literal, C: Coefficient> LinearConstraint<Lit, C> {
 	}
 }
 
-impl<'a, DB: ClauseDatabase, C: Coefficient> From<&'a Box<dyn IntVarEnc<DB, C>>>
-	for LinExp<DB::Lit, C>
-{
-	fn from(x: &'a Box<dyn IntVarEnc<DB, C>>) -> Self {
+impl<'a, Lit: Literal, C: Coefficient> From<&'a Box<dyn IntVarEnc<Lit, C>>> for LinExp<Lit, C> {
+	fn from(x: &'a Box<dyn IntVarEnc<Lit, C>>) -> Self {
 		x.into_lin_exp()
 	}
 }

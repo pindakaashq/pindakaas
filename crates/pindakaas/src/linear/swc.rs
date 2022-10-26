@@ -25,7 +25,7 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 		#[allow(clippy::needless_collect)]
 		let xs = lin.terms
 			.iter()
-			.map(|part| -> Box<dyn IntVarEnc<DB, C>> {
+			.map(|part| -> Box<dyn IntVarEnc<DB::Lit, C>> {
 				Box::new(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone()))
 			})
 			.collect::<Vec<_>>();
@@ -38,7 +38,7 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 					)
 				})
 				.collect::<IntervalMap<_, _>>();
-			let next: Box<dyn IntVarEnc<DB, C>> = Box::new(IntVarOrd::new(db, dom));
+			let next: Box<dyn IntVarEnc<DB::Lit, C>> = Box::new(IntVarOrd::new(db, dom));
 
 			if self.add_consistency {
 				encode_consistency(db, &next).unwrap();

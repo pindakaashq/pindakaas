@@ -40,16 +40,16 @@ impl<C: Coefficient> Constant<C> {
 	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient + 'static> IntVarEnc<DB, C> for Constant<C> {
+impl<Lit: Literal, C: Coefficient + 'static> IntVarEnc<Lit, C> for Constant<C> {
 	fn dom(&self) -> IntervalSet<C> {
 		interval_set!(self.c..(self.c + C::one()))
 	}
 
-	fn clone_dyn(&self) -> Box<dyn IntVarEnc<DB, C>> {
+	fn clone_dyn(&self) -> Box<dyn IntVarEnc<Lit, C>> {
 		Box::new(self.clone()) // Forward to the derive(Clone) impl
 	}
 
-	fn eq(&self, v: &C) -> Option<Vec<DB::Lit>> {
+	fn eq(&self, v: &C) -> Option<Vec<Lit>> {
 		if &self.c == v {
 			None
 		} else {
@@ -57,7 +57,7 @@ impl<DB: ClauseDatabase, C: Coefficient + 'static> IntVarEnc<DB, C> for Constant
 		}
 	}
 
-	fn geq(&self, v: &C) -> Option<Vec<DB::Lit>> {
+	fn geq(&self, v: &C) -> Option<Vec<Lit>> {
 		if &self.c >= v {
 			None
 		} else {
@@ -65,25 +65,29 @@ impl<DB: ClauseDatabase, C: Coefficient + 'static> IntVarEnc<DB, C> for Constant
 		}
 	}
 
-	fn into_lin_exp(&self) -> LinExp<DB::Lit, C> {
+	fn into_lin_exp(&self) -> LinExp<Lit, C> {
 		LinExp::new().add_constant(self.c)
 	}
 }
 
 // TODO maybe C -> PosCoeff<C>
-// #[derive(Debug)]
-pub(crate) struct IntVarOrd<DB: ClauseDatabase, C: Coefficient> {
-	xs: IntervalMap<C, DB::Lit>,
+#[derive(Debug)]
+pub(crate) struct IntVarOrd<Lit: Literal, C: Coefficient> {
+	xs: IntervalMap<C, Lit>,
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> Clone for Box<dyn IntVarEnc<DB, C>> {
+impl<Lit: Literal, C: Coefficient> Clone for Box<dyn IntVarEnc<Lit, C>> {
 	fn clone(&self) -> Self {
 		self.clone_dyn()
 	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> IntVarOrd<DB, C> {
-	pub fn new(db: &mut DB, dom: IntervalMap<C, Option<DB::Lit>>) -> Self {
+
+impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
+	pub fn new<DB: ClauseDatabase<Lit = Lit>>(
+		db: &mut DB,
+		dom: IntervalMap<C, Option<Lit>>,
+	) -> Self {
 		let xs = dom
 			.into_iter(..)
 			.map(|(v, lit)| (v, lit.unwrap_or_else(|| new_var!(db))))
@@ -93,7 +97,7 @@ impl<DB: ClauseDatabase, C: Coefficient> IntVarOrd<DB, C> {
 	}
 }
 
-impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarEnc<DB, C> for IntVarOrd<DB, C> {
+impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for IntVarOrd<Lit, C> {
 	fn dom(&self) -> IntervalSet<C> {
 		std::iter::once(self.lb()..self.lb() + C::one())
 			.chain(self.xs.intervals(..))
@@ -104,7 +108,7 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarEnc<DB, C> fo
 		self.xs.range().unwrap().start - C::one()
 	}
 
-	fn clone_dyn(&self) -> Box<dyn IntVarEnc<DB, C>> {
+	fn clone_dyn(&self) -> Box<dyn IntVarEnc<Lit, C>> {
 		Box::new(IntVarOrd {
 			xs: self.xs.clone(),
 		})
@@ -114,11 +118,11 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarEnc<DB, C> fo
 		self.xs.range().unwrap().end - C::one()
 	}
 
-	fn eq(&self, _: &C) -> Option<Vec<DB::Lit>> {
+	fn eq(&self, _: &C) -> Option<Vec<Lit>> {
 		todo!();
 	}
 
-	fn geq(&self, v: &C) -> Option<Vec<DB::Lit>> {
+	fn geq(&self, v: &C) -> Option<Vec<Lit>> {
 		if v <= &self.lb() {
 			None
 		} else if v > &self.ub() {
@@ -131,7 +135,7 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarEnc<DB, C> fo
 		}
 	}
 
-	fn into_lin_exp(&self) -> LinExp<DB::Lit, C> {
+	fn into_lin_exp(&self) -> LinExp<Lit, C> {
 		LinExp::new().add_chain(
 			&self
 				.xs
@@ -143,15 +147,15 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarEnc<DB, C> fo
 }
 
 // TODO maybe C -> PosCoeff<C>
-#[derive(Clone)]
-pub(crate) struct IntVarBin<DB: ClauseDatabase, C: Coefficient> {
-	xs: Vec<DB::Lit>,
+#[derive(Clone, Debug)]
+pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
+	xs: Vec<Lit>,
 	lb: C,
 	ub: C,
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> IntVarBin<DB, C> {
-	pub fn _new(db: &mut DB, ub: C) -> Self {
+impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
+	pub fn _new<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, ub: C) -> Self {
 		let bits = C::zero().leading_zeros() - ub.leading_zeros();
 		Self {
 			xs: (0..bits).map(|_| db.new_var()).collect(),
@@ -161,14 +165,14 @@ impl<DB: ClauseDatabase, C: Coefficient> IntVarBin<DB, C> {
 	}
 }
 
-impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarEnc<DB, C> for IntVarBin<DB, C> {
+impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for IntVarBin<Lit, C> {
 	fn dom(&self) -> IntervalSet<C> {
 		num::iter::range_inclusive(self.lb, self.ub)
 			.map(|i| i..(i + C::one()))
 			.collect()
 	}
 
-	fn clone_dyn(&self) -> Box<dyn IntVarEnc<DB, C>> {
+	fn clone_dyn(&self) -> Box<dyn IntVarEnc<Lit, C>> {
 		Box::new(IntVarBin {
 			xs: self.xs.clone(),
 			lb: self.lb,
@@ -186,10 +190,10 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarEnc<DB, C> fo
 
 	// TODO return ref
 	// TODO impl Index
-	fn geq(&self, v: &C) -> Option<Vec<DB::Lit>> {
+	fn geq(&self, v: &C) -> Option<Vec<Lit>> {
 		let mut v = *v;
 		v.unsigned_shl(v.trailing_zeros());
-		let mut vs: Vec<DB::Lit> = vec![];
+		let mut vs: Vec<Lit> = vec![];
 		let mut i = 0;
 		loop {
 			vs.push(self.xs[i].clone());
@@ -201,11 +205,11 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarEnc<DB, C> fo
 		}
 	}
 
-	fn eq(&self, _: &C) -> Option<Vec<DB::Lit>> {
+	fn eq(&self, _: &C) -> Option<Vec<Lit>> {
 		todo!();
 	}
 
-	fn into_lin_exp(&self) -> LinExp<DB::Lit, C> {
+	fn into_lin_exp(&self) -> LinExp<Lit, C> {
 		let mut exp = LinExp::new();
 		let mut k = C::one();
 		let two = C::one() + C::one();
@@ -217,9 +221,9 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarEnc<DB, C> fo
 	}
 }
 
-impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarOrd<DB, C> {
+impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarOrd<Lit, C> {
 	/// Constructs IntVar `y` for linear expression `xs` so that ∑ xs ≦ y, using order encoding
-	pub fn from_part_using_le_ord(
+	pub fn from_part_using_le_ord<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
 		xs: &Part<DB::Lit, PosCoeff<C>>,
 		ub: PosCoeff<C>,
@@ -290,12 +294,12 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarOrd<DB, C> {
 	}
 }
 
-pub(crate) trait IntVarEnc<DB: ClauseDatabase, C: Coefficient> {
+pub(crate) trait IntVarEnc<Lit: Literal, C: Coefficient>: std::fmt::Debug {
 	/// Returns a clause constraining `x>=v`, which is None if true and empty if false
-	fn geq(&self, v: &C) -> Option<Vec<DB::Lit>>;
+	fn geq(&self, v: &C) -> Option<Vec<Lit>>;
 
 	/// Returns a clause constraining `x==v`, which is None if true and empty if false
-	fn eq(&self, v: &C) -> Option<Vec<DB::Lit>>;
+	fn eq(&self, v: &C) -> Option<Vec<Lit>>;
 
 	/// Returns a partitioned domain
 	fn dom(&self) -> IntervalSet<C>;
@@ -308,37 +312,41 @@ pub(crate) trait IntVarEnc<DB: ClauseDatabase, C: Coefficient> {
 		self.dom().range().unwrap().end - C::one()
 	}
 
-	fn clone_dyn(&self) -> Box<dyn IntVarEnc<DB, C>>;
+	fn clone_dyn(&self) -> Box<dyn IntVarEnc<Lit, C>>;
 
-	fn into_lin_exp(&self) -> LinExp<DB::Lit, C>;
+	fn into_lin_exp(&self) -> LinExp<Lit, C>;
+
+	fn debug(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "x in {:?}", self.dom())
+	}
 }
 
 pub(crate) fn encode_consistency<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 	db: &mut DB,
-	x: &Box<dyn IntVarEnc<DB, C>>,
+	x: &Box<dyn IntVarEnc<DB::Lit, C>>,
 ) -> Result {
-	let b: Box<dyn IntVarEnc<DB, C>> = Box::new(Constant::new(-C::one()));
+	let b: Box<dyn IntVarEnc<DB::Lit, C>> = Box::new(Constant::new(-C::one()));
 	TernLeEncoder::default().encode(db, &TernLeConstraint::new(x, &b, x))
 }
 
-pub(crate) struct TernLeConstraint<'a, DB: ClauseDatabase, C: Coefficient> {
-	pub(crate) x: &'a Box<dyn IntVarEnc<DB, C>>,
-	pub(crate) y: &'a Box<dyn IntVarEnc<DB, C>>,
-	pub(crate) z: &'a Box<dyn IntVarEnc<DB, C>>,
+pub(crate) struct TernLeConstraint<'a, Lit: Literal, C: Coefficient> {
+	pub(crate) x: &'a Box<dyn IntVarEnc<Lit, C>>,
+	pub(crate) y: &'a Box<dyn IntVarEnc<Lit, C>>,
+	pub(crate) z: &'a Box<dyn IntVarEnc<Lit, C>>,
 }
 
-impl<'a, DB: ClauseDatabase, C: Coefficient> TernLeConstraint<'a, DB, C> {
+impl<'a, Lit: Literal, C: Coefficient> TernLeConstraint<'a, Lit, C> {
 	pub fn new(
-		x: &'a Box<dyn IntVarEnc<DB, C>>,
-		y: &'a Box<dyn IntVarEnc<DB, C>>,
-		z: &'a Box<dyn IntVarEnc<DB, C>>,
+		x: &'a Box<dyn IntVarEnc<Lit, C>>,
+		y: &'a Box<dyn IntVarEnc<Lit, C>>,
+		z: &'a Box<dyn IntVarEnc<Lit, C>>,
 	) -> Self {
 		Self { x, y, z }
 	}
 }
 
-impl<'a, DB: ClauseDatabase, C: Coefficient> Checker for TernLeConstraint<'a, DB, C> {
-	type Lit = DB::Lit;
+impl<'a, Lit: Literal, C: Coefficient> Checker for TernLeConstraint<'a, Lit, C> {
+	type Lit = Lit;
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
 		let x: LinExp<_, _> = LinExp::from(self.x);
 		let y: LinExp<_, _> = LinExp::from(self.y);
@@ -354,10 +362,10 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Checker for TernLeConstraint<'a, DB
 #[derive(Default)]
 pub(crate) struct TernLeEncoder {}
 
-impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB, C>>
+impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB::Lit, C>>
 	for TernLeEncoder
 {
-	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB, C>) -> Result {
+	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
 		let TernLeConstraint { x, y, z } = tern;
 		for c_a in x.dom() {
 			for c_b in y.dom() {
@@ -415,13 +423,13 @@ pub mod tests {
 	#![allow(dead_code)]
 
 	use super::*;
-	use crate::helpers::tests::TestDB;
+	use crate::helpers::tests::{assert_sol, TestDB};
 	use iset::interval_set;
 
 	fn get_ord_x<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 		db: &mut DB,
 		dom: IntervalSet<C>,
-	) -> Box<dyn IntVarEnc<DB, C>> {
+	) -> Box<dyn IntVarEnc<DB::Lit, C>> {
 		Box::new(IntVarOrd::new(
 			db,
 			dom.into_iter(..).map(|iv| (iv, None)).collect(),
@@ -452,7 +460,7 @@ pub mod tests {
 	// #[test]
 	fn ord_plus_ord_leq_bin_test() {
 		let mut db = TestDB::new(0);
-		let (x, y, z): (_, _, Box<dyn IntVarEnc<TestDB, i32>>) = (
+		let (x, y, z): (_, _, Box<dyn IntVarEnc<i32, i32>>) = (
 			get_ord_x(&mut db, interval_set!(1..2, 5..7)),
 			get_ord_x(&mut db, interval_set!(2..3, 4..5)),
 			Box::new(IntVarBin::_new(&mut db, 12)),
@@ -464,22 +472,24 @@ pub mod tests {
 		db.expect_clauses(vec![vec![]]).check_complete();
 	}
 
-	// #[test]
-	fn bin_plus_bin_le_bin_test() {
-		let mut db = TestDB::new(0);
-		let (x, y, z): (
-			Box<dyn IntVarEnc<TestDB, i32>>,
-			Box<dyn IntVarEnc<TestDB, i32>>,
-			Box<dyn IntVarEnc<TestDB, i32>>,
-		) = (
-			Box::new(IntVarBin::_new(&mut db, 12)),
-			Box::new(IntVarBin::_new(&mut db, 12)),
-			Box::new(IntVarBin::_new(&mut db, 12)),
-		);
+	// 	// #[test]
+	// 	fn bin_plus_bin_le_bin_test() {
+	// 		let mut db = TestDB::new(0);
+	// 		let (x, y, z): (
+	// 			Box<dyn IntVarEnc<i32, i32>>,
+	// 			Box<dyn IntVarEnc<i32, i32>>,
+	// 			Box<dyn IntVarEnc<i32, i32>>,
+	// 		) = (
+	// 			Box::new(IntVarBin::_new(&mut db, 12)),
+	// 			Box::new(IntVarBin::_new(&mut db, 12)),
+	// 			Box::new(IntVarBin::_new(&mut db, 12)),
+	// 		);
 
-		TernLeEncoder::default()
-			.encode(&mut db, &TernLeConstraint::new(&x, &y, &z))
-			.unwrap();
-		db.expect_clauses(vec![]).check_complete();
-	}
+	// 		let con = TernLeConstraint {
+	// 			x: &x,
+	// 			y: &y,
+	// 			z: &z,
+	// 		};
+	// 		assert_sol!(db, TernLeEncoder::default(), 0, con);
+	// 	}
 }

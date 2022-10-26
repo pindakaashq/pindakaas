@@ -29,7 +29,7 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 		let xs = lin
 			.terms
 			.iter()
-			.map(|part| -> Box<dyn IntVarEnc<DB, C>> {
+			.map(|part| -> Box<dyn IntVarEnc<DB::Lit, C>> {
 				Box::new(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone()))
 			})
 			.collect::<Vec<_>>();
@@ -49,26 +49,26 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 }
 
 fn build_totalizer<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
-	mut layer: Vec<Box<dyn IntVarEnc<DB, C>>>,
+	mut layer: Vec<Box<dyn IntVarEnc<DB::Lit, C>>>,
 	db: &mut DB,
 	l: C,
 	u: C,
 	limit_root: bool,
 	add_consistency: bool,
 	level: u32,
-) -> Box<dyn IntVarEnc<DB, C>> {
+) -> Box<dyn IntVarEnc<DB::Lit, C>> {
 	if layer.len() == 1 {
 		let root = layer.pop().unwrap();
 		if limit_root {
-			let zero: Box<dyn IntVarEnc<DB, C>> = Box::new(Constant::new(C::zero()));
-			let parent: Box<dyn IntVarEnc<DB, C>> = Box::new(Constant::new(u));
+			let zero: Box<dyn IntVarEnc<DB::Lit, C>> = Box::new(Constant::new(C::zero()));
+			let parent: Box<dyn IntVarEnc<DB::Lit, C>> = Box::new(Constant::new(u));
 			TernLeEncoder::default()
 				.encode(db, &TernLeConstraint::new(&root, &zero, &parent))
 				.unwrap();
 		}
 		root
 	} else if limit_root && layer.len() == 2 {
-		let parent: Box<dyn IntVarEnc<DB, C>> = Box::new(Constant::new(u));
+		let parent: Box<dyn IntVarEnc<DB::Lit, C>> = Box::new(Constant::new(u));
 		TernLeEncoder::default()
 			.encode(db, &TernLeConstraint::new(&layer[0], &layer[1], &parent))
 			.unwrap();
@@ -100,7 +100,8 @@ fn build_totalizer<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 						})
 						.collect();
 
-						let parent: Box<dyn IntVarEnc<DB, C>> = Box::new(IntVarOrd::new(db, dom));
+						let parent: Box<dyn IntVarEnc<DB::Lit, C>> =
+							Box::new(IntVarOrd::new(db, dom));
 
 						if add_consistency {
 							encode_consistency(db, &parent).unwrap();
