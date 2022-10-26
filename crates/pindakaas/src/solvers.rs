@@ -36,10 +36,10 @@ impl ClauseDatabase for IpasirSolver {
 		Ok(())
 	}
 }
-impl<Lit: Literal + Zero + One + AddAssign + Into<std::ffi::c_int>> From<Cnf<Lit>>
+impl<Lit: Literal + Zero + One + AddAssign + Into<std::ffi::c_int>> From<crate::Cnf<Lit>>
 	for IpasirSolver
 {
-	fn from(cnf: Cnf<Lit>) -> Self {
+	fn from(cnf: crate::Cnf<Lit>) -> Self {
 		use ipasir::IpasirSolver as SolverProtocol;
 		let mut slv = IpasirSolver {
 			slv: ipasir::ffi::Solver::init(),

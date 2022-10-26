@@ -1,7 +1,6 @@
 use crate::{
-	int::{encode_consistency, ord_plus_ord_le_x, IntVarEnc, IntVarOrd},
-	trace::new_var,
-	ClauseDatabase, Coefficient, Encoder, Linear, Result,
+	int::{encode_consistency, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+	trace::new_var, ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 use iset::IntervalMap;
 
@@ -42,10 +41,13 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			let next = IntVarEnc::Ord(IntVarOrd::new(db, dom));
 
 			if self.add_consistency {
-				encode_consistency(db, &next);
+				encode_consistency(db, &next).unwrap();
 			}
 
-			ord_plus_ord_le_x(db, &prev, &leaf, &next);
+			TernLeEncoder::default()
+				.encode(db, &TernLeConstraint::new(&prev, &leaf, &next))
+				.unwrap();
+
 			(i + 1, next)
 		});
 		Ok(())
