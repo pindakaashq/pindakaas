@@ -1,7 +1,9 @@
 use iset::{interval_set, IntervalMap, IntervalSet};
 use itertools::Itertools;
 
-use crate::{linear::Part, new_var, ClauseDatabase, Coefficient, Literal, PosCoeff};
+use crate::{
+	linear::Part, new_var, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
+};
 use std::{
 	collections::{HashMap, HashSet},
 	ops::Neg,
@@ -285,39 +287,59 @@ pub(crate) trait IntVarEnc<DB: ClauseDatabase, C: Coefficient> {
 pub(crate) fn encode_consistency<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 	db: &mut DB,
 	x: &Box<dyn IntVarEnc<DB, C>>,
-) {
+) -> Result {
 	let b: Box<dyn IntVarEnc<DB, C>> = Box::new(Constant::new(-C::one()));
-	ord_plus_ord_le_x(db, x, &b, x);
+	TernLeEncoder::default().encode(db, &TernLeConstraint::new(x, &b, x))
 }
 
-pub(crate) fn ord_plus_ord_le_x<DB: ClauseDatabase, C: Coefficient>(
-	db: &mut DB,
-	a: &Box<dyn IntVarEnc<DB, C>>,
-	b: &Box<dyn IntVarEnc<DB, C>>,
-	c: &Box<dyn IntVarEnc<DB, C>>,
-) {
-	for c_a in a.dom() {
-		for c_b in b.dom() {
-			let neg = |disjunction: Option<Vec<DB::Lit>>| -> Option<Vec<DB::Lit>> {
-				match disjunction {
-					None => Some(vec![]),
-					Some(lits) if lits.is_empty() => None,
-					Some(lits) => Some(lits.into_iter().map(|l| l.negate()).collect()),
-				}
-			};
+pub(crate) struct TernLeConstraint<'a, DB: ClauseDatabase, C: Coefficient> {
+	pub(crate) x: &'a Box<dyn IntVarEnc<DB, C>>,
+	pub(crate) y: &'a Box<dyn IntVarEnc<DB, C>>,
+	pub(crate) z: &'a Box<dyn IntVarEnc<DB, C>>,
+}
 
-			let (c_a, c_b) = ((c_a.end - C::one()), (c_b.end - C::one()));
-			let c_c = c_a + c_b;
-			let (l_a, l_b, l_c) = (neg(a.geq(&c_a)), neg(b.geq(&c_b)), c.geq(&c_c));
+impl<'a, DB: ClauseDatabase, C: Coefficient> TernLeConstraint<'a, DB, C> {
+	pub fn new(
+		x: &'a Box<dyn IntVarEnc<DB, C>>,
+		y: &'a Box<dyn IntVarEnc<DB, C>>,
+		z: &'a Box<dyn IntVarEnc<DB, C>>,
+	) -> Self {
+		Self { x, y, z }
+	}
+}
 
-			if let Some(l_a) = l_a {
-				if let Some(l_b) = l_b {
-					if let Some(l_c) = l_c {
-						db.add_clause(&[l_a, l_b, l_c].concat()).unwrap();
+#[derive(Default)]
+pub(crate) struct TernLeEncoder {}
+
+impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB, C>>
+	for TernLeEncoder
+{
+	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB, C>) -> Result {
+		let TernLeConstraint { x, y, z } = tern;
+		for c_a in x.dom() {
+			for c_b in y.dom() {
+				let neg = |disjunction: Option<Vec<DB::Lit>>| -> Option<Vec<DB::Lit>> {
+					match disjunction {
+						None => Some(vec![]),
+						Some(lits) if lits.is_empty() => None,
+						Some(lits) => Some(lits.into_iter().map(|l| l.negate()).collect()),
+					}
+				};
+
+				let (c_a, c_b) = ((c_a.end - C::one()), (c_b.end - C::one()));
+				let c_c = c_a + c_b;
+				let (l_a, l_b, l_c) = (neg(x.geq(&c_a)), neg(y.geq(&c_b)), z.geq(&c_c));
+
+				if let Some(l_a) = l_a {
+					if let Some(l_b) = l_b {
+						if let Some(l_c) = l_c {
+							db.add_clause(&[l_a, l_b, l_c].concat())?
+						}
 					}
 				}
 			}
 		}
+		Ok(())
 	}
 }
 
@@ -378,7 +400,9 @@ pub mod tests {
 			get_ord_x(&mut db, interval_set!(2..3, 4..5)),
 			get_ord_x(&mut db, interval_set!(0..4, 4..11)),
 		);
-		ord_plus_ord_le_x(&mut db, &x, &y, &z);
+		TernLeEncoder::default()
+			.encode(&mut db, &TernLeConstraint::new(&x, &y, &z))
+			.unwrap();
 		db.expect_clauses(vec![]).check_complete();
 	}
 
@@ -390,7 +414,10 @@ pub mod tests {
 			get_ord_x(&mut db, interval_set!(2..3, 4..5)),
 			Box::new(IntVarBin::_new(&mut db, 12)),
 		);
-		ord_plus_ord_le_x(&mut db, &x, &y, &z);
+
+		TernLeEncoder::default()
+			.encode(&mut db, &TernLeConstraint::new(&x, &y, &z))
+			.unwrap();
 		db.expect_clauses(vec![vec![]]).check_complete();
 	}
 
@@ -406,7 +433,10 @@ pub mod tests {
 			Box::new(IntVarBin::_new(&mut db, 12)),
 			Box::new(IntVarBin::_new(&mut db, 12)),
 		);
-		ord_plus_ord_le_x(&mut db, &x, &y, &z);
+
+		TernLeEncoder::default()
+			.encode(&mut db, &TernLeConstraint::new(&x, &y, &z))
+			.unwrap();
 		db.expect_clauses(vec![]).check_complete();
 	}
 }
