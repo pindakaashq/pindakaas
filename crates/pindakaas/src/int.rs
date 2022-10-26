@@ -302,7 +302,7 @@ pub(crate) fn ord_plus_ord_le_x<DB: ClauseDatabase, C: Coefficient>(
 				match disjunction {
 					None => Some(vec![]),
 					Some(lits) if lits.is_empty() => None,
-					Some(lits) => Some(lits.into_iter().map(|l| -l).collect()),
+					Some(lits) => Some(lits.into_iter().map(|l| l.negate()).collect()),
 				}
 			};
 
