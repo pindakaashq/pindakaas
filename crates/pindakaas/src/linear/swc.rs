@@ -1,6 +1,7 @@
 use crate::{
 	int::{encode_consistency, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
-	trace::new_var, ClauseDatabase, Coefficient, Encoder, Linear, Result,
+	trace::new_var,
+	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 use iset::IntervalMap;
 
