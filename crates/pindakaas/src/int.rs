@@ -24,16 +24,6 @@ impl<Lit: Literal> Neg for LitOrConst<Lit> {
 	}
 }
 
-impl<Lit: Literal> LitOrConst<Lit> {
-	// TODO replace for Signed?
-	fn polarity(&self) -> bool {
-		match self {
-			Self::Lit(lit) => !lit.is_negated(),
-			Self::Const(b) => *b,
-		}
-	}
-}
-
 // TODO maybe C -> PosCoeff<C>
 #[derive(Debug, Clone)]
 pub(crate) struct IntVar<Lit: Literal, C: Coefficient> {
@@ -53,24 +43,21 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> for IntVar<Lit, C> {
 
 	// TODO return ref
 	// TODO impl Index
-	fn eq(&self, v: &C) -> Vec<LitOrConst<Lit>> {
-		self.geq(v)
-			.into_iter()
-			.chain(self.geq(v).into_iter().map(|v| v.neg()))
-			.collect()
+	fn eq(&self, _: &C) -> Vec<LitOrConst<Lit>> {
+		todo!();
 	}
-	fn geq(&self, v: &C) -> Vec<LitOrConst<Lit>> {
-		vec![if v <= self.lb() {
-			LitOrConst::Const(true)
+
+	fn geq(&self, v: &C) -> Option<Vec<Lit>> {
+		if v <= self.lb() {
+			None
 		} else if v > self.ub() {
-			LitOrConst::Const(false)
+			Some(vec![])
 		} else {
 			match self.xs.overlap(*v).collect::<Vec<_>>()[..] {
-				[(_, x)] => LitOrConst::Lit(x.clone()),
-				// _ => panic!("No or multiples variables at {v:?} in {self:?}"),
-				_ => panic!("No or multiples variables"),
+				[(_, x)] => Some(vec![x.clone()]),
+				_ => panic!("No or multiples variables at {v:?} in {self:?}"),
 			}
-		}]
+		}
 	}
 }
 
@@ -93,17 +80,17 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> for IntVarBin<Lit, C> {
 
 	// TODO return ref
 	// TODO impl Index
-	fn geq(&self, v: &C) -> Vec<LitOrConst<Lit>> {
+	fn geq(&self, v: &C) -> Option<Vec<Lit>> {
 		let mut v = *v;
 		v.unsigned_shl(v.trailing_zeros());
-		let mut vs: Vec<LitOrConst<Lit>> = vec![];
+		let mut vs: Vec<Lit> = vec![];
 		let mut i = 0;
 		loop {
-			vs.push(LitOrConst::Lit(self.xs[i].clone()));
+			vs.push(self.xs[i].clone());
 			v = v.signed_shl(v.signed_shl(1).trailing_zeros() + 1); // TODO not sure if better than just shifting one at a time
 			i += v.trailing_zeros() as usize;
 			if i >= self.xs.len() {
-				return vs;
+				return Some(vs);
 			}
 		}
 	}
@@ -255,19 +242,22 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 
 pub(crate) trait IntVarEnc<Lit: Literal, C: Coefficient> {
 	// fn index(&self, v: &C) -> &Self::Output;
-	fn geq(&self, v: &C) -> Vec<LitOrConst<Lit>> {
-		self.eq(v).into_iter().filter(|x| x.polarity()).collect()
-	}
+	fn geq(&self, v: &C) -> Option<Vec<Lit>>;
 
 	fn eq(&self, v: &C) -> Vec<LitOrConst<Lit>>;
 	fn lb(&self) -> &C;
 	fn ub(&self) -> &C;
 }
-pub(crate) fn ord_plus_ord_le_ord<DB: ClauseDatabase + ?Sized, C: Coefficient>(
+
+pub(crate) fn ord_plus_ord_le_x<
+	DB: ClauseDatabase + ?Sized,
+	C: Coefficient,
+	IV: IntVarEnc<DB::Lit, C>,
+>(
 	db: &mut DB,
 	a: &IntVar<DB::Lit, C>,
 	b: &IntVar<DB::Lit, C>,
-	c: &IntVar<DB::Lit, C>,
+	c: &IV,
 ) {
 	for (l_a, c_a) in a.iter() {
 		for (l_b, c_b) in b.iter() {
@@ -282,11 +272,15 @@ pub(crate) fn ord_plus_ord_le_ord<DB: ClauseDatabase + ?Sized, C: Coefficient>(
 						.collect()
 				};
 
-			// TODO check
-			let l_c = c.geq(&(*c_a + *c_b))[0].clone();
-			if !(l_a == l_c.clone() || l_b == l_c.clone()) {
-				if let Ok(cls) = &create_clause(vec![-l_a.clone(), -l_b, l_c.clone()]) {
-					db.add_clause(cls).unwrap();
+			let v = *c_a + *c_b;
+			if let Some(c_geq_v) = c.geq(&v) {
+				// TODO convert lits to LitOrConst, since we still need to adapt iter before we can handle this properly
+				let c_geq_v = c_geq_v.into_iter().map(LitOrConst::Lit).collect::<Vec<_>>();
+				if !(c_geq_v.contains(&l_a) || c_geq_v.contains(&l_b)) {
+					let clause = vec![vec![-l_a.clone(), -l_b], c_geq_v].concat();
+					if let Ok(cls) = &create_clause(clause) {
+						db.add_clause(cls).unwrap();
+					}
 				}
 			}
 		}
@@ -317,6 +311,8 @@ pub(crate) fn ord_plus_ord_le_ord_sparse_dom<C: Coefficient>(
 #[cfg(test)]
 pub mod tests {
 	use super::*;
+	use crate::helpers::tests::TestDB;
+	use iset::interval_map;
 
 	#[test]
 	fn bin_geq_test() {
@@ -325,6 +321,47 @@ pub mod tests {
 			lb: 0,
 			ub: 12,
 		};
-		assert_eq!(x.geq(&3), vec![LitOrConst::Lit(1), LitOrConst::Lit(3)]);
+		assert_eq!(x.geq(&3), Some(vec![1, 3]));
+	}
+
+	fn get_xy() -> (IntVar<i32, i32>, IntVar<i32, i32>) {
+		(
+			IntVar {
+				xs: interval_map!( 1..2 => 1, 5..7 => 2 ), // 0, 1, 6
+				lb: 0.into(),
+				ub: 8.into(),
+			},
+			IntVar {
+				xs: interval_map!( 2..3 => 3, 4..5 => 5 ), // 1, 2, 4
+				lb: 1.into(),
+				ub: 8.into(),
+			},
+		)
+	}
+
+	#[test]
+	fn ord_plus_ord_leq_ord_test() {
+		let mut db = TestDB::new(7);
+		let (x, y) = get_xy();
+		let z = IntVar {
+			xs: interval_map!( 0..4 => 6, 4..11 => 7 ), // 0, 1, 2, 4, 6,
+			lb: 0.into(),
+			ub: 10.into(),
+		};
+		ord_plus_ord_le_x(&mut db, &x, &y, &z);
+		db.expect_clauses(vec![]).check_complete();
+	}
+
+	#[test]
+	fn ord_plus_ord_leq_bin_test() {
+		let mut db = TestDB::new(7);
+		let (x, y) = get_xy();
+		let z = IntVarBin {
+			xs: vec![1, 2, 3, 4],
+			lb: 0.into(),
+			ub: 12.into(),
+		};
+		ord_plus_ord_le_x(&mut db, &x, &y, &z);
+		db.expect_clauses(vec![]).check_complete();
 	}
 }
