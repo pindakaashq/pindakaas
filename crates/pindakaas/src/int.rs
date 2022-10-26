@@ -3,9 +3,10 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	linear::Part,
+	linear::{LinExp, Part},
 	trace::{emit_clause, new_var},
-	ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
+	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
+	Unsatisfiable,
 };
 use std::{collections::HashSet, hash::BuildHasherDefault, ops::Neg};
 
@@ -77,6 +78,16 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			}
 		}
 	}
+
+	fn as_lin_exp(&self) -> LinExp<Lit, C> {
+		LinExp::new().add_chain(
+			&self
+				.xs
+				.iter(..)
+				.map(|(iv, lit)| (lit.clone(), iv.end - C::one()))
+				.collect::<Vec<_>>(),
+		)
+	}
 }
 
 // TODO maybe C -> PosCoeff<C>
@@ -132,6 +143,17 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 
 	fn eq(&self, _: &C) -> Option<Vec<Lit>> {
 		todo!();
+	}
+
+	fn as_lin_exp(&self) -> LinExp<Lit, C> {
+		let mut exp = LinExp::new();
+		let mut k = C::one();
+		let two = C::one() + C::one();
+		for lit in &self.xs {
+			exp += (lit.clone(), k);
+			k *= two;
+		}
+		exp
 	}
 }
 
@@ -276,6 +298,14 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 			// _ => self.dom().range().unwrap().end - C::one(),
 		}
 	}
+
+	pub(crate) fn as_lin_exp(&self) -> LinExp<Lit, C> {
+		match self {
+			IntVarEnc::Ord(o) => o.as_lin_exp(),
+			IntVarEnc::Bin(b) => b.as_lin_exp(),
+			IntVarEnc::Const(c) => LinExp::new().add_constant(*c),
+		}
+	}
 }
 
 pub(crate) fn encode_consistency<DB: ClauseDatabase, C: Coefficient>(
@@ -299,6 +329,20 @@ impl<'a, Lit: Literal, C: Coefficient> TernLeConstraint<'a, Lit, C> {
 		z: &'a IntVarEnc<Lit, C>,
 	) -> Self {
 		Self { x, y, z }
+	}
+}
+
+impl<'a, Lit: Literal, C: Coefficient> Checker for TernLeConstraint<'a, Lit, C> {
+	type Lit = Lit;
+	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
+		let x: LinExp<_, _> = LinExp::from(self.x);
+		let y: LinExp<_, _> = LinExp::from(self.y);
+		let z: LinExp<_, _> = LinExp::from(self.z);
+		if x.assign(solution) + y.assign(solution) <= z.assign(solution) {
+			Ok(())
+		} else {
+			Err(CheckError::Unsatisfiable(Unsatisfiable))
+		}
 	}
 }
 

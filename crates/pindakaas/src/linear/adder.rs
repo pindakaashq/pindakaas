@@ -378,7 +378,6 @@ mod tests {
 			vec![-1, -2, 3, -4],
 			vec![-1, -2, -3, 4],
 		]);
-		// two.add_clause(&[-5]).unwrap();
 		// TODO encode this if encoder does not support constraint
 		assert!(PairwiseEncoder::default()
 			.encode(
