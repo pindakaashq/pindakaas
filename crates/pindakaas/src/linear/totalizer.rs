@@ -1,5 +1,5 @@
 use crate::{
-	int::{ord_plus_ord_le_ord, ord_plus_ord_le_ord_sparse_dom, IntVar},
+	int::{ord_plus_ord_le_ord_sparse_dom, ord_plus_ord_le_x, IntVar},
 	linear::LimitComp,
 	trace::new_var,
 	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
@@ -61,12 +61,12 @@ fn build_totalizer<DB: ClauseDatabase + ?Sized, C: Coefficient>(
 		if limit_root {
 			let zero = IntVar::constant(C::zero().into());
 			let parent = IntVar::constant(u);
-			ord_plus_ord_le_ord(db, &root, &zero, &parent);
+			ord_plus_ord_le_x(db, &root, &zero, &parent);
 		}
 		root
 	} else if limit_root && layer.len() == 2 {
 		let parent = IntVar::constant(u);
-		ord_plus_ord_le_ord(db, &layer[0], &layer[1], &parent);
+		ord_plus_ord_le_x(db, &layer[0], &layer[1], &parent);
 		parent
 	} else {
 		build_totalizer(
@@ -104,7 +104,7 @@ fn build_totalizer<DB: ClauseDatabase + ?Sized, C: Coefficient>(
 							parent.encode_consistency(db);
 						}
 
-						ord_plus_ord_le_ord(db, left, right, &parent);
+						ord_plus_ord_le_x(db, left, right, &parent);
 						parent
 					}
 					_ => panic!(),
