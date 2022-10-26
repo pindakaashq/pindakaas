@@ -4,8 +4,8 @@ use std::{
 };
 
 use crate::{
-	Cardinality, CardinalityOne, CheckError, Checker, ClauseDatabase, Coefficient, Encoder,
-	IntEncoding, Literal, PairwiseEncoder, Result, Unsatisfiable,
+	int::IntVarEnc, Cardinality, CardinalityOne, CheckError, Checker, ClauseDatabase, Coefficient,
+	Encoder, IntEncoding, Literal, PairwiseEncoder, Result, Unsatisfiable,
 };
 
 mod adder;
@@ -143,21 +143,22 @@ impl<Lit: Literal, C: Coefficient> LinearConstraint<Lit, C> {
 	}
 }
 
+impl<'a, DB: ClauseDatabase, C: Coefficient> From<&'a Box<dyn IntVarEnc<DB, C>>>
+	for LinExp<DB::Lit, C>
+{
+	fn from(x: &'a Box<dyn IntVarEnc<DB, C>>) -> Self {
+		x.into_lin_exp()
+	}
+}
+
 impl<Lit: Literal, C: Coefficient> Checker for LinearConstraint<Lit, C> {
 	type Lit = Lit;
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let lhs = &self.exp.terms.iter().fold(C::zero(), |acc, (lit, coef)| {
-			let a = solution.iter().find(|x| x.var() == lit.var());
-			acc + if *lit == *a.unwrap() {
-				C::one()
-			} else {
-				C::zero()
-			} * *coef
-		});
+		let lhs = self.exp.assign(solution);
 		if match self.cmp {
-			Comparator::LessEq => *lhs <= self.k,
-			Comparator::Equal => *lhs == self.k,
-			Comparator::GreaterEq => *lhs >= self.k,
+			Comparator::LessEq => lhs <= self.k,
+			Comparator::Equal => lhs == self.k,
+			Comparator::GreaterEq => lhs >= self.k,
 		} {
 			Ok(())
 		} else {
@@ -256,6 +257,17 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 			.push((Constraint::Domain { lb, ub }, terms.len()));
 		self.terms.extend(terms.iter().cloned());
 		self
+	}
+
+	pub(crate) fn assign(&self, solution: &[Lit]) -> C {
+		self.terms.iter().fold(C::zero(), |acc, (lit, coef)| {
+			let a = solution.iter().find(|x| x.var() == lit.var());
+			acc + if *lit == *a.unwrap() {
+				C::one()
+			} else {
+				C::zero()
+			} * *coef
+		})
 	}
 }
 

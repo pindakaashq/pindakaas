@@ -2,7 +2,9 @@ use iset::{interval_set, IntervalMap, IntervalSet};
 use itertools::Itertools;
 
 use crate::{
-	linear::Part, new_var, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
+	linear::{LinExp, Part},
+	new_var, CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
+	Unsatisfiable,
 };
 use std::{
 	collections::{HashMap, HashSet},
@@ -61,6 +63,10 @@ impl<DB: ClauseDatabase, C: Coefficient + 'static> IntVarEnc<DB, C> for Constant
 		} else {
 			Some(vec![])
 		}
+	}
+
+	fn into_lin_exp(&self) -> LinExp<DB::Lit, C> {
+		LinExp::new().add_constant(self.c)
 	}
 }
 
@@ -123,6 +129,16 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarEnc<DB, C> fo
 				_ => panic!("No or multiples variables at {v:?}"),
 			}
 		}
+	}
+
+	fn into_lin_exp(&self) -> LinExp<DB::Lit, C> {
+		LinExp::new().add_chain(
+			&self
+				.xs
+				.iter(..)
+				.map(|(iv, lit)| (lit.clone(), iv.end - C::one()))
+				.collect::<Vec<_>>(),
+		)
 	}
 }
 
@@ -187,6 +203,17 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> IntVarEnc<DB, C> fo
 
 	fn eq(&self, _: &C) -> Option<Vec<DB::Lit>> {
 		todo!();
+	}
+
+	fn into_lin_exp(&self) -> LinExp<DB::Lit, C> {
+		let mut exp = LinExp::new();
+		let mut k = C::one();
+		let two = C::one() + C::one();
+		for lit in &self.xs {
+			exp += (lit.clone(), k);
+			k *= two;
+		}
+		exp
 	}
 }
 
@@ -282,6 +309,8 @@ pub(crate) trait IntVarEnc<DB: ClauseDatabase, C: Coefficient> {
 	}
 
 	fn clone_dyn(&self) -> Box<dyn IntVarEnc<DB, C>>;
+
+	fn into_lin_exp(&self) -> LinExp<DB::Lit, C>;
 }
 
 pub(crate) fn encode_consistency<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
@@ -305,6 +334,20 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> TernLeConstraint<'a, DB, C> {
 		z: &'a Box<dyn IntVarEnc<DB, C>>,
 	) -> Self {
 		Self { x, y, z }
+	}
+}
+
+impl<'a, DB: ClauseDatabase, C: Coefficient> Checker for TernLeConstraint<'a, DB, C> {
+	type Lit = DB::Lit;
+	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
+		let x: LinExp<_, _> = LinExp::from(self.x);
+		let y: LinExp<_, _> = LinExp::from(self.y);
+		let z: LinExp<_, _> = LinExp::from(self.z);
+		if x.assign(solution) + y.assign(solution) <= z.assign(solution) {
+			Ok(())
+		} else {
+			Err(CheckError::Unsatisfiable(Unsatisfiable))
+		}
 	}
 }
 
