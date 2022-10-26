@@ -2,7 +2,7 @@ use iset::{interval_map, IntervalMap};
 use itertools::{Itertools, Position};
 
 use crate::{
-	int::{ord_plus_ord_le_ord, IntVar, IntVarEnc, LitOrConst},
+	int::{ord_plus_ord_le_x, IntVar, IntVarEnc, LitOrConst},
 	linear::LimitComp,
 	trace::new_var,
 	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
@@ -41,7 +41,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 				next.encode_consistency(db);
 			}
 
-			ord_plus_ord_le_ord(db, &curr, &x_i, &next);
+			ord_plus_ord_le_x(db, &curr, &x_i, &next);
 			next
 		});
 

@@ -1,5 +1,5 @@
 use crate::{
-	int::{ord_plus_ord_le_ord, IntVar},
+	int::{ord_plus_ord_le_x, IntVar},
 	trace::new_var,
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
@@ -42,7 +42,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 				next.encode_consistency(db);
 			}
 
-			ord_plus_ord_le_ord(db, &prev, &leaf, &next);
+			ord_plus_ord_le_x(db, &prev, &leaf, &next);
 			(i + 1, next)
 		});
 		Ok(())
