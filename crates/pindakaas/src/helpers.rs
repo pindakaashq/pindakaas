@@ -150,6 +150,8 @@ pub mod tests {
 	}
 
 	const OUTPUT_SPLR: bool = false;
+	/// The maximum number of variable to generate expected solutions for
+	const GENERATE_EXPECTED_SOLUTIONS: i32 = 0;
 
 	pub(crate) struct TestDB {
 		slv: Solver,
@@ -201,15 +203,47 @@ pub mod tests {
 				sol.sort_by(|a, b| a.abs().cmp(&b.abs()));
 			}
 			solutions.sort();
+			if let Some(self_solutions) = &self.solutions {
+				assert_eq!(self_solutions, &solutions, "Previous (probably generated) solutions (left) differ from given solutions (right)" );
+			}
 			self.solutions = Some(solutions);
 			self.unchecked = true;
 			self
 		}
 
+		fn generate_solutions(&self, check: fn(&[i32]) -> bool) -> Vec<Vec<i32>> {
+			let n = self.num_var;
+			if n > 32 {
+				unimplemented!(
+					"Cannot generate solutions using binary shifts with more than 32 variables."
+				);
+			}
+			let solutions = (0..((2_i32).pow(n as u32)))
+				.map(|i| {
+					(0..n)
+						.map(|j| if ((i >> j) & 1) == 1 { j + 1 } else { -(j + 1) })
+						.collect::<Vec<_>>()
+				})
+				.filter(|g| check(&g[..]))
+				.collect();
+			eprintln!("!vec[");
+			for sol in &solutions {
+				eprintln!("  !vec{sol:?},");
+			}
+			eprintln!("],");
+
+			solutions
+		}
+
 		pub fn with_check(mut self, checker: fn(&[i32]) -> bool) -> TestDB {
-			self.check = Some(checker);
-			self.unchecked = true;
-			self
+			if self.solutions.is_none() && self.num_var <= GENERATE_EXPECTED_SOLUTIONS {
+				let solutions = self.generate_solutions(checker);
+				self.expect_solutions(solutions)
+			} else {
+				self.check = Some(checker);
+				self.unchecked = true;
+				self
+			}
 		}
 
 		pub fn check_complete(&mut self) {
