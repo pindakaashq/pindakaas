@@ -32,8 +32,8 @@ impl ClauseDatabase for IpasirSolver {
 		Ok(())
 	}
 }
-impl<Lit: Literal + Zero + One + AddAssign + Into<c_int>> From<crate::Cnf<Lit>> for IpasirSolver {
-	fn from(cnf: crate::Cnf<Lit>) -> Self {
+impl<Lit: Literal + Zero + One + AddAssign + Into<c_int>> From<Cnf<Lit>> for IpasirSolver {
+	fn from(cnf: Cnf<Lit>) -> Self {
 		use ipasir::IpasirSolver as SolverProtocol;
 		let mut slv = IpasirSolver {
 			slv: ipasir::ffi::Solver::init(),
@@ -184,13 +184,13 @@ impl<Lit: Literal + Zero + One + Into<i32>> From<Cnf<Lit>> for SplrSolver {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::{linear::LimitComp, CardinalityOne, Encoder, PairwiseEncoder};
 
 	/// TODO: This breaks things, but I think it should be solved in SPLR 0.17
 	#[cfg(feature = "splr")]
 	#[test]
 	fn test_splr() {
+		use super::*;
+		use crate::{linear::LimitComp, CardinalityOne, Encoder, PairwiseEncoder};
 		use splr::{Certificate, SolveIF};
 
 		let mut slv = splr::Solver::default();
