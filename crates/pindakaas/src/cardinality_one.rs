@@ -26,7 +26,10 @@ impl<Lit: Literal> Checker for CardinalityOne<Lit> {
 				*lit == v.unwrap()
 			})
 			.count();
-		if count <= 1 {
+		if match self.cmp {
+			LimitComp::LessEq => count <= 1,
+			LimitComp::Equal => count == 1,
+		} {
 			Ok(())
 		} else {
 			Err(CheckError::Unsatisfiable(Unsatisfiable))
