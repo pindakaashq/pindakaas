@@ -71,8 +71,8 @@ fn module(_py: Python, m: &PyModule) -> PyResult<()> {
 	Ok(())
 }
 
-#[pyfunction(b = true)]
-fn adder_encode(mut db: PyRefMut<'_, Cnf>, b: bool) -> Result<(), PyErr> {
+#[pyfunction]
+fn adder_encode(mut db: PyRefMut<'_, Cnf>) -> Result<(), PyErr> {
 	let pref = db.deref_mut();
 	let db = &mut pref.0;
 	let x = LinExp::from_slices(&[1, 2, 3], &[Lit(1), Lit(2), Lit(3)]);
