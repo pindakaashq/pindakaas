@@ -40,7 +40,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	) -> Self {
 		let xs = dom
 			.into_iter(..)
-			.map(|(v, lit)| (v, lit.unwrap_or_else(|| new_var!(db))))
+			.map(|(v, lit)| (v, lit.unwrap_or_else(|| new_var!(db, format!("x>={v:?}")))))
 			.collect::<IntervalMap<_, _>>();
 		debug_assert!(!xs.is_empty());
 		Self { xs }
@@ -80,11 +80,16 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	}
 
 	fn as_lin_exp(&self) -> LinExp<Lit, C> {
+		let mut acc = self.lb();
 		LinExp::new().add_chain(
 			&self
 				.xs
 				.iter(..)
-				.map(|(iv, lit)| (lit.clone(), iv.end - C::one()))
+				.map(|(iv, lit)| {
+					let v = iv.end - C::one() - acc;
+					acc += v;
+					(lit.clone(), v)
+				})
 				.collect::<Vec<_>>(),
 		)
 	}
@@ -335,10 +340,10 @@ impl<'a, Lit: Literal, C: Coefficient> TernLeConstraint<'a, Lit, C> {
 impl<'a, Lit: Literal, C: Coefficient> Checker for TernLeConstraint<'a, Lit, C> {
 	type Lit = Lit;
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let x: LinExp<_, _> = LinExp::from(self.x);
-		let y: LinExp<_, _> = LinExp::from(self.y);
-		let z: LinExp<_, _> = LinExp::from(self.z);
-		if x.assign(solution) + y.assign(solution) <= z.assign(solution) {
+		let x = LinExp::from(self.x).assign(solution);
+		let y = LinExp::from(self.y).assign(solution);
+		let z = LinExp::from(self.z).assign(solution);
+		if x + y <= z {
 			Ok(())
 		} else {
 			Err(CheckError::Unsatisfiable(Unsatisfiable))
@@ -410,7 +415,7 @@ pub mod tests {
 	#![allow(dead_code)]
 
 	use super::*;
-	use crate::helpers::tests::TestDB;
+	use crate::helpers::tests::{assert_sol, TestDB};
 	use iset::interval_set;
 
 	fn get_ord_x<DB: ClauseDatabase, C: Coefficient>(
@@ -423,54 +428,141 @@ pub mod tests {
 		))
 	}
 
+	fn get_bin_x<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
+		db: &mut DB,
+		ub: C,
+	) -> Box<dyn IntVarEnc<DB::Lit, C>> {
+		Box::new(IntVarBin::_new(db, ub))
+	}
+
+	#[test]
+	fn constant_test() {
+		let c = get_constant::<i32, i32>(42);
+		dbg!(&c);
+
+		dbg!(&c);
+		dbg!(&c.dom());
+		dbg!(&c.lb());
+		dbg!(&c.ub());
+
+		assert_eq!(c.lb(), 42);
+		assert_eq!(c.ub(), 42);
+		assert_eq!(c.geq(&6), None);
+		assert_eq!(c.geq(&45), Some(vec![]));
+	}
+
+	#[test]
+	fn ord_geq_test() {
+		let mut db = TestDB::new(0);
+		let x = get_ord_x(&mut db, interval_set!(1..5, 5..7, 7..11));
+		// encode_consistency(&mut db, &x).unwrap();
+
+		let b: Box<dyn IntVarEnc<i32, i32>> = Box::new(Constant::new(-1));
+		let consistency_constraint = TernLeConstraint::new(&x, &b, &x);
+		TernLeEncoder::default()
+			.encode(&mut db, &consistency_constraint)
+			.unwrap();
+
+		dbg!(&x);
+		dbg!(&x.dom());
+		dbg!(&x.lb());
+		dbg!(&x.ub());
+		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
+		dbg!(&x_lin);
+
+		assert_eq!(x.lb(), 0);
+		assert_eq!(x.ub(), 10);
+		assert_eq!(x.geq(&6), Some(vec![2]));
+
+		assert_eq!(x_lin.assign(&[-1, -2, -3]), 0);
+		assert_eq!(x_lin.assign(&[1, -2, -3]), 4);
+		assert_eq!(x_lin.assign(&[1, 2, -3]), 6);
+		assert_eq!(x_lin.assign(&[1, 2, 3]), 10);
+		// assert_eq!(x_lin.assign(&[-1, 2, 3]), -1);
+
+		// x in 0..10
+		let con = TernLeConstraint {
+			x: &x,
+			y: &get_constant(0),
+			z: &get_constant(6),
+		};
+		dbg!(&con);
+		TernLeEncoder::default().encode(&mut db, &con).unwrap();
+		db.generate_solutions(
+			// move |sol| con.check(sol).is_ok() && consistency_constraint.check(sol).is_ok(),
+			move |sol| consistency_constraint.check(sol).is_ok(),
+			3,
+		);
+
+		// assert_sol!(db, TernLeEncoder::default(), 0, &con);
+	}
+
 	#[test]
 	fn bin_geq_test() {
 		let mut db = TestDB::new(0);
-		let x = IntVarBin::_new(&mut db, 12);
+		let x = get_bin_x(&mut db, 12);
 		assert_eq!(x.geq(&3), Some(vec![1, 3]));
 	}
 
 	#[test]
 	fn ord_plus_ord_leq_ord_test() {
 		let mut db = TestDB::new(0);
-		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..2, 5..7)),
-			get_ord_x(&mut db, interval_set!(2..3, 4..5)),
-			get_ord_x(&mut db, interval_set!(0..4, 4..11)),
+		assert_sol!(
+			TernLeEncoder::default(),
+			0,
+			&TernLeConstraint {
+				x: &get_ord_x(&mut db, interval_set!(1..2, 5..7)),
+				y: &get_ord_x(&mut db, interval_set!(2..3, 4..5)),
+				z: &get_ord_x(&mut db, interval_set!(0..4, 4..11)),
+			}
 		);
-		TernLeEncoder::default()
-			.encode(&mut db, &TernLeConstraint::new(&x, &y, &z))
-			.unwrap();
-		db.expect_clauses(vec![]).check_complete();
 	}
 
 	// #[test]
 	fn ord_plus_ord_leq_bin_test() {
 		let mut db = TestDB::new(0);
-		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..2, 5..7)),
-			get_ord_x(&mut db, interval_set!(2..3, 4..5)),
-			IntVarEnc::Bin(IntVarBin::_new(&mut db, 12)),
+		assert_sol!(
+			TernLeEncoder::default(),
+			0,
+			&TernLeConstraint {
+				x: &get_ord_x(&mut db, interval_set!(1..2, 5..7)),
+				y: &get_ord_x(&mut db, interval_set!(2..3, 4..5)),
+				z: &get_bin_x(&mut db, 12),
+			}
 		);
-
-		TernLeEncoder::default()
-			.encode(&mut db, &TernLeConstraint::new(&x, &y, &z))
-			.unwrap();
-		db.expect_clauses(vec![vec![]]).check_complete();
 	}
 
-	// #[test]
+	// 	// #[test]
+	// 	fn bin_plus_bin_le_bin_test() {
+	// 		let mut db = TestDB::new(0);
+	// 		let (x, y, z): (
+	// 			Box<dyn IntVarEnc<i32, i32>>,
+	// 			Box<dyn IntVarEnc<i32, i32>>,
+	// 			Box<dyn IntVarEnc<i32, i32>>,
+	// 		) = (
+	// 			Box::new(IntVarBin::_new(&mut db, 12)),
+	// 			Box::new(IntVarBin::_new(&mut db, 12)),
+	// 			Box::new(IntVarBin::_new(&mut db, 12)),
+	// 		);
+
+	// 		let con = TernLeConstraint {
+	// 			x: &x,
+	// 			y: &y,
+	// 			z: &z,
+	// 		};
+	// 		assert_sol!(db, TernLeEncoder::default(), 0, con);
+	// 	}
+	#[test]
 	fn bin_plus_bin_le_bin_test() {
 		let mut db = TestDB::new(0);
-		let mut bin_12 = || IntVarEnc::Bin(IntVarBin::_new(&mut db, 12));
-
-		let x = bin_12();
-		let y = bin_12();
-		let z = bin_12();
-
-		TernLeEncoder::default()
-			.encode(&mut db, &TernLeConstraint::new(&x, &y, &z))
-			.unwrap();
-		db.expect_clauses(vec![]).check_complete();
+		assert_sol!(
+			TernLeEncoder::default(),
+			0,
+			&TernLeConstraint {
+				x: &get_bin_x(&mut db, 12),
+				y: &get_bin_x(&mut db, 12),
+				z: &get_bin_x(&mut db, 12),
+			}
+		);
 	}
 }
