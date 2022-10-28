@@ -298,10 +298,10 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 	}
 
 	pub(crate) fn assign(&self, solution: &[Lit]) -> C {
-		self.terms.iter().fold(C::zero(), |acc, (lit, coef)| {
+		self.terms.iter().fold(self.add, |acc, (lit, coef)| {
 			let a = solution.iter().find(|x| x.var() == lit.var());
 			acc + if *lit == *a.unwrap() {
-				C::one()
+				self.mult
 			} else {
 				C::zero()
 			} * *coef
