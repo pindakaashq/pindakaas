@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use num::{One, Zero};
-use std::{ffi::c_int, ops::AddAssign};
+use std::{ops::AddAssign};
 
 use crate::{ClauseDatabase, Cnf, Literal};
 pub struct IpasirSolver {
@@ -8,7 +8,7 @@ pub struct IpasirSolver {
 	last_var: Option<ipasir::Var>,
 }
 impl ClauseDatabase for IpasirSolver {
-	type Lit = c_int; // FIXME: Should be ipasir::Lit, but that does not implement Hash
+	type Lit = i32; // FIXME: Should be ipasir::Lit, but that does not implement Hash
 	fn new_var(&mut self) -> Self::Lit {
 		match self.last_var {
 			None => {
@@ -47,7 +47,7 @@ impl<Lit: Literal + Zero + One + AddAssign + Into<c_int>> From<Cnf<Lit>> for Ipa
 			slv.slv.add_clause(
 				cl.iter()
 					.map(|lit| {
-						let lit: c_int = lit.clone().into();
+						let lit: i32 = lit.clone().into();
 						ipasir::Lit::try_from(lit).unwrap()
 					})
 					.collect_vec(),

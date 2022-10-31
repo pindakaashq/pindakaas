@@ -2,7 +2,7 @@ use iset::{interval_map, IntervalMap};
 use itertools::{Itertools, Position};
 
 use crate::{
-	int::{ord_plus_ord_le_ord, IntVar, LitOrConst},
+	int::{ord_plus_ord_le_ord, IntVar, IntVarEnc, LitOrConst},
 	linear::LimitComp,
 	new_var, ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
@@ -27,7 +27,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 			.terms
 			.iter()
 			.map(|part| IntVar::from_part_using_le_ord(db, part, lin.k.clone()))
-			.sorted_by(|a, b| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
+			.sorted_by(|a, b| b.ub().cmp(a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
 		let mut ws = construct_bdd(db, &xs, lin.k.clone()).into_iter();
 		let first = ws.next().unwrap();
