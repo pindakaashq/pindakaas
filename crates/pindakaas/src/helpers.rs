@@ -113,6 +113,12 @@ pub mod tests {
 				.expect("Encoding proved to be trivially unsatisfiable");
 			$tdb.check_complete()
 		};
+		($tdb:ident, $enc:expr, $max:expr, $arg:expr) => {
+			$tdb = $tdb.with_check(|sol| $arg.check(sol).is_ok());
+			$enc.encode(&mut $tdb, $arg)
+				.expect("Encoding proved to be trivially unsatisfiable");
+			$tdb.check_complete()
+		};
 		($enc:expr, $max:expr, $($args:expr),+ => $solns:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
             assert_sol!(tdb => $enc, $($args),+ => $solns)
