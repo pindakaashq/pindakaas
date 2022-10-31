@@ -2,13 +2,17 @@ use itertools::Itertools;
 use num::{One, Zero};
 use std::ops::AddAssign;
 
-use crate::{ClauseDatabase, Cnf, Literal};
+#[cfg(feature = "minisat")]
+use crate::Cnf;
+
+use crate::{ClauseDatabase, Literal};
 pub struct IpasirSolver {
 	slv: ipasir::ffi::Solver,
 	last_var: Option<ipasir::Var>,
 }
 impl ClauseDatabase for IpasirSolver {
 	type Lit = i32; // FIXME: Should be ipasir::Lit, but that does not implement Hash
+				// FIXME: was std::ffi::c_int, but I can't import it for some reason
 	fn new_var(&mut self) -> Self::Lit {
 		match self.last_var {
 			None => {
