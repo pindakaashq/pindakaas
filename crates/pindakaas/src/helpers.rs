@@ -234,7 +234,7 @@ pub mod tests {
 	pub(crate) struct TestDB {
 		slv: Solver,
 		/// Number of variables available when solver is created
-		num_var: i32,
+		pub(crate) num_var: i32,
 		/// Clauses expected by the test case
 		clauses: Option<Vec<(bool, Vec<i32>)>>,
 		/// Solutions expected by the test case
@@ -289,8 +289,13 @@ pub mod tests {
 			self
 		}
 
-		fn generate_solutions(&self, check: fn(&[i32]) -> bool) -> Vec<Vec<i32>> {
-			let n = self.num_var;
+		pub fn _generate_solutions(&self, _: fn(&[i32]) -> bool) -> Vec<Vec<i32>> {
+			todo!();
+		}
+
+		pub fn generate_solutions(&self, check: impl Fn(&[i32]) -> bool, n: i32) -> Vec<Vec<i32>> {
+			// let n = self.num_var;
+			dbg!(&n);
 			if n > 32 {
 				unimplemented!(
 					"Cannot generate solutions using binary shifts with more than 32 variables."
@@ -304,18 +309,18 @@ pub mod tests {
 				})
 				.filter(|g| check(&g[..]))
 				.collect();
-			eprintln!("!vec[");
+			eprintln!("vec![");
 			for sol in &solutions {
-				eprintln!("  !vec{sol:?},");
+				eprintln!("  vec!{sol:?},");
 			}
-			eprintln!("],");
+			eprintln!("]");
 
 			solutions
 		}
 
 		pub fn with_check(mut self, checker: fn(&[i32]) -> bool) -> TestDB {
 			if self.solutions.is_none() && self.num_var <= GENERATE_EXPECTED_SOLUTIONS {
-				let solutions = self.generate_solutions(checker);
+				let solutions = self._generate_solutions(checker);
 				self.expect_solutions(solutions)
 			} else {
 				self.check = Some(checker);

@@ -1,5 +1,6 @@
 use iset::{interval_set, IntervalMap, IntervalSet};
 use itertools::Itertools;
+use std::any::Any;
 
 use crate::{
 	linear::{LinExp, Part},
@@ -68,6 +69,10 @@ impl<Lit: Literal, C: Coefficient + 'static> IntVarEnc<Lit, C> for Constant<C> {
 	fn into_lin_exp(&self) -> LinExp<Lit, C> {
 		LinExp::new().add_constant(self.c)
 	}
+
+	fn as_any(&self) -> &dyn Any {
+		self
+	}
 }
 
 // TODO maybe C -> PosCoeff<C>
@@ -81,7 +86,6 @@ impl<Lit: Literal, C: Coefficient> Clone for Box<dyn IntVarEnc<Lit, C>> {
 		self.clone_dyn()
 	}
 }
-
 
 impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	pub fn new<DB: ClauseDatabase<Lit = Lit>>(
@@ -98,6 +102,47 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			.collect::<IntervalMap<_, _>>();
 		debug_assert!(!xs.is_empty());
 		Self { xs }
+	}
+
+	pub fn _consistency(&self) -> ImplicationChainConstraint<Lit> {
+		ImplicationChainConstraint {
+			lits: self.xs.values(..).cloned().collect::<Vec<_>>(),
+		}
+	}
+}
+
+pub(crate) struct ImplicationChainConstraint<Lit: Literal> {
+	lits: Vec<Lit>, // TODO slice?
+}
+
+#[derive(Default)]
+pub(crate) struct ImplicationChainEncoder {}
+
+impl ImplicationChainEncoder {
+	pub fn _encode<DB: ClauseDatabase>(
+		&mut self,
+		db: &mut DB,
+		ic: &ImplicationChainConstraint<DB::Lit>,
+	) -> Result {
+		for (a, b) in ic.lits.iter().tuple_windows() {
+			db.add_clause(&[b.negate(), a.clone()])?
+		}
+		Ok(())
+	}
+}
+
+impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
+	type Lit = Lit;
+	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
+		self.lits.iter().tuple_windows().try_for_each(|(a, b)| {
+			let a = Self::assign(a, solution);
+			let b = Self::assign(b, solution);
+			if b.is_negated() || !a.is_negated() {
+				Ok(())
+			} else {
+				Err(CheckError::Unsatisfiable(Unsatisfiable))
+			}
+		})
 	}
 }
 
@@ -152,6 +197,10 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 				})
 				.collect::<Vec<_>>(),
 		)
+	}
+
+	fn as_any(&self) -> &dyn Any {
+		self
 	}
 }
 
@@ -227,6 +276,10 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 			k *= two;
 		}
 		exp
+	}
+
+	fn as_any(&self) -> &dyn Any {
+		self
 	}
 }
 
@@ -323,11 +376,14 @@ pub(crate) trait IntVarEnc<Lit: Literal, C: Coefficient>: std::fmt::Debug {
 
 	fn clone_dyn(&self) -> Box<dyn IntVarEnc<Lit, C>>;
 
+	// TODO consume self?
 	fn into_lin_exp(&self) -> LinExp<Lit, C>;
 
 	fn debug(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "x in {:?}", self.dom())
 	}
+
+	fn as_any(&self) -> &dyn Any;
 }
 
 pub(crate) fn encode_consistency<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
@@ -443,29 +499,21 @@ pub mod tests {
 		db: &mut DB,
 		dom: IntervalSet<C>,
 	) -> Box<dyn IntVarEnc<DB::Lit, C>> {
-		Box::new(IntVarOrd::new(
-			db,
-			dom.into_iter(..).map(|iv| (iv, None)).collect(),
-		))
+		let x = IntVarOrd::new(db, dom.into_iter(..).map(|iv| (iv, None)).collect());
+		Box::new(x)
 	}
 
 	fn get_bin_x<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 		db: &mut DB,
 		ub: C,
 	) -> Box<dyn IntVarEnc<DB::Lit, C>> {
-		Box::new(IntVarBin::_new(db, ub))
+		let x = IntVarBin::_new(db, ub);
+		Box::new(x)
 	}
 
 	#[test]
 	fn constant_test() {
 		let c = get_constant::<i32, i32>(42);
-		dbg!(&c);
-
-		dbg!(&c);
-		dbg!(&c.dom());
-		dbg!(&c.lb());
-		dbg!(&c.ub());
-
 		assert_eq!(c.lb(), 42);
 		assert_eq!(c.ub(), 42);
 		assert_eq!(c.geq(&6), None);
@@ -475,21 +523,17 @@ pub mod tests {
 	#[test]
 	fn ord_geq_test() {
 		let mut db = TestDB::new(0);
-		let x = get_ord_x(&mut db, interval_set!(1..5, 5..7, 7..11));
-		// encode_consistency(&mut db, &x).unwrap();
+		let x = get_ord_x::<_, i32>(&mut db, interval_set!(1..5, 5..7, 7..11));
+		let consistency = x
+			.as_any()
+			.downcast_ref::<IntVarOrd<_, i32>>()
+			.unwrap()
+			._consistency();
 
-		let b: Box<dyn IntVarEnc<i32, i32>> = Box::new(Constant::new(-1));
-		let consistency_constraint = TernLeConstraint::new(&x, &b, &x);
-		TernLeEncoder::default()
-			.encode(&mut db, &consistency_constraint)
+		ImplicationChainEncoder::default()
+			._encode(&mut db, &consistency)
 			.unwrap();
-
-		dbg!(&x);
-		dbg!(&x.dom());
-		dbg!(&x.lb());
-		dbg!(&x.ub());
 		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
-		dbg!(&x_lin);
 
 		assert_eq!(x.lb(), 0);
 		assert_eq!(x.ub(), 10);
@@ -499,22 +543,27 @@ pub mod tests {
 		assert_eq!(x_lin.assign(&[1, -2, -3]), 4);
 		assert_eq!(x_lin.assign(&[1, 2, -3]), 6);
 		assert_eq!(x_lin.assign(&[1, 2, 3]), 10);
-		// assert_eq!(x_lin.assign(&[-1, 2, 3]), -1);
 
-		// x in 0..10
-		let con = TernLeConstraint {
+		let tern = TernLeConstraint {
 			x: &x,
 			y: &get_constant(0),
 			z: &get_constant(6),
 		};
-		TernLeEncoder::default().encode(&mut db, &con).unwrap();
+
+		// TernLeEncoder::default().encode(&mut db, &tern).unwrap();
 		// db.generate_solutions(
-		// 	// move |sol| con.check(sol).is_ok() && consistency_constraint.check(sol).is_ok(),
-		// 	move |sol| consistency_constraint.check(sol).is_ok(),
+		// 	move |sol| tern.check(sol).is_ok() && consistency.check(sol).is_ok(),
 		// 	3,
 		// );
 
-		// assert_sol!(db, TernLeEncoder::default(), 0, &con);
+		db.num_var = 3;
+
+		assert_sol!(db, TernLeEncoder::default(), 3, &tern =>
+		vec![
+		  vec![-1, -2, -3],
+		  vec![1, -2, -3],
+		  vec![1, 2, -3],
+		]);
 	}
 
 	#[test]
