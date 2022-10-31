@@ -1,6 +1,7 @@
 use itertools::Itertools;
 use num::{One, Zero};
 use std::ops::AddAssign;
+use crate::Cnf;
 
 #[cfg(feature = "minisat")]
 use crate::Cnf;
@@ -36,7 +37,7 @@ impl ClauseDatabase for IpasirSolver {
 		Ok(())
 	}
 }
-impl<Lit: Literal + Zero + One + AddAssign + Into<c_int>> From<Cnf<Lit>> for IpasirSolver {
+impl<Lit: Literal + Zero + One + AddAssign + Into<i32>> From<Cnf<Lit>> for IpasirSolver {
 	fn from(cnf: Cnf<Lit>) -> Self {
 		use ipasir::IpasirSolver as SolverProtocol;
 		let mut slv = IpasirSolver {
