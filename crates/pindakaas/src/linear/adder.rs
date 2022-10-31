@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::{
-	helpers::XorEncoder,
+	helpers::{XorConstraint, XorEncoder},
 	int::LitOrConst,
 	linear::LimitComp,
 	trace::{emit_clause, new_var},
@@ -241,7 +241,7 @@ fn sum_circuit<DB: ClauseDatabase>(
 			}
 			_ => unreachable!(),
 		},
-		LitOrConst::Const(true) => XorEncoder::default().encode(db, input),
+		LitOrConst::Const(true) => XorEncoder::default().encode(db, &XorConstraint::new(input)),
 		LitOrConst::Const(false) => match input {
 			[a, b] => {
 				emit_clause!(db, &[a.clone(), b.negate()])?;

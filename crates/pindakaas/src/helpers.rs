@@ -1,4 +1,7 @@
-use crate::{trace::emit_clause, ClauseDatabase, Literal, Result};
+use crate::{
+	trace::emit_clause, CheckError, Checker, ClauseDatabase, Encoder, Literal, Result,
+	Unsatisfiable,
+};
 
 /// Encode the constraint lits[0] ⊕ ... ⊕ lits[n].
 /// # Warning
@@ -6,15 +9,15 @@ use crate::{trace::emit_clause, ClauseDatabase, Literal, Result};
 #[derive(Default)]
 pub struct XorEncoder {}
 
-impl XorEncoder {
+impl<'a, DB: ClauseDatabase> Encoder<DB, XorConstraint<'a, DB::Lit>> for XorEncoder {
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "xor_encoder", skip_all, fields(
-			constraint = itertools::join(lits.iter().map(crate::trace::trace_print_lit), " ⊻ ")
+			constraint = itertools::join(xor.lits.iter().map(crate::trace::trace_print_lit), " ⊻ ")
 		))
 	)]
-	pub fn encode<DB: ClauseDatabase>(&mut self, db: &mut DB, lits: &[DB::Lit]) -> Result {
-		match lits {
+	fn encode(&mut self, db: &mut DB, xor: &XorConstraint<DB::Lit>) -> Result {
+		match xor.lits {
 			[a] => emit_clause!(db, &[a.clone()]),
 			[a, b] => {
 				emit_clause!(db, &[a.clone(), b.clone()])?;
@@ -26,7 +29,36 @@ impl XorEncoder {
 				emit_clause!(db, &[a.negate(), b.clone(), c.negate()])?;
 				emit_clause!(db, &[a.negate(), b.negate(), c.clone()])
 			}
-			_ => panic!("Unexpected usage of XOR with more that three arguments"),
+			_ => panic!("Unexpected usage of XOR with zero or more than three arguments"),
+		}
+	}
+}
+
+pub struct XorConstraint<'a, Lit: Literal> {
+	pub(crate) lits: &'a [Lit],
+}
+
+impl<'a, Lit: Literal> XorConstraint<'a, Lit> {
+	pub fn new(lits: &'a [Lit]) -> Self {
+		Self { lits }
+	}
+}
+
+impl<'a, Lit: Literal> Checker for XorConstraint<'a, Lit> {
+	type Lit = Lit;
+	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
+		let count = self
+			.lits
+			.iter()
+			.filter(|lit| {
+				let v = solution.iter().find(|x| x.var() == lit.var());
+				*lit == v.unwrap()
+			})
+			.count();
+		if count % 2 == 1 {
+			Ok(())
+		} else {
+			Err(CheckError::Unsatisfiable(Unsatisfiable))
 		}
 	}
 }
@@ -169,7 +201,7 @@ pub mod tests {
 		assert_enc_sol!(
 			XorEncoder::default(),
 			2,
-			&[1, 2] =>
+			&XorConstraint::new(&[1,2]) =>
 			vec![vec![1, 2], vec![-1, -2]],
 			vec![vec![-1, 2], vec![1, -2]]
 		);
