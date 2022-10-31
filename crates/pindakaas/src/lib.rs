@@ -23,7 +23,7 @@ use std::{
 use itertools::{Itertools, Position};
 use num::{
 	traits::{NumAssignOps, NumOps},
-	One, PrimInt, Signed, Zero,
+	Integer, One, PrimInt, Signed, Zero,
 };
 
 mod cardinality;
@@ -165,8 +165,11 @@ impl<Lit: Literal> fmt::Display for CheckError<Lit> {
 
 /// Coefficient in PB constraints are represented by types that implement the
 /// `Coefficient` constraint.
-pub trait Coefficient: Signed + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug {}
-impl<T: Signed + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug> Coefficient for T {}
+pub trait Coefficient:
+	Signed + Integer + PrimInt + NumAssignOps + NumOps + Hash + fmt::Debug
+{
+}
+impl<T: Signed + PrimInt + Integer + NumAssignOps + NumOps + Hash + fmt::Debug> Coefficient for T {}
 
 /// IntEncoding is a enumerated type use to represent Boolean encodings of
 /// integer variables within this library
