@@ -507,13 +507,12 @@ pub mod tests {
 			y: &get_constant(0),
 			z: &get_constant(6),
 		};
-		dbg!(&con);
 		TernLeEncoder::default().encode(&mut db, &con).unwrap();
-		db.generate_solutions(
-			// move |sol| con.check(sol).is_ok() && consistency_constraint.check(sol).is_ok(),
-			move |sol| consistency_constraint.check(sol).is_ok(),
-			3,
-		);
+		// db.generate_solutions(
+		// 	// move |sol| con.check(sol).is_ok() && consistency_constraint.check(sol).is_ok(),
+		// 	move |sol| consistency_constraint.check(sol).is_ok(),
+		// 	3,
+		// );
 
 		// assert_sol!(db, TernLeEncoder::default(), 0, &con);
 	}
