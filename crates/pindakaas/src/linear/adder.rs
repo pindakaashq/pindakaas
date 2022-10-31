@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
-	helpers::XorEncoder, linear::LimitComp, ClauseDatabase, Coefficient, Encoder, Linear, Literal,
-	Result, Unsatisfiable,
+	helpers::{XorConstraint, XorEncoder},
+	linear::LimitComp,
+	ClauseDatabase, Coefficient, Encoder, Linear, Literal, Result, Unsatisfiable,
 };
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
@@ -69,7 +70,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 						// Compute sum
 						if last && lin.cmp == LimitComp::Equal {
 							// No need to create a new literal, force the sum to equal the result
-							force_sum(db, lits.as_slice(), k[b])?;
+							force_sum(db, &XorConstraint::new(&lits), k[b])?;
 						} else if lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
 							// Literal is not used for the less-than constraint unless a zero has been seen first
 							bucket[b].push(create_sum_lit(db, lits.as_slice())?);
@@ -203,11 +204,11 @@ fn create_sum_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<D
 
 /// Force circuit that represents the sum bit when adding lits together using an adder
 /// circuit to take the value k
-fn force_sum<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Result {
+fn force_sum<DB: ClauseDatabase>(db: &mut DB, xor: &XorConstraint<DB::Lit>, k: bool) -> Result {
 	if k {
-		XorEncoder::default().encode(db, lits)
+		XorEncoder::default().encode(db, xor)
 	} else {
-		match lits {
+		match xor.lits {
 			[a, b] => {
 				db.add_clause(&[a.clone(), b.negate()])?;
 				db.add_clause(&[a.negate(), b.clone()])

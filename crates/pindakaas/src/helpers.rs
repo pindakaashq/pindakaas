@@ -1,4 +1,4 @@
-use crate::{ClauseDatabase, Literal, Result};
+use crate::{CheckError, Checker, ClauseDatabase, Literal, Result, Unsatisfiable};
 
 /// Encode the constraint lits[0] ⊕ ... ⊕ lits[n].
 /// # Warning
@@ -7,8 +7,12 @@ use crate::{ClauseDatabase, Literal, Result};
 pub struct XorEncoder {}
 
 impl XorEncoder {
-	pub fn encode<DB: ClauseDatabase>(&mut self, db: &mut DB, lits: &[DB::Lit]) -> Result {
-		match lits {
+	pub fn encode<DB: ClauseDatabase>(
+		&mut self,
+		db: &mut DB,
+		xor: &XorConstraint<DB::Lit>,
+	) -> Result {
+		match xor.lits {
 			[a] => db.add_clause(&[a.clone()]),
 			[a, b] => {
 				db.add_clause(&[a.clone(), b.clone()])?;
@@ -20,7 +24,36 @@ impl XorEncoder {
 				db.add_clause(&[a.negate(), b.clone(), c.negate()])?;
 				db.add_clause(&[a.negate(), b.negate(), c.clone()])
 			}
-			_ => panic!("Unexpected usage of XOR with more that three arguments"),
+			_ => panic!("Unexpected usage of XOR with zero or more than three arguments"),
+		}
+	}
+}
+
+pub struct XorConstraint<'a, Lit: Literal> {
+	pub(crate) lits: &'a [Lit],
+}
+
+impl<'a, Lit: Literal> XorConstraint<'a, Lit> {
+	pub fn new(lits: &'a [Lit]) -> Self {
+		Self { lits }
+	}
+}
+
+impl<'a, Lit: Literal> Checker for XorConstraint<'a, Lit> {
+	type Lit = Lit;
+	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
+		let count = self
+			.lits
+			.iter()
+			.filter(|lit| {
+				let v = solution.iter().find(|x| x.var() == lit.var());
+				*lit == v.unwrap()
+			})
+			.count();
+		if count % 2 == 1 {
+			Ok(())
+		} else {
+			Err(CheckError::Unsatisfiable(Unsatisfiable))
 		}
 	}
 }
@@ -184,7 +217,7 @@ pub mod tests {
 		assert_enc_sol!(
 			XorEncoder::default(),
 			2,
-			&[1, 2] =>
+			&XorConstraint::new(&[1,2]) =>
 			vec![vec![1, 2], vec![-1, -2]],
 			vec![vec![-1, 2], vec![1, -2]]
 		);
