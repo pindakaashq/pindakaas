@@ -503,33 +503,33 @@ pub mod tests {
 		assert_eq!(x.geq(&3), Some(vec![1, 3]));
 	}
 
-	#[test]
-	fn ord_plus_ord_leq_ord_test() {
-		let mut db = TestDB::new(0);
-		assert_sol!(
-			TernLeEncoder::default(),
-			0,
-			&TernLeConstraint {
-				x: &get_ord_x(&mut db, interval_set!(1..2, 5..7)),
-				y: &get_ord_x(&mut db, interval_set!(2..3, 4..5)),
-				z: &get_ord_x(&mut db, interval_set!(0..4, 4..11)),
-			}
-		);
-	}
+	// 	#[test]
+	// 	fn ord_plus_ord_leq_ord_test() {
+	// 		let mut db = TestDB::new(0);
+	// 		assert_sol!(
+	// 			TernLeEncoder::default(),
+	// 			0,
+	// 			&TernLeConstraint {
+	// 				x: &get_ord_x(&mut db, interval_set!(1..2, 5..7)),
+	// 				y: &get_ord_x(&mut db, interval_set!(2..3, 4..5)),
+	// 				z: &get_ord_x(&mut db, interval_set!(0..4, 4..11)),
+	// 			}
+	// 		);
+	// 	}
 
-	// #[test]
-	fn ord_plus_ord_leq_bin_test() {
-		let mut db = TestDB::new(0);
-		assert_sol!(
-			TernLeEncoder::default(),
-			0,
-			&TernLeConstraint {
-				x: &get_ord_x(&mut db, interval_set!(1..2, 5..7)),
-				y: &get_ord_x(&mut db, interval_set!(2..3, 4..5)),
-				z: &get_bin_x(&mut db, 12),
-			}
-		);
-	}
+	// 	// #[test]
+	// 	fn ord_plus_ord_leq_bin_test() {
+	// 		let mut db = TestDB::new(0);
+	// 		assert_sol!(
+	// 			TernLeEncoder::default(),
+	// 			0,
+	// 			&TernLeConstraint {
+	// 				x: &get_ord_x(&mut db, interval_set!(1..2, 5..7)),
+	// 				y: &get_ord_x(&mut db, interval_set!(2..3, 4..5)),
+	// 				z: &get_bin_x(&mut db, 12),
+	// 			}
+	// 		);
+	// 	}
 
 	// 	// #[test]
 	// 	fn bin_plus_bin_le_bin_test() {
@@ -551,17 +551,18 @@ pub mod tests {
 	// 		};
 	// 		assert_sol!(db, TernLeEncoder::default(), 0, con);
 	// 	}
-	#[test]
-	fn bin_plus_bin_le_bin_test() {
-		let mut db = TestDB::new(0);
-		assert_sol!(
-			TernLeEncoder::default(),
-			0,
-			&TernLeConstraint {
-				x: &get_bin_x(&mut db, 12),
-				y: &get_bin_x(&mut db, 12),
-				z: &get_bin_x(&mut db, 12),
-			}
-		);
-	}
+
+	// #[test]
+	// fn bin_plus_bin_le_bin_test() {
+	// 	let mut db = TestDB::new(0);
+	// 	assert_sol!(
+	// 		TernLeEncoder::default(),
+	// 		0,
+	// 		&TernLeConstraint {
+	// 			x: &get_bin_x(&mut db, 12),
+	// 			y: &get_bin_x(&mut db, 12),
+	// 			z: &get_bin_x(&mut db, 12),
+	// 		}
+	// 	);
+	// }
 }
