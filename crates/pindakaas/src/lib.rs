@@ -118,6 +118,11 @@ pub trait Checker {
 	/// - and it return [`Incomplete`] when not all the literals used in the
 	///   constraint have been assigned.
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>>;
+
+	/// Returns assignment of `lit` in `solution`
+	fn assign<'a>(lit: &'a Self::Lit, solution: &'a [Self::Lit]) -> &'a Self::Lit {
+		solution.iter().find(|x| x.var() == lit.var()).expect("Could not find lit {lit} in solution {solution}; perhaps this variable did not occur in any clause")
+	}
 }
 
 /// Incomplete is a error type returned by a [`Checker`] type when the

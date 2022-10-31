@@ -97,13 +97,11 @@ fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 						)
 						.into_iter(..)
 						.map(|interval| {
-							(
-								interval,
-								Some(new_var!(
-									db,
-									format!("w_{}_{}>={:?}", level + 1, _node + 1, interval)
-								)),
-							)
+							let var = new_var!(
+								db,
+								format!("w_{}_{}>={:?}", level + 1, _node + 1, interval)
+							);
+							(interval, Some(var))
 						})
 						.collect();
 
