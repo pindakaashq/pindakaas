@@ -55,6 +55,7 @@ pub mod tests {
 	use super::*;
 	use crate::Unsatisfiable;
 
+	use crate::{linear::LimitComp, CardinalityOne, Checker, Encoder, LadderEncoder};
 	use splr::{
 		types::{CNFDescription, Instantiate},
 		Certificate, Config, SatSolverIF, SolveIF, Solver, SolverError,
@@ -67,17 +68,23 @@ pub mod tests {
 	macro_rules! assert_enc {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-			tdb = tdb.expect_clauses($clauses);
-			$enc.encode(&mut tdb, $arg)
+            assert_enc!(tdb => $enc, $arg => $clauses)
+		};
+		($tdb:ident => $enc:expr, $arg:expr => $clauses:expr) => {
+			$tdb = $tdb.expect_clauses($clauses);
+			$enc.encode(&mut $tdb, $arg)
 				.expect("Encoding proved to be trivially unsatisfiable");
-			tdb.check_complete()
+			$tdb.check_complete()
 		};
 		($enc:expr, $max:expr, $($args:expr),+ => $clauses:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-			tdb = tdb.expect_clauses($clauses);
-			$enc.encode(&mut tdb, ($($args),+))
+            assert_enc!(tdb => $enc, $($args),+ => $clauses)
+		};
+		($tdb:ident => $enc:expr, $($args:expr),+ => $clauses:expr) => {
+			$tdb = $tdb.expect_clauses($clauses);
+			$enc.encode(&mut $tdb, ($($args),+))
 				.expect("Encoding proved to be trivially unsatisfiable");
-			tdb.check_complete()
+			$tdb.check_complete()
 		};
 	}
 	pub(crate) use assert_enc;
@@ -85,21 +92,21 @@ pub mod tests {
 	macro_rules! assert_sol {
 		($enc:expr, $max:expr, $arg:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-            assert_sol!(tdb, $enc, $max, $arg)
+            assert_sol!(tdb => $enc, $arg)
 		};
-		($tdb:ident, $enc:expr, $max:expr, $arg:expr) => {
+		($tdb:ident => $enc:expr, $arg:expr) => {
 			$tdb = $tdb.with_check(|sol| $arg.check(sol).is_ok());
 			$enc.encode(&mut $tdb, $arg)
 				.expect("Encoding proved to be trivially unsatisfiable");
 			$tdb.check_complete()
 		};
-		($enc:expr, $max:expr, $arg:expr => $solns:expr) => {
+		($enc:expr, $max:expr, $($args:expr),+ => $solns:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-            assert_sol!(tdb, $enc, $max, $arg => $solns)
+            assert_sol!(tdb => $enc, $($args),+ => $solns)
 		};
-		($tdb:ident, $enc:expr, $max:expr, $arg:expr => $solns:expr) => {
+		($tdb:ident => $enc:expr, $($args:expr),+ => $solns:expr) => {
 			$tdb = $tdb.expect_solutions($solns);
-			$enc.encode(&mut $tdb, $arg)
+			$enc.encode(&mut $tdb, ($($args),+))
 				.expect("Encoding proved to be trivially unsatisfiable");
 			$tdb.check_complete()
         }
@@ -109,22 +116,22 @@ pub mod tests {
 	macro_rules! assert_enc_sol {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-            assert_enc_sol!(tdb, $enc, $max, $arg => $clauses)
+            assert_enc_sol!(tdb => $enc, $arg => $clauses)
 		};
-		($tdb:ident, $enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
+		($tdb:ident => $enc:expr, $arg:expr => $clauses:expr) => {
 			$tdb = $tdb.expect_clauses($clauses);
 			$enc.encode(&mut $tdb, $arg)
 				.expect("Encoding proved to be trivially unsatisfiable");
 			$tdb.check_complete()
 		};
-		($enc:expr, $max:expr, $arg:expr => $clauses:expr, $solns:expr) => {
+		($enc:expr, $max:expr, $($args:expr),+ => $clauses:expr, $solns:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-            assert_enc_sol!(tdb, $enc, $max, $arg => $clauses, $solns)
+            assert_enc_sol!(tdb => $enc, $($args),+ => $clauses, $solns)
 		};
-        ($tdb:ident, $enc:expr, $max:expr, $arg:expr => $clauses:expr, $solns:expr) => {
+        ($tdb:ident => $enc:expr, $($args:expr),+ => $clauses:expr, $solns:expr) => {
 			$tdb = $tdb.expect_clauses($clauses);
 			$tdb = $tdb.expect_solutions($solns);
-			$enc.encode(&mut $tdb, $arg)
+			$enc.encode(&mut $tdb, ($($args),+))
 				.expect("Encoding proved to be trivially unsatisfiable");
 			$tdb.check_complete()
 		};
@@ -147,6 +154,29 @@ pub mod tests {
 		assert_sol!(Negate::default(), 1, &1 => vec![vec![-1]]);
 		// Test encoding and possible solutions
 		assert_enc_sol!(Negate::default(), 1, &1 => vec![vec![-1]], vec![vec![-1]]);
+
+		// Test resulting encoding for given TestDB instance
+		let mut tdb = TestDB::new(2);
+		tdb.add_clause(&[2]).unwrap();
+		assert_enc!(tdb => Negate::default(), &1 => vec![vec![-1]]); // only clauses of encoder are checked against
+
+		let mut tdb = TestDB::new(2);
+		tdb.add_clause(&[2]).unwrap();
+		assert_sol!(tdb => Negate::default(), &1 => vec![vec![-1,2]]);
+
+		let mut tdb = TestDB::new(2);
+		tdb.add_clause(&[2]).unwrap();
+		assert_enc_sol!(tdb => Negate::default(), &1 => vec![vec![-1]], vec![vec![-1,2]]);
+	}
+
+	#[test]
+	fn test_assert_macros_with_check() {
+		let mut tdb = TestDB::new(3);
+		tdb.add_clause(&[1]).unwrap();
+		assert_sol!(tdb => LadderEncoder::default(), &CardinalityOne {
+			lits: vec![2, 3],
+			cmp: LimitComp::LessEq,
+		});
 	}
 
 	#[test]
