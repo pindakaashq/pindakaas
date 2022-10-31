@@ -40,10 +40,54 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	) -> Self {
 		let xs = dom
 			.into_iter(..)
-			.map(|(v, lit)| (v, lit.unwrap_or_else(|| new_var!(db, format!("x>={v:?}")))))
+			.map(|(v, lit)| {
+				let lit = lit.unwrap_or_else(|| new_var!(db, format!("x>={v:?}")));
+				(v, lit)
+			})
 			.collect::<IntervalMap<_, _>>();
 		debug_assert!(!xs.is_empty());
 		Self { xs }
+	}
+
+	pub fn _consistency(&self) -> ImplicationChainConstraint<Lit> {
+		ImplicationChainConstraint {
+			lits: self.xs.values(..).cloned().collect::<Vec<_>>(),
+		}
+	}
+}
+
+pub(crate) struct ImplicationChainConstraint<Lit: Literal> {
+	lits: Vec<Lit>, // TODO slice?
+}
+
+#[derive(Default)]
+pub(crate) struct ImplicationChainEncoder {}
+
+impl ImplicationChainEncoder {
+	pub fn _encode<DB: ClauseDatabase>(
+		&mut self,
+		db: &mut DB,
+		ic: &ImplicationChainConstraint<DB::Lit>,
+	) -> Result {
+		for (a, b) in ic.lits.iter().tuple_windows() {
+			db.add_clause(&[b.negate(), a.clone()])?
+		}
+		Ok(())
+	}
+}
+
+impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
+	type Lit = Lit;
+	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
+		self.lits.iter().tuple_windows().try_for_each(|(a, b)| {
+			let a = Self::assign(a, solution);
+			let b = Self::assign(b, solution);
+			if b.is_negated() || !a.is_negated() {
+				Ok(())
+			} else {
+				Err(CheckError::Unsatisfiable(Unsatisfiable))
+			}
+		})
 	}
 }
 
@@ -428,23 +472,13 @@ pub mod tests {
 		))
 	}
 
-	fn get_bin_x<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
-		db: &mut DB,
-		ub: C,
-	) -> Box<dyn IntVarEnc<DB::Lit, C>> {
-		Box::new(IntVarBin::_new(db, ub))
+	fn get_bin_x<DB: ClauseDatabase, C: Coefficient>(db: &mut DB, ub: C) -> IntVarEnc<DB::Lit, C> {
+		IntVarEnc::Bin(IntVarBin::_new(db, ub))
 	}
 
 	#[test]
 	fn constant_test() {
-		let c = get_constant::<i32, i32>(42);
-		dbg!(&c);
-
-		dbg!(&c);
-		dbg!(&c.dom());
-		dbg!(&c.lb());
-		dbg!(&c.ub());
-
+		let c: IntVarEnc<i32, _> = IntVarEnc::Const(42);
 		assert_eq!(c.lb(), 42);
 		assert_eq!(c.ub(), 42);
 		assert_eq!(c.geq(&6), None);
@@ -454,21 +488,16 @@ pub mod tests {
 	#[test]
 	fn ord_geq_test() {
 		let mut db = TestDB::new(0);
-		let x = get_ord_x(&mut db, interval_set!(1..5, 5..7, 7..11));
-		// encode_consistency(&mut db, &x).unwrap();
+		let x = get_ord_x::<_, i32>(&mut db, interval_set!(1..5, 5..7, 7..11));
+		let consistency = match &x {
+			IntVarEnc::Ord(o) => o._consistency(),
+			_ => unreachable!(),
+		};
 
-		let b: Box<dyn IntVarEnc<i32, i32>> = Box::new(Constant::new(-1));
-		let consistency_constraint = TernLeConstraint::new(&x, &b, &x);
-		TernLeEncoder::default()
-			.encode(&mut db, &consistency_constraint)
+		ImplicationChainEncoder::default()
+			._encode(&mut db, &consistency)
 			.unwrap();
-
-		dbg!(&x);
-		dbg!(&x.dom());
-		dbg!(&x.lb());
-		dbg!(&x.ub());
 		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
-		dbg!(&x_lin);
 
 		assert_eq!(x.lb(), 0);
 		assert_eq!(x.ub(), 10);
@@ -478,22 +507,27 @@ pub mod tests {
 		assert_eq!(x_lin.assign(&[1, -2, -3]), 4);
 		assert_eq!(x_lin.assign(&[1, 2, -3]), 6);
 		assert_eq!(x_lin.assign(&[1, 2, 3]), 10);
-		// assert_eq!(x_lin.assign(&[-1, 2, 3]), -1);
 
-		// x in 0..10
-		let con = TernLeConstraint {
+		let tern = TernLeConstraint {
 			x: &x,
-			y: &get_constant(0),
-			z: &get_constant(6),
+			y: &IntVarEnc::Const(0),
+			z: &IntVarEnc::Const(6),
 		};
-		TernLeEncoder::default().encode(&mut db, &con).unwrap();
+
+		// TernLeEncoder::default().encode(&mut db, &tern).unwrap();
 		// db.generate_solutions(
-		// 	// move |sol| con.check(sol).is_ok() && consistency_constraint.check(sol).is_ok(),
-		// 	move |sol| consistency_constraint.check(sol).is_ok(),
+		// 	move |sol| tern.check(sol).is_ok() && consistency.check(sol).is_ok(),
 		// 	3,
 		// );
 
-		// assert_sol!(db, TernLeEncoder::default(), 0, &con);
+		db.num_var = 3;
+
+		assert_sol!(db => TernLeEncoder::default(), &tern =>
+		vec![
+		  vec![-1, -2, -3],
+		  vec![1, -2, -3],
+		  vec![1, 2, -3],
+		]);
 	}
 
 	#[test]
