@@ -1,9 +1,7 @@
+use crate::Cnf;
 use itertools::Itertools;
 use num::{One, Zero};
 use std::ops::AddAssign;
-
-#[cfg(feature = "minisat")]
-use crate::Cnf;
 
 use crate::{ClauseDatabase, Literal};
 pub struct IpasirSolver {
@@ -39,7 +37,7 @@ impl ClauseDatabase for IpasirSolver {
 impl<Lit: Literal + Zero + One + AddAssign + Into<std::ffi::c_int>> From<crate::Cnf<Lit>>
 	for IpasirSolver
 {
-	fn from(cnf: crate::Cnf<Lit>) -> Self {
+	fn from(cnf: Cnf<Lit>) -> Self {
 		use ipasir::IpasirSolver as SolverProtocol;
 		let mut slv = IpasirSolver {
 			slv: ipasir::ffi::Solver::init(),
