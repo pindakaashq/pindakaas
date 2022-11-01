@@ -172,38 +172,38 @@ pub(crate) fn lex_lesseq_const<DB: ClauseDatabase, C: Coefficient>(
 	Ok(())
 }
 
-/// Returns the result, `c`, of adding `a` to `b`, all encoded using the log encoding.
+/// Constrains the slice `z`, to be the result of adding `x` to `y`, all encoded using the log encoding.
 ///
 /// TODO: Should this use the IntEncoding::Log input??
-#[allow(dead_code)]
 pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 	db: &mut DB,
-	a: &[DB::Lit],
-	b: &[DB::Lit],
+	x: &[DB::Lit],
+	y: &[DB::Lit],
+	z: &[DB::Lit],
 	bits: usize,
-) -> Result<Vec<Option<DB::Lit>>> {
-	let mut c = Vec::with_capacity(bits);
+) -> Result {
 	let mut carry = None;
 	for i in 0..bits {
-		let b = [a.get(i), b.get(i), carry.as_ref()]
+		let b = [x.get(i), y.get(i), carry.as_ref()]
 			.into_iter()
 			.flatten()
 			.cloned()
 			.collect::<Vec<DB::Lit>>();
+		let sum = z.get(i).unwrap(); // TODO: What if z has less members?
 		match &b[..] {
 			[] => {
-				c.push(None);
+				emit_clause!(db, &[sum.negate()])?;
 				carry = None;
 			}
-			[x] => {
-				c.push(Some(x.clone()));
+			[a] => {
+				// sum == x
+				emit_clause!(db, &[sum.negate(), a.clone()])?;
+				emit_clause!(db, &[sum.clone(), a.negate()])?;
 				carry = None;
 			}
 			_ => {
 				debug_assert!(b.len() <= 3);
-				let sum = new_var!(db, crate::trace::subscripted_name("∑", i));
 				sum_circuit(db, &b, LitOrConst::Lit(sum.clone()))?;
-				c.push(Some(sum));
 				carry = if i + 1 < bits {
 					let carry = new_var!(db, crate::trace::subscripted_name("c", i));
 					carry_circuit(db, &b, LitOrConst::Lit(carry.clone()))?;
@@ -215,13 +215,13 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 			}
 		}
 	}
-	for l in a.iter().skip(bits) {
+	for l in x.iter().skip(bits) {
 		emit_clause!(db, &[l.negate()])?;
 	}
-	for l in b.iter().skip(bits) {
+	for l in y.iter().skip(bits) {
 		emit_clause!(db, &[l.negate()])?;
 	}
-	Ok(c)
+	Ok(())
 }
 
 /// Encode the adder sum circuit
