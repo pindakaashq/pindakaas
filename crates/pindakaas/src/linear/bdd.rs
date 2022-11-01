@@ -36,15 +36,19 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 			})
 			.sorted_by(|a, b| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
-		let mut ws = construct_bdd(db, &xs, lin.k.clone()).into_iter();
+		let mut ws =
+			construct_bdd(db, &xs.iter().map(Box::as_ref).collect(), lin.k.clone()).into_iter();
 		let first = ws.next().unwrap();
-		xs.into_iter().zip(ws).fold(first, |curr, (x_i, next)| {
+		xs.iter().zip(ws).fold(first, |curr, (x_i, next)| {
 			if self.add_consistency {
-				encode_consistency(db, &next).unwrap();
+				encode_consistency(db, next.as_ref()).unwrap();
 			}
 
 			TernLeEncoder::default()
-				.encode(db, &TernLeConstraint::new(&curr, &x_i, &next))
+				.encode(
+					db,
+					&TernLeConstraint::new(curr.as_ref(), x_i.as_ref(), next.as_ref()),
+				)
 				.unwrap();
 			next
 		});
@@ -53,9 +57,9 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 	}
 }
 
-fn construct_bdd<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
+fn construct_bdd<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 	db: &mut DB,
-	xs: &Vec<Box<dyn IntVarEnc<DB::Lit, C>>>,
+	xs: &Vec<&'a dyn IntVarEnc<DB::Lit, C>>,
 	k: PosCoeff<C>,
 ) -> Vec<Box<dyn IntVarEnc<DB::Lit, C>>> {
 	let ubs = xs.iter().map(|x| x.ub()).collect::<Vec<_>>();
@@ -112,7 +116,7 @@ fn construct_bdd<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 fn bdd<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 	db: &mut DB,
 	i: usize,
-	xs: &Vec<Box<dyn IntVarEnc<DB::Lit, C>>>,
+	xs: &Vec<&dyn IntVarEnc<DB::Lit, C>>,
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, LitOrConst<DB::Lit>>>,
 	first: bool,

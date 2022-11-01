@@ -36,15 +36,14 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
 		build_totalizer(
+			// xs.iter().map(Box::as_ref).collect(),
 			xs,
 			db,
 			C::zero(),
 			*lin.k.clone(),
-			true,
 			self.add_consistency,
 			0,
-		);
-		Ok(())
+		)
 	}
 }
 
@@ -53,33 +52,21 @@ fn build_totalizer<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 	db: &mut DB,
 	l: C,
 	u: C,
-	limit_root: bool,
 	add_consistency: bool,
 	level: u32,
-) -> Box<dyn IntVarEnc<DB::Lit, C>> {
+) -> Result {
 	if layer.len() == 1 {
 		let root = layer.pop().unwrap();
-		if limit_root {
-			let zero: Box<dyn IntVarEnc<DB::Lit, C>> = Box::new(Constant::new(C::zero()));
-			let parent: Box<dyn IntVarEnc<DB::Lit, C>> = Box::new(Constant::new(u));
-			TernLeEncoder::default()
-				.encode(db, &TernLeConstraint::new(&root, &zero, &parent))
-				.unwrap();
-		}
-		root
-	} else if limit_root && layer.len() == 2 {
-		let parent: Box<dyn IntVarEnc<DB::Lit, C>> = Box::new(Constant::new(u));
-		TernLeEncoder::default()
-			.encode(db, &TernLeConstraint::new(&layer[0], &layer[1], &parent))
-			.unwrap();
-		parent
+		let zero = Constant::new(C::zero());
+		let parent = Constant::new(u);
+		TernLeEncoder::default().encode(db, &TernLeConstraint::new(root.as_ref(), &zero, &parent))
 	} else {
-		build_totalizer(
-			layer
-				.chunks(2)
-				.enumerate()
-				.map(|(_node, children)| match children {
-					[x] => x.clone(),
+		let next_layer = layer
+			.chunks(2)
+			.enumerate()
+			.map(|(_node, children)| -> Box<dyn IntVarEnc<DB::Lit, C>> {
+				match children {
+					[x] => x.clone_dyn(),
 					[left, right] => {
 						let l = if layer.len() > 2 { C::zero() } else { l };
 						let dom = ord_plus_ord_le_ord_sparse_dom(
@@ -104,24 +91,26 @@ fn build_totalizer<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 							Box::new(IntVarOrd::new(db, dom));
 
 						if add_consistency {
-							encode_consistency(db, &parent).unwrap();
+							encode_consistency(db, parent.as_ref()).unwrap();
 						}
 
 						TernLeEncoder::default()
-							.encode(db, &TernLeConstraint::new(left, right, &parent))
+							.encode(
+								db,
+								&TernLeConstraint::new(
+									left.as_ref(),
+									right.as_ref(),
+									parent.as_ref(),
+								),
+							)
 							.unwrap();
 						parent
 					}
 					_ => panic!(),
-				})
-				.collect(),
-			db,
-			l,
-			u,
-			limit_root,
-			add_consistency,
-			level + 1,
-		)
+				}
+			})
+			.collect();
+		build_totalizer(next_layer, db, l, u, add_consistency, level + 1)
 	}
 }
 

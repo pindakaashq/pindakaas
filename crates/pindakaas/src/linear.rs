@@ -144,8 +144,8 @@ impl<Lit: Literal, C: Coefficient> LinearConstraint<Lit, C> {
 	}
 }
 
-impl<'a, Lit: Literal, C: Coefficient> From<&'a Box<dyn IntVarEnc<Lit, C>>> for LinExp<Lit, C> {
-	fn from(x: &'a Box<dyn IntVarEnc<Lit, C>>) -> Self {
+impl<'a, Lit: Literal, C: Coefficient> From<&'a dyn IntVarEnc<Lit, C>> for LinExp<Lit, C> {
+	fn from(x: &'a dyn IntVarEnc<Lit, C>) -> Self {
 		x.into_lin_exp()
 	}
 }

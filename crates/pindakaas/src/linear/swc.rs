@@ -1,5 +1,5 @@
 use crate::{
-	int::{encode_consistency, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+	int::{encode_consistency, IntVarOrd, TernLeConstraint, TernLeEncoder},
 	new_var, ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 use iset::IntervalMap;
@@ -25,9 +25,7 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 		#[allow(clippy::needless_collect)]
 		let xs = lin.terms
 			.iter()
-			.map(|part| -> Box<dyn IntVarEnc<DB::Lit, C>> {
-				Box::new(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone()))
-			})
+			.map(|part| Box::new(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone())))
 			.collect::<Vec<_>>();
 		xs.into_iter().enumerate().reduce(|(i, prev), (_, leaf)| {
 			let dom = num::iter::range_inclusive(C::one(), *lin.k)
@@ -38,14 +36,17 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 					)
 				})
 				.collect::<IntervalMap<_, _>>();
-			let next: Box<dyn IntVarEnc<DB::Lit, C>> = Box::new(IntVarOrd::new(db, dom));
+			let next = Box::new(IntVarOrd::new(db, dom));
 
 			if self.add_consistency {
-				encode_consistency(db, &next).unwrap();
+				encode_consistency(db, next.as_ref()).unwrap();
 			}
 
 			TernLeEncoder::default()
-				.encode(db, &TernLeConstraint::new(&prev, &leaf, &next))
+				.encode(
+					db,
+					&TernLeConstraint::new(prev.as_ref(), leaf.as_ref(), next.as_ref()),
+				)
 				.unwrap();
 
 			(i + 1, next)
