@@ -125,17 +125,19 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 
 	fn as_lin_exp(&self) -> LinExp<Lit, C> {
 		let mut acc = self.lb();
-		LinExp::new().add_chain(
-			&self
-				.xs
-				.iter(..)
-				.map(|(iv, lit)| {
-					let v = iv.end - C::one() - acc;
-					acc += v;
-					(lit.clone(), v)
-				})
-				.collect::<Vec<_>>(),
-		)
+		LinExp::new()
+			.add_chain(
+				&self
+					.xs
+					.iter(..)
+					.map(|(iv, lit)| {
+						let v = iv.end - C::one() - acc;
+						acc += v;
+						(lit.clone(), v)
+					})
+					.collect::<Vec<_>>(),
+			)
+			.add_constant(self.lb())
 	}
 }
 
@@ -513,15 +515,29 @@ pub mod tests {
 	fn get_ord_x<DB: ClauseDatabase, C: Coefficient>(
 		db: &mut DB,
 		dom: IntervalSet<C>,
+		consistent: bool,
 	) -> IntVarEnc<DB::Lit, C> {
-		IntVarEnc::Ord(IntVarOrd::new(
-			db,
-			dom.into_iter(..).map(|iv| (iv, None)).collect(),
-		))
+		let x = IntVarOrd::new(db, dom.into_iter(..).map(|iv| (iv, None)).collect());
+		if consistent {
+			ImplicationChainEncoder::default()
+				._encode(db, &x._consistency())
+				.unwrap();
+		}
+		IntVarEnc::Ord(x)
 	}
 
-	fn get_bin_x<DB: ClauseDatabase, C: Coefficient>(db: &mut DB, ub: C) -> IntVarEnc<DB::Lit, C> {
-		IntVarEnc::Bin(IntVarBin::_new(db, ub))
+	fn get_bin_x<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
+		db: &mut DB,
+		ub: C,
+		consistent: bool,
+	) -> IntVarEnc<DB::Lit, C> {
+		let x = IntVarBin::_new(db, ub);
+		if consistent {
+			TernLeEncoder::default()
+				.encode(db, &x._consistency().get())
+				.unwrap();
+		}
+		IntVarEnc::Bin(x)
 	}
 
 	#[test]
@@ -536,15 +552,7 @@ pub mod tests {
 	#[test]
 	fn bin_geq_test() {
 		let mut db = TestDB::new(0);
-		let x = get_bin_x::<_, i32>(&mut db, 12);
-		let consistency = match &x {
-			IntVarEnc::Bin(b) => b._consistency(),
-			_ => unreachable!(),
-		};
-
-		TernLeEncoder::default()
-			.encode(&mut db, &consistency.get())
-			.unwrap();
+		let x = get_bin_x::<_, i32>(&mut db, 12, true);
 		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
 
 		assert_eq!(x.lb(), 0);
@@ -585,7 +593,7 @@ pub mod tests {
 	fn bin_geq_2_test() {
 		let mut db = TestDB::new(0);
 		let tern = TernLeConstraint {
-			x: &get_bin_x(&mut db, 12),
+			x: &IntVarEnc::Bin(IntVarBin::_new(&mut db, 12)),
 			y: &IntVarEnc::Const(0),
 			z: &IntVarEnc::Const(6),
 		};
@@ -605,22 +613,15 @@ pub mod tests {
 	#[test]
 	fn ord_geq_test() {
 		let mut db = TestDB::new(0);
-		let x = get_ord_x::<_, i32>(&mut db, interval_set!(1..5, 5..7, 7..11));
-		let consistency = match &x {
-			IntVarEnc::Ord(o) => o._consistency(),
-			_ => unreachable!(),
-		};
+		let x = get_ord_x::<_, i32>(&mut db, interval_set!(3..5, 5..7, 7..11), true);
 
-		ImplicationChainEncoder::default()
-			._encode(&mut db, &consistency)
-			.unwrap();
 		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
 
-		assert_eq!(x.lb(), 0);
+		assert_eq!(x.lb(), 2);
 		assert_eq!(x.ub(), 10);
 		assert_eq!(x.geq(&6), Some(vec![2]));
 
-		assert_eq!(x_lin.assign(&[-1, -2, -3]), 0);
+		assert_eq!(x_lin.assign(&[-1, -2, -3]), 2);
 		assert_eq!(x_lin.assign(&[1, -2, -3]), 4);
 		assert_eq!(x_lin.assign(&[1, 2, -3]), 6);
 		assert_eq!(x_lin.assign(&[1, 2, 3]), 10);
@@ -647,19 +648,64 @@ pub mod tests {
 		]);
 	}
 
-	// 	#[test]
-	// 	fn ord_plus_ord_leq_ord_test() {
-	// 		let mut db = TestDB::new(0);
-	// 		assert_sol!(
-	// 			TernLeEncoder::default(),
-	// 			0,
-	// 			&TernLeConstraint {
-	// 				x: &get_ord_x(&mut db, interval_set!(1..2, 5..7)),
-	// 				y: &get_ord_x(&mut db, interval_set!(2..3, 4..5)),
-	// 				z: &get_ord_x(&mut db, interval_set!(0..4, 4..11)),
-	// 			}
-	// 		);
-	// 	}
+	#[test]
+	fn ord_plus_ord_leq_ord_test() {
+		let mut db = TestDB::new(0);
+		let (x, y, z) = (
+			get_ord_x(&mut db, interval_set!(1..2, 5..7), true),
+			get_ord_x(&mut db, interval_set!(2..3, 4..5), true),
+			get_ord_x(&mut db, interval_set!(0..4, 4..11), true),
+		);
+		let tern = TernLeConstraint {
+			x: &x,
+			y: &y,
+			z: &z,
+		};
+		db.num_var = 6;
+
+		// TernLeEncoder::default().encode(&mut db, &tern).unwrap();
+		// let x_con = x
+		// 	.as_any()
+		// 	.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 	.unwrap()
+		// 	._consistency();
+		// let y_con = y
+		// 	.as_any()
+		// 	.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 	.unwrap()
+		// 	._consistency();
+		// let z_con = z
+		// 	.as_any()
+		// 	.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 	.unwrap()
+		// 	._consistency();
+		// db.generate_solutions(
+		// 	move |sol| {
+		// 		tern.check(sol).is_ok()
+		// 			&& x_con.check(sol).is_ok()
+		// 			&& y_con.check(sol).is_ok()
+		// 			&& z_con.check(sol).is_ok()
+		// 	},
+		// 	db.num_var,
+		// );
+
+		assert_sol!(db => TernLeEncoder::default(), &tern =>
+		vec![
+		  vec![-1, -2, -3, -4, 5, -6],
+		  vec![-1, -2, -3, -4, 5, 6],
+		  vec![-1, -2, 3, -4, 5, -6],
+		  vec![-1, -2, 3, -4, 5, 6],
+		  vec![-1, -2, 3, 4, 5, 6],
+		  vec![1, -2, -3, -4, 5, -6],
+		  vec![1, -2, -3, -4, 5, 6],
+		  vec![1, -2, 3, -4, 5, -6],
+		  vec![1, -2, 3, -4, 5, 6],
+		  vec![1, -2, 3, 4, 5, 6],
+		  vec![1, 2, -3, -4, 5, 6],
+		  vec![1, 2, 3, -4, 5, 6],
+		  vec![1, 2, 3, 4, 5, 6],
+				]);
+	}
 
 	// 	// #[test]
 	// 	fn ord_plus_ord_leq_bin_test() {
@@ -668,9 +714,9 @@ pub mod tests {
 	// 			TernLeEncoder::default(),
 	// 			0,
 	// 			&TernLeConstraint {
-	// 				x: &get_ord_x(&mut db, interval_set!(1..2, 5..7)),
-	// 				y: &get_ord_x(&mut db, interval_set!(2..3, 4..5)),
-	// 				z: &get_bin_x(&mut db, 12),
+	// 				x: &get_ord_x(&mut db, interval_set!(1..2, 5..7), true),
+	// 				y: &get_ord_x(&mut db, interval_set!(2..3, 4..5), true),
+	// 				z: &get_bin_x(&mut db, 12, true),
 	// 			}
 	// 		);
 	// 	}
@@ -703,9 +749,9 @@ pub mod tests {
 	// 		TernLeEncoder::default(),
 	// 		0,
 	// 		&TernLeConstraint {
-	// 			x: &get_bin_x(&mut db, 12),
-	// 			y: &get_bin_x(&mut db, 12),
-	// 			z: &get_bin_x(&mut db, 12),
+	// 			x: &get_bin_x(&mut db, 12, true),
+	// 			y: &get_bin_x(&mut db, 12, true),
+	// 			z: &get_bin_x(&mut db, 12, true),
 	// 		}
 	// 	);
 	// }
