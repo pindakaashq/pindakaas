@@ -293,9 +293,8 @@ pub mod tests {
 			todo!();
 		}
 
+		#[allow(dead_code)]
 		pub fn generate_solutions(&self, check: impl Fn(&[i32]) -> bool, n: i32) -> Vec<Vec<i32>> {
-			// let n = self.num_var;
-			dbg!(&n);
 			if n > 32 {
 				unimplemented!(
 					"Cannot generate solutions using binary shifts with more than 32 variables."

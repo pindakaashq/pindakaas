@@ -1,10 +1,7 @@
+use crate::Cnf;
 use itertools::Itertools;
 use num::{One, Zero};
 use std::ops::AddAssign;
-use crate::Cnf;
-
-#[cfg(feature = "minisat")]
-use crate::Cnf;
 
 use crate::{ClauseDatabase, Literal};
 pub struct IpasirSolver {
