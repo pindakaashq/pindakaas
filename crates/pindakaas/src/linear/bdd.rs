@@ -38,13 +38,13 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 			.collect::<Vec<_>>();
 		let mut ws = construct_bdd(db, &xs, lin.k.clone()).into_iter();
 		let first = ws.next().unwrap();
-		xs.into_iter().zip(ws).fold(first, |curr, (x_i, next)| {
+		xs.iter().zip(ws).fold(first, |curr, (x_i, next)| {
 			if self.add_consistency {
 				encode_consistency(db, &next).unwrap();
 			}
 
 			TernLeEncoder::default()
-				.encode(db, &TernLeConstraint::new(&curr, &x_i, &next))
+				.encode(db, &TernLeConstraint::new(&curr, x_i, &next))
 				.unwrap();
 			next
 		});

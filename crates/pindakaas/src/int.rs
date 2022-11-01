@@ -156,6 +156,14 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			ub,
 		}
 	}
+
+	pub fn _consistency(&self) -> TernLeConstraintContainer<Lit, C> {
+		TernLeConstraintContainer {
+			x: IntVarEnc::Bin(self.clone()),
+			y: IntVarEnc::Const(self.lb),
+			z: IntVarEnc::Const(self.ub),
+		}
+	}
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
@@ -364,8 +372,7 @@ pub(crate) fn encode_consistency<DB: ClauseDatabase, C: Coefficient>(
 	x: &IntVarEnc<DB::Lit, C>,
 ) -> Result {
 	let b = IntVarEnc::Const(-C::one());
-	let con = TernLeConstraint::new(x, &b, x);
-	TernLeEncoder::default().encode(db, &con)
+	TernLeEncoder::default().encode(db, &TernLeConstraint::new(x, &b, x))
 }
 
 pub(crate) struct TernLeConstraint<'a, Lit: Literal, C: Coefficient> {
@@ -398,6 +405,24 @@ impl<'a, Lit: Literal, C: Coefficient> Checker for TernLeConstraint<'a, Lit, C> 
 	}
 }
 
+#[allow(dead_code)] // TODO
+pub(crate) struct TernLeConstraintContainer<Lit: Literal, C: Coefficient> {
+	pub(crate) x: IntVarEnc<Lit, C>,
+	pub(crate) y: IntVarEnc<Lit, C>,
+	pub(crate) z: IntVarEnc<Lit, C>,
+}
+
+impl<'a, Lit: Literal, C: Coefficient> TernLeConstraintContainer<Lit, C> {
+	#[allow(dead_code)]
+	pub(crate) fn get(&'a self) -> TernLeConstraint<'a, Lit, C> {
+		TernLeConstraint {
+			x: &self.x,
+			y: &self.y,
+			z: &self.z,
+		}
+	}
+}
+
 #[derive(Default)]
 pub(crate) struct TernLeEncoder {}
 
@@ -407,7 +432,6 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
 		let TernLeConstraint { x, y, z } = tern;
 		if let IntVarEnc::Bin(x_bin) = x {
-			println!("A");
 			if let IntVarEnc::Const(z_con) = z {
 				return lex_lesseq_const(
 					db,
@@ -512,11 +536,19 @@ pub mod tests {
 	#[test]
 	fn bin_geq_test() {
 		let mut db = TestDB::new(0);
-		let x = get_bin_x::<_, i32>(&mut db, 10);
+		let x = get_bin_x::<_, i32>(&mut db, 12);
+		let consistency = match &x {
+			IntVarEnc::Bin(b) => b._consistency(),
+			_ => unreachable!(),
+		};
+
+		TernLeEncoder::default()
+			.encode(&mut db, &consistency.get())
+			.unwrap();
 		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
 
 		assert_eq!(x.lb(), 0);
-		assert_eq!(x.ub(), 10);
+		assert_eq!(x.ub(), 12);
 		assert_eq!(x.geq(&7), Some(vec![1, 4])); // 7-1=6 = 0110
 
 		assert_eq!(x_lin.assign(&[-1, -2, -3, -4]), 0);
@@ -528,7 +560,7 @@ pub mod tests {
 		let tern = TernLeConstraint {
 			x: &x,
 			y: &IntVarEnc::Const(0),
-			z: &IntVarEnc::Const(12), // TODO no consistency implemented for this bound yet
+			z: &IntVarEnc::Const(10), // TODO no consistency implemented for this bound yet
 		};
 
 		db.num_var = 4;
@@ -546,8 +578,6 @@ pub mod tests {
 		  vec![-1, -2, -3, 4],
 		  vec![1, -2, -3, 4],
 		  vec![-1, 2, -3, 4],
-		  vec![1, 2, -3, 4],
-		  vec![-1, -2, 3, 4],
 		]);
 	}
 
