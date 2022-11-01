@@ -176,18 +176,20 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	// TODO return ref
 	// TODO impl Index
 	fn geq(&self, v: &C) -> Option<Vec<Lit>> {
-		let mut v = *v;
-		v.unsigned_shl(v.trailing_zeros());
-		let mut vs: Vec<Lit> = vec![];
-		let mut i = 0;
-		loop {
-			vs.push(self.xs[i].clone());
-			v = v.signed_shl(v.signed_shl(1).trailing_zeros() + 1); // TODO not sure if better than just shifting one at a time
-			i += v.trailing_zeros() as usize;
-			if i >= self.xs.len() {
-				return Some(vs);
-			}
-		}
+		let v = *v - C::one(); // x >= 7 == x > 6
+		Some(
+			self.xs
+				.iter()
+				.enumerate()
+				.filter_map(|(i, lit)| {
+					if ((v >> i) & C::one()) != C::one() {
+						Some(lit.clone())
+					} else {
+						None
+					}
+				})
+				.collect::<Vec<_>>(),
+		)
 	}
 
 	fn eq(&self, _: &C) -> Option<Vec<Lit>> {
@@ -486,6 +488,22 @@ pub mod tests {
 	}
 
 	#[test]
+	fn bin_geq_test() {
+		let mut db = TestDB::new(0);
+		let x = get_bin_x::<_, i32>(&mut db, 10);
+		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
+
+		assert_eq!(x.lb(), 0);
+		assert_eq!(x.ub(), 10);
+		assert_eq!(x.geq(&7), Some(vec![1,4])); // 7-1=6 = 0110
+
+		assert_eq!(x_lin.assign(&[-1, -2, -3, -4]), 0);
+		assert_eq!(x_lin.assign(&[1, -2, -3, -4]), 1);
+		assert_eq!(x_lin.assign(&[1, 2, -3, -4]), 3);
+		assert_eq!(x_lin.assign(&[1, 2, -3, 4]), 11);
+		assert_eq!(x_lin.assign(&[1, 2, 3, 4]), 15);
+	}
+	#[test]
 	fn ord_geq_test() {
 		let mut db = TestDB::new(0);
 		let x = get_ord_x::<_, i32>(&mut db, interval_set!(1..5, 5..7, 7..11));
@@ -528,13 +546,6 @@ pub mod tests {
 		  vec![1, -2, -3],
 		  vec![1, 2, -3],
 		]);
-	}
-
-	#[test]
-	fn bin_geq_test() {
-		let mut db = TestDB::new(0);
-		let x = get_bin_x(&mut db, 12);
-		assert_eq!(x.geq(&3), Some(vec![1, 3]));
 	}
 
 	// 	#[test]
