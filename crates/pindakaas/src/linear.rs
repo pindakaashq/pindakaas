@@ -14,6 +14,7 @@ mod bdd;
 mod swc;
 mod totalizer;
 
+pub(crate) use adder::x_bin_le;
 pub use adder::AdderEncoder;
 pub use aggregator::LinearAggregator;
 pub use bdd::BddEncoder;

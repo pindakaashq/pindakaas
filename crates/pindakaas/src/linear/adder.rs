@@ -2,13 +2,19 @@ use std::collections::HashMap;
 
 use crate::{
 	helpers::{XorConstraint, XorEncoder},
-	linear::LimitComp,
+	linear::{LimitComp, PosCoeff},
 	ClauseDatabase, Coefficient, Encoder, Linear, Literal, Result, Unsatisfiable,
 };
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
 #[derive(Default)]
 pub struct AdderEncoder {}
+
+fn to_bin<C: Coefficient>(k: PosCoeff<C>, bits: usize) -> Vec<bool> {
+	(0..bits)
+		.map(|b| *k & (C::one() << b) != C::zero())
+		.collect::<Vec<_>>()
+}
 
 impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for AdderEncoder {
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
@@ -22,9 +28,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 		// The number of relevant bits in k
 		let bits = (C::zero().leading_zeros() - lin.k.leading_zeros()) as usize;
 		let first_zero = lin.k.trailing_ones() as usize;
-		let mut k = (0..bits)
-			.map(|b| *lin.k & (C::one() << b) != C::zero())
-			.collect::<Vec<bool>>();
+		let mut k = to_bin(lin.k.clone(), bits);
 		debug_assert!(k[bits - 1]);
 
 		// Create structure with which coefficients use which bits
@@ -107,22 +111,34 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 
 		// Enforce less-than constraint
 		if lin.cmp == LimitComp::LessEq {
-			// For every zero bit in k:
-			// - either the sum bit is also zero, or
-			// - a higher sum bit is zero that was one in k.
-			for i in 0..bits {
-				if !k[i] && sum[i].is_some() {
-					db.add_clause(
-						&(i..bits)
-							.filter_map(|j| if j == i || k[j] { sum[j].clone() } else { None })
-							.map(|lit| lit.negate())
-							.collect::<Vec<DB::Lit>>(),
-					)?;
-				}
-			}
+			x_bin_le(db, sum.as_slice(), lin.k.clone(), bits)?;
 		}
 		Ok(())
 	}
+}
+
+/// Uses lexicographic constraint to constrain x:B ≦ k
+pub(crate) fn x_bin_le<DB: ClauseDatabase, C: Coefficient>(
+	db: &mut DB,
+	x: &[Option<DB::Lit>],
+	k: PosCoeff<C>,
+	bits: usize,
+) -> Result {
+	let k = to_bin(k, bits);
+	// For every zero bit in k:
+	// - either the `x` bit is also zero, or
+	// - a higher `x` bit is zero that was one in k.
+	for i in 0..bits {
+		if !k[i] && x[i].is_some() {
+			db.add_clause(
+				&(i..bits)
+					.filter_map(|j| if j == i || k[j] { x[j].clone() } else { None })
+					.map(|lit| lit.negate())
+					.collect::<Vec<DB::Lit>>(),
+			)?;
+		}
+	}
+	Ok(())
 }
 
 /// Returns the result, `c`, of adding `a` to `b`, all encoded using the log encoding.
