@@ -3,12 +3,16 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	linear::{lex_lesseq_const, LinExp, Part},
+	linear::{lex_lesseq_const, log_enc_add, LinExp, Part},
 	trace::{emit_clause, new_var},
 	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
 	Unsatisfiable,
 };
-use std::{collections::HashSet, hash::BuildHasherDefault, ops::Neg};
+use std::{
+	collections::HashSet,
+	hash::BuildHasherDefault,
+	ops::{Neg, Range},
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum LitOrConst<Lit: Literal> {
@@ -110,14 +114,15 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		todo!();
 	}
 
-	fn geq(&self, v: &C) -> Option<Vec<Lit>> {
-		if v <= &self.lb() {
-			None
-		} else if v > &self.ub() {
-			Some(vec![])
+	fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
+		let v = v.end - C::one();
+		if v <= self.lb() {
+			vec![]
+		} else if v > self.ub() {
+			vec![vec![]]
 		} else {
-			match self.xs.overlap(*v).collect::<Vec<_>>()[..] {
-				[(_, x)] => Some(vec![x.clone()]),
+			match self.xs.overlap(v).collect::<Vec<_>>()[..] {
+				[(_, x)] => vec![vec![x.clone()]],
 				_ => panic!("No or multiples variables at {v:?}"),
 			}
 		}
@@ -187,9 +192,12 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 
 	// TODO return ref
 	// TODO impl Index
-	fn geq(&self, v: &C) -> Option<Vec<Lit>> {
-		let v = *v - C::one(); // x >= 7 == x > 6
-		Some(
+	fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
+		num::iter::range_inclusive(
+			std::cmp::max(self.lb(), v.start - C::one()),
+			std::cmp::min(self.ub(), v.end - C::one() - C::one()),
+		)
+		.map(|v| {
 			self.xs
 				.iter()
 				.enumerate()
@@ -200,8 +208,9 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 						None
 					}
 				})
-				.collect::<Vec<_>>(),
-		)
+				.collect::<Vec<_>>()
+		})
+		.collect()
 	}
 
 	fn eq(&self, _: &C) -> Option<Vec<Lit>> {
@@ -304,15 +313,15 @@ pub(crate) enum IntVarEnc<Lit: Literal, C: Coefficient> {
 
 impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 	/// Returns a clause constraining `x>=v`, which is None if true and empty if false
-	pub(crate) fn geq(&self, v: &C) -> Option<Vec<Lit>> {
+	pub(crate) fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		match self {
 			IntVarEnc::Ord(o) => o.geq(v),
 			IntVarEnc::Bin(b) => b.geq(v),
 			IntVarEnc::Const(c) => {
-				if c >= v {
-					None
+				if *c >= v.end - C::one() {
+					vec![]
 				} else {
-					Some(Vec::new())
+					vec![vec![]]
 				}
 			}
 		}
@@ -436,7 +445,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
 		let TernLeConstraint { x, y, z } = tern;
 		if let IntVarEnc::Bin(x_bin) = x {
-			if let IntVarEnc::Const(z_con) = z {
+			if let (IntVarEnc::Const(y_con), IntVarEnc::Const(z_con)) = (y, z) {
 				return lex_lesseq_const(
 					db,
 					x_bin
@@ -445,33 +454,46 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 						.map(|x| Some(x.clone()))
 						.collect::<Vec<_>>()
 						.as_slice(),
-					(*z_con).into(),
+					(*z_con - *y_con).into(),
 					x_bin.xs.len(),
 				);
-			} else if let IntVarEnc::Bin(_z_bin) = z {
-				todo!()
+			} else if let (IntVarEnc::Bin(y_bin), IntVarEnc::Bin(z_bin)) = (y, z) {
+				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs, x_bin.xs.len())
 			} else {
-				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method")
+				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x:?}, {y:?}, {z:?}")
 			}
 		} else {
 			for c_a in x.dom() {
 				for c_b in y.dom() {
-					let neg = |disjunction: Option<Vec<DB::Lit>>| -> Option<Vec<DB::Lit>> {
-						match disjunction {
-							None => Some(vec![]),
-							Some(lits) if lits.is_empty() => None,
-							Some(lits) => Some(lits.into_iter().map(|l| l.negate()).collect()),
+					let neg = |clauses: Vec<Vec<DB::Lit>>| -> Vec<Vec<DB::Lit>> {
+						if clauses.is_empty() {
+							vec![vec![]]
+						} else if clauses.contains(&vec![]) {
+							vec![]
+						} else {
+							clauses
+								.into_iter()
+								.map(|clause| clause.into_iter().map(|lit| lit.negate()).collect())
+								.collect()
 						}
 					};
 
-					let (c_a, c_b) = ((c_a.end - C::one()), (c_b.end - C::one()));
-					let c_c = c_a + c_b;
-					let (l_a, l_b, l_c) = (neg(x.geq(&c_a)), neg(y.geq(&c_b)), z.geq(&c_c));
+					// TODO tighten c_c.start
+					let c_c = (std::cmp::min(c_a.start, c_b.start))
+						..(((c_a.end - C::one()) + (c_b.end - C::one())) + C::one());
+					let (a, b, c) = (
+						neg(x.geq(c_a.clone())),
+						neg(y.geq(c_b.clone())),
+						z.geq(c_c.clone()),
+					);
 
-					if let Some(l_a) = l_a {
-						if let Some(l_b) = l_b {
-							if let Some(l_c) = l_c {
-								emit_clause!(db, &[l_a, l_b, l_c].concat())?
+					for cls_a in &a {
+						for cls_b in &b {
+							for cls_c in &c {
+								emit_clause!(
+									db,
+									&[cls_a.clone(), cls_b.clone(), cls_c.clone()].concat()
+								)?;
 							}
 						}
 					}
@@ -547,19 +569,24 @@ pub mod tests {
 		let c: IntVarEnc<i32, _> = IntVarEnc::Const(42);
 		assert_eq!(c.lb(), 42);
 		assert_eq!(c.ub(), 42);
-		assert_eq!(c.geq(&6), None);
-		assert_eq!(c.geq(&45), Some(vec![]));
+		assert_eq!(c.geq(6..7), Vec::<Vec<i32>>::new());
+		assert_eq!(c.geq(45..46), vec![vec![]]);
 	}
 
 	#[test]
 	fn bin_geq_test() {
 		let mut db = TestDB::new(0);
 		let x = get_bin_x::<_, i32>(&mut db, 12, true);
+		let x_con = match &x {
+			IntVarEnc::Bin(b) => b._consistency(),
+			_ => unreachable!(),
+		};
 		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
 
 		assert_eq!(x.lb(), 0);
 		assert_eq!(x.ub(), 12);
-		assert_eq!(x.geq(&7), Some(vec![1, 4])); // 7-1=6 = 0110
+		assert_eq!(x.geq(7..8), vec![vec![1, 4]]); // 7-1=6 == 0110 (right-to-left!)
+		assert_eq!(x.geq(5..8), vec![vec![1, 2, 4], vec![2, 4], vec![1, 4]]); // 4=0100,5=0101,6=0110
 
 		assert_eq!(x_lin.assign(&[-1, -2, -3, -4]), 0);
 		assert_eq!(x_lin.assign(&[1, -2, -3, -4]), 1);
@@ -574,6 +601,11 @@ pub mod tests {
 		};
 
 		db.num_var = 4;
+
+		db.generate_solutions(
+			|sol| tern.check(sol).is_ok() && x_con.get().check(sol).is_ok(),
+			db.num_var,
+		);
 
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
@@ -621,7 +653,8 @@ pub mod tests {
 
 		assert_eq!(x.lb(), 2);
 		assert_eq!(x.ub(), 10);
-		assert_eq!(x.geq(&6), Some(vec![2]));
+		assert_eq!(x.geq(6..7), vec![vec![2]]);
+		assert_eq!(x.geq(4..7), vec![vec![2]]);
 
 		assert_eq!(x_lin.assign(&[-1, -2, -3]), 2);
 		assert_eq!(x_lin.assign(&[1, -2, -3]), 4);
@@ -634,12 +667,6 @@ pub mod tests {
 			z: &IntVarEnc::Const(6),
 		};
 
-		// TernLeEncoder::default().encode(&mut db, &tern).unwrap();
-		// db.generate_solutions(
-		// 	move |sol| tern.check(sol).is_ok() && consistency.check(sol).is_ok(),
-		// 	3,
-		// );
-
 		db.num_var = 3;
 
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
@@ -651,7 +678,7 @@ pub mod tests {
 	}
 
 	#[test]
-	fn ord_plus_ord_leq_ord_test() {
+	fn ord_plus_ord_le_ord_test() {
 		let mut db = TestDB::new(0);
 		let (x, y, z) = (
 			get_ord_x(&mut db, interval_set!(1..2, 5..7), true),
@@ -665,31 +692,27 @@ pub mod tests {
 		};
 		db.num_var = 6;
 
-		// TernLeEncoder::default().encode(&mut db, &tern).unwrap();
-		// let x_con = x
-		// 	.as_any()
-		// 	.downcast_ref::<IntVarOrd<i32, i32>>()
-		// 	.unwrap()
-		// 	._consistency();
-		// let y_con = y
-		// 	.as_any()
-		// 	.downcast_ref::<IntVarOrd<i32, i32>>()
-		// 	.unwrap()
-		// 	._consistency();
-		// let z_con = z
-		// 	.as_any()
-		// 	.downcast_ref::<IntVarOrd<i32, i32>>()
-		// 	.unwrap()
-		// 	._consistency();
-		// db.generate_solutions(
-		// 	move |sol| {
-		// 		tern.check(sol).is_ok()
-		// 			&& x_con.check(sol).is_ok()
-		// 			&& y_con.check(sol).is_ok()
-		// 			&& z_con.check(sol).is_ok()
-		// 	},
-		// 	db.num_var,
-		// );
+		let x_con = match &x {
+			IntVarEnc::Ord(o) => o._consistency(),
+			_ => unreachable!(),
+		};
+		let y_con = match &y {
+			IntVarEnc::Ord(o) => o._consistency(),
+			_ => unreachable!(),
+		};
+		let z_con = match &z {
+			IntVarEnc::Ord(o) => o._consistency(),
+			_ => unreachable!(),
+		};
+		db.generate_solutions(
+			|sol| {
+				tern.check(sol).is_ok()
+					&& x_con.check(sol).is_ok()
+					&& y_con.check(sol).is_ok()
+					&& z_con.check(sol).is_ok()
+			},
+			db.num_var,
+		);
 
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
@@ -709,19 +732,183 @@ pub mod tests {
 				]);
 	}
 
-	// 	// #[test]
-	// 	fn ord_plus_ord_leq_bin_test() {
-	// 		let mut db = TestDB::new(0);
-	// 		assert_sol!(
-	// 			TernLeEncoder::default(),
-	// 			0,
-	// 			&TernLeConstraint {
-	// 				x: &get_ord_x(&mut db, interval_set!(1..2, 5..7), true),
-	// 				y: &get_ord_x(&mut db, interval_set!(2..3, 4..5), true),
-	// 				z: &get_bin_x(&mut db, 12, true),
-	// 			}
-	// 		);
-	// 	}
+	#[test]
+	fn ord_le_bin_test() {
+		let mut db = TestDB::new(0);
+		let (x, y, z) = (
+			get_ord_x(&mut db, interval_set!(1..2, 5..7), true),
+			IntVarEnc::Const(0),
+			get_bin_x(&mut db, 7, true),
+		);
+		let tern = TernLeConstraint {
+			x: &x,
+			y: &y,
+			z: &z,
+		};
+		db.num_var = 2 + 0 + 3;
+
+		let x_con = match &x {
+			IntVarEnc::Ord(o) => o._consistency(),
+			_ => unreachable!(),
+		};
+		let z_con = match &z {
+			IntVarEnc::Bin(b) => b._consistency(),
+			_ => unreachable!(),
+		};
+		db.generate_solutions(
+			|sol| {
+				tern.check(sol).is_ok()
+					&& x_con.check(sol).is_ok()
+					&& z_con.get().check(sol).is_ok()
+			},
+			db.num_var,
+		);
+
+		assert_sol!(db => TernLeEncoder::default(), &tern => vec![
+		vec![-1, -2, -3, -4, -5],
+		vec![-1, -2, 3, -4, -5],
+		vec![1, -2, 3, -4, -5],
+		vec![-1, -2, -3, 4, -5],
+		vec![1, -2, -3, 4, -5],
+		vec![-1, -2, 3, 4, -5],
+		vec![1, -2, 3, 4, -5],
+		vec![-1, -2, -3, -4, 5],
+		vec![1, -2, -3, -4, 5],
+		vec![-1, -2, 3, -4, 5],
+		vec![1, -2, 3, -4, 5],
+		vec![-1, -2, -3, 4, 5],
+		vec![1, -2, -3, 4, 5],
+		vec![1, 2, -3, 4, 5],
+		vec![-1, -2, 3, 4, 5],
+		vec![1, -2, 3, 4, 5],
+		vec![1, 2, 3, 4, 5],
+			 ]);
+	}
+
+	#[test]
+	fn ord_plus_ord_le_bin_test() {
+		let mut db = TestDB::new(0);
+		let (x, y, z) = (
+			get_ord_x(&mut db, interval_set!(1..2, 5..7), true),
+			get_ord_x(&mut db, interval_set!(2..3, 4..5), true),
+			get_bin_x(&mut db, 12, true),
+		);
+		let tern = TernLeConstraint {
+			x: &x,
+			y: &y,
+			z: &z,
+		};
+		db.num_var = 2 + 2 + 4;
+
+		// let tern_clone = tern.clone();
+		// TernLeEncoder::default()
+		// 	.encode(&mut db, &tern_clone)
+		// 	.unwrap();
+		// let x_con = x
+		// 	.as_any()
+		// 	.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 	.unwrap()
+		// 	._consistency();
+		// let y_con = y
+		// 	.as_any()
+		// 	.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 	.unwrap()
+		// 	._consistency();
+		// let z_con = z
+		// 	.as_any()
+		// 	.downcast_ref::<IntVarBin<i32, i32>>()
+		// 	.unwrap()
+		// 	._consistency();
+		// db.generate_solutions(
+		// 	move |sol| {
+		// 		tern_clone.check(sol).is_ok()
+		// 			&& x_con.check(sol).is_ok()
+		// 			&& y_con.check(sol).is_ok()
+		// 			&& z_con.check(sol).is_ok()
+		// 	},
+		// 	db.num_var,
+		// );
+
+		assert_sol!(db => TernLeEncoder::default(), &tern =>
+		vec![
+		  vec![-1, -2, -3, -4, -5, -6, -7, 8],
+		  vec![-1, -2, -3, -4, -5, -6, 7, -8],
+		  vec![-1, -2, -3, -4, -5, -6, 7, 8],
+		  vec![-1, -2, -3, -4, -5, 6, -7, -8],
+		  vec![-1, -2, -3, -4, -5, 6, -7, 8],
+		  vec![-1, -2, -3, -4, -5, 6, 7, -8],
+		  vec![-1, -2, -3, -4, 5, -6, -7, -8],
+		  vec![-1, -2, -3, -4, 5, -6, -7, 8],
+		  vec![-1, -2, -3, -4, 5, -6, 7, -8],
+		  vec![-1, -2, -3, -4, 5, 6, -7, -8],
+		  vec![-1, -2, -3, -4, 5, 6, -7, 8],
+		  vec![-1, -2, -3, -4, 5, 6, 7, -8],
+		  vec![-1, -2, 3, -4, -5, -6, -7, 8],
+		  vec![-1, -2, 3, -4, -5, -6, 7, -8],
+		  vec![-1, -2, 3, -4, -5, -6, 7, 8],
+		  vec![-1, -2, 3, -4, -5, 6, -7, -8],
+		  vec![-1, -2, 3, -4, -5, 6, -7, 8],
+		  vec![-1, -2, 3, -4, -5, 6, 7, -8],
+		  vec![-1, -2, 3, -4, 5, -6, -7, 8],
+		  vec![-1, -2, 3, -4, 5, -6, 7, -8],
+		  vec![-1, -2, 3, -4, 5, 6, -7, -8],
+		  vec![-1, -2, 3, -4, 5, 6, -7, 8],
+		  vec![-1, -2, 3, -4, 5, 6, 7, -8],
+		  vec![-1, -2, 3, 4, -5, -6, -7, 8],
+		  vec![-1, -2, 3, 4, -5, -6, 7, -8],
+		  vec![-1, -2, 3, 4, -5, -6, 7, 8],
+		  vec![-1, -2, 3, 4, -5, 6, -7, 8],
+		  vec![-1, -2, 3, 4, -5, 6, 7, -8],
+		  vec![-1, -2, 3, 4, 5, -6, -7, 8],
+		  vec![-1, -2, 3, 4, 5, -6, 7, -8],
+		  vec![-1, -2, 3, 4, 5, 6, -7, 8],
+		  vec![-1, -2, 3, 4, 5, 6, 7, -8],
+		  vec![1, -2, -3, -4, -5, -6, -7, 8],
+		  vec![1, -2, -3, -4, -5, -6, 7, -8],
+		  vec![1, -2, -3, -4, -5, -6, 7, 8],
+		  vec![1, -2, -3, -4, -5, 6, -7, -8],
+		  vec![1, -2, -3, -4, -5, 6, -7, 8],
+		  vec![1, -2, -3, -4, -5, 6, 7, -8],
+		  vec![1, -2, -3, -4, 5, -6, -7, 8],
+		  vec![1, -2, -3, -4, 5, -6, 7, -8],
+		  vec![1, -2, -3, -4, 5, 6, -7, -8],
+		  vec![1, -2, -3, -4, 5, 6, -7, 8],
+		  vec![1, -2, -3, -4, 5, 6, 7, -8],
+		  vec![1, -2, 3, -4, -5, -6, -7, 8],
+		  vec![1, -2, 3, -4, -5, -6, 7, -8],
+		  vec![1, -2, 3, -4, -5, -6, 7, 8],
+		  vec![1, -2, 3, -4, -5, 6, -7, 8],
+		  vec![1, -2, 3, -4, -5, 6, 7, -8],
+		  vec![1, -2, 3, -4, 5, -6, -7, 8],
+		  vec![1, -2, 3, -4, 5, -6, 7, -8],
+		  vec![1, -2, 3, -4, 5, 6, -7, -8],
+		  vec![1, -2, 3, -4, 5, 6, -7, 8],
+		  vec![1, -2, 3, -4, 5, 6, 7, -8],
+		  vec![1, -2, 3, 4, -5, -6, -7, 8],
+		  vec![1, -2, 3, 4, -5, -6, 7, 8],
+		  vec![1, -2, 3, 4, -5, 6, -7, 8],
+		  vec![1, -2, 3, 4, -5, 6, 7, -8],
+		  vec![1, -2, 3, 4, 5, -6, -7, 8],
+		  vec![1, -2, 3, 4, 5, -6, 7, -8],
+		  vec![1, -2, 3, 4, 5, 6, -7, 8],
+		  vec![1, -2, 3, 4, 5, 6, 7, -8],
+		  vec![1, 2, -3, -4, -5, -6, -7, 8],
+		  vec![1, 2, -3, -4, -5, -6, 7, 8],
+		  vec![1, 2, -3, -4, -5, 6, -7, 8],
+		  // [1, 2, -3, -4, 5, -6, 7, -8] = 6 + 1 <= 5
+		  vec![1, 2, -3, -4, 5, -6, -7, 8],
+		  vec![1, 2, -3, -4, 5, 6, -7, 8],
+		  vec![1, 2, -3, -4, 5, 6, 7, -8],
+		  vec![1, 2, 3, -4, -5, -6, -7, 8],
+		  vec![1, 2, 3, -4, -5, -6, 7, 8],
+		  vec![1, 2, 3, -4, -5, 6, -7, 8],
+		  vec![1, 2, 3, -4, 5, -6, -7, 8],
+		  vec![1, 2, 3, -4, 5, 6, -7, 8],
+		  vec![1, 2, 3, 4, -5, -6, 7, 8],
+		  vec![1, 2, 3, 4, -5, 6, -7, 8],
+		  vec![1, 2, 3, 4, 5, 6, -7, 8],
+						]);
+	}
 
 	// 	// #[test]
 	// 	fn bin_plus_bin_le_bin_test() {
