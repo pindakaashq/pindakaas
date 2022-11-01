@@ -77,7 +77,8 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 							force_sum(db, &XorConstraint::new(&lits), k[b])?;
 						} else if lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
 							// Literal is not used for the less-than constraint unless a zero has been seen first
-							bucket[b].push(create_sum_lit(db, lits.as_slice())?);
+							let sum_lit = db.new_var();
+							bucket[b].push(create_sum_lit(db, sum_lit, lits.as_slice())?);
 						}
 
 						// Compute carry
@@ -141,20 +142,20 @@ pub(crate) fn x_bin_le<DB: ClauseDatabase, C: Coefficient>(
 	Ok(())
 }
 
-/// Returns the result, `c`, of adding `a` to `b`, all encoded using the log encoding.
+/// Constrains the result, `c`, of adding `a` to `b`, all encoded using the log encoding.
 ///
 /// TODO: Should this use the IntEncoding::Log input??
-#[allow(dead_code)]
 pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 	db: &mut DB,
-	a: &[DB::Lit],
-	b: &[DB::Lit],
+	x: &[DB::Lit],
+	y: &[DB::Lit],
+	z: &[DB::Lit],
 	bits: usize,
-) -> Result<Vec<Option<DB::Lit>>> {
+) -> Result {
 	let mut c = Vec::with_capacity(bits);
 	let mut carry = None;
 	for i in 0..bits {
-		let b = [a.get(i), b.get(i), carry.as_ref()]
+		let b = [x.get(i), y.get(i), carry.as_ref()]
 			.into_iter()
 			.flatten()
 			.cloned()
@@ -170,7 +171,8 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 			}
 			_ => {
 				debug_assert!(b.len() <= 3);
-				c.push(Some(create_sum_lit(db, &b)?));
+				let sum_lit = z.get(i).unwrap();
+				c.push(Some(create_sum_lit(db, sum_lit.clone(), &b)?));
 				carry = if i + 1 < bits {
 					Some(create_carry_lit(db, &b)?)
 				} else {
@@ -180,21 +182,24 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 			}
 		}
 	}
-	for l in a.iter().skip(bits) {
+	for l in x.iter().skip(bits) {
 		db.add_clause(&[l.negate()])?;
 	}
-	for l in b.iter().skip(bits) {
+	for l in y.iter().skip(bits) {
 		db.add_clause(&[l.negate()])?;
 	}
-	Ok(c)
+	Ok(())
 }
 
 /// Create a literal that represents the sum bit when adding lits together using an adder
 /// circuit
 ///
 /// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
-fn create_sum_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<DB::Lit> {
-	let sum = db.new_var();
+fn create_sum_lit<DB: ClauseDatabase>(
+	db: &mut DB,
+	sum: DB::Lit,
+	lits: &[DB::Lit],
+) -> Result<DB::Lit> {
 	match lits {
 		[a, b] => {
 			db.add_clause(&[a.negate(), b.negate(), sum.negate()])?;
