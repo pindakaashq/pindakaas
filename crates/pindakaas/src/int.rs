@@ -218,7 +218,13 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarBin<Lit, C> {
 	pub fn _new<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, ub: C) -> Self {
 		let bits = C::zero().leading_zeros() - ub.leading_zeros();
 		Self {
-			xs: (0..bits).map(|_| db.new_var()).collect(),
+			xs: (0..bits)
+				.map(|i| {
+					#[cfg(debug_assertions)]
+					let lbl = format!("x^{}", 2_usize.pow(i));
+					new_var!(db, lbl)
+				})
+				.collect(),
 			lb: Constant::new(C::zero()), // TODO support non-zero
 			ub: Constant::new(ub),
 		}
