@@ -121,7 +121,7 @@ pub trait Checker {
 
 	/// Returns assignment of `lit` in `solution`
 	fn assign<'a>(lit: &'a Self::Lit, solution: &'a [Self::Lit]) -> &'a Self::Lit {
-		solution.iter().find(|x| x.var() == lit.var()).expect("Could not find lit {lit} in solution {solution}; perhaps this variable did not occur in any clause")
+		solution.iter().find(|x| x.var() == lit.var()).unwrap_or_else(|| panic!("Could not find lit {lit:?} in solution {solution:?}; perhaps this variable did not occur in any clause"))
 	}
 }
 
