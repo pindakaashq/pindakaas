@@ -36,16 +36,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			.collect::<Vec<_>>();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
-		build_totalizer(
-			xs,
-			db,
-			C::zero(),
-			*lin.k.clone(),
-			true,
-			self.add_consistency,
-			0,
-		);
-		Ok(())
+		build_totalizer(xs, db, C::zero(), *lin.k.clone(), self.add_consistency, 0)
 	}
 }
 
@@ -55,77 +46,56 @@ fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	l: C,
 	u: C,
-	limit_root: bool,
 	add_consistency: bool,
 	// level is only used for output variable name output
 	level: u32,
-) -> IntVarEnc<DB::Lit, C> {
+) -> Result {
 	if layer.len() == 1 {
 		let root = layer.pop().unwrap();
-		if limit_root {
-			let zero = IntVarEnc::Const(C::zero());
-			let parent = IntVarEnc::Const(u);
-			TernLeEncoder::default()
-				.encode(db, &TernLeConstraint::new(&root, &zero, &parent))
-				.unwrap();
-		}
-		root
-	} else if limit_root && layer.len() == 2 {
+		let zero = IntVarEnc::Const(C::zero());
 		let parent = IntVarEnc::Const(u);
-		TernLeEncoder::default()
-			.encode(db, &TernLeConstraint::new(&layer[0], &layer[1], &parent))
-			.unwrap();
-		parent
+		TernLeEncoder::default().encode(db, &TernLeConstraint::new(&root, &zero, &parent))
 	} else {
-		build_totalizer(
-			layer
-				.chunks(2)
-				.enumerate()
-				.map(|(_node, children)| match children {
-					[x] => x.clone(),
-					[left, right] => {
-						let l = if layer.len() > 2 { C::zero() } else { l };
-						let dom = ord_plus_ord_le_ord_sparse_dom(
-							left.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
-							right
-								.dom()
-								.into_iter(..)
-								.map(|c| c.end - C::one())
-								.collect(),
-							l,
-							u,
-						)
-						.into_iter(..)
-						.map(|interval| {
-							let var = new_var!(
-								db,
-								format!("w_{}_{}>={:?}", level + 1, _node + 1, interval)
-							);
-							(interval, Some(var))
-						})
-						.collect();
+		let next_layer = layer
+			.chunks(2)
+			.enumerate()
+			.map(|(_node, children)| match children {
+				[x] => x.clone(),
+				[left, right] => {
+					let l = if layer.len() > 2 { C::zero() } else { l };
+					let dom = ord_plus_ord_le_ord_sparse_dom(
+						left.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
+						right
+							.dom()
+							.into_iter(..)
+							.map(|c| c.end - C::one())
+							.collect(),
+						l,
+						u,
+					)
+					.into_iter(..)
+					.map(|interval| {
+						let var =
+							new_var!(db, format!("w_{}_{}>={:?}", level + 1, _node + 1, interval));
+						(interval, Some(var))
+					})
+					.collect();
 
-						let parent = IntVarEnc::Ord(IntVarOrd::new(db, dom));
+					let parent = IntVarEnc::Ord(IntVarOrd::new(db, dom));
 
-						if add_consistency {
-							encode_consistency(db, &parent).unwrap();
-						}
-
-						TernLeEncoder::default()
-							.encode(db, &TernLeConstraint::new(left, right, &parent))
-							.unwrap();
-						parent
+					if add_consistency {
+						encode_consistency(db, &parent).unwrap();
 					}
-					_ => panic!(),
-				})
-				.collect(),
-			db,
-			l,
-			u,
-			limit_root,
-			add_consistency,
-			level + 1,
-		)
+
+					TernLeEncoder::default()
+						.encode(db, &TernLeConstraint::new(left, right, &parent))
+						.unwrap();
+					parent
+				}
+				_ => panic!(),
+			})
+			.collect();
+		build_totalizer(next_layer, db, l, u, add_consistency, level + 1)
 	}
 }
 
