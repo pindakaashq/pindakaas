@@ -3,7 +3,7 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	linear::{LinExp, Part},
+	linear::{lex_lesseq_const, LinExp, Part},
 	trace::{emit_clause, new_var},
 	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
 	Unsatisfiable,
@@ -70,7 +70,7 @@ impl ImplicationChainEncoder {
 		ic: &ImplicationChainConstraint<DB::Lit>,
 	) -> Result {
 		for (a, b) in ic.lits.iter().tuple_windows() {
-			db.add_clause(&[b.negate(), a.clone()])?
+			emit_clause!(db, &[b.negate(), a.clone()])?
 		}
 		Ok(())
 	}
@@ -142,7 +142,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 // TODO maybe C -> PosCoeff<C>
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
-	xs: Vec<Lit>,
+	pub(crate) xs: Vec<Lit>,
 	lb: C,
 	ub: C,
 }
@@ -364,7 +364,8 @@ pub(crate) fn encode_consistency<DB: ClauseDatabase, C: Coefficient>(
 	x: &IntVarEnc<DB::Lit, C>,
 ) -> Result {
 	let b = IntVarEnc::Const(-C::one());
-	TernLeEncoder::default().encode(db, &TernLeConstraint::new(x, &b, x))
+	let con = TernLeConstraint::new(x, &b, x);
+	TernLeEncoder::default().encode(db, &con)
 }
 
 pub(crate) struct TernLeConstraint<'a, Lit: Literal, C: Coefficient> {
@@ -405,30 +406,51 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 {
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
 		let TernLeConstraint { x, y, z } = tern;
-		for c_a in x.dom() {
-			for c_b in y.dom() {
-				let neg = |disjunction: Option<Vec<DB::Lit>>| -> Option<Vec<DB::Lit>> {
-					match disjunction {
-						None => Some(vec![]),
-						Some(lits) if lits.is_empty() => None,
-						Some(lits) => Some(lits.into_iter().map(|l| l.negate()).collect()),
-					}
-				};
+		if let IntVarEnc::Bin(x_bin) = x {
+			println!("A");
+			if let IntVarEnc::Const(z_con) = z {
+				return lex_lesseq_const(
+					db,
+					x_bin
+						.xs
+						.iter()
+						.map(|x| Some(x.clone()))
+						.collect::<Vec<_>>()
+						.as_slice(),
+					(*z_con).into(),
+					x_bin.xs.len(),
+				);
+			} else if let IntVarEnc::Bin(_z_bin) = z {
+				todo!()
+			} else {
+				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method")
+			}
+		} else {
+			for c_a in x.dom() {
+				for c_b in y.dom() {
+					let neg = |disjunction: Option<Vec<DB::Lit>>| -> Option<Vec<DB::Lit>> {
+						match disjunction {
+							None => Some(vec![]),
+							Some(lits) if lits.is_empty() => None,
+							Some(lits) => Some(lits.into_iter().map(|l| l.negate()).collect()),
+						}
+					};
 
-				let (c_a, c_b) = ((c_a.end - C::one()), (c_b.end - C::one()));
-				let c_c = c_a + c_b;
-				let (l_a, l_b, l_c) = (neg(x.geq(&c_a)), neg(y.geq(&c_b)), z.geq(&c_c));
+					let (c_a, c_b) = ((c_a.end - C::one()), (c_b.end - C::one()));
+					let c_c = c_a + c_b;
+					let (l_a, l_b, l_c) = (neg(x.geq(&c_a)), neg(y.geq(&c_b)), z.geq(&c_c));
 
-				if let Some(l_a) = l_a {
-					if let Some(l_b) = l_b {
-						if let Some(l_c) = l_c {
-							emit_clause!(db, &[l_a, l_b, l_c].concat())?
+					if let Some(l_a) = l_a {
+						if let Some(l_b) = l_b {
+							if let Some(l_c) = l_c {
+								emit_clause!(db, &[l_a, l_b, l_c].concat())?
+							}
 						}
 					}
 				}
 			}
+			Ok(())
 		}
-		Ok(())
 	}
 }
 
@@ -495,14 +517,61 @@ pub mod tests {
 
 		assert_eq!(x.lb(), 0);
 		assert_eq!(x.ub(), 10);
-		assert_eq!(x.geq(&7), Some(vec![1,4])); // 7-1=6 = 0110
+		assert_eq!(x.geq(&7), Some(vec![1, 4])); // 7-1=6 = 0110
 
 		assert_eq!(x_lin.assign(&[-1, -2, -3, -4]), 0);
 		assert_eq!(x_lin.assign(&[1, -2, -3, -4]), 1);
 		assert_eq!(x_lin.assign(&[1, 2, -3, -4]), 3);
 		assert_eq!(x_lin.assign(&[1, 2, -3, 4]), 11);
 		assert_eq!(x_lin.assign(&[1, 2, 3, 4]), 15);
+
+		let tern = TernLeConstraint {
+			x: &x,
+			y: &IntVarEnc::Const(0),
+			z: &IntVarEnc::Const(12), // TODO no consistency implemented for this bound yet
+		};
+
+		db.num_var = 4;
+
+		assert_sol!(db => TernLeEncoder::default(), &tern =>
+		vec![
+		  vec![-1, -2, -3, -4],
+		  vec![1, -2, -3, -4],
+		  vec![-1, 2, -3, -4],
+		  vec![1, 2, -3, -4],
+		  vec![-1, -2, 3, -4],
+		  vec![1, -2, 3, -4],
+		  vec![-1, 2, 3, -4],
+		  vec![1, 2, 3, -4],
+		  vec![-1, -2, -3, 4],
+		  vec![1, -2, -3, 4],
+		  vec![-1, 2, -3, 4],
+		  vec![1, 2, -3, 4],
+		  vec![-1, -2, 3, 4],
+		]);
 	}
+
+	#[test]
+	fn bin_geq_2_test() {
+		let mut db = TestDB::new(0);
+		let tern = TernLeConstraint {
+			x: &get_bin_x(&mut db, 12),
+			y: &IntVarEnc::Const(0),
+			z: &IntVarEnc::Const(6),
+		};
+		db.num_var = 4;
+		assert_sol!(db => TernLeEncoder::default(), &tern =>
+		vec![
+		vec![-1, -2, -3, -4], // 0
+		vec![1, -2, -3, -4], // 1
+		vec![-1, 2, -3, -4], // 2
+		vec![1, 2, -3, -4], // 3
+		vec![-1, -2, 3, -4], // 4
+		vec![1, -2, 3, -4], // 5
+		vec![-1, 2, 3, -4],// 6
+		]);
+	}
+
 	#[test]
 	fn ord_geq_test() {
 		let mut db = TestDB::new(0);
