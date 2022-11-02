@@ -425,7 +425,7 @@ pub mod tests {
 						polarity,
 						self.labels
 							.get(&var)
-							.unwrap_or(&format!("x_{}", var))
+							.unwrap_or(&format!("_{}", var))
 							.to_string()
 					)
 				};
@@ -501,6 +501,18 @@ pub mod tests {
 			let i = self.new_var();
 			self.labels.insert(i, label);
 			i
+		}
+
+		fn to_label(&self, lit: &Self::Lit) -> String {
+			let polarity = if lit.is_negated() { "-" } else { "" };
+			format!(
+				"{}{}",
+				polarity,
+				self.labels
+					.get(&lit.var())
+					.unwrap_or(&format!("{}", lit.var()))
+					.to_string()
+			)
 		}
 	}
 }

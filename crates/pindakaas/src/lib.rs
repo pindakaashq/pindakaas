@@ -217,6 +217,10 @@ pub trait ClauseDatabase {
 	fn new_var_with_label(&mut self, _: String) -> Self::Lit {
 		self.new_var()
 	}
+
+	fn to_label(&self, lit: &Self::Lit) -> String {
+		format!("{:?}", lit)
+	}
 }
 
 // TODO: Add usage and think about interface

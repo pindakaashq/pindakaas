@@ -217,13 +217,14 @@ pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 }
 
 impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarBin<Lit, C> {
-	pub fn _new<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, ub: C) -> Self {
+	// TODO change to with_label or something
+	pub fn _new<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, ub: C, lbl: String) -> Self {
 		let bits = C::zero().leading_zeros() - ub.leading_zeros();
 		Self {
 			xs: (0..bits)
 				.map(|i| {
 					#[cfg(debug_assertions)]
-					let lbl = format!("x^{}", 2_usize.pow(i));
+					let lbl = format!("{}^{}", lbl, i);
 					new_var!(db, lbl)
 				})
 				.collect(),
@@ -575,8 +576,9 @@ pub mod tests {
 		db: &mut DB,
 		ub: C,
 		consistent: bool,
+		lbl: String,
 	) -> Box<dyn IntVarEnc<DB::Lit, C>> {
-		let x = IntVarBin::_new(db, ub);
+		let x = IntVarBin::_new(db, ub, lbl);
 		if consistent {
 			TernLeEncoder::default()
 				.encode(db, &x._consistency())
@@ -597,7 +599,7 @@ pub mod tests {
 	#[test]
 	fn bin_geq_test() {
 		let mut db = TestDB::new(0);
-		let x = get_bin_x::<_, i32>(&mut db, 12, true);
+		let x = get_bin_x::<_, i32>(&mut db, 12, true, String::from("x"));
 		let x_con = x
 			.as_any()
 			.downcast_ref::<IntVarBin<i32, i32>>()
@@ -648,8 +650,9 @@ pub mod tests {
 	#[test]
 	fn bin_geq_2_test() {
 		let mut db = TestDB::new(0);
+		let x = IntVarBin::_new(&mut db, 12, String::from("x"));
 		let tern = TernLeConstraint {
-			x: &IntVarBin::_new(&mut db, 12),
+			x: &x,
 			y: &Constant::new(0),
 			z: &Constant::new(6),
 		};
@@ -763,7 +766,7 @@ pub mod tests {
 		let (x, y, z) = (
 			get_ord_x(&mut db, interval_set!(1..2, 5..7), true),
 			get_constant(0),
-			get_bin_x(&mut db, 7, true),
+			get_bin_x(&mut db, 7, true, String::from("z")),
 		);
 		let tern = TernLeConstraint {
 			x: x.as_ref(),
@@ -814,7 +817,7 @@ pub mod tests {
 		let (x, y, z) = (
 			get_ord_x(&mut db, interval_set!(1..2, 5..7), true),
 			get_ord_x(&mut db, interval_set!(2..3, 4..5), true),
-			get_bin_x(&mut db, 12, true),
+			get_bin_x(&mut db, 12, true, String::from("z")),
 		);
 		let tern = TernLeConstraint {
 			x: x.as_ref(),
@@ -918,7 +921,6 @@ pub mod tests {
 		  vec![1, 2, -3, -4, -5, -6, -7, 8],
 		  vec![1, 2, -3, -4, -5, -6, 7, 8],
 		  vec![1, 2, -3, -4, -5, 6, -7, 8],
-		  // [1, 2, -3, -4, 5, -6, 7, -8] = 6 + 1 <= 5
 		  vec![1, 2, -3, -4, 5, -6, -7, 8],
 		  vec![1, 2, -3, -4, 5, 6, -7, 8],
 		  vec![1, 2, -3, -4, 5, 6, 7, -8],
@@ -931,6 +933,64 @@ pub mod tests {
 		  vec![1, 2, 3, 4, -5, 6, -7, 8],
 		  vec![1, 2, 3, 4, 5, 6, -7, 8],
 						]);
+	}
+
+	#[test]
+	fn bin_plus_bin_eq_bin_test() {
+		let mut db = TestDB::new(0);
+		let (x, y, z) = (
+			get_bin_x(&mut db, 2, true, String::from("x")),
+			get_bin_x(&mut db, 3, true, String::from("y")),
+			get_bin_x(&mut db, 5, true, String::from("z")),
+		);
+
+		let tern = TernLeConstraint {
+			x: x.as_ref(),
+			y: y.as_ref(),
+			z: z.as_ref(),
+		};
+		db.num_var = 2 + 2 + 3;
+
+		let x_con = x
+			.as_any()
+			.downcast_ref::<IntVarBin<i32, i32>>()
+			.unwrap()
+			._consistency();
+		let y_con = y
+			.as_any()
+			.downcast_ref::<IntVarBin<i32, i32>>()
+			.unwrap()
+			._consistency();
+		let z_con = z
+			.as_any()
+			.downcast_ref::<IntVarBin<i32, i32>>()
+			.unwrap()
+			._consistency();
+		db.generate_solutions(
+			|sol| {
+				tern.check(sol).is_ok()
+					&& x_con.check(sol).is_ok()
+					&& y_con.check(sol).is_ok()
+					&& z_con.check(sol).is_ok()
+			},
+			db.num_var,
+		);
+
+		assert_sol!(db => TernLeEncoder::default(), &tern =>
+		vec![
+		vec![-1, -2, -3, -4, -5, -6, -7],
+		vec![-1, -2, -3, 4, -5, 6, -7],
+		vec![-1, -2, 3, -4, 5, -6, -7],
+		vec![-1, -2, 3, 4, 5, 6, -7],
+		vec![-1, 2, -3, -4, -5, 6, -7],
+		vec![-1, 2, -3, 4, -5, -6, 7],
+		vec![-1, 2, 3, -4, 5, 6, -7],
+		vec![-1, 2, 3, 4, 5, -6, 7],
+		vec![1, -2, -3, -4, 5, -6, -7],
+		vec![1, -2, -3, 4, 5, 6, -7],
+		vec![1, -2, 3, -4, -5, 6, -7],
+		vec![1, -2, 3, 4, -5, -6, 7],
+			 ]);
 	}
 
 	// 	// #[test]
