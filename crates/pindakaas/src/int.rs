@@ -562,6 +562,30 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			} else {
 				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x:?}, {y:?}, {z:?}")
 			}
+		} else if let (Some(x_ord), Some(y_ord), Some(z_bin)) = (
+			x.as_any().downcast_ref::<IntVarOrd<DB::Lit, C>>(),
+			y.as_any().downcast_ref::<IntVarOrd<DB::Lit, C>>(),
+			z.as_any().downcast_ref::<IntVarBin<DB::Lit, C>>(),
+		) {
+			let dom = ord_plus_ord_le_ord_sparse_dom(
+				x.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
+				y.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
+				z.lb(),
+				z.ub(),
+			);
+			let z_ord = IntVarOrd::new(
+				db,
+				dom.iter(..).map(|iv| (iv, None)).collect(),
+				String::from("z_ord"),
+			);
+			self.encode(
+				db,
+				&TernLeConstraint::new(x_ord, y_ord, LimitComp::LessEq, &z_ord),
+			)?;
+			self.encode(
+				db,
+				&TernLeConstraint::new(&z_ord, &Constant::new(C::zero()), LimitComp::LessEq, z_bin),
+			)
 		} else {
 			// assert!(cmp == &LimitComp::LessEq, "Only support <= for x+y ? z");
 			for c_a in x.dom() {
