@@ -1,8 +1,5 @@
 use crate::{
-	int::{
-		encode_consistency, ord_plus_ord_le_ord_sparse_dom, IntVarEnc, IntVarOrd, TernLeConstraint,
-		TernLeEncoder,
-	},
+	int::{ord_plus_ord_le_ord_sparse_dom, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 	linear::LimitComp,
 	trace::new_var,
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
@@ -54,7 +51,10 @@ fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 		let root = layer.pop().unwrap();
 		let zero = IntVarEnc::Const(C::zero());
 		let parent = IntVarEnc::Const(u);
-		TernLeEncoder::default().encode(db, &TernLeConstraint::new(&root, &zero, &parent))
+		TernLeEncoder::default().encode(
+			db,
+			&TernLeConstraint::new(&root, &zero, LimitComp::LessEq, &parent),
+		)
 	} else {
 		let next_layer = layer
 			.chunks(2)
@@ -83,12 +83,15 @@ fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 
 					let parent = IntVarEnc::Ord(IntVarOrd::new(db, dom));
 
-					if add_consistency {
-						encode_consistency(db, &parent).unwrap();
-					}
+					// if add_consistency {
+					// 	encode_consistency(db, &parent).unwrap();
+					// }
 
 					TernLeEncoder::default()
-						.encode(db, &TernLeConstraint::new(left, right, &parent))
+						.encode(
+							db,
+							&TernLeConstraint::new(left, right, LimitComp::LessEq, &parent),
+						)
 						.unwrap();
 					parent
 				}
