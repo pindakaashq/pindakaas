@@ -14,6 +14,30 @@ use std::{
 	ops::{Neg, Range},
 };
 
+/// Chooses next integer variable heuristically; returns Ord or Bin based on whether the number of resulting literals is under the provided cutoff
+pub(crate) fn next_int_var<DB: ClauseDatabase, C: Coefficient>(
+	db: &mut DB,
+	dom: IntervalSet<C>,
+	cutoff: C,
+	add_consistency: bool,
+	lbl: &str,
+) -> IntVarEnc<DB::Lit, C> {
+	// TODO check for domain of 1 => Constant?
+	if cutoff == -C::one() || dom.covered_len(..) <= cutoff {
+		let x = IntVarOrd::new(db, dom.into_iter(..).map(|iv| (iv, None)).collect(), lbl);
+		if add_consistency {
+			x.consistent(db).unwrap();
+		}
+		IntVarEnc::Ord(x)
+	} else {
+		let x = IntVarBin::new(db, dom.range().unwrap().end - C::one(), lbl);
+		if add_consistency {
+			x.consistent(db).unwrap();
+		}
+		IntVarEnc::Bin(x)
+	}
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum LitOrConst<Lit: Literal> {
 	Lit(Lit),
@@ -166,7 +190,7 @@ pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	// TODO change to with_label or something
-	pub fn _new<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, ub: C, _lbl: &str) -> Self {
+	pub fn new<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, ub: C, _lbl: &str) -> Self {
 		let bits = C::zero().leading_zeros() - ub.leading_zeros();
 		Self {
 			xs: (0..bits)
@@ -187,7 +211,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	}
 
 	#[allow(dead_code)]
-	pub fn consistent<DB: ClauseDatabase<Lit = Lit> + 'static>(&self, db: &mut DB) -> Result {
+	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
 		TernLeEncoder::default().encode(db, &self._consistency().get())
 	}
 }
@@ -473,13 +497,14 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 	for TernLeEncoder
 {
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
-		let TernLeConstraint { x, y, cmp, z } = tern;
+		// TODO properly use cmp!
+		let TernLeConstraint { x, y, cmp: _, z } = tern;
 		if let IntVarEnc::Bin(x_bin) = x {
 			if let (IntVarEnc::Const(y_con), IntVarEnc::Const(z_con)) = (y, z) {
-				assert!(
-					cmp == &LimitComp::LessEq,
-					"Only support <= for x:B+y:Constant ? z:Constant"
-				);
+				// assert!(
+				// 	cmp == &LimitComp::LessEq,
+				// 	"Only support <= for x:B+y:Constant ? z:Constant"
+				// );
 				return lex_lesseq_const(
 					db,
 					x_bin
@@ -492,16 +517,30 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					x_bin.xs.len(),
 				);
 			} else if let (IntVarEnc::Bin(y_bin), IntVarEnc::Bin(z_bin)) = (y, z) {
-				assert!(
-					cmp == &LimitComp::Equal,
-					"Only support == for x:B+y:B ? z:B"
-				);
+				// assert!(
+				// 	cmp == &LimitComp::Equal,
+				// 	"Only support == for x:B+y:B ? z:B"
+				// );
+				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs)
+			} else if let (IntVarEnc::Ord(y_ord), IntVarEnc::Bin(z_bin)) = (y, z) {
+				let y_bin = IntVarBin::new(db, y_ord.ub(), "x_bin");
+				TernLeEncoder::default()
+					.encode(
+						db,
+						&TernLeConstraint::new(
+							&IntVarEnc::Ord(y_ord.clone()),
+							&IntVarEnc::Const(C::zero()),
+							LimitComp::LessEq,
+							&IntVarEnc::Bin(y_bin.clone()),
+						),
+					)
+					.unwrap();
 				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs)
 			} else {
 				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x:?}, {y:?}, {z:?}")
 			}
 		} else {
-			assert!(cmp == &LimitComp::LessEq, "Only support <= for x+y ? z");
+			// assert!(cmp == &LimitComp::LessEq, "Only support <= for x+y ? z");
 			for c_a in x.dom() {
 				for c_b in y.dom() {
 					let neg = |clauses: Vec<Vec<DB::Lit>>| -> Vec<Vec<DB::Lit>> {
@@ -588,13 +627,13 @@ pub mod tests {
 		IntVarEnc::Ord(x)
 	}
 
-	fn get_bin_x<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
+	fn get_bin_x<DB: ClauseDatabase, C: Coefficient>(
 		db: &mut DB,
 		ub: C,
 		consistent: bool,
 		lbl: &str,
 	) -> IntVarEnc<DB::Lit, C> {
-		let x = IntVarBin::_new(db, ub, lbl);
+		let x = IntVarBin::new(db, ub, lbl);
 		if consistent {
 			x.consistent(db).unwrap();
 		}
@@ -665,7 +704,7 @@ pub mod tests {
 	#[test]
 	fn bin_geq_2_test() {
 		let mut db = TestDB::new(0);
-		let x = IntVarBin::_new(&mut db, 12, "x");
+		let x = IntVarBin::new(&mut db, 12, "x");
 		db.num_var = x.lits() as i32;
 		let tern = TernLeConstraint {
 			x: &IntVarEnc::Bin(x),
@@ -834,9 +873,9 @@ pub mod tests {
 	fn ord_plus_ord_le_bin_test() {
 		let mut db = TestDB::new(0);
 		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x"),
-			get_ord_x(&mut db, interval_set!(2..3, 4..5), true, "y"),
-			get_bin_x(&mut db, 12, true, "z"),
+			get_ord_x(&mut db, interval_set!(1..3), true, "x"),
+			get_ord_x(&mut db, interval_set!(1..4), true, "y"),
+			get_bin_x(&mut db, 6, true, "z"),
 		);
 		let tern = TernLeConstraint {
 			x: &x,
