@@ -115,8 +115,8 @@ impl<DB: ClauseDatabase, C: Coefficient, Enc: Encoder<DB, Linear<DB::Lit, C>> + 
 pub(crate) trait LinMarker {}
 impl LinMarker for AdderEncoder {}
 impl LinMarker for BddEncoder {}
-impl LinMarker for SwcEncoder {}
-impl LinMarker for TotalizerEncoder {}
+impl<C: Coefficient> LinMarker for SwcEncoder<C> {}
+impl<C: Coefficient> LinMarker for TotalizerEncoder<C> {}
 
 // TODO how can we support both Part(itions) of "terms" ( <Lit, C> for pb
 // constraints) and just lits (<Lit>) for AMK/AMO's?
