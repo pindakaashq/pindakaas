@@ -507,8 +507,10 @@ impl<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>
 {
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
 		// TODO properly use cmp!
-		let TernLeConstraint { x, y, cmp: _, z } = tern;
-		if let Some(x_bin) = x.as_any().downcast_ref::<IntVarBin<DB::Lit, C>>() {
+		let TernLeConstraint { x, y, cmp, z } = tern;
+		if x.as_any().is::<IntVarOrd<DB::Lit, C>>() && y.as_any().is::<IntVarBin<DB::Lit, C>>() {
+			self.encode(db, &TernLeConstraint::new(*y, *x, cmp.clone(), *z))
+		} else if let Some(x_bin) = x.as_any().downcast_ref::<IntVarBin<DB::Lit, C>>() {
 			if let (Some(y_con), Some(z_con)) = (
 				y.as_any().downcast_ref::<Constant<C>>(),
 				z.as_any().downcast_ref::<Constant<C>>(),
@@ -553,7 +555,10 @@ impl<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>
 						),
 					)
 					.unwrap();
-				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs, z_bin.lits())
+				self.encode(
+					db,
+					&TernLeConstraint::new(x_bin, &y_bin, cmp.clone(), z_bin),
+				)
 			} else {
 				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x:?}, {y:?}, {z:?}")
 			}
