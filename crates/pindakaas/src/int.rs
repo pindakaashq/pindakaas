@@ -144,6 +144,10 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			)
 			.add_constant(self.lb())
 	}
+
+	fn lits(&self) -> usize {
+		self.xs.len()
+	}
 }
 
 // TODO maybe C -> PosCoeff<C>
@@ -227,6 +231,10 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			k *= two;
 		}
 		exp
+	}
+
+	fn lits(&self) -> usize {
+		self.xs.len()
 	}
 }
 
@@ -377,6 +385,15 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 			IntVarEnc::Ord(o) => o.as_lin_exp(),
 			IntVarEnc::Bin(b) => b.as_lin_exp(),
 			IntVarEnc::Const(c) => LinExp::new().add_constant(*c),
+		}
+	}
+	/// Return number of lits in encoding
+	#[allow(dead_code)]
+	fn lits(&self) -> usize {
+		match self {
+			IntVarEnc::Ord(o) => o.lits(),
+			IntVarEnc::Bin(b) => b.lits(),
+			IntVarEnc::Const(_) => 0,
 		}
 	}
 }
@@ -585,6 +602,7 @@ pub mod tests {
 		};
 		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
 
+		assert_eq!(x.lits(), 4);
 		assert_eq!(x.lb(), 0);
 		assert_eq!(x.ub(), 12);
 		assert_eq!(x.geq(7..8), vec![vec![1, 4]]); // 7-1=6 == 0110 (right-to-left!)
@@ -602,7 +620,7 @@ pub mod tests {
 			z: &IntVarEnc::Const(10), // TODO no consistency implemented for this bound yet
 		};
 
-		db.num_var = 4;
+		db.num_var = x.lits() as i32;
 
 		db.generate_solutions(
 			|sol| tern.check(sol).is_ok() && x_con.get().check(sol).is_ok(),
@@ -629,12 +647,12 @@ pub mod tests {
 	fn bin_geq_2_test() {
 		let mut db = TestDB::new(0);
 		let x = IntVarBin::_new(&mut db, 12, "x");
+		db.num_var = x.lits() as i32;
 		let tern = TernLeConstraint {
 			x: &IntVarEnc::Bin(x),
 			y: &IntVarEnc::Const(0),
 			z: &IntVarEnc::Const(6),
 		};
-		db.num_var = 4;
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
 		vec![-1, -2, -3, -4], // 0
@@ -654,6 +672,7 @@ pub mod tests {
 
 		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
 
+		assert_eq!(x.lits(), 3);
 		assert_eq!(x.lb(), 2);
 		assert_eq!(x.ub(), 10);
 		assert_eq!(x.geq(6..7), vec![vec![2]]);
@@ -670,7 +689,7 @@ pub mod tests {
 			z: &IntVarEnc::Const(6),
 		};
 
-		db.num_var = 3;
+		db.num_var = x.lits() as i32;
 
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
@@ -693,7 +712,7 @@ pub mod tests {
 			y: &y,
 			z: &z,
 		};
-		db.num_var = 6;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
 		let x_con = match &x {
 			IntVarEnc::Ord(o) => o._consistency(),
@@ -748,7 +767,7 @@ pub mod tests {
 			y: &y,
 			z: &z,
 		};
-		db.num_var = 2 + 0 + 3;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
 		let x_con = match &x {
 			IntVarEnc::Ord(o) => o._consistency(),
@@ -801,7 +820,7 @@ pub mod tests {
 			y: &y,
 			z: &z,
 		};
-		db.num_var = 2 + 2 + 4;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
 		// let tern_clone = tern.clone();
 		// TernLeEncoder::default()
@@ -926,7 +945,7 @@ pub mod tests {
 			y: &y,
 			z: &z,
 		};
-		db.num_var = 2 + 2 + 3;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
 		let x_con = match &x {
 			IntVarEnc::Bin(b) => b._consistency(),
