@@ -434,6 +434,19 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		}
 	}
 }
+
+impl<Lit: Literal, C: Coefficient> From<IntVarBin<Lit, C>> for IntVarEnc<Lit, C> {
+	fn from(b: IntVarBin<Lit, C>) -> Self {
+		Self::Bin(b)
+	}
+}
+
+impl<Lit: Literal, C: Coefficient> From<IntVarOrd<Lit, C>> for IntVarEnc<Lit, C> {
+	fn from(o: IntVarOrd<Lit, C>) -> Self {
+		Self::Ord(o)
+	}
+}
+
 pub(crate) struct TernLeConstraint<'a, Lit: Literal, C: Coefficient> {
 	pub(crate) x: &'a IntVarEnc<Lit, C>,
 	pub(crate) y: &'a IntVarEnc<Lit, C>,
@@ -498,8 +511,10 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 {
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
 		// TODO properly use cmp!
-		let TernLeConstraint { x, y, cmp: _, z } = tern;
-		if let IntVarEnc::Bin(x_bin) = x {
+		let TernLeConstraint { x, y, cmp, z } = tern;
+		if matches!(x, IntVarEnc::Ord(_)) && matches!(x, IntVarEnc::Bin(_)) {
+			self.encode(db, &TernLeConstraint::new(*y, *x, cmp.clone(), *z))
+		} else if let IntVarEnc::Bin(x_bin) = x {
 			if let (IntVarEnc::Const(y_con), IntVarEnc::Const(z_con)) = (y, z) {
 				// assert!(
 				// 	cmp == &LimitComp::LessEq,
@@ -528,14 +543,22 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					.encode(
 						db,
 						&TernLeConstraint::new(
-							&IntVarEnc::Ord(y_ord.clone()),
+							&y_ord.clone().into(),
 							&IntVarEnc::Const(C::zero()),
 							LimitComp::LessEq,
-							&IntVarEnc::Bin(y_bin.clone()),
+							&y_bin.clone().into(),
 						),
 					)
 					.unwrap();
-				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs)
+				self.encode(
+					db,
+					&TernLeConstraint::new(
+						&x_bin.clone().into(),
+						&y_bin.into(),
+						cmp.clone(),
+						&z_bin.clone().into(),
+					),
+				)
 			} else {
 				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x:?}, {y:?}, {z:?}")
 			}
