@@ -37,10 +37,9 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 				Box::new(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone()))
 			})
 			.collect::<Vec<_>>();
-
 		let n = xs.len();
 		xs.into_iter().enumerate().reduce(|(_, v), (i, x)| {
-			let dom = num::iter::range_inclusive(C::one(), *lin.k)
+			let dom = num::iter::range_inclusive(C::one(), std::cmp::min(v.ub() + x.ub(), *lin.k))
 				.map(|j| j..(j + C::one()))
 				.collect::<IntervalSet<_>>();
 
