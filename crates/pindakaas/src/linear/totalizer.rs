@@ -1,7 +1,6 @@
 use crate::{
 	int::{ord_plus_ord_le_ord_sparse_dom, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 	linear::LimitComp,
-	trace::new_var,
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 
@@ -59,7 +58,7 @@ fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 		let next_layer = layer
 			.chunks(2)
 			.enumerate()
-			.map(|(_node, children)| match children {
+			.map(|(node, children)| match children {
 				[x] => x.clone(),
 				[left, right] => {
 					let l = if layer.len() > 2 { C::zero() } else { l };
@@ -72,20 +71,18 @@ fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 							.collect(),
 						l,
 						u,
-					)
-					.into_iter(..)
-					.map(|interval| {
-						let var =
-							new_var!(db, format!("w_{}_{}>={:?}", level + 1, _node + 1, interval));
-						(interval, Some(var))
-					})
-					.collect();
+					);
 
-					let parent = IntVarEnc::Ord(IntVarOrd::new(db, dom));
+					let parent = IntVarOrd::new(
+						db,
+						dom.iter(..).map(|iv| (iv, None)).collect(),
+						&format!("w_{node}"),
+					);
+					if add_consistency {
+						parent.consistent(db).unwrap();
+					}
 
-					// if add_consistency {
-					// 	encode_consistency(db, &parent).unwrap();
-					// }
+					let parent = IntVarEnc::Ord(parent);
 
 					TernLeEncoder::default()
 						.encode(
