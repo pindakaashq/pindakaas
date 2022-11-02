@@ -33,14 +33,15 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 			})
 			.sorted_by(|a, b| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
-		let mut ws =
-			construct_bdd(db, &xs.iter().map(Box::as_ref).collect(), lin.k.clone()).into_iter();
+		let mut ws = construct_bdd(
+			db,
+			&xs.iter().map(Box::as_ref).collect(),
+			lin.k.clone(),
+			self.add_consistency,
+		)
+		.into_iter();
 		let first = ws.next().unwrap();
 		xs.iter().zip(ws).fold(first, |curr, (x_i, next)| {
-			// if self.add_consistency {
-			// 	encode_consistency(db, next.as_ref()).unwrap();
-			// }
-
 			TernLeEncoder::default()
 				.encode(
 					db,
@@ -63,6 +64,7 @@ fn construct_bdd<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 	db: &mut DB,
 	xs: &Vec<&'a dyn IntVarEnc<DB::Lit, C>>,
 	k: PosCoeff<C>,
+	add_consistency: bool,
 ) -> Vec<Box<dyn IntVarEnc<DB::Lit, C>>> {
 	let ubs = xs.iter().map(|x| x.ub()).collect::<Vec<_>>();
 	let k = *k;
@@ -84,12 +86,13 @@ fn construct_bdd<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 		.collect();
 	bdd(db, 0, xs, C::zero(), &mut ws, true);
 	ws.into_iter()
+		.enumerate()
 		.with_position()
 		.filter_map(|w| -> Option<Box<dyn IntVarEnc<DB::Lit, C>>> {
 			// TODO refactor by directly converting Const layers into Constants (regardless of position)
 			match w {
 				Position::First(_) => Some(Box::new(Constant::new(C::zero()))),
-				Position::Middle(w) => {
+				Position::Middle((i, w)) => {
 					let dom: IntervalMap<_, _> = w
 						.into_iter(..)
 						.tuple_windows()
@@ -105,7 +108,11 @@ fn construct_bdd<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 					if dom.is_empty() {
 						None
 					} else {
-						Some(Box::new(IntVarOrd::new(db, dom)))
+						let x = IntVarOrd::new(db, dom, format!("w_{i}"));
+						if add_consistency {
+							x.consistent(db).unwrap();
+						}
+						Some(Box::new(x))
 					}
 				}
 				Position::Last(_) => Some(Box::new(Constant::new(k))),

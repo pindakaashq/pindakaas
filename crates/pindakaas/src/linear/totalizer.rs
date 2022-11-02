@@ -1,10 +1,10 @@
 use crate::{
 	int::{
-		ord_plus_ord_le_ord_sparse_dom, Constant, IntVarEnc, IntVarOrd, TernLeConstraint,
-		TernLeEncoder,
+		ord_plus_ord_le_ord_sparse_dom, Constant, IntVarBin, IntVarEnc, IntVarOrd,
+		TernLeConstraint, TernLeEncoder,
 	},
 	linear::LimitComp,
-	new_var, ClauseDatabase, Coefficient, Encoder, Linear, Result,
+	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized Totalizer (GT)
@@ -67,7 +67,7 @@ fn build_totalizer<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 		let next_layer = layer
 			.chunks(2)
 			.enumerate()
-			.map(|(_node, children)| -> Box<dyn IntVarEnc<DB::Lit, C>> {
+			.map(|(node, children)| -> Box<dyn IntVarEnc<DB::Lit, C>> {
 				match children {
 					[x] => x.clone_dyn(),
 					[left, right] => {
@@ -81,21 +81,18 @@ fn build_totalizer<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 								.collect(),
 							l,
 							u,
-						)
-						.into_iter(..)
-						.map(|interval| {
-							#[cfg(debug_assertions)]
-							let lbl = format!("w_{}_{}>={:?}", level + 1, _node + 1, interval);
-							(interval, Some(new_var!(db, lbl)))
-						})
-						.collect();
+						);
 
-						let parent: Box<dyn IntVarEnc<DB::Lit, C>> =
-							Box::new(IntVarOrd::new(db, dom));
+						let parent = IntVarOrd::new(
+							db,
+							dom.iter(..).map(|iv| (iv, None)).collect(),
+							format!("w_{node}"),
+						);
+						if add_consistency {
+							parent.consistent(db).unwrap();
+						}
 
-						// if add_consistency {
-						// 	encode_consistency(db, parent.as_ref()).unwrap();
-						// }
+						let parent: Box<dyn IntVarEnc<DB::Lit, C>> = Box::new(parent);
 
 						TernLeEncoder::default()
 							.encode(
