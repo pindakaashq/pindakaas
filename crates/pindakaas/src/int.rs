@@ -13,6 +13,30 @@ use std::{
 	ops::Neg,
 };
 
+/// Chooses next integer variable heuristically; returns Ord or Bin based on whether the number of resulting literals is under the provided cutoff
+pub(crate) fn next_int_var<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
+	db: &mut DB,
+	dom: IntervalSet<C>,
+	cutoff: C,
+	add_consistency: bool,
+	lbl: String,
+) -> Box<dyn IntVarEnc<DB::Lit, C>> {
+	// TODO check for domain of 1 => Constant?
+	if cutoff == -C::one() || dom.covered_len(..) <= cutoff {
+		let x = IntVarOrd::new(db, dom.into_iter(..).map(|iv| (iv, None)).collect(), lbl);
+		if add_consistency {
+			x.consistent(db).unwrap();
+		}
+		Box::new(x)
+	} else {
+		let x = IntVarBin::new(db, dom.range().unwrap().end - C::one(), lbl);
+		if add_consistency {
+			x.consistent(db).unwrap();
+		}
+		Box::new(x)
+	}
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum LitOrConst<Lit: Literal> {
 	Lit(Lit),
@@ -482,16 +506,17 @@ impl<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>
 	Encoder<DB, TernLeConstraint<'a, DB::Lit, C>> for TernLeEncoder
 {
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
-		let TernLeConstraint { x, y, cmp, z } = tern;
+		// TODO properly use cmp!
+		let TernLeConstraint { x, y, cmp: _, z } = tern;
 		if let Some(x_bin) = x.as_any().downcast_ref::<IntVarBin<DB::Lit, C>>() {
 			if let (Some(y_con), Some(z_con)) = (
 				y.as_any().downcast_ref::<Constant<C>>(),
 				z.as_any().downcast_ref::<Constant<C>>(),
 			) {
-				assert!(
-					cmp == &LimitComp::LessEq,
-					"Only support <= for x:B+y:Constant ? z:Constant"
-				);
+				// assert!(
+				// 	cmp == &LimitComp::LessEq,
+				// 	"Only support <= for x:B+y:Constant ? z:Constant"
+				// );
 				return x_bin_le(
 					db,
 					x_bin
@@ -507,16 +532,33 @@ impl<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>
 				y.as_any().downcast_ref::<IntVarBin<DB::Lit, C>>(),
 				z.as_any().downcast_ref::<IntVarBin<DB::Lit, C>>(),
 			) {
-				assert!(
-					cmp == &LimitComp::Equal,
-					"Only support == for x:B+y:B ? z:B"
-				);
+				// assert!(
+				// 	cmp == &LimitComp::Equal,
+				// 	"Only support == for x:B+y:B ? z:B"
+				// );
+				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs, z_bin.lits())
+			} else if let (Some(y_ord), Some(z_bin)) = (
+				y.as_any().downcast_ref::<IntVarOrd<DB::Lit, C>>(),
+				z.as_any().downcast_ref::<IntVarBin<DB::Lit, C>>(),
+			) {
+				let y_bin = IntVarBin::new(db, y_ord.ub(), String::from("x_bin"));
+				TernLeEncoder::default()
+					.encode(
+						db,
+						&TernLeConstraint::new(
+							y_ord,
+							&Constant::new(C::zero()),
+							LimitComp::LessEq,
+							&y_bin,
+						),
+					)
+					.unwrap();
 				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs, z_bin.lits())
 			} else {
 				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x:?}, {y:?}, {z:?}")
 			}
 		} else {
-			assert!(cmp == &LimitComp::LessEq, "Only support <= for x+y ? z");
+			// assert!(cmp == &LimitComp::LessEq, "Only support <= for x+y ? z");
 			for c_a in x.dom() {
 				for c_b in y.dom() {
 					let neg = |clauses: Vec<Vec<DB::Lit>>| -> Vec<Vec<DB::Lit>> {
@@ -860,9 +902,9 @@ pub mod tests {
 	fn ord_plus_ord_le_bin_test() {
 		let mut db = TestDB::new(0);
 		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..2, 5..7), true, String::from("x")),
-			get_ord_x(&mut db, interval_set!(2..3, 4..5), true, String::from("y")),
-			get_bin_x(&mut db, 12, true, String::from("z")),
+			get_ord_x(&mut db, interval_set!(1..3), true, String::from("x")),
+			get_ord_x(&mut db, interval_set!(1..4), true, String::from("y")),
+			get_bin_x(&mut db, 6, true, String::from("z")),
 		);
 		let tern = TernLeConstraint {
 			x: x.as_ref(),
