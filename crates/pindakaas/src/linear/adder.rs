@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
 	helpers::{XorConstraint, XorEncoder},
 	linear::{LimitComp, PosCoeff},
-	ClauseDatabase, Coefficient, Encoder, Linear, Literal, Result, Unsatisfiable,
+	new_var, ClauseDatabase, Coefficient, Encoder, Linear, Literal, Result, Unsatisfiable,
 };
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
@@ -77,8 +77,9 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 							force_sum(db, &XorConstraint::new(&lits), k[b])?;
 						} else if lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
 							// Literal is not used for the less-than constraint unless a zero has been seen first
-							let sum_lit = db.new_var();
-							bucket[b].push(create_sum_lit(db, sum_lit, lits.as_slice())?);
+							let sum = db.new_var();
+							create_sum_lit(db, lits.as_slice(), &sum)?;
+							bucket[b].push(sum);
 						}
 
 						// Compute carry
@@ -95,7 +96,9 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 							// Mark k[b + 1] as false (otherwise next step will fail)
 							k[b + 1] = false;
 						} else {
-							bucket[b + 1].push(create_carry_lit(db, lits.as_slice())?);
+							let carry = db.new_var();
+							create_carry_lit(db, lits.as_slice(), &carry)?;
+							bucket[b + 1].push(carry);
 						}
 					}
 					debug_assert!(
@@ -152,34 +155,22 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 	z: &[DB::Lit],
 	bits: usize,
 ) -> Result {
-	let mut c = Vec::with_capacity(bits);
 	let mut carry = None;
 	for i in 0..bits {
+		let sum = z.get(i).unwrap();
 		let b = [x.get(i), y.get(i), carry.as_ref()]
 			.into_iter()
 			.flatten()
 			.cloned()
 			.collect::<Vec<DB::Lit>>();
-		match &b[..] {
-			[] => {
-				c.push(None);
-				carry = None;
-			}
-			[x] => {
-				c.push(Some(x.clone()));
-				carry = None;
-			}
-			_ => {
-				debug_assert!(b.len() <= 3);
-				let sum_lit = z.get(i).unwrap();
-				c.push(Some(create_sum_lit(db, sum_lit.clone(), &b)?));
-				carry = if i + 1 < bits {
-					Some(create_carry_lit(db, &b)?)
-				} else {
-					force_carry(db, &b, false)?;
-					None
-				};
-			}
+		debug_assert!(b.len() <= 3);
+		create_sum_lit(db, &b, sum)?;
+		if i + 1 < bits {
+			let c = new_var!(db, format!("c_{i}"));
+			create_carry_lit(db, &b, &c)?;
+			carry = Some(c);
+		} else {
+			force_carry(db, &b, false)?;
 		}
 	}
 	for l in x.iter().skip(bits) {
@@ -195,12 +186,21 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 /// circuit
 ///
 /// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
-fn create_sum_lit<DB: ClauseDatabase>(
-	db: &mut DB,
-	sum: DB::Lit,
-	lits: &[DB::Lit],
-) -> Result<DB::Lit> {
+fn create_sum_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], sum: &DB::Lit) -> Result {
+	#[cfg(debug_assertions)]
+	println!(
+		"Encode sum of {} as {}",
+		lits.iter()
+			.map(|l| db.to_label(l))
+			.collect::<Vec<_>>()
+			.join(", "),
+		db.to_label(sum)
+	);
 	match lits {
+		[a] => {
+			db.add_clause(&[a.negate(), sum.clone()])?;
+			db.add_clause(&[a.clone(), sum.negate()])?;
+		}
 		[a, b] => {
 			db.add_clause(&[a.negate(), b.negate(), sum.negate()])?;
 			db.add_clause(&[a.negate(), b.clone(), sum.clone()])?;
@@ -220,7 +220,7 @@ fn create_sum_lit<DB: ClauseDatabase>(
 		}
 		_ => unreachable!(),
 	}
-	Ok(sum)
+	Ok(())
 }
 
 /// Force circuit that represents the sum bit when adding lits together using an adder
@@ -249,9 +249,20 @@ fn force_sum<DB: ClauseDatabase>(db: &mut DB, xor: &XorConstraint<DB::Lit>, k: b
 /// circuit
 ///
 /// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
-fn create_carry_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<DB::Lit> {
-	let carry = db.new_var();
+fn create_carry_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], carry: &DB::Lit) -> Result {
+	#[cfg(debug_assertions)]
+	println!(
+		"Encode carry of {} as {}",
+		lits.iter()
+			.map(|l| db.to_label(l))
+			.collect::<Vec<_>>()
+			.join(", "),
+		db.to_label(carry)
+	);
 	match lits {
+		[_] => {
+			db.add_clause(&[carry.negate()])?;
+		}
 		[a, b] => {
 			db.add_clause(&[a.negate(), b.negate(), carry.clone()])?;
 			db.add_clause(&[a.clone(), carry.negate()])?;
@@ -268,13 +279,20 @@ fn create_carry_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result
 		}
 		_ => unreachable!(),
 	}
-	Ok(carry)
+	Ok(())
 }
 
 /// Force the circuit that represents the carry bit when adding lits together using an adder
 /// circuit to take the value k
 fn force_carry<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Result {
 	match lits {
+		[_] => {
+			if k {
+				Err(Unsatisfiable)
+			} else {
+				Ok(())
+			}
+		}
 		[a, b] => {
 			if k {
 				// TODO: Can we avoid this?
