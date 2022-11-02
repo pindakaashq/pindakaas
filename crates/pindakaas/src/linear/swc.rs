@@ -1,5 +1,6 @@
 use crate::{
-	int::{encode_consistency, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+	int::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+	linear::LimitComp,
 	trace::new_var,
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
@@ -41,12 +42,15 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 				.collect::<IntervalMap<_, _>>();
 			let next = IntVarEnc::Ord(IntVarOrd::new(db, dom));
 
-			if self.add_consistency {
-				encode_consistency(db, &next).unwrap();
-			}
+			// if self.add_consistency {
+			// 	encode_consistency(db, &next).unwrap();
+			// }
 
 			TernLeEncoder::default()
-				.encode(db, &TernLeConstraint::new(&prev, &leaf, &next))
+				.encode(
+					db,
+					&TernLeConstraint::new(&prev, &leaf, LimitComp::LessEq, &next),
+				)
 				.unwrap();
 
 			(i + 1, next)
