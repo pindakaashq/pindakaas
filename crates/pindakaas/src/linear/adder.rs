@@ -180,8 +180,8 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 	x: &[DB::Lit],
 	y: &[DB::Lit],
 	z: &[DB::Lit],
-	bits: usize,
 ) -> Result {
+	let bits = z.len();
 	let mut carry = None;
 	for i in 0..bits {
 		let b = [x.get(i), y.get(i), carry.as_ref()]
