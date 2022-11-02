@@ -58,6 +58,11 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			lits: self.xs.values(..).cloned().collect::<Vec<_>>(),
 		}
 	}
+
+	#[allow(dead_code)]
+	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
+		ImplicationChainEncoder::default()._encode(db, &self._consistency())
+	}
 }
 
 pub(crate) struct ImplicationChainConstraint<Lit: Literal> {
@@ -178,6 +183,11 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			cmp: LimitComp::LessEq,
 			z: IntVarEnc::Const(self.ub),
 		}
+	}
+
+	#[allow(dead_code)]
+	pub fn consistent<DB: ClauseDatabase<Lit = Lit> + 'static>(&self, db: &mut DB) -> Result {
+		TernLeEncoder::default().encode(db, &self._consistency().get())
 	}
 }
 
@@ -484,7 +494,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					cmp == &LimitComp::Equal,
 					"Only support == for x:B+y:B ? z:B"
 				);
-				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs, x_bin.xs.len())
+				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs)
 			} else {
 				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x:?}, {y:?}, {z:?}")
 			}
@@ -570,9 +580,7 @@ pub mod tests {
 	) -> IntVarEnc<DB::Lit, C> {
 		let x = IntVarOrd::new(db, dom.into_iter(..).map(|iv| (iv, None)).collect());
 		if consistent {
-			ImplicationChainEncoder::default()
-				._encode(db, &x._consistency())
-				.unwrap();
+			x.consistent(db).unwrap();
 		}
 		IntVarEnc::Ord(x)
 	}
@@ -585,9 +593,7 @@ pub mod tests {
 	) -> IntVarEnc<DB::Lit, C> {
 		let x = IntVarBin::_new(db, ub, lbl);
 		if consistent {
-			TernLeEncoder::default()
-				.encode(db, &x._consistency().get())
-				.unwrap();
+			x.consistent(db).unwrap();
 		}
 		IntVarEnc::Bin(x)
 	}
