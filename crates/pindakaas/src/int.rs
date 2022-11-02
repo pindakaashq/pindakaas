@@ -4,7 +4,7 @@ use std::any::Any;
 use std::ops::Range;
 
 use crate::{
-	linear::{log_enc_add, x_bin_le, LinExp, Part},
+	linear::{log_enc_add, x_bin_le, LimitComp, LinExp, Part},
 	new_var, CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
 	Unsatisfiable,
 };
@@ -245,6 +245,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarBin<Lit, C> {
 		TernLeConstraint {
 			x: self,
 			y: &self.lb,
+			cmp: LimitComp::LessEq,
 			z: &self.ub,
 		}
 	}
@@ -422,29 +423,27 @@ pub(crate) trait IntVarEnc<Lit: Literal, C: Coefficient>: std::fmt::Debug {
 
 	fn as_any(&self) -> &dyn Any;
 
-pub(crate) fn encode_consistency<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
-	db: &mut DB,
-	x: &dyn IntVarEnc<DB::Lit, C>,
-) -> Result {
-	let b = Constant::new(-C::one());
-	TernLeEncoder::default().encode(db, &TernLeConstraint::new(x, &b, x))
 	/// Return number of lits in encoding
 	fn lits(&self) -> usize;
 }
 
+#[derive(Debug)]
 pub(crate) struct TernLeConstraint<'a, Lit: Literal, C: Coefficient> {
 	pub(crate) x: &'a dyn IntVarEnc<Lit, C>,
 	pub(crate) y: &'a dyn IntVarEnc<Lit, C>,
+	pub(crate) cmp: LimitComp,
 	pub(crate) z: &'a dyn IntVarEnc<Lit, C>,
 }
 
+// TODO rename TernLeConstraint => TernLinConstraint/Encoder
 impl<'a, Lit: Literal, C: Coefficient> TernLeConstraint<'a, Lit, C> {
 	pub fn new(
 		x: &'a dyn IntVarEnc<Lit, C>,
 		y: &'a dyn IntVarEnc<Lit, C>,
+		cmp: LimitComp,
 		z: &'a dyn IntVarEnc<Lit, C>,
 	) -> Self {
-		Self { x, y, z }
+		Self { x, y, cmp, z }
 	}
 }
 
@@ -454,7 +453,11 @@ impl<'a, Lit: Literal, C: Coefficient> Checker for TernLeConstraint<'a, Lit, C> 
 		let x = LinExp::<_, _>::from(self.x).assign(solution);
 		let y = LinExp::<_, _>::from(self.y).assign(solution);
 		let z = LinExp::<_, _>::from(self.z).assign(solution);
-		if x + y <= z {
+		// TODO into LinearConstraint => Check?
+		if match self.cmp {
+			LimitComp::LessEq => x + y <= z,
+			LimitComp::Equal => x + y == z,
+		} {
 			Ok(())
 		} else {
 			Err(CheckError::Unsatisfiable(Unsatisfiable))
@@ -469,12 +472,16 @@ impl<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>
 	Encoder<DB, TernLeConstraint<'a, DB::Lit, C>> for TernLeEncoder
 {
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
-		let TernLeConstraint { x, y, z } = tern;
+		let TernLeConstraint { x, y, cmp, z } = tern;
 		if let Some(x_bin) = x.as_any().downcast_ref::<IntVarBin<DB::Lit, C>>() {
 			if let (Some(y_con), Some(z_con)) = (
 				y.as_any().downcast_ref::<Constant<C>>(),
 				z.as_any().downcast_ref::<Constant<C>>(),
 			) {
+				assert!(
+					cmp == &LimitComp::LessEq,
+					"Only support <= for x:B+y:Constant ? z:Constant"
+				);
 				return x_bin_le(
 					db,
 					x_bin
@@ -490,11 +497,16 @@ impl<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>
 				y.as_any().downcast_ref::<IntVarBin<DB::Lit, C>>(),
 				z.as_any().downcast_ref::<IntVarBin<DB::Lit, C>>(),
 			) {
-				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs, x_bin.xs.len())
+				assert!(
+					cmp == &LimitComp::Equal,
+					"Only support == for x:B+y:B ? z:B"
+				);
+				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs, z_bin.lits())
 			} else {
 				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x:?}, {y:?}, {z:?}")
 			}
 		} else {
+			assert!(cmp == &LimitComp::LessEq, "Only support <= for x+y ? z");
 			for c_a in x.dom() {
 				for c_b in y.dom() {
 					let neg = |clauses: Vec<Vec<DB::Lit>>| -> Vec<Vec<DB::Lit>> {
@@ -706,6 +718,8 @@ pub mod tests {
 		let tern = TernLeConstraint {
 			x: x.as_ref(),
 			y: &Constant::new(0),
+			cmp: LimitComp::LessEq,
+
 			z: &Constant::new(6),
 		};
 
@@ -730,6 +744,7 @@ pub mod tests {
 		let tern = TernLeConstraint {
 			x: x.as_ref(),
 			y: y.as_ref(),
+			cmp: LimitComp::LessEq,
 			z: z.as_ref(),
 		};
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
@@ -788,6 +803,7 @@ pub mod tests {
 		let tern = TernLeConstraint {
 			x: x.as_ref(),
 			y: y.as_ref(),
+			cmp: LimitComp::LessEq,
 			z: z.as_ref(),
 		};
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
@@ -839,14 +855,11 @@ pub mod tests {
 		let tern = TernLeConstraint {
 			x: x.as_ref(),
 			y: y.as_ref(),
+			cmp: LimitComp::LessEq,
 			z: z.as_ref(),
 		};
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
-		// let tern_clone = tern.clone();
-		// TernLeEncoder::default()
-		// 	.encode(&mut db, &tern_clone)
-		// 	.unwrap();
 		// let x_con = x
 		// 	.as_any()
 		// 	.downcast_ref::<IntVarOrd<i32, i32>>()
@@ -863,8 +876,8 @@ pub mod tests {
 		// 	.unwrap()
 		// 	._consistency();
 		// db.generate_solutions(
-		// 	move |sol| {
-		// 		tern_clone.check(sol).is_ok()
+		// 	|sol| {
+		// 		tern.check(sol).is_ok()
 		// 			&& x_con.check(sol).is_ok()
 		// 			&& y_con.check(sol).is_ok()
 		// 			&& z_con.check(sol).is_ok()
@@ -964,6 +977,7 @@ pub mod tests {
 		let tern = TernLeConstraint {
 			x: x.as_ref(),
 			y: y.as_ref(),
+			cmp: LimitComp::Equal,
 			z: z.as_ref(),
 		};
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;

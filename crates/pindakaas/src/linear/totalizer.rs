@@ -1,7 +1,7 @@
 use crate::{
 	int::{
-		encode_consistency, ord_plus_ord_le_ord_sparse_dom, Constant, IntVarEnc, IntVarOrd,
-		TernLeConstraint, TernLeEncoder,
+		ord_plus_ord_le_ord_sparse_dom, Constant, IntVarEnc, IntVarOrd, TernLeConstraint,
+		TernLeEncoder,
 	},
 	linear::LimitComp,
 	new_var, ClauseDatabase, Coefficient, Encoder, Linear, Result,
@@ -59,7 +59,10 @@ fn build_totalizer<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 		let root = layer.pop().unwrap();
 		let zero = Constant::new(C::zero());
 		let parent = Constant::new(u);
-		TernLeEncoder::default().encode(db, &TernLeConstraint::new(root.as_ref(), &zero, &parent))
+		TernLeEncoder::default().encode(
+			db,
+			&TernLeConstraint::new(root.as_ref(), &zero, LimitComp::LessEq, &parent),
+		)
 	} else {
 		let next_layer = layer
 			.chunks(2)
@@ -90,9 +93,9 @@ fn build_totalizer<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 						let parent: Box<dyn IntVarEnc<DB::Lit, C>> =
 							Box::new(IntVarOrd::new(db, dom));
 
-						if add_consistency {
-							encode_consistency(db, parent.as_ref()).unwrap();
-						}
+						// if add_consistency {
+						// 	encode_consistency(db, parent.as_ref()).unwrap();
+						// }
 
 						TernLeEncoder::default()
 							.encode(
@@ -100,6 +103,7 @@ fn build_totalizer<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 								&TernLeConstraint::new(
 									left.as_ref(),
 									right.as_ref(),
+									LimitComp::LessEq,
 									parent.as_ref(),
 								),
 							)

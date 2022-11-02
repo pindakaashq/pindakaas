@@ -1,5 +1,6 @@
 use crate::{
-	int::{encode_consistency, IntVarOrd, TernLeConstraint, TernLeEncoder},
+	int::{IntVarOrd, TernLeConstraint, TernLeEncoder},
+	linear::LimitComp,
 	new_var, ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 use iset::IntervalMap;
@@ -38,14 +39,19 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 				.collect::<IntervalMap<_, _>>();
 			let next = Box::new(IntVarOrd::new(db, dom));
 
-			if self.add_consistency {
-				encode_consistency(db, next.as_ref()).unwrap();
-			}
+			// if self.add_consistency {
+			// 	encode_consistency(db, next.as_ref()).unwrap();
+			// }
 
 			TernLeEncoder::default()
 				.encode(
 					db,
-					&TernLeConstraint::new(prev.as_ref(), leaf.as_ref(), next.as_ref()),
+					&TernLeConstraint::new(
+						prev.as_ref(),
+						leaf.as_ref(),
+						LimitComp::LessEq,
+						next.as_ref(),
+					),
 				)
 				.unwrap();
 

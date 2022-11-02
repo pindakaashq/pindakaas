@@ -2,10 +2,7 @@ use iset::{interval_map, IntervalMap};
 use itertools::{Itertools, Position};
 
 use crate::{
-	int::{
-		encode_consistency, Constant, IntVarEnc, IntVarOrd, LitOrConst, TernLeConstraint,
-		TernLeEncoder,
-	},
+	int::{Constant, IntVarEnc, IntVarOrd, LitOrConst, TernLeConstraint, TernLeEncoder},
 	linear::LimitComp,
 	new_var, ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
@@ -40,14 +37,19 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 			construct_bdd(db, &xs.iter().map(Box::as_ref).collect(), lin.k.clone()).into_iter();
 		let first = ws.next().unwrap();
 		xs.iter().zip(ws).fold(first, |curr, (x_i, next)| {
-			if self.add_consistency {
-				encode_consistency(db, next.as_ref()).unwrap();
-			}
+			// if self.add_consistency {
+			// 	encode_consistency(db, next.as_ref()).unwrap();
+			// }
 
 			TernLeEncoder::default()
 				.encode(
 					db,
-					&TernLeConstraint::new(curr.as_ref(), x_i.as_ref(), next.as_ref()),
+					&TernLeConstraint::new(
+						curr.as_ref(),
+						x_i.as_ref(),
+						LimitComp::LessEq,
+						next.as_ref(),
+					),
 				)
 				.unwrap();
 			next
