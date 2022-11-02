@@ -74,6 +74,10 @@ impl<Lit: Literal, C: Coefficient + 'static> IntVarEnc<Lit, C> for Constant<C> {
 	fn as_any(&self) -> &dyn Any {
 		self
 	}
+
+	fn lits(&self) -> usize {
+		0
+	}
 }
 
 // TODO maybe C -> PosCoeff<C>
@@ -206,6 +210,10 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 	fn as_any(&self) -> &dyn Any {
 		self
 	}
+
+	fn lits(&self) -> usize {
+		self.xs.len()
+	}
 }
 
 // TODO maybe C -> PosCoeff<C>
@@ -305,6 +313,10 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 
 	fn as_any(&self) -> &dyn Any {
 		self
+	}
+
+	fn lits(&self) -> usize {
+		self.xs.len()
 	}
 }
 
@@ -409,7 +421,6 @@ pub(crate) trait IntVarEnc<Lit: Literal, C: Coefficient>: std::fmt::Debug {
 	}
 
 	fn as_any(&self) -> &dyn Any;
-}
 
 pub(crate) fn encode_consistency<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 	db: &mut DB,
@@ -417,6 +428,8 @@ pub(crate) fn encode_consistency<DB: ClauseDatabase + 'static, C: Coefficient + 
 ) -> Result {
 	let b = Constant::new(-C::one());
 	TernLeEncoder::default().encode(db, &TernLeConstraint::new(x, &b, x))
+	/// Return number of lits in encoding
+	fn lits(&self) -> usize;
 }
 
 pub(crate) struct TernLeConstraint<'a, Lit: Literal, C: Coefficient> {
@@ -607,6 +620,7 @@ pub mod tests {
 			._consistency();
 		let x_lin: LinExp<i32, i32> = LinExp::from(x.as_ref());
 
+		assert_eq!(x.lits(), 4);
 		assert_eq!(x.lb(), 0);
 		assert_eq!(x.ub(), 12);
 		assert_eq!(x.geq(7..8), vec![vec![1, 4]]); // 7-1=6 == 0110 (right-to-left!)
@@ -621,10 +635,11 @@ pub mod tests {
 		let tern = TernLeConstraint {
 			x: x.as_ref(),
 			y: &Constant::new(0),
+			cmp: LimitComp::LessEq,
 			z: &Constant::new(10), // TODO no consistency implemented for this bound yet
 		};
 
-		db.num_var = 4;
+		db.num_var = x.lits() as i32;
 
 		db.generate_solutions(
 			|sol| tern.check(sol).is_ok() && x_con.check(sol).is_ok(),
@@ -654,9 +669,10 @@ pub mod tests {
 		let tern = TernLeConstraint {
 			x: &x,
 			y: &Constant::new(0),
+			cmp: LimitComp::LessEq,
 			z: &Constant::new(6),
 		};
-		db.num_var = 4;
+		db.num_var = x.lits() as i32;
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
 		vec![-1, -2, -3, -4], // 0
@@ -676,6 +692,7 @@ pub mod tests {
 
 		let x_lin: LinExp<i32, i32> = LinExp::from(x.as_ref());
 
+		assert_eq!(x.lits(), 3);
 		assert_eq!(x.lb(), 2);
 		assert_eq!(x.ub(), 10);
 		assert_eq!(x.geq(6..7), vec![vec![2]]);
@@ -692,7 +709,7 @@ pub mod tests {
 			z: &Constant::new(6),
 		};
 
-		db.num_var = 3;
+		db.num_var = x.lits() as i32;
 
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
@@ -715,7 +732,7 @@ pub mod tests {
 			y: y.as_ref(),
 			z: z.as_ref(),
 		};
-		db.num_var = 6;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
 		let x_con = x
 			.as_any()
@@ -773,7 +790,7 @@ pub mod tests {
 			y: y.as_ref(),
 			z: z.as_ref(),
 		};
-		db.num_var = 2 + 0 + 3;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
 		let x_con = x
 			.as_any()
@@ -824,7 +841,7 @@ pub mod tests {
 			y: y.as_ref(),
 			z: z.as_ref(),
 		};
-		db.num_var = 2 + 2 + 4;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
 		// let tern_clone = tern.clone();
 		// TernLeEncoder::default()
@@ -949,7 +966,7 @@ pub mod tests {
 			y: y.as_ref(),
 			z: z.as_ref(),
 		};
-		db.num_var = 2 + 2 + 3;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
 		let x_con = x
 			.as_any()
