@@ -36,13 +36,9 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 			})
 			.sorted_by(|a, b| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
-		let mut ws = construct_bdd(db, &xs, lin.k.clone()).into_iter();
+		let mut ws = construct_bdd(db, &xs, lin.k.clone(), self.add_consistency).into_iter();
 		let first = ws.next().unwrap();
 		xs.iter().zip(ws).fold(first, |curr, (x_i, next)| {
-			// if self.add_consistency {
-			// 	encode_consistency(db, &next).unwrap();
-			// }
-
 			TernLeEncoder::default()
 				.encode(
 					db,
@@ -60,6 +56,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	xs: &Vec<IntVarEnc<DB::Lit, C>>,
 	k: PosCoeff<C>,
+	add_consistency: bool,
 ) -> Vec<IntVarEnc<DB::Lit, C>> {
 	let ubs = xs.iter().map(|x| x.ub()).collect::<Vec<_>>();
 	let k = *k;
@@ -81,12 +78,13 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 		.collect();
 	bdd(db, 0, xs, C::zero(), &mut ws, true);
 	ws.into_iter()
+		.enumerate()
 		.with_position()
 		.filter_map(|w| {
 			// TODO refactor by directly converting Const layers into Constants (regardless of position)
 			match w {
 				Position::First(_) => Some(IntVarEnc::Const(C::zero())),
-				Position::Middle(w) => {
+				Position::Middle((i, w)) => {
 					let dom: IntervalMap<_, _> = w
 						.into_iter(..)
 						.tuple_windows()
@@ -102,7 +100,11 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 					if dom.is_empty() {
 						None
 					} else {
-						Some(IntVarEnc::Ord(IntVarOrd::new(db, dom)))
+						let x = IntVarOrd::new(db, dom, &format!("w_{i}"));
+						if add_consistency {
+							x.consistent(db).unwrap();
+						}
+						Some(IntVarEnc::Ord(x))
 					}
 				}
 				Position::Last(_) => Some(IntVarEnc::Const(k)),

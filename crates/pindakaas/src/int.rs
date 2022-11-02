@@ -41,11 +41,12 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	pub fn new<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
 		dom: IntervalMap<C, Option<Lit>>,
+		_lbl: &str,
 	) -> Self {
 		let xs = dom
 			.into_iter(..)
 			.map(|(v, lit)| {
-				let lit = lit.unwrap_or_else(|| new_var!(db, format!("x>={v:?}")));
+				let lit = lit.unwrap_or_else(|| new_var!(db, format!("{_lbl}>={v:?}")));
 				(v, lit)
 			})
 			.collect::<IntervalMap<_, _>>();
@@ -297,7 +298,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 						}
 					})
 					.collect();
-				IntVarOrd::new(db, dom)
+				IntVarOrd::new(db, dom, "x")
 			}
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
 			Part::Ic(terms) => {
@@ -316,6 +317,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 							((prev + C::one())..(coef + C::one()), Some(lit))
 						})
 						.collect(),
+					"x",
 				)
 			}
 			Part::Dom(_terms, _l, _u) => todo!(),
@@ -577,8 +579,9 @@ pub mod tests {
 		db: &mut DB,
 		dom: IntervalSet<C>,
 		consistent: bool,
+		lbl: &str,
 	) -> IntVarEnc<DB::Lit, C> {
-		let x = IntVarOrd::new(db, dom.into_iter(..).map(|iv| (iv, None)).collect());
+		let x = IntVarOrd::new(db, dom.into_iter(..).map(|iv| (iv, None)).collect(), lbl);
 		if consistent {
 			x.consistent(db).unwrap();
 		}
@@ -685,7 +688,7 @@ pub mod tests {
 	#[test]
 	fn ord_geq_test() {
 		let mut db = TestDB::new(0);
-		let x = get_ord_x::<_, i32>(&mut db, interval_set!(3..5, 5..7, 7..11), true);
+		let x = get_ord_x::<_, i32>(&mut db, interval_set!(3..5, 5..7, 7..11), true, "x");
 
 		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
 
@@ -721,9 +724,9 @@ pub mod tests {
 	fn ord_plus_ord_le_ord_test() {
 		let mut db = TestDB::new(0);
 		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..2, 5..7), true),
-			get_ord_x(&mut db, interval_set!(2..3, 4..5), true),
-			get_ord_x(&mut db, interval_set!(0..4, 4..11), true),
+			get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x"),
+			get_ord_x(&mut db, interval_set!(2..3, 4..5), true, "y"),
+			get_ord_x(&mut db, interval_set!(0..4, 4..11), true, "z"),
 		);
 		let tern = TernLeConstraint {
 			x: &x,
@@ -777,7 +780,7 @@ pub mod tests {
 	fn ord_le_bin_test() {
 		let mut db = TestDB::new(0);
 		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..2, 5..7), true),
+			get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x"),
 			IntVarEnc::Const(0),
 			get_bin_x(&mut db, 7, true, "z"),
 		);
@@ -831,8 +834,8 @@ pub mod tests {
 	fn ord_plus_ord_le_bin_test() {
 		let mut db = TestDB::new(0);
 		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..2, 5..7), true),
-			get_ord_x(&mut db, interval_set!(2..3, 4..5), true),
+			get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x"),
+			get_ord_x(&mut db, interval_set!(2..3, 4..5), true, "y"),
 			get_bin_x(&mut db, 12, true, "z"),
 		);
 		let tern = TernLeConstraint {
@@ -1006,39 +1009,4 @@ pub mod tests {
 			]
 		);
 	}
-
-	// 	// #[test]
-	// 	fn bin_plus_bin_le_bin_test() {
-	// 		let mut db = TestDB::new(0);
-	// 		let (x, y, z): (
-	// 			Box<dyn IntVarEnc<i32, i32>>,
-	// 			Box<dyn IntVarEnc<i32, i32>>,
-	// 			Box<dyn IntVarEnc<i32, i32>>,
-	// 		) = (
-	// 			Box::new(IntVarBin::_new(&mut db, 12)),
-	// 			Box::new(IntVarBin::_new(&mut db, 12)),
-	// 			Box::new(IntVarBin::_new(&mut db, 12)),
-	// 		);
-
-	// 		let con = TernLeConstraint {
-	// 			x: &x,
-	// 			y: &y,
-	// 			z: &z,
-	// 		};
-	// 		assert_sol!(db, TernLeEncoder::default(), 0, con);
-	// 	}
-
-	// #[test]
-	// fn bin_plus_bin_le_bin_test() {
-	// 	let mut db = TestDB::new(0);
-	// 	assert_sol!(
-	// 		TernLeEncoder::default(),
-	// 		0,
-	// 		&TernLeConstraint {
-	// 			x: &get_bin_x(&mut db, 12, true),
-	// 			y: &get_bin_x(&mut db, 12, true),
-	// 			z: &get_bin_x(&mut db, 12, true),
-	// 		}
-	// 	);
-	// }
 }

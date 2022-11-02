@@ -1,7 +1,6 @@
 use crate::{
 	int::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 	linear::LimitComp,
-	trace::new_var,
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 use iset::IntervalMap;
@@ -33,18 +32,14 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.collect::<Vec<_>>();
 		xs.into_iter().enumerate().reduce(|(i, prev), (_, leaf)| {
 			let dom = num::iter::range_inclusive(C::one(), *lin.k)
-				.map(|j| {
-					(
-						j..(j + C::one()),
-						Some(new_var!(db, format!("w_{}>={:?}", i + 1, j))),
-					)
-				})
+				.map(|j| (j..(j + C::one()), None))
 				.collect::<IntervalMap<_, _>>();
-			let next = IntVarEnc::Ord(IntVarOrd::new(db, dom));
 
-			// if self.add_consistency {
-			// 	encode_consistency(db, &next).unwrap();
-			// }
+			let next = IntVarOrd::new(db, dom, &format!("w_{}", i + 1));
+			if self.add_consistency {
+				next.consistent(db).unwrap();
+			}
+			let next = IntVarEnc::Ord(next);
 
 			TernLeEncoder::default()
 				.encode(
