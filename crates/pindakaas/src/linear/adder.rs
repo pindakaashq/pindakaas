@@ -187,7 +187,7 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 ///
 /// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
 fn create_sum_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], sum: &DB::Lit) -> Result {
-	#[cfg(debug_assertions)]
+	#[cfg(feature = "label")]
 	println!(
 		"Encode sum of {} as {}",
 		lits.iter()
@@ -250,7 +250,7 @@ fn force_sum<DB: ClauseDatabase>(db: &mut DB, xor: &XorConstraint<DB::Lit>, k: b
 ///
 /// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
 fn create_carry_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], carry: &DB::Lit) -> Result {
-	#[cfg(debug_assertions)]
+	#[cfg(feature = "label")]
 	println!(
 		"Encode carry of {} as {}",
 		lits.iter()

@@ -59,7 +59,7 @@ impl<'a, Lit: Literal> Checker for XorConstraint<'a, Lit> {
 }
 
 // TODO to be incorporated with labels feature
-#[cfg(debug_assertions)]
+#[cfg(feature = "label")]
 #[macro_export]
 macro_rules! new_var {
 	($db:expr) => {
@@ -70,7 +70,7 @@ macro_rules! new_var {
 	};
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(feature = "label"))]
 #[macro_export]
 macro_rules! new_var {
 	($db:expr) => {
@@ -91,10 +91,9 @@ pub mod tests {
 		types::{CNFDescription, Instantiate},
 		Certificate, Config, SatSolverIF, SolveIF, Solver, SolverError,
 	};
-	use std::{
-		collections::{HashMap, HashSet},
-		thread::panicking,
-	};
+	#[cfg(feature = "label")]
+	use std::collections::HashMap;
+	use std::{collections::HashSet, thread::panicking};
 
 	macro_rules! assert_enc {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
@@ -241,6 +240,7 @@ pub mod tests {
 		solutions: Option<Vec<Vec<i32>>>,
 		check: Option<fn(&[i32]) -> bool>,
 		unchecked: bool,
+		#[cfg(feature = "label")]
 		labels: HashMap<i32, String>,
 	}
 
@@ -262,6 +262,7 @@ pub mod tests {
 				solutions: None,
 				check: None,
 				unchecked: false,
+				#[cfg(feature = "label")]
 				labels: HashMap::new(),
 			}
 		}
@@ -415,7 +416,7 @@ pub mod tests {
 		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
 			let mut cl = Vec::from(cl);
 
-			#[cfg(debug_assertions)]
+			#[cfg(feature = "label")]
 			{
 				let lit_as_string = |lit: &Self::Lit| -> String {
 					let polarity = if lit.is_positive() { "" } else { "-" };
@@ -497,12 +498,14 @@ pub mod tests {
 			res
 		}
 
+		#[cfg(feature = "label")]
 		fn new_var_with_label(&mut self, label: String) -> Self::Lit {
 			let i = self.new_var();
 			self.labels.insert(i, label);
 			i
 		}
 
+		#[cfg(feature = "label")]
 		fn to_label(&self, lit: &Self::Lit) -> String {
 			let polarity = if lit.is_negated() { "-" } else { "" };
 			format!(

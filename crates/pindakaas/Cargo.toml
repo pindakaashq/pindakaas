@@ -10,6 +10,9 @@ license = "MPL-2.0"
 
 edition = "2021"
 
+[features]
+label = []
+
 [dependencies]
 ipasir = { version = "0.3", features = ["ffi"] }
 iset = "0.1.1"

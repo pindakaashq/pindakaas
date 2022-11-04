@@ -217,10 +217,12 @@ pub trait ClauseDatabase {
 	/// subsequent encoding effort can be abandoned.
 	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result;
 
+	#[cfg(feature = "label")]
 	fn new_var_with_label(&mut self, _: String) -> Self::Lit {
 		self.new_var()
 	}
 
+	#[cfg(feature = "label")]
 	fn to_label(&self, lit: &Self::Lit) -> String {
 		format!("{:?}", lit)
 	}

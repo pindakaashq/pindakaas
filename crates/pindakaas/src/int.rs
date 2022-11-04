@@ -168,7 +168,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		let xs = dom
 			.into_iter(..)
 			.map(|(v, lit)| {
-				#[cfg(debug_assertions)]
+				#[cfg(feature = "label")]
 				let lbl = format!("{lbl}>={v:?}");
 				(v, lit.unwrap_or_else(|| new_var!(db, lbl)))
 			})
@@ -304,11 +304,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarBin<Lit, C> {
 		let bits = C::zero().leading_zeros() - ub.leading_zeros();
 		Self {
 			xs: (0..bits)
-				.map(|i| {
-					#[cfg(debug_assertions)]
-					let lbl = format!("{}^{}", lbl, i);
-					new_var!(db, lbl)
-				})
+				.map(|_i| new_var!(db, format!("{}^{}", lbl, _i)))
 				.collect(),
 			lb: Constant::new(C::zero()), // TODO support non-zero
 			ub: Constant::new(ub),
@@ -560,7 +556,7 @@ impl<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>
 	Encoder<DB, TernLeConstraint<'a, DB::Lit, C>> for TernLeEncoder
 {
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
-		#[cfg(debug_assertions)]
+		#[cfg(feature = "label")]
 		println!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z);
 		// TODO properly use cmp!
 		let TernLeConstraint { x, y, cmp, z } = tern;

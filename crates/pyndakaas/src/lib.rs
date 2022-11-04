@@ -11,6 +11,9 @@ use num::{One, Zero};
 use pindakaas as base;
 use pyo3::{exceptions::PyArithmeticError, prelude::*};
 
+#[cfg(feature = "label")]
+unimplemented!("The feature `label` is not implemented for pyndakaas crate");
+
 #[pyclass]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Lit(i32);
