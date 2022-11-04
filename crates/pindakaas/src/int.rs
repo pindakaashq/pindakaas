@@ -3,6 +3,7 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
+	helpers::is_powers_of_two,
 	linear::{lex_lesseq_const, log_enc_add, LimitComp, LinExp, Part},
 	trace::{emit_clause, new_var},
 	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
@@ -118,7 +119,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 }
 
 pub(crate) struct ImplicationChainConstraint<Lit: Literal> {
-	lits: Vec<Lit>, // TODO slice?
+	lits: Vec<Lit>,
 }
 
 #[derive(Default)]
@@ -167,10 +168,6 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		self.xs.range().unwrap().end - C::one()
 	}
 
-	fn eq(&self, _: &C) -> Option<Vec<Lit>> {
-		todo!();
-	}
-
 	fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		let v = v.end - C::one();
 		if v <= self.lb() {
@@ -207,7 +204,6 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	}
 }
 
-// TODO maybe C -> PosCoeff<C>
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 	pub(crate) xs: Vec<Lit>,
@@ -226,6 +222,27 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				.collect(),
 			lb: C::zero(), // TODO support non-zero
 			ub,
+			lbl,
+		}
+	}
+
+	pub fn from_terms(
+		terms: Vec<(Lit, PosCoeff<C>)>,
+		lb: PosCoeff<C>,
+		ub: PosCoeff<C>,
+		lbl: String,
+	) -> Self {
+		debug_assert!(is_powers_of_two(
+			terms
+				.iter()
+				.map(|(_, c)| **c)
+				.collect::<Vec<_>>()
+				.as_slice()
+		));
+		Self {
+			xs: terms.into_iter().map(|(l, _)| l).collect(),
+			lb: *lb, // TODO support non-zero
+			ub: *ub,
 			lbl,
 		}
 	}
@@ -260,8 +277,6 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		self.ub
 	}
 
-	// TODO return ref
-	// TODO impl Index
 	fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		num::iter::range_inclusive(
 			std::cmp::max(self.lb(), v.start - C::one()),
@@ -281,10 +296,6 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				.collect::<Vec<_>>()
 		})
 		.collect()
-	}
-
-	fn eq(&self, _: &C) -> Option<Vec<Lit>> {
-		todo!();
 	}
 
 	fn as_lin_exp(&self) -> LinExp<Lit, C> {
@@ -374,7 +385,30 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 					lbl,
 				)
 			}
-			Part::Dom(_terms, _l, _u) => todo!(),
+			Part::Dom(terms, l, u) => {
+				let x_bin =
+					IntVarBin::from_terms(terms.to_vec(), l.clone(), u.clone(), String::from("x"));
+				let x_ord = IntVarOrd::new(
+					db,
+					num::iter::range_inclusive(x_bin.lb(), x_bin.ub())
+						.map(|i| (i..(i + C::one()), None))
+						.collect(),
+					String::from("x"),
+				);
+
+				TernLeEncoder::default()
+					.encode(
+						db,
+						&TernLeConstraint::new(
+							&x_ord.clone().into(),
+							&IntVarEnc::Const(C::zero()),
+							LimitComp::LessEq,
+							&x_bin.into(),
+						),
+					)
+					.unwrap();
+				x_ord
+			}
 		}
 	}
 }
@@ -398,22 +432,6 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 					vec![]
 				} else {
 					vec![vec![]]
-				}
-			}
-		}
-	}
-
-	/// Returns a clause constraining `x==v`, which is None if true and empty if false
-	#[allow(dead_code)]
-	pub(crate) fn eq(&self, v: &C) -> Option<Vec<Lit>> {
-		match self {
-			IntVarEnc::Ord(o) => o.eq(v),
-			IntVarEnc::Bin(b) => b.eq(v),
-			IntVarEnc::Const(c) => {
-				if c == v {
-					None
-				} else {
-					Some(Vec::new())
 				}
 			}
 		}
