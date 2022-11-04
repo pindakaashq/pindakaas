@@ -28,8 +28,14 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 		let xs = lin
 			.terms
 			.iter()
-			.map(|part| -> Box<dyn IntVarEnc<DB::Lit, C>> {
-				Box::new(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone()))
+			.enumerate()
+			.map(|(i, part)| -> Box<dyn IntVarEnc<DB::Lit, C>> {
+				Box::new(IntVarOrd::from_part_using_le_ord(
+					db,
+					part,
+					lin.k.clone(),
+					format!("x_{i}"),
+				))
 			})
 			.sorted_by(|a, b| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();

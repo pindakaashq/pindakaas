@@ -33,8 +33,14 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 		#[allow(clippy::needless_collect)]
 		let xs = lin.terms
 			.iter()
-			.map(|part| -> Box<dyn IntVarEnc<DB::Lit, C>> {
-				Box::new(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone()))
+			.enumerate()
+			.map(|(i, part)| -> Box<dyn IntVarEnc<DB::Lit, C>> {
+				Box::new(IntVarOrd::from_part_using_le_ord(
+					db,
+					part,
+					lin.k.clone(),
+					format!("x_{i}"),
+				))
 			})
 			.collect::<Vec<_>>();
 		let n = xs.len();

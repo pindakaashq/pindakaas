@@ -1,6 +1,7 @@
 use iset::{interval_set, IntervalMap, IntervalSet};
 use itertools::Itertools;
 use std::any::Any;
+use std::fmt;
 use std::ops::Range;
 
 use crate::{
@@ -66,6 +67,47 @@ impl<C: Coefficient> Constant<C> {
 	}
 }
 
+impl fmt::Display for LimitComp {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			LimitComp::Equal => write!(f, "=="),
+			LimitComp::LessEq => write!(f, ">="),
+		}
+	}
+}
+
+impl<C: Coefficient> fmt::Display for Constant<C> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{:?}", self.c)
+	}
+}
+
+impl<Lit: Literal + 'static, C: Coefficient + 'static> fmt::Display for IntVarBin<Lit, C> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(
+			f,
+			"{}:B in {:?}..{:?} ({})",
+			self.lbl,
+			self.lb(),
+			self.ub(),
+			self.lits()
+		)
+	}
+}
+
+impl<Lit: Literal + 'static, C: Coefficient + 'static> fmt::Display for IntVarOrd<Lit, C> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(
+			f,
+			"{}:O in {:?}..{:?} ({})",
+			self.lbl,
+			self.lb(),
+			self.ub(),
+			self.lits()
+		)
+	}
+}
+
 impl<Lit: Literal, C: Coefficient + 'static> IntVarEnc<Lit, C> for Constant<C> {
 	fn dom(&self) -> IntervalSet<C> {
 		interval_set!(self.c..(self.c + C::one()))
@@ -108,6 +150,7 @@ impl<Lit: Literal, C: Coefficient + 'static> IntVarEnc<Lit, C> for Constant<C> {
 #[derive(Debug)]
 pub(crate) struct IntVarOrd<Lit: Literal, C: Coefficient> {
 	xs: IntervalMap<C, Lit>,
+	lbl: String,
 }
 
 impl<Lit: Literal, C: Coefficient> Clone for Box<dyn IntVarEnc<Lit, C>> {
@@ -131,7 +174,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			})
 			.collect::<IntervalMap<_, _>>();
 		debug_assert!(!xs.is_empty());
-		Self { xs }
+		Self { xs, lbl }
 	}
 
 	pub fn _consistency(&self) -> ImplicationChainConstraint<Lit> {
@@ -194,6 +237,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 	fn clone_dyn(&self) -> Box<dyn IntVarEnc<Lit, C>> {
 		Box::new(IntVarOrd {
 			xs: self.xs.clone(),
+			lbl: self.lbl.clone(),
 		})
 	}
 
@@ -251,6 +295,7 @@ pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 	pub(crate) xs: Vec<Lit>,
 	lb: Constant<C>,
 	ub: Constant<C>,
+	lbl: String,
 }
 
 impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarBin<Lit, C> {
@@ -267,6 +312,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarBin<Lit, C> {
 				.collect(),
 			lb: Constant::new(C::zero()), // TODO support non-zero
 			ub: Constant::new(ub),
+			lbl,
 		}
 	}
 
@@ -296,6 +342,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 			xs: self.xs.clone(),
 			lb: self.lb.clone(),
 			ub: self.ub.clone(),
+			lbl: self.lbl.clone(),
 		})
 	}
 
@@ -360,6 +407,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarOrd<Lit, C> {
 		db: &mut DB,
 		xs: &Part<DB::Lit, PosCoeff<C>>,
 		ub: PosCoeff<C>,
+		lbl: String,
 	) -> Self {
 		// TODO add_consistency on coupled leaves (wherever not equal to principal vars)
 		// if add_consistency {
@@ -401,7 +449,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarOrd<Lit, C> {
 						}
 					})
 					.collect();
-				IntVarOrd::new(db, dom, String::from("x"))
+				IntVarOrd::new(db, dom, String::from(lbl))
 			}
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
 			Part::Ic(terms) => {
@@ -420,7 +468,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarOrd<Lit, C> {
 							((prev + C::one())..(coef + C::one()), Some(lit))
 						})
 						.collect(),
-					String::from("x"),
+					String::from(lbl),
 				)
 			}
 			Part::Dom(_terms, _l, _u) => todo!(),
@@ -428,7 +476,9 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarOrd<Lit, C> {
 	}
 }
 
-pub(crate) trait IntVarEnc<Lit: Literal, C: Coefficient>: std::fmt::Debug {
+pub(crate) trait IntVarEnc<Lit: Literal, C: Coefficient>:
+	std::fmt::Debug + std::fmt::Display
+{
 	/// Returns a clause constraining `x>=v`, which is None if true and empty if false
 	fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>>;
 
@@ -452,6 +502,10 @@ pub(crate) trait IntVarEnc<Lit: Literal, C: Coefficient>: std::fmt::Debug {
 	fn into_lin_exp(&self) -> LinExp<Lit, C>;
 
 	fn debug(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "x in {:?}", self.dom())
+	}
+
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "x in {:?}", self.dom())
 	}
 
@@ -506,6 +560,8 @@ impl<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>
 	Encoder<DB, TernLeConstraint<'a, DB::Lit, C>> for TernLeEncoder
 {
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
+		#[cfg(debug_assertions)]
+		println!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z);
 		// TODO properly use cmp!
 		let TernLeConstraint { x, y, cmp, z } = tern;
 		if x.as_any().is::<IntVarOrd<DB::Lit, C>>() && y.as_any().is::<IntVarBin<DB::Lit, C>>() {
@@ -1105,5 +1161,50 @@ pub mod tests {
 		vec![1, -2, 3, -4, -5, 6, -7],
 		vec![1, -2, 3, 4, -5, -6, 7],
 			 ]);
+	}
+
+	#[test]
+	fn bin_plus_ord_eq_bin_test() {
+		let mut db = TestDB::new(0);
+		let (x, y, z) = (
+			get_bin_x(&mut db, 6, true, String::from("x")),
+			get_ord_x(&mut db, interval_set!(1..6), true, String::from("y")),
+			get_bin_x(&mut db, 6, true, String::from("z")),
+		);
+
+		let tern = TernLeConstraint {
+			x: x.as_ref(),
+			y: y.as_ref(),
+			cmp: LimitComp::LessEq,
+			z: z.as_ref(),
+		};
+		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+
+		let x_con = x
+			.as_any()
+			.downcast_ref::<IntVarBin<i32, i32>>()
+			.unwrap()
+			._consistency();
+		let y_con = y
+			.as_any()
+			.downcast_ref::<IntVarOrd<i32, i32>>()
+			.unwrap()
+			._consistency();
+		let z_con = z
+			.as_any()
+			.downcast_ref::<IntVarBin<i32, i32>>()
+			.unwrap()
+			._consistency();
+		let sols = db.generate_solutions(
+			|sol| {
+				tern.check(sol).is_ok()
+					&& x_con.check(sol).is_ok()
+					&& y_con.check(sol).is_ok()
+					&& z_con.check(sol).is_ok()
+			},
+			db.num_var,
+		);
+
+		assert_sol!(db => TernLeEncoder::default(), &tern => sols);
 	}
 }
