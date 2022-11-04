@@ -1,7 +1,7 @@
 use crate::Cnf;
 use itertools::Itertools;
 use num::{One, Zero};
-use std::ops::AddAssign;
+use std::{ffi::c_int, ops::AddAssign};
 
 use crate::{ClauseDatabase, Literal};
 pub struct IpasirSolver {
@@ -9,8 +9,7 @@ pub struct IpasirSolver {
 	last_var: Option<ipasir::Var>,
 }
 impl ClauseDatabase for IpasirSolver {
-	type Lit = i32; // FIXME: Should be ipasir::Lit, but that does not implement Hash
-				// FIXME: was std::ffi::c_int, but I can't import it for some reason
+	type Lit = c_int; // FIXME: Should be ipasir::Lit, but that does not implement Hash
 	fn new_var(&mut self) -> Self::Lit {
 		match self.last_var {
 			None => {
@@ -34,9 +33,7 @@ impl ClauseDatabase for IpasirSolver {
 		Ok(())
 	}
 }
-impl<Lit: Literal + Zero + One + AddAssign + Into<std::ffi::c_int>> From<crate::Cnf<Lit>>
-	for IpasirSolver
-{
+impl<Lit: Literal + Zero + One + AddAssign + Into<c_int>> From<Cnf<Lit>> for IpasirSolver {
 	fn from(cnf: Cnf<Lit>) -> Self {
 		use ipasir::IpasirSolver as SolverProtocol;
 		let mut slv = IpasirSolver {
@@ -51,7 +48,7 @@ impl<Lit: Literal + Zero + One + AddAssign + Into<std::ffi::c_int>> From<crate::
 			slv.slv.add_clause(
 				cl.iter()
 					.map(|lit| {
-						let lit: i32 = lit.clone().into();
+						let lit: c_int = lit.clone().into();
 						ipasir::Lit::try_from(lit).unwrap()
 					})
 					.collect_vec(),
@@ -116,7 +113,7 @@ impl ClauseDatabase for MiniSatSolver {
 	}
 }
 #[cfg(feature = "minisat")]
-impl<Lit: Literal + Zero + One + Into<i32>> From<Cnf<Lit>> for MiniSatSolver {
+impl<Lit: Literal + Zero + One + Into<c_int>> From<Cnf<Lit>> for MiniSatSolver {
 	fn from(cnf: Cnf<Lit>) -> Self {
 		let mut slv = minisat::Solver::new();
 		let mut map = rustc_hash::FxHashMap::default();
@@ -124,7 +121,7 @@ impl<Lit: Literal + Zero + One + Into<i32>> From<Cnf<Lit>> for MiniSatSolver {
 			let cl = cl
 				.iter()
 				.map(|lit| {
-					let ival: i32 = lit.clone().into();
+					let ival: c_int = lit.clone().into();
 					*map.entry(ival).or_insert_with(|| slv.new_var())
 				})
 				.collect_vec();
