@@ -316,6 +316,10 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 			acc + if *lit == *a { self.mult } else { C::zero() } * *coef
 		})
 	}
+
+	pub fn terms(&self) -> std::collections::vec_deque::Iter<'_, (Lit, C)> {
+		self.terms.iter()
+	}
 }
 
 impl<Lit: Literal, C: Coefficient> Default for LinExp<Lit, C> {
