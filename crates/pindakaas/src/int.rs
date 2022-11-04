@@ -999,109 +999,32 @@ pub mod tests {
 		};
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
-		// let x_con = x
-		// 	.as_any()
-		// 	.downcast_ref::<IntVarOrd<i32, i32>>()
-		// 	.unwrap()
-		// 	._consistency();
-		// let y_con = y
-		// 	.as_any()
-		// 	.downcast_ref::<IntVarOrd<i32, i32>>()
-		// 	.unwrap()
-		// 	._consistency();
-		// let z_con = z
-		// 	.as_any()
-		// 	.downcast_ref::<IntVarBin<i32, i32>>()
-		// 	.unwrap()
-		// 	._consistency();
-		// db.generate_solutions(
-		// 	|sol| {
-		// 		tern.check(sol).is_ok()
-		// 			&& x_con.check(sol).is_ok()
-		// 			&& y_con.check(sol).is_ok()
-		// 			&& z_con.check(sol).is_ok()
-		// 	},
-		// 	db.num_var,
-		// );
+		let x_con = x
+			.as_any()
+			.downcast_ref::<IntVarOrd<i32, i32>>()
+			.unwrap()
+			._consistency();
+		let y_con = y
+			.as_any()
+			.downcast_ref::<IntVarOrd<i32, i32>>()
+			.unwrap()
+			._consistency();
+		let z_con = z
+			.as_any()
+			.downcast_ref::<IntVarBin<i32, i32>>()
+			.unwrap()
+			._consistency();
+		let sols = db.generate_solutions(
+			|sol| {
+				tern.check(sol).is_ok()
+					&& x_con.check(sol).is_ok()
+					&& y_con.check(sol).is_ok()
+					&& z_con.check(sol).is_ok()
+			},
+			db.num_var,
+		);
 
-		assert_sol!(db => TernLeEncoder::default(), &tern =>
-		vec![
-		  vec![-1, -2, -3, -4, -5, -6, -7, 8],
-		  vec![-1, -2, -3, -4, -5, -6, 7, -8],
-		  vec![-1, -2, -3, -4, -5, -6, 7, 8],
-		  vec![-1, -2, -3, -4, -5, 6, -7, -8],
-		  vec![-1, -2, -3, -4, -5, 6, -7, 8],
-		  vec![-1, -2, -3, -4, -5, 6, 7, -8],
-		  vec![-1, -2, -3, -4, 5, -6, -7, -8],
-		  vec![-1, -2, -3, -4, 5, -6, -7, 8],
-		  vec![-1, -2, -3, -4, 5, -6, 7, -8],
-		  vec![-1, -2, -3, -4, 5, 6, -7, -8],
-		  vec![-1, -2, -3, -4, 5, 6, -7, 8],
-		  vec![-1, -2, -3, -4, 5, 6, 7, -8],
-		  vec![-1, -2, 3, -4, -5, -6, -7, 8],
-		  vec![-1, -2, 3, -4, -5, -6, 7, -8],
-		  vec![-1, -2, 3, -4, -5, -6, 7, 8],
-		  vec![-1, -2, 3, -4, -5, 6, -7, -8],
-		  vec![-1, -2, 3, -4, -5, 6, -7, 8],
-		  vec![-1, -2, 3, -4, -5, 6, 7, -8],
-		  vec![-1, -2, 3, -4, 5, -6, -7, 8],
-		  vec![-1, -2, 3, -4, 5, -6, 7, -8],
-		  vec![-1, -2, 3, -4, 5, 6, -7, -8],
-		  vec![-1, -2, 3, -4, 5, 6, -7, 8],
-		  vec![-1, -2, 3, -4, 5, 6, 7, -8],
-		  vec![-1, -2, 3, 4, -5, -6, -7, 8],
-		  vec![-1, -2, 3, 4, -5, -6, 7, -8],
-		  vec![-1, -2, 3, 4, -5, -6, 7, 8],
-		  vec![-1, -2, 3, 4, -5, 6, -7, 8],
-		  vec![-1, -2, 3, 4, -5, 6, 7, -8],
-		  vec![-1, -2, 3, 4, 5, -6, -7, 8],
-		  vec![-1, -2, 3, 4, 5, -6, 7, -8],
-		  vec![-1, -2, 3, 4, 5, 6, -7, 8],
-		  vec![-1, -2, 3, 4, 5, 6, 7, -8],
-		  vec![1, -2, -3, -4, -5, -6, -7, 8],
-		  vec![1, -2, -3, -4, -5, -6, 7, -8],
-		  vec![1, -2, -3, -4, -5, -6, 7, 8],
-		  vec![1, -2, -3, -4, -5, 6, -7, -8],
-		  vec![1, -2, -3, -4, -5, 6, -7, 8],
-		  vec![1, -2, -3, -4, -5, 6, 7, -8],
-		  vec![1, -2, -3, -4, 5, -6, -7, 8],
-		  vec![1, -2, -3, -4, 5, -6, 7, -8],
-		  vec![1, -2, -3, -4, 5, 6, -7, -8],
-		  vec![1, -2, -3, -4, 5, 6, -7, 8],
-		  vec![1, -2, -3, -4, 5, 6, 7, -8],
-		  vec![1, -2, 3, -4, -5, -6, -7, 8],
-		  vec![1, -2, 3, -4, -5, -6, 7, -8],
-		  vec![1, -2, 3, -4, -5, -6, 7, 8],
-		  vec![1, -2, 3, -4, -5, 6, -7, 8],
-		  vec![1, -2, 3, -4, -5, 6, 7, -8],
-		  vec![1, -2, 3, -4, 5, -6, -7, 8],
-		  vec![1, -2, 3, -4, 5, -6, 7, -8],
-		  vec![1, -2, 3, -4, 5, 6, -7, -8],
-		  vec![1, -2, 3, -4, 5, 6, -7, 8],
-		  vec![1, -2, 3, -4, 5, 6, 7, -8],
-		  vec![1, -2, 3, 4, -5, -6, -7, 8],
-		  vec![1, -2, 3, 4, -5, -6, 7, 8],
-		  vec![1, -2, 3, 4, -5, 6, -7, 8],
-		  vec![1, -2, 3, 4, -5, 6, 7, -8],
-		  vec![1, -2, 3, 4, 5, -6, -7, 8],
-		  vec![1, -2, 3, 4, 5, -6, 7, -8],
-		  vec![1, -2, 3, 4, 5, 6, -7, 8],
-		  vec![1, -2, 3, 4, 5, 6, 7, -8],
-		  vec![1, 2, -3, -4, -5, -6, -7, 8],
-		  vec![1, 2, -3, -4, -5, -6, 7, 8],
-		  vec![1, 2, -3, -4, -5, 6, -7, 8],
-		  vec![1, 2, -3, -4, 5, -6, -7, 8],
-		  vec![1, 2, -3, -4, 5, 6, -7, 8],
-		  vec![1, 2, -3, -4, 5, 6, 7, -8],
-		  vec![1, 2, 3, -4, -5, -6, -7, 8],
-		  vec![1, 2, 3, -4, -5, -6, 7, 8],
-		  vec![1, 2, 3, -4, -5, 6, -7, 8],
-		  vec![1, 2, 3, -4, 5, -6, -7, 8],
-		  vec![1, 2, 3, -4, 5, 6, -7, 8],
-		  vec![1, 2, 3, 4, -5, -6, 7, 8],
-		  vec![1, 2, 3, 4, -5, 6, -7, 8],
-		  vec![1, 2, 3, 4, 5, 6, -7, 8],
-						]);
+		assert_sol!(db => TernLeEncoder::default(), &tern => sols);
 	}
 
 	#[test]
@@ -1136,7 +1059,7 @@ pub mod tests {
 			.downcast_ref::<IntVarBin<i32, i32>>()
 			.unwrap()
 			._consistency();
-		db.generate_solutions(
+		let sols = db.generate_solutions(
 			|sol| {
 				tern.check(sol).is_ok()
 					&& x_con.check(sol).is_ok()
@@ -1146,22 +1069,41 @@ pub mod tests {
 			db.num_var,
 		);
 
-		assert_sol!(db => TernLeEncoder::default(), &tern =>
-		vec![
-		vec![-1, -2, -3, -4, -5, -6, -7],
-		vec![-1, -2, -3, 4, -5, 6, -7],
-		vec![-1, -2, 3, -4, 5, -6, -7],
-		vec![-1, -2, 3, 4, 5, 6, -7],
-		vec![-1, 2, -3, -4, -5, 6, -7],
-		vec![-1, 2, -3, 4, -5, -6, 7],
-		vec![-1, 2, 3, -4, 5, 6, -7],
-		vec![-1, 2, 3, 4, 5, -6, 7],
-		vec![1, -2, -3, -4, 5, -6, -7],
-		vec![1, -2, -3, 4, 5, 6, -7],
-		vec![1, -2, 3, -4, -5, 6, -7],
-		vec![1, -2, 3, 4, -5, -6, 7],
-			 ]);
+		assert_sol!(db => TernLeEncoder::default(), &tern => sols);
 	}
+
+	// || [crates/pindakaas/src/int.rs:511] &tern = TernLeConstraint {
+	// ||     x: IntVarBin {
+	// ||         xs: [
+	// ||             4,
+	// ||             5,
+	// ||             6,
+	// ||         ],
+	// ||         lb: Constant {
+	// ||             c: 0,
+	// ||         },
+	// ||         ub: Constant {
+	// ||             c: 6,
+	// ||         },
+	// ||     },
+	// ||     y: IntVarOrd {
+	// ||         xs: {1..6 => 3},
+	// ||     },
+	// ||     cmp: LessEq,
+	// ||     z: IntVarBin {
+	// ||         xs: [
+	// ||             7,
+	// ||             8,
+	// ||             9,
+	// ||         ],
+	// ||         lb: Constant {
+	// ||             c: 0,
+	// ||         },
+	// ||         ub: Constant {
+	// ||             c: 6,
+	// ||         },
+	// ||     },
+	// || }
 
 	#[test]
 	fn bin_plus_ord_eq_bin_test() {
