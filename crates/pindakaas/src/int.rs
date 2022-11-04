@@ -5,6 +5,7 @@ use std::fmt;
 use std::ops::Range;
 
 use crate::{
+	helpers::is_powers_of_two,
 	linear::{log_enc_add, x_bin_le, LimitComp, LinExp, Part},
 	new_var, CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
 	Unsatisfiable,
@@ -55,7 +56,6 @@ impl<Lit: Literal> Neg for LitOrConst<Lit> {
 	}
 }
 
-// TODO maybe C -> PosCoeff<C>
 #[derive(Clone, Debug)]
 pub(crate) struct Constant<C: Coefficient> {
 	pub(crate) c: C,
@@ -117,14 +117,6 @@ impl<Lit: Literal, C: Coefficient + 'static> IntVarEnc<Lit, C> for Constant<C> {
 		Box::new(self.clone())
 	}
 
-	fn eq(&self, v: &C) -> Option<Vec<Lit>> {
-		if &self.c == v {
-			None
-		} else {
-			Some(vec![])
-		}
-	}
-
 	fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		if self.c >= v.end - C::one() {
 			vec![]
@@ -146,7 +138,6 @@ impl<Lit: Literal, C: Coefficient + 'static> IntVarEnc<Lit, C> for Constant<C> {
 	}
 }
 
-// TODO maybe C -> PosCoeff<C>
 #[derive(Debug)]
 pub(crate) struct IntVarOrd<Lit: Literal, C: Coefficient> {
 	xs: IntervalMap<C, Lit>,
@@ -189,7 +180,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 }
 
 pub(crate) struct ImplicationChainConstraint<Lit: Literal> {
-	lits: Vec<Lit>, // TODO slice?
+	lits: Vec<Lit>,
 }
 
 #[derive(Default)]
@@ -245,10 +236,6 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 		self.xs.range().unwrap().end - C::one()
 	}
 
-	fn eq(&self, _: &C) -> Option<Vec<Lit>> {
-		todo!();
-	}
-
 	fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		let v = v.end - C::one();
 		if v <= self.lb() {
@@ -289,7 +276,6 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 	}
 }
 
-// TODO maybe C -> PosCoeff<C>
 #[derive(Clone, Debug)]
 pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 	pub(crate) xs: Vec<Lit>,
@@ -308,6 +294,27 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarBin<Lit, C> {
 				.collect(),
 			lb: Constant::new(C::zero()), // TODO support non-zero
 			ub: Constant::new(ub),
+			lbl,
+		}
+	}
+
+	pub fn from_terms(
+		terms: Vec<(Lit, PosCoeff<C>)>,
+		lb: PosCoeff<C>,
+		ub: PosCoeff<C>,
+		lbl: String,
+	) -> Self {
+		debug_assert!(is_powers_of_two(
+			terms
+				.iter()
+				.map(|(_, c)| **c)
+				.collect::<Vec<_>>()
+				.as_slice()
+		));
+		Self {
+			xs: terms.into_iter().map(|(l, _)| l).collect(),
+			lb: Constant::new(*lb), // TODO support non-zero
+			ub: Constant::new(*ub),
 			lbl,
 		}
 	}
@@ -350,8 +357,6 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 		self.ub.c
 	}
 
-	// TODO return ref
-	// TODO impl Index
 	fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		num::iter::range_inclusive(
 			std::cmp::max(self.lb(), v.start - C::one()),
@@ -371,10 +376,6 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 				.collect::<Vec<_>>()
 		})
 		.collect()
-	}
-
-	fn eq(&self, _: &C) -> Option<Vec<Lit>> {
-		todo!();
 	}
 
 	fn ref_into_lin_exp(&self) -> LinExp<Lit, C> {
@@ -399,7 +400,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 
 impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarOrd<Lit, C> {
 	/// Constructs IntVar `y` for linear expression `xs` so that ∑ xs ≦ y, using order encoding
-	pub fn from_part_using_le_ord<DB: ClauseDatabase<Lit = Lit>>(
+	pub fn from_part_using_le_ord<DB: ClauseDatabase<Lit = Lit> + 'static>(
 		db: &mut DB,
 		xs: &Part<DB::Lit, PosCoeff<C>>,
 		ub: PosCoeff<C>,
@@ -467,7 +468,30 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarOrd<Lit, C> {
 					lbl,
 				)
 			}
-			Part::Dom(_terms, _l, _u) => todo!(),
+			Part::Dom(terms, l, u) => {
+				let x_bin =
+					IntVarBin::from_terms(terms.to_vec(), l.clone(), u.clone(), String::from("x"));
+				let x_ord = IntVarOrd::new(
+					db,
+					num::iter::range_inclusive(x_bin.lb(), x_bin.ub())
+						.map(|i| (i..(i + C::one()), None))
+						.collect(),
+					String::from("x"),
+				);
+
+				TernLeEncoder::default()
+					.encode(
+						db,
+						&TernLeConstraint::new(
+							&x_ord,
+							&Constant::new(C::zero()),
+							LimitComp::LessEq,
+							&x_bin,
+						),
+					)
+					.unwrap();
+				x_ord
+			}
 		}
 	}
 }
@@ -477,9 +501,6 @@ pub(crate) trait IntVarEnc<Lit: Literal, C: Coefficient>:
 {
 	/// Returns a clause constraining `x>=v`, which is None if true and empty if false
 	fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>>;
-
-	/// Returns a clause constraining `x==v`, which is None if true and empty if false
-	fn eq(&self, v: &C) -> Option<Vec<Lit>>;
 
 	/// Returns a partitioned domain
 	fn dom(&self) -> IntervalSet<C>;

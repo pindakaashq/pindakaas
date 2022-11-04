@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
+	helpers::is_powers_of_two,
 	linear::{Constraint, LimitComp, Part, PosCoeff},
 	Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, LinVariant, Linear,
 	LinearConstraint, Literal, Result, Unsatisfiable,
@@ -45,15 +46,11 @@ impl LinearAggregator {
 					Constraint::AtMostOne => partition.push(Part::Amo(terms)),
 					Constraint::ImplicationChain => partition.push(Part::Ic(terms)),
 					Constraint::Domain { lb, ub } => {
-						let coef = terms[0].1;
-						let still_log = |terms: &Vec<(DB::Lit, C)>| {
-							terms
-								.iter()
-								.enumerate()
-								.all(|(i, (_, c))| c == &(num::pow(C::from(2).unwrap(), i) * coef))
-						};
 						// Domain constraint can only be enforced when PB is coef*(x1 + 2x2 + 4x3 + ...), where l <= x1 + 2*x2 + 4*x3 + ... <= u
-						if terms.len() == con.1 && still_log(&terms) {
+						if terms.len() == con.1
+							&& is_powers_of_two(
+								terms.iter().map(|(_, c)| *c).collect::<Vec<_>>().as_slice(),
+							) {
 							// Adjust the bounds to account for coef
 							let (lb, ub) = if lin.cmp == Comparator::GreaterEq {
 								// 0..range can be encoded by the bits multiplied by coef

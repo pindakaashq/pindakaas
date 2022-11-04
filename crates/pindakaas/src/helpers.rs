@@ -1,4 +1,13 @@
-use crate::{CheckError, Checker, ClauseDatabase, Literal, Result, Unsatisfiable};
+use crate::{CheckError, Checker, ClauseDatabase, Coefficient, Literal, Result, Unsatisfiable};
+
+/// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
+pub fn is_powers_of_two<C: Coefficient>(coefs: &[C]) -> bool {
+	let mult = coefs[0];
+	coefs
+		.iter()
+		.enumerate()
+		.all(|(i, c)| c == &(num::pow(C::from(2).unwrap(), i) * mult))
+}
 
 /// Encode the constraint lits[0] ⊕ ... ⊕ lits[n].
 /// # Warning
