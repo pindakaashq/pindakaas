@@ -770,10 +770,6 @@ pub mod tests {
 	fn bin_geq_test() {
 		let mut db = TestDB::new(0);
 		let x = get_bin_x::<_, i32>(&mut db, 12, true, "x".to_string());
-		let x_con = match &x {
-			IntVarEnc::Bin(b) => b._consistency(),
-			_ => unreachable!(),
-		};
 		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
 
 		assert_eq!(x.lits(), 4);
@@ -798,7 +794,16 @@ pub mod tests {
 		db.num_var = x.lits() as i32;
 
 		db.generate_solutions(
-			|sol| tern.check(sol).is_ok() && x_con.get().check(sol).is_ok(),
+			|sol| {
+				tern.check(sol).is_ok()
+					&& match &x {
+						IntVarEnc::Bin(b) => b._consistency(),
+						_ => unreachable!(),
+					}
+					.get()
+					.check(sol)
+					.is_ok()
+			},
 			db.num_var,
 		);
 
@@ -897,27 +902,30 @@ pub mod tests {
 		};
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
-		let x_con = match &x {
-			IntVarEnc::Ord(o) => o._consistency(),
-			_ => unreachable!(),
-		};
-		let y_con = match &y {
-			IntVarEnc::Ord(o) => o._consistency(),
-			_ => unreachable!(),
-		};
-		let z_con = match &z {
-			IntVarEnc::Ord(o) => o._consistency(),
-			_ => unreachable!(),
-		};
-		db.generate_solutions(
-			|sol| {
-				tern.check(sol).is_ok()
-					&& x_con.check(sol).is_ok()
-					&& y_con.check(sol).is_ok()
-					&& z_con.check(sol).is_ok()
-			},
-			db.num_var,
-		);
+		// let sols = db.generate_solutions(
+		// 	|sol| {
+		// 		tern.check(sol).is_ok()
+		// 			&& x.as_any()
+		// 				.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 				.unwrap()
+		// 				._consistency()
+		// 				.check(sol)
+		// 				.is_ok() && y
+		// 			.as_any()
+		// 			.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 			.unwrap()
+		// 			._consistency()
+		// 			.check(sol)
+		// 			.is_ok() && z
+		// 			.as_any()
+		// 			.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 			.unwrap()
+		// 			._consistency()
+		// 			.check(sol)
+		// 			.is_ok()
+		// 	},
+		// 	db.num_var,
+		// );
 
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
@@ -953,22 +961,24 @@ pub mod tests {
 		};
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
-		let x_con = match &x {
-			IntVarEnc::Ord(o) => o._consistency(),
-			_ => unreachable!(),
-		};
-		let z_con = match &z {
-			IntVarEnc::Bin(b) => b._consistency(),
-			_ => unreachable!(),
-		};
-		db.generate_solutions(
-			|sol| {
-				tern.check(sol).is_ok()
-					&& x_con.check(sol).is_ok()
-					&& z_con.get().check(sol).is_ok()
-			},
-			db.num_var,
-		);
+		// let sols = db.generate_solutions(
+		// 	|sol| {
+		// 		tern.check(sol).is_ok()
+		// 			&& x.as_any()
+		// 				.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 				.unwrap()
+		// 				._consistency()
+		// 				.check(sol)
+		// 				.is_ok() && z
+		// 			.as_any()
+		// 			.downcast_ref::<IntVarBin<i32, i32>>()
+		// 			.unwrap()
+		// 			._consistency()
+		// 			.check(sol)
+		// 			.is_ok()
+		// 	},
+		// 	db.num_var,
+		// );
 
 		assert_sol!(db => TernLeEncoder::default(), &tern => vec![
 		vec![-1, -2, -3, -4, -5],
@@ -1007,29 +1017,52 @@ pub mod tests {
 		};
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
-		let x_con = match &x {
-			IntVarEnc::Ord(o) => o._consistency(),
-			_ => unreachable!(),
-		};
-		let y_con = match &y {
-			IntVarEnc::Ord(o) => o._consistency(),
-			_ => unreachable!(),
-		};
-		let z_con = match &z {
-			IntVarEnc::Bin(b) => b._consistency(),
-			_ => unreachable!(),
-		};
-		let sols = db.generate_solutions(
-			|sol| {
-				tern.check(sol).is_ok()
-					&& x_con.check(sol).is_ok()
-					&& y_con.check(sol).is_ok()
-					&& z_con.get().check(sol).is_ok()
-			},
-			db.num_var,
-		);
+		// let sols = db.generate_solutions(
+		// 	|sol| {
+		// 		tern.check(sol).is_ok()
+		// 			&& x.as_any()
+		// 				.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 				.unwrap()
+		// 				._consistency()
+		// 				.check(sol)
+		// 				.is_ok() && y
+		// 			.as_any()
+		// 			.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 			.unwrap()
+		// 			._consistency()
+		// 			.check(sol)
+		// 			.is_ok() && z
+		// 			.as_any()
+		// 			.downcast_ref::<IntVarBin<i32, i32>>()
+		// 			.unwrap()
+		// 			._consistency()
+		// 			.check(sol)
+		// 			.is_ok()
+		// 	},
+		// 	db.num_var,
+		// );
 
-		assert_sol!(db => TernLeEncoder::default(), &tern => sols);
+		assert_sol!(db => TernLeEncoder::default(), &tern =>
+		vec![
+		  vec![-1, -2, -3, -4, -5],
+		  vec![-1, -2, 3, -4, -5],
+		  vec![-1, -2, -3, 4, -5],
+		  vec![1, -2, -3, 4, -5],
+		  vec![-1, -2, 3, 4, -5],
+		  vec![1, -2, 3, 4, -5],
+		  vec![-1, 2, 3, 4, -5],
+		  vec![-1, -2, -3, -4, 5],
+		  vec![1, -2, -3, -4, 5],
+		  vec![-1, 2, -3, -4, 5],
+		  vec![-1, -2, 3, -4, 5],
+		  vec![1, -2, 3, -4, 5],
+		  vec![-1, 2, 3, -4, 5],
+		  vec![1, 2, 3, -4, 5],
+		  vec![-1, -2, -3, 4, 5],
+		  vec![1, -2, -3, 4, 5],
+		  vec![-1, 2, -3, 4, 5],
+		  vec![1, 2, -3, 4, 5],
+		]);
 	}
 
 	#[test]
@@ -1049,63 +1082,48 @@ pub mod tests {
 		};
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
-		let x_con = match &x {
-			IntVarEnc::Bin(b) => b._consistency(),
-			_ => unreachable!(),
-		};
-		let y_con = match &y {
-			IntVarEnc::Bin(b) => b._consistency(),
-			_ => unreachable!(),
-		};
-		let z_con = match &z {
-			IntVarEnc::Bin(b) => b._consistency(),
-			_ => unreachable!(),
-		};
-		let sols = db.generate_solutions(
-			|sol| {
-				tern.check(sol).is_ok()
-					&& x_con.get().check(sol).is_ok()
-					&& y_con.get().check(sol).is_ok()
-					&& z_con.get().check(sol).is_ok()
-			},
-			db.num_var,
+		// let sols = db.generate_solutions(
+		// 	|sol| {
+		// 		tern.check(sol).is_ok()
+		// 			&& x.as_any()
+		// 				.downcast_ref::<IntVarBin<i32, i32>>()
+		// 				.unwrap()
+		// 				._consistency()
+		// 				.check(sol)
+		// 				.is_ok() && y
+		// 			.as_any()
+		// 			.downcast_ref::<IntVarBin<i32, i32>>()
+		// 			.unwrap()
+		// 			._consistency()
+		// 			.check(sol)
+		// 			.is_ok() && z
+		// 			.as_any()
+		// 			.downcast_ref::<IntVarBin<i32, i32>>()
+		// 			.unwrap()
+		// 			._consistency()
+		// 			.check(sol)
+		// 			.is_ok()
+		// 	},
+		// 	db.num_var,
+		// );
+
+		assert_sol!(db => TernLeEncoder::default(), &tern =>
+		vec![
+		  vec![-1, -2, -3, -4, -5, -6, -7],
+		  vec![1, -2, -3, -4, 5, -6, -7],
+		  vec![-1, -2, 3, -4, 5, -6, -7],
+		  vec![-1, 2, -3, -4, -5, 6, -7],
+		  vec![1, -2, 3, -4, -5, 6, -7],
+		  vec![-1, -2, -3, 4, -5, 6, -7],
+		  vec![-1, 2, 3, -4, 5, 6, -7],
+		  vec![1, -2, -3, 4, 5, 6, -7],
+		  vec![-1, -2, 3, 4, 5, 6, -7],
+		  vec![-1, 2, -3, 4, -5, -6, 7],
+		  vec![1, -2, 3, 4, -5, -6, 7],
+		  vec![-1, 2, 3, 4, 5, -6, 7],
+		]
 		);
-
-		assert_sol!(db => TernLeEncoder::default(), &tern => sols);
 	}
-
-	// || [crates/pindakaas/src/int.rs:511] &tern = TernLeConstraint {
-	// ||     x: IntVarBin {
-	// ||         xs: [
-	// ||             4,
-	// ||             5,
-	// ||             6,
-	// ||         ],
-	// ||         lb: Constant {
-	// ||             c: 0,
-	// ||         },
-	// ||         ub: Constant {
-	// ||             c: 6,
-	// ||         },
-	// ||     },
-	// ||     y: IntVarOrd {
-	// ||         xs: {1..6 => 3},
-	// ||     },
-	// ||     cmp: LessEq,
-	// ||     z: IntVarBin {
-	// ||         xs: [
-	// ||             7,
-	// ||             8,
-	// ||             9,
-	// ||         ],
-	// ||         lb: Constant {
-	// ||             c: 0,
-	// ||         },
-	// ||         ub: Constant {
-	// ||             c: 6,
-	// ||         },
-	// ||     },
-	// || }
 
 	#[test]
 	fn bin_plus_ord_eq_bin_test() {
@@ -1124,28 +1142,65 @@ pub mod tests {
 		};
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
-		let x_con = match &x {
-			IntVarEnc::Bin(b) => b._consistency(),
-			_ => unreachable!(),
-		};
-		let y_con = match &y {
-			IntVarEnc::Ord(o) => o._consistency(),
-			_ => unreachable!(),
-		};
-		let z_con = match &z {
-			IntVarEnc::Bin(b) => b._consistency(),
-			_ => unreachable!(),
-		};
-		let sols = db.generate_solutions(
-			|sol| {
-				tern.check(sol).is_ok()
-					&& x_con.get().check(sol).is_ok()
-					&& y_con.check(sol).is_ok()
-					&& z_con.get().check(sol).is_ok()
-			},
-			db.num_var,
-		);
+		// let sols = db.generate_solutions(
+		// 	|sol| {
+		// 		tern.check(sol).is_ok()
+		// 			&& x.as_any()
+		// 				.downcast_ref::<IntVarBin<i32, i32>>()
+		// 				.unwrap()
+		// 				._consistency()
+		// 				.check(sol)
+		// 				.is_ok() && y
+		// 			.as_any()
+		// 			.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 			.unwrap()
+		// 			._consistency()
+		// 			.check(sol)
+		// 			.is_ok() && z
+		// 			.as_any()
+		// 			.downcast_ref::<IntVarBin<i32, i32>>()
+		// 			.unwrap()
+		// 			._consistency()
+		// 			.check(sol)
+		// 			.is_ok()
+		// 	},
+		// 	db.num_var,
+		// );
 
-		assert_sol!(db => TernLeEncoder::default(), &tern => sols);
+		assert_sol!(db => TernLeEncoder::default(), &tern =>
+		vec![
+		  vec![-1, -2, -3, -4, -5, -6, -7],
+		  vec![-1, -2, -3, -4, 5, -6, -7],
+		  vec![1, -2, -3, -4, 5, -6, -7],
+		  vec![-1, -2, -3, -4, -5, 6, -7],
+		  vec![1, -2, -3, -4, -5, 6, -7],
+		  vec![-1, 2, -3, -4, -5, 6, -7],
+		  vec![-1, -2, -3, -4, 5, 6, -7],
+		  vec![1, -2, -3, -4, 5, 6, -7],
+		  vec![-1, 2, -3, -4, 5, 6, -7],
+		  vec![1, 2, -3, -4, 5, 6, -7],
+		  vec![-1, -2, -3, -4, -5, -6, 7],
+		  vec![1, -2, -3, -4, -5, -6, 7],
+		  vec![-1, 2, -3, -4, -5, -6, 7],
+		  vec![1, 2, -3, -4, -5, -6, 7],
+		  vec![-1, -2, 3, -4, -5, -6, 7],
+		  vec![-1, -2, -3, -4, 5, -6, 7],
+		  vec![1, -2, -3, -4, 5, -6, 7],
+		  vec![-1, 2, -3, -4, 5, -6, 7],
+		  vec![1, 2, -3, -4, 5, -6, 7],
+		  vec![-1, -2, 3, -4, 5, -6, 7],
+		  vec![1, -2, 3, -4, 5, -6, 7],
+		  vec![-1, -2, -3, 4, 5, -6, 7],
+		  vec![-1, -2, -3, -4, -5, 6, 7],
+		  vec![1, -2, -3, -4, -5, 6, 7],
+		  vec![-1, 2, -3, -4, -5, 6, 7],
+		  vec![1, 2, -3, -4, -5, 6, 7],
+		  vec![-1, -2, 3, -4, -5, 6, 7],
+		  vec![1, -2, 3, -4, -5, 6, 7],
+		  vec![-1, 2, 3, -4, -5, 6, 7],
+		  vec![-1, -2, -3, 4, -5, 6, 7],
+		  vec![1, -2, -3, 4, -5, 6, 7],
+		]
+		);
 	}
 }

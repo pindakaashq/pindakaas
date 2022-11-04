@@ -282,11 +282,7 @@ pub mod tests {
 			self
 		}
 
-		pub fn _generate_solutions(&self, _: fn(&[i32]) -> bool) -> Vec<Vec<i32>> {
-			todo!();
-		}
-
-		#[allow(dead_code)] // TODO
+		#[allow(dead_code)]
 		pub fn generate_solutions(&self, check: impl Fn(&[i32]) -> bool, n: i32) -> Vec<Vec<i32>> {
 			if n > 32 {
 				unimplemented!(
@@ -312,7 +308,7 @@ pub mod tests {
 
 		pub fn with_check(mut self, checker: fn(&[i32]) -> bool) -> TestDB {
 			if self.solutions.is_none() && self.num_var <= GENERATE_EXPECTED_SOLUTIONS {
-				let solutions = self._generate_solutions(checker);
+				let solutions = self.generate_solutions(checker, self.num_var);
 				self.expect_solutions(solutions)
 			} else {
 				self.check = Some(checker);
