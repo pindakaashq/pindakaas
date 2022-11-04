@@ -131,22 +131,26 @@ impl LinearAggregator {
 						if min_coef.is_negative() {
 							let q = -*min_coef;
 
-							// this term will cancel out later when we add q*min_lit to the LHS
-							terms.remove(min_index);
-
-							// add aux var y and constrain y <-> ( ~x1 /\ ~x2 /\ ... )
+							// add aux var y and constrain y <-> ( ~x1 /\ ~x2 /\ .. )
 							let y = db.new_var();
+
+                            // ~x1 /\ ~x2 /\ .. -> y == x1 \/ x2 \/ .. \/ y
 							db.add_clause(
 								&terms
 									.iter()
-									.map(|(lit, _)| lit.negate())
+									.map(|(lit, _)| lit.clone())
 									.chain(std::iter::once(y.clone()))
 									.collect::<Vec<DB::Lit>>(),
 							)
 							.unwrap();
+
+                            // y -> ( ~x1 /\ ~x2 /\ .. ) == ~y \/ ~x1, ~y \/ ~x2, ..
 							for lit in terms.iter().map(|tup| tup.0.clone()) {
-								db.add_clause(&[y.negate(), lit]).unwrap();
+								db.add_clause(&[y.negate(), lit.negate()]).unwrap();
 							}
+
+							// this term will cancel out later when we add q*min_lit to the LHS
+							terms.remove(min_index);
 
 							// since y + x1 + x2 + ... = 1 (exactly-one), we have q*y + q*x1 + q*x2 + ... = q
 							// after adding term 0*y, we can add q*y + q*x1 + q*x2 + ... on the LHS, and q on the RHS
@@ -203,21 +207,6 @@ impl LinearAggregator {
 							u.into(),
 						)]
 					}
-				}
-			})
-			.map(|part| {
-				// This step has to come *after* Amo normalization
-				let filter_zero_coefficients = |terms: Vec<(DB::Lit, PosCoeff<C>)>| -> Vec<(DB::Lit, PosCoeff<C>)> {
-					terms
-						.into_iter()
-						.filter(|(_, coef)| **coef != C::zero())
-						.collect()
-				};
-
-				match part {
-					Part::Amo(terms) => Part::Amo(filter_zero_coefficients(terms)),
-					Part::Ic(terms) => Part::Ic(filter_zero_coefficients(terms)),
-					Part::Dom(terms, l, u) => Part::Dom(filter_zero_coefficients(terms), l, u),
 				}
 			})
 			.filter(|part| part.iter().next().is_some()) // filter out empty groups
