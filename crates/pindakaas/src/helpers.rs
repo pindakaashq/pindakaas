@@ -423,21 +423,7 @@ pub mod tests {
 
 			#[cfg(feature = "label")]
 			{
-				let lit_as_string = |lit: &Self::Lit| -> String {
-					let polarity = if lit.is_positive() { "" } else { "-" };
-					let var = lit.abs();
-					format!(
-						"{}{}, ",
-						polarity,
-						self.labels
-							.get(&var)
-							.unwrap_or(&format!("_{}", var))
-							.to_string()
-					)
-				};
-
-				let out = cl.iter().map(lit_as_string).collect::<String>();
-				println!("{}\t\t({:?})", out, cl);
+				println!("{}\t\t({:?})", cl.iter().map(self::to_label).join(","), cl);
 			}
 
 			cl.sort_by(|a, b| a.abs().cmp(&b.abs()));
