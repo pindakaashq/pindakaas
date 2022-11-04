@@ -133,7 +133,7 @@ impl<Lit: Literal, C: Coefficient + 'static> IntVarEnc<Lit, C> for Constant<C> {
 		}
 	}
 
-	fn into_lin_exp(&self) -> LinExp<Lit, C> {
+	fn ref_into_lin_exp(&self) -> LinExp<Lit, C> {
 		LinExp::new().add_constant(self.c)
 	}
 
@@ -263,7 +263,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 		}
 	}
 
-	fn into_lin_exp(&self) -> LinExp<Lit, C> {
+	fn ref_into_lin_exp(&self) -> LinExp<Lit, C> {
 		let mut acc = self.lb();
 		LinExp::new()
 			.add_chain(
@@ -377,7 +377,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarEnc<Lit, C> for Int
 		todo!();
 	}
 
-	fn into_lin_exp(&self) -> LinExp<Lit, C> {
+	fn ref_into_lin_exp(&self) -> LinExp<Lit, C> {
 		let mut exp = LinExp::new();
 		let mut k = C::one();
 		let two = C::one() + C::one();
@@ -445,7 +445,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarOrd<Lit, C> {
 						}
 					})
 					.collect();
-				IntVarOrd::new(db, dom, String::from(lbl))
+				IntVarOrd::new(db, dom, lbl)
 			}
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
 			Part::Ic(terms) => {
@@ -464,7 +464,7 @@ impl<Lit: Literal + 'static, C: Coefficient + 'static> IntVarOrd<Lit, C> {
 							((prev + C::one())..(coef + C::one()), Some(lit))
 						})
 						.collect(),
-					String::from(lbl),
+					lbl,
 				)
 			}
 			Part::Dom(_terms, _l, _u) => todo!(),
@@ -494,8 +494,8 @@ pub(crate) trait IntVarEnc<Lit: Literal, C: Coefficient>:
 
 	fn clone_dyn(&self) -> Box<dyn IntVarEnc<Lit, C>>;
 
-	// TODO consume self?
-	fn into_lin_exp(&self) -> LinExp<Lit, C>;
+	// TODO I would like this to be `int_lin_exp`, consuming self, but then I can't use it in on &dyn IntVarEnc in Checker::check
+	fn ref_into_lin_exp(&self) -> LinExp<Lit, C>;
 
 	fn debug(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "x in {:?}", self.dom())
