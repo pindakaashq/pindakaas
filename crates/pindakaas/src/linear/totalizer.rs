@@ -49,6 +49,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			db,
 			C::zero(),
 			*lin.k.clone(),
+			0,
 		)
 	}
 }
@@ -60,6 +61,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 		db: &mut DB,
 		l: C,
 		u: C,
+		level: u32,
 	) -> Result {
 		if layer.len() == 1 {
 			TernLeEncoder::default().encode(
@@ -95,7 +97,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 							dom,
 							self.cutoff,
 							self.add_consistency,
-							format!("w_{node}"),
+							format!("gt_{level}_{node}"),
 						);
 
 						TernLeEncoder::default()
@@ -109,7 +111,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 					_ => panic!(),
 				})
 				.collect();
-			self.build_totalizer(next_layer, db, l, u)
+			self.build_totalizer(next_layer, db, l, u, level + 1)
 		}
 	}
 }
