@@ -22,7 +22,7 @@ pub(crate) fn next_int_var<DB: ClauseDatabase + 'static, C: Coefficient + 'stati
 	lbl: String,
 ) -> Box<dyn IntVarEnc<DB::Lit, C>> {
 	// TODO check for domain of 1 => Constant?
-	if cutoff == -C::one() || dom.covered_len(..) <= cutoff {
+	if cutoff == -C::one() || C::from(dom.len()).unwrap() <= cutoff {
 		let x = IntVarOrd::new(db, dom.into_iter(..).map(|iv| (iv, None)).collect(), lbl);
 		if add_consistency {
 			x.consistent(db).unwrap();
