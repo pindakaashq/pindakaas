@@ -308,6 +308,7 @@ impl LinearAggregator {
 					Part::Dom(terms, l, u)
 				}
 			})
+			.filter(|part| part.iter().next().is_some()) // filter out empty groups
 			.collect::<Vec<Part<DB::Lit, PosCoeff<C>>>>();
 
 		// Check whether some literals can violate / satisfy the constraint
