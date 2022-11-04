@@ -101,7 +101,7 @@ impl<C: Coefficient + 'static> TotalizerEncoder<C> {
 								dom,
 								self.cutoff,
 								self.add_consistency,
-								format!("w_{node}"),
+								format!("gt_{level}_{node}"),
 							);
 
 							TernLeEncoder::default()

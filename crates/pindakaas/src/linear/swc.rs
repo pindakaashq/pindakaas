@@ -49,7 +49,13 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Linear<
 				.map(|j| j..(j + C::one()))
 				.collect::<IntervalSet<_>>();
 
-			let next = next_int_var(db, dom, self.cutoff, self.add_consistency, format!("w_{i}"));
+			let next = next_int_var(
+				db,
+				dom,
+				self.cutoff,
+				self.add_consistency,
+				format!("swc_{i}"),
+			);
 
 			TernLeEncoder::default()
 				.encode(

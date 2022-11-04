@@ -114,7 +114,7 @@ fn construct_bdd<'a, DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 					if dom.is_empty() {
 						None
 					} else {
-						let x = IntVarOrd::new(db, dom, format!("w_{i}"));
+						let x = IntVarOrd::new(db, dom, format!("bdd_{i}"));
 						if add_consistency {
 							x.consistent(db).unwrap();
 						}
@@ -157,7 +157,7 @@ fn bdd<DB: ClauseDatabase + 'static, C: Coefficient + 'static>(
 			let lit = if first {
 				LitOrConst::Const(true)
 			} else {
-				LitOrConst::Lit(new_var!(db, format!("w_{i}>={interval:?}")))
+				LitOrConst::Lit(new_var!(db, format!("bdd_{i}>={interval:?}")))
 			};
 
 			let interval_already_exists = ws[i].insert(interval.clone(), lit.clone()).is_some();
