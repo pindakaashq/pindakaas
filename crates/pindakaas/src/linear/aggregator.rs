@@ -209,6 +209,21 @@ impl LinearAggregator {
 					}
 				}
 			})
+			.map(|part| {
+				// This step has to come *after* Amo normalization
+				let filter_zero_coefficients = |terms: Vec<(DB::Lit, PosCoeff<C>)>| -> Vec<(DB::Lit, PosCoeff<C>)> {
+					terms
+						.into_iter()
+						.filter(|(_, coef)| **coef != C::zero())
+						.collect()
+				};
+
+				match part {
+					Part::Amo(terms) => Part::Amo(filter_zero_coefficients(terms)),
+					Part::Ic(terms) => Part::Ic(filter_zero_coefficients(terms)),
+					Part::Dom(terms, l, u) => Part::Dom(filter_zero_coefficients(terms), l, u),
+				}
+			})
 			.filter(|part| part.iter().next().is_some()) // filter out empty groups
 			.collect();
 
