@@ -171,11 +171,20 @@ impl<Lit: Literal> fmt::Display for CheckError<Lit> {
 /// Coefficient in PB constraints are represented by types that implement the
 /// `Coefficient` constraint.
 pub trait Coefficient:
-	Signed + Integer + PrimInt + NumAssignOps + NumOps + Hash + Default + fmt::Debug
+	Signed + Integer + PrimInt + NumAssignOps + NumOps + Hash + Default + fmt::Debug + fmt::Display
 {
 }
-impl<T: Signed + PrimInt + Integer + NumAssignOps + NumOps + Hash + Default + fmt::Debug>
-	Coefficient for T
+impl<
+		T: Signed
+			+ PrimInt
+			+ Integer
+			+ NumAssignOps
+			+ NumOps
+			+ Hash
+			+ Default
+			+ fmt::Debug
+			+ fmt::Display,
+	> Coefficient for T
 {
 }
 
@@ -244,7 +253,7 @@ impl<'a, DB: ClauseDatabase> ClauseDatabase for ConditionalDatabase<'a, DB> {
 /// A representation for Boolean formulas in conjunctive normal form.
 ///
 /// It can be used to create formulas manually, to store the results from
-/// encoders, read formulas from a file, and writse them to a file
+/// encoders, read formulas from a file, and write them to a file
 #[derive(Clone, Debug)]
 pub struct Cnf<Lit: Literal + Zero + One = i32> {
 	/// The last variable created by [`new_var`]
@@ -255,6 +264,19 @@ pub struct Cnf<Lit: Literal + Zero + One = i32> {
 	size: Vec<usize>,
 }
 
+/// A representation for a weighted CNF formula
+///
+/// Same as CNF, but every clause has an optional weight. Otherwise, it is a hard clause.
+#[derive(Clone, Debug, Default)]
+pub struct Wcnf<Lit: Literal + Zero + One = i32, C: Coefficient = i32> {
+	/// The CNF formula
+	cnf: Cnf<Lit>,
+	/// The weight for every clause
+	weights: Vec<Option<C>>,
+	// TODO this can be optimised, for example by having all weighted clauses at the start/end
+}
+
+// TODO not sure how to handle converting num_var for vars()
 impl<Lit: Literal + Zero + One + Display> Cnf<Lit> {
 	/// Store CNF formula at given path in DIMACS format
 	///
@@ -268,7 +290,67 @@ impl<Lit: Literal + Zero + One + Display> Cnf<Lit> {
 		}
 		write!(file, "{self}")
 	}
+
+	// pub fn vars(&self) -> usize {
+	// 	usize::try_from(self.last_var.clone()).unwrap()
+	// }
+
+	pub fn clauses(&self) -> usize {
+		self.size.len()
+	}
+
+	pub fn literals(&self) -> usize {
+		self.size.iter().sum()
+	}
 }
+
+impl<Lit: Literal + Zero + One + Display, C: Coefficient> Display for Wcnf<Lit, C> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let num_var = &self.cnf.last_var;
+		let num_clauses = self.cnf.size.len();
+		let top = self.weights.iter().fold(C::one(), |acc, _| acc + C::one());
+		writeln!(f, "p wcnf {num_var} {num_clauses} {top}")?;
+		let mut start = 0;
+		for (size, weight) in self.cnf.size.iter().zip(self.weights.iter()) {
+			let cl = self.cnf.lits.iter().skip(start).take(*size);
+			let weight = weight.unwrap_or(top);
+			for lit in cl {
+				write!(f, "{weight} {lit} ")?
+			}
+			writeln!(f)?;
+			start += size;
+		}
+		Ok(())
+	}
+}
+
+impl<Lit: Literal + Zero + One + Display, C: Coefficient> Wcnf<Lit, C> {
+	/// Store WCNF formula at given path in WDIMACS format
+	///
+	/// File will optionally be prefaced by a given comment
+	pub fn to_file(&self, path: &Path, comment: Option<&str>) -> Result<(), io::Error> {
+		let mut file = File::create(path)?;
+		if let Some(comment) = comment {
+			for line in comment.lines() {
+				writeln!(file, "c {line}")?
+			}
+		}
+		write!(file, "{self}")
+	}
+
+	// pub fn vars(&self) -> usize {
+	// self.cnf.vars()
+	// }
+
+	pub fn clauses(&self) -> usize {
+		self.cnf.clauses()
+	}
+
+	pub fn literals(&self) -> usize {
+		self.cnf.literals()
+	}
+}
+
 impl<Lit: Literal + Zero + One + Display> Display for Cnf<Lit> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let num_var = &self.last_var;
@@ -367,6 +449,25 @@ impl<Lit: Literal + Zero + One> ClauseDatabase for Cnf<Lit> {
 		self.lits.extend_from_slice(cl);
 		self.size.push(cl.len());
 		Ok(())
+	}
+}
+
+impl<Lit: Literal + Zero + One, C: Coefficient> Wcnf<Lit, C> {
+	pub fn add_weighted_clause(&mut self, cl: &[Lit], weight: Option<C>) -> Result {
+		self.cnf.add_clause(cl)?;
+		self.weights.push(weight);
+		Ok(())
+	}
+}
+
+impl<Lit: Literal + Zero + One> ClauseDatabase for Wcnf<Lit> {
+	type Lit = Lit;
+	fn new_var(&mut self) -> Self::Lit {
+		self.cnf.new_var()
+	}
+
+	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
+		self.cnf.add_clause(cl)
 	}
 }
 
