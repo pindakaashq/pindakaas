@@ -36,7 +36,10 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 		let xs = lin
 			.terms
 			.iter()
-			.map(|part| IntVarEnc::Ord(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone())))
+			.enumerate()
+			.map(|(i, part)| {
+				IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone(), format!("x_{i}")).into()
+			})
 			.collect::<Vec<_>>();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
@@ -92,7 +95,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 							dom,
 							self.cutoff,
 							self.add_consistency,
-							&format!("w_{node}"),
+							format!("w_{node}"),
 						);
 
 						TernLeEncoder::default()
