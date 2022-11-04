@@ -10,6 +10,7 @@ use crate::{
 };
 use std::{
 	collections::HashSet,
+	fmt,
 	hash::BuildHasherDefault,
 	ops::{Neg, Range},
 };
@@ -20,7 +21,7 @@ pub(crate) fn next_int_var<DB: ClauseDatabase, C: Coefficient>(
 	dom: IntervalSet<C>,
 	cutoff: C,
 	add_consistency: bool,
-	lbl: &str,
+	lbl: String,
 ) -> IntVarEnc<DB::Lit, C> {
 	// TODO check for domain of 1 => Constant?
 	if cutoff == -C::one() || C::from(dom.len()).unwrap() <= cutoff {
@@ -55,17 +56,43 @@ impl<Lit: Literal> Neg for LitOrConst<Lit> {
 	}
 }
 
-// TODO maybe C -> PosCoeff<C>
+impl<Lit: Literal + 'static, C: Coefficient + 'static> fmt::Display for IntVarBin<Lit, C> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(
+			f,
+			"{}:B in {:?}..{:?} ({})",
+			self.lbl,
+			self.lb(),
+			self.ub(),
+			self.lits()
+		)
+	}
+}
+
+impl<Lit: Literal + 'static, C: Coefficient + 'static> fmt::Display for IntVarOrd<Lit, C> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(
+			f,
+			"{}:O in {:?}..{:?} ({})",
+			self.lbl,
+			self.lb(),
+			self.ub(),
+			self.lits()
+		)
+	}
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarOrd<Lit: Literal, C: Coefficient> {
 	xs: IntervalMap<C, Lit>,
+	lbl: String,
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	pub fn new<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
 		dom: IntervalMap<C, Option<Lit>>,
-		_lbl: &str,
+		lbl: String,
 	) -> Self {
 		let xs = dom
 			.into_iter(..)
@@ -75,7 +102,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			})
 			.collect::<IntervalMap<_, _>>();
 		debug_assert!(!xs.is_empty());
-		Self { xs }
+		Self { xs, lbl }
 	}
 
 	pub fn _consistency(&self) -> ImplicationChainConstraint<Lit> {
@@ -186,11 +213,12 @@ pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 	pub(crate) xs: Vec<Lit>,
 	lb: C,
 	ub: C,
+	lbl: String,
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	// TODO change to with_label or something
-	pub fn new<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, ub: C, _lbl: &str) -> Self {
+	pub fn new<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, ub: C, lbl: String) -> Self {
 		let bits = C::zero().leading_zeros() - ub.leading_zeros();
 		Self {
 			xs: (0..bits)
@@ -198,6 +226,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				.collect(),
 			lb: C::zero(), // TODO support non-zero
 			ub,
+			lbl,
 		}
 	}
 
@@ -280,6 +309,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		db: &mut DB,
 		xs: &Part<Lit, PosCoeff<C>>,
 		ub: PosCoeff<C>,
+		lbl: String,
 	) -> Self {
 		// TODO add_consistency on coupled leaves (wherever not equal to principal vars)
 		// if add_consistency {
@@ -322,7 +352,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 						}
 					})
 					.collect();
-				IntVarOrd::new(db, dom, "x")
+				IntVarOrd::new(db, dom, lbl)
 			}
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
 			Part::Ic(terms) => {
@@ -341,7 +371,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 							((prev + C::one())..(coef + C::one()), Some(lit))
 						})
 						.collect(),
-					"x",
+					lbl,
 				)
 			}
 			Part::Dom(_terms, _l, _u) => todo!(),
@@ -509,6 +539,10 @@ pub(crate) struct TernLeEncoder {}
 impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB::Lit, C>>
 	for TernLeEncoder
 {
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "tern_le_encoder", skip_all, fields(constraint = format!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z)))
+	)]
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
 		// TODO properly use cmp!
 		let TernLeConstraint { x, y, cmp, z } = tern;
@@ -538,7 +572,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				// );
 				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs)
 			} else if let (IntVarEnc::Ord(y_ord), IntVarEnc::Bin(z_bin)) = (y, z) {
-				let y_bin = IntVarBin::new(db, y_ord.ub(), "x_bin");
+				let y_bin = IntVarBin::new(db, y_ord.ub(), "x_bin".to_string());
 				TernLeEncoder::default()
 					.encode(
 						db,
@@ -562,11 +596,9 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			} else {
 				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x:?}, {y:?}, {z:?}")
 			}
-		} else if let (Some(x_ord), Some(y_ord), Some(z_bin)) = (
-			x.as_any().downcast_ref::<IntVarOrd<DB::Lit, C>>(),
-			y.as_any().downcast_ref::<IntVarOrd<DB::Lit, C>>(),
-			z.as_any().downcast_ref::<IntVarBin<DB::Lit, C>>(),
-		) {
+		} else if let (IntVarEnc::Ord(x_ord), IntVarEnc::Ord(y_ord), IntVarEnc::Bin(z_bin)) =
+			(x, y, z)
+		{
 			let dom = ord_plus_ord_le_ord_sparse_dom(
 				x.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
 				y.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
@@ -580,11 +612,21 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			);
 			self.encode(
 				db,
-				&TernLeConstraint::new(x_ord, y_ord, LimitComp::LessEq, &z_ord),
+				&TernLeConstraint::new(
+					&x_ord.clone().into(),
+					&y_ord.clone().into(),
+					LimitComp::LessEq,
+					&z_ord.clone().into(),
+				),
 			)?;
 			self.encode(
 				db,
-				&TernLeConstraint::new(&z_ord, &Constant::new(C::zero()), LimitComp::LessEq, z_bin),
+				&TernLeConstraint::new(
+					&z_ord.into(),
+					&IntVarEnc::Const(C::zero()),
+					LimitComp::LessEq,
+					&z_bin.clone().into(),
+				),
 			)
 		} else {
 			// assert!(cmp == &LimitComp::LessEq, "Only support <= for x+y ? z");
@@ -665,7 +707,7 @@ pub mod tests {
 		db: &mut DB,
 		dom: IntervalSet<C>,
 		consistent: bool,
-		lbl: &str,
+		lbl: String,
 	) -> IntVarEnc<DB::Lit, C> {
 		let x = IntVarOrd::new(db, dom.into_iter(..).map(|iv| (iv, None)).collect(), lbl);
 		if consistent {
@@ -678,7 +720,7 @@ pub mod tests {
 		db: &mut DB,
 		ub: C,
 		consistent: bool,
-		lbl: &str,
+		lbl: String,
 	) -> IntVarEnc<DB::Lit, C> {
 		let x = IntVarBin::new(db, ub, lbl);
 		if consistent {
@@ -699,7 +741,7 @@ pub mod tests {
 	#[test]
 	fn bin_geq_test() {
 		let mut db = TestDB::new(0);
-		let x = get_bin_x::<_, i32>(&mut db, 12, true, "x");
+		let x = get_bin_x::<_, i32>(&mut db, 12, true, "x".to_string());
 		let x_con = match &x {
 			IntVarEnc::Bin(b) => b._consistency(),
 			_ => unreachable!(),
@@ -751,7 +793,7 @@ pub mod tests {
 	#[test]
 	fn bin_geq_2_test() {
 		let mut db = TestDB::new(0);
-		let x = IntVarBin::new(&mut db, 12, "x");
+		let x = IntVarBin::new(&mut db, 12, "x".to_string());
 		db.num_var = x.lits() as i32;
 		let tern = TernLeConstraint {
 			x: &IntVarEnc::Bin(x),
@@ -774,7 +816,12 @@ pub mod tests {
 	#[test]
 	fn ord_geq_test() {
 		let mut db = TestDB::new(0);
-		let x = get_ord_x::<_, i32>(&mut db, interval_set!(3..5, 5..7, 7..11), true, "x");
+		let x = get_ord_x::<_, i32>(
+			&mut db,
+			interval_set!(3..5, 5..7, 7..11),
+			true,
+			"x".to_string(),
+		);
 
 		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
 
@@ -810,9 +857,9 @@ pub mod tests {
 	fn ord_plus_ord_le_ord_test() {
 		let mut db = TestDB::new(0);
 		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x"),
-			get_ord_x(&mut db, interval_set!(2..3, 4..5), true, "y"),
-			get_ord_x(&mut db, interval_set!(0..4, 4..11), true, "z"),
+			get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x".to_string()),
+			get_ord_x(&mut db, interval_set!(2..3, 4..5), true, "y".to_string()),
+			get_ord_x(&mut db, interval_set!(0..4, 4..11), true, "z".to_string()),
 		);
 		let tern = TernLeConstraint {
 			x: &x,
@@ -866,9 +913,9 @@ pub mod tests {
 	fn ord_le_bin_test() {
 		let mut db = TestDB::new(0);
 		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x"),
+			get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x".to_string()),
 			IntVarEnc::Const(0),
-			get_bin_x(&mut db, 7, true, "z"),
+			get_bin_x(&mut db, 7, true, "z".to_string()),
 		);
 		let tern = TernLeConstraint {
 			x: &x,
@@ -920,9 +967,9 @@ pub mod tests {
 	fn ord_plus_ord_le_bin_test() {
 		let mut db = TestDB::new(0);
 		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..3), true, "x"),
-			get_ord_x(&mut db, interval_set!(1..4), true, "y"),
-			get_bin_x(&mut db, 6, true, "z"),
+			get_ord_x(&mut db, interval_set!(1..3), true, "x".to_string()),
+			get_ord_x(&mut db, interval_set!(1..4), true, "y".to_string()),
+			get_bin_x(&mut db, 6, true, "z".to_string()),
 		);
 		let tern = TernLeConstraint {
 			x: &x,
@@ -1041,9 +1088,9 @@ pub mod tests {
 	fn bin_plus_bin_eq_bin_test() {
 		let mut db = TestDB::new(0);
 		let (x, y, z) = (
-			get_bin_x(&mut db, 2, true, "x"),
-			get_bin_x(&mut db, 3, true, "y"),
-			get_bin_x(&mut db, 5, true, "z"),
+			get_bin_x(&mut db, 2, true, "x".to_string()),
+			get_bin_x(&mut db, 3, true, "y".to_string()),
+			get_bin_x(&mut db, 5, true, "z".to_string()),
 		);
 
 		let tern = TernLeConstraint {
@@ -1094,5 +1141,47 @@ pub mod tests {
 				vec![1, -2, 3, 4, -5, -6, 7],
 			]
 		);
+	}
+
+	#[test]
+	fn bin_plus_ord_eq_bin_test() {
+		let mut db = TestDB::new(0);
+		let (x, y, z) = (
+			get_bin_x(&mut db, 6, true, String::from("x")),
+			get_ord_x(&mut db, interval_set!(1..6), true, String::from("y")),
+			get_bin_x(&mut db, 6, true, String::from("z")),
+		);
+
+		let tern = TernLeConstraint {
+			x: &x,
+			y: &y,
+			cmp: LimitComp::LessEq,
+			z: &z,
+		};
+		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+
+		let x_con = match &x {
+			IntVarEnc::Bin(b) => b._consistency(),
+			_ => unreachable!(),
+		};
+		let y_con = match &y {
+			IntVarEnc::Ord(o) => o._consistency(),
+			_ => unreachable!(),
+		};
+		let z_con = match &z {
+			IntVarEnc::Bin(b) => b._consistency(),
+			_ => unreachable!(),
+		};
+		let sols = db.generate_solutions(
+			|sol| {
+				tern.check(sol).is_ok()
+					&& x_con.get().check(sol).is_ok()
+					&& y_con.check(sol).is_ok()
+					&& z_con.get().check(sol).is_ok()
+			},
+			db.num_var,
+		);
+
+		assert_sol!(db => TernLeEncoder::default(), &tern => sols);
 	}
 }

@@ -31,10 +31,11 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 		let xs = lin
 			.terms
 			.iter()
-			.map(|part| -> IntVarEnc<DB::Lit, C> {
-				IntVarEnc::Ord(IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone()))
+			.enumerate()
+			.map(|(i, part)| {
+				IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone(), format!("x_{i}")).into()
 			})
-			.sorted_by(|a, b| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
+			.sorted_by(|a: &IntVarEnc<_, C>, b: &IntVarEnc<_, C>| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
 		let mut ws = construct_bdd(db, &xs, lin.k.clone(), self.add_consistency).into_iter();
 		let first = ws.next().unwrap();
@@ -100,7 +101,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 					if dom.is_empty() {
 						None
 					} else {
-						let x = IntVarOrd::new(db, dom, &format!("w_{i}"));
+						let x = IntVarOrd::new(db, dom, format!("w_{i}"));
 						if add_consistency {
 							x.consistent(db).unwrap();
 						}
