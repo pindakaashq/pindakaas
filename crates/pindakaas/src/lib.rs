@@ -291,9 +291,9 @@ impl<Lit: Literal + Zero + One + Display> Cnf<Lit> {
 		write!(file, "{self}")
 	}
 
-	// pub fn vars(&self) -> usize {
-	// 	usize::try_from(self.last_var.clone()).unwrap()
-	// }
+	pub fn variables(&self) -> Lit {
+		self.last_var.clone()
+	}
 
 	pub fn clauses(&self) -> usize {
 		self.size.len()
@@ -338,9 +338,9 @@ impl<Lit: Literal + Zero + One + Display, C: Coefficient> Wcnf<Lit, C> {
 		write!(file, "{self}")
 	}
 
-	// pub fn vars(&self) -> usize {
-	// self.cnf.vars()
-	// }
+	pub fn variables(&self) -> Lit {
+		self.cnf.variables()
+	}
 
 	pub fn clauses(&self) -> usize {
 		self.cnf.clauses()
