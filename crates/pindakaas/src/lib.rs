@@ -308,16 +308,22 @@ impl<Lit: Literal + Zero + One + Display, C: Coefficient> Display for Wcnf<Lit, 
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let num_var = &self.cnf.last_var;
 		let num_clauses = self.cnf.size.len();
-		let top = self.weights.iter().fold(C::one(), |acc, _| acc + C::one());
+		let top = *self
+			.weights
+			.iter()
+			.flatten()
+			.max()
+			.expect("No soft clauses in Wcnf formula")
+			+ C::one();
 		writeln!(f, "p wcnf {num_var} {num_clauses} {top}")?;
 		let mut start = 0;
 		for (size, weight) in self.cnf.size.iter().zip(self.weights.iter()) {
 			let cl = self.cnf.lits.iter().skip(start).take(*size);
-			let weight = weight.unwrap_or(top);
+			let weight = weight.unwrap_or_else(|| top.clone());
 			for lit in cl {
 				write!(f, "{weight} {lit} ")?
 			}
-			writeln!(f)?;
+			writeln!(f, "0")?;
 			start += size;
 		}
 		Ok(())
