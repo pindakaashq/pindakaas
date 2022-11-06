@@ -55,3 +55,34 @@ impl<DB: ClauseDatabase, Enc: Encoder<DB, Cardinality<DB::Lit, i8>> + CardMarker
 // local marker trait, to ensure the previous definition only applies within this crate
 pub(crate) trait CardMarker {}
 impl<T: LinMarker> CardMarker for T {}
+
+#[cfg(test)]
+pub(crate) mod tests {
+	macro_rules! card_test_suite {
+		($encoder:expr) => {
+			#[test]
+			fn test_amo_triple_2() {
+				assert_sol!(
+					$encoder,
+					3,
+					&Cardinality {
+						lits: vec![-1, -2, 3],
+						cmp: LimitComp::LessEq,
+						k: PosCoeff(2)
+					} =>
+						vec![
+							vec![-1, -2, -3],
+							vec![-1, 2, -3],
+							vec![-1, 2, 3],
+							vec![1, -2, -3],
+							vec![1, -2, 3],
+							vec![1, 2, -3],
+							vec![1, 2, 3],
+						]
+				);
+			}
+		};
+	}
+
+	pub(crate) use card_test_suite;
+}
