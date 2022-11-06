@@ -2,9 +2,11 @@ use crate::{
 	linear::LimitComp, CheckError, Checker, ClauseDatabase, Literal, Result, Unsatisfiable,
 };
 
+mod bitwise;
 mod ladder;
 mod pairwise;
 
+pub use bitwise::BitwiseEncoder;
 pub use ladder::LadderEncoder;
 pub use pairwise::PairwiseEncoder;
 
