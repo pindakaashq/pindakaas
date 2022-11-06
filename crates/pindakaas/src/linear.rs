@@ -310,9 +310,9 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 
 	pub(crate) fn assign(&self, solution: &[Lit]) -> C {
 		self.terms.iter().fold(self.add, |acc, (lit, coef)| {
-            // TODO why can't I provide types for this function?
+			// TODO why can't I provide types for this function?
 			// let a: &Lit = Checker::assign(&lit, solution);
-            let a = solution.iter().find(|x| x.var() == lit.var()).unwrap_or_else(|| panic!("Could not find lit {lit:?} in solution {solution:?}; perhaps this variable did not occur in any clause"));
+			let a = solution.iter().find(|x| x.var() == lit.var()).unwrap_or_else(|| panic!("Could not find lit {lit:?} in solution {solution:?}; perhaps this variable did not occur in any clause"));
 			acc + if *lit == *a { self.mult } else { C::zero() } * *coef
 		})
 	}
