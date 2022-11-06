@@ -1,7 +1,6 @@
 use crate::{
-	linear::{LimitComp, LinMarker, PosCoeff},
-	CardinalityOne, CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal,
-	Unsatisfiable,
+	linear::{LimitComp, LinMarker, Linear, PosCoeff},
+	CardinalityOne, Checker, ClauseDatabase, Coefficient, Encoder, Literal,
 };
 
 #[derive(Clone, Debug)]
@@ -41,22 +40,7 @@ impl<Lit: Literal, C: Coefficient> Checker for Cardinality<Lit, C> {
 	type Lit = Lit;
 
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), crate::CheckError<Self::Lit>> {
-		let count = self
-			.lits
-			.iter()
-			.filter(|lit| {
-				let v = solution.iter().find(|x| x.var() == lit.var());
-				*lit == v.unwrap()
-			})
-			.fold(C::zero(), |acc, _| acc + C::one());
-		if match self.cmp {
-			LimitComp::LessEq => count <= *self.k,
-			LimitComp::Equal => count == *self.k,
-		} {
-			Ok(())
-		} else {
-			Err(CheckError::Unsatisfiable(Unsatisfiable))
-		}
+		Linear::from(self.clone()).check(solution)
 	}
 }
 
