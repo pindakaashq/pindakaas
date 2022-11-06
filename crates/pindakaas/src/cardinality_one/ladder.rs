@@ -5,13 +5,13 @@ use crate::{linear::LimitComp, CardinalityOne, ClauseDatabase, Encoder, Literal,
 pub struct LadderEncoder {}
 
 impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne<DB::Lit>> for LadderEncoder {
-	fn encode(&mut self, db: &mut DB, amo: &CardinalityOne<DB::Lit>) -> Result {
+	fn encode(&mut self, db: &mut DB, card1: &CardinalityOne<DB::Lit>) -> Result {
 		// TODO could be slightly optimised to not introduce fixed lits
 		let mut a = db.new_var(); // y_v-1
-		if amo.cmp == LimitComp::Equal {
+		if card1.cmp == LimitComp::Equal {
 			db.add_clause(&[a.clone()])?;
 		}
-		for x in amo.lits.iter() {
+		for x in card1.lits.iter() {
 			let b = db.new_var(); // y_v
 			db.add_clause(&[b.negate(), a.clone()])?; // y_v -> y_v-1
 
@@ -21,7 +21,7 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne<DB::Lit>> for LadderEncoder 
 			db.add_clause(&[a.negate(), b.clone(), x.clone()])?; // (y_v-1 /\ ¬y_v) -> x=v
 			a = b;
 		}
-		if amo.cmp == LimitComp::Equal {
+		if card1.cmp == LimitComp::Equal {
 			db.add_clause(&[a.negate()])?;
 		}
 		Ok(())
@@ -57,6 +57,10 @@ mod tests {
 				vec![-4, 5, 2],
 				vec![-5, 4],
 				vec![-5],
+			],
+			vec![
+				vec![1, -2],
+				vec![-1, 2],
 			]
 		);
 	}
