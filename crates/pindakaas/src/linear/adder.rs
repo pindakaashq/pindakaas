@@ -354,14 +354,15 @@ mod tests {
 
 	use super::*;
 	use crate::{
+		cardinality::tests::card_test_suite,
 		cardinality_one::tests::card1_test_suite,
 		helpers::tests::{assert_enc_sol, assert_sol, TestDB},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
 			LimitComp, StaticLinEncoder,
 		},
-		CardinalityOne, Checker, Comparator, Encoder, LinExp, LinearConstraint, LinearEncoder,
-		PairwiseEncoder,
+		Cardinality, CardinalityOne, Checker, Comparator, Encoder, LinExp, LinearConstraint,
+		LinearEncoder, PairwiseEncoder,
 	};
 
 	#[test]
@@ -430,4 +431,5 @@ mod tests {
 
 	linear_test_suite!(AdderEncoder::default());
 	card1_test_suite!(AdderEncoder::default());
+	card_test_suite!(AdderEncoder::default());
 }
