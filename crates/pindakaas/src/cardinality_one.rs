@@ -1,6 +1,7 @@
 use crate::{
-	linear::LimitComp, trace::emit_clause, CheckError, Checker, ClauseDatabase, Literal, Result,
-	Unsatisfiable,
+	linear::{LimitComp, Linear},
+	trace::emit_clause,
+	Checker, ClauseDatabase, Literal, Result,
 };
 
 mod bitwise;
@@ -36,22 +37,7 @@ impl<Lit: Literal> Checker for CardinalityOne<Lit> {
 	type Lit = Lit;
 
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), crate::CheckError<Self::Lit>> {
-		let count = self
-			.lits
-			.iter()
-			.filter(|lit| {
-				let v = solution.iter().find(|x| x.var() == lit.var());
-				*lit == v.unwrap()
-			})
-			.count();
-		if match self.cmp {
-			LimitComp::LessEq => count <= 1,
-			LimitComp::Equal => count == 1,
-		} {
-			Ok(())
-		} else {
-			Err(CheckError::Unsatisfiable(Unsatisfiable))
-		}
+		Linear::<Self::Lit, i8>::from(self.clone()).check(solution)
 	}
 }
 

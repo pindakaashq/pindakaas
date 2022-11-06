@@ -1,6 +1,6 @@
 use crate::{
-	trace::emit_clause, CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, Result,
-	Unsatisfiable,
+	trace::emit_clause, CheckError, Checker, ClauseDatabase, Coefficient, Encoder, LinExp, Literal,
+	Result, Unsatisfiable,
 };
 
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
@@ -56,14 +56,14 @@ impl<'a, Lit: Literal> XorConstraint<'a, Lit> {
 impl<'a, Lit: Literal> Checker for XorConstraint<'a, Lit> {
 	type Lit = Lit;
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let count = self
-			.lits
-			.iter()
-			.filter(|lit| {
-				let v = solution.iter().find(|x| x.var() == lit.var());
-				*lit == v.unwrap()
-			})
-			.count();
+		let count = LinExp::from_terms(
+			self.lits
+				.iter()
+				.map(|l| (l.clone(), 1))
+				.collect::<Vec<(Self::Lit, i32)>>()
+				.as_slice(),
+		)
+		.assign(solution);
 		if count % 2 == 1 {
 			Ok(())
 		} else {

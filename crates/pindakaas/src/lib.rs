@@ -319,7 +319,7 @@ impl<Lit: Literal + Zero + One + Display, C: Coefficient> Display for Wcnf<Lit, 
 		let mut start = 0;
 		for (size, weight) in self.cnf.size.iter().zip(self.weights.iter()) {
 			let cl = self.cnf.lits.iter().skip(start).take(*size);
-			let weight = weight.unwrap_or_else(|| top.clone());
+			let weight = weight.unwrap_or(top);
 			for lit in cl {
 				write!(f, "{weight} {lit} ")?
 			}
