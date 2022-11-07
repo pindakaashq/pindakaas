@@ -8,9 +8,12 @@ use crate::{
 	Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, LinVariant, Linear,
 	LinearConstraint, Literal, Result, Unsatisfiable,
 };
+use itertools::Itertools;
 
 #[derive(Default)]
-pub struct LinearAggregator {}
+pub struct LinearAggregator {
+	sort_same_coefficients: bool,
+}
 
 impl LinearAggregator {
 	#[cfg_attr(
@@ -79,10 +82,41 @@ impl LinearAggregator {
 				}
 			}
 		}
+
 		// Add remaining (unconstrained) terms
 		debug_assert!(agg.len() <= lin.exp.num_free);
-		for term in agg.drain() {
-			partition.push(Part::Amo(vec![term]));
+		self.sort_same_coefficients = true;
+		if self.sort_same_coefficients {
+			let mut same_coefficients = Vec::with_capacity(agg.len());
+			let mut first = true;
+			for (x, y) in agg
+				.into_iter()
+				.sorted_by(|(_, a), (_, b)| a.cmp(b))
+				.tuple_windows()
+			{
+				if first {
+					first = false;
+					same_coefficients.push(x.clone());
+				}
+				if x.1 == y.1 {
+					same_coefficients.push(y);
+				} else {
+					if same_coefficients.len() > 1 {
+						partition.push(Part::Ic(same_coefficients.clone()));
+					} else {
+						for term in same_coefficients.clone() {
+							partition.push(Part::Amo(vec![term]));
+						}
+					}
+					same_coefficients.clear();
+					same_coefficients.push(y);
+				}
+			}
+
+			if !same_coefficients.is_empty() {
+				debug_assert!(same_coefficients.len() == 1);
+				partition.push(Part::Amo(same_coefficients));
+			}
 		}
 
 		let mut k = if lin.cmp == Comparator::GreaterEq {
@@ -661,6 +695,30 @@ mod tests {
 			),
 			Ok(LinVariant::Trivial)
 		);
+	}
+
+	#[test]
+	fn test_sort_same_coefficients() {
+		let mut db = TestDB::new(4);
+		assert_eq!(
+			LinearAggregator::default().aggregate(
+				&mut db,
+				&LinearConstraint::new(
+					LinExp::from((1, 3)) + (2, 3) + (4, 5) + (3, 3),
+					Comparator::LessEq,
+					10
+				)
+			),
+			Ok(LinVariant::Linear(Linear {
+				terms: vec![
+					Part::Ic(vec![(1, 3.into()), (2, 3.into()), (3, 3.into())]),
+					Part::Amo(vec![(4, 5.into())]),
+				],
+				cmp: LimitComp::LessEq,
+				k: 10.into(),
+			}))
+		);
+		db.check_complete()
 	}
 
 	#[test]
