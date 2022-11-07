@@ -32,13 +32,14 @@ pub(crate) mod helpers;
 pub(crate) mod int;
 mod linear;
 pub mod solvers;
+mod sorted;
 pub mod trace;
 
 pub use cardinality::Cardinality;
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
 pub use linear::{
-	AdderEncoder, BddEncoder, Comparator, LinExp, LinVariant, Linear, LinearConstraint,
-	LinearEncoder, PosCoeff, SwcEncoder, TotalizerEncoder,
+	AdderEncoder, BddEncoder, Comparator, LinExp, LinVariant, Linear, LinearAggregator,
+	LinearConstraint, LinearEncoder, PosCoeff, SwcEncoder, TotalizerEncoder,
 };
 
 /// Literal is the super-trait for types that can be used to represent boolean

@@ -13,7 +13,7 @@ mod adder;
 mod aggregator;
 mod bdd;
 mod swc;
-mod totalizer;
+pub(crate) mod totalizer;
 
 pub use adder::AdderEncoder;
 pub(crate) use adder::{lex_lesseq_const, log_enc_add};
