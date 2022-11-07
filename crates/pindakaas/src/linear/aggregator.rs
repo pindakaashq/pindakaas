@@ -4,18 +4,25 @@ use std::hash::BuildHasherDefault;
 use crate::{
 	helpers::is_powers_of_two,
 	linear::{Constraint, LimitComp, Part, PosCoeff},
+	sorted::{Sorted, SortedEncoder},
 	trace::emit_clause,
-	Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, LinVariant, Linear,
-	LinearConstraint, Literal, Result, Unsatisfiable,
+	Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, LinExp, LinVariant,
+	Linear, LinearConstraint, Literal, Result, Unsatisfiable,
 };
 use itertools::Itertools;
 
 #[derive(Default)]
 pub struct LinearAggregator {
-	sort_same_coefficients: bool,
+	sort_same_coefficients: usize,
 }
 
 impl LinearAggregator {
+	/// For non-zero `n`, detect groups of minimum size `n` with free literals and same coefficients, sort them and add them as implication chain group
+	pub fn sort_same_coefficients(&mut self, n: usize) -> &mut Self {
+		self.sort_same_coefficients = n;
+		self
+	}
+
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
@@ -85,24 +92,39 @@ impl LinearAggregator {
 
 		// Add remaining (unconstrained) terms
 		debug_assert!(agg.len() <= lin.exp.num_free);
-		self.sort_same_coefficients = true;
-		if self.sort_same_coefficients {
-			let mut same_coefficients = Vec::with_capacity(agg.len());
-			let mut first = true;
-			for (x, y) in agg
+
+		if !agg.is_empty() {
+			let mut same_coefficients = Vec::<(DB::Lit, C)>::with_capacity(agg.len());
+			let mut it = agg
 				.into_iter()
 				.sorted_by(|(_, a), (_, b)| a.cmp(b))
-				.tuple_windows()
-			{
-				if first {
-					first = false;
-					same_coefficients.push(x.clone());
-				}
+				.peekable();
+
+			same_coefficients.push(it.peek().unwrap().clone());
+			for (x, y) in it.tuple_windows() {
 				if x.1 == y.1 {
 					same_coefficients.push(y);
 				} else {
-					if same_coefficients.len() > 1 {
-						partition.push(Part::Ic(same_coefficients.clone()));
+					if self.sort_same_coefficients >= 2
+						&& same_coefficients.len() >= self.sort_same_coefficients
+					{
+						let coef = same_coefficients[0].1;
+						let lits = same_coefficients
+							.clone()
+							.into_iter()
+							.map(|(lit, _)| lit)
+							.collect::<Vec<_>>();
+						let sorted: LinExp<DB::Lit, C> = SortedEncoder::default()
+							.encode(db, &Sorted::new(&lits))
+							.unwrap();
+						partition.push(Part::Ic(
+							sorted
+								.terms()
+								.into_iter()
+								.cloned()
+								.map(|(l, c)| (l, c * coef))
+								.collect(),
+						));
 					} else {
 						for term in same_coefficients.clone() {
 							partition.push(Part::Amo(vec![term]));
@@ -113,9 +135,8 @@ impl LinearAggregator {
 				}
 			}
 
-			if !same_coefficients.is_empty() {
-				debug_assert!(same_coefficients.len() == 1);
-				partition.push(Part::Amo(same_coefficients));
+			for term in same_coefficients.drain(..) {
+				partition.push(Part::Amo(vec![term]));
 			}
 		}
 
@@ -701,17 +722,19 @@ mod tests {
 	fn test_sort_same_coefficients() {
 		let mut db = TestDB::new(4);
 		assert_eq!(
-			LinearAggregator::default().aggregate(
-				&mut db,
-				&LinearConstraint::new(
-					LinExp::from((1, 3)) + (2, 3) + (4, 5) + (3, 3),
-					Comparator::LessEq,
-					10
-				)
-			),
+			LinearAggregator::default()
+				.sort_same_coefficients(2)
+				.aggregate(
+					&mut db,
+					&LinearConstraint::new(
+						LinExp::from((1, 3)) + (2, 3) + (4, 5) + (3, 3),
+						Comparator::LessEq,
+						10
+					)
+				),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
-					Part::Ic(vec![(1, 3.into()), (2, 3.into()), (3, 3.into())]),
+					Part::Ic(vec![(7, 3.into()), (8, 3.into()), (9, 3.into())]),
 					Part::Amo(vec![(4, 5.into())]),
 				],
 				cmp: LimitComp::LessEq,
