@@ -57,27 +57,33 @@ impl<Lit: Literal> Neg for LitOrConst<Lit> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
+impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarOrd<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}:B in {:?}..{:?} ({})",
+			"{}:O in {{{}}} ({})",
 			self.lbl,
-			self.lb(),
-			self.ub(),
+			self.dom()
+				.iter(..)
+				.map(|iv| iv.end - C::one())
+				.sorted()
+				.join(", "),
 			self.lits()
 		)
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarOrd<Lit, C> {
+impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}:O in {:?}..{:?} ({})",
+			"{}:B in {{{}}} ({})",
 			self.lbl,
-			self.lb(),
-			self.ub(),
+			self.dom()
+				.iter(..)
+				.map(|iv| iv.end - C::one())
+				.sorted()
+				.join(", "),
 			self.lits()
 		)
 	}
