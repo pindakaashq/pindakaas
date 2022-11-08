@@ -404,6 +404,27 @@ impl LinearAggregator {
 					cmp,
 				}));
 			}
+
+			// At most n-1 out of n is equivalent to at least *not* one
+			// Ex. at most 2 out of 3 true = at least 1 out of 3 false
+			if (0..partition.len()).fold(C::zero(), |acc, _| acc + C::one()) == *k + C::one() {
+				let neg = partition.iter().map(|l| l.negate()).collect::<Vec<_>>();
+				db.add_clause(&neg)?;
+
+				if cmp == LimitComp::LessEq {
+					return Ok(LinVariant::Trivial);
+				} else {
+					// we still need to constrain x1 + x2 .. >= n-1
+					//   == (1 - ~x1) + (1 - ~x2) + .. >= n-1
+					//   == - ~x1 - ~x2 - .. <= n-1-n ( == .. <= -1)
+					//   == ~x1 + ~x2 + .. <= 1
+					return Ok(LinVariant::CardinalityOne(CardinalityOne {
+						lits: neg,
+						cmp: LimitComp::LessEq,
+					}));
+				}
+			}
+
 			// Encode count constraint
 			return Ok(LinVariant::Cardinality(Cardinality {
 				lits: partition,
@@ -523,13 +544,13 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut db,
 				&LinearConstraint::new(
-					LinExp::from((1, 1)) + (2, 1) + (3, 1),
+					LinExp::from((1, 1)) + (2, 1) + (3, 1) + (4, 1),
 					Comparator::LessEq,
 					2
 				)
 			),
 			Ok(LinVariant::Cardinality(Cardinality {
-				lits: vec![1, 2, 3],
+				lits: vec![1, 2, 3, 4],
 				cmp: LimitComp::LessEq,
 				k: 2.into(),
 			}))
@@ -538,13 +559,13 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut db,
 				&LinearConstraint::new(
-					LinExp::from((1, 3)) + (2, 3) + (3, 3),
+					LinExp::from((1, 3)) + (2, 3) + (3, 3) + (4, 3),
 					Comparator::LessEq,
 					7
 				)
 			),
 			Ok(LinVariant::Cardinality(Cardinality {
-				lits: vec![1, 2, 3],
+				lits: vec![1, 2, 3, 4],
 				cmp: LimitComp::LessEq,
 				k: 2.into(),
 			}))
@@ -555,13 +576,13 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut db,
 				&LinearConstraint::new(
-					LinExp::from((1, 1)) + (2, 1) + (3, 1),
+					LinExp::from((1, 1)) + (2, 1) + (3, 1) + (4, 1),
 					Comparator::Equal,
 					2
 				)
 			),
 			Ok(LinVariant::Cardinality(Cardinality {
-				lits: vec![1, 2, 3],
+				lits: vec![1, 2, 3, 4],
 				cmp: LimitComp::Equal,
 				k: 2.into(),
 			}))
@@ -570,13 +591,13 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut db,
 				&LinearConstraint::new(
-					LinExp::from((1, 3)) + (2, 3) + (3, 3),
+					LinExp::from((1, 3)) + (2, 3) + (3, 3) + (4, 3),
 					Comparator::Equal,
 					6
 				)
 			),
 			Ok(LinVariant::Cardinality(Cardinality {
-				lits: vec![1, 2, 3],
+				lits: vec![1, 2, 3, 4],
 				cmp: LimitComp::Equal,
 				k: 2.into(),
 			}))
@@ -834,6 +855,41 @@ mod tests {
 				],
 				cmp: LimitComp::LessEq,
 				k: 13.into(),
+			}))
+		);
+	}
+
+	#[test]
+	fn test_at_least_one_negated() {
+		let mut db = TestDB::new(4).expect_clauses(vec![vec![-1, -2, -3, -4]]);
+		// An exactly one constraint adds an at most one constraint + a clause for all literals
+		assert_eq!(
+			LinearAggregator::default().aggregate(
+				&mut db,
+				&LinearConstraint::new(
+					LinExp::from((1, 1)) + (2, 1) + (3, 1) + (4, 1),
+					Comparator::LessEq,
+					3
+				)
+			),
+			Ok(LinVariant::Trivial)
+		);
+		db.check_complete();
+
+		// Correctly detect equal k
+		assert_eq!(
+			LinearAggregator::default().aggregate(
+				&mut TestDB::new(3),
+				&LinearConstraint::new(
+					LinExp::from((1, 1)) + (2, 1) + (3, 1),
+					Comparator::Equal,
+					2
+				)
+			),
+			// actually leaves over a CardinalityOne constraint
+			Ok(LinVariant::CardinalityOne(CardinalityOne {
+				lits: vec![-1, -2, -3],
+				cmp: LimitComp::LessEq,
 			}))
 		);
 	}
