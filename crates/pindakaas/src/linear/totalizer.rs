@@ -11,7 +11,7 @@ use crate::{
 #[derive(Clone, Default)]
 pub struct TotalizerEncoder<C: Coefficient> {
 	add_consistency: bool,
-	cutoff: C,
+	cutoff: Option<C>,
 }
 
 impl<C: Coefficient> TotalizerEncoder<C> {
@@ -19,7 +19,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 		self.add_consistency = b;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: C) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: Option<C>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
@@ -43,39 +43,34 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			.collect::<Vec<_>>();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
-		let root = build_totalizer(
+		build_totalizer(
 			xs,
 			db,
 			C::zero(),
 			*lin.k.clone(),
 			0,
 			self.add_consistency,
-			self.cutoff,
+			None,
+			IntVarEnc::Const(*lin.k),
 		);
-
-		TernLeEncoder::default().encode(
-			db,
-			&TernLeConstraint::new(
-				&root,
-				&IntVarEnc::Const(C::zero()),
-				LimitComp::LessEq,
-				&IntVarEnc::Const(*lin.k),
-			),
-		)
+		Ok(())
 	}
 }
 
+// TODO
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
-	mut layer: Vec<IntVarEnc<DB::Lit, C>>,
+	layer: Vec<IntVarEnc<DB::Lit, C>>,
 	db: &mut DB,
 	l: C,
 	u: C,
 	level: u32,
 	add_consistency: bool,
-	cutoff: C,
+	cutoff: Option<C>,
+	root: IntVarEnc<DB::Lit, C>,
 ) -> IntVarEnc<DB::Lit, C> {
 	if layer.len() == 1 {
-		layer.pop().unwrap()
+		root
 	} else {
 		let next_layer = layer
 			.chunks(2)
@@ -83,25 +78,29 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 			.map(|(node, children)| match children {
 				[x] => x.clone(),
 				[left, right] => {
-					let l = if layer.len() > 2 { C::zero() } else { l };
-					let dom = ord_plus_ord_le_ord_sparse_dom(
-						left.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
-						right
-							.dom()
-							.into_iter(..)
-							.map(|c| c.end - C::one())
-							.collect(),
-						l,
-						u,
-					);
+					let parent = if layer.len() > 2 {
+						let l = if layer.len() > 2 { C::zero() } else { l };
+						let dom = ord_plus_ord_le_ord_sparse_dom(
+							left.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
+							right
+								.dom()
+								.into_iter(..)
+								.map(|c| c.end - C::one())
+								.collect(),
+							l,
+							u,
+						);
 
-					let parent = next_int_var(
-						db,
-						dom,
-						cutoff,
-						add_consistency,
-						format!("gt_{level}_{node}"),
-					);
+						next_int_var(
+							db,
+							dom,
+							cutoff,
+							add_consistency,
+							format!("gt_{level}_{node}"),
+						)
+					} else {
+						root.clone()
+					};
 
 					TernLeEncoder::default()
 						.encode(
@@ -114,7 +113,16 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 				_ => panic!(),
 			})
 			.collect();
-		build_totalizer(next_layer, db, l, u, level + 1, add_consistency, cutoff)
+		build_totalizer(
+			next_layer,
+			db,
+			l,
+			u,
+			level + 1,
+			add_consistency,
+			cutoff,
+			root,
+		)
 	}
 }
 

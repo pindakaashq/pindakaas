@@ -20,12 +20,12 @@ use std::{
 pub(crate) fn next_int_var<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	dom: IntervalSet<C>,
-	cutoff: C,
+	cutoff: Option<C>,
 	add_consistency: bool,
 	lbl: String,
 ) -> IntVarEnc<DB::Lit, C> {
 	// TODO check for domain of 1 => Constant?
-	if cutoff == -C::one() || C::from(dom.len()).unwrap() <= cutoff {
+	if cutoff.is_none() || C::from(dom.len()).unwrap() <= cutoff.unwrap() {
 		let x = IntVarOrd::new(db, dom.into_iter(..).map(|iv| (iv, None)).collect(), lbl);
 		if add_consistency {
 			x.consistent(db).unwrap();
@@ -862,14 +862,13 @@ pub mod tests {
 			"x".to_string(),
 		);
 
-		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
-
 		assert_eq!(x.lits(), 3);
 		assert_eq!(x.lb(), 2);
 		assert_eq!(x.ub(), 10);
 		assert_eq!(x.geq(6..7), vec![vec![2]]);
 		assert_eq!(x.geq(4..7), vec![vec![2]]);
 
+		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
 		assert_eq!(x_lin.assign(&[-1, -2, -3]), 2);
 		assert_eq!(x_lin.assign(&[1, -2, -3]), 4);
 		assert_eq!(x_lin.assign(&[1, 2, -3]), 6);

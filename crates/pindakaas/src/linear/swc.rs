@@ -9,7 +9,7 @@ use iset::IntervalSet;
 #[derive(Clone, Default)]
 pub struct SwcEncoder<C: Coefficient> {
 	add_consistency: bool,
-	cutoff: C,
+	cutoff: Option<C>,
 }
 
 impl<C: Coefficient> SwcEncoder<C> {
@@ -17,7 +17,7 @@ impl<C: Coefficient> SwcEncoder<C> {
 		self.add_consistency = b;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: C) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: Option<C>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
