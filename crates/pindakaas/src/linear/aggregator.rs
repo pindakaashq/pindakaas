@@ -5,8 +5,8 @@ use crate::{
 	helpers::is_powers_of_two,
 	linear::{Constraint, LimitComp, Part, PosCoeff},
 	sorted::{Sorted, SortedEncoder},
-	trace::emit_clause,
-	Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, LinExp, LinVariant,
+	trace::{emit_clause, new_var},
+	Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, Encoder, LinVariant,
 	Linear, LinearConstraint, Literal, Result, Unsatisfiable,
 };
 use itertools::Itertools;
@@ -92,51 +92,35 @@ impl LinearAggregator {
 
 		// Add remaining (unconstrained) terms
 		debug_assert!(agg.len() <= lin.exp.num_free);
+		// for term in agg.drain() {
+		// 	partition.push(Part::Amo(vec![term]));
+		// }
 
-		if !agg.is_empty() {
-			let mut same_coefficients = Vec::<(DB::Lit, C)>::with_capacity(agg.len());
-			let mut it = agg
-				.into_iter()
-				.sorted_by(|(_, a), (_, b)| a.cmp(b))
-				.peekable();
+		let n = agg.len();
+		for (coef, group) in &agg
+			.into_iter()
+			.sorted_by(|(_, a), (_, b)| a.cmp(b))
+			.group_by(|x| x.1)
+		{
+			let xs = group.map(|x| x.0).collect::<Vec<_>>();
 
-			same_coefficients.push(it.peek().unwrap().clone());
-			for (x, y) in it.tuple_windows() {
-				if x.1 == y.1 {
-					same_coefficients.push(y);
-				} else {
-					if self.sort_same_coefficients >= 2
-						&& same_coefficients.len() >= self.sort_same_coefficients
-					{
-						let coef = same_coefficients[0].1;
-						let lits = same_coefficients
-							.clone()
-							.into_iter()
-							.map(|(lit, _)| lit)
-							.collect::<Vec<_>>();
-						let sorted: LinExp<DB::Lit, C> = SortedEncoder::default()
-							.encode(db, &Sorted::new(&lits))
-							.unwrap();
-						partition.push(Part::Ic(
-							sorted
-								.terms()
-								.into_iter()
-								.cloned()
-								.map(|(l, c)| (l, c * coef))
-								.collect(),
-						));
-					} else {
-						for term in same_coefficients.clone() {
-							partition.push(Part::Amo(vec![term]));
-						}
-					}
-					same_coefficients.clear();
-					same_coefficients.push(y);
+			if self.sort_same_coefficients >= 2
+				&& xs.len() >= self.sort_same_coefficients
+				&& xs.len() < n
+			{
+				eprintln!("found same coef chain of {}", xs.len());
+				let ys = xs
+					.iter()
+					.map(|_x| new_var!(db, format!("s_{_x:?}"))) // TODO: use label of _x
+					.collect::<Vec<_>>();
+				SortedEncoder::default()
+					.encode(db, &Sorted::new(&xs, &ys))
+					.unwrap();
+				partition.push(Part::Ic(ys.into_iter().map(|y| (y, coef)).collect()));
+			} else {
+				for x in xs {
+					partition.push(Part::Amo(vec![(x, coef)]));
 				}
-			}
-
-			for term in same_coefficients.drain(..) {
-				partition.push(Part::Amo(vec![term]));
 			}
 		}
 
@@ -734,7 +718,7 @@ mod tests {
 				),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
-					Part::Ic(vec![(7, 3.into()), (8, 3.into()), (9, 3.into())]),
+					Part::Ic(vec![(5, 3.into()), (6, 3.into()), (7, 3.into())]),
 					Part::Amo(vec![(4, 5.into())]),
 				],
 				cmp: LimitComp::LessEq,

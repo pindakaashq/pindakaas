@@ -1,70 +1,112 @@
 use crate::{
-	int::IntVarOrd, linear::totalizer::build_totalizer, CheckError, Checker, ClauseDatabase,
-	Coefficient, LinExp, Literal, Unsatisfiable,
+	int::{IntVarEnc, IntVarOrd},
+	linear::totalizer::build_totalizer,
+	CheckError, Checker, ClauseDatabase, Encoder, LinExp, Literal, Result, Unsatisfiable,
 };
-use iset::interval_map;
-// use itertools::Itertools;
+use iset::{interval_map, IntervalMap};
+
 #[derive(Default)]
 pub struct SortedEncoder {}
 
 pub struct Sorted<'a, Lit: Literal> {
 	xs: &'a [Lit],
+	ys: &'a [Lit],
 }
 
 impl<'a, Lit: Literal> Sorted<'a, Lit> {
-	pub fn new(xs: &'a [Lit]) -> Self {
-		Self { xs }
+	pub fn new(xs: &'a [Lit], ys: &'a [Lit]) -> Self {
+		Self { xs, ys }
 	}
 }
 
 impl<'a, Lit: Literal> Checker for Sorted<'a, Lit> {
 	type Lit = Lit;
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let _lhs: i32 = LinExp::from_terms(
+		let lhs = LinExp::from_terms(
 			self.xs
 				.iter()
 				.map(|x| (x.clone(), 1))
 				.collect::<Vec<_>>()
 				.as_slice(),
 		)
-		.assign(solution);
-		Ok(())
-		// self.xs
-		// 	.iter()
-		// 	.map(|x| Sorted::<Lit>::assign(x, solution))
-		// 	.tuple_windows(|(a, b)| !a.is_negated.cmp(!b.is_negated()))
+		.assign(solution) as usize;
+
+		let rhs = self
+			.ys
+			.iter()
+			.map(|y| Self::assign(y, solution))
+			.collect::<Vec<_>>();
+		if lhs == 0 || !rhs[lhs - 1].is_negated() {
+			Ok(())
+		} else {
+			Err(CheckError::Unsatisfiable(Unsatisfiable))
+		}
 	}
 }
 
-impl SortedEncoder {
-	pub fn encode<DB: ClauseDatabase, C: Coefficient>(
-		&mut self,
-		db: &mut DB,
-		con: &Sorted<DB::Lit>,
-	) -> std::result::Result<LinExp<DB::Lit, C>, Unsatisfiable> {
-		let xs = con
+impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_, DB::Lit>> for SortedEncoder {
+	fn encode(&mut self, db: &mut DB, sorted: &Sorted<DB::Lit>) -> Result {
+		let xs = sorted
 			.xs
 			.iter()
 			.enumerate()
 			.map(|(i, x)| {
 				IntVarOrd::new(
 					db,
-					interval_map! { C::one()..(C::one()+C::one()) => Some(x.clone()) },
+					interval_map! { 1..2 => Some(x.clone()) },
 					format!("x_{i}"),
 				)
 				.into()
 			})
 			.collect::<Vec<_>>();
 
-		let root = build_totalizer(
-			xs,
+		let n = (sorted.xs.len() + 1) as i64;
+
+		let y = IntVarOrd::new(
 			db,
-			C::zero(),
-			con.xs.iter().fold(C::zero(), |acc, _| acc + C::one()),
-			0,
-			false,
-			-C::one(),
-		);
-		Ok(LinExp::from(&root))
+			IntervalMap::from_sorted(
+				num::iter::range_inclusive(1, n)
+					.zip(sorted.ys.iter())
+					.map(|(i, y)| (i..i + 1, Some(y.clone()))),
+			),
+			"y".to_string(),
+		)
+		.into();
+
+		let y = build_totalizer(xs, db, 0, sorted.xs.len() as i64, 0, false, None, y);
+
+		if let IntVarEnc::Ord(o) = y {
+			o.consistent(db)
+		} else {
+			unreachable!()
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	#[cfg(feature = "trace")]
+	use traced_test::test;
+
+	use super::*;
+	use crate::helpers::tests::{assert_sol, TestDB};
+
+	#[test]
+	fn test_small_sorted() {
+		let mut db = TestDB::new(4);
+		let con = &Sorted::new(&[1, 2], &[3, 4]);
+		let sols = vec![
+			vec![-1, -2, -3, -4],
+			vec![-1, -2, -3, 4],
+			vec![-1, -2, 3, -4],
+			vec![-1, -2, 3, 4],
+			vec![-1, 2, 3, -4],
+			vec![-1, 2, 3, 4],
+			vec![1, -2, 3, -4],
+			vec![1, -2, 3, 4],
+			// vec![1, 2, -3, 4],
+			vec![1, 2, 3, 4],
+		];
+		assert_sol!(db => SortedEncoder::default(), &con => sols);
 	}
 }
