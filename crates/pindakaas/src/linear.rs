@@ -595,7 +595,7 @@ impl<DB: ClauseDatabase, C: Coefficient, Enc: Encoder<DB, LinVariant<DB::Lit, C>
 		tracing::instrument(name = "linear_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&mut self, db: &mut DB, lin: &LinearConstraint<DB::Lit, C>) -> Result {
-		let variant = LinearAggregator::default().aggregate(db, lin)?;
+		let variant = self.agg.aggregate(db, lin)?;
 		self.enc.encode(db, &variant)
 	}
 }
