@@ -121,14 +121,47 @@ mod tests {
 	use super::*;
 	use crate::{
 		// cardinality_one::tests::card1_test_suite, CardinalityOne,
-		helpers::tests::assert_sol,
+		helpers::tests::{assert_sol, TestDB},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
 			LimitComp,
 		},
 		Checker,
+		Comparator,
 		Encoder,
+		LinExp,
+		LinearAggregator,
+		LinearConstraint,
 	};
+
+	#[test]
+	fn test_sort_same_coefficients_2() {
+		use crate::linear::{LinearEncoder, StaticLinEncoder};
+		use crate::{Checker, Encoder};
+		let mut db = TestDB::new(5);
+		let mut agg = LinearAggregator::default();
+		agg.sort_same_coefficients(3);
+		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder<i32>>>::default();
+		encoder.add_linear_aggregater(agg);
+		let con = LinearConstraint::new(
+			LinExp::new() + (1, 3) + (2, 3) + (3, 1) + (4, 1) + (5, 3),
+			Comparator::GreaterEq,
+			2,
+		);
+		assert!(encoder.encode(&mut db, &con).is_ok());
+		db.with_check(|sol| {
+			{
+				let con = LinearConstraint::new(
+					LinExp::new() + (1, 3) + (2, 3) + (3, 1) + (4, 1) + (5, 3),
+					Comparator::GreaterEq,
+					2,
+				);
+				con.check(sol)
+			}
+			.is_ok()
+		})
+		.check_complete()
+	}
 
 	linear_test_suite!(TotalizerEncoder::default());
 	// FIXME: Totalizer does not support LimitComp::Equal
