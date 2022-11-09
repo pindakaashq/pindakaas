@@ -108,9 +108,16 @@ impl LinearAggregator {
 				&& xs.len() >= self.sort_same_coefficients
 				&& xs.len() < n
 			{
-				eprintln!("found same coef chain of {}", xs.len());
+				// if c=1, then just card_one constraint?
+				let c = if lin.cmp == Comparator::LessEq {
+					// TODO safety?
+					(lin.k / coef).to_usize().unwrap()
+				} else {
+					xs.len()
+				};
 				let ys = xs
 					.iter()
+					.take(c)
 					.map(|_x| new_var!(db, format!("s_{_x:?}"))) // TODO: use label of _x
 					.collect::<Vec<_>>();
 				SortedEncoder::default()
