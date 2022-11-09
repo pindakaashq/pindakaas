@@ -96,6 +96,7 @@ impl LinearAggregator {
 		// 	partition.push(Part::Amo(vec![term]));
 		// }
 
+		// Do not interfere with a cardinality constraint
 		let n = agg.len();
 		for (coef, group) in &agg
 			.into_iter()
@@ -730,6 +731,32 @@ mod tests {
 				],
 				cmp: LimitComp::LessEq,
 				k: 10.into(),
+			}))
+		);
+		db.check_complete()
+	}
+
+	#[test]
+	fn test_sort_same_coefficients_using_minimal_chain() {
+		let mut db = TestDB::new(5);
+		assert_eq!(
+			LinearAggregator::default()
+				.sort_same_coefficients(2)
+				.aggregate(
+					&mut db,
+					&LinearConstraint::new(
+						LinExp::from((1, 5)) + (2, 5) + (3, 5) + (4, 5) + (5, 4),
+						Comparator::LessEq,
+						12 // only need 2 to sort
+					)
+				),
+			Ok(LinVariant::Linear(Linear {
+				terms: vec![
+					Part::Amo(vec![(5, 4.into())]),
+					Part::Ic(vec![(6, 5.into()), (7, 5.into())]),
+				],
+				cmp: LimitComp::LessEq,
+				k: 12.into(),
 			}))
 		);
 		db.check_complete()
