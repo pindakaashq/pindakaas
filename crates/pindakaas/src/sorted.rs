@@ -1,6 +1,6 @@
 use crate::{
 	int::{IntVarEnc, IntVarOrd},
-	linear::totalizer::build_totalizer,
+	linear::{totalizer::build_totalizer, LimitComp},
 	CheckError, Checker, ClauseDatabase, Encoder, LinExp, Literal, Result, Unsatisfiable,
 };
 use iset::{interval_map, IntervalMap};
@@ -9,13 +9,14 @@ use iset::{interval_map, IntervalMap};
 pub struct SortedEncoder {}
 
 pub struct Sorted<'a, Lit: Literal> {
-	xs: &'a [Lit],
-	ys: &'a [Lit],
+	pub(crate) xs: &'a [Lit],
+	pub(crate) cmp: LimitComp,
+	pub(crate) ys: &'a [Lit],
 }
 
 impl<'a, Lit: Literal> Sorted<'a, Lit> {
-	pub fn new(xs: &'a [Lit], ys: &'a [Lit]) -> Self {
-		Self { xs, ys }
+	pub(crate) fn new(xs: &'a [Lit], cmp: LimitComp, ys: &'a [Lit]) -> Self {
+		Self { xs, cmp, ys }
 	}
 }
 
@@ -29,14 +30,27 @@ impl<'a, Lit: Literal> Checker for Sorted<'a, Lit> {
 				.collect::<Vec<_>>()
 				.as_slice(),
 		)
-		.assign(solution) as usize;
+		.assign(solution)? as usize;
 
 		let rhs = self
 			.ys
 			.iter()
 			.map(|y| Self::assign(y, solution))
 			.collect::<Vec<_>>();
-		if lhs == 0 || !rhs[lhs - 1].is_negated() {
+
+		let rhs_eq = LinExp::new()
+			.add_chain(
+				self.ys
+					.iter()
+					.map(|y| (y.clone(), 1))
+					.collect::<Vec<_>>()
+					.as_slice(),
+			)
+			.assign(solution)? as usize;
+
+		if self.cmp == LimitComp::LessEq && (lhs == 0 || !rhs[lhs - 1].is_negated())
+			|| (self.cmp == LimitComp::Equal && lhs == rhs_eq)
+		{
 			Ok(())
 		} else {
 			Err(CheckError::Unsatisfiable(Unsatisfiable))
@@ -94,7 +108,7 @@ mod tests {
 	#[test]
 	fn test_small_sorted() {
 		let mut db = TestDB::new(4);
-		let con = &Sorted::new(&[1, 2], &[3, 4]);
+		let con = &Sorted::new(&[1, 2], LimitComp::LessEq, &[3, 4]);
 		let sols = vec![
 			vec![-1, -2, -3, -4],
 			vec![-1, -2, -3, 4],

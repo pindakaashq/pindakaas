@@ -121,7 +121,7 @@ impl LinearAggregator {
 					.map(|_x| new_var!(db, format!("s_{_x:?}"))) // TODO: use label of _x
 					.collect::<Vec<_>>();
 				SortedEncoder::default()
-					.encode(db, &Sorted::new(&xs, &ys))
+					.encode(db, &Sorted::new(&xs, LimitComp::Equal, &ys))
 					.unwrap();
 				partition.push(Part::Ic(ys.into_iter().map(|y| (y, coef)).collect()));
 			} else {
