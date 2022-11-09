@@ -47,7 +47,6 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			xs,
 			db,
 			C::zero(),
-			*lin.k.clone(),
 			0,
 			self.add_consistency,
 			None,
@@ -57,13 +56,10 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 	}
 }
 
-// TODO
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 	layer: Vec<IntVarEnc<DB::Lit, C>>,
 	db: &mut DB,
 	l: C,
-	u: C,
 	level: u32,
 	add_consistency: bool,
 	cutoff: Option<C>,
@@ -88,7 +84,7 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 								.map(|c| c.end - C::one())
 								.collect(),
 							l,
-							u,
+							root.ub(),
 						);
 
 						next_int_var(
@@ -113,16 +109,7 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 				_ => panic!(),
 			})
 			.collect();
-		build_totalizer(
-			next_layer,
-			db,
-			l,
-			u,
-			level + 1,
-			add_consistency,
-			cutoff,
-			root,
-		)
+		build_totalizer(next_layer, db, l, level + 1, add_consistency, cutoff, root)
 	}
 }
 
