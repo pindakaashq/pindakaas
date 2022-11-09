@@ -61,14 +61,13 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarOrd<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}:O in {{{}}} ({})",
+			"{}{{{}}}:O",
 			self.lbl,
 			self.dom()
 				.iter(..)
 				.map(|iv| iv.end - C::one())
 				.sorted()
-				.join(", "),
-			self.lits()
+				.join(","),
 		)
 	}
 }
@@ -77,14 +76,13 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}:B in {{{}}} ({})",
+			"{}{{{}}}:B",
 			self.lbl,
 			self.dom()
 				.iter(..)
 				.map(|iv| iv.end - C::one())
 				.sorted()
-				.join(", "),
-			self.lits()
+				.join(","),
 		)
 	}
 }
@@ -101,6 +99,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		dom: IntervalMap<C, Option<Lit>>,
 		lbl: String,
 	) -> Self {
+		assert!(!dom.is_empty());
 		let xs = dom
 			.into_iter(..)
 			.map(|(v, lit)| {
@@ -108,7 +107,6 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 				(v, lit)
 			})
 			.collect::<IntervalMap<_, _>>();
-		debug_assert!(!xs.is_empty());
 		Self { xs, lbl }
 	}
 
@@ -667,25 +665,12 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			// assert!(cmp == &LimitComp::LessEq, "Only support <= for x+y ? z");
 			for c_a in x.dom() {
 				for c_b in y.dom() {
-					let neg = |clauses: Vec<Vec<DB::Lit>>| -> Vec<Vec<DB::Lit>> {
-						if clauses.is_empty() {
-							vec![vec![]]
-						} else if clauses.contains(&vec![]) {
-							vec![]
-						} else {
-							clauses
-								.into_iter()
-								.map(|clause| clause.into_iter().map(|lit| lit.negate()).collect())
-								.collect()
-						}
-					};
-
 					// TODO tighten c_c.start
 					let c_c = (std::cmp::min(c_a.start, c_b.start))
 						..(((c_a.end - C::one()) + (c_b.end - C::one())) + C::one());
 					let (a, b, c) = (
-						neg(x.geq(c_a.clone())),
-						neg(y.geq(c_b.clone())),
+						negate_cnf(x.geq(c_a.clone())),
+						negate_cnf(y.geq(c_b.clone())),
 						z.geq(c_c.clone()),
 					);
 
@@ -703,6 +688,19 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			}
 			Ok(())
 		}
+	}
+}
+
+pub(crate) fn negate_cnf<Lit: Literal>(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
+	if clauses.is_empty() {
+		vec![vec![]]
+	} else if clauses.contains(&vec![]) {
+		vec![]
+	} else {
+		clauses
+			.into_iter()
+			.map(|clause| clause.into_iter().map(|lit| lit.negate()).collect())
+			.collect()
 	}
 }
 
