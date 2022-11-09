@@ -89,8 +89,8 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarOrd<Lit: Literal, C: Coefficient> {
-	xs: IntervalMap<C, Lit>,
-	lbl: String,
+	pub(crate) xs: IntervalMap<C, Lit>,
+	pub(crate) lbl: String,
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
@@ -158,21 +158,21 @@ impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
-	fn dom(&self) -> IntervalSet<C> {
+	pub fn dom(&self) -> IntervalSet<C> {
 		std::iter::once(self.lb()..self.lb() + C::one())
 			.chain(self.xs.intervals(..))
 			.collect()
 	}
 
-	fn lb(&self) -> C {
+	pub fn lb(&self) -> C {
 		self.xs.range().unwrap().start - C::one()
 	}
 
-	fn ub(&self) -> C {
+	pub fn ub(&self) -> C {
 		self.xs.range().unwrap().end - C::one()
 	}
 
-	fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
+	pub fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		let v = v.end - C::one();
 		if v <= self.lb() {
 			vec![]
@@ -186,7 +186,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		}
 	}
 
-	fn as_lin_exp(&self) -> LinExp<Lit, C> {
+	pub fn as_lin_exp(&self) -> LinExp<Lit, C> {
 		let mut acc = self.lb();
 		LinExp::new()
 			.add_chain(
@@ -203,7 +203,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			.add_constant(self.lb())
 	}
 
-	fn lits(&self) -> usize {
+	pub fn lits(&self) -> usize {
 		self.xs.len()
 	}
 }
