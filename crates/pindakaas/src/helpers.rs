@@ -63,7 +63,7 @@ impl<'a, Lit: Literal> Checker for XorConstraint<'a, Lit> {
 				.collect::<Vec<(Self::Lit, i32)>>()
 				.as_slice(),
 		)
-		.assign(solution);
+		.assign(solution)?;
 		if count % 2 == 1 {
 			Ok(())
 		} else {

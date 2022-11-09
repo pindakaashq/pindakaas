@@ -533,9 +533,10 @@ impl<'a, Lit: Literal, C: Coefficient> TernLeConstraint<'a, Lit, C> {
 impl<'a, Lit: Literal, C: Coefficient> Checker for TernLeConstraint<'a, Lit, C> {
 	type Lit = Lit;
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let x = LinExp::from(self.x).assign(solution);
-		let y = LinExp::from(self.y).assign(solution);
-		let z = LinExp::from(self.z).assign(solution);
+		let x = LinExp::from(self.x).assign(solution)?;
+		let y = LinExp::from(self.y).assign(solution)?;
+		let z = LinExp::from(self.z).assign(solution)?;
+		// TODO into LinearConstraint => Check?
 		if match self.cmp {
 			LimitComp::LessEq => x + y <= z,
 			LimitComp::Equal => x + y == z,
@@ -784,11 +785,11 @@ pub mod tests {
 		assert_eq!(x.geq(7..8), vec![vec![1, 4]]); // 7-1=6 == 0110 (right-to-left!)
 		assert_eq!(x.geq(5..8), vec![vec![1, 2, 4], vec![2, 4], vec![1, 4]]); // 4=0100,5=0101,6=0110
 
-		assert_eq!(x_lin.assign(&[-1, -2, -3, -4]), 0);
-		assert_eq!(x_lin.assign(&[1, -2, -3, -4]), 1);
-		assert_eq!(x_lin.assign(&[1, 2, -3, -4]), 3);
-		assert_eq!(x_lin.assign(&[1, 2, -3, 4]), 11);
-		assert_eq!(x_lin.assign(&[1, 2, 3, 4]), 15);
+		assert_eq!(x_lin.assign(&[-1, -2, -3, -4]), Ok(0));
+		assert_eq!(x_lin.assign(&[1, -2, -3, -4]), Ok(1));
+		assert_eq!(x_lin.assign(&[1, 2, -3, -4]), Ok(3));
+		assert_eq!(x_lin.assign(&[1, 2, -3, 4]), Ok(11));
+		assert_eq!(x_lin.assign(&[1, 2, 3, 4]), Ok(15));
 
 		let tern = TernLeConstraint {
 			x: &x,
@@ -869,10 +870,12 @@ pub mod tests {
 		assert_eq!(x.geq(4..7), vec![vec![2]]);
 
 		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
-		assert_eq!(x_lin.assign(&[-1, -2, -3]), 2);
-		assert_eq!(x_lin.assign(&[1, -2, -3]), 4);
-		assert_eq!(x_lin.assign(&[1, 2, -3]), 6);
-		assert_eq!(x_lin.assign(&[1, 2, 3]), 10);
+		assert!(x_lin.assign(&[1, -2, 3]).is_err());
+		assert!(x_lin.assign(&[-1, 2, -3]).is_err());
+		assert_eq!(x_lin.assign(&[-1, -2, -3]), Ok(2));
+		assert_eq!(x_lin.assign(&[1, -2, -3]), Ok(4));
+		assert_eq!(x_lin.assign(&[1, 2, -3]), Ok(6));
+		assert_eq!(x_lin.assign(&[1, 2, 3]), Ok(10));
 
 		let tern = TernLeConstraint {
 			x: &x,

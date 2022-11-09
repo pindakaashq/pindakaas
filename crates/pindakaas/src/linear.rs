@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use std::{
 	collections::VecDeque,
 	fmt,
@@ -203,7 +204,7 @@ impl<Lit: Literal, C: Coefficient> From<&IntVarEnc<Lit, C>> for LinExp<Lit, C> {
 impl<Lit: Literal, C: Coefficient> Checker for LinearConstraint<Lit, C> {
 	type Lit = Lit;
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let lhs = self.exp.assign(solution);
+		let lhs = self.exp.assign(solution)?;
 		if match self.cmp {
 			Comparator::LessEq => lhs <= self.k,
 			Comparator::Equal => lhs == self.k,
@@ -224,7 +225,7 @@ pub enum Comparator {
 }
 
 #[derive(Debug, Clone)]
-enum Constraint<C: Coefficient> {
+pub(crate) enum Constraint<C: Coefficient> {
 	AtMostOne,
 	ImplicationChain,
 	Domain { lb: C, ub: C },
@@ -308,12 +309,53 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 		self
 	}
 
-	pub(crate) fn assign(&self, solution: &[Lit]) -> C {
-		self.terms.iter().fold(self.add, |acc, (lit, coef)| {
-			// TODO why can't I provide types for this function?
-			// let a: &Lit = Checker::assign(&lit, solution);
-			let a = solution.iter().find(|x| x.var() == lit.var()).unwrap_or_else(|| panic!("Could not find lit {lit:?} in solution {solution:?}; perhaps this variable did not occur in any clause"));
-			acc + if *lit == *a { self.mult } else { C::zero() } * *coef
+	pub(crate) fn iter(&self) -> impl Iterator<Item = (Option<Constraint<C>>, Vec<&(Lit, C)>)> {
+		let mut it = self.terms.iter();
+		std::iter::once((
+			None,
+			Vec::from_iter((0..self.num_free).map(|_| it.next().unwrap())),
+		))
+		.chain(self.constraints.iter().map(move |constraint| {
+			let mut terms = Vec::with_capacity(constraint.1);
+			for _ in 0..constraint.1 {
+				if let Some(term) = it.next() {
+					terms.push(term)
+				}
+			}
+			(Some(constraint.0.clone()), terms)
+		}))
+	}
+
+	pub(crate) fn assign(&self, solution: &[Lit]) -> Result<C, CheckError<Lit>> {
+		let evaluate = |assignments: &Vec<(Lit, C, Lit)>| {
+			assignments
+				.iter()
+				.fold(C::zero(), |acc, (lit, coef, assignment)| {
+					acc + if lit == assignment { *coef } else { C::zero() }
+				})
+		};
+		self.iter().fold(Ok(self.add), |acc, (constraint,terms) | {
+            let assignments = terms.into_iter().map(|(lit,coef)| {
+                let assignment = solution.iter().find(|x| x.var() == lit.var()).unwrap_or_else(|| panic!("Could not find lit {lit:?} in solution {solution:?}; perhaps this variable did not occur in any clause"));
+                                                    (
+                    lit.clone(),*coef,assignment.clone())
+                    }).collect::<Vec<(Lit,C,Lit)>>();
+
+            let is_consistent = match constraint {
+                Some(Constraint::AtMostOne) => assignments.iter().filter(|(lit,_,a)| lit == a).count() <= 1,
+                Some(Constraint::ImplicationChain) =>  assignments.iter().map(|(lit,_,a)| lit == a).tuple_windows().all(|(a, b)| a.cmp(&b).is_ge()),
+                Some(Constraint::Domain { lb, ub }) => {
+                    let a = evaluate(&assignments);
+                    lb <= a && a <= ub
+                }
+                None => true
+            };
+
+            if is_consistent {
+                Ok(acc?+evaluate(&assignments) * self.mult)
+            } else {
+                Err(CheckError::Unsatisfiable(Unsatisfiable))
+            }
 		})
 	}
 
