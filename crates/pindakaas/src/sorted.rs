@@ -73,7 +73,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_, DB::Lit>> for SortedEncoder {
 		)
 		.into();
 
-		let y = build_totalizer(xs, db, 0, sorted.xs.len() as i64, 0, false, None, y);
+		let y = build_totalizer(xs, db, 0, 0, false, None, y);
 
 		if let IntVarEnc::Ord(o) = y {
 			o.consistent(db)
