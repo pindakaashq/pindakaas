@@ -132,7 +132,7 @@ impl SortedEncoder {
 		// mut xs: Vec<IntVarOrd<DB::Lit, C>>,
 		xs: &[IntVarOrd<DB::Lit, C>],
 		y: &IntVarOrd<DB::Lit, C>,
-		lvl: usize,
+		_lvl: usize,
 	) -> Result {
 		// TODO: Add tracing
 		// eprintln!("sorted([{}], {})", xs.iter().join(", "), y);
@@ -141,20 +141,20 @@ impl SortedEncoder {
 			[x] => {
 				x.xs.values(..)
 					.zip(y.xs.values(..))
-					.try_for_each(|(x, y)| self.equiv(db, x, y, lvl + 1))?;
+					.try_for_each(|(x, y)| self.equiv(db, x, y, _lvl + 1))?;
 				x.xs.values((y.ub() + C::one())..)
 					.try_for_each(|x| emit_clause!(db, &[x.negate()]))
 			}
-			[x1, x2] => self.comp(db, x1, x2, y, lvl + 1),
+			[x1, x2] => self.comp(db, x1, x2, y, _lvl + 1),
 			xs => {
 				let n = xs.len() / 2;
 				let m = std::cmp::min((0..n).fold(C::zero(), |a, _| a + C::one()), y.ub());
 				let y1 = self.next_int_var(db, m, String::from("y_1"));
 				let m_ = std::cmp::min((n..xs.len()).fold(C::zero(), |a, _| a + C::one()), y.ub());
 				let y2 = self.next_int_var(db, m_, String::from("y_2"));
-				self.sorted(db, &xs[..n], &y1, lvl)?;
-				self.sorted(db, &xs[n..], &y2, lvl)?;
-				self.merged(db, &y1, &y2, y, lvl + 1)
+				self.sorted(db, &xs[..n], &y1, _lvl)?;
+				self.sorted(db, &xs[n..], &y2, _lvl)?;
+				self.merged(db, &y1, &y2, y, _lvl + 1)
 			}
 		}
 	}
@@ -165,19 +165,19 @@ impl SortedEncoder {
 		x1: &IntVarOrd<DB::Lit, C>,
 		x2: &IntVarOrd<DB::Lit, C>,
 		y: &IntVarOrd<DB::Lit, C>,
-		lvl: usize,
+		_lvl: usize,
 	) -> Result {
 		// TODO: Add tracing
-		// eprintln!("{:lvl$}merged({}, {}, {})", "", x1, x2, y, lvl = lvl);
-		let (a, b) = (x1.ub(), x2.ub());
+		// eprintln!("{:_lvl$}merged({}, {}, {})", "", x1, x2, y, _lvl = _lvl);
+		let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
 		assert!(y.ub() <= a + b);
 
 		if a.is_zero() && b.is_zero() {
 			Ok(())
 		} else if a.is_one() && b.is_one() {
-			self.comp(db, x1, x2, y, lvl + 1)
+			self.comp(db, x1, x2, y, _lvl + 1)
 		} else if a.is_odd() && b.is_even() {
-			self.merged(db, x2, x1, y, lvl + 1)
+			self.merged(db, x2, x1, y, _lvl + 1)
 		} else {
 			// TODO can more easily be implemented using affine views
 			let mut odd_even = |x: &IntVarOrd<DB::Lit, C>| {
@@ -218,12 +218,13 @@ impl SortedEncoder {
 			let mut merge = |db: &mut DB,
 			                 x1: Option<IntVarOrd<_, _>>,
 			                 x2: Option<IntVarOrd<_, _>>,
+			                 c: C,
 			                 lbl: String| match (x1, x2) {
 				(None, Some(x2)) => Ok(x2),
 				(Some(x1), None) => Ok(x1),
 				(Some(x1), Some(x2)) => {
-					let z = self.next_int_var(db, x1.ub() + x2.ub(), lbl);
-					self.merged(db, &x1, &x2, &z, lvl + 1)?;
+					let z = self.next_int_var(db, std::cmp::min(x1.ub() + x2.ub(), c), lbl);
+					self.merged(db, &x1, &x2, &z, _lvl + 1)?;
 					Ok(z)
 				}
 				(None, None) => unreachable!(),
@@ -232,60 +233,67 @@ impl SortedEncoder {
 			let (x1_odd, x1_even) = odd_even(x1);
 			let (x2_odd, x2_even) = odd_even(x2);
 
-			// TODO: Does this need tracing?
-			// eprintln!(
-			// 	"{:lvl$}odd_even({:?}, {:?}, {:?}, {:?})",
-			// 	"",
-			// 	x1_odd,
-			// 	x1_even,
-			// 	x2_odd,
-			// 	x2_even,
-			// 	lvl = lvl
-			// );
-			let z_odd = merge(db, x1_odd, x2_odd, String::from("z_odd"))?;
-			let z_even = merge(db, x1_even, x2_even, String::from("z_even"))?;
-			// TODO: Does this need tracing?
-			// eprintln!("{:lvl$}z({z_odd}, {z_even})", "", lvl = lvl);
+			let c_even_card_net = a <= c && b <= c && a + b > c && c.is_even();
+			let c_odd_card_net = a <= c && b <= c && a + b > c && c > C::zero() && c.is_odd();
+
+			let z_odd_ub = if c_even_card_net {
+				(c / (C::one() + C::one())) + C::one()
+			} else if c_odd_card_net {
+				(c + C::one()) / (C::one() + C::one())
+			} else {
+				x1_odd.as_ref().map(|x| x.ub()).unwrap_or_default()
+					+ x2_odd.as_ref().map(|x| x.ub()).unwrap_or_default()
+			};
+
+			let z_odd = merge(db, x1_odd, x2_odd, z_odd_ub, String::from("z_odd"))?;
+
+			let z_even_ub = if c_even_card_net {
+				c / (C::one() + C::one())
+			} else if c_odd_card_net {
+				(c - C::one()) / (C::one() + C::one())
+			} else {
+				x1_even.as_ref().map(|x| x.ub()).unwrap_or_default()
+					+ x2_even.as_ref().map(|x| x.ub()).unwrap_or_default()
+			};
+
+			let z_even = merge(db, x1_even, x2_even, z_even_ub, String::from("z_even"))?;
 
 			for ((z_even_i, z_odd_i), (y_even, y_odd)) in z_even
 				.xs
 				.values(..)
 				.zip(z_odd.xs.values(..).skip(1))
-				.zip(y.xs.values(..).skip(1).tuple_windows())
-			// .zip(z_odd.xs.values(..))
-			// .zip(y.xs.values(..).tuples())
+				.zip(y.xs.values(..).skip(1).tuples())
 			{
-				self.comp_lits(db, z_even_i, z_odd_i, y_even, Some(y_odd), lvl + 1)?;
+				self.comp_lits(db, z_even_i, z_odd_i, y_even, Some(y_odd), _lvl + 1)?;
 			}
 
 			// TODO this is a bit clunky (and at least inefficient). The first/last lits of z should view y1/yn.
 			let y1 = y.xs.values(..).next().unwrap();
 			let z1 = z_odd.xs.values(..).next().unwrap();
-			self.equiv(db, z1, y1, lvl + 1)?;
+			self.equiv(db, z1, y1, _lvl + 1)?;
 
-			let c = y.ub();
-
-			if a <= c && b <= c && c > C::one() && a + b > c && c.is_even() {
+			if c_even_card_net {
 				let yn = y.xs.values(..).last().unwrap();
 				let za = z_even.xs.values(..).last().unwrap();
 				let zb = z_odd.xs.values(..).last().unwrap();
-				self.comp_lits(db, za, zb, yn, None, lvl + 1)?;
+				self.comp_lits(db, za, zb, yn, None, _lvl + 1)?;
+			} else if c_odd_card_net {
 			} else if a.is_even() && b.is_even() {
 				let yn = y.xs.values(..).last().unwrap();
 				let zn = z_even.xs.values(..).last().unwrap();
-				self.equiv(db, yn, zn, lvl + 1)?;
+				self.equiv(db, yn, zn, _lvl + 1)?;
 			} else if a.is_odd() && b.is_odd() {
 				let yn = y.xs.values(..).last().unwrap();
 				let zn = z_odd.xs.values(..).last().unwrap();
-				self.equiv(db, yn, zn, lvl + 1)?;
+				self.equiv(db, yn, zn, _lvl + 1)?;
 			}
 
-			// TODO: What is this supposed to trace
+			// TODO: Does this need tracing?
 			// eprintln!(
-			// 	"{:lvl$}{}",
-			// 	"",
-			// 	y.xs.values(..).map(|l| db.to_label(l)).join(", "),
-			// 	lvl = lvl
+			//	"{:_lvl$}{}",
+			//	"",
+			//	y.xs.values(..).map(|l| db.to_label(l)).join(", "),
+			//	_lvl = _lvl
 			// );
 			Ok(())
 		}
@@ -297,10 +305,10 @@ impl SortedEncoder {
 		x: &IntVarOrd<DB::Lit, C>,
 		y: &IntVarOrd<DB::Lit, C>,
 		z: &IntVarOrd<DB::Lit, C>,
-		lvl: usize,
+		_lvl: usize,
 	) -> Result {
 		// TODO: Add tracing
-		// eprintln!("{:lvl$}comp({}, {}, {})", "", x, y, z, lvl = lvl);
+		// eprintln!("{:_lvl$}comp({}, {}, {})", "", x, y, z, _lvl = _lvl);
 		debug_assert!(x.ub() == C::one());
 		debug_assert!(y.ub() == C::one());
 		debug_assert!(z.ub() == C::one() || z.ub() == C::one() + C::one());
@@ -311,7 +319,7 @@ impl SortedEncoder {
 		let mut zs = z.xs.values(..);
 		let z1 = zs.next().unwrap();
 		let z2 = zs.next(); // optional
-		self.comp_lits(db, &x, &y, z1, z2, lvl + 1)
+		self.comp_lits(db, &x, &y, z1, z2, _lvl + 1)
 	}
 
 	fn equiv<DB: ClauseDatabase>(
@@ -337,13 +345,13 @@ impl SortedEncoder {
 	) -> Result {
 		// TODO: Add tracing
 		// eprintln!(
-		// 	"{:lvl$}comp_lits({:?}, {:?}, {:?}, {:?})",
+		// 	"{:_lvl$}comp_lits({:?}, {:?}, {:?}, {:?})",
 		//	"",
 		//	x,
 		//	y,
 		//	z1,
 		//	z2,
-		//	lvl = _lvl
+		//	_lvl = _lvl
 		// );
 		emit_clause!(db, &[x.negate(), z1.clone()])?;
 		emit_clause!(db, &[y.negate(), z1.clone()])?;
@@ -395,6 +403,14 @@ mod tests {
 	}
 
 	#[test]
+	fn test_3_2_sorted_eq() {
+		let mut db = TestDB::new(5);
+		let con = &Sorted::new(&[1, 2, 3], LimitComp::Equal, &[4, 5]);
+		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
+		assert_sol!(db => SortedEncoder::default(), &con => sols);
+	}
+
+	#[test]
 	fn test_4_sorted_eq() {
 		let mut db = TestDB::new(8);
 		let con = &Sorted::new(&[1, 2, 3, 4], LimitComp::Equal, &[5, 6, 7, 8]);
@@ -403,17 +419,25 @@ mod tests {
 	}
 
 	#[test]
-	fn test_5_sorted_eq() {
-		let mut db = TestDB::new(10);
-		let con = &Sorted::new(&[1, 2, 3, 4, 5], LimitComp::Equal, &[6, 7, 8, 9, 10]);
+	fn test_4_2_sorted_eq() {
+		let mut db = TestDB::new(6);
+		let con = &Sorted::new(&[1, 2, 3, 4], LimitComp::Equal, &[5, 6]);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		assert_sol!(db => SortedEncoder::default(), &con => sols);
 	}
 
 	#[test]
-	fn test_3_2_sorted_eq() {
-		let mut db = TestDB::new(5);
-		let con = &Sorted::new(&[1, 2, 3], LimitComp::Equal, &[4, 5]);
+	fn test_4_3_sorted_eq() {
+		let mut db = TestDB::new(7);
+		let con = &Sorted::new(&[1, 2, 3, 4], LimitComp::Equal, &[5, 6, 7]);
+		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
+		assert_sol!(db => SortedEncoder::default(), &con => sols);
+	}
+
+	#[test]
+	fn test_5_sorted_eq() {
+		let mut db = TestDB::new(10);
+		let con = &Sorted::new(&[1, 2, 3, 4, 5], LimitComp::Equal, &[6, 7, 8, 9, 10]);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		assert_sol!(db => SortedEncoder::default(), &con => sols);
 	}
