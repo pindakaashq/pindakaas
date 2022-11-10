@@ -361,8 +361,8 @@ mod tests {
 			tests::{construct_terms, linear_test_suite},
 			LimitComp, StaticLinEncoder,
 		},
-		Cardinality, CardinalityOne, Checker, Comparator, Encoder, LinExp, LinearConstraint,
-		LinearEncoder, PairwiseEncoder,
+		Cardinality, CardinalityOne, Comparator, Encoder, LinExp, LinearConstraint, LinearEncoder,
+		PairwiseEncoder,
 	};
 
 	#[test]

@@ -169,7 +169,6 @@ mod tests {
 			tests::{construct_terms, linear_test_suite},
 			LimitComp,
 		},
-		Checker,
 		Encoder,
 	};
 	linear_test_suite!(BddEncoder::default());
