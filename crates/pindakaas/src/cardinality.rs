@@ -3,6 +3,9 @@ use crate::{
 	CardinalityOne, Checker, ClauseDatabase, Coefficient, Encoder, Literal,
 };
 
+mod sorting_network;
+pub use sorting_network::SortingNetworkEncoder;
+
 #[derive(Clone, Debug)]
 pub struct Cardinality<Lit: Literal, C: Coefficient> {
 	pub(crate) lits: Vec<Lit>,
@@ -60,15 +63,16 @@ impl<T: LinMarker> CardMarker for T {}
 pub(crate) mod tests {
 	macro_rules! card_test_suite {
 		($encoder:expr) => {
+
 			#[test]
-			fn test_amo_triple_2() {
+			fn test_card_le_2_3() {
 				assert_sol!(
 					$encoder,
 					3,
 					&Cardinality {
 						lits: vec![-1, -2, 3],
 						cmp: LimitComp::LessEq,
-						k: PosCoeff(2)
+						k: 2.into()
 					} =>
 						vec![
 							vec![-1, -2, -3],
@@ -81,6 +85,97 @@ pub(crate) mod tests {
 						]
 				);
 			}
+
+			#[test]
+			fn test_card_eq_1_3() {
+				assert_sol!(
+					$encoder,
+					3,
+					&Cardinality {
+						lits: vec![1, 2, 3],
+						cmp: LimitComp::Equal,
+						k: 1.into()
+					}
+					=>
+					vec![
+					vec![ 1,-2,-3],
+					vec![-1, 2,-3],
+					vec![-1,-2, 3],
+					]
+				);
+			}
+
+
+			#[test]
+			fn test_card_eq_2_3() {
+				assert_sol!(
+					$encoder,
+					3,
+					&Cardinality {
+						lits: vec![1, 2, 3],
+						cmp: LimitComp::Equal,
+						k: 2.into()
+					}
+					=>
+					vec![
+					vec![1, 2, -3],
+					vec![1, -2, 3],
+					vec![-1, 2, 3],
+					]
+				);
+			}
+
+			#[test]
+			fn test_card_eq_2_4() {
+				assert_sol!(
+					$encoder,
+					4,
+					&Cardinality {
+						lits: vec![1, 2, 3, 4],
+						cmp: LimitComp::Equal,
+						k: 2.into()
+					} =>
+					vec![
+					  vec![1, 2, -3, -4],
+					  vec![1, -2, 3, -4],
+					  vec![-1, 2, 3, -4],
+					  vec![1, -2, -3, 4],
+					  vec![-1, 2, -3, 4],
+					  vec![-1, -2, 3, 4],
+					]
+				);
+			}
+
+
+
+			#[test]
+			fn test_card_eq_3_5() {
+				assert_sol!(
+					$encoder,
+					5,
+					&Cardinality {
+						lits: vec![ 1,  2, 3, 4 ,5 ],
+						cmp: LimitComp::Equal,
+						k: 3.into()
+					}
+					=>
+					vec![
+					vec![1, 2, 3, -4, -5],
+					vec![1, 2, -3, 4, -5],
+					vec![1, -2, 3, 4, -5],
+					vec![-1, 2, 3, 4, -5],
+					vec![1, 2, -3, -4, 5],
+					vec![1, -2, 3, -4, 5],
+					vec![-1, 2, 3, -4, 5],
+					vec![1, -2, -3, 4, 5],
+					vec![-1, 2, -3, 4, 5],
+					vec![-1, -2, 3, 4, 5],
+					]
+				);
+			}
+
+
+
 		};
 	}
 

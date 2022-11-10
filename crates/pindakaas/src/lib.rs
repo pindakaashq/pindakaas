@@ -35,7 +35,7 @@ pub mod solvers;
 mod sorted;
 pub mod trace;
 
-pub use cardinality::Cardinality;
+pub use cardinality::{Cardinality, SortingNetworkEncoder};
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
 pub use linear::{
 	AdderEncoder, BddEncoder, Comparator, LinExp, LinVariant, Linear, LinearAggregator,
