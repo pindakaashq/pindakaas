@@ -83,9 +83,7 @@ pub mod tests {
 	use traced_test::test;
 
 	use super::*;
-	use crate::{
-		linear::LimitComp, CardinalityOne, Checker, Encoder, LadderEncoder, Unsatisfiable,
-	};
+	use crate::{linear::LimitComp, CardinalityOne, Encoder, LadderEncoder, Unsatisfiable};
 
 	macro_rules! assert_enc {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
@@ -117,12 +115,14 @@ pub mod tests {
             assert_sol!(tdb => $enc, $arg)
 		};
 		($tdb:ident => $enc:expr, $arg:expr) => {
+			use $crate::Checker;
 			$tdb = $tdb.with_check(|sol| $arg.check(sol).is_ok());
 			$enc.encode(&mut $tdb, $arg)
 				.expect("Encoding proved to be trivially unsatisfiable");
 			$tdb.check_complete()
 		};
 		($tdb:ident, $enc:expr, $max:expr, $arg:expr) => {
+			use $crate::Checker;
 			$tdb = $tdb.with_check(|sol| $arg.check(sol).is_ok());
 			$enc.encode(&mut $tdb, $arg)
 				.expect("Encoding proved to be trivially unsatisfiable");

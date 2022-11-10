@@ -126,7 +126,6 @@ mod tests {
 			tests::{construct_terms, linear_test_suite},
 			LimitComp,
 		},
-		Checker,
 		Comparator,
 		Encoder,
 		LinExp,

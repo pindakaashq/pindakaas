@@ -83,7 +83,7 @@ mod tests {
 			tests::{construct_terms, linear_test_suite},
 			LimitComp,
 		},
-		Checker, Encoder,
+		Encoder,
 	};
 
 	linear_test_suite!(SwcEncoder::default());

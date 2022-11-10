@@ -51,7 +51,6 @@ mod tests {
 		cardinality_one::tests::card1_test_suite,
 		helpers::tests::{assert_enc_sol, assert_sol},
 		linear::LimitComp,
-		Checker,
 	};
 
 	card1_test_suite!(BitwiseEncoder::default());
