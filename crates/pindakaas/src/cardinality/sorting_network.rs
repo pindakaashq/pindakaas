@@ -24,7 +24,6 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Cardina
 			.collect::<Vec<_>>();
 		let sorted = Sorted::new(card.lits.as_slice(), LimitComp::Equal, &ys);
 		SortedEncoder::default().encode(db, &sorted)?;
-		eprintln!("BACK");
 
 		if card.cmp == LimitComp::Equal {
 			for y in ys.into_iter().with_position() {
