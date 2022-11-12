@@ -58,6 +58,7 @@ impl<DB: ClauseDatabase, Enc: Encoder<DB, Cardinality<DB::Lit, i8>> + CardMarker
 // local marker trait, to ensure the previous definition only applies within this crate
 pub(crate) trait CardMarker {}
 impl<T: LinMarker> CardMarker for T {}
+impl CardMarker for SortingNetworkEncoder {}
 
 #[cfg(test)]
 pub(crate) mod tests {

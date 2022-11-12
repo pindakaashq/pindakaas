@@ -43,8 +43,9 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Cardina
 mod tests {
 	use super::*;
 	use crate::{
-		cardinality::tests::card_test_suite, helpers::tests::assert_sol, linear::LimitComp,
-		Cardinality, Encoder,
+		cardinality::tests::card_test_suite, cardinality_one::tests::card1_test_suite,
+		helpers::tests::assert_sol, linear::LimitComp, Cardinality, CardinalityOne, Encoder,
 	};
+	card1_test_suite!(SortingNetworkEncoder::default());
 	card_test_suite!(SortingNetworkEncoder::default());
 }
