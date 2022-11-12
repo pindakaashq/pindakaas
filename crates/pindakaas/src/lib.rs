@@ -305,6 +305,51 @@ impl<Lit: Literal + Zero + One + Display> Cnf<Lit> {
 	}
 }
 
+impl<Lit: Literal + Zero + One + Display, C: Coefficient> From<Wcnf<Lit, C>> for Cnf<Lit> {
+	// TODO implement iter for Cnf
+	fn from(wcnf: Wcnf<Lit, C>) -> Self {
+		let mut start = 0;
+		let lits_size = wcnf
+			.cnf
+			.size
+			.iter()
+			.zip(wcnf.weights.iter())
+			.filter_map(|(size, weight)| {
+				if weight.is_none() {
+					let ret = (
+						wcnf.cnf
+							.lits
+							.iter()
+							.skip(start)
+							.take(*size)
+							.cloned()
+							.collect::<Vec<_>>(),
+						size,
+					);
+					start += size;
+					Some(ret)
+				} else {
+					start += size;
+					None
+				}
+			})
+			.collect::<Vec<_>>();
+		let lits = lits_size
+			.iter()
+			.flat_map(|lit_size| lit_size.0.clone())
+			.collect();
+		let size = lits_size
+			.iter()
+			.map(|lit_size| *lit_size.1)
+			.collect::<Vec<_>>();
+		Self {
+			lits,
+			last_var: wcnf.cnf.last_var,
+			size,
+		}
+	}
+}
+
 impl<Lit: Literal + Zero + One + Display, C: Coefficient> Display for Wcnf<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let num_var = &self.cnf.last_var;
