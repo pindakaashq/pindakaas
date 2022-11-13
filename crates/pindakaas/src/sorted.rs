@@ -9,7 +9,16 @@ use iset::{interval_map, IntervalMap};
 use itertools::Itertools;
 
 #[derive(Default)]
-pub struct SortedEncoder {}
+pub struct SortedEncoder {
+	add_consistency: bool,
+}
+
+impl SortedEncoder {
+	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
+		self.add_consistency = b;
+		self
+	}
+}
 
 pub struct Sorted<'a, Lit: Literal> {
 	pub(crate) xs: &'a [Lit],
@@ -84,10 +93,15 @@ impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_, DB::Lit>> for SortedEncoder {
 					.zip(sorted.ys.iter())
 					.map(|(i, y)| (i..i + 1, Some(y.clone()))),
 			),
-			"y".to_string(),
+			"s_x".to_string(),
 		);
 
+		if self.add_consistency {
+			y.consistent(db).unwrap();
+		}
+
 		match sorted.cmp {
+			// TODO bit unstable; use sorting network instead!
 			LimitComp::LessEq => {
 				let y = build_totalizer(
 					xs.into_iter().map_into().collect::<Vec<_>>(),
@@ -99,11 +113,14 @@ impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_, DB::Lit>> for SortedEncoder {
 					y.into(),
 				);
 
-				if let IntVarEnc::Ord(o) = y {
-					o.consistent(db)
-				} else {
-					unreachable!()
+				if self.add_consistency {
+					if let IntVarEnc::Ord(o) = y {
+						o.consistent(db)?;
+					} else {
+						unreachable!()
+					}
 				}
+				Ok(())
 			}
 			LimitComp::Equal => self.sorted(db, &xs, &y, 0),
 		}
@@ -117,13 +134,17 @@ impl SortedEncoder {
 		ub: C,
 		lbl: String,
 	) -> IntVarOrd<DB::Lit, C> {
-		IntVarOrd::new(
+		let y = IntVarOrd::new(
 			db,
 			IntervalMap::from_sorted(
 				num::iter::range_inclusive(C::one(), ub).map(|i| (i..(i + C::one()), None)),
 			),
 			lbl,
-		)
+		);
+		if self.add_consistency {
+			y.consistent(db).unwrap();
+		}
+		y
 	}
 
 	fn sorted<DB: ClauseDatabase, C: Coefficient>(
