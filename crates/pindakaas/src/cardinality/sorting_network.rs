@@ -8,11 +8,20 @@ use itertools::{Itertools, Position};
 
 /// Encoder for the linear constraints that ∑ litsᵢ ≷ k using a sorting network
 #[derive(Default)]
-pub struct SortingNetworkEncoder {}
+pub struct SortingNetworkEncoder {
+	add_consistency: bool,
+}
+
+impl SortingNetworkEncoder {
+	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
+		self.add_consistency = b;
+		self
+	}
+}
 
 use crate::sorted::{Sorted, SortedEncoder};
 
-impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Cardinality<DB::Lit, C>>
+impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Cardinality<DB::Lit, C>>
 	for SortingNetworkEncoder
 {
 	fn encode(&mut self, db: &mut DB, card: &Cardinality<DB::Lit, C>) -> Result {
@@ -23,7 +32,9 @@ impl<DB: ClauseDatabase + 'static, C: Coefficient + 'static> Encoder<DB, Cardina
 			.map(|_x| new_var!(db, format!("y_{_x:?}"))) // TODO: Use label of _x
 			.collect::<Vec<_>>();
 		let sorted = Sorted::new(card.lits.as_slice(), LimitComp::Equal, &ys);
-		SortedEncoder::default().encode(db, &sorted)?;
+		SortedEncoder::default()
+			.add_consistency(self.add_consistency)
+			.encode(db, &sorted)?;
 
 		if card.cmp == LimitComp::Equal {
 			for y in ys.into_iter().with_position() {

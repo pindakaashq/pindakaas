@@ -14,12 +14,19 @@ use itertools::Itertools;
 #[derive(Default)]
 pub struct LinearAggregator {
 	sort_same_coefficients: usize,
+	add_sorted_consistency: bool, // TODO should we pass a whole Encoder<Sorted..>?
 }
 
 impl LinearAggregator {
 	/// For non-zero `n`, detect groups of minimum size `n` with free literals and same coefficients, sort them and add them as implication chain group
 	pub fn sort_same_coefficients(&mut self, n: usize) -> &mut Self {
 		self.sort_same_coefficients = n;
+		self
+	}
+
+	/// When sorting same coefficients, also impose consistency on resulting auxiliary variables
+	pub fn add_sorted_consistency(&mut self, b: bool) -> &mut Self {
+		self.add_sorted_consistency = b;
 		self
 	}
 
@@ -122,6 +129,7 @@ impl LinearAggregator {
 					.map(|_x| new_var!(db, format!("s_{_x:?}"))) // TODO: use label of _x
 					.collect::<Vec<_>>();
 				SortedEncoder::default()
+					.add_consistency(self.add_sorted_consistency)
 					.encode(db, &Sorted::new(&xs, LimitComp::Equal, &ys))
 					.unwrap();
 				partition.push(Part::Ic(ys.into_iter().map(|y| (y, coef)).collect()));
