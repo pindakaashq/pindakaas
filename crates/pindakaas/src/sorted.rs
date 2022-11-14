@@ -1,5 +1,5 @@
 use crate::{
-	int::{IntVarEnc, IntVarOrd},
+	int::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 	linear::{totalizer::build_totalizer, LimitComp},
 	trace::emit_clause,
 	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, LinExp, Literal, Result,
@@ -8,14 +8,28 @@ use crate::{
 use iset::{interval_map, IntervalMap};
 use itertools::Itertools;
 
-#[derive(Default)]
 pub struct SortedEncoder {
 	add_consistency: bool,
+	lambda: f32,
+}
+
+impl Default for SortedEncoder {
+	fn default() -> Self {
+		Self {
+			lambda: 2.5,
+			add_consistency: false,
+		}
+	}
 }
 
 impl SortedEncoder {
 	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
+		self
+	}
+	#[allow(dead_code)] // TODO
+	pub fn add_lambda(&mut self, lambda: f32) -> &mut Self {
+		self.lambda = lambda;
 		self
 	}
 }
@@ -147,16 +161,48 @@ impl SortedEncoder {
 		y
 	}
 
+	fn lambda(&self, v: usize, c: usize) -> usize {
+		((v as f32) * self.lambda) as usize + c
+	}
+
 	fn sorted<DB: ClauseDatabase, C: Coefficient>(
 		&mut self,
 		db: &mut DB,
-		// mut xs: Vec<IntVarOrd<DB::Lit, C>>,
 		xs: &[IntVarOrd<DB::Lit, C>],
 		y: &IntVarOrd<DB::Lit, C>,
 		_lvl: usize,
 	) -> Result {
 		// TODO: Add tracing
 		// eprintln!("sorted([{}], {})", xs.iter().join(", "), y);
+		// use std::io::Write;
+		// std::io::stdout().flush().unwrap();
+
+		let (n, m) = (xs.len(), y.ub().to_usize().unwrap());
+
+		let ((vr, cr), (vd, cd)) = (
+			Self::sorted_cost(n, m, false),
+			Self::sorted_cost(n, m, true),
+		);
+		let direct = self.lambda(vd, cd) < self.lambda(vr, cr);
+
+		debug_assert!(xs.iter().all(|x| x.ub() == C::one()));
+		if direct {
+			return (1..=m).try_for_each(|k| {
+				let k_c = (0..k).fold(C::zero(), |a, _| a + C::one());
+				xs.iter()
+					.map(|x| x.geq(C::one()..(C::one() + C::one()))[0][0].clone())
+					.combinations(k)
+					.try_for_each(|lits| {
+						db.add_clause(
+							lits.into_iter()
+								.map(|lit| lit.negate())
+								.chain(y.geq(k_c..(k_c + C::one()))[0].iter().cloned())
+								.collect::<Vec<_>>()
+								.as_slice(),
+						)
+					})
+			});
+		}
 		match xs {
 			[] => Ok(()),
 			[x] => {
@@ -173,9 +219,84 @@ impl SortedEncoder {
 				let y1 = self.next_int_var(db, m, String::from("y_1"));
 				let m_ = std::cmp::min((n..xs.len()).fold(C::zero(), |a, _| a + C::one()), y.ub());
 				let y2 = self.next_int_var(db, m_, String::from("y_2"));
+
 				self.sorted(db, &xs[..n], &y1, _lvl)?;
 				self.sorted(db, &xs[n..], &y2, _lvl)?;
 				self.merged(db, &y1, &y2, y, _lvl + 1)
+			}
+		}
+	}
+
+	fn sorted_cost(n: usize, m: usize, direct: bool) -> (usize, usize) {
+		if direct {
+			(
+				m,
+				(0..m)
+					.map(|k| (n - k + 1..=n).product::<usize>())
+					.sum::<usize>(),
+			)
+		} else {
+			match n {
+				0 => (0, 0),
+				1 => (0, 0),
+				2 => (2, 3),
+				3 => (2, 3),
+				_ => {
+					let l = (n as f32 / 2.0) as usize;
+					let (v1, c1) = Self::sorted_cost(l, m, direct);
+					let (v2, c2) = Self::sorted_cost(n - l, m, direct);
+					let (v3, c3) =
+						Self::merged_cost(std::cmp::min(l, m), std::cmp::min(n - l, m), m, direct);
+					(v1 + v2 + v3, c1 + c2 + c3)
+				}
+			}
+		}
+	}
+
+	fn merged_cost(a: usize, b: usize, c: usize, direct: bool) -> (usize, usize) {
+		if a > b {
+			Self::merged_cost(b, a, c, direct)
+		} else if direct {
+			(
+				c,
+				(a + b) * c
+					- (((c * (c - 1)) as f32) / 2.0) as usize
+					- (((b * (b - 1)) as f32) / 2.0) as usize
+					- (((a * (c - 1)) as f32) / 2.0) as usize,
+			)
+		} else {
+			match (a, b) {
+				(0, 0) => (0, 0),
+				(1, 0) => (0, 0),
+				(0, 1) => (0, 0),
+				(1, 1) => (2, 3),
+				_ => {
+					// let v3 = 2 * ((a + b - 1) as f32 / 2.0) as usize;
+					// let c3 = 3 * ((a + b - 1) as f32 / 2.0) as usize;
+					use num::Integer;
+					let c3 = if c.is_odd() {
+						(3 * c - 3) as f32 / 2.0
+					} else {
+						((3 * c - 2) as f32 / 2.0) + 2.0
+					} as usize;
+					let v3 = c - 1;
+					let (a, b, c) = (a as f32 / 2.0, b as f32 / 2.0, c as f32 / 2.0);
+					let ((v1, c1), (v2, c2)) = (
+						Self::merged_cost(
+							a.ceil() as usize,
+							b.ceil() as usize,
+							c.floor() as usize + 1,
+							false,
+						),
+						Self::merged_cost(
+							a.floor() as usize,
+							b.floor() as usize,
+							c.floor() as usize,
+							false,
+						),
+					);
+					(v1 + v2 + v3, c1 + c2 + c3)
+				}
 			}
 		}
 	}
@@ -190,8 +311,37 @@ impl SortedEncoder {
 	) -> Result {
 		// TODO: Add tracing
 		// eprintln!("{:_lvl$}merged({}, {}, {})", "", x1, x2, y, _lvl = _lvl);
+
 		let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
 		assert!(y.ub() <= a + b);
+
+		let ((vr, cr), (vd, cd)) = (
+			Self::merged_cost(
+				a.to_usize().unwrap(),
+				b.to_usize().unwrap(),
+				c.to_usize().unwrap(),
+				false,
+			),
+			Self::merged_cost(
+				a.to_usize().unwrap(),
+				b.to_usize().unwrap(),
+				c.to_usize().unwrap(),
+				true,
+			),
+		);
+		let direct = self.lambda(vd, cd) < self.lambda(vr, cr);
+
+		if direct {
+			return TernLeEncoder::default().encode(
+				db,
+				&TernLeConstraint {
+					x: &x1.clone().into(),
+					y: &x2.clone().into(),
+					cmp: LimitComp::LessEq,
+					z: &y.clone().into(), // TODO no consistency implemented for this bound yet
+				},
+			);
+		}
 
 		if a.is_zero() && b.is_zero() {
 			Ok(())
