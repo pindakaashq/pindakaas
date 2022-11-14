@@ -14,7 +14,7 @@ pub use pairwise::PairwiseEncoder;
 
 #[derive(Debug, Clone)]
 pub struct CardinalityOne<Lit: Literal> {
-	pub(crate) lits: Vec<Lit>,
+	pub lits: Vec<Lit>,
 	pub(crate) cmp: LimitComp,
 }
 
