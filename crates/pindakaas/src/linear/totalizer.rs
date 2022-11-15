@@ -131,6 +131,7 @@ mod tests {
 		LinExp,
 		LinearAggregator,
 		LinearConstraint,
+		SortedEncoder,
 	};
 
 	#[test]
@@ -139,7 +140,7 @@ mod tests {
 		use crate::{Checker, Encoder};
 		let mut db = TestDB::new(5);
 		let mut agg = LinearAggregator::default();
-		agg.sort_same_coefficients(3);
+		agg.sort_same_coefficients(SortedEncoder::default(), 3);
 		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder<i32>>>::default();
 		encoder.add_linear_aggregater(agg);
 		let con = LinearConstraint::new(

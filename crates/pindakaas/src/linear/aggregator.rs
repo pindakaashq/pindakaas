@@ -13,20 +13,15 @@ use itertools::Itertools;
 
 #[derive(Default)]
 pub struct LinearAggregator {
+	sorted_encoder: SortedEncoder,
 	sort_same_coefficients: usize,
-	add_sorted_consistency: bool, // TODO should we pass a whole Encoder<Sorted..>?
 }
 
 impl LinearAggregator {
-	/// For non-zero `n`, detect groups of minimum size `n` with free literals and same coefficients, sort them and add them as implication chain group
-	pub fn sort_same_coefficients(&mut self, n: usize) -> &mut Self {
+	/// For non-zero `n`, detect groups of minimum size `n` with free literals and same coefficients, sort them (using provided SortedEncoder) and add them as a single implication chain group
+	pub fn sort_same_coefficients(&mut self, sorted_encoder: SortedEncoder, n: usize) -> &mut Self {
+		self.sorted_encoder = sorted_encoder;
 		self.sort_same_coefficients = n;
-		self
-	}
-
-	/// When sorting same coefficients, also impose consistency on resulting auxiliary variables
-	pub fn add_sorted_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_sorted_consistency = b;
 		self
 	}
 
@@ -461,47 +456,53 @@ impl LinearAggregator {
 			}));
 		}
 
-		// Do not interfere with a cardinality constraint
-		let n = partition.len();
-		let (free_lits, mut partition): (Vec<_>, Vec<_>) = partition.into_iter().partition(
-			|part| matches!(part, Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1),
-		);
+		let partition = if self.sort_same_coefficients >= 2 {
+			let n = partition.len();
+			let (free_lits, mut partition): (Vec<_>, Vec<_>) = partition.into_iter().partition(
+				|part| matches!(part, Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1),
+			);
 
-		for (coef, group) in &free_lits
-			.into_iter()
-			.map(|part| match part {
-				Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1 => x[0].clone(),
-				_ => unreachable!(),
-			})
-			.sorted_by(|(_, a), (_, b)| a.cmp(b))
-			.group_by(|x| x.1.clone())
-		{
-			let xs = group.map(|x| x.0).collect::<Vec<_>>();
-
-			if self.sort_same_coefficients >= 2
-				&& xs.len() >= self.sort_same_coefficients
-				&& xs.len() < n
+			for (coef, group) in &free_lits
+				.into_iter()
+				.map(|part| match part {
+					Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1 => x[0].clone(),
+					_ => unreachable!(),
+				})
+				.sorted_by(|(_, a), (_, b)| a.cmp(b))
+				.group_by(|x| x.1.clone())
 			{
-				let c = (*k / *coef).to_usize().unwrap();
+				let xs = group.map(|x| x.0).collect::<Vec<_>>();
 
-				let ys = xs
-					.iter()
-					.take(c)
-					.map(|_x| new_var!(db, format!("s_{_x:?}"))) // TODO: Use label of _x
-					.collect::<Vec<_>>();
-				SortedEncoder::default()
-					.add_consistency(self.add_sorted_consistency)
-					.encode(db, &Sorted::new(&xs, LimitComp::LessEq, &ys))
-					.unwrap();
-				partition.push(Part::Ic(
-					ys.into_iter().map(|y| (y, coef.clone())).collect(),
-				));
-			} else {
-				for x in xs {
-					partition.push(Part::Amo(vec![(x, coef.clone())]));
+				if self.sort_same_coefficients >= 2
+					&& xs.len() >= self.sort_same_coefficients
+					&& xs.len() < n
+				{
+					let c = (*k / *coef).to_usize().unwrap();
+
+					// eprintln!("found same coef chain of {} for coef {} and k {:?}; sort with {c} aux vars", xs.len(), *coef, lin.k);
+
+					let ys = xs
+						.iter()
+						.take(c)
+						.map(|_x| new_var!(db, format!("s_{_x:?}"))) // TODO: Use label of _x
+						.collect::<Vec<_>>();
+					self.sorted_encoder
+						.encode(db, &Sorted::new(&xs, LimitComp::LessEq, &ys))
+						.unwrap();
+					partition.push(Part::Ic(
+						ys.into_iter().map(|y| (y, coef.clone())).collect(),
+					));
+				} else {
+					for x in xs {
+						partition.push(Part::Amo(vec![(x, coef.clone())]));
+					}
 				}
 			}
-		}
+
+			partition
+		} else {
+			partition
+		};
 
 		// Default case: encode pseudo-Boolean linear constraint
 		Ok(LinVariant::Linear(Linear {
@@ -728,7 +729,7 @@ mod tests {
 		let mut db = TestDB::new(4);
 		assert_eq!(
 			LinearAggregator::default()
-				.sort_same_coefficients(2)
+				.sort_same_coefficients(SortedEncoder::default(), 2)
 				.aggregate(
 					&mut db,
 					&LinearConstraint::new(
@@ -754,7 +755,7 @@ mod tests {
 		let mut db = TestDB::new(5);
 		assert_eq!(
 			LinearAggregator::default()
-				.sort_same_coefficients(2)
+				.sort_same_coefficients(SortedEncoder::default(), 2)
 				.aggregate(
 					&mut db,
 					&LinearConstraint::new(
