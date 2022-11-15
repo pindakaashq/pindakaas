@@ -133,7 +133,7 @@ pub(crate) enum Part<Lit, C> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum LimitComp {
+pub enum LimitComp {
 	Equal,
 	LessEq,
 }
