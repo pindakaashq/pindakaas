@@ -8,9 +8,9 @@ pub use sorting_network::SortingNetworkEncoder;
 
 #[derive(Clone, Debug)]
 pub struct Cardinality<Lit: Literal, C: Coefficient> {
-	pub(crate) lits: Vec<Lit>,
-	pub(crate) cmp: LimitComp,
-	pub(crate) k: PosCoeff<C>,
+	pub lits: Vec<Lit>,
+	pub cmp: LimitComp,
+	pub k: PosCoeff<C>,
 }
 
 impl<Lit: Literal, C: Coefficient> From<CardinalityOne<Lit>> for Cardinality<Lit, C> {
