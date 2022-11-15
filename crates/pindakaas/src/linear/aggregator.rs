@@ -130,7 +130,7 @@ impl LinearAggregator {
 					.collect::<Vec<_>>();
 				SortedEncoder::default()
 					.add_consistency(self.add_sorted_consistency)
-					.encode(db, &Sorted::new(&xs, LimitComp::Equal, &ys))
+					.encode(db, &Sorted::new(&xs, LimitComp::LessEq, &ys))
 					.unwrap();
 				partition.push(Part::Ic(ys.into_iter().map(|y| (y, coef)).collect()));
 			} else {
