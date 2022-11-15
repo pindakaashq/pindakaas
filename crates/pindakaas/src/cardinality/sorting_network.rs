@@ -25,8 +25,10 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Cardinality<DB::Lit, C>>
 		let ys = num::range_inclusive(C::one(), std::cmp::min(n, *card.k))
 			.map(|_| new_var!(db, format!("y_{:?}", &card.lits[0]))) // TODO: Use label
 			.collect::<Vec<_>>();
-		let sorted = Sorted::new(card.lits.as_slice(), card.cmp.clone(), &ys);
-		self.sorted_encoder.encode(db, &sorted)?;
+		self.sorted_encoder.encode(
+			db,
+			&Sorted::new(card.lits.as_slice(), card.cmp.clone(), &ys),
+		)?;
 
 		ys.into_iter().try_for_each(|y| emit_clause!(db, &[y]))
 	}
@@ -103,6 +105,16 @@ mod tests {
 			#[test]
 			fn test_card_5_3() {
 				test_card!($encoder, 5, $cmp, 3);
+			}
+
+			#[test]
+			fn test_card_6_1() {
+				test_card!($encoder, 6, $cmp, 1);
+			}
+
+			#[test]
+			fn test_card_5_2() {
+				test_card!($encoder, 5, $cmp, 1);
 			}
 
 			// #[test]

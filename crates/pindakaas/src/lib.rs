@@ -41,6 +41,7 @@ pub use linear::{
 	AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear, LinearAggregator,
 	LinearConstraint, LinearEncoder, PosCoeff, SwcEncoder, TotalizerEncoder,
 };
+pub use sorted::{SortedEncoder, SortedStrategy};
 
 /// Literal is the super-trait for types that can be used to represent boolean
 /// literals in this library.
