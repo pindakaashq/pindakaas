@@ -108,7 +108,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_, DB::Lit>> for SortedEncoder {
 
 		xs[n..]
 			.iter()
-			.try_for_each(|x| db.add_clause(&[x.geq(1..2_i32)[0][0].negate()]))?;
+			.try_for_each(|x| emit_clause!(db, &[x.geq(1..2_i32)[0][0].negate()]))?;
 
 		// We make n+1 sorted lits, with the n+1'th set to false.
 		let last = new_var!(db, "end");
@@ -131,7 +131,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_, DB::Lit>> for SortedEncoder {
 			unimplemented!("Cannot use {:?} to encode {:?}, since the Recursive strategy will encode complete equality (and the Direct strategy will encode complete LessEq). So the Mixed strategy of the two encodes incomplete LessEq, as in, some solutions will be missing.", self.strategy, sorted.cmp);
 		}
 		self.sorted(db, &xs, &sorted.cmp, &y, 0)?;
-		db.add_clause(&[last.negate()])
+		emit_clause!(db, &[last.negate()])
 	}
 }
 
@@ -180,13 +180,12 @@ impl SortedEncoder {
 					.map(|x| x.geq(C::one()..(C::one() + C::one()))[0][0].clone())
 					.combinations(k.to_usize().unwrap())
 					.try_for_each(|lits| {
-						db.add_clause(
-							lits.into_iter()
-								.map(|lit| lit.negate())
-								.chain(y.geq(k..(k + C::one()))[0].iter().cloned())
-								.collect::<Vec<_>>()
-								.as_slice(),
-						)
+						let cl = lits
+							.into_iter()
+							.map(|lit| lit.negate())
+							.chain(y.geq(k..(k + C::one()))[0].iter().cloned())
+							.collect::<Vec<_>>();
+						emit_clause!(db, cl.as_slice())
 					})
 			});
 		}

@@ -99,45 +99,8 @@ impl LinearAggregator {
 
 		// Add remaining (unconstrained) terms
 		debug_assert!(agg.len() <= lin.exp.num_free);
-		// for term in agg.drain() {
-		// 	partition.push(Part::Amo(vec![term]));
-		// }
-
-		// Do not interfere with a cardinality constraint
-		let n = agg.len();
-		for (coef, group) in &agg
-			.into_iter()
-			.sorted_by(|(_, a), (_, b)| a.cmp(b))
-			.group_by(|x| x.1)
-		{
-			let xs = group.map(|x| x.0).collect::<Vec<_>>();
-
-			if self.sort_same_coefficients >= 2
-				&& xs.len() >= self.sort_same_coefficients
-				&& xs.len() < n
-			{
-				// if c=1, then just card_one constraint?
-				let c = if lin.cmp == Comparator::LessEq {
-					// TODO safety?
-					(lin.k / coef).to_usize().unwrap()
-				} else {
-					xs.len()
-				};
-				let ys = xs
-					.iter()
-					.take(c)
-					.map(|_x| new_var!(db, format!("s_{_x:?}"))) // TODO: use label of _x
-					.collect::<Vec<_>>();
-				SortedEncoder::default()
-					.add_consistency(self.add_sorted_consistency)
-					.encode(db, &Sorted::new(&xs, LimitComp::LessEq, &ys))
-					.unwrap();
-				partition.push(Part::Ic(ys.into_iter().map(|y| (y, coef)).collect()));
-			} else {
-				for x in xs {
-					partition.push(Part::Amo(vec![(x, coef)]));
-				}
-			}
+		for term in agg.drain() {
+			partition.push(Part::Amo(vec![term]));
 		}
 
 		let mut k = if lin.cmp == Comparator::GreaterEq {
@@ -496,6 +459,48 @@ impl LinearAggregator {
 				cmp,
 				k,
 			}));
+		}
+
+		// Do not interfere with a cardinality constraint
+		let n = partition.len();
+		let (free_lits, mut partition): (Vec<_>, Vec<_>) = partition.into_iter().partition(
+			|part| matches!(part, Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1),
+		);
+
+		for (coef, group) in &free_lits
+			.into_iter()
+			.map(|part| match part {
+				Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1 => x[0].clone(),
+				_ => unreachable!(),
+			})
+			.sorted_by(|(_, a), (_, b)| a.cmp(b))
+			.group_by(|x| x.1.clone())
+		{
+			let xs = group.map(|x| x.0).collect::<Vec<_>>();
+
+			if self.sort_same_coefficients >= 2
+				&& xs.len() >= self.sort_same_coefficients
+				&& xs.len() < n
+			{
+				let c = (*k / *coef).to_usize().unwrap();
+
+				let ys = xs
+					.iter()
+					.take(c)
+					.map(|_x| new_var!(db, format!("s_{_x:?}"))) // TODO: Use label of _x
+					.collect::<Vec<_>>();
+				SortedEncoder::default()
+					.add_consistency(self.add_sorted_consistency)
+					.encode(db, &Sorted::new(&xs, LimitComp::LessEq, &ys))
+					.unwrap();
+				partition.push(Part::Ic(
+					ys.into_iter().map(|y| (y, coef.clone())).collect(),
+				));
+			} else {
+				for x in xs {
+					partition.push(Part::Amo(vec![(x, coef.clone())]));
+				}
+			}
 		}
 
 		// Default case: encode pseudo-Boolean linear constraint
