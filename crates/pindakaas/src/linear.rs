@@ -161,6 +161,7 @@ pub struct LinExp<Lit: Literal, C: Coefficient> {
 	mult: C,
 }
 
+#[derive(Debug)]
 pub struct LinearConstraint<Lit: Literal, C: Coefficient> {
 	/// Expression being constrained
 	exp: LinExp<Lit, C>,
