@@ -520,6 +520,10 @@ impl<Lit: Literal + Zero + One> ClauseDatabase for Wcnf<Lit> {
 }
 
 impl<Lit: Literal + Zero + One> Cnf<Lit> {
+    /// Construct a new `Cnf` with no clauses. New variables are offset by `last_var`.
+    pub fn new(last_var: Lit) -> Self {
+        Self { last_var, ..Self::default() }
+    }
 	pub fn iter(&self) -> CnfIterator<Lit> {
 		CnfIterator {
 			lits: &self.lits,
