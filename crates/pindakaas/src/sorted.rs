@@ -162,13 +162,21 @@ impl SortedEncoder {
 		y: &IntVarOrd<DB::Lit, C>,
 		_lvl: usize,
 	) -> Result {
-		// TODO: Add tracing
-		// eprintln!("sorted([{}], {})", xs.iter().join(", "), y);
-
 		let (n, m) = (xs.len(), y.ub());
+		let direct = self.use_direct_sort(n, m.to_usize().unwrap());
+
+		// TODO: Add tracing
+		// eprintln!(
+		//	"{:_lvl$}sorted([{}], {}, {})",
+		//	"",
+		//	xs.iter().join(", "),
+		//	y,
+		//	direct,
+		//	_lvl = _lvl
+		// );
 
 		debug_assert!(xs.iter().all(|x| x.ub() == C::one()));
-		if self.use_direct_sort(n, m.to_usize().unwrap()) {
+		if direct {
 			return num::range_inclusive(C::one(), m).try_for_each(|k| {
 				xs.iter()
 					.map(|x| x.geq(C::one()..(C::one() + C::one()))[0][0].clone())
@@ -316,15 +324,25 @@ impl SortedEncoder {
 		y: &IntVarOrd<DB::Lit, C>,
 		_lvl: usize,
 	) -> Result {
-		// TODO: Add tracing
-		// eprintln!("{:_lvl$}merged({}, {}, {})", "", x1, x2, y, _lvl = _lvl);
-
 		let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
-		if self.use_direct_merge(
+		let direct = self.use_direct_merge(
 			a.to_usize().unwrap(),
 			b.to_usize().unwrap(),
 			c.to_usize().unwrap(),
-		) {
+		);
+
+		// TODO: Add tracing
+		// eprintln!(
+		//	"{:_lvl$}merged({}, {}, {}, {})",
+		//	"",
+		//	x1,
+		//	x2,
+		//	y,
+		//	direct,
+		//	_lvl = _lvl
+		// );
+
+		if direct {
 			return TernLeEncoder::default().encode(
 				db,
 				&TernLeConstraint {
