@@ -569,8 +569,8 @@ impl<Lit: Literal, C: Coefficient> Checker for Linear<Lit, C> {
 
 #[derive(Default)]
 pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = LinearAggregator> {
-	enc: Enc,
-	agg: Agg,
+	pub enc: Enc,
+	pub agg: Agg,
 }
 
 impl<Enc, Agg> LinearEncoder<Enc, Agg> {
