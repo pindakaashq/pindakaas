@@ -506,6 +506,10 @@ impl<Lit: Literal + Zero + One, C: Coefficient> Wcnf<Lit, C> {
 		self.weights.push(weight);
 		Ok(())
 	}
+
+	pub fn iter(&self) -> impl Iterator<Item = (&[Lit], &Option<C>)> {
+		self.cnf.iter().zip(self.weights.iter())
+	}
 }
 
 impl<Lit: Literal + Zero + One> ClauseDatabase for Wcnf<Lit> {
