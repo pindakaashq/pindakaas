@@ -10,6 +10,7 @@
 use std::{
 	clone::Clone,
 	cmp::Eq,
+	cmp::Ordering,
 	error::Error,
 	fmt::{self, Display},
 	fs::File,
@@ -269,7 +270,7 @@ pub struct Cnf<Lit: Literal + Zero + One = i32> {
 /// A representation for a weighted CNF formula
 ///
 /// Same as CNF, but every clause has an optional weight. Otherwise, it is a hard clause.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Wcnf<Lit: Literal + Zero + One = i32, C: Coefficient = i32> {
 	/// The CNF formula
 	cnf: Cnf<Lit>,
@@ -417,62 +418,134 @@ impl<Lit: Literal + Zero + One + Display> Display for Cnf<Lit> {
 	}
 }
 
-impl<Lit: Literal + Zero + One + FromStr> Cnf<Lit> {
-	/// Read a CNF formula from a file formatted in the DIMACS CNF format
-	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-		let file = File::open(path)?;
-		let mut had_header = false;
-		let mut cnf = Cnf::<Lit>::default();
-		let mut cl: Vec<Lit> = Vec::new();
-		for line in BufReader::new(file).lines() {
-			match line {
-				Ok(line) if line.is_empty() || line.starts_with('c') => (),
-				Ok(line) if had_header => {
-					for seg in line.split(' ') {
-						if let Ok(l) = seg.parse::<Lit>() {
-							if l == Lit::zero() {
-								cnf.add_clause(&cl)
-									.expect("CNF::add_clause does not return Unsatisfiable");
-								cl.clear();
-							} else {
-								cl.push(l);
-							}
+enum Dimacs<Lit: Literal + Zero + One + FromStr, C: Coefficient> {
+	Cnf(Cnf<Lit>),
+	Wcnf(Wcnf<Lit, C>),
+}
+
+fn parse_dimacs_file<Lit: Literal + Zero + One + FromStr + Display, C: Coefficient + FromStr>(
+	path: &Path,
+	expect_wcnf: bool,
+) -> Result<Dimacs<Lit, C>, io::Error> {
+	let file = File::open(path)?;
+	let mut had_header = false;
+
+	let mut wcnf = Wcnf::<Lit, C>::default();
+
+	let mut cl: Vec<Lit> = Vec::new();
+	let mut top: Option<C> = None;
+	let weight: Option<C> = None;
+
+	for line in BufReader::new(file).lines() {
+		match line {
+			Ok(line) if line.is_empty() || line.starts_with('c') => (),
+			Ok(line) if had_header => {
+				for seg in line.split(' ') {
+					if expect_wcnf {
+						// let weight = seg.parse::<C>().expect("Error parsing WCNF weight");
+						if let Ok(weight) = seg.parse::<C>() {
+							wcnf.weights.push(match weight.cmp(&top.unwrap()) {
+								Ordering::Less => Some(weight),
+								Ordering::Equal => None,
+								Ordering::Greater => panic!(
+								"Found weight weight {weight} greater than top {top:?} from header"
+							),
+							});
+						} else {
+							panic!("Cannot parse line {line}");
+						}
+					}
+
+					if let Ok(lit) = seg.parse::<Lit>() {
+						if lit == Lit::zero() {
+							wcnf.add_weighted_clause(&cl, weight)
+								.expect("CNF::add_clause does not return Unsatisfiable");
+							cl.clear();
+						} else {
+							cl.push(lit);
 						}
 					}
 				}
-				// parse header, expected format: "p cnf {num_var} {num_clauses}"
-				Ok(line) => {
-					let vec: Vec<&str> = line.split_whitespace().collect();
-					// check "p" and "cnf" keyword
-					if vec.len() != 4 || vec[0..2] != ["p", "cnf"] {
-						return Err(io::Error::new(
-							io::ErrorKind::InvalidInput,
-							"expected DIMACS CNF header formatted \"p cnf {variables} {clauses}\"",
-						));
-					}
-					// parse number of variables
-					cnf.last_var = vec[2].parse().map_err(|_| {
-						io::Error::new(
-							io::ErrorKind::InvalidInput,
-							"unable to parse number of variables",
-						)
-					})?;
-					// parse number of clauses
-					let num_clauses: usize = vec[3].parse().map_err(|_| {
-						io::Error::new(
-							io::ErrorKind::InvalidInput,
-							"unable to parse number of clauses",
-						)
-					})?;
-					cnf.lits.reserve(num_clauses);
-					cnf.size.reserve(num_clauses);
-					// parsing header complete
-					had_header = true;
-				}
-				Err(e) => return Err(e),
 			}
+			// parse header, expected format: "p cnf {num_var} {num_clauses}"
+			Ok(line) => {
+				let vec: Vec<&str> = line.split_whitespace().collect();
+				// check "p" and "cnf" keyword
+				if !expect_wcnf && (vec.len() != 4 || vec[0..2] != ["p", "cnf"]) {
+					return Err(io::Error::new(
+						io::ErrorKind::InvalidInput,
+						"expected DIMACS CNF header formatted \"p cnf {variables} {clauses}\"",
+					));
+				} else if expect_wcnf && (vec.len() != 4 || vec[0..2] != ["p", "wcnf"]) {
+					return Err(io::Error::new(
+						io::ErrorKind::InvalidInput,
+						"expected DIMACS WCNF header formatted \"p wcnf {variables} {clauses} {top}\"",
+					));
+				}
+				// parse number of variables
+				wcnf.cnf.last_var = vec[2].parse().map_err(|_| {
+					io::Error::new(
+						io::ErrorKind::InvalidInput,
+						"unable to parse number of variables",
+					)
+				})?;
+				// parse number of clauses
+				let num_clauses: usize = vec[3].parse().map_err(|_| {
+					io::Error::new(
+						io::ErrorKind::InvalidInput,
+						"unable to parse number of clauses",
+					)
+				})?;
+
+				wcnf.cnf.lits.reserve(num_clauses);
+				wcnf.cnf.size.reserve(num_clauses);
+
+				if expect_wcnf {
+					top = Some(vec[4].parse().map_err(|_| {
+						io::Error::new(io::ErrorKind::InvalidInput, "unable to parse top weight")
+					})?);
+				}
+
+				// parsing header complete
+				had_header = true;
+			}
+			Err(e) => return Err(e),
 		}
-		Ok(cnf)
+	}
+
+	if expect_wcnf {
+		Ok(Dimacs::Wcnf(wcnf))
+	} else {
+		Ok(Dimacs::Cnf(Cnf::<Lit>::from(wcnf)))
+	}
+}
+
+impl<Lit: Literal + Zero + One + FromStr + Display> Cnf<Lit> {
+	/// Read a CNF formula from a file formatted in the DIMACS CNF format
+	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
+		match parse_dimacs_file::<Lit, i8>(path, false)? {
+			Dimacs::Cnf(cnf) => Ok(cnf),
+			_ => unreachable!(),
+		}
+	}
+}
+
+impl<Lit: Literal + Zero + One + FromStr + Display, C: Coefficient + FromStr> Wcnf<Lit, C> {
+	/// Read a WCNF formula from a file formatted in the (W)DIMACS WCNF format
+	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
+		match parse_dimacs_file::<Lit, C>(path, true)? {
+			Dimacs::Wcnf(wcnf) => Ok(wcnf),
+			_ => unreachable!(),
+		}
+	}
+}
+
+impl<Lit: Literal + Zero + One, C: Coefficient> Default for Wcnf<Lit, C> {
+	fn default() -> Self {
+		Self {
+			cnf: Cnf::<Lit>::default(),
+			weights: Vec::new(),
+		}
 	}
 }
 
