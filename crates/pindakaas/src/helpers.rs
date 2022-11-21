@@ -222,6 +222,20 @@ pub mod tests {
 		);
 	}
 
+	#[test]
+	fn test_expect_statistics() {
+		let mut tdb = TestDB::new(3);
+		tdb = tdb.expect_vars(2);
+		tdb = tdb.expect_cls(3);
+		tdb = tdb.expect_lits(5);
+		tdb.add_clause(&[1, 2]).unwrap();
+		tdb.new_var();
+		tdb.add_clause(&[-3, -4]).unwrap();
+		tdb.new_var();
+		tdb.add_clause(&[5]).unwrap();
+		tdb.check_complete();
+	}
+
 	const OUTPUT_SPLR: bool = false;
 	/// The maximum number of variable to generate expected solutions for
 	const GENERATE_EXPECTED_SOLUTIONS: i32 = 0;
@@ -236,6 +250,9 @@ pub mod tests {
 		solutions: Option<Vec<Vec<i32>>>,
 		check: Option<fn(&[i32]) -> bool>,
 		unchecked: bool,
+		expected_vars: Option<usize>,
+		expected_cls: Option<usize>,
+		expected_lits: Option<usize>,
 	}
 
 	impl TestDB {
@@ -256,6 +273,9 @@ pub mod tests {
 				solutions: None,
 				check: None,
 				unchecked: false,
+				expected_vars: None,
+				expected_cls: None,
+				expected_lits: None,
 			}
 		}
 
@@ -266,6 +286,21 @@ pub mod tests {
 			clauses.sort();
 			self.clauses = Some(clauses.into_iter().map(|cl| (false, cl)).collect());
 			self.unchecked = true;
+			self
+		}
+
+		pub fn expect_vars(mut self, vars: usize) -> TestDB {
+			self.expected_vars = Some(vars);
+			self
+		}
+
+		pub fn expect_cls(mut self, cls: usize) -> TestDB {
+			self.expected_cls = Some(cls);
+			self
+		}
+
+		pub fn expect_lits(mut self, lits: usize) -> TestDB {
+			self.expected_lits = Some(lits);
 			self
 		}
 
@@ -332,7 +367,12 @@ pub mod tests {
 					missing
 				);
 			}
-			if self.solutions.is_none() && self.check.is_none() {
+			if self.solutions.is_none()
+				&& self.check.is_none()
+				&& self.expected_vars.is_none()
+				&& self.expected_cls.is_none()
+				&& self.expected_lits.is_none()
+			{
 				return;
 			}
 			if OUTPUT_SPLR {
@@ -387,6 +427,15 @@ pub mod tests {
 					"solutions found by the solver do not match expected set of solutions"
 				);
 			}
+			assert!(
+				(self.expected_vars.is_none() || self.expected_vars.unwrap() == 0)
+					&& (self.expected_cls.is_none() || self.expected_cls.unwrap() == 0)
+					&& (self.expected_lits.is_none() || self.expected_lits.unwrap() == 0),
+				"Missing {} var(s), {} clause(s) and {} literal(s)",
+				self.expected_vars.unwrap_or(0),
+				self.expected_cls.unwrap_or(0),
+				self.expected_lits.unwrap_or(0)
+			);
 		}
 	}
 
@@ -415,6 +464,15 @@ pub mod tests {
 					}
 				}
 				assert!(found, "unexpected clause: {:?}", cl);
+			}
+
+			if let Some(num) = &mut self.expected_cls {
+				assert!(*num > 0, "unexpected number of new clauses");
+				*num -= 1;
+			}
+			if let Some(num) = &mut self.expected_lits {
+				assert!(*num >= cl.len(), "unexpected number of new literals");
+				*num -= cl.len();
 			}
 
 			if OUTPUT_SPLR {
@@ -461,6 +519,12 @@ pub mod tests {
 
 		fn new_var(&mut self) -> Self::Lit {
 			let res = self.slv.add_var() as i32;
+
+			if let Some(num) = &mut self.expected_vars {
+				assert!(*num > 0, "unexpected number of new variables");
+				*num -= 1;
+			}
+
 			if OUTPUT_SPLR {
 				eprintln!("let x{} = slv.add_var() as i32;", res);
 			}
