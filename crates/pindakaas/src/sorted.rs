@@ -150,8 +150,8 @@ impl SortedEncoder {
 		y
 	}
 
-	fn lambda(v: usize, c: usize, lambda: f32) -> usize {
-		((v as f32) * lambda) as usize + c
+	fn lambda(v: u128, c: u128, lambda: f32) -> u128 {
+		((v as f32) * lambda) as u128 + c
 	}
 
 	fn sorted<DB: ClauseDatabase, C: Coefficient>(
@@ -163,7 +163,7 @@ impl SortedEncoder {
 		_lvl: usize,
 	) -> Result {
 		let (n, m) = (xs.len(), y.ub());
-		let direct = self.use_direct_sort(n, m.to_usize().unwrap());
+		let direct = self.use_direct_sort(n as u128, m.to_u128().unwrap());
 
 		// TODO: Add tracing
 		// eprintln!(
@@ -203,10 +203,11 @@ impl SortedEncoder {
 			[x1, x2] if y.ub() <= C::one() + C::one() => self.comp(db, x1, x2, cmp, y, _lvl + 1),
 			xs => {
 				let n = n / 2;
-				let m = std::cmp::min((0..n).fold(C::zero(), |a, _| a + C::one()), y.ub());
-				let y1 = self.next_int_var(db, m, String::from("y_1"));
-				let m_ = std::cmp::min((n..xs.len()).fold(C::zero(), |a, _| a + C::one()), y.ub());
-				let y2 = self.next_int_var(db, m_, String::from("y_2"));
+				let m_left = std::cmp::min((0..n).fold(C::zero(), |a, _| a + C::one()), y.ub());
+				let y1 = self.next_int_var(db, m_left, String::from("y_1"));
+				let m_right =
+					std::cmp::min((n..xs.len()).fold(C::zero(), |a, _| a + C::one()), y.ub());
+				let y2 = self.next_int_var(db, m_right, String::from("y_2"));
 
 				self.sorted(db, &xs[..n], cmp, &y1, _lvl)?;
 				self.sorted(db, &xs[n..], cmp, &y2, _lvl)?;
@@ -215,7 +216,7 @@ impl SortedEncoder {
 		}
 	}
 
-	fn use_direct_sort(&self, n: usize, m: usize) -> bool {
+	fn use_direct_sort(&self, n: u128, m: u128) -> bool {
 		match self.strategy {
 			SortedStrategy::Direct => true,
 			SortedStrategy::Recursive => false,
@@ -229,13 +230,13 @@ impl SortedEncoder {
 		}
 	}
 
-	fn sorted_cost(n: usize, m: usize, direct: bool) -> (usize, usize) {
+	fn sorted_cost(n: u128, m: u128, direct: bool) -> (u128, u128) {
 		if direct {
 			(
 				m,
 				(0..m)
-					.map(|k| (n - k + 1..=n).product::<usize>())
-					.sum::<usize>(),
+					.map(|k| (n - k + 1..=n).product::<u128>())
+					.sum::<u128>(),
 			)
 		} else {
 			match n {
@@ -244,7 +245,7 @@ impl SortedEncoder {
 				2 => (2, 3),
 				3 => (2, 3),
 				_ => {
-					let l = (n as f32 / 2.0) as usize;
+					let l = (n as f32 / 2.0) as u128;
 					let (v1, c1) = Self::sorted_cost(l, m, direct);
 					let (v2, c2) = Self::sorted_cost(n - l, m, direct);
 					let (v3, c3) =
@@ -255,7 +256,7 @@ impl SortedEncoder {
 		}
 	}
 
-	fn use_direct_merge(&self, a: usize, b: usize, c: usize) -> bool {
+	fn use_direct_merge(&self, a: u128, b: u128, c: u128) -> bool {
 		match self.strategy {
 			SortedStrategy::Direct => true,
 			SortedStrategy::Recursive => false,
@@ -269,16 +270,16 @@ impl SortedEncoder {
 		}
 	}
 
-	fn merged_cost(a: usize, b: usize, c: usize, direct: bool) -> (usize, usize) {
+	fn merged_cost(a: u128, b: u128, c: u128, direct: bool) -> (u128, u128) {
 		if a > b {
 			Self::merged_cost(b, a, c, direct)
 		} else if direct {
 			(
 				c,
 				(a + b) * c
-					- (((c * (c - 1)) as f32) / 2.0) as usize
-					- (((b * (b - 1)) as f32) / 2.0) as usize
-					- (((a * (c - 1)) as f32) / 2.0) as usize,
+					- (((c * (c - 1)) as f32) / 2.0) as u128
+					- (((b * (b - 1)) as f32) / 2.0) as u128
+					- (((a * (c - 1)) as f32) / 2.0) as u128,
 			)
 		} else {
 			match (a, b) {
@@ -292,20 +293,20 @@ impl SortedEncoder {
 						(3 * c - 3) as f32 / 2.0
 					} else {
 						((3 * c - 2) as f32 / 2.0) + 2.0
-					} as usize;
+					} as u128;
 					let v3 = c - 1;
 					let (a, b, c) = (a as f32 / 2.0, b as f32 / 2.0, c as f32 / 2.0);
 					let ((v1, c1), (v2, c2)) = (
 						Self::merged_cost(
-							a.ceil() as usize,
-							b.ceil() as usize,
-							c.floor() as usize + 1,
+							a.ceil() as u128,
+							b.ceil() as u128,
+							c.floor() as u128 + 1,
 							false,
 						),
 						Self::merged_cost(
-							a.floor() as usize,
-							b.floor() as usize,
-							c.floor() as usize,
+							a.floor() as u128,
+							b.floor() as u128,
+							c.floor() as u128,
 							false,
 						),
 					);
@@ -326,9 +327,9 @@ impl SortedEncoder {
 	) -> Result {
 		let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
 		let direct = self.use_direct_merge(
-			a.to_usize().unwrap(),
-			b.to_usize().unwrap(),
-			c.to_usize().unwrap(),
+			a.to_u128().unwrap(),
+			b.to_u128().unwrap(),
+			c.to_u128().unwrap(),
 		);
 
 		// TODO: Add tracing
@@ -682,5 +683,11 @@ mod tests {
 		let mut enc = SortedEncoder::default();
 		enc.set_strategy(SortedStrategy::Direct);
 		assert_sol!(db => enc, &con => sols);
+	}
+
+	#[test]
+	fn test_sorted_cost_test() {
+		let (n, m) = (50, 16);
+		SortedEncoder::sorted_cost(n, m, true); // should not lead to overflow
 	}
 }
