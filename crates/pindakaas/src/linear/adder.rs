@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::{
 	helpers::XorEncoder,
@@ -21,7 +21,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 			.terms
 			.iter()
 			.flat_map(|part| part.iter().map(|(lit, coef)| (lit.clone(), **coef)))
-			.collect::<HashMap<DB::Lit, C>>();
+			.collect::<FxHashMap<DB::Lit, C>>();
 
 		debug_assert!(lin.cmp == LimitComp::LessEq || lin.cmp == LimitComp::Equal);
 		// The number of relevant bits in k
