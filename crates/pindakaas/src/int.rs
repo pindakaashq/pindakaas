@@ -1,15 +1,13 @@
 use iset::IntervalMap;
 use itertools::Itertools;
+use rustc_hash::FxHashMap;
 
 use crate::{
 	linear::Part,
 	trace::{emit_clause, new_var},
 	ClauseDatabase, Coefficient, Literal, PosCoeff,
 };
-use std::{
-	collections::{HashMap, HashSet},
-	ops::Neg,
-};
+use std::{collections::HashSet, hash::BuildHasherDefault, ops::Neg};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum LitOrConst<Lit: Literal> {
@@ -134,7 +132,8 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					.map(|(lit, coef)| (coef.clone(), lit.clone()))
 					.collect();
 				// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
-				let mut h: HashMap<C, Vec<DB::Lit>> = HashMap::with_capacity(terms.len());
+				let mut h: FxHashMap<C, Vec<DB::Lit>> =
+					FxHashMap::with_capacity_and_hasher(terms.len(), BuildHasherDefault::default());
 				for (coef, lit) in terms {
 					debug_assert!(coef <= ub);
 					h.entry(*coef).or_insert_with(Vec::new).push(lit);

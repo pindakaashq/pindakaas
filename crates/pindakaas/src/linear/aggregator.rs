@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
+use std::hash::BuildHasherDefault;
 
 use crate::{
 	linear::{Constraint, LimitComp, Part, PosCoeff},
@@ -17,7 +18,7 @@ impl LinearAggregator {
 	) -> Result<LinVariant<DB::Lit, C>> {
 		// Convert ≤ to ≥ and aggregate multiple occurrences of the same
 		// variable.
-		let mut agg = HashMap::with_capacity(lin.exp.terms.len());
+		let mut agg = FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), BuildHasherDefault::default());
 		for term in &lin.exp.terms {
 			let var = term.0.var();
 			let entry = agg.entry(var).or_insert_with(C::zero);

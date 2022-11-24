@@ -115,7 +115,7 @@ impl ClauseDatabase for MiniSatSolver {
 impl<Lit: Literal + Zero + One + Into<i32>> From<Cnf<Lit>> for MiniSatSolver {
 	fn from(cnf: Cnf<Lit>) -> Self {
 		let mut slv = minisat::Solver::new();
-		let mut map = std::collections::HashMap::new();
+		let mut map = rustc_hash::FxHashMap::default();
 		for cl in cnf.iter() {
 			let cl = cl
 				.iter()
