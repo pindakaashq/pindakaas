@@ -442,7 +442,6 @@ fn parse_dimacs_file<Lit: Literal + Zero + One + FromStr + Display, C: Coefficie
 			Ok(line) if had_header => {
 				for seg in line.split(' ') {
 					if expect_wcnf {
-						// let weight = seg.parse::<C>().expect("Error parsing WCNF weight");
 						if let Ok(weight) = seg.parse::<C>() {
 							wcnf.weights.push(match weight.cmp(&top.unwrap()) {
 								Ordering::Less => Some(weight),
@@ -467,7 +466,7 @@ fn parse_dimacs_file<Lit: Literal + Zero + One + FromStr + Display, C: Coefficie
 					}
 				}
 			}
-			// parse header, expected format: "p cnf {num_var} {num_clauses}"
+			// parse header, expected format: "p cnf {num_var} {num_clauses}" or "p wcnf {num_var} {num_clauses} {top}"
 			Ok(line) => {
 				let vec: Vec<&str> = line.split_whitespace().collect();
 				// check "p" and "cnf" keyword

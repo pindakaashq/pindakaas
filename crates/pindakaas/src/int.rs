@@ -61,13 +61,14 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarOrd<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}{{{}}}:O",
+			"{}{{{}}}:O [{:?}]",
 			self.lbl,
 			self.dom()
 				.iter(..)
 				.map(|iv| iv.end - C::one())
 				.sorted()
 				.join(","),
+			self.xs.values(..).map(|x| format!("{:?}", x)).join(","),
 		)
 	}
 }
@@ -158,6 +159,66 @@ impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
+	pub fn add<DB: ClauseDatabase<Lit = Lit>>(
+		&self,
+		db: &mut DB,
+		y: &IntVarEnc<Lit, C>,
+		// _: &LimitComp,
+		// enc: &mut dyn Encoder<DB, TernLeConstraint<'a, DB, C>>,
+	) -> Result<IntVarEnc<Lit, C>> {
+		if let IntVarEnc::Const(y) = y {
+			Ok(IntVarOrd {
+				xs: self
+					.xs
+					.clone()
+					.into_iter(..)
+					.map(|(c, l)| ((c.start + *y)..(c.end + *y), l))
+					.collect(),
+				lbl: self.lbl.clone(),
+			}
+			.into())
+		} else if let IntVarEnc::Ord(y) = y {
+			let z = IntVarOrd::new(
+				db,
+				IntervalMap::from_sorted(
+					num::iter::range_inclusive(C::one(), self.ub() + y.ub())
+						.map(|i| (i..(i + C::one()), None)),
+				),
+				format!("{}+{}", self.lbl, y.lbl),
+			)
+			.into();
+			// eprintln!("z: {}", z);
+			// let con = TernLeConstraint::new(self, y, cmp.clone(), z.as_ref());
+			// enc.encode(db, &con)?;
+			Ok(z)
+		} else {
+			todo!()
+		}
+	}
+
+	pub fn div(&self, c: &C) -> IntVarEnc<Lit, C> {
+		assert!(*c == C::one() + C::one(), "Can only divide IntVarOrd by 2");
+		let lb = self.lb();
+		let xs = self
+			.xs
+			.clone()
+			.into_iter(..)
+			.filter(|(c, _)| (c.end - C::one()).is_even())
+			.map(|(c, l)| (((c.end - C::one()) / (C::one() + C::one())), l))
+			.map(|(c, l)| (c..(c + C::one()), l))
+			.collect::<IntervalMap<_, _>>();
+
+		if xs.is_empty() {
+			IntVarEnc::Const(lb / *c)
+		} else {
+			IntVarOrd {
+				xs,
+				lbl: self.lbl.clone(),
+			}
+			.into()
+		}
+	}
+
 	pub fn dom(&self) -> IntervalSet<C> {
 		std::iter::once(self.lb()..self.lb() + C::one())
 			.chain(self.xs.intervals(..))
@@ -267,6 +328,20 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
+	fn add<DB: ClauseDatabase<Lit = Lit>>(
+		&self,
+		_: &mut DB,
+		_: &IntVarEnc<Lit, C>,
+		// _: &LimitComp,
+		// _: &mut dyn Encoder<DB, TernLeConstraint<DB, C>>,
+	) -> Result<IntVarEnc<Lit, C>> {
+		todo!()
+	}
+
+	fn div(&self, _: &C) -> IntVarEnc<Lit, C> {
+		todo!()
+	}
+
 	fn dom(&self) -> IntervalSet<C> {
 		num::iter::range_inclusive(self.lb, self.ub)
 			.map(|i| i..(i + C::one()))
@@ -426,6 +501,27 @@ pub(crate) enum IntVarEnc<Lit: Literal, C: Coefficient> {
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
+	pub(crate) fn add<DB: ClauseDatabase<Lit = Lit>>(
+		&self,
+		db: &mut DB,
+		y: &IntVarEnc<Lit, C>,
+		// cmp: &LimitComp,
+		// enc: &'a mut dyn Encoder<DB, TernLeConstraint<'a, DB, C>>,
+	) -> Result<IntVarEnc<Lit, C>> {
+		match self {
+			IntVarEnc::Ord(o) => o.add(db, y),
+			IntVarEnc::Bin(b) => b.add(db, y),
+			IntVarEnc::Const(c) => {
+				if let IntVarEnc::Const(y) = y {
+					Ok(IntVarEnc::Const(*c + *y))
+				} else {
+					// y.add(db, self, cmp, enc)
+					y.add(db, self)
+				}
+			}
+		}
+	}
+
 	/// Returns a clause constraining `x>=v`, which is None if true and empty if false
 	pub(crate) fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		match self {
@@ -438,6 +534,14 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 					vec![vec![]]
 				}
 			}
+		}
+	}
+
+	pub(crate) fn div(&self, c: &C) -> IntVarEnc<Lit, C> {
+		match self {
+			IntVarEnc::Ord(o) => o.div(c),
+			IntVarEnc::Bin(b) => b.div(c),
+			IntVarEnc::Const(m) => IntVarEnc::Const(*m / *c),
 		}
 	}
 
@@ -478,7 +582,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 	}
 	/// Return number of lits in encoding
 	#[allow(dead_code)]
-	fn lits(&self) -> usize {
+	pub(crate) fn lits(&self) -> usize {
 		match self {
 			IntVarEnc::Ord(o) => o.lits(),
 			IntVarEnc::Bin(b) => b.lits(),
@@ -526,6 +630,29 @@ impl<'a, Lit: Literal, C: Coefficient> TernLeConstraint<'a, Lit, C> {
 	) -> Self {
 		Self { x, y, cmp, z }
 	}
+
+	pub fn is_fixed(&self) -> Result<bool, Unsatisfiable> {
+		let TernLeConstraint { x, y, cmp, z } = self;
+		if let IntVarEnc::Const(x) = x {
+			if let IntVarEnc::Const(y) = y {
+				if let IntVarEnc::Const(z) = z {
+					return if Self::check(*x, *y, cmp, *z) {
+						Ok(true)
+					} else {
+						Err(Unsatisfiable)
+					};
+				}
+			}
+		}
+		Ok(false)
+	}
+
+	fn check(x: C, y: C, cmp: &LimitComp, z: C) -> bool {
+		match cmp {
+			LimitComp::LessEq => x + y <= z,
+			LimitComp::Equal => x + y == z,
+		}
+	}
 }
 
 impl<'a, Lit: Literal, C: Coefficient> Checker for TernLeConstraint<'a, Lit, C> {
@@ -534,15 +661,17 @@ impl<'a, Lit: Literal, C: Coefficient> Checker for TernLeConstraint<'a, Lit, C> 
 		let x = LinExp::from(self.x).assign(solution)?;
 		let y = LinExp::from(self.y).assign(solution)?;
 		let z = LinExp::from(self.z).assign(solution)?;
-		// TODO into LinearConstraint => Check?
-		if match self.cmp {
-			LimitComp::LessEq => x + y <= z,
-			LimitComp::Equal => x + y == z,
-		} {
+		if Self::check(x, y, &self.cmp, z) {
 			Ok(())
 		} else {
 			Err(CheckError::Unsatisfiable(Unsatisfiable))
 		}
+	}
+}
+
+impl<Lit: Literal, C: Coefficient> fmt::Display for TernLeConstraint<'_, Lit, C> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{} + {} {} {}", self.x, self.y, self.cmp, self.z)
 	}
 }
 
@@ -579,7 +708,17 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
 		// TODO properly use cmp!
 		let TernLeConstraint { x, y, cmp, z } = tern;
-		if matches!(x, IntVarEnc::Ord(_)) && matches!(x, IntVarEnc::Bin(_)) {
+		if matches!(x, IntVarEnc::Const(_)) {
+			self.encode(
+				db,
+				&TernLeConstraint {
+					x: *y,
+					y: *x,
+					cmp: cmp.clone(),
+					z: *z,
+				},
+			)
+		} else if matches!(x, IntVarEnc::Ord(_)) && matches!(y, IntVarEnc::Bin(_)) {
 			self.encode(db, &TernLeConstraint::new(*y, *x, cmp.clone(), *z))
 		} else if let IntVarEnc::Bin(x_bin) = x {
 			if let (IntVarEnc::Const(y_con), IntVarEnc::Const(z_con)) = (y, z) {
@@ -627,7 +766,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					),
 				)
 			} else {
-				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x:?}, {y:?}, {z:?}")
+				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x}, {y}, {z}")
 			}
 		} else if let (IntVarEnc::Ord(x_ord), IntVarEnc::Ord(y_ord), IntVarEnc::Bin(z_bin)) =
 			(x, y, z)
@@ -661,6 +800,23 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					&z_bin.clone().into(),
 				),
 			)
+		} else if let (
+			IntVarEnc::Ord(x_ord),
+			IntVarEnc::Const(c),
+			LimitComp::Equal,
+			IntVarEnc::Ord(z_ord),
+		) = (x, y, cmp, z)
+		{
+			// TODO figure this out!!
+			let x_ord = x_ord.add(db, &IntVarEnc::Const(*c))?;
+			for d in x_ord.dom() {
+				for xs in x_ord.geq(d.clone()) {
+					for zs in z_ord.geq(d.clone()) {
+						equivalent(db, &xs[0], &zs[0])?;
+					}
+				}
+			}
+			Ok(())
 		} else {
 			// assert!(cmp == &LimitComp::LessEq, "Only support <= for x+y ? z");
 			for c_a in x.dom() {
@@ -668,27 +824,42 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					// TODO tighten c_c.start
 					let c_c = (std::cmp::min(c_a.start, c_b.start))
 						..(((c_a.end - C::one()) + (c_b.end - C::one())) + C::one());
-					let (a, b, c) = (
-						negate_cnf(x.geq(c_a.clone())),
-						negate_cnf(y.geq(c_b.clone())),
-						z.geq(c_c.clone()),
-					);
+					let x_geq_c_a = x.geq(c_a.clone());
+					let y_geq_c_b = y.geq(c_b.clone());
+					let z_geq_c_c = z.geq(c_c.clone());
 
-					for cls_a in &a {
-						for cls_b in &b {
-							for cls_c in &c {
-								emit_clause!(
-									db,
-									&[cls_a.clone(), cls_b.clone(), cls_c.clone()].concat()
-								)?;
-							}
-						}
-					}
+					add_clauses_for(db, negate_cnf(x_geq_c_a), negate_cnf(y_geq_c_b), z_geq_c_c)?;
 				}
 			}
 			Ok(())
 		}
 	}
+}
+
+pub fn equivalent<DB: ClauseDatabase>(db: &mut DB, x: &DB::Lit, y: &DB::Lit) -> Result {
+	if x == y {
+		return Ok(());
+	}
+
+	emit_clause!(db, &[x.negate(), y.clone()])?;
+	emit_clause!(db, &[y.negate(), x.clone()])?;
+	Ok(())
+}
+
+pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
+	db: &mut DB,
+	a: Vec<Vec<DB::Lit>>,
+	b: Vec<Vec<DB::Lit>>,
+	c: Vec<Vec<DB::Lit>>,
+) -> Result {
+	for cls_a in &a {
+		for cls_b in &b {
+			for cls_c in &c {
+				emit_clause!(db, &[cls_a.clone(), cls_b.clone(), cls_c.clone()].concat())?
+			}
+		}
+	}
+	Ok(())
 }
 
 pub(crate) fn negate_cnf<Lit: Literal>(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
@@ -697,6 +868,7 @@ pub(crate) fn negate_cnf<Lit: Literal>(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> 
 	} else if clauses.contains(&vec![]) {
 		vec![]
 	} else {
+		assert!(clauses.len() == 1);
 		clauses
 			.into_iter()
 			.map(|clause| clause.into_iter().map(|lit| lit.negate()).collect())

@@ -1,7 +1,10 @@
 use crate::{
-	int::{IntVarOrd, TernLeConstraint, TernLeEncoder},
+	int::{
+		add_clauses_for, equivalent, negate_cnf, IntVarEnc, IntVarOrd, TernLeConstraint,
+		TernLeEncoder,
+	},
 	linear::LimitComp,
-	trace::{emit_clause, new_var},
+	trace::emit_clause,
 	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, LinExp, Literal, Result,
 	Unsatisfiable,
 };
@@ -91,26 +94,17 @@ impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_, DB::Lit>> for SortedEncoder {
 			.xs
 			.iter()
 			.map(|x| Some(x.clone()))
-			.chain(
-				std::iter::repeat(None).take((sorted.ys.len() + 1).saturating_sub(sorted.xs.len())),
-			)
 			.enumerate()
 			.map(|(i, x)| {
 				IntVarOrd::new(db, interval_map! { 1..2_i32 => x }, format!("x_{}", i + 1))
 			})
 			.collect::<Vec<_>>();
 
-		xs[n..]
-			.iter()
-			.try_for_each(|x| emit_clause!(db, &[x.geq(1..2_i32)[0][0].negate()]))?;
-
-		// We make n+1 sorted lits, with the n+1'th set to false.
-		let last = new_var!(db, "end");
 		let y = IntVarOrd::new(
 			db,
 			IntervalMap::from_sorted(
 				num::iter::range_inclusive(1, n as i32 + 1)
-					.zip(sorted.ys.iter().chain(std::iter::once(&last)))
+					.zip(sorted.ys.iter())
 					.map(|(i, y)| (i..(i + 1), Some(y.clone()))),
 			),
 			"s_x".to_string(),
@@ -124,8 +118,22 @@ impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_, DB::Lit>> for SortedEncoder {
 		if sorted.cmp == LimitComp::Equal && self.strategy != SortedStrategy::Recursive {
 			unimplemented!("Cannot use {:?} to encode {:?}, since the Recursive strategy will encode complete equality (and the Direct strategy will encode complete LessEq). So the Mixed strategy of the two encodes incomplete LessEq, as in, some solutions will be missing.", self.strategy, sorted.cmp);
 		}
-		self.sorted(db, &xs, &sorted.cmp, &y, 0)?;
-		emit_clause!(db, &[last.negate()])
+		self.sorted(db, &xs, &sorted.cmp, &y, 0)
+	}
+}
+
+impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB::Lit, C>>
+	for SortedEncoder
+{
+	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
+		let TernLeConstraint { x, y, cmp, z } = tern;
+		if tern.is_fixed()? {
+			Ok(())
+		} else if let (IntVarEnc::Ord(x), IntVarEnc::Ord(y), IntVarEnc::Ord(z)) = (x, y, z) {
+			self.merged(db, x, y, cmp, z, 0)
+		} else {
+			TernLeEncoder::default().encode(db, tern)
+		}
 	}
 }
 
@@ -177,7 +185,7 @@ impl SortedEncoder {
 
 		debug_assert!(xs.iter().all(|x| x.ub() == C::one()));
 		if direct {
-			return num::range_inclusive(C::one(), m).try_for_each(|k| {
+			return num::range_inclusive(C::one(), m + C::one()).try_for_each(|k| {
 				xs.iter()
 					.map(|x| x.geq(C::one()..(C::one() + C::one()))[0][0].clone())
 					.combinations(k.to_usize().unwrap())
@@ -196,18 +204,22 @@ impl SortedEncoder {
 			[x] => {
 				x.xs.values(..)
 					.zip(y.xs.values(..))
-					.try_for_each(|(x, y)| self.equiv(db, x, y, _lvl + 1))?;
+					.try_for_each(|(x, y)| equivalent(db, x, y))?;
 				x.xs.values((y.ub() + C::one())..)
 					.try_for_each(|x| emit_clause!(db, &[x.negate()]))
 			}
-			[x1, x2] if y.ub() <= C::one() + C::one() => self.comp(db, x1, x2, cmp, y, _lvl + 1),
 			xs => {
 				let n = n / 2;
-				let m_left = std::cmp::min((0..n).fold(C::zero(), |a, _| a + C::one()), y.ub());
-				let y1 = self.next_int_var(db, m_left, String::from("y_1"));
-				let m_right =
-					std::cmp::min((n..xs.len()).fold(C::zero(), |a, _| a + C::one()), y.ub());
-				let y2 = self.next_int_var(db, m_right, String::from("y_2"));
+				let y1 = self.next_int_var(
+					db,
+					std::cmp::min((0..n).fold(C::zero(), |a, _| a + C::one()), y.ub()),
+					String::from("y_1"),
+				);
+				let y2 = self.next_int_var(
+					db,
+					std::cmp::min((n..xs.len()).fold(C::zero(), |a, _| a + C::one()), y.ub()),
+					String::from("y_2"),
+				);
 
 				self.sorted(db, &xs[..n], cmp, &y1, _lvl)?;
 				self.sorted(db, &xs[n..], cmp, &y2, _lvl)?;
@@ -358,132 +370,33 @@ impl SortedEncoder {
 		if a.is_zero() && b.is_zero() {
 			Ok(())
 		} else if a.is_one() && b.is_one() && c <= C::one() + C::one() {
-			self.comp(db, x1, x2, cmp, y, _lvl + 1)
-		} else if a.is_odd() && b.is_even() {
-			self.merged(db, x2, x1, cmp, y, _lvl + 1)
+			let x2 = x2.add(db, &IntVarEnc::Const(C::one()))?;
+			let y = y.add(db, &IntVarEnc::Const(C::one()))?;
+			self.comp(db, &x1.clone().into(), &x2, cmp, &y, C::one())
 		} else {
-			// TODO can more easily be implemented using affine views
-			let mut odd_even = |x: &IntVarOrd<DB::Lit, C>| {
-				let (odd, even): (Vec<_>, Vec<_>) =
-					x.xs.iter(..)
-						.map(|(c, l)| (c.end - C::one(), l))
-						.partition(|(c, _)| c.is_odd());
-				let x1 = if odd.is_empty() {
-					None
-				} else {
-					Some(IntVarOrd::new(
-						db,
-						IntervalMap::from_sorted(
-							odd.into_iter()
-								.map(|(c, l)| (((c + C::one()) / (C::one() + C::one())), l))
-								.map(|(c, l)| (c..(c + C::one()), Some(l.clone()))),
-						),
-						format!("{}_odd", x.lbl),
-					))
-				};
+			let two = C::one() + C::one();
+			let x1_floor = x1.div(&two);
+			let x1_ceil = x1.add(db, &IntVarEnc::Const(C::one()))?.div(&two);
 
-				let x2 = if even.is_empty() {
-					None
-				} else {
-					Some(IntVarOrd::new(
-						db,
-						IntervalMap::from_sorted(
-							even.into_iter()
-								.map(|(c, l)| ((c / (C::one() + C::one())), l))
-								.map(|(c, l)| (c..(c + C::one()), Some(l.clone()))),
-						),
-						format!("{}_even", x.lbl),
-					))
-				};
-				(x1, x2)
-			};
+			let x2_floor = x2.div(&two);
+			let x2_ceil = x2.add(db, &IntVarEnc::Const(C::one()))?.div(&two);
 
-			let mut merge = |db: &mut DB,
-			                 x1: Option<IntVarOrd<_, _>>,
-			                 x2: Option<IntVarOrd<_, _>>,
-			                 c: C,
-			                 lbl: String| match (x1, x2) {
-				(None, Some(x2)) => Ok(Some(x2)),
-				(Some(x1), None) => Ok(Some(x1)),
-				(Some(x1), Some(x2)) => {
-					let z = self.next_int_var(db, std::cmp::min(x1.ub() + x2.ub(), c), lbl);
-					self.merged(db, &x1, &x2, cmp, &z, _lvl + 1)?;
-					Ok(Some(z))
-				}
-				(None, None) => Ok(None),
-			};
+			let z_floor = x1_floor.add(db, &x2_floor)?;
+			self.encode(
+				db,
+				&TernLeConstraint::new(&x1_floor, &x2_floor, cmp.clone(), &z_floor),
+			)?;
 
-			let (x1_odd, x1_even) = odd_even(x1);
-			let (x2_odd, x2_even) = odd_even(x2);
+			let z_ceil = x1_ceil.add(db, &x2_ceil)?;
+			self.encode(
+				db,
+				&TernLeConstraint::new(&x1_ceil, &x2_ceil, cmp.clone(), &z_ceil),
+			)?;
 
-			let c_even_card_net = a <= c && b <= c && a + b > c && c.is_even();
-			let c_odd_card_net = a <= c && b <= c && a + b > c && c > C::zero() && c.is_odd();
-
-			let z_odd_ub = if c_even_card_net {
-				(c / (C::one() + C::one())) + C::one()
-			} else if c_odd_card_net {
-				(c + C::one()) / (C::one() + C::one())
-			} else {
-				x1_odd.as_ref().map(|x| x.ub()).unwrap_or_default()
-					+ x2_odd.as_ref().map(|x| x.ub()).unwrap_or_default()
-			};
-
-			let z_odd = merge(db, x1_odd, x2_odd, z_odd_ub, String::from("z_odd"))?;
-
-			let z_even_ub = if c_even_card_net {
-				c / (C::one() + C::one())
-			} else if c_odd_card_net {
-				(c - C::one()) / (C::one() + C::one())
-			} else {
-				x1_even.as_ref().map(|x| x.ub()).unwrap_or_default()
-					+ x2_even.as_ref().map(|x| x.ub()).unwrap_or_default()
-			};
-
-			let z_even = merge(db, x1_even, x2_even, z_even_ub, String::from("z_even"))?;
-
-			if z_odd.is_some() && z_even.is_some() {
-				for ((z_even_i, z_odd_i), (y_even, y_odd)) in z_even
-					.as_ref()
-					.unwrap()
-					.xs
-					.values(..)
-					.zip(z_odd.as_ref().unwrap().xs.values(..).skip(1))
-					.zip(y.xs.values(..).skip(1).tuples())
-				{
-					self.comp_lits(db, z_even_i, z_odd_i, cmp, y_even, Some(y_odd), _lvl + 1)?;
-				}
+			for c in num::iter::range_inclusive(C::zero(), c) {
+				self.comp(db, &z_floor, &z_ceil, cmp, &y.clone().into(), c)?;
 			}
 
-			// TODO this is a bit clunky (and at least inefficient). The first/last lits of z should view y1/yn.
-			if z_odd.is_some() {
-				let y1 = y.xs.values(..).next().unwrap();
-				let z1 = z_odd.as_ref().unwrap().xs.values(..).next().unwrap();
-				self.equiv(db, z1, y1, _lvl + 1)?;
-			}
-
-			if c_even_card_net && z_even.is_some() && z_odd.is_some() {
-				let yn = y.xs.values(..).last().unwrap();
-				let za = z_even.as_ref().unwrap().xs.values(..).last().unwrap();
-				let zb = z_odd.as_ref().unwrap().xs.values(..).last().unwrap();
-				self.comp_lits(db, za, zb, cmp, yn, None, _lvl + 1)?;
-			} else if c_odd_card_net {
-			} else if a.is_even() && b.is_even() && z_even.is_some() {
-				let yn = y.xs.values(..).last().unwrap();
-				let zn = z_even.as_ref().unwrap().xs.values(..).last().unwrap();
-				self.equiv(db, yn, zn, _lvl + 1)?;
-			} else if a.is_odd() && b.is_odd() && z_odd.is_some() {
-				let yn = y.xs.values(..).last().unwrap();
-				let zn = z_odd.as_ref().unwrap().xs.values(..).last().unwrap();
-				self.equiv(db, yn, zn, _lvl + 1)?;
-			}
-
-			// TODO: Does this need tracing?
-			// eprintln!(
-			//	"{:_lvl$}{}",
-			//	"",
-			//	y.xs.values(..).map(|l| db.to_label(l)).join(", "),
-			//	_lvl = _lvl
-			// );
 			Ok(())
 		}
 	}
@@ -491,73 +404,28 @@ impl SortedEncoder {
 	fn comp<DB: ClauseDatabase, C: Coefficient>(
 		&mut self,
 		db: &mut DB,
-		x: &IntVarOrd<DB::Lit, C>,
-		y: &IntVarOrd<DB::Lit, C>,
-		cmp: &LimitComp,
-		z: &IntVarOrd<DB::Lit, C>,
-		_lvl: usize,
-	) -> Result {
-		// TODO: Add tracing
-		// eprintln!("{:_lvl$}comp({}, {}, {})", "", x, y, z, _lvl = _lvl);
-		debug_assert!(x.ub() == C::one());
-		debug_assert!(y.ub() == C::one());
-		debug_assert!(z.ub() == C::one() || z.ub() == C::one() + C::one());
-
-		let x = x.geq(C::one()..(C::one() + C::one()))[0][0].clone();
-		let y = y.geq(C::one()..(C::one() + C::one()))[0][0].clone();
-
-		let mut zs = z.xs.values(..);
-		let z1 = zs.next().unwrap();
-		let z2 = zs.next(); // optional
-		self.comp_lits(db, &x, &y, cmp, z1, z2, _lvl + 1)
-	}
-
-	fn equiv<DB: ClauseDatabase>(
-		&mut self,
-		db: &mut DB,
-		x: &DB::Lit,
-		y: &DB::Lit,
-		_: usize,
-	) -> Result {
-		emit_clause!(db, &[x.negate(), y.clone()])?;
-		emit_clause!(db, &[x.clone(), y.negate()])?;
-		Ok(())
-	}
-
-	#[allow(clippy::too_many_arguments)] // TODO
-	fn comp_lits<DB: ClauseDatabase>(
-		&mut self,
-		db: &mut DB,
-		x: &DB::Lit,
-		y: &DB::Lit,
+		x: &IntVarEnc<DB::Lit, C>,
+		y: &IntVarEnc<DB::Lit, C>,
 		_: &LimitComp,
-		z1: &DB::Lit,
-		z2: Option<&DB::Lit>,
-		_lvl: usize,
+		z: &IntVarEnc<DB::Lit, C>,
+		c: C,
 	) -> Result {
-		// TODO: Add tracing
-		// eprintln!(
-		// 	"{:_lvl$}comp_lits({:?}, {:?}, {:?}, {:?})",
-		//	"",
-		//	x,
-		//	y,
-		//	z1,
-		//	z2,
-		//	_lvl = _lvl
-		// );
-		emit_clause!(db, &[x.negate(), z1.clone()])?;
-		emit_clause!(db, &[y.negate(), z1.clone()])?;
+		let to_iv = |c: C| c..(c + C::one());
+		let empty_clause: Vec<Vec<DB::Lit>> = vec![Vec::new()];
+		let c1 = c;
+		let c2 = c + C::one();
+		let x = x.geq(to_iv(c1)); // c
+		let y = y.geq(to_iv(c2)); // c+1
+		let z1 = z.geq(to_iv(c1 + c1)); // 2c
+		let z2 = z.geq(to_iv(c1 + c2)); // 2c+1
 
-		if let Some(z2) = z2 {
-			emit_clause!(db, &[x.negate(), y.negate(), z2.clone()])?;
-			emit_clause!(db, &[x.clone(), z2.negate()])?;
-			emit_clause!(db, &[y.clone(), z2.negate()])?;
-		} else {
-			emit_clause!(db, &[x.negate(), y.negate()])?;
-		}
+		add_clauses_for(db, negate_cnf(x.clone()), empty_clause.clone(), z1.clone())?;
+		add_clauses_for(db, negate_cnf(y.clone()), empty_clause.clone(), z1.clone())?;
+		add_clauses_for(db, negate_cnf(x.clone()), negate_cnf(y.clone()), z2.clone())?;
 
-		// TODO redundant if no z2
-		emit_clause!(db, &[x.clone(), y.clone(), z1.negate()])?;
+		add_clauses_for(db, x.clone(), empty_clause.clone(), negate_cnf(z2.clone()))?;
+		add_clauses_for(db, y.clone(), empty_clause, negate_cnf(z2))?;
+		add_clauses_for(db, x, y, negate_cnf(z1))?;
 		Ok(())
 	}
 }
@@ -569,6 +437,28 @@ mod tests {
 
 	use super::*;
 	use crate::helpers::tests::{assert_sol, TestDB};
+	use iset::interval_map;
+
+	#[test]
+	fn test_2_merged_eq() {
+		let mut db = TestDB::new(0);
+		let x: IntVarEnc<_, _> =
+			IntVarOrd::new(&mut db, interval_map!( 1..2 => None ), "x".to_string()).into();
+		let y: IntVarEnc<_, _> =
+			IntVarOrd::new(&mut db, interval_map!( 1..2 => None ), "y".to_string()).into();
+		let z: IntVarEnc<_, _> = IntVarOrd::new(
+			&mut db,
+			interval_map!( 1..2 => None, 2..3 => None ),
+			"z".to_string(),
+		)
+		.into();
+		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+		let con = TernLeConstraint::<i32, i32>::new(&x, &y, LimitComp::Equal, &z);
+		let mut enc = SortedEncoder::default();
+		enc.set_strategy(SortedStrategy::Recursive);
+		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
+		assert_sol!(db => enc, &con => sols);
+	}
 
 	#[test]
 	fn test_2_sorted_eq() {
@@ -577,7 +467,7 @@ mod tests {
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = SortedEncoder::default();
 		enc.set_strategy(SortedStrategy::Recursive);
-		assert_sol!(db => enc, &con => sols);
+		assert_sol!(db => enc, con => sols);
 	}
 
 	#[test]
@@ -587,7 +477,7 @@ mod tests {
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = SortedEncoder::default();
 		enc.set_strategy(SortedStrategy::Recursive);
-		assert_sol!(db => enc, &con => sols);
+		assert_sol!(db => enc, con => sols);
 	}
 
 	#[test]
@@ -597,7 +487,7 @@ mod tests {
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = SortedEncoder::default();
 		enc.set_strategy(SortedStrategy::Recursive);
-		assert_sol!(db => enc, &con => sols);
+		assert_sol!(db => enc, con => sols);
 	}
 
 	#[test]
@@ -607,7 +497,7 @@ mod tests {
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = SortedEncoder::default();
 		enc.set_strategy(SortedStrategy::Recursive);
-		assert_sol!(db => enc, &con => sols);
+		assert_sol!(db => enc, con => sols);
 	}
 
 	#[test]
@@ -617,7 +507,7 @@ mod tests {
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = SortedEncoder::default();
 		enc.set_strategy(SortedStrategy::Recursive);
-		assert_sol!(db => enc, &con => sols);
+		assert_sol!(db => enc, con => sols);
 	}
 
 	#[test]
@@ -627,7 +517,7 @@ mod tests {
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = SortedEncoder::default();
 		enc.set_strategy(SortedStrategy::Recursive);
-		assert_sol!(db => enc, &con => sols);
+		assert_sol!(db => enc, con => sols);
 	}
 
 	// TODO splr bug
@@ -648,7 +538,7 @@ mod tests {
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = SortedEncoder::default();
 		enc.set_strategy(SortedStrategy::Recursive);
-		assert_sol!(db => enc, &con => sols);
+		assert_sol!(db => enc, con => sols);
 	}
 
 	#[test]
@@ -658,7 +548,7 @@ mod tests {
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = SortedEncoder::default();
 		enc.set_strategy(SortedStrategy::Recursive);
-		assert_sol!(db => enc, &con => sols);
+		assert_sol!(db => enc, con => sols);
 	}
 
 	#[test]
@@ -672,7 +562,7 @@ mod tests {
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = SortedEncoder::default();
 		enc.set_strategy(SortedStrategy::Recursive);
-		assert_sol!(db => enc, &con => sols);
+		assert_sol!(db => enc, con => sols);
 	}
 
 	#[test]
@@ -682,7 +572,7 @@ mod tests {
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = SortedEncoder::default();
 		enc.set_strategy(SortedStrategy::Direct);
-		assert_sol!(db => enc, &con => sols);
+		assert_sol!(db => enc, con => sols);
 	}
 
 	#[test]
