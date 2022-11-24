@@ -171,7 +171,7 @@ impl SortedEncoder {
 		_lvl: usize,
 	) -> Result {
 		let (n, m) = (xs.len(), y.ub());
-		let direct = self.use_direct_sort(n as u128, m.to_u128().unwrap());
+		let direct = false;
 
 		// TODO: Add tracing
 		// eprintln!(
@@ -228,21 +228,21 @@ impl SortedEncoder {
 		}
 	}
 
-	fn use_direct_sort(&self, n: u128, m: u128) -> bool {
+	fn _use_direct_sort(&self, n: u128, m: u128) -> bool {
 		match self.strategy {
 			SortedStrategy::Direct => true,
 			SortedStrategy::Recursive => false,
 			SortedStrategy::Mixed(lambda) => {
 				let ((vr, cr), (vd, cd)) = (
-					Self::sorted_cost(n, m, false),
-					Self::sorted_cost(n, m, true),
+					Self::_sorted_cost(n, m, false),
+					Self::_sorted_cost(n, m, true),
 				);
 				Self::lambda(vd, cd, lambda) < Self::lambda(vr, cr, lambda)
 			}
 		}
 	}
 
-	fn sorted_cost(n: u128, m: u128, direct: bool) -> (u128, u128) {
+	fn _sorted_cost(n: u128, m: u128, direct: bool) -> (u128, u128) {
 		if direct {
 			(
 				m,
@@ -258,8 +258,8 @@ impl SortedEncoder {
 				3 => (2, 3),
 				_ => {
 					let l = (n as f32 / 2.0) as u128;
-					let (v1, c1) = Self::sorted_cost(l, m, direct);
-					let (v2, c2) = Self::sorted_cost(n - l, m, direct);
+					let (v1, c1) = Self::_sorted_cost(l, m, direct);
+					let (v2, c2) = Self::_sorted_cost(n - l, m, direct);
 					let (v3, c3) =
 						Self::merged_cost(std::cmp::min(l, m), std::cmp::min(n - l, m), m, direct);
 					(v1 + v2 + v3, c1 + c2 + c3)
