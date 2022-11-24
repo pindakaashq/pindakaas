@@ -16,7 +16,7 @@ pub struct SortedEncoder {
 	strategy: SortedStrategy,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum SortedStrategy {
 	Direct,
 	Recursive,
