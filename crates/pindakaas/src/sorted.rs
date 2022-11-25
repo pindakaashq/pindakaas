@@ -578,6 +578,6 @@ mod tests {
 	#[test]
 	fn test_sorted_cost_test() {
 		let (n, m) = (50, 16);
-		SortedEncoder::sorted_cost(n, m, true); // should not lead to overflow
+		SortedEncoder::_sorted_cost(n, m, true); // should not lead to overflow
 	}
 }

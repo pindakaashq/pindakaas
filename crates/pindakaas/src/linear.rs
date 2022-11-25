@@ -58,7 +58,7 @@ pub enum LinVariant<Lit: Literal, C: Coefficient> {
 	Trivial,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Linear<Lit: Literal, C: Coefficient> {
 	pub(crate) terms: Vec<Part<Lit, PosCoeff<C>>>,
 	pub(crate) cmp: LimitComp,
@@ -83,6 +83,10 @@ impl<Lit: Literal, C: Coefficient> Linear<Lit, C> {
 			"="
 		};
 		format!("{x} {op} {:?}", *self.k)
+	}
+
+	pub fn set_k(&mut self, k: C) {
+		self.k = k.into();
 	}
 }
 
@@ -125,7 +129,7 @@ impl<C: Coefficient> LinMarker for TotalizerEncoder<C> {}
 //
 // TODO add EO, and probably something for Unconstrained
 // TODO this can probably follow the same structure as LinExp
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Part<Lit, C> {
 	Amo(Vec<(Lit, C)>),
 	Ic(Vec<(Lit, C)>),
