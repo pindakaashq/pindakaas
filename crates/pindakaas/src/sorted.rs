@@ -116,10 +116,6 @@ impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_, DB::Lit>> for SortedEncoder {
 			y.consistent(db).unwrap();
 		}
 
-		// TODO
-		if sorted.cmp == LimitComp::Equal && self.strategy != SortedStrategy::Recursive {
-			unimplemented!("Cannot use {:?} to encode {:?}, since the Recursive strategy will encode complete equality (and the Direct strategy will encode complete LessEq). So the Mixed strategy of the two encodes incomplete LessEq, as in, some solutions will be missing.", self.strategy, sorted.cmp);
-		}
 		self.sorted(db, &xs, &sorted.cmp, &y, 0)
 	}
 }
@@ -407,7 +403,7 @@ impl SortedEncoder {
 		db: &mut DB,
 		x: &IntVarEnc<DB::Lit, C>,
 		y: &IntVarEnc<DB::Lit, C>,
-		_: &LimitComp,
+		cmp: &LimitComp,
 		z: &IntVarEnc<DB::Lit, C>,
 		c: C,
 	) -> Result {
@@ -424,9 +420,11 @@ impl SortedEncoder {
 		add_clauses_for(db, negate_cnf(y.clone()), empty_clause.clone(), z1.clone())?;
 		add_clauses_for(db, negate_cnf(x.clone()), negate_cnf(y.clone()), z2.clone())?;
 
-		add_clauses_for(db, x.clone(), empty_clause.clone(), negate_cnf(z2.clone()))?;
-		add_clauses_for(db, y.clone(), empty_clause, negate_cnf(z2))?;
-		add_clauses_for(db, x, y, negate_cnf(z1))?;
+		if cmp == &LimitComp::Equal {
+			add_clauses_for(db, x.clone(), empty_clause.clone(), negate_cnf(z2.clone()))?;
+			add_clauses_for(db, y.clone(), empty_clause, negate_cnf(z2))?;
+			add_clauses_for(db, x, y, negate_cnf(z1))?;
+		}
 		Ok(())
 	}
 }

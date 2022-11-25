@@ -124,6 +124,19 @@ mod tests {
 		};
 	}
 
+	mod le_recursive {
+		sorted_card_test_suite!(
+			{
+				let mut e = SortingNetworkEncoder::default();
+				let mut f = SortedEncoder::default();
+				f.set_strategy(SortedStrategy::Recursive);
+				e.set_sorted_encoder(f);
+				e
+			},
+			LimitComp::LessEq
+		);
+	}
+
 	mod eq_recursive {
 		sorted_card_test_suite!(
 			{

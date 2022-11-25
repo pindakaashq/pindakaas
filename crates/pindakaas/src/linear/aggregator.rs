@@ -485,7 +485,7 @@ impl LinearAggregator {
 						.map(|_i| new_var!(db, format!("s_{}", _i)))
 						.collect::<Vec<_>>();
 					self.sorted_encoder
-						.encode(db, &Sorted::new(&xs, LimitComp::LessEq, &ys))
+						.encode(db, &Sorted::new(&xs, LimitComp::Equal, &ys))
 						.unwrap();
 					partition.push(Part::Ic(
 						ys.into_iter().map(|y| (y, coef.clone())).collect(),
