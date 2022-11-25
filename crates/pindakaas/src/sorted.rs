@@ -160,6 +160,21 @@ impl SortedEncoder {
 		((v as f32) * lambda) as u128 + c
 	}
 
+	/// The sorted/merged base case of x1{0,1}+x2{0,1}<=y{0,1,2}
+	fn smerge<DB: ClauseDatabase, C: Coefficient>(
+		&mut self,
+		db: &mut DB,
+		x1: &IntVarOrd<DB::Lit, C>,
+		x2: &IntVarOrd<DB::Lit, C>,
+		cmp: &LimitComp,
+		y: &IntVarOrd<DB::Lit, C>,
+	) -> Result {
+		// we let x2 take the place of z_ceil, so we need to add 1 to both sides
+		let x2 = x2.add(db, &IntVarEnc::Const(C::one()))?;
+		let y = y.add(db, &IntVarEnc::Const(C::one()))?;
+		self.comp(db, &x1.clone().into(), &x2, cmp, &y, C::one())
+	}
+
 	fn sorted<DB: ClauseDatabase, C: Coefficient>(
 		&mut self,
 		db: &mut DB,
@@ -206,6 +221,7 @@ impl SortedEncoder {
 				x.xs.values((y.ub() + C::one())..)
 					.try_for_each(|x| emit_clause!(db, &[x.negate()]))
 			}
+			[x1, x2] if m <= C::one() + C::one() => self.smerge(db, x1, x2, cmp, y),
 			xs => {
 				let n = n / 2;
 				let y1 = self.next_int_var(
@@ -367,9 +383,7 @@ impl SortedEncoder {
 		if a.is_zero() && b.is_zero() {
 			Ok(())
 		} else if a.is_one() && b.is_one() && c <= C::one() + C::one() {
-			let x2 = x2.add(db, &IntVarEnc::Const(C::one()))?;
-			let y = y.add(db, &IntVarEnc::Const(C::one()))?;
-			self.comp(db, &x1.clone().into(), &x2, cmp, &y, C::one())
+			self.smerge(db, x1, x2, cmp, y)
 		} else {
 			let two = C::one() + C::one();
 			let x1_floor = x1.div(&two);
