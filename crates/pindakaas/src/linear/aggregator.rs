@@ -481,10 +481,8 @@ impl LinearAggregator {
 
 					// eprintln!("found same coef chain of {} for coef {} and k {:?}; sort with {c} aux vars", xs.len(), *coef, lin.k);
 
-					let ys = xs
-						.iter()
-						.take(c)
-						.map(|_x| new_var!(db, format!("s_{_x:?}"))) // TODO: Use label of _x
+					let ys = (1..=c)
+						.map(|_i| new_var!(db, format!("s_{}", _i)))
 						.collect::<Vec<_>>();
 					self.sorted_encoder
 						.encode(db, &Sorted::new(&xs, LimitComp::LessEq, &ys))
