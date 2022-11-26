@@ -101,7 +101,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 					if dom.is_empty() {
 						None
 					} else {
-						let x = IntVarOrd::new(db, dom, format!("bdd_{i}"));
+						let x = IntVarOrd::from_views(db, dom, format!("bdd_{i}"));
 						if add_consistency {
 							x.consistent(db).unwrap();
 						}

@@ -1,6 +1,6 @@
 use crate::{
+	int::IntVarEnc,
 	sorted::{Sorted, SortedEncoder},
-	trace::{emit_clause, new_var},
 	Cardinality, ClauseDatabase, Coefficient, Encoder, Result,
 };
 
@@ -21,16 +21,14 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Cardinality<DB::Lit, C>>
 	for SortingNetworkEncoder
 {
 	fn encode(&mut self, db: &mut DB, card: &Cardinality<DB::Lit, C>) -> Result {
-		let n = (0..card.lits.len()).fold(C::one(), |a, _| a + C::one());
-		let ys = num::range_inclusive(C::one(), std::cmp::min(n, *card.k))
-			.map(|_| new_var!(db, format!("y_{:?}", &card.lits[0]))) // TODO: Use label
-			.collect::<Vec<_>>();
 		self.sorted_encoder.encode(
 			db,
-			&Sorted::new(card.lits.as_slice(), card.cmp.clone(), &ys),
-		)?;
-
-		ys.into_iter().try_for_each(|y| emit_clause!(db, &[y]))
+			&Sorted::new(
+				card.lits.as_slice(),
+				card.cmp.clone(),
+				&IntVarEnc::Const(*card.k),
+			),
+		)
 	}
 }
 
@@ -160,6 +158,19 @@ mod tests {
 				e
 			},
 			LimitComp::LessEq
+		);
+	}
+
+	mod eq_direct {
+		sorted_card_test_suite!(
+			{
+				let mut e = SortingNetworkEncoder::default();
+				let mut f = SortedEncoder::default();
+				f.set_strategy(SortedStrategy::Direct);
+				e.set_sorted_encoder(f);
+				e
+			},
+			LimitComp::Equal
 		);
 	}
 

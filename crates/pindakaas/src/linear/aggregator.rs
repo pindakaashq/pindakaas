@@ -3,11 +3,12 @@ use std::hash::BuildHasherDefault;
 
 use crate::{
 	helpers::is_powers_of_two,
+	int::IntVarOrd,
 	linear::{Constraint, LimitComp, Part, PosCoeff},
 	sorted::{Sorted, SortedEncoder},
-	trace::{emit_clause, new_var},
-	Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, Encoder, LinVariant,
-	Linear, LinearConstraint, Literal, Result, Unsatisfiable,
+	trace::emit_clause,
+	Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, Encoder, LinExp,
+	LinVariant, Linear, LinearConstraint, Literal, Result, Unsatisfiable,
 };
 use itertools::Itertools;
 
@@ -477,18 +478,22 @@ impl LinearAggregator {
 					&& xs.len() >= self.sort_same_coefficients
 					&& xs.len() < n
 				{
-					let c = (*k / *coef).to_usize().unwrap();
+					let c = *k / *coef;
 
 					// eprintln!("found same coef chain of {} for coef {} and k {:?}; sort with {c} aux vars", xs.len(), *coef, lin.k);
 
-					let ys = (1..=c)
-						.map(|_i| new_var!(db, format!("s_{}", _i)))
-						.collect::<Vec<_>>();
+					let y = IntVarOrd::from_bounds(db, C::zero(), c, String::from("s")).into();
 					self.sorted_encoder
-						.encode(db, &Sorted::new(&xs, LimitComp::Equal, &ys))
+						.encode(db, &Sorted::new(&xs, LimitComp::Equal, &y))
 						.unwrap();
+
+					let lin_exp = LinExp::from(&y);
 					partition.push(Part::Ic(
-						ys.into_iter().map(|y| (y, coef.clone())).collect(),
+						lin_exp
+							.terms
+							.into_iter()
+							.map(|(lit, _)| (lit, coef.clone()))
+							.collect(),
 					));
 				} else {
 					for x in xs {
