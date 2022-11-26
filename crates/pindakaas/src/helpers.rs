@@ -88,7 +88,7 @@ pub mod tests {
 	macro_rules! assert_enc {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-            assert_enc!(tdb => $enc, $arg => $clauses)
+			assert_enc!(tdb => $enc, $arg => $clauses)
 		};
 		($tdb:ident => $enc:expr, $arg:expr => $clauses:expr) => {
 			$tdb = $tdb.expect_clauses($clauses);
@@ -98,7 +98,7 @@ pub mod tests {
 		};
 		($enc:expr, $max:expr, $($args:expr),+ => $clauses:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-            assert_enc!(tdb => $enc, $($args),+ => $clauses)
+			assert_enc!(tdb => $enc, $($args),+ => $clauses)
 		};
 		($tdb:ident => $enc:expr, $($args:expr),+ => $clauses:expr) => {
 			$tdb = $tdb.expect_clauses($clauses);
@@ -112,7 +112,7 @@ pub mod tests {
 	macro_rules! assert_sol {
 		($enc:expr, $max:expr, $arg:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-            assert_sol!(tdb => $enc, $arg)
+			assert_sol!(tdb => $enc, $arg)
 		};
 		($tdb:ident => $enc:expr, $arg:expr) => {
 			use $crate::Checker;
@@ -130,21 +130,21 @@ pub mod tests {
 		};
 		($enc:expr, $max:expr, $($args:expr),+ => $solns:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-            assert_sol!(tdb => $enc, $($args),+ => $solns)
+			assert_sol!(tdb => $enc, $($args),+ => $solns)
 		};
 		($tdb:ident => $enc:expr, $($args:expr),+ => $solns:expr) => {
 			$tdb = $tdb.expect_solutions($solns);
 			$enc.encode(&mut $tdb, $($args),+)
 				.expect("Encoding proved to be trivially unsatisfiable");
 			$tdb.check_complete()
-        }
+		}
 	}
 	pub(crate) use assert_sol;
 
 	macro_rules! assert_enc_sol {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-            assert_enc_sol!(tdb => $enc, $arg => $clauses)
+			assert_enc_sol!(tdb => $enc, $arg => $clauses)
 		};
 		($tdb:ident => $enc:expr, $arg:expr => $clauses:expr) => {
 			$tdb = $tdb.expect_clauses($clauses);
@@ -154,17 +154,48 @@ pub mod tests {
 		};
 		($enc:expr, $max:expr, $($args:expr),+ => $clauses:expr, $solns:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-            assert_enc_sol!(tdb => $enc, $($args),+ => $clauses, $solns)
+			assert_enc_sol!(tdb => $enc, $($args),+ => $clauses, $solns)
 		};
-        ($tdb:ident => $enc:expr, $($args:expr),+ => $clauses:expr, $solns:expr) => {
-			$tdb = $tdb.expect_clauses($clauses);
-			$tdb = $tdb.expect_solutions($solns);
-			$enc.encode(&mut $tdb, ($($args),+))
-				.expect("Encoding proved to be trivially unsatisfiable");
+		($tdb:ident => $enc:expr, $($args:expr),+ => $clauses:expr, $solns:expr) => {
+			assert!(!$solns.is_empty(), "cannot using `assert_enc_sol!` with an empty solution set, use `assert_unsat!` or `assert_trivial_unsat!` instead.")
+			if $enc.encode(&mut $tdb, ($($args),+)).is_err() {
+				assert!($solns.is_empty())
+			} else {
+				$tdb = $tdb.expect_clauses($clauses);
+				$tdb = $tdb.expect_solutions($solns);
+			}
 			$tdb.check_complete()
 		};
 	}
 	pub(crate) use assert_enc_sol;
+
+	macro_rules! assert_unsat {
+		($enc:expr, $max:expr, $($args:expr),+) => {
+			let mut tdb = $crate::helpers::tests::TestDB::new($max);
+			assert_unsat!(tdb => $enc, $($args),+)
+		};
+		($tdb:ident => $enc:expr, $($args:expr),+) => {
+			if ! $enc.encode(&mut $tdb, ($($args),+)).is_err() {
+				$tdb = $tdb.expect_solutions($solns);
+				$tdb.check_complete();
+			}
+		};
+	}
+	pub(crate) use assert_unsat;
+
+	macro_rules! assert_trivial_unsat {
+		($enc:expr, $max:expr, $($args:expr),+) => {
+			let mut tdb = $crate::helpers::tests::TestDB::new($max);
+			assert_trivial_unsat!(tdb => $enc, $($args),+)
+		};
+		($tdb:ident => $enc:expr, $($args:expr),+) => {
+			assert_eq!($enc.encode(&mut $tdb, ($($args),+)), Err($crate::Unsatisfiable))
+		};
+		($res:expr) => {
+			assert_eq!($res, Err($crate::Unsatisfiable))
+		}
+	}
+	pub(crate) use assert_trivial_unsat;
 
 	#[test]
 	fn test_assert_macros() {
