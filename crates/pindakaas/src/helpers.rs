@@ -157,7 +157,7 @@ pub mod tests {
 			assert_enc_sol!(tdb => $enc, $($args),+ => $clauses, $solns)
 		};
 		($tdb:ident => $enc:expr, $($args:expr),+ => $clauses:expr, $solns:expr) => {
-			assert!(!$solns.is_empty(), "cannot using `assert_enc_sol!` with an empty solution set, use `assert_unsat!` or `assert_trivial_unsat!` instead.")
+			assert!(!$solns.is_empty(), "cannot using `assert_enc_sol!` with an empty solution set, use `assert_unsat!` or `assert_trivial_unsat!` instead.");
 			if $enc.encode(&mut $tdb, ($($args),+)).is_err() {
 				assert!($solns.is_empty())
 			} else {
@@ -176,7 +176,7 @@ pub mod tests {
 		};
 		($tdb:ident => $enc:expr, $($args:expr),+) => {
 			if ! $enc.encode(&mut $tdb, ($($args),+)).is_err() {
-				$tdb = $tdb.expect_solutions($solns);
+				$tdb = $tdb.expect_solutions(vec![]);
 				$tdb.check_complete();
 			}
 		};
