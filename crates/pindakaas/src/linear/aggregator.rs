@@ -518,7 +518,11 @@ mod tests {
 	use traced_test::test;
 
 	use super::*;
-	use crate::{helpers::tests::TestDB, linear::tests::construct_terms, LinExp};
+	use crate::{
+		helpers::tests::{assert_trivial_unsat, TestDB},
+		linear::tests::construct_terms,
+		LinExp,
+	};
 
 	#[test]
 	fn test_combine() {
@@ -1022,52 +1026,32 @@ mod tests {
 		let mut db = TestDB::new(3);
 
 		// Constant cannot be reached
-		assert_eq!(
-			LinearAggregator::default().aggregate(
-				&mut db,
-				&LinearConstraint::new(
-					LinExp::from((1, 1)) + (2, 2) + (3, 2),
-					Comparator::Equal,
-					6
-				)
-			),
-			Err(Unsatisfiable),
-		);
-		assert_eq!(
-			LinearAggregator::default().aggregate(
-				&mut db,
-				&LinearConstraint::new(
-					LinExp::from((1, 1)) + (2, 2) + (3, 2),
-					Comparator::GreaterEq,
-					6,
-				)
-			),
-			Err(Unsatisfiable),
-		);
-		assert_eq!(
-			LinearAggregator::default().aggregate(
-				&mut db,
-				&LinearConstraint::new(
-					LinExp::from((1, 1)) + (2, 2) + (3, 2),
-					Comparator::LessEq,
-					-1
-				)
-			),
-			Err(Unsatisfiable),
-		);
+		assert_trivial_unsat!(LinearAggregator::default().aggregate(
+			&mut db,
+			&LinearConstraint::new(LinExp::from((1, 1)) + (2, 2) + (3, 2), Comparator::Equal, 6)
+		));
+		assert_trivial_unsat!(LinearAggregator::default().aggregate(
+			&mut db,
+			&LinearConstraint::new(
+				LinExp::from((1, 1)) + (2, 2) + (3, 2),
+				Comparator::GreaterEq,
+				6,
+			)
+		));
+		assert_trivial_unsat!(LinearAggregator::default().aggregate(
+			&mut db,
+			&LinearConstraint::new(
+				LinExp::from((1, 1)) + (2, 2) + (3, 2),
+				Comparator::LessEq,
+				-1
+			)
+		));
 
 		// Scaled counting constraint with off-scaled Constant
-		assert_eq!(
-			LinearAggregator::default().aggregate(
-				&mut db,
-				&LinearConstraint::new(
-					LinExp::from((1, 4)) + (2, 4) + (3, 4),
-					Comparator::Equal,
-					6
-				)
-			),
-			Err(Unsatisfiable),
-		);
+		assert_trivial_unsat!(LinearAggregator::default().aggregate(
+			&mut db,
+			&LinearConstraint::new(LinExp::from((1, 4)) + (2, 4) + (3, 4), Comparator::Equal, 6)
+		));
 	}
 
 	impl PartialEq for Part<i32, u32> {
