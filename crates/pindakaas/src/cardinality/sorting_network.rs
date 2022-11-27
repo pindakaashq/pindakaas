@@ -180,7 +180,7 @@ mod tests {
 			{
 				let mut e = SortingNetworkEncoder::default();
 				let mut f = SortedEncoder::default();
-				f.set_strategy(SortedStrategy::Mixed(0.5));
+				f.set_strategy(SortedStrategy::Mixed(2));
 				e.set_sorted_encoder(f);
 				e
 			},

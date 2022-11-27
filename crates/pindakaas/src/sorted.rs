@@ -15,17 +15,17 @@ pub struct SortedEncoder {
 	strategy: SortedStrategy,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum SortedStrategy {
 	Direct,
 	Recursive,
-	Mixed(f32),
+	Mixed(u32),
 }
 
 impl Default for SortedEncoder {
 	fn default() -> Self {
 		Self {
-			strategy: SortedStrategy::Mixed(10f32),
+			strategy: SortedStrategy::Mixed(10),
 			add_consistency: false,
 		}
 	}
@@ -140,8 +140,27 @@ impl SortedEncoder {
 		}
 	}
 
-	fn lambda(v: u128, c: u128, lambda: f32) -> u128 {
-		((v as f32) * lambda) as u128 + c
+	fn comp_lambda(
+		&self,
+		dir_cost: (u128, u128),
+		rec_cost: (u128, u128),
+	) -> (SortedStrategy, (u128, u128)) {
+		match self.strategy {
+			SortedStrategy::Direct => (SortedStrategy::Direct, dir_cost),
+			SortedStrategy::Recursive => (SortedStrategy::Recursive, rec_cost),
+			SortedStrategy::Mixed(lambda) => {
+				if Self::lambda(dir_cost, lambda) < Self::lambda(rec_cost, lambda) {
+					(SortedStrategy::Direct, dir_cost)
+				} else {
+					(SortedStrategy::Recursive, rec_cost)
+				}
+			}
+		}
+	}
+
+	// TODO safely use floating point for lambda
+	fn lambda((v, c): (u128, u128), lambda: u32) -> u128 {
+		(v * lambda as u128) + c
 	}
 
 	/// The sorted/merged base case of x1{0,1}+x2{0,1}<=y{0,1,2}
@@ -229,102 +248,49 @@ impl SortedEncoder {
 		}
 	}
 
-	fn _use_direct_sort(&self, n: u128, m: u128) -> bool {
-		match self.strategy {
-			SortedStrategy::Direct => true,
-			SortedStrategy::Recursive => false,
-			SortedStrategy::Mixed(lambda) => {
-				let ((vr, cr), (vd, cd)) = (
-					Self::_sorted_cost(n, m, false),
-					Self::_sorted_cost(n, m, true),
-				);
-				Self::lambda(vd, cd, lambda) < Self::lambda(vr, cr, lambda)
-			}
-		}
-	}
-
-	fn _sorted_cost(n: u128, m: u128, direct: bool) -> (u128, u128) {
-		if direct {
-			(
-				m,
-				(0..m)
-					.map(|k| (n - k + 1..=n).product::<u128>())
-					.sum::<u128>(),
-			)
-		} else {
-			match n {
-				0 => (0, 0),
-				1 => (0, 0),
-				2 => (2, 3),
-				3 => (2, 3),
-				_ => {
-					let l = (n as f32 / 2.0) as u128;
-					let (v1, c1) = Self::_sorted_cost(l, m, direct);
-					let (v2, c2) = Self::_sorted_cost(n - l, m, direct);
-					let (v3, c3) =
-						Self::merged_cost(std::cmp::min(l, m), std::cmp::min(n - l, m), m, direct);
-					(v1 + v2 + v3, c1 + c2 + c3)
-				}
-			}
-		}
-	}
-
-	fn use_direct_merge(&self, a: u128, b: u128, c: u128) -> bool {
-		match self.strategy {
-			SortedStrategy::Direct => true,
-			SortedStrategy::Recursive => false,
-			SortedStrategy::Mixed(lambda) => {
-				let ((vr, cr), (vd, cd)) = (
-					Self::merged_cost(a, b, c, false),
-					Self::merged_cost(a, b, c, true),
-				);
-				Self::lambda(vd, cd, lambda) < Self::lambda(vr, cr, lambda)
-			}
-		}
-	}
-
-	fn merged_cost(a: u128, b: u128, c: u128, direct: bool) -> (u128, u128) {
+	fn merged_cost(&self, a: u128, b: u128, c: u128) -> (SortedStrategy, (u128, u128)) {
+		let div_ceil = |a: u128, b: u128| {
+			a.checked_add(b)
+				.unwrap()
+				.checked_sub(1)
+				.unwrap()
+				.checked_div(b)
+				.unwrap()
+		};
 		if a > b {
-			Self::merged_cost(b, a, c, direct)
-		} else if direct {
-			(
-				c,
-				(a + b) * c
-					- (((c * (c - 1)) as f32) / 2.0) as u128
-					- (((b * (b - 1)) as f32) / 2.0) as u128
-					- (((a * (c - 1)) as f32) / 2.0) as u128,
-			)
+			self.merged_cost(b, a, c)
 		} else {
-			match (a, b) {
-				(0, 0) => (0, 0),
-				(1, 0) => (0, 0),
-				(0, 1) => (0, 0),
-				(1, 1) => (2, 3),
-				_ => {
-					let c3 = if c.is_odd() {
-						(3 * c - 3) as f32 / 2.0
-					} else {
-						((3 * c - 2) as f32 / 2.0) + 2.0
-					} as u128;
-					let v3 = c - 1;
-					let (a, b, c) = (a as f32 / 2.0, b as f32 / 2.0, c as f32 / 2.0);
-					let ((v1, c1), (v2, c2)) = (
-						Self::merged_cost(
-							a.ceil() as u128,
-							b.ceil() as u128,
-							c.floor() as u128 + 1,
-							false,
-						),
-						Self::merged_cost(
-							a.floor() as u128,
-							b.floor() as u128,
-							c.floor() as u128,
-							false,
+			let dir_cost = if a <= c && b <= c && a + b > c {
+				(
+					c,
+					(a + b) * c - ((c * (c - 1)) / 2) - ((a * (a - 1)) / 2) - ((b * (b - 1)) / 2),
+				)
+			} else {
+				(a + b, a * b + a + b)
+			};
+			let rec_cost = match (a, b, c) {
+				(0, 0, _) => (0, 0),
+				(1, 0, _) => unreachable!(),
+				(0, 1, _) => (0, 0),
+				(1, 1, 1) => (1, 2),
+				(1, 1, 2) => (2, 3),
+				(a, b, c) => {
+					let ((_, (v1, c1)), (_, (v2, c2)), (v3, c3)) = (
+						self.merged_cost(div_ceil(a, 2), div_ceil(b, 2), c / 2 + 1),
+						self.merged_cost(a / 2, b / 2, c / 2),
+						(
+							c - 1,
+							if c.is_odd() {
+								(3 * c - 3) / 2
+							} else {
+								((3 * c - 2) / 2) + 2
+							},
 						),
 					);
 					(v1 + v2 + v3, c1 + c2 + c3)
 				}
-			}
+			};
+			self.comp_lambda(dir_cost, rec_cost)
 		}
 	}
 
@@ -338,7 +304,7 @@ impl SortedEncoder {
 		_lvl: usize,
 	) -> Result {
 		let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
-		let direct = self.use_direct_merge(
+		let (strat, _cost) = self.merged_cost(
 			a.to_u128().unwrap(),
 			b.to_u128().unwrap(),
 			c.to_u128().unwrap(),
@@ -346,17 +312,17 @@ impl SortedEncoder {
 
 		// TODO: Add tracing
 		// eprintln!(
-		//	"{:_lvl$}merged({}, {}, {}, {})",
+		//	"{:_lvl$}merged({}, {}, {}, {:?})",
 		//	"",
 		//	x1,
 		//	x2,
 		//	y,
-		//	direct,
+		//	_cost,
 		//	_lvl = _lvl
 		// );
 
-		if direct {
-			return TernLeEncoder::default().encode(
+		match strat {
+			SortedStrategy::Direct => TernLeEncoder::default().encode(
 				db,
 				&TernLeConstraint {
 					x: x1,
@@ -364,38 +330,40 @@ impl SortedEncoder {
 					cmp: cmp.clone(),
 					z: y, // TODO no consistency implemented for this bound yet
 				},
-			);
-		}
+			),
+			SortedStrategy::Recursive => {
+				if a.is_zero() && b.is_zero() {
+					Ok(())
+				} else if a.is_one() && b.is_one() && c <= C::one() + C::one() {
+					self.smerge(db, x1, x2, cmp, y)
+				} else {
+					let two = C::one() + C::one();
+					let x1_floor = x1.div(&two);
+					let x1_ceil = x1.add(db, &IntVarEnc::Const(C::one()))?.div(&two);
 
-		if a.is_zero() && b.is_zero() {
-			Ok(())
-		} else if a.is_one() && b.is_one() && c <= C::one() + C::one() {
-			self.smerge(db, x1, x2, cmp, y)
-		} else {
-			let two = C::one() + C::one();
-			let x1_floor = x1.div(&two);
-			let x1_ceil = x1.add(db, &IntVarEnc::Const(C::one()))?.div(&two);
+					let x2_floor = x2.div(&two);
+					let x2_ceil = x2.add(db, &IntVarEnc::Const(C::one()))?.div(&two);
 
-			let x2_floor = x2.div(&two);
-			let x2_ceil = x2.add(db, &IntVarEnc::Const(C::one()))?.div(&two);
+					let z_floor = x1_floor.add(db, &x2_floor)?;
+					self.encode(
+						db,
+						&TernLeConstraint::new(&x1_floor, &x2_floor, cmp.clone(), &z_floor),
+					)?;
 
-			let z_floor = x1_floor.add(db, &x2_floor)?;
-			self.encode(
-				db,
-				&TernLeConstraint::new(&x1_floor, &x2_floor, cmp.clone(), &z_floor),
-			)?;
+					let z_ceil = x1_ceil.add(db, &x2_ceil)?;
+					self.encode(
+						db,
+						&TernLeConstraint::new(&x1_ceil, &x2_ceil, cmp.clone(), &z_ceil),
+					)?;
 
-			let z_ceil = x1_ceil.add(db, &x2_ceil)?;
-			self.encode(
-				db,
-				&TernLeConstraint::new(&x1_ceil, &x2_ceil, cmp.clone(), &z_ceil),
-			)?;
+					for c in num::iter::range_inclusive(C::zero(), c) {
+						self.comp(db, &z_floor, &z_ceil, cmp, y, c)?;
+					}
 
-			for c in num::iter::range_inclusive(C::zero(), c) {
-				self.comp(db, &z_floor, &z_ceil, cmp, y, c)?;
+					Ok(())
+				}
 			}
-
-			Ok(())
+			_ => unreachable!(),
 		}
 	}
 
