@@ -484,7 +484,7 @@ impl LinearAggregator {
 
 					let y = IntVarOrd::from_bounds(db, C::zero(), c, String::from("s")).into();
 					self.sorted_encoder
-						.encode(db, &Sorted::new(&xs, LimitComp::Equal, &y))
+						.encode(db, &Sorted::new(&xs, cmp.clone(), &y))
 						.unwrap();
 
 					let lin_exp = LinExp::from(&y);
