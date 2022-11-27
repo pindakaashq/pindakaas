@@ -12,8 +12,10 @@ use itertools::Itertools;
 use num::Integer;
 
 pub struct SortedEncoder {
-	add_consistency: bool,
-	strategy: SortedStrategy,
+	pub(crate) add_consistency: bool,
+	pub(crate) strategy: SortedStrategy,
+	pub(crate) overwrite_direct_cmp: Option<LimitComp>,
+	pub(crate) overwrite_recursive_cmp: Option<LimitComp>,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -28,6 +30,8 @@ impl Default for SortedEncoder {
 		Self {
 			strategy: SortedStrategy::Mixed(10),
 			add_consistency: false,
+			overwrite_direct_cmp: Some(LimitComp::LessEq),
+			overwrite_recursive_cmp: Some(LimitComp::Equal),
 		}
 	}
 }
@@ -255,15 +259,18 @@ impl SortedEncoder {
 		// );
 
 		match strat {
-			SortedStrategy::Direct => TernLeEncoder::default().encode(
-				db,
-				&TernLeConstraint {
-					x: x1,
-					y: x2,
-					cmp: cmp.clone(),
-					z: y, // TODO no consistency implemented for this bound yet
-				},
-			),
+			SortedStrategy::Direct => {
+				let cmp = self.overwrite_direct_cmp.as_ref().unwrap_or(cmp).clone();
+				TernLeEncoder::default().encode(
+					db,
+					&TernLeConstraint {
+						x: x1,
+						y: x2,
+						cmp,
+						z: y, // TODO no consistency implemented for this bound yet
+					},
+				)
+			}
 			SortedStrategy::Recursive => {
 				if a.is_zero() && b.is_zero() {
 					Ok(())
@@ -309,6 +316,7 @@ impl SortedEncoder {
 		z: &IntVarEnc<DB::Lit, C>,
 		c: C,
 	) -> Result {
+		let cmp = self.overwrite_recursive_cmp.as_ref().unwrap_or(cmp);
 		let to_iv = |c: C| c..(c + C::one());
 		let empty_clause: Vec<Vec<DB::Lit>> = vec![Vec::new()];
 		let c1 = c;
@@ -420,6 +428,15 @@ mod tests {
 	use super::*;
 	use crate::helpers::tests::{assert_sol, TestDB};
 
+	fn get_sorted_encoder(strategy: SortedStrategy) -> SortedEncoder {
+		SortedEncoder {
+			strategy,
+			add_consistency: false,
+			overwrite_direct_cmp: None,
+			overwrite_recursive_cmp: None,
+		}
+	}
+
 	#[test]
 	fn test_2_merged_eq() {
 		let mut db = TestDB::new(0);
@@ -427,9 +444,8 @@ mod tests {
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 1, String::from("y")).into();
 		let z: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("z")).into();
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
-		let con = TernLeConstraint::<i32, i32>::new(&x, &y, LimitComp::Equal, &z);
-		let mut enc = SortedEncoder::default();
-		enc.set_strategy(SortedStrategy::Recursive);
+		let con = TernLeConstraint::new(&x, &y, LimitComp::Equal, &z);
+		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		assert_sol!(db => enc, &con => sols);
 	}
@@ -441,8 +457,7 @@ mod tests {
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[1, 2], LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
-		let mut enc = SortedEncoder::default();
-		enc.set_strategy(SortedStrategy::Recursive);
+		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		assert_sol!(db => enc, con => sols);
 	}
 
@@ -453,8 +468,7 @@ mod tests {
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3], LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
-		let mut enc = SortedEncoder::default();
-		enc.set_strategy(SortedStrategy::Recursive);
+		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		assert_sol!(db => enc, con => sols);
 	}
 
@@ -465,8 +479,7 @@ mod tests {
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3], LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
-		let mut enc = SortedEncoder::default();
-		enc.set_strategy(SortedStrategy::Recursive);
+		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		assert_sol!(db => enc, con => sols);
 	}
 
@@ -477,8 +490,7 @@ mod tests {
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4], LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
-		let mut enc = SortedEncoder::default();
-		enc.set_strategy(SortedStrategy::Recursive);
+		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		assert_sol!(db => enc, con => sols);
 	}
 
@@ -489,8 +501,7 @@ mod tests {
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4], LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
-		let mut enc = SortedEncoder::default();
-		enc.set_strategy(SortedStrategy::Recursive);
+		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		assert_sol!(db => enc, con => sols);
 	}
 
@@ -501,8 +512,7 @@ mod tests {
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4], LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
-		let mut enc = SortedEncoder::default();
-		enc.set_strategy(SortedStrategy::Recursive);
+		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		assert_sol!(db => enc, con => sols);
 	}
 
@@ -524,8 +534,7 @@ mod tests {
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4, 5], LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
-		let mut enc = SortedEncoder::default();
-		enc.set_strategy(SortedStrategy::Recursive);
+		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		assert_sol!(db => enc, con => sols);
 	}
 
@@ -536,8 +545,7 @@ mod tests {
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4, 5, 6], LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
-		let mut enc = SortedEncoder::default();
-		enc.set_strategy(SortedStrategy::Recursive);
+		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		assert_sol!(db => enc, con => sols);
 	}
 
@@ -548,8 +556,7 @@ mod tests {
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4, 5, 6, 7], LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
-		let mut enc = SortedEncoder::default();
-		enc.set_strategy(SortedStrategy::Recursive);
+		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		assert_sol!(db => enc, con => sols);
 	}
 
@@ -560,8 +567,7 @@ mod tests {
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[-1, -2, -3, -4, -5], LimitComp::LessEq, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
-		let mut enc = SortedEncoder::default();
-		enc.set_strategy(SortedStrategy::Direct);
+		let mut enc = get_sorted_encoder(SortedStrategy::Direct);
 		assert_sol!(db => enc, con => sols);
 	}
 }

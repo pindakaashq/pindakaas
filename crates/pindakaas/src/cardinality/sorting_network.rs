@@ -126,8 +126,13 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				let mut f = SortedEncoder::default();
-				f.set_strategy(SortedStrategy::Recursive);
+				#[allow(unused_mut)]
+				let mut f = SortedEncoder {
+					strategy: SortedStrategy::Recursive,
+					add_consistency: false,
+					overwrite_direct_cmp: None,
+					overwrite_recursive_cmp: None,
+				};
 				e.set_sorted_encoder(f);
 				e
 			},
@@ -139,7 +144,13 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				let mut f = SortedEncoder::default();
+				#[allow(unused_mut)]
+				let mut f = SortedEncoder {
+					strategy: SortedStrategy::Recursive,
+					add_consistency: false,
+					overwrite_direct_cmp: None,
+					overwrite_recursive_cmp: None,
+				};
 				f.set_strategy(SortedStrategy::Recursive);
 				e.set_sorted_encoder(f);
 				e
@@ -152,8 +163,13 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				let mut f = SortedEncoder::default();
-				f.set_strategy(SortedStrategy::Direct);
+				#[allow(unused_mut)]
+				let mut f = SortedEncoder {
+					strategy: SortedStrategy::Direct,
+					add_consistency: false,
+					overwrite_direct_cmp: None,
+					overwrite_recursive_cmp: None,
+				};
 				e.set_sorted_encoder(f);
 				e
 			},
@@ -165,8 +181,13 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				let mut f = SortedEncoder::default();
-				f.set_strategy(SortedStrategy::Direct);
+				#[allow(unused_mut)]
+				let mut f = SortedEncoder {
+					strategy: SortedStrategy::Direct,
+					add_consistency: false,
+					overwrite_direct_cmp: None,
+					overwrite_recursive_cmp: None,
+				};
 				e.set_sorted_encoder(f);
 				e
 			},
@@ -174,13 +195,17 @@ mod tests {
 		);
 	}
 
-	// Note; do not use expect_solutions, since Mixed yields incomplete solutions
 	mod le_mixed {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				let mut f = SortedEncoder::default();
-				f.set_strategy(SortedStrategy::Mixed(2));
+				#[allow(unused_mut)]
+				let mut f = SortedEncoder {
+					strategy: SortedStrategy::Mixed(2),
+					add_consistency: false,
+					overwrite_direct_cmp: None,
+					overwrite_recursive_cmp: None,
+				};
 				e.set_sorted_encoder(f);
 				e
 			},
