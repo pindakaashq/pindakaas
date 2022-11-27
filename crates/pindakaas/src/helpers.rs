@@ -133,6 +133,7 @@ pub mod tests {
 			assert_sol!(tdb => $enc, $($args),+ => $solns)
 		};
 		($tdb:ident => $enc:expr, $($args:expr),+ => $solns:expr) => {
+			assert!(!$solns.is_empty(), "cannot using `assert_enc_sol!` with an empty solution set, use `assert_unsat!` or `assert_trivial_unsat!` instead.");
 			$tdb = $tdb.expect_solutions($solns);
 			$enc.encode(&mut $tdb, $($args),+)
 				.expect("Encoding proved to be trivially unsatisfiable");
@@ -158,12 +159,10 @@ pub mod tests {
 		};
 		($tdb:ident => $enc:expr, $($args:expr),+ => $clauses:expr, $solns:expr) => {
 			assert!(!$solns.is_empty(), "cannot using `assert_enc_sol!` with an empty solution set, use `assert_unsat!` or `assert_trivial_unsat!` instead.");
-			if $enc.encode(&mut $tdb, ($($args),+)).is_err() {
-				assert!($solns.is_empty())
-			} else {
-				$tdb = $tdb.expect_clauses($clauses);
-				$tdb = $tdb.expect_solutions($solns);
-			}
+			$tdb = $tdb.expect_clauses($clauses);
+			$tdb = $tdb.expect_solutions($solns);
+			$enc.encode(&mut $tdb, ($($args),+))
+				.expect("Encoding proved to be trivially unsatisfiable");
 			$tdb.check_complete()
 		};
 	}

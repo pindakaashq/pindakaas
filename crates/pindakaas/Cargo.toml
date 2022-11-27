@@ -11,6 +11,7 @@ license = "MPL-2.0"
 edition = "2021"
 
 [dependencies]
+cached = "0.40"
 ipasir = { version = "0.3", features = ["ffi"] }
 iset = "0.1.1"
 itertools = "0.10"
