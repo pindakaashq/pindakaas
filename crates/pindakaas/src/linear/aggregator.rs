@@ -458,33 +458,26 @@ impl LinearAggregator {
 		}
 
 		let partition = if self.sort_same_coefficients >= 2 {
-			let n = partition.len();
 			let (free_lits, mut partition): (Vec<_>, Vec<_>) = partition.into_iter().partition(
 				|part| matches!(part, Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1),
 			);
 
-			for (coef, group) in &free_lits
+			for (coef, lits) in free_lits
 				.into_iter()
 				.map(|part| match part {
 					Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1 => x[0].clone(),
 					_ => unreachable!(),
 				})
-				.sorted_by(|(_, a), (_, b)| a.cmp(b))
-				.group_by(|x| x.1.clone())
+				.map(|(lit, coef)| (*coef, lit))
+				.into_group_map()
+				.into_iter()
 			{
-				let xs = group.map(|x| x.0).collect::<Vec<_>>();
-
-				if self.sort_same_coefficients >= 2
-					&& xs.len() >= self.sort_same_coefficients
-					&& xs.len() < n
-				{
-					let c = *k / *coef;
-
-					// eprintln!("found same coef chain of {} for coef {} and k {:?}; sort with {c} aux vars", xs.len(), *coef, lin.k);
+				if self.sort_same_coefficients >= 2 && lits.len() >= self.sort_same_coefficients {
+					let c = *k / coef;
 
 					let y = IntVarOrd::from_bounds(db, C::zero(), c, String::from("s")).into();
 					self.sorted_encoder
-						.encode(db, &Sorted::new(&xs, cmp.clone(), &y))
+						.encode(db, &Sorted::new(&lits, cmp.clone(), &y))
 						.unwrap();
 
 					let lin_exp = LinExp::from(&y);
@@ -492,12 +485,12 @@ impl LinearAggregator {
 						lin_exp
 							.terms
 							.into_iter()
-							.map(|(lit, _)| (lit, coef.clone()))
+							.map(|(lit, _)| (lit, coef.into()))
 							.collect(),
 					));
 				} else {
-					for x in xs {
-						partition.push(Part::Amo(vec![(x, coef.clone())]));
+					for x in lits {
+						partition.push(Part::Amo(vec![(x, coef.into())]));
 					}
 				}
 			}
