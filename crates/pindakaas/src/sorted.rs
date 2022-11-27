@@ -5,6 +5,7 @@ use crate::{
 	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, LinExp, Literal, Result,
 	Unsatisfiable,
 };
+use cached::proc_macro::cached;
 
 use iset::interval_map;
 use itertools::Itertools;
@@ -15,7 +16,7 @@ pub struct SortedEncoder {
 	strategy: SortedStrategy,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum SortedStrategy {
 	Direct,
 	Recursive,
@@ -140,29 +141,6 @@ impl SortedEncoder {
 		}
 	}
 
-	fn comp_lambda(
-		&self,
-		dir_cost: (u128, u128),
-		rec_cost: (u128, u128),
-	) -> (SortedStrategy, (u128, u128)) {
-		match self.strategy {
-			SortedStrategy::Direct => (SortedStrategy::Direct, dir_cost),
-			SortedStrategy::Recursive => (SortedStrategy::Recursive, rec_cost),
-			SortedStrategy::Mixed(lambda) => {
-				if Self::lambda(dir_cost, lambda) < Self::lambda(rec_cost, lambda) {
-					(SortedStrategy::Direct, dir_cost)
-				} else {
-					(SortedStrategy::Recursive, rec_cost)
-				}
-			}
-		}
-	}
-
-	// TODO safely use floating point for lambda
-	fn lambda((v, c): (u128, u128), lambda: u32) -> u128 {
-		(v * lambda as u128) + c
-	}
-
 	/// The sorted/merged base case of x1{0,1}+x2{0,1}<=y{0,1,2}
 	fn smerge<DB: ClauseDatabase, C: Coefficient>(
 		&mut self,
@@ -248,52 +226,6 @@ impl SortedEncoder {
 		}
 	}
 
-	fn merged_cost(&self, a: u128, b: u128, c: u128) -> (SortedStrategy, (u128, u128)) {
-		let div_ceil = |a: u128, b: u128| {
-			a.checked_add(b)
-				.unwrap()
-				.checked_sub(1)
-				.unwrap()
-				.checked_div(b)
-				.unwrap()
-		};
-		if a > b {
-			self.merged_cost(b, a, c)
-		} else {
-			let dir_cost = if a <= c && b <= c && a + b > c {
-				(
-					c,
-					(a + b) * c - ((c * (c - 1)) / 2) - ((a * (a - 1)) / 2) - ((b * (b - 1)) / 2),
-				)
-			} else {
-				(a + b, a * b + a + b)
-			};
-			let rec_cost = match (a, b, c) {
-				(0, 0, _) => (0, 0),
-				(1, 0, _) => unreachable!(),
-				(0, 1, _) => (0, 0),
-				(1, 1, 1) => (1, 2),
-				(1, 1, 2) => (2, 3),
-				(a, b, c) => {
-					let ((_, (v1, c1)), (_, (v2, c2)), (v3, c3)) = (
-						self.merged_cost(div_ceil(a, 2), div_ceil(b, 2), c / 2 + 1),
-						self.merged_cost(a / 2, b / 2, c / 2),
-						(
-							c - 1,
-							if c.is_odd() {
-								(3 * c - 3) / 2
-							} else {
-								((3 * c - 2) / 2) + 2
-							},
-						),
-					);
-					(v1 + v2 + v3, c1 + c2 + c3)
-				}
-			};
-			self.comp_lambda(dir_cost, rec_cost)
-		}
-	}
-
 	fn merged<DB: ClauseDatabase, C: Coefficient>(
 		&mut self,
 		db: &mut DB,
@@ -304,10 +236,11 @@ impl SortedEncoder {
 		_lvl: usize,
 	) -> Result {
 		let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
-		let (strat, _cost) = self.merged_cost(
+		let (strat, _cost) = merged_cost(
 			a.to_u128().unwrap(),
 			b.to_u128().unwrap(),
 			c.to_u128().unwrap(),
+			self.strategy.clone(),
 		);
 
 		// TODO: Add tracing
@@ -396,6 +329,87 @@ impl SortedEncoder {
 		}
 		Ok(())
 	}
+}
+
+fn merged_dir_cost(a: u128, b: u128, c: u128) -> (u128, u128) {
+	if a <= c && b <= c && a + b > c {
+		(
+			c,
+			(a + b) * c - ((c * (c - 1)) / 2) - ((a * (a - 1)) / 2) - ((b * (b - 1)) / 2),
+		)
+	} else {
+		(a + b, a * b + a + b)
+	}
+}
+
+fn merged_rec_cost(a: u128, b: u128, c: u128, strat: SortedStrategy) -> (u128, u128) {
+	let div_ceil = |a: u128, b: u128| {
+		a.checked_add(b)
+			.unwrap()
+			.checked_sub(1)
+			.unwrap()
+			.checked_div(b)
+			.unwrap()
+	};
+
+	match (a, b, c) {
+		(0, 0, _) => (0, 0),
+		(1, 0, _) => unreachable!(),
+		(0, 1, _) => (0, 0),
+		(1, 1, 1) => (1, 2),
+		(1, 1, 2) => (2, 3),
+		(a, b, c) => {
+			let ((_, (v1, c1)), (_, (v2, c2)), (v3, c3)) = (
+				merged_cost(div_ceil(a, 2), div_ceil(b, 2), c / 2 + 1, strat.clone()),
+				merged_cost(a / 2, b / 2, c / 2, strat),
+				(
+					c - 1,
+					if c.is_odd() {
+						(3 * c - 3) / 2
+					} else {
+						((3 * c - 2) / 2) + 2
+					},
+				),
+			);
+			(v1 + v2 + v3, c1 + c2 + c3)
+		}
+	}
+}
+
+fn merged_mix_cost(
+	dir_cost: (u128, u128),
+	rec_cost: (u128, u128),
+	l: u32,
+) -> (SortedStrategy, (u128, u128)) {
+	if lambda(dir_cost, l) < lambda(rec_cost, l) {
+		(SortedStrategy::Direct, dir_cost)
+	} else {
+		(SortedStrategy::Recursive, rec_cost)
+	}
+}
+
+#[cached]
+fn merged_cost(a: u128, b: u128, c: u128, strat: SortedStrategy) -> (SortedStrategy, (u128, u128)) {
+	if a > b {
+		merged_cost(b, a, c, strat)
+	} else {
+		match strat {
+			SortedStrategy::Direct => (SortedStrategy::Direct, merged_dir_cost(a, b, c)),
+			SortedStrategy::Recursive => {
+				(SortedStrategy::Recursive, merged_rec_cost(a, b, c, strat))
+			}
+			SortedStrategy::Mixed(lambda) => merged_mix_cost(
+				merged_dir_cost(a, b, c),
+				merged_rec_cost(a, b, c, strat),
+				lambda,
+			),
+		}
+	}
+}
+
+// TODO safely use floating point for lambda
+fn lambda((v, c): (u128, u128), lambda: u32) -> u128 {
+	(v * lambda as u128) + c
 }
 
 #[cfg(test)]
@@ -550,10 +564,4 @@ mod tests {
 		enc.set_strategy(SortedStrategy::Direct);
 		assert_sol!(db => enc, con => sols);
 	}
-
-	// 	#[test]
-	// 	fn test_sorted_cost_test() {
-	// 		let (n, m) = (50, 16);
-	// 		SortedEncoder::sorted_cost(n, m, true); // should not lead to overflow
-	// 	}
 }
