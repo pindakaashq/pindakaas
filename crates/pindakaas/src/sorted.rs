@@ -18,7 +18,7 @@ pub struct SortedEncoder {
 	pub(crate) overwrite_recursive_cmp: Option<LimitComp>,
 	pub(crate) sort_n: SortN,
 }
-
+#[allow(dead_code)]
 pub enum SortN {
 	One,
 	#[allow(dead_code)] // TODO
@@ -39,7 +39,7 @@ impl Default for SortedEncoder {
 			add_consistency: false,
 			overwrite_direct_cmp: Some(LimitComp::LessEq),
 			overwrite_recursive_cmp: Some(LimitComp::Equal),
-			sort_n: SortN::One,
+			sort_n: SortN::DivTwo,
 		}
 	}
 }
