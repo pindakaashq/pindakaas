@@ -16,6 +16,13 @@ pub struct SortedEncoder {
 	pub(crate) strategy: SortedStrategy,
 	pub(crate) overwrite_direct_cmp: Option<LimitComp>,
 	pub(crate) overwrite_recursive_cmp: Option<LimitComp>,
+	pub(crate) sort_n: SortN,
+}
+
+pub enum SortN {
+	One,
+	#[allow(dead_code)] // TODO
+	DivTwo,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -32,6 +39,7 @@ impl Default for SortedEncoder {
 			add_consistency: false,
 			overwrite_direct_cmp: Some(LimitComp::LessEq),
 			overwrite_recursive_cmp: Some(LimitComp::Equal),
+			sort_n: SortN::One,
 		}
 	}
 }
@@ -211,21 +219,56 @@ impl SortedEncoder {
 			),
 			[x1, x2] if m <= C::one() + C::one() => self.smerge(db, x1, x2, cmp, y),
 			xs => {
-				let n = n / 2;
-				let y1 = self.next_int_var(
+				let n = match self.sort_n {
+					SortN::One => 1,
+					SortN::DivTwo => n / 2,
+				};
+				let y1 = self.sort(
 					db,
+					&xs[..n],
+					cmp,
 					std::cmp::min((0..n).fold(C::zero(), |a, _| a + C::one()), y.ub()),
-					String::from("y_1"),
+					String::from("y1"),
+					_lvl,
 				);
-				let y2 = self.next_int_var(
+				let y2 = self.sort(
 					db,
+					&xs[n..],
+					cmp,
 					std::cmp::min((n..xs.len()).fold(C::zero(), |a, _| a + C::one()), y.ub()),
-					String::from("y_2"),
+					String::from("y2"),
+					_lvl,
 				);
 
-				self.sorted(db, &xs[..n], cmp, &y1, _lvl)?;
-				self.sorted(db, &xs[n..], cmp, &y2, _lvl)?;
-				self.merged(db, &y1, &y2, cmp, y, _lvl + 1)
+				if let Some(y1) = y1 {
+					if let Some(y2) = y2 {
+						self.merged(db, &y1, &y2, cmp, y, _lvl + 1)
+					} else {
+						Ok(())
+					}
+				} else {
+					Ok(())
+				}
+			}
+		}
+	}
+
+	fn sort<DB: ClauseDatabase, C: Coefficient>(
+		&mut self,
+		db: &mut DB,
+		xs: &[IntVarEnc<DB::Lit, C>],
+		cmp: &LimitComp,
+		ub: C,
+		lbl: String,
+		_lvl: usize,
+	) -> Option<IntVarEnc<DB::Lit, C>> {
+		match xs {
+			[] => None,
+			[x] => Some(x.clone()),
+			xs => {
+				let y = self.next_int_var(db, ub, lbl);
+				self.sorted(db, xs, cmp, &y, _lvl).unwrap();
+				Some(y)
 			}
 		}
 	}
@@ -431,9 +474,9 @@ mod tests {
 	fn get_sorted_encoder(strategy: SortedStrategy) -> SortedEncoder {
 		SortedEncoder {
 			strategy,
-			add_consistency: false,
 			overwrite_direct_cmp: None,
 			overwrite_recursive_cmp: None,
+			..SortedEncoder::default()
 		}
 	}
 

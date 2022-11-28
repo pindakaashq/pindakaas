@@ -129,9 +129,9 @@ mod tests {
 				#[allow(unused_mut)]
 				let mut f = SortedEncoder {
 					strategy: SortedStrategy::Recursive,
-					add_consistency: false,
 					overwrite_direct_cmp: None,
 					overwrite_recursive_cmp: None,
+					..SortedEncoder::default()
 				};
 				e.set_sorted_encoder(f);
 				e
@@ -147,9 +147,9 @@ mod tests {
 				#[allow(unused_mut)]
 				let mut f = SortedEncoder {
 					strategy: SortedStrategy::Recursive,
-					add_consistency: false,
 					overwrite_direct_cmp: None,
 					overwrite_recursive_cmp: None,
+					..SortedEncoder::default()
 				};
 				f.set_strategy(SortedStrategy::Recursive);
 				e.set_sorted_encoder(f);
@@ -166,9 +166,9 @@ mod tests {
 				#[allow(unused_mut)]
 				let mut f = SortedEncoder {
 					strategy: SortedStrategy::Direct,
-					add_consistency: false,
 					overwrite_direct_cmp: None,
 					overwrite_recursive_cmp: None,
+					..SortedEncoder::default()
 				};
 				e.set_sorted_encoder(f);
 				e
@@ -184,9 +184,9 @@ mod tests {
 				#[allow(unused_mut)]
 				let mut f = SortedEncoder {
 					strategy: SortedStrategy::Direct,
-					add_consistency: false,
 					overwrite_direct_cmp: None,
 					overwrite_recursive_cmp: None,
+					..SortedEncoder::default()
 				};
 				e.set_sorted_encoder(f);
 				e
@@ -202,9 +202,9 @@ mod tests {
 				#[allow(unused_mut)]
 				let mut f = SortedEncoder {
 					strategy: SortedStrategy::Mixed(2),
-					add_consistency: false,
 					overwrite_direct_cmp: None,
 					overwrite_recursive_cmp: None,
+					..SortedEncoder::default()
 				};
 				e.set_sorted_encoder(f);
 				e
