@@ -26,13 +26,7 @@ splr = { version = "0.16", optional = true }
 
 [dev-dependencies]
 splr = { version = "0.16", features = ["incremental_solver"] }
-test-log = { version = "0.2.11", features = ["trace"] }
-env_logger = "0.9.3"
 tracing = { version = "0.1.37", default-features = false }
-tracing-subscriber = { version = "0.3.16", default-features = false, features = [
-	"env-filter",
-	"fmt",
-] }
 
 [features]
 trace = ["tracing"]

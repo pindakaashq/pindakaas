@@ -14,7 +14,7 @@ pub struct AdderEncoder {}
 impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for AdderEncoder {
 	#[cfg_attr(
 		feature = "trace",
-		tracing::instrument(name = "adder_encoder", skip_all)
+		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = ?lin))
 	)]
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		let pair = &lin
@@ -183,7 +183,7 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 /// circuit
 ///
 /// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
-#[cfg_attr(feature = "trace", tracing::instrument(name = "create_sum", skip_all))]
+#[cfg_attr(feature = "trace", tracing::instrument(name = "create_sum", skip_all, fields(constraint = ?lits)))]
 fn create_sum_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<DB::Lit> {
 	let sum = new_var!(db);
 	match lits {
@@ -211,7 +211,7 @@ fn create_sum_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<D
 
 /// Force circuit that represents the sum bit when adding lits together using an adder
 /// circuit to take the value k
-#[cfg_attr(feature = "trace", tracing::instrument(name = "force_sum", skip_all))]
+#[cfg_attr(feature = "trace", tracing::instrument(name = "force_sum", skip_all, fields(constraint = ?lits)))]
 fn force_sum<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Result {
 	if k {
 		XorEncoder::default().encode(db, lits)
@@ -238,7 +238,7 @@ fn force_sum<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Resu
 /// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
 #[cfg_attr(
 	feature = "trace",
-	tracing::instrument(name = "create_carry", skip_all)
+	tracing::instrument(name = "create_carry", skip_all, fields(constraint = ?lits))
 )]
 fn create_carry_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<DB::Lit> {
 	let carry = new_var!(db);
@@ -264,7 +264,7 @@ fn create_carry_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result
 
 /// Force the circuit that represents the carry bit when adding lits together using an adder
 /// circuit to take the value k
-#[cfg_attr(feature = "trace", tracing::instrument(name = "force_carry", skip_all))]
+#[cfg_attr(feature = "trace", tracing::instrument(name = "force_carry", skip_all, fields(constraint = ?lits)))]
 fn force_carry<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Result {
 	match lits {
 		[a, b] => {
@@ -288,8 +288,6 @@ fn force_carry<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Re
 
 #[cfg(test)]
 mod tests {
-	use test_log::test;
-
 	use super::*;
 	use crate::{
 		cardinality_one::tests::card1_test_suite,
