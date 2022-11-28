@@ -5,9 +5,20 @@ use crate::{
 };
 
 /// Encoder for the linear constraints that ∑ litsᵢ ≷ k using a sorting network
-#[derive(Default)]
 pub struct SortingNetworkEncoder {
-	sorted_encoder: SortedEncoder,
+	pub sorted_encoder: SortedEncoder,
+}
+
+impl Default for SortingNetworkEncoder {
+	fn default() -> Self {
+		Self {
+			sorted_encoder: SortedEncoder {
+				overwrite_direct_cmp: None,
+				overwrite_recursive_cmp: None,
+				..SortedEncoder::default()
+			},
+		}
+	}
 }
 
 impl SortingNetworkEncoder {
