@@ -32,7 +32,7 @@ pub(crate) mod helpers;
 pub(crate) mod int;
 mod linear;
 pub mod solvers;
-pub(crate) mod trace;
+pub mod trace;
 
 pub use cardinality::Cardinality;
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
