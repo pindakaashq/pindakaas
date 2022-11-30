@@ -1,6 +1,7 @@
 use crate::{
 	int::{ord_plus_ord_le_ord, IntVar},
-	new_var, ClauseDatabase, Coefficient, Encoder, Linear, Result,
+	trace::new_var,
+	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)

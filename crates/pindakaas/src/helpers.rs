@@ -1,4 +1,4 @@
-use crate::{ClauseDatabase, Literal, Result};
+use crate::{trace::emit_clause, ClauseDatabase, Literal, Result};
 
 /// Encode the constraint lits[0] ⊕ ... ⊕ lits[n].
 /// # Warning
@@ -7,47 +7,23 @@ use crate::{ClauseDatabase, Literal, Result};
 pub struct XorEncoder {}
 
 impl XorEncoder {
+	#[cfg_attr(feature = "trace", tracing::instrument(name = "xor_encoder", skip_all))]
 	pub fn encode<DB: ClauseDatabase>(&mut self, db: &mut DB, lits: &[DB::Lit]) -> Result {
 		match lits {
-			[a] => db.add_clause(&[a.clone()]),
+			[a] => emit_clause!(db, &[a.clone()]),
 			[a, b] => {
-				db.add_clause(&[a.clone(), b.clone()])?;
-				db.add_clause(&[a.negate(), b.negate()])
+				emit_clause!(db, &[a.clone(), b.clone()])?;
+				emit_clause!(db, &[a.negate(), b.negate()])
 			}
 			[a, b, c] => {
-				db.add_clause(&[a.clone(), b.clone(), c.clone()])?;
-				db.add_clause(&[a.clone(), b.negate(), c.negate()])?;
-				db.add_clause(&[a.negate(), b.clone(), c.negate()])?;
-				db.add_clause(&[a.negate(), b.negate(), c.clone()])
+				emit_clause!(db, &[a.clone(), b.clone(), c.clone()])?;
+				emit_clause!(db, &[a.clone(), b.negate(), c.negate()])?;
+				emit_clause!(db, &[a.negate(), b.clone(), c.negate()])?;
+				emit_clause!(db, &[a.negate(), b.negate(), c.clone()])
 			}
 			_ => panic!("Unexpected usage of XOR with more that three arguments"),
 		}
 	}
-}
-
-// TODO to be incorporated with labels feature
-#[cfg(debug_assertions)]
-#[macro_export]
-macro_rules! new_var {
-	($db:expr) => {
-		$db.new_var()
-	};
-	($db:expr, $lbl:expr) => {
-		// $db.new_var_with_label($lbl)
-		$db.new_var()
-	};
-}
-
-#[cfg(not(debug_assertions))]
-#[macro_export]
-macro_rules! new_var {
-	($db:expr) => {
-		$db.new_var()
-	};
-	($db:expr, $lbl:expr) => {
-		// $db.new_var_with_label($lbl)
-		$db.new_var()
-	};
 }
 
 #[cfg(test)]
@@ -60,10 +36,7 @@ pub mod tests {
 		types::{CNFDescription, Instantiate},
 		Certificate, Config, SatSolverIF, SolveIF, Solver, SolverError,
 	};
-	use std::{
-		collections::{HashMap, HashSet},
-		thread::panicking,
-	};
+	use std::{collections::HashSet, thread::panicking};
 
 	macro_rules! assert_enc {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
@@ -143,8 +116,12 @@ pub mod tests {
 		#[derive(Default)]
 		struct Negate {}
 		impl Negate {
+			#[cfg_attr(
+				feature = "trace",
+				tracing::instrument(name = "negate_encoder", skip_all)
+			)]
 			fn encode<'a, DB: ClauseDatabase>(&mut self, db: &mut DB, lit: &DB::Lit) -> Result {
-				db.add_clause(&[lit.negate()])
+				emit_clause!(db, &[lit.negate()])
 			}
 		}
 
@@ -204,7 +181,6 @@ pub mod tests {
 		solutions: Option<Vec<Vec<i32>>>,
 		check: Option<fn(&[i32]) -> bool>,
 		unchecked: bool,
-		labels: HashMap<i32, String>,
 	}
 
 	impl TestDB {
@@ -225,7 +201,6 @@ pub mod tests {
 				solutions: None,
 				check: None,
 				unchecked: false,
-				labels: HashMap::new(),
 			}
 		}
 
@@ -373,25 +348,6 @@ pub mod tests {
 
 		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
 			let mut cl = Vec::from(cl);
-
-			#[cfg(debug_assertions)]
-			{
-				let lit_as_string = |lit: &Self::Lit| -> String {
-					let polarity = if lit.is_positive() { "" } else { "-" };
-					let var = lit.abs();
-					format!(
-						"{}{}, ",
-						polarity,
-						self.labels
-							.get(&var)
-							.unwrap_or(&format!("x_{}", var))
-							.to_string()
-					)
-				};
-
-				let out = cl.iter().map(lit_as_string).collect::<String>();
-				println!("{}\t\t({:?})", out, cl);
-			}
 
 			cl.sort_by(|a, b| a.abs().cmp(&b.abs()));
 			if let Some(clauses) = &mut self.clauses {

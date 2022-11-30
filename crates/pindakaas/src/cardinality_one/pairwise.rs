@@ -1,7 +1,9 @@
 use itertools::Itertools;
 
 use super::at_least_one_clause;
-use crate::{linear::LimitComp, CardinalityOne, ClauseDatabase, Encoder, Literal, Result};
+use crate::{
+	linear::LimitComp, trace::emit_clause, CardinalityOne, ClauseDatabase, Encoder, Literal, Result,
+};
 
 /// An encoder for an At Most One constraints that for every pair of literals
 /// states that one of the literals has to be `false`.
@@ -16,7 +18,7 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne<DB::Lit>> for PairwiseEncode
 		}
 		// For every pair of literals (i, j) add "¬i ∨ ¬j"
 		for (a, b) in card1.lits.iter().tuple_combinations() {
-			db.add_clause(&[a.negate(), b.negate()])?
+			emit_clause!(db, &[a.negate(), b.negate()])?
 		}
 		Ok(())
 	}
