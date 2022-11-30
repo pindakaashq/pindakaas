@@ -20,7 +20,9 @@ pub struct CardinalityOne<Lit: Literal> {
 impl<Lit: Literal> CardinalityOne<Lit> {
 	#[cfg(feature = "trace")]
 	pub(crate) fn trace_print(&self) -> String {
-		let x = itertools::join(self.lits.iter().map(|l| format!("{{{l:?}}}")), " + ");
+		use crate::trace::trace_print_lit;
+
+		let x = itertools::join(self.lits.iter().map(trace_print_lit), " + ");
 		let op = if self.cmp == LimitComp::LessEq {
 			"≤"
 		} else {

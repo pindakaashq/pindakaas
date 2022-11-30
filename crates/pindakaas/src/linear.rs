@@ -65,11 +65,13 @@ pub struct Linear<Lit: Literal, C: Coefficient> {
 impl<Lit: Literal, C: Coefficient> Linear<Lit, C> {
 	#[cfg(feature = "trace")]
 	pub(crate) fn trace_print(&self) -> String {
+		use crate::trace::trace_print_lit;
+
 		let x = itertools::join(
 			self.terms
 				.iter()
-				.flat_map(|part| part.iter().map(|(lit, coef)| (lit.clone(), **coef)))
-				.map(|(l, c)| format!("{c:?}·{{{l:?}}}")),
+				.flat_map(|part| part.iter().map(|(lit, coef)| (lit, **coef)))
+				.map(|(l, c)| format!("{c:?}·{}", trace_print_lit(l))),
 			" + ",
 		);
 		let op = if self.cmp == LimitComp::LessEq {

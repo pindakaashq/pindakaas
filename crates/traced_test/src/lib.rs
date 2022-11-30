@@ -20,8 +20,7 @@ pub fn test(_attr: TokenStream, item: TokenStream) -> TokenStream {
 			function.block.to_token_stream()
 		)
 		.parse::<TokenStream>()
-		.expect("unable to parse tracing execution token stream")
-		.into(),
+		.expect("unable to parse tracing execution token stream"),
 	)
 	.expect("unable to parse tracing execution statement");
 	// Replace function body
