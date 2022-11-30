@@ -14,7 +14,7 @@ pub struct AdderEncoder {}
 impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for AdderEncoder {
 	#[cfg_attr(
 		feature = "trace",
-		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = ?lin))
+		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		let pair = &lin

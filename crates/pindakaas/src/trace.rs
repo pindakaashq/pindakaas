@@ -61,7 +61,7 @@ mod subscriber {
 		Event, Id, Level, Metadata, Subscriber,
 	};
 
-	use super::subscript_numer;
+	use super::subscripted_name;
 
 	#[derive(Debug)]
 	pub struct Tracer {
@@ -98,6 +98,26 @@ mod subscriber {
 				write!(out, "│ ").unwrap();
 			}
 			writeln!(out, "{line}").unwrap();
+		}
+
+		fn pretty_constraint(&self, cons: String) -> String {
+			let mut it = cons.split('{');
+			let mut ret = String::from(it.next().unwrap_or_default());
+
+			let lit_names = self.lit_names.lock().unwrap();
+			while let Some(chunk) = it.next() {
+				if let Some((lit, rem)) = chunk.split_once('}') {
+					if let Some(label) = lit_names.get(lit) {
+						ret.push_str(label);
+					} else {
+						ret.push_str(&create_var_name(&lit, "x"));
+					}
+					ret.push_str(rem)
+				} else {
+					ret.push_str(chunk)
+				}
+			}
+			ret
 		}
 	}
 
@@ -165,6 +185,9 @@ mod subscriber {
 			let ident = tracing::span::Id::from_u64(res);
 			let mut visitor = SpanVisitor::new(ident.clone(), span.metadata().name().into());
 			span.record(&mut visitor);
+			if let Some(cons) = visitor.constraint {
+				visitor.constraint = Some(self.pretty_constraint(cons));
+			}
 			let mut stack = self.stack.lock().unwrap();
 			stack.push(visitor);
 			ident
@@ -197,7 +220,7 @@ mod subscriber {
 								let mut label = lit_names
 									.get(&lit)
 									.cloned()
-									.unwrap_or_else(|| pretty_print_var(&lit, "x"));
+									.unwrap_or_else(|| create_var_name(&lit, "x"));
 								if neg {
 									label.insert(0, '¬')
 								};
@@ -221,10 +244,12 @@ mod subscriber {
 			assert_eq!(&visitor.ident, span); // FIXME: Deal with out of order execution
 			assert_eq!(visitor.start, None); // FIXME: Deal with re-entrant spans
 			visitor.start = Some(Instant::now());
-			self.indented_output(
-				indent,
-				&format!("╭─╴{} {:?}", visitor.name, visitor.constraint),
-			);
+			let constraint = if let Some(cons) = &visitor.constraint {
+				cons.as_str()
+			} else {
+				""
+			};
+			self.indented_output(indent, &format!("╭─╴{}: {}", visitor.name, constraint));
 		}
 
 		fn exit(&self, span: &Id) {
@@ -267,13 +292,9 @@ mod subscriber {
 		Clause,
 	}
 
-	fn pretty_print_var(var: &str, prepend: &str) -> String {
+	fn create_var_name(var: &str, prepend: &str) -> String {
 		if let Ok(x) = var.parse::<usize>() {
-			let mut s = String::from(prepend);
-			for c in subscript_numer(x) {
-				s.push(c)
-			}
-			s
+			subscripted_name(prepend, x)
 		} else {
 			String::from(var)
 		}
@@ -284,7 +305,7 @@ mod subscriber {
 			match self.kind {
 				Some(EventKind::NewVar) if self.var.is_some() => {
 					let var = self.var.unwrap();
-					let name = self.label.unwrap_or_else(|| pretty_print_var(&var, "i"));
+					let name = self.label.unwrap_or_else(|| create_var_name(&var, "i"));
 					Some(RecordedEvent::NewVar(var, name))
 				}
 				Some(EventKind::Clause) if self.clause.is_some() && self.fail.is_some() => {
@@ -363,10 +384,10 @@ mod subscriber {
 	}
 
 	impl Visit for SpanVisitor {
-		fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-			let value = Some(format!("{value:?}"));
+		fn record_debug(&mut self, _field: &Field, _value: &dyn fmt::Debug) {}
+		fn record_str(&mut self, field: &Field, value: &str) {
 			if field.name() == "constraint" {
-				self.constraint = value
+				self.constraint = Some(String::from(value))
 			}
 		}
 	}
@@ -374,11 +395,19 @@ mod subscriber {
 #[cfg(feature = "trace")]
 pub use subscriber::{FlushGuard, Tracer};
 
-pub(crate) fn subscript_numer(num: usize) -> impl Iterator<Item = char> {
+pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 	num.to_string()
 		.chars()
 		.map(|d| d.to_digit(10).unwrap())
 		.map(|d| char::from_u32(0x2080 + d).unwrap())
 		.collect::<Vec<_>>()
 		.into_iter()
+}
+
+pub(crate) fn subscripted_name(name: &str, sub: usize) -> String {
+	let mut s = String::from(name);
+	for c in subscript_number(sub) {
+		s.push(c)
+	}
+	s
 }
