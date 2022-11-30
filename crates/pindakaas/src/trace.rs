@@ -105,12 +105,12 @@ mod subscriber {
 			let mut ret = String::from(it.next().unwrap_or_default());
 
 			let lit_names = self.lit_names.lock().unwrap();
-			while let Some(chunk) = it.next() {
+			for chunk in it {
 				if let Some((lit, rem)) = chunk.split_once('}') {
 					if let Some(label) = lit_names.get(lit) {
 						ret.push_str(label);
 					} else {
-						ret.push_str(&create_var_name(&lit, "x"));
+						ret.push_str(&create_var_name(lit, "x"));
 					}
 					ret.push_str(rem)
 				} else {
@@ -416,4 +416,9 @@ pub(crate) fn subscripted_name(name: &str, sub: usize) -> String {
 		s.push(c)
 	}
 	s
+}
+
+#[cfg(feature = "trace")]
+pub(crate) fn trace_print_lit<Lit: crate::Literal>(l: &Lit) -> String {
+	format!("{}{{{:?}}}", if l.is_negated() { "¬" } else { "" }, l.var())
 }
