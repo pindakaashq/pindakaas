@@ -1,7 +1,11 @@
 use iset::IntervalMap;
 use itertools::Itertools;
 
-use crate::{linear::Part, new_var, ClauseDatabase, Coefficient, Literal, PosCoeff};
+use crate::{
+	linear::Part,
+	trace::{emit_clause, new_var},
+	ClauseDatabase, Coefficient, Literal, PosCoeff,
+};
 use std::{
 	collections::{HashMap, HashSet},
 	ops::Neg,
@@ -97,7 +101,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 				// TODO clean up
 				if let LitOrConst::Lit(a) = lit_a {
 					if let LitOrConst::Lit(b) = lit_b {
-						db.add_clause(&[b.negate(), a]).unwrap();
+						emit_clause!(db, &[b.negate(), a]).unwrap();
 					} else {
 						panic!();
 					}
@@ -144,7 +148,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 						} else {
 							let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
 							for lit in lits {
-								db.add_clause(&[lit.negate(), o.clone()]).unwrap();
+								emit_clause!(db, &[lit.negate(), o.clone()]).unwrap();
 							}
 							(coef.into(), o)
 						}
@@ -216,7 +220,7 @@ pub(crate) fn ord_plus_ord_le_ord<DB: ClauseDatabase + ?Sized, C: Coefficient>(
 			let l_c = c.ge((*c_a + *c_b).into());
 			if !(l_a == l_c.clone() || l_b == l_c.clone()) {
 				if let Ok(cls) = &create_clause(vec![-l_a.clone(), -l_b, l_c]) {
-					db.add_clause(cls).unwrap();
+					emit_clause!(db, cls).unwrap();
 				}
 			}
 		}

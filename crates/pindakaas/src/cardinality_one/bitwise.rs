@@ -1,5 +1,7 @@
 use super::at_least_one_clause;
-use crate::{linear::LimitComp, CardinalityOne, ClauseDatabase, Encoder, Literal, Result};
+use crate::{
+	linear::LimitComp, trace::emit_clause, CardinalityOne, ClauseDatabase, Encoder, Literal, Result,
+};
 
 /// An encoder for [`CardinalityOne`] constraints that uses a logarithm
 /// encoded selector variable to ensure the selection of at most one of
@@ -24,9 +26,9 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne<DB::Lit>> for BitwiseEncoder
 		for (i, lit) in card1.lits.iter().enumerate() {
 			for (j, sig) in signals.iter().enumerate() {
 				if i & (1 << j) != 0 {
-					db.add_clause(&[lit.negate(), sig.clone()])?;
+					emit_clause!(db, &[lit.negate(), sig.clone()])?;
 				} else {
-					db.add_clause(&[lit.negate(), sig.negate()])?;
+					emit_clause!(db, &[lit.negate(), sig.negate()])?;
 				}
 			}
 		}

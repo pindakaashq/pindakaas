@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
 use crate::{
-	helpers::XorEncoder, linear::LimitComp, ClauseDatabase, Coefficient, Encoder, Linear, Literal,
-	Result, Unsatisfiable,
+	helpers::XorEncoder,
+	linear::LimitComp,
+	trace::{emit_clause, new_var},
+	ClauseDatabase, Coefficient, Encoder, Linear, Literal, Result, Unsatisfiable,
 };
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
@@ -10,6 +12,10 @@ use crate::{
 pub struct AdderEncoder {}
 
 impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for AdderEncoder {
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "adder_encoder", skip_all)
+	)]
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		let pair = &lin
 			.terms
@@ -50,7 +56,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 				1 => {
 					let x = bucket[b].pop().unwrap();
 					if lin.cmp == LimitComp::Equal {
-						db.add_clause(&[if k[b] { x } else { x.negate() }])?
+						emit_clause!(db, &[if k[b] { x.clone() } else { x.negate() }])?
 					} else {
 						sum[b] = Some(x);
 					}
@@ -111,11 +117,12 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 			// - a higher sum bit is zero that was one in k.
 			for i in 0..bits {
 				if !k[i] && sum[i].is_some() {
-					db.add_clause(
+					emit_clause!(
+						db,
 						&(i..bits)
 							.filter_map(|j| if j == i || k[j] { sum[j].clone() } else { None })
 							.map(|lit| lit.negate())
-							.collect::<Vec<DB::Lit>>(),
+							.collect::<Vec<DB::Lit>>()
 					)?;
 				}
 			}
@@ -164,10 +171,10 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 		}
 	}
 	for l in a.iter().skip(bits) {
-		db.add_clause(&[l.negate()])?;
+		emit_clause!(db, &[l.negate()])?;
 	}
 	for l in b.iter().skip(bits) {
-		db.add_clause(&[l.negate()])?;
+		emit_clause!(db, &[l.negate()])?;
 	}
 	Ok(c)
 }
@@ -176,25 +183,26 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 /// circuit
 ///
 /// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
+#[cfg_attr(feature = "trace", tracing::instrument(name = "create_sum", skip_all))]
 fn create_sum_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<DB::Lit> {
-	let sum = db.new_var();
+	let sum = new_var!(db);
 	match lits {
 		[a, b] => {
-			db.add_clause(&[a.negate(), b.negate(), sum.negate()])?;
-			db.add_clause(&[a.negate(), b.clone(), sum.clone()])?;
-			db.add_clause(&[a.clone(), b.negate(), sum.clone()])?;
-			db.add_clause(&[a.clone(), b.clone(), sum.negate()])?;
+			emit_clause!(db, &[a.negate(), b.negate(), sum.negate()])?;
+			emit_clause!(db, &[a.negate(), b.clone(), sum.clone()])?;
+			emit_clause!(db, &[a.clone(), b.negate(), sum.clone()])?;
+			emit_clause!(db, &[a.clone(), b.clone(), sum.negate()])?;
 		}
 		[a, b, c] => {
-			db.add_clause(&[a.clone(), b.clone(), c.clone(), sum.negate()])?;
-			db.add_clause(&[a.clone(), b.negate(), c.negate(), sum.negate()])?;
-			db.add_clause(&[a.negate(), b.clone(), c.negate(), sum.negate()])?;
-			db.add_clause(&[a.negate(), b.negate(), c.clone(), sum.negate()])?;
+			emit_clause!(db, &[a.clone(), b.clone(), c.clone(), sum.negate()])?;
+			emit_clause!(db, &[a.clone(), b.negate(), c.negate(), sum.negate()])?;
+			emit_clause!(db, &[a.negate(), b.clone(), c.negate(), sum.negate()])?;
+			emit_clause!(db, &[a.negate(), b.negate(), c.clone(), sum.negate()])?;
 
-			db.add_clause(&[a.negate(), b.negate(), c.negate(), sum.clone()])?;
-			db.add_clause(&[a.negate(), b.clone(), c.clone(), sum.clone()])?;
-			db.add_clause(&[a.clone(), b.negate(), c.clone(), sum.clone()])?;
-			db.add_clause(&[a.clone(), b.clone(), c.negate(), sum.clone()])?;
+			emit_clause!(db, &[a.negate(), b.negate(), c.negate(), sum.clone()])?;
+			emit_clause!(db, &[a.negate(), b.clone(), c.clone(), sum.clone()])?;
+			emit_clause!(db, &[a.clone(), b.negate(), c.clone(), sum.clone()])?;
+			emit_clause!(db, &[a.clone(), b.clone(), c.negate(), sum.clone()])?;
 		}
 		_ => unreachable!(),
 	}
@@ -203,20 +211,21 @@ fn create_sum_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<D
 
 /// Force circuit that represents the sum bit when adding lits together using an adder
 /// circuit to take the value k
+#[cfg_attr(feature = "trace", tracing::instrument(name = "force_sum", skip_all))]
 fn force_sum<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Result {
 	if k {
 		XorEncoder::default().encode(db, lits)
 	} else {
 		match lits {
 			[a, b] => {
-				db.add_clause(&[a.clone(), b.negate()])?;
-				db.add_clause(&[a.negate(), b.clone()])
+				emit_clause!(db, &[a.clone(), b.negate()])?;
+				emit_clause!(db, &[a.negate(), b.clone()])
 			}
 			[a, b, c] => {
-				db.add_clause(&[a.negate(), b.negate(), c.negate()])?;
-				db.add_clause(&[a.negate(), b.clone(), c.clone()])?;
-				db.add_clause(&[a.clone(), b.negate(), c.clone()])?;
-				db.add_clause(&[a.clone(), b.clone(), c.negate()])
+				emit_clause!(db, &[a.negate(), b.negate(), c.negate()])?;
+				emit_clause!(db, &[a.negate(), b.clone(), c.clone()])?;
+				emit_clause!(db, &[a.clone(), b.negate(), c.clone()])?;
+				emit_clause!(db, &[a.clone(), b.clone(), c.negate()])
 			}
 			_ => unreachable!(),
 		}
@@ -227,22 +236,26 @@ fn force_sum<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Resu
 /// circuit
 ///
 /// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
+#[cfg_attr(
+	feature = "trace",
+	tracing::instrument(name = "create_carry", skip_all)
+)]
 fn create_carry_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<DB::Lit> {
-	let carry = db.new_var();
+	let carry = new_var!(db);
 	match lits {
 		[a, b] => {
-			db.add_clause(&[a.negate(), b.negate(), carry.clone()])?;
-			db.add_clause(&[a.clone(), carry.negate()])?;
-			db.add_clause(&[b.clone(), carry.negate()])?;
+			emit_clause!(db, &[a.negate(), b.negate(), carry.clone()])?;
+			emit_clause!(db, &[a.clone(), carry.negate()])?;
+			emit_clause!(db, &[b.clone(), carry.negate()])?;
 		}
 		[a, b, c] => {
-			db.add_clause(&[a.clone(), b.clone(), carry.negate()])?;
-			db.add_clause(&[a.clone(), c.clone(), carry.negate()])?;
-			db.add_clause(&[b.clone(), c.clone(), carry.negate()])?;
+			emit_clause!(db, &[a.clone(), b.clone(), carry.negate()])?;
+			emit_clause!(db, &[a.clone(), c.clone(), carry.negate()])?;
+			emit_clause!(db, &[b.clone(), c.clone(), carry.negate()])?;
 
-			db.add_clause(&[a.negate(), b.negate(), carry.clone()])?;
-			db.add_clause(&[a.negate(), c.negate(), carry.clone()])?;
-			db.add_clause(&[b.negate(), c.negate(), carry.clone()])?;
+			emit_clause!(db, &[a.negate(), b.negate(), carry.clone()])?;
+			emit_clause!(db, &[a.negate(), c.negate(), carry.clone()])?;
+			emit_clause!(db, &[b.negate(), c.negate(), carry.clone()])?;
 		}
 		_ => unreachable!(),
 	}
@@ -251,22 +264,23 @@ fn create_carry_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result
 
 /// Force the circuit that represents the carry bit when adding lits together using an adder
 /// circuit to take the value k
+#[cfg_attr(feature = "trace", tracing::instrument(name = "force_carry", skip_all))]
 fn force_carry<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Result {
 	match lits {
 		[a, b] => {
 			if k {
 				// TODO: Can we avoid this?
-				db.add_clause(&[a.clone()])?;
-				db.add_clause(&[b.clone()])
+				emit_clause!(db, &[a.clone()])?;
+				emit_clause!(db, &[b.clone()])
 			} else {
-				db.add_clause(&[a.negate(), b.negate()])
+				emit_clause!(db, &[a.negate(), b.negate()])
 			}
 		}
 		[a, b, c] => {
 			let neg = |x: &DB::Lit| if k { x.clone() } else { x.negate() };
-			db.add_clause(&[neg(a), neg(b)])?;
-			db.add_clause(&[neg(a), neg(c)])?;
-			db.add_clause(&[neg(b), neg(c)])
+			emit_clause!(db, &[neg(a), neg(b)])?;
+			emit_clause!(db, &[neg(a), neg(c)])?;
+			emit_clause!(db, &[neg(b), neg(c)])
 		}
 		_ => unreachable!(),
 	}
@@ -274,6 +288,8 @@ fn force_carry<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Re
 
 #[cfg(test)]
 mod tests {
+	use test_log::test;
+
 	use super::*;
 	use crate::{
 		cardinality_one::tests::card1_test_suite,

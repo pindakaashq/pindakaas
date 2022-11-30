@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
 	linear::{Constraint, LimitComp, Part, PosCoeff},
 	Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, LinVariant, Linear,
-	LinearConstraint, Literal, Result, Unsatisfiable,
+	LinearConstraint, Literal, Result, Unsatisfiable, trace::emit_clause,
 };
 
 #[derive(Default)]
@@ -135,18 +135,18 @@ impl LinearAggregator {
 							let y = db.new_var();
 
                             // ~x1 /\ ~x2 /\ .. -> y == x1 \/ x2 \/ .. \/ y
-							db.add_clause(
+							emit_clause!(db, 
 								&terms
 									.iter()
 									.map(|(lit, _)| lit.clone())
 									.chain(std::iter::once(y.clone()))
-									.collect::<Vec<DB::Lit>>(),
+									.collect::<Vec<DB::Lit>>()
 							)
 							.unwrap();
 
                             // y -> ( ~x1 /\ ~x2 /\ .. ) == ~y \/ ~x1, ~y \/ ~x2, ..
 							for lit in terms.iter().map(|tup| tup.0.clone()) {
-								db.add_clause(&[y.negate(), lit.negate()]).unwrap();
+								emit_clause!(db, &[y.negate(), lit.negate()]).unwrap();
 							}
 
 							// this term will cancel out later when we add q*min_lit to the LHS
@@ -235,7 +235,7 @@ impl LinearAggregator {
 		if k == C::zero() {
 			for part in partition {
 				for (lit, _) in part.iter() {
-					db.add_clause(&[lit.negate()])?
+					emit_clause!(db, &[lit.negate()])?
 				}
 			}
 			return Ok(LinVariant::Trivial);
@@ -252,7 +252,7 @@ impl LinearAggregator {
 						.into_iter()
 						.filter(|(lit, coef)| {
 							if coef > &k {
-								db.add_clause(&[lit.negate()]).unwrap();
+								emit_clause!(db, &[lit.negate()]).unwrap();
 								false
 							} else {
 								true
@@ -269,7 +269,7 @@ impl LinearAggregator {
 							.filter(|(lit, coef)| {
 								acc += **coef;
 								if acc > *k {
-									db.add_clause(&[lit.negate()]).unwrap();
+									emit_clause!(db, &[lit.negate()]).unwrap();
 									false
 								} else {
 									true
@@ -284,7 +284,7 @@ impl LinearAggregator {
 						.into_iter()
 						.filter(|(lit, coef)| {
 							if coef > &k {
-								db.add_clause(&[lit.negate()]).unwrap();
+								emit_clause!(db, &[lit.negate()]).unwrap();
 								false
 							} else {
 								true
@@ -327,12 +327,12 @@ impl LinearAggregator {
 
 				// If we have only 2 (unassigned) lits, which together (but not individually) exceed k, then -x1\/-x2
 				if partition.iter().flat_map(|part| part.iter()).count() == 2 {
-					db.add_clause(
+					emit_clause!(db, 
 						&partition
 							.iter()
 							.flat_map(|part| part.iter())
 							.map(|(lit, _)| lit.negate())
-							.collect::<Vec<DB::Lit>>(),
+							.collect::<Vec<DB::Lit>>()
 					)?;
 					return Ok(LinVariant::Trivial);
 				}
@@ -345,7 +345,7 @@ impl LinearAggregator {
 					for part in partition {
 						match part {
 							Part::Amo(terms) => {
-								db.add_clause(&[terms
+								emit_clause!(db, &[terms
 									.iter()
 									.max_by(|(_, a), (_, b)| a.cmp(b))
 									.unwrap()
@@ -354,7 +354,7 @@ impl LinearAggregator {
 							}
 							Part::Ic(terms) | Part::Dom(terms, _, _) => {
 								for (lit, _) in terms {
-									db.add_clause(&[lit.clone()])?;
+									emit_clause!(db, &[lit.clone()])?;
 								}
 							}
 						};
@@ -409,7 +409,7 @@ impl LinearAggregator {
 			// Ex. at most 2 out of 3 true = at least 1 out of 3 false
 			if (0..partition.len()).fold(C::zero(), |acc, _| acc + C::one()) == *k + C::one() {
 				let neg = partition.iter().map(|l| l.negate()).collect::<Vec<_>>();
-				db.add_clause(&neg)?;
+				emit_clause!(db, &neg)?;
 
 				if cmp == LimitComp::LessEq {
 					return Ok(LinVariant::Trivial);

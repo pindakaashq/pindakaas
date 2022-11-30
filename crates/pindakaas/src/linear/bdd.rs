@@ -4,7 +4,8 @@ use itertools::{Itertools, Position};
 use crate::{
 	int::{ord_plus_ord_le_ord, IntVar, LitOrConst},
 	linear::LimitComp,
-	new_var, ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
+	trace::new_var,
+	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)

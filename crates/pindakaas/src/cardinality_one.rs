@@ -1,5 +1,6 @@
 use crate::{
-	linear::LimitComp, CheckError, Checker, ClauseDatabase, Literal, Result, Unsatisfiable,
+	linear::LimitComp, trace::emit_clause, CheckError, Checker, ClauseDatabase, Literal, Result,
+	Unsatisfiable,
 };
 
 mod bitwise;
@@ -44,7 +45,7 @@ pub(crate) fn at_least_one_clause<DB: ClauseDatabase>(
 	card1: &CardinalityOne<DB::Lit>,
 ) -> Result {
 	debug_assert_eq!(card1.cmp, LimitComp::Equal);
-	db.add_clause(&card1.lits)
+	emit_clause!(db, &card1.lits)
 }
 
 #[cfg(test)]
