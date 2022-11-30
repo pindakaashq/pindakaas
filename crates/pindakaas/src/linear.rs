@@ -17,6 +17,7 @@ mod totalizer;
 pub use adder::AdderEncoder;
 pub use aggregator::LinearAggregator;
 pub use bdd::BddEncoder;
+use itertools::join;
 pub use swc::SwcEncoder;
 pub use totalizer::TotalizerEncoder;
 
@@ -60,6 +61,24 @@ pub struct Linear<Lit: Literal, C: Coefficient> {
 	pub(crate) terms: Vec<Part<Lit, PosCoeff<C>>>,
 	pub(crate) cmp: LimitComp,
 	pub(crate) k: PosCoeff<C>,
+}
+
+impl<Lit: Literal, C: Coefficient> Linear<Lit, C> {
+	pub(crate) fn trace_print(&self) -> String {
+		let x = join(
+			self.terms
+				.iter()
+				.flat_map(|part| part.iter().map(|(lit, coef)| (lit.clone(), **coef)))
+				.map(|(l, c)| format!("{c:?}·{{{l:?}}}")),
+			" + ",
+		);
+		let op = if self.cmp == LimitComp::LessEq {
+			"≤"
+		} else {
+			"="
+		};
+		format!("{x} {op} {:?}", *self.k)
+	}
 }
 
 impl<Lit: Literal, C: Coefficient> From<Cardinality<Lit, C>> for Linear<Lit, C> {
@@ -619,6 +638,9 @@ mod tests {
 		($encoder:expr) => {
 			#[test]
 			fn test_small_le_1() {
+				let (tracer, _guard) = crate::trace::Tracer::new();
+				tracing::subscriber::set_global_default(tracer).expect("setting tracing default failed");
+
 				assert_sol!(
 					$encoder,
 					3,

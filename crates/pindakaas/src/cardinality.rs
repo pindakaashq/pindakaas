@@ -1,3 +1,5 @@
+use itertools::join;
+
 use crate::{
 	linear::{LimitComp, LinMarker, PosCoeff},
 	CardinalityOne, CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal,
@@ -18,6 +20,20 @@ impl<Lit: Literal, C: Coefficient> From<CardinalityOne<Lit>> for Cardinality<Lit
 			cmp: card1.cmp,
 			k: C::one().into(),
 		}
+	}
+}
+
+impl<Lit: Literal, C: Coefficient> Cardinality<Lit, C> {
+	// FIXME: Remove when used
+	#[allow(dead_code)]
+	pub(crate) fn trace_print(&self) -> String {
+		let x = join(self.lits.iter().map(|l| format!("{{{l:?}}}")), " + ");
+		let op = if self.cmp == LimitComp::LessEq {
+			"≤"
+		} else {
+			"="
+		};
+		format!("{x} {op} {:?}", *self.k)
 	}
 }
 

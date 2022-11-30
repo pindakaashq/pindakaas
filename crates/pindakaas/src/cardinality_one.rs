@@ -3,6 +3,8 @@ use crate::{
 	Unsatisfiable,
 };
 
+use itertools::join;
+
 mod bitwise;
 mod ladder;
 mod pairwise;
@@ -15,6 +17,18 @@ pub use pairwise::PairwiseEncoder;
 pub struct CardinalityOne<Lit: Literal> {
 	pub(crate) lits: Vec<Lit>,
 	pub(crate) cmp: LimitComp,
+}
+
+impl<Lit: Literal> CardinalityOne<Lit> {
+	pub(crate) fn trace_print(&self) -> String {
+		let x = join(self.lits.iter().map(|l| format!("{{{l:?}}}")), " + ");
+		let op = if self.cmp == LimitComp::LessEq {
+			"≤"
+		} else {
+			"="
+		};
+		format!("{x} {op} 1")
+	}
 }
 
 impl<Lit: Literal> Checker for CardinalityOne<Lit> {
