@@ -39,7 +39,6 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			lin.k.clone(),
 			true,
 			self.add_consistency,
-			0,
 		);
 		Ok(())
 	}
@@ -52,7 +51,6 @@ fn build_totalizer<DB: ClauseDatabase + ?Sized, C: Coefficient>(
 	u: PosCoeff<C>,
 	limit_root: bool,
 	add_consistency: bool,
-	level: u32,
 ) -> IntVar<DB::Lit, C> {
 	if layer.len() == 1 {
 		let root = layer.pop().unwrap();
@@ -113,7 +111,6 @@ fn build_totalizer<DB: ClauseDatabase + ?Sized, C: Coefficient>(
 			u,
 			limit_root,
 			add_consistency,
-			level + 1,
 		)
 	}
 }
