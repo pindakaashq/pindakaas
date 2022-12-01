@@ -45,6 +45,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 	}
 }
 
+#[allow(clippy::only_used_in_recursion)]
 fn build_totalizer<DB: ClauseDatabase + ?Sized, C: Coefficient>(
 	mut layer: Vec<IntVar<DB::Lit, C>>,
 	db: &mut DB,
@@ -52,6 +53,7 @@ fn build_totalizer<DB: ClauseDatabase + ?Sized, C: Coefficient>(
 	u: PosCoeff<C>,
 	limit_root: bool,
 	add_consistency: bool,
+	// level is only used for output variable name output
 	level: u32,
 ) -> IntVar<DB::Lit, C> {
 	if layer.len() == 1 {
