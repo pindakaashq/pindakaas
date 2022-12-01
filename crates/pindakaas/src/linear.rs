@@ -162,6 +162,25 @@ impl<Lit: Literal, C: Coefficient> LinearConstraint<Lit, C> {
 	pub fn new(exp: LinExp<Lit, C>, cmp: Comparator, k: C) -> Self {
 		Self { exp, cmp, k }
 	}
+
+	#[cfg(feature = "trace")]
+	pub(crate) fn trace_print(&self) -> String {
+		use crate::trace::trace_print_lit;
+
+		let x = itertools::join(
+			self.exp
+				.terms
+				.iter()
+				.map(|(l, c)| format!("{c:?}·{}", trace_print_lit(l))),
+			" + ",
+		);
+		let op = match self.cmp {
+			Comparator::LessEq => "≤",
+			Comparator::Equal => "=",
+			Comparator::GreaterEq => "≥",
+		};
+		format!("{x} {op} {:?}", self.k)
+	}
 }
 
 impl<Lit: Literal, C: Coefficient> Checker for LinearConstraint<Lit, C> {
@@ -500,6 +519,10 @@ impl<Enc> LinearEncoder<Enc> {
 impl<DB: ClauseDatabase, C: Coefficient, Enc: Encoder<DB, LinVariant<DB::Lit, C>>>
 	Encoder<DB, LinearConstraint<DB::Lit, C>> for LinearEncoder<Enc>
 {
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "linear_encoder", skip_all, fields(constraint = lin.trace_print()))
+	)]
 	fn encode(&mut self, db: &mut DB, lin: &LinearConstraint<DB::Lit, C>) -> Result {
 		let variant = LinearAggregator::default().aggregate(db, lin)?;
 		self.enc.encode(db, &variant)

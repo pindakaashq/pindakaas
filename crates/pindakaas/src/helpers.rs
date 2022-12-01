@@ -7,7 +7,12 @@ use crate::{trace::emit_clause, ClauseDatabase, Literal, Result};
 pub struct XorEncoder {}
 
 impl XorEncoder {
-	#[cfg_attr(feature = "trace", tracing::instrument(name = "xor_encoder", skip_all))]
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "xor_encoder", skip_all, fields(
+			constraint = itertools::join(lits.iter().map(crate::trace::trace_print_lit), " ⊻ ")
+		))
+	)]
 	pub fn encode<DB: ClauseDatabase>(&mut self, db: &mut DB, lits: &[DB::Lit]) -> Result {
 		match lits {
 			[a] => emit_clause!(db, &[a.clone()]),
