@@ -2,6 +2,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
 	helpers::XorEncoder,
+	int::LitOrConst,
 	linear::LimitComp,
 	trace::{emit_clause, new_var},
 	ClauseDatabase, Coefficient, Encoder, Linear, Literal, Result, Unsatisfiable,
@@ -75,10 +76,22 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 						// Compute sum
 						if last && lin.cmp == LimitComp::Equal {
 							// No need to create a new literal, force the sum to equal the result
-							force_sum(db, lits.as_slice(), k[b])?;
+							sum_circuit(db, lits.as_slice(), LitOrConst::Const(k[b]))?;
 						} else if lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
 							// Literal is not used for the less-than constraint unless a zero has been seen first
-							bucket[b].push(create_sum_lit(db, lits.as_slice())?);
+							let sum = new_var!(
+								db,
+								if last {
+									crate::trace::subscripted_name("∑", b)
+								} else {
+									crate::trace::subscripted_name(
+										&format!("iS{b}"),
+										(bucket[b].len() / 3) + 1,
+									)
+								}
+							);
+							sum_circuit(db, lits.as_slice(), LitOrConst::Lit(sum.clone()))?;
+							bucket[b].push(sum);
 						}
 
 						// Compute carry
@@ -87,15 +100,27 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 							if lits.len() == 2 && lin.cmp == LimitComp::Equal {
 								// Already encoded by the XOR to compute the sum
 							} else {
-								force_carry(db, &lits[..], false)?
+								carry_circuit(db, &lits[..], LitOrConst::Const(false))?
 							}
 						} else if last && lin.cmp == LimitComp::Equal && bucket[b + 1].is_empty() {
 							// No need to create a new literal, force the carry to equal the result
-							force_carry(db, &lits[..], k[b + 1])?;
+							carry_circuit(db, &lits[..], LitOrConst::Const(k[b + 1]))?;
 							// Mark k[b + 1] as false (otherwise next step will fail)
 							k[b + 1] = false;
 						} else {
-							bucket[b + 1].push(create_carry_lit(db, lits.as_slice())?);
+							let carry = new_var!(
+								db,
+								if last {
+									crate::trace::subscripted_name("c", b)
+								} else {
+									crate::trace::subscripted_name(
+										&format!("iC{b}"),
+										(bucket[b].len() / 3) + 1,
+									)
+								}
+							);
+							carry_circuit(db, lits.as_slice(), LitOrConst::Lit(carry.clone()))?;
+							bucket[b + 1].push(carry);
 						}
 					}
 					debug_assert!(
@@ -160,11 +185,15 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 			}
 			_ => {
 				debug_assert!(b.len() <= 3);
-				c.push(Some(create_sum_lit(db, &b)?));
+				let sum = new_var!(db, crate::trace::subscripted_name("∑", i));
+				sum_circuit(db, &b, LitOrConst::Lit(sum.clone()))?;
+				c.push(Some(sum));
 				carry = if i + 1 < bits {
-					Some(create_carry_lit(db, &b)?)
+					let carry = new_var!(db, crate::trace::subscripted_name("c", i));
+					carry_circuit(db, &b, LitOrConst::Lit(carry.clone()))?;
+					Some(carry)
 				} else {
-					force_carry(db, &b, false)?;
+					carry_circuit(db, &b, LitOrConst::Const(false))?;
 					None
 				};
 			}
@@ -179,44 +208,41 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 	Ok(c)
 }
 
-/// Create a literal that represents the sum bit when adding lits together using an adder
-/// circuit
+/// Encode the adder sum circuit
 ///
-/// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
-#[cfg_attr(feature = "trace", tracing::instrument(name = "create_sum", skip_all, fields(constraint = ?lits)))]
-fn create_sum_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<DB::Lit> {
-	let sum = new_var!(db);
-	match lits {
-		[a, b] => {
-			emit_clause!(db, &[a.negate(), b.negate(), sum.negate()])?;
-			emit_clause!(db, &[a.negate(), b.clone(), sum.clone()])?;
-			emit_clause!(db, &[a.clone(), b.negate(), sum.clone()])?;
-			emit_clause!(db, &[a.clone(), b.clone(), sum.negate()])?;
-		}
-		[a, b, c] => {
-			emit_clause!(db, &[a.clone(), b.clone(), c.clone(), sum.negate()])?;
-			emit_clause!(db, &[a.clone(), b.negate(), c.negate(), sum.negate()])?;
-			emit_clause!(db, &[a.negate(), b.clone(), c.negate(), sum.negate()])?;
-			emit_clause!(db, &[a.negate(), b.negate(), c.clone(), sum.negate()])?;
+/// This function accepts either 2 literals as `input` (half adder) or 3
+/// literals (full adder).
+///
+/// `output` can be either a literal, or a constant Boolean value.
+#[cfg_attr(feature = "trace", tracing::instrument(name = "sum_circuit", skip_all, fields(constraint = trace_print_sum(input, &output))))]
+fn sum_circuit<DB: ClauseDatabase>(
+	db: &mut DB,
+	input: &[DB::Lit],
+	output: LitOrConst<DB::Lit>,
+) -> Result {
+	match output {
+		LitOrConst::Lit(sum) => match input {
+			[a, b] => {
+				emit_clause!(db, &[a.negate(), b.negate(), sum.negate()])?;
+				emit_clause!(db, &[a.negate(), b.clone(), sum.clone()])?;
+				emit_clause!(db, &[a.clone(), b.negate(), sum.clone()])?;
+				emit_clause!(db, &[a.clone(), b.clone(), sum.negate()])
+			}
+			[a, b, c] => {
+				emit_clause!(db, &[a.clone(), b.clone(), c.clone(), sum.negate()])?;
+				emit_clause!(db, &[a.clone(), b.negate(), c.negate(), sum.negate()])?;
+				emit_clause!(db, &[a.negate(), b.clone(), c.negate(), sum.negate()])?;
+				emit_clause!(db, &[a.negate(), b.negate(), c.clone(), sum.negate()])?;
 
-			emit_clause!(db, &[a.negate(), b.negate(), c.negate(), sum.clone()])?;
-			emit_clause!(db, &[a.negate(), b.clone(), c.clone(), sum.clone()])?;
-			emit_clause!(db, &[a.clone(), b.negate(), c.clone(), sum.clone()])?;
-			emit_clause!(db, &[a.clone(), b.clone(), c.negate(), sum.clone()])?;
-		}
-		_ => unreachable!(),
-	}
-	Ok(sum)
-}
-
-/// Force circuit that represents the sum bit when adding lits together using an adder
-/// circuit to take the value k
-#[cfg_attr(feature = "trace", tracing::instrument(name = "force_sum", skip_all, fields(constraint = ?lits)))]
-fn force_sum<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Result {
-	if k {
-		XorEncoder::default().encode(db, lits)
-	} else {
-		match lits {
+				emit_clause!(db, &[a.negate(), b.negate(), c.negate(), sum.clone()])?;
+				emit_clause!(db, &[a.negate(), b.clone(), c.clone(), sum.clone()])?;
+				emit_clause!(db, &[a.clone(), b.negate(), c.clone(), sum.clone()])?;
+				emit_clause!(db, &[a.clone(), b.clone(), c.negate(), sum])
+			}
+			_ => unreachable!(),
+		},
+		LitOrConst::Const(true) => XorEncoder::default().encode(db, input),
+		LitOrConst::Const(false) => match input {
 			[a, b] => {
 				emit_clause!(db, &[a.clone(), b.negate()])?;
 				emit_clause!(db, &[a.negate(), b.clone()])
@@ -228,61 +254,80 @@ fn force_sum<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Resu
 				emit_clause!(db, &[a.clone(), b.clone(), c.negate()])
 			}
 			_ => unreachable!(),
-		}
+		},
 	}
 }
 
-/// Create a literal that represents the carry bit when adding lits together using an adder
-/// circuit
+#[cfg(feature = "trace")]
+fn trace_print_sum<Lit: Literal>(input: &[Lit], output: &LitOrConst<Lit>) -> String {
+	use crate::trace::trace_print_lit;
+	let inner = itertools::join(input.iter().map(trace_print_lit), " ⊻ ");
+	match output {
+		LitOrConst::Lit(r) => format!("{} ≡ {}", trace_print_lit(r), inner),
+		LitOrConst::Const(true) => inner,
+		LitOrConst::Const(false) => format!("¬({inner})"),
+	}
+}
+
+/// Encode the adder carry circuit
 ///
-/// Warning: Internal function expect 2 ≤ lits.len() ≤ 3
-#[cfg_attr(
-	feature = "trace",
-	tracing::instrument(name = "create_carry", skip_all, fields(constraint = ?lits))
-)]
-fn create_carry_lit<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit]) -> Result<DB::Lit> {
-	let carry = new_var!(db);
-	match lits {
-		[a, b] => {
-			emit_clause!(db, &[a.negate(), b.negate(), carry.clone()])?;
-			emit_clause!(db, &[a.clone(), carry.negate()])?;
-			emit_clause!(db, &[b.clone(), carry.negate()])?;
-		}
-		[a, b, c] => {
-			emit_clause!(db, &[a.clone(), b.clone(), carry.negate()])?;
-			emit_clause!(db, &[a.clone(), c.clone(), carry.negate()])?;
-			emit_clause!(db, &[b.clone(), c.clone(), carry.negate()])?;
+/// This function accepts either 2 literals as `input` (half adder) or 3
+/// literals (full adder).
+///
+/// `output` can be either a literal, or a constant Boolean value.
+#[cfg_attr(feature = "trace", tracing::instrument(name = "carry_circuit", skip_all, fields(constraint = trace_print_carry(input, &output))))]
+fn carry_circuit<DB: ClauseDatabase>(
+	db: &mut DB,
+	input: &[DB::Lit],
+	output: LitOrConst<DB::Lit>,
+) -> Result {
+	match output {
+		LitOrConst::Lit(carry) => match input {
+			[a, b] => {
+				emit_clause!(db, &[a.negate(), b.negate(), carry.clone()])?;
+				emit_clause!(db, &[a.clone(), carry.negate()])?;
+				emit_clause!(db, &[b.clone(), carry.negate()])
+			}
+			[a, b, c] => {
+				emit_clause!(db, &[a.clone(), b.clone(), carry.negate()])?;
+				emit_clause!(db, &[a.clone(), c.clone(), carry.negate()])?;
+				emit_clause!(db, &[b.clone(), c.clone(), carry.negate()])?;
 
-			emit_clause!(db, &[a.negate(), b.negate(), carry.clone()])?;
-			emit_clause!(db, &[a.negate(), c.negate(), carry.clone()])?;
-			emit_clause!(db, &[b.negate(), c.negate(), carry.clone()])?;
-		}
-		_ => unreachable!(),
+				emit_clause!(db, &[a.negate(), b.negate(), carry.clone()])?;
+				emit_clause!(db, &[a.negate(), c.negate(), carry.clone()])?;
+				emit_clause!(db, &[b.negate(), c.negate(), carry])
+			}
+			_ => unreachable!(),
+		},
+		LitOrConst::Const(k) => match input {
+			[a, b] => {
+				if k {
+					// TODO: Can we avoid this?
+					emit_clause!(db, &[a.clone()])?;
+					emit_clause!(db, &[b.clone()])
+				} else {
+					emit_clause!(db, &[a.negate(), b.negate()])
+				}
+			}
+			[a, b, c] => {
+				let neg = |x: &DB::Lit| if k { x.clone() } else { x.negate() };
+				emit_clause!(db, &[neg(a), neg(b)])?;
+				emit_clause!(db, &[neg(a), neg(c)])?;
+				emit_clause!(db, &[neg(b), neg(c)])
+			}
+			_ => unreachable!(),
+		},
 	}
-	Ok(carry)
 }
 
-/// Force the circuit that represents the carry bit when adding lits together using an adder
-/// circuit to take the value k
-#[cfg_attr(feature = "trace", tracing::instrument(name = "force_carry", skip_all, fields(constraint = ?lits)))]
-fn force_carry<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Result {
-	match lits {
-		[a, b] => {
-			if k {
-				// TODO: Can we avoid this?
-				emit_clause!(db, &[a.clone()])?;
-				emit_clause!(db, &[b.clone()])
-			} else {
-				emit_clause!(db, &[a.negate(), b.negate()])
-			}
-		}
-		[a, b, c] => {
-			let neg = |x: &DB::Lit| if k { x.clone() } else { x.negate() };
-			emit_clause!(db, &[neg(a), neg(b)])?;
-			emit_clause!(db, &[neg(a), neg(c)])?;
-			emit_clause!(db, &[neg(b), neg(c)])
-		}
-		_ => unreachable!(),
+#[cfg(feature = "trace")]
+fn trace_print_carry<Lit: Literal>(input: &[Lit], output: &LitOrConst<Lit>) -> String {
+	use crate::trace::trace_print_lit;
+	let inner = itertools::join(input.iter().map(trace_print_lit), " + ");
+	match output {
+		LitOrConst::Lit(r) => format!("{} ≡ ({} > 1)", trace_print_lit(r), inner),
+		LitOrConst::Const(true) => format!("{inner} > 1"),
+		LitOrConst::Const(false) => format!("{inner} ≤ 1"),
 	}
 }
 
