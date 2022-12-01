@@ -288,16 +288,86 @@ fn force_carry<DB: ClauseDatabase>(db: &mut DB, lits: &[DB::Lit], k: bool) -> Re
 
 #[cfg(test)]
 mod tests {
+	#[cfg(feature = "trace")]
+	use traced_test::test;
+
 	use super::*;
 	use crate::{
 		cardinality_one::tests::card1_test_suite,
-		helpers::tests::assert_sol,
+		helpers::tests::{assert_enc_sol, assert_sol, TestDB},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
-			LimitComp,
+			LimitComp, StaticLinEncoder,
 		},
-		CardinalityOne, Checker, Encoder,
+		CardinalityOne, Checker, Comparator, Encoder, LinExp, LinearConstraint, LinearEncoder,
+		PairwiseEncoder,
 	};
+
+	#[test]
+	fn test_pb_encode() {
+		assert_enc_sol!(
+			LinearEncoder::<StaticLinEncoder>::default(),
+			4,
+			&LinearConstraint::<i32,i32>::new(LinExp::from((1,1)) + (2,1) + (3,1) + (4,2),
+			Comparator::LessEq,
+			1)
+			=>
+			vec![
+			vec![-4], vec![-3, -1], vec![-2, -1], vec![-3, -2]
+			],
+			vec![
+				vec![-1, -2, -3, -4],
+				vec![-1, -2, 3, -4],
+				vec![-1, 2, -3, -4],
+				vec![1, -2, -3, -4],
+			]
+		);
+	}
+
+	#[test]
+	fn test_encoders() {
+		// +7*x1 +10*x2 +4*x3 +4*x4 <= 9
+		let mut db = TestDB::new(4).expect_solutions(vec![
+			vec![-1, -2, -3, -4],
+			vec![1, -2, -3, -4],
+			vec![-1, -2, 3, -4],
+			vec![-1, -2, -3, 4],
+		]);
+		// two.add_clause(&[-5]).unwrap();
+		// TODO encode this if encoder does not support constraint
+		assert!(PairwiseEncoder::default()
+			.encode(
+				&mut db,
+				&CardinalityOne {
+					lits: vec![1, 2],
+					cmp: LimitComp::LessEq
+				}
+			)
+			.is_ok());
+		assert!(PairwiseEncoder::default()
+			.encode(
+				&mut db,
+				&CardinalityOne {
+					lits: vec![3, 4],
+					cmp: LimitComp::LessEq
+				}
+			)
+			.is_ok());
+		assert!(LinearEncoder::<StaticLinEncoder<AdderEncoder>>::default()
+			.encode(
+				&mut db,
+				&LinearConstraint::<i32, i32>::new(
+					LinExp::default()
+						.add_choice(&[(1, 7), (2, 10)])
+						.add_choice(&[(3, 4), (4, 4)]),
+					Comparator::LessEq,
+					9,
+				),
+			)
+			.is_ok());
+		db.check_complete();
+	}
+
 	linear_test_suite!(AdderEncoder::default());
 	card1_test_suite!(AdderEncoder::default());
 }

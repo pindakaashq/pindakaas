@@ -202,19 +202,23 @@ mod subscriber {
 		fn event(&self, event: &Event<'_>) {
 			let mut stack = self.stack.lock().unwrap();
 			let indent = stack.len();
-			let mut frame = stack.last_mut().unwrap();
+			let frame = stack.last_mut();
 			let mut visitor = EventVisitor::default();
 			event.record(&mut visitor);
 			if let Some(event) = visitor.recorded_event() {
 				match event {
 					RecordedEvent::NewVar(var, name) => {
-						frame.vars += 1;
+						if let Some(frame) = frame {
+							frame.vars += 1;
+						}
 						let mut lit_names = self.lit_names.lock().unwrap();
 						lit_names.insert(var, name);
 					}
 					RecordedEvent::Clause(cl, fail) => {
+						if let Some(frame) = frame {
+							frame.clauses += 1;
+						}
 						let lit_names = self.lit_names.lock().unwrap();
-						frame.clauses += 1;
 						let clause = join(
 							cl.into_iter().map(|(neg, lit)| {
 								let mut label = lit_names
@@ -395,6 +399,7 @@ mod subscriber {
 #[cfg(feature = "trace")]
 pub use subscriber::{FlushGuard, Tracer};
 
+#[cfg(feature = "trace")]
 pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 	num.to_string()
 		.chars()
@@ -404,6 +409,7 @@ pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 		.into_iter()
 }
 
+#[cfg(feature = "trace")]
 pub(crate) fn subscripted_name(name: &str, sub: usize) -> String {
 	let mut s = String::from(name);
 	for c in subscript_number(sub) {

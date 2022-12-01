@@ -28,15 +28,18 @@ impl XorEncoder {
 
 #[cfg(test)]
 pub mod tests {
-	use super::*;
-	use crate::Unsatisfiable;
-
-	use crate::{linear::LimitComp, CardinalityOne, Checker, Encoder, LadderEncoder};
 	use splr::{
 		types::{CNFDescription, Instantiate},
 		Certificate, Config, SatSolverIF, SolveIF, Solver, SolverError,
 	};
 	use std::{collections::HashSet, thread::panicking};
+	#[cfg(feature = "trace")]
+	use traced_test::test;
+
+	use super::*;
+	use crate::{
+		linear::LimitComp, CardinalityOne, Checker, Encoder, LadderEncoder, Unsatisfiable,
+	};
 
 	macro_rules! assert_enc {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
