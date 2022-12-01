@@ -12,7 +12,7 @@ pub struct BitwiseEncoder {}
 impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne<DB::Lit>> for BitwiseEncoder {
 	#[cfg_attr(
 		feature = "trace",
-		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = card1.trace_print()))
+		tracing::instrument(name = "bitwise_encoder", skip_all, fields(constraint = card1.trace_print()))
 	)]
 	fn encode(&mut self, db: &mut DB, card1: &CardinalityOne<DB::Lit>) -> Result {
 		let size = card1.lits.len();
@@ -43,6 +43,9 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne<DB::Lit>> for BitwiseEncoder
 
 #[cfg(test)]
 mod tests {
+	#[cfg(feature = "trace")]
+	use traced_test::test;
+
 	use super::*;
 	use crate::{
 		cardinality_one::tests::card1_test_suite,
@@ -55,9 +58,6 @@ mod tests {
 
 	#[test]
 	fn test_eo_bitwise() {
-		let (tracer, _guard) = crate::trace::Tracer::new();
-		tracing::subscriber::set_global_default(tracer).expect("setting tracing default failed");
-
 		assert_enc_sol!(
 			BitwiseEncoder::default(),
 			2,

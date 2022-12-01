@@ -396,6 +396,9 @@ impl<'a, Lit: Literal + Zero + One> Iterator for CnfIterator<'a, Lit> {
 
 #[cfg(test)]
 mod tests {
+	#[cfg(feature = "trace")]
+	use traced_test::test;
+
 	use super::*;
 
 	#[test]

@@ -3,8 +3,6 @@ use crate::{
 	Unsatisfiable,
 };
 
-use itertools::join;
-
 mod bitwise;
 mod ladder;
 mod pairwise;
@@ -20,8 +18,9 @@ pub struct CardinalityOne<Lit: Literal> {
 }
 
 impl<Lit: Literal> CardinalityOne<Lit> {
+	#[cfg(feature = "trace")]
 	pub(crate) fn trace_print(&self) -> String {
-		let x = join(self.lits.iter().map(|l| format!("{{{l:?}}}")), " + ");
+		let x = itertools::join(self.lits.iter().map(|l| format!("{{{l:?}}}")), " + ");
 		let op = if self.cmp == LimitComp::LessEq {
 			"≤"
 		} else {

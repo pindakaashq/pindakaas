@@ -145,6 +145,9 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 
 #[cfg(test)]
 mod tests {
+	#[cfg(feature = "trace")]
+	use traced_test::test;
+
 	use super::*;
 	use crate::{
 		// cardinality_one::tests::card1_test_suite, CardinalityOne,

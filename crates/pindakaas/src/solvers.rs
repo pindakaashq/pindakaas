@@ -184,6 +184,9 @@ impl<Lit: Literal + Zero + One + Into<i32>> From<Cnf<Lit>> for SplrSolver {
 
 #[cfg(test)]
 mod tests {
+	#[cfg(all(feature = "trace", feature = "splr"))] // TODO: currently marked as unused when splr feature is not enabled
+	use traced_test::test;
+
 	/// TODO: This breaks things, but I think it should be solved in SPLR 0.17
 	#[cfg(feature = "splr")]
 	#[test]

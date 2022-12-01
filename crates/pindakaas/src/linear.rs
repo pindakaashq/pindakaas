@@ -17,7 +17,6 @@ mod totalizer;
 pub use adder::AdderEncoder;
 pub use aggregator::LinearAggregator;
 pub use bdd::BddEncoder;
-use itertools::join;
 pub use swc::SwcEncoder;
 pub use totalizer::TotalizerEncoder;
 
@@ -64,8 +63,9 @@ pub struct Linear<Lit: Literal, C: Coefficient> {
 }
 
 impl<Lit: Literal, C: Coefficient> Linear<Lit, C> {
+	#[cfg(feature = "trace")]
 	pub(crate) fn trace_print(&self) -> String {
-		let x = join(
+		let x = itertools::join(
 			self.terms
 				.iter()
 				.flat_map(|part| part.iter().map(|(lit, coef)| (lit.clone(), **coef)))
@@ -556,11 +556,8 @@ impl<
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::{
-		helpers::tests::{assert_enc_sol, TestDB},
-		PairwiseEncoder,
-	};
+	use super::Part;
+	use crate::PosCoeff;
 
 	pub(crate) fn construct_terms(terms: &[(i32, i32)]) -> Vec<Part<i32, PosCoeff<i32>>> {
 		terms
@@ -569,78 +566,10 @@ mod tests {
 			.collect()
 	}
 
-	#[test]
-	fn test_pb_encode() {
-		assert_enc_sol!(
-			LinearEncoder::<StaticLinEncoder>::default(),
-			4,
-			&LinearConstraint::<i32,i32>::new(LinExp::from((1,1)) + (2,1) + (3,1) + (4,2),
-			Comparator::LessEq,
-			1)
-			=>
-			vec![
-			vec![-4], vec![-3, -1], vec![-2, -1], vec![-3, -2]
-			],
-			vec![
-				vec![-1, -2, -3, -4],
-				vec![-1, -2, 3, -4],
-				vec![-1, 2, -3, -4],
-				vec![1, -2, -3, -4],
-			]
-		);
-	}
-
-	#[test]
-	fn test_encoders() {
-		// +7*x1 +10*x2 +4*x3 +4*x4 <= 9
-		let mut db = TestDB::new(4).expect_solutions(vec![
-			vec![-1, -2, -3, -4],
-			vec![1, -2, -3, -4],
-			vec![-1, -2, 3, -4],
-			vec![-1, -2, -3, 4],
-		]);
-		// two.add_clause(&[-5]).unwrap();
-		// TODO encode this if encoder does not support constraint
-		assert!(PairwiseEncoder::default()
-			.encode(
-				&mut db,
-				&CardinalityOne {
-					lits: vec![1, 2],
-					cmp: LimitComp::LessEq
-				}
-			)
-			.is_ok());
-		assert!(PairwiseEncoder::default()
-			.encode(
-				&mut db,
-				&CardinalityOne {
-					lits: vec![3, 4],
-					cmp: LimitComp::LessEq
-				}
-			)
-			.is_ok());
-		assert!(LinearEncoder::<StaticLinEncoder<AdderEncoder>>::default()
-			.encode(
-				&mut db,
-				&LinearConstraint::<i32, i32>::new(
-					LinExp::default()
-						.add_choice(&[(1, 7), (2, 10)])
-						.add_choice(&[(3, 4), (4, 4)]),
-					Comparator::LessEq,
-					9,
-				),
-			)
-			.is_ok());
-		db.check_complete();
-	}
-
 	macro_rules! linear_test_suite {
 		($encoder:expr) => {
 			#[test]
 			fn test_small_le_1() {
-				let (tracer, _guard) = crate::trace::Tracer::new();
-				tracing::subscriber::set_global_default(tracer).expect("setting tracing default failed");
-
 				assert_sol!(
 					$encoder,
 					3,

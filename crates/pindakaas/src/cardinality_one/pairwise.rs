@@ -26,8 +26,10 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne<DB::Lit>> for PairwiseEncode
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+	#[cfg(feature = "trace")]
+	use traced_test::test;
 
+	use super::*;
 	use crate::{
 		cardinality_one::tests::card1_test_suite,
 		helpers::tests::{assert_enc_sol, assert_sol},

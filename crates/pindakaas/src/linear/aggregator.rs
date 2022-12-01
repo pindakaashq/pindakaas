@@ -445,6 +445,8 @@ impl LinearAggregator {
 
 #[cfg(test)]
 mod tests {
+	#[cfg(feature = "trace")]
+	use traced_test::test;
 	use itertools::Itertools;
 
 	use super::*;
