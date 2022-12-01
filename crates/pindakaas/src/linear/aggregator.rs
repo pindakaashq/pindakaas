@@ -3,14 +3,19 @@ use std::hash::BuildHasherDefault;
 
 use crate::{
 	linear::{Constraint, LimitComp, Part, PosCoeff},
+	trace::emit_clause,
 	Cardinality, CardinalityOne, ClauseDatabase, Coefficient, Comparator, LinVariant, Linear,
-	LinearConstraint, Literal, Result, Unsatisfiable, trace::emit_clause,
+	LinearConstraint, Literal, Result, Unsatisfiable,
 };
 
 #[derive(Default)]
 pub struct LinearAggregator {}
 
 impl LinearAggregator {
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
+	)]
 	pub fn aggregate<DB: ClauseDatabase, C: Coefficient>(
 		&mut self,
 		db: &mut DB,
@@ -18,7 +23,8 @@ impl LinearAggregator {
 	) -> Result<LinVariant<DB::Lit, C>> {
 		// Convert ≤ to ≥ and aggregate multiple occurrences of the same
 		// variable.
-		let mut agg = FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), BuildHasherDefault::default());
+		let mut agg =
+			FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), BuildHasherDefault::default());
 		for term in &lin.exp.terms {
 			let var = term.0.var();
 			let entry = agg.entry(var).or_insert_with(C::zero);
@@ -136,7 +142,8 @@ impl LinearAggregator {
 							let y = db.new_var();
 
                             // ~x1 /\ ~x2 /\ .. -> y == x1 \/ x2 \/ .. \/ y
-							emit_clause!(db, 
+							emit_clause!(
+								db,
 								&terms
 									.iter()
 									.map(|(lit, _)| lit.clone())
@@ -328,7 +335,8 @@ impl LinearAggregator {
 
 				// If we have only 2 (unassigned) lits, which together (but not individually) exceed k, then -x1\/-x2
 				if partition.iter().flat_map(|part| part.iter()).count() == 2 {
-					emit_clause!(db, 
+					emit_clause!(
+						db,
 						&partition
 							.iter()
 							.flat_map(|part| part.iter())
@@ -346,12 +354,15 @@ impl LinearAggregator {
 					for part in partition {
 						match part {
 							Part::Amo(terms) => {
-								emit_clause!(db, &[terms
-									.iter()
-									.max_by(|(_, a), (_, b)| a.cmp(b))
-									.unwrap()
-									.0
-									.clone()])?;
+								emit_clause!(
+									db,
+									&[terms
+										.iter()
+										.max_by(|(_, a), (_, b)| a.cmp(b))
+										.unwrap()
+										.0
+										.clone()]
+								)?;
 							}
 							Part::Ic(terms) | Part::Dom(terms, _, _) => {
 								for (lit, _) in terms {
@@ -445,9 +456,9 @@ impl LinearAggregator {
 
 #[cfg(test)]
 mod tests {
+	use itertools::Itertools;
 	#[cfg(feature = "trace")]
 	use traced_test::test;
-	use itertools::Itertools;
 
 	use super::*;
 	use crate::{helpers::tests::TestDB, linear::tests::construct_terms, LinExp};

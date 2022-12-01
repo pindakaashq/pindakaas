@@ -18,6 +18,10 @@ impl SwcEncoder {
 }
 
 impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for SwcEncoder {
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
+	)]
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		// TODO not possible to fix since both closures use db?
 		#[allow(clippy::needless_collect)]

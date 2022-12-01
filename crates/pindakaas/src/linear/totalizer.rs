@@ -19,6 +19,10 @@ impl TotalizerEncoder {
 }
 
 impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for TotalizerEncoder {
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
+	)]
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		assert!(lin.cmp == LimitComp::LessEq);
 		let xs = lin

@@ -11,6 +11,10 @@ use crate::{
 pub struct PairwiseEncoder {}
 
 impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne<DB::Lit>> for PairwiseEncoder {
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "pairwise_encoder", skip_all, fields(constraint = card1.trace_print()))
+	)]
 	fn encode(&mut self, db: &mut DB, card1: &CardinalityOne<DB::Lit>) -> Result {
 		// Add clause to ensure "at least one" literal holds
 		if card1.cmp == LimitComp::Equal {
