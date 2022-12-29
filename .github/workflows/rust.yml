@@ -12,14 +12,29 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build
+        run: cargo build --verbose
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run tests
+        run: cargo test --workspace --verbose
+  check:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - name: Check Formatting
         run: cargo fmt --all -- --check
-      - name: Build
-        run: cargo build --verbose
-      - name: Run tests
-        run: cargo test --workspace --verbose
       - name: Run clippy
         run: cargo clippy -- -D warnings
+  semver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Check semver
+        uses: obi1kenobi/cargo-semver-checks-action@v1
+        with:
+          crate-name: pindakaas
