@@ -16,18 +16,25 @@
 
 ## Supported Constraints
 
-- At most one
-  - **TODO encoding**
-- At most _K_
-  - **TODO encoding**
+- At most one (AMO)
+  - Bitwise encoding
+  - Ladder encoding
+  - Pairwise encoding
+- Cardinality constraints
+  - Sorting Network encoding
 - Boolean linear
-  - **TODO encoding**
-- Integer linear
-  - **TODO encoding**
+  - Adder encoding
+  - BDD encoding
+  - Sequential Weight Counter encoding
+  - Totalizer encoding
+- Integer (linear)
+  - Direct / Domain / Unary encoding
+  - Order encoding
+  - Binary encoding
 
 ## Installation and usage
 
-Although the main pindakaas library is written in rust, it is also available from Python and C(++).
+Although the main pindakaas library is written in rust, it is also available from Python. (A C(++) interface is also under consideration).
 
 ### Rust
 
@@ -37,15 +44,9 @@ cargo add pindakaas
 
 ### Python
 
-**TODO**
-
 ```bash
 pip install pindakaas
 ```
-
-### C/C++
-
-**TODO**
 
 ## Acknowledgements
 
