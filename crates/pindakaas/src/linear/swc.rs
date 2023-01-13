@@ -4,6 +4,7 @@ use crate::{
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 use iset::IntervalSet;
+use itertools::Itertools;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)
 #[derive(Clone, Default)]
@@ -31,9 +32,8 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		// self.cutoff = -C::one();
 		// self.add_consistency = true;
-		// TODO not possible to fix since both closures use db?
-		#[allow(clippy::needless_collect)]
-		let xs = lin.terms
+		let xs = lin
+			.terms
 			.iter()
 			.enumerate()
 			.map(|(i, part)| {
@@ -41,32 +41,41 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			})
 			.collect::<Vec<IntVarEnc<_, _>>>();
 		let n = xs.len();
-		xs.into_iter().enumerate().reduce(|(_, v), (i, x)| {
-			let dom = num::iter::range_inclusive(C::one(), std::cmp::min(v.ub() + x.ub(), *lin.k))
-				.map(|j| j..(j + C::one()))
-				.collect::<IntervalSet<_>>();
 
-			let next = next_int_var(
-				db,
-				dom,
-				self.cutoff,
-				self.add_consistency,
-				format!("swc_{i}"),
-			);
+		// TODO not possible to fix since both closures use db?
+		#[allow(clippy::needless_collect)]
+		let ys = std::iter::once(IntVarEnc::Const(C::zero()))
+			.chain(
+				(1..=n)
+					.map(|i| {
+						next_int_var(
+							db,
+							num::iter::range_inclusive(C::one() - *lin.k, C::zero())
+								.map(|j| j..(j + C::one()))
+								.collect::<IntervalSet<_>>(),
+							self.cutoff,
+							self.add_consistency,
+							format!("y_{i}"),
+						)
+					})
+					.take(n),
+			)
+			.collect::<Vec<_>>();
 
-			TernLeEncoder::default()
-				.encode(db, &TernLeConstraint::new(&v, &x, LimitComp::LessEq, &next))
-				.unwrap();
+		ys.into_iter()
+			.tuple_windows()
+			.zip(xs.into_iter())
+			.for_each(|((y_curr, y_next), x)| {
+				// x_i + y_{i+1} <= y_i
+				TernLeEncoder::default()
+					.encode(
+						db,
+						&TernLeConstraint::new(&x, &y_next, LimitComp::LessEq, &y_curr),
+					)
+					.unwrap();
 
-			// If the last aux var is binary, we need to always encode consistency to limit the total sum
-			if i == n - 1 && !self.add_consistency {
-				if let IntVarEnc::Bin(next_bin) = &next {
-					next_bin.consistent(db).unwrap();
-				}
-			}
-
-			(i + 1, next)
-		});
+				// TODO If the last aux var is binary, we need to always encode consistency to limit the total sum
+			});
 		Ok(())
 	}
 }
