@@ -61,7 +61,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarOrd<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}{{{}}}:O [{:?}]",
+			"{}:O ∈ {{{}}} [{:?}]",
 			self.lbl,
 			self.dom()
 				.iter(..)
@@ -77,13 +77,13 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}{{{}}}:B",
+			"{}:O ∈ {{{}}}",
 			self.lbl,
 			self.dom()
 				.iter(..)
 				.map(|iv| iv.end - C::one())
 				.sorted()
-				.join(","),
+				.join(",")
 		)
 	}
 }
