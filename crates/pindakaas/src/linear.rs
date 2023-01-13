@@ -146,7 +146,7 @@ impl fmt::Display for LimitComp {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			LimitComp::Equal => write!(f, "=="),
-			LimitComp::LessEq => write!(f, ">="),
+			LimitComp::LessEq => write!(f, "<="),
 		}
 	}
 }
