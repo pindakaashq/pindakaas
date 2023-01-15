@@ -136,7 +136,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		let xs = views
 			.into_iter(..)
 			.map(|(v, lit)| {
-				#[cfg(feature = "label")]
+				#[cfg(feature = "trace")]
 				let lbl = format!("{lbl}>={v:?}");
 				(v, lit.unwrap_or_else(|| new_var!(db, lbl)))
 			})
