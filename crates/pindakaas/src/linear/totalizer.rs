@@ -46,6 +46,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 		build_totalizer(
 			xs,
 			db,
+			&lin.cmp,
 			C::zero(),
 			0,
 			self.add_consistency,
@@ -59,6 +60,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 	layer: Vec<IntVarEnc<DB::Lit, C>>,
 	db: &mut DB,
+	cmp: &LimitComp,
 	l: C,
 	level: u32,
 	add_consistency: bool,
@@ -101,7 +103,7 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 					TernLeEncoder::default()
 						.encode(
 							db,
-							&TernLeConstraint::new(left, right, LimitComp::LessEq, &parent),
+							&TernLeConstraint::new(left, right, cmp.clone(), &parent),
 						)
 						.unwrap();
 					parent
@@ -109,7 +111,16 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 				_ => panic!(),
 			})
 			.collect();
-		build_totalizer(next_layer, db, l, level + 1, add_consistency, cutoff, root)
+		build_totalizer(
+			next_layer,
+			db,
+			cmp,
+			l,
+			level + 1,
+			add_consistency,
+			cutoff,
+			root,
+		)
 	}
 }
 
