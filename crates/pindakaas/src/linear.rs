@@ -729,6 +729,40 @@ mod tests {
 					]
 				);
 			}
+
+
+			#[test]
+			fn test_small_eq_1() {
+				assert_sol!(
+					$encoder,
+					3,
+					&Linear {
+						terms: construct_terms(&[(1, 1), (2, 2), (3, 4),]),
+						cmp: LimitComp::Equal,
+						k: 5.into()
+					}
+					=> vec![
+						vec![ 1, -2,  3],
+					]
+				);
+			}
+
+			#[test]
+			fn test_small_eq_2() {
+				assert_sol!(
+					$encoder,
+					3,
+					&Linear {
+						terms: construct_terms(&[(1, 1), (2, 2), (3, 3),]),
+						cmp: LimitComp::Equal,
+						k: 3.into()
+					}
+					=> vec![
+						vec![-1, -2,  3],
+						vec![ 1,  2, -3],
+					]
+				);
+			}
 		};
 	}
 	pub(crate) use linear_test_suite;

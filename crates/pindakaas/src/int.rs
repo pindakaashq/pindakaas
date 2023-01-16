@@ -847,7 +847,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					for c_b in y.dom().iter(..).skip(1).chain(std::iter::once(
 						(y.ub() + C::one())..(y.ub() + C::one() + C::one()),
 					)) {
-						let c_c = (c_a.end - C::one()) + (c_b.end - C::one()) - C::one();
+						let c_c = (c_a.start) + (c_b.start) - C::one();
 						let c_c = c_c..(c_c + C::one());
 						let x_geq_c_a = x.geq(c_a.clone());
 						let y_geq_c_b = y.geq(c_b.clone());
