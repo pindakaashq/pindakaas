@@ -839,20 +839,27 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				}
 			}
 
-			// x<a /\ y<b -> z<a+b-1
+			let leq = |x: &IntVarEnc<DB::Lit, C>, v: Range<C>| -> Vec<Vec<DB::Lit>> {
+				negate_cnf(x.geq((v.start + C::one())..(v.end + C::one())))
+			};
+
+			// x<=a /\ y<=b -> z<=a+b
 			if cmp == &LimitComp::Equal {
-				for c_a in x.dom().iter(..).skip(1).chain(std::iter::once(
-					(x.ub() + C::one())..(x.ub() + C::one() + C::one()),
-				)) {
-					for c_b in y.dom().iter(..).skip(1).chain(std::iter::once(
-						(y.ub() + C::one())..(y.ub() + C::one() + C::one()),
-					)) {
-						let c_c = (c_a.start) + (c_b.start) - C::one();
+				for c_a in x.dom().iter(..) {
+					for c_b in y.dom().iter(..) {
+						let c_c = (c_a.end - C::one()) + (c_b.end - C::one());
 						let c_c = c_c..(c_c + C::one());
-						let x_geq_c_a = x.geq(c_a.clone());
-						let y_geq_c_b = y.geq(c_b.clone());
-						let z_geq_c_c = z.geq(c_c.clone());
-						add_clauses_for(db, x_geq_c_a, y_geq_c_b, negate_cnf(z_geq_c_c))?;
+						let x_geq_c_a = leq(x, c_a.clone());
+						let y_geq_c_b = leq(y, c_b.clone());
+						let z_geq_c_c = leq(z, c_c.clone());
+
+
+						add_clauses_for(
+							db,
+							negate_cnf(x_geq_c_a),
+							negate_cnf(y_geq_c_b),
+							z_geq_c_c,
+						)?;
 					}
 				}
 			}
