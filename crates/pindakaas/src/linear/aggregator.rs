@@ -12,7 +12,7 @@ use crate::{
 };
 use itertools::Itertools;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct LinearAggregator {
 	sorted_encoder: SortedEncoder,
 	sort_same_coefficients: usize,

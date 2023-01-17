@@ -11,6 +11,7 @@ use iset::interval_map;
 use itertools::Itertools;
 use num::Integer;
 
+#[derive(Clone)]
 pub struct SortedEncoder {
 	pub(crate) add_consistency: bool,
 	pub(crate) strategy: SortedStrategy,
@@ -19,6 +20,7 @@ pub struct SortedEncoder {
 	pub(crate) sort_n: SortN,
 }
 #[allow(dead_code)]
+#[derive(Clone)]
 pub enum SortN {
 	One,
 	#[allow(dead_code)] // TODO
