@@ -35,7 +35,8 @@ impl LinearAggregator {
 		db: &mut DB,
 		lin: &LinearConstraint<DB::Lit, C>,
 	) -> Result<LinVariant<DB::Lit, C>> {
-		// Convert ≤ to ≥ and aggregate multiple occurrences of the same
+		let mut k = lin.k;
+		// Aggregate multiple occurrences of the same
 		// variable.
 		let mut agg =
 			FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), BuildHasherDefault::default());
@@ -43,10 +44,18 @@ impl LinearAggregator {
 			let var = term.0.var();
 			let entry = agg.entry(var).or_insert_with(C::zero);
 			let mut coef = term.1 * lin.exp.mult;
-			if term.0.is_negated() ^ (lin.cmp == Comparator::GreaterEq) {
-				coef *= -C::one()
+			if term.0.is_negated() {
+				k -= coef;
+				coef = -coef;
 			}
+
 			*entry += coef;
+		}
+
+		// Convert ≥ to ≤
+		if lin.cmp == Comparator::GreaterEq {
+			agg = agg.into_iter().map(|(var, coef)| (var, -coef)).collect();
+			k = -k;
 		}
 
 		let mut partition = Vec::with_capacity(lin.exp.constraints.len());
@@ -99,11 +108,7 @@ impl LinearAggregator {
 			partition.push(Part::Amo(vec![term]));
 		}
 
-		let mut k = if lin.cmp == Comparator::GreaterEq {
-			-lin.k
-		} else {
-			lin.k
-		} - lin.exp.add;
+		k -= lin.exp.add;
 		let cmp = match lin.cmp {
 			Comparator::LessEq | Comparator::GreaterEq => LimitComp::LessEq,
 			Comparator::Equal => LimitComp::Equal,
@@ -543,19 +548,24 @@ mod tests {
 		);
 
 		// Aggregation of positive and negative occurrences of the same literal
+		// x1 +2*~x1 + ... <= 3
+		// x1 +2 -2*x1 + ... <= 3
+		// x1 -2*x1 + ... <= 1
+		// -1*x1 + ... <= 1
+		// +1*~x1 + ... <= 2
 		assert_eq!(
 			LinearAggregator::default().aggregate(
 				&mut db,
 				&LinearConstraint::new(
 					LinExp::from((1, 1)) + (-1, 2) + (2, 1) + (3, 2),
 					Comparator::LessEq,
-					2
+					3
 				)
 			),
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[(-1, 1), (2, 1), (3, 2)]),
 				cmp: LimitComp::LessEq,
-				k: 3.into()
+				k: 2.into()
 			}))
 		);
 
@@ -982,6 +992,35 @@ mod tests {
 				k: 13.into(),
 			}))
 		);
+	}
+
+	#[test]
+	fn test_false_trivial_unsat() {
+		let mut db = TestDB::new(7);
+		assert_eq!(
+			LinearAggregator::default().aggregate(
+				&mut db,
+				&LinearConstraint::new(
+					LinExp::from((1, 1)) + (-2, 2) + (3, 1) + (4, 1) + (-5, 4) + (6, 1) + (-7, 1),
+					Comparator::GreaterEq,
+					7
+				)
+			),
+			Ok(LinVariant::Linear(Linear {
+				terms: construct_terms(&[
+					(5, 4),
+					(2, 2),
+					(7, 1),
+					(-4, 1),
+					(-1, 1),
+					(-6, 1),
+					(-3, 1)
+				]),
+				cmp: LimitComp::LessEq,
+				k: 4.into(),
+			}))
+		);
+		db.check_complete();
 	}
 
 	#[test]
