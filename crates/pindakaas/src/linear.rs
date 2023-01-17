@@ -61,7 +61,7 @@ pub enum LinVariant<Lit: Literal, C: Coefficient> {
 #[derive(Debug, Clone)]
 pub struct Linear<Lit: Literal, C: Coefficient> {
 	pub(crate) terms: Vec<Part<Lit, PosCoeff<C>>>,
-	pub(crate) cmp: LimitComp,
+	pub cmp: LimitComp,
 	pub(crate) k: PosCoeff<C>,
 }
 
@@ -175,6 +175,31 @@ pub struct LinearConstraint<Lit: Literal, C: Coefficient> {
 	k: C,
 }
 
+impl From<LimitComp> for Comparator {
+	fn from(value: LimitComp) -> Self {
+		match value {
+			LimitComp::Equal => Comparator::Equal,
+			LimitComp::LessEq => Comparator::LessEq,
+		}
+	}
+}
+
+impl<Lit: Literal, C: Coefficient> From<Linear<Lit, C>> for LinearConstraint<Lit, C> {
+	fn from(lin: Linear<Lit, C>) -> Self {
+		LinearConstraint {
+			exp: LinExp::from_terms(
+				lin.terms
+					.iter()
+					.flat_map(|part| part.iter().map(|(l, c)| (l.clone(), *c.clone())))
+					.collect::<Vec<_>>()
+					.as_slice(),
+			),
+			cmp: lin.cmp.into(),
+			k: *lin.k,
+		}
+	}
+}
+
 impl<Lit: Literal, C: Coefficient> LinearConstraint<Lit, C> {
 	pub fn new(exp: LinExp<Lit, C>, cmp: Comparator, k: C) -> Self {
 		Self { exp, cmp, k }
@@ -197,6 +222,10 @@ impl<Lit: Literal, C: Coefficient> LinearConstraint<Lit, C> {
 			Comparator::GreaterEq => "≥",
 		};
 		format!("{x} {op} {:?}", self.k)
+	}
+
+	pub fn set_cmp(&mut self, cmp: Comparator) {
+		self.cmp = cmp;
 	}
 }
 
