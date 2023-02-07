@@ -735,7 +735,6 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 		tracing::instrument(name = "tern_le_encoder", skip_all, fields(constraint = format!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z)))
 	)]
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
-		// TODO properly use cmp!
 		let TernLeConstraint { x, y, cmp, z } = tern;
 		if matches!(x, IntVarEnc::Const(_)) {
 			self.encode(

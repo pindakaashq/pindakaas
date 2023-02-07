@@ -27,7 +27,6 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
-		assert!(lin.cmp == LimitComp::LessEq);
 		let xs = lin
 			.terms
 			.iter()
@@ -37,13 +36,14 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 			})
 			.sorted_by(|a: &IntVarEnc<_, C>, b: &IntVarEnc<_, C>| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
-		let mut ws = construct_bdd(db, &xs, lin.k.clone(), self.add_consistency).into_iter();
+		let mut ws =
+			construct_bdd(db, &xs, &lin.cmp, lin.k.clone(), self.add_consistency).into_iter();
 		let first = ws.next().unwrap();
 		xs.iter().zip(ws).fold(first, |curr, (x_i, next)| {
 			TernLeEncoder::default()
 				.encode(
 					db,
-					&TernLeConstraint::new(&curr, x_i, LimitComp::LessEq, &next),
+					&TernLeConstraint::new(&curr, x_i, lin.cmp.clone(), &next),
 				)
 				.unwrap();
 			next
@@ -56,6 +56,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	xs: &Vec<IntVarEnc<DB::Lit, C>>,
+	cmp: &LimitComp,
 	k: PosCoeff<C>,
 	add_consistency: bool,
 ) -> Vec<IntVarEnc<DB::Lit, C>> {
@@ -71,10 +72,16 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 			// TODO optimize
 			let lb = neg_inf..ubs[i..].iter().fold(k + C::one(), |acc, ub| acc - *ub);
 			let ub = (k + C::one())..inf;
-			interval_map! { lb => LitOrConst::Const(true), ub => LitOrConst::Const(false) }
+                match cmp {
+                    LimitComp::LessEq => interval_map! { lb => LitOrConst::Const(true), ub => LitOrConst::Const(false) },
+                    LimitComp::Equal => interval_map! { lb.start..(lb.end - C::one()) => LitOrConst::Const(false), ub => LitOrConst::Const(false) }
+                }
 		})
 		.chain(std::iter::once(
-			interval_map! { neg_inf..k+C::one() => LitOrConst::Const(true) , k+C::one()..inf => LitOrConst::Const(false) },
+                match cmp {
+                    LimitComp::LessEq => interval_map! { neg_inf..k+C::one() => LitOrConst::Const(true), k+C::one()..inf => LitOrConst::Const(false) },
+                    LimitComp::Equal => interval_map! { neg_inf..k => LitOrConst::Const(false), k..k+C::one() => LitOrConst::Const(true), k+C::one()..inf => LitOrConst::Const(false) },
+                }
 		))
 		.collect();
 	bdd(db, 0, xs, C::zero(), &mut ws, true);
