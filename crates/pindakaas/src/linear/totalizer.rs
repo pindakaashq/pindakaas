@@ -1,6 +1,9 @@
+//use iset::{interval_set, IntervalSet};
+use itertools::Itertools;
+
 use crate::{
 	int::{
-		next_int_var, ord_plus_ord_le_ord_sparse_dom, IntVarEnc, IntVarOrd, TernLeConstraint,
+		next_int_var, IntVarEnc, IntVarOrd, TernLeConstraint,
 		TernLeEncoder,
 	},
 	linear::LimitComp,
@@ -72,44 +75,55 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 		let next_layer = layer
 			.chunks(2)
 			.enumerate()
-			.map(|(node, children)| match children {
+			.map(|(node, children)| {
+				let doms = match &children.iter().map(|x| x.dom().clone()).collect::<Vec<_>>()[..] {
+					[x] => x.clone(),
+					[left, right] => {
+						if layer.len() > 2 {
+							left.iter(..)
+								.cartesian_product(right.iter(..))
+								.map(|(a, b)| a.end - C::one() + b.end - C::one())
+                                .filter(|&d| d <= root.ub())
+								.sorted()
+                                .dedup()
+								.tuple_windows()
+								.map(|(a, b)| (a + C::one())..(b + C::one()))
+								.collect()
+						} else {
+							root.dom()
+						}
+					}
+					_ => panic!(),
+				};
+				(children, doms)
+			})
+			.collect::<Vec<_>>();
+
+		let next_layer = next_layer
+			.into_iter()
+			.map(|(children, dom)| match children {
 				[x] => x.clone(),
 				[left, right] => {
-					let parent = if layer.len() > 2 {
-						let l = if layer.len() > 2 { C::zero() } else { l };
-						let dom = ord_plus_ord_le_ord_sparse_dom(
-							left.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
-							right
-								.dom()
-								.into_iter(..)
-								.map(|c| c.end - C::one())
-								.collect(),
-							l,
-							root.ub(),
-						);
-
-						next_int_var(
-							db,
-							dom,
-							cutoff,
-							add_consistency,
-							format!("gt_{level}_{node}"),
-						)
-					} else {
-						root.clone()
-					};
+					let parent = next_int_var(
+						db,
+						dom.clone(),
+						cutoff,
+						add_consistency,
+						format!("gt_{level}"),
+					);
 
 					TernLeEncoder::default()
 						.encode(
 							db,
-							&TernLeConstraint::new(left, right, cmp.clone(), &parent),
+							&TernLeConstraint::new(&left, &right, cmp.clone(), &parent),
 						)
 						.unwrap();
 					parent
 				}
-				_ => panic!(),
+				_ => unreachable!(),
 			})
-			.collect();
+			.collect::<Vec<_>>();
+
 		build_totalizer(
 			next_layer,
 			db,
