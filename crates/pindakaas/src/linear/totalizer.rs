@@ -1,11 +1,9 @@
-//use iset::{interval_set, IntervalSet};
+use std::collections::HashSet;
+
 use itertools::Itertools;
 
 use crate::{
-	int::{
-		next_int_var, IntVarEnc, IntVarOrd, TernLeConstraint,
-		TernLeEncoder,
-	},
+	int::{next_int_var, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 	linear::LimitComp,
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
@@ -34,7 +32,6 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
-
 		let xs = lin
 			.terms
 			.iter()
@@ -74,23 +71,33 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 	} else {
 		let next_layer = layer
 			.chunks(2)
-			.enumerate()
-			.map(|(node, children)| {
-				let doms = match &children.iter().map(|x| x.dom().clone()).collect::<Vec<_>>()[..] {
+			.map(|children| {
+				let doms = match &children
+					.iter()
+					.map(|x| {
+						x.dom()
+							.clone()
+							.into_iter(..)
+							.map(|x| x.end - C::one())
+							.collect::<HashSet<_>>()
+					})
+					.collect::<Vec<_>>()[..]
+				{
 					[x] => x.clone(),
 					[left, right] => {
 						if layer.len() > 2 {
-							left.iter(..)
-								.cartesian_product(right.iter(..))
-								.map(|(a, b)| a.end - C::one() + b.end - C::one())
-                                .filter(|&d| d <= root.ub())
-								.sorted()
-                                .dedup()
-								.tuple_windows()
-								.map(|(a, b)| (a + C::one())..(b + C::one()))
-								.collect()
+							left.iter()
+								.cartesian_product(right.iter())
+								.map(|(&a, &b)| a + b)
+								.filter(|&d| d <= root.ub())
+								//.sorted()
+								//.dedup()
+								.collect::<HashSet<_>>()
 						} else {
 							root.dom()
+								.into_iter(..)
+								.map(|x| x.end - C::one())
+								.collect::<HashSet<_>>()
 						}
 					}
 					_ => panic!(),
@@ -99,18 +106,30 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 			})
 			.collect::<Vec<_>>();
 
+		let doms = propagate_layer_bounds(
+			next_layer.iter().map(|(_, doms)| doms.clone()).collect(),
+			//next_layer.1,
+			cmp,
+			root.ub(),
+		);
+
 		let next_layer = next_layer
 			.into_iter()
-			.map(|(children, dom)| match children {
+			.zip(doms.into_iter())
+			.enumerate()
+			.map(|(node, ((children, _), dom))| match children {
 				[x] => x.clone(),
 				[left, right] => {
-					let parent = next_int_var(
-						db,
-						dom.clone(),
-						cutoff,
-						add_consistency,
-						format!("gt_{level}"),
-					);
+                    // TODO re-establish binary heurstic
+					let parent = if dom.len() == 1 {
+						IntVarEnc::Const(dom.into_iter().next().unwrap())
+					} else {
+						IntVarEnc::Ord(IntVarOrd::from_dom(
+							db,
+							dom.into_iter().sorted().collect::<Vec<_>>().as_slice(),
+							format!("gt_{}_{}", level + 1, node + 1),
+						))
+					};
 
 					TernLeEncoder::default()
 						.encode(
@@ -134,6 +153,39 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 			cutoff,
 			root,
 		)
+	}
+}
+
+fn propagate_layer_bounds<C: Coefficient>(
+	doms: Vec<HashSet<C>>,
+	cmp: &LimitComp,
+	k: C,
+) -> Vec<HashSet<C>> {
+	if cmp == &LimitComp::LessEq {
+		return doms;
+	}
+
+	let cnt = doms.iter().map(HashSet::len).sum::<usize>();
+	let layer_ub = doms
+		.iter()
+		.map(|x| x.iter().max().unwrap())
+		.fold(C::zero(), |a, &b| a + b);
+
+	let doms = doms
+		.into_iter()
+		.map(|dom| {
+			let dom_ub = dom.iter().max().unwrap().clone();
+			dom.into_iter()
+				.filter(|d| *d + layer_ub - dom_ub >= k)
+				.collect()
+		})
+		.collect::<Vec<_>>();
+
+	let new_cnt = doms.iter().map(HashSet::len).sum();
+	if cnt == new_cnt {
+		doms
+	} else {
+		propagate_layer_bounds(doms, cmp, k)
 	}
 }
 
