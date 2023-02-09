@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use itertools::Itertools;
 
 use crate::{
-	int::{next_int_var, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+	int::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 	linear::LimitComp,
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
@@ -120,7 +120,7 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 			.map(|(node, ((children, _), dom))| match children {
 				[x] => x.clone(),
 				[left, right] => {
-                    // TODO re-establish binary heurstic
+					// TODO re-establish binary heurstic
 					let parent = if dom.len() == 1 {
 						IntVarEnc::Const(dom.into_iter().next().unwrap())
 					} else {
@@ -177,6 +177,21 @@ fn propagate_layer_bounds<C: Coefficient>(
 			let dom_ub = dom.iter().max().unwrap().clone();
 			dom.into_iter()
 				.filter(|d| *d + layer_ub - dom_ub >= k)
+				.collect::<HashSet<_>>()
+		})
+		.collect::<Vec<_>>();
+
+	let layer_lb = doms
+		.iter()
+		.map(|x| x.iter().min().unwrap())
+		.fold(C::zero(), |a, &b| a + b);
+
+	let doms = doms
+		.into_iter()
+		.map(|dom| {
+			let dom_lb = dom.iter().min().unwrap().clone();
+			dom.into_iter()
+				.filter(|d| *d + layer_lb - dom_lb <= k)
 				.collect()
 		})
 		.collect::<Vec<_>>();
