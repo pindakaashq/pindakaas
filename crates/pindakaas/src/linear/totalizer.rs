@@ -89,9 +89,6 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 							left.iter()
 								.cartesian_product(right.iter())
 								.map(|(&a, &b)| a + b)
-								.filter(|&d| d <= root.ub())
-								//.sorted()
-								//.dedup()
 								.collect::<HashSet<_>>()
 						} else {
 							root.dom()
@@ -108,7 +105,6 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 
 		let doms = propagate_layer_bounds(
 			next_layer.iter().map(|(_, doms)| doms.clone()).collect(),
-			//next_layer.1,
 			cmp,
 			root.ub(),
 		);
@@ -161,25 +157,25 @@ fn propagate_layer_bounds<C: Coefficient>(
 	cmp: &LimitComp,
 	k: C,
 ) -> Vec<HashSet<C>> {
-	if cmp == &LimitComp::LessEq {
-		return doms;
-	}
-
 	let cnt = doms.iter().map(HashSet::len).sum::<usize>();
-	let layer_ub = doms
-		.iter()
-		.map(|x| x.iter().max().unwrap())
-		.fold(C::zero(), |a, &b| a + b);
 
-	let doms = doms
-		.into_iter()
-		.map(|dom| {
-			let dom_ub = dom.iter().max().unwrap().clone();
-			dom.into_iter()
-				.filter(|d| *d + layer_ub - dom_ub >= k)
-				.collect::<HashSet<_>>()
-		})
-		.collect::<Vec<_>>();
+	let doms = if cmp == &LimitComp::Equal {
+		let layer_ub = doms
+			.iter()
+			.map(|x| x.iter().max().unwrap())
+			.fold(C::zero(), |a, &b| a + b);
+
+		doms.into_iter()
+			.map(|dom| {
+				let dom_ub = dom.iter().max().unwrap().clone();
+				dom.into_iter()
+					.filter(|d| *d + layer_ub - dom_ub >= k)
+					.collect::<HashSet<_>>()
+			})
+			.collect::<Vec<_>>()
+	} else {
+		doms
+	};
 
 	let layer_lb = doms
 		.iter()
