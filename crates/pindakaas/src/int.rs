@@ -114,7 +114,10 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	pub fn from_dom<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, dom: &[C], lbl: String) -> Self {
 		Self::from_syms(
 			db,
-			dom.iter().skip(1).map(|&i| i..(i + C::one())).collect(),
+			dom.into_iter()
+				.tuple_windows()
+				.map(|(&a, &b)| (a + C::one())..(b + C::one()))
+				.collect(),
 			lbl,
 		)
 	}
@@ -273,7 +276,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		} else {
 			match self.xs.overlap(v).collect::<Vec<_>>()[..] {
 				[(_, x)] => vec![vec![x.clone()]],
-				_ => panic!("No or multiples variables at {v:?}"),
+				_ => panic!("No or multiples literals at {v:?} for var {self:?}"),
 			}
 		}
 	}
