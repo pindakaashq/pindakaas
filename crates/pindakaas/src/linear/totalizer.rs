@@ -103,17 +103,13 @@ pub(crate) fn build_totalizer<DB: ClauseDatabase, C: Coefficient>(
 			})
 			.collect::<Vec<_>>();
 
-		let doms = propagate_layer_bounds(
-			next_layer.iter().map(|(_, doms)| doms.clone()).collect(),
-			cmp,
-			root.ub(),
-		);
-
-		let next_layer = next_layer
+		let (children, doms): (Vec<_>, Vec<_>) = next_layer.into_iter().unzip();
+		let doms = propagate_layer_bounds(doms, cmp, root.ub());
+		let next_layer = children
 			.into_iter()
 			.zip(doms.into_iter())
 			.enumerate()
-			.map(|(node, ((children, _), dom))| match children {
+			.map(|(node, (children, dom))| match children {
 				[x] => x.clone(),
 				[left, right] => {
 					// TODO re-establish binary heurstic
