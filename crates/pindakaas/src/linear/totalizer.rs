@@ -84,8 +84,10 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 	}
 }
 
+// TODO perhaps id can be used by replacing vars HashMap to just vec
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct IntVar<C: Coefficient> {
+	id: usize,
 	dom: Vec<C>,
 }
 
@@ -206,8 +208,10 @@ fn build_totalizer<Lit: Literal, C: Coefficient>(
 	let mut model = Model {
 		vars: xs
 			.into_iter()
-			.map(|x| {
+			.enumerate()
+			.map(|(id, x)| {
 				let var = IntVar {
+					id,
 					dom: x.dom().iter(..).map(|d| d.end - C::one()).collect(),
 				};
 				(Rc::new(var), x)
@@ -232,6 +236,7 @@ fn build_totalizer<Lit: Literal, C: Coefficient>(
 				}
 				[left, right] => {
 					let parent = Rc::new(IntVar {
+						id: model.vars.len(),
 						dom: if layer.len() == 2 {
 							vec![k]
 						} else {
