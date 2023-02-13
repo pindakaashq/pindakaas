@@ -1,5 +1,6 @@
 use crate::Literal;
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -42,45 +43,25 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 				IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone(), format!("x_{i}")).into()
 			})
 			.collect::<Vec<IntVarEnc<DB::Lit, C>>>();
-		dbg!(&xs);
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
 		let mut model = build_totalizer(xs, &lin.cmp, *lin.k);
-		model.encode(db)?;
-		Ok(())
 
-		/*
-		model
-			.cons
-			.iter()
-			.map(|Lin { xs, cmp, k }| match children {
-				[x] => x.clone(),
-				[left, right] => {
-					// TODO re-establish binary heurstic
-					let parent = if dom.len() == 1 {
-						IntVarEnc::Const(dom.into_iter().next().unwrap())
-					} else {
-						IntVarEnc::Ord(IntVarOrd::from_dom(
-							db,
-							dom.into_iter().sorted().collect::<Vec<_>>().as_slice(),
-							format!("gt_{}_{}", level + 1, node + 1),
-						))
-					};
+		let mut size = model.size();
 
-					TernLeEncoder::default()
-						.encode(
-							db,
-							&TernLeConstraint::new(&left, &right, cmp.clone(), &parent),
-						)
-						.unwrap();
-					parent
-				}
-				_ => unreachable!(),
-			})
-			.collect::<Vec<_>>();
-			*/
+		loop {
+			for con in &mut model.cons {
+				con.propagate_bounds();
+			}
+			let new_size = model.size();
+			if size == new_size {
+				break;
+			} else {
+				size = new_size;
+			}
+		}
 
-		//Ok(())
+		model.encode(db)
 	}
 }
 
@@ -93,8 +74,8 @@ struct IntVar<C: Coefficient> {
 
 impl<C: Coefficient> IntVar<C> {
 	fn encode<DB: ClauseDatabase>(&self, db: &mut DB) -> IntVarEnc<DB::Lit, C> {
-		if self.dom.len() == 1 {
-			IntVarEnc::Const(self.dom.iter().next().unwrap().clone())
+		if self.size() == 1 {
+			IntVarEnc::Const(*self.dom.first().unwrap())
 		} else {
 			IntVarEnc::Ord(IntVarOrd::from_dom(
 				db,
@@ -104,97 +85,148 @@ impl<C: Coefficient> IntVar<C> {
 					.cloned()
 					.collect::<Vec<_>>()
 					.as_slice(),
-				format!("gt"),
+				"gt".to_string(),
 			))
+		}
+	}
+
+	fn size(&self) -> usize {
+		self.dom.len()
+	}
+
+	fn lb(&self, c: &C) -> C {
+		*c * if c.is_negative() {
+			self.dom[self.dom.len() - 1]
+		} else {
+			self.dom[0]
+		}
+	}
+
+	fn ub(&self, c: &C) -> C {
+		*c * if c.is_negative() {
+			self.dom[0]
+		} else {
+			self.dom[self.dom.len() - 1]
 		}
 	}
 }
 
 #[derive(Debug)]
 struct Lin<C: Coefficient> {
-	xs: Vec<Rc<IntVar<C>>>,
+	xs: Vec<(C, Rc<RefCell<IntVar<C>>>)>,
 	cmp: LimitComp,
-	k: C,
+}
+
+impl<C: Coefficient> Lin<C> {
+	fn lb(&self) -> C {
+		self.xs
+			.iter()
+			.map(|(c, x)| x.borrow().lb(c))
+			.fold(C::zero(), |a, b| a + b)
+	}
+	fn ub(&self) -> C {
+		self.xs
+			.iter()
+			.map(|(c, x)| x.borrow().ub(c))
+			.fold(C::zero(), |a, b| a + b)
+	}
+
+	fn propagate_bounds(&mut self) {
+		loop {
+			let mut fixpoint = true;
+			if self.cmp == LimitComp::Equal {
+				let xs_ub = self.ub();
+				for (c, x) in &self.xs {
+					let x_ub = x.borrow().ub(c);
+					x.borrow_mut().dom.retain(|d| {
+						if *c * *d + xs_ub - x_ub >= C::zero() {
+							true
+						} else {
+							fixpoint = false;
+							false
+						}
+					});
+				}
+			}
+
+			let xs_lb = self.lb();
+			for (c, x) in &self.xs {
+				let x_lb = x.borrow().lb(c);
+				x.borrow_mut().dom.retain(|d| {
+					if *c * *d + xs_lb - x_lb <= C::zero() {
+						true
+					} else {
+						fixpoint = false;
+						false
+					}
+				});
+				assert!(x.borrow().size() > 0);
+			}
+
+			if fixpoint {
+				return;
+			}
+		}
+	}
 }
 
 #[derive(Debug)]
 struct Model<Lit: Literal, C: Coefficient> {
-	vars: HashMap<Rc<IntVar<C>>, IntVarEnc<Lit, C>>,
+	vars: HashMap<usize, IntVarEnc<Lit, C>>,
 	cons: Vec<Lin<C>>,
+	var_ids: usize,
 }
 
 impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
-	/*
-	fn var_enc<DB: ClauseDatabase<Lit = Lit>>(
-		&mut self,
-		db: &mut DB,
-		x: Rc<IntVar<C>>,
-	) -> &IntVarEnc<DB::Lit, C> {
-		self.vars.entry(x).or_insert_with(|| {})
+	fn new() -> Self {
+		Self {
+			vars: HashMap::new(),
+			cons: vec![],
+			var_ids: 0,
+		}
 	}
-	*/
 
-	/*
-	fn encode_vars<DB: ClauseDatabase<Lit = Lit>>(
-		&self,
-		db: &mut DB,
-		enc: Vec<IntVarEnc<Lit, C>>,
-	) -> HashMap<&IntVar<C>, IntVarEnc<Lit, C>> {
-		dbg!(&enc);
-		self.vars
-			.iter()
-			.zip_longest(enc)
-			.map(|x_enc| match x_enc {
-				EitherOrBoth::Both(x, enc) => (x, enc),
-				EitherOrBoth::Left(x) => {
-					let enc = if x.dom.len() == 1 {
-						IntVarEnc::Const(x.dom.iter().next().unwrap().clone())
-					} else {
-						IntVarEnc::Ord(IntVarOrd::from_dom(
-							db,
-							x.dom
-								.iter()
-								.sorted()
-								.cloned()
-								.collect::<Vec<_>>()
-								.as_slice(),
-							format!("gt"),
-						))
-					};
-					(x, enc)
-				}
-				EitherOrBoth::Right(_) => unreachable!(),
-			})
-			.collect::<HashMap<_, _>>()
+	fn new_var(&mut self, dom: Vec<C>) -> IntVar<C> {
+		self.var_ids += 1;
+		IntVar {
+			id: self.var_ids,
+			dom,
+		}
 	}
-	*/
+
+	fn size(&self) -> usize {
+		self.cons
+			.iter()
+			.map(|con| con.xs.iter().map(|(_, x)| x.borrow().size()).sum::<usize>())
+			.sum()
+	}
 
 	fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result {
-		//let encs = self.encode_vars(db, encs);
-
 		for con in &self.cons {
-			let Lin { xs, cmp, k: _ } = con;
-			assert!(con.xs.len() == 3);
+			let Lin { xs, cmp } = con;
+			assert!(
+				con.xs.len() == 3
+					&& con.xs.iter().map(|(c, _)| c).collect::<Vec<_>>()
+						== [&C::one(), &C::one(), &-C::one()]
+			);
 
-			for x in xs {
-				if !self.vars.contains_key(x) {
-					self.vars.insert(x.clone(), x.encode(db));
-				}
+			for (_, x) in xs {
+				self.vars.entry(x.borrow().id).or_insert_with(|| {
+					let enc = x.borrow().encode(db);
+					enc
+				});
 			}
-			//     self.var_enc(db, x.clone()).clone())
 
-			let (x, y, z) = (&self.vars[&xs[0]], &self.vars[&xs[1]], &self.vars[&xs[2]]);
+			let (x, y, z) = (
+				&self.vars[&xs[0].1.borrow().id],
+				&self.vars[&xs[1].1.borrow().id],
+				&self.vars[&xs[2].1.borrow().id],
+			);
 
 			TernLeEncoder::default()
-				.encode(
-					db,
-					//&TernLeConstraint::new(&v[xs[0].as_ref()], v[xs[1]], cmp.clone(), v[xs[2]]),
-					&TernLeConstraint::new(&x, &y, cmp.clone(), &z),
-				)
+				.encode(db, &TernLeConstraint::new(x, y, cmp.clone(), z))
 				.unwrap();
 		}
-
-		dbg!(&self);
 
 		Ok(())
 	}
@@ -205,55 +237,45 @@ fn build_totalizer<Lit: Literal, C: Coefficient>(
 	cmp: &LimitComp,
 	k: C,
 ) -> Model<Lit, C> {
-	let mut model = Model {
-		vars: xs
-			.into_iter()
-			.enumerate()
-			.map(|(id, x)| {
-				let var = IntVar {
-					id,
-					dom: x.dom().iter(..).map(|d| d.end - C::one()).collect(),
-				};
-				(Rc::new(var), x)
-			})
-			.collect(),
-		cons: vec![],
-	};
-
-	let mut layer = model
-		.vars
-		.iter()
-		.map(|(l, _)| l.clone())
+	let mut model = Model::new();
+	let mut layer = xs
+		.into_iter()
+		.map(|x| {
+			let var = model.new_var(x.dom().iter(..).map(|d| d.end - C::one()).collect());
+			model.vars.insert(var.id, x);
+			Rc::new(RefCell::new(var))
+		})
 		.collect::<Vec<_>>();
 
-	dbg!(&layer);
 	while layer.len() > 1 {
-		let mut next_layer = Vec::<Rc<IntVar<C>>>::new();
+		let mut next_layer = Vec::<Rc<RefCell<IntVar<C>>>>::new();
 		for children in layer.chunks(2) {
-			match &children[..] {
+			match children {
 				[x] => {
 					next_layer.push(x.clone());
 				}
 				[left, right] => {
-					let parent = Rc::new(IntVar {
-						id: model.vars.len(),
-						dom: if layer.len() == 2 {
-							vec![k]
-						} else {
-							left.dom
-								.iter()
-								.cartesian_product(right.dom.iter())
-								.map(|(&a, &b)| a + b)
-								.filter(|x| x <= &k)
-								.sorted()
-								.dedup()
-								.collect()
-						},
-					});
+					let dom = if layer.len() == 2 {
+						vec![k]
+					} else {
+						left.borrow()
+							.dom
+							.iter()
+							.cartesian_product(right.borrow().dom.iter())
+							.map(|(&a, &b)| a + b)
+							.sorted()
+							.dedup()
+							.collect()
+					};
+					let parent = Rc::new(RefCell::new(model.new_var(dom)));
+
 					model.cons.push(Lin {
-						xs: vec![left.clone(), right.clone(), parent.clone()],
+						xs: vec![
+							(C::one(), left.clone()),
+							(C::one(), right.clone()),
+							(-C::one(), parent.clone()),
+						],
 						cmp: cmp.clone(),
-						k: C::zero(),
 					});
 					next_layer.push(parent);
 				}
@@ -264,96 +286,6 @@ fn build_totalizer<Lit: Literal, C: Coefficient>(
 	}
 
 	model
-
-	/*
-			let (children, doms): (Vec<_>, Vec<_>) = next_layer.into_iter().unzip();
-			let doms = propagate_layer_bounds(doms, cmp, root.ub());
-			dbg!(&doms);
-			let next_layer = children
-				.into_iter()
-				.zip(doms.into_iter())
-				.enumerate()
-				.map(|(node, (children, dom))| match children {
-					[x] => x.clone(),
-					[left, right] => {
-						// TODO re-establish binary heurstic
-						let parent = if dom.len() == 1 {
-							IntVarEnc::Const(dom.into_iter().next().unwrap())
-						} else {
-							IntVarEnc::Ord(IntVarOrd::from_dom(
-								db,
-								dom.into_iter().sorted().collect::<Vec<_>>().as_slice(),
-								format!("gt_{}_{}", level + 1, node + 1),
-							))
-						};
-
-						TernLeEncoder::default()
-							.encode(
-								db,
-								&TernLeConstraint::new(&left, &right, cmp.clone(), &parent),
-							)
-							.unwrap();
-						parent
-					}
-					_ => unreachable!(),
-				})
-				.collect::<Vec<_>>();
-
-			build_totalizer(next_layer, db, cmp, level + 1)
-		}
-	*/
-}
-
-//add_consistency,
-//cutoff,
-//root,
-
-fn propagate_layer_bounds<C: Coefficient>(
-	doms: Vec<HashSet<C>>,
-	cmp: &LimitComp,
-	k: C,
-) -> Vec<HashSet<C>> {
-	let cnt = doms.iter().map(HashSet::len).sum::<usize>();
-
-	let doms = if cmp == &LimitComp::Equal {
-		let layer_ub = doms
-			.iter()
-			.map(|x| x.iter().max().unwrap())
-			.fold(C::zero(), |a, &b| a + b);
-
-		doms.into_iter()
-			.map(|dom| {
-				let dom_ub = dom.iter().max().unwrap().clone();
-				dom.into_iter()
-					.filter(|d| *d + layer_ub - dom_ub >= k)
-					.collect::<HashSet<_>>()
-			})
-			.collect::<Vec<_>>()
-	} else {
-		doms
-	};
-
-	let layer_lb = doms
-		.iter()
-		.map(|x| x.iter().min().unwrap())
-		.fold(C::zero(), |a, &b| a + b);
-
-	let doms = doms
-		.into_iter()
-		.map(|dom| {
-			let dom_lb = *dom.iter().min().unwrap();
-			dom.into_iter()
-				.filter(|d| *d + layer_lb - dom_lb <= k)
-				.collect()
-		})
-		.collect::<Vec<_>>();
-
-	let new_cnt = doms.iter().map(HashSet::len).sum();
-	if cnt == new_cnt {
-		doms
-	} else {
-		propagate_layer_bounds(doms, cmp, k)
-	}
 }
 
 #[cfg(test)]
