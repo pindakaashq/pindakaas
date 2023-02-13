@@ -792,7 +792,26 @@ mod tests {
 					]
 				);
 			}
+
+			#[test]
+			fn test_small_eq_3() {
+				assert_sol!(
+					$encoder,
+					4,
+					&Linear {
+						terms: construct_terms(&[(1, 2), (2, 3), (3, 5), (4,7)]),
+						cmp: LimitComp::Equal,
+						k: 10.into()
+					}
+					=> vec![
+						vec![-1, 2,-3, 4],
+						vec![ 1, 2, 3,-4],
+					]
+				);
+			}
 		};
+
+
 	}
 	pub(crate) use linear_test_suite;
 }
