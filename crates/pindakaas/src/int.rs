@@ -114,7 +114,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	pub fn from_dom<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, dom: &[C], lbl: String) -> Self {
 		Self::from_syms(
 			db,
-			dom.into_iter()
+			dom.iter()
 				.tuple_windows()
 				.map(|(&a, &b)| (a + C::one())..(b + C::one()))
 				.collect(),
@@ -854,7 +854,6 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 						let x_geq_c_a = leq(x, c_a.clone());
 						let y_geq_c_b = leq(y, c_b.clone());
 						let z_geq_c_c = leq(z, c_c.clone());
-
 
 						add_clauses_for(
 							db,
