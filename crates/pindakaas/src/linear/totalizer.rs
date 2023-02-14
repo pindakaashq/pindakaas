@@ -51,7 +51,8 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 
 		loop {
 			for con in &mut model.cons {
-				if con.cmp == LimitComp::Equal {
+				let propagate_dom = false;
+				if propagate_dom && con.cmp == LimitComp::Equal {
 					con.propagate_dom();
 				} else {
 					con.propagate_bounds();
@@ -240,8 +241,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	fn size(&self) -> usize {
 		self.cons
 			.iter()
-			.map(|con| con.xs.iter().map(|(_, x)| x.borrow().size()).sum::<usize>())
-			.sum()
+			.flat_map(|con| con.xs.iter().map(|(_, x)| x.borrow()))
+			.sorted_by_key(|x| x.id)
+			.dedup_by(|x, y| x.id == y.id)
+			.map(|x| x.size())
+			.sum::<usize>()
 	}
 
 	fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result {
