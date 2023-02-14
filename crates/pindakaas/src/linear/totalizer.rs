@@ -51,7 +51,11 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 
 		loop {
 			for con in &mut model.cons {
-				con.propagate_bounds();
+				if con.cmp == LimitComp::Equal {
+					con.propagate_dom();
+				} else {
+					con.propagate_bounds();
+				}
 			}
 			let new_size = model.size();
 			if size == new_size {
@@ -131,6 +135,44 @@ impl<C: Coefficient> Lin<C> {
 			.fold(C::zero(), |a, b| a + b)
 	}
 
+	fn propagate_dom(&mut self) {
+		assert!(self.cmp == LimitComp::Equal);
+		loop {
+			let mut fixpoint = true;
+			for (i, (c_i, x_i)) in self.xs.iter().enumerate() {
+				x_i.borrow_mut().dom.retain(|d_i| {
+					if self
+						.xs
+						.iter()
+						.enumerate()
+						.filter_map(|(j, (c_j, x_j))| {
+							(i != j).then(|| {
+								x_j.borrow()
+									.dom
+									.iter()
+									.map(|d_j_k| *c_j * *d_j_k)
+									.collect::<Vec<_>>()
+							})
+						})
+						.multi_cartesian_product()
+						.any(|rs| {
+							*c_i * *d_i + rs.into_iter().fold(C::zero(), |a, b| a + b) == C::zero()
+						}) {
+						true
+					} else {
+						fixpoint = false;
+						false
+					}
+				});
+				assert!(x_i.borrow().size() > 0);
+			}
+
+			if fixpoint {
+				return;
+			}
+		}
+	}
+
 	fn propagate_bounds(&mut self) {
 		loop {
 			let mut fixpoint = true;
@@ -146,6 +188,7 @@ impl<C: Coefficient> Lin<C> {
 							false
 						}
 					});
+					assert!(x.borrow().size() > 0);
 				}
 			}
 
