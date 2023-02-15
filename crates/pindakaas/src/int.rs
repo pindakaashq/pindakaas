@@ -1,6 +1,10 @@
 use iset::{interval_set, IntervalMap, IntervalSet};
-use itertools::Itertools;
 use rustc_hash::FxHashMap;
+
+use itertools::Itertools;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::{
 	helpers::is_powers_of_two,
@@ -16,8 +20,9 @@ use std::{
 	ops::{Neg, Range},
 };
 
+// TODO update with Model.new_var
 /// Chooses next integer variable heuristically; returns Ord or Bin based on whether the number of resulting literals is under the provided cutoff
-pub(crate) fn next_int_var<DB: ClauseDatabase, C: Coefficient>(
+pub(crate) fn _next_int_var<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	dom: IntervalSet<C>,
 	cutoff: Option<C>,
@@ -1516,6 +1521,262 @@ pub mod tests {
 				IntVarEncoding::Ord => IntVarOrd::from_dom(db, dom, lbl).into(),
 				_ => todo!(),
 			}),
+		}
+	}
+}
+
+#[derive(Debug)]
+pub(crate) struct Model<Lit: Literal, C: Coefficient> {
+	vars: HashMap<usize, IntVarEnc<Lit, C>>,
+	pub(crate) cons: Vec<Lin<C>>,
+	var_ids: usize,
+}
+
+impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
+	pub fn new() -> Self {
+		Self {
+			vars: HashMap::new(),
+			cons: vec![],
+			var_ids: 0,
+		}
+	}
+
+	pub fn add_int_var_enc(&mut self, x: IntVarEnc<Lit, C>) -> IntVar<C> {
+		let var = self.new_var(x.dom().iter(..).map(|d| d.end - C::one()).collect());
+		self.vars.insert(var.id, x);
+		var
+	}
+
+	pub fn new_var(&mut self, dom: Vec<C>) -> IntVar<C> {
+		self.var_ids += 1;
+		IntVar {
+			id: self.var_ids,
+			dom,
+		}
+	}
+
+	pub fn size(&self) -> usize {
+		self.cons
+			.iter()
+			.flat_map(|con| con.xs.iter().map(|(_, x)| x.borrow()))
+			.sorted_by_key(|x| x.id)
+			.dedup_by(|x, y| x.id == y.id)
+			.map(|x| x.size())
+			.sum::<usize>()
+	}
+
+	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result {
+		for con in &self.cons {
+			let Lin { xs, cmp } = con;
+			assert!(
+				con.xs.len() == 3
+					&& con.xs.iter().map(|(c, _)| c).collect::<Vec<_>>()
+						== [&C::one(), &C::one(), &-C::one()]
+			);
+
+			for (_, x) in xs {
+				self.vars.entry(x.borrow().id).or_insert_with(|| {
+					let enc = x.borrow().encode(db);
+					enc
+				});
+			}
+
+			let (x, y, z) = (
+				&self.vars[&xs[0].1.borrow().id],
+				&self.vars[&xs[1].1.borrow().id],
+				&self.vars[&xs[2].1.borrow().id],
+			);
+
+			TernLeEncoder::default()
+				.encode(db, &TernLeConstraint::new(x, y, cmp.clone(), z))
+				.unwrap();
+		}
+
+		Ok(())
+	}
+
+	pub fn propagate(&mut self, propagate_dom: bool) {
+		let mut size = self.size();
+		let size_orig = size;
+
+		let mut i = 0;
+		loop {
+			//propagate all constraints
+			for con in &mut self.cons {
+				// TODO stats;
+				if propagate_dom && con.cmp == LimitComp::Equal {
+					con.propagate_dom();
+				} else {
+					con.propagate_bounds();
+				}
+			}
+			// do again if the number of domain values decreased
+			let new_size = self.size();
+			i += 1;
+			if size == new_size {
+				break;
+			} else {
+				size = new_size;
+			}
+		}
+		println!("diff = {}", size_orig - size);
+		println!("loops = {i}");
+	}
+}
+
+#[derive(Debug)]
+pub struct Lin<C: Coefficient> {
+	pub(crate) xs: Vec<(C, Rc<RefCell<IntVar<C>>>)>,
+	pub(crate) cmp: LimitComp,
+}
+
+impl<C: Coefficient> Lin<C> {
+	pub fn tern(
+		x: Rc<RefCell<IntVar<C>>>,
+		y: Rc<RefCell<IntVar<C>>>,
+		cmp: LimitComp,
+		z: Rc<RefCell<IntVar<C>>>,
+	) -> Self {
+		Lin {
+			xs: vec![(C::one(), x), (C::one(), y), (-C::one(), z)],
+			cmp,
+		}
+	}
+
+	pub fn lb(&self) -> C {
+		self.xs
+			.iter()
+			.map(|(c, x)| x.borrow().lb(c))
+			.fold(C::zero(), |a, b| a + b)
+	}
+
+	pub fn ub(&self) -> C {
+		self.xs
+			.iter()
+			.map(|(c, x)| x.borrow().ub(c))
+			.fold(C::zero(), |a, b| a + b)
+	}
+
+	pub fn propagate_dom(&mut self) {
+		assert!(self.cmp == LimitComp::Equal);
+		loop {
+			let mut fixpoint = true;
+			for (i, (c_i, x_i)) in self.xs.iter().enumerate() {
+				x_i.borrow_mut().dom.retain(|d_i| {
+					if self
+						.xs
+						.iter()
+						.enumerate()
+						.filter_map(|(j, (c_j, x_j))| {
+							(i != j).then(|| {
+								x_j.borrow()
+									.dom
+									.iter()
+									.map(|d_j_k| *c_j * *d_j_k)
+									.collect::<Vec<_>>()
+							})
+						})
+						.multi_cartesian_product()
+						.any(|rs| {
+							*c_i * *d_i + rs.into_iter().fold(C::zero(), |a, b| a + b) == C::zero()
+						}) {
+						true
+					} else {
+						fixpoint = false;
+						false
+					}
+				});
+				assert!(x_i.borrow().size() > 0);
+			}
+
+			if fixpoint {
+				return;
+			}
+		}
+	}
+
+	pub fn propagate_bounds(&mut self) {
+		loop {
+			let mut fixpoint = true;
+			if self.cmp == LimitComp::Equal {
+				for (c, x) in &self.xs {
+					let xs_ub = self.ub();
+					let x_ub = x.borrow().ub(c);
+					x.borrow_mut().dom.retain(|d| {
+						if *c * *d + xs_ub - x_ub >= C::zero() {
+							true
+						} else {
+							fixpoint = false;
+							false
+						}
+					});
+					assert!(x.borrow().size() > 0);
+				}
+			}
+
+			for (c, x) in &self.xs {
+				let xs_lb = self.lb();
+				let x_lb = x.borrow().lb(c);
+				x.borrow_mut().dom.retain(|d| {
+					if *c * *d + xs_lb - x_lb <= C::zero() {
+						true
+					} else {
+						fixpoint = false;
+						false
+					}
+				});
+				assert!(x.borrow().size() > 0);
+			}
+
+			if fixpoint {
+				return;
+			}
+		}
+	}
+}
+
+// TODO perhaps id can be used by replacing vars HashMap to just vec
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct IntVar<C: Coefficient> {
+	pub(crate) id: usize,
+	pub(crate) dom: Vec<C>,
+}
+
+impl<C: Coefficient> IntVar<C> {
+	fn encode<DB: ClauseDatabase>(&self, db: &mut DB) -> IntVarEnc<DB::Lit, C> {
+		if self.size() == 1 {
+			IntVarEnc::Const(*self.dom.first().unwrap())
+		} else {
+			IntVarEnc::Ord(IntVarOrd::from_dom(
+				db,
+				self.dom
+					.iter()
+					.sorted()
+					.cloned()
+					.collect::<Vec<_>>()
+					.as_slice(),
+				"x".to_string(),
+			))
+		}
+	}
+
+	fn size(&self) -> usize {
+		self.dom.len()
+	}
+
+	fn lb(&self, c: &C) -> C {
+		*c * if c.is_negative() {
+			self.dom[self.dom.len() - 1]
+		} else {
+			self.dom[0]
+		}
+	}
+
+	fn ub(&self, c: &C) -> C {
+		*c * if c.is_negative() {
+			self.dom[0]
+		} else {
+			self.dom[self.dom.len() - 1]
 		}
 	}
 }
