@@ -1,12 +1,14 @@
+pub(crate) use crate::int::IntVar;
+use crate::int::Lin;
+use crate::int::Model;
 use crate::Literal;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use itertools::Itertools;
 
 use crate::{
-	int::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+	int::{IntVarEnc, IntVarOrd},
 	linear::LimitComp,
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
@@ -46,236 +48,8 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
 		let mut model = build_totalizer(xs, &lin.cmp, *lin.k);
-
-		let mut size = model.size();
-
-		loop {
-			for con in &mut model.cons {
-				let propagate_dom = false;
-				if propagate_dom && con.cmp == LimitComp::Equal {
-					con.propagate_dom();
-				} else {
-					con.propagate_bounds();
-				}
-			}
-			let new_size = model.size();
-			if size == new_size {
-				break;
-			} else {
-				size = new_size;
-			}
-		}
-
+		model.propagate(false);
 		model.encode(db)
-	}
-}
-
-// TODO perhaps id can be used by replacing vars HashMap to just vec
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-struct IntVar<C: Coefficient> {
-	id: usize,
-	dom: Vec<C>,
-}
-
-impl<C: Coefficient> IntVar<C> {
-	fn encode<DB: ClauseDatabase>(&self, db: &mut DB) -> IntVarEnc<DB::Lit, C> {
-		if self.size() == 1 {
-			IntVarEnc::Const(*self.dom.first().unwrap())
-		} else {
-			IntVarEnc::Ord(IntVarOrd::from_dom(
-				db,
-				self.dom
-					.iter()
-					.sorted()
-					.cloned()
-					.collect::<Vec<_>>()
-					.as_slice(),
-				"gt".to_string(),
-			))
-		}
-	}
-
-	fn size(&self) -> usize {
-		self.dom.len()
-	}
-
-	fn lb(&self, c: &C) -> C {
-		*c * if c.is_negative() {
-			self.dom[self.dom.len() - 1]
-		} else {
-			self.dom[0]
-		}
-	}
-
-	fn ub(&self, c: &C) -> C {
-		*c * if c.is_negative() {
-			self.dom[0]
-		} else {
-			self.dom[self.dom.len() - 1]
-		}
-	}
-}
-
-#[derive(Debug)]
-struct Lin<C: Coefficient> {
-	xs: Vec<(C, Rc<RefCell<IntVar<C>>>)>,
-	cmp: LimitComp,
-}
-
-impl<C: Coefficient> Lin<C> {
-	fn lb(&self) -> C {
-		self.xs
-			.iter()
-			.map(|(c, x)| x.borrow().lb(c))
-			.fold(C::zero(), |a, b| a + b)
-	}
-	fn ub(&self) -> C {
-		self.xs
-			.iter()
-			.map(|(c, x)| x.borrow().ub(c))
-			.fold(C::zero(), |a, b| a + b)
-	}
-
-	fn propagate_dom(&mut self) {
-		assert!(self.cmp == LimitComp::Equal);
-		loop {
-			let mut fixpoint = true;
-			for (i, (c_i, x_i)) in self.xs.iter().enumerate() {
-				x_i.borrow_mut().dom.retain(|d_i| {
-					if self
-						.xs
-						.iter()
-						.enumerate()
-						.filter_map(|(j, (c_j, x_j))| {
-							(i != j).then(|| {
-								x_j.borrow()
-									.dom
-									.iter()
-									.map(|d_j_k| *c_j * *d_j_k)
-									.collect::<Vec<_>>()
-							})
-						})
-						.multi_cartesian_product()
-						.any(|rs| {
-							*c_i * *d_i + rs.into_iter().fold(C::zero(), |a, b| a + b) == C::zero()
-						}) {
-						true
-					} else {
-						fixpoint = false;
-						false
-					}
-				});
-				assert!(x_i.borrow().size() > 0);
-			}
-
-			if fixpoint {
-				return;
-			}
-		}
-	}
-
-	fn propagate_bounds(&mut self) {
-		loop {
-			let mut fixpoint = true;
-			if self.cmp == LimitComp::Equal {
-				let xs_ub = self.ub();
-				for (c, x) in &self.xs {
-					let x_ub = x.borrow().ub(c);
-					x.borrow_mut().dom.retain(|d| {
-						if *c * *d + xs_ub - x_ub >= C::zero() {
-							true
-						} else {
-							fixpoint = false;
-							false
-						}
-					});
-					assert!(x.borrow().size() > 0);
-				}
-			}
-
-			let xs_lb = self.lb();
-			for (c, x) in &self.xs {
-				let x_lb = x.borrow().lb(c);
-				x.borrow_mut().dom.retain(|d| {
-					if *c * *d + xs_lb - x_lb <= C::zero() {
-						true
-					} else {
-						fixpoint = false;
-						false
-					}
-				});
-				assert!(x.borrow().size() > 0);
-			}
-
-			if fixpoint {
-				return;
-			}
-		}
-	}
-}
-
-#[derive(Debug)]
-struct Model<Lit: Literal, C: Coefficient> {
-	vars: HashMap<usize, IntVarEnc<Lit, C>>,
-	cons: Vec<Lin<C>>,
-	var_ids: usize,
-}
-
-impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
-	fn new() -> Self {
-		Self {
-			vars: HashMap::new(),
-			cons: vec![],
-			var_ids: 0,
-		}
-	}
-
-	fn new_var(&mut self, dom: Vec<C>) -> IntVar<C> {
-		self.var_ids += 1;
-		IntVar {
-			id: self.var_ids,
-			dom,
-		}
-	}
-
-	fn size(&self) -> usize {
-		self.cons
-			.iter()
-			.flat_map(|con| con.xs.iter().map(|(_, x)| x.borrow()))
-			.sorted_by_key(|x| x.id)
-			.dedup_by(|x, y| x.id == y.id)
-			.map(|x| x.size())
-			.sum::<usize>()
-	}
-
-	fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result {
-		for con in &self.cons {
-			let Lin { xs, cmp } = con;
-			assert!(
-				con.xs.len() == 3
-					&& con.xs.iter().map(|(c, _)| c).collect::<Vec<_>>()
-						== [&C::one(), &C::one(), &-C::one()]
-			);
-
-			for (_, x) in xs {
-				self.vars.entry(x.borrow().id).or_insert_with(|| {
-					let enc = x.borrow().encode(db);
-					enc
-				});
-			}
-
-			let (x, y, z) = (
-				&self.vars[&xs[0].1.borrow().id],
-				&self.vars[&xs[1].1.borrow().id],
-				&self.vars[&xs[2].1.borrow().id],
-			);
-
-			TernLeEncoder::default()
-				.encode(db, &TernLeConstraint::new(x, y, cmp.clone(), z))
-				.unwrap();
-		}
-
-		Ok(())
 	}
 }
 
@@ -287,11 +61,7 @@ fn build_totalizer<Lit: Literal, C: Coefficient>(
 	let mut model = Model::new();
 	let mut layer = xs
 		.into_iter()
-		.map(|x| {
-			let var = model.new_var(x.dom().iter(..).map(|d| d.end - C::one()).collect());
-			model.vars.insert(var.id, x);
-			Rc::new(RefCell::new(var))
-		})
+		.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
 		.collect::<Vec<_>>();
 
 	while layer.len() > 1 {
@@ -316,14 +86,12 @@ fn build_totalizer<Lit: Literal, C: Coefficient>(
 					};
 					let parent = Rc::new(RefCell::new(model.new_var(dom)));
 
-					model.cons.push(Lin {
-						xs: vec![
-							(C::one(), left.clone()),
-							(C::one(), right.clone()),
-							(-C::one(), parent.clone()),
-						],
-						cmp: cmp.clone(),
-					});
+					model.cons.push(Lin::tern(
+						left.clone(),
+						right.clone(),
+						cmp.clone(),
+						parent.clone(),
+					));
 					next_layer.push(parent);
 				}
 				_ => panic!(),

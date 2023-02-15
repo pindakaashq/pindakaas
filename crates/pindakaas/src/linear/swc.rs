@@ -1,10 +1,11 @@
+use crate::int::Lin;
 use crate::{
-	int::{next_int_var, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
-	linear::LimitComp,
+	int::{IntVarOrd, Model},
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
-use iset::IntervalSet;
 use itertools::Itertools;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)
 #[derive(Clone, Default)]
@@ -32,51 +33,54 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		// self.cutoff = -C::one();
 		// self.add_consistency = true;
+		let mut model = Model::new();
 		let xs = lin
 			.terms
 			.iter()
 			.enumerate()
 			.map(|(i, part)| {
-				IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone(), format!("x_{i}")).into()
+				Rc::new(RefCell::new(
+					model.add_int_var_enc(
+						IntVarOrd::from_part_using_le_ord(
+							db,
+							part,
+							lin.k.clone(),
+							format!("x_{i}"),
+						)
+						.into(),
+					),
+				))
 			})
-			.collect::<Vec<IntVarEnc<_, _>>>();
+			.collect::<Vec<_>>();
 		let n = xs.len();
 
 		// TODO not possible to fix since both closures use db?
-		#[allow(clippy::needless_collect)]
-		let ys = std::iter::once(IntVarEnc::Const(C::zero()))
+		#[allow(clippy::needless_collect)] // TODO no idea how to avoid collect
+		let ys = std::iter::once(model.new_var(vec![C::zero()]))
 			.chain(
-				(1..=n)
-					.map(|i| {
-						next_int_var(
-							db,
-							num::iter::range_inclusive(C::one() - *lin.k, C::zero())
-								.map(|j| j..(j + C::one()))
-								.collect::<IntervalSet<_>>(),
-							self.cutoff,
-							self.add_consistency,
-							format!("y_{i}"),
-						)
+				(1..n)
+					.map(|_| {
+						model.new_var(num::iter::range_inclusive(-*lin.k, C::zero()).collect())
 					})
 					.take(n),
 			)
+			.collect::<Vec<_>>()
+			.into_iter()
+			.chain(std::iter::once(model.new_var(vec![-*lin.k])))
+			.map(|y| Rc::new(RefCell::new(y)))
 			.collect::<Vec<_>>();
 
 		ys.into_iter()
 			.tuple_windows()
 			.zip(xs.into_iter())
 			.for_each(|((y_curr, y_next), x)| {
-				// x_i + y_{i+1} <= y_i
-				TernLeEncoder::default()
-					.encode(
-						db,
-						&TernLeConstraint::new(&x, &y_next, LimitComp::LessEq, &y_curr),
-					)
-					.unwrap();
-
-				// TODO If the last aux var is binary, we need to always encode consistency to limit the total sum
+				model
+					.cons
+					.push(Lin::tern(x, y_next, lin.cmp.clone(), y_curr));
 			});
-		Ok(())
+
+		model.propagate(false);
+		model.encode(db)
 	}
 }
 
