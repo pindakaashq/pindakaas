@@ -41,10 +41,11 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			.terms
 			.iter()
 			.enumerate()
-			.map(|(i, part)| {
+			.map(|(i, part)| -> IntVarEnc<DB::Lit, C> {
 				IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone(), format!("x_{i}")).into()
 			})
-			.collect::<Vec<IntVarEnc<DB::Lit, C>>>();
+			.sorted_by_key(|x| x.ub())
+			.collect::<Vec<_>>();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
 		let mut model = build_totalizer(xs, &lin.cmp, *lin.k);
