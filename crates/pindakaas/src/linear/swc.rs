@@ -79,7 +79,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 					.push(Lin::tern(x, y_next, lin.cmp.clone(), y_curr));
 			});
 
-		model.propagate(false);
+		model.propagate(false, vec![model.cons.len() - 1]);
 		model.encode(db)
 	}
 }
