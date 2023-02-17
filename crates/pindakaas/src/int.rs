@@ -1595,32 +1595,28 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		Ok(())
 	}
 
-	pub fn propagate(&mut self, propagate_dom: bool) {
-		let mut size = self.size();
-		let size_orig = size;
+	pub fn propagate(&mut self, propagate_dom: bool, mut queue: Vec<usize>) {
 
-		let mut i = 0;
-		loop {
+		while let Some(con) = queue.pop() {
 			//propagate all constraints
-			for con in &mut self.cons {
-				// TODO stats;
-				if propagate_dom && con.cmp == LimitComp::Equal {
-					con.propagate_dom();
-				} else {
-					con.propagate_bounds();
-				}
-			}
-			// do again if the number of domain values decreased
-			let new_size = self.size();
-			i += 1;
-			if size == new_size {
-				break;
+			if propagate_dom && self.cons[con].cmp == LimitComp::Equal {
+				self.cons[con].propagate_dom();
 			} else {
-				size = new_size;
+				let changed = self.cons[con].propagate_bounds();
+				let mut cons = self
+					.cons
+					.iter()
+					.enumerate()
+					.filter_map(|(i, con)| {
+						con.xs
+							.iter()
+							.any(|(_, x)| changed.contains(&x.borrow().id))
+							.then_some(i)
+					})
+					.collect::<Vec<_>>();
+				queue.append(&mut cons);
 			}
 		}
-		println!("diff = {}", size_orig - size);
-		println!("loops = {i}");
 	}
 }
 
@@ -1695,41 +1691,48 @@ impl<C: Coefficient> Lin<C> {
 		}
 	}
 
-	pub fn propagate_bounds(&mut self) {
+	pub fn propagate_bounds(&mut self) -> Vec<usize> {
+		let mut changed = vec![];
 		loop {
 			let mut fixpoint = true;
 			if self.cmp == LimitComp::Equal {
 				for (c, x) in &self.xs {
 					let xs_ub = self.ub();
-					let x_ub = x.borrow().ub(c);
-					x.borrow_mut().dom.retain(|d| {
+					let mut x = x.borrow_mut();
+					let x_ub = x.ub(c);
+					let id = x.id;
+					x.dom.retain(|d| {
 						if *c * *d + xs_ub - x_ub >= C::zero() {
 							true
 						} else {
+							changed.push(id);
 							fixpoint = false;
 							false
 						}
 					});
-					assert!(x.borrow().size() > 0);
+					assert!(x.size() > 0);
 				}
 			}
 
 			for (c, x) in &self.xs {
 				let xs_lb = self.lb();
-				let x_lb = x.borrow().lb(c);
-				x.borrow_mut().dom.retain(|d| {
+				let mut x = x.borrow_mut();
+				let x_lb = x.lb(c);
+				let id = x.id;
+				x.dom.retain(|d| {
 					if *c * *d + xs_lb - x_lb <= C::zero() {
 						true
 					} else {
+						changed.push(id);
 						fixpoint = false;
 						false
 					}
 				});
-				assert!(x.borrow().size() > 0);
+				assert!(x.size() > 0);
 			}
 
 			if fixpoint {
-				return;
+				return changed;
 			}
 		}
 	}

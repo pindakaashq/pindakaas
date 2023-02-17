@@ -48,7 +48,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
 		let mut model = build_totalizer(xs, &lin.cmp, *lin.k);
-		model.propagate(false);
+		model.propagate(false, vec![model.cons.len() - 1]);
 		model.encode(db)
 	}
 }
