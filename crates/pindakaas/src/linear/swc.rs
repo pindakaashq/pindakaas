@@ -1,10 +1,11 @@
-use crate::int::Lin;
+use crate::int::{Consistency, Lin};
 use crate::{
 	int::{IntVarOrd, Model},
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 use itertools::Itertools;
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)
@@ -56,7 +57,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 
 		// TODO not possible to fix since both closures use db?
 		#[allow(clippy::needless_collect)] // TODO no idea how to avoid collect
-		let ys = std::iter::once(model.new_var(vec![C::zero()]))
+		let ys = std::iter::once(model.new_var(BTreeSet::from([C::zero()])))
 			.chain(
 				(1..n)
 					.map(|_| {
@@ -66,7 +67,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			)
 			.collect::<Vec<_>>()
 			.into_iter()
-			.chain(std::iter::once(model.new_var(vec![-*lin.k])))
+			.chain(std::iter::once(model.new_var(BTreeSet::from([-*lin.k]))))
 			.map(|y| Rc::new(RefCell::new(y)))
 			.collect::<Vec<_>>();
 
@@ -79,7 +80,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 					.push(Lin::tern(x, y_next, lin.cmp.clone(), y_curr));
 			});
 
-		model.propagate(false, vec![model.cons.len() - 1]);
+		model.propagate(Consistency::Bounds, vec![model.cons.len() - 1]);
 		model.encode(db)
 	}
 }
