@@ -744,7 +744,20 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 	)]
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
 		let TernLeConstraint { x, y, cmp, z } = tern;
-		if matches!(x, IntVarEnc::Const(_)) {
+		if matches!(
+			(x, y, z),
+			(
+				IntVarEnc::Const(_),
+				IntVarEnc::Const(_),
+				IntVarEnc::Const(_)
+			)
+		) {
+			if tern.check(&[]).is_ok() {
+				Ok(())
+			} else {
+				Err(Unsatisfiable)
+			}
+		} else if matches!(x, IntVarEnc::Const(_)) {
 			self.encode(
 				db,
 				&TernLeConstraint {
