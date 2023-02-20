@@ -264,12 +264,46 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			.collect()
 	}
 
+	pub fn leqs(&self) -> Vec<(Range<C>, Vec<Vec<Lit>>)> {
+		self.xs
+			.iter(..)
+			.map(|(v, x)| {
+				(
+					(v.start - C::one())..(v.end - C::one()),
+					//(v.start + C::one())..(v.end + C::one()),
+					vec![vec![x.negate()]],
+				)
+			})
+			.chain(std::iter::once((self.ub()..self.ub() + C::one(), vec![])))
+			.collect()
+	}
+
+	pub fn geqs(&self) -> Vec<(Range<C>, Vec<Vec<Lit>>)> {
+		std::iter::once((self.lb()..self.lb() + C::one(), vec![]))
+			.chain(self.xs.iter(..).map(|(v, x)| (v, vec![vec![x.clone()]])))
+			.collect()
+	}
+
 	pub fn lb(&self) -> C {
 		self.xs.range().unwrap().start - C::one()
 	}
 
 	pub fn ub(&self) -> C {
 		self.xs.range().unwrap().end - C::one()
+	}
+
+	pub fn leq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
+		let v = v.start + C::one();
+		if v <= self.lb() {
+			vec![vec![]]
+		} else if v > self.ub() {
+			vec![]
+		} else {
+			match self.xs.overlap(v).collect::<Vec<_>>()[..] {
+				[(_, x)] => vec![vec![x.negate()]],
+				_ => panic!("No or multiples literals at {v:?} for var {self:?}"),
+			}
+		}
 	}
 
 	pub fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
@@ -547,6 +581,43 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 				} else {
 					// y.add(db, self, cmp, enc)
 					y.add(db, self)
+				}
+			}
+		}
+	}
+
+	pub(crate) fn leqs(&self) -> Vec<(Range<C>, Vec<Vec<Lit>>)> {
+		match self {
+			IntVarEnc::Ord(o) => o.leqs(),
+			x => x
+				.dom()
+				.into_iter(..)
+				.map(|c| (c.clone(), x.geq(c)))
+				.collect(),
+		}
+	}
+
+	pub(crate) fn geqs(&self) -> Vec<(Range<C>, Vec<Vec<Lit>>)> {
+		match self {
+			IntVarEnc::Ord(o) => o.geqs(),
+			x => x
+				.dom()
+				.into_iter(..)
+				.map(|c| (c.clone(), x.leq(c)))
+				.collect(),
+		}
+	}
+
+	/// Returns cnf constraining `x<=v`, which is empty if true and contains empty if false
+	pub(crate) fn leq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
+		match self {
+			IntVarEnc::Ord(o) => o.leq(v),
+			IntVarEnc::Bin(_) => todo!(),
+			IntVarEnc::Const(c) => {
+				if *c <= v.end - C::one() {
+					vec![]
+				} else {
+					vec![vec![]]
 				}
 			}
 		}
@@ -846,38 +917,35 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				),
 			)
 		} else {
-			for c_a in x.dom() {
-				for c_b in y.dom() {
+			for (c_a, x_geq_c_a) in x.geqs() {
+				for (c_b, y_geq_c_b) in y.geqs() {
 					// TODO tighten c_c.start
 					let c_c = (std::cmp::min(c_a.start, c_b.start))
 						..(((c_a.end - C::one()) + (c_b.end - C::one())) + C::one());
-					let x_geq_c_a = x.geq(c_a.clone());
-					let y_geq_c_b = y.geq(c_b.clone());
 					let z_geq_c_c = z.geq(c_c.clone());
 
-					add_clauses_for(db, negate_cnf(x_geq_c_a), negate_cnf(y_geq_c_b), z_geq_c_c)?;
+					add_clauses_for(
+						db,
+						negate_cnf(x_geq_c_a.clone()),
+						negate_cnf(y_geq_c_b),
+						z_geq_c_c,
+					)?;
 				}
 			}
 
-			let leq = |x: &IntVarEnc<DB::Lit, C>, v: Range<C>| -> Vec<Vec<DB::Lit>> {
-				negate_cnf(x.geq((v.start + C::one())..(v.end + C::one())))
-			};
-
 			// x<=a /\ y<=b -> z<=a+b
 			if cmp == &LimitComp::Equal {
-				for c_a in x.dom().iter(..) {
-					for c_b in y.dom().iter(..) {
-						let c_c = (c_a.end - C::one()) + (c_b.end - C::one());
+				for (c_a, x_leq_c_a) in x.leqs() {
+					for (c_b, y_leq_c_b) in y.leqs() {
+						let c_c = (c_a.start) + (c_b.start);
 						let c_c = c_c..(c_c + C::one());
-						let x_geq_c_a = leq(x, c_a.clone());
-						let y_geq_c_b = leq(y, c_b.clone());
-						let z_geq_c_c = leq(z, c_c.clone());
+						let z_leq_c_c = z.leq(c_c.clone());
 
 						add_clauses_for(
 							db,
-							negate_cnf(x_geq_c_a),
-							negate_cnf(y_geq_c_b),
-							z_geq_c_c,
+							negate_cnf(x_leq_c_a.clone()),
+							negate_cnf(y_leq_c_b),
+							z_leq_c_c,
 						)?;
 					}
 				}
