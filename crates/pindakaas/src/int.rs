@@ -2,9 +2,9 @@ use iset::{interval_set, IntervalMap, IntervalSet};
 use rustc_hash::FxHashMap;
 
 use itertools::Itertools;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::{cell::RefCell, collections::BTreeSet};
 
 use crate::{
 	helpers::is_powers_of_two,
@@ -1545,6 +1545,15 @@ pub(crate) struct Model<Lit: Literal, C: Coefficient> {
 	var_ids: usize,
 }
 
+// TODO Domain will be used once (/if) this is added as encoder feature.
+#[allow(dead_code)]
+#[derive(PartialEq)]
+pub(crate) enum Consistency {
+	None,
+	Bounds,
+	Domain,
+}
+
 impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	pub fn new() -> Self {
 		Self {
@@ -1560,22 +1569,12 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		var
 	}
 
-	pub fn new_var(&mut self, dom: Vec<C>) -> IntVar<C> {
+	pub fn new_var(&mut self, dom: BTreeSet<C>) -> IntVar<C> {
 		self.var_ids += 1;
 		IntVar {
 			id: self.var_ids,
 			dom,
 		}
-	}
-
-	pub fn size(&self) -> usize {
-		self.cons
-			.iter()
-			.flat_map(|con| con.xs.iter().map(|(_, x)| x.borrow()))
-			.sorted_by_key(|x| x.id)
-			.dedup_by(|x, y| x.id == y.id)
-			.map(|x| x.size())
-			.sum::<usize>()
 	}
 
 	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result {
@@ -1608,27 +1607,24 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		Ok(())
 	}
 
-	pub fn propagate(&mut self, propagate_dom: bool, mut queue: Vec<usize>) {
-
+	pub(crate) fn propagate(&mut self, consistency: Consistency, mut queue: Vec<usize>) {
+		if consistency == Consistency::None {
+			return;
+		}
 		while let Some(con) = queue.pop() {
-			//propagate all constraints
-			if propagate_dom && self.cons[con].cmp == LimitComp::Equal {
-				self.cons[con].propagate_dom();
-			} else {
-				let changed = self.cons[con].propagate_bounds();
-				let mut cons = self
-					.cons
-					.iter()
-					.enumerate()
-					.filter_map(|(i, con)| {
-						con.xs
-							.iter()
-							.any(|(_, x)| changed.contains(&x.borrow().id))
-							.then_some(i)
-					})
-					.collect::<Vec<_>>();
-				queue.append(&mut cons);
-			}
+			let changed = self.cons[con].propagate(&consistency);
+			let mut cons = self
+				.cons
+				.iter()
+				.enumerate()
+				.filter_map(|(i, con)| {
+					con.xs
+						.iter()
+						.any(|(_, x)| changed.contains(&x.borrow().id))
+						.then_some(i)
+				})
+				.collect::<Vec<_>>();
+			queue.append(&mut cons);
 		}
 	}
 }
@@ -1666,86 +1662,120 @@ impl<C: Coefficient> Lin<C> {
 			.fold(C::zero(), |a, b| a + b)
 	}
 
-	pub fn propagate_dom(&mut self) {
-		assert!(self.cmp == LimitComp::Equal);
-		loop {
-			let mut fixpoint = true;
-			for (i, (c_i, x_i)) in self.xs.iter().enumerate() {
-				x_i.borrow_mut().dom.retain(|d_i| {
-					if self
-						.xs
-						.iter()
-						.enumerate()
-						.filter_map(|(j, (c_j, x_j))| {
-							(i != j).then(|| {
-								x_j.borrow()
-									.dom
-									.iter()
-									.map(|d_j_k| *c_j * *d_j_k)
-									.collect::<Vec<_>>()
-							})
-						})
-						.multi_cartesian_product()
-						.any(|rs| {
-							*c_i * *d_i + rs.into_iter().fold(C::zero(), |a, b| a + b) == C::zero()
-						}) {
-						true
-					} else {
-						fixpoint = false;
-						false
-					}
-				});
-				assert!(x_i.borrow().size() > 0);
-			}
-
-			if fixpoint {
-				return;
-			}
-		}
-	}
-
-	pub fn propagate_bounds(&mut self) -> Vec<usize> {
+	pub(crate) fn propagate(&mut self, consistency: &Consistency) -> Vec<usize> {
+		let mut i = 0;
 		let mut changed = vec![];
-		loop {
-			let mut fixpoint = true;
-			if self.cmp == LimitComp::Equal {
-				for (c, x) in &self.xs {
-					let xs_ub = self.ub();
-					let mut x = x.borrow_mut();
-					let x_ub = x.ub(c);
-					let id = x.id;
-					x.dom.retain(|d| {
-						if *c * *d + xs_ub - x_ub >= C::zero() {
-							true
+		match consistency {
+			Consistency::None => unreachable!(),
+			Consistency::Bounds => loop {
+				let mut fixpoint = true;
+				i += 1;
+				if i > 10 {
+					panic!();
+				}
+				if self.cmp == LimitComp::Equal {
+					for (c, x) in &self.xs {
+						let xs_ub = self.ub();
+						let mut x = x.borrow_mut();
+						let size = x.size();
+
+						let id = x.id;
+						let x_ub = if c.is_positive() {
+							*x.dom.last().unwrap()
 						} else {
+							*x.dom.first().unwrap()
+						};
+
+						// c*d >= x_ub*c + xs_ub := d >= x_ub - xs_ub/c
+						let b = x_ub - (xs_ub / *c);
+
+						if !c.is_negative() {
+							x.ge(&b);
+						} else {
+							x.le(&b);
+						}
+
+						if x.size() < size {
 							changed.push(id);
 							fixpoint = false;
-							false
 						}
-					});
-					assert!(x.size() > 0);
+						assert!(x.size() > 0);
+					}
 				}
-			}
 
-			for (c, x) in &self.xs {
-				let xs_lb = self.lb();
-				let mut x = x.borrow_mut();
-				let x_lb = x.lb(c);
-				let id = x.id;
-				x.dom.retain(|d| {
-					if *c * *d + xs_lb - x_lb <= C::zero() {
-						true
+				let rs_lb = self.lb();
+				for (c, x) in &self.xs {
+					let mut x = x.borrow_mut();
+					let size = x.size();
+					let x_lb = if c.is_positive() {
+						*x.dom.first().unwrap()
 					} else {
+						*x.dom.last().unwrap()
+					};
+
+					let id = x.id;
+
+					// c*d <= c*x_lb - rs_lb
+					// d <= x_lb - (rs_lb / c) (or d >= .. if d<0)
+					let b = x_lb - (rs_lb / *c);
+
+					if c.is_negative() {
+						x.ge(&b);
+					} else {
+						x.le(&b);
+					}
+
+					if x.size() < size {
+						println!("Pruned {}", size - x.size());
 						changed.push(id);
 						fixpoint = false;
-						false
 					}
-				});
-				assert!(x.size() > 0);
-			}
+					assert!(x.size() > 0);
+				}
 
-			if fixpoint {
-				return changed;
+				if fixpoint {
+					return changed;
+				}
+			},
+			Consistency::Domain => {
+				assert!(self.cmp == LimitComp::Equal);
+				loop {
+					let mut fixpoint = true;
+					for (i, (c_i, x_i)) in self.xs.iter().enumerate() {
+						let id = x_i.borrow().id;
+						x_i.borrow_mut().dom.retain(|d_i| {
+							if self
+								.xs
+								.iter()
+								.enumerate()
+								.filter_map(|(j, (c_j, x_j))| {
+									(i != j).then(|| {
+										x_j.borrow()
+											.dom
+											.iter()
+											.map(|d_j_k| *c_j * *d_j_k)
+											.collect::<Vec<_>>()
+									})
+								})
+								.multi_cartesian_product()
+								.any(|rs| {
+									*c_i * *d_i + rs.into_iter().fold(C::zero(), |a, b| a + b)
+										== C::zero()
+								}) {
+								true
+							} else {
+								fixpoint = false;
+								changed.push(id);
+								false
+							}
+						});
+						assert!(x_i.borrow().size() > 0);
+					}
+
+					if fixpoint {
+						return changed;
+					}
+				}
 			}
 		}
 	}
@@ -1755,7 +1785,7 @@ impl<C: Coefficient> Lin<C> {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct IntVar<C: Coefficient> {
 	pub(crate) id: usize,
-	pub(crate) dom: Vec<C>,
+	pub(crate) dom: BTreeSet<C>,
 }
 
 impl<C: Coefficient> IntVar<C> {
@@ -1776,23 +1806,33 @@ impl<C: Coefficient> IntVar<C> {
 		}
 	}
 
+	fn ge(&mut self, bound: &C) {
+		self.dom = self.dom.split_off(bound);
+	}
+
+	fn le(&mut self, bound: &C) {
+		self.dom.split_off(&(*bound + C::one()));
+	}
+
 	fn size(&self) -> usize {
 		self.dom.len()
 	}
 
 	fn lb(&self, c: &C) -> C {
-		*c * if c.is_negative() {
-			self.dom[self.dom.len() - 1]
+		*c * *(if c.is_negative() {
+			self.dom.last()
 		} else {
-			self.dom[0]
-		}
+			self.dom.first()
+		})
+		.unwrap()
 	}
 
 	fn ub(&self, c: &C) -> C {
-		*c * if c.is_negative() {
-			self.dom[0]
+		*c * *(if c.is_negative() {
+			self.dom.first()
 		} else {
-			self.dom[self.dom.len() - 1]
-		}
+			self.dom.last()
+		})
+		.unwrap()
 	}
 }

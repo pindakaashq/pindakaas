@@ -1,8 +1,10 @@
+use crate::int::Consistency;
 pub(crate) use crate::int::IntVar;
 use crate::int::Lin;
 use crate::int::Model;
 use crate::Literal;
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -48,8 +50,9 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			.collect::<Vec<_>>();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
+		let consistency = Consistency::Bounds;
 		let mut model = build_totalizer(xs, &lin.cmp, *lin.k);
-		model.propagate(false, vec![model.cons.len() - 1]);
+		model.propagate(consistency, vec![model.cons.len() - 1]);
 		model.encode(db)
 	}
 }
@@ -74,13 +77,14 @@ fn build_totalizer<Lit: Literal, C: Coefficient>(
 				}
 				[left, right] => {
 					let dom = if layer.len() == 2 {
-						vec![k]
+						BTreeSet::from([k])
 					} else {
 						left.borrow()
 							.dom
 							.iter()
 							.cartesian_product(right.borrow().dom.iter())
 							.map(|(&a, &b)| a + b)
+							.filter(|&d| d <= k)
 							.sorted()
 							.dedup()
 							.collect()
