@@ -1632,17 +1632,22 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	pub fn add_int_var_enc(&mut self, x: IntVarEnc<Lit, C>) -> IntVar<C> {
-		let var = self.new_var(x.dom().iter(..).map(|d| d.end - C::one()).collect());
+		let var = self.new_var(x.dom().iter(..).map(|d| d.end - C::one()).collect(), false);
 		self.vars.insert(var.id, x);
 		var
 	}
 
-	pub fn new_var(&mut self, dom: BTreeSet<C>) -> IntVar<C> {
+	pub fn new_var(&mut self, dom: BTreeSet<C>, add_consistency: bool) -> IntVar<C> {
 		self.var_ids += 1;
 		IntVar {
 			id: self.var_ids,
 			dom,
+			add_consistency,
 		}
+	}
+
+	pub fn new_constant(&mut self, c: C) -> IntVar<C> {
+		self.new_var(BTreeSet::from([c]), false)
 	}
 
 	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result {
@@ -1854,6 +1859,7 @@ impl<C: Coefficient> Lin<C> {
 pub struct IntVar<C: Coefficient> {
 	pub(crate) id: usize,
 	pub(crate) dom: BTreeSet<C>,
+	add_consistency: bool,
 }
 
 impl<C: Coefficient> IntVar<C> {
@@ -1861,7 +1867,7 @@ impl<C: Coefficient> IntVar<C> {
 		if self.size() == 1 {
 			IntVarEnc::Const(*self.dom.first().unwrap())
 		} else {
-			IntVarEnc::Ord(IntVarOrd::from_dom(
+			let x = IntVarEnc::Ord(IntVarOrd::from_dom(
 				db,
 				self.dom
 					.iter()
@@ -1870,7 +1876,12 @@ impl<C: Coefficient> IntVar<C> {
 					.collect::<Vec<_>>()
 					.as_slice(),
 				"x".to_string(),
-			))
+			));
+			if self.add_consistency {
+				x.consistent(db).unwrap();
+			}
+			x
+			// TODO support again binary cutoff `if cutoff.is_none() || C::from(dom.len()).unwrap() <= cutoff.unwrap()`
 		}
 	}
 

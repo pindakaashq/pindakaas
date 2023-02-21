@@ -51,61 +51,65 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
 		let consistency = Consistency::Bounds;
-		let mut model = build_totalizer(xs, &lin.cmp, *lin.k);
+		let mut model = self.build_totalizer(xs, &lin.cmp, *lin.k);
 		model.propagate(consistency, vec![model.cons.len() - 1]);
 		model.encode(db)
 	}
 }
 
-fn build_totalizer<Lit: Literal, C: Coefficient>(
-	xs: Vec<IntVarEnc<Lit, C>>,
-	cmp: &LimitComp,
-	k: C,
-) -> Model<Lit, C> {
-	let mut model = Model::new();
-	let mut layer = xs
-		.into_iter()
-		.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
-		.collect::<Vec<_>>();
+impl<C: Coefficient> TotalizerEncoder<C> {
+	fn build_totalizer<Lit: Literal>(
+		&self,
+		xs: Vec<IntVarEnc<Lit, C>>,
+		cmp: &LimitComp,
+		k: C,
+	) -> Model<Lit, C> {
+		let mut model = Model::new();
+		let mut layer = xs
+			.into_iter()
+			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
+			.collect::<Vec<_>>();
 
-	while layer.len() > 1 {
-		let mut next_layer = Vec::<Rc<RefCell<IntVar<C>>>>::new();
-		for children in layer.chunks(2) {
-			match children {
-				[x] => {
-					next_layer.push(x.clone());
-				}
-				[left, right] => {
-					let dom = if layer.len() == 2 {
-						BTreeSet::from([k])
-					} else {
-						left.borrow()
-							.dom
-							.iter()
-							.cartesian_product(right.borrow().dom.iter())
-							.map(|(&a, &b)| a + b)
-							.filter(|&d| d <= k)
-							.sorted()
-							.dedup()
-							.collect()
-					};
-					let parent = Rc::new(RefCell::new(model.new_var(dom)));
+		while layer.len() > 1 {
+			let mut next_layer = Vec::<Rc<RefCell<IntVar<C>>>>::new();
+			for children in layer.chunks(2) {
+				match children {
+					[x] => {
+						next_layer.push(x.clone());
+					}
+					[left, right] => {
+						let dom = if layer.len() == 2 {
+							BTreeSet::from([k])
+						} else {
+							left.borrow()
+								.dom
+								.iter()
+								.cartesian_product(right.borrow().dom.iter())
+								.map(|(&a, &b)| a + b)
+								.filter(|&d| d <= k)
+								.sorted()
+								.dedup()
+								.collect()
+						};
+						let parent =
+							Rc::new(RefCell::new(model.new_var(dom, self.add_consistency)));
 
-					model.cons.push(Lin::tern(
-						left.clone(),
-						right.clone(),
-						cmp.clone(),
-						parent.clone(),
-					));
-					next_layer.push(parent);
+						model.cons.push(Lin::tern(
+							left.clone(),
+							right.clone(),
+							cmp.clone(),
+							parent.clone(),
+						));
+						next_layer.push(parent);
+					}
+					_ => panic!(),
 				}
-				_ => panic!(),
 			}
+			layer = next_layer;
 		}
-		layer = next_layer;
-	}
 
-	model
+		model
+	}
 }
 
 #[cfg(test)]

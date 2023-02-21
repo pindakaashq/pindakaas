@@ -5,7 +5,6 @@ use crate::{
 };
 use itertools::Itertools;
 use std::cell::RefCell;
-use std::collections::BTreeSet;
 use std::rc::Rc;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)
@@ -57,17 +56,20 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 
 		// TODO not possible to fix since both closures use db?
 		#[allow(clippy::needless_collect)] // TODO no idea how to avoid collect
-		let ys = std::iter::once(model.new_var(BTreeSet::from([C::zero()])))
+		let ys = std::iter::once(model.new_constant(C::zero()))
 			.chain(
 				(1..n)
 					.map(|_| {
-						model.new_var(num::iter::range_inclusive(-*lin.k, C::zero()).collect())
+						model.new_var(
+							num::iter::range_inclusive(-*lin.k, C::zero()).collect(),
+							self.add_consistency,
+						)
 					})
 					.take(n),
 			)
 			.collect::<Vec<_>>()
 			.into_iter()
-			.chain(std::iter::once(model.new_var(BTreeSet::from([-*lin.k]))))
+			.chain(std::iter::once(model.new_constant(-*lin.k)))
 			.map(|y| Rc::new(RefCell::new(y)))
 			.collect::<Vec<_>>();
 
