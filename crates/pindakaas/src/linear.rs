@@ -160,19 +160,19 @@ pub struct LinExp<Lit: Literal, C: Coefficient> {
 	/// Constraints placed on different terms, and the number of terms involved in the constraint
 	constraints: Vec<(Constraint<C>, usize)>,
 	/// Additive constant
-	add: C,
+	pub add: C,
 	/// Multiplicative contant
-	mult: C,
+	pub mult: C,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LinearConstraint<Lit: Literal, C: Coefficient> {
 	/// Expression being constrained
-	exp: LinExp<Lit, C>,
+	pub exp: LinExp<Lit, C>,
 	/// Comparator when exp is on the left hand side and k is on the right hand side
-	cmp: Comparator,
+	pub cmp: Comparator,
 	/// Coefficient providing the upper bound or lower bound to exp, or both
-	k: C,
+	pub k: C,
 }
 
 impl From<LimitComp> for Comparator {
