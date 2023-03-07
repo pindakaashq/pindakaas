@@ -19,12 +19,17 @@ use crate::{
 #[derive(Clone, Default)]
 pub struct TotalizerEncoder<C: Coefficient> {
 	add_consistency: bool,
+	add_propagation: Consistency,
 	cutoff: Option<C>,
 }
 
 impl<C: Coefficient> TotalizerEncoder<C> {
 	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
+		self
+	}
+	pub fn add_propagation(&mut self, c: Consistency) -> &mut Self {
+		self.add_propagation = c;
 		self
 	}
 	pub fn add_cutoff(&mut self, c: Option<C>) -> &mut Self {
@@ -50,9 +55,8 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			.collect::<Vec<_>>();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
-		let consistency = Consistency::Bounds;
 		let mut model = self.build_totalizer(xs, &lin.cmp, *lin.k);
-		model.propagate(consistency, vec![model.cons.len() - 1]);
+		model.propagate(&self.add_propagation, vec![model.cons.len() - 1]);
 		model.encode(db)
 	}
 }
