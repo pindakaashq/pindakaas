@@ -11,12 +11,17 @@ use std::rc::Rc;
 #[derive(Clone, Default)]
 pub struct SwcEncoder<C: Coefficient> {
 	add_consistency: bool,
+	add_propagation: Consistency,
 	cutoff: Option<C>,
 }
 
 impl<C: Coefficient> SwcEncoder<C> {
 	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
+		self
+	}
+	pub fn add_propagation(&mut self, c: Consistency) -> &mut Self {
+		self.add_propagation = c;
 		self
 	}
 	pub fn add_cutoff(&mut self, c: Option<C>) -> &mut Self {
@@ -82,7 +87,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 					.push(Lin::tern(x, y_next, lin.cmp.clone(), y_curr));
 			});
 
-		model.propagate(Consistency::Bounds, vec![model.cons.len() - 1]);
+		model.propagate(&self.add_propagation, vec![model.cons.len() - 1]);
 		model.encode(db)
 	}
 }
