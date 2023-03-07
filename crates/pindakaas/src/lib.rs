@@ -38,6 +38,7 @@ pub mod trace;
 
 pub use cardinality::{Cardinality, SortingNetworkEncoder};
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
+pub use int::Consistency;
 pub use linear::{
 	AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear, LinearAggregator,
 	LinearConstraint, LinearEncoder, PosCoeff, SwcEncoder, TotalizerEncoder,
@@ -308,10 +309,10 @@ impl<Lit: Literal + Zero + One + Display> Cnf<Lit> {
 }
 
 impl<Lit: Literal + Zero + One + Display, C: Coefficient> From<Cnf<Lit>> for Wcnf<Lit, C> {
-    fn from(cnf: Cnf<Lit>) -> Self {
-        let weights = std::iter::repeat(None).take(cnf.clauses()).collect();
-        Wcnf { cnf, weights }
-    }
+	fn from(cnf: Cnf<Lit>) -> Self {
+		let weights = std::iter::repeat(None).take(cnf.clauses()).collect();
+		Wcnf { cnf, weights }
+	}
 }
 impl<Lit: Literal + Zero + One + Display, C: Coefficient> From<Wcnf<Lit, C>> for Cnf<Lit> {
 	// TODO implement iter for Cnf
