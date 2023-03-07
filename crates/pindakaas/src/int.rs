@@ -1615,9 +1615,10 @@ pub(crate) struct Model<Lit: Literal, C: Coefficient> {
 
 // TODO Domain will be used once (/if) this is added as encoder feature.
 #[allow(dead_code)]
-#[derive(PartialEq)]
-pub(crate) enum Consistency {
+#[derive(Default, Clone, PartialEq)]
+pub enum Consistency {
 	None,
+	#[default]
 	Bounds,
 	Domain,
 }
@@ -1680,8 +1681,8 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		Ok(())
 	}
 
-	pub(crate) fn propagate(&mut self, consistency: Consistency, mut queue: Vec<usize>) {
-		if consistency == Consistency::None {
+	pub(crate) fn propagate(&mut self, consistency: &Consistency, mut queue: Vec<usize>) {
+		if consistency == &Consistency::None {
 			return;
 		}
 		while let Some(con) = queue.pop() {
