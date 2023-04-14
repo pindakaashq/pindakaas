@@ -36,16 +36,13 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 			})
 			.sorted_by(|a: &IntVarEnc<_, C>, b: &IntVarEnc<_, C>| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
-		let mut ws =
-			construct_bdd(db, &xs, &lin.cmp, lin.k.clone(), self.add_consistency).into_iter();
+
+		let ws = construct_bdd(db, &xs, &lin.cmp, lin.k.clone(), self.add_consistency);
+		let mut ws = ws.into_iter();
 		let first = ws.next().unwrap();
 		xs.iter().zip(ws).fold(first, |curr, (x_i, next)| {
-			TernLeEncoder::default()
-				.encode(
-					db,
-					&TernLeConstraint::new(&curr, x_i, lin.cmp.clone(), &next),
-				)
-				.unwrap();
+			let c = TernLeConstraint::new(&curr, x_i, lin.cmp.clone(), &next);
+			TernLeEncoder::default().encode(db, &c).unwrap();
 			next
 		});
 
@@ -72,17 +69,26 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 			// TODO optimize
 			let lb = neg_inf..ubs[i..].iter().fold(k + C::one(), |acc, ub| acc - *ub);
 			let ub = (k + C::one())..inf;
-                match cmp {
-                    LimitComp::LessEq => interval_map! { lb => LitOrConst::Const(true), ub => LitOrConst::Const(false) },
-                    LimitComp::Equal => interval_map! { lb.start..(lb.end - C::one()) => LitOrConst::Const(false), ub => LitOrConst::Const(false) }
-                }
+			match cmp {
+				LimitComp::LessEq => {
+					interval_map! { lb => LitOrConst::Const(true), ub => LitOrConst::Const(false) }
+				}
+				LimitComp::Equal => interval_map! {
+					lb.start..(lb.end - C::one()) => LitOrConst::Const(false),
+					ub => LitOrConst::Const(false)
+				},
+			}
 		})
-		.chain(std::iter::once(
-                match cmp {
-                    LimitComp::LessEq => interval_map! { neg_inf..k+C::one() => LitOrConst::Const(true), k+C::one()..inf => LitOrConst::Const(false) },
-                    LimitComp::Equal => interval_map! { neg_inf..k => LitOrConst::Const(false), k..k+C::one() => LitOrConst::Const(true), k+C::one()..inf => LitOrConst::Const(false) },
-                }
-		))
+		.chain(std::iter::once(match cmp {
+			LimitComp::LessEq => interval_map! {
+				neg_inf..k+C::one() => LitOrConst::Const(true),
+				k+C::one()..inf => LitOrConst::Const(false)
+			},
+			LimitComp::Equal => interval_map! {
+				neg_inf..k => LitOrConst::Const(false),
+				k..k+C::one() => LitOrConst::Const(true), k+C::one()..inf => LitOrConst::Const(false)
+			},
+		}))
 		.collect();
 	bdd(db, 0, xs, C::zero(), &mut ws, true);
 	ws.into_iter()
@@ -101,13 +107,18 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 							match lit {
 								LitOrConst::Lit(lit) => Some((interval, Some(lit))),
 								LitOrConst::Const(false) => None,
-								_ => unreachable!(),
+								LitOrConst::Const(true) => Some((interval, None)),
 							}
 						})
 						.collect();
 					if dom.is_empty() {
 						None
+					} else if dom.iter(..).all(|(_, d)| d.is_none()) {
+						Some(IntVarEnc::Const(
+							dom.iter(..).last().unwrap().0.end - C::one(),
+						))
 					} else {
+						let dom = dom.into_iter(..).filter(|(_, lit)| lit.is_some()).collect();
 						let x = IntVarOrd::from_views(db, dom, format!("bdd_{i}"));
 						if add_consistency {
 							x.consistent(db).unwrap();
@@ -132,12 +143,16 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 ) -> (std::ops::Range<C>, LitOrConst<DB::Lit>) {
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
+			let mut first_copy = first;
 			let interval = xs[i]
 				.dom()
 				.iter(..)
 				.map(|v| {
 					let v = v.end - C::one();
-					let (interval, lit) = bdd(db, i + 1, xs, sum + v, ws, false);
+					let (interval, lit) = bdd(db, i + 1, xs, sum + v, ws, first_copy);
+					if matches!(lit, LitOrConst::Const(true) | LitOrConst::Lit(_)) {
+						first_copy = false;
+					}
 					((interval.start - v)..(interval.end - v), lit)
 				})
 				.reduce(|(a, _), (b, lit_b)| {

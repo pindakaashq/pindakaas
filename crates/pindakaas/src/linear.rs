@@ -766,7 +766,7 @@ mod tests {
 					$encoder,
 					3,
 					&Linear {
-						terms: construct_terms(&[(1, 1), (2, 2), (3, 4),]),
+						terms: construct_terms(&[(1, 1), (2, 2), (3, 4)]),
 						cmp: LimitComp::Equal,
 						k: 5.into()
 					}
