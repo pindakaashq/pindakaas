@@ -283,6 +283,7 @@ pub mod tests {
 		expected_vars: Option<usize>,
 		expected_cls: Option<usize>,
 		expected_lits: Option<usize>,
+		expecting_no_unit_clauses: bool,
 	}
 
 	impl TestDB {
@@ -306,6 +307,7 @@ pub mod tests {
 				expected_vars: None,
 				expected_cls: None,
 				expected_lits: None,
+				expecting_no_unit_clauses: false,
 			}
 		}
 
@@ -494,6 +496,14 @@ pub mod tests {
 					}
 				}
 				assert!(found, "unexpected clause: {:?}", cl);
+			}
+
+			if self.expecting_no_unit_clauses {
+				assert!(
+					cl.len() > 1 || cl[0] <= self.num_var,
+					"Unexpected unit clause on aux var {:?}",
+					cl
+				);
 			}
 
 			if let Some(num) = &mut self.expected_cls {
