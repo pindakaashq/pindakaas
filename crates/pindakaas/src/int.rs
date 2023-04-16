@@ -1796,7 +1796,7 @@ impl<C: Coefficient> Lin<C> {
 					}
 
 					if x.size() < size {
-						println!("Pruned {}", size - x.size());
+						//println!("Pruned {}", size - x.size());
 						changed.push(id);
 						fixpoint = false;
 					}
