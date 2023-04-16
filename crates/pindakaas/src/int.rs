@@ -565,6 +565,18 @@ pub(crate) enum IntVarEnc<Lit: Literal, C: Coefficient> {
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
+	pub(crate) fn from_dom<DB: ClauseDatabase<Lit = Lit>>(
+		db: &mut DB,
+		dom: &[C],
+		lbl: String,
+	) -> Result<IntVarEnc<DB::Lit, C>> {
+		match dom {
+			[] => Err(Unsatisfiable),
+			[d] => Ok(IntVarEnc::Const(*d)),
+			dom => Ok(IntVarOrd::from_dom(db, dom, lbl).into()),
+		}
+	}
+
 	pub(crate) fn add<DB: ClauseDatabase<Lit = Lit>>(
 		&self,
 		db: &mut DB,
@@ -1020,9 +1032,9 @@ pub mod tests {
 	macro_rules! test_int_lin_ord_ord_ord {
 		($encoder:expr,$x:expr,$y:expr,$cmp:expr,$z:expr) => {
 			let mut db = TestDB::new(0);
-			let x = from_dom(&mut db, $x, IntVarEncoding::Ord, String::from("x")).unwrap();
-			let y = from_dom(&mut db, $y, IntVarEncoding::Ord, String::from("y")).unwrap();
-			let z = from_dom(&mut db, $z, IntVarEncoding::Ord, String::from("z")).unwrap();
+			let x = IntVarEnc::from_dom(&mut db, $x, String::from("x")).unwrap();
+			let y = IntVarEnc::from_dom(&mut db, $y, String::from("y")).unwrap();
+			let z = IntVarEnc::from_dom(&mut db, $z, String::from("z")).unwrap();
 
 			db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
@@ -1588,22 +1600,6 @@ pub mod tests {
 			}
 		}
 	}
-
-	fn from_dom<DB: ClauseDatabase, C: Coefficient>(
-		db: &mut DB,
-		dom: &[C],
-		enc: IntVarEncoding,
-		lbl: String,
-	) -> Result<IntVarEnc<DB::Lit, C>> {
-		match dom {
-			[] => Err(Unsatisfiable),
-			[d] => Ok(IntVarEnc::Const(*d)),
-			dom => Ok(match enc {
-				IntVarEncoding::Ord => IntVarOrd::from_dom(db, dom, lbl).into(),
-				_ => todo!(),
-			}),
-		}
-	}
 }
 
 #[derive(Debug)]
@@ -1686,7 +1682,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			return;
 		}
 		while let Some(con) = queue.pop() {
-			let changed = self.cons[con].propagate(&consistency);
+			let changed = self.cons[con].propagate(consistency);
 			let mut cons = self
 				.cons
 				.iter()
