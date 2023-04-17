@@ -145,7 +145,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			.into_iter(..)
 			.map(|(v, lit)| {
 				#[cfg(feature = "trace")]
-				let lbl = format!("{lbl}>={v:?}");
+				let lbl = format!("{lbl}>={}..{}", v.start, v.end - C::one());
 				(v, lit.unwrap_or_else(|| new_var!(db, lbl)))
 			})
 			.collect::<IntervalMap<_, _>>();
@@ -565,6 +565,23 @@ pub(crate) enum IntVarEnc<Lit: Literal, C: Coefficient> {
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
+       /*
+	pub(crate) fn from_views<DB: ClauseDatabase<Lit = Lit>>(
+		db: &mut DB,
+		views: IntervalMap<C, Option<DB::Lit>>,
+		lbl: String,
+	) -> Result<IntVarEnc<DB::Lit, C>> {
+		dbg!(&views);
+		if views.len() == 0 {
+			Err(Unsatisfiable)
+		//} else if views.len() == 1 {
+		//	let (c, _) = views.into_iter(..).next().unwrap();
+		//	Ok(IntVarEnc::Const(c.end - C::one()))
+		} else {
+			Ok(IntVarOrd::from_views(db, views, lbl).into())
+		}
+	}
+       */
 	pub(crate) fn from_dom<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
 		dom: &[C],

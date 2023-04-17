@@ -1,9 +1,13 @@
-use iset::{interval_set, IntervalSet};
+use std::ops::AddAssign;
+
+use iset::{interval_map, IntervalMap};
 use itertools::Itertools;
+use num::One;
 
 use crate::{
-	int::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+	int::{IntVarEnc, IntVarOrd, LitOrConst, TernLeConstraint, TernLeEncoder},
 	linear::LimitComp,
+	trace::new_var,
 	ClauseDatabase, Coefficient, Encoder, Linear, Literal, PosCoeff, Result,
 };
 
@@ -72,67 +76,118 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 			let ub = (k + C::one())..inf;
 			match cmp {
 				LimitComp::LessEq => {
-					interval_set! { lb, ub }
+					interval_map! { lb => LitOrConst::Const(true), ub => LitOrConst::Const(false) }
 				}
-				LimitComp::Equal => interval_set! { lb.start..(lb.end - C::one()), ub },
+				LimitComp::Equal => interval_map! { lb.start..(lb.end - C::one()) => LitOrConst::Const(false), ub => LitOrConst::Const(false) },
 			}
 		})
 		.chain(std::iter::once(match cmp {
 			LimitComp::LessEq => {
-				interval_set! { neg_inf..C::zero(), C::zero()..k+C::one(), k+C::one()..inf }
+				interval_map! { neg_inf..C::zero() => LitOrConst::Const(false), C::zero()..k+C::one() => LitOrConst::Const(true), k+C::one()..inf => LitOrConst::Const(false)}
 			}
-			LimitComp::Equal => interval_set! { neg_inf..k, k..k+C::one(), k+C::one()..inf },
+			LimitComp::Equal => interval_map! { neg_inf..k => LitOrConst::Const(false), k..k+C::one() => LitOrConst::Const(true), k+C::one()..inf => LitOrConst::Const(false) },
 		}))
 		.collect();
-	bdd(0, xs, C::zero(), &mut ws);
+
+	//struct TDB<Lit: Literal> {
+	//	nlit: usize,
+	//}
+
+	//impl<Lit: Literal + AddAssign + One> ClauseDatabase for TDB<Lit> {
+	//	type Lit = Lit;
+
+	//	fn new_var(&mut self) -> Self::Lit {
+	//		self.nlit += 1;
+	//		self.nlit
+	//	}
+
+	//	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
+	//		unreachable!()
+	//	}
+	//}
+
+	bdd(db, 0, xs, C::zero(), &mut ws);
 	ws.into_iter()
 		.enumerate()
 		.map(|(i, w)| {
-			let mut dom = w.into_iter(..);
+			let mut views = w.into_iter(..);
 			if cmp == &LimitComp::Equal {
-				dom.next();
+				views.next();
 			}
 
-			let dom = dom
-				.map(|iv| iv.end - C::one())
-				.filter(|c| c >= &C::zero())
-				.collect::<Vec<_>>();
-			let dom = &dom[..(dom.len() - 1)];
-			let y = IntVarEnc::from_dom(db, dom, format!("bdd_{i}")).unwrap();
-			if add_consistency {
-				y.consistent(db).unwrap();
+			let mut lb = C::zero();
+			let views = views
+				.filter(|(iv, _)| iv.end - C::one() >= C::zero())
+				.filter_map(|(iv, lit)| match lit {
+					LitOrConst::Lit(lit) => Some((iv, Some(lit))),
+					LitOrConst::Const(true) => {
+						lb = iv.end - C::one();
+						None
+					}
+					LitOrConst::Const(false) => None,
+				})
+				.collect::<IntervalMap<_, _>>();
+
+			if views.is_empty() {
+				IntVarEnc::Const(lb)
+			} else {
+				let y = IntVarEnc::Ord(IntVarOrd::from_views(db, views, format!("bdd_{i}")).into());
+
+				if add_consistency {
+					y.consistent(db).unwrap();
+				}
+				y
 			}
-			y
 		})
 		.collect()
 }
 
-fn bdd<Lit: Literal, C: Coefficient>(
+fn bdd<DB: ClauseDatabase, C: Coefficient>(
+	db: &mut DB,
 	i: usize,
-	xs: &Vec<IntVarEnc<Lit, C>>,
+	xs: &Vec<IntVarEnc<DB::Lit, C>>,
 	sum: C,
-	ws: &mut Vec<IntervalSet<C>>,
-) -> std::ops::Range<C> {
+	ws: &mut Vec<IntervalMap<C, LitOrConst<DB::Lit>>>,
+) -> (std::ops::Range<C>, LitOrConst<DB::Lit>) {
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
-			let interval = xs[i]
-				.dom()
+			let dom = xs[i].dom();
+
+			let intervals = dom
 				.iter(..)
-				.map(|v| {
-					let v = v.end - C::one();
-					let interval = bdd(i + 1, xs, sum + v, ws);
-					(interval.start - v)..(interval.end - v)
-				})
+				.map(|v| v.end - C::one())
+				.map(|v| (v, bdd(db, i + 1, xs, sum + v, ws)))
+				.collect::<Vec<_>>();
+
+			let view = intervals
+				.iter()
+				.map(|(_, (_, lit))| lit)
+				.all_equal()
+				.then(|| intervals.first().unwrap().1 .1.clone());
+
+			let interval = intervals
+				.into_iter()
+				.map(|(v, (interval, _))| (interval.start - v)..(interval.end - v))
 				.reduce(|a, b| std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end))
 				.unwrap();
-			let new_interval_inserted = ws[i].insert(interval.clone());
+
+			let lit = if let Some(view) = view {
+				view
+			} else {
+				LitOrConst::Lit(new_var!(
+					db,
+					format!("bdd_{i}>={}..{}", interval.start, interval.end - C::one())
+				))
+			};
+
+			let new_interval_inserted = ws[i].insert(interval.clone(), lit.clone()).is_none();
 			debug_assert!(
 				new_interval_inserted,
 				"Duplicate interval {interval:?} inserted into {ws:?} layer {i}"
 			);
-			interval
+			(interval, lit)
 		}
-		[a] => a.clone(),
+		[(a, lit)] => (a.clone(), lit.clone().clone()),
 		_ => panic!("ROBDD intervals should be disjoint, but were {:?}", ws[i]),
 	}
 }
