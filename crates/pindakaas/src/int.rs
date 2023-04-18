@@ -956,15 +956,6 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					// TODO tighten c_c.start
 					let c_c = (std::cmp::min(c_a.start, c_b.start))
 						..(((c_a.end - C::one()) + (c_b.end - C::one())) + C::one());
-					println!(
-						"x>={}..{} and y>={}..{} -> z>={}..{}",
-						c_a.start,
-						c_a.end - C::one(),
-						c_b.start,
-						c_b.end - C::one(),
-						c_c.start,
-						c_c.end - C::one()
-					);
 					let z_geq_c_c = z.geq(c_c.clone());
 
 					add_clauses_for(
@@ -983,15 +974,6 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 						let c_c = (c_a.start) + (c_b.start);
 						let c_c = c_c..(c_c + C::one());
 
-						println!(
-							"x<={}..{} and y<={}..{} -> z<={}..{}",
-							c_a.start,
-							c_a.end - C::one(),
-							c_b.start,
-							c_b.end - C::one(),
-							c_c.start,
-							c_c.end - C::one()
-						);
 
 						let z_leq_c_c = z.leq(c_c.clone());
 
