@@ -220,12 +220,12 @@ mod subscriber {
 						}
 						let lit_names = self.lit_names.lock().unwrap();
 						let clause = join(
-							cl.into_iter().map(|(neg, lit)| {
+							cl.into_iter().map(|(pos, lit)| {
 								let mut label = lit_names
 									.get(&lit)
 									.cloned()
 									.unwrap_or_else(|| create_var_name(&lit, "x"));
-								if neg {
+								if !pos {
 									label.insert(0, '¬')
 								};
 								label
