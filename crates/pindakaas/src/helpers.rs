@@ -74,11 +74,16 @@ impl<'a, Lit: Literal> Checker for XorConstraint<'a, Lit> {
 
 #[cfg(test)]
 pub mod tests {
+	type Lit = i32; // TODO replace all i32s for Lit
+
 	use splr::{
 		types::{CNFDescription, Instantiate},
 		Certificate, Config, SatSolverIF, SolveIF, Solver, SolverError,
 	};
-	use std::{collections::HashSet, thread::panicking};
+	use std::{
+		collections::{HashMap, HashSet},
+		thread::panicking,
+	};
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
@@ -284,6 +289,7 @@ pub mod tests {
 		expected_cls: Option<usize>,
 		expected_lits: Option<usize>,
 		expecting_no_unit_clauses: bool,
+		expecting_no_equivalences: Option<HashMap<Lit, Lit>>,
 	}
 
 	impl TestDB {
@@ -307,7 +313,8 @@ pub mod tests {
 				expected_vars: None,
 				expected_cls: None,
 				expected_lits: None,
-				expecting_no_unit_clauses: false,
+				expecting_no_unit_clauses: true,
+				expecting_no_equivalences: None,
 			}
 		}
 
@@ -504,6 +511,46 @@ pub mod tests {
 					"Unexpected unit clause on aux var {:?}",
 					cl
 				);
+			}
+
+			if let Some(equivalences) = &mut self.expecting_no_equivalences {
+				let mut cl = cl.clone();
+				cl.sort_by_key(|l| l.abs());
+				if match cl[..] {
+					[a, b] => {
+						if !a.is_negated() && !b.is_negated() {
+							let (a, b) = (a.var(), b.var());
+							// a \/ b = ~a -> b
+							equivalences.insert(a.negate(), b);
+							// do we have b -> ~a = ~b \/ ~a = a -> ~b?
+							equivalences.get(&a) == Some(&b.negate())
+						} else if a.is_negated() && !b.is_negated() {
+							let (a, b) = (a.var(), b.var());
+							// ~a \/ b = a -> b
+							equivalences.insert(a, b);
+							// do we have b -> a = ~b \/ a = ~a -> ~b?
+							equivalences.get(&a.negate()) == Some(&b.negate())
+						} else if !a.is_negated() && b.is_negated() {
+							let (a, b) = (a.var(), b.var());
+							// a \/ ~b = ~a -> ~b
+							equivalences.insert(a.negate(), b.negate());
+							// do we have ~b -> ~a = b \/ ~a = a -> b?
+							equivalences.get(&a) == Some(&b)
+						} else if a.is_negated() && b.is_negated() {
+							let (a, b) = (a.var(), b.var());
+							// ~a \/ ~b = a -> ~b
+							equivalences.insert(a.negate(), b.negate());
+							// do we have ~b -> a = b \/ a = ~a -> b?
+							equivalences.get(&a.negate()) == Some(&b)
+						} else {
+							unreachable!("{:?}", cl);
+						}
+					}
+					_ => false,
+				} {
+					//panic!("Unexpected equivalence by adding {cl:?}");
+					println!("Unexpected equivalence by adding {cl:?}");
+				}
 			}
 
 			if let Some(num) = &mut self.expected_cls {
