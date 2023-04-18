@@ -1,8 +1,5 @@
-use std::ops::AddAssign;
-
 use iset::{interval_map, IntervalMap};
 use itertools::Itertools;
-use num::One;
 
 use crate::{
 	int::{IntVarEnc, IntVarOrd, LitOrConst, TernLeConstraint, TernLeEncoder},
@@ -37,8 +34,15 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 			.map(|(i, part)| {
 				IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone(), format!("x_{i}")).into()
 			})
-			.sorted_by(|a: &IntVarEnc<_, C>, b: &IntVarEnc<_, C>| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
+			//.sorted_by(|a: &IntVarEnc<_, C>, b: &IntVarEnc<_, C>| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
+
+		println!(
+			"{} {} {}",
+			xs.iter().map(|x| format!("{x}")).join(" + "),
+			lin.cmp,
+			*lin.k
+		);
 
 		let ws = construct_bdd(db, &xs, &lin.cmp, lin.k.clone(), self.add_consistency);
 
@@ -76,7 +80,11 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 			let ub = (k + C::one())..inf;
 			match cmp {
 				LimitComp::LessEq => {
-					interval_map! { lb => LitOrConst::Const(true), ub => LitOrConst::Const(false) }
+                    if lb.end - C::one() >= C::zero() {
+                        interval_map! { lb => LitOrConst::Const(true), ub => LitOrConst::Const(false) }
+                    } else {
+                        interval_map! { ub => LitOrConst::Const(false) }
+                    }
 				}
 				LimitComp::Equal => interval_map! { lb.start..(lb.end - C::one()) => LitOrConst::Const(false), ub => LitOrConst::Const(false) },
 			}
@@ -106,7 +114,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 	//	}
 	//}
 
-	bdd(db, 0, xs, C::zero(), &mut ws);
+	bdd(db, 0, xs, C::zero(), &mut ws, true);
 	ws.into_iter()
 		.enumerate()
 		.map(|(i, w)| {
@@ -115,29 +123,48 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 				views.next();
 			}
 
-			let mut lb = C::zero();
+			let lb = views
+				.find_map(|(iv, lit)| {
+					(matches!(lit, LitOrConst::Lit(_) | LitOrConst::Const(true)))
+						.then_some(iv.end - C::one())
+				})
+				.unwrap();
+
+			let mut last_false_iv_start = None;
 			let views = views
 				.filter(|(iv, _)| iv.end - C::one() >= C::zero())
 				.filter_map(|(iv, lit)| match lit {
-					LitOrConst::Lit(lit) => Some((iv, Some(lit))),
-					LitOrConst::Const(true) => {
-						lb = iv.end - C::one();
+					LitOrConst::Lit(lit) => {
+						if let Some(last_false_iv_start_) = last_false_iv_start {
+							last_false_iv_start = None;
+							Some((last_false_iv_start_..iv.end, Some(lit)))
+						} else {
+							Some((iv, Some(lit)))
+						}
+					}
+					LitOrConst::Const(true) => None,
+					LitOrConst::Const(false) => {
+						if last_false_iv_start.is_none() {
+							last_false_iv_start = Some(iv.start);
+						}
 						None
 					}
-					LitOrConst::Const(false) => None,
 				})
 				.collect::<IntervalMap<_, _>>();
 
-			if views.is_empty() {
+			let y = if views.is_empty() {
 				IntVarEnc::Const(lb)
 			} else {
-				let y = IntVarEnc::Ord(IntVarOrd::from_views(db, views, format!("bdd_{i}")).into());
+				let mut y = IntVarOrd::from_views(db, views, Some(lb), format!("bdd_{i}"));
+				y.gapless(); // TODO this indicates we can remove `syms`
+				let y = IntVarEnc::Ord(y);
 
 				if add_consistency {
 					y.consistent(db).unwrap();
 				}
 				y
-			}
+			};
+			y
 		})
 		.collect()
 }
@@ -148,6 +175,7 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 	xs: &Vec<IntVarEnc<DB::Lit, C>>,
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, LitOrConst<DB::Lit>>>,
+	first: bool,
 ) -> (std::ops::Range<C>, LitOrConst<DB::Lit>) {
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
@@ -156,7 +184,8 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 			let intervals = dom
 				.iter(..)
 				.map(|v| v.end - C::one())
-				.map(|v| (v, bdd(db, i + 1, xs, sum + v, ws)))
+				.enumerate()
+				.map(|(j, v)| (v, bdd(db, i + 1, xs, sum + v, ws, j == 0 && first)))
 				.collect::<Vec<_>>();
 
 			let view = intervals
@@ -171,7 +200,9 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 				.reduce(|a, b| std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end))
 				.unwrap();
 
-			let lit = if let Some(view) = view {
+			let lit = if first {
+				LitOrConst::Const(true)
+			} else if let Some(view) = view {
 				view
 			} else {
 				LitOrConst::Lit(new_var!(
