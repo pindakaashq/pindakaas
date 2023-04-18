@@ -31,7 +31,7 @@ pub(crate) fn _next_int_var<DB: ClauseDatabase, C: Coefficient>(
 ) -> IntVarEnc<DB::Lit, C> {
 	// TODO check for domain of 1 => Constant?
 	if cutoff.is_none() || C::from(dom.len()).unwrap() <= cutoff.unwrap() {
-		let x = IntVarOrd::from_syms(db, dom, lbl);
+		let x = IntVarOrd::from_syms(db, dom, None, lbl);
 		if add_consistency {
 			x.consistent(db).unwrap();
 		}
@@ -70,8 +70,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarOrd<Lit, C> {
 			self.lbl,
 			self.dom()
 				.iter(..)
-				.map(|iv| iv.end - C::one())
-				.sorted()
+				.map(|iv| format!("{}..{}", iv.start, iv.end - C::one()))
 				.join(","),
 			self.xs.values(..).map(|x| format!("{:?}", x)).join(","),
 		)
@@ -82,7 +81,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}:O ∈ {{{}}}",
+			"{}:B ∈ {{{}}}",
 			self.lbl,
 			self.dom()
 				.iter(..)
@@ -96,6 +95,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarOrd<Lit: Literal, C: Coefficient> {
 	pub(crate) xs: IntervalMap<C, Lit>,
+	pub(crate) lb: C,
 	pub(crate) lbl: String,
 }
 
@@ -112,17 +112,24 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 				.into_iter()
 				.collect::<Vec<_>>()
 				.as_slice(),
+			Some(lb),
 			lbl,
 		)
 	}
 
-	pub fn from_dom<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, dom: &[C], lbl: String) -> Self {
+	pub fn from_dom<DB: ClauseDatabase<Lit = Lit>>(
+		db: &mut DB,
+		dom: &[C],
+		lb: Option<C>,
+		lbl: String,
+	) -> Self {
 		Self::from_syms(
 			db,
 			dom.iter()
 				.tuple_windows()
 				.map(|(&a, &b)| (a + C::one())..(b + C::one()))
 				.collect(),
+			lb,
 			lbl,
 		)
 	}
@@ -130,16 +137,19 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	pub fn from_syms<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
 		syms: IntervalSet<C>,
+		lb: Option<C>,
 		lbl: String,
 	) -> Self {
-		Self::from_views(db, syms.into_iter(..).map(|c| (c, None)).collect(), lbl)
+		Self::from_views(db, syms.into_iter(..).map(|c| (c, None)).collect(), lb, lbl)
 	}
 
 	pub fn from_views<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
 		views: IntervalMap<C, Option<DB::Lit>>,
+		lb: Option<C>,
 		lbl: String,
 	) -> Self {
+		let lb = lb.unwrap_or_else(|| views.intervals(..).next().unwrap().start - C::one());
 		assert!(!views.is_empty());
 		let xs = views
 			.into_iter(..)
@@ -149,7 +159,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 				(v, lit.unwrap_or_else(|| new_var!(db, lbl)))
 			})
 			.collect::<IntervalMap<_, _>>();
-		Self { xs, lbl }
+		Self { xs, lb, lbl }
 	}
 
 	pub fn _consistency(&self) -> ImplicationChainConstraint<Lit> {
@@ -200,6 +210,17 @@ impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
+	pub(crate) fn gapless(&mut self) {
+		self.xs = std::iter::once((
+			self.lb..(self.lb + C::one()),
+			self.xs.values(..).next().unwrap().clone(),
+		))
+		.chain(self.xs.clone().into_iter(..))
+		.tuple_windows()
+		.map(|((val_a, _), (val_b, lit_b))| (val_a.end..val_b.end, lit_b))
+		.collect();
+	}
+
 	pub fn add<DB: ClauseDatabase<Lit = Lit>>(
 		&self,
 		db: &mut DB,
@@ -208,13 +229,15 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		// enc: &mut dyn Encoder<DB, TernLeConstraint<'a, DB, C>>,
 	) -> Result<IntVarEnc<Lit, C>> {
 		if let IntVarEnc::Const(y) = y {
+			let xs = self
+				.xs
+				.clone()
+				.into_iter(..)
+				.map(|(c, l)| ((c.start + *y)..(c.end + *y), l))
+				.collect();
 			Ok(IntVarOrd {
-				xs: self
-					.xs
-					.clone()
-					.into_iter(..)
-					.map(|(c, l)| ((c.start + *y)..(c.end + *y), l))
-					.collect(),
+				xs,
+				lb: self.lb + *y,
 				lbl: self.lbl.clone(),
 			}
 			.into())
@@ -252,6 +275,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		} else {
 			IntVarOrd {
 				xs,
+				lb,
 				lbl: self.lbl.clone(),
 			}
 			.into()
@@ -259,7 +283,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	}
 
 	pub fn dom(&self) -> IntervalSet<C> {
-		std::iter::once(self.lb()..self.lb() + C::one())
+		std::iter::once(self.lb()..(self.lb() + C::one()))
 			.chain(self.xs.intervals(..))
 			.collect()
 	}
@@ -270,7 +294,6 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			.map(|(v, x)| {
 				(
 					(v.start - C::one())..(v.end - C::one()),
-					//(v.start + C::one())..(v.end + C::one()),
 					vec![vec![x.negate()]],
 				)
 			})
@@ -279,13 +302,13 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	}
 
 	pub fn geqs(&self) -> Vec<(Range<C>, Vec<Vec<Lit>>)> {
-		std::iter::once((self.lb()..self.lb() + C::one(), vec![]))
+		std::iter::once((self.lb()..(self.lb() + C::one()), vec![]))
 			.chain(self.xs.iter(..).map(|(v, x)| (v, vec![vec![x.clone()]])))
 			.collect()
 	}
 
 	pub fn lb(&self) -> C {
-		self.xs.range().unwrap().start - C::one()
+		self.lb
 	}
 
 	pub fn ub(&self) -> C {
@@ -293,7 +316,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	}
 
 	pub fn leq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
-		let v = v.start + C::one();
+		let v = v.start + C::one(); // [x<=v] = [x < v+1]
 		if v <= self.lb() {
 			vec![vec![]]
 		} else if v > self.ub() {
@@ -511,28 +534,25 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 							(interval, Some(o))
 						}
 					})
-					.collect();
-				IntVarOrd::from_views(db, dom, lbl)
+					.collect::<IntervalMap<_, _>>();
+				IntVarOrd::from_views(db, dom, None, lbl)
 			}
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
 			Part::Ic(terms) => {
 				let mut acc = C::zero(); // running sum
-				IntVarOrd::from_views(
-					db,
-					std::iter::once(&(terms[0].0.clone(), C::zero().into()))
-						.chain(terms.iter())
-						.map(|(lit, coef)| {
-							acc += **coef;
-							debug_assert!(acc <= *ub);
-							(acc, lit.clone())
-						})
-						.tuple_windows()
-						.map(|((prev, _), (coef, lit))| {
-							((prev + C::one())..(coef + C::one()), Some(lit))
-						})
-						.collect(),
-					lbl,
-				)
+				let dom = std::iter::once(&(terms[0].0.clone(), C::zero().into()))
+					.chain(terms.iter())
+					.map(|(lit, coef)| {
+						acc += **coef;
+						debug_assert!(acc <= *ub);
+						(acc, lit.clone())
+					})
+					.tuple_windows()
+					.map(|((prev, _), (coef, lit))| {
+						((prev + C::one())..(coef + C::one()), Some(lit))
+					})
+					.collect::<IntervalMap<_, _>>();
+				IntVarOrd::from_views(db, dom, None, lbl)
 			}
 			Part::Dom(terms, l, u) => {
 				let x_bin =
@@ -565,32 +585,16 @@ pub(crate) enum IntVarEnc<Lit: Literal, C: Coefficient> {
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
-       /*
-	pub(crate) fn from_views<DB: ClauseDatabase<Lit = Lit>>(
-		db: &mut DB,
-		views: IntervalMap<C, Option<DB::Lit>>,
-		lbl: String,
-	) -> Result<IntVarEnc<DB::Lit, C>> {
-		dbg!(&views);
-		if views.len() == 0 {
-			Err(Unsatisfiable)
-		//} else if views.len() == 1 {
-		//	let (c, _) = views.into_iter(..).next().unwrap();
-		//	Ok(IntVarEnc::Const(c.end - C::one()))
-		} else {
-			Ok(IntVarOrd::from_views(db, views, lbl).into())
-		}
-	}
-       */
 	pub(crate) fn from_dom<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
 		dom: &[C],
 		lbl: String,
 	) -> Result<IntVarEnc<DB::Lit, C>> {
+		let lb = dom[0];
 		match dom {
 			[] => Err(Unsatisfiable),
 			[d] => Ok(IntVarEnc::Const(*d)),
-			dom => Ok(IntVarOrd::from_dom(db, dom, lbl).into()),
+			dom => Ok(IntVarOrd::from_dom(db, dom, Some(lb), lbl).into()),
 		}
 	}
 
@@ -926,7 +930,8 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				z.lb(),
 				z.ub(),
 			);
-			let z_ord = IntVarOrd::from_syms(db, dom, String::from("z_ord"));
+
+			let z_ord = IntVarOrd::from_syms(db, dom, None, String::from("z_ord"));
 			self.encode(
 				db,
 				&TernLeConstraint::new(
@@ -951,6 +956,15 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					// TODO tighten c_c.start
 					let c_c = (std::cmp::min(c_a.start, c_b.start))
 						..(((c_a.end - C::one()) + (c_b.end - C::one())) + C::one());
+					println!(
+						"x>={}..{} and y>={}..{} -> z>={}..{}",
+						c_a.start,
+						c_a.end - C::one(),
+						c_b.start,
+						c_b.end - C::one(),
+						c_c.start,
+						c_c.end - C::one()
+					);
 					let z_geq_c_c = z.geq(c_c.clone());
 
 					add_clauses_for(
@@ -968,6 +982,17 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					for (c_b, y_leq_c_b) in y.leqs() {
 						let c_c = (c_a.start) + (c_b.start);
 						let c_c = c_c..(c_c + C::one());
+
+						println!(
+							"x<={}..{} and y<={}..{} -> z<={}..{}",
+							c_a.start,
+							c_a.end - C::one(),
+							c_b.start,
+							c_b.end - C::one(),
+							c_c.start,
+							c_c.end - C::one()
+						);
+
 						let z_leq_c_c = z.leq(c_c.clone());
 
 						add_clauses_for(
@@ -1127,7 +1152,7 @@ pub mod tests {
 		consistent: bool,
 		lbl: String,
 	) -> IntVarEnc<DB::Lit, C> {
-		let x = IntVarOrd::from_syms(db, dom, lbl);
+		let x = IntVarOrd::from_syms(db, dom, None, lbl);
 		if consistent {
 			x.consistent(db).unwrap();
 		}
@@ -1889,6 +1914,7 @@ impl<C: Coefficient> IntVar<C> {
 					.cloned()
 					.collect::<Vec<_>>()
 					.as_slice(),
+				None,
 				"x".to_string(),
 			));
 			if self.add_consistency {

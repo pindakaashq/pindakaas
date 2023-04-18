@@ -104,6 +104,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Sorted<'_, DB::Lit, C>> for
 				IntVarOrd::from_views(
 					db,
 					interval_map! { C::one()..(C::one()+C::one()) => x },
+					None,
 					format!("x_{}", i + 1),
 				)
 				.into()
