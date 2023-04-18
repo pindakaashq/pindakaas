@@ -313,7 +313,7 @@ pub mod tests {
 				expected_vars: None,
 				expected_cls: None,
 				expected_lits: None,
-				expecting_no_unit_clauses: true,
+				expecting_no_unit_clauses: false,
 				expecting_no_equivalences: None,
 			}
 		}
