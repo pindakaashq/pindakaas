@@ -180,12 +180,18 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
 			let dom = xs[i].dom();
+			let mut first_copy = first;
 
 			let intervals = dom
 				.iter(..)
 				.map(|v| v.end - C::one())
-				.enumerate()
-				.map(|(j, v)| (v, bdd(db, i + 1, xs, sum + v, ws, j == 0 && first)))
+				.map(|v| {
+					let sub = bdd(db, i + 1, xs, sum + v, ws, first_copy);
+					if !matches!(sub.1, LitOrConst::Const(false)) {
+						first_copy = false;
+					}
+					(v, sub)
+				})
 				.collect::<Vec<_>>();
 
 			let view = intervals
