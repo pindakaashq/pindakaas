@@ -5,7 +5,7 @@ use crate::{
 	int::{IntVarEnc, IntVarOrd, LitOrConst, TernLeConstraint, TernLeEncoder},
 	linear::LimitComp,
 	trace::new_var,
-	ClauseDatabase, Coefficient, Encoder, Linear, Literal, PosCoeff, Result,
+	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
