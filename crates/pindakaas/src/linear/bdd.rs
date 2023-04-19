@@ -37,13 +37,6 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 			.sorted_by(|a: &IntVarEnc<_, C>, b: &IntVarEnc<_, C>| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
 
-		println!(
-			"{} {} {}",
-			xs.iter().map(|x| format!("{x}")).join(" + "),
-			lin.cmp,
-			*lin.k
-		);
-
 		let ws = construct_bdd(db, &xs, &lin.cmp, lin.k.clone(), self.add_consistency);
 
 		// TODO add consistency
