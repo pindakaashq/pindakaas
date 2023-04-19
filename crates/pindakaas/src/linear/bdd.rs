@@ -114,7 +114,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 	//	}
 	//}
 
-	bdd(db, 0, xs, C::zero(), &mut ws, true);
+	bdd(db, 0, xs, C::zero(), &mut ws);
 	ws.into_iter()
 		.enumerate()
 		.map(|(i, w)| {
@@ -175,40 +175,26 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 	xs: &Vec<IntVarEnc<DB::Lit, C>>,
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, LitOrConst<DB::Lit>>>,
-	first: bool,
 ) -> (std::ops::Range<C>, LitOrConst<DB::Lit>) {
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
 			let dom = xs[i].dom();
-			let mut first_copy = first;
-
-			let intervals = dom
+			let views = dom
 				.iter(..)
 				.map(|v| v.end - C::one())
-				.map(|v| {
-					let sub = bdd(db, i + 1, xs, sum + v, ws, first_copy);
-					if !matches!(sub.1, LitOrConst::Const(false)) {
-						first_copy = false;
-					}
-					(v, sub)
-				})
+				.map(|v| (v, bdd(db, i + 1, xs, sum + v, ws)))
 				.collect::<Vec<_>>();
 
-			let view = intervals
-				.iter()
-				.map(|(_, (_, lit))| lit)
-				.all_equal()
-				.then(|| intervals.first().unwrap().1 .1.clone());
+			let view = (views.iter().map(|(_, (_, lit))| lit).all_equal())
+				.then(|| views.first().unwrap().1 .1.clone());
 
-			let interval = intervals
+			let interval = views
 				.into_iter()
 				.map(|(v, (interval, _))| (interval.start - v)..(interval.end - v))
 				.reduce(|a, b| std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end))
 				.unwrap();
 
-			let lit = if first {
-				LitOrConst::Const(true)
-			} else if let Some(view) = view {
+			let lit = if let Some(view) = view {
 				view
 			} else {
 				LitOrConst::Lit(new_var!(
