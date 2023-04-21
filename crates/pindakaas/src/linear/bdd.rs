@@ -83,42 +83,61 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 	k: PosCoeff<C>,
 	add_consistency: bool,
 ) -> Vec<IntVarEnc<DB::Lit, C>> {
-	let ubs = xs.iter().map(|x| x.ub()).collect::<Vec<_>>();
 	let k = *k;
-	let inf = ubs.iter().fold(C::one() + C::one(), |a, &b| (a + b));
-	let neg_inf = k - inf;
 
-	let mut ws = ubs
+	let bounds = xs
 		.iter()
-		.enumerate()
-		.map(|(i, _)| {
-			// TODO optimize
-            let lb_end = ubs[i..].iter().fold(k + C::one(), |acc, ub| acc - *ub);
-			let ub = (k + C::one())..inf;
-			match cmp {
-				LimitComp::LessEq => {
-                    if lb_end > C::zero() {
-                        interval_map! { C::zero()..lb_end => BddNode::Const(true), ub => BddNode::Const(false) }
-                    } else {
-                        interval_map! { ub => BddNode::Const(false) }
-                    }
-				}
-				LimitComp::Equal => {
-                    if lb_end > C::one() {
-                        interval_map! { C::zero()..(lb_end - C::one()) => BddNode::Const(false), ub => BddNode::Const(false) }
-                    } else {
-                        interval_map! { ub => BddNode::Const(false) }
-                    }
+		.scan((C::zero(), C::zero()), |state, x| {
+			*state = (state.0 + x.lb(), state.1 + x.ub());
+			Some(*state)
+		})
+		.chain(std::iter::once((C::zero(), k)))
+		.collect::<Vec<_>>();
 
-                },
+	let margins = xs
+		.iter()
+		.rev()
+		.scan((k, k), |state, x| {
+			*state = (state.0 - x.lb(), state.1 - x.ub());
+			Some(*state)
+		})
+		.collect::<Vec<_>>();
+
+	let inf = xs.iter().fold(C::zero(), |a, x| a + x.ub()) + C::one();
+
+	let mut ws = margins
+		.into_iter()
+		.rev()
+		.chain(std::iter::once((
+			k,
+			match cmp {
+				LimitComp::Equal => k,
+				LimitComp::LessEq => k,
+			},
+		)))
+		.zip(bounds)
+		.map(|((lb_margin, ub_margin), (lb, ub))| {
+			dbg!(lb_margin, ub_margin);
+			match cmp {
+				LimitComp::LessEq => [
+					(ub_margin > lb)
+						.then_some((C::zero()..(ub_margin + C::one()), BddNode::Const(true))),
+					(lb_margin <= ub)
+						.then_some(((lb_margin + C::one())..inf, BddNode::Const(false))),
+				]
+				.into_iter()
+				.flatten()
+				.collect(),
+				LimitComp::Equal => {
+					if lb_margin > C::one() {
+						interval_map! { C::zero()..(lb_margin - C::one()) => BddNode::Const(false)
+						 }
+					} else {
+						interval_map! {}
+					}
+				}
 			}
 		})
-		.chain(std::iter::once(match cmp {
-			LimitComp::LessEq => {
-				interval_map! { neg_inf..C::zero() => BddNode::Const(false), C::zero()..k+C::one() => BddNode::Const(true), k+C::one()..inf => BddNode::Const(false)}
-			}
-			LimitComp::Equal => interval_map! { neg_inf..k => BddNode::Const(false), k..k+C::one() => BddNode::Const(true), k+C::one()..inf => BddNode::Const(false) },
-		}))
 		.collect();
 
 	bdd(db, 0, xs, C::zero(), &mut ws);
