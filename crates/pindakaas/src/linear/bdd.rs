@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use iset::IntervalMap;
 use itertools::Itertools;
@@ -39,24 +39,47 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 			.sorted_by(|a: &IntVarEnc<_, C>, b: &IntVarEnc<_, C>| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect::<Vec<_>>();
 
-		let ws = construct_bdd(db, &xs, &lin.cmp, lin.k.clone(), self.add_consistency);
-
 		let mut model = Model::new();
 
+		let ys = construct_bdd(db, &xs, &lin.cmp, lin.k.clone());
 		let xs = xs
 			.into_iter()
 			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
 			.collect::<Vec<_>>();
 
-		let ws = ws
+		let ys = ys
 			.into_iter()
-			.map(|w| Rc::new(RefCell::new(model.add_int_var_enc(w))))
+			.map(|nodes| {
+				let mut views = HashMap::new();
+				Rc::new(RefCell::new({
+					let mut y = model.new_var(
+						nodes
+							.into_iter(..)
+							.filter_map(|(iv, node)| match node {
+								BddNode::Gap => None,
+								BddNode::Val => Some(iv.end - C::one()),
+								BddNode::View(view) => {
+									let val = iv.end - C::one();
+									views.insert(val, view);
+									Some(val)
+								}
+							})
+							.collect(),
+						self.add_consistency,
+					);
+					y.views = views
+						.into_iter()
+						.map(|(val, view)| (val, (y.id + 1, view)))
+						.collect();
+					y
+				}))
+			})
 			.collect::<Vec<_>>();
 
-		// TODO add consistency
-		let mut ws = ws.into_iter();
-		let first = ws.next().unwrap();
-		xs.iter().zip(ws).fold(first, |curr, (x_i, next)| {
+
+		let mut ys = ys.into_iter();
+		let first = ys.next().unwrap();
+		xs.iter().zip(ys).fold(first, |curr, (x_i, next)| {
 			model.cons.push(Lin::tern(
 				curr.clone(),
 				x_i.clone(),
@@ -81,8 +104,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 	xs: &Vec<IntVarEnc<DB::Lit, C>>,
 	cmp: &LimitComp,
 	k: PosCoeff<C>,
-	add_consistency: bool,
-) -> Vec<IntVarEnc<DB::Lit, C>> {
+) -> Vec<IntervalMap<C, BddNode<C>>> {
 	let k = *k;
 
 	let bounds = xs
@@ -141,30 +163,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 		.collect();
 
 	bdd(db, 0, xs, C::zero(), &mut ws);
-
-	ws.into_iter()
-		.enumerate()
-		.map(|(i, nodes)| {
-			let nodes = nodes
-				.into_iter(..)
-				.filter_map(|(iv, node)| (node != BddNode::Gap).then_some(iv.end - C::one()))
-				.collect::<Vec<_>>();
-
-			dbg!(&nodes);
-			let y = if nodes.len() == 1 {
-				IntVarEnc::Const(nodes[0])
-			} else {
-				let y = IntVarOrd::from_dom(db, &nodes, None, format!("bdd_{i}"));
-				let y = IntVarEnc::Ord(y);
-
-				if add_consistency {
-					y.consistent(db).unwrap();
-				}
-				y
-			};
-			y
-		})
-		.collect()
+	ws
 }
 
 #[derive(Debug, Clone, PartialEq)]

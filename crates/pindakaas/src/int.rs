@@ -1666,6 +1666,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			id: self.var_ids,
 			dom,
 			add_consistency,
+			views: HashMap::default(),
 		}
 	}
 
@@ -1674,6 +1675,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result {
+		let mut all_views = HashMap::new();
 		for con in &self.cons {
 			let Lin { xs, cmp } = con;
 			assert!(
@@ -1683,10 +1685,9 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			);
 
 			for (_, x) in xs {
-				self.vars.entry(x.borrow().id).or_insert_with(|| {
-					let enc = x.borrow().encode(db);
-					enc
-				});
+				self.vars
+					.entry(x.borrow().id)
+					.or_insert_with(|| x.borrow().encode(db, &mut all_views));
 			}
 
 			let (x, y, z) = (
@@ -1878,31 +1879,55 @@ impl<C: Coefficient> Lin<C> {
 }
 
 // TODO perhaps id can be used by replacing vars HashMap to just vec
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntVar<C: Coefficient> {
 	pub(crate) id: usize,
 	pub(crate) dom: BTreeSet<C>,
 	add_consistency: bool,
+	pub(crate) views: HashMap<C, (usize, C)>,
+}
+
+impl<C: Coefficient> fmt::Display for IntVar<C> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "x{} ∈ {{{}}}", self.id, self.dom.iter().join(","))
+	}
 }
 
 impl<C: Coefficient> IntVar<C> {
-	fn encode<DB: ClauseDatabase>(&self, db: &mut DB) -> IntVarEnc<DB::Lit, C> {
+	fn encode<DB: ClauseDatabase>(
+		&self,
+		db: &mut DB,
+		views: &mut HashMap<(usize, C), DB::Lit>,
+	) -> IntVarEnc<DB::Lit, C> {
 		if self.size() == 1 {
 			IntVarEnc::Const(*self.dom.first().unwrap())
 		} else {
-			let x = IntVarEnc::Ord(IntVarOrd::from_dom(
+			let x = IntVarEnc::Ord(IntVarOrd::from_views(
 				db,
 				self.dom
 					.iter()
 					.sorted()
 					.cloned()
-					.collect::<Vec<_>>()
-					.as_slice(),
+					.tuple_windows()
+					.map(|(a, b)| (a + C::one())..(b + C::one()))
+					.map(|v| (v.clone(), views.get(&(self.id, v.end - C::one())).cloned()))
+					.collect(),
 				None,
 				"x".to_string(),
 			));
 			if self.add_consistency {
 				x.consistent(db).unwrap();
+			}
+
+			for view in self
+				.views
+				.iter()
+				.map(|(c, (id, val))| ((*id, *val), x.geq(*c..(*c + C::one())).clone()))
+			{
+                // TODO refactor
+				if view.1.len() > 0 {
+					views.insert(view.0, view.1[0][0].clone());
+				}
 			}
 			x
 			// TODO support again binary cutoff `if cutoff.is_none() || C::from(dom.len()).unwrap() <= cutoff.unwrap()`
