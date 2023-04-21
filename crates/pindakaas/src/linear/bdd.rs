@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use iset::{interval_map, IntervalMap};
+use iset::IntervalMap;
 use itertools::Itertools;
 
 #[allow(unused_imports)]
@@ -145,43 +145,16 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 	ws.into_iter()
 		.enumerate()
 		.map(|(i, nodes)| {
-
-
-			let mut last_false_iv_start = None;
 			let nodes = nodes
 				.into_iter(..)
-				.filter(|(iv, _)| iv.end - C::one() >= C::zero())
-				.filter_map(|(iv, node)| match node {
-					BddNode::View(_) | BddNode::Val => {
-						if let Some(last_false_iv_start_) = last_false_iv_start {
-							last_false_iv_start = None;
-							Some((last_false_iv_start_..iv.end, Some(node)))
-						} else {
-							Some((iv, Some(node)))
-						}
-					}
-					BddNode::Gap => {
-						if last_false_iv_start.is_none() {
-							last_false_iv_start = Some(iv.start);
-						}
-						None
-					}
-				})
-				.collect::<IntervalMap<_, _>>();
+				.filter_map(|(iv, node)| (node != BddNode::Gap).then_some(iv.end - C::one()))
+				.collect::<Vec<_>>();
 
 			dbg!(&nodes);
 			let y = if nodes.len() == 1 {
-				IntVarEnc::Const(nodes.into_iter(..).next().unwrap().0.end - C::one())
+				IntVarEnc::Const(nodes[0])
 			} else {
-				let y = IntVarOrd::from_dom(
-					db,
-					&nodes
-						.intervals(..)
-						.map(|c| c.end - C::one())
-						.collect::<Vec<_>>()[..],
-					None,
-					format!("bdd_{i}"),
-				);
+				let y = IntVarOrd::from_dom(db, &nodes, None, format!("bdd_{i}"));
 				let y = IntVarEnc::Ord(y);
 
 				if add_consistency {
@@ -210,8 +183,8 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 ) -> (std::ops::Range<C>, BddNode<C>) {
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
-			let dom = xs[i].dom();
-			let views = dom
+			let views = xs[i]
+				.dom()
 				.iter(..)
 				.map(|v| v.end - C::one())
 				.map(|v| (v, bdd(db, i + 1, xs, sum + v, ws)))
