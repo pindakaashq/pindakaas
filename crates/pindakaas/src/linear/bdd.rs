@@ -91,14 +91,20 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 			*state = (state.0 + x.lb(), state.1 + x.ub());
 			Some(*state)
 		})
-		.chain(std::iter::once((C::zero(), k)))
+		.chain(std::iter::once((
+			match cmp {
+				LimitComp::LessEq => C::zero(),
+				LimitComp::Equal => C::zero(),
+			},
+			k,
+		)))
 		.collect::<Vec<_>>();
 
 	let margins = xs
 		.iter()
 		.rev()
 		.scan((k, k), |state, x| {
-			*state = (state.0 - x.lb(), state.1 - x.ub());
+			*state = (state.0 - x.ub(), state.1 - x.lb());
 			Some(*state)
 		})
 		.collect::<Vec<_>>();
@@ -109,34 +115,31 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 		.into_iter()
 		.rev()
 		.chain(std::iter::once((
-			k,
 			match cmp {
-				LimitComp::Equal => k,
 				LimitComp::LessEq => k,
+				LimitComp::Equal => k,
 			},
+			k,
 		)))
 		.zip(bounds)
 		.map(|((lb_margin, ub_margin), (lb, ub))| {
-			dbg!(lb_margin, ub_margin);
 			match cmp {
-				LimitComp::LessEq => [
-					(ub_margin > lb)
-						.then_some((C::zero()..(ub_margin + C::one()), BddNode::Const(true))),
-					(lb_margin <= ub)
-						.then_some(((lb_margin + C::one())..inf, BddNode::Const(false))),
-				]
-				.into_iter()
-				.flatten()
-				.collect(),
-				LimitComp::Equal => {
-					if lb_margin > C::one() {
-						interval_map! { C::zero()..(lb_margin - C::one()) => BddNode::Const(false)
-						 }
-					} else {
-						interval_map! {}
-					}
-				}
+				LimitComp::LessEq => vec![
+					(lb_margin > lb)
+						.then_some((C::zero()..(lb_margin + C::one()), BddNode::Const(true))),
+					(ub_margin <= ub)
+						.then_some(((ub_margin + C::one())..inf, BddNode::Const(false))),
+				],
+				LimitComp::Equal => vec![
+					(lb_margin > lb).then_some((C::zero()..lb_margin, BddNode::Const(false))),
+					(lb_margin == ub_margin).then_some((k..(k + C::one()), BddNode::Const(true))),
+					(ub_margin <= ub)
+						.then_some(((ub_margin + C::one())..inf, BddNode::Const(false))),
+				],
 			}
+			.into_iter()
+			.flatten()
+			.collect()
 		})
 		.collect();
 
