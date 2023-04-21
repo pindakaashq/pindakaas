@@ -1,11 +1,13 @@
+use std::{cell::RefCell, rc::Rc};
+
 use iset::{interval_map, IntervalMap};
 use itertools::Itertools;
 
+#[allow(unused_imports)]
 use crate::{
-	int::{IntVarEnc, IntVarOrd, LitOrConst, TernLeConstraint, TernLeEncoder},
+	int::{IntVarEnc, IntVarOrd, Lin, Model},
 	linear::LimitComp,
-	trace::new_var,
-	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
+	ClauseDatabase, Coefficient, Consistency, Encoder, Linear, PosCoeff, Result,
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
@@ -39,15 +41,37 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 
 		let ws = construct_bdd(db, &xs, &lin.cmp, lin.k.clone(), self.add_consistency);
 
+		let mut model = Model::new();
+
+		let xs = xs
+			.into_iter()
+			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
+			.collect::<Vec<_>>();
+
+		let ws = ws
+			.into_iter()
+			.map(|w| Rc::new(RefCell::new(model.add_int_var_enc(w))))
+			.collect::<Vec<_>>();
+
 		// TODO add consistency
 		let mut ws = ws.into_iter();
 		let first = ws.next().unwrap();
 		xs.iter().zip(ws).fold(first, |curr, (x_i, next)| {
-			let c = TernLeConstraint::new(&curr, x_i, lin.cmp.clone(), &next);
-			TernLeEncoder::default().encode(db, &c).unwrap();
+			model.cons.push(Lin::tern(
+				curr.clone(),
+				x_i.clone(),
+				lin.cmp.clone(),
+				next.clone(),
+			));
 			next
 		});
 
+		//let add_propagation = Consistency::Bounds;
+		//let size = model.size();
+		//model.propagate(&add_propagation, vec![model.cons.len() - 1]);
+		//assert!(size - model.size() == 0);
+		//println!("{} - {} = {}", size, model.size(), size - model.size());
+		model.encode(db)?;
 		Ok(())
 	}
 }
@@ -69,74 +93,56 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 		.enumerate()
 		.map(|(i, _)| {
 			// TODO optimize
-			let lb = neg_inf..ubs[i..].iter().fold(k + C::one(), |acc, ub| acc - *ub);
+            let lb_end = ubs[i..].iter().fold(k + C::one(), |acc, ub| acc - *ub);
 			let ub = (k + C::one())..inf;
 			match cmp {
 				LimitComp::LessEq => {
-                    if lb.end - C::one() >= C::zero() {
-                        interval_map! { lb => LitOrConst::Const(true), ub => LitOrConst::Const(false) }
+                    if lb_end > C::zero() {
+                        interval_map! { C::zero()..lb_end => BddNode::Const(true), ub => BddNode::Const(false) }
                     } else {
-                        interval_map! { ub => LitOrConst::Const(false) }
+                        interval_map! { ub => BddNode::Const(false) }
                     }
 				}
-				LimitComp::Equal => interval_map! { lb.start..(lb.end - C::one()) => LitOrConst::Const(false), ub => LitOrConst::Const(false) },
+				LimitComp::Equal => {
+                    if lb_end > C::one() {
+                        interval_map! { C::zero()..(lb_end - C::one()) => BddNode::Const(false), ub => BddNode::Const(false) }
+                    } else {
+                        interval_map! { ub => BddNode::Const(false) }
+                    }
+
+                },
 			}
 		})
 		.chain(std::iter::once(match cmp {
 			LimitComp::LessEq => {
-				interval_map! { neg_inf..C::zero() => LitOrConst::Const(false), C::zero()..k+C::one() => LitOrConst::Const(true), k+C::one()..inf => LitOrConst::Const(false)}
+				interval_map! { neg_inf..C::zero() => BddNode::Const(false), C::zero()..k+C::one() => BddNode::Const(true), k+C::one()..inf => BddNode::Const(false)}
 			}
-			LimitComp::Equal => interval_map! { neg_inf..k => LitOrConst::Const(false), k..k+C::one() => LitOrConst::Const(true), k+C::one()..inf => LitOrConst::Const(false) },
+			LimitComp::Equal => interval_map! { neg_inf..k => BddNode::Const(false), k..k+C::one() => BddNode::Const(true), k+C::one()..inf => BddNode::Const(false) },
 		}))
 		.collect();
 
-	//struct TDB<Lit: Literal> {
-	//	nlit: usize,
-	//}
-
-	//impl<Lit: Literal + AddAssign + One> ClauseDatabase for TDB<Lit> {
-	//	type Lit = Lit;
-
-	//	fn new_var(&mut self) -> Self::Lit {
-	//		self.nlit += 1;
-	//		self.nlit
-	//	}
-
-	//	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
-	//		unreachable!()
-	//	}
-	//}
-
 	bdd(db, 0, xs, C::zero(), &mut ws);
+
 	ws.into_iter()
 		.enumerate()
-		.map(|(i, w)| {
-			let mut views = w.into_iter(..);
-			if cmp == &LimitComp::Equal {
-				views.next();
-			}
+		.map(|(i, nodes)| {
 
-			let lb = views
-				.find_map(|(iv, lit)| {
-					(matches!(lit, LitOrConst::Lit(_) | LitOrConst::Const(true)))
-						.then_some(iv.end - C::one())
-				})
-				.unwrap();
 
 			let mut last_false_iv_start = None;
-			let views = views
+			let nodes = nodes
+				.into_iter(..)
 				.filter(|(iv, _)| iv.end - C::one() >= C::zero())
-				.filter_map(|(iv, lit)| match lit {
-					LitOrConst::Lit(lit) => {
+				.filter_map(|(iv, node)| match node {
+					BddNode::View(_) | BddNode::Val => {
 						if let Some(last_false_iv_start_) = last_false_iv_start {
 							last_false_iv_start = None;
-							Some((last_false_iv_start_..iv.end, Some(lit)))
+							Some((last_false_iv_start_..iv.end, Some(node)))
 						} else {
-							Some((iv, Some(lit)))
+							Some((iv, Some(node)))
 						}
 					}
-					LitOrConst::Const(true) => None,
-					LitOrConst::Const(false) => {
+					BddNode::Const(true) => Some((iv, Some(BddNode::Val))),
+					BddNode::Const(false) => {
 						if last_false_iv_start.is_none() {
 							last_false_iv_start = Some(iv.start);
 						}
@@ -145,11 +151,19 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 				})
 				.collect::<IntervalMap<_, _>>();
 
-			let y = if views.is_empty() {
-				IntVarEnc::Const(lb)
+			let y =
+            if nodes.len() == 1 {
+				IntVarEnc::Const(nodes.into_iter(..).next().unwrap().0.end - C::one())
 			} else {
-				let mut y = IntVarOrd::from_views(db, views, Some(lb), format!("bdd_{i}"));
-				y.gapless(); // TODO this indicates we can remove `syms`
+				let y = IntVarOrd::from_dom(
+					db,
+					&nodes
+						.intervals(..)
+						.map(|c| c.end - C::one())
+						.collect::<Vec<_>>()[..],
+					None,
+					format!("bdd_{i}"),
+				);
 				let y = IntVarEnc::Ord(y);
 
 				if add_consistency {
@@ -162,13 +176,20 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 		.collect()
 }
 
+#[derive(Debug, Clone, PartialEq)]
+enum BddNode<C: Coefficient> {
+	Val,
+	Const(bool), // TODO perhaps Const(false) = gap, while Const(true) = just Val?
+	View(C),
+}
+
 fn bdd<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	i: usize,
 	xs: &Vec<IntVarEnc<DB::Lit, C>>,
 	sum: C,
-	ws: &mut Vec<IntervalMap<C, LitOrConst<DB::Lit>>>,
-) -> (std::ops::Range<C>, LitOrConst<DB::Lit>) {
+	ws: &mut Vec<IntervalMap<C, BddNode<C>>>,
+) -> (std::ops::Range<C>, BddNode<C>) {
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
 			let dom = xs[i].dom();
@@ -178,8 +199,8 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 				.map(|v| (v, bdd(db, i + 1, xs, sum + v, ws)))
 				.collect::<Vec<_>>();
 
-			let view = (views.iter().map(|(_, (_, lit))| lit).all_equal())
-				.then(|| views.first().unwrap().1 .1.clone());
+			let view = (views.iter().map(|(_, (iv, _))| iv).all_equal())
+				.then(|| views.first().unwrap().1 .0.end - C::one());
 
 			let interval = views
 				.into_iter()
@@ -187,23 +208,20 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 				.reduce(|a, b| std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end))
 				.unwrap();
 
-			let lit = if let Some(view) = view {
-				view
+			let node = if let Some(view) = view {
+				BddNode::View(view)
 			} else {
-				LitOrConst::Lit(new_var!(
-					db,
-					format!("bdd_{i}>={}..{}", interval.start, interval.end - C::one())
-				))
+				BddNode::Val
 			};
 
-			let new_interval_inserted = ws[i].insert(interval.clone(), lit.clone()).is_none();
+			let new_interval_inserted = ws[i].insert(interval.clone(), node.clone()).is_none();
 			debug_assert!(
 				new_interval_inserted,
 				"Duplicate interval {interval:?} inserted into {ws:?} layer {i}"
 			);
-			(interval, lit)
+			(interval, node)
 		}
-		[(a, lit)] => (a.clone(), lit.clone().clone()),
+		[(a, node)] => (a.clone(), node.clone().clone()),
 		_ => panic!("ROBDD intervals should be disjoint, but were {:?}", ws[i]),
 	}
 }
