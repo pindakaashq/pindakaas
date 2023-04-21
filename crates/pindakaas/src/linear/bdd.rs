@@ -125,16 +125,13 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 		.map(|((lb_margin, ub_margin), (lb, ub))| {
 			match cmp {
 				LimitComp::LessEq => vec![
-					(lb_margin > lb)
-						.then_some((C::zero()..(lb_margin + C::one()), BddNode::Const(true))),
-					(ub_margin <= ub)
-						.then_some(((ub_margin + C::one())..inf, BddNode::Const(false))),
+					(lb_margin > lb).then_some((C::zero()..(lb_margin + C::one()), BddNode::Val)),
+					(ub_margin <= ub).then_some(((ub_margin + C::one())..inf, BddNode::Gap)),
 				],
 				LimitComp::Equal => vec![
-					(lb_margin > lb).then_some((C::zero()..lb_margin, BddNode::Const(false))),
-					(lb_margin == ub_margin).then_some((k..(k + C::one()), BddNode::Const(true))),
-					(ub_margin <= ub)
-						.then_some(((ub_margin + C::one())..inf, BddNode::Const(false))),
+					(lb_margin > lb).then_some((C::zero()..lb_margin, BddNode::Gap)),
+					(lb_margin == ub_margin).then_some((k..(k + C::one()), BddNode::Val)),
+					(ub_margin <= ub).then_some(((ub_margin + C::one())..inf, BddNode::Gap)),
 				],
 			}
 			.into_iter()
@@ -163,8 +160,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 							Some((iv, Some(node)))
 						}
 					}
-					BddNode::Const(true) => Some((iv, Some(BddNode::Val))),
-					BddNode::Const(false) => {
+					BddNode::Gap => {
 						if last_false_iv_start.is_none() {
 							last_false_iv_start = Some(iv.start);
 						}
@@ -173,8 +169,8 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 				})
 				.collect::<IntervalMap<_, _>>();
 
-			let y =
-            if nodes.len() == 1 {
+			dbg!(&nodes);
+			let y = if nodes.len() == 1 {
 				IntVarEnc::Const(nodes.into_iter(..).next().unwrap().0.end - C::one())
 			} else {
 				let y = IntVarOrd::from_dom(
@@ -201,7 +197,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 #[derive(Debug, Clone, PartialEq)]
 enum BddNode<C: Coefficient> {
 	Val,
-	Const(bool), // TODO perhaps Const(false) = gap, while Const(true) = just Val?
+	Gap,
 	View(C),
 }
 
