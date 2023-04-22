@@ -936,9 +936,11 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 
 					add_clauses_for(
 						db,
-						negate_cnf(x_geq_c_a.clone()),
-						negate_cnf(y_geq_c_b),
-						z_geq_c_c,
+						vec![
+							negate_cnf(x_geq_c_a.clone()),
+							negate_cnf(y_geq_c_b),
+							z_geq_c_c,
+						],
 					)?;
 				}
 			}
@@ -955,9 +957,11 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 
 						add_clauses_for(
 							db,
-							negate_cnf(x_leq_c_a.clone()),
-							negate_cnf(y_leq_c_b),
-							z_leq_c_c,
+							vec![
+								negate_cnf(x_leq_c_a.clone()),
+								negate_cnf(y_leq_c_b),
+								z_leq_c_c,
+							],
 						)?;
 					}
 				}
@@ -969,16 +973,31 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 
 pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 	db: &mut DB,
-	a: Vec<Vec<DB::Lit>>,
-	b: Vec<Vec<DB::Lit>>,
-	c: Vec<Vec<DB::Lit>>,
+	expression: Vec<Vec<Vec<DB::Lit>>>,
 ) -> Result {
-	for cls_a in &a {
-		for cls_b in &b {
-			for cls_c in &c {
-				emit_clause!(db, &[cls_a.clone(), cls_b.clone(), cls_c.clone()].concat())?
+	// TODO doctor out type of expression (clauses containing conjunctions?)
+
+	let filter_trivial = true;
+	for cls in expression
+		.into_iter()
+		.map(|cls| cls.into_iter())
+		.multi_cartesian_product()
+	{
+		let cls = cls.concat(); // filter out [] (empty conjunctions?) of the clause
+		if filter_trivial {
+			let mut lits = HashSet::<DB::Lit>::with_capacity(cls.len());
+			if cls.iter().any(|lit| {
+				if lits.contains(&lit.negate()) {
+					true
+				} else {
+					lits.insert(lit.clone());
+					false
+				}
+			}) {
+				continue;
 			}
 		}
+		emit_clause!(db, &cls)?
 	}
 	Ok(())
 }
