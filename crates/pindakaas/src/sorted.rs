@@ -371,14 +371,26 @@ impl SortedEncoder {
 		let z1 = z.geq(to_iv(c1 + c1)); // 2c
 		let z2 = z.geq(to_iv(c1 + c2)); // 2c+1
 
-		add_clauses_for(db, negate_cnf(x.clone()), empty_clause.clone(), z1.clone())?;
-		add_clauses_for(db, negate_cnf(y.clone()), empty_clause.clone(), z1.clone())?;
-		add_clauses_for(db, negate_cnf(x.clone()), negate_cnf(y.clone()), z2.clone())?;
+		add_clauses_for(
+			db,
+			vec![negate_cnf(x.clone()), empty_clause.clone(), z1.clone()],
+		)?;
+		add_clauses_for(
+			db,
+			vec![negate_cnf(y.clone()), empty_clause.clone(), z1.clone()],
+		)?;
+		add_clauses_for(
+			db,
+			vec![negate_cnf(x.clone()), negate_cnf(y.clone()), z2.clone()],
+		)?;
 
 		if cmp == &LimitComp::Equal {
-			add_clauses_for(db, x.clone(), empty_clause.clone(), negate_cnf(z2.clone()))?;
-			add_clauses_for(db, y.clone(), empty_clause, negate_cnf(z2))?;
-			add_clauses_for(db, x, y, negate_cnf(z1))?;
+			add_clauses_for(
+				db,
+				vec![x.clone(), empty_clause.clone(), negate_cnf(z2.clone())],
+			)?;
+			add_clauses_for(db, vec![y.clone(), empty_clause, negate_cnf(z2)])?;
+			add_clauses_for(db, vec![x, y, negate_cnf(z1)])?;
 		}
 		Ok(())
 	}
