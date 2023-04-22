@@ -189,6 +189,7 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 				.map(|v| (v, bdd(db, i + 1, xs, sum + v, ws)))
 				.collect::<Vec<_>>();
 
+			// TODO could we check whether a domain value of x always leads to gaps?
 			let is_gap = views.iter().all(|(_, (_, v))| v == &BddNode::Gap);
 			// TODO without checking actual Val identity, could we miss when the next layer has two
 			// adjacent nodes that are both views on the same node at the layer below?
