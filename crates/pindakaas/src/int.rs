@@ -566,7 +566,6 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		dom: &[C],
 		lbl: String,
 	) -> Result<IntVarEnc<DB::Lit, C>> {
-		let lb = dom[0];
 		match dom {
 			[] => Err(Unsatisfiable),
 			[d] => Ok(IntVarEnc::Const(*d)),
@@ -1914,10 +1913,10 @@ impl<C: Coefficient> IntVar<C> {
 			for view in self
 				.views
 				.iter()
-				.map(|(c, (id, val))| ((*id, *val), x.geq(*c..(*c + C::one())).clone()))
+				.map(|(c, (id, val))| ((*id, *val), x.geq(*c..(*c + C::one()))))
 			{
 				// TODO refactor
-				if view.1.len() > 0 {
+				if !view.1.is_empty() {
 					views.insert(view.0, view.1[0][0].clone());
 				}
 			}

@@ -3,6 +3,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use iset::IntervalMap;
 use itertools::Itertools;
 
+use crate::Literal;
 #[allow(unused_imports)]
 use crate::{
 	int::{IntVarEnc, IntVarOrd, Lin, Model},
@@ -41,7 +42,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 
 		let mut model = Model::new();
 
-		let ys = construct_bdd(db, &xs, &lin.cmp, lin.k.clone());
+		let ys = construct_bdd(&xs, &lin.cmp, lin.k.clone());
 		let xs = xs
 			.into_iter()
 			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
@@ -76,16 +77,16 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 			})
 			.collect::<Vec<_>>();
 
-
 		let mut ys = ys.into_iter();
 		let first = ys.next().unwrap();
+		assert!(
+			first.as_ref().borrow().size() == 1
+				&& first.as_ref().borrow().ub(&C::one()) == C::zero()
+		);
 		xs.iter().zip(ys).fold(first, |curr, (x_i, next)| {
-			model.cons.push(Lin::tern(
-				curr.clone(),
-				x_i.clone(),
-				lin.cmp.clone(),
-				next.clone(),
-			));
+			model
+				.cons
+				.push(Lin::tern(curr, x_i.clone(), lin.cmp.clone(), next.clone()));
 			next
 		});
 
@@ -99,9 +100,8 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 	}
 }
 
-fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
-	db: &mut DB,
-	xs: &Vec<IntVarEnc<DB::Lit, C>>,
+fn construct_bdd<Lit: Literal, C: Coefficient>(
+	xs: &Vec<IntVarEnc<Lit, C>>,
 	cmp: &LimitComp,
 	k: PosCoeff<C>,
 ) -> Vec<IntervalMap<C, BddNode<C>>> {
@@ -162,7 +162,7 @@ fn construct_bdd<DB: ClauseDatabase, C: Coefficient>(
 		})
 		.collect();
 
-	bdd(db, 0, xs, C::zero(), &mut ws);
+	bdd(0, xs, C::zero(), &mut ws);
 	ws
 }
 
@@ -173,10 +173,9 @@ enum BddNode<C: Coefficient> {
 	View(C),
 }
 
-fn bdd<DB: ClauseDatabase, C: Coefficient>(
-	db: &mut DB,
+fn bdd<Lit: Literal, C: Coefficient>(
 	i: usize,
-	xs: &Vec<IntVarEnc<DB::Lit, C>>,
+	xs: &Vec<IntVarEnc<Lit, C>>,
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, BddNode<C>>>,
 ) -> (std::ops::Range<C>, BddNode<C>) {
@@ -186,7 +185,7 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 				.dom()
 				.iter(..)
 				.map(|v| v.end - C::one())
-				.map(|v| (v, bdd(db, i + 1, xs, sum + v, ws)))
+				.map(|v| (v, bdd(i + 1, xs, sum + v, ws)))
 				.collect::<Vec<_>>();
 
 			// TODO could we check whether a domain value of x always leads to gaps?
@@ -217,7 +216,7 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 			);
 			(interval, node)
 		}
-		[(a, node)] => (a.clone(), node.clone().clone()),
+		[(a, node)] => (a.clone(), (*node).clone()),
 		_ => panic!("ROBDD intervals should be disjoint, but were {:?}", ws[i]),
 	}
 }
