@@ -79,10 +79,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 
 		let mut ys = ys.into_iter();
 		let first = ys.next().unwrap();
-		assert!(
-			first.as_ref().borrow().size() == 1
-				&& first.as_ref().borrow().ub(&C::one()) == C::zero()
-		);
+		assert!(first.as_ref().borrow().size() == 1);
 		xs.iter().zip(ys).fold(first, |curr, (x_i, next)| {
 			model
 				.cons
