@@ -832,6 +832,25 @@ mod tests {
 				);
 			}
 
+			#[test]
+			fn test_small_eq_4() {
+				assert_sol!(
+					$encoder,
+					4,
+					&Linear {
+						terms: construct_terms(&[(1, 2), (2, 1), (3, 2), (4,2)]),
+						cmp: LimitComp::Equal,
+						k: 4.into()
+					}
+					=> vec![
+						vec![ 1,-2,-3, 4],
+						vec![-1,-2, 3, 4],
+						vec![ 1,-2, 3,-4],
+					]
+				);
+			}
+
+
             /*
              * TODO add clausees for Ics (otherwise test won't work for all encoders)
             #[test]

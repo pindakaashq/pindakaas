@@ -189,6 +189,9 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 				.map(|v| (v, bdd(db, i + 1, xs, sum + v, ws)))
 				.collect::<Vec<_>>();
 
+			let is_gap = views.iter().all(|(_, (_, v))| v == &BddNode::Gap);
+			// TODO without checking actual Val identity, could we miss when the next layer has two
+			// adjacent nodes that are both views on the same node at the layer below?
 			let view = (views.iter().map(|(_, (iv, _))| iv).all_equal())
 				.then(|| views.first().unwrap().1 .0.end - C::one());
 
@@ -198,7 +201,9 @@ fn bdd<DB: ClauseDatabase, C: Coefficient>(
 				.reduce(|a, b| std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end))
 				.unwrap();
 
-			let node = if let Some(view) = view {
+			let node = if is_gap {
+				BddNode::Gap
+			} else if let Some(view) = view {
 				BddNode::View(view)
 			} else {
 				BddNode::Val

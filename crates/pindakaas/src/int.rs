@@ -1924,7 +1924,7 @@ impl<C: Coefficient> IntVar<C> {
 				.iter()
 				.map(|(c, (id, val))| ((*id, *val), x.geq(*c..(*c + C::one())).clone()))
 			{
-                // TODO refactor
+				// TODO refactor
 				if view.1.len() > 0 {
 					views.insert(view.0, view.1[0][0].clone());
 				}
