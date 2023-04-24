@@ -1752,16 +1752,11 @@ impl<C: Coefficient> Lin<C> {
 	}
 
 	pub(crate) fn propagate(&mut self, consistency: &Consistency) -> Vec<usize> {
-		let mut i = 0;
 		let mut changed = vec![];
 		match consistency {
 			Consistency::None => unreachable!(),
 			Consistency::Bounds => loop {
 				let mut fixpoint = true;
-				i += 1;
-				if i > 10 {
-					panic!();
-				}
 				if self.cmp == LimitComp::Equal {
 					for (c, x) in &self.xs {
 						let xs_ub = self.ub();
