@@ -37,7 +37,7 @@ pub(crate) fn _next_int_var<DB: ClauseDatabase, C: Coefficient>(
 		}
 		IntVarEnc::Ord(x)
 	} else {
-		let x = IntVarBin::new(db, dom.range().unwrap().end - C::one(), lbl);
+		let x = IntVarBin::from_bounds(db, C::zero(), dom.range().unwrap().end - C::one(), lbl);
 		if add_consistency {
 			x.consistent(db).unwrap();
 		}
@@ -350,13 +350,18 @@ pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	// TODO change to with_label or something
-	pub fn new<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, ub: C, lbl: String) -> Self {
+	pub fn from_bounds<DB: ClauseDatabase<Lit = Lit>>(
+		db: &mut DB,
+		lb: C,
+		ub: C,
+		lbl: String,
+	) -> Self {
 		let bits = C::zero().leading_zeros() - ub.leading_zeros();
 		Self {
 			xs: (0..bits)
 				.map(|_i| new_var!(db, format!("{}^{}", lbl, _i)))
 				.collect(),
-			lb: C::zero(), // TODO support non-zero
+			lb,
 			ub,
 			lbl,
 		}
@@ -831,12 +836,14 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				IntVarEnc::Const(_)
 			)
 		) {
+			// All const
 			if tern.check(&[]).is_ok() {
 				Ok(())
 			} else {
 				Err(Unsatisfiable)
 			}
 		} else if matches!(x, IntVarEnc::Const(_)) {
+			// x is const ~ swap args
 			self.encode(
 				db,
 				&TernLeConstraint {
@@ -847,9 +854,12 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				},
 			)
 		} else if matches!(x, IntVarEnc::Ord(_)) && matches!(y, IntVarEnc::Bin(_)) {
+			// x is ord and y is bin ~ swap args
 			self.encode(db, &TernLeConstraint::new(*y, *x, cmp.clone(), *z))
 		} else if let IntVarEnc::Bin(x_bin) = x {
+			// x is bin
 			if let (IntVarEnc::Const(y_con), IntVarEnc::Const(z_con)) = (y, z) {
+				// and rest is const ~ lex constraint
 				// assert!(
 				// 	cmp == &LimitComp::LessEq,
 				// 	"Only support <= for x:B+y:Constant ? z:Constant"
@@ -866,13 +876,31 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					x_bin.xs.len(),
 				);
 			} else if let (IntVarEnc::Bin(y_bin), IntVarEnc::Bin(z_bin)) = (y, z) {
+				// y and z are also bin ~ use adder
 				// assert!(
 				// 	cmp == &LimitComp::Equal,
 				// 	"Only support == for x:B+y:B ? z:B"
 				// );
 				log_enc_add(db, &x_bin.xs, &y_bin.xs, &z_bin.xs)
-			} else if let (IntVarEnc::Ord(y_ord), IntVarEnc::Bin(z_bin)) = (y, z) {
-				let y_bin = IntVarBin::new(db, y_ord.ub(), "x_bin".to_string());
+			} else if let (IntVarEnc::Bin(_), IntVarEnc::Const(z_con)) = (y, z) {
+				// y is bin and z is const ~ redundantly encode y + z_bin in 0..z # z and z_bin <= z (needs final constraint b/c if no guaranteed consistency)
+				// TODO better coupling ;
+				let z_bin = IntVarEnc::Bin(IntVarBin::from_bounds(
+					db,
+					C::zero(),
+					*z_con,
+					"z_bin".to_string(),
+				));
+				self.encode(db, &TernLeConstraint::new(x, y, cmp.clone(), &z_bin))?;
+				// TODO omit if consistent z_bin
+				self.encode(
+					db,
+					&TernLeConstraint::new(&z_bin, &IntVarEnc::Const(C::zero()), cmp.clone(), &z),
+				)
+			} else if let (IntVarEnc::Ord(y_ord), IntVarEnc::Bin(_) | IntVarEnc::Const(_)) = (y, z)
+			{
+				// y is order and z is bin or const ~ redundant y_bin = y_ord and x_bin + y_bin # z
+				let y_bin = IntVarBin::from_bounds(db, y_ord.lb(), y_ord.ub(), "x_bin".to_string());
 				TernLeEncoder::default()
 					.encode(
 						db,
@@ -886,12 +914,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					.unwrap();
 				self.encode(
 					db,
-					&TernLeConstraint::new(
-						&x_bin.clone().into(),
-						&y_bin.into(),
-						cmp.clone(),
-						&z_bin.clone().into(),
-					),
+					&TernLeConstraint::new(&x_bin.clone().into(), &y_bin.into(), cmp.clone(), z),
 				)
 			} else {
 				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x}, {y}, {z}")
@@ -950,7 +973,6 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					for (c_b, y_leq_c_b) in y.leqs() {
 						let c_c = (c_a.start) + (c_b.start);
 						let c_c = c_c..(c_c + C::one());
-
 
 						let z_leq_c_c = z.leq(c_c.clone());
 
@@ -1141,7 +1163,7 @@ pub mod tests {
 		consistent: bool,
 		lbl: String,
 	) -> IntVarEnc<DB::Lit, C> {
-		let x = IntVarBin::new(db, ub, lbl);
+		let x = IntVarBin::from_bounds(db, C::zero(), ub, lbl);
 		if consistent {
 			x.consistent(db).unwrap();
 		}
@@ -1217,7 +1239,7 @@ pub mod tests {
 	#[test]
 	fn bin_geq_2_test() {
 		let mut db = TestDB::new(0);
-		let x = IntVarBin::new(&mut db, 12, "x".to_string());
+		let x = IntVarBin::from_bounds(&mut db, 0, 12, "x".to_string());
 		db.num_var = x.lits() as i32;
 		let tern = TernLeConstraint {
 			x: &IntVarEnc::Bin(x),
@@ -1666,7 +1688,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		self.new_var(BTreeSet::from([c]), false)
 	}
 
-	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(&mut self, db: &mut DB) -> Result {
+	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(
+		&mut self,
+		db: &mut DB,
+		cutoff: Option<C>,
+	) -> Result {
 		let mut all_views = HashMap::new();
 		for con in &self.cons {
 			let Lin { xs, cmp } = con;
@@ -1679,7 +1705,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			for (_, x) in xs {
 				self.vars
 					.entry(x.borrow().id)
-					.or_insert_with(|| x.borrow().encode(db, &mut all_views));
+					.or_insert_with(|| x.borrow().encode(db, &mut all_views, cutoff));
 			}
 
 			let (x, y, z) = (
@@ -1885,22 +1911,35 @@ impl<C: Coefficient> IntVar<C> {
 		&self,
 		db: &mut DB,
 		views: &mut HashMap<(usize, C), DB::Lit>,
+		cutoff: Option<C>,
 	) -> IntVarEnc<DB::Lit, C> {
 		if self.size() == 1 {
 			IntVarEnc::Const(*self.dom.first().unwrap())
 		} else {
-			let x = IntVarEnc::Ord(IntVarOrd::from_views(
-				db,
-				self.dom
+			let use_binary =
+				cutoff.is_none() || C::from(self.dom.len()).unwrap() <= cutoff.unwrap();
+
+			let x = if use_binary {
+				let dom = self
+					.dom
 					.iter()
 					.sorted()
 					.cloned()
 					.tuple_windows()
 					.map(|(a, b)| (a + C::one())..(b + C::one()))
 					.map(|v| (v.clone(), views.get(&(self.id, v.end - C::one())).cloned()))
-					.collect(),
-				"x".to_string(),
-			));
+					.collect::<IntervalMap<_, _>>();
+				IntVarEnc::Ord(IntVarOrd::from_views(db, dom, "x".to_string()))
+			} else {
+				let y = IntVarBin::from_bounds(
+					db,
+					*self.dom.first().unwrap(),
+					*self.dom.last().unwrap(),
+					"x".to_string(),
+				);
+				IntVarEnc::Bin(y)
+			};
+
 			if self.add_consistency {
 				x.consistent(db).unwrap();
 			}
@@ -1916,7 +1955,6 @@ impl<C: Coefficient> IntVar<C> {
 				}
 			}
 			x
-			// TODO support again binary cutoff `if cutoff.is_none() || C::from(dom.len()).unwrap() <= cutoff.unwrap()`
 		}
 	}
 

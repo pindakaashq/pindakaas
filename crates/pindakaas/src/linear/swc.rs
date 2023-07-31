@@ -88,7 +88,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			});
 
 		model.propagate(&self.add_propagation, vec![model.cons.len() - 1]);
-		model.encode(db)
+		model.encode(db, self.cutoff)
 	}
 }
 

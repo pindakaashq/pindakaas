@@ -120,9 +120,9 @@ impl<DB: ClauseDatabase, C: Coefficient, Enc: Encoder<DB, Linear<DB::Lit, C>> + 
 // local marker trait, to ensure the previous definition only applies within this crate
 pub(crate) trait LinMarker {}
 impl LinMarker for AdderEncoder {}
-impl LinMarker for BddEncoder {}
-impl<C: Coefficient> LinMarker for SwcEncoder<C> {}
 impl<C: Coefficient> LinMarker for TotalizerEncoder<C> {}
+impl<C: Coefficient> LinMarker for SwcEncoder<C> {}
+impl<C: Coefficient> LinMarker for BddEncoder<C> {}
 
 // TODO how can we support both Part(itions) of "terms" ( <Lit, C> for pb
 // constraints) and just lits (<Lit>) for AMK/AMO's?
@@ -849,7 +849,6 @@ mod tests {
 					]
 				);
 			}
-
 
             /*
              * TODO add clausees for Ics (otherwise test won't work for all encoders)

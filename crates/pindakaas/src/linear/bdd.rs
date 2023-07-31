@@ -13,18 +13,27 @@ use crate::{
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
 #[derive(Default, Clone)]
-pub struct BddEncoder {
+pub struct BddEncoder<C: Coefficient> {
 	add_consistency: bool,
+	cutoff: Option<C>,
 }
 
-impl BddEncoder {
+impl<C: Coefficient> BddEncoder<C> {
 	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
+	pub fn add_cutoff(&mut self, c: Option<C>) -> &mut Self {
+		self.cutoff = c;
+		self
+	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for BddEncoder {
+impl<DB, C> Encoder<DB, Linear<DB::Lit, C>> for BddEncoder<C>
+where
+	DB: ClauseDatabase,
+	C: Coefficient,
+{
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
@@ -92,7 +101,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Bdd
 		//model.propagate(&add_propagation, vec![model.cons.len() - 1]);
 		//assert!(size - model.size() == 0);
 		//println!("{} - {} = {}", size, model.size(), size - model.size());
-		model.encode(db)?;
+		model.encode(db, self.cutoff)?;
 		Ok(())
 	}
 }
