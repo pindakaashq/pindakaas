@@ -27,6 +27,7 @@ use num::{
 	Integer, One, PrimInt, Signed, Zero,
 };
 
+mod bench;
 mod cardinality;
 mod cardinality_one;
 pub(crate) mod helpers;
