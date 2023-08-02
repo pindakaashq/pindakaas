@@ -15,6 +15,8 @@ use crate::{
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 
+const EQUALIZE_INTERMEDIATES: bool = false;
+
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized Totalizer (GT)
 #[derive(Clone, Default)]
 pub struct TotalizerEncoder<C: Coefficient> {
@@ -82,7 +84,8 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 						next_layer.push(x.clone());
 					}
 					[left, right] => {
-						let dom = if layer.len() == 2 {
+						let at_root = layer.len() == 2;
+						let dom = if at_root {
 							BTreeSet::from([k])
 						} else {
 							left.borrow()
@@ -101,7 +104,11 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 						model.cons.push(Lin::tern(
 							left.clone(),
 							right.clone(),
-							cmp.clone(),
+							if !at_root && EQUALIZE_INTERMEDIATES {
+								LimitComp::Equal
+							} else {
+								cmp.clone()
+							},
 							parent.clone(),
 						));
 						next_layer.push(parent);
