@@ -119,13 +119,7 @@ fn construct_bdd<Lit: Literal, C: Coefficient>(
 			*state = (state.0 + x.lb(), state.1 + x.ub());
 			Some(*state)
 		})
-		.chain(std::iter::once((
-			match cmp {
-				LimitComp::LessEq => C::zero(),
-				LimitComp::Equal => C::zero(),
-			},
-			k,
-		)))
+		.chain(std::iter::once((C::zero(), k)))
 		.collect::<Vec<_>>();
 
 	let margins = xs
@@ -142,13 +136,7 @@ fn construct_bdd<Lit: Literal, C: Coefficient>(
 	let mut ws = margins
 		.into_iter()
 		.rev()
-		.chain(std::iter::once((
-			match cmp {
-				LimitComp::LessEq => k,
-				LimitComp::Equal => k,
-			},
-			k,
-		)))
+		.chain(std::iter::once((k, k)))
 		.zip(bounds)
 		.map(|((lb_margin, ub_margin), (lb, ub))| {
 			match cmp {
