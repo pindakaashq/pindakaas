@@ -368,9 +368,10 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	}
 
 	pub fn consistency(&self) -> TernLeConstraintContainer<Lit, C> {
+		// TODO constrain lower bound
 		TernLeConstraintContainer {
 			x: IntVarEnc::Bin(self.clone()),
-			y: IntVarEnc::Const(self.lb),
+			y: IntVarEnc::Const(C::zero()),
 			cmp: LimitComp::LessEq,
 			z: IntVarEnc::Const(self.ub),
 		}
