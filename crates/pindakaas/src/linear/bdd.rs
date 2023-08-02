@@ -57,8 +57,9 @@ where
 			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
 			.collect::<Vec<_>>();
 
-		let ys = ys
-			.into_iter()
+		// TODO cannot avoid?
+		#[allow(clippy::needless_collect)]
+		let ys = ys.into_iter()
 			.map(|nodes| {
 				let mut views = HashMap::new();
 				Rc::new(RefCell::new({
@@ -122,6 +123,8 @@ fn construct_bdd<Lit: Literal, C: Coefficient>(
 		.chain(std::iter::once((C::zero(), k)))
 		.collect::<Vec<_>>();
 
+	// TODO ? also hard to avoid?
+	#[allow(clippy::needless_collect)]
 	let margins = xs
 		.iter()
 		.rev()

@@ -3,6 +3,7 @@ use rustc_hash::FxHashMap;
 
 use itertools::Itertools;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::rc::Rc;
 use std::{cell::RefCell, collections::BTreeSet};
 
@@ -37,32 +38,37 @@ impl<Lit: Literal> Neg for LitOrConst<Lit> {
 	}
 }
 
+fn display_dom<C: Coefficient>(dom: &BTreeSet<C>) -> String {
+	const ELIPSIZE: usize = 8;
+	let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
+	if dom.len() > ELIPSIZE && C::from(dom.len()).unwrap() == ub - lb + C::one() {
+		format!("{}..{}", dom.first().unwrap(), dom.last().unwrap())
+	} else if dom.len() > ELIPSIZE {
+		format!(
+			"{{{},..,{ub}}} ({}|{})",
+			dom.iter().take(ELIPSIZE).join(","),
+			dom.len(),
+			IntVar::required_bits(lb, ub)
+		)
+	} else {
+		format!("{{{}}}", dom.iter().join(","))
+	}
+}
+
 impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarOrd<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
 			"{}:O ∈ {{{}}}",
 			self.lbl,
-			if self.xs.len() > 8 && self.xs.covered_len(..) == C::from(self.xs.len()).unwrap() {
-				format!("{}..{}", self.lb(), self.ub())
-			} else {
-				self.dom()
-					.iter(..)
-					.map(|iv| format!("{}", iv.end - C::one()))
-					.join(",")
-			},
+			display_dom(&self.dom().iter(..).map(|d| d.end - C::one()).collect())
 		)
 	}
 }
 
 impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"{}:B ∈ {{{}}}",
-			self.lbl,
-			format!("{}..{}", self.lb(), self.ub())
-		)
+		write!(f, "{}:B ∈ {{{}..{}}}", self.lbl, self.lb(), self.ub())
 	}
 }
 
@@ -125,7 +131,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		Self { xs, lbl }
 	}
 
-	pub fn _consistency(&self) -> ImplicationChainConstraint<Lit> {
+	pub fn consistency(&self) -> ImplicationChainConstraint<Lit> {
 		ImplicationChainConstraint {
 			lits: self.xs.values(..).cloned().collect::<Vec<_>>(),
 		}
@@ -133,7 +139,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 
 	#[allow(dead_code)]
 	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
-		ImplicationChainEncoder::default()._encode(db, &self._consistency())
+		ImplicationChainEncoder::default()._encode(db, &self.consistency())
 	}
 }
 
@@ -323,11 +329,6 @@ pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
-	pub fn required_bits(lb: C, ub: C) -> u32 {
-		// TODO
-		// lb.leading_zeros() - ub.leading_zeros()
-		lb.leading_zeros() - ub.leading_zeros()
-	}
 	// TODO change to with_label or something
 	pub fn from_bounds<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
@@ -336,7 +337,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		lbl: String,
 	) -> Self {
 		Self {
-			xs: (0..Self::required_bits(lb, ub))
+			xs: (0..IntVar::required_bits(lb, ub))
 				.map(|_i| new_var!(db, format!("{}^{}", lbl, _i)))
 				.collect(),
 			lb,
@@ -366,7 +367,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		}
 	}
 
-	pub fn _consistency(&self) -> TernLeConstraintContainer<Lit, C> {
+	pub fn consistency(&self) -> TernLeConstraintContainer<Lit, C> {
 		TernLeConstraintContainer {
 			x: IntVarEnc::Bin(self.clone()),
 			y: IntVarEnc::Const(self.lb),
@@ -376,7 +377,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	}
 
 	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
-		TernLeEncoder::default().encode(db, &self._consistency().get())
+		TernLeEncoder::default().encode(db, &self.consistency().get())
 	}
 
 	fn add<DB: ClauseDatabase<Lit = Lit>>(
@@ -874,7 +875,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				// TODO omit if consistent z_bin
 				self.encode(
 					db,
-					&TernLeConstraint::new(&z_bin, &IntVarEnc::Const(C::zero()), cmp.clone(), &z),
+					&TernLeConstraint::new(&z_bin, &IntVarEnc::Const(C::zero()), cmp.clone(), z),
 				)
 			} else if let (IntVarEnc::Ord(y_ord), IntVarEnc::Bin(_) | IntVarEnc::Const(_)) = (y, z)
 			{
@@ -897,7 +898,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					&TernLeConstraint::new(&x_bin.clone().into(), &y_bin.into(), cmp.clone(), z),
 				)
 			} else {
-				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {x}, {y}, {z}")
+				unimplemented!("LHS binary variables only implemented for some cases (and not tested in general method) for {}",tern)
 			}
 		} else if let (IntVarEnc::Ord(x_ord), IntVarEnc::Ord(y_ord), IntVarEnc::Bin(z_bin)) =
 			(x, y, z)
@@ -1194,7 +1195,7 @@ pub mod tests {
 			|sol| {
 				tern.check(sol).is_ok()
 					&& match &x {
-						IntVarEnc::Bin(b) => b._consistency(),
+						IntVarEnc::Bin(b) => b.consistency(),
 						_ => unreachable!(),
 					}
 					.get()
@@ -1643,6 +1644,41 @@ pub enum Consistency {
 	Domain,
 }
 
+impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		for con in &self.cons {
+			writeln!(f, "{}", con)?;
+		}
+		Ok(())
+	}
+}
+
+impl<C: Coefficient> Display for Lin<C> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let disp_x = |x: &(C, Rc<RefCell<IntVar<C>>>)| -> String {
+			let (coef, x) = x;
+			assert!(coef.abs() == C::one());
+			let x = x.borrow();
+
+			format!("{}", x)
+		};
+		write!(
+			f,
+			"{} {} {}",
+			self.xs[0..2].iter().map(disp_x).join(" + "),
+			self.cmp,
+			disp_x(&self.xs[2])
+		)?;
+		Ok(())
+	}
+}
+
+impl<C: Coefficient> fmt::Display for IntVar<C> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "x{} ∈ {}", self.id, display_dom(&self.dom))
+	}
+}
+
 impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	pub fn new() -> Self {
 		Self {
@@ -1687,9 +1723,10 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			);
 
 			for (_, x) in xs {
+				let x = x.borrow();
 				self.vars
-					.entry(x.borrow().id)
-					.or_insert_with(|| x.borrow().encode(db, &mut all_views, cutoff));
+					.entry(x.id)
+					.or_insert_with(|| x.encode(db, &mut all_views, x.prefer_order(cutoff)));
 			}
 
 			let (x, y, z) = (
@@ -1884,29 +1921,17 @@ pub struct IntVar<C: Coefficient> {
 	pub(crate) views: HashMap<C, (usize, C)>,
 }
 
-impl<C: Coefficient> fmt::Display for IntVar<C> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "x{} ∈ {{{}}}", self.id, self.dom.iter().join(","))
-	}
-}
-
 impl<C: Coefficient> IntVar<C> {
 	fn encode<DB: ClauseDatabase>(
 		&self,
 		db: &mut DB,
 		views: &mut HashMap<(usize, C), DB::Lit>,
-		cutoff: Option<C>,
+		prefer_order: bool,
 	) -> IntVarEnc<DB::Lit, C> {
 		if self.size() == 1 {
 			IntVarEnc::Const(*self.dom.first().unwrap())
 		} else {
-			let x = if cutoff.is_none()
-				|| C::from(IntVarBin::<DB::Lit, C>::required_bits(
-					self.lb(&C::one()),
-					self.ub(&C::one()),
-				))
-				.unwrap() < cutoff.unwrap()
-			{
+			let x = if prefer_order {
 				let dom = self
 					.dom
 					.iter()
@@ -1973,5 +1998,22 @@ impl<C: Coefficient> IntVar<C> {
 			self.dom.last()
 		})
 		.unwrap()
+	}
+
+	pub fn required_bits(_: C, ub: C) -> u32 {
+		// TODO support non-zero lb's
+		// lb.leading_zeros() - ub.leading_zeros()
+		C::zero().leading_zeros() - ub.leading_zeros()
+	}
+
+	fn prefer_order(&self, cutoff: Option<C>) -> bool {
+		match cutoff {
+			None => true,
+			Some(cutoff) if cutoff == C::zero() => false,
+			Some(cutoff) => {
+				C::from(Self::required_bits(self.lb(&C::one()), self.ub(&C::one()))).unwrap()
+					< cutoff
+			}
+		}
 	}
 }
