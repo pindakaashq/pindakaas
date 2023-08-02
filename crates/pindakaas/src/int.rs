@@ -20,31 +20,6 @@ use std::{
 	ops::{Neg, Range},
 };
 
-// TODO update with Model.new_var
-/// Chooses next integer variable heuristically; returns Ord or Bin based on whether the number of resulting literals is under the provided cutoff
-pub(crate) fn _next_int_var<DB: ClauseDatabase, C: Coefficient>(
-	db: &mut DB,
-	dom: IntervalSet<C>,
-	cutoff: Option<C>,
-	add_consistency: bool,
-	lbl: String,
-) -> IntVarEnc<DB::Lit, C> {
-	// TODO check for domain of 1 => Constant?
-	if cutoff.is_none() || C::from(dom.len()).unwrap() <= cutoff.unwrap() {
-		let x = IntVarOrd::from_syms(db, dom, lbl);
-		if add_consistency {
-			x.consistent(db).unwrap();
-		}
-		IntVarEnc::Ord(x)
-	} else {
-		let x = IntVarBin::from_bounds(db, C::zero(), dom.range().unwrap().end - C::one(), lbl);
-		if add_consistency {
-			x.consistent(db).unwrap();
-		}
-		IntVarEnc::Bin(x)
-	}
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum LitOrConst<Lit: Literal> {
 	Lit(Lit),
@@ -66,13 +41,16 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarOrd<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}:O ∈ {{{}}} [{:?}]",
+			"{}:O ∈ {{{}}}",
 			self.lbl,
-			self.dom()
-				.iter(..)
-				.map(|iv| format!("{}..{}", iv.start, iv.end - C::one()))
-				.join(","),
-			self.xs.values(..).map(|x| format!("{:?}", x)).join(","),
+			if self.xs.len() > 8 && self.xs.covered_len(..) == C::from(self.xs.len()).unwrap() {
+				format!("{}..{}", self.lb(), self.ub())
+			} else {
+				self.dom()
+					.iter(..)
+					.map(|iv| format!("{}", iv.end - C::one()))
+					.join(",")
+			},
 		)
 	}
 }
@@ -83,11 +61,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 			f,
 			"{}:B ∈ {{{}}}",
 			self.lbl,
-			self.dom()
-				.iter(..)
-				.map(|iv| iv.end - C::one())
-				.sorted()
-				.join(",")
+			format!("{}..{}", self.lb(), self.ub())
 		)
 	}
 }
@@ -349,6 +323,11 @@ pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
+	pub fn required_bits(lb: C, ub: C) -> u32 {
+		// TODO
+		// lb.leading_zeros() - ub.leading_zeros()
+		lb.leading_zeros() - ub.leading_zeros()
+	}
 	// TODO change to with_label or something
 	pub fn from_bounds<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
@@ -356,9 +335,8 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		ub: C,
 		lbl: String,
 	) -> Self {
-		let bits = C::zero().leading_zeros() - ub.leading_zeros();
 		Self {
-			xs: (0..bits)
+			xs: (0..Self::required_bits(lb, ub))
 				.map(|_i| new_var!(db, format!("{}^{}", lbl, _i)))
 				.collect(),
 			lb,
@@ -735,6 +713,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarEnc<Lit, C> {
 	}
 }
 
+#[derive(Debug)]
 pub(crate) struct TernLeConstraint<'a, Lit: Literal, C: Coefficient> {
 	pub(crate) x: &'a IntVarEnc<Lit, C>,
 	pub(crate) y: &'a IntVarEnc<Lit, C>,
@@ -816,7 +795,7 @@ impl<'a, Lit: Literal, C: Coefficient> TernLeConstraintContainer<Lit, C> {
 	}
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct TernLeEncoder {}
 
 impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB::Lit, C>>
@@ -908,6 +887,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 							&y_ord.clone().into(),
 							&IntVarEnc::Const(C::zero()),
 							LimitComp::LessEq,
+							// cmp.clone(),  % TODO implement IntVarBin.leq
 							&y_bin.clone().into(),
 						),
 					)
@@ -922,6 +902,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 		} else if let (IntVarEnc::Ord(x_ord), IntVarEnc::Ord(y_ord), IntVarEnc::Bin(z_bin)) =
 			(x, y, z)
 		{
+			// TODO could be removed since close to `else` case?
 			let dom = ord_plus_ord_le_ord_sparse_dom(
 				x.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
 				y.dom().into_iter(..).map(|c| c.end - C::one()).collect(),
@@ -936,6 +917,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					&x_ord.clone().into(),
 					&y_ord.clone().into(),
 					LimitComp::LessEq,
+					// cmp.clone(),  % TODO implement IntVarBin.leq
 					&z_ord.clone().into(),
 				),
 			)?;
@@ -945,10 +927,12 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					&z_ord.into(),
 					&IntVarEnc::Const(C::zero()),
 					LimitComp::LessEq,
+					// cmp.clone(),  % TODO implement IntVarBin.leq
 					&z_bin.clone().into(),
 				),
 			)
 		} else {
+			// couple or constrain x:E + y:E <= z:E
 			for (c_a, x_geq_c_a) in x.geqs() {
 				for (c_b, y_geq_c_b) in y.geqs() {
 					// TODO tighten c_c.start
@@ -1916,10 +1900,13 @@ impl<C: Coefficient> IntVar<C> {
 		if self.size() == 1 {
 			IntVarEnc::Const(*self.dom.first().unwrap())
 		} else {
-			let use_binary =
-				cutoff.is_none() || C::from(self.dom.len()).unwrap() <= cutoff.unwrap();
-
-			let x = if use_binary {
+			let x = if cutoff.is_none()
+				|| C::from(IntVarBin::<DB::Lit, C>::required_bits(
+					self.lb(&C::one()),
+					self.ub(&C::one()),
+				))
+				.unwrap() < cutoff.unwrap()
+			{
 				let dom = self
 					.dom
 					.iter()

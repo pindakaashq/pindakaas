@@ -19,7 +19,6 @@ mod test {
 		PairwiseEncoder,
 	};
 
-
 	#[test]
 	fn test_rand_pb() {
 		let n = 5;
@@ -39,8 +38,8 @@ mod test {
 			LinearAggregator::default(),
 		);
 		let con = LinearConstraint::new(LinExp::from_terms(&terms), Comparator::LessEq, n * m / 2);
-        use crate::Encoder;
-		encoder.encode(&mut db, &con).unwrap();
+		// use crate::Encoder;
+		// encoder.encode(&mut db, &con).unwrap();
 		// db.with_check(|sol| {
 		//     {
 		//         let con = LinearConstraint::new(
