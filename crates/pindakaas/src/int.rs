@@ -2011,10 +2011,7 @@ impl<C: Coefficient> IntVar<C> {
 		match cutoff {
 			None => true,
 			Some(cutoff) if cutoff == C::zero() => false,
-			Some(cutoff) => {
-				C::from(Self::required_bits(self.lb(&C::one()), self.ub(&C::one()))).unwrap()
-					< cutoff
-			}
+			Some(cutoff) => C::from(self.dom.len()).unwrap() < cutoff,
 		}
 	}
 }
