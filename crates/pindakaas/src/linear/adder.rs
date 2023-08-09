@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::{
-	helpers::{XorConstraint, XorEncoder},
+	helpers::{as_binary, XorConstraint, XorEncoder},
 	int::LitOrConst,
 	linear::{LimitComp, PosCoeff},
 	trace::{emit_clause, new_var},
@@ -11,12 +11,6 @@ use crate::{
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
 #[derive(Default)]
 pub struct AdderEncoder {}
-
-fn as_binary<C: Coefficient>(k: PosCoeff<C>, bits: usize) -> Vec<bool> {
-	(0..bits)
-		.map(|b| *k & (C::one() << b) != C::zero())
-		.collect::<Vec<_>>()
-}
 
 impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for AdderEncoder {
 	#[cfg_attr(
@@ -39,10 +33,10 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 
 		// Create structure with which coefficients use which bits
 		let mut bucket = vec![Vec::new(); bits];
-		for (i, bucker) in bucket.iter_mut().enumerate().take(bits) {
+		for (i, bucket) in bucket.iter_mut().enumerate().take(bits) {
 			for (lit, coef) in pair {
 				if *coef & (C::one() << i) != C::zero() {
-					bucker.push(lit.clone());
+					bucket.push(lit.clone());
 				}
 			}
 		}
@@ -141,14 +135,18 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 
 		// Enforce less-than constraint
 		if lin.cmp == LimitComp::LessEq {
-			lex_lesseq_const(db, sum.as_slice(), lin.k.clone(), bits)?;
+			lex_leq_const(db, sum.as_slice(), lin.k.clone(), bits)?;
 		}
 		Ok(())
 	}
 }
 
 /// Uses lexicographic constraint to constrain x:B ≦ k
-pub(crate) fn lex_lesseq_const<DB: ClauseDatabase, C: Coefficient>(
+#[cfg_attr(
+	feature = "trace",
+	tracing::instrument(name = "lex_lesseq_const", skip_all)
+)]
+pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	x: &[Option<DB::Lit>],
 	k: PosCoeff<C>,
@@ -172,13 +170,37 @@ pub(crate) fn lex_lesseq_const<DB: ClauseDatabase, C: Coefficient>(
 	Ok(())
 }
 
+/// Uses lexicographic constraint to constrain x:B ≦ k
+#[cfg_attr(feature = "trace", tracing::instrument(name = "lex", skip_all))]
+pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
+	db: &mut DB,
+	x: &[Option<DB::Lit>],
+	k: PosCoeff<C>,
+	bits: usize,
+) -> Result {
+	let k = as_binary(k, bits);
+	for i in 0..bits {
+		if k[i] && x[i].is_some() {
+			emit_clause!(
+				db,
+				&(i..bits)
+					.filter_map(|j| if j == i || !k[j] { x[j].clone() } else { None })
+					.collect::<Vec<DB::Lit>>()
+			)?;
+		}
+	}
+	Ok(())
+}
+
 /// Constrains the slice `z`, to be the result of adding `x` to `y`, all encoded using the log encoding.
 ///
 /// TODO: Should this use the IntEncoding::Log input??
+#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} # {z:?}"))))]
 pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 	db: &mut DB,
 	x: &[DB::Lit],
 	y: &[DB::Lit],
+	_: &LimitComp,
 	z: &[DB::Lit],
 ) -> Result {
 	let bits = z.len();
@@ -222,6 +244,22 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 		emit_clause!(db, &[l.negate()])?;
 	}
 	Ok(())
+}
+
+fn _clause<DB: ClauseDatabase>(db: &mut DB, lits: &[LitOrConst<DB::Lit>]) -> Result {
+	if let Ok(clause) = lits
+		.iter()
+		.filter_map(|lit| match lit {
+			LitOrConst::Lit(lit) => Some(Ok(lit.clone())),
+			LitOrConst::Const(true) => Some(Err(())), // clause satisfied
+			LitOrConst::Const(false) => None,         // literal falsified
+		})
+		.collect::<std::result::Result<Vec<_>, ()>>()
+	{
+		emit_clause!(db, &clause)
+	} else {
+		Ok(())
+	}
 }
 
 /// Encode the adder sum circuit
