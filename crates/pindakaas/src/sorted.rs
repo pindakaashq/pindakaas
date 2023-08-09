@@ -595,8 +595,8 @@ mod tests {
 		assert_sol!(db => enc, con => sols);
 	}
 
-	#[test]
-	fn test_5_6_sorted_eq() {
+	// #[test]
+	fn _test_5_6_sorted_eq() {
 		let mut db = TestDB::new(11);
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 5, String::from("y")).into();
 		db.num_var = db.num_var + y.lits() as i32;

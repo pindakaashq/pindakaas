@@ -1,15 +1,22 @@
 use crate::{
-	trace::emit_clause, CheckError, Checker, ClauseDatabase, Coefficient, Encoder, LinExp, Literal,
-	Result, Unsatisfiable,
+	linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase, Coefficient,
+	Encoder, LinExp, Literal, Result, Unsatisfiable,
 };
 
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
-pub fn is_powers_of_two<C: Coefficient>(coefs: &[C]) -> bool {
+pub(crate) fn is_powers_of_two<C: Coefficient>(coefs: &[C]) -> bool {
 	let mult = coefs[0];
 	coefs
 		.iter()
 		.enumerate()
 		.all(|(i, c)| c == &(num::pow(C::from(2).unwrap(), i) * mult))
+}
+
+/// Convert `k` to unsigned binary in `bits`
+pub(crate) fn as_binary<C: Coefficient>(k: PosCoeff<C>, bits: usize) -> Vec<bool> {
+	(0..bits)
+		.map(|b| *k & (C::one() << b) != C::zero())
+		.collect::<Vec<_>>()
 }
 
 /// Encode the constraint lits[0] ⊕ ... ⊕ lits[n].

@@ -162,11 +162,13 @@ impl<Lit: Literal> fmt::Display for Incomplete<Lit> {
 pub enum CheckError<Lit: Literal> {
 	Unsatisfiable(Unsatisfiable),
 	Incomplete(Incomplete<Lit>),
+	Fail(String),
 }
 impl<Lit: Literal> Error for CheckError<Lit> {}
 impl<Lit: Literal> fmt::Display for CheckError<Lit> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
+			CheckError::Fail(err) => err.fmt(f),
 			CheckError::Unsatisfiable(err) => err.fmt(f),
 			CheckError::Incomplete(err) => err.fmt(f),
 		}
