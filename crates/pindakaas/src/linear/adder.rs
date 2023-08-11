@@ -195,58 +195,105 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 /// Constrains the slice `z`, to be the result of adding `x` to `y`, all encoded using the log encoding.
 ///
 /// TODO: Should this use the IntEncoding::Log input??
-#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} # {z:?}"))))]
+#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} # {s:?}"))))]
 pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 	db: &mut DB,
 	x: &[DB::Lit],
 	y: &[DB::Lit],
-	_: &LimitComp,
-	z: &[DB::Lit],
+	cmp: &LimitComp,
+	s: &[DB::Lit],
 ) -> Result {
-	let bits = z.len();
-	let mut carry = None;
-	for i in 0..bits {
-		let b = [x.get(i), y.get(i), carry.as_ref()]
-			.into_iter()
-			.flatten()
-			.cloned()
-			.collect::<Vec<DB::Lit>>();
-		let sum = z.get(i).unwrap(); // TODO: What if z has less members?
-		match &b[..] {
-			[] => {
-				emit_clause!(db, &[sum.negate()])?;
-				carry = None;
+	log_enc_add_(
+		db,
+		&x.iter().cloned().map(LitOrConst::from).collect::<Vec<_>>(),
+		&y.iter().cloned().map(LitOrConst::from).collect::<Vec<_>>(),
+		cmp,
+		&s.iter().cloned().map(LitOrConst::from).collect::<Vec<_>>(),
+	)
+}
+pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
+	db: &mut DB,
+	x: &[LitOrConst<DB::Lit>],
+	y: &[LitOrConst<DB::Lit>],
+	cmp: &LimitComp,
+	z: &[LitOrConst<DB::Lit>],
+) -> Result {
+	let n = itertools::max([x.len(), y.len(), z.len()]).unwrap();
+
+	let bit = |x: &[LitOrConst<DB::Lit>], i: usize| -> LitOrConst<DB::Lit> {
+		x.get(i)
+			.map(LitOrConst::<DB::Lit>::clone)
+			.unwrap_or(LitOrConst::Const(false))
+	};
+
+	match cmp {
+		LimitComp::Equal => {
+			let c = &std::iter::once(LitOrConst::Const(false))
+				.chain((1..n).map(|_i| {
+					LitOrConst::Lit(new_var!(db, crate::trace::subscripted_name("c", _i)))
+				}))
+				.collect::<Vec<_>>();
+			for i in 0..n {
+				// sum circuit
+				clause(db, &[bit(x, i), bit(y, i), bit(c, i), -bit(z, i)])?;
+				clause(db, &[bit(x, i), -bit(y, i), -bit(c, i), -bit(z, i)])?;
+				clause(db, &[-bit(x, i), bit(y, i), -bit(c, i), -bit(z, i)])?;
+				clause(db, &[-bit(x, i), -bit(y, i), bit(c, i), -bit(z, i)])?;
+
+				clause(db, &[-bit(x, i), -bit(y, i), -bit(c, i), bit(z, i)])?;
+				clause(db, &[-bit(x, i), bit(y, i), bit(c, i), bit(z, i)])?;
+				clause(db, &[bit(x, i), -bit(y, i), bit(c, i), bit(z, i)])?;
+				clause(db, &[bit(x, i), bit(y, i), -bit(c, i), bit(z, i)])?;
+
+				// carry circuit
+				clause(db, &[bit(x, i), bit(y, i), -bit(c, i + 1)])?;
+				clause(db, &[bit(x, i), bit(c, i), -bit(c, i + 1)])?;
+				clause(db, &[bit(y, i), bit(c, i), -bit(c, i + 1)])?;
+				clause(db, &[-bit(x, i), -bit(y, i), bit(c, i + 1)])?;
+				clause(db, &[-bit(x, i), -bit(c, i), bit(c, i + 1)])?;
+				clause(db, &[-bit(y, i), -bit(c, i), bit(c, i + 1)])?;
 			}
-			[a] => {
-				// sum == x
-				emit_clause!(db, &[sum.negate(), a.clone()])?;
-				emit_clause!(db, &[sum.clone(), a.negate()])?;
-				carry = None;
+			Ok(())
+		}
+		LimitComp::LessEq => {
+			assert!(y.iter().all(|y| matches!(y, LitOrConst::Const(false))));
+
+			let c = &(0..n)
+				.map(|_i| LitOrConst::Lit(new_var!(db, crate::trace::subscripted_name("c", _i))))
+				.chain(std::iter::once(LitOrConst::Const(true)))
+				.collect::<Vec<_>>();
+
+			// higher i -> more significant
+			for i in 0..n {
+				// c = all more significant bits are equal AND current one is
+				// if up to i is equal, all preceding must be equal
+				clause(db, &[-bit(c, i), bit(c, i + 1)])?;
+				// if up to i is equal, x<->s
+				clause(db, &[-bit(c, i), -bit(x, i), bit(z, i)])?;
+				clause(db, &[-bit(c, i), -bit(z, i), bit(x, i)])?;
+
+				// if not up to i is equal, either preceding bit was not equal, or x!=s
+				clause(db, &[bit(c, i), -bit(c, i + 1), bit(x, i), bit(z, i)])?;
+				clause(db, &[bit(c, i), -bit(c, i + 1), -bit(x, i), -bit(z, i)])?;
+
+				// if preceding bits are equal, then x<=s
+				clause(db, &[-bit(c, i + 1), -bit(x, i), bit(z, i)])?;
 			}
-			_ => {
-				debug_assert!(b.len() <= 3);
-				sum_circuit(db, &b, LitOrConst::Lit(sum.clone()))?;
-				carry = if i + 1 < bits {
-					let carry = new_var!(db, crate::trace::subscripted_name("c", i));
-					carry_circuit(db, &b, LitOrConst::Lit(carry.clone()))?;
-					Some(carry)
-				} else {
-					carry_circuit(db, &b, LitOrConst::Const(false))?;
-					None
-				};
+
+			clause(db, &[-bit(x, n - 1), bit(z, n - 1)])?;
+
+			Ok(())
+
 			}
 		}
 	}
-	for l in x.iter().skip(bits) {
-		emit_clause!(db, &[l.negate()])?;
-	}
-	for l in y.iter().skip(bits) {
-		emit_clause!(db, &[l.negate()])?;
+}
+
 	}
 	Ok(())
 }
 
-fn _clause<DB: ClauseDatabase>(db: &mut DB, lits: &[LitOrConst<DB::Lit>]) -> Result {
+fn clause<DB: ClauseDatabase>(db: &mut DB, lits: &[LitOrConst<DB::Lit>]) -> Result {
 	if let Ok(clause) = lits
 		.iter()
 		.filter_map(|lit| match lit {

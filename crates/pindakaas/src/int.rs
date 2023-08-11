@@ -9,7 +9,7 @@ use std::{cell::RefCell, collections::BTreeSet};
 
 use crate::{
 	helpers::{as_binary, is_powers_of_two},
-	linear::{lex_geq_const, lex_leq_const, log_enc_add, LimitComp, LinExp, Part},
+	linear::{lex_geq_const, lex_leq_const, log_enc_add, log_enc_add_, LimitComp, LinExp, Part},
 	trace::{emit_clause, new_var},
 	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
 	Unsatisfiable,
@@ -25,6 +25,18 @@ use std::{
 pub(crate) enum LitOrConst<Lit: Literal> {
 	Lit(Lit),
 	Const(bool),
+}
+
+impl<Lit: Literal> From<Lit> for LitOrConst<Lit> {
+	fn from(item: Lit) -> Self {
+		LitOrConst::Lit(item)
+	}
+}
+
+impl<Lit: Literal> From<bool> for LitOrConst<Lit> {
+	fn from(item: bool) -> Self {
+		LitOrConst::Const(item)
+	}
 }
 
 impl<Lit: Literal> Display for LitOrConst<Lit> {
@@ -150,79 +162,6 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
 		ImplicationChainEncoder::default()._encode(db, &self.consistency())
 	}
-}
-
-pub(crate) struct ImplicationChainConstraint<Lit: Literal> {
-	lits: Vec<Lit>,
-}
-
-#[derive(Default)]
-pub(crate) struct ImplicationChainEncoder {}
-
-impl ImplicationChainEncoder {
-	pub fn _encode<DB: ClauseDatabase>(
-		&mut self,
-		db: &mut DB,
-		ic: &ImplicationChainConstraint<DB::Lit>,
-	) -> Result {
-		for (a, b) in ic.lits.iter().tuple_windows() {
-			emit_clause!(db, &[b.negate(), a.clone()])?
-		}
-		Ok(())
-	}
-}
-
-impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
-	type Lit = Lit;
-	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		self.lits.iter().tuple_windows().try_for_each(|(a, b)| {
-			let a = Self::assign(a, solution);
-			let b = Self::assign(b, solution);
-			if b.is_negated() || !a.is_negated() {
-				Ok(())
-			} else {
-				Err(CheckError::Unsatisfiable(Unsatisfiable))
-			}
-		})
-	}
-}
-
-impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
-	pub fn add<DB: ClauseDatabase<Lit = Lit>>(
-		&self,
-		db: &mut DB,
-		y: &IntVarEnc<Lit, C>,
-		// _: &LimitComp,
-		// enc: &mut dyn Encoder<DB, TernLeConstraint<'a, DB, C>>,
-	) -> Result<IntVarEnc<Lit, C>> {
-		if let IntVarEnc::Const(y) = y {
-			let xs = self
-				.xs
-				.clone()
-				.into_iter(..)
-				.map(|(c, l)| ((c.start + *y)..(c.end + *y), l))
-				.collect();
-			Ok(IntVarOrd {
-				xs,
-				lbl: self.lbl.clone(),
-			}
-			.into())
-		} else if let IntVarEnc::Ord(y) = y {
-			let z = IntVarOrd::from_bounds(
-				db,
-				C::zero(),
-				self.ub() + y.ub(),
-				format!("{}+{}", self.lbl, y.lbl),
-			)
-			.into();
-			// eprintln!("z: {}", z);
-			// let con = TernLeConstraint::new(self, y, cmp.clone(), z.as_ref());
-			// enc.encode(db, &con)?;
-			Ok(z)
-		} else {
-			todo!()
-		}
-	}
 
 	pub fn div(&self, c: &C) -> IntVarEnc<Lit, C> {
 		assert!(*c == C::one() + C::one(), "Can only divide IntVarOrd by 2");
@@ -329,6 +268,41 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	}
 }
 
+pub(crate) struct ImplicationChainConstraint<Lit: Literal> {
+	lits: Vec<Lit>,
+}
+
+#[derive(Default)]
+pub(crate) struct ImplicationChainEncoder {}
+
+impl ImplicationChainEncoder {
+	pub fn _encode<DB: ClauseDatabase>(
+		&mut self,
+		db: &mut DB,
+		ic: &ImplicationChainConstraint<DB::Lit>,
+	) -> Result {
+		for (a, b) in ic.lits.iter().tuple_windows() {
+			emit_clause!(db, &[b.negate(), a.clone()])?
+		}
+		Ok(())
+	}
+}
+
+impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
+	type Lit = Lit;
+	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
+		self.lits.iter().tuple_windows().try_for_each(|(a, b)| {
+			let a = Self::assign(a, solution);
+			let b = Self::assign(b, solution);
+			if b.is_negated() || !a.is_negated() {
+				Ok(())
+			} else {
+				Err(CheckError::Unsatisfiable(Unsatisfiable))
+			}
+		})
+	}
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 	pub(crate) xs: Vec<Lit>,
@@ -398,15 +372,6 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		)
 	}
 
-	fn add<DB: ClauseDatabase<Lit = Lit>>(
-		&self,
-		_: &mut DB,
-		_: &IntVarEnc<Lit, C>,
-		// _: &LimitComp,
-		// _: &mut dyn Encoder<DB, TernLeConstraint<DB, C>>,
-	) -> Result<IntVarEnc<Lit, C>> {
-		todo!()
-	}
 
 	fn div(&self, _: &C) -> IntVarEnc<Lit, C> {
 		todo!()
@@ -608,17 +573,38 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		// cmp: &LimitComp,
 		// enc: &'a mut dyn Encoder<DB, TernLeConstraint<'a, DB, C>>,
 	) -> Result<IntVarEnc<Lit, C>> {
-		match self {
-			IntVarEnc::Ord(o) => o.add(db, y),
-			IntVarEnc::Bin(b) => b.add(db, y),
-			IntVarEnc::Const(c) => {
-				if let IntVarEnc::Const(y) = y {
-					Ok(IntVarEnc::Const(*c + *y))
-				} else {
-					// y.add(db, self, cmp, enc)
-					y.add(db, self)
+		match (self, y) {
+			(IntVarEnc::Const(a), IntVarEnc::Const(b)) => Ok(IntVarEnc::Const(*a + *b)),
+			// TODO only used in sorters which enforce the constraints later!
+			(IntVarEnc::Ord(x), IntVarEnc::Ord(y)) => Ok(IntVarEnc::Ord(IntVarOrd::from_bounds(
+				db,
+				C::zero(),
+				self.ub() + y.ub(),
+				format!("{}+{}", x.lbl, y.lbl),
+			))),
+			(IntVarEnc::Ord(x), IntVarEnc::Const(y)) | (IntVarEnc::Const(y), IntVarEnc::Ord(x)) => {
+				let xs =
+					x.xs.clone()
+						.into_iter(..)
+						.map(|(c, l)| ((c.start + *y)..(c.end + *y), l))
+						.collect();
+				Ok(IntVarOrd {
+					xs,
+					lbl: format!("{}+{}", x.lbl, y),
 				}
+				.into())
 			}
+			(IntVarEnc::Bin(x), IntVarEnc::Bin(y)) => {
+				let z_bin = IntVarBin::from_bounds(
+					db,
+					x.lb() + y.lb(),
+					x.ub() + y.ub(),
+					"z_bin".to_string(),
+				);
+				log_enc_add(db, &x.xs, &y.xs, &LimitComp::Equal, &z_bin.xs)?;
+				Ok(IntVarEnc::Bin(z_bin))
+			}
+			_ => todo!("{self} + {y}"),
 		}
 	}
 
@@ -889,23 +875,8 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					),
 				}
 			}
-			(IntVarEnc::Const(_), _, _) => {
-				// x is const ~ swap args
-				self.encode(
-					db,
-					&TernLeConstraint {
-						x: *y,
-						y: *x,
-						cmp: cmp.clone(),
-						z: *z,
-					},
-				)
-			}
-			(IntVarEnc::Ord(_), IntVarEnc::Bin(_), IntVarEnc::Bin(_)) => {
-				// x is ord and y is bin ~ swap args
-				self.encode(db, &TernLeConstraint::new(*y, *x, cmp.clone(), *z))
-			}
-			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y_con), IntVarEnc::Const(z_con)) => {
+			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y_con), IntVarEnc::Const(z_con))
+			| (IntVarEnc::Const(y_con), IntVarEnc::Bin(x_bin), IntVarEnc::Const(z_con)) => {
 				// and rest is const ~ lex constraint
 				// assert!(
 				// 	cmp == &LimitComp::LessEq,
@@ -933,20 +904,44 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 						}),
 				}
 			}
-			(IntVarEnc::Bin(_), IntVarEnc::Const(_), IntVarEnc::Bin(_)) => {
-				todo!()
-				// match cmp {
-				//     LimitComp::Equal => {
-				//         log_enc_add()
-				//     }
-				// }
-			}
+			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y_const), IntVarEnc::Bin(z_bin))
+			| (IntVarEnc::Const(y_const), IntVarEnc::Bin(x_bin), IntVarEnc::Bin(z_bin)) => log_enc_add_(
+				db,
+				&x_bin
+					.xs
+					.iter()
+					.cloned()
+					.map(LitOrConst::from)
+					.collect::<Vec<_>>(),
+				&as_binary((*y_const).into(), z_bin.lits())
+					.into_iter()
+					.map(LitOrConst::Const)
+					.collect::<Vec<_>>(),
+				cmp,
+				&z_bin
+					.xs
+					.iter()
+					.cloned()
+					.map(LitOrConst::from)
+					.collect::<Vec<_>>(),
+			),
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Bin(y_bin), IntVarEnc::Bin(z_bin)) => {
 				// y and z are also bin ~ use adder
-				if cmp != &LimitComp::Equal {
-					unimplemented!("Only equality supported for x:B+y:B # z:B, but was {tern}");
+				match cmp {
+					LimitComp::Equal => log_enc_add(db, &x_bin.xs, &y_bin.xs, cmp, &z_bin.xs),
+					LimitComp::LessEq => {
+						let xy = x.add(db, y)?;
+						self.encode(
+							db,
+							&TernLeConstraint::new(
+								&xy,
+								&IntVarEnc::Const(C::zero()),
+								LimitComp::LessEq,
+								z,
+							),
+						)
+					}
 				}
-				log_enc_add(db, &x_bin.xs, &y_bin.xs, &LimitComp::Equal, &z_bin.xs)
 			}
 			(IntVarEnc::Bin(_), IntVarEnc::Bin(_), IntVarEnc::Const(z_con)) => {
 				// y is bin and z is const ~ redundantly encode y + z_bin in 0..z # z and z_bin <= z (needs final constraint b/c if no guaranteed consistency)
@@ -957,18 +952,29 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					*z_con,
 					"z_bin".to_string(),
 				));
-				self.encode(db, &TernLeConstraint::new(x, y, cmp.clone(), &z_bin))?;
+				self.encode(db, &TernLeConstraint::new(x, y, LimitComp::Equal, &z_bin))?;
 				// TODO omit if consistent z_bin
 				self.encode(
 					db,
 					&TernLeConstraint::new(&z_bin, &IntVarEnc::Const(C::zero()), cmp.clone(), z),
 				)
 			}
-			(
-				IntVarEnc::Bin(x_bin),
-				IntVarEnc::Ord(y_ord),
-				IntVarEnc::Bin(_) | IntVarEnc::Const(_),
-			) => {
+			(IntVarEnc::Bin(_), IntVarEnc::Bin(_), IntVarEnc::Ord(_)) => {
+				let z_bin = IntVarEnc::Bin(IntVarBin::from_bounds(
+					db,
+					x.lb() + y.lb(),
+					x.ub() + y.ub(),
+					"z_bin".to_string(),
+				));
+				self.encode(db, &TernLeConstraint::new(x, y, LimitComp::Equal, &z_bin))?;
+				// TODO omit if consistent z_bin
+				self.encode(
+					db,
+					&TernLeConstraint::new(&z_bin, &IntVarEnc::Const(C::zero()), cmp.clone(), z),
+				)
+			}
+			(IntVarEnc::Bin(x_bin), IntVarEnc::Ord(y_ord), _)
+			| (IntVarEnc::Ord(y_ord), IntVarEnc::Bin(x_bin), _) => {
 				// y is order and z is bin or const ~ redundant y_bin = y_ord and x_bin + y_bin # z
 				let y_bin = IntVarBin::from_bounds(db, y_ord.lb(), y_ord.ub(), "x_bin".to_string());
 				TernLeEncoder::default()
@@ -987,10 +993,6 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					&TernLeConstraint::new(&x_bin.clone().into(), &y_bin.into(), cmp.clone(), z),
 				)
 			}
-			#[allow(unreachable_patterns)]
-			(IntVarEnc::Bin(_), IntVarEnc::Ord(_), IntVarEnc::Bin(_) | IntVarEnc::Const(_)) => {
-				unreachable!("LHS binary variables only implemented for some cases (and not tested in general method) for {}",tern)
-			}
 			(IntVarEnc::Ord(x_ord), IntVarEnc::Ord(y_ord), IntVarEnc::Bin(z_bin)) => {
 				// TODO could be removed since close to `else` case?
 				let dom = ord_plus_ord_le_ord_sparse_dom(
@@ -999,7 +1001,6 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					z.lb(),
 					z.ub(),
 				);
-
 				let z_ord = IntVarOrd::from_syms(db, dom, String::from("z_ord"));
 				self.encode(
 					db,
@@ -1157,7 +1158,10 @@ pub mod tests {
 	use crate::helpers::tests::{assert_sol, assert_unsat, TestDB};
 	use iset::interval_set;
 
-	const RUN_UNSUPPORTED: bool = false;
+	const SKIP_UNSUPPORTED: bool = true;
+
+	#[cfg(feature = "trace")]
+	use traced_test::test;
 
 	macro_rules! test_int_lin {
 		($encoder:expr,$x:expr,$y:expr,$cmp:expr,$z:expr) => {
@@ -1183,7 +1187,7 @@ pub mod tests {
 
 			#[test]
 			fn test_o_o_b() {
-				if $cmp != LimitComp::Equal && RUN_UNSUPPORTED {
+				if $cmp != LimitComp::Equal && !SKIP_UNSUPPORTED {
 					test_int_lin_encs!(
 						$encoder,
 						$x,
@@ -1201,7 +1205,7 @@ pub mod tests {
 
 			#[test]
 			fn test_o_b_o() {
-				if $cmp != LimitComp::Equal && RUN_UNSUPPORTED {
+				if $cmp != LimitComp::Equal && !SKIP_UNSUPPORTED {
 					test_int_lin_encs!(
 						$encoder,
 						$x,
@@ -1219,7 +1223,7 @@ pub mod tests {
 
 			#[test]
 			fn test_o_b_b() {
-				if $y.len() == &1 && $cmp != LimitComp::Equal && RUN_UNSUPPORTED {
+				if $y.len() == &1 && $cmp != LimitComp::Equal && !SKIP_UNSUPPORTED {
 					test_int_lin_encs!(
 						$encoder,
 						$x,
@@ -1237,7 +1241,7 @@ pub mod tests {
 
 			#[test]
 			fn test_b_o_o() {
-				if $cmp != LimitComp::Equal && RUN_UNSUPPORTED {
+				if $cmp != LimitComp::Equal && !SKIP_UNSUPPORTED {
 					test_int_lin_encs!(
 						$encoder,
 						$x,
@@ -1255,8 +1259,8 @@ pub mod tests {
 
 			#[test]
 			fn _test_b_o_b() {
-				// if $y.len() > &1 && $cmp == LimitComp::Equal && RUN_UNSUPPORTED {
-				if RUN_UNSUPPORTED {
+				// if $y.len() > &1 && $cmp == LimitComp::Equal && !SKIP_UNSUPPORTED {
+				if !SKIP_UNSUPPORTED {
 					test_int_lin_encs!(
 						$encoder,
 						$x,
@@ -1274,7 +1278,7 @@ pub mod tests {
 
 			#[test]
 			fn test_b_b_o() {
-				if $y.len() > &1 && $cmp != LimitComp::Equal && RUN_UNSUPPORTED {
+				if $y.len() > &1 && $cmp != LimitComp::Equal && !SKIP_UNSUPPORTED {
 					test_int_lin_encs!(
 						$encoder,
 						$x,
@@ -1693,19 +1697,48 @@ pub mod tests {
 	}
 
 	#[test]
-	fn bin_plus_bin_le_bin_test() {
+	fn bin_le_bin_test() {
 		let mut db = TestDB::new(0);
-		let n = 3;
+		let n = 5;
+		let ub = (2i32.pow(n)) - 1;
+
 		let (x, y, z) = (
-			get_bin_x(&mut db, (2i32.pow(n)) - 1, true, "x".to_string()),
-			get_bin_x(&mut db, (2i32.pow(n)) - 1, true, "y".to_string()),
-			get_bin_x(&mut db, (2i32.pow(n + 1)) - 1, true, "z".to_string()),
+			get_bin_x(&mut db, ub, true, "x".to_string()),
+			IntVarEnc::Const(0),
+			// get_bin_x(&mut db, (2i32.pow(n)) - 1, true, "y".to_string()),
+			get_bin_x(&mut db, ub, true, "z".to_string()),
 		);
 
 		let tern = TernLeConstraint {
 			x: &x,
 			y: &y,
-			cmp: LimitComp::Equal,
+			// cmp: LimitComp::Equal,
+			cmp: LimitComp::LessEq,
+			z: &z,
+		};
+		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+
+		let sols = db.generate_solutions(|sol| tern.check(sol).is_ok(), db.num_var);
+
+		assert_sol!(db => TernLeEncoder::default(), &tern =>
+					sols
+		);
+	}
+
+	#[test]
+	fn bin_plus_bin_le_bin_test() {
+		let mut db = TestDB::new(0);
+		let n = 2;
+		let (x, y, z) = (
+			get_bin_x(&mut db, (2i32.pow(n)) - 1, true, "x".to_string()),
+			get_bin_x(&mut db, (2i32.pow(n)) - 1, true, "y".to_string()),
+			get_bin_x(&mut db, (2i32.pow(n + 1)) - 2, true, "z".to_string()),
+		);
+
+		let tern = TernLeConstraint {
+			x: &x,
+			y: &y,
+			cmp: LimitComp::LessEq,
 			z: &z,
 		};
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
