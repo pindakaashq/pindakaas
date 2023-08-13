@@ -141,6 +141,14 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		lbl: String,
 	) -> Self {
 		assert!(!views.is_empty());
+		assert!(
+			views
+				.iter(..)
+				.tuple_windows()
+				.all(|(a, b)| a.0.end == b.0.start),
+			"Expecting contiguous domain of intervals but was {views:?}"
+		);
+
 		let xs = views
 			.into_iter(..)
 			.map(|(v, lit)| {
@@ -567,16 +575,28 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		&self,
 		db: &mut DB,
 		y: &IntVarEnc<Lit, C>,
+		lb: Option<C>,
+		ub: Option<C>,
 		// cmp: &LimitComp,
 		// enc: &'a mut dyn Encoder<DB, TernLeConstraint<'a, DB, C>>,
 	) -> Result<IntVarEnc<Lit, C>> {
+		let comp_lb = self.lb() + y.lb();
+		let lb = std::cmp::max(lb.unwrap_or(comp_lb), comp_lb);
+
+		let comp_ub = self.ub() + y.ub();
+		let ub = std::cmp::min(ub.unwrap_or(comp_ub), comp_ub);
+
 		match (self, y) {
 			(IntVarEnc::Const(a), IntVarEnc::Const(b)) => Ok(IntVarEnc::Const(*a + *b)),
 			// TODO only used in sorters which enforce the constraints later!
-			(IntVarEnc::Ord(x), IntVarEnc::Ord(y)) => Ok(IntVarEnc::Ord(IntVarOrd::from_bounds(
+			(IntVarEnc::Ord(x), IntVarEnc::Ord(y)) => Ok(IntVarEnc::Ord(IntVarOrd::from_syms(
 				db,
-				C::zero(),
-				self.ub() + y.ub(),
+				ord_plus_ord_le_ord_sparse_dom(
+					x.dom().iter(..).map(|d| d.end - C::one()).collect(),
+					y.dom().iter(..).map(|d| d.end - C::one()).collect(),
+					lb,
+					ub,
+				),
 				format!("{}+{}", x.lbl, y.lbl),
 			))),
 			(IntVarEnc::Ord(x), IntVarEnc::Const(y)) | (IntVarEnc::Const(y), IntVarEnc::Ord(x)) => {
@@ -592,23 +612,13 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 				.into())
 			}
 			(IntVarEnc::Bin(x), IntVarEnc::Bin(y)) => {
-				let z_bin = IntVarBin::from_bounds(
-					db,
-					x.lb() + y.lb(),
-					x.ub() + y.ub(),
-					"z_bin".to_string(),
-				);
+				let z_bin = IntVarBin::from_bounds(db, lb, ub, "z_bin".to_string());
 				log_enc_add(db, &x.xs, &y.xs, &LimitComp::Equal, &z_bin.xs)?;
 				Ok(IntVarEnc::Bin(z_bin))
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y))
 			| (IntVarEnc::Const(y), IntVarEnc::Bin(x_bin)) => {
-				let z_bin = IntVarBin::from_bounds(
-					db,
-					x_bin.lb() + *y,
-					x_bin.ub() + *y,
-					"z_bin".to_string(),
-				);
+				let z_bin = IntVarBin::from_bounds(db, lb, ub, "z_bin".to_string());
 				log_enc_add_(
 					db,
 					&x_bin
@@ -935,7 +945,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			| (IntVarEnc::Const(y_const), IntVarEnc::Bin(x_bin), IntVarEnc::Bin(z_bin)) => {
 				let (x_bin, y_const) = if y_const.is_zero() || cmp == &LimitComp::Equal {
 					(x_bin.clone(), *y_const)
-				} else if let IntVarEnc::Bin(x_bin) = x.add(db, y)? {
+				} else if let IntVarEnc::Bin(x_bin) = x.add(db, y, Some(z.lb()), Some(z.ub()))? {
 					(x_bin, C::zero())
 				} else {
 					unreachable!()
@@ -967,7 +977,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				match cmp {
 					LimitComp::Equal => log_enc_add(db, &x_bin.xs, &y_bin.xs, cmp, &z_bin.xs),
 					LimitComp::LessEq => {
-						let xy = x.add(db, y)?;
+						let xy = x.add(db, y, Some(z.lb()), Some(z.ub()))?;
 						xy.consistent(db)?;
 						self.encode(
 							db,
@@ -982,18 +992,10 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				}
 			}
 			(IntVarEnc::Bin(_), IntVarEnc::Bin(_), _) => {
-				// y is bin and z is const ~ redundantly encode y + z_bin in 0..z # z and z_bin <= z (needs final constraint b/c if no guaranteed consistency)
+				// y/y is bin but z is not bin ~ redundantly encode y + z_bin in 0..z # z and z_bin <= z
 				// TODO better coupling ;
-				// Don't use x.add(db, y) since the ub = z_con which could be lower than x.ub+y.ub
-				let z_bin = IntVarEnc::Bin(IntVarBin::from_bounds(
-					db,
-					C::zero(),
-					z.ub(),
-					"z_bin".to_string(),
-				));
+				let z_bin = x.add(db, y, None, Some(z.ub()))?;
 				z_bin.consistent(db)?;
-				self.encode(db, &TernLeConstraint::new(x, y, LimitComp::Equal, &z_bin))?;
-				// TODO omit if consistent z_bin
 				self.encode(
 					db,
 					&TernLeConstraint::new(&z_bin, &IntVarEnc::Const(C::zero()), cmp.clone(), z),
@@ -1022,7 +1024,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			}
 			(IntVarEnc::Bin(_), IntVarEnc::Const(c), IntVarEnc::Ord(_))
 			| (IntVarEnc::Const(c), IntVarEnc::Bin(_), IntVarEnc::Ord(_)) => {
-				let z = z.add(db, &IntVarEnc::Const(c.neg()))?;
+				let z = z.add(db, &IntVarEnc::Const(c.neg()), Some(z.lb()), Some(z.ub()))?;
 
 				// x + c <= z == z-c >= x == /\ (z'<=a -> x<=a)
 				for (c_a, z_leq_c_a) in z.leqs() {
@@ -1051,7 +1053,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				for (c_a, x_geq_c_a) in x.geqs() {
 					for (c_b, y_geq_c_b) in y.geqs() {
 						// TODO tighten c_c.start
-						let c_c = (std::cmp::min(c_a.start, c_b.start))
+						let c_c = (std::cmp::max(c_a.start, c_b.start))
 							..(((c_a.end - C::one()) + (c_b.end - C::one())) + C::one());
 						let z_geq_c_c = z.geq(c_c.clone());
 
@@ -1137,6 +1139,29 @@ pub(crate) fn negate_cnf<Lit: Literal>(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> 
 	}
 }
 
+pub(crate) fn ord_plus_ord_le_ord_sparse_dom<C: Coefficient>(
+	a: Vec<C>,
+	b: Vec<C>,
+	l: C,
+	u: C,
+) -> IntervalSet<C> {
+	// TODO optimize by dedup (if already sorted?)
+	HashSet::<C>::from_iter(a.iter().flat_map(|a| {
+		b.iter().filter_map(move |b| {
+			// TODO refactor: use then_some when stabilized
+			if *a + *b >= l && *a + *b <= u {
+				Some(*a + *b)
+			} else {
+				None
+			}
+		})
+	}))
+	.into_iter()
+	.sorted()
+	.tuple_windows()
+	.map(|(a, b)| (a + C::one())..(b + C::one()))
+	.collect::<IntervalSet<_>>()
+}
 
 #[cfg(test)]
 pub mod tests {
@@ -1338,7 +1363,16 @@ pub mod tests {
 			mod _0123_23_2345 {
 				test_int_lin!($encoder, &[0, 1, 2, 3], &[2, 3], $cmp, &[2, 3, 4, 5]);
 			}
-			// TODO gaps?
+
+			mod _012478_0_0123456789 {
+				test_int_lin!(
+					$encoder,
+					&[0, 1, 2, 4, 7, 8],
+					&[0],
+					$cmp,
+					&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+				);
+			}
 		};
 	}
 
@@ -1517,8 +1551,8 @@ pub mod tests {
 	fn ord_plus_ord_le_ord_test() {
 		let mut db = TestDB::new(0);
 		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x".to_string()),
-			get_ord_x(&mut db, interval_set!(2..3, 4..5), true, "y".to_string()),
+			get_ord_x(&mut db, interval_set!(1..2, 2..7), true, "x".to_string()),
+			get_ord_x(&mut db, interval_set!(2..3, 3..5), true, "y".to_string()),
 			get_ord_x(&mut db, interval_set!(0..4, 4..11), true, "z".to_string()),
 		);
 		let tern = TernLeConstraint {
@@ -1576,7 +1610,9 @@ pub mod tests {
 	fn ord_le_bin_test() {
 		let mut db = TestDB::new(0);
 		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x".to_string()),
+			get_ord_x(&mut db, interval_set!(1..2, 2..7), true, "x".to_string()),
+			// TODO 'gapped' in interval_set:
+			// get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x".to_string()),
 			IntVarEnc::Const(0),
 			get_bin_x(&mut db, 7, true, "z".to_string()),
 		);
@@ -1588,44 +1624,12 @@ pub mod tests {
 		};
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 
-		// let sols = db.generate_solutions(
-		// 	|sol| {
-		// 		tern.check(sol).is_ok()
-		// 			&& x.as_any()
-		// 				.downcast_ref::<IntVarOrd<i32, i32>>()
-		// 				.unwrap()
-		// 				._consistency()
-		// 				.check(sol)
-		// 				.is_ok() && z
-		// 			.as_any()
-		// 			.downcast_ref::<IntVarBin<i32, i32>>()
-		// 			.unwrap()
-		// 			._consistency()
-		// 			.check(sol)
-		// 			.is_ok()
-		// 	},
-		// 	db.num_var,
-		// );
+		let sols = db.generate_solutions(|sol| tern.check(sol).is_ok(), db.num_var);
 
-		assert_sol!(db => TernLeEncoder::default(), &tern => vec![
-		vec![-1, -2, -3, -4, -5],
-		vec![-1, -2, 3, -4, -5],
-		vec![1, -2, 3, -4, -5],
-		vec![-1, -2, -3, 4, -5],
-		vec![1, -2, -3, 4, -5],
-		vec![-1, -2, 3, 4, -5],
-		vec![1, -2, 3, 4, -5],
-		vec![-1, -2, -3, -4, 5],
-		vec![1, -2, -3, -4, 5],
-		vec![-1, -2, 3, -4, 5],
-		vec![1, -2, 3, -4, 5],
-		vec![-1, -2, -3, 4, 5],
-		vec![1, -2, -3, 4, 5],
-		vec![1, 2, -3, 4, 5],
-		vec![-1, -2, 3, 4, 5],
-		vec![1, -2, 3, 4, 5],
-		vec![1, 2, 3, 4, 5],
-			 ]);
+		assert_sol!(db => TernLeEncoder::default(), &tern => sols
+
+
+		);
 	}
 
 	#[test]
