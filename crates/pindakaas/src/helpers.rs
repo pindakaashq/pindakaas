@@ -12,8 +12,16 @@ pub(crate) fn is_powers_of_two<C: Coefficient>(coefs: &[C]) -> bool {
 		.all(|(i, c)| c == &(num::pow(C::from(2).unwrap(), i) * mult))
 }
 
+pub(crate) fn unsigned_binary_range_ub<C: Coefficient>(bits: usize) -> C {
+	(0..bits).fold(C::zero(), |a, i| a + (num::pow(C::from(2).unwrap(), i)))
+}
 /// Convert `k` to unsigned binary in `bits`
 pub(crate) fn as_binary<C: Coefficient>(k: PosCoeff<C>, bits: usize) -> Vec<bool> {
+	assert!(
+		*k <= unsigned_binary_range_ub(bits),
+		"{} cannot be represented in {bits} bits",
+		*k,
+	);
 	(0..bits)
 		.map(|b| *k & (C::one() << b) != C::zero())
 		.collect::<Vec<_>>()
