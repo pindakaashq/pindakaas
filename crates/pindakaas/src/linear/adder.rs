@@ -170,8 +170,8 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 	Ok(())
 }
 
-/// Uses lexicographic constraint to constrain x:B ≦ k
-#[cfg_attr(feature = "trace", tracing::instrument(name = "lex", skip_all))]
+/// Uses lexicographic constraint to constrain x:B >= k
+#[cfg_attr(feature = "trace", tracing::instrument(name = "lex_geq", skip_all))]
 pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	x: &[Option<DB::Lit>],
@@ -195,22 +195,23 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 /// Constrains the slice `z`, to be the result of adding `x` to `y`, all encoded using the log encoding.
 ///
 /// TODO: Should this use the IntEncoding::Log input??
-#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} # {s:?}"))))]
 pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 	db: &mut DB,
 	x: &[DB::Lit],
 	y: &[DB::Lit],
 	cmp: &LimitComp,
-	s: &[DB::Lit],
+	z: &[DB::Lit],
 ) -> Result {
 	log_enc_add_(
 		db,
 		&x.iter().cloned().map(LitOrConst::from).collect::<Vec<_>>(),
 		&y.iter().cloned().map(LitOrConst::from).collect::<Vec<_>>(),
 		cmp,
-		&s.iter().cloned().map(LitOrConst::from).collect::<Vec<_>>(),
+		&z.iter().cloned().map(LitOrConst::from).collect::<Vec<_>>(),
 	)
 }
+
+#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} {cmp} {z:?}"))))]
 pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 	db: &mut DB,
 	x: &[LitOrConst<DB::Lit>],
