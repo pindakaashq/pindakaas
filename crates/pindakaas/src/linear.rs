@@ -88,6 +88,14 @@ impl<Lit: Literal, C: Coefficient> Linear<Lit, C> {
 	pub fn set_k(&mut self, k: C) {
 		self.k = k.into();
 	}
+
+	pub fn len(&self) -> usize {
+		self.terms.len()
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.terms.is_empty()
+	}
 }
 
 impl<Lit: Literal, C: Coefficient> From<Cardinality<Lit, C>> for Linear<Lit, C> {
@@ -379,9 +387,10 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
                 Some(Constraint::AtMostOne) => assignments.iter().filter(|(lit,_,a)| lit == a).count() <= 1,
                 Some(Constraint::ImplicationChain) =>  assignments.iter().map(|(lit,_,a)| lit == a).tuple_windows().all(|(a, b)| a.cmp(&b).is_ge()),
                 Some(Constraint::Domain { lb, ub }) => {
-                    let a = evaluate(&assignments);
+                    // divide by first coeff to get int assignment
+                    let a = evaluate(&assignments).div(assignments[0].1);
                     lb <= a && a <= ub
-                }
+                },
                 None => true
             };
 

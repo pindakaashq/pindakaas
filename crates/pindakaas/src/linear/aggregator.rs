@@ -966,6 +966,28 @@ mod tests {
 			}))
 		);
 
+		// Correctly account for the coefficient in the Dom bounds
+		let mut db = TestDB::new(5);
+		assert_eq!(
+			LinearAggregator::default().aggregate(
+				&mut db,
+				&LinearConstraint::new(
+					LinExp::default().add_bounded_log_encoding(&[(1, 1), (2, 2), (3, 4)], 0, 3),
+					Comparator::LessEq,
+					5,
+				)
+			),
+			Ok(LinVariant::Linear(Linear {
+				terms: vec![Part::Dom(
+					vec![(1, 1.into()), (2, 2.into()), (3, 4.into())],
+					0.into(),
+					7.into()
+				),],
+				cmp: LimitComp::LessEq,
+				k: 5.into(),
+			}))
+		);
+
 		// Correctly convert GreaterEq into LessEq with side constrains
 		let mut db = TestDB::new(5);
 		assert_eq!(

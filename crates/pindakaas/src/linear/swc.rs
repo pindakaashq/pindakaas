@@ -1,6 +1,6 @@
 use crate::int::{Consistency, Lin};
 use crate::{
-	int::{IntVarOrd, Model},
+	int::{IntVarEnc, Model},
 	ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 use itertools::Itertools;
@@ -43,19 +43,8 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.terms
 			.iter()
 			.enumerate()
-			.map(|(i, part)| {
-				Rc::new(RefCell::new(
-					model.add_int_var_enc(
-						IntVarOrd::from_part_using_le_ord(
-							db,
-							part,
-							lin.k.clone(),
-							format!("x_{i}"),
-						)
-						.into(),
-					),
-				))
-			})
+			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
+			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
 			.collect::<Vec<_>>();
 		let n = xs.len();
 

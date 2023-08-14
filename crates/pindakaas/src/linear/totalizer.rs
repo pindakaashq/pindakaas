@@ -10,9 +10,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 
 use crate::{
-	int::{IntVarEnc, IntVarOrd},
-	linear::LimitComp,
-	ClauseDatabase, Coefficient, Encoder, Linear, Result,
+	int::IntVarEnc, linear::LimitComp, ClauseDatabase, Coefficient, Encoder, Linear, Result,
 };
 
 const EQUALIZE_INTERMEDIATES: bool = false;
@@ -50,9 +48,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			.terms
 			.iter()
 			.enumerate()
-			.map(|(i, part)| -> IntVarEnc<DB::Lit, C> {
-				IntVarOrd::from_part_using_le_ord(db, part, lin.k.clone(), format!("x_{i}")).into()
-			})
+			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
 			.sorted_by_key(|x| x.ub())
 			.collect::<Vec<_>>();
 
