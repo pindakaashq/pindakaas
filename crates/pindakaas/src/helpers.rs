@@ -432,15 +432,22 @@ pub mod tests {
 			if OUTPUT_SPLR {
 				eprintln!("let result: Vec<Vec<i32>> = slv.iter().collect();");
 			}
+			const ONLY_OUTPUT: bool = true;
 			let mut from_slv: Vec<Vec<i32>> = Vec::new();
 			while let Ok(Certificate::SAT(model)) = self.slv.solve() {
-				from_slv.push(
+				let solution = if ONLY_OUTPUT {
 					model
+						.clone()
 						.into_iter()
 						.filter(|l| l.abs() <= self.num_var)
-						.collect(),
-				);
-				let nogood: Vec<i32> = from_slv.last().unwrap().iter().map(|l| -l).collect();
+						.collect()
+				} else {
+					model
+				};
+
+				from_slv.push(solution.clone());
+
+				let nogood: Vec<i32> = solution.iter().map(|l| -l).collect();
 				match SatSolverIF::add_clause(&mut self.slv, nogood) {
 					Err(SolverError::Inconsistent | SolverError::EmptyClause) => {
 						break;
@@ -461,6 +468,47 @@ pub mod tests {
 			}
 			if let Some(solutions) = &self.solutions {
 				// we are only interested in literals present in the expected solutions (and not in auxiliary variables)
+				from_slv.sort();
+
+				let from_slv_output = if ONLY_OUTPUT {
+					from_slv.clone()
+				} else {
+					from_slv
+						.iter()
+						.map(|sol| {
+							sol.iter()
+								.filter(|l| l.abs() <= self.num_var)
+								.cloned()
+								.collect::<Vec<_>>()
+						})
+						.collect()
+				};
+
+				let misses = solutions
+					.iter()
+					.filter(|s| !from_slv_output.contains(s))
+					.collect::<Vec<_>>();
+
+				if !misses.is_empty() {
+					println!("Misses ({})", misses.len());
+					for s in misses {
+						println!("  Miss: {s:?}");
+					}
+				}
+
+				let extras = from_slv
+					.iter()
+					.zip(from_slv_output)
+					.filter_map(|(sol, out)| (!solutions.contains(&out)).then_some(sol))
+					.collect::<Vec<_>>();
+
+				if !extras.is_empty() {
+					println!("Extras ({})", extras.len());
+					for s in extras {
+						println!("  Extra: {s:?}");
+					}
+				}
+
 				let vars = HashSet::<i32>::from_iter(
 					solutions
 						.iter()
