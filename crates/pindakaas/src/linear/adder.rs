@@ -28,7 +28,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 		// The number of relevant bits in k
 		let bits = (C::zero().leading_zeros() - lin.k.leading_zeros()) as usize;
 		let first_zero = lin.k.trailing_ones() as usize;
-		let mut k = as_binary(lin.k.clone(), bits);
+		let mut k = as_binary(lin.k.clone(), Some(bits));
 		debug_assert!(k[bits - 1]);
 
 		// Create structure with which coefficients use which bits
@@ -152,7 +152,7 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 	k: PosCoeff<C>,
 	bits: usize,
 ) -> Result {
-	let k = as_binary(k, bits);
+	let k = as_binary(k, Some(bits));
 	// For every zero bit in k:
 	// - either the `x` bit is also zero, or
 	// - a higher `x` bit is zero that was one in k.
@@ -178,7 +178,7 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 	k: PosCoeff<C>,
 	bits: usize,
 ) -> Result {
-	let k = as_binary(k, bits);
+	let k = as_binary(k, Some(bits));
 	for i in 0..bits {
 		if k[i] && x[i].is_some() {
 			emit_clause!(
@@ -269,29 +269,23 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 				// c = all more significant bits are equal AND current one is
 				// if up to i is equal, all preceding must be equal
 				clause(db, &[-bit(c, i), bit(c, i + 1)])?;
-				// if up to i is equal, x<->s
+				// if up to i is equal, x<->z
 				clause(db, &[-bit(c, i), -bit(x, i), bit(z, i)])?;
 				clause(db, &[-bit(c, i), -bit(z, i), bit(x, i)])?;
 
-				// if not up to i is equal, either preceding bit was not equal, or x!=s
+				// if not up to i is equal, either preceding bit was not equal, or x!=z
 				clause(db, &[bit(c, i), -bit(c, i + 1), bit(x, i), bit(z, i)])?;
 				clause(db, &[bit(c, i), -bit(c, i + 1), -bit(x, i), -bit(z, i)])?;
 
-				// if preceding bits are equal, then x<=s
+				// if preceding bits are equal, then x<=z
 				clause(db, &[-bit(c, i + 1), -bit(x, i), bit(z, i)])?;
 			}
 
 			clause(db, &[-bit(x, n - 1), bit(z, n - 1)])?;
 
 			Ok(())
-
-			}
 		}
 	}
-}
-
-	}
-	Ok(())
 }
 
 fn clause<DB: ClauseDatabase>(db: &mut DB, lits: &[LitOrConst<DB::Lit>]) -> Result {
