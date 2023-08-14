@@ -1,6 +1,6 @@
 use crate::{
-	linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase, Coefficient,
-	Encoder, LinExp, Literal, Result, Unsatisfiable,
+	int::IntVar, linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase,
+	Coefficient, Encoder, LinExp, Literal, Result, Unsatisfiable,
 };
 
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
@@ -16,7 +16,8 @@ pub(crate) fn unsigned_binary_range_ub<C: Coefficient>(bits: usize) -> C {
 	(0..bits).fold(C::zero(), |a, i| a + (num::pow(C::from(2).unwrap(), i)))
 }
 /// Convert `k` to unsigned binary in `bits`
-pub(crate) fn as_binary<C: Coefficient>(k: PosCoeff<C>, bits: usize) -> Vec<bool> {
+pub(crate) fn as_binary<C: Coefficient>(k: PosCoeff<C>, bits: Option<usize>) -> Vec<bool> {
+	let bits = bits.unwrap_or_else(|| IntVar::required_bits(C::zero(), *k) as usize);
 	assert!(
 		*k <= unsigned_binary_range_ub(bits),
 		"{} cannot be represented in {bits} bits",
