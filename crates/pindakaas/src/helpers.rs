@@ -386,11 +386,12 @@ pub mod tests {
 				})
 				.filter(|g| check(&g[..]))
 				.collect();
-			eprintln!("vec![");
-			for sol in &solutions {
-				eprintln!("  vec!{sol:?},");
-			}
-			eprintln!("]");
+
+			// eprintln!("vec![");
+			// for sol in &solutions {
+			// 	eprintln!("  vec!{sol:?},");
+			// }
+			// eprintln!("]");
 
 			solutions
 		}
