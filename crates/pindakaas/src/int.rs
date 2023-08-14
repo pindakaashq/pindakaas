@@ -1,4 +1,4 @@
-use iset::{interval_set, IntervalMap, IntervalSet};
+use iset::{interval_map, interval_set, IntervalMap, IntervalSet};
 use rustc_hash::FxHashMap;
 
 use itertools::Itertools;
@@ -460,24 +460,23 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
-	/// Constructs IntVar `y` for linear expression `xs` so that ∑ xs ≦ y, using order encoding
-	pub fn from_part_using_le_ord<DB: ClauseDatabase<Lit = Lit>>(
+#[derive(Debug, Clone)]
+pub(crate) enum IntVarEnc<Lit: Literal, C: Coefficient> {
+	Ord(IntVarOrd<Lit, C>),
+	Bin(IntVarBin<Lit, C>),
+	Const(C),
+}
+
+const COUPLE_DOM_PART_TO_ORD: bool = false;
+
+impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
+	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
+	pub fn from_part<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
 		xs: &Part<Lit, PosCoeff<C>>,
 		ub: PosCoeff<C>,
 		lbl: String,
-	) -> Self {
-		// TODO add_consistency on coupled leaves (wherever not equal to principal vars)
-		// if add_consistency {
-		// 	for leaf in &leaves {
-		// 		leaf.encode_consistency(db);
-		// 	}
-		// }
-
-		// couple given encodings to the order encoding
-		// TODO experiment with adding consistency constraint to totalizer nodes (including on leaves!)
-
+	) -> Vec<Self> {
 		match xs {
 			Part::Amo(terms) => {
 				let terms: Vec<(PosCoeff<C>, Lit)> = terms
@@ -509,7 +508,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 						}
 					})
 					.collect::<IntervalMap<_, _>>();
-				IntVarOrd::from_views(db, dom, lbl)
+				vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, lbl))]
 			}
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
 			Part::Ic(terms) => {
@@ -526,38 +525,52 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 						((prev + C::one())..(coef + C::one()), Some(lit))
 					})
 					.collect::<IntervalMap<_, _>>();
-				IntVarOrd::from_views(db, dom, lbl)
+				vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, lbl))]
 			}
 			Part::Dom(terms, l, u) => {
+                // TODO account for bounds (or even better, create IntVarBin)
+                if COUPLE_DOM_PART_TO_ORD {
+                    // TODO old method (which at least respected bounds)
 				let x_bin =
 					IntVarBin::from_terms(terms.to_vec(), l.clone(), u.clone(), String::from("x"));
-				let x_ord = IntVarOrd::from_bounds(db, x_bin.lb(), x_bin.ub(), String::from("x"));
+				let x_ord = IntVarEnc::Ord(IntVarOrd::from_bounds(db, x_bin.lb(), x_bin.ub(), String::from("x")));
 
 				TernLeEncoder::default()
 					.encode(
 						db,
 						&TernLeConstraint::new(
-							&x_ord.clone().into(),
+                            &x_ord,
 							&IntVarEnc::Const(C::zero()),
 							LimitComp::LessEq,
 							&x_bin.into(),
 						),
 					)
 					.unwrap();
-				x_ord
+                vec![x_ord]
+                } else {
+                terms.iter().enumerate().map(|(i,(lit, coef))| {IntVarEnc::Ord(IntVarOrd::from_views(
+                                db,
+                                interval_map! { C::one()..(**coef+C::one()) => Some(lit.clone()) },
+                                format!("{lbl}^{i}")
+                                ))}).collect()
+                }
 			}
+
+            // TODO Not so easy to transfer a binary encoded int var
+			// Part::Dom(terms, l, u) => {
+			// let coef = (terms[0].1);
+			// let false_ if (coef > 1).then(|| let false_ = Some(new_var!(db)); emit_clause!(&[-false_]); false_ });
+			// let terms = (1..coef).map(|_| false_.clone()).chain(terms.to_vec());
+
+			// IntVarEnc::Bin(IntVarBin::from_terms(
+			// 	terms.to_vec(),
+			// 	l.clone(),
+			// 	u.clone(),
+			// 	String::from("x"),
+			// ))},
 		}
 	}
-}
 
-#[derive(Debug, Clone)]
-pub(crate) enum IntVarEnc<Lit: Literal, C: Coefficient> {
-	Ord(IntVarOrd<Lit, C>),
-	Bin(IntVarBin<Lit, C>),
-	Const(C),
-}
-
-impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 	#[allow(dead_code)]
 	pub(crate) fn from_dom<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
@@ -612,13 +625,13 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 				.into())
 			}
 			(IntVarEnc::Bin(x), IntVarEnc::Bin(y)) => {
-				let z_bin = IntVarBin::from_bounds(db, lb, ub, "z_bin".to_string());
+				let z_bin = IntVarBin::from_bounds(db, lb, ub, format!("{}+{}", x.lbl, y.lbl));
 				log_enc_add(db, &x.xs, &y.xs, &LimitComp::Equal, &z_bin.xs)?;
 				Ok(IntVarEnc::Bin(z_bin))
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y))
 			| (IntVarEnc::Const(y), IntVarEnc::Bin(x_bin)) => {
-				let z_bin = IntVarBin::from_bounds(db, lb, ub, "z_bin".to_string());
+				let z_bin = IntVarBin::from_bounds(db, lb, ub, format!("{}+{}", x_bin.lbl, y));
 				log_enc_add_(
 					db,
 					&x_bin
@@ -868,6 +881,8 @@ impl<'a, Lit: Literal, C: Coefficient> TernLeConstraintContainer<Lit, C> {
 #[derive(Debug, Default)]
 pub(crate) struct TernLeEncoder {}
 
+const ENCODE_REDUNDANT_X_O_Y_O_Z_B: bool = true;
+
 impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB::Lit, C>>
 	for TernLeEncoder
 {
@@ -1004,7 +1019,12 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Ord(y_ord), _)
 			| (IntVarEnc::Ord(y_ord), IntVarEnc::Bin(x_bin), _) => {
 				// y is order and z is bin or const ~ redundant y_bin = y_ord and x_bin + y_bin # z
-				let y_bin = IntVarBin::from_bounds(db, y_ord.lb(), y_ord.ub(), "x_bin".to_string());
+				let y_bin = IntVarBin::from_bounds(
+					db,
+					y_ord.lb(),
+					y_ord.ub(),
+					format!("{}{cmp}y:B", y_ord.lbl),
+				);
 
 				self.encode(
 					db,
@@ -1020,6 +1040,22 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				self.encode(
 					db,
 					&TernLeConstraint::new(&x_bin.clone().into(), &y_bin.into(), cmp.clone(), z),
+				)
+			}
+			(IntVarEnc::Ord(_), IntVarEnc::Ord(_), IntVarEnc::Bin(_))
+				if ENCODE_REDUNDANT_X_O_Y_O_Z_B =>
+			{
+				// Avoid too many coupling clause
+				let xy_ord = x.add(db, y, None, None)?;
+				// TODO why necessary?
+				xy_ord.consistent(db)?;
+
+				// TODO `x:O.add(y:O)` does not add clauses yet
+				self.encode(db, &TernLeConstraint::new(x, y, cmp.clone(), &xy_ord))?;
+
+				self.encode(
+					db,
+					&TernLeConstraint::new(&xy_ord, &IntVarEnc::Const(C::zero()), cmp.clone(), z),
 				)
 			}
 			(IntVarEnc::Bin(_), IntVarEnc::Const(c), IntVarEnc::Ord(_))
@@ -1052,7 +1088,6 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 
 				for (c_a, x_geq_c_a) in x.geqs() {
 					for (c_b, y_geq_c_b) in y.geqs() {
-						// TODO tighten c_c.start
 						let c_c = (std::cmp::max(c_a.start, c_b.start))
 							..(((c_a.end - C::one()) + (c_b.end - C::one())) + C::one());
 						let z_geq_c_c = z.geq(c_c.clone());
