@@ -165,8 +165,20 @@ impl SortedEncoder {
 		y: &IntVarEnc<DB::Lit, C>,
 	) -> Result {
 		// we let x2 take the place of z_ceil, so we need to add 1 to both sides
-		let x2 = x2.add(db, &IntVarEnc::Const(C::one()), None, None)?;
-		let y = y.add(db, &IntVarEnc::Const(C::one()), None, None)?;
+		let x2 = x2.add(
+			db,
+			&mut TernLeEncoder::default(),
+			&IntVarEnc::Const(C::one()),
+			None,
+			None,
+		)?;
+		let y = y.add(
+			db,
+			&mut TernLeEncoder::default(),
+			&IntVarEnc::Const(C::one()),
+			None,
+			None,
+		)?;
 		self.comp(db, x1, &x2, cmp, &y, C::one())
 	}
 
@@ -325,21 +337,35 @@ impl SortedEncoder {
 					let two = C::one() + C::one();
 					let x1_floor = x1.div(&two);
 					let x1_ceil = x1
-						.add(db, &IntVarEnc::Const(C::one()), None, None)?
+						.add(
+							db,
+							&mut TernLeEncoder::default(),
+							&IntVarEnc::Const(C::one()),
+							None,
+							None,
+						)?
 						.div(&two);
 
 					let x2_floor = x2.div(&two);
 					let x2_ceil = x2
-						.add(db, &IntVarEnc::Const(C::one()), None, None)?
+						.add(
+							db,
+							&mut TernLeEncoder::default(),
+							&IntVarEnc::Const(C::one()),
+							None,
+							None,
+						)?
 						.div(&two);
 
-					let z_floor = x1_floor.add(db, &x2_floor, None, None)?;
+					let z_floor =
+						x1_floor.add(db, &mut TernLeEncoder::default(), &x2_floor, None, None)?;
 					self.encode(
 						db,
 						&TernLeConstraint::new(&x1_floor, &x2_floor, cmp.clone(), &z_floor),
 					)?;
 
-					let z_ceil = x1_ceil.add(db, &x2_ceil, None, None)?;
+					let z_ceil =
+						x1_ceil.add(db, &mut TernLeEncoder::default(), &x2_ceil, None, None)?;
 					self.encode(
 						db,
 						&TernLeConstraint::new(&x1_ceil, &x2_ceil, cmp.clone(), &z_ceil),
