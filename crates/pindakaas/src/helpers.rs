@@ -397,6 +397,26 @@ pub mod tests {
 			solutions
 		}
 
+		pub fn _print_solutions(sols: &Vec<Vec<i32>>) -> String {
+			format!(
+				"vec![
+{}
+]",
+				sols.into_iter()
+					.map(|sol| format!(
+						"\tvec![{}]",
+						(*sol)
+							.iter()
+							.map(|lit| lit.to_string())
+							.collect::<Vec<_>>()
+							.join(", ")
+					))
+					.collect::<Vec<_>>()
+					.join(",\n")
+			)
+			.to_string()
+		}
+
 		pub fn with_check(mut self, checker: fn(&[i32]) -> bool) -> TestDB {
 			if self.solutions.is_none() && self.num_var <= GENERATE_EXPECTED_SOLUTIONS {
 				let solutions = self.generate_solutions(checker, self.num_var);
