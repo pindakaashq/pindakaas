@@ -863,32 +863,6 @@ mod tests {
 					]
 				);
 			}
-
-            /*
-             * TODO add clausees for Ics (otherwise test won't work for all encoders)
-            #[test]
-            fn test_eq_with_ics() {
-                assert_sol!(
-                    $encoder,
-                    6,
-                    &Linear {
-                        terms: vec![
-                            Part::Ic(vec![(1, PosCoeff(4)), (2, PosCoeff(4))]),
-                            Part::Ic(vec![(3, PosCoeff(4)), (4, PosCoeff(4))]),
-                            Part::Ic(vec![(5, PosCoeff(5)), (6, PosCoeff(5))]),
-                        ],
-                        cmp: LimitComp::Equal,
-                        k: PosCoeff(18),
-                    }
-                    =>
-                    vec![
-                    vec![1, 2, -3, -4, 5, 6],
-                    vec![1, -2, 3, -4, 5, 6],
-                    vec![-1, -2, 3, 4, 5, 6],
-                    ]
-                        );
-            }
-            */
 		};
 
 

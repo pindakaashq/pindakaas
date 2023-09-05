@@ -95,11 +95,6 @@ where
 			next
 		});
 
-		//let add_propagation = Consistency::Bounds;
-		//let size = model.size();
-		//model.propagate(&add_propagation, vec![model.cons.len() - 1]);
-		//assert!(size - model.size() == 0);
-		//println!("{} - {} = {}", size, model.size(), size - model.size());
 		model.encode(db, self.cutoff)?;
 		Ok(())
 	}

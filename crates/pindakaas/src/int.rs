@@ -1492,11 +1492,6 @@ pub mod tests {
 				test_int_lin!($encoder, &[0, 1], &[1], $cmp, &[1, 2]);
 			}
 
-			// TODO disabled since this will create lex with unequal lower bounds
-			// mod _01_1_12 {
-			// 	test_int_lin!($encoder, &[0, 1], &[1], $cmp, &[0, 1, 2]);
-			// }
-
 			mod _01_01_012 {
 				test_int_lin!($encoder, &[0, 1], &[0, 1], $cmp, &[0, 1, 2]);
 			}
