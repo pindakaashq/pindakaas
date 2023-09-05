@@ -117,7 +117,6 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		Self::from_dom(
 			db,
 			num::iter::range_inclusive(lb, ub)
-				.into_iter()
 				.collect::<Vec<_>>()
 				.as_slice(),
 			lbl,
