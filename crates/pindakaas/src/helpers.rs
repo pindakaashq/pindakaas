@@ -388,12 +388,6 @@ pub mod tests {
 				.filter(|g| check(&g[..]))
 				.collect();
 
-			// eprintln!("vec![");
-			// for sol in &solutions {
-			// 	eprintln!("  vec!{sol:?},");
-			// }
-			// eprintln!("]");
-
 			solutions
 		}
 
@@ -512,9 +506,9 @@ pub mod tests {
 					.collect::<Vec<_>>();
 
 				if !misses.is_empty() {
-					println!("Misses ({})", misses.len());
+					println!("Missing solutions ({})", misses.len());
 					for s in misses {
-						println!("  Miss: {s:?}");
+						println!("  -{s:?}");
 					}
 				}
 
@@ -525,9 +519,9 @@ pub mod tests {
 					.collect::<Vec<_>>();
 
 				if !extras.is_empty() {
-					println!("Extras ({})", extras.len());
+					println!("Extra solutions ({})", extras.len());
 					for s in extras {
-						println!("  Extra: {s:?}");
+						println!("  +{s:?}");
 					}
 				}
 
