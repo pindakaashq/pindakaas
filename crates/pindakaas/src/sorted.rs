@@ -1,5 +1,6 @@
 use crate::{
-	int::{add_clauses_for, negate_cnf, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+	helpers::{add_clauses_for, negate_cnf},
+	int::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 	linear::LimitComp,
 	trace::emit_clause,
 	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, LinExp, Literal, Result,

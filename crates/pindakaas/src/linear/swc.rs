@@ -1,8 +1,5 @@
-use crate::int::{Consistency, Lin};
-use crate::{
-	int::{IntVarEnc, Model},
-	ClauseDatabase, Coefficient, Encoder, Linear, Result,
-};
+use crate::int::{Consistency, Lin, Model};
+use crate::{int::IntVarEnc, ClauseDatabase, Coefficient, Encoder, Linear, Result};
 use itertools::Itertools;
 use std::cell::RefCell;
 use std::rc::Rc;
