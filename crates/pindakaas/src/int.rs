@@ -93,10 +93,9 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}:B ∈ {{{}..{}}} [{}]",
+			"{}:B ∈ {} [{}]",
 			self.lbl,
-			self.lb(),
-			self.ub(),
+			display_dom(&self.dom().iter(..).map(|d| d.end - C::one()).collect()),
 			self.lits()
 		)
 	}
