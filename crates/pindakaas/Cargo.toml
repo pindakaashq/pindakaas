@@ -28,7 +28,6 @@ splr = { version = "0.16", optional = true }
 [dev-dependencies]
 splr = { version = "0.16", features = ["incremental_solver"] }
 traced_test = { path = "../traced_test" }
-rand = "0.8.5"
 
 [features]
 trace = ["tracing"]
