@@ -8,7 +8,7 @@ use crate::Literal;
 use crate::{
 	int::{IntVarEnc, IntVarOrd, Lin, Model},
 	linear::LimitComp,
-	ClauseDatabase, Coefficient, Consistency, Encoder, Linear, PosCoeff, Result,
+	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)

@@ -2,6 +2,8 @@ use crate::{
 	int::IntVar, linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase,
 	Coefficient, Encoder, LinExp, Literal, Result, Unsatisfiable,
 };
+use itertools::Itertools;
+use std::collections::HashSet;
 
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
 pub(crate) fn is_powers_of_two<C: Coefficient>(coefs: &[C]) -> bool {
@@ -26,6 +28,55 @@ pub(crate) fn as_binary<C: Coefficient>(k: PosCoeff<C>, bits: Option<usize>) -> 
 	(0..bits)
 		.map(|b| *k & (C::one() << b) != C::zero())
 		.collect::<Vec<_>>()
+}
+
+const FILTER_TRIVIAL_CLAUSES: bool = false;
+/// Adds clauses for a DNF formula (disjunction of conjunctions)
+/// Ex. (a /\ -b) \/ c == a \/ c /\ -b \/ c
+/// If any disjunction is empty, this satisfies the whole formula. If any element contains the empty conjunction, that element is falsified in the final clause.
+pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
+	db: &mut DB,
+	expression: Vec<Vec<Vec<DB::Lit>>>,
+) -> Result {
+	// TODO doctor out type of expression (clauses containing conjunctions?)
+
+	for cls in expression
+		.into_iter()
+		.map(|cls| cls.into_iter())
+		.multi_cartesian_product()
+	{
+		let cls = cls.concat(); // filter out [] (empty conjunctions?) of the clause
+		if FILTER_TRIVIAL_CLAUSES {
+			let mut lits = HashSet::<DB::Lit>::with_capacity(cls.len());
+			if cls.iter().any(|lit| {
+				if lits.contains(&lit.negate()) {
+					true
+				} else {
+					lits.insert(lit.clone());
+					false
+				}
+			}) {
+				continue;
+			}
+		}
+		emit_clause!(db, &cls)?
+	}
+	Ok(())
+}
+
+/// Negates CNF (flipping between empty clause and formula)
+pub(crate) fn negate_cnf<Lit: Literal>(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
+	if clauses.is_empty() {
+		vec![vec![]]
+	} else if clauses.contains(&vec![]) {
+		vec![]
+	} else {
+		assert!(clauses.len() == 1);
+		clauses
+			.into_iter()
+			.map(|clause| clause.into_iter().map(|lit| lit.negate()).collect())
+			.collect()
+	}
 }
 
 /// Encode the constraint lits[0] ⊕ ... ⊕ lits[n].

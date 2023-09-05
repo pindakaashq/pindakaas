@@ -31,7 +31,7 @@ use num::{
 mod cardinality;
 mod cardinality_one;
 pub(crate) mod helpers;
-pub(crate) mod int;
+mod int;
 mod linear;
 pub mod solvers;
 mod sorted;
@@ -39,7 +39,6 @@ pub mod trace;
 
 pub use cardinality::{Cardinality, SortingNetworkEncoder};
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
-pub use int::Consistency;
 pub use linear::{
 	AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear, LinearAggregator,
 	LinearConstraint, LinearEncoder, PosCoeff, SwcEncoder, TotalizerEncoder,
