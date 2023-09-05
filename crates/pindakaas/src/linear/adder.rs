@@ -257,7 +257,6 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 			Ok(())
 		}
 		LimitComp::LessEq => {
-
 			let c = &(0..n)
 				.map(|_i| LitOrConst::Lit(new_var!(db, crate::trace::subscripted_name("c", _i))))
 				.chain(std::iter::once(LitOrConst::Const(true)))

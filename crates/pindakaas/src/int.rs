@@ -1569,7 +1569,7 @@ pub mod tests {
 		assert_eq!(c.geq(45..46), vec![vec![]]);
 	}
 
-    // TODO adapt to 0-grounded binary
+	// TODO adapt to 0-grounded binary
 	// #[test]
 	fn _bin_1_test() {
 		let mut db = TestDB::new(0);

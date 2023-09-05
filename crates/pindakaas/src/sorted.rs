@@ -1174,7 +1174,7 @@ mod tests {
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 3, String::from("y")).into();
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4, 5], LimitComp::Equal, &y);
-		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
+		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 
 		let sols = vec![
 			vec![-1, -2, -3, -4, -5, -6, -7, -8, -9, -10, -11],
