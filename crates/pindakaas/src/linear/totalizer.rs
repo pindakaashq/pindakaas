@@ -53,8 +53,8 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			.collect::<Vec<_>>();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
-		let mut model = self.build_totalizer(xs, &lin.cmp, *lin.k);
-		model.propagate(&self.add_propagation, vec![model.cons.len() - 1]);
+		let mut model = self.build_totalizer(xs, &lin.cmp, *lin.k)?;
+		model.propagate(&self.add_propagation);
 		model.encode(db, self.cutoff)
 	}
 }
@@ -65,7 +65,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 		xs: Vec<IntVarEnc<Lit, C>>,
 		cmp: &LimitComp,
 		k: C,
-	) -> Model<Lit, C> {
+	) -> Result<Model<Lit, C>> {
 		let mut model = Model::new();
 		let mut layer = xs
 			.into_iter()
@@ -97,7 +97,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 						let parent =
 							Rc::new(RefCell::new(model.new_var(dom, self.add_consistency)));
 
-						model.cons.push(Lin::tern(
+						model.add_constraint(Lin::tern(
 							left.clone(),
 							right.clone(),
 							if !at_root && EQUALIZE_INTERMEDIATES {
@@ -106,7 +106,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 								cmp.clone()
 							},
 							parent.clone(),
-						));
+						))?;
 						next_layer.push(parent);
 					}
 					_ => panic!(),
@@ -115,7 +115,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 			layer = next_layer;
 		}
 
-		model
+		Ok(model)
 	}
 }
 

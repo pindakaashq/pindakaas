@@ -88,12 +88,11 @@ where
 		let mut ys = ys.into_iter();
 		let first = ys.next().unwrap();
 		assert!(first.as_ref().borrow().size() == 1);
-		xs.iter().zip(ys).fold(first, |curr, (x_i, next)| {
+		xs.iter().zip(ys).try_fold(first, |curr, (x_i, next)| {
 			model
-				.cons
-				.push(Lin::tern(curr, x_i.clone(), lin.cmp.clone(), next.clone()));
-			next
-		});
+				.add_constraint(Lin::tern(curr, x_i.clone(), lin.cmp.clone(), next.clone()))
+				.map(|_| next)
+		})?;
 
 		model.encode(db, self.cutoff)?;
 		Ok(())

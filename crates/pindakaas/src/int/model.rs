@@ -19,7 +19,7 @@ use super::{display_dom, enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, IntVarO
 #[derive(Debug)]
 pub(crate) struct Model<Lit: Literal, C: Coefficient> {
 	vars: HashMap<usize, IntVarEnc<Lit, C>>,
-	pub(crate) cons: Vec<Lin<C>>,
+	cons: Vec<Lin<C>>,
 	var_ids: usize,
 }
 
@@ -93,6 +93,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		}
 	}
 
+	pub fn add_constraint(&mut self, constraint: Lin<C>) -> crate::Result {
+		self.cons.push(constraint);
+		Ok(())
+	}
+
 	pub fn new_constant(&mut self, c: C) -> IntVar<C> {
 		self.new_var(BTreeSet::from([c]), false)
 	}
@@ -132,24 +137,20 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		Ok(())
 	}
 
-	pub(crate) fn propagate(&mut self, consistency: &Consistency, mut queue: Vec<usize>) {
+	pub(crate) fn propagate(&mut self, consistency: &Consistency) {
+		// TODO for Gt/Bdd we actually know we can start propagation at the last constraint
+		let mut queue = BTreeSet::from_iter(0..self.cons.len());
 		if consistency == &Consistency::None {
 			return;
 		}
-		while let Some(con) = queue.pop() {
+		while let Some(con) = queue.pop_last() {
 			let changed = self.cons[con].propagate(consistency);
-			let mut cons = self
-				.cons
-				.iter()
-				.enumerate()
-				.filter_map(|(i, con)| {
-					con.xs
-						.iter()
-						.any(|(_, x)| changed.contains(&x.borrow().id))
-						.then_some(i)
-				})
-				.collect::<Vec<_>>();
-			queue.append(&mut cons);
+			queue.extend(self.cons.iter().enumerate().filter_map(|(i, con)| {
+				con.xs
+					.iter()
+					.any(|(_, x)| changed.contains(&x.borrow().id))
+					.then_some(i)
+			}));
 		}
 	}
 }
