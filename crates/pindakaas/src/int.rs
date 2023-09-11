@@ -55,6 +55,9 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 
 pub(crate) fn display_dom<C: Coefficient>(dom: &BTreeSet<C>) -> String {
 	const ELIPSIZE: usize = 8;
+	if dom.is_empty() {
+		return String::from("{}");
+	}
 	let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
 	if dom.len() > ELIPSIZE && C::from(dom.len()).unwrap() == ub - lb + C::one() {
 		format!("{}..{}", dom.first().unwrap(), dom.last().unwrap())
