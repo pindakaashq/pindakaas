@@ -64,7 +64,12 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.tuple_windows()
 			.zip(xs.into_iter())
 			.try_for_each(|((y_curr, y_next), x)| {
-				model.add_constraint(Lin::tern(x, y_next, lin.cmp.clone(), y_curr))
+				model.add_constraint(Lin::tern(
+					x,
+					y_next,
+					lin.cmp.clone().try_into().unwrap(),
+					y_curr,
+				))
 			})?;
 
 		model.propagate(&self.add_propagation);

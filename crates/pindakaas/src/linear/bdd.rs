@@ -35,7 +35,7 @@ impl<C: Coefficient> BddEncoder<C> {
 	) -> crate::Result<Model<Lit, C>, Unsatisfiable> {
 		let mut model = Model::<Lit, C>::new(num_var);
 		let xs = lin.vars();
-		let ys = construct_bdd(&xs, &lin.cmp, lin.k.into());
+		let ys = construct_bdd(&xs, &lin.cmp.try_into().unwrap(), lin.k.into());
 
 		// TODO cannot avoid?
 		#[allow(clippy::needless_collect)]
@@ -69,7 +69,7 @@ impl<C: Coefficient> BddEncoder<C> {
 		assert!(first.as_ref().borrow().size() == 1);
 		xs.iter().zip(ys).try_fold(first, |curr, (x_i, next)| {
 			model
-				.add_constraint(Lin::tern(curr, x_i.clone(), lin.cmp.clone(), next.clone()))
+				.add_constraint(Lin::tern(curr, x_i.clone(), lin.cmp, next.clone()))
 				.map(|_| next)
 		})?;
 
@@ -97,9 +97,10 @@ where
 			.map(|x| (C::one(), model.add_int_var_enc(x)))
 			.collect::<Vec<_>>();
 
-		model.extend(
-			self.decompose::<DB::Lit>(Lin::new(&xs, lin.cmp.clone(), *lin.k), model.num_var)?,
-		);
+		model.extend(self.decompose::<DB::Lit>(
+			Lin::new(&xs, lin.cmp.clone().try_into().unwrap(), *lin.k),
+			model.num_var,
+		)?);
 
 		model.encode(db, self.cutoff)?;
 		Ok(())

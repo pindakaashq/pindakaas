@@ -1,13 +1,12 @@
 use crate::int::Consistency;
 use crate::int::Lin;
 use crate::int::Model;
+use crate::Comparator;
 use crate::Literal;
 
 use itertools::Itertools;
 
-use crate::{
-	int::IntVarEnc, linear::LimitComp, ClauseDatabase, Coefficient, Encoder, Linear, Result,
-};
+use crate::{int::IntVarEnc, ClauseDatabase, Coefficient, Encoder, Linear, Result};
 
 const EQUALIZE_INTERMEDIATES: bool = false;
 
@@ -49,7 +48,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			.collect::<Vec<_>>();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
-		let mut model = self.build_totalizer(xs, &lin.cmp, *lin.k)?;
+		let mut model = self.build_totalizer(xs, &lin.cmp.clone().into(), *lin.k)?;
 		model.propagate(&self.add_propagation);
 		model.encode(db, self.cutoff)
 	}
@@ -59,7 +58,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 	fn build_totalizer<Lit: Literal>(
 		&self,
 		xs: Vec<IntVarEnc<Lit, C>>,
-		cmp: &LimitComp,
+		cmp: &Comparator,
 		k: C,
 	) -> Result<Model<Lit, C>> {
 		let mut model = Model::default();
@@ -96,9 +95,9 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 							left.clone(),
 							right.clone(),
 							if !at_root && EQUALIZE_INTERMEDIATES {
-								LimitComp::Equal
+								Comparator::Equal
 							} else {
-								cmp.clone()
+								*cmp
 							},
 							parent.clone(),
 						))?;

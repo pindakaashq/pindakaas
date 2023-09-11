@@ -152,8 +152,8 @@ pub enum LimitComp {
 impl fmt::Display for LimitComp {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			LimitComp::Equal => write!(f, "=="),
-			LimitComp::LessEq => write!(f, "<="),
+			LimitComp::Equal => write!(f, "="),
+			LimitComp::LessEq => write!(f, "≤"),
 		}
 	}
 }
@@ -189,6 +189,18 @@ impl From<LimitComp> for Comparator {
 			LimitComp::LessEq => Comparator::LessEq,
 		}
 	}
+}
+
+impl TryFrom<Comparator> for LimitComp {
+	fn try_from(value: Comparator) -> Result<Self, ()> {
+		match value {
+			Comparator::Equal => Ok(LimitComp::Equal),
+			Comparator::LessEq => Ok(LimitComp::LessEq),
+			_ => Err(()),
+		}
+	}
+
+	type Error = ();
 }
 
 impl<Lit: Literal, C: Coefficient> From<Linear<Lit, C>> for LinearConstraint<Lit, C> {
@@ -263,6 +275,16 @@ pub enum Comparator {
 	LessEq,
 	Equal,
 	GreaterEq,
+}
+
+impl fmt::Display for Comparator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Comparator::Equal => write!(f, "="),
+			Comparator::LessEq => write!(f, "≤"),
+			Comparator::GreaterEq => write!(f, "≥"),
+		}
+	}
 }
 
 #[derive(Debug, Clone)]
