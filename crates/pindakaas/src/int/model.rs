@@ -306,7 +306,8 @@ impl<C: Coefficient> Lin<C> {
 				let mut fixpoint = true;
 				if self.cmp == LimitComp::Equal {
 					for (c, x) in &self.xs {
-						let xs_ub = self.ub();
+						// TODO why is this one not before loop like below?
+						let xs_ub = self.ub() - self.k;
 						let mut x = x.borrow_mut();
 						let size = x.size();
 
@@ -334,7 +335,7 @@ impl<C: Coefficient> Lin<C> {
 					}
 				}
 
-				let rs_lb = self.lb();
+				let rs_lb = self.lb() - self.k;
 				for (c, x) in &self.xs {
 					let mut x = x.borrow_mut();
 					let size = x.size();
@@ -552,7 +553,7 @@ mod tests {
 			.add_constraint(Lin::new(&[(1, x1), (1, x2), (1, x3)], LimitComp::LessEq, k))
 			.unwrap();
 		let mut cnf = Cnf::new(0);
-		// model.propagate(&Consistency::Bounds);
+		model.propagate(&Consistency::Bounds);
 		model.encode(&mut cnf, None).unwrap();
 	}
 }
