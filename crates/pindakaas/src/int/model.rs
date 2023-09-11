@@ -138,15 +138,12 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		self.new_var(&[c], false)
 	}
 
-	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(
-		&mut self,
-		db: &mut DB,
-		cutoff: Option<C>,
-	) -> crate::Result {
-		// TODO decompose + aggregate constants + encode trivial constraints
-		let mut all_views = HashMap::new();
-
-		self.cons = self
+	// TODO pass Decomposer (with cutoff, etc..)
+	pub fn decompose(&self) -> Result<Model<Lit, C>, Unsatisfiable> {
+		// TODO aggregate constants + encode trivial constraints
+		let mut model = Model::new(self.num_var);
+		model.vars = self.vars.clone(); // TODO we should design the interaction between the model (self) and the decomposed model better (by consuming self?)
+		model.cons = self
 			.cons
 			.iter()
 			.cloned()
@@ -154,6 +151,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 				match &lin.xs[..] {
 					[] => Ok(vec![]),
 					[(_, x)] => {
+						assert!(false, "Probably incorrect fixing of vars");
 						match lin.cmp {
 							LimitComp::Equal => {
 								x.borrow_mut().fix(&C::zero())?;
@@ -168,31 +166,43 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					_ if lin.is_tern() => Ok(vec![lin]),
 					_ => {
 						let new_model =
-							BddEncoder::default().decompose::<Lit>(lin, self.num_var)?;
-						self.vars.extend(new_model.vars);
+							BddEncoder::default().decompose::<Lit>(lin, model.num_var)?;
+						model.vars.extend(new_model.vars);
 						Ok(new_model.cons)
 					}
 				}
 			})
 			.flatten_ok()
 			.flatten()
-			.collect();
+			.collect::<Vec<_>>();
+		Ok(model)
+	}
 
-		for con in &self.cons {
+	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(
+		&mut self,
+		db: &mut DB,
+		cutoff: Option<C>,
+	) -> crate::Result {
+		// Create decomposed model
+		let mut model = self.decompose()?;
+
+		let mut all_views = HashMap::new();
+		for con in &model.cons {
 			let Lin { xs, cmp, k: _ } = con;
-			assert!(con.is_tern(), "{self}");
+			assert!(con.is_tern(), "{model}");
 
 			for (_, x) in xs {
 				let x = x.borrow();
-				self.vars
+				model
+					.vars
 					.entry(x.id)
 					.or_insert_with(|| x.encode(db, &mut all_views, x.prefer_order(cutoff)));
 			}
 
 			let (x, y, z) = (
-				&self.vars[&xs[0].1.borrow().id],
-				&self.vars[&xs[1].1.borrow().id],
-				&self.vars[&xs[2].1.borrow().id],
+				&model.vars[&xs[0].1.borrow().id],
+				&model.vars[&xs[1].1.borrow().id],
+				&model.vars[&xs[2].1.borrow().id],
 			);
 
 			TernLeEncoder::default()
@@ -203,7 +213,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		Ok(())
 	}
 
-	pub(crate) fn propagate(&mut self, consistency: &Consistency) {
+	pub fn propagate(&mut self, consistency: &Consistency) {
 		// TODO for Gt/Bdd we actually know we can start propagation at the last constraint
 		let mut queue = BTreeSet::from_iter(0..self.cons.len());
 		if consistency == &Consistency::None {
