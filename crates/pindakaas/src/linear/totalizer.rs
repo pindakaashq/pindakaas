@@ -2,7 +2,6 @@ use crate::int::Consistency;
 use crate::int::Lin;
 use crate::int::Model;
 use crate::Literal;
-use std::collections::BTreeSet;
 
 use itertools::Itertools;
 
@@ -79,7 +78,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 					[left, right] => {
 						let at_root = layer.len() == 2;
 						let dom = if at_root {
-							BTreeSet::from([k])
+							vec![k]
 						} else {
 							left.borrow()
 								.dom
@@ -91,7 +90,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 								.dedup()
 								.collect()
 						};
-						let parent = model.new_var(dom, self.add_consistency);
+						let parent = model.new_var(&dom, self.add_consistency);
 
 						model.add_constraint(Lin::tern(
 							left.clone(),
@@ -165,7 +164,7 @@ mod tests {
 		.check_complete()
 	}
 
-	linear_test_suite!(TotalizerEncoder::default());
+	linear_test_suite!(TotalizerEncoder::default().add_propagation(Consistency::Bounds));
 	// FIXME: Totalizer does not support LimitComp::Equal
 	// card1_test_suite!(TotalizerEncoder::default());
 }
