@@ -305,9 +305,8 @@ impl<C: Coefficient> Lin<C> {
 			Consistency::Bounds => loop {
 				let mut fixpoint = true;
 				if self.cmp == LimitComp::Equal {
+					let xs_ub = self.ub() - self.k;
 					for (c, x) in &self.xs {
-						// TODO why is this one not before loop like below?
-						let xs_ub = self.ub() - self.k;
 						let mut x = x.borrow_mut();
 						let size = x.size();
 
