@@ -1,4 +1,4 @@
-use crate::Encoder;
+use crate::{Encoder, Unsatisfiable};
 use itertools::Itertools;
 use std::{
 	cell::RefCell,
@@ -16,11 +16,12 @@ use crate::{
 
 use super::{display_dom, enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, IntVarOrd};
 
+// TODO should we keep IntVar i/o IntVarEnc?
 #[derive(Debug)]
-pub(crate) struct Model<Lit: Literal, C: Coefficient> {
+pub struct Model<Lit: Literal, C: Coefficient> {
 	vars: HashMap<usize, IntVarEnc<Lit, C>>,
 	cons: Vec<Lin<C>>,
-	var_ids: usize,
+	num_var: usize,
 }
 
 // TODO Domain will be used once (/if) this is added as encoder feature.
@@ -54,9 +55,10 @@ impl<C: Coefficient> Display for Lin<C> {
 		write!(
 			f,
 			"{} {} {}",
-			self.xs[0..2].iter().map(disp_x).join(" + "),
+			self.xs.iter().map(disp_x).join(" + "),
 			self.cmp,
-			disp_x(&self.xs[2])
+			self.k,
+			// disp_x(&(C::one(), self.k()))
 		)?;
 		Ok(())
 	}
@@ -68,29 +70,31 @@ impl<C: Coefficient> fmt::Display for IntVar<C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
-	pub fn new() -> Self {
+impl<Lit: Literal, C: Coefficient> Default for Model<Lit, C> {
+	fn default() -> Self {
 		Self {
 			vars: HashMap::new(),
 			cons: vec![],
-			var_ids: 0,
+			num_var: 0,
 		}
 	}
+}
 
-	pub fn add_int_var_enc(&mut self, x: IntVarEnc<Lit, C>) -> IntVar<C> {
+impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
+	pub(crate) fn add_int_var_enc(&mut self, x: IntVarEnc<Lit, C>) -> Rc<RefCell<IntVar<C>>> {
 		let var = self.new_var(x.dom().iter(..).map(|d| d.end - C::one()).collect(), false);
-		self.vars.insert(var.id, x);
+		self.vars.insert(var.borrow().id, x);
 		var
 	}
 
-	pub fn new_var(&mut self, dom: BTreeSet<C>, add_consistency: bool) -> IntVar<C> {
-		self.var_ids += 1;
-		IntVar {
-			id: self.var_ids,
+	pub fn new_var(&mut self, dom: BTreeSet<C>, add_consistency: bool) -> Rc<RefCell<IntVar<C>>> {
+		self.num_var += 1;
+		Rc::new(RefCell::new(IntVar {
+			id: self.num_var,
 			dom,
 			add_consistency,
 			views: HashMap::default(),
-		}
+		}))
 	}
 
 	pub fn add_constraint(&mut self, constraint: Lin<C>) -> crate::Result {
@@ -98,7 +102,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		Ok(())
 	}
 
-	pub fn new_constant(&mut self, c: C) -> IntVar<C> {
+	pub fn new_constant(&mut self, c: C) -> Rc<RefCell<IntVar<C>>> {
 		self.new_var(BTreeSet::from([c]), false)
 	}
 
@@ -107,9 +111,41 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		db: &mut DB,
 		cutoff: Option<C>,
 	) -> crate::Result {
+		// TODO decompose + aggregate constants + encode trivial constraints
 		let mut all_views = HashMap::new();
+
+		self.cons = self
+			.cons
+			.iter()
+			.cloned()
+			.map(|lin| -> Result<Vec<_>, Unsatisfiable> {
+				match &lin.xs[..] {
+					[] => Ok(vec![]),
+					[(_, x)] => {
+						match lin.cmp {
+							LimitComp::Equal => {
+								x.borrow_mut().fix(&C::zero())?;
+							}
+							LimitComp::LessEq => {
+								x.borrow_mut().le(&C::zero());
+							}
+						};
+						Ok(vec![])
+					}
+					[x, y] => Ok(vec![Lin::new(&[x.clone(), y.clone()], lin.cmp, C::zero())]),
+					[_, _, _] => Ok(vec![lin]),
+					_xs => {
+						// BddEncoder::default().decompose(lin, self)
+						todo!()
+					}
+				}
+			})
+			.flatten_ok()
+			.flatten()
+			.collect();
+
 		for con in &self.cons {
-			let Lin { xs, cmp } = con;
+			let Lin { xs, cmp, k: _ } = con;
 			assert!(
 				con.xs.len() == 3
 					&& con.xs.iter().map(|(c, _)| c).collect::<Vec<_>>()
@@ -155,13 +191,23 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 }
 
-#[derive(Debug)]
+// TODO LimitComp -> Comp
+#[derive(Debug, Clone)]
 pub struct Lin<C: Coefficient> {
-	pub(crate) xs: Vec<(C, Rc<RefCell<IntVar<C>>>)>,
-	pub(crate) cmp: LimitComp,
+	pub xs: Vec<(C, Rc<RefCell<IntVar<C>>>)>,
+	pub cmp: LimitComp,
+	pub k: C,
 }
 
 impl<C: Coefficient> Lin<C> {
+	pub fn new(terms: &[(C, Rc<RefCell<IntVar<C>>>)], cmp: LimitComp, k: C) -> Self {
+		Lin {
+			xs: terms.to_vec(),
+			cmp,
+			k,
+		}
+	}
+
 	pub fn tern(
 		x: Rc<RefCell<IntVar<C>>>,
 		y: Rc<RefCell<IntVar<C>>>,
@@ -171,6 +217,37 @@ impl<C: Coefficient> Lin<C> {
 		Lin {
 			xs: vec![(C::one(), x), (C::one(), y), (-C::one(), z)],
 			cmp,
+			k: C::zero(),
+		}
+	}
+
+	pub fn vars(&self) -> Vec<Rc<RefCell<IntVar<C>>>> {
+		self.xs
+			.iter()
+			.cloned()
+			.map(|(_, x)| x)
+			// .filter(|x| !x.borrow().is_const())
+			.collect::<_>()
+	}
+
+	pub fn decompose<Lit: Literal>(mut self) -> Vec<Lin<C>> {
+		match &mut self.xs[..] {
+			[] => vec![],
+			[(_, x)] => {
+				match self.cmp {
+					LimitComp::Equal => {
+						x.borrow_mut().fix(&C::zero()).unwrap();
+					}
+					LimitComp::LessEq => {
+						x.borrow_mut().le(&C::zero());
+					}
+				};
+				vec![]
+			}
+			[x, y] => {
+				vec![Lin::new(&[x.clone(), y.clone()], self.cmp, C::zero())]
+			}
+			_ => todo!(),
 		}
 	}
 
@@ -360,6 +437,20 @@ impl<C: Coefficient> IntVar<C> {
 		}
 	}
 
+	pub(crate) fn dom(&self) -> std::collections::btree_set::Iter<C> {
+		self.dom.iter()
+	}
+
+	// TODO should not be C i/o &C?
+	fn fix(&mut self, q: &C) -> crate::Result {
+		if self.dom.contains(q) {
+			self.dom = [*q].into();
+			Ok(())
+		} else {
+			Err(Unsatisfiable)
+		}
+	}
+
 	fn ge(&mut self, bound: &C) {
 		self.dom = self.dom.split_off(bound);
 	}
@@ -404,5 +495,26 @@ impl<C: Coefficient> IntVar<C> {
 			Some(cutoff) if cutoff == C::zero() => false,
 			Some(cutoff) => C::from(self.dom.len()).unwrap() < cutoff,
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::{Cnf, Lin, Model};
+
+	#[test]
+	fn model_test() {
+		let mut model = Model::<i32, i32>::default();
+		let x1 = model.new_var([0, 2].into(), true);
+		let x2 = model.new_var([0, 3].into(), true);
+		let x3 = model.new_var([0, 5].into(), true);
+		let k = 6;
+		model
+			.add_constraint(Lin::new(&[(1, x1), (1, x2), (1, x3)], LimitComp::LessEq, k))
+			.unwrap();
+		let mut cnf = Cnf::new(0);
+		model.propagate(&Consistency::Bounds);
+		model.encode(&mut cnf, None).unwrap();
 	}
 }

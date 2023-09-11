@@ -1,8 +1,6 @@
 use crate::int::{Consistency, Lin, Model};
 use crate::{int::IntVarEnc, ClauseDatabase, Coefficient, Encoder, Linear, Result};
 use itertools::Itertools;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)
 #[derive(Clone, Default)]
@@ -35,13 +33,13 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		// self.cutoff = -C::one();
 		// self.add_consistency = true;
-		let mut model = Model::new();
+		let mut model = Model::default();
 		let xs = lin
 			.terms
 			.iter()
 			.enumerate()
 			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
-			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
+			.map(|x| model.add_int_var_enc(x))
 			.collect::<Vec<_>>();
 		let n = xs.len();
 
@@ -61,7 +59,6 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.collect::<Vec<_>>()
 			.into_iter()
 			.chain(std::iter::once(model.new_constant(-*lin.k)))
-			.map(|y| Rc::new(RefCell::new(y)))
 			.collect::<Vec<_>>();
 
 		ys.into_iter()

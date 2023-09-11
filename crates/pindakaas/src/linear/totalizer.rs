@@ -1,11 +1,8 @@
 use crate::int::Consistency;
-pub(crate) use crate::int::IntVar;
 use crate::int::Lin;
 use crate::int::Model;
 use crate::Literal;
-use std::cell::RefCell;
 use std::collections::BTreeSet;
-use std::rc::Rc;
 
 use itertools::Itertools;
 
@@ -66,14 +63,14 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 		cmp: &LimitComp,
 		k: C,
 	) -> Result<Model<Lit, C>> {
-		let mut model = Model::new();
+		let mut model = Model::default();
 		let mut layer = xs
 			.into_iter()
-			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
+			.map(|x| model.add_int_var_enc(x))
 			.collect::<Vec<_>>();
 
 		while layer.len() > 1 {
-			let mut next_layer = Vec::<Rc<RefCell<IntVar<C>>>>::new();
+			let mut next_layer = Vec::<_>::new();
 			for children in layer.chunks(2) {
 				match children {
 					[x] => {
@@ -94,8 +91,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 								.dedup()
 								.collect()
 						};
-						let parent =
-							Rc::new(RefCell::new(model.new_var(dom, self.add_consistency)));
+						let parent = model.new_var(dom, self.add_consistency);
 
 						model.add_constraint(Lin::tern(
 							left.clone(),
