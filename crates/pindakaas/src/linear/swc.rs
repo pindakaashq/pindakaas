@@ -49,10 +49,9 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.chain(
 				(1..n)
 					.map(|_| {
-						model.new_var(
-							num::iter::range_inclusive(-*lin.k, C::zero()).collect(),
-							self.add_consistency,
-						)
+						let dom =
+							num::iter::range_inclusive(-*lin.k, C::zero()).collect::<Vec<_>>();
+						model.new_var(&dom, self.add_consistency)
 					})
 					.take(n),
 			)

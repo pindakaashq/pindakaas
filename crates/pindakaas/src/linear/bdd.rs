@@ -42,21 +42,19 @@ impl<C: Coefficient> BddEncoder<C> {
 		let ys = ys.into_iter()
 			.map(|nodes| {
 				let mut views = HashMap::new();
-				let y = model.new_var(
-					nodes
-						.into_iter(..)
-						.filter_map(|(iv, node)| match node {
-							BddNode::Gap => None,
-							BddNode::Val => Some(iv.end - C::one()),
-							BddNode::View(view) => {
-								let val = iv.end - C::one();
-								views.insert(val, view);
-								Some(val)
-							}
-						})
-						.collect(),
-					self.add_consistency,
-				);
+				let dom = nodes
+					.into_iter(..)
+					.filter_map(|(iv, node)| match node {
+						BddNode::Gap => None,
+						BddNode::Val => Some(iv.end - C::one()),
+						BddNode::View(view) => {
+							let val = iv.end - C::one();
+							views.insert(val, view);
+							Some(val)
+						}
+					})
+					.collect::<Vec<_>>();
+				let y = model.new_var(&dom, self.add_consistency);
 				let next_id = y.borrow().id + 1;
 				y.borrow_mut().views = views
 					.into_iter()

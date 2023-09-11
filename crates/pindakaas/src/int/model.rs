@@ -109,17 +109,21 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	pub(crate) fn add_int_var_enc(&mut self, x: IntVarEnc<Lit, C>) -> Rc<RefCell<IntVar<C>>> {
-		let var = self.new_var(x.dom().iter(..).map(|d| d.end - C::one()).collect(), false);
+		let dom = x
+			.dom()
+			.iter(..)
+			.map(|d| d.end - C::one())
+			.collect::<Vec<_>>();
+		let var = self.new_var(&dom, false);
 		self.vars.insert(var.borrow().id, x);
 		var
 	}
 
-	// TODO BTreeSet -> &[C]
-	pub fn new_var(&mut self, dom: BTreeSet<C>, add_consistency: bool) -> Rc<RefCell<IntVar<C>>> {
+	pub fn new_var(&mut self, dom: &[C], add_consistency: bool) -> Rc<RefCell<IntVar<C>>> {
 		self.num_var += 1;
 		Rc::new(RefCell::new(IntVar {
 			id: self.num_var,
-			dom,
+			dom: dom.iter().cloned().collect(),
 			add_consistency,
 			views: HashMap::default(),
 		}))
@@ -131,7 +135,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	pub fn new_constant(&mut self, c: C) -> Rc<RefCell<IntVar<C>>> {
-		self.new_var(BTreeSet::from([c]), false)
+		self.new_var(&[c], false)
 	}
 
 	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(
@@ -544,9 +548,9 @@ mod tests {
 	#[test]
 	fn model_test() {
 		let mut model = Model::<i32, i32>::default();
-		let x1 = model.new_var([0, 2].into(), true);
-		let x2 = model.new_var([0, 3].into(), true);
-		let x3 = model.new_var([0, 5].into(), true);
+		let x1 = model.new_var(&[0, 2], true);
+		let x2 = model.new_var(&[0, 3], true);
+		let x3 = model.new_var(&[0, 5], true);
 		let k = 6;
 		model
 			.add_constraint(Lin::new(&[(1, x1), (1, x2), (1, x3)], LimitComp::LessEq, k))
