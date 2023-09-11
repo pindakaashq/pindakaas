@@ -65,17 +65,17 @@ impl<C: Coefficient> Display for Lin<C> {
 			write!(
 				f,
 				"{} + {} {} {}",
-				self.xs[0].1.borrow(),
-				self.xs[1].1.borrow(),
+				self.exp.terms[0].1.borrow(),
+				self.exp.terms[1].1.borrow(),
 				self.cmp,
-				self.xs[2].1.borrow(),
+				self.exp.terms[2].1.borrow(),
 				// disp_x(&(C::one(), self.k()))
 			)
 		} else {
 			write!(
 				f,
 				"{} {} {}",
-				self.xs.iter().map(disp_term).join(" "),
+				self.exp.terms.iter().map(disp_term).join(" "),
 				self.cmp,
 				self.k,
 				// disp_x(&(C::one(), self.k()))
@@ -148,7 +148,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.iter()
 			.cloned()
 			.map(|lin| -> Result<Vec<_>, Unsatisfiable> {
-				match &lin.xs[..] {
+				match &lin.exp.terms[..] {
 					[] => Ok(vec![]),
 					[(_, x)] => {
 						match lin.cmp {
@@ -191,10 +191,14 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 		let mut all_views = HashMap::new();
 		for con in &model.cons {
-			let Lin { xs, cmp, k: _ } = con;
+			let Lin {
+				exp: LinExp { terms },
+				cmp,
+				k: _,
+			} = con;
 			assert!(con.is_tern(), "{model}");
 
-			for (_, x) in xs {
+			for (_, x) in terms {
 				let x = x.borrow();
 				model
 					.vars
@@ -203,9 +207,9 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			}
 
 			let (x, y, z) = (
-				&model.vars[&xs[0].1.borrow().id],
-				&model.vars[&xs[1].1.borrow().id],
-				&model.vars[&xs[2].1.borrow().id],
+				&model.vars[&terms[0].1.borrow().id],
+				&model.vars[&terms[1].1.borrow().id],
+				&model.vars[&terms[2].1.borrow().id],
 			);
 
 			TernLeEncoder::default()
@@ -228,7 +232,8 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		while let Some(con) = queue.pop_last() {
 			let changed = self.cons[con].propagate(consistency);
 			queue.extend(self.cons.iter().enumerate().filter_map(|(i, con)| {
-				con.xs
+				con.exp
+					.terms
 					.iter()
 					.any(|(_, x)| changed.contains(&x.borrow().id))
 					.then_some(i)
@@ -245,8 +250,13 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 }
 
 #[derive(Debug, Clone)]
+pub struct LinExp<C: Coefficient> {
+	terms: Vec<(C, Rc<RefCell<IntVar<C>>>)>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Lin<C: Coefficient> {
-	pub xs: Vec<(C, Rc<RefCell<IntVar<C>>>)>,
+	pub exp: LinExp<C>,
 	pub cmp: Comparator,
 	pub k: C,
 }
@@ -254,7 +264,9 @@ pub struct Lin<C: Coefficient> {
 impl<C: Coefficient> Lin<C> {
 	pub fn new(terms: &[(C, Rc<RefCell<IntVar<C>>>)], cmp: Comparator, k: C) -> Self {
 		Lin {
-			xs: terms.to_vec(),
+			exp: LinExp {
+				terms: terms.to_vec(),
+			},
 			cmp,
 			k,
 		}
@@ -267,14 +279,17 @@ impl<C: Coefficient> Lin<C> {
 		z: Rc<RefCell<IntVar<C>>>,
 	) -> Self {
 		Lin {
-			xs: vec![(C::one(), x), (C::one(), y), (-C::one(), z)],
+			exp: LinExp {
+				terms: vec![(C::one(), x), (C::one(), y), (-C::one(), z)],
+			},
 			cmp,
 			k: C::zero(),
 		}
 	}
 
 	pub fn vars(&self) -> Vec<Rc<RefCell<IntVar<C>>>> {
-		self.xs
+		self.exp
+			.terms
 			.iter()
 			.cloned()
 			.map(|(_, x)| x)
@@ -283,14 +298,16 @@ impl<C: Coefficient> Lin<C> {
 	}
 
 	pub fn lb(&self) -> C {
-		self.xs
+		self.exp
+			.terms
 			.iter()
 			.map(|(c, x)| x.borrow().lb(c))
 			.fold(C::zero(), |a, b| a + b)
 	}
 
 	pub fn ub(&self) -> C {
-		self.xs
+		self.exp
+			.terms
 			.iter()
 			.map(|(c, x)| x.borrow().ub(c))
 			.fold(C::zero(), |a, b| a + b)
@@ -304,7 +321,7 @@ impl<C: Coefficient> Lin<C> {
 				let mut fixpoint = true;
 				if self.cmp == Comparator::Equal {
 					let xs_ub = self.ub() - self.k;
-					for (c, x) in &self.xs {
+					for (c, x) in &self.exp.terms {
 						let mut x = x.borrow_mut();
 						let size = x.size();
 
@@ -333,7 +350,7 @@ impl<C: Coefficient> Lin<C> {
 				}
 
 				let rs_lb = self.lb() - self.k;
-				for (c, x) in &self.xs {
+				for (c, x) in &self.exp.terms {
 					let mut x = x.borrow_mut();
 					let size = x.size();
 					let x_lb = if c.is_positive() {
@@ -370,11 +387,12 @@ impl<C: Coefficient> Lin<C> {
 				assert!(self.cmp == Comparator::Equal);
 				loop {
 					let mut fixpoint = true;
-					for (i, (c_i, x_i)) in self.xs.iter().enumerate() {
+					for (i, (c_i, x_i)) in self.exp.terms.iter().enumerate() {
 						let id = x_i.borrow().id;
 						x_i.borrow_mut().dom.retain(|d_i| {
 							if self
-								.xs
+								.exp
+								.terms
 								.iter()
 								.enumerate()
 								.filter_map(|(j, (c_j, x_j))| {
@@ -410,7 +428,8 @@ impl<C: Coefficient> Lin<C> {
 	}
 
 	fn is_tern(&self) -> bool {
-		self.xs.iter().map(|(c, _)| c).collect::<Vec<_>>() == [&C::one(), &C::one(), &-C::one()]
+		self.exp.terms.iter().map(|(c, _)| c).collect::<Vec<_>>()
+			== [&C::one(), &C::one(), &-C::one()]
 			&& self.k == C::zero()
 	}
 }
