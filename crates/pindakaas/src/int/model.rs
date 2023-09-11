@@ -1,4 +1,4 @@
-use crate::{Encoder, Unsatisfiable};
+use crate::{BddEncoder, Encoder, Unsatisfiable};
 use itertools::Itertools;
 use std::{
 	cell::RefCell,
@@ -21,7 +21,7 @@ use super::{display_dom, enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, IntVarO
 pub struct Model<Lit: Literal, C: Coefficient> {
 	vars: HashMap<usize, IntVarEnc<Lit, C>>,
 	cons: Vec<Lin<C>>,
-	num_var: usize,
+	pub(crate) num_var: usize,
 }
 
 // TODO Domain will be used once (/if) this is added as encoder feature.
@@ -45,22 +45,42 @@ impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 
 impl<C: Coefficient> Display for Lin<C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let disp_x = |x: &(C, Rc<RefCell<IntVar<C>>>)| -> String {
+		let disp_term = |x: &(C, Rc<RefCell<IntVar<C>>>)| -> String {
 			let (coef, x) = x;
-			assert!(coef.abs() == C::one());
 			let x = x.borrow();
 
-			format!("{}", x)
+			format!(
+				"{}{}{}",
+				if coef.is_positive() { "+" } else { "-" },
+				if coef.abs() == C::one() {
+					String::from("")
+				} else {
+					format!("*{}", coef.abs())
+				},
+				x
+			)
 		};
-		write!(
-			f,
-			"{} {} {}",
-			self.xs.iter().map(disp_x).join(" + "),
-			self.cmp,
-			self.k,
-			// disp_x(&(C::one(), self.k()))
-		)?;
-		Ok(())
+
+		if self.is_tern() {
+			write!(
+				f,
+				"{} + {} {} {}",
+				self.xs[0].1.borrow(),
+				self.xs[1].1.borrow(),
+				self.cmp,
+				self.xs[2].1.borrow(),
+				// disp_x(&(C::one(), self.k()))
+			)
+		} else {
+			write!(
+				f,
+				"{} {} {}",
+				self.xs.iter().map(disp_term).join(" "),
+				self.cmp,
+				self.k,
+				// disp_x(&(C::one(), self.k()))
+			)
+		}
 	}
 }
 
@@ -81,12 +101,20 @@ impl<Lit: Literal, C: Coefficient> Default for Model<Lit, C> {
 }
 
 impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
+	pub fn new(num_var: usize) -> Self {
+		Self {
+			num_var,
+			..Self::default()
+		}
+	}
+
 	pub(crate) fn add_int_var_enc(&mut self, x: IntVarEnc<Lit, C>) -> Rc<RefCell<IntVar<C>>> {
 		let var = self.new_var(x.dom().iter(..).map(|d| d.end - C::one()).collect(), false);
 		self.vars.insert(var.borrow().id, x);
 		var
 	}
 
+	// TODO BTreeSet -> &[C]
 	pub fn new_var(&mut self, dom: BTreeSet<C>, add_consistency: bool) -> Rc<RefCell<IntVar<C>>> {
 		self.num_var += 1;
 		Rc::new(RefCell::new(IntVar {
@@ -133,10 +161,12 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 						Ok(vec![])
 					}
 					[x, y] => Ok(vec![Lin::new(&[x.clone(), y.clone()], lin.cmp, C::zero())]),
-					[_, _, _] => Ok(vec![lin]),
-					_xs => {
-						// BddEncoder::default().decompose(lin, self)
-						todo!()
+					_ if lin.is_tern() => Ok(vec![lin]),
+					_ => {
+						let new_model =
+							BddEncoder::default().decompose::<Lit>(lin, self.num_var)?;
+						self.vars.extend(new_model.vars);
+						Ok(new_model.cons)
 					}
 				}
 			})
@@ -146,11 +176,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 		for con in &self.cons {
 			let Lin { xs, cmp, k: _ } = con;
-			assert!(
-				con.xs.len() == 3
-					&& con.xs.iter().map(|(c, _)| c).collect::<Vec<_>>()
-						== [&C::one(), &C::one(), &-C::one()]
-			);
+			assert!(con.is_tern(), "{self}");
 
 			for (_, x) in xs {
 				let x = x.borrow();
@@ -188,6 +214,13 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					.then_some(i)
 			}));
 		}
+	}
+
+	pub(crate) fn extend(&mut self, other: Model<Lit, C>) {
+		// TODO potentially, we could increment the other var ids by self.num_var here
+		self.vars.extend(other.vars);
+		self.num_var = other.num_var;
+		self.cons.extend(other.cons);
 	}
 }
 
@@ -377,6 +410,11 @@ impl<C: Coefficient> Lin<C> {
 			}
 		}
 	}
+
+	fn is_tern(&self) -> bool {
+		self.xs.iter().map(|(c, _)| c).collect::<Vec<_>>() == [&C::one(), &C::one(), &-C::one()]
+			&& self.k == C::zero()
+	}
 }
 
 // TODO perhaps id can be used by replacing vars HashMap to just vec
@@ -514,7 +552,7 @@ mod tests {
 			.add_constraint(Lin::new(&[(1, x1), (1, x2), (1, x3)], LimitComp::LessEq, k))
 			.unwrap();
 		let mut cnf = Cnf::new(0);
-		model.propagate(&Consistency::Bounds);
+		// model.propagate(&Consistency::Bounds);
 		model.encode(&mut cnf, None).unwrap();
 	}
 }

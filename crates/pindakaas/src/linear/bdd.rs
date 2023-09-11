@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use iset::IntervalMap;
 use itertools::Itertools;
 
-use crate::{int::IntVar, Literal};
+use crate::{int::IntVar, Literal, Unsatisfiable};
 #[allow(unused_imports)]
 use crate::{
 	int::{IntVarEnc, IntVarOrd, Lin, Model},
@@ -31,8 +31,9 @@ impl<C: Coefficient> BddEncoder<C> {
 	pub(crate) fn decompose<Lit: Literal>(
 		&mut self,
 		lin: Lin<C>,
-		model: &mut Model<Lit, C>,
-	) -> Result {
+		num_var: usize,
+	) -> crate::Result<Model<Lit, C>, Unsatisfiable> {
+		let mut model = Model::<Lit, C>::new(num_var);
 		let xs = lin.vars();
 		let ys = construct_bdd(&xs, &lin.cmp, lin.k.into());
 
@@ -74,7 +75,7 @@ impl<C: Coefficient> BddEncoder<C> {
 				.map(|_| next)
 		})?;
 
-		Ok(())
+		Ok(model)
 	}
 }
 
@@ -98,7 +99,9 @@ where
 			.map(|x| (C::one(), model.add_int_var_enc(x)))
 			.collect::<Vec<_>>();
 
-		self.decompose(Lin::new(&xs, lin.cmp.clone(), *lin.k), &mut model)?;
+		model.extend(
+			self.decompose::<DB::Lit>(Lin::new(&xs, lin.cmp.clone(), *lin.k), model.num_var)?,
+		);
 
 		model.encode(db, self.cutoff)?;
 		Ok(())
