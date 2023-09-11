@@ -1,4 +1,4 @@
-use crate::{BddEncoder, Encoder, Unsatisfiable};
+use crate::{BddEncoder, Comparator, Encoder, Unsatisfiable};
 use itertools::Itertools;
 use std::{
 	cell::RefCell,
@@ -11,7 +11,7 @@ use iset::IntervalMap;
 
 use crate::{
 	int::{TernLeConstraint, TernLeEncoder},
-	ClauseDatabase, Coefficient, LimitComp, Literal,
+	ClauseDatabase, Coefficient, Literal,
 };
 
 use super::{display_dom, enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, IntVarOrd};
@@ -151,16 +151,19 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 				match &lin.xs[..] {
 					[] => Ok(vec![]),
 					[(_, x)] => {
-						assert!(false, "Probably incorrect fixing of vars");
 						match lin.cmp {
-							LimitComp::Equal => {
-								x.borrow_mut().fix(&C::zero())?;
-							}
-							LimitComp::LessEq => {
+							Comparator::LessEq => {
 								x.borrow_mut().le(&C::zero());
 							}
+							Comparator::Equal => {
+								x.borrow_mut().fix(&C::zero())?;
+							}
+							Comparator::GreaterEq => {
+								x.borrow_mut().ge(&C::zero());
+							}
 						};
-						Ok(vec![])
+						todo!("Untested code: fixing of vars from unary constraints");
+						// Ok(vec![])
 					}
 					[x, y] => Ok(vec![Lin::new(&[x.clone(), y.clone()], lin.cmp, C::zero())]),
 					_ if lin.is_tern() => Ok(vec![lin]),
@@ -206,7 +209,10 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			);
 
 			TernLeEncoder::default()
-				.encode(db, &TernLeConstraint::new(x, y, cmp.clone(), z))
+				.encode(
+					db,
+					&TernLeConstraint::new(x, y, (*cmp).try_into().unwrap(), z),
+				)
 				.unwrap();
 		}
 
@@ -238,16 +244,15 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 }
 
-// TODO LimitComp -> Comp
 #[derive(Debug, Clone)]
 pub struct Lin<C: Coefficient> {
 	pub xs: Vec<(C, Rc<RefCell<IntVar<C>>>)>,
-	pub cmp: LimitComp,
+	pub cmp: Comparator,
 	pub k: C,
 }
 
 impl<C: Coefficient> Lin<C> {
-	pub fn new(terms: &[(C, Rc<RefCell<IntVar<C>>>)], cmp: LimitComp, k: C) -> Self {
+	pub fn new(terms: &[(C, Rc<RefCell<IntVar<C>>>)], cmp: Comparator, k: C) -> Self {
 		Lin {
 			xs: terms.to_vec(),
 			cmp,
@@ -258,7 +263,7 @@ impl<C: Coefficient> Lin<C> {
 	pub fn tern(
 		x: Rc<RefCell<IntVar<C>>>,
 		y: Rc<RefCell<IntVar<C>>>,
-		cmp: LimitComp,
+		cmp: Comparator,
 		z: Rc<RefCell<IntVar<C>>>,
 	) -> Self {
 		Lin {
@@ -275,27 +280,6 @@ impl<C: Coefficient> Lin<C> {
 			.map(|(_, x)| x)
 			// .filter(|x| !x.borrow().is_const())
 			.collect::<_>()
-	}
-
-	pub fn decompose<Lit: Literal>(mut self) -> Vec<Lin<C>> {
-		match &mut self.xs[..] {
-			[] => vec![],
-			[(_, x)] => {
-				match self.cmp {
-					LimitComp::Equal => {
-						x.borrow_mut().fix(&C::zero()).unwrap();
-					}
-					LimitComp::LessEq => {
-						x.borrow_mut().le(&C::zero());
-					}
-				};
-				vec![]
-			}
-			[x, y] => {
-				vec![Lin::new(&[x.clone(), y.clone()], self.cmp, C::zero())]
-			}
-			_ => todo!(),
-		}
 	}
 
 	pub fn lb(&self) -> C {
@@ -318,7 +302,7 @@ impl<C: Coefficient> Lin<C> {
 			Consistency::None => unreachable!(),
 			Consistency::Bounds => loop {
 				let mut fixpoint = true;
-				if self.cmp == LimitComp::Equal {
+				if self.cmp == Comparator::Equal {
 					let xs_ub = self.ub() - self.k;
 					for (c, x) in &self.xs {
 						let mut x = x.borrow_mut();
@@ -383,7 +367,7 @@ impl<C: Coefficient> Lin<C> {
 				}
 			},
 			Consistency::Domain => {
-				assert!(self.cmp == LimitComp::Equal);
+				assert!(self.cmp == Comparator::Equal);
 				loop {
 					let mut fixpoint = true;
 					for (i, (c_i, x_i)) in self.xs.iter().enumerate() {
@@ -563,7 +547,11 @@ mod tests {
 		let x3 = model.new_var(&[0, 5], true);
 		let k = 6;
 		model
-			.add_constraint(Lin::new(&[(1, x1), (1, x2), (1, x3)], LimitComp::LessEq, k))
+			.add_constraint(Lin::new(
+				&[(1, x1), (1, x2), (1, x3)],
+				Comparator::LessEq,
+				k,
+			))
 			.unwrap();
 		let mut cnf = Cnf::new(0);
 		model.propagate(&Consistency::Bounds);
