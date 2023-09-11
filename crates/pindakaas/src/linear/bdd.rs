@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use iset::IntervalMap;
 use itertools::Itertools;
 
-use crate::Literal;
+use crate::{int::IntVar, Literal};
 #[allow(unused_imports)]
 use crate::{
 	int::{IntVarEnc, IntVarOrd, Lin, Model},
@@ -27,61 +27,41 @@ impl<C: Coefficient> BddEncoder<C> {
 		self.cutoff = c;
 		self
 	}
-}
 
-impl<DB, C> Encoder<DB, Linear<DB::Lit, C>> for BddEncoder<C>
-where
-	DB: ClauseDatabase,
-	C: Coefficient,
-{
-	#[cfg_attr(
-		feature = "trace",
-		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
-	)]
-	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
-		let xs = lin
-			.terms
-			.iter()
-			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
-			.sorted_by(|a: &IntVarEnc<_, C>, b: &IntVarEnc<_, C>| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
-			.collect::<Vec<_>>();
-
-		let mut model = Model::new();
-
-		let ys = construct_bdd(&xs, &lin.cmp, lin.k.clone());
-		let xs = xs
-			.into_iter()
-			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
-			.collect::<Vec<_>>();
+	pub(crate) fn decompose<Lit: Literal>(
+		&mut self,
+		lin: Lin<C>,
+		model: &mut Model<Lit, C>,
+	) -> Result {
+		let xs = lin.vars();
+		let ys = construct_bdd(&xs, &lin.cmp, lin.k.into());
 
 		// TODO cannot avoid?
 		#[allow(clippy::needless_collect)]
 		let ys = ys.into_iter()
 			.map(|nodes| {
 				let mut views = HashMap::new();
-				Rc::new(RefCell::new({
-					let mut y = model.new_var(
-						nodes
-							.into_iter(..)
-							.filter_map(|(iv, node)| match node {
-								BddNode::Gap => None,
-								BddNode::Val => Some(iv.end - C::one()),
-								BddNode::View(view) => {
-									let val = iv.end - C::one();
-									views.insert(val, view);
-									Some(val)
-								}
-							})
-							.collect(),
-						self.add_consistency,
-					);
-					y.views = views
-						.into_iter()
-						.map(|(val, view)| (val, (y.id + 1, view)))
-						.collect();
-					y
-				}))
+				let y = model.new_var(
+					nodes
+						.into_iter(..)
+						.filter_map(|(iv, node)| match node {
+							BddNode::Gap => None,
+							BddNode::Val => Some(iv.end - C::one()),
+							BddNode::View(view) => {
+								let val = iv.end - C::one();
+								views.insert(val, view);
+								Some(val)
+							}
+						})
+						.collect(),
+					self.add_consistency,
+				);
+				let next_id = y.borrow().id + 1;
+				y.borrow_mut().views = views
+					.into_iter()
+					.map(|(val, view)| (val, (next_id, view)))
+					.collect();
+				y
 			})
 			.collect::<Vec<_>>();
 
@@ -94,13 +74,39 @@ where
 				.map(|_| next)
 		})?;
 
+		Ok(())
+	}
+}
+
+impl<DB, C> Encoder<DB, Linear<DB::Lit, C>> for BddEncoder<C>
+where
+	DB: ClauseDatabase,
+	C: Coefficient,
+{
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
+	)]
+	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
+		let mut model = Model::default();
+		let xs = lin
+			.terms
+			.iter()
+			.enumerate()
+			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
+			.sorted_by(|a: &IntVarEnc<_, C>, b: &IntVarEnc<_, C>| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
+			.map(|x| (C::one(), model.add_int_var_enc(x)))
+			.collect::<Vec<_>>();
+
+		self.decompose(Lin::new(&xs, lin.cmp.clone(), *lin.k), &mut model)?;
+
 		model.encode(db, self.cutoff)?;
 		Ok(())
 	}
 }
 
-fn construct_bdd<Lit: Literal, C: Coefficient>(
-	xs: &Vec<IntVarEnc<Lit, C>>,
+fn construct_bdd<C: Coefficient>(
+	xs: &Vec<Rc<RefCell<IntVar<C>>>>,
 	cmp: &LimitComp,
 	k: PosCoeff<C>,
 ) -> Vec<IntervalMap<C, BddNode<C>>> {
@@ -109,7 +115,10 @@ fn construct_bdd<Lit: Literal, C: Coefficient>(
 	let bounds = xs
 		.iter()
 		.scan((C::zero(), C::zero()), |state, x| {
-			*state = (state.0 + x.lb(), state.1 + x.ub());
+			*state = (
+				state.0 + x.borrow().lb(&C::one()),
+				state.1 + x.borrow().ub(&C::one()),
+			);
 			Some(*state)
 		})
 		.chain(std::iter::once((C::zero(), k)))
@@ -121,12 +130,18 @@ fn construct_bdd<Lit: Literal, C: Coefficient>(
 		.iter()
 		.rev()
 		.scan((k, k), |state, x| {
-			*state = (state.0 - x.ub(), state.1 - x.lb());
+			*state = (
+				state.0 - x.borrow().ub(&C::one()),
+				state.1 - x.borrow().lb(&C::one()),
+			);
 			Some(*state)
 		})
 		.collect::<Vec<_>>();
 
-	let inf = xs.iter().fold(C::zero(), |a, x| a + x.ub()) + C::one();
+	let inf = xs
+		.iter()
+		.fold(C::zero(), |a, x| a + x.borrow().ub(&C::one()))
+		+ C::one();
 
 	let mut ws = margins
 		.into_iter()
@@ -162,19 +177,18 @@ enum BddNode<C: Coefficient> {
 	View(C),
 }
 
-fn bdd<Lit: Literal, C: Coefficient>(
+fn bdd<C: Coefficient>(
 	i: usize,
-	xs: &Vec<IntVarEnc<Lit, C>>,
+	xs: &Vec<Rc<RefCell<IntVar<C>>>>,
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, BddNode<C>>>,
 ) -> (std::ops::Range<C>, BddNode<C>) {
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
-			let views = xs[i]
+			let x_i = xs[i].borrow(); // let expression to satisfy borrow checker
+			let views = x_i
 				.dom()
-				.iter(..)
-				.map(|v| v.end - C::one())
-				.map(|v| (v, bdd(i + 1, xs, sum + v, ws)))
+				.map(|v| (v, bdd(i + 1, xs, sum + *v, ws)))
 				.collect::<Vec<_>>();
 
 			// TODO could we check whether a domain value of x always leads to gaps?
@@ -186,7 +200,7 @@ fn bdd<Lit: Literal, C: Coefficient>(
 
 			let interval = views
 				.into_iter()
-				.map(|(v, (interval, _))| (interval.start - v)..(interval.end - v))
+				.map(|(v, (interval, _))| (interval.start - *v)..(interval.end - *v))
 				.reduce(|a, b| std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end))
 				.unwrap();
 
