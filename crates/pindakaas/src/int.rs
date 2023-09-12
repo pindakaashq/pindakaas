@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 pub(crate) use constrain::{TernLeConstraint, TernLeEncoder};
 pub(crate) use enc::{IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
-pub use model::{Consistency, IntVar, Lin, Model};
+pub use model::{Consistency, IntVar, Lin, Model, Term};
 
 use crate::{linear::Constraint, CheckError, Coefficient, LinExp, Literal, Unsatisfiable};
 
