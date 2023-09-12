@@ -1,5 +1,6 @@
 mod constrain;
 mod enc;
+mod helpers;
 mod model;
 
 use itertools::Itertools;

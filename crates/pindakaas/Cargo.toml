@@ -17,6 +17,8 @@ iset = "0.1.1"
 itertools = "0.10"
 num = "0.4"
 rustc-hash = "1.1.0"
+bzip2 = "0.4.4"
+flate2 = "1.0.25"
 
 # Optional encoding tracing capabilities
 tracing = { version = "0.1.37", optional = true }
