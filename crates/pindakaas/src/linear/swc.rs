@@ -1,4 +1,4 @@
-use crate::int::{Consistency, Lin, Model};
+use crate::int::{Consistency, Lin, Model, Term};
 use crate::{int::IntVarEnc, ClauseDatabase, Coefficient, Encoder, Linear, Result};
 use itertools::Itertools;
 
@@ -40,6 +40,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.enumerate()
 			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
 			.map(|x| model.add_int_var_enc(x))
+			.map(Term::from)
 			.collect::<Vec<_>>();
 		let n = xs.len();
 
@@ -58,6 +59,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.collect::<Vec<_>>()
 			.into_iter()
 			.chain(std::iter::once(model.new_constant(-*lin.k)))
+			.map(Term::from)
 			.collect::<Vec<_>>();
 
 		ys.into_iter()
@@ -92,7 +94,7 @@ mod tests {
 		Encoder,
 	};
 
-	linear_test_suite!(SwcEncoder::default());
+	linear_test_suite!(SwcEncoder::default().add_propagation(Consistency::None));
 	// FIXME: SWC does not support LimitComp::Equal
 	// card1_test_suite!(SwcEncoder::default());
 }

@@ -807,6 +807,32 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 			IntVarEnc::Const(_) => 0,
 		}
 	}
+
+	pub fn multiply<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB, rhs: C) -> Self {
+		assert!(!rhs.is_negative(), "TODO: negative coefficients");
+		if rhs == C::zero() {
+			IntVarEnc::Const(C::zero())
+		} else if rhs == C::one() {
+			self.clone()
+		} else {
+			match self {
+				IntVarEnc::Ord(o) => IntVarEnc::Ord(IntVarOrd::from_views(
+					db,
+					std::iter::once((self.lb(), None))
+						.chain(
+							o.xs.iter(..)
+								.map(|(iv, lit)| ((iv.end - C::one()) * rhs, Some(lit.clone()))),
+						)
+						.tuple_windows()
+						.map(|((a, _), (b, lit))| ((a + C::one())..(b + C::one()), lit))
+						.collect(),
+					format!("{}*{}", rhs, o.lbl.clone()),
+				)),
+				IntVarEnc::Bin(_) => todo!(),
+				IntVarEnc::Const(c) => IntVarEnc::Const(*c * rhs),
+			}
+		}
+	}
 }
 
 impl<Lit: Literal, C: Coefficient> From<IntVarBin<Lit, C>> for IntVarEnc<Lit, C> {

@@ -39,7 +39,7 @@ pub mod trace;
 
 pub use cardinality::{Cardinality, SortingNetworkEncoder};
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
-pub use int::{Consistency, Lin, Model};
+pub use int::{Consistency, Lin, Model, Term};
 pub use linear::{
 	AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear, LinearAggregator,
 	LinearConstraint, LinearEncoder, PosCoeff, SwcEncoder, TotalizerEncoder,
@@ -178,7 +178,16 @@ impl<Lit: Literal> fmt::Display for CheckError<Lit> {
 /// Coefficient in PB constraints are represented by types that implement the
 /// `Coefficient` constraint.
 pub trait Coefficient:
-	Signed + Integer + PrimInt + NumAssignOps + NumOps + Hash + Default + fmt::Debug + fmt::Display
+	Signed
+	+ Integer
+	+ PrimInt
+	+ NumAssignOps
+	+ NumOps
+	+ Hash
+	+ Default
+	+ FromStr
+	+ fmt::Debug
+	+ fmt::Display
 {
 }
 impl<
@@ -189,6 +198,7 @@ impl<
 			+ NumOps
 			+ Hash
 			+ Default
+			+ FromStr
 			+ fmt::Debug
 			+ fmt::Display,
 	> Coefficient for T

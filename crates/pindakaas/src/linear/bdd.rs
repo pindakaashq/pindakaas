@@ -1,15 +1,15 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
 use iset::IntervalMap;
 use itertools::Itertools;
 
-use crate::{int::IntVar, Literal, Unsatisfiable};
 #[allow(unused_imports)]
 use crate::{
-	int::{IntVarEnc, IntVarOrd, Lin, Model},
+	int::{IntVarEnc, IntVarOrd, Lin, Model, Term},
 	linear::LimitComp,
 	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
+use crate::{Literal, Unsatisfiable};
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
 #[derive(Default, Clone)]
@@ -34,8 +34,7 @@ impl<C: Coefficient> BddEncoder<C> {
 		num_var: usize,
 	) -> crate::Result<Model<Lit, C>, Unsatisfiable> {
 		let mut model = Model::<Lit, C>::new(num_var);
-		let xs = lin.vars();
-		let ys = construct_bdd(&xs, &lin.cmp.try_into().unwrap(), lin.k.into());
+		let ys = construct_bdd(&lin);
 
 		// TODO cannot avoid?
 		#[allow(clippy::needless_collect)]
@@ -62,16 +61,21 @@ impl<C: Coefficient> BddEncoder<C> {
 					.collect();
 				y
 			})
+			.map(Term::from)
 			.collect::<Vec<_>>();
 
 		let mut ys = ys.into_iter();
 		let first = ys.next().unwrap();
-		assert!(first.as_ref().borrow().size() == 1);
-		xs.iter().zip(ys).try_fold(first, |curr, (x_i, next)| {
-			model
-				.add_constraint(Lin::tern(curr, x_i.clone(), lin.cmp, next.clone()))
-				.map(|_| next)
-		})?;
+		assert!(first.size() == 1);
+		lin.exp
+			.terms
+			.iter()
+			.zip(ys)
+			.try_fold(first, |curr, (term, next)| {
+				model
+					.add_constraint(Lin::tern(curr, term.clone(), lin.cmp, next.clone()))
+					.map(|_| next)
+			})?;
 
 		Ok(model)
 	}
@@ -94,7 +98,8 @@ where
 			.enumerate()
 			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
 			.sorted_by(|a: &IntVarEnc<_, C>, b: &IntVarEnc<_, C>| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
-			.map(|x| (C::one(), model.add_int_var_enc(x)))
+			.map(|x| model.add_int_var_enc(x))
+			.map(Term::from)
 			.collect::<Vec<_>>();
 
 		model.extend(self.decompose::<DB::Lit>(
@@ -107,58 +112,52 @@ where
 	}
 }
 
-fn construct_bdd<C: Coefficient>(
-	xs: &Vec<Rc<RefCell<IntVar<C>>>>,
-	cmp: &LimitComp,
-	k: PosCoeff<C>,
-) -> Vec<IntervalMap<C, BddNode<C>>> {
-	let k = *k;
-
-	let bounds = xs
+fn construct_bdd<C: Coefficient>(lin: &Lin<C>) -> Vec<IntervalMap<C, BddNode<C>>> {
+	let bounds = lin
+		.exp
+		.terms
 		.iter()
-		.scan((C::zero(), C::zero()), |state, x| {
-			*state = (
-				state.0 + x.borrow().lb(&C::one()),
-				state.1 + x.borrow().ub(&C::one()),
-			);
+		.scan((C::zero(), C::zero()), |state, term| {
+			*state = (state.0 + term.lb(), state.1 + term.ub());
 			Some(*state)
 		})
-		.chain(std::iter::once((C::zero(), k)))
+		.chain(std::iter::once((C::zero(), lin.k)))
 		.collect::<Vec<_>>();
 
 	// TODO ? also hard to avoid?
 	#[allow(clippy::needless_collect)]
-	let margins = xs
+	let margins = lin
+		.exp
+		.terms
 		.iter()
 		.rev()
-		.scan((k, k), |state, x| {
-			*state = (
-				state.0 - x.borrow().ub(&C::one()),
-				state.1 - x.borrow().lb(&C::one()),
-			);
+		.scan((lin.k, lin.k), |state, term| {
+			*state = (state.0 - term.ub(), state.1 - term.lb());
 			Some(*state)
 		})
 		.collect::<Vec<_>>();
 
-	let inf = xs
+	let inf = lin
+		.exp
+		.terms
 		.iter()
-		.fold(C::zero(), |a, x| a + x.borrow().ub(&C::one()))
+		.fold(C::zero(), |a, term| a + term.ub())
 		+ C::one();
 
 	let mut ws = margins
 		.into_iter()
 		.rev()
-		.chain(std::iter::once((k, k)))
+		.chain(std::iter::once((lin.k, lin.k)))
 		.zip(bounds)
 		.map(|((lb_margin, ub_margin), (lb, ub))| {
-			match cmp {
+			match lin.cmp.try_into().unwrap() {
 				LimitComp::LessEq => vec![
 					(lb_margin > lb).then_some((C::zero()..(lb_margin + C::one()), BddNode::Val)),
 					(ub_margin <= ub).then_some(((ub_margin + C::one())..inf, BddNode::Gap)),
 				],
 				LimitComp::Equal => vec![
 					(lb_margin > lb).then_some((C::zero()..lb_margin, BddNode::Gap)),
-					(lb_margin == ub_margin).then_some((k..(k + C::one()), BddNode::Val)),
+					(lb_margin == ub_margin).then_some((lin.k..(lin.k + C::one()), BddNode::Val)),
 					(ub_margin <= ub).then_some(((ub_margin + C::one())..inf, BddNode::Gap)),
 				],
 			}
@@ -168,7 +167,7 @@ fn construct_bdd<C: Coefficient>(
 		})
 		.collect();
 
-	bdd(0, xs, C::zero(), &mut ws);
+	bdd(0, &lin.exp.terms, C::zero(), &mut ws);
 	ws
 }
 
@@ -181,15 +180,15 @@ enum BddNode<C: Coefficient> {
 
 fn bdd<C: Coefficient>(
 	i: usize,
-	xs: &Vec<Rc<RefCell<IntVar<C>>>>,
+	xs: &Vec<Term<C>>,
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, BddNode<C>>>,
 ) -> (std::ops::Range<C>, BddNode<C>) {
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
-			let x_i = xs[i].borrow(); // let expression to satisfy borrow checker
-			let views = x_i
-				.dom()
+			let dom = xs[i].dom();
+			let views = dom
+				.iter()
 				.map(|v| (v, bdd(i + 1, xs, sum + *v, ws)))
 				.collect::<Vec<_>>();
 

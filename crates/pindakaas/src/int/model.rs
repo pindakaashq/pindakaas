@@ -16,12 +16,15 @@ use crate::{
 
 use super::{display_dom, enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, IntVarOrd};
 
+// TODO usize -> intId struct
+
 // TODO should we keep IntVar i/o IntVarEnc?
 #[derive(Debug)]
 pub struct Model<Lit: Literal, C: Coefficient> {
-	vars: HashMap<usize, IntVarEnc<Lit, C>>,
-	cons: Vec<Lin<C>>,
+	pub(crate) vars: HashMap<usize, IntVarEnc<Lit, C>>,
+	pub(crate) cons: Vec<Lin<C>>,
 	pub(crate) num_var: usize,
+	pub(crate) obj: Obj<C>,
 }
 
 // TODO Domain will be used once (/if) this is added as encoder feature.
@@ -34,56 +37,49 @@ pub enum Consistency {
 	Domain,
 }
 
+#[derive(Debug, Clone)]
+pub enum Obj<C: Coefficient> {
+	Minimize(LinExp<C>),
+	Maximize(LinExp<C>),
+	Satisfy,
+}
+
 impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		for con in &self.cons {
 			writeln!(f, "{}", con)?;
 		}
+		writeln!(f, "obj: {}", self.obj)?;
 		Ok(())
+	}
+}
+
+impl<C: Coefficient> Display for Obj<C> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Obj::Minimize(exp) => write!(f, "min {exp}"),
+			Obj::Maximize(exp) => write!(f, "max {exp}"),
+			Obj::Satisfy => write!(f, "sat"),
+		}
+	}
+}
+
+impl<C: Coefficient> Display for Term<C> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{:+}*{}", self.c, self.x.borrow())
+	}
+}
+impl<C: Coefficient> Display for LinExp<C> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.terms.iter().join(" "))
 	}
 }
 
 impl<C: Coefficient> Display for Lin<C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let disp_term = |x: &(C, Rc<RefCell<IntVar<C>>>)| -> String {
-			let (coef, x) = x;
-			let x = x.borrow();
-
-			format!(
-				"{}{}{}",
-				if coef.is_positive() { "+" } else { "-" },
-				if coef.abs() == C::one() {
-					String::from("")
-				} else {
-					format!("*{}", coef.abs())
-				},
-				x
-			)
-		};
-
-		if self.is_tern() {
-			write!(
-				f,
-				"{} + {} {} {}",
-				self.exp.terms[0].1.borrow(),
-				self.exp.terms[1].1.borrow(),
-				self.cmp,
-				self.exp.terms[2].1.borrow(),
-				// disp_x(&(C::one(), self.k()))
-			)
-		} else {
-			write!(
-				f,
-				"{} {} {}",
-				self.exp.terms.iter().map(disp_term).join(" "),
-				self.cmp,
-				self.k,
-				// disp_x(&(C::one(), self.k()))
-			)
-		}
+		write!(f, "{} {} {}", self.exp, self.cmp, self.k,)
 	}
 }
-
 impl<C: Coefficient> fmt::Display for IntVar<C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "x{} ∈ {}", self.id, display_dom(&self.dom))
@@ -96,6 +92,7 @@ impl<Lit: Literal, C: Coefficient> Default for Model<Lit, C> {
 			vars: HashMap::new(),
 			cons: vec![],
 			num_var: 0,
+			obj: Obj::Satisfy,
 		}
 	}
 }
@@ -150,16 +147,16 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.map(|lin| -> Result<Vec<_>, Unsatisfiable> {
 				match &lin.exp.terms[..] {
 					[] => Ok(vec![]),
-					[(_, x)] => {
+					[term] => {
 						match lin.cmp {
 							Comparator::LessEq => {
-								x.borrow_mut().le(&C::zero());
+								term.x.borrow_mut().le(&C::zero());
 							}
 							Comparator::Equal => {
-								x.borrow_mut().fix(&C::zero())?;
+								term.x.borrow_mut().fix(&C::zero())?;
 							}
 							Comparator::GreaterEq => {
-								x.borrow_mut().ge(&C::zero());
+								term.x.borrow_mut().ge(&C::zero());
 							}
 						};
 						todo!("Untested code: fixing of vars from unary constraints");
@@ -194,28 +191,48 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			let Lin {
 				exp: LinExp { terms },
 				cmp,
-				k: _,
+				k,
 			} = con;
-			assert!(con.is_tern(), "{model}");
 
-			for (_, x) in terms {
-				let x = x.borrow();
-				model
-					.vars
-					.entry(x.id)
-					.or_insert_with(|| x.encode(db, &mut all_views, x.prefer_order(cutoff)));
-			}
+			assert!(terms.len() == 3 && k.is_zero(), "{model}");
 
-			let (x, y, z) = (
-				&model.vars[&terms[0].1.borrow().id],
-				&model.vars[&terms[1].1.borrow().id],
-				&model.vars[&terms[2].1.borrow().id],
-			);
+			let terms = terms
+				.iter()
+				.map(|term| {
+					let x = term.x.borrow();
+					(
+						term.c,
+						if x.is_constant() {
+							x.encode(db, &mut all_views, x.prefer_order(cutoff))
+						} else {
+							assert!(x.id != 0);
+							model
+								.vars
+								.entry(x.id)
+								.or_insert_with(|| {
+									x.encode(db, &mut all_views, x.prefer_order(cutoff))
+								})
+								.clone()
+						},
+					)
+				})
+				.collect::<Vec<_>>();
+
+
+			let mut process_c = |i: usize, to_rhs: bool| {
+				terms[i]
+					.1
+					.multiply(db, if to_rhs { -terms[i].0 } else { terms[i].0 })
+			};
+
+			let x = process_c(0, false);
+			let y = process_c(1, false);
+			let z = process_c(2, true);
 
 			TernLeEncoder::default()
 				.encode(
 					db,
-					&TernLeConstraint::new(x, y, (*cmp).try_into().unwrap(), z),
+					&TernLeConstraint::new(&x, &y, (*cmp).try_into().unwrap(), &z),
 				)
 				.unwrap();
 		}
@@ -235,7 +252,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 				con.exp
 					.terms
 					.iter()
-					.any(|(_, x)| changed.contains(&x.borrow().id))
+					.any(|term| changed.contains(&term.x.borrow().id))
 					.then_some(i)
 			}));
 		}
@@ -251,7 +268,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 #[derive(Debug, Clone)]
 pub struct LinExp<C: Coefficient> {
-	terms: Vec<(C, Rc<RefCell<IntVar<C>>>)>,
+	pub(crate) terms: Vec<Term<C>>,
 }
 
 #[derive(Debug, Clone)]
@@ -261,8 +278,53 @@ pub struct Lin<C: Coefficient> {
 	pub k: C,
 }
 
+#[derive(Debug, Clone)]
+pub struct Term<C: Coefficient> {
+	pub c: C,
+	pub x: Rc<RefCell<IntVar<C>>>,
+}
+
+impl<C: Coefficient> From<Rc<RefCell<IntVar<C>>>> for Term<C> {
+	fn from(value: Rc<RefCell<IntVar<C>>>) -> Self {
+		Term::new(C::one(), value)
+	}
+}
+
+impl<C: Coefficient> Term<C> {
+	pub fn new(c: C, x: Rc<RefCell<IntVar<C>>>) -> Self {
+		Self { c, x }
+	}
+
+	pub fn lb(&self) -> C {
+		self.c
+			* (if self.c.is_negative() {
+				self.x.borrow().ub()
+			} else {
+				self.x.borrow().lb()
+			})
+	}
+
+	pub(crate) fn ub(&self) -> C {
+		self.c
+			* (if self.c.is_negative() {
+				self.x.borrow().lb()
+			} else {
+				self.x.borrow().ub()
+			})
+	}
+
+	// TODO [?] correct way to return iter?
+	pub(crate) fn dom(&self) -> Vec<C> {
+		self.x.borrow().dom.iter().map(|d| self.c * *d).collect()
+	}
+
+	pub(crate) fn size(&self) -> usize {
+		self.x.borrow().size()
+	}
+}
+
 impl<C: Coefficient> Lin<C> {
-	pub fn new(terms: &[(C, Rc<RefCell<IntVar<C>>>)], cmp: Comparator, k: C) -> Self {
+	pub fn new(terms: &[Term<C>], cmp: Comparator, k: C) -> Self {
 		Lin {
 			exp: LinExp {
 				terms: terms.to_vec(),
@@ -272,36 +334,21 @@ impl<C: Coefficient> Lin<C> {
 		}
 	}
 
-	pub fn tern(
-		x: Rc<RefCell<IntVar<C>>>,
-		y: Rc<RefCell<IntVar<C>>>,
-		cmp: Comparator,
-		z: Rc<RefCell<IntVar<C>>>,
-	) -> Self {
+	pub fn tern(x: Term<C>, y: Term<C>, cmp: Comparator, z: Term<C>) -> Self {
 		Lin {
 			exp: LinExp {
-				terms: vec![(C::one(), x), (C::one(), y), (-C::one(), z)],
+				terms: vec![x, y, Term::new(-z.c, z.x)],
 			},
 			cmp,
 			k: C::zero(),
 		}
 	}
 
-	pub fn vars(&self) -> Vec<Rc<RefCell<IntVar<C>>>> {
-		self.exp
-			.terms
-			.iter()
-			.cloned()
-			.map(|(_, x)| x)
-			// .filter(|x| !x.borrow().is_const())
-			.collect::<_>()
-	}
-
 	pub fn lb(&self) -> C {
 		self.exp
 			.terms
 			.iter()
-			.map(|(c, x)| x.borrow().lb(c))
+			.map(Term::lb)
 			.fold(C::zero(), |a, b| a + b)
 	}
 
@@ -309,7 +356,7 @@ impl<C: Coefficient> Lin<C> {
 		self.exp
 			.terms
 			.iter()
-			.map(|(c, x)| x.borrow().ub(c))
+			.map(Term::ub)
 			.fold(C::zero(), |a, b| a + b)
 	}
 
@@ -321,21 +368,21 @@ impl<C: Coefficient> Lin<C> {
 				let mut fixpoint = true;
 				if self.cmp == Comparator::Equal {
 					let xs_ub = self.ub() - self.k;
-					for (c, x) in &self.exp.terms {
-						let mut x = x.borrow_mut();
+					for term in &self.exp.terms {
+						let mut x = term.x.borrow_mut();
 						let size = x.size();
 
 						let id = x.id;
-						let x_ub = if c.is_positive() {
+						let x_ub = if term.c.is_positive() {
 							*x.dom.last().unwrap()
 						} else {
 							*x.dom.first().unwrap()
 						};
 
 						// c*d >= x_ub*c + xs_ub := d >= x_ub - xs_ub/c
-						let b = x_ub - (xs_ub / *c);
+						let b = x_ub - (xs_ub / term.c);
 
-						if !c.is_negative() {
+						if !term.c.is_negative() {
 							x.ge(&b);
 						} else {
 							x.le(&b);
@@ -350,10 +397,10 @@ impl<C: Coefficient> Lin<C> {
 				}
 
 				let rs_lb = self.lb() - self.k;
-				for (c, x) in &self.exp.terms {
-					let mut x = x.borrow_mut();
+				for term in &self.exp.terms {
+					let mut x = term.x.borrow_mut();
 					let size = x.size();
-					let x_lb = if c.is_positive() {
+					let x_lb = if term.c.is_positive() {
 						*x.dom.first().unwrap()
 					} else {
 						*x.dom.last().unwrap()
@@ -363,9 +410,9 @@ impl<C: Coefficient> Lin<C> {
 
 					// c*d <= c*x_lb - rs_lb
 					// d <= x_lb - (rs_lb / c) (or d >= .. if d<0)
-					let b = x_lb - (rs_lb / *c);
+					let b = x_lb - (rs_lb / term.c);
 
-					if c.is_negative() {
+					if term.c.is_negative() {
 						x.ge(&b);
 					} else {
 						x.le(&b);
@@ -387,26 +434,28 @@ impl<C: Coefficient> Lin<C> {
 				assert!(self.cmp == Comparator::Equal);
 				loop {
 					let mut fixpoint = true;
-					for (i, (c_i, x_i)) in self.exp.terms.iter().enumerate() {
-						let id = x_i.borrow().id;
-						x_i.borrow_mut().dom.retain(|d_i| {
+					for (i, term) in self.exp.terms.iter().enumerate() {
+						let id = term.x.borrow().id;
+						term.x.borrow_mut().dom.retain(|d_i| {
 							if self
 								.exp
 								.terms
 								.iter()
 								.enumerate()
-								.filter_map(|(j, (c_j, x_j))| {
+								.filter_map(|(j, term_j)| {
 									(i != j).then(|| {
-										x_j.borrow()
+										term_j
+											.x
+											.borrow()
 											.dom
 											.iter()
-											.map(|d_j_k| *c_j * *d_j_k)
+											.map(|d_j_k| term_j.c * *d_j_k)
 											.collect::<Vec<_>>()
 									})
 								})
 								.multi_cartesian_product()
 								.any(|rs| {
-									*c_i * *d_i + rs.into_iter().fold(C::zero(), |a, b| a + b)
+									term.c * *d_i + rs.into_iter().fold(C::zero(), |a, b| a + b)
 										== C::zero()
 								}) {
 								true
@@ -416,7 +465,7 @@ impl<C: Coefficient> Lin<C> {
 								false
 							}
 						});
-						assert!(x_i.borrow().size() > 0);
+						assert!(term.x.borrow().size() > 0);
 					}
 
 					if fixpoint {
@@ -428,29 +477,34 @@ impl<C: Coefficient> Lin<C> {
 	}
 
 	fn is_tern(&self) -> bool {
-		self.exp.terms.iter().map(|(c, _)| c).collect::<Vec<_>>()
-			== [&C::one(), &C::one(), &-C::one()]
+		self.exp.terms.iter().map(|term| term.c).collect::<Vec<_>>()
+			== [C::one(), C::one(), -C::one()]
 			&& self.k == C::zero()
 	}
 }
 
 // TODO perhaps id can be used by replacing vars HashMap to just vec
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IntVar<C: Coefficient> {
 	pub(crate) id: usize,
-	pub(crate) dom: BTreeSet<C>,
-	add_consistency: bool,
+	pub(crate) dom: BTreeSet<C>, // TODO implement rangelist
+	pub(crate) add_consistency: bool,
 	pub(crate) views: HashMap<C, (usize, C)>,
 }
 
 impl<C: Coefficient> IntVar<C> {
+
+	pub fn is_constant(&self) -> bool {
+		self.size() == 1
+	}
+
 	fn encode<DB: ClauseDatabase>(
 		&self,
 		db: &mut DB,
 		views: &mut HashMap<(usize, C), DB::Lit>,
 		prefer_order: bool,
 	) -> IntVarEnc<DB::Lit, C> {
-		if self.size() == 1 {
+		if self.is_constant() {
 			IntVarEnc::Const(*self.dom.first().unwrap())
 		} else {
 			let x = if prefer_order {
@@ -518,22 +572,12 @@ impl<C: Coefficient> IntVar<C> {
 		self.dom.len()
 	}
 
-	pub(crate) fn lb(&self, c: &C) -> C {
-		*c * *(if c.is_negative() {
-			self.dom.last()
-		} else {
-			self.dom.first()
-		})
-		.unwrap()
+	pub(crate) fn lb(&self) -> C {
+		*self.dom.first().unwrap()
 	}
 
-	pub(crate) fn ub(&self, c: &C) -> C {
-		*c * *(if c.is_negative() {
-			self.dom.first()
-		} else {
-			self.dom.last()
-		})
-		.unwrap()
+	pub(crate) fn ub(&self) -> C {
+		*self.dom.last().unwrap()
 	}
 
 	pub fn required_bits(lb: C, ub: C) -> u32 {
@@ -567,7 +611,7 @@ mod tests {
 		let k = 6;
 		model
 			.add_constraint(Lin::new(
-				&[(1, x1), (1, x2), (1, x3)],
+				&[Term::new(1, x1), Term::new(1, x2), Term::new(1, x3)],
 				Comparator::LessEq,
 				k,
 			))

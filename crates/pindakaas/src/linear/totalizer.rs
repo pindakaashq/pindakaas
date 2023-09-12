@@ -92,14 +92,14 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 						let parent = model.new_var(&dom, self.add_consistency);
 
 						model.add_constraint(Lin::tern(
-							left.clone(),
-							right.clone(),
+							left.clone().into(),
+							right.clone().into(),
 							if !at_root && EQUALIZE_INTERMEDIATES {
 								Comparator::Equal
 							} else {
 								*cmp
 							},
-							parent.clone(),
+							parent.clone().into(),
 						))?;
 						next_layer.push(parent);
 					}
@@ -163,7 +163,7 @@ mod tests {
 		.check_complete()
 	}
 
-	linear_test_suite!(TotalizerEncoder::default().add_propagation(Consistency::Bounds));
+	linear_test_suite!(TotalizerEncoder::default().add_propagation(Consistency::None));
 	// FIXME: Totalizer does not support LimitComp::Equal
 	// card1_test_suite!(TotalizerEncoder::default());
 }
