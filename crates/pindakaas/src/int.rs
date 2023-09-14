@@ -8,13 +8,15 @@ use std::collections::BTreeSet;
 
 pub(crate) use constrain::{TernLeConstraint, TernLeEncoder};
 pub(crate) use enc::{IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
-pub use model::{Consistency, IntVar, Lin, Model, Term};
+pub use model::{Consistency, IntVar, Lin, LinExp, Model, Term};
 
-use crate::{linear::Constraint, CheckError, Coefficient, LinExp, Literal, Unsatisfiable};
+use crate::{
+	linear::Constraint, CheckError, Coefficient, LinExp as PbLinExp, Literal, Unsatisfiable,
+};
 
 use self::enc::GROUND_BINARY_AT_LB;
 
-impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
+impl<Lit: Literal, C: Coefficient> PbLinExp<Lit, C> {
 	pub(crate) fn assign(&self, solution: &[Lit]) -> Result<C, CheckError<Lit>> {
 		let evaluate = |assignments: &Vec<(Lit, C, Lit)>| {
 			assignments

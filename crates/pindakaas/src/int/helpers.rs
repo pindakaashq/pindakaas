@@ -21,6 +21,114 @@ pub enum Format {
 }
 
 impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
+	pub fn to_text(&self, format: Format) -> String {
+		match format {
+			Format::Lp => {
+				// let mut output = String::new();
+				format!(
+					"Subject To
+{}
+Bounds
+{}
+End
+",
+					self.cons
+						.iter()
+						.enumerate()
+						.map(|(i, con)| format!(
+							"  {}: {} {} {}",
+							con.lbl.clone().unwrap_or_else(|| format!("c{}", i)),
+							con.exp
+								.terms
+								.iter()
+								.map(|term| format!(
+									"{} {} {}",
+									if term.c.is_positive() { "+" } else { "-" },
+									term.c.abs(),
+									term.x.borrow().lbl()
+								))
+								.join(" "),
+							match con.cmp {
+								Comparator::LessEq => "<=",
+								Comparator::Equal => "=",
+								Comparator::GreaterEq => ">=",
+							},
+							con.k
+						))
+						.join("\n"),
+					self.vars()
+						.into_iter()
+						.sorted_by_key(|x| x.borrow().lbl())
+						.map(|x| {
+							let x = x.borrow();
+							format!("  {} <= {} <= {}", x.lb(), x.lbl(), x.ub())
+						})
+						.join("\n")
+				)
+			}
+			Format::Opb => {
+				todo!();
+				/*
+				println!("Write LP {path:?}");
+
+				let mut output = File::create(path)?;
+
+				use std::io::Write;
+				//let pbs = self.pbs.iter().map(|pb| pb.into::<())
+				let vars = self
+					.pbs
+					.iter()
+					.flat_map(|pb| pb.exp.terms())
+					.map(|v| v.0)
+					.collect::<HashSet<Lit>>()
+					.len();
+
+				writeln!(
+					output,
+					"* #variable= {} #constraint= {}",
+					vars,
+					self.pbs.len()
+				)?;
+
+				writeln!(output, ";",)?;
+
+				for pb in &self.pbs {
+					let pb = if pb.cmp == Comparator::LessEq && rewrite_leqs {
+						let mut pb = pb.clone();
+						pb.exp *= -1;
+						pb.k = -pb.k;
+						pb.cmp = Comparator::GreaterEq;
+						pb
+					} else {
+						pb.clone()
+					};
+					for (lit, coef) in pb.exp.terms() {
+						write!(
+							output,
+							//"{} {} x{} ",
+							"{:+} x{} ",
+							pb.exp.mult * coef,
+							//if coef.is_positive() { "+" } else { "-" },
+							//coef.abs(),
+							lit,
+						)?;
+					}
+					writeln!(
+						output,
+						"{} {};",
+						match pb.cmp {
+							pindakaas::Comparator::LessEq => "<=",
+							pindakaas::Comparator::Equal => "=",
+							pindakaas::Comparator::GreaterEq => ">=",
+						},
+						pb.k - pb.exp.add,
+					)?;
+				}
+				Ok(())
+				*/
+			}
+		}
+	}
 	pub fn from_file(path: PathBuf) -> Result<Self, String> {
 		let ext = path.extension().unwrap().to_str().unwrap();
 		let file = File::open(path.clone()).unwrap();
@@ -313,9 +421,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		let vars = vars
 			.into_iter()
 			.sorted()
-			.map(|(lp_id, (lb, ub))| {
+			.flat_map(|(lp_id, (lb, ub))| {
 				let dom = num::iter::range_inclusive(lb, ub).collect::<Vec<_>>();
-				(lp_id, model.new_var(&dom, true))
+				model
+					.new_var(&dom, true, Some(lp_id.clone()))
+					.map(|x| (lp_id, x))
 			})
 			.collect::<HashMap<_, _>>();
 
@@ -337,7 +447,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					exp: to_ilp_exp(&lin),
 					cmp,
 					k,
-					// lbl,
+					lbl: lbl.clone(),
 				})
 				.map_err(|_| {
 					format!(
@@ -383,9 +493,7 @@ mod tests {
 			String::from(
 				"
 * comment
-+1 x1 +2 x2 +2 x3 +3 x4 = 2 ;
-+1 x1 +1 x2 +2 x3 <= 2 ;
-+1 x3 +1 x4 +3 x2 <= 3 ;
++2 x1 +3 x2 +5 x3 <= 6 ;
 ",
 			),
 			Format::Opb,
@@ -393,35 +501,28 @@ mod tests {
 		.unwrap();
 		let mut cnf = Cnf::new(0);
 		model.encode(&mut cnf, None).unwrap();
+		println!("opb = {}", model.to_text(Format::Opb));
 	}
 
 	#[test]
 	fn test_from_lp() {
-		let mut model = Model::<i32, i32>::from_string(
-			String::from(
-				"
-Maximize
-  x + y + z
+		let lp = r"
+\ comment
 Subject To
   c1: 2 x + 3 y + 5 z <= 6
 Binary
   x
   y
-  z
+Bounds
+  0 <= z <= 1
 End
-",
-				// 2 * x {0,1,2} + 3 * x2 { 0,1} .. <= 6
-				//  x {0,2,4} + x2 { 0,3} .. <= 6
-				// x {0,2,4 } + y1 { .. } <= y2 ...
-			),
-			Format::Lp,
-		)
-		.unwrap();
-
-		// c0: x + y = 1
+";
+		let mut model = Model::<i32, i32>::from_string(lp.into(), Format::Lp).unwrap();
 		let mut cnf = Cnf::new(0);
 		println!("model = {model}");
 
 		model.encode(&mut cnf, None).unwrap();
+		println!("lp = {}", model.to_text(Format::Lp));
+		// assert_eq!(lp, model.to_text(Format::Lp));
 	}
 }
