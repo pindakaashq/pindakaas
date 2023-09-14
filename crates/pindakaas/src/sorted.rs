@@ -130,7 +130,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			&& matches!(y, IntVarEnc::Ord(_))
 			&& matches!(z, IntVarEnc::Ord(_))
 		{
-			self.merged(db, x, y, cmp, z, 0)
+			self.merged(db, x, y, &(**cmp).try_into().unwrap(), z, 0)
 		} else {
 			TernLeEncoder::default().encode(db, tern)
 		}
@@ -228,7 +228,7 @@ impl SortedEncoder {
 				&TernLeConstraint {
 					x,
 					y: &IntVarEnc::Const(C::zero()),
-					cmp: cmp.clone(),
+					cmp: &(cmp.clone()).into(),
 					z: y,
 				},
 			),
@@ -324,7 +324,7 @@ impl SortedEncoder {
 					&TernLeConstraint {
 						x: x1,
 						y: x2,
-						cmp,
+						cmp: &(cmp).into(),
 						z: y, // TODO no consistency implemented for this bound yet
 					},
 				)
@@ -362,14 +362,19 @@ impl SortedEncoder {
 						x1_floor.add(db, &mut TernLeEncoder::default(), &x2_floor, None, None)?;
 					self.encode(
 						db,
-						&TernLeConstraint::new(&x1_floor, &x2_floor, cmp.clone(), &z_floor),
+						&TernLeConstraint::new(
+							&x1_floor,
+							&x2_floor,
+							&(cmp.clone()).into(),
+							&z_floor,
+						),
 					)?;
 
 					let z_ceil =
 						x1_ceil.add(db, &mut TernLeEncoder::default(), &x2_ceil, None, None)?;
 					self.encode(
 						db,
-						&TernLeConstraint::new(&x1_ceil, &x2_ceil, cmp.clone(), &z_ceil),
+						&TernLeConstraint::new(&x1_ceil, &x2_ceil, &(cmp.clone()).into(), &z_ceil),
 					)?;
 
 					for c in num::iter::range_inclusive(C::zero(), c) {
@@ -514,7 +519,10 @@ mod tests {
 	use traced_test::test;
 
 	use super::*;
-	use crate::helpers::tests::{assert_sol, TestDB};
+	use crate::{
+		helpers::tests::{assert_sol, TestDB},
+		Comparator,
+	};
 
 	fn get_sorted_encoder(strategy: SortedStrategy) -> SortedEncoder {
 		SortedEncoder {
@@ -532,7 +540,7 @@ mod tests {
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 1, String::from("y")).into();
 		let z: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("z")).into();
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
-		let con = TernLeConstraint::new(&x, &y, LimitComp::Equal, &z);
+		let con = TernLeConstraint::new(&x, &y, &Comparator::Equal, &z);
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let sols = vec![
@@ -1398,7 +1406,7 @@ mod tests {
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 5, String::from("y")).into();
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4, 5, 6], LimitComp::Equal, &y);
-		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
+		let sols = db.brute_force_solve(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
 		assert_sol!(db => enc, con => sols);
@@ -1410,7 +1418,7 @@ mod tests {
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 6, String::from("y")).into();
 		db.num_var = db.num_var + y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4, 5, 6, 7], LimitComp::Equal, &y);
-		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
+		let sols = db.brute_force_solve(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
 		assert_sol!(db => enc, con => sols);

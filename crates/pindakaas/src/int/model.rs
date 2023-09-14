@@ -1,4 +1,4 @@
-use crate::{BddEncoder, Comparator, Encoder, Unsatisfiable};
+use crate::{int::helpers::Format, BddEncoder, Comparator, Encoder, Unsatisfiable};
 use itertools::Itertools;
 use std::{
 	cell::RefCell,
@@ -54,6 +54,20 @@ impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 	}
 }
 
+use crate::{CheckError, Checker};
+
+impl<Lit: Literal, C: Coefficient> Checker for Model<Lit, C> {
+	type Lit = Lit;
+	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
+		let a = self
+			.vars
+			.iter()
+			.flat_map(|(id, x)| x.assign(solution).map(|a| (*id, a)))
+			.collect::<HashMap<_, _>>();
+		self.cons.iter().try_for_each(|con| con.check::<Lit>(&a))
+	}
+}
+
 impl<C: Coefficient> Display for Obj<C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
@@ -105,25 +119,38 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		}
 	}
 
-	pub(crate) fn add_int_var_enc(&mut self, x: IntVarEnc<Lit, C>) -> Rc<RefCell<IntVar<C>>> {
+	pub(crate) fn add_int_var_enc(
+		&mut self,
+		x: IntVarEnc<Lit, C>,
+	) -> Result<Rc<RefCell<IntVar<C>>>, Unsatisfiable> {
 		let dom = x
 			.dom()
 			.iter(..)
 			.map(|d| d.end - C::one())
 			.collect::<Vec<_>>();
-		let var = self.new_var(&dom, false);
+		let var = self.new_var(&dom, false, None)?;
 		self.vars.insert(var.borrow().id, x);
-		var
+		Ok(var)
 	}
 
-	pub fn new_var(&mut self, dom: &[C], add_consistency: bool) -> Rc<RefCell<IntVar<C>>> {
-		self.num_var += 1;
-		Rc::new(RefCell::new(IntVar {
-			id: self.num_var,
-			dom: dom.iter().cloned().collect(),
-			add_consistency,
-			views: HashMap::default(),
-		}))
+	pub fn new_var(
+		&mut self,
+		dom: &[C],
+		add_consistency: bool,
+		lbl: Option<String>,
+	) -> Result<Rc<RefCell<IntVar<C>>>, Unsatisfiable> {
+		(!dom.is_empty())
+			.then(|| {
+				self.num_var += 1;
+				Rc::new(RefCell::new(IntVar {
+					id: self.num_var,
+					dom: dom.iter().cloned().collect(),
+					add_consistency,
+					views: HashMap::default(),
+					lbl,
+				}))
+			})
+			.ok_or(Unsatisfiable)
 	}
 
 	pub fn add_constraint(&mut self, constraint: Lin<C>) -> crate::Result {
@@ -132,7 +159,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	pub fn new_constant(&mut self, c: C) -> Rc<RefCell<IntVar<C>>> {
-		self.new_var(&[c], false)
+		self.new_var(&[c], false, None).unwrap()
 	}
 
 	// TODO pass Decomposer (with cutoff, etc..)
@@ -144,11 +171,12 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.cons
 			.iter()
 			.cloned()
-			.map(|lin| -> Result<Vec<_>, Unsatisfiable> {
-				match &lin.exp.terms[..] {
+			.map(|con| -> Result<Vec<_>, Unsatisfiable> {
+				println!("con = {con}");
+				match &con.exp.terms[..] {
 					[] => Ok(vec![]),
 					[term] => {
-						match lin.cmp {
+						match con.cmp {
 							Comparator::LessEq => {
 								term.x.borrow_mut().le(&C::zero());
 							}
@@ -162,11 +190,16 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 						todo!("Untested code: fixing of vars from unary constraints");
 						// Ok(vec![])
 					}
-					[x, y] => Ok(vec![Lin::new(&[x.clone(), y.clone()], lin.cmp, C::zero())]),
-					_ if lin.is_tern() => Ok(vec![lin]),
+					[x, y] => Ok(vec![Lin::new(
+						&[x.clone(), y.clone()],
+						con.cmp,
+						C::zero(),
+						None,
+					)]),
+					_ if con.is_tern() => Ok(vec![con]),
 					_ => {
 						let new_model =
-							BddEncoder::default().decompose::<Lit>(lin, model.num_var)?;
+							BddEncoder::default().decompose::<Lit>(con, model.num_var)?;
 						model.vars.extend(new_model.vars);
 						Ok(new_model.cons)
 					}
@@ -182,20 +215,45 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		&mut self,
 		db: &mut DB,
 		cutoff: Option<C>,
-	) -> crate::Result {
-		// Create decomposed model
-		let mut model = self.decompose()?;
+	) -> Result<Self, Unsatisfiable> {
+		// Create decomposed model and its aux vars
+		let mut decomposition = self.decompose()?;
 
+		// Encode (or retrieve encoded) variables (in order of id)
 		let mut all_views = HashMap::new();
-		for con in &model.cons {
+		let enc_vars = decomposition
+			.vars()
+			.iter()
+			.filter(|var| !var.borrow().is_constant())
+			.sorted_by_key(|var| var.borrow().id)
+			.map(|var| {
+				(
+					var.borrow().id,
+					self.vars
+						.entry(var.borrow().id)
+						.or_insert_with(|| {
+							var.borrow().encode(
+								db,
+								&mut all_views,
+								var.borrow().prefer_order(cutoff),
+							)
+						})
+						.clone(),
+				)
+			})
+			.collect::<HashMap<_, _>>();
+
+		for con in &decomposition.cons {
 			let Lin {
 				exp: LinExp { terms },
 				cmp,
 				k,
+				..
 			} = con;
 
-			assert!(terms.len() == 3 && k.is_zero(), "{model}");
+			assert!(terms.len() == 3 && k.is_zero(), "{decomposition}");
 
+			// Get term's variable's base encoding
 			let terms = terms
 				.iter()
 				.map(|term| {
@@ -205,20 +263,13 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 						if x.is_constant() {
 							x.encode(db, &mut all_views, x.prefer_order(cutoff))
 						} else {
-							assert!(x.id != 0);
-							model
-								.vars
-								.entry(x.id)
-								.or_insert_with(|| {
-									x.encode(db, &mut all_views, x.prefer_order(cutoff))
-								})
-								.clone()
+							enc_vars[&x.id].clone()
 						},
 					)
 				})
 				.collect::<Vec<_>>();
 
-
+			// Apply coefficient
 			let mut process_c = |i: usize, to_rhs: bool| {
 				terms[i]
 					.1
@@ -230,14 +281,12 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			let z = process_c(2, true);
 
 			TernLeEncoder::default()
-				.encode(
-					db,
-					&TernLeConstraint::new(&x, &y, (*cmp).try_into().unwrap(), &z),
-				)
+				.encode(db, &TernLeConstraint::new(&x, &y, cmp, &z))
 				.unwrap();
 		}
 
-		Ok(())
+		decomposition.vars = enc_vars;
+		Ok(decomposition)
 	}
 
 	pub fn propagate(&mut self, consistency: &Consistency) {
@@ -264,6 +313,18 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		self.num_var = other.num_var;
 		self.cons.extend(other.cons);
 	}
+	pub(crate) fn vars(&self) -> Vec<Rc<RefCell<IntVar<C>>>> {
+		self.cons
+			.iter()
+			.flat_map(|con| {
+				con.exp
+					.terms
+					.iter()
+					.filter_map(|term| (!term.x.borrow().is_constant()).then(|| term.x.clone()))
+			})
+			.unique_by(|x| x.borrow().id)
+			.collect()
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -276,6 +337,7 @@ pub struct Lin<C: Coefficient> {
 	pub exp: LinExp<C>,
 	pub cmp: Comparator,
 	pub k: C,
+	pub lbl: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -324,23 +386,25 @@ impl<C: Coefficient> Term<C> {
 }
 
 impl<C: Coefficient> Lin<C> {
-	pub fn new(terms: &[Term<C>], cmp: Comparator, k: C) -> Self {
+	pub fn new(terms: &[Term<C>], cmp: Comparator, k: C, lbl: Option<String>) -> Self {
 		Lin {
 			exp: LinExp {
 				terms: terms.to_vec(),
 			},
 			cmp,
 			k,
+			lbl,
 		}
 	}
 
-	pub fn tern(x: Term<C>, y: Term<C>, cmp: Comparator, z: Term<C>) -> Self {
+	pub fn tern(x: Term<C>, y: Term<C>, cmp: Comparator, z: Term<C>, lbl: Option<String>) -> Self {
 		Lin {
 			exp: LinExp {
 				terms: vec![x, y, Term::new(-z.c, z.x)],
 			},
 			cmp,
 			k: C::zero(),
+			lbl,
 		}
 	}
 
@@ -481,6 +545,25 @@ impl<C: Coefficient> Lin<C> {
 			== [C::one(), C::one(), -C::one()]
 			&& self.k == C::zero()
 	}
+
+	fn check<Lit: Literal>(&self, a: &HashMap<usize, C>) -> Result<(), CheckError<Lit>> {
+		let lhs = self
+			.exp
+			.terms
+			.iter()
+			.map(|term| term.c * a[&term.x.borrow().id])
+			.fold(C::zero(), C::add);
+
+		if match self.cmp {
+			Comparator::LessEq => lhs <= self.k,
+			Comparator::Equal => lhs == self.k,
+			Comparator::GreaterEq => lhs >= self.k,
+		} {
+			Ok(())
+		} else {
+			Err(CheckError::Unsatisfiable(Unsatisfiable))
+		}
+	}
 }
 
 // TODO perhaps id can be used by replacing vars HashMap to just vec
@@ -490,10 +573,10 @@ pub struct IntVar<C: Coefficient> {
 	pub(crate) dom: BTreeSet<C>, // TODO implement rangelist
 	pub(crate) add_consistency: bool,
 	pub(crate) views: HashMap<C, (usize, C)>,
+	lbl: Option<String>,
 }
 
 impl<C: Coefficient> IntVar<C> {
-
 	pub fn is_constant(&self) -> bool {
 		self.size() == 1
 	}
@@ -595,29 +678,171 @@ impl<C: Coefficient> IntVar<C> {
 			Some(cutoff) => C::from(self.dom.len()).unwrap() < cutoff,
 		}
 	}
+
+	pub fn lbl(&self) -> String {
+		self.lbl.clone().unwrap_or_else(|| self.id.to_string())
+	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{Cnf, Lin, Model};
+	use crate::{helpers::tests::TestDB, int::model::Format, Cnf, Lin, Model};
+
+	impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
+		fn check_assignment(&self, assignment: &HashMap<usize, C>) -> Result<(), CheckError<Lit>> {
+			self.cons
+				.iter()
+				.try_for_each(|con| con.check::<Lit>(assignment))
+		}
+	}
 
 	#[test]
 	fn model_test() {
 		let mut model = Model::<i32, i32>::default();
-		let x1 = model.new_var(&[0, 2], true);
-		let x2 = model.new_var(&[0, 3], true);
-		let x3 = model.new_var(&[0, 5], true);
+		let x1 = model
+			.new_var(&[0, 2], true, Some("x1".to_string()))
+			.unwrap();
+		let x2 = model
+			.new_var(&[0, 3], true, Some("x2".to_string()))
+			.unwrap();
+		let x3 = model
+			.new_var(&[0, 5], true, Some("x3".to_string()))
+			.unwrap();
 		let k = 6;
 		model
 			.add_constraint(Lin::new(
 				&[Term::new(1, x1), Term::new(1, x2), Term::new(1, x3)],
 				Comparator::LessEq,
 				k,
+				Some(String::from("c1")),
 			))
 			.unwrap();
 		let mut cnf = Cnf::new(0);
-		model.propagate(&Consistency::Bounds);
+		// model.propagate(&Consistency::Bounds);
 		model.encode(&mut cnf, None).unwrap();
+	}
+
+	macro_rules! lp_test_case {
+		($lp:expr) => {
+			use super::*;
+
+			#[test]
+			fn test() {
+				let mut model = Model::<i32, i32>::from_string($lp.into(), Format::Lp).unwrap();
+				// let mut cnf = Cnf::new(0);
+				// let vars = decomp_model.vars();
+
+				let vars = model.vars();
+				let sols = vars
+					.iter()
+					.map(|var| var.borrow().dom.clone().into_iter().collect::<Vec<_>>())
+					.multi_cartesian_product()
+					.map(|a| {
+						vars.iter()
+							.map(|var| var.borrow().id.clone())
+							.zip(a)
+							.collect::<HashMap<_, _>>()
+					})
+					.filter(|a| model.check_assignment(a).is_ok())
+					.collect::<Vec<_>>();
+
+				let mut db = TestDB::new(0);
+				let decomposition = model.encode(&mut db, None).unwrap();
+				println!("decomposition = {decomposition}");
+
+				// Count principal variables
+				let principal_enc_vars = vars
+					.iter()
+					.map(|var| (var.borrow().id, &decomposition.vars[&var.borrow().id]))
+					.collect::<HashMap<_, _>>();
+
+				db.num_var = principal_enc_vars
+					.iter()
+					.map(|(_, var)| var.lits())
+					.sum::<usize>() as i32;
+
+				let lit_assignments = db.solve().into_iter().sorted().collect::<Vec<_>>();
+
+				let int_assignments = lit_assignments
+					.iter()
+					.flat_map(|lit_assignment| {
+						let int_assignment = principal_enc_vars
+							.iter()
+							.flat_map(|(id, var)| var.assign(&lit_assignment).map(|a| (*id, a)))
+							.collect::<HashMap<_, _>>();
+
+						// Check principal constraints
+						model
+							.check_assignment(&int_assignment)
+							.map(|_| int_assignment)
+					})
+					.collect::<Vec<_>>();
+
+				let extra_int_assignments = int_assignments
+					.iter()
+					.filter(|a| !sols.contains(a))
+					.cloned()
+					.collect::<Vec<_>>();
+
+				let missing_int_assignments = sols
+					.iter()
+					.filter(|a| !int_assignments.contains(a))
+					.cloned()
+					.collect::<Vec<_>>();
+
+				assert!(
+					extra_int_assignments.is_empty() && missing_int_assignments.is_empty(),
+					"{extra_int_assignments:?}\n{missing_int_assignments:?}"
+				);
+
+				assert_eq!(int_assignments, sols);
+			}
+		};
+	}
+
+	mod lp_1 {
+		lp_test_case!(
+			r"
+Subject To
+  c0: + 2 x1 + 3 x2 + 5 x3 <= 6
+Binary
+  x1
+  x2
+  x3
+End
+"
+		);
+	}
+
+	mod lp_2 {
+		lp_test_case!(
+			r"
+Subject To
+  c0: + 2 x1 + 3 x2 + 5 x3 >= 4
+Binary
+  x1
+  x2
+  x3
+End
+"
+		);
+	}
+
+	mod soh {
+		lp_test_case!(
+			r"
+Subject To
+\ c0: + 1 x1 - 1 x3 >= 0
+\ c1: + 1 x2 - 1 x4 >= 0
+  c2: + 1 x1 + 1 x2 - 1 x3 - 1 x4 <= -1
+Bounds
+  0 <= x1 <= 5
+  0 <= x2 <= 5
+  0 <= x3 <= 5
+  0 <= x4 <= 5
+End
+"
+		);
 	}
 }

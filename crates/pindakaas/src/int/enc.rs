@@ -6,9 +6,10 @@ use itertools::Itertools;
 use std::fmt::Display;
 
 use crate::int::{IntVar, TernLeConstraint, TernLeEncoder};
+use crate::Comparator;
 use crate::{
 	helpers::{as_binary, is_powers_of_two, unsigned_binary_range_ub},
-	linear::{LimitComp, LinExp, Part},
+	linear::{LinExp, Part},
 	trace::{emit_clause, new_var},
 	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
 	Unsatisfiable,
@@ -356,7 +357,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				&TernLeConstraint {
 					x: &IntVarEnc::Const(self.lb),
 					y: &IntVarEnc::Const(C::zero()),
-					cmp: LimitComp::LessEq,
+					cmp: &Comparator::LessEq,
 					z: &IntVarEnc::Bin(self.clone()),
 				},
 			)?;
@@ -366,7 +367,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			&TernLeConstraint {
 				x: &IntVarEnc::Bin(self.clone()),
 				y: &IntVarEnc::Const(C::zero()),
-				cmp: LimitComp::LessEq,
+				cmp: &Comparator::LessEq,
 				z: &IntVarEnc::Const(self.ub),
 			},
 		)
@@ -487,7 +488,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				&TernLeConstraint {
 					x: &IntVarEnc::Bin(self.clone()),
 					y: &IntVarEnc::Const(y),
-					cmp: LimitComp::Equal,
+					cmp: &Comparator::Equal,
 					z: &IntVarEnc::Bin(z_bin.clone()),
 				},
 			)?;
@@ -577,7 +578,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 						&TernLeConstraint::new(
                             &x_ord,
 							&IntVarEnc::Const(C::zero()),
-							LimitComp::LessEq,
+                            &Comparator::LessEq,
 							&x_bin.into(),
 						),
 					)
@@ -679,7 +680,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 					&TernLeConstraint {
 						x: &IntVarEnc::Bin(x_bin.clone()),
 						y,
-						cmp: LimitComp::Equal,
+						cmp: &Comparator::Equal,
 						z: &z,
 					},
 				)?;
@@ -832,6 +833,10 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 				IntVarEnc::Const(c) => IntVarEnc::Const(*c * rhs),
 			}
 		}
+	}
+
+	pub(crate) fn assign(&self, solution: &[Lit]) -> Result<C, CheckError<Lit>> {
+		LinExp::from(self).assign(solution)
 	}
 }
 

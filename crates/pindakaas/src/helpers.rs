@@ -40,11 +40,7 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 ) -> Result {
 	// TODO doctor out type of expression (clauses containing conjunctions?)
 
-	for cls in expression
-		.into_iter()
-		.map(|cls| cls.into_iter())
-		.multi_cartesian_product()
-	{
+	for cls in expression.into_iter().multi_cartesian_product() {
 		let cls = cls.concat(); // filter out [] (empty conjunctions?) of the clause
 		if FILTER_TRIVIAL_CLAUSES {
 			let mut lits = HashSet::<DB::Lit>::with_capacity(cls.len());
@@ -359,6 +355,8 @@ pub mod tests {
 		expecting_no_equivalences: Option<HashMap<Lit, Lit>>,
 	}
 
+	const ONLY_OUTPUT: bool = true;
+
 	impl TestDB {
 		pub fn new(num_var: i32) -> TestDB {
 			if OUTPUT_SPLR {
@@ -423,8 +421,7 @@ pub mod tests {
 			self
 		}
 
-		#[allow(dead_code)]
-		pub fn generate_solutions(&self, check: impl Fn(&[i32]) -> bool, n: i32) -> Vec<Vec<i32>> {
+		pub fn brute_force_solve(&self, check: impl Fn(&[i32]) -> bool, n: i32) -> Vec<Vec<i32>> {
 			if n > 32 {
 				unimplemented!(
 					"Cannot generate solutions using binary shifts with more than 32 variables."
@@ -464,7 +461,7 @@ pub mod tests {
 
 		pub fn with_check(mut self, checker: fn(&[i32]) -> bool) -> TestDB {
 			if self.solutions.is_none() && self.num_var <= GENERATE_EXPECTED_SOLUTIONS {
-				let solutions = self.generate_solutions(checker, self.num_var);
+				let solutions = self.brute_force_solve(checker, self.num_var);
 				self.expect_solutions(solutions)
 			} else {
 				self.check = Some(checker);
@@ -473,33 +470,7 @@ pub mod tests {
 			}
 		}
 
-		pub fn check_complete(&mut self) {
-			self.unchecked = false;
-			if let Some(clauses) = &self.clauses {
-				let missing: Vec<Vec<i32>> = clauses
-					.iter()
-					.filter(|exp| exp.0 == false)
-					.map(|exp| exp.1.clone())
-					.collect();
-				// assert!(false, "{:?} {:?}", clauses, missing);
-				assert!(
-					missing.is_empty(),
-					"clauses are missing from the encoding: {:?}",
-					missing
-				);
-			}
-			if self.solutions.is_none()
-				&& self.check.is_none()
-				&& self.expected_vars.is_none()
-				&& self.expected_cls.is_none()
-				&& self.expected_lits.is_none()
-			{
-				return;
-			}
-			if OUTPUT_SPLR {
-				eprintln!("let result: Vec<Vec<i32>> = slv.iter().collect();");
-			}
-			const ONLY_OUTPUT: bool = true;
+		pub fn solve(&mut self) -> Vec<Vec<i32>> {
 			let mut from_slv: Vec<Vec<i32>> = Vec::new();
 			while let Ok(Certificate::SAT(model)) = self.slv.solve() {
 				let solution = if ONLY_OUTPUT {
@@ -528,13 +499,45 @@ pub mod tests {
 			for sol in &mut from_slv {
 				sol.sort_by(|a, b| a.abs().cmp(&b.abs()));
 			}
+			from_slv
+		}
+
+		pub fn check_complete(&mut self) {
+			self.unchecked = false;
+			if let Some(clauses) = &self.clauses {
+				let missing: Vec<Vec<i32>> = clauses
+					.iter()
+					.filter(|exp| exp.0 == false)
+					.map(|exp| exp.1.clone())
+					.collect();
+				// assert!(false, "{:?} {:?}", clauses, missing);
+				assert!(
+					missing.is_empty(),
+					"clauses are missing from the encoding: {:?}",
+					missing
+				);
+			}
+			if self.solutions.is_none()
+				&& self.check.is_none()
+				&& self.expected_vars.is_none()
+				&& self.expected_cls.is_none()
+				&& self.expected_lits.is_none()
+			{
+				return;
+			}
+			if OUTPUT_SPLR {
+				eprintln!("let result: Vec<Vec<i32>> = slv.iter().collect();");
+			}
+
+			let mut from_slv = self.solve();
+
 			if let Some(check) = &self.check {
 				for sol in &mut from_slv {
 					assert!(check(sol), "solution {:?} failed check", sol)
 				}
 			}
 			if let Some(solutions) = &self.solutions {
-				// we are only interested in literals present in the expected solutions (and not in auxiliary variables)
+				// solutions only contain principal variables; so we might have to filter from_slv if it contains aux vars
 				from_slv.sort();
 
 				let from_slv_output = if ONLY_OUTPUT {

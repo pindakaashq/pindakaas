@@ -5,11 +5,13 @@ use itertools::Itertools;
 
 #[allow(unused_imports)]
 use crate::{
-	int::{IntVarEnc, IntVarOrd, Lin, Model, Term},
+	int::{IntVarEnc, IntVarOrd, Lin, LinExp, Model, Term},
 	linear::LimitComp,
 	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
-use crate::{Literal, Unsatisfiable};
+use crate::{Comparator, Literal, Unsatisfiable};
+
+const SORT_TERMS: bool = true;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
 #[derive(Default, Clone)]
@@ -34,12 +36,33 @@ impl<C: Coefficient> BddEncoder<C> {
 		num_var: usize,
 	) -> crate::Result<Model<Lit, C>, Unsatisfiable> {
 		let mut model = Model::<Lit, C>::new(num_var);
+
+		// sort by *decreasing* ub
+
+		let lin = if SORT_TERMS {
+			Lin {
+				exp: LinExp {
+					terms: lin
+						.exp
+						.terms
+						.iter()
+						.cloned()
+						.sorted_by(|a: &Term<C>, b: &Term<C>| b.ub().cmp(&a.ub()))
+						.collect(),
+				},
+				..lin
+			}
+		} else {
+			lin
+		};
+
 		let ys = construct_bdd(&lin);
 
 		// TODO cannot avoid?
 		#[allow(clippy::needless_collect)]
 		let ys = ys.into_iter()
-			.map(|nodes| {
+			.enumerate()
+			.flat_map(|(i, nodes)| {
 				let mut views = HashMap::new();
 				let dom = nodes
 					.into_iter(..)
@@ -53,13 +76,15 @@ impl<C: Coefficient> BddEncoder<C> {
 						}
 					})
 					.collect::<Vec<_>>();
-				let y = model.new_var(&dom, self.add_consistency);
-				let next_id = y.borrow().id + 1;
-				y.borrow_mut().views = views
-					.into_iter()
-					.map(|(val, view)| (val, (next_id, view)))
-					.collect();
-				y
+				model
+					.new_var(&dom, self.add_consistency, Some(format!("bdd_{}", i)))
+					.map(|y| {
+						y.borrow_mut().views = views
+							.into_iter()
+							.map(|(val, view)| (val, (y.borrow().id + 1, view)))
+							.collect();
+						y
+					})
 			})
 			.map(Term::from)
 			.collect::<Vec<_>>();
@@ -73,7 +98,7 @@ impl<C: Coefficient> BddEncoder<C> {
 			.zip(ys)
 			.try_fold(first, |curr, (term, next)| {
 				model
-					.add_constraint(Lin::tern(curr, term.clone(), lin.cmp, next.clone()))
+					.add_constraint(Lin::tern(curr, term.clone(), lin.cmp, next.clone(), None))
 					.map(|_| next)
 			})?;
 
@@ -97,13 +122,12 @@ where
 			.iter()
 			.enumerate()
 			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
-			.sorted_by(|a: &IntVarEnc<_, C>, b: &IntVarEnc<_, C>| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
-			.map(|x| model.add_int_var_enc(x))
+			.flat_map(|x| model.add_int_var_enc(x))
 			.map(Term::from)
 			.collect::<Vec<_>>();
 
 		model.extend(self.decompose::<DB::Lit>(
-			Lin::new(&xs, lin.cmp.clone().try_into().unwrap(), *lin.k),
+			Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None),
 			model.num_var,
 		)?);
 
@@ -113,6 +137,9 @@ where
 }
 
 fn construct_bdd<C: Coefficient>(lin: &Lin<C>) -> Vec<IntervalMap<C, BddNode<C>>> {
+	// Ex. 2 x1 {0,2} + 3 x2 {0,3} + 5 x3 {0,5} <= 6
+	// Calculate the lower and upper bounds of the first i terms ++ (0,k)
+	// Ex. [(0,2), (0,5), (0,10), (0,6)]
 	let bounds = lin
 		.exp
 		.terms
@@ -125,6 +152,9 @@ fn construct_bdd<C: Coefficient>(lin: &Lin<C>) -> Vec<IntervalMap<C, BddNode<C>>
 		.collect::<Vec<_>>();
 
 	// TODO ? also hard to avoid?
+	// Calculate the margin for the partial sum up to term i before we get UNSAT/SAT
+	// Ex. [(1,6), (-2,6), (-4,6) ]
+	//  (-2,6) means at the 2nd term, the sum cannot exceed 6 (otherwise, it's UNSAT), and cannot be less than 2 (otherwise it's SAT; if the partial sum is 1, we cannot violate the constraint with only have 5 left in the last term)
 	#[allow(clippy::needless_collect)]
 	let margins = lin
 		.exp
@@ -137,12 +167,7 @@ fn construct_bdd<C: Coefficient>(lin: &Lin<C>) -> Vec<IntervalMap<C, BddNode<C>>
 		})
 		.collect::<Vec<_>>();
 
-	let inf = lin
-		.exp
-		.terms
-		.iter()
-		.fold(C::zero(), |a, term| a + term.ub())
-		+ C::one();
+	let (neg_inf, pos_inf) = (lin.lb() - C::one(), lin.ub() + C::one());
 
 	let mut ws = margins
 		.into_iter()
@@ -150,15 +175,19 @@ fn construct_bdd<C: Coefficient>(lin: &Lin<C>) -> Vec<IntervalMap<C, BddNode<C>>
 		.chain(std::iter::once((lin.k, lin.k)))
 		.zip(bounds)
 		.map(|((lb_margin, ub_margin), (lb, ub))| {
-			match lin.cmp.try_into().unwrap() {
-				LimitComp::LessEq => vec![
-					(lb_margin > lb).then_some((C::zero()..(lb_margin + C::one()), BddNode::Val)),
-					(ub_margin <= ub).then_some(((ub_margin + C::one())..inf, BddNode::Gap)),
+			match lin.cmp {
+				Comparator::LessEq => vec![
+					(lb_margin > lb).then_some((neg_inf..(lb_margin + C::one()), BddNode::Val)),
+					(ub_margin <= ub).then_some(((ub_margin + C::one())..pos_inf, BddNode::Gap)),
 				],
-				LimitComp::Equal => vec![
-					(lb_margin > lb).then_some((C::zero()..lb_margin, BddNode::Gap)),
+				Comparator::Equal => vec![
+					(lb_margin > lb).then_some((neg_inf..lb_margin, BddNode::Gap)),
 					(lb_margin == ub_margin).then_some((lin.k..(lin.k + C::one()), BddNode::Val)),
-					(ub_margin <= ub).then_some(((ub_margin + C::one())..inf, BddNode::Gap)),
+					(ub_margin <= ub).then_some(((ub_margin + C::one())..pos_inf, BddNode::Gap)),
+				],
+				Comparator::GreaterEq => vec![
+					(ub_margin < ub).then_some(((lb_margin + C::one())..pos_inf, BddNode::Gap)),
+					(lb_margin >= lb).then_some((neg_inf..(lb_margin + C::one()), BddNode::Val)),
 				],
 			}
 			.into_iter()

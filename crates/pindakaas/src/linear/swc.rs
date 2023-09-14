@@ -39,7 +39,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.iter()
 			.enumerate()
 			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
-			.map(|x| model.add_int_var_enc(x))
+			.flat_map(|x| model.add_int_var_enc(x))
 			.map(Term::from)
 			.collect::<Vec<_>>();
 		let n = xs.len();
@@ -49,10 +49,10 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 		let ys = std::iter::once(model.new_constant(C::zero()))
 			.chain(
 				(1..n)
-					.map(|_| {
+					.flat_map(|i| {
 						let dom =
 							num::iter::range_inclusive(-*lin.k, C::zero()).collect::<Vec<_>>();
-						model.new_var(&dom, self.add_consistency)
+						model.new_var(&dom, self.add_consistency, Some(format!("swc_{}", i)))
 					})
 					.take(n),
 			)
@@ -66,16 +66,12 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.tuple_windows()
 			.zip(xs.into_iter())
 			.try_for_each(|((y_curr, y_next), x)| {
-				model.add_constraint(Lin::tern(
-					x,
-					y_next,
-					lin.cmp.clone().try_into().unwrap(),
-					y_curr,
-				))
+				model.add_constraint(Lin::tern(x, y_next, lin.cmp.clone().into(), y_curr, None))
 			})?;
 
 		model.propagate(&self.add_propagation);
-		model.encode(db, self.cutoff)
+		model.encode(db, self.cutoff)?;
+		Ok(())
 	}
 }
 
