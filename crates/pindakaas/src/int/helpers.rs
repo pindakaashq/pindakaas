@@ -67,65 +67,38 @@ End
 				)
 			}
 			Format::Opb => {
-				todo!();
-				/*
-				println!("Write LP {path:?}");
+				println!("Write OPB");
 
-				let mut output = File::create(path)?;
+				// let mut output = File::create(path)?;
 
-				use std::io::Write;
+				// use std::io::Write;
 				//let pbs = self.pbs.iter().map(|pb| pb.into::<())
-				let vars = self
-					.pbs
-					.iter()
-					.flat_map(|pb| pb.exp.terms())
-					.map(|v| v.0)
-					.collect::<HashSet<Lit>>()
-					.len();
+				let vars = self.vars().iter().unique_by(|x| x.borrow().id).count();
 
-				writeln!(
-					output,
-					"* #variable= {} #constraint= {}",
+				format!(
+					"* #variable= {} #constraint= {}
+{} 
+                   ",
 					vars,
-					self.pbs.len()
-				)?;
-
-				writeln!(output, ";",)?;
-
-				for pb in &self.pbs {
-					let pb = if pb.cmp == Comparator::LessEq && rewrite_leqs {
-						let mut pb = pb.clone();
-						pb.exp *= -1;
-						pb.k = -pb.k;
-						pb.cmp = Comparator::GreaterEq;
-						pb
-					} else {
-						pb.clone()
-					};
-					for (lit, coef) in pb.exp.terms() {
-						write!(
-							output,
-							//"{} {} x{} ",
-							"{:+} x{} ",
-							pb.exp.mult * coef,
-							//if coef.is_positive() { "+" } else { "-" },
-							//coef.abs(),
-							lit,
-						)?;
-					}
-					writeln!(
-						output,
-						"{} {};",
-						match pb.cmp {
-							pindakaas::Comparator::LessEq => "<=",
-							pindakaas::Comparator::Equal => "=",
-							pindakaas::Comparator::GreaterEq => ">=",
-						},
-						pb.k - pb.exp.add,
-					)?;
-				}
-				Ok(())
-				*/
+					self.cons.len(),
+					self.cons
+						.iter()
+						.map(|con| format!(
+							"{} {} {}",
+							con.exp
+								.terms
+								.iter()
+								.map(|term| format!("{:+} {}", term.c, term.x.borrow().lbl(),))
+								.join(" "),
+							match con.cmp {
+								Comparator::LessEq => "<=",
+								Comparator::Equal => "=",
+								Comparator::GreaterEq => ">=",
+							},
+							con.k
+						))
+						.join(";\n")
+				)
 			}
 		}
 	}
