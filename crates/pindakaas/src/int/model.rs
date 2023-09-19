@@ -1,4 +1,4 @@
-use crate::{int::helpers::Format, BddEncoder, Comparator, Encoder, Unsatisfiable};
+use crate::{BddEncoder, Comparator, Encoder, Unsatisfiable};
 use itertools::Itertools;
 use std::{
 	cell::RefCell,
@@ -634,7 +634,7 @@ impl<C: Coefficient> IntVar<C> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{helpers::tests::TestDB, int::model::Format, Cnf, Lin, Model};
+	use crate::{helpers::tests::TestDB, Cnf, Format, Lin, Model};
 
 	impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		fn check_assignment(&self, assignment: &HashMap<usize, C>) -> Result<(), CheckError<Lit>> {

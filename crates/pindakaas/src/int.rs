@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 
 pub(crate) use constrain::{TernLeConstraint, TernLeEncoder};
 pub(crate) use enc::{IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
+pub use helpers::Format;
 pub use model::{Consistency, IntVar, Lin, LinExp, Model, Term};
 
 use crate::{
