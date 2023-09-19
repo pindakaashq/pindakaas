@@ -38,7 +38,6 @@ impl<C: Coefficient> BddEncoder<C> {
 		let mut model = Model::<Lit, C>::new(num_var);
 
 		// sort by *decreasing* ub
-
 		let lin = if SORT_TERMS {
 			Lin {
 				exp: LinExp {
@@ -56,23 +55,32 @@ impl<C: Coefficient> BddEncoder<C> {
 			lin
 		};
 
-		let mut ys = (0..lin.exp.terms.len())
-			.map(|i| rest(&lin, i))
-			.chain(std::iter::once((C::zero(), C::zero())))
-			.map(|(inner_lb, inner_ub)| (lin.k - inner_ub, lin.k - inner_lb)) // find inner bounds
-			.into_iter()
-			.zip(
+		// Ex. 2 x1 {0,2} + 3 x2 {0,3} + 5 x3 {0,5} <= 6
+
+		// We calculate the bounds of the partial sum
+		// Ex. [(0,0), (0,2), (0,5), (0,10)]
+		let mut ys = std::iter::once((C::zero(), C::zero()))
+			.chain(
 				lin.exp
 					.terms
 					.iter()
 					.map(|term| (term.lb(), term.ub()))
-					.chain(std::iter::once((C::zero(), lin.k)))
 					.scan((C::zero(), C::zero()), |state, (lb, ub)| {
 						*state = (state.0 + lb, state.1 + ub);
 						Some(*state)
 					}),
 			)
-			.map(|((inner_lb, inner_ub), (outer_lb, outer_ub))| {
+			.map(|(outer_lb, outer_ub)| {
+				// From each outer bound, we can calculate the distance to k as k - (UB - ub)
+				// Ex. [ k - (10,0), k - (8,0), k - (5,0), k - (0,0) ] // remaining weight for each term
+				//       = [ (-4,6), (-2, 6), (1, 6), (0,6) ] // distance to k
+				let (inner_lb, inner_ub) = (
+					(lin.k - (lin.ub() - outer_ub)),
+					(lin.k - (lin.lb() - outer_lb)),
+				);
+
+				// The distance to k determines sat/unsat (1/0 terminal)
+				// And the outer bounds are used as plus/minus-infinity
 				match lin.cmp {
 					Comparator::LessEq => vec![
 						(outer_lb..=inner_lb, BddNode::Val),
@@ -95,6 +103,7 @@ impl<C: Coefficient> BddEncoder<C> {
 				.into_iter()
 				.filter(|(iv, _)| !iv.is_empty())
 				.map(|(iv, node)| {
+					// Turn inclusive ranges into regular ranges for IntervalMap
 					let (lb, ub) = iv.into_inner();
 					(lb..(ub + C::one()), node)
 				})
@@ -102,9 +111,28 @@ impl<C: Coefficient> BddEncoder<C> {
 			})
 			.collect::<Vec<_>>();
 
+		// Ex. base case:
+		// []
+		// []
+		// [0..1 => Val]
+		// [0..6 => Val, 7..10 => Gap]
+
+
+		// Construct BDD
+		// Ex.
+		// [0..0 => Val]
+		// [0..1 => Val, 2..2 => Val]
+		// [0..1 => Val, 2..5 => Val]
+		// [0..6 => Val, 7..10 => Gap]
 		bdd(0, &lin.exp.terms, C::zero(), &mut ys);
 
-		// TODO cannot avoid?
+
+		// Turn BDD into integer variables and constraints
+		// Ex.
+		// x1 ∈ {0,2} + y_0 ∈ {0} ≤ y_1 ∈ {1,2}
+		// x2 ∈ {0,3} + y_1 ∈ {1,2} ≤ y_2 ∈ {1,5}
+		// x3 ∈ {0,5} + y_2 ∈ {1,5} ≤ y_3 ∈ {6}
+		// TODO since both borrow model, I don't know how to avoid needless_collect
 		#[allow(clippy::needless_collect)]
 		let ys = ys.into_iter()
 			.enumerate()
@@ -183,21 +211,6 @@ where
 		model.encode(db, self.cutoff)?;
 		Ok(())
 	}
-}
-
-
-/// m(i) = ∑_i^n ( ub(x_i), lb(x_i) )
-fn rest<C: Coefficient>(lin: &Lin<C>, i: usize) -> (C, C) {
-	(
-		lin.exp.terms[i..]
-			.iter()
-			.map(|term| term.lb())
-			.fold(C::zero(), C::add),
-		lin.exp.terms[i..]
-			.iter()
-			.map(|term| term.ub())
-			.fold(C::zero(), C::add),
-	)
 }
 
 #[derive(Debug, Clone, PartialEq)]
