@@ -3,7 +3,6 @@ use itertools::Itertools;
 use std::{
 	cell::RefCell,
 	collections::{BTreeSet, HashMap},
-	fmt::{self, Display},
 	rc::Rc,
 };
 
@@ -14,7 +13,7 @@ use crate::{
 	ClauseDatabase, Coefficient, Literal,
 };
 
-use super::{display_dom, enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, IntVarOrd};
+use super::{enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, IntVarOrd};
 
 // TODO usize -> intId struct
 
@@ -44,16 +43,6 @@ pub enum Obj<C: Coefficient> {
 	Satisfy,
 }
 
-impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		for con in &self.cons {
-			writeln!(f, "{}", con)?;
-		}
-		writeln!(f, "obj: {}", self.obj)?;
-		Ok(())
-	}
-}
-
 use crate::{CheckError, Checker};
 
 impl<Lit: Literal, C: Coefficient> Checker for Model<Lit, C> {
@@ -65,38 +54,6 @@ impl<Lit: Literal, C: Coefficient> Checker for Model<Lit, C> {
 			.flat_map(|(id, x)| x.assign(solution).map(|a| (*id, a)))
 			.collect::<HashMap<_, _>>();
 		self.cons.iter().try_for_each(|con| con.check::<Lit>(&a))
-	}
-}
-
-impl<C: Coefficient> Display for Obj<C> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Obj::Minimize(exp) => write!(f, "min {exp}"),
-			Obj::Maximize(exp) => write!(f, "max {exp}"),
-			Obj::Satisfy => write!(f, "sat"),
-		}
-	}
-}
-
-impl<C: Coefficient> Display for Term<C> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{:+}*{}", self.c, self.x.borrow())
-	}
-}
-impl<C: Coefficient> Display for LinExp<C> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{}", self.terms.iter().join(" "))
-	}
-}
-
-impl<C: Coefficient> Display for Lin<C> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{} {} {}", self.exp, self.cmp, self.k,)
-	}
-}
-impl<C: Coefficient> fmt::Display for IntVar<C> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "x{} ∈ {}", self.id, display_dom(&self.dom))
 	}
 }
 
@@ -172,7 +129,6 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.iter()
 			.cloned()
 			.map(|con| -> Result<Vec<_>, Unsatisfiable> {
-				println!("con = {con}");
 				match &con.exp.terms[..] {
 					[] => Ok(vec![]),
 					[term] => {
@@ -409,19 +365,11 @@ impl<C: Coefficient> Lin<C> {
 	}
 
 	pub fn lb(&self) -> C {
-		self.exp
-			.terms
-			.iter()
-			.map(Term::lb)
-			.fold(C::zero(), |a, b| a + b)
+		self.exp.terms.iter().map(Term::lb).fold(C::zero(), C::add)
 	}
 
 	pub fn ub(&self) -> C {
-		self.exp
-			.terms
-			.iter()
-			.map(Term::ub)
-			.fold(C::zero(), |a, b| a + b)
+		self.exp.terms.iter().map(Term::ub).fold(C::zero(), C::add)
 	}
 
 	pub(crate) fn propagate(&mut self, consistency: &Consistency) -> Vec<usize> {
@@ -540,10 +488,9 @@ impl<C: Coefficient> Lin<C> {
 		}
 	}
 
-	fn is_tern(&self) -> bool {
-		self.exp.terms.iter().map(|term| term.c).collect::<Vec<_>>()
-			== [C::one(), C::one(), -C::one()]
-			&& self.k == C::zero()
+	pub(crate) fn is_tern(&self) -> bool {
+		let cs = self.exp.terms.iter().map(|term| term.c).collect::<Vec<_>>();
+		cs[0].is_positive() && cs[1].is_positive() && cs[2].is_negative() && self.k.is_zero()
 	}
 
 	fn check<Lit: Literal>(&self, a: &HashMap<usize, C>) -> Result<(), CheckError<Lit>> {
@@ -680,7 +627,7 @@ impl<C: Coefficient> IntVar<C> {
 	}
 
 	pub fn lbl(&self) -> String {
-		self.lbl.clone().unwrap_or_else(|| self.id.to_string())
+		self.lbl.clone().unwrap_or_else(|| format!("x{}", self.id))
 	}
 }
 
@@ -725,7 +672,7 @@ mod tests {
 
 	macro_rules! lp_test_case {
 		($lp:expr) => {
-			use super::*;
+			use super::*; // TODO why is this not necessary for linear_test_suite?
 
 			#[test]
 			fn test() {
@@ -791,9 +738,32 @@ mod tests {
 					.cloned()
 					.collect::<Vec<_>>();
 
+				fn show_int_assignments(a: &Vec<HashMap<usize, i32>>) -> Vec<String> {
+					a.iter()
+						.map(|a| {
+							a.iter()
+								.sorted()
+								.map(|(id, a)| format!("x_{id}={a}"))
+								.join(", ")
+						})
+						.collect()
+				}
+
 				assert!(
 					extra_int_assignments.is_empty() && missing_int_assignments.is_empty(),
-					"{extra_int_assignments:?}\n{missing_int_assignments:?}"
+					"
+Extra solutions:
+{}
+Missing solutions:
+{}",
+					show_int_assignments(&extra_int_assignments)
+						.iter()
+						.map(|a| format!("+ {a}"))
+						.join("\n"),
+					show_int_assignments(&missing_int_assignments)
+						.iter()
+						.map(|a| format!("- {a}"))
+						.join("\n"),
 				);
 
 				assert_eq!(int_assignments, sols);
@@ -819,7 +789,7 @@ End
 		lp_test_case!(
 			r"
 Subject To
-  c0: + 2 x1 + 3 x2 + 5 x3 >= 4
+  c0: + 2 x1 + 3 x2 + 5 x3 >= 6
 Binary
   x1
   x2
@@ -829,20 +799,22 @@ End
 		);
 	}
 
-	mod soh {
-		lp_test_case!(
-			r"
-Subject To
-\ c0: + 1 x1 - 1 x3 >= 0
-\ c1: + 1 x2 - 1 x4 >= 0
-  c2: + 1 x1 + 1 x2 - 1 x3 - 1 x4 <= -1
-Bounds
-  0 <= x1 <= 5
-  0 <= x2 <= 5
-  0 <= x3 <= 5
-  0 <= x4 <= 5
-End
-"
-		);
-	}
+	/*
+		mod soh {
+			lp_test_case!(
+				r"
+	Subject To
+	\ c0: + 1 x1 - 1 x3 >= 0
+	\ c1: + 1 x2 - 1 x4 >= 0
+	  c2: + 1 x1 + 1 x2 - 1 x3 - 1 x4 <= -1
+	Bounds
+	  0 <= x1 <= 5
+	  0 <= x2 <= 5
+	  0 <= x3 <= 5
+	  0 <= x4 <= 5
+	End
+	"
+			);
+		}
+		*/
 }

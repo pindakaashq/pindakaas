@@ -1,4 +1,5 @@
 mod constrain;
+mod display;
 mod enc;
 mod helpers;
 mod model;
