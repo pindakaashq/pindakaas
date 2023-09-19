@@ -56,7 +56,53 @@ impl<C: Coefficient> BddEncoder<C> {
 			lin
 		};
 
-		let ys = construct_bdd(&lin);
+		let mut ys = (0..lin.exp.terms.len())
+			.map(|i| rest(&lin, i))
+			.chain(std::iter::once((C::zero(), C::zero())))
+			.map(|(inner_lb, inner_ub)| (lin.k - inner_ub, lin.k - inner_lb)) // find inner bounds
+			.into_iter()
+			.zip(
+				lin.exp
+					.terms
+					.iter()
+					.map(|term| (term.lb(), term.ub()))
+					.chain(std::iter::once((C::zero(), lin.k)))
+					.scan((C::zero(), C::zero()), |state, (lb, ub)| {
+						*state = (state.0 + lb, state.1 + ub);
+						Some(*state)
+					}),
+			)
+			.map(|((inner_lb, inner_ub), (outer_lb, outer_ub))| {
+				match lin.cmp {
+					Comparator::LessEq => vec![
+						(outer_lb..=inner_lb, BddNode::Val),
+						(inner_ub + C::one()..=outer_ub, BddNode::Gap),
+					],
+					Comparator::Equal => {
+						vec![
+							(outer_lb..=(inner_lb - C::one()), BddNode::Gap),
+							(inner_ub..=inner_lb, BddNode::Val),
+							((inner_ub + C::one())..=outer_ub, BddNode::Gap),
+						]
+					}
+					Comparator::GreaterEq => {
+						vec![
+							(outer_lb..=(inner_lb - C::one()), BddNode::Gap),
+							(inner_ub..=outer_ub, BddNode::Val),
+						]
+					}
+				}
+				.into_iter()
+				.filter(|(iv, _)| !iv.is_empty())
+				.map(|(iv, node)| {
+					let (lb, ub) = iv.into_inner();
+					(lb..(ub + C::one()), node)
+				})
+				.collect::<IntervalMap<_, _>>()
+			})
+			.collect::<Vec<_>>();
+
+		bdd(0, &lin.exp.terms, C::zero(), &mut ys);
 
 		// TODO cannot avoid?
 		#[allow(clippy::needless_collect)]
@@ -67,8 +113,8 @@ impl<C: Coefficient> BddEncoder<C> {
 				let dom = nodes
 					.into_iter(..)
 					.filter_map(|(iv, node)| match node {
-						BddNode::Gap => None,
 						BddNode::Val => Some(iv.end - C::one()),
+						BddNode::Gap => None,
 						BddNode::View(view) => {
 							let val = iv.end - C::one();
 							views.insert(val, view);
@@ -98,7 +144,7 @@ impl<C: Coefficient> BddEncoder<C> {
 			.zip(ys)
 			.try_fold(first, |curr, (term, next)| {
 				model
-					.add_constraint(Lin::tern(curr, term.clone(), lin.cmp, next.clone(), None))
+					.add_constraint(Lin::tern(term.clone(), curr, lin.cmp, next.clone(), None))
 					.map(|_| next)
 			})?;
 
@@ -126,78 +172,32 @@ where
 			.map(Term::from)
 			.collect::<Vec<_>>();
 
-		model.extend(self.decompose::<DB::Lit>(
+		let decomposition = self.decompose::<DB::Lit>(
 			Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None),
 			model.num_var,
-		)?);
+		)?;
+
+
+		model.extend(decomposition);
 
 		model.encode(db, self.cutoff)?;
 		Ok(())
 	}
 }
 
-fn construct_bdd<C: Coefficient>(lin: &Lin<C>) -> Vec<IntervalMap<C, BddNode<C>>> {
-	// Ex. 2 x1 {0,2} + 3 x2 {0,3} + 5 x3 {0,5} <= 6
-	// Calculate the lower and upper bounds of the first i terms ++ (0,k)
-	// Ex. [(0,2), (0,5), (0,10), (0,6)]
-	let bounds = lin
-		.exp
-		.terms
-		.iter()
-		.scan((C::zero(), C::zero()), |state, term| {
-			*state = (state.0 + term.lb(), state.1 + term.ub());
-			Some(*state)
-		})
-		.chain(std::iter::once((C::zero(), lin.k)))
-		.collect::<Vec<_>>();
 
-	// TODO ? also hard to avoid?
-	// Calculate the margin for the partial sum up to term i before we get UNSAT/SAT
-	// Ex. [(1,6), (-2,6), (-4,6) ]
-	//  (-2,6) means at the 2nd term, the sum cannot exceed 6 (otherwise, it's UNSAT), and cannot be less than 2 (otherwise it's SAT; if the partial sum is 1, we cannot violate the constraint with only have 5 left in the last term)
-	#[allow(clippy::needless_collect)]
-	let margins = lin
-		.exp
-		.terms
-		.iter()
-		.rev()
-		.scan((lin.k, lin.k), |state, term| {
-			*state = (state.0 - term.ub(), state.1 - term.lb());
-			Some(*state)
-		})
-		.collect::<Vec<_>>();
-
-	let (neg_inf, pos_inf) = (lin.lb() - C::one(), lin.ub() + C::one());
-
-	let mut ws = margins
-		.into_iter()
-		.rev()
-		.chain(std::iter::once((lin.k, lin.k)))
-		.zip(bounds)
-		.map(|((lb_margin, ub_margin), (lb, ub))| {
-			match lin.cmp {
-				Comparator::LessEq => vec![
-					(lb_margin > lb).then_some((neg_inf..(lb_margin + C::one()), BddNode::Val)),
-					(ub_margin <= ub).then_some(((ub_margin + C::one())..pos_inf, BddNode::Gap)),
-				],
-				Comparator::Equal => vec![
-					(lb_margin > lb).then_some((neg_inf..lb_margin, BddNode::Gap)),
-					(lb_margin == ub_margin).then_some((lin.k..(lin.k + C::one()), BddNode::Val)),
-					(ub_margin <= ub).then_some(((ub_margin + C::one())..pos_inf, BddNode::Gap)),
-				],
-				Comparator::GreaterEq => vec![
-					(ub_margin < ub).then_some(((lb_margin + C::one())..pos_inf, BddNode::Gap)),
-					(lb_margin >= lb).then_some((neg_inf..(lb_margin + C::one()), BddNode::Val)),
-				],
-			}
-			.into_iter()
-			.flatten()
-			.collect()
-		})
-		.collect();
-
-	bdd(0, &lin.exp.terms, C::zero(), &mut ws);
-	ws
+/// m(i) = ∑_i^n ( ub(x_i), lb(x_i) )
+fn rest<C: Coefficient>(lin: &Lin<C>, i: usize) -> (C, C) {
+	(
+		lin.exp.terms[i..]
+			.iter()
+			.map(|term| term.lb())
+			.fold(C::zero(), C::add),
+		lin.exp.terms[i..]
+			.iter()
+			.map(|term| term.ub())
+			.fold(C::zero(), C::add),
+	)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -216,21 +216,19 @@ fn bdd<C: Coefficient>(
 	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
 		[] => {
 			let dom = xs[i].dom();
-			let views = dom
+			let children = dom
 				.iter()
 				.map(|v| (v, bdd(i + 1, xs, sum + *v, ws)))
 				.collect::<Vec<_>>();
 
-			// TODO could we check whether a domain value of x always leads to gaps?
-			let is_gap = views.iter().all(|(_, (_, v))| v == &BddNode::Gap);
-			// TODO without checking actual Val identity, could we miss when the next layer has two
-			// adjacent nodes that are both views on the same node at the layer below?
-			let view = (views.iter().map(|(_, (iv, _))| iv).all_equal())
-				.then(|| views.first().unwrap().1 .0.end - C::one());
+			let is_gap = children.iter().all(|(_, (_, v))| v == &BddNode::Gap);
 
-			let interval = views
+			let view = (children.iter().map(|(_, (iv, _))| iv).all_equal())
+				.then(|| children.first().unwrap().1 .0.end - C::one());
+
+			let iv = children
 				.into_iter()
-				.map(|(v, (interval, _))| (interval.start - *v)..(interval.end - *v))
+				.map(|(v, (iv, _))| (iv.start - *v)..(iv.end - *v))
 				.reduce(|a, b| std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end))
 				.unwrap();
 
@@ -242,12 +240,11 @@ fn bdd<C: Coefficient>(
 				BddNode::Val
 			};
 
-			let new_interval_inserted = ws[i].insert(interval.clone(), node.clone()).is_none();
-			debug_assert!(
-				new_interval_inserted,
-				"Duplicate interval {interval:?} inserted into {ws:?} layer {i}"
+			assert!(
+				ws[i].insert(iv.clone(), BddNode::Val).is_none(),
+				"Duplicate interval {iv:?} inserted into {ws:?} layer {i}"
 			);
-			(interval, node)
+			(iv, node)
 		}
 		[(a, node)] => (a.clone(), (*node).clone()),
 		_ => panic!("ROBDD intervals should be disjoint, but were {:?}", ws[i]),
