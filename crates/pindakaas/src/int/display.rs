@@ -17,13 +17,13 @@ impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 
 impl<C: Coefficient> Display for Term<C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{:+}*{}", self.c, self.x.borrow())
+		write!(f, "{:+}·{}", self.c, self.x.borrow())
 	}
 }
 
 impl<C: Coefficient> Display for LinExp<C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{}", self.terms.iter().join(" + "))
+		write!(f, "{}", self.terms.iter().join(" "))
 	}
 }
 
@@ -42,11 +42,11 @@ impl<C: Coefficient> Display for Lin<C> {
 		if self.is_tern() {
 			write!(
 				f,
-				"{} + {} {} {}",
-				self.exp.terms[0].x.borrow(),
-				self.exp.terms[1].x.borrow(),
+				"{} {} {} {}",
+				self.exp.terms[0],
+				self.exp.terms[1],
 				self.cmp,
-				self.exp.terms[2].x.borrow(),
+				self.exp.terms[2].clone() * -C::one(),
 			)
 		} else {
 			write!(f, "{} {} {}", self.exp, self.cmp, self.k,)

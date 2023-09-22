@@ -1,24 +1,25 @@
-use crate::{BddEncoder, Comparator, Encoder, Unsatisfiable};
+use crate::{
+	helpers::{add_clauses_for, negate_cnf},
+	BddEncoder, Comparator, Unsatisfiable,
+};
 use itertools::Itertools;
 use std::{
 	cell::RefCell,
 	collections::{BTreeSet, HashMap},
+	ops::Mul,
 	rc::Rc,
 };
 
 use iset::IntervalMap;
 
-use crate::{
-	int::{TernLeConstraint, TernLeEncoder},
-	ClauseDatabase, Coefficient, Literal,
-};
+use crate::{ClauseDatabase, Coefficient, Literal};
 
 use super::{enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, IntVarOrd};
 
 // TODO usize -> intId struct
 
 // TODO should we keep IntVar i/o IntVarEnc?
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Model<Lit: Literal, C: Coefficient> {
 	pub(crate) vars: HashMap<usize, IntVarEnc<Lit, C>>,
 	pub(crate) cons: Vec<Lin<C>>,
@@ -300,6 +301,16 @@ pub struct Lin<C: Coefficient> {
 pub struct Term<C: Coefficient> {
 	pub c: C,
 	pub x: Rc<RefCell<IntVar<C>>>,
+}
+
+impl<C: Coefficient> Mul<C> for Term<C> {
+	type Output = Self;
+	fn mul(self, rhs: C) -> Self {
+		Self {
+			x: self.x,
+			c: self.c * rhs,
+		}
+	}
 }
 
 impl<C: Coefficient> From<Rc<RefCell<IntVar<C>>>> for Term<C> {

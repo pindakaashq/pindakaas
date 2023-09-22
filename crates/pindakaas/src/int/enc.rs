@@ -799,6 +799,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 			IntVarEnc::Const(c) => LinExp::new().add_constant(*c),
 		}
 	}
+
 	/// Return number of lits in encoding
 	#[allow(dead_code)]
 	pub(crate) fn lits(&self) -> usize {
@@ -809,6 +810,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		}
 	}
 
+	#[allow(dead_code)]
 	pub fn multiply<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB, rhs: C) -> Self {
 		assert!(!rhs.is_negative(), "TODO: negative coefficients");
 		if rhs == C::zero() {
