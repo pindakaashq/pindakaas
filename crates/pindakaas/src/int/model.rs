@@ -121,7 +121,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	// TODO pass Decomposer (with cutoff, etc..)
-	pub fn decompose(&self) -> Result<Model<Lit, C>, Unsatisfiable> {
+	pub fn decompose(self) -> Result<Model<Lit, C>, Unsatisfiable> {
 		// TODO aggregate constants + encode trivial constraints
 		let mut model = Model::new(self.num_var);
 		model.vars = self.vars.clone(); // TODO we should design the interaction between the model (self) and the decomposed model better (by consuming self?)
@@ -174,7 +174,14 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		cutoff: Option<C>,
 	) -> Result<Self, Unsatisfiable> {
 		// Create decomposed model and its aux vars
-		let mut decomposition = self.decompose()?;
+		// TODO fix 2 failing unit tests for decomposed models
+		const DECOMPOSE: bool = false;
+
+		let mut decomposition = if DECOMPOSE {
+			self.clone().decompose()?
+		} else {
+			self.clone()
+		};
 
 		// Encode (or retrieve encoded) variables (in order of id)
 		let mut all_views = HashMap::new();
@@ -201,45 +208,21 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.collect::<HashMap<_, _>>();
 
 		for con in &decomposition.cons {
-			let Lin {
-				exp: LinExp { terms },
-				cmp,
-				k,
-				..
-			} = con;
-
-			assert!(terms.len() == 3 && k.is_zero(), "{decomposition}");
-
-			// Get term's variable's base encoding
-			let terms = terms
+			let enc = con
+				.exp
+				.terms
 				.iter()
 				.map(|term| {
 					let x = term.x.borrow();
-					(
-						term.c,
-						if x.is_constant() {
-							x.encode(db, &mut all_views, x.prefer_order(cutoff))
-						} else {
-							enc_vars[&x.id].clone()
-						},
-					)
+					if x.is_constant() {
+						x.encode(db, &mut all_views, x.prefer_order(cutoff))
+					} else {
+						enc_vars[&x.id].clone()
+					}
 				})
-				.collect::<Vec<_>>();
+				.collect();
 
-			// Apply coefficient
-			let mut process_c = |i: usize, to_rhs: bool| {
-				terms[i]
-					.1
-					.multiply(db, if to_rhs { -terms[i].0 } else { terms[i].0 })
-			};
-
-			let x = process_c(0, false);
-			let y = process_c(1, false);
-			let z = process_c(2, true);
-
-			TernLeEncoder::default()
-				.encode(db, &TernLeConstraint::new(&x, &y, cmp, &z))
-				.unwrap();
+			con.encode(db, enc)?;
 		}
 
 		decomposition.vars = enc_vars;
@@ -522,6 +505,77 @@ impl<C: Coefficient> Lin<C> {
 			Err(CheckError::Unsatisfiable(Unsatisfiable))
 		}
 	}
+
+	fn _is_simplified(&self) -> bool {
+		self.exp
+			.terms
+			.iter()
+			.all(|term| !term.c.is_zero() && !term.x.borrow().is_constant())
+	}
+
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "lin_encoder", skip_all, fields(constraint = format!("{}", self)))
+	)]
+	fn encode<DB: ClauseDatabase>(
+		&self,
+		db: &mut DB,
+		encs: Vec<IntVarEnc<DB::Lit, C>>,
+	) -> crate::Result {
+		println!("self = {self}");
+
+		// TODO assert simplified/simplify
+		// assert!(self._is_simplified());
+
+		match self.cmp {
+			Comparator::Equal => vec![true, false],
+			Comparator::LessEq => vec![true],
+			Comparator::GreaterEq => vec![false],
+		}
+		.into_iter()
+		.try_for_each(|is_leq| {
+			encs[0..encs.len() - 1]
+				.iter()
+				.zip(&self.exp.terms)
+				.map(|(enc, term)| {
+					if is_leq == term.c.is_positive() {
+						enc.geqs()
+					} else {
+						enc.leqs()
+					}
+				})
+				.multi_cartesian_product()
+				.try_for_each(|geqs| {
+					let rhs = geqs
+						.iter()
+						.zip(&self.exp.terms)
+						.map(|((d, _), term)| {
+							if is_leq == term.c.is_positive() {
+								term.c * (d.end - C::one())
+							} else {
+								term.c * d.start
+							}
+						})
+						.fold(self.k, C::sub);
+
+					let conditions = geqs
+						.iter()
+						.map(|(_, cnf)| negate_cnf(cnf.clone()))
+						.collect::<Vec<_>>();
+
+					let (last_enc, last_c) =
+						(&encs[encs.len() - 1], &self.exp.terms[encs.len() - 1].c);
+
+					let last = if is_leq == last_c.is_positive() {
+						last_enc.leq_(rhs.div_ceil(last_c))
+					} else {
+						last_enc.geq_(rhs.div_floor(last_c))
+					};
+
+					add_clauses_for(db, conditions.iter().cloned().chain([last]).collect())
+				})
+		})
+	}
 }
 
 // TODO perhaps id can be used by replacing vars HashMap to just vec
@@ -558,13 +612,13 @@ impl<C: Coefficient> IntVar<C> {
 					.map(|(a, b)| (a + C::one())..(b + C::one()))
 					.map(|v| (v.clone(), views.get(&(self.id, v.end - C::one())).cloned()))
 					.collect::<IntervalMap<_, _>>();
-				IntVarEnc::Ord(IntVarOrd::from_views(db, dom, "x".to_string()))
+				IntVarEnc::Ord(IntVarOrd::from_views(db, dom, self.lbl()))
 			} else {
 				let y = IntVarBin::from_bounds(
 					db,
 					*self.dom.first().unwrap(),
 					*self.dom.last().unwrap(),
-					"x".to_string(),
+					self.lbl(),
 				);
 				IntVarEnc::Bin(y)
 			};
@@ -644,8 +698,10 @@ impl<C: Coefficient> IntVar<C> {
 
 #[cfg(test)]
 mod tests {
+
 	use super::*;
-	use crate::{helpers::tests::TestDB, Cnf, Format, Lin, Model};
+	// use crate::{helpers::tests::TestDB, Cnf, Format, Lin, Model};
+	use crate::{Cnf, Lin, Model};
 
 	impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		fn check_assignment(&self, assignment: &HashMap<usize, C>) -> Result<(), CheckError<Lit>> {
@@ -681,15 +737,18 @@ mod tests {
 		model.encode(&mut cnf, None).unwrap();
 	}
 
+	#[cfg(feature = "trace")]
+	use traced_test::test;
+
 	macro_rules! lp_test_case {
 		($lp:expr) => {
-			use super::*; // TODO why is this not necessary for linear_test_suite?
+			use crate::{helpers::tests::TestDB, Format, Model};
+			use itertools::Itertools;
+			use std::collections::HashMap;
 
 			#[test]
-			fn test() {
+			fn test_lp() {
 				let mut model = Model::<i32, i32>::from_string($lp.into(), Format::Lp).unwrap();
-				// let mut cnf = Cnf::new(0);
-				// let vars = decomp_model.vars();
 
 				let vars = model.vars();
 				let sols = vars
@@ -707,7 +766,8 @@ mod tests {
 
 				let mut db = TestDB::new(0);
 				let decomposition = model.encode(&mut db, None).unwrap();
-				println!("decomposition = {decomposition}");
+
+				println!("decomposition = {}", decomposition);
 
 				// Count principal variables
 				let principal_enc_vars = vars
@@ -760,6 +820,7 @@ mod tests {
 						.collect()
 				}
 
+				// TODO find violated constraints for extra assignments
 				assert!(
 					extra_int_assignments.is_empty() && missing_int_assignments.is_empty(),
 					"
@@ -782,7 +843,7 @@ Missing solutions:
 		};
 	}
 
-	mod lp_1 {
+	mod lp_le_1 {
 		lp_test_case!(
 			r"
 Subject To
@@ -791,6 +852,104 @@ Binary
   x1
   x2
   x3
+End
+"
+		);
+	}
+
+	mod lp_le_2 {
+		lp_test_case!(
+			r"
+Subject To
+  c0: + 1 x1 + 2 x2 - 1 x3 <= 0
+Bounds
+  0 <= x1 <= 2
+  0 <= x2 <= 2
+  0 <= x3 <= 2
+End
+"
+		);
+	}
+
+	mod lp_ge_pb_unit {
+		lp_test_case!(
+			r"
+Subject To
+  c0: + 1 x1 + 2 x2 + 1 x3 >= -2
+Bounds
+  0 <= x1 <= 1
+  0 <= x2 <= 1
+  0 <= x3 <= 1
+End
+"
+		);
+	}
+
+	mod lp_ge_pb_neg {
+		lp_test_case!(
+			r"
+Subject To
+  c0: + 1 x1 + 2 x2 - 1 x3 >= 0
+Bounds
+  0 <= x1 <= 1
+  0 <= x2 <= 1
+  0 <= x3 <= 1
+End
+"
+		);
+	}
+
+	mod lp_ge_neg {
+		lp_test_case!(
+			r"
+Subject To
+  c0: + 1 x1 + 2 x2 - 1 x3 >= 0
+Bounds
+  0 <= x1 <= 3
+  0 <= x2 <= 4
+  0 <= x3 <= 5
+End
+"
+		);
+	}
+
+	mod lp_ge_neg_2 {
+		lp_test_case!(
+			r"
+Subject To
+  c0: + 1 x1 + 2 x2 - 3 x3 >= 0
+Bounds
+  -2 <= x1 <= 3
+  -1 <= x2 <= 4
+  -2 <= x3 <= 5
+End
+"
+		);
+	}
+
+	mod lp_le_neg_last {
+		lp_test_case!(
+			r"
+Subject To
+  c0: + 1 x1 + 2 x2 - 3 x3 <= 0
+Bounds
+  -2 <= x1 <= 3
+  -1 <= x2 <= 4
+  -2 <= x3 <= 5
+End
+"
+		);
+	}
+
+	mod lp_le_3 {
+		lp_test_case!(
+			r"
+Subject To
+  c0: + 1 x1 + 1 x2 - 1 x3 <= 0
+Doms
+  x1 in 0,2
+  x2 in 0,3
+  x3 in 0,2,3,5
 End
 "
 		);
@@ -810,22 +969,61 @@ End
 		);
 	}
 
-	/*
-		mod soh {
-			lp_test_case!(
-				r"
-	Subject To
-	\ c0: + 1 x1 - 1 x3 >= 0
-	\ c1: + 1 x2 - 1 x4 >= 0
-	  c2: + 1 x1 + 1 x2 - 1 x3 - 1 x4 <= -1
-	Bounds
-	  0 <= x1 <= 5
-	  0 <= x2 <= 5
-	  0 <= x3 <= 5
-	  0 <= x4 <= 5
-	End
-	"
-			);
-		}
-		*/
+	mod lp_3 {
+		lp_test_case!(
+			"
+Subject To
+  c0: + 2 x1 -3 x2 = 0
+Bounds
+  0 <= x1 <= 3
+  0 <= x2 <= 5
+End
+"
+		);
+	}
+
+	mod lp_4 {
+		lp_test_case!(
+			"
+Subject To
+  c0: + 2 x1 - 3 x2 = 0
+Bounds
+  0 <= x1 <= 3
+  0 <= x2 <= 5
+End
+"
+		);
+	}
+
+	mod lp_4_xs {
+		lp_test_case!(
+			"
+Subject To
+  c0: + 2 x1 - 3 x2 + 2 x3 - 4 x4 <= 6
+Bounds
+  0 <= x1 <= 1
+  0 <= x2 <= 1
+  0 <= x3 <= 1
+  0 <= x4 <= 1
+End
+"
+		);
+	}
+
+	mod soh {
+		lp_test_case!(
+			"
+Subject To
+c0: + 1 x1 - 1 x3 >= 0
+c1: + 1 x2 - 1 x4 >= 0
+c2: + 1 x1 + 1 x2 - 1 x3 - 1 x4 <= -1
+Bounds
+0 <= x1 <= 3
+0 <= x2 <= 3
+0 <= x3 <= 3
+0 <= x4 <= 3
+End
+"
+		);
+	}
 }
