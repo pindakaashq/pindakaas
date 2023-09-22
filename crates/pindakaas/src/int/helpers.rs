@@ -144,26 +144,22 @@ End
 			SubjectTo,
 			Binary,
 			Bounds,
+			Doms,
 			Minimize,
 			Maximize,
 			// Satisfy,
 		}
 
-		let mut vars: HashMap<String, (C, C)> = HashMap::new();
+		let mut vars: HashMap<String, Vec<C>> = HashMap::new();
 
 		let mut cons: Vec<(ParseLinExp<C>, Comparator, C, Option<String>)> = vec![];
 
-		let set_bounds = |var: &str, lb: &str, ub: &str, vars: &mut HashMap<String, (C, C)>| {
+		let set_doms = |var: &str, dom: &[C], vars: &mut HashMap<String, Vec<C>>| {
 			//let id = var[1..].parse::<usize>().unwrap();
-			let bnds = (
-				lb.parse::<C>()
-					.unwrap_or_else(|_| panic!("Could not parse lb {lb}")),
-				ub.parse::<C>()
-					.unwrap_or_else(|_| panic!("Could not parse ub {ub}")),
-			);
+			let dom = dom.to_vec();
 			vars.entry(var.to_string())
-				.and_modify(|var| *var = bnds)
-				.or_insert(bnds);
+				.and_modify(|var| *var = dom.clone())
+				.or_insert(dom);
 		};
 
 		let mut obj = ParseObj::Satisfy;
@@ -215,6 +211,9 @@ End
 						["bounds"] => {
 							state = State::Bounds;
 						}
+						["doms"] => {
+							state = State::Doms;
+						}
 						["generals" | "general" | "gen" | "semi-continuous" | "semis" | "semi"] => {
 							return Err(String::from(
 								"Generals/semi-continuous sections not supported",
@@ -223,10 +222,33 @@ End
 						["minimize" | "minimum" | "min"] => state = State::Minimize,
 						["maximize" | "maximum" | "max"] => state = State::Maximize,
 						[var, "=", val] if state == State::Bounds => {
-							set_bounds(var, val, val, &mut vars);
+							set_doms(
+								var,
+								&[val
+									.parse::<C>()
+									.unwrap_or_else(|_| panic!("Could not = {val}"))],
+								&mut vars,
+							);
+						}
+						[var, "in", dom] if state == State::Doms => {
+							let dom = dom
+								.split(',')
+								.map(|c| {
+									c.parse::<C>()
+										.unwrap_or_else(|_| panic!("Could not parse dom value {c}"))
+								})
+								.collect::<Vec<_>>();
+							set_doms(var, &dom, &mut vars);
 						}
 						[lb, "<=", var, "<=", ub] if state == State::Bounds => {
-							set_bounds(var, lb, ub, &mut vars);
+							let dom = num::iter::range_inclusive(
+								lb.parse::<C>()
+									.unwrap_or_else(|_| panic!("Could not parse lb {lb}")),
+								ub.parse::<C>()
+									.unwrap_or_else(|_| panic!("Could not parse ub {ub}")),
+							)
+							.collect::<Vec<_>>();
+							set_doms(var, &dom, &mut vars);
 						}
 						[var, ">=", lb] if state == State::Bounds => {
 							return Err(format!(
@@ -235,7 +257,7 @@ End
 						}
 						xs if state == State::Binary => {
 							xs.iter().for_each(|x| {
-								set_bounds(x, "0", "1", &mut vars);
+								set_doms(x, &[C::zero(), C::one()], &mut vars);
 							});
 						}
 						line if matches!(
@@ -348,7 +370,7 @@ End
 											|| token.starts_with('x')
 										{
 											let var = token.to_string();
-											set_bounds(&var, "0", "1", &mut vars);
+											set_doms(&var, &[C::zero(), C::one()], &mut vars);
 											con.0.push(var);
 
 										// if we didn't see a coefficient, it should be +/- 1
@@ -394,8 +416,7 @@ End
 		let vars = vars
 			.into_iter()
 			.sorted()
-			.flat_map(|(lp_id, (lb, ub))| {
-				let dom = num::iter::range_inclusive(lb, ub).collect::<Vec<_>>();
+			.flat_map(|(lp_id, dom)| {
 				model
 					.new_var(&dom, true, Some(lp_id.clone()))
 					.map(|x| (lp_id, x))
