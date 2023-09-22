@@ -716,7 +716,12 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		}
 	}
 
-	/// Returns cnf constraining `x<=v`, which is empty if true and contains empty if false
+	/// Returns cnf constraining `x<=v`
+	pub(crate) fn leq_(&self, v: C) -> Vec<Vec<Lit>> {
+		self.leq(v..(v + C::one()))
+	}
+
+	/// Returns cnf constraining `x<=a..b`
 	pub(crate) fn leq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		match self {
 			IntVarEnc::Ord(o) => o.leq(v),
@@ -732,7 +737,12 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		}
 	}
 
-	/// Returns a clause constraining `x>=v`, which is None if true and empty if false
+	/// Returns cnf constraining `x>=v`
+	pub(crate) fn geq_(&self, v: C) -> Vec<Vec<Lit>> {
+		self.geq(v..(v + C::one()))
+	}
+
+	/// Returns a clause constraining `x>=a..b`
 	pub(crate) fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		match self {
 			IntVarEnc::Ord(o) => o.geq(v),
