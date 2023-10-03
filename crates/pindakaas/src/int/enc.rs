@@ -527,7 +527,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 				}
 
 				let dom = std::iter::once((C::zero(), vec![]))
-					.chain(h.into_iter())
+					.chain(h)
 					.sorted_by(|(a, _), (b, _)| a.cmp(b))
 					.tuple_windows()
 					.map(|((prev, _), (coef, lits))| {

@@ -66,7 +66,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 
 		ys.into_iter()
 			.tuple_windows()
-			.zip(xs.into_iter())
+			.zip(xs)
 			.for_each(|((y_curr, y_next), x)| {
 				model
 					.cons
