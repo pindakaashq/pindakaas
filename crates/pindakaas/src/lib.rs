@@ -142,11 +142,11 @@ impl<Lit: Literal> fmt::Display for Incomplete<Lit> {
 			1 => write!(f, "Literal {:?} is unasssigned", self.missing[0]),
 			_ => {
 				write!(f, "Literals")?;
-				for pos in self.missing.iter().with_position() {
+				for (pos, lit) in self.missing.iter().with_position() {
 					match pos {
-						Position::First(lit) => write!(f, " {:?}", lit)?,
-						Position::Middle(lit) => write!(f, ", {:?}", lit)?,
-						Position::Last(lit) => write!(f, ", and {:?}", lit)?,
+						Position::First => write!(f, " {:?}", lit)?,
+						Position::Middle => write!(f, ", {:?}", lit)?,
+						Position::Last => write!(f, ", and {:?}", lit)?,
 						_ => unreachable!(),
 					}
 				}
