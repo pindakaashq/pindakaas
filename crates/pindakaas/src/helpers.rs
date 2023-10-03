@@ -387,7 +387,7 @@ pub mod tests {
 
 		pub fn expect_clauses(mut self, mut clauses: Vec<Vec<i32>>) -> TestDB {
 			for cl in &mut clauses {
-				cl.sort_by(|a, b| a.abs().cmp(&b.abs()));
+				cl.sort_by_key(|a| a.abs());
 			}
 			clauses.sort();
 			self.clauses = Some(clauses.into_iter().map(|cl| (false, cl)).collect());
@@ -412,7 +412,7 @@ pub mod tests {
 
 		pub fn expect_solutions(mut self, mut solutions: Vec<Vec<i32>>) -> TestDB {
 			for sol in &mut solutions {
-				sol.sort_by(|a, b| a.abs().cmp(&b.abs()));
+				sol.sort_by_key(|a| a.abs());
 			}
 			solutions.sort();
 			if let Some(self_solutions) = &self.solutions {
@@ -430,16 +430,15 @@ pub mod tests {
 					"Cannot generate solutions using binary shifts with more than 32 variables."
 				);
 			}
-			let solutions = (0..((2_i32).pow(n as u32)))
+
+			(0..((2_i32).pow(n as u32)))
 				.map(|i| {
 					(0..n)
 						.map(|j| if ((i >> j) & 1) == 1 { j + 1 } else { -(j + 1) })
 						.collect::<Vec<_>>()
 				})
 				.filter(|g| check(&g[..]))
-				.collect();
-
-			solutions
+				.collect()
 		}
 
 		pub fn _print_solutions(sols: &Vec<Vec<i32>>) -> String {
@@ -447,7 +446,7 @@ pub mod tests {
 				"vec![
 {}
 ]",
-				sols.into_iter()
+				sols.iter()
 					.map(|sol| format!(
 						"\tvec![{}]",
 						(*sol)
@@ -478,7 +477,7 @@ pub mod tests {
 			if let Some(clauses) = &self.clauses {
 				let missing: Vec<Vec<i32>> = clauses
 					.iter()
-					.filter(|exp| exp.0 == false)
+					.filter(|exp| !exp.0)
 					.map(|exp| exp.1.clone())
 					.collect();
 				// assert!(false, "{:?} {:?}", clauses, missing);
@@ -526,7 +525,7 @@ pub mod tests {
 				}
 			}
 			for sol in &mut from_slv {
-				sol.sort_by(|a, b| a.abs().cmp(&b.abs()));
+				sol.sort_by_key(|a| a.abs());
 			}
 			if let Some(check) = &self.check {
 				for sol in &mut from_slv {
@@ -622,7 +621,7 @@ pub mod tests {
 		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
 			let mut cl = Vec::from(cl);
 
-			cl.sort_by(|a, b| a.abs().cmp(&b.abs()));
+			cl.sort_by_key(|a| a.abs());
 			if let Some(clauses) = &mut self.clauses {
 				let mut found = false;
 				for exp in clauses {
