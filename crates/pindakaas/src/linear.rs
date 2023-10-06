@@ -1,12 +1,12 @@
 use std::{
 	collections::VecDeque,
-	fmt,
+	fmt::{self, Display},
 	ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign},
 };
 
 use crate::{
-	int::IntVarEnc, Cardinality, CardinalityOne, CheckError, Checker, ClauseDatabase, Coefficient,
-	Encoder, IntEncoding, Literal, PairwiseEncoder, Result, Unsatisfiable,
+	Cardinality, CardinalityOne, CheckError, Checker, ClauseDatabase, Coeff, Encoder, IntEncoding,
+	Lit, PairwiseEncoder, Result, Unsatisfiable, Valuation,
 };
 
 mod adder;
@@ -19,52 +19,63 @@ pub use adder::AdderEncoder;
 pub(crate) use adder::{lex_geq_const, lex_leq_const, log_enc_add, log_enc_add_};
 pub use aggregator::LinearAggregator;
 pub use bdd::BddEncoder;
+use itertools::Itertools;
 pub use swc::SwcEncoder;
 pub use totalizer::TotalizerEncoder;
 
-/// PosCoeff is a container used when coefficients that are guaranteed
-/// by the programmer to be 0 or greater.
-///
-/// # Warning
-/// The [`From`] implementation of this type will panic if the  
-#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
-pub struct PosCoeff<C: Coefficient>(C);
-impl<C: Coefficient> From<C> for PosCoeff<C> {
-	fn from(c: C) -> Self {
-		assert!(
-			!c.is_negative(),
-			"could not create PosCoeff, value was found to be negative"
-		);
+/// PosCoeff is a type for coefficients that are guaranteed by the programmer to
+/// be 0 or greater.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct PosCoeff(Coeff);
+
+impl PosCoeff {
+	pub fn new(c: Coeff) -> Self {
+		if c < 0 {
+			panic!("cannot create a PosCoeff with a negative value")
+		}
 		Self(c)
 	}
 }
-impl<C: Coefficient> Deref for PosCoeff<C> {
-	type Target = C;
+
+impl From<PosCoeff> for Coeff {
+	fn from(val: PosCoeff) -> Self {
+		val.0
+	}
+}
+impl Deref for PosCoeff {
+	type Target = Coeff;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
-impl<C: Coefficient> DerefMut for PosCoeff<C> {
+impl DerefMut for PosCoeff {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		&mut self.0
 	}
 }
+
+impl Display for PosCoeff {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
+
 #[derive(Debug)]
-pub enum LinVariant<Lit: Literal, C: Coefficient> {
-	Linear(Linear<Lit, C>),
-	Cardinality(Cardinality<Lit, C>),
-	CardinalityOne(CardinalityOne<Lit>),
+pub enum LinVariant {
+	Linear(Linear),
+	Cardinality(Cardinality),
+	CardinalityOne(CardinalityOne),
 	Trivial,
 }
 
 #[derive(Debug, Clone)]
-pub struct Linear<Lit: Literal, C: Coefficient> {
-	pub(crate) terms: Vec<Part<Lit, PosCoeff<C>>>,
+pub struct Linear {
+	pub(crate) terms: Vec<Part>,
 	pub cmp: LimitComp,
-	pub(crate) k: PosCoeff<C>,
+	pub(crate) k: PosCoeff,
 }
 
-impl<Lit: Literal, C: Coefficient> Linear<Lit, C> {
+impl Linear {
 	#[cfg(feature = "trace")]
 	pub(crate) fn trace_print(&self) -> String {
 		use crate::trace::trace_print_lit;
@@ -84,8 +95,8 @@ impl<Lit: Literal, C: Coefficient> Linear<Lit, C> {
 		format!("{x} {op} {:?}", *self.k)
 	}
 
-	pub fn set_k(&mut self, k: C) {
-		self.k = k.into();
+	pub fn set_k(&mut self, k: Coeff) {
+		self.k = PosCoeff::new(k);
 	}
 
 	pub fn len(&self) -> usize {
@@ -97,39 +108,37 @@ impl<Lit: Literal, C: Coefficient> Linear<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> From<Cardinality<Lit, C>> for Linear<Lit, C> {
-	fn from(card: Cardinality<Lit, C>) -> Self {
+impl From<Cardinality> for Linear {
+	fn from(card: Cardinality) -> Self {
 		Self {
 			terms: card
 				.lits
 				.into_iter()
-				.map(|l| Part::Amo(vec![(l, C::one().into())]))
+				.map(|l| Part::Amo(vec![(l, PosCoeff::new(1))]))
 				.collect(),
 			cmp: card.cmp,
 			k: card.k,
 		}
 	}
 }
-impl<Lit: Literal, C: Coefficient> From<CardinalityOne<Lit>> for Linear<Lit, C> {
-	fn from(amo: CardinalityOne<Lit>) -> Self {
+impl From<CardinalityOne> for Linear {
+	fn from(amo: CardinalityOne) -> Self {
 		Self::from(Cardinality::from(amo))
 	}
 }
 
 // Automatically implement Cardinality encoding when you can encode Linear constraints
-impl<DB: ClauseDatabase, C: Coefficient, Enc: Encoder<DB, Linear<DB::Lit, C>> + LinMarker>
-	Encoder<DB, Cardinality<DB::Lit, C>> for Enc
-{
-	fn encode(&mut self, db: &mut DB, con: &Cardinality<DB::Lit, C>) -> crate::Result {
-		self.encode(db, &Linear::<DB::Lit, C>::from(con.clone()))
+impl<DB: ClauseDatabase, Enc: Encoder<DB, Linear> + LinMarker> Encoder<DB, Cardinality> for Enc {
+	fn encode(&mut self, db: &mut DB, con: &Cardinality) -> crate::Result {
+		self.encode(db, &Linear::from(con.clone()))
 	}
 }
 // local marker trait, to ensure the previous definition only applies within this crate
 pub(crate) trait LinMarker {}
 impl LinMarker for AdderEncoder {}
-impl<C: Coefficient> LinMarker for TotalizerEncoder<C> {}
-impl<C: Coefficient> LinMarker for SwcEncoder<C> {}
-impl<C: Coefficient> LinMarker for BddEncoder<C> {}
+impl LinMarker for TotalizerEncoder {}
+impl LinMarker for SwcEncoder {}
+impl LinMarker for BddEncoder {}
 
 // TODO how can we support both Part(itions) of "terms" ( <Lit, C> for pb
 // constraints) and just lits (<Lit>) for AMK/AMO's?
@@ -137,10 +146,10 @@ impl<C: Coefficient> LinMarker for BddEncoder<C> {}
 // TODO add EO, and probably something for Unconstrained
 // TODO this can probably follow the same structure as LinExp
 #[derive(Debug, Clone)]
-pub(crate) enum Part<Lit, C> {
-	Amo(Vec<(Lit, C)>),
-	Ic(Vec<(Lit, C)>),
-	Dom(Vec<(Lit, C)>, C, C),
+pub(crate) enum Part {
+	Amo(Vec<(Lit, PosCoeff)>),
+	Ic(Vec<(Lit, PosCoeff)>),
+	Dom(Vec<(Lit, PosCoeff)>, PosCoeff, PosCoeff),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -159,27 +168,39 @@ impl fmt::Display for LimitComp {
 }
 
 #[derive(Clone, Debug)]
-pub struct LinExp<Lit: Literal, C: Coefficient> {
+pub struct LinExp {
 	/// All terms of the pseudo-Boolean linear expression
-	terms: VecDeque<(Lit, C)>,
+	terms: VecDeque<(Lit, Coeff)>,
 	/// Number of unconstrained terms (located at the front of `terms`)
 	num_free: usize,
 	/// Constraints placed on different terms, and the number of terms involved in the constraint
-	constraints: Vec<(Constraint<C>, usize)>,
+	constraints: Vec<(Constraint, usize)>,
 	/// Additive constant
-	pub add: C,
+	pub add: Coeff,
 	/// Multiplicative contant
-	pub mult: C,
+	pub mult: Coeff,
+}
+
+impl Default for LinExp {
+	fn default() -> Self {
+		Self {
+			terms: Default::default(),
+			num_free: 0,
+			constraints: Default::default(),
+			add: 0,
+			mult: 1,
+		}
+	}
 }
 
 #[derive(Debug, Clone)]
-pub struct LinearConstraint<Lit: Literal, C: Coefficient> {
+pub struct LinearConstraint {
 	/// Expression being constrained
-	pub exp: LinExp<Lit, C>,
+	pub exp: LinExp,
 	/// Comparator when exp is on the left hand side and k is on the right hand side
 	pub cmp: Comparator,
 	/// Coefficient providing the upper bound or lower bound to exp, or both
-	pub k: C,
+	pub k: Coeff,
 }
 
 impl From<LimitComp> for Comparator {
@@ -191,14 +212,14 @@ impl From<LimitComp> for Comparator {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> From<Linear<Lit, C>> for LinearConstraint<Lit, C> {
-	fn from(lin: Linear<Lit, C>) -> Self {
+impl From<Linear> for LinearConstraint {
+	fn from(lin: Linear) -> Self {
 		LinearConstraint {
 			exp: LinExp::from_terms(
 				lin.terms
 					.iter()
-					.flat_map(|part| part.iter().map(|(l, c)| (l.clone(), *c.clone())))
-					.collect::<Vec<_>>()
+					.flat_map(|part| part.into_iter().map(|&(l, c)| (l, *c)))
+					.collect_vec()
 					.as_slice(),
 			),
 			cmp: lin.cmp.into(),
@@ -207,8 +228,8 @@ impl<Lit: Literal, C: Coefficient> From<Linear<Lit, C>> for LinearConstraint<Lit
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> LinearConstraint<Lit, C> {
-	pub fn new(exp: LinExp<Lit, C>, cmp: Comparator, k: C) -> Self {
+impl LinearConstraint {
+	pub fn new(exp: LinExp, cmp: Comparator, k: Coeff) -> Self {
 		Self { exp, cmp, k }
 	}
 
@@ -236,16 +257,9 @@ impl<Lit: Literal, C: Coefficient> LinearConstraint<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> From<&IntVarEnc<Lit, C>> for LinExp<Lit, C> {
-	fn from(x: &IntVarEnc<Lit, C>) -> Self {
-		x.as_lin_exp()
-	}
-}
-
-impl<Lit: Literal, C: Coefficient> Checker for LinearConstraint<Lit, C> {
-	type Lit = Lit;
-	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let lhs = self.exp.assign(solution)?;
+impl Checker for LinearConstraint {
+	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError> {
+		let lhs = self.exp.value(value)?;
 		if match self.cmp {
 			Comparator::LessEq => lhs <= self.k,
 			Comparator::Equal => lhs == self.k,
@@ -266,14 +280,22 @@ pub enum Comparator {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Constraint<C: Coefficient> {
+pub(crate) enum Constraint {
 	AtMostOne,
 	ImplicationChain,
-	Domain { lb: C, ub: C },
+	Domain { lb: Coeff, ub: Coeff },
 }
 
-impl<Lit, C> Part<Lit, C> {
-	fn iter(&self) -> std::slice::Iter<(Lit, C)> {
+impl Part {
+	pub fn iter(&self) -> impl Iterator<Item = &(Lit, PosCoeff)> {
+		self.into_iter()
+	}
+}
+impl<'a> IntoIterator for &'a Part {
+	type Item = &'a (Lit, PosCoeff);
+	type IntoIter = std::slice::Iter<'a, (Lit, PosCoeff)>;
+
+	fn into_iter(self) -> Self::IntoIter {
 		match self {
 			Part::Amo(terms) => terms.iter(),
 			Part::Ic(terms) => terms.iter(),
@@ -282,15 +304,13 @@ impl<Lit, C> Part<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
-	pub fn new() -> Self {
-		Self {
-			..Default::default()
-		}
-	}
-
-	pub fn from_slices(weights: &[C], lits: &[Lit]) -> Self {
-		assert!(weights.len() == lits.len(), "");
+impl LinExp {
+	pub fn from_slices(weights: &[Coeff], lits: &[Lit]) -> Self {
+		assert_eq!(
+			weights.len(),
+			lits.len(),
+			"the number of weights and literals must be equal"
+		);
 		Self {
 			terms: lits.iter().cloned().zip(weights.iter().cloned()).collect(),
 			num_free: lits.len(),
@@ -298,7 +318,7 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 		}
 	}
 
-	pub fn from_terms(terms: &[(Lit, C)]) -> Self {
+	pub fn from_terms(terms: &[(Lit, Coeff)]) -> Self {
 		Self {
 			terms: terms.iter().cloned().collect(),
 			num_free: terms.len(),
@@ -308,9 +328,9 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 
 	/// Add multiple terms to the linear expression of which at most one
 	/// can be chosen
-	pub fn add_choice(mut self, choice: &[(Lit, C)]) -> Self {
+	pub fn add_choice(mut self, choice: &[(Lit, Coeff)]) -> Self {
 		if let [term] = choice {
-			self += term.clone();
+			self += *term;
 		} else {
 			self.terms.extend(choice.iter().cloned());
 			self.constraints.push((Constraint::AtMostOne, choice.len()))
@@ -320,9 +340,9 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 
 	/// Add multiple terms to the linear expression where the literal
 	/// in each term is implied by the literal in the consecutive term
-	pub fn add_chain(mut self, chain: &[(Lit, C)]) -> Self {
+	pub fn add_chain(mut self, chain: &[(Lit, Coeff)]) -> Self {
 		if let [term] = chain {
-			self += term.clone();
+			self += *term;
 		} else {
 			self.terms.extend(chain.iter().cloned());
 			self.constraints
@@ -331,26 +351,31 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 		self
 	}
 
-	pub fn add_constant(mut self, k: C) -> Self {
+	pub fn add_constant(mut self, k: Coeff) -> Self {
 		self.add += k;
 		self
 	}
 
 	pub fn add_lit(mut self, lit: Lit) -> Self {
-		self += (lit, C::one());
+		self += (lit, 1);
 		self
 	}
 
 	// TODO I'm not really happy with this interface yet...
 	// Probably makes more sense to use something like int encodings
-	pub fn add_bounded_log_encoding(mut self, terms: &[(Lit, C)], lb: C, ub: C) -> Self {
+	pub fn add_bounded_log_encoding(
+		mut self,
+		terms: &[(Lit, Coeff)],
+		lb: Coeff,
+		ub: Coeff,
+	) -> Self {
 		self.constraints
 			.push((Constraint::Domain { lb, ub }, terms.len()));
 		self.terms.extend(terms.iter().cloned());
 		self
 	}
 
-	pub(crate) fn iter(&self) -> impl Iterator<Item = (Option<Constraint<C>>, Vec<&(Lit, C)>)> {
+	pub(crate) fn iter(&self) -> impl Iterator<Item = (Option<Constraint>, Vec<&(Lit, Coeff)>)> {
 		let mut it = self.terms.iter();
 		std::iter::once((
 			None,
@@ -367,50 +392,37 @@ impl<Lit: Literal, C: Coefficient> LinExp<Lit, C> {
 		}))
 	}
 
-	pub fn terms(&self) -> std::collections::vec_deque::Iter<'_, (Lit, C)> {
-		self.terms.iter()
+	pub fn terms(&self) -> impl Iterator<Item = (Lit, Coeff)> + '_ {
+		self.terms.iter().copied()
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Default for LinExp<Lit, C> {
-	fn default() -> Self {
-		Self {
-			terms: VecDeque::new(),
-			num_free: 0,
-			constraints: Vec::new(),
-			add: C::zero(),
-			mult: C::one(),
-		}
-	}
-}
-
-impl<Lit: Literal, C: Coefficient> From<Lit> for LinExp<Lit, C> {
+impl From<Lit> for LinExp {
 	fn from(lit: Lit) -> Self {
 		Self {
-			terms: VecDeque::from([(lit, C::one())]),
+			terms: VecDeque::from([(lit, 1)]),
 			num_free: 1,
 			..Default::default()
 		}
 	}
 }
-impl<Lit: Literal, C: Coefficient> From<(Lit, C)> for LinExp<Lit, C> {
-	fn from(term: (Lit, C)) -> Self {
+impl From<Coeff> for LinExp {
+	fn from(value: Coeff) -> Self {
 		Self {
-			terms: VecDeque::from([term]),
-			num_free: 1,
+			add: value,
 			..Default::default()
 		}
 	}
 }
-impl<'a, Lit: Literal, C: Coefficient> From<IntEncoding<'a, Lit, C>> for LinExp<Lit, C> {
-	fn from(var: IntEncoding<'a, Lit, C>) -> Self {
+impl<'a> From<IntEncoding<'a>> for LinExp {
+	fn from(var: IntEncoding<'a>) -> Self {
 		match var {
 			IntEncoding::Direct { first, vals } => {
 				let mut terms = VecDeque::with_capacity(vals.len());
 				let mut k = first;
 				for lit in vals {
-					terms.push_back((lit.clone(), k));
-					k += C::one();
+					terms.push_back((*lit, k));
+					k += 1;
 				}
 				Self {
 					terms,
@@ -419,21 +431,21 @@ impl<'a, Lit: Literal, C: Coefficient> From<IntEncoding<'a, Lit, C>> for LinExp<
 				}
 			}
 			IntEncoding::Order { first, vals } => Self {
-				terms: vals.iter().map(|lit| (lit.clone(), C::one())).collect(),
+				terms: vals.iter().map(|lit| (*lit, 1)).collect(),
 				constraints: vec![(Constraint::ImplicationChain, vals.len())],
 				add: first,
 				..Default::default()
 			},
 			IntEncoding::Log { signed, bits } => {
 				let mut terms = VecDeque::with_capacity(bits.len());
-				let two = C::one() + C::one();
-				let mut k = C::one();
+				let two = 1 + 1;
+				let mut k = 1;
 				for lit in bits {
-					terms.push_back((lit.clone(), k));
+					terms.push_back((*lit, k));
 					k *= two;
 				}
 				if signed {
-					terms.back_mut().unwrap().1 *= -C::one();
+					terms.back_mut().unwrap().1 *= -1;
 				}
 				Self {
 					terms,
@@ -445,48 +457,48 @@ impl<'a, Lit: Literal, C: Coefficient> From<IntEncoding<'a, Lit, C>> for LinExp<
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> AddAssign<(Lit, C)> for LinExp<Lit, C> {
-	fn add_assign(&mut self, rhs: (Lit, C)) {
+impl AddAssign<(Lit, Coeff)> for LinExp {
+	fn add_assign(&mut self, rhs: (Lit, Coeff)) {
 		self.terms.push_front(rhs);
 		self.num_free += 1
 	}
 }
-impl<Lit: Literal, C: Coefficient> Add<(Lit, C)> for LinExp<Lit, C> {
-	type Output = LinExp<Lit, C>;
-	fn add(mut self, rhs: (Lit, C)) -> Self::Output {
+impl Add<(Lit, Coeff)> for LinExp {
+	type Output = LinExp;
+	fn add(mut self, rhs: (Lit, Coeff)) -> Self::Output {
 		self += rhs;
 		self
 	}
 }
-impl<'a, Lit: Literal, C: Coefficient> AddAssign<IntEncoding<'a, Lit, C>> for LinExp<Lit, C> {
-	fn add_assign(&mut self, rhs: IntEncoding<'a, Lit, C>) {
+impl<'a> AddAssign<IntEncoding<'a>> for LinExp {
+	fn add_assign(&mut self, rhs: IntEncoding<'a>) {
 		match rhs {
 			IntEncoding::Direct { first, vals } => {
 				let mut k = first;
 				for lit in vals {
-					self.terms.push_back((lit.clone(), k));
-					k += C::one();
+					self.terms.push_back((*lit, k));
+					k += 1;
 				}
 				self.constraints.push((Constraint::AtMostOne, vals.len()))
 			}
 			IntEncoding::Order { first, vals } => {
 				for lit in vals {
-					self.terms.push_back((lit.clone(), C::one()))
+					self.terms.push_back((*lit, 1))
 				}
 				self.add += first;
 				self.constraints
 					.push((Constraint::ImplicationChain, vals.len()))
 			}
 			IntEncoding::Log { signed, bits } => {
-				let two = C::one() + C::one();
-				let mut k = C::one();
+				let two = 1 + 1;
+				let mut k = 1;
 				for lit in bits {
-					self.terms.push_front((lit.clone(), k));
+					self.terms.push_front((*lit, k));
 					k *= two;
 				}
 				// TODO!
 				if signed {
-					self.terms.front_mut().unwrap().1 *= -C::one();
+					self.terms.front_mut().unwrap().1 *= -1;
 				}
 				self.num_free += bits.len();
 			}
@@ -494,23 +506,23 @@ impl<'a, Lit: Literal, C: Coefficient> AddAssign<IntEncoding<'a, Lit, C>> for Li
 	}
 }
 
-impl<'a, Lit: Literal, C: Coefficient> Add<IntEncoding<'a, Lit, C>> for LinExp<Lit, C> {
-	type Output = LinExp<Lit, C>;
-	fn add(mut self, rhs: IntEncoding<'a, Lit, C>) -> Self::Output {
+impl<'a> Add<IntEncoding<'a>> for LinExp {
+	type Output = LinExp;
+	fn add(mut self, rhs: IntEncoding<'a>) -> Self::Output {
 		self += rhs;
 		self
 	}
 }
-impl<Lit: Literal, C: Coefficient> AddAssign<LinExp<Lit, C>> for LinExp<Lit, C> {
-	fn add_assign(&mut self, rhs: LinExp<Lit, C>) {
+impl AddAssign<LinExp> for LinExp {
+	fn add_assign(&mut self, rhs: LinExp) {
 		// Multiply the current expression
-		if self.mult != C::one() {
+		if self.mult != 1 {
 			self.add *= self.mult;
 			for term in &mut self.terms {
 				term.1 *= self.mult;
 			}
 		}
-		self.mult = C::one();
+		self.mult = 1;
 		// Add other LinExp
 		self.add += rhs.add * rhs.mult;
 		let mut rh_terms = rhs.terms;
@@ -527,50 +539,45 @@ impl<Lit: Literal, C: Coefficient> AddAssign<LinExp<Lit, C>> for LinExp<Lit, C> 
 		self.constraints.extend(rhs.constraints);
 	}
 }
-impl<Lit: Literal, C: Coefficient> Add<LinExp<Lit, C>> for LinExp<Lit, C> {
-	type Output = LinExp<Lit, C>;
-	fn add(mut self, rhs: LinExp<Lit, C>) -> Self::Output {
+impl Add<LinExp> for LinExp {
+	type Output = LinExp;
+	fn add(mut self, rhs: LinExp) -> Self::Output {
 		self += rhs;
 		self
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> MulAssign<C> for LinExp<Lit, C> {
-	fn mul_assign(&mut self, rhs: C) {
+impl MulAssign<Coeff> for LinExp {
+	fn mul_assign(&mut self, rhs: Coeff) {
 		self.mult *= rhs;
 	}
 }
-impl<Lit: Literal, C: Coefficient> Mul<C> for LinExp<Lit, C> {
-	type Output = LinExp<Lit, C>;
-	fn mul(mut self, rhs: C) -> Self::Output {
+impl Mul<Coeff> for LinExp {
+	type Output = LinExp;
+	fn mul(mut self, rhs: Coeff) -> Self::Output {
 		self *= rhs;
 		self
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Checker for Linear<Lit, C> {
-	type Lit = Lit;
-
-	fn check(&self, solution: &[Self::Lit]) -> Result<(), crate::CheckError<Self::Lit>> {
-		let lhs = &self
-			.terms
-			.iter()
-			.flat_map(|part| part.iter().map(|(lit, coef)| (lit.clone(), **coef)))
-			.fold(C::zero(), |acc, (lit, coef)| {
-				let a = solution.iter().find(|x| x.var() == lit.var());
-				acc + if lit == *a.unwrap() {
-					C::one()
-				} else {
-					C::zero()
-				} * coef
-			});
+impl Checker for Linear {
+	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError> {
+		let mut sum = 0;
+		for (lit, coef) in self.terms.iter().flat_map(|p| p.iter().copied()) {
+			match value(lit) {
+				Some(true) => sum += *coef,
+				None if self.cmp == LimitComp::LessEq => sum += *coef,
+				Some(false) => {}
+				None => return Err(Unsatisfiable.into()),
+			}
+		}
 		if match self.cmp {
-			LimitComp::LessEq => *lhs <= *self.k,
-			LimitComp::Equal => *lhs == *self.k,
+			LimitComp::LessEq => sum <= *self.k,
+			LimitComp::Equal => sum == *self.k,
 		} {
 			Ok(())
 		} else {
-			Err(CheckError::Unsatisfiable(Unsatisfiable))
+			Err(Unsatisfiable.into())
 		}
 	}
 }
@@ -595,14 +602,14 @@ impl<Enc, Agg> LinearEncoder<Enc, Agg> {
 	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient, Enc: Encoder<DB, LinVariant<DB::Lit, C>>>
-	Encoder<DB, LinearConstraint<DB::Lit, C>> for LinearEncoder<Enc>
+impl<DB: ClauseDatabase, Enc: Encoder<DB, LinVariant>> Encoder<DB, LinearConstraint>
+	for LinearEncoder<Enc>
 {
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "linear_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, lin: &LinearConstraint<DB::Lit, C>) -> Result {
+	fn encode(&mut self, db: &mut DB, lin: &LinearConstraint) -> Result {
 		let variant = self.agg.aggregate(db, lin)?;
 		self.enc.encode(db, &variant)
 	}
@@ -642,13 +649,12 @@ impl<LinEnc, CardEnc, AmoEnc> StaticLinEncoder<LinEnc, CardEnc, AmoEnc> {
 
 impl<
 		DB: ClauseDatabase,
-		C: Coefficient,
-		LinEnc: Encoder<DB, Linear<DB::Lit, C>>,
-		CardEnc: Encoder<DB, Cardinality<DB::Lit, C>>,
-		AmoEnc: Encoder<DB, CardinalityOne<DB::Lit>>,
-	> Encoder<DB, LinVariant<DB::Lit, C>> for StaticLinEncoder<LinEnc, CardEnc, AmoEnc>
+		LinEnc: Encoder<DB, Linear>,
+		CardEnc: Encoder<DB, Cardinality>,
+		AmoEnc: Encoder<DB, CardinalityOne>,
+	> Encoder<DB, LinVariant> for StaticLinEncoder<LinEnc, CardEnc, AmoEnc>
 {
-	fn encode(&mut self, db: &mut DB, lin: &LinVariant<DB::Lit, C>) -> Result {
+	fn encode(&mut self, db: &mut DB, lin: &LinVariant) -> Result {
 		match &lin {
 			LinVariant::Linear(lin) => self.lin_enc.encode(db, lin),
 			LinVariant::Cardinality(card) => self.card_enc.encode(db, card),
@@ -660,13 +666,13 @@ impl<
 
 #[cfg(test)]
 mod tests {
-	use super::Part;
-	use crate::PosCoeff;
+	use super::{Part, PosCoeff};
+	use crate::{Coeff, Lit};
 
-	pub(crate) fn construct_terms(terms: &[(i32, i32)]) -> Vec<Part<i32, PosCoeff<i32>>> {
+	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(terms: &[(L, Coeff)]) -> Vec<Part> {
 		terms
 			.iter()
-			.map(|(lit, coef)| Part::Amo(vec![(*lit, PosCoeff::from(*coef))]))
+			.map(|(lit, coef)| Part::Amo(vec![(lit.clone().into(), PosCoeff::new(*coef))]))
 			.collect()
 	}
 
@@ -680,14 +686,14 @@ mod tests {
 					&Linear {
 						terms: construct_terms(&[(1, 2), (2, 3), (3, 5),]),
 						cmp: LimitComp::LessEq,
-						k: 6.into()
+						k: PosCoeff::new(6)
 					}
 					=> vec![
-						vec![-1, -2, -3], // 0
-						vec![ 1, -2, -3], // 2
-						vec![-1,  2, -3], // 3
-						vec![ 1,  2, -3], // 5
-						vec![-1, -2,  3], // 5
+						lits![-1, -2, -3], // 0
+						lits![ 1, -2, -3], // 2
+						lits![-1,  2, -3], // 3
+						lits![ 1,  2, -3], // 5
+						lits![-1, -2,  3], // 5
 					]
 				);
 			}
@@ -707,7 +713,7 @@ mod tests {
 							(-6, 6)
 						]),
 						cmp: LimitComp::LessEq,
-						k: 19.into()
+						k: PosCoeff::new(19)
 					}
 				);
 			}
@@ -720,15 +726,15 @@ mod tests {
 					&Linear {
 						terms: construct_terms(&[(1, 1), (2, 2), (3, 4),]),
 						cmp: LimitComp::LessEq,
-						k: 5.into()
+						k: PosCoeff::new(5)
 					}
 					=> vec![
-						vec![-1, -2, -3],
-						vec![ 1, -2, -3],
-						vec![-1,  2, -3],
-						vec![ 1,  2, -3],
-						vec![-1, -2,  3],
-						vec![ 1, -2,  3],
+						lits![-1, -2, -3],
+						lits![ 1, -2, -3],
+						lits![-1,  2, -3],
+						lits![ 1,  2, -3],
+						lits![-1, -2,  3],
+						lits![ 1, -2,  3],
 					]
 				);
 			}
@@ -741,15 +747,15 @@ mod tests {
 					&Linear {
 						terms: construct_terms(&[(1, 4), (2, 6), (3, 7),]),
 						cmp: LimitComp::LessEq,
-						k: 10.into()
+						k: PosCoeff::new(10)
 					}
-                    => vec![
-                        vec![-1, -2, -3],
-                        vec![1, -2, -3],
-                        vec![-1, 2, -3],
-                        vec![1, 2, -3],
-                        vec![-1, -2, 3],
-                    ]
+					=> vec![
+						lits![-1, -2, -3],
+						lits![1, -2, -3],
+						lits![-1, 2, -3],
+						lits![1, 2, -3],
+						lits![-1, -2, 3],
+					]
 
 				);
 			}
@@ -764,10 +770,10 @@ mod tests {
 					&Linear {
 						terms: construct_terms(&[(1, 1), (2, 2), (3, 4)]),
 						cmp: LimitComp::Equal,
-						k: 5.into()
+						k: PosCoeff::new(5)
 					}
 					=> vec![
-						vec![ 1, -2,  3],
+						lits![ 1, -2,  3],
 					]
 				);
 			}
@@ -780,11 +786,11 @@ mod tests {
 					&Linear {
 						terms: construct_terms(&[(1, 1), (2, 2), (3, 3),]),
 						cmp: LimitComp::Equal,
-						k: 3.into()
+						k: PosCoeff::new(3)
 					}
 					=> vec![
-						vec![-1, -2,  3],
-						vec![ 1,  2, -3],
+						lits![-1, -2,  3],
+						lits![ 1,  2, -3],
 					]
 				);
 			}
@@ -797,11 +803,11 @@ mod tests {
 					&Linear {
 						terms: construct_terms(&[(1, 2), (2, 3), (3, 5), (4,7)]),
 						cmp: LimitComp::Equal,
-						k: 10.into()
+						k: PosCoeff::new(10)
 					}
 					=> vec![
-						vec![-1, 2,-3, 4],
-						vec![ 1, 2, 3,-4],
+						lits![-1, 2,-3, 4],
+						lits![ 1, 2, 3,-4],
 					]
 				);
 			}
@@ -814,12 +820,12 @@ mod tests {
 					&Linear {
 						terms: construct_terms(&[(1, 2), (2, 1), (3, 2), (4,2)]),
 						cmp: LimitComp::Equal,
-						k: 4.into()
+						k: PosCoeff::new(4)
 					}
 					=> vec![
-						vec![ 1,-2,-3, 4],
-						vec![-1,-2, 3, 4],
-						vec![ 1,-2, 3,-4],
+						lits![ 1,-2,-3, 4],
+						lits![-1,-2, 3, 4],
+						lits![ 1,-2, 3,-4],
 					]
 				);
 			}

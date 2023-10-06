@@ -1,5 +1,3 @@
-use crate::Encoder;
-use itertools::Itertools;
 use std::{
 	cell::RefCell,
 	collections::{BTreeSet, HashMap},
@@ -8,18 +6,18 @@ use std::{
 };
 
 use iset::IntervalMap;
-
-use crate::{
-	int::{TernLeConstraint, TernLeEncoder},
-	ClauseDatabase, Coefficient, LimitComp, Literal,
-};
+use itertools::Itertools;
 
 use super::{display_dom, enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, IntVarOrd};
+use crate::{
+	int::{TernLeConstraint, TernLeEncoder},
+	ClauseDatabase, Coeff, Encoder, LimitComp, Lit,
+};
 
-#[derive(Debug)]
-pub(crate) struct Model<Lit: Literal, C: Coefficient> {
-	vars: HashMap<usize, IntVarEnc<Lit, C>>,
-	pub(crate) cons: Vec<Lin<C>>,
+#[derive(Debug, Default)]
+pub(crate) struct Model {
+	vars: HashMap<usize, IntVarEnc>,
+	pub(crate) cons: Vec<Lin>,
 	var_ids: usize,
 }
 
@@ -33,7 +31,7 @@ pub enum Consistency {
 	Domain,
 }
 
-impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
+impl Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		for con in &self.cons {
 			writeln!(f, "{}", con)?;
@@ -42,11 +40,11 @@ impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 	}
 }
 
-impl<C: Coefficient> Display for Lin<C> {
+impl Display for Lin {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let disp_x = |x: &(C, Rc<RefCell<IntVar<C>>>)| -> String {
+		let disp_x = |x: &(Coeff, Rc<RefCell<IntVar>>)| -> String {
 			let (coef, x) = x;
-			assert!(coef.abs() == C::one());
+			assert!(coef.abs() == 1);
 			let x = x.borrow();
 
 			format!("{}", x)
@@ -62,28 +60,20 @@ impl<C: Coefficient> Display for Lin<C> {
 	}
 }
 
-impl<C: Coefficient> fmt::Display for IntVar<C> {
+impl fmt::Display for IntVar {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "x{} ∈ {}", self.id, display_dom(&self.dom))
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
-	pub fn new() -> Self {
-		Self {
-			vars: HashMap::new(),
-			cons: vec![],
-			var_ids: 0,
-		}
-	}
-
-	pub fn add_int_var_enc(&mut self, x: IntVarEnc<Lit, C>) -> IntVar<C> {
-		let var = self.new_var(x.dom().iter(..).map(|d| d.end - C::one()).collect(), false);
+impl Model {
+	pub fn add_int_var_enc(&mut self, x: IntVarEnc) -> IntVar {
+		let var = self.new_var(x.dom().iter(..).map(|d| d.end - 1).collect(), false);
 		self.vars.insert(var.id, x);
 		var
 	}
 
-	pub fn new_var(&mut self, dom: BTreeSet<C>, add_consistency: bool) -> IntVar<C> {
+	pub fn new_var(&mut self, dom: BTreeSet<Coeff>, add_consistency: bool) -> IntVar {
 		self.var_ids += 1;
 		IntVar {
 			id: self.var_ids,
@@ -93,22 +83,20 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		}
 	}
 
-	pub fn new_constant(&mut self, c: C) -> IntVar<C> {
+	pub fn new_constant(&mut self, c: Coeff) -> IntVar {
 		self.new_var(BTreeSet::from([c]), false)
 	}
 
-	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(
+	pub fn encode<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
-		cutoff: Option<C>,
+		cutoff: Option<Coeff>,
 	) -> crate::Result {
 		let mut all_views = HashMap::new();
 		for con in &self.cons {
 			let Lin { xs, cmp } = con;
 			assert!(
-				con.xs.len() == 3
-					&& con.xs.iter().map(|(c, _)| c).collect::<Vec<_>>()
-						== [&C::one(), &C::one(), &-C::one()]
+				con.xs.len() == 3 && con.xs.iter().map(|(c, _)| c).collect_vec() == [&1, &1, &-1]
 			);
 
 			for (_, x) in xs {
@@ -148,43 +136,37 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 						.any(|(_, x)| changed.contains(&x.borrow().id))
 						.then_some(i)
 				})
-				.collect::<Vec<_>>();
+				.collect_vec();
 			queue.append(&mut cons);
 		}
 	}
 }
 
 #[derive(Debug)]
-pub struct Lin<C: Coefficient> {
-	pub(crate) xs: Vec<(C, Rc<RefCell<IntVar<C>>>)>,
+pub struct Lin {
+	pub(crate) xs: Vec<(Coeff, Rc<RefCell<IntVar>>)>,
 	pub(crate) cmp: LimitComp,
 }
 
-impl<C: Coefficient> Lin<C> {
+impl Lin {
 	pub fn tern(
-		x: Rc<RefCell<IntVar<C>>>,
-		y: Rc<RefCell<IntVar<C>>>,
+		x: Rc<RefCell<IntVar>>,
+		y: Rc<RefCell<IntVar>>,
 		cmp: LimitComp,
-		z: Rc<RefCell<IntVar<C>>>,
+		z: Rc<RefCell<IntVar>>,
 	) -> Self {
 		Lin {
-			xs: vec![(C::one(), x), (C::one(), y), (-C::one(), z)],
+			xs: vec![(1, x), (1, y), (-1, z)],
 			cmp,
 		}
 	}
 
-	pub fn lb(&self) -> C {
-		self.xs
-			.iter()
-			.map(|(c, x)| x.borrow().lb(c))
-			.fold(C::zero(), |a, b| a + b)
+	pub fn lb(&self) -> Coeff {
+		self.xs.iter().map(|(c, x)| x.borrow().lb(c)).sum::<i64>()
 	}
 
-	pub fn ub(&self) -> C {
-		self.xs
-			.iter()
-			.map(|(c, x)| x.borrow().ub(c))
-			.fold(C::zero(), |a, b| a + b)
+	pub fn ub(&self) -> Coeff {
+		self.xs.iter().map(|(c, x)| x.borrow().ub(c)).sum::<i64>()
 	}
 
 	pub(crate) fn propagate(&mut self, consistency: &Consistency) -> Vec<usize> {
@@ -268,20 +250,17 @@ impl<C: Coefficient> Lin<C> {
 								.xs
 								.iter()
 								.enumerate()
-								.filter_map(|(j, (c_j, x_j))| {
-									(i != j).then(|| {
-										x_j.borrow()
-											.dom
-											.iter()
-											.map(|d_j_k| *c_j * *d_j_k)
-											.collect::<Vec<_>>()
-									})
+								.filter(|&(j, (_c_j, _x_j))| (i != j))
+								.map(|(_j, (c_j, x_j))| {
+									x_j.borrow()
+										.dom
+										.iter()
+										.map(|d_j_k| *c_j * *d_j_k)
+										.collect_vec()
 								})
 								.multi_cartesian_product()
-								.any(|rs| {
-									*c_i * *d_i + rs.into_iter().fold(C::zero(), |a, b| a + b)
-										== C::zero()
-								}) {
+								.any(|rs| *c_i * *d_i + rs.into_iter().sum::<i64>() == 0)
+							{
 								true
 							} else {
 								fixpoint = false;
@@ -303,20 +282,20 @@ impl<C: Coefficient> Lin<C> {
 
 // TODO perhaps id can be used by replacing vars HashMap to just vec
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IntVar<C: Coefficient> {
+pub struct IntVar {
 	pub(crate) id: usize,
-	pub(crate) dom: BTreeSet<C>,
+	pub(crate) dom: BTreeSet<Coeff>,
 	add_consistency: bool,
-	pub(crate) views: HashMap<C, (usize, C)>,
+	pub(crate) views: HashMap<Coeff, (usize, Coeff)>,
 }
 
-impl<C: Coefficient> IntVar<C> {
+impl IntVar {
 	fn encode<DB: ClauseDatabase>(
 		&self,
 		db: &mut DB,
-		views: &mut HashMap<(usize, C), DB::Lit>,
+		views: &mut HashMap<(usize, Coeff), Lit>,
 		prefer_order: bool,
-	) -> IntVarEnc<DB::Lit, C> {
+	) -> IntVarEnc {
 		if self.size() == 1 {
 			IntVarEnc::Const(*self.dom.first().unwrap())
 		} else {
@@ -327,8 +306,8 @@ impl<C: Coefficient> IntVar<C> {
 					.sorted()
 					.cloned()
 					.tuple_windows()
-					.map(|(a, b)| (a + C::one())..(b + C::one()))
-					.map(|v| (v.clone(), views.get(&(self.id, v.end - C::one())).cloned()))
+					.map(|(a, b)| (a + 1)..(b + 1))
+					.map(|v| (v.clone(), views.get(&(self.id, v.end - 1)).cloned()))
 					.collect::<IntervalMap<_, _>>();
 				IntVarEnc::Ord(IntVarOrd::from_views(db, dom, "x".to_string()))
 			} else {
@@ -348,30 +327,30 @@ impl<C: Coefficient> IntVar<C> {
 			for view in self
 				.views
 				.iter()
-				.map(|(c, (id, val))| ((*id, *val), x.geq(*c..(*c + C::one()))))
+				.map(|(c, (id, val))| ((*id, *val), x.geq(*c..(*c + 1))))
 			{
 				// TODO refactor
 				if !view.1.is_empty() {
-					views.insert(view.0, view.1[0][0].clone());
+					views.insert(view.0, view.1[0][0]);
 				}
 			}
 			x
 		}
 	}
 
-	fn ge(&mut self, bound: &C) {
+	fn ge(&mut self, bound: &Coeff) {
 		self.dom = self.dom.split_off(bound);
 	}
 
-	fn le(&mut self, bound: &C) {
-		self.dom.split_off(&(*bound + C::one()));
+	fn le(&mut self, bound: &Coeff) {
+		self.dom.split_off(&(*bound + 1));
 	}
 
 	pub(crate) fn size(&self) -> usize {
 		self.dom.len()
 	}
 
-	pub(crate) fn lb(&self, c: &C) -> C {
+	pub(crate) fn lb(&self, c: &Coeff) -> Coeff {
 		*c * *(if c.is_negative() {
 			self.dom.last()
 		} else {
@@ -380,7 +359,7 @@ impl<C: Coefficient> IntVar<C> {
 		.unwrap()
 	}
 
-	pub(crate) fn ub(&self, c: &C) -> C {
+	pub(crate) fn ub(&self, c: &Coeff) -> Coeff {
 		*c * *(if c.is_negative() {
 			self.dom.first()
 		} else {
@@ -389,19 +368,20 @@ impl<C: Coefficient> IntVar<C> {
 		.unwrap()
 	}
 
-	pub fn required_bits(lb: C, ub: C) -> u32 {
+	pub fn required_bits(lb: Coeff, ub: Coeff) -> u32 {
+		const ZERO: Coeff = 0;
 		if GROUND_BINARY_AT_LB {
-			C::zero().leading_zeros() - ((ub - lb).leading_zeros())
+			ZERO.leading_zeros() - ((ub - lb).leading_zeros())
 		} else {
-			C::zero().leading_zeros() - (ub.leading_zeros())
+			ZERO.leading_zeros() - (ub.leading_zeros())
 		}
 	}
 
-	fn prefer_order(&self, cutoff: Option<C>) -> bool {
+	fn prefer_order(&self, cutoff: Option<Coeff>) -> bool {
 		match cutoff {
 			None => true,
-			Some(cutoff) if cutoff == C::zero() => false,
-			Some(cutoff) => C::from(self.dom.len()).unwrap() < cutoff,
+			Some(0) => false,
+			Some(cutoff) => (self.dom.len() as Coeff) < cutoff,
 		}
 	}
 }

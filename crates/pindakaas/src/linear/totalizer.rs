@@ -1,29 +1,25 @@
-use crate::int::Consistency;
-pub(crate) use crate::int::IntVar;
-use crate::int::Lin;
-use crate::int::Model;
-use crate::Literal;
-use std::cell::RefCell;
-use std::collections::BTreeSet;
-use std::rc::Rc;
+use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
 use itertools::Itertools;
 
+pub(crate) use crate::int::IntVar;
 use crate::{
-	int::IntVarEnc, linear::LimitComp, ClauseDatabase, Coefficient, Encoder, Linear, Result,
+	int::{Consistency, IntVarEnc, Lin, Model},
+	linear::LimitComp,
+	ClauseDatabase, Coeff, Encoder, Linear, Result,
 };
 
 const EQUALIZE_INTERMEDIATES: bool = false;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized Totalizer (GT)
 #[derive(Clone, Default)]
-pub struct TotalizerEncoder<C: Coefficient> {
+pub struct TotalizerEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,
-	cutoff: Option<C>,
+	cutoff: Option<Coeff>,
 }
 
-impl<C: Coefficient> TotalizerEncoder<C> {
+impl TotalizerEncoder {
 	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
@@ -32,25 +28,25 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 		self.add_propagation = c;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Option<C>) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for TotalizerEncoder<C> {
+impl<DB: ClauseDatabase> Encoder<DB, Linear> for TotalizerEncoder {
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
+	fn encode(&mut self, db: &mut DB, lin: &Linear) -> Result {
 		let xs = lin
 			.terms
 			.iter()
 			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
+			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
 			.sorted_by_key(|x| x.ub())
-			.collect::<Vec<_>>();
+			.collect_vec();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
 		let mut model = self.build_totalizer(xs, &lin.cmp, *lin.k);
@@ -59,21 +55,16 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 	}
 }
 
-impl<C: Coefficient> TotalizerEncoder<C> {
-	fn build_totalizer<Lit: Literal>(
-		&self,
-		xs: Vec<IntVarEnc<Lit, C>>,
-		cmp: &LimitComp,
-		k: C,
-	) -> Model<Lit, C> {
-		let mut model = Model::new();
+impl TotalizerEncoder {
+	fn build_totalizer(&self, xs: Vec<IntVarEnc>, cmp: &LimitComp, k: Coeff) -> Model {
+		let mut model = Model::default();
 		let mut layer = xs
 			.into_iter()
 			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
-			.collect::<Vec<_>>();
+			.collect_vec();
 
 		while layer.len() > 1 {
-			let mut next_layer = Vec::<Rc<RefCell<IntVar<C>>>>::new();
+			let mut next_layer = Vec::<Rc<RefCell<IntVar>>>::new();
 			for children in layer.chunks(2) {
 				match children {
 					[x] => {
@@ -127,43 +118,44 @@ mod tests {
 	use super::*;
 	use crate::{
 		// cardinality_one::tests::card1_test_suite, CardinalityOne,
-		helpers::tests::{assert_sol, TestDB},
+		helpers::tests::{assert_sol, lits, TestDB},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
-			LimitComp,
+			LimitComp, PosCoeff,
 		},
 		Comparator,
 		Encoder,
 		LinExp,
 		LinearAggregator,
 		LinearConstraint,
+		Lit,
 		SortedEncoder,
 	};
 
 	#[test]
 	fn test_sort_same_coefficients_2() {
-		use crate::linear::{LinearEncoder, StaticLinEncoder};
-		use crate::{Checker, Encoder};
+		use crate::{
+			linear::{LinearEncoder, StaticLinEncoder},
+			Checker, Encoder,
+		};
 		let mut db = TestDB::new(5);
 		let mut agg = LinearAggregator::default();
 		agg.sort_same_coefficients(SortedEncoder::default(), 3);
-		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder<i32>>>::default();
+		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default();
 		encoder.add_linear_aggregater(agg);
 		let con = LinearConstraint::new(
-			LinExp::new() + (1, 3) + (2, 3) + (3, 1) + (4, 1) + (5, 3),
+			LinExp::from_slices(&[3, 3, 1, 1, 3], &lits![1, 2, 3, 4, 5]),
 			Comparator::GreaterEq,
 			2,
 		);
 		assert!(encoder.encode(&mut db, &con).is_ok());
-		db.with_check(|sol| {
-			{
-				let con = LinearConstraint::new(
-					LinExp::new() + (1, 3) + (2, 3) + (3, 1) + (4, 1) + (5, 3),
-					Comparator::GreaterEq,
-					2,
-				);
-				con.check(sol)
-			}
+		db.with_check(|value| {
+			LinearConstraint::new(
+				LinExp::from_slices(&[3, 3, 1, 1, 3], &lits![1, 2, 3, 4, 5]),
+				Comparator::GreaterEq,
+				2,
+			)
+			.check(value)
 			.is_ok()
 		})
 		.check_complete()

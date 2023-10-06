@@ -15,14 +15,12 @@ cached = "0.46"
 ipasir = { version = "0.3", features = ["ffi"] }
 iset = "0.2"
 itertools = "0.11"
-num = "0.4"
 rustc-hash = "1.1"
 
 # Optional encoding tracing capabilities
 tracing = { version = "0.1", optional = true }
 
 # Optional Solver Interfaces
-minisat = { git = "https://github.com/luteberget/minisat-rs.git", optional = true } # waiting on release for minisat::Lit::var()
 splr = { version = "0.17", optional = true }
 
 [dev-dependencies]

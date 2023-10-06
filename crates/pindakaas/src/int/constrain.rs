@@ -1,33 +1,27 @@
-use itertools::Itertools;
-
-use crate::helpers::{add_clauses_for, negate_cnf};
-use crate::{
-	helpers::as_binary,
-	linear::{lex_geq_const, lex_leq_const, log_enc_add, log_enc_add_, LimitComp, LinExp},
-	trace::emit_clause,
-	Coefficient, Literal,
-};
-use crate::{CheckError, Checker, ClauseDatabase, Encoder, Unsatisfiable};
 use std::fmt;
 
-use super::enc::GROUND_BINARY_AT_LB;
-use super::{IntVarBin, IntVarEnc, LitOrConst};
+use itertools::Itertools;
+
+use super::{enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, LitOrConst};
+use crate::{
+	helpers::{add_clauses_for, as_binary, negate_cnf},
+	linear::{
+		lex_geq_const, lex_leq_const, log_enc_add, log_enc_add_, LimitComp, LinExp, PosCoeff,
+	},
+	trace::emit_clause,
+	CheckError, Checker, ClauseDatabase, Coeff, Encoder, Unsatisfiable, Valuation,
+};
 
 #[derive(Debug)]
-pub(crate) struct TernLeConstraint<'a, Lit: Literal, C: Coefficient> {
-	pub(crate) x: &'a IntVarEnc<Lit, C>,
-	pub(crate) y: &'a IntVarEnc<Lit, C>,
+pub(crate) struct TernLeConstraint<'a> {
+	pub(crate) x: &'a IntVarEnc,
+	pub(crate) y: &'a IntVarEnc,
 	pub(crate) cmp: LimitComp,
-	pub(crate) z: &'a IntVarEnc<Lit, C>,
+	pub(crate) z: &'a IntVarEnc,
 }
 
-impl<'a, Lit: Literal, C: Coefficient> TernLeConstraint<'a, Lit, C> {
-	pub fn new(
-		x: &'a IntVarEnc<Lit, C>,
-		y: &'a IntVarEnc<Lit, C>,
-		cmp: LimitComp,
-		z: &'a IntVarEnc<Lit, C>,
-	) -> Self {
+impl<'a> TernLeConstraint<'a> {
+	pub fn new(x: &'a IntVarEnc, y: &'a IntVarEnc, cmp: LimitComp, z: &'a IntVarEnc) -> Self {
 		Self { x, y, cmp, z }
 	}
 
@@ -47,7 +41,7 @@ impl<'a, Lit: Literal, C: Coefficient> TernLeConstraint<'a, Lit, C> {
 		Ok(false)
 	}
 
-	fn check(x: C, y: C, cmp: &LimitComp, z: C) -> bool {
+	fn check(x: Coeff, y: Coeff, cmp: &LimitComp, z: Coeff) -> bool {
 		match cmp {
 			LimitComp::LessEq => x + y <= z,
 			LimitComp::Equal => x + y == z,
@@ -55,12 +49,11 @@ impl<'a, Lit: Literal, C: Coefficient> TernLeConstraint<'a, Lit, C> {
 	}
 }
 
-impl<'a, Lit: Literal, C: Coefficient> Checker for TernLeConstraint<'a, Lit, C> {
-	type Lit = Lit;
-	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let x = LinExp::from(self.x).assign(solution)?;
-		let y = LinExp::from(self.y).assign(solution)?;
-		let z = LinExp::from(self.z).assign(solution)?;
+impl<'a> Checker for TernLeConstraint<'a> {
+	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError> {
+		let x = LinExp::from(self.x).value(&value)?;
+		let y = LinExp::from(self.y).value(&value)?;
+		let z = LinExp::from(self.z).value(&value)?;
 		if Self::check(x, y, &self.cmp, z) {
 			Ok(())
 		} else {
@@ -71,29 +64,9 @@ impl<'a, Lit: Literal, C: Coefficient> Checker for TernLeConstraint<'a, Lit, C> 
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> fmt::Display for TernLeConstraint<'_, Lit, C> {
+impl fmt::Display for TernLeConstraint<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{} + {} {} {}", self.x, self.y, self.cmp, self.z)
-	}
-}
-
-#[allow(dead_code)] // TODO
-pub(crate) struct TernLeConstraintContainer<Lit: Literal, C: Coefficient> {
-	pub(crate) x: IntVarEnc<Lit, C>,
-	pub(crate) y: IntVarEnc<Lit, C>,
-	pub(crate) cmp: LimitComp,
-	pub(crate) z: IntVarEnc<Lit, C>,
-}
-
-impl<'a, Lit: Literal, C: Coefficient> TernLeConstraintContainer<Lit, C> {
-	#[allow(dead_code)]
-	pub(crate) fn get(&'a self) -> TernLeConstraint<'a, Lit, C> {
-		TernLeConstraint {
-			x: &self.x,
-			y: &self.y,
-			cmp: self.cmp.clone(),
-			z: &self.z,
-		}
 	}
 }
 
@@ -102,42 +75,22 @@ pub(crate) struct TernLeEncoder {}
 
 const ENCODE_REDUNDANT_X_O_Y_O_Z_B: bool = true;
 
-impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB::Lit, C>>
-	for TernLeEncoder
-{
+impl<'a, DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'a>> for TernLeEncoder {
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "tern_le_encoder", skip_all, fields(constraint = format!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z)))
 	)]
-	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> crate::Result {
+	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint) -> crate::Result {
 		#[cfg(debug_assertions)]
 		{
 			const PRINT_TESTCASES: bool = false;
 			if PRINT_TESTCASES {
 				println!(" // {tern}");
-				let x = tern
-					.x
-					.dom()
-					.iter(..)
-					.map(|iv| iv.end - C::one())
-					.collect::<Vec<_>>();
-				let y = tern
-					.y
-					.dom()
-					.iter(..)
-					.map(|iv| iv.end - C::one())
-					.collect::<Vec<_>>();
-				let z = tern
-					.z
-					.dom()
-					.iter(..)
-					.map(|iv| iv.end - C::one())
-					.collect::<Vec<_>>();
+				let x = tern.x.dom().iter(..).map(|iv| iv.end - 1).collect_vec();
+				let y = tern.y.dom().iter(..).map(|iv| iv.end - 1).collect_vec();
+				let z = tern.z.dom().iter(..).map(|iv| iv.end - 1).collect_vec();
 				println!(
-					"mod _test_{}_{}_{} {{
-                test_int_lin!($encoder, &[{}], &[{}], $cmp, &[{}]);
-                }}
-                ",
+					"mod _test_{}_{}_{} {{\n\ttest_int_lin!($encoder, &[{}], &[{}], $cmp, &[{}]);\n}}\n",
 					x.iter().join(""),
 					y.iter().join(""),
 					z.iter().join(""),
@@ -152,7 +105,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 
 		return match (x, y, z) {
 			(IntVarEnc::Const(_), IntVarEnc::Const(_), IntVarEnc::Const(_)) => {
-				if tern.check(&[]).is_ok() {
+				if tern.check(|_| None).is_ok() {
 					Ok(())
 				} else {
 					Err(Unsatisfiable)
@@ -164,25 +117,19 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					// put z_bin on the left, const on the right
 					LimitComp::LessEq => lex_geq_const(
 						db,
-						z_bin
-							.xs
-							.iter()
-							.map(|x| Some(x.clone()))
-							.collect::<Vec<_>>()
-							.as_slice(),
-						if GROUND_BINARY_AT_LB {
+						z_bin.xs.iter().map(|x| Some(*x)).collect_vec().as_slice(),
+						PosCoeff::new(if GROUND_BINARY_AT_LB {
 							lhs - z_bin.lb()
 						} else {
 							lhs
-						}
-						.into(),
+						}),
 						z_bin.lits(),
 					),
 					LimitComp::Equal => self.encode(
 						db,
 						&TernLeConstraint {
 							x: z,
-							y: &IntVarEnc::Const(C::zero()),
+							y: &IntVarEnc::Const(0),
 							cmp: cmp.clone(),
 							z: &IntVarEnc::Const(lhs),
 						},
@@ -197,30 +144,22 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				// 	"Only support <= for x:B+y:Constant ? z:Constant"
 				// );
 
-				let rhs = if GROUND_BINARY_AT_LB {
+				let rhs = PosCoeff::new(if GROUND_BINARY_AT_LB {
 					*z_con - *y_con - x_bin.lb()
 				} else {
 					*z_con - *y_con
-				}
-				.into();
+				});
 				match cmp {
 					LimitComp::LessEq => lex_leq_const(
 						db,
-						x_bin
-							.xs
-							.iter()
-							.map(|x| Some(x.clone()))
-							.collect::<Vec<_>>()
-							.as_slice(),
+						x_bin.xs.iter().map(|x| Some(*x)).collect_vec().as_slice(),
 						rhs,
 						x_bin.lits(),
 					),
-					LimitComp::Equal => as_binary(rhs, Some(x_bin.lits()))
+					LimitComp::Equal => as_binary(rhs, Some(x_bin.lits() as u32))
 						.into_iter()
-						.zip(x_bin.xs.iter())
-						.try_for_each(|(b, x)| {
-							emit_clause!(db, &[if b { x.clone() } else { x.negate() }])
-						}),
+						.zip(x_bin.xs.iter().copied())
+						.try_for_each(|(b, x)| emit_clause!(db, [if b { x } else { !x }])),
 				}
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y_const), IntVarEnc::Bin(z_bin))
@@ -234,23 +173,13 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				};
 				log_enc_add_(
 					db,
-					&x_bin
-						.xs
-						.iter()
-						.cloned()
-						.map(LitOrConst::from)
-						.collect::<Vec<_>>(),
-					&as_binary((*y_const).into(), Some(x_bin.lits()))
+					&x_bin.xs.iter().cloned().map(LitOrConst::from).collect_vec(),
+					&as_binary(PosCoeff::new(*y_const), Some(x_bin.lits() as u32))
 						.into_iter()
 						.map(LitOrConst::Const)
-						.collect::<Vec<_>>(),
+						.collect_vec(),
 					cmp,
-					&z_bin
-						.xs
-						.iter()
-						.cloned()
-						.map(LitOrConst::from)
-						.collect::<Vec<_>>(),
+					&z_bin.xs.iter().cloned().map(LitOrConst::from).collect_vec(),
 				)
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Bin(y_bin), IntVarEnc::Bin(z_bin)) => {
@@ -262,12 +191,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 						xy.consistent(db)?; // TODO can be removed if grounding is correct
 						self.encode(
 							db,
-							&TernLeConstraint::new(
-								&xy,
-								&IntVarEnc::Const(C::zero()),
-								LimitComp::LessEq,
-								z,
-							),
+							&TernLeConstraint::new(&xy, &IntVarEnc::Const(0), LimitComp::LessEq, z),
 						)
 					}
 				}
@@ -279,7 +203,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				z_bin.consistent(db)?;
 				self.encode(
 					db,
-					&TernLeConstraint::new(&z_bin, &IntVarEnc::Const(C::zero()), cmp.clone(), z),
+					&TernLeConstraint::new(&z_bin, &IntVarEnc::Const(0), cmp.clone(), z),
 				)
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Ord(y_ord), _)
@@ -296,7 +220,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					db,
 					&TernLeConstraint::new(
 						&y_ord.clone().into(),
-						&IntVarEnc::Const(C::zero()), // TODO maybe - lb
+						&IntVarEnc::Const(0), // TODO maybe - lb
 						cmp.clone(),
 						&y_bin.clone().into(),
 					),
@@ -321,24 +245,18 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 
 				self.encode(
 					db,
-					&TernLeConstraint::new(&xy_ord, &IntVarEnc::Const(C::zero()), cmp.clone(), z),
+					&TernLeConstraint::new(&xy_ord, &IntVarEnc::Const(0), cmp.clone(), z),
 				)
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(c), IntVarEnc::Ord(_))
 			| (IntVarEnc::Const(c), IntVarEnc::Bin(x_bin), IntVarEnc::Ord(_)) => {
-				let z = z.add(
-					db,
-					self,
-					&IntVarEnc::Const(c.neg()),
-					Some(z.lb()),
-					Some(z.ub()),
-				)?;
+				let z = z.add(db, self, &IntVarEnc::Const(-c), Some(z.lb()), Some(z.ub()))?;
 
 				// x + c <= z == z-c >= x == /\ (z'<=a -> x<=a)
 				for (c_a, z_leq_c_a) in z.leqs() {
 					// TODO alt; just propagate by adding lex constraint
 					let c_a = if z_leq_c_a.is_empty() {
-						c_a.start..(x.ub() + C::one())
+						c_a.start..(x.ub() + 1)
 					} else {
 						c_a
 					};
@@ -365,7 +283,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					for (c_b, y_geq_c_b) in y.geqs() {
 						// TODO is the max actually correct/good?
 						let c_c = (std::cmp::max(c_a.start, c_b.start))
-							..(((c_a.end - C::one()) + (c_b.end - C::one())) + C::one());
+							..(((c_a.end - 1) + (c_b.end - 1)) + 1);
 
 						let z_geq_c_c = z.geq(c_c.clone());
 
@@ -384,8 +302,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				if cmp == &LimitComp::Equal {
 					for (c_a, x_leq_c_a) in x.leqs() {
 						for (c_b, y_leq_c_b) in y.leqs() {
-							let c_c = (c_a.start + c_b.start)
-								..(c_a.end - C::one() + c_b.end - C::one()) + C::one();
+							let c_c = (c_a.start + c_b.start)..(c_a.end - 1 + c_b.end - 1) + 1;
 
 							let z_leq_c_c = z.leq(c_c.clone());
 
@@ -409,21 +326,23 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 #[cfg(test)]
 pub mod tests {
 
-	use super::*;
-	use crate::{
-		helpers::tests::{assert_sol, assert_unsat, TestDB},
-		int::{IntVar, IntVarOrd},
-	};
 	use iset::{interval_set, IntervalSet};
-
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
+	use super::*;
+	use crate::{
+		helpers::tests::{assert_sol, assert_unsat, lits, make_valuation, TestDB},
+		int::{IntVar, IntVarOrd},
+		Lit,
+	};
+
 	macro_rules! test_int_lin {
 		($encoder:expr,$x:expr,$y:expr,$cmp:expr,$z:expr) => {
-			use super::*;
 			#[cfg(feature = "trace")]
 			use traced_test::test;
+
+			use super::*;
 
 			#[test]
 			fn o_o_o() {
@@ -555,13 +474,7 @@ pub mod tests {
 				z: &z,
 			};
 
-			let sols =
-				db.generate_solutions(
-					|sol| {
-						tern.check(sol).is_ok()
-					},
-					db.num_var,
-					);
+			let sols = db.generate_solutions(|sol| tern.check(sol).is_ok(), db.num_var);
 
 			x.consistent(&mut db).unwrap();
 			y.consistent(&mut db).unwrap();
@@ -626,12 +539,12 @@ pub mod tests {
 		int_lin_test_suite!(TernLeEncoder::default(), LimitComp::Equal);
 	}
 
-	fn get_ord_x<DB: ClauseDatabase, C: Coefficient>(
+	fn get_ord_x<DB: ClauseDatabase>(
 		db: &mut DB,
-		dom: IntervalSet<C>,
+		dom: IntervalSet<Coeff>,
 		consistent: bool,
 		lbl: String,
-	) -> IntVarEnc<DB::Lit, C> {
+	) -> IntVarEnc {
 		let x = IntVarOrd::from_syms(db, dom, lbl);
 		if consistent {
 			x.consistent(db).unwrap();
@@ -639,13 +552,13 @@ pub mod tests {
 		IntVarEnc::Ord(x)
 	}
 
-	fn get_bin_x<DB: ClauseDatabase, C: Coefficient>(
+	fn get_bin_x<DB: ClauseDatabase>(
 		db: &mut DB,
-		lb: C,
-		ub: C,
+		lb: Coeff,
+		ub: Coeff,
 		consistent: bool,
 		lbl: String,
-	) -> IntVarEnc<DB::Lit, C> {
+	) -> IntVarEnc {
 		let x = IntVarBin::from_bounds(db, lb, ub, lbl);
 		if consistent {
 			x.consistent(db).unwrap();
@@ -655,10 +568,10 @@ pub mod tests {
 
 	#[test]
 	fn constant_test() {
-		let c: IntVarEnc<i32, _> = IntVarEnc::Const(42);
+		let c: IntVarEnc = IntVarEnc::Const(42);
 		assert_eq!(c.lb(), 42);
 		assert_eq!(c.ub(), 42);
-		assert_eq!(c.geq(6..7), Vec::<Vec<i32>>::new());
+		assert_eq!(c.geq(6..7), Vec::<Vec<_>>::new());
 		assert_eq!(c.geq(45..46), vec![vec![]]);
 	}
 
@@ -666,8 +579,8 @@ pub mod tests {
 	// #[test]
 	fn _bin_1_test() {
 		let mut db = TestDB::new(0);
-		let x = get_bin_x::<_, i32>(&mut db, 2, 12, true, "x".to_string());
-		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
+		let x = get_bin_x(&mut db, 2, 12, true, "x".to_string());
+		let x_lin = LinExp::from(&x);
 
 		assert_eq!(x.lits(), 4);
 		assert_eq!(x.lb(), 2);
@@ -678,38 +591,44 @@ pub mod tests {
 		assert_eq!(IntVar::required_bits(3, 10), 3); // 8 vals => 3 bits
 
 		// geq looks zeroes of at (start+1..) end-2 - lb
-		assert_eq!(x.geq(3..4), vec![vec![1, 2, 3, 4]]); // 4-2 - 2 = 4 == 0000 (right-to-left!)
-		assert_eq!(x.geq(7..8), vec![vec![1, 2, 4]]); // 8-2 - 2 = 4 == 0100
-		assert_eq!(x.geq(7..9), vec![vec![1, 2, 4], vec![2, 4]]); // and 9-2 -2 = 5 = 0101
-		assert_eq!(x.geq(5..6), vec![vec![1, 3, 4]]); // 6-2 - 2 = 2 == 0010
-		assert_eq!(x.geq(6..7), vec![vec![3, 4]]); // 7-2 - 2 = 3 == 0011
+		assert_eq!(x.geq(3..4), vec![lits![1, 2, 3, 4]]); // 4-2 - 2 = 4 == 0000 (right-to-left!)
+		assert_eq!(x.geq(7..8), vec![lits![1, 2, 4]]); // 8-2 - 2 = 4 == 0100
+		assert_eq!(x.geq(7..9), vec![lits![1, 2, 4], lits![2, 4]]); // and 9-2 -2 = 5 = 0101
+		assert_eq!(x.geq(5..6), vec![lits![1, 3, 4]]); // 6-2 - 2 = 2 == 0010
+		assert_eq!(x.geq(6..7), vec![lits![3, 4]]); // 7-2 - 2 = 3 == 0011
 
 		// leq looks at ones at start+1 - lb?
-		assert_eq!(x.leq(6..7), vec![vec![-1, -3]]); // 6+1 - 2 = 5 == 0101
-		assert_eq!(x.leq(6..8), vec![vec![-1, -3], vec![-2, -3]]); // and 7+1 - 2 = 6 == 0110
+		assert_eq!(x.leq(6..7), vec![lits![-1, -3]]); // 6+1 - 2 = 5 == 0101
+		assert_eq!(x.leq(6..8), vec![lits![-1, -3], lits![-2, -3]]); // and 7+1 - 2 = 6 == 0110
 		assert_eq!(
 			x.leq(6..9),
-			vec![vec![-1, -3], vec![-2, -3], vec![-1, -2, -3]]
+			vec![lits![-1, -3], lits![-2, -3], lits![-1, -2, -3]]
 		); // and 8+1 -2 = 7 == 0111
-		assert_eq!(x.leq(5..8), vec![vec![-3], vec![-1, -3], vec![-2, -3]]); // and 5+1 -2 = 4 == 0100
+		assert_eq!(x.leq(5..8), vec![lits![-3], lits![-1, -3], lits![-2, -3]]); // and 5+1 -2 = 4 == 0100
 
-		assert_eq!(x.geq(1..5), vec![vec![1, 2, 3, 4], vec![2, 3, 4]]); // trues and 0000 and 0001
-		assert_eq!(x.geq(15..20), vec![vec![1, 2], vec![2], vec![1], vec![]]); // 16-2 - 2 = 12 = 1100, 1101, 1110, false
-
-		assert_eq!(x.leq(-2..3), vec![vec![], vec![-1]]); //
-		assert_eq!(x.leq(15..20), vec![vec![-2, -3, -4], vec![-1, -2, -3, -4]]); // 15+1 -2 = 14 = 1110, 1111, true
-
-		assert_eq!(x_lin.assign(&[-1, -2, -3, -4]), Ok(2));
-		assert_eq!(x_lin.assign(&[1, -2, -3, -4]), Ok(2 + 1));
-		assert_eq!(x_lin.assign(&[1, 2, -3, -4]), Ok(2 + 3));
-		assert_eq!(x_lin.assign(&[-1, 2, -3, 4]), Ok(2 + 10));
+		assert_eq!(x.geq(1..5), vec![lits![1, 2, 3, 4], lits![2, 3, 4]]); // trues and 0000 and 0001
 		assert_eq!(
-			x_lin.assign(&[1, 2, -3, 4]),
-			Err(CheckError::Unsatisfiable(Unsatisfiable)) // 2 + 11 = 13
+			x.geq(15..20),
+			vec![lits![1, 2], lits![2], lits![1], lits![]]
+		); // 16-2 - 2 = 12 = 1100, 1101, 1110, false
+
+		assert_eq!(x.leq(-2..3), vec![lits![], lits![-1]]); //
+		assert_eq!(
+			x.leq(15..20),
+			vec![lits![-2, -3, -4], lits![-1, -2, -3, -4]]
+		); // 15+1 -2 = 14 = 1110, 1111, true
+
+		assert_eq!(x_lin.value(&make_valuation(&[-1, -2, -3, -4])), Ok(2));
+		assert_eq!(x_lin.value(&make_valuation(&[1, -2, -3, -4])), Ok(2 + 1));
+		assert_eq!(x_lin.value(&make_valuation(&[1, 2, -3, -4])), Ok(2 + 3));
+		assert_eq!(x_lin.value(&make_valuation(&[-1, 2, -3, 4])), Ok(2 + 10));
+		assert_eq!(
+			x_lin.value(&make_valuation(&[1, 2, -3, 4])),
+			Err(Unsatisfiable.into()) // 2 + 11 = 13
 		);
 		assert_eq!(
-			x_lin.assign(&[1, 2, 3, 4]),
-			Err(CheckError::Unsatisfiable(Unsatisfiable))
+			x_lin.value(&make_valuation(&[1, 2, 3, 4])),
+			Err(Unsatisfiable.into())
 		);
 
 		let tern = TernLeConstraint {
@@ -739,20 +658,20 @@ pub mod tests {
 		};
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
-		vec![-1, -2, -3, -4], // 0
-		vec![1, -2, -3, -4], // 1
-		vec![-1, 2, -3, -4], // 2
-		vec![1, 2, -3, -4], // 3
-		vec![-1, -2, 3, -4], // 4
-		vec![1, -2, 3, -4], // 5
-		vec![-1, 2, 3, -4],// 6
+			lits![-1, -2, -3, -4], // 0
+			lits![1, -2, -3, -4], // 1
+			lits![-1, 2, -3, -4], // 2
+			lits![1, 2, -3, -4], // 3
+			lits![-1, -2, 3, -4], // 4
+			lits![1, -2, 3, -4], // 5
+			lits![-1, 2, 3, -4],// 6
 		]);
 	}
 
 	#[test]
 	fn ord_geq_test() {
 		let mut db = TestDB::new(0);
-		let x = get_ord_x::<_, i32>(
+		let x = get_ord_x(
 			&mut db,
 			interval_set!(3..5, 5..7, 7..11),
 			true,
@@ -762,16 +681,16 @@ pub mod tests {
 		assert_eq!(x.lits(), 3);
 		assert_eq!(x.lb(), 2);
 		assert_eq!(x.ub(), 10);
-		assert_eq!(x.geq(6..7), vec![vec![2]]);
-		assert_eq!(x.geq(4..7), vec![vec![2]]);
+		assert_eq!(x.geq(6..7), vec![lits![2]]);
+		assert_eq!(x.geq(4..7), vec![lits![2]]);
 
-		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
-		assert!(x_lin.assign(&[1, -2, 3]).is_err());
-		assert!(x_lin.assign(&[-1, 2, -3]).is_err());
-		assert_eq!(x_lin.assign(&[-1, -2, -3]), Ok(2));
-		assert_eq!(x_lin.assign(&[1, -2, -3]), Ok(4));
-		assert_eq!(x_lin.assign(&[1, 2, -3]), Ok(6));
-		assert_eq!(x_lin.assign(&[1, 2, 3]), Ok(10));
+		let x_lin = LinExp::from(&x);
+		assert!(x_lin.value(&make_valuation(&[1, -2, 3])).is_err());
+		assert!(x_lin.value(&make_valuation(&[-1, 2, -3])).is_err());
+		assert_eq!(x_lin.value(&make_valuation(&[-1, -2, -3])), Ok(2));
+		assert_eq!(x_lin.value(&make_valuation(&[1, -2, -3])), Ok(4));
+		assert_eq!(x_lin.value(&make_valuation(&[1, 2, -3])), Ok(6));
+		assert_eq!(x_lin.value(&make_valuation(&[1, 2, 3])), Ok(10));
 
 		let tern = TernLeConstraint {
 			x: &x,
@@ -784,9 +703,9 @@ pub mod tests {
 
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
-		  vec![-1, -2, -3],
-		  vec![1, -2, -3],
-		  vec![1, 2, -3],
+			lits![-1, -2, -3],
+			lits![1, -2, -3],
+			lits![1, 2, -3],
 		]);
 	}
 
@@ -833,20 +752,20 @@ pub mod tests {
 
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
-		  vec![-1, -2, -3, -4, 5, -6],
-		  vec![-1, -2, -3, -4, 5, 6],
-		  vec![-1, -2, 3, -4, 5, -6],
-		  vec![-1, -2, 3, -4, 5, 6],
-		  vec![-1, -2, 3, 4, 5, 6],
-		  vec![1, -2, -3, -4, 5, -6],
-		  vec![1, -2, -3, -4, 5, 6],
-		  vec![1, -2, 3, -4, 5, -6],
-		  vec![1, -2, 3, -4, 5, 6],
-		  vec![1, -2, 3, 4, 5, 6],
-		  vec![1, 2, -3, -4, 5, 6],
-		  vec![1, 2, 3, -4, 5, 6],
-		  vec![1, 2, 3, 4, 5, 6],
-				]);
+			lits![-1, -2, -3, -4, 5, -6],
+			lits![-1, -2, -3, -4, 5, 6],
+			lits![-1, -2, 3, -4, 5, -6],
+			lits![-1, -2, 3, -4, 5, 6],
+			lits![-1, -2, 3, 4, 5, 6],
+			lits![1, -2, -3, -4, 5, -6],
+			lits![1, -2, -3, -4, 5, 6],
+			lits![1, -2, 3, -4, 5, -6],
+			lits![1, -2, 3, -4, 5, 6],
+			lits![1, -2, 3, 4, 5, 6],
+			lits![1, 2, -3, -4, 5, 6],
+			lits![1, 2, 3, -4, 5, 6],
+			lits![1, 2, 3, 4, 5, 6],
+		]);
 	}
 
 	#[test]
@@ -918,24 +837,24 @@ pub mod tests {
 
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
-		  vec![-1, -2, -3, -4, -5],
-		  vec![-1, -2, 3, -4, -5],
-		  vec![-1, -2, -3, 4, -5],
-		  vec![1, -2, -3, 4, -5],
-		  vec![-1, -2, 3, 4, -5],
-		  vec![1, -2, 3, 4, -5],
-		  vec![-1, 2, 3, 4, -5],
-		  vec![-1, -2, -3, -4, 5],
-		  vec![1, -2, -3, -4, 5],
-		  vec![-1, 2, -3, -4, 5],
-		  vec![-1, -2, 3, -4, 5],
-		  vec![1, -2, 3, -4, 5],
-		  vec![-1, 2, 3, -4, 5],
-		  vec![1, 2, 3, -4, 5],
-		  vec![-1, -2, -3, 4, 5],
-		  vec![1, -2, -3, 4, 5],
-		  vec![-1, 2, -3, 4, 5],
-		  vec![1, 2, -3, 4, 5],
+			lits![-1, -2, -3, -4, -5],
+			lits![-1, -2, 3, -4, -5],
+			lits![-1, -2, -3, 4, -5],
+			lits![1, -2, -3, 4, -5],
+			lits![-1, -2, 3, 4, -5],
+			lits![1, -2, 3, 4, -5],
+			lits![-1, 2, 3, 4, -5],
+			lits![-1, -2, -3, -4, 5],
+			lits![1, -2, -3, -4, 5],
+			lits![-1, 2, -3, -4, 5],
+			lits![-1, -2, 3, -4, 5],
+			lits![1, -2, 3, -4, 5],
+			lits![-1, 2, 3, -4, 5],
+			lits![1, 2, 3, -4, 5],
+			lits![-1, -2, -3, 4, 5],
+			lits![1, -2, -3, 4, 5],
+			lits![-1, 2, -3, 4, 5],
+			lits![1, 2, -3, 4, 5],
 		]);
 	}
 
@@ -944,7 +863,7 @@ pub mod tests {
 		let mut db = TestDB::new(0);
 		let n = 4;
 		let lb = 0;
-		let ub = (2i32.pow(n)) - 1;
+		let ub = ((2i32.pow(n)) - 1) as Coeff;
 
 		let (x, y, z) = (
 			get_bin_x(&mut db, lb, ub, true, "x".to_string()),
@@ -964,9 +883,7 @@ pub mod tests {
 
 		let sols = db.generate_solutions(|sol| tern.check(sol).is_ok(), db.num_var);
 
-		assert_sol!(db => TernLeEncoder::default(), &tern =>
-					sols
-		);
+		assert_sol!(db => TernLeEncoder::default(), &tern => sols);
 	}
 
 	#[test]
@@ -974,7 +891,7 @@ pub mod tests {
 		let mut db = TestDB::new(0);
 		let n = 5;
 		let lb = 0;
-		let ub = (2i32.pow(n)) - 1;
+		let ub = ((2i32.pow(n)) - 1) as Coeff;
 
 		let (x, y, z) = (
 			get_bin_x(&mut db, lb, ub, true, "x".to_string()),
@@ -1004,9 +921,27 @@ pub mod tests {
 		let mut db = TestDB::new(0);
 		let n = 2;
 		let (x, y, z) = (
-			get_bin_x(&mut db, 0, (2i32.pow(n)) - 1, true, "x".to_string()),
-			get_bin_x(&mut db, 0, (2i32.pow(n)) - 1, true, "y".to_string()),
-			get_bin_x(&mut db, 0, (2i32.pow(n + 1)) - 2, true, "z".to_string()),
+			get_bin_x(
+				&mut db,
+				0,
+				((2i32.pow(n)) - 1) as Coeff,
+				true,
+				"x".to_string(),
+			),
+			get_bin_x(
+				&mut db,
+				0,
+				((2i32.pow(n)) - 1) as Coeff,
+				true,
+				"y".to_string(),
+			),
+			get_bin_x(
+				&mut db,
+				0,
+				((2i32.pow(n + 1)) - 2) as Coeff,
+				true,
+				"z".to_string(),
+			),
 		);
 
 		let tern = TernLeConstraint {
@@ -1068,18 +1003,18 @@ pub mod tests {
 
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
-		  vec![-1, -2, -3, -4, -5, -6, -7],
-		  vec![1, -2, -3, -4, 5, -6, -7],
-		  vec![-1, -2, 3, -4, 5, -6, -7],
-		  vec![-1, 2, -3, -4, -5, 6, -7],
-		  vec![1, -2, 3, -4, -5, 6, -7],
-		  vec![-1, -2, -3, 4, -5, 6, -7],
-		  vec![-1, 2, 3, -4, 5, 6, -7],
-		  vec![1, -2, -3, 4, 5, 6, -7],
-		  vec![-1, -2, 3, 4, 5, 6, -7],
-		  vec![-1, 2, -3, 4, -5, -6, 7],
-		  vec![1, -2, 3, 4, -5, -6, 7],
-		  vec![-1, 2, 3, 4, 5, -6, 7],
+			lits![-1, -2, -3, -4, -5, -6, -7],
+			lits![1, -2, -3, -4, 5, -6, -7],
+			lits![-1, -2, 3, -4, 5, -6, -7],
+			lits![-1, 2, -3, -4, -5, 6, -7],
+			lits![1, -2, 3, -4, -5, 6, -7],
+			lits![-1, -2, -3, 4, -5, 6, -7],
+			lits![-1, 2, 3, -4, 5, 6, -7],
+			lits![1, -2, -3, 4, 5, 6, -7],
+			lits![-1, -2, 3, 4, 5, 6, -7],
+			lits![-1, 2, -3, 4, -5, -6, 7],
+			lits![1, -2, 3, 4, -5, -6, 7],
+			lits![-1, 2, 3, 4, 5, -6, 7],
 		]
 		);
 	}
@@ -1128,37 +1063,37 @@ pub mod tests {
 
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
-		  vec![-1, -2, -3, -4, -5, -6, -7],
-		  vec![-1, -2, -3, -4, 5, -6, -7],
-		  vec![1, -2, -3, -4, 5, -6, -7],
-		  vec![-1, -2, -3, -4, -5, 6, -7],
-		  vec![1, -2, -3, -4, -5, 6, -7],
-		  vec![-1, 2, -3, -4, -5, 6, -7],
-		  vec![-1, -2, -3, -4, 5, 6, -7],
-		  vec![1, -2, -3, -4, 5, 6, -7],
-		  vec![-1, 2, -3, -4, 5, 6, -7],
-		  vec![1, 2, -3, -4, 5, 6, -7],
-		  vec![-1, -2, -3, -4, -5, -6, 7],
-		  vec![1, -2, -3, -4, -5, -6, 7],
-		  vec![-1, 2, -3, -4, -5, -6, 7],
-		  vec![1, 2, -3, -4, -5, -6, 7],
-		  vec![-1, -2, 3, -4, -5, -6, 7],
-		  vec![-1, -2, -3, -4, 5, -6, 7],
-		  vec![1, -2, -3, -4, 5, -6, 7],
-		  vec![-1, 2, -3, -4, 5, -6, 7],
-		  vec![1, 2, -3, -4, 5, -6, 7],
-		  vec![-1, -2, 3, -4, 5, -6, 7],
-		  vec![1, -2, 3, -4, 5, -6, 7],
-		  vec![-1, -2, -3, 4, 5, -6, 7],
-		  vec![-1, -2, -3, -4, -5, 6, 7],
-		  vec![1, -2, -3, -4, -5, 6, 7],
-		  vec![-1, 2, -3, -4, -5, 6, 7],
-		  vec![1, 2, -3, -4, -5, 6, 7],
-		  vec![-1, -2, 3, -4, -5, 6, 7],
-		  vec![1, -2, 3, -4, -5, 6, 7],
-		  vec![-1, 2, 3, -4, -5, 6, 7],
-		  vec![-1, -2, -3, 4, -5, 6, 7],
-		  vec![1, -2, -3, 4, -5, 6, 7],
+			lits![-1, -2, -3, -4, -5, -6, -7],
+			lits![-1, -2, -3, -4, 5, -6, -7],
+			lits![1, -2, -3, -4, 5, -6, -7],
+			lits![-1, -2, -3, -4, -5, 6, -7],
+			lits![1, -2, -3, -4, -5, 6, -7],
+			lits![-1, 2, -3, -4, -5, 6, -7],
+			lits![-1, -2, -3, -4, 5, 6, -7],
+			lits![1, -2, -3, -4, 5, 6, -7],
+			lits![-1, 2, -3, -4, 5, 6, -7],
+			lits![1, 2, -3, -4, 5, 6, -7],
+			lits![-1, -2, -3, -4, -5, -6, 7],
+			lits![1, -2, -3, -4, -5, -6, 7],
+			lits![-1, 2, -3, -4, -5, -6, 7],
+			lits![1, 2, -3, -4, -5, -6, 7],
+			lits![-1, -2, 3, -4, -5, -6, 7],
+			lits![-1, -2, -3, -4, 5, -6, 7],
+			lits![1, -2, -3, -4, 5, -6, 7],
+			lits![-1, 2, -3, -4, 5, -6, 7],
+			lits![1, 2, -3, -4, 5, -6, 7],
+			lits![-1, -2, 3, -4, 5, -6, 7],
+			lits![1, -2, 3, -4, 5, -6, 7],
+			lits![-1, -2, -3, 4, 5, -6, 7],
+			lits![-1, -2, -3, -4, -5, 6, 7],
+			lits![1, -2, -3, -4, -5, 6, 7],
+			lits![-1, 2, -3, -4, -5, 6, 7],
+			lits![1, 2, -3, -4, -5, 6, 7],
+			lits![-1, -2, 3, -4, -5, 6, 7],
+			lits![1, -2, 3, -4, -5, 6, 7],
+			lits![-1, 2, 3, -4, -5, 6, 7],
+			lits![-1, -2, -3, 4, -5, 6, 7],
+			lits![1, -2, -3, 4, -5, 6, 7],
 		]
 		);
 	}
@@ -1169,12 +1104,12 @@ pub mod tests {
 		Bin,
 	}
 
-	fn from_dom<DB: ClauseDatabase, C: Coefficient>(
+	fn from_dom<DB: ClauseDatabase>(
 		db: &mut DB,
-		dom: &[C],
+		dom: &[Coeff],
 		enc: &IntVarEncoding,
 		lbl: String,
-	) -> IntVarEnc<DB::Lit, C> {
+	) -> IntVarEnc {
 		if dom.len() == 1 {
 			IntVarEnc::Const(dom[0])
 		} else {
