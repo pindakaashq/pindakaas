@@ -117,7 +117,6 @@ impl<C: Coefficient> BddEncoder<C> {
 		// [0..1 => Val]
 		// [0..6 => Val, 7..10 => Gap]
 
-
 		// Construct BDD
 		// Ex.
 		// [0..0 => Val]
@@ -125,7 +124,6 @@ impl<C: Coefficient> BddEncoder<C> {
 		// [0..1 => Val, 2..5 => Val]
 		// [0..6 => Val, 7..10 => Gap]
 		bdd(0, &lin.exp.terms, C::zero(), &mut ys);
-
 
 		// Turn BDD into integer variables and constraints
 		// Ex.
@@ -204,7 +202,6 @@ where
 			Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None),
 			model.num_var,
 		)?;
-
 
 		model.extend(decomposition);
 

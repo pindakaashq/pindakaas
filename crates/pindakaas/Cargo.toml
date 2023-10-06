@@ -11,24 +11,24 @@ license = "MPL-2.0"
 edition = "2021"
 
 [dependencies]
-cached = "0.40"
+cached = "0.46"
 ipasir = { version = "0.3", features = ["ffi"] }
-iset = "0.1.1"
-itertools = "0.10"
-num = "0.4"
+iset = "0.2"
+itertools = "0.11"
 rustc-hash = "1.1.0"
-bzip2 = "0.4.4"
-flate2 = "1.0.25"
+num = "0.4"
+bzip2 = "0.4"
+flate2 = "1.0"
 
 # Optional encoding tracing capabilities
-tracing = { version = "0.1.37", optional = true }
+tracing = { version = "0.1", optional = true }
 
 # Optional Solver Interfaces
 minisat = { git = "https://github.com/luteberget/minisat-rs.git", optional = true } # waiting on release for minisat::Lit::var()
-splr = { version = "0.16", optional = true }
+splr = { version = "0.17", optional = true }
 
 [dev-dependencies]
-splr = { version = "0.16", features = ["incremental_solver"] }
+splr = { version = "0.17", features = ["incremental_solver"] }
 traced_test = { path = "../traced_test" }
 
 [features]

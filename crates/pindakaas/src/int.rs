@@ -27,33 +27,34 @@ impl<Lit: Literal, C: Coefficient> PbLinExp<Lit, C> {
 					acc + if lit == assignment { *coef } else { C::zero() }
 				})
 		};
-		self.iter().fold(Ok(self.add), |acc, (constraint,terms) | {
-            let assignments = terms.into_iter().map(|(lit,coef)| {
-                let assignment = solution.iter().find(|x| x.var() == lit.var()).unwrap_or_else(|| panic!("Could not find lit {lit:?} in solution {solution:?}; perhaps this variable did not occur in any clause"));
-                                                    (
-                    lit.clone(),*coef,assignment.clone())
-                    }).collect::<Vec<(Lit,C,Lit)>>();
+		self.iter().try_fold(self.add, |acc, (constraint,terms) | {
+			let assignments: Vec<(Lit,C,Lit)> = terms.into_iter().map(|(lit,coef)| {
+				let assignment = solution.iter()
+					.find(|x| x.var() == lit.var())
+					.unwrap_or_else(|| panic!("Could not find lit {lit:?} in solution {solution:?}; perhaps this variable did not occur in any clause"));
+				(lit.clone(), *coef,assignment.clone())
+			}).collect();
 
-            let is_consistent = match constraint {
-                Some(Constraint::AtMostOne) => assignments.iter().filter(|(lit,_,a)| lit == a).count() <= 1,
-                Some(Constraint::ImplicationChain) =>  assignments.iter().map(|(lit,_,a)| lit == a).tuple_windows().all(|(a, b)| a.cmp(&b).is_ge()),
-                Some(Constraint::Domain { lb, ub }) => {
-                    // divide by first coeff to get int assignment
-                    let a = evaluate(&assignments).div(assignments[0].1);
-                    if GROUND_BINARY_AT_LB {
-                        a <= ub - lb
-                    } else {
-                    lb <= a && a <= ub
-                    }
-                },
-                None => true
-            };
+			let is_consistent = match constraint {
+				Some(Constraint::AtMostOne) => assignments.iter().filter(|(lit,_,a)| lit == a).count() <= 1,
+				Some(Constraint::ImplicationChain) =>  assignments.iter().map(|(lit,_,a)| lit == a).tuple_windows().all(|(a, b)| a.cmp(&b).is_ge()),
+				Some(Constraint::Domain { lb, ub }) => {
+					// divide by first coeff to get int assignment
+					let a = evaluate(&assignments).div(assignments[0].1);
+					if GROUND_BINARY_AT_LB {
+						a <= ub - lb
+					} else {
+						lb <= a && a <= ub
+					}
+				},
+				None => true
+			};
 
-            if is_consistent {
-                Ok(acc?+evaluate(&assignments) * self.mult)
-            } else {
-                Err(CheckError::Unsatisfiable(Unsatisfiable))
-            }
+			if is_consistent {
+				Ok(acc+evaluate(&assignments) * self.mult)
+			} else {
+				Err(CheckError::Unsatisfiable(Unsatisfiable))
+			}
 		})
 	}
 }

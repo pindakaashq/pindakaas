@@ -546,7 +546,7 @@ impl<Lit: Literal, C: Coefficient> AddAssign<LinExp<Lit, C>> for LinExp<Lit, C> 
 			.extend(rh_terms.into_iter().map(|(l, c)| (l, c * rhs.mult)));
 		self.terms.rotate_right(rhs.num_free);
 		self.num_free += rhs.num_free;
-		self.constraints.extend(rhs.constraints.into_iter());
+		self.constraints.extend(rhs.constraints);
 	}
 }
 impl<Lit: Literal, C: Coefficient> Add<LinExp<Lit, C>> for LinExp<Lit, C> {
@@ -688,7 +688,7 @@ mod tests {
 	pub(crate) fn construct_terms(terms: &[(i32, i32)]) -> Vec<Part<i32, PosCoeff<i32>>> {
 		terms
 			.iter()
-			.map(|(lit, coef)| Part::Amo(vec![(lit.clone(), PosCoeff::from(coef.clone()))]))
+			.map(|(lit, coef)| Part::Amo(vec![(*lit, PosCoeff::from(*coef))]))
 			.collect()
 	}
 
