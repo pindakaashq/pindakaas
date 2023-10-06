@@ -556,7 +556,7 @@ mod tests {
 	fn test_2_sorted_eq() {
 		let mut db = TestDB::new(4);
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("y")).into();
-		db.num_var = db.num_var + y.lits() as i32;
+		db.num_var += y.lits() as i32;
 		let con = &Sorted::new(&[1, 2], LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let sols = vec![
@@ -585,7 +585,7 @@ mod tests {
 	fn test_3_sorted_eq() {
 		let mut db = TestDB::new(6);
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 3, String::from("y")).into();
-		db.num_var = db.num_var + y.lits() as i32;
+		db.num_var += y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3], LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let sols = vec![
@@ -663,7 +663,7 @@ mod tests {
 	fn test_3_2_sorted_eq() {
 		let mut db = TestDB::new(5);
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("y")).into();
-		db.num_var = db.num_var + y.lits() as i32;
+		db.num_var += y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3], LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 
@@ -706,7 +706,7 @@ mod tests {
 	fn test_4_sorted_eq() {
 		let mut db = TestDB::new(8);
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 4, String::from("y")).into();
-		db.num_var = db.num_var + y.lits() as i32;
+		db.num_var += y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4], LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let sols = vec![
@@ -976,7 +976,7 @@ mod tests {
 	fn test_4_2_sorted_eq() {
 		let mut db = TestDB::new(6);
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("y")).into();
-		db.num_var = db.num_var + y.lits() as i32;
+		db.num_var += y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4], LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 
@@ -1035,7 +1035,7 @@ mod tests {
 	fn test_4_3_sorted_eq() {
 		let mut db = TestDB::new(7);
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 3, String::from("y")).into();
-		db.num_var = db.num_var + y.lits() as i32;
+		db.num_var += y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4], LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 
@@ -1181,7 +1181,7 @@ mod tests {
 	fn test_5_3_sorted_eq() {
 		let mut db = TestDB::new(8);
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 3, String::from("y")).into();
-		db.num_var = db.num_var + y.lits() as i32;
+		db.num_var += y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4, 5], LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 
@@ -1404,7 +1404,7 @@ mod tests {
 	fn _test_5_6_sorted_eq() {
 		let mut db = TestDB::new(11);
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 5, String::from("y")).into();
-		db.num_var = db.num_var + y.lits() as i32;
+		db.num_var += y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4, 5, 6], LimitComp::Equal, &y);
 		let sols = db.brute_force_solve(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
@@ -1416,7 +1416,7 @@ mod tests {
 	fn _test_6_7_sorted_eq() {
 		let mut db = TestDB::new(13);
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 6, String::from("y")).into();
-		db.num_var = db.num_var + y.lits() as i32;
+		db.num_var += y.lits() as i32;
 		let con = &Sorted::new(&[1, 2, 3, 4, 5, 6, 7], LimitComp::Equal, &y);
 		let sols = db.brute_force_solve(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
@@ -1428,7 +1428,7 @@ mod tests {
 	fn test_5_1_sorted_eq_negated() {
 		let mut db = TestDB::new(6);
 		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 1, String::from("y")).into();
-		db.num_var = db.num_var + y.lits() as i32;
+		db.num_var += y.lits() as i32;
 		let con = &Sorted::new(&[-1, -2, -3, -4, -5], LimitComp::LessEq, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 

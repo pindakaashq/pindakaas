@@ -100,7 +100,6 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		Self::from_dom(
 			db,
 			num::iter::range_inclusive(lb, ub)
-				.into_iter()
 				.collect::<Vec<_>>()
 				.as_slice(),
 			lbl,
@@ -529,7 +528,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 				}
 
 				let dom = std::iter::once((C::zero(), vec![]))
-					.chain(h.into_iter())
+					.chain(h)
 					.sorted_by(|(a, _), (b, _)| a.cmp(b))
 					.tuple_windows()
 					.map(|((prev, _), (coef, lits))| {
