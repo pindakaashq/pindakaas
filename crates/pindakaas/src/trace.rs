@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 /// Helper marco to create a new variable within an Encoder
 #[cfg(feature = "trace")]
 macro_rules! new_var {
@@ -27,9 +29,9 @@ pub(crate) use new_var;
 #[cfg(feature = "trace")]
 macro_rules! emit_clause {
 	($db:expr, $cl:expr) => {{
-		let slice = $cl;
-		let res = $db.add_clause(slice);
-		tracing::info!(clause = ?slice, fail = matches!(res, Err($crate::Unsatisfiable)), "emit clause");
+		let slice = $cl.into_iter().collect::<Vec<_>>();
+		let res = $db.add_clause(slice.iter().copied());
+		tracing::info!(clause = ?&slice, fail = matches!(res, Err($crate::Unsatisfiable)), "emit clause");
 		res
 	}};
 }
@@ -335,15 +337,15 @@ mod subscriber {
 
 	impl Visit for EventVisitor {
 		fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-			let value = Some(format!("{value:?}"));
+			let value = format!("{value:?}");
 			match field.name() {
-				"message" => match value.unwrap().as_str() {
+				"message" => match value.as_str() {
 					"new variable" => self.kind = Some(EventKind::NewVar),
 					"emit clause" => self.kind = Some(EventKind::Clause),
 					_ => {}
 				},
-				"var" => self.var = value,
-				"clause" => self.clause = value,
+				"var" => self.var = Some(value),
+				"clause" => self.clause = Some(value),
 				_ => {}
 			}
 		}
@@ -400,12 +402,14 @@ mod subscriber {
 pub use subscriber::{FlushGuard, Tracer};
 
 #[cfg(feature = "trace")]
+use crate::Lit;
+
 pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 	num.to_string()
 		.chars()
 		.map(|d| d.to_digit(10).unwrap())
 		.map(|d| char::from_u32(0x2080 + d).unwrap())
-		.collect::<Vec<_>>()
+		.collect_vec()
 		.into_iter()
 }
 
@@ -419,6 +423,6 @@ pub(crate) fn subscripted_name(name: &str, sub: usize) -> String {
 }
 
 #[cfg(feature = "trace")]
-pub(crate) fn trace_print_lit<Lit: crate::Literal>(l: &Lit) -> String {
+pub(crate) fn trace_print_lit(l: &Lit) -> String {
 	format!("{}{{{:?}}}", if l.is_negated() { "¬" } else { "" }, l.var())
 }

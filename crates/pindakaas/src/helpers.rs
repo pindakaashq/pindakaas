@@ -1,33 +1,35 @@
-use crate::{
-	int::IntVar, linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase,
-	Coefficient, Encoder, LinExp, Literal, Result, Unsatisfiable,
-};
-use itertools::Itertools;
 use std::collections::HashSet;
 
+use itertools::Itertools;
+
+use crate::{
+	int::IntVar, linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase, Coeff,
+	Encoder, LinExp, Lit, Result, Unsatisfiable, Valuation,
+};
+
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
-pub(crate) fn is_powers_of_two<C: Coefficient>(coefs: &[C]) -> bool {
-	let mult = coefs[0];
-	coefs
-		.iter()
-		.enumerate()
-		.all(|(i, c)| c == &(num::pow(C::from(2).unwrap(), i) * mult))
+pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool {
+	let mut it = coefs.into_iter().enumerate();
+	if let Some((_, mult)) = it.next() {
+		const TWO: Coeff = 2;
+		it.all(|(i, c)| c == (TWO.pow(i as u32) * mult))
+	} else {
+		false
+	}
 }
 
-pub(crate) fn unsigned_binary_range_ub<C: Coefficient>(bits: usize) -> C {
-	(0..bits).fold(C::zero(), |a, i| a + (num::pow(C::from(2).unwrap(), i)))
+pub(crate) fn unsigned_binary_range_ub(bits: u32) -> Coeff {
+	const TWO: Coeff = 2;
+	(0u32..bits).fold(0, |sum, i| sum + TWO.pow(i))
 }
 /// Convert `k` to unsigned binary in `bits`
-pub(crate) fn as_binary<C: Coefficient>(k: PosCoeff<C>, bits: Option<usize>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| IntVar::required_bits(C::zero(), *k) as usize);
+pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
+	let bits = bits.unwrap_or_else(|| IntVar::required_bits(0, *k));
 	assert!(
 		*k <= unsigned_binary_range_ub(bits),
-		"{} cannot be represented in {bits} bits",
-		*k,
+		"{k} cannot be represented in {bits} bits"
 	);
-	(0..bits)
-		.map(|b| *k & (C::one() << b) != C::zero())
-		.collect::<Vec<_>>()
+	(0..bits).map(|b| *k & (1 << b) != 0).collect()
 }
 
 const FILTER_TRIVIAL_CLAUSES: bool = false;
@@ -36,7 +38,7 @@ const FILTER_TRIVIAL_CLAUSES: bool = false;
 /// If any disjunction is empty, this satisfies the whole formula. If any element contains the empty conjunction, that element is falsified in the final clause.
 pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 	db: &mut DB,
-	expression: Vec<Vec<Vec<DB::Lit>>>,
+	expression: Vec<Vec<Vec<Lit>>>,
 ) -> Result {
 	// TODO doctor out type of expression (clauses containing conjunctions?)
 
@@ -47,25 +49,25 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 	{
 		let cls = cls.concat(); // filter out [] (empty conjunctions?) of the clause
 		if FILTER_TRIVIAL_CLAUSES {
-			let mut lits = HashSet::<DB::Lit>::with_capacity(cls.len());
+			let mut lits = HashSet::<Lit>::with_capacity(cls.len());
 			if cls.iter().any(|lit| {
-				if lits.contains(&lit.negate()) {
+				if lits.contains(&(!lit)) {
 					true
 				} else {
-					lits.insert(lit.clone());
+					lits.insert(*lit);
 					false
 				}
 			}) {
 				continue;
 			}
 		}
-		emit_clause!(db, &cls)?
+		emit_clause!(db, cls)?
 	}
 	Ok(())
 }
 
 /// Negates CNF (flipping between empty clause and formula)
-pub(crate) fn negate_cnf<Lit: Literal>(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
+pub(crate) fn negate_cnf(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
 	if clauses.is_empty() {
 		vec![vec![]]
 	} else if clauses.contains(&vec![]) {
@@ -74,7 +76,7 @@ pub(crate) fn negate_cnf<Lit: Literal>(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> 
 		assert!(clauses.len() == 1);
 		clauses
 			.into_iter()
-			.map(|clause| clause.into_iter().map(|lit| lit.negate()).collect())
+			.map(|clause| clause.into_iter().map(|lit| !lit).collect())
 			.collect()
 	}
 }
@@ -85,77 +87,70 @@ pub(crate) fn negate_cnf<Lit: Literal>(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> 
 #[derive(Default)]
 pub struct XorEncoder {}
 
-impl<'a, DB: ClauseDatabase> Encoder<DB, XorConstraint<'a, DB::Lit>> for XorEncoder {
+impl<'a, DB: ClauseDatabase> Encoder<DB, XorConstraint<'a>> for XorEncoder {
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "xor_encoder", skip_all, fields(
 			constraint = itertools::join(xor.lits.iter().map(crate::trace::trace_print_lit), " ⊻ ")
 		))
 	)]
-	fn encode(&mut self, db: &mut DB, xor: &XorConstraint<DB::Lit>) -> Result {
-		match xor.lits {
-			[a] => emit_clause!(db, &[a.clone()]),
+	fn encode(&mut self, db: &mut DB, xor: &XorConstraint) -> Result {
+		match *xor.lits {
+			[a] => emit_clause!(db, [a]),
 			[a, b] => {
-				emit_clause!(db, &[a.clone(), b.clone()])?;
-				emit_clause!(db, &[a.negate(), b.negate()])
+				emit_clause!(db, [a, b])?;
+				emit_clause!(db, [!a, !b])
 			}
 			[a, b, c] => {
-				emit_clause!(db, &[a.clone(), b.clone(), c.clone()])?;
-				emit_clause!(db, &[a.clone(), b.negate(), c.negate()])?;
-				emit_clause!(db, &[a.negate(), b.clone(), c.negate()])?;
-				emit_clause!(db, &[a.negate(), b.negate(), c.clone()])
+				emit_clause!(db, [a, b, c])?;
+				emit_clause!(db, [a, !b, !c])?;
+				emit_clause!(db, [!a, b, !c])?;
+				emit_clause!(db, [!a, !b, c])
 			}
 			_ => panic!("Unexpected usage of XOR with zero or more than three arguments"),
 		}
 	}
 }
 
-pub struct XorConstraint<'a, Lit: Literal> {
+pub struct XorConstraint<'a> {
 	pub(crate) lits: &'a [Lit],
 }
 
-impl<'a, Lit: Literal> XorConstraint<'a, Lit> {
+impl<'a> XorConstraint<'a> {
 	pub fn new(lits: &'a [Lit]) -> Self {
 		Self { lits }
 	}
 }
 
-impl<'a, Lit: Literal> Checker for XorConstraint<'a, Lit> {
-	type Lit = Lit;
-	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let count = LinExp::from_terms(
-			self.lits
-				.iter()
-				.map(|l| (l.clone(), 1))
-				.collect::<Vec<(Self::Lit, i32)>>()
-				.as_slice(),
-		)
-		.assign(solution)?;
+impl<'a> Checker for XorConstraint<'a> {
+	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError> {
+		let count = LinExp::from_terms(self.lits.iter().map(|&l| (l, 1)).collect_vec().as_slice())
+			.value(value)?;
 		if count % 2 == 1 {
 			Ok(())
 		} else {
-			Err(CheckError::Unsatisfiable(Unsatisfiable))
+			Err(Unsatisfiable.into())
 		}
 	}
 }
 
 #[cfg(test)]
 pub mod tests {
-	type Lit = i32; // TODO replace all i32s for Lit
+	use std::{
+		collections::{HashMap, HashSet},
+		num::NonZeroI32,
+		thread::panicking,
+	};
 
 	use splr::{
 		types::{CNFDescription, Instantiate},
 		Certificate, Config, SatSolverIF, SolveIF, Solver, SolverError,
 	};
-	use std::{
-		collections::{HashMap, HashSet},
-		thread::panicking,
-	};
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;
-	use crate::{linear::LimitComp, CardinalityOne, Encoder, LadderEncoder, Unsatisfiable};
+	use crate::{linear::LimitComp, CardinalityOne, Encoder, LadderEncoder, Unsatisfiable, Var};
 
 	macro_rules! assert_enc {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
@@ -268,6 +263,18 @@ pub mod tests {
 	}
 	pub(crate) use assert_trivial_unsat;
 
+	macro_rules! lits {
+		() => (
+			std::vec::Vec::new()
+		);
+		($($x:expr),+ $(,)?) => (
+			<[Lit]>::into_vec(
+				std::boxed::Box::new([$($crate::Lit::from($x)),+])
+			)
+		);
+	}
+	pub(crate) use lits;
+
 	#[test]
 	fn test_assert_macros() {
 		#[derive(Default)]
@@ -277,38 +284,38 @@ pub mod tests {
 				feature = "trace",
 				tracing::instrument(name = "negate_encoder", skip_all)
 			)]
-			fn encode<'a, DB: ClauseDatabase>(&mut self, db: &mut DB, lit: &DB::Lit) -> Result {
-				emit_clause!(db, &[lit.negate()])
+			fn encode<'a, DB: ClauseDatabase>(&mut self, db: &mut DB, lit: Lit) -> Result {
+				emit_clause!(db, [!lit])
 			}
 		}
 
 		// Test resulting encoding
-		assert_enc!(Negate::default(), 1, &1 => vec![vec![-1]]);
+		assert_enc!(Negate::default(), 1, 1.into() => vec![lits![-1]]);
 		// Test possible solutions (using specification)
-		assert_sol!(Negate::default(), 1, &1 => vec![vec![-1]]);
+		assert_sol!(Negate::default(), 1, 1.into() => vec![lits![-1]]);
 		// Test encoding and possible solutions
-		assert_enc_sol!(Negate::default(), 1, &1 => vec![vec![-1]], vec![vec![-1]]);
+		assert_enc_sol!(Negate::default(), 1, 1.into() => vec![lits![-1]], vec![lits![-1]]);
 
 		// Test resulting encoding for given TestDB instance
 		let mut tdb = TestDB::new(2);
-		tdb.add_clause(&[2]).unwrap();
-		assert_enc!(tdb => Negate::default(), &1 => vec![vec![-1]]); // only clauses of encoder are checked against
+		tdb.add_clause(lits![2]).unwrap();
+		assert_enc!(tdb => Negate::default(), 1.into() => vec![lits![-1]]); // only clauses of encoder are checked against
 
 		let mut tdb = TestDB::new(2);
-		tdb.add_clause(&[2]).unwrap();
-		assert_sol!(tdb => Negate::default(), &1 => vec![vec![-1,2]]);
+		tdb.add_clause(lits![2]).unwrap();
+		assert_sol!(tdb => Negate::default(), 1.into() => vec![lits![-1,2]]);
 
 		let mut tdb = TestDB::new(2);
-		tdb.add_clause(&[2]).unwrap();
-		assert_enc_sol!(tdb => Negate::default(), &1 => vec![vec![-1]], vec![vec![-1,2]]);
+		tdb.add_clause(lits![2]).unwrap();
+		assert_enc_sol!(tdb => Negate::default(), 1.into() => vec![lits![-1]], vec![lits![-1,2]]);
 	}
 
 	#[test]
 	fn test_assert_macros_with_check() {
 		let mut tdb = TestDB::new(3);
-		tdb.add_clause(&[1]).unwrap();
+		tdb.add_clause(lits![1]).unwrap();
 		assert_sol!(tdb => LadderEncoder::default(), &CardinalityOne {
-			lits: vec![2, 3],
+			lits: lits![2, 3],
 			cmp: LimitComp::LessEq,
 		});
 	}
@@ -318,9 +325,9 @@ pub mod tests {
 		assert_enc_sol!(
 			XorEncoder::default(),
 			2,
-			&XorConstraint::new(&[1,2]) =>
-			vec![vec![1, 2], vec![-1, -2]],
-			vec![vec![-1, 2], vec![1, -2]]
+			&XorConstraint::new(&lits![1,2]) =>
+			vec![lits![1, 2], lits![-1, -2]],
+			vec![lits![-1, 2], lits![1, -2]]
 		);
 	}
 
@@ -330,12 +337,25 @@ pub mod tests {
 		tdb = tdb.expect_vars(2);
 		tdb = tdb.expect_cls(3);
 		tdb = tdb.expect_lits(5);
-		tdb.add_clause(&[1, 2]).unwrap();
+		tdb.add_clause(lits![1, 2]).unwrap();
 		tdb.new_var();
-		tdb.add_clause(&[-3, -4]).unwrap();
+		tdb.add_clause(lits![-3, -4]).unwrap();
 		tdb.new_var();
-		tdb.add_clause(&[5]).unwrap();
+		tdb.add_clause(lits![5]).unwrap();
 		tdb.check_complete();
+	}
+
+	pub(crate) fn make_valuation<L: Into<Lit> + Copy>(g: &[L]) -> impl Valuation + '_ {
+		|l: Lit| {
+			let abs: Lit = l.var().into();
+			let v = Into::<i32>::into(abs) as usize;
+			if v <= g.len() {
+				debug_assert_eq!(g[v - 1].into().var(), l.var());
+				Some(g[v - 1].into() == l)
+			} else {
+				None
+			}
+		}
 	}
 
 	const OUTPUT_SPLR: bool = false;
@@ -347,10 +367,10 @@ pub mod tests {
 		/// Number of variables available when solver is created
 		pub(crate) num_var: i32,
 		/// Clauses expected by the test case
-		clauses: Option<Vec<(bool, Vec<i32>)>>,
+		clauses: Option<Vec<(bool, Vec<Lit>)>>,
 		/// Solutions expected by the test case
-		solutions: Option<Vec<Vec<i32>>>,
-		check: Option<fn(&[i32]) -> bool>,
+		solutions: Option<Vec<Vec<Lit>>>,
+		check: Option<fn(&dyn Valuation) -> bool>,
 		unchecked: bool,
 		expected_vars: Option<usize>,
 		expected_cls: Option<usize>,
@@ -385,9 +405,9 @@ pub mod tests {
 			}
 		}
 
-		pub fn expect_clauses(mut self, mut clauses: Vec<Vec<i32>>) -> TestDB {
+		pub fn expect_clauses(mut self, mut clauses: Vec<Vec<Lit>>) -> TestDB {
 			for cl in &mut clauses {
-				cl.sort_by_key(|a| a.abs());
+				cl.sort();
 			}
 			clauses.sort();
 			self.clauses = Some(clauses.into_iter().map(|cl| (false, cl)).collect());
@@ -410,9 +430,9 @@ pub mod tests {
 			self
 		}
 
-		pub fn expect_solutions(mut self, mut solutions: Vec<Vec<i32>>) -> TestDB {
+		pub fn expect_solutions(mut self, mut solutions: Vec<Vec<Lit>>) -> TestDB {
 			for sol in &mut solutions {
-				sol.sort_by_key(|a| a.abs());
+				sol.sort();
 			}
 			solutions.sort();
 			if let Some(self_solutions) = &self.solutions {
@@ -424,7 +444,11 @@ pub mod tests {
 		}
 
 		#[allow(dead_code)]
-		pub fn generate_solutions(&self, check: impl Fn(&[i32]) -> bool, n: i32) -> Vec<Vec<i32>> {
+		pub fn generate_solutions(
+			&self,
+			check: impl Fn(&dyn Valuation) -> bool,
+			n: i32,
+		) -> Vec<Vec<Lit>> {
 			if n > 32 {
 				unimplemented!(
 					"Cannot generate solutions using binary shifts with more than 32 variables."
@@ -434,34 +458,29 @@ pub mod tests {
 			(0..((2_i32).pow(n as u32)))
 				.map(|i| {
 					(0..n)
-						.map(|j| if ((i >> j) & 1) == 1 { j + 1 } else { -(j + 1) })
-						.collect::<Vec<_>>()
+						.map(|j| if ((i >> j) & 1) == 1 { j + 1 } else { -(j + 1) }.into())
+						.collect_vec()
 				})
-				.filter(|g| check(&g[..]))
+				.filter(|g| check(&make_valuation(g)))
 				.collect()
 		}
 
-		pub fn _print_solutions(sols: &Vec<Vec<i32>>) -> String {
+		pub fn _print_solutions(sols: &Vec<Vec<Lit>>) -> String {
 			format!(
-				"vec![
-{}
-]",
+				"vec![\n{}\n]",
 				sols.iter()
 					.map(|sol| format!(
 						"\tvec![{}]",
 						(*sol)
 							.iter()
-							.map(|lit| lit.to_string())
-							.collect::<Vec<_>>()
+							.map(|&lit| Into::<i32>::into(lit).to_string())
 							.join(", ")
 					))
-					.collect::<Vec<_>>()
 					.join(",\n")
 			)
-			.to_string()
 		}
 
-		pub fn with_check(mut self, checker: fn(&[i32]) -> bool) -> TestDB {
+		pub fn with_check(mut self, checker: fn(&dyn Valuation) -> bool) -> TestDB {
 			if self.solutions.is_none() && self.num_var <= GENERATE_EXPECTED_SOLUTIONS {
 				let solutions = self.generate_solutions(checker, self.num_var);
 				self.expect_solutions(solutions)
@@ -475,12 +494,10 @@ pub mod tests {
 		pub fn check_complete(&mut self) {
 			self.unchecked = false;
 			if let Some(clauses) = &self.clauses {
-				let missing: Vec<Vec<i32>> = clauses
+				let missing: Vec<Vec<Lit>> = clauses
 					.iter()
-					.filter(|exp| !exp.0)
-					.map(|exp| exp.1.clone())
+					.filter_map(|(found, cl)| if *found { None } else { Some(cl.clone()) })
 					.collect();
-				// assert!(false, "{:?} {:?}", clauses, missing);
 				assert!(
 					missing.is_empty(),
 					"clauses are missing from the encoding: {:?}",
@@ -499,21 +516,21 @@ pub mod tests {
 				eprintln!("let result: Vec<Vec<i32>> = slv.iter().collect();");
 			}
 			const ONLY_OUTPUT: bool = true;
-			let mut from_slv: Vec<Vec<i32>> = Vec::new();
+			let mut from_slv: Vec<Vec<Lit>> = Vec::new();
 			while let Ok(Certificate::SAT(model)) = self.slv.solve() {
-				let solution = if ONLY_OUTPUT {
+				let solution: Vec<Lit> = if ONLY_OUTPUT {
 					model
-						.clone()
-						.into_iter()
+						.iter()
 						.filter(|l| l.abs() <= self.num_var)
+						.map(|&l| l.into())
 						.collect()
 				} else {
-					model
+					model.iter().map(|&l| l.into()).collect()
 				};
 
 				from_slv.push(solution.clone());
 
-				let nogood: Vec<i32> = solution.iter().map(|l| -l).collect();
+				let nogood: Vec<i32> = solution.iter().map(|l| (!l).into()).collect();
 				match SatSolverIF::add_clause(&mut self.slv, nogood) {
 					Err(SolverError::Inconsistent | SolverError::EmptyClause) => {
 						break;
@@ -525,11 +542,15 @@ pub mod tests {
 				}
 			}
 			for sol in &mut from_slv {
-				sol.sort_by_key(|a| a.abs());
+				sol.sort();
 			}
 			if let Some(check) = &self.check {
 				for sol in &mut from_slv {
-					assert!(check(sol), "solution {:?} failed check", sol)
+					assert!(
+						check(&make_valuation(sol)),
+						"solution {:?} failed check",
+						sol
+					)
 				}
 			}
 			if let Some(solutions) = &self.solutions {
@@ -543,9 +564,9 @@ pub mod tests {
 						.iter()
 						.map(|sol| {
 							sol.iter()
-								.filter(|l| l.abs() <= self.num_var)
+								.filter(|l| Into::<i32>::into(l.var()) <= self.num_var)
 								.cloned()
-								.collect::<Vec<_>>()
+								.collect_vec()
 						})
 						.collect()
 				};
@@ -553,7 +574,7 @@ pub mod tests {
 				let misses = solutions
 					.iter()
 					.filter(|s| !from_slv_output.contains(s))
-					.collect::<Vec<_>>();
+					.collect_vec();
 
 				if !misses.is_empty() {
 					println!("Missing solutions ({})", misses.len());
@@ -566,7 +587,7 @@ pub mod tests {
 					.iter()
 					.zip(from_slv_output)
 					.filter_map(|(sol, out)| (!solutions.contains(&out)).then_some(sol))
-					.collect::<Vec<_>>();
+					.collect_vec();
 
 				if !extras.is_empty() {
 					println!("Extra solutions ({})", extras.len());
@@ -575,16 +596,15 @@ pub mod tests {
 					}
 				}
 
-				let vars = HashSet::<i32>::from_iter(
-					solutions
-						.iter()
-						.flat_map(|sol| sol.iter().map(|lit| lit.abs())),
-				);
+				let vars: HashSet<Var> = solutions
+					.iter()
+					.flat_map(|sol| sol.iter().map(|lit| lit.var()))
+					.collect();
 
-				let mut from_slv: Vec<Vec<i32>> = HashSet::<Vec<i32>>::from_iter(
+				let mut from_slv: Vec<Vec<Lit>> = HashSet::<Vec<Lit>>::from_iter(
 					from_slv
 						.into_iter()
-						.map(|xs| xs.into_iter().filter(|x| vars.contains(&x.abs())).collect()),
+						.map(|xs| xs.into_iter().filter(|x| vars.contains(&x.var())).collect()),
 				)
 				.into_iter()
 				.collect();
@@ -616,17 +636,14 @@ pub mod tests {
 	}
 
 	impl ClauseDatabase for TestDB {
-		type Lit = i32;
+		fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
+			let cl = cl.into_iter().sorted().collect_vec();
 
-		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
-			let mut cl = Vec::from(cl);
-
-			cl.sort_by_key(|a| a.abs());
 			if let Some(clauses) = &mut self.clauses {
 				let mut found = false;
-				for exp in clauses {
-					if cl == exp.1 {
-						exp.0 = true;
+				for (f, x) in clauses {
+					if &cl == x {
+						*f = true;
 						found = true;
 						break;
 					}
@@ -636,7 +653,7 @@ pub mod tests {
 
 			if self.expecting_no_unit_clauses {
 				assert!(
-					cl.len() > 1 || cl[0] <= self.num_var,
+					cl.len() > 1 || Into::<i32>::into(cl[0]) <= self.num_var,
 					"Unexpected unit clause on aux var {:?}",
 					cl
 				);
@@ -644,40 +661,36 @@ pub mod tests {
 
 			if let Some(equivalences) = &mut self.expecting_no_equivalences {
 				let mut cl = cl.clone();
-				cl.sort_by_key(|l| l.abs());
+				cl.sort();
 				if match cl[..] {
 					[a, b] => {
+						let (a, b): (Lit, Lit) = (a.var().into(), b.var().into());
 						if !a.is_negated() && !b.is_negated() {
-							let (a, b) = (a.var(), b.var());
 							// a \/ b = ~a -> b
-							equivalences.insert(a.negate(), b);
+							equivalences.insert(!a, b);
 							// do we have b -> ~a = ~b \/ ~a = a -> ~b?
-							equivalences.get(&a) == Some(&b.negate())
+							equivalences.get(&a) == Some(&!b)
 						} else if a.is_negated() && !b.is_negated() {
-							let (a, b) = (a.var(), b.var());
 							// ~a \/ b = a -> b
 							equivalences.insert(a, b);
 							// do we have b -> a = ~b \/ a = ~a -> ~b?
-							equivalences.get(&a.negate()) == Some(&b.negate())
+							equivalences.get(&!a) == Some(&!b)
 						} else if !a.is_negated() && b.is_negated() {
-							let (a, b) = (a.var(), b.var());
 							// a \/ ~b = ~a -> ~b
-							equivalences.insert(a.negate(), b.negate());
+							equivalences.insert(!a, !b);
 							// do we have ~b -> ~a = b \/ ~a = a -> b?
 							equivalences.get(&a) == Some(&b)
 						} else if a.is_negated() && b.is_negated() {
-							let (a, b) = (a.var(), b.var());
 							// ~a \/ ~b = a -> ~b
-							equivalences.insert(a.negate(), b.negate());
+							equivalences.insert(!a, !b);
 							// do we have ~b -> a = b \/ a = ~a -> b?
-							equivalences.get(&a.negate()) == Some(&b)
+							equivalences.get(&!a) == Some(&b)
 						} else {
 							unreachable!("{:?}", cl);
 						}
 					}
 					_ => false,
 				} {
-					//panic!("Unexpected equivalence by adding {cl:?}");
 					println!("Unexpected equivalence by adding {cl:?}");
 				}
 			}
@@ -695,10 +708,11 @@ pub mod tests {
 				let list: Vec<String> = cl
 					.iter()
 					.map(|l| {
-						if l.abs() <= self.num_var {
+						let v: i32 = l.var().into();
+						if v <= self.num_var {
 							l.to_string()
 						} else {
-							format!("{}x{}", if *l < 0 { "-" } else { "" }, l.abs())
+							format!("{}x{}", if l.is_negated() { "-" } else { "" }, v)
 						}
 					})
 					.collect();
@@ -719,8 +733,11 @@ pub mod tests {
 
 			match match cl.len() {
 				0 => return Err(Unsatisfiable),
-				1 => self.slv.add_assignment(cl[0]),
-				_ => SatSolverIF::add_clause(&mut self.slv, cl),
+				1 => self.slv.add_assignment(cl[0].into()),
+				_ => SatSolverIF::add_clause(
+					&mut self.slv,
+					cl.iter().map(|&l| l.into()).collect_vec(),
+				),
 			} {
 				Ok(_) => Ok(()),
 				Err(err) => match err {
@@ -733,7 +750,7 @@ pub mod tests {
 			}
 		}
 
-		fn new_var(&mut self) -> Self::Lit {
+		fn new_var(&mut self) -> Lit {
 			let res = self.slv.add_var() as i32;
 
 			if let Some(num) = &mut self.expected_vars {
@@ -744,7 +761,7 @@ pub mod tests {
 			if OUTPUT_SPLR {
 				eprintln!("let x{} = slv.add_var() as i32;", res);
 			}
-			res
+			Lit(NonZeroI32::new(res).unwrap())
 		}
 	}
 }

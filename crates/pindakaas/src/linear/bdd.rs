@@ -1,59 +1,54 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc};
 
 use iset::IntervalMap;
 use itertools::Itertools;
 
-use crate::Literal;
-#[allow(unused_imports)]
+use super::PosCoeff;
 use crate::{
-	int::{IntVarEnc, IntVarOrd, Lin, Model},
+	int::{IntVarEnc, Lin, Model},
 	linear::LimitComp,
-	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
+	ClauseDatabase, Coeff, Encoder, Linear, Result,
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
 #[derive(Default, Clone)]
-pub struct BddEncoder<C: Coefficient> {
+pub struct BddEncoder {
 	add_consistency: bool,
-	cutoff: Option<C>,
+	cutoff: Option<Coeff>,
 }
 
-impl<C: Coefficient> BddEncoder<C> {
+impl BddEncoder {
 	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Option<C>) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
 }
 
-impl<DB, C> Encoder<DB, Linear<DB::Lit, C>> for BddEncoder<C>
-where
-	DB: ClauseDatabase,
-	C: Coefficient,
-{
+impl<DB: ClauseDatabase> Encoder<DB, Linear> for BddEncoder {
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
+	fn encode(&mut self, db: &mut DB, lin: &Linear) -> Result {
 		let xs = lin
 			.terms
 			.iter()
 			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
-			.sorted_by(|a: &IntVarEnc<_, C>, b: &IntVarEnc<_, C>| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
-			.collect::<Vec<_>>();
+			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
+			.sorted_by(|a: &IntVarEnc, b: &IntVarEnc| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
+			.collect_vec();
 
-		let mut model = Model::new();
+		let mut model = Model::default();
 
-		let ys = construct_bdd(&xs, &lin.cmp, lin.k.clone());
+		let ys = construct_bdd(&xs, &lin.cmp, lin.k);
 		let xs = xs
 			.into_iter()
 			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
-			.collect::<Vec<_>>();
+			.collect_vec();
 
 		// TODO cannot avoid?
 		#[allow(clippy::needless_collect)]
@@ -66,9 +61,9 @@ where
 							.into_iter(..)
 							.filter_map(|(iv, node)| match node {
 								BddNode::Gap => None,
-								BddNode::Val => Some(iv.end - C::one()),
+								BddNode::Val => Some(iv.end - 1),
 								BddNode::View(view) => {
-									let val = iv.end - C::one();
+									let val = iv.end - 1;
 									views.insert(val, view);
 									Some(val)
 								}
@@ -83,7 +78,7 @@ where
 					y
 				}))
 			})
-			.collect::<Vec<_>>();
+			.collect_vec();
 
 		let mut ys = ys.into_iter();
 		let first = ys.next().unwrap();
@@ -100,21 +95,21 @@ where
 	}
 }
 
-fn construct_bdd<Lit: Literal, C: Coefficient>(
-	xs: &Vec<IntVarEnc<Lit, C>>,
+fn construct_bdd(
+	xs: &Vec<IntVarEnc>,
 	cmp: &LimitComp,
-	k: PosCoeff<C>,
-) -> Vec<IntervalMap<C, BddNode<C>>> {
+	k: PosCoeff,
+) -> Vec<IntervalMap<Coeff, BddNode>> {
 	let k = *k;
 
 	let bounds = xs
 		.iter()
-		.scan((C::zero(), C::zero()), |state, x| {
+		.scan((0, 0), |state, x| {
 			*state = (state.0 + x.lb(), state.1 + x.ub());
 			Some(*state)
 		})
-		.chain(std::iter::once((C::zero(), k)))
-		.collect::<Vec<_>>();
+		.chain(std::iter::once((0, k)))
+		.collect_vec();
 
 	// TODO ? also hard to avoid?
 	#[allow(clippy::needless_collect)]
@@ -125,9 +120,9 @@ fn construct_bdd<Lit: Literal, C: Coefficient>(
 			*state = (state.0 - x.ub(), state.1 - x.lb());
 			Some(*state)
 		})
-		.collect::<Vec<_>>();
+		.collect_vec();
 
-	let inf = xs.iter().fold(C::zero(), |a, x| a + x.ub()) + C::one();
+	let inf = xs.iter().fold(0, |a, x| a + x.ub()) + 1;
 
 	let mut ws = margins
 		.into_iter()
@@ -137,13 +132,13 @@ fn construct_bdd<Lit: Literal, C: Coefficient>(
 		.map(|((lb_margin, ub_margin), (lb, ub))| {
 			match cmp {
 				LimitComp::LessEq => vec![
-					(lb_margin > lb).then_some((C::zero()..(lb_margin + C::one()), BddNode::Val)),
-					(ub_margin <= ub).then_some(((ub_margin + C::one())..inf, BddNode::Gap)),
+					(lb_margin > lb).then_some((0..(lb_margin + 1), BddNode::Val)),
+					(ub_margin <= ub).then_some(((ub_margin + 1)..inf, BddNode::Gap)),
 				],
 				LimitComp::Equal => vec![
-					(lb_margin > lb).then_some((C::zero()..lb_margin, BddNode::Gap)),
-					(lb_margin == ub_margin).then_some((k..(k + C::one()), BddNode::Val)),
-					(ub_margin <= ub).then_some(((ub_margin + C::one())..inf, BddNode::Gap)),
+					(lb_margin > lb).then_some((0..lb_margin, BddNode::Gap)),
+					(lb_margin == ub_margin).then_some((k..(k + 1), BddNode::Val)),
+					(ub_margin <= ub).then_some(((ub_margin + 1)..inf, BddNode::Gap)),
 				],
 			}
 			.into_iter()
@@ -152,38 +147,38 @@ fn construct_bdd<Lit: Literal, C: Coefficient>(
 		})
 		.collect();
 
-	bdd(0, xs, C::zero(), &mut ws);
+	bdd(0, xs, 0, &mut ws);
 	ws
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum BddNode<C: Coefficient> {
+enum BddNode {
 	Val,
 	Gap,
-	View(C),
+	View(Coeff),
 }
 
-fn bdd<Lit: Literal, C: Coefficient>(
+fn bdd(
 	i: usize,
-	xs: &Vec<IntVarEnc<Lit, C>>,
-	sum: C,
-	ws: &mut Vec<IntervalMap<C, BddNode<C>>>,
-) -> (std::ops::Range<C>, BddNode<C>) {
-	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
+	xs: &Vec<IntVarEnc>,
+	sum: Coeff,
+	ws: &mut Vec<IntervalMap<Coeff, BddNode>>,
+) -> (Range<Coeff>, BddNode) {
+	match &ws[i].overlap(sum).collect_vec()[..] {
 		[] => {
 			let views = xs[i]
 				.dom()
 				.iter(..)
-				.map(|v| v.end - C::one())
+				.map(|v| v.end - 1)
 				.map(|v| (v, bdd(i + 1, xs, sum + v, ws)))
-				.collect::<Vec<_>>();
+				.collect_vec();
 
 			// TODO could we check whether a domain value of x always leads to gaps?
 			let is_gap = views.iter().all(|(_, (_, v))| v == &BddNode::Gap);
 			// TODO without checking actual Val identity, could we miss when the next layer has two
 			// adjacent nodes that are both views on the same node at the layer below?
 			let view = (views.iter().map(|(_, (iv, _))| iv).all_equal())
-				.then(|| views.first().unwrap().1 .0.end - C::one());
+				.then(|| views.first().unwrap().1 .0.end - 1);
 
 			let interval = views
 				.into_iter()
@@ -219,12 +214,13 @@ mod tests {
 	use super::*;
 	use crate::{
 		// cardinality_one::tests::card1_test_suite, CardinalityOne,
-		helpers::tests::assert_sol,
+		helpers::tests::{assert_sol, lits},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
 			LimitComp,
 		},
 		Encoder,
+		Lit,
 	};
 	linear_test_suite!(BddEncoder::default());
 	// FIXME: BDD does not support LimitComp::Equal

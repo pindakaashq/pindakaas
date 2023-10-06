@@ -1,16 +1,15 @@
+use cached::proc_macro::cached;
+use iset::interval_map;
+use itertools::Itertools;
+
 use crate::{
 	helpers::{add_clauses_for, negate_cnf},
 	int::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 	linear::LimitComp,
 	trace::emit_clause,
-	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, LinExp, Literal, Result,
-	Unsatisfiable,
+	CheckError, Checker, ClauseDatabase, Coeff, Encoder, LinExp, Lit, Result, Unsatisfiable,
+	Valuation,
 };
-use cached::proc_macro::cached;
-
-use iset::interval_map;
-use itertools::Itertools;
-use num::Integer;
 
 #[derive(Clone)]
 pub struct SortedEncoder {
@@ -58,35 +57,28 @@ impl SortedEncoder {
 	}
 }
 
-pub struct Sorted<'a, Lit: Literal, C: Coefficient> {
+pub struct Sorted<'a> {
 	pub(crate) xs: &'a [Lit],
 	pub(crate) cmp: LimitComp,
-	pub(crate) y: &'a IntVarEnc<Lit, C>,
+	pub(crate) y: &'a IntVarEnc,
 }
 
-impl<'a, Lit: Literal, C: Coefficient> Sorted<'a, Lit, C> {
-	pub(crate) fn new(xs: &'a [Lit], cmp: LimitComp, y: &'a IntVarEnc<Lit, C>) -> Self {
+impl<'a> Sorted<'a> {
+	pub(crate) fn new(xs: &'a [Lit], cmp: LimitComp, y: &'a IntVarEnc) -> Self {
 		Self { xs, cmp, y }
 	}
 }
 
-impl<'a, Lit: Literal, C: Coefficient> Checker for Sorted<'a, Lit, C> {
-	type Lit = Lit;
-	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let lhs = LinExp::from_terms(
-			self.xs
-				.iter()
-				.map(|x| (x.clone(), C::one()))
-				.collect::<Vec<_>>()
-				.as_slice(),
-		)
-		.assign(solution)?;
+impl<'a> Checker for Sorted<'a> {
+	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError> {
+		let lhs = LinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
+			.value(&value)?;
+		let rhs = LinExp::from(self.y).value(&value)?;
 
-		let rhs = LinExp::<_, _>::from(self.y).assign(solution)?;
-
-		if (self.cmp == LimitComp::LessEq && lhs <= rhs)
-			|| (self.cmp == LimitComp::Equal && lhs == rhs)
-		{
+		if match self.cmp {
+			LimitComp::LessEq => lhs <= rhs,
+			LimitComp::Equal => lhs == rhs,
+		} {
 			Ok(())
 		} else {
 			Err(CheckError::Unsatisfiable(Unsatisfiable))
@@ -94,22 +86,18 @@ impl<'a, Lit: Literal, C: Coefficient> Checker for Sorted<'a, Lit, C> {
 	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Sorted<'_, DB::Lit, C>> for SortedEncoder {
-	fn encode(&mut self, db: &mut DB, sorted: &Sorted<DB::Lit, C>) -> Result {
+impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_>> for SortedEncoder {
+	fn encode(&mut self, db: &mut DB, sorted: &Sorted) -> Result {
 		let xs = sorted
 			.xs
 			.iter()
-			.map(|x| Some(x.clone()))
+			.map(|x| Some(*x))
 			.enumerate()
 			.map(|(i, x)| {
-				IntVarOrd::from_views(
-					db,
-					interval_map! { C::one()..(C::one()+C::one()) => x },
-					format!("x_{}", i + 1),
-				)
-				.into()
+				IntVarOrd::from_views(db, interval_map! { 1..2 => x }, format!("x_{}", i + 1))
+					.into()
 			})
-			.collect::<Vec<_>>();
+			.collect_vec();
 
 		if self.add_consistency {
 			sorted.y.consistent(db).unwrap();
@@ -119,10 +107,8 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Sorted<'_, DB::Lit, C>> for
 	}
 }
 
-impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB::Lit, C>>
-	for SortedEncoder
-{
-	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> Result {
+impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for SortedEncoder {
+	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint) -> Result {
 		let TernLeConstraint { x, y, cmp, z } = tern;
 		if tern.is_fixed()? {
 			Ok(())
@@ -138,17 +124,17 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 }
 
 impl SortedEncoder {
-	fn next_int_var<DB: ClauseDatabase, C: Coefficient>(
+	fn next_int_var<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
-		ub: C,
+		ub: Coeff,
 		lbl: String,
-	) -> IntVarEnc<DB::Lit, C> {
+	) -> IntVarEnc {
 		// TODO We always have the view x>=1 <-> y>=1, which is now realized using equiv
-		if ub == C::zero() {
-			IntVarEnc::Const(C::zero())
+		if ub == 0 {
+			IntVarEnc::Const(0)
 		} else {
-			let y = IntVarOrd::from_bounds(db, C::zero(), ub, lbl);
+			let y = IntVarOrd::from_bounds(db, 0, ub, lbl);
 			if self.add_consistency {
 				y.consistent(db).unwrap();
 			}
@@ -157,38 +143,38 @@ impl SortedEncoder {
 	}
 
 	/// The sorted/merged base case of x1{0,1}+x2{0,1}<=y{0,1,2}
-	fn smerge<DB: ClauseDatabase, C: Coefficient>(
+	fn smerge<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
-		x1: &IntVarEnc<DB::Lit, C>,
-		x2: &IntVarEnc<DB::Lit, C>,
+		x1: &IntVarEnc,
+		x2: &IntVarEnc,
 		cmp: &LimitComp,
-		y: &IntVarEnc<DB::Lit, C>,
+		y: &IntVarEnc,
 	) -> Result {
 		// we let x2 take the place of z_ceil, so we need to add 1 to both sides
 		let x2 = x2.add(
 			db,
 			&mut TernLeEncoder::default(),
-			&IntVarEnc::Const(C::one()),
+			&IntVarEnc::Const(1),
 			None,
 			None,
 		)?;
 		let y = y.add(
 			db,
 			&mut TernLeEncoder::default(),
-			&IntVarEnc::Const(C::one()),
+			&IntVarEnc::Const(1),
 			None,
 			None,
 		)?;
-		self.comp(db, x1, &x2, cmp, &y, C::one())
+		self.comp(db, x1, &x2, cmp, &y, 1)
 	}
 
-	fn sorted<DB: ClauseDatabase, C: Coefficient>(
+	fn sorted<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
-		xs: &[IntVarEnc<DB::Lit, C>],
+		xs: &[IntVarEnc],
 		cmp: &LimitComp,
-		y: &IntVarEnc<DB::Lit, C>,
+		y: &IntVarEnc,
 		_lvl: usize,
 	) -> Result {
 		let (n, m) = (xs.len(), y.ub());
@@ -205,19 +191,19 @@ impl SortedEncoder {
 		// 	_lvl = _lvl
 		// );
 
-		debug_assert!(xs.iter().all(|x| x.ub() == C::one()));
+		debug_assert!(xs.iter().all(|x| x.ub() == 1));
 		if direct {
-			return num::range_inclusive(C::one(), m + C::one()).try_for_each(|k| {
+			return (1..=m + 1).try_for_each(|k| {
 				xs.iter()
-					.map(|x| x.geq(C::one()..(C::one() + C::one()))[0][0].clone())
-					.combinations(k.to_usize().unwrap())
+					.map(|x| x.geq(1..2)[0][0])
+					.combinations(k as usize)
 					.try_for_each(|lits| {
-						let cl = lits
-							.into_iter()
-							.map(|lit| lit.negate())
-							.chain(y.geq(k..(k + C::one()))[0].iter().cloned())
-							.collect::<Vec<_>>();
-						emit_clause!(db, cl.as_slice())
+						emit_clause!(
+							db,
+							lits.into_iter()
+								.map(|lit| !lit)
+								.chain(y.geq(k..(k + 1))[0].iter().cloned())
+						)
 					})
 			});
 		}
@@ -227,12 +213,12 @@ impl SortedEncoder {
 				db,
 				&TernLeConstraint {
 					x,
-					y: &IntVarEnc::Const(C::zero()),
+					y: &IntVarEnc::Const(0),
 					cmp: cmp.clone(),
 					z: y,
 				},
 			),
-			[x1, x2] if m <= C::one() + C::one() => self.smerge(db, x1, x2, cmp, y),
+			[x1, x2] if m <= 2 => self.smerge(db, x1, x2, cmp, y),
 			xs => {
 				let n = match self.sort_n {
 					SortN::One => 1,
@@ -242,7 +228,7 @@ impl SortedEncoder {
 					db,
 					&xs[..n],
 					cmp,
-					std::cmp::min((0..n).fold(C::zero(), |a, _| a + C::one()), y.ub()),
+					std::cmp::min((0..n).fold(0, |a, _| a + 1), y.ub()),
 					String::from("y1"),
 					_lvl,
 				);
@@ -250,7 +236,7 @@ impl SortedEncoder {
 					db,
 					&xs[n..],
 					cmp,
-					std::cmp::min((n..xs.len()).fold(C::zero(), |a, _| a + C::one()), y.ub()),
+					std::cmp::min((n..xs.len()).fold(0, |a, _| a + 1), y.ub()),
 					String::from("y2"),
 					_lvl,
 				);
@@ -268,15 +254,15 @@ impl SortedEncoder {
 		}
 	}
 
-	fn sort<DB: ClauseDatabase, C: Coefficient>(
+	fn sort<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
-		xs: &[IntVarEnc<DB::Lit, C>],
+		xs: &[IntVarEnc],
 		cmp: &LimitComp,
-		ub: C,
+		ub: Coeff,
 		lbl: String,
 		_lvl: usize,
-	) -> Option<IntVarEnc<DB::Lit, C>> {
+	) -> Option<IntVarEnc> {
 		match xs {
 			[] => None,
 			[x] => Some(x.clone()),
@@ -288,22 +274,17 @@ impl SortedEncoder {
 		}
 	}
 
-	fn merged<DB: ClauseDatabase, C: Coefficient>(
+	fn merged<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
-		x1: &IntVarEnc<DB::Lit, C>,
-		x2: &IntVarEnc<DB::Lit, C>,
+		x1: &IntVarEnc,
+		x2: &IntVarEnc,
 		cmp: &LimitComp,
-		y: &IntVarEnc<DB::Lit, C>,
+		y: &IntVarEnc,
 		_lvl: usize,
 	) -> Result {
 		let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
-		let (strat, _cost) = merged_cost(
-			a.to_u128().unwrap(),
-			b.to_u128().unwrap(),
-			c.to_u128().unwrap(),
-			self.strategy.clone(),
-		);
+		let (strat, _cost) = merged_cost(a as u128, b as u128, c as u128, self.strategy.clone());
 
 		// TODO: Add tracing
 		// eprintln!(
@@ -330,33 +311,32 @@ impl SortedEncoder {
 				)
 			}
 			SortedStrategy::Recursive => {
-				if a.is_zero() && b.is_zero() {
+				if a == 0 && b == 0 {
 					Ok(())
-				} else if a.is_one() && b.is_one() && c <= C::one() + C::one() {
+				} else if a == 1 && b == 1 && c <= 2 {
 					self.smerge(db, x1, x2, cmp, y)
 				} else {
-					let two = C::one() + C::one();
-					let x1_floor = x1.div(&two);
+					let x1_floor = x1.div(2);
 					let x1_ceil = x1
 						.add(
 							db,
 							&mut TernLeEncoder::default(),
-							&IntVarEnc::Const(C::one()),
+							&IntVarEnc::Const(1),
 							None,
 							None,
 						)?
-						.div(&two);
+						.div(2);
 
-					let x2_floor = x2.div(&two);
+					let x2_floor = x2.div(2);
 					let x2_ceil = x2
 						.add(
 							db,
 							&mut TernLeEncoder::default(),
-							&IntVarEnc::Const(C::one()),
+							&IntVarEnc::Const(1),
 							None,
 							None,
 						)?
-						.div(&two);
+						.div(2);
 
 					let z_floor =
 						x1_floor.add(db, &mut TernLeEncoder::default(), &x2_floor, None, None)?;
@@ -372,7 +352,7 @@ impl SortedEncoder {
 						&TernLeConstraint::new(&x1_ceil, &x2_ceil, cmp.clone(), &z_ceil),
 					)?;
 
-					for c in num::iter::range_inclusive(C::zero(), c) {
+					for c in 0..=c {
 						self.comp(db, &z_floor, &z_ceil, cmp, y, c)?;
 					}
 
@@ -383,20 +363,20 @@ impl SortedEncoder {
 		}
 	}
 
-	fn comp<DB: ClauseDatabase, C: Coefficient>(
+	fn comp<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
-		x: &IntVarEnc<DB::Lit, C>,
-		y: &IntVarEnc<DB::Lit, C>,
+		x: &IntVarEnc,
+		y: &IntVarEnc,
 		cmp: &LimitComp,
-		z: &IntVarEnc<DB::Lit, C>,
-		c: C,
+		z: &IntVarEnc,
+		c: Coeff,
 	) -> Result {
 		let cmp = self.overwrite_recursive_cmp.as_ref().unwrap_or(cmp);
-		let to_iv = |c: C| c..(c + C::one());
-		let empty_clause: Vec<Vec<DB::Lit>> = vec![Vec::new()];
+		let to_iv = |c: Coeff| c..(c + 1);
+		let empty_clause: Vec<Vec<Lit>> = vec![Vec::new()];
 		let c1 = c;
-		let c2 = c + C::one();
+		let c2 = c + 1;
 		let x = x.geq(to_iv(c1)); // c
 		let y = y.geq(to_iv(c2)); // c+1
 		let z1 = z.geq(to_iv(c1 + c1)); // 2c
@@ -460,7 +440,7 @@ fn merged_rec_cost(a: u128, b: u128, c: u128, strat: SortedStrategy) -> (u128, u
 				merged_cost(a / 2, b / 2, c / 2, strat),
 				(
 					c - 1,
-					if c.is_odd() {
+					if c % 2 == 1 {
 						(3 * c - 3) / 2
 					} else {
 						((3 * c - 2) / 2) + 2
@@ -514,7 +494,7 @@ mod tests {
 	use traced_test::test;
 
 	use super::*;
-	use crate::helpers::tests::{assert_sol, TestDB};
+	use crate::helpers::tests::{assert_sol, lits, TestDB};
 
 	fn get_sorted_encoder(strategy: SortedStrategy) -> SortedEncoder {
 		SortedEncoder {
@@ -528,18 +508,18 @@ mod tests {
 	#[test]
 	fn test_2_merged_eq() {
 		let mut db = TestDB::new(0);
-		let x: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 1, String::from("x")).into();
-		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 1, String::from("y")).into();
-		let z: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("z")).into();
+		let x: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 1, String::from("x")).into();
+		let y: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 1, String::from("y")).into();
+		let z: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("z")).into();
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 		let con = TernLeConstraint::new(&x, &y, LimitComp::Equal, &z);
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let sols = vec![
-			vec![-1, -2, -3, -4],
-			vec![1, -2, 3, -4],
-			vec![-1, 2, 3, -4],
-			vec![1, 2, 3, 4],
+			lits![-1, -2, -3, -4],
+			lits![1, -2, 3, -4],
+			lits![-1, 2, 3, -4],
+			lits![1, 2, 3, 4],
 		];
 		assert_sol!(db => enc, &con => sols);
 	}
@@ -547,27 +527,28 @@ mod tests {
 	#[test]
 	fn test_2_sorted_eq() {
 		let mut db = TestDB::new(4);
-		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("y")).into();
+		let y: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("y")).into();
 		db.num_var += y.lits() as i32;
-		let con = &Sorted::new(&[1, 2], LimitComp::Equal, &y);
+		let lits = lits![1, 2];
+		let con = &Sorted::new(&lits, LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let sols = vec![
-			vec![-1, -2, -3, -4, -5, -6],
-			vec![-1, -2, 3, -4, -5, -6],
-			vec![-1, -2, -3, 4, -5, -6],
-			vec![-1, -2, 3, 4, -5, -6],
-			vec![1, -2, -3, -4, 5, -6],
-			vec![-1, 2, -3, -4, 5, -6],
-			vec![1, -2, 3, -4, 5, -6],
-			vec![-1, 2, 3, -4, 5, -6],
-			vec![1, -2, -3, 4, 5, -6],
-			vec![-1, 2, -3, 4, 5, -6],
-			vec![1, -2, 3, 4, 5, -6],
-			vec![-1, 2, 3, 4, 5, -6],
-			vec![1, 2, -3, -4, 5, 6],
-			vec![1, 2, 3, -4, 5, 6],
-			vec![1, 2, -3, 4, 5, 6],
-			vec![1, 2, 3, 4, 5, 6],
+			lits![-1, -2, -3, -4, -5, -6],
+			lits![-1, -2, 3, -4, -5, -6],
+			lits![-1, -2, -3, 4, -5, -6],
+			lits![-1, -2, 3, 4, -5, -6],
+			lits![1, -2, -3, -4, 5, -6],
+			lits![-1, 2, -3, -4, 5, -6],
+			lits![1, -2, 3, -4, 5, -6],
+			lits![-1, 2, 3, -4, 5, -6],
+			lits![1, -2, -3, 4, 5, -6],
+			lits![-1, 2, -3, 4, 5, -6],
+			lits![1, -2, 3, 4, 5, -6],
+			lits![-1, 2, 3, 4, 5, -6],
+			lits![1, 2, -3, -4, 5, 6],
+			lits![1, 2, 3, -4, 5, 6],
+			lits![1, 2, -3, 4, 5, 6],
+			lits![1, 2, 3, 4, 5, 6],
 		];
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		assert_sol!(db => enc, con => sols);
@@ -576,75 +557,76 @@ mod tests {
 	#[test]
 	fn test_3_sorted_eq() {
 		let mut db = TestDB::new(6);
-		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 3, String::from("y")).into();
+		let y: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 3, String::from("y")).into();
 		db.num_var += y.lits() as i32;
-		let con = &Sorted::new(&[1, 2, 3], LimitComp::Equal, &y);
+		let lits = lits![1, 2, 3];
+		let con = &Sorted::new(&lits, LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let sols = vec![
-			vec![-1, -2, -3, -4, -5, -6, -7, -8, -9],
-			vec![-1, -2, -3, 4, -5, -6, -7, -8, -9],
-			vec![-1, -2, -3, -4, 5, -6, -7, -8, -9],
-			vec![-1, -2, -3, 4, 5, -6, -7, -8, -9],
-			vec![-1, -2, -3, -4, -5, 6, -7, -8, -9],
-			vec![-1, -2, -3, 4, -5, 6, -7, -8, -9],
-			vec![-1, -2, -3, -4, 5, 6, -7, -8, -9],
-			vec![-1, -2, -3, 4, 5, 6, -7, -8, -9],
-			vec![1, -2, -3, -4, -5, -6, 7, -8, -9],
-			vec![-1, 2, -3, -4, -5, -6, 7, -8, -9],
-			vec![-1, -2, 3, -4, -5, -6, 7, -8, -9],
-			vec![1, -2, -3, 4, -5, -6, 7, -8, -9],
-			vec![-1, 2, -3, 4, -5, -6, 7, -8, -9],
-			vec![-1, -2, 3, 4, -5, -6, 7, -8, -9],
-			vec![1, -2, -3, -4, 5, -6, 7, -8, -9],
-			vec![-1, 2, -3, -4, 5, -6, 7, -8, -9],
-			vec![-1, -2, 3, -4, 5, -6, 7, -8, -9],
-			vec![1, -2, -3, 4, 5, -6, 7, -8, -9],
-			vec![-1, 2, -3, 4, 5, -6, 7, -8, -9],
-			vec![-1, -2, 3, 4, 5, -6, 7, -8, -9],
-			vec![1, -2, -3, -4, -5, 6, 7, -8, -9],
-			vec![-1, 2, -3, -4, -5, 6, 7, -8, -9],
-			vec![-1, -2, 3, -4, -5, 6, 7, -8, -9],
-			vec![1, -2, -3, 4, -5, 6, 7, -8, -9],
-			vec![-1, 2, -3, 4, -5, 6, 7, -8, -9],
-			vec![-1, -2, 3, 4, -5, 6, 7, -8, -9],
-			vec![1, -2, -3, -4, 5, 6, 7, -8, -9],
-			vec![-1, 2, -3, -4, 5, 6, 7, -8, -9],
-			vec![-1, -2, 3, -4, 5, 6, 7, -8, -9],
-			vec![1, -2, -3, 4, 5, 6, 7, -8, -9],
-			vec![-1, 2, -3, 4, 5, 6, 7, -8, -9],
-			vec![-1, -2, 3, 4, 5, 6, 7, -8, -9],
-			vec![1, 2, -3, -4, -5, -6, 7, 8, -9],
-			vec![1, -2, 3, -4, -5, -6, 7, 8, -9],
-			vec![-1, 2, 3, -4, -5, -6, 7, 8, -9],
-			vec![1, 2, -3, 4, -5, -6, 7, 8, -9],
-			vec![1, -2, 3, 4, -5, -6, 7, 8, -9],
-			vec![-1, 2, 3, 4, -5, -6, 7, 8, -9],
-			vec![1, 2, -3, -4, 5, -6, 7, 8, -9],
-			vec![1, -2, 3, -4, 5, -6, 7, 8, -9],
-			vec![-1, 2, 3, -4, 5, -6, 7, 8, -9],
-			vec![1, 2, -3, 4, 5, -6, 7, 8, -9],
-			vec![1, -2, 3, 4, 5, -6, 7, 8, -9],
-			vec![-1, 2, 3, 4, 5, -6, 7, 8, -9],
-			vec![1, 2, -3, -4, -5, 6, 7, 8, -9],
-			vec![1, -2, 3, -4, -5, 6, 7, 8, -9],
-			vec![-1, 2, 3, -4, -5, 6, 7, 8, -9],
-			vec![1, 2, -3, 4, -5, 6, 7, 8, -9],
-			vec![1, -2, 3, 4, -5, 6, 7, 8, -9],
-			vec![-1, 2, 3, 4, -5, 6, 7, 8, -9],
-			vec![1, 2, -3, -4, 5, 6, 7, 8, -9],
-			vec![1, -2, 3, -4, 5, 6, 7, 8, -9],
-			vec![-1, 2, 3, -4, 5, 6, 7, 8, -9],
-			vec![1, 2, -3, 4, 5, 6, 7, 8, -9],
-			vec![1, -2, 3, 4, 5, 6, 7, 8, -9],
-			vec![-1, 2, 3, 4, 5, 6, 7, 8, -9],
-			vec![1, 2, 3, -4, -5, -6, 7, 8, 9],
-			vec![1, 2, 3, 4, -5, -6, 7, 8, 9],
-			vec![1, 2, 3, -4, 5, -6, 7, 8, 9],
-			vec![1, 2, 3, 4, 5, -6, 7, 8, 9],
-			vec![1, 2, 3, -4, -5, 6, 7, 8, 9],
-			vec![1, 2, 3, 4, -5, 6, 7, 8, 9],
-			vec![1, 2, 3, -4, 5, 6, 7, 8, 9],
-			vec![1, 2, 3, 4, 5, 6, 7, 8, 9],
+			lits![-1, -2, -3, -4, -5, -6, -7, -8, -9],
+			lits![-1, -2, -3, 4, -5, -6, -7, -8, -9],
+			lits![-1, -2, -3, -4, 5, -6, -7, -8, -9],
+			lits![-1, -2, -3, 4, 5, -6, -7, -8, -9],
+			lits![-1, -2, -3, -4, -5, 6, -7, -8, -9],
+			lits![-1, -2, -3, 4, -5, 6, -7, -8, -9],
+			lits![-1, -2, -3, -4, 5, 6, -7, -8, -9],
+			lits![-1, -2, -3, 4, 5, 6, -7, -8, -9],
+			lits![1, -2, -3, -4, -5, -6, 7, -8, -9],
+			lits![-1, 2, -3, -4, -5, -6, 7, -8, -9],
+			lits![-1, -2, 3, -4, -5, -6, 7, -8, -9],
+			lits![1, -2, -3, 4, -5, -6, 7, -8, -9],
+			lits![-1, 2, -3, 4, -5, -6, 7, -8, -9],
+			lits![-1, -2, 3, 4, -5, -6, 7, -8, -9],
+			lits![1, -2, -3, -4, 5, -6, 7, -8, -9],
+			lits![-1, 2, -3, -4, 5, -6, 7, -8, -9],
+			lits![-1, -2, 3, -4, 5, -6, 7, -8, -9],
+			lits![1, -2, -3, 4, 5, -6, 7, -8, -9],
+			lits![-1, 2, -3, 4, 5, -6, 7, -8, -9],
+			lits![-1, -2, 3, 4, 5, -6, 7, -8, -9],
+			lits![1, -2, -3, -4, -5, 6, 7, -8, -9],
+			lits![-1, 2, -3, -4, -5, 6, 7, -8, -9],
+			lits![-1, -2, 3, -4, -5, 6, 7, -8, -9],
+			lits![1, -2, -3, 4, -5, 6, 7, -8, -9],
+			lits![-1, 2, -3, 4, -5, 6, 7, -8, -9],
+			lits![-1, -2, 3, 4, -5, 6, 7, -8, -9],
+			lits![1, -2, -3, -4, 5, 6, 7, -8, -9],
+			lits![-1, 2, -3, -4, 5, 6, 7, -8, -9],
+			lits![-1, -2, 3, -4, 5, 6, 7, -8, -9],
+			lits![1, -2, -3, 4, 5, 6, 7, -8, -9],
+			lits![-1, 2, -3, 4, 5, 6, 7, -8, -9],
+			lits![-1, -2, 3, 4, 5, 6, 7, -8, -9],
+			lits![1, 2, -3, -4, -5, -6, 7, 8, -9],
+			lits![1, -2, 3, -4, -5, -6, 7, 8, -9],
+			lits![-1, 2, 3, -4, -5, -6, 7, 8, -9],
+			lits![1, 2, -3, 4, -5, -6, 7, 8, -9],
+			lits![1, -2, 3, 4, -5, -6, 7, 8, -9],
+			lits![-1, 2, 3, 4, -5, -6, 7, 8, -9],
+			lits![1, 2, -3, -4, 5, -6, 7, 8, -9],
+			lits![1, -2, 3, -4, 5, -6, 7, 8, -9],
+			lits![-1, 2, 3, -4, 5, -6, 7, 8, -9],
+			lits![1, 2, -3, 4, 5, -6, 7, 8, -9],
+			lits![1, -2, 3, 4, 5, -6, 7, 8, -9],
+			lits![-1, 2, 3, 4, 5, -6, 7, 8, -9],
+			lits![1, 2, -3, -4, -5, 6, 7, 8, -9],
+			lits![1, -2, 3, -4, -5, 6, 7, 8, -9],
+			lits![-1, 2, 3, -4, -5, 6, 7, 8, -9],
+			lits![1, 2, -3, 4, -5, 6, 7, 8, -9],
+			lits![1, -2, 3, 4, -5, 6, 7, 8, -9],
+			lits![-1, 2, 3, 4, -5, 6, 7, 8, -9],
+			lits![1, 2, -3, -4, 5, 6, 7, 8, -9],
+			lits![1, -2, 3, -4, 5, 6, 7, 8, -9],
+			lits![-1, 2, 3, -4, 5, 6, 7, 8, -9],
+			lits![1, 2, -3, 4, 5, 6, 7, 8, -9],
+			lits![1, -2, 3, 4, 5, 6, 7, 8, -9],
+			lits![-1, 2, 3, 4, 5, 6, 7, 8, -9],
+			lits![1, 2, 3, -4, -5, -6, 7, 8, 9],
+			lits![1, 2, 3, 4, -5, -6, 7, 8, 9],
+			lits![1, 2, 3, -4, 5, -6, 7, 8, 9],
+			lits![1, 2, 3, 4, 5, -6, 7, 8, 9],
+			lits![1, 2, 3, -4, -5, 6, 7, 8, 9],
+			lits![1, 2, 3, 4, -5, 6, 7, 8, 9],
+			lits![1, 2, 3, -4, 5, 6, 7, 8, 9],
+			lits![1, 2, 3, 4, 5, 6, 7, 8, 9],
 		];
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
@@ -654,40 +636,41 @@ mod tests {
 	#[test]
 	fn test_3_2_sorted_eq() {
 		let mut db = TestDB::new(5);
-		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("y")).into();
+		let y: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("y")).into();
 		db.num_var += y.lits() as i32;
-		let con = &Sorted::new(&[1, 2, 3], LimitComp::Equal, &y);
+		let lits = lits![1, 2, 3];
+		let con = &Sorted::new(&lits, LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 
 		let sols = vec![
-			vec![-1, -2, -3, -4, -5, -6, -7],
-			vec![-1, -2, -3, 4, -5, -6, -7],
-			vec![-1, -2, -3, -4, 5, -6, -7],
-			vec![-1, -2, -3, 4, 5, -6, -7],
-			vec![1, -2, -3, -4, -5, 6, -7],
-			vec![-1, 2, -3, -4, -5, 6, -7],
-			vec![-1, -2, 3, -4, -5, 6, -7],
-			vec![1, -2, -3, 4, -5, 6, -7],
-			vec![-1, 2, -3, 4, -5, 6, -7],
-			vec![-1, -2, 3, 4, -5, 6, -7],
-			vec![1, -2, -3, -4, 5, 6, -7],
-			vec![-1, 2, -3, -4, 5, 6, -7],
-			vec![-1, -2, 3, -4, 5, 6, -7],
-			vec![1, -2, -3, 4, 5, 6, -7],
-			vec![-1, 2, -3, 4, 5, 6, -7],
-			vec![-1, -2, 3, 4, 5, 6, -7],
-			vec![1, 2, -3, -4, -5, 6, 7],
-			vec![1, -2, 3, -4, -5, 6, 7],
-			vec![-1, 2, 3, -4, -5, 6, 7],
-			vec![1, 2, -3, 4, -5, 6, 7],
-			vec![1, -2, 3, 4, -5, 6, 7],
-			vec![-1, 2, 3, 4, -5, 6, 7],
-			vec![1, 2, -3, -4, 5, 6, 7],
-			vec![1, -2, 3, -4, 5, 6, 7],
-			vec![-1, 2, 3, -4, 5, 6, 7],
-			vec![1, 2, -3, 4, 5, 6, 7],
-			vec![1, -2, 3, 4, 5, 6, 7],
-			vec![-1, 2, 3, 4, 5, 6, 7],
+			lits![-1, -2, -3, -4, -5, -6, -7],
+			lits![-1, -2, -3, 4, -5, -6, -7],
+			lits![-1, -2, -3, -4, 5, -6, -7],
+			lits![-1, -2, -3, 4, 5, -6, -7],
+			lits![1, -2, -3, -4, -5, 6, -7],
+			lits![-1, 2, -3, -4, -5, 6, -7],
+			lits![-1, -2, 3, -4, -5, 6, -7],
+			lits![1, -2, -3, 4, -5, 6, -7],
+			lits![-1, 2, -3, 4, -5, 6, -7],
+			lits![-1, -2, 3, 4, -5, 6, -7],
+			lits![1, -2, -3, -4, 5, 6, -7],
+			lits![-1, 2, -3, -4, 5, 6, -7],
+			lits![-1, -2, 3, -4, 5, 6, -7],
+			lits![1, -2, -3, 4, 5, 6, -7],
+			lits![-1, 2, -3, 4, 5, 6, -7],
+			lits![-1, -2, 3, 4, 5, 6, -7],
+			lits![1, 2, -3, -4, -5, 6, 7],
+			lits![1, -2, 3, -4, -5, 6, 7],
+			lits![-1, 2, 3, -4, -5, 6, 7],
+			lits![1, 2, -3, 4, -5, 6, 7],
+			lits![1, -2, 3, 4, -5, 6, 7],
+			lits![-1, 2, 3, 4, -5, 6, 7],
+			lits![1, 2, -3, -4, 5, 6, 7],
+			lits![1, -2, 3, -4, 5, 6, 7],
+			lits![-1, 2, 3, -4, 5, 6, 7],
+			lits![1, 2, -3, 4, 5, 6, 7],
+			lits![1, -2, 3, 4, 5, 6, 7],
+			lits![-1, 2, 3, 4, 5, 6, 7],
 		];
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
@@ -697,267 +680,268 @@ mod tests {
 	#[test]
 	fn test_4_sorted_eq() {
 		let mut db = TestDB::new(8);
-		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 4, String::from("y")).into();
+		let y: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 4, String::from("y")).into();
 		db.num_var += y.lits() as i32;
-		let con = &Sorted::new(&[1, 2, 3, 4], LimitComp::Equal, &y);
+		let lits = lits![1, 2, 3, 4];
+		let con = &Sorted::new(&lits, LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let sols = vec![
-			vec![-1, -2, -3, -4, -5, -6, -7, -8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, 5, -6, -7, -8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, -5, 6, -7, -8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, 5, 6, -7, -8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, -5, -6, 7, -8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, 5, -6, 7, -8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, -5, 6, 7, -8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, 5, 6, 7, -8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, -5, -6, -7, 8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, 5, -6, -7, 8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, -5, 6, -7, 8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, 5, 6, -7, 8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, -5, -6, 7, 8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, 5, -6, 7, 8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, -5, 6, 7, 8, -9, -10, -11, -12],
-			vec![-1, -2, -3, -4, 5, 6, 7, 8, -9, -10, -11, -12],
-			vec![1, -2, -3, -4, -5, -6, -7, -8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, -5, -6, -7, -8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, -5, -6, -7, -8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, -5, -6, -7, -8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, 5, -6, -7, -8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, 5, -6, -7, -8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, 5, -6, -7, -8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, 5, -6, -7, -8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, -5, 6, -7, -8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, -5, 6, -7, -8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, -5, 6, -7, -8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, -5, 6, -7, -8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, 5, 6, -7, -8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, 5, 6, -7, -8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, 5, 6, -7, -8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, 5, 6, -7, -8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, -5, -6, 7, -8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, -5, -6, 7, -8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, -5, -6, 7, -8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, -5, -6, 7, -8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, 5, -6, 7, -8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, 5, -6, 7, -8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, 5, -6, 7, -8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, 5, -6, 7, -8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, -5, 6, 7, -8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, -5, 6, 7, -8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, -5, 6, 7, -8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, -5, 6, 7, -8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, 5, 6, 7, -8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, 5, 6, 7, -8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, 5, 6, 7, -8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, 5, 6, 7, -8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, -5, -6, -7, 8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, -5, -6, -7, 8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, -5, -6, -7, 8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, -5, -6, -7, 8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, 5, -6, -7, 8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, 5, -6, -7, 8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, 5, -6, -7, 8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, 5, -6, -7, 8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, -5, 6, -7, 8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, -5, 6, -7, 8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, -5, 6, -7, 8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, -5, 6, -7, 8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, 5, 6, -7, 8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, 5, 6, -7, 8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, 5, 6, -7, 8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, 5, 6, -7, 8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, -5, -6, 7, 8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, -5, -6, 7, 8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, -5, -6, 7, 8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, -5, -6, 7, 8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, 5, -6, 7, 8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, 5, -6, 7, 8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, 5, -6, 7, 8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, 5, -6, 7, 8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, -5, 6, 7, 8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, -5, 6, 7, 8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, -5, 6, 7, 8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, -5, 6, 7, 8, 9, -10, -11, -12],
-			vec![1, -2, -3, -4, 5, 6, 7, 8, 9, -10, -11, -12],
-			vec![-1, 2, -3, -4, 5, 6, 7, 8, 9, -10, -11, -12],
-			vec![-1, -2, 3, -4, 5, 6, 7, 8, 9, -10, -11, -12],
-			vec![-1, -2, -3, 4, 5, 6, 7, 8, 9, -10, -11, -12],
-			vec![1, 2, -3, -4, -5, -6, -7, -8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, -5, -6, -7, -8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, -5, -6, -7, -8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, -5, -6, -7, -8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, -5, -6, -7, -8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, -5, -6, -7, -8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, 5, -6, -7, -8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, 5, -6, -7, -8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, 5, -6, -7, -8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, 5, -6, -7, -8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, 5, -6, -7, -8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, 5, -6, -7, -8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, -5, 6, -7, -8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, -5, 6, -7, -8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, -5, 6, -7, -8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, -5, 6, -7, -8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, -5, 6, -7, -8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, -5, 6, -7, -8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, 5, 6, -7, -8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, 5, 6, -7, -8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, 5, 6, -7, -8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, 5, 6, -7, -8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, 5, 6, -7, -8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, 5, 6, -7, -8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, -5, -6, 7, -8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, -5, -6, 7, -8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, -5, -6, 7, -8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, -5, -6, 7, -8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, -5, -6, 7, -8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, -5, -6, 7, -8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, 5, -6, 7, -8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, 5, -6, 7, -8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, 5, -6, 7, -8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, 5, -6, 7, -8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, 5, -6, 7, -8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, 5, -6, 7, -8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, -5, 6, 7, -8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, -5, 6, 7, -8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, -5, 6, 7, -8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, -5, 6, 7, -8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, -5, 6, 7, -8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, -5, 6, 7, -8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, 5, 6, 7, -8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, 5, 6, 7, -8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, 5, 6, 7, -8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, 5, 6, 7, -8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, 5, 6, 7, -8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, 5, 6, 7, -8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, -5, -6, -7, 8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, -5, -6, -7, 8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, -5, -6, -7, 8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, -5, -6, -7, 8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, -5, -6, -7, 8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, -5, -6, -7, 8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, 5, -6, -7, 8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, 5, -6, -7, 8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, 5, -6, -7, 8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, 5, -6, -7, 8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, 5, -6, -7, 8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, 5, -6, -7, 8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, -5, 6, -7, 8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, -5, 6, -7, 8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, -5, 6, -7, 8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, -5, 6, -7, 8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, -5, 6, -7, 8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, -5, 6, -7, 8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, 5, 6, -7, 8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, 5, 6, -7, 8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, 5, 6, -7, 8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, 5, 6, -7, 8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, 5, 6, -7, 8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, 5, 6, -7, 8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, -5, -6, 7, 8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, -5, -6, 7, 8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, -5, -6, 7, 8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, -5, -6, 7, 8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, -5, -6, 7, 8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, -5, -6, 7, 8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, 5, -6, 7, 8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, 5, -6, 7, 8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, 5, -6, 7, 8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, 5, -6, 7, 8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, 5, -6, 7, 8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, 5, -6, 7, 8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, -5, 6, 7, 8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, -5, 6, 7, 8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, -5, 6, 7, 8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, -5, 6, 7, 8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, -5, 6, 7, 8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, -5, 6, 7, 8, 9, 10, -11, -12],
-			vec![1, 2, -3, -4, 5, 6, 7, 8, 9, 10, -11, -12],
-			vec![1, -2, 3, -4, 5, 6, 7, 8, 9, 10, -11, -12],
-			vec![-1, 2, 3, -4, 5, 6, 7, 8, 9, 10, -11, -12],
-			vec![1, -2, -3, 4, 5, 6, 7, 8, 9, 10, -11, -12],
-			vec![-1, 2, -3, 4, 5, 6, 7, 8, 9, 10, -11, -12],
-			vec![-1, -2, 3, 4, 5, 6, 7, 8, 9, 10, -11, -12],
-			vec![1, 2, 3, -4, -5, -6, -7, -8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, -5, -6, -7, -8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, -5, -6, -7, -8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, -5, -6, -7, -8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, 5, -6, -7, -8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, 5, -6, -7, -8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, 5, -6, -7, -8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, 5, -6, -7, -8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, -5, 6, -7, -8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, -5, 6, -7, -8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, -5, 6, -7, -8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, -5, 6, -7, -8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, 5, 6, -7, -8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, 5, 6, -7, -8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, 5, 6, -7, -8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, 5, 6, -7, -8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, -5, -6, 7, -8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, -5, -6, 7, -8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, -5, -6, 7, -8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, -5, -6, 7, -8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, 5, -6, 7, -8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, 5, -6, 7, -8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, 5, -6, 7, -8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, 5, -6, 7, -8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, -5, 6, 7, -8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, -5, 6, 7, -8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, -5, 6, 7, -8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, -5, 6, 7, -8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, 5, 6, 7, -8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, 5, 6, 7, -8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, 5, 6, 7, -8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, 5, 6, 7, -8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, -5, -6, -7, 8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, -5, -6, -7, 8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, -5, -6, -7, 8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, -5, -6, -7, 8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, 5, -6, -7, 8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, 5, -6, -7, 8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, 5, -6, -7, 8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, 5, -6, -7, 8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, -5, 6, -7, 8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, -5, 6, -7, 8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, -5, 6, -7, 8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, -5, 6, -7, 8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, 5, 6, -7, 8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, 5, 6, -7, 8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, 5, 6, -7, 8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, 5, 6, -7, 8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, -5, -6, 7, 8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, -5, -6, 7, 8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, -5, -6, 7, 8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, -5, -6, 7, 8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, 5, -6, 7, 8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, 5, -6, 7, 8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, 5, -6, 7, 8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, 5, -6, 7, 8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, -5, 6, 7, 8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, -5, 6, 7, 8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, -5, 6, 7, 8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, -5, 6, 7, 8, 9, 10, 11, -12],
-			vec![1, 2, 3, -4, 5, 6, 7, 8, 9, 10, 11, -12],
-			vec![1, 2, -3, 4, 5, 6, 7, 8, 9, 10, 11, -12],
-			vec![1, -2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -12],
-			vec![-1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -12],
-			vec![1, 2, 3, 4, -5, -6, -7, -8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, 5, -6, -7, -8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, -5, 6, -7, -8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, 5, 6, -7, -8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, -5, -6, 7, -8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, 5, -6, 7, -8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, -5, 6, 7, -8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, 5, 6, 7, -8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, -5, -6, -7, 8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, 5, -6, -7, 8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, -5, 6, -7, 8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, 5, 6, -7, 8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, -5, -6, 7, 8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, 5, -6, 7, 8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, -5, 6, 7, 8, 9, 10, 11, 12],
-			vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+			lits![-1, -2, -3, -4, -5, -6, -7, -8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, 5, -6, -7, -8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, -5, 6, -7, -8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, 5, 6, -7, -8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, -5, -6, 7, -8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, 5, -6, 7, -8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, -5, 6, 7, -8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, 5, 6, 7, -8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, -5, -6, -7, 8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, 5, -6, -7, 8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, -5, 6, -7, 8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, 5, 6, -7, 8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, -5, -6, 7, 8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, 5, -6, 7, 8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, -5, 6, 7, 8, -9, -10, -11, -12],
+			lits![-1, -2, -3, -4, 5, 6, 7, 8, -9, -10, -11, -12],
+			lits![1, -2, -3, -4, -5, -6, -7, -8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, -5, -6, -7, -8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, -5, -6, -7, -8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, -5, -6, -7, -8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, 5, -6, -7, -8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, 5, -6, -7, -8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, 5, -6, -7, -8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, 5, -6, -7, -8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, -5, 6, -7, -8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, -5, 6, -7, -8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, -5, 6, -7, -8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, -5, 6, -7, -8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, 5, 6, -7, -8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, 5, 6, -7, -8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, 5, 6, -7, -8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, 5, 6, -7, -8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, -5, -6, 7, -8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, -5, -6, 7, -8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, -5, -6, 7, -8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, -5, -6, 7, -8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, 5, -6, 7, -8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, 5, -6, 7, -8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, 5, -6, 7, -8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, 5, -6, 7, -8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, -5, 6, 7, -8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, -5, 6, 7, -8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, -5, 6, 7, -8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, -5, 6, 7, -8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, 5, 6, 7, -8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, 5, 6, 7, -8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, 5, 6, 7, -8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, 5, 6, 7, -8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, -5, -6, -7, 8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, -5, -6, -7, 8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, -5, -6, -7, 8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, -5, -6, -7, 8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, 5, -6, -7, 8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, 5, -6, -7, 8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, 5, -6, -7, 8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, 5, -6, -7, 8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, -5, 6, -7, 8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, -5, 6, -7, 8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, -5, 6, -7, 8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, -5, 6, -7, 8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, 5, 6, -7, 8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, 5, 6, -7, 8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, 5, 6, -7, 8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, 5, 6, -7, 8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, -5, -6, 7, 8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, -5, -6, 7, 8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, -5, -6, 7, 8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, -5, -6, 7, 8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, 5, -6, 7, 8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, 5, -6, 7, 8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, 5, -6, 7, 8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, 5, -6, 7, 8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, -5, 6, 7, 8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, -5, 6, 7, 8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, -5, 6, 7, 8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, -5, 6, 7, 8, 9, -10, -11, -12],
+			lits![1, -2, -3, -4, 5, 6, 7, 8, 9, -10, -11, -12],
+			lits![-1, 2, -3, -4, 5, 6, 7, 8, 9, -10, -11, -12],
+			lits![-1, -2, 3, -4, 5, 6, 7, 8, 9, -10, -11, -12],
+			lits![-1, -2, -3, 4, 5, 6, 7, 8, 9, -10, -11, -12],
+			lits![1, 2, -3, -4, -5, -6, -7, -8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, -5, -6, -7, -8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, -5, -6, -7, -8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, -5, -6, -7, -8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, -5, -6, -7, -8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, -5, -6, -7, -8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, 5, -6, -7, -8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, 5, -6, -7, -8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, 5, -6, -7, -8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, 5, -6, -7, -8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, 5, -6, -7, -8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, 5, -6, -7, -8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, -5, 6, -7, -8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, -5, 6, -7, -8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, -5, 6, -7, -8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, -5, 6, -7, -8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, -5, 6, -7, -8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, -5, 6, -7, -8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, 5, 6, -7, -8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, 5, 6, -7, -8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, 5, 6, -7, -8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, 5, 6, -7, -8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, 5, 6, -7, -8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, 5, 6, -7, -8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, -5, -6, 7, -8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, -5, -6, 7, -8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, -5, -6, 7, -8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, -5, -6, 7, -8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, -5, -6, 7, -8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, -5, -6, 7, -8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, 5, -6, 7, -8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, 5, -6, 7, -8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, 5, -6, 7, -8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, 5, -6, 7, -8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, 5, -6, 7, -8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, 5, -6, 7, -8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, -5, 6, 7, -8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, -5, 6, 7, -8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, -5, 6, 7, -8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, -5, 6, 7, -8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, -5, 6, 7, -8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, -5, 6, 7, -8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, 5, 6, 7, -8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, 5, 6, 7, -8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, 5, 6, 7, -8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, 5, 6, 7, -8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, 5, 6, 7, -8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, 5, 6, 7, -8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, -5, -6, -7, 8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, -5, -6, -7, 8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, -5, -6, -7, 8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, -5, -6, -7, 8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, -5, -6, -7, 8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, -5, -6, -7, 8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, 5, -6, -7, 8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, 5, -6, -7, 8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, 5, -6, -7, 8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, 5, -6, -7, 8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, 5, -6, -7, 8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, 5, -6, -7, 8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, -5, 6, -7, 8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, -5, 6, -7, 8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, -5, 6, -7, 8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, -5, 6, -7, 8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, -5, 6, -7, 8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, -5, 6, -7, 8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, 5, 6, -7, 8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, 5, 6, -7, 8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, 5, 6, -7, 8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, 5, 6, -7, 8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, 5, 6, -7, 8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, 5, 6, -7, 8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, -5, -6, 7, 8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, -5, -6, 7, 8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, -5, -6, 7, 8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, -5, -6, 7, 8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, -5, -6, 7, 8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, -5, -6, 7, 8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, 5, -6, 7, 8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, 5, -6, 7, 8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, 5, -6, 7, 8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, 5, -6, 7, 8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, 5, -6, 7, 8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, 5, -6, 7, 8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, -5, 6, 7, 8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, -5, 6, 7, 8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, -5, 6, 7, 8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, -5, 6, 7, 8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, -5, 6, 7, 8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, -5, 6, 7, 8, 9, 10, -11, -12],
+			lits![1, 2, -3, -4, 5, 6, 7, 8, 9, 10, -11, -12],
+			lits![1, -2, 3, -4, 5, 6, 7, 8, 9, 10, -11, -12],
+			lits![-1, 2, 3, -4, 5, 6, 7, 8, 9, 10, -11, -12],
+			lits![1, -2, -3, 4, 5, 6, 7, 8, 9, 10, -11, -12],
+			lits![-1, 2, -3, 4, 5, 6, 7, 8, 9, 10, -11, -12],
+			lits![-1, -2, 3, 4, 5, 6, 7, 8, 9, 10, -11, -12],
+			lits![1, 2, 3, -4, -5, -6, -7, -8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, -5, -6, -7, -8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, -5, -6, -7, -8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, -5, -6, -7, -8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, 5, -6, -7, -8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, 5, -6, -7, -8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, 5, -6, -7, -8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, 5, -6, -7, -8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, -5, 6, -7, -8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, -5, 6, -7, -8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, -5, 6, -7, -8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, -5, 6, -7, -8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, 5, 6, -7, -8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, 5, 6, -7, -8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, 5, 6, -7, -8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, 5, 6, -7, -8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, -5, -6, 7, -8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, -5, -6, 7, -8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, -5, -6, 7, -8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, -5, -6, 7, -8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, 5, -6, 7, -8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, 5, -6, 7, -8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, 5, -6, 7, -8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, 5, -6, 7, -8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, -5, 6, 7, -8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, -5, 6, 7, -8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, -5, 6, 7, -8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, -5, 6, 7, -8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, 5, 6, 7, -8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, 5, 6, 7, -8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, 5, 6, 7, -8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, 5, 6, 7, -8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, -5, -6, -7, 8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, -5, -6, -7, 8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, -5, -6, -7, 8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, -5, -6, -7, 8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, 5, -6, -7, 8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, 5, -6, -7, 8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, 5, -6, -7, 8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, 5, -6, -7, 8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, -5, 6, -7, 8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, -5, 6, -7, 8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, -5, 6, -7, 8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, -5, 6, -7, 8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, 5, 6, -7, 8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, 5, 6, -7, 8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, 5, 6, -7, 8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, 5, 6, -7, 8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, -5, -6, 7, 8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, -5, -6, 7, 8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, -5, -6, 7, 8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, -5, -6, 7, 8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, 5, -6, 7, 8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, 5, -6, 7, 8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, 5, -6, 7, 8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, 5, -6, 7, 8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, -5, 6, 7, 8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, -5, 6, 7, 8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, -5, 6, 7, 8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, -5, 6, 7, 8, 9, 10, 11, -12],
+			lits![1, 2, 3, -4, 5, 6, 7, 8, 9, 10, 11, -12],
+			lits![1, 2, -3, 4, 5, 6, 7, 8, 9, 10, 11, -12],
+			lits![1, -2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -12],
+			lits![-1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -12],
+			lits![1, 2, 3, 4, -5, -6, -7, -8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, 5, -6, -7, -8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, -5, 6, -7, -8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, 5, 6, -7, -8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, -5, -6, 7, -8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, 5, -6, 7, -8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, -5, 6, 7, -8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, 5, 6, 7, -8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, -5, -6, -7, 8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, 5, -6, -7, 8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, -5, 6, -7, 8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, 5, 6, -7, 8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, -5, -6, 7, 8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, 5, -6, 7, 8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, -5, 6, 7, 8, 9, 10, 11, 12],
+			lits![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
 		];
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
@@ -967,56 +951,57 @@ mod tests {
 	#[test]
 	fn test_4_2_sorted_eq() {
 		let mut db = TestDB::new(6);
-		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("y")).into();
+		let y: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("y")).into();
 		db.num_var += y.lits() as i32;
-		let con = &Sorted::new(&[1, 2, 3, 4], LimitComp::Equal, &y);
+		let lits = lits![1, 2, 3, 4];
+		let con = &Sorted::new(&lits, LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 
 		let sols = vec![
-			vec![-1, -2, -3, -4, -5, -6, -7, -8],
-			vec![-1, -2, -3, -4, 5, -6, -7, -8],
-			vec![-1, -2, -3, -4, -5, 6, -7, -8],
-			vec![-1, -2, -3, -4, 5, 6, -7, -8],
-			vec![1, -2, -3, -4, -5, -6, 7, -8],
-			vec![-1, 2, -3, -4, -5, -6, 7, -8],
-			vec![-1, -2, 3, -4, -5, -6, 7, -8],
-			vec![-1, -2, -3, 4, -5, -6, 7, -8],
-			vec![1, -2, -3, -4, 5, -6, 7, -8],
-			vec![-1, 2, -3, -4, 5, -6, 7, -8],
-			vec![-1, -2, 3, -4, 5, -6, 7, -8],
-			vec![-1, -2, -3, 4, 5, -6, 7, -8],
-			vec![1, -2, -3, -4, -5, 6, 7, -8],
-			vec![-1, 2, -3, -4, -5, 6, 7, -8],
-			vec![-1, -2, 3, -4, -5, 6, 7, -8],
-			vec![-1, -2, -3, 4, -5, 6, 7, -8],
-			vec![1, -2, -3, -4, 5, 6, 7, -8],
-			vec![-1, 2, -3, -4, 5, 6, 7, -8],
-			vec![-1, -2, 3, -4, 5, 6, 7, -8],
-			vec![-1, -2, -3, 4, 5, 6, 7, -8],
-			vec![1, 2, -3, -4, -5, -6, 7, 8],
-			vec![1, -2, 3, -4, -5, -6, 7, 8],
-			vec![-1, 2, 3, -4, -5, -6, 7, 8],
-			vec![1, -2, -3, 4, -5, -6, 7, 8],
-			vec![-1, 2, -3, 4, -5, -6, 7, 8],
-			vec![-1, -2, 3, 4, -5, -6, 7, 8],
-			vec![1, 2, -3, -4, 5, -6, 7, 8],
-			vec![1, -2, 3, -4, 5, -6, 7, 8],
-			vec![-1, 2, 3, -4, 5, -6, 7, 8],
-			vec![1, -2, -3, 4, 5, -6, 7, 8],
-			vec![-1, 2, -3, 4, 5, -6, 7, 8],
-			vec![-1, -2, 3, 4, 5, -6, 7, 8],
-			vec![1, 2, -3, -4, -5, 6, 7, 8],
-			vec![1, -2, 3, -4, -5, 6, 7, 8],
-			vec![-1, 2, 3, -4, -5, 6, 7, 8],
-			vec![1, -2, -3, 4, -5, 6, 7, 8],
-			vec![-1, 2, -3, 4, -5, 6, 7, 8],
-			vec![-1, -2, 3, 4, -5, 6, 7, 8],
-			vec![1, 2, -3, -4, 5, 6, 7, 8],
-			vec![1, -2, 3, -4, 5, 6, 7, 8],
-			vec![-1, 2, 3, -4, 5, 6, 7, 8],
-			vec![1, -2, -3, 4, 5, 6, 7, 8],
-			vec![-1, 2, -3, 4, 5, 6, 7, 8],
-			vec![-1, -2, 3, 4, 5, 6, 7, 8],
+			lits![-1, -2, -3, -4, -5, -6, -7, -8],
+			lits![-1, -2, -3, -4, 5, -6, -7, -8],
+			lits![-1, -2, -3, -4, -5, 6, -7, -8],
+			lits![-1, -2, -3, -4, 5, 6, -7, -8],
+			lits![1, -2, -3, -4, -5, -6, 7, -8],
+			lits![-1, 2, -3, -4, -5, -6, 7, -8],
+			lits![-1, -2, 3, -4, -5, -6, 7, -8],
+			lits![-1, -2, -3, 4, -5, -6, 7, -8],
+			lits![1, -2, -3, -4, 5, -6, 7, -8],
+			lits![-1, 2, -3, -4, 5, -6, 7, -8],
+			lits![-1, -2, 3, -4, 5, -6, 7, -8],
+			lits![-1, -2, -3, 4, 5, -6, 7, -8],
+			lits![1, -2, -3, -4, -5, 6, 7, -8],
+			lits![-1, 2, -3, -4, -5, 6, 7, -8],
+			lits![-1, -2, 3, -4, -5, 6, 7, -8],
+			lits![-1, -2, -3, 4, -5, 6, 7, -8],
+			lits![1, -2, -3, -4, 5, 6, 7, -8],
+			lits![-1, 2, -3, -4, 5, 6, 7, -8],
+			lits![-1, -2, 3, -4, 5, 6, 7, -8],
+			lits![-1, -2, -3, 4, 5, 6, 7, -8],
+			lits![1, 2, -3, -4, -5, -6, 7, 8],
+			lits![1, -2, 3, -4, -5, -6, 7, 8],
+			lits![-1, 2, 3, -4, -5, -6, 7, 8],
+			lits![1, -2, -3, 4, -5, -6, 7, 8],
+			lits![-1, 2, -3, 4, -5, -6, 7, 8],
+			lits![-1, -2, 3, 4, -5, -6, 7, 8],
+			lits![1, 2, -3, -4, 5, -6, 7, 8],
+			lits![1, -2, 3, -4, 5, -6, 7, 8],
+			lits![-1, 2, 3, -4, 5, -6, 7, 8],
+			lits![1, -2, -3, 4, 5, -6, 7, 8],
+			lits![-1, 2, -3, 4, 5, -6, 7, 8],
+			lits![-1, -2, 3, 4, 5, -6, 7, 8],
+			lits![1, 2, -3, -4, -5, 6, 7, 8],
+			lits![1, -2, 3, -4, -5, 6, 7, 8],
+			lits![-1, 2, 3, -4, -5, 6, 7, 8],
+			lits![1, -2, -3, 4, -5, 6, 7, 8],
+			lits![-1, 2, -3, 4, -5, 6, 7, 8],
+			lits![-1, -2, 3, 4, -5, 6, 7, 8],
+			lits![1, 2, -3, -4, 5, 6, 7, 8],
+			lits![1, -2, 3, -4, 5, 6, 7, 8],
+			lits![-1, 2, 3, -4, 5, 6, 7, 8],
+			lits![1, -2, -3, 4, 5, 6, 7, 8],
+			lits![-1, 2, -3, 4, 5, 6, 7, 8],
+			lits![-1, -2, 3, 4, 5, 6, 7, 8],
 		];
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
@@ -1026,132 +1011,133 @@ mod tests {
 	#[test]
 	fn test_4_3_sorted_eq() {
 		let mut db = TestDB::new(7);
-		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 3, String::from("y")).into();
+		let y: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 3, String::from("y")).into();
 		db.num_var += y.lits() as i32;
-		let con = &Sorted::new(&[1, 2, 3, 4], LimitComp::Equal, &y);
+		let lits = lits![1, 2, 3, 4];
+		let con = &Sorted::new(&lits, LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 
 		let sols = vec![
-			vec![-1, -2, -3, -4, -5, -6, -7, -8, -9, -10],
-			vec![-1, -2, -3, -4, 5, -6, -7, -8, -9, -10],
-			vec![-1, -2, -3, -4, -5, 6, -7, -8, -9, -10],
-			vec![-1, -2, -3, -4, 5, 6, -7, -8, -9, -10],
-			vec![-1, -2, -3, -4, -5, -6, 7, -8, -9, -10],
-			vec![-1, -2, -3, -4, 5, -6, 7, -8, -9, -10],
-			vec![-1, -2, -3, -4, -5, 6, 7, -8, -9, -10],
-			vec![-1, -2, -3, -4, 5, 6, 7, -8, -9, -10],
-			vec![1, -2, -3, -4, -5, -6, -7, 8, -9, -10],
-			vec![-1, 2, -3, -4, -5, -6, -7, 8, -9, -10],
-			vec![-1, -2, 3, -4, -5, -6, -7, 8, -9, -10],
-			vec![-1, -2, -3, 4, -5, -6, -7, 8, -9, -10],
-			vec![1, -2, -3, -4, 5, -6, -7, 8, -9, -10],
-			vec![-1, 2, -3, -4, 5, -6, -7, 8, -9, -10],
-			vec![-1, -2, 3, -4, 5, -6, -7, 8, -9, -10],
-			vec![-1, -2, -3, 4, 5, -6, -7, 8, -9, -10],
-			vec![1, -2, -3, -4, -5, 6, -7, 8, -9, -10],
-			vec![-1, 2, -3, -4, -5, 6, -7, 8, -9, -10],
-			vec![-1, -2, 3, -4, -5, 6, -7, 8, -9, -10],
-			vec![-1, -2, -3, 4, -5, 6, -7, 8, -9, -10],
-			vec![1, -2, -3, -4, 5, 6, -7, 8, -9, -10],
-			vec![-1, 2, -3, -4, 5, 6, -7, 8, -9, -10],
-			vec![-1, -2, 3, -4, 5, 6, -7, 8, -9, -10],
-			vec![-1, -2, -3, 4, 5, 6, -7, 8, -9, -10],
-			vec![1, -2, -3, -4, -5, -6, 7, 8, -9, -10],
-			vec![-1, 2, -3, -4, -5, -6, 7, 8, -9, -10],
-			vec![-1, -2, 3, -4, -5, -6, 7, 8, -9, -10],
-			vec![-1, -2, -3, 4, -5, -6, 7, 8, -9, -10],
-			vec![1, -2, -3, -4, 5, -6, 7, 8, -9, -10],
-			vec![-1, 2, -3, -4, 5, -6, 7, 8, -9, -10],
-			vec![-1, -2, 3, -4, 5, -6, 7, 8, -9, -10],
-			vec![-1, -2, -3, 4, 5, -6, 7, 8, -9, -10],
-			vec![1, -2, -3, -4, -5, 6, 7, 8, -9, -10],
-			vec![-1, 2, -3, -4, -5, 6, 7, 8, -9, -10],
-			vec![-1, -2, 3, -4, -5, 6, 7, 8, -9, -10],
-			vec![-1, -2, -3, 4, -5, 6, 7, 8, -9, -10],
-			vec![1, -2, -3, -4, 5, 6, 7, 8, -9, -10],
-			vec![-1, 2, -3, -4, 5, 6, 7, 8, -9, -10],
-			vec![-1, -2, 3, -4, 5, 6, 7, 8, -9, -10],
-			vec![-1, -2, -3, 4, 5, 6, 7, 8, -9, -10],
-			vec![1, 2, -3, -4, -5, -6, -7, 8, 9, -10],
-			vec![1, -2, 3, -4, -5, -6, -7, 8, 9, -10],
-			vec![-1, 2, 3, -4, -5, -6, -7, 8, 9, -10],
-			vec![1, -2, -3, 4, -5, -6, -7, 8, 9, -10],
-			vec![-1, 2, -3, 4, -5, -6, -7, 8, 9, -10],
-			vec![-1, -2, 3, 4, -5, -6, -7, 8, 9, -10],
-			vec![1, 2, -3, -4, 5, -6, -7, 8, 9, -10],
-			vec![1, -2, 3, -4, 5, -6, -7, 8, 9, -10],
-			vec![-1, 2, 3, -4, 5, -6, -7, 8, 9, -10],
-			vec![1, -2, -3, 4, 5, -6, -7, 8, 9, -10],
-			vec![-1, 2, -3, 4, 5, -6, -7, 8, 9, -10],
-			vec![-1, -2, 3, 4, 5, -6, -7, 8, 9, -10],
-			vec![1, 2, -3, -4, -5, 6, -7, 8, 9, -10],
-			vec![1, -2, 3, -4, -5, 6, -7, 8, 9, -10],
-			vec![-1, 2, 3, -4, -5, 6, -7, 8, 9, -10],
-			vec![1, -2, -3, 4, -5, 6, -7, 8, 9, -10],
-			vec![-1, 2, -3, 4, -5, 6, -7, 8, 9, -10],
-			vec![-1, -2, 3, 4, -5, 6, -7, 8, 9, -10],
-			vec![1, 2, -3, -4, 5, 6, -7, 8, 9, -10],
-			vec![1, -2, 3, -4, 5, 6, -7, 8, 9, -10],
-			vec![-1, 2, 3, -4, 5, 6, -7, 8, 9, -10],
-			vec![1, -2, -3, 4, 5, 6, -7, 8, 9, -10],
-			vec![-1, 2, -3, 4, 5, 6, -7, 8, 9, -10],
-			vec![-1, -2, 3, 4, 5, 6, -7, 8, 9, -10],
-			vec![1, 2, -3, -4, -5, -6, 7, 8, 9, -10],
-			vec![1, -2, 3, -4, -5, -6, 7, 8, 9, -10],
-			vec![-1, 2, 3, -4, -5, -6, 7, 8, 9, -10],
-			vec![1, -2, -3, 4, -5, -6, 7, 8, 9, -10],
-			vec![-1, 2, -3, 4, -5, -6, 7, 8, 9, -10],
-			vec![-1, -2, 3, 4, -5, -6, 7, 8, 9, -10],
-			vec![1, 2, -3, -4, 5, -6, 7, 8, 9, -10],
-			vec![1, -2, 3, -4, 5, -6, 7, 8, 9, -10],
-			vec![-1, 2, 3, -4, 5, -6, 7, 8, 9, -10],
-			vec![1, -2, -3, 4, 5, -6, 7, 8, 9, -10],
-			vec![-1, 2, -3, 4, 5, -6, 7, 8, 9, -10],
-			vec![-1, -2, 3, 4, 5, -6, 7, 8, 9, -10],
-			vec![1, 2, -3, -4, -5, 6, 7, 8, 9, -10],
-			vec![1, -2, 3, -4, -5, 6, 7, 8, 9, -10],
-			vec![-1, 2, 3, -4, -5, 6, 7, 8, 9, -10],
-			vec![1, -2, -3, 4, -5, 6, 7, 8, 9, -10],
-			vec![-1, 2, -3, 4, -5, 6, 7, 8, 9, -10],
-			vec![-1, -2, 3, 4, -5, 6, 7, 8, 9, -10],
-			vec![1, 2, -3, -4, 5, 6, 7, 8, 9, -10],
-			vec![1, -2, 3, -4, 5, 6, 7, 8, 9, -10],
-			vec![-1, 2, 3, -4, 5, 6, 7, 8, 9, -10],
-			vec![1, -2, -3, 4, 5, 6, 7, 8, 9, -10],
-			vec![-1, 2, -3, 4, 5, 6, 7, 8, 9, -10],
-			vec![-1, -2, 3, 4, 5, 6, 7, 8, 9, -10],
-			vec![1, 2, 3, -4, -5, -6, -7, 8, 9, 10],
-			vec![1, 2, -3, 4, -5, -6, -7, 8, 9, 10],
-			vec![1, -2, 3, 4, -5, -6, -7, 8, 9, 10],
-			vec![-1, 2, 3, 4, -5, -6, -7, 8, 9, 10],
-			vec![1, 2, 3, -4, 5, -6, -7, 8, 9, 10],
-			vec![1, 2, -3, 4, 5, -6, -7, 8, 9, 10],
-			vec![1, -2, 3, 4, 5, -6, -7, 8, 9, 10],
-			vec![-1, 2, 3, 4, 5, -6, -7, 8, 9, 10],
-			vec![1, 2, 3, -4, -5, 6, -7, 8, 9, 10],
-			vec![1, 2, -3, 4, -5, 6, -7, 8, 9, 10],
-			vec![1, -2, 3, 4, -5, 6, -7, 8, 9, 10],
-			vec![-1, 2, 3, 4, -5, 6, -7, 8, 9, 10],
-			vec![1, 2, 3, -4, 5, 6, -7, 8, 9, 10],
-			vec![1, 2, -3, 4, 5, 6, -7, 8, 9, 10],
-			vec![1, -2, 3, 4, 5, 6, -7, 8, 9, 10],
-			vec![-1, 2, 3, 4, 5, 6, -7, 8, 9, 10],
-			vec![1, 2, 3, -4, -5, -6, 7, 8, 9, 10],
-			vec![1, 2, -3, 4, -5, -6, 7, 8, 9, 10],
-			vec![1, -2, 3, 4, -5, -6, 7, 8, 9, 10],
-			vec![-1, 2, 3, 4, -5, -6, 7, 8, 9, 10],
-			vec![1, 2, 3, -4, 5, -6, 7, 8, 9, 10],
-			vec![1, 2, -3, 4, 5, -6, 7, 8, 9, 10],
-			vec![1, -2, 3, 4, 5, -6, 7, 8, 9, 10],
-			vec![-1, 2, 3, 4, 5, -6, 7, 8, 9, 10],
-			vec![1, 2, 3, -4, -5, 6, 7, 8, 9, 10],
-			vec![1, 2, -3, 4, -5, 6, 7, 8, 9, 10],
-			vec![1, -2, 3, 4, -5, 6, 7, 8, 9, 10],
-			vec![-1, 2, 3, 4, -5, 6, 7, 8, 9, 10],
-			vec![1, 2, 3, -4, 5, 6, 7, 8, 9, 10],
-			vec![1, 2, -3, 4, 5, 6, 7, 8, 9, 10],
-			vec![1, -2, 3, 4, 5, 6, 7, 8, 9, 10],
-			vec![-1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+			lits![-1, -2, -3, -4, -5, -6, -7, -8, -9, -10],
+			lits![-1, -2, -3, -4, 5, -6, -7, -8, -9, -10],
+			lits![-1, -2, -3, -4, -5, 6, -7, -8, -9, -10],
+			lits![-1, -2, -3, -4, 5, 6, -7, -8, -9, -10],
+			lits![-1, -2, -3, -4, -5, -6, 7, -8, -9, -10],
+			lits![-1, -2, -3, -4, 5, -6, 7, -8, -9, -10],
+			lits![-1, -2, -3, -4, -5, 6, 7, -8, -9, -10],
+			lits![-1, -2, -3, -4, 5, 6, 7, -8, -9, -10],
+			lits![1, -2, -3, -4, -5, -6, -7, 8, -9, -10],
+			lits![-1, 2, -3, -4, -5, -6, -7, 8, -9, -10],
+			lits![-1, -2, 3, -4, -5, -6, -7, 8, -9, -10],
+			lits![-1, -2, -3, 4, -5, -6, -7, 8, -9, -10],
+			lits![1, -2, -3, -4, 5, -6, -7, 8, -9, -10],
+			lits![-1, 2, -3, -4, 5, -6, -7, 8, -9, -10],
+			lits![-1, -2, 3, -4, 5, -6, -7, 8, -9, -10],
+			lits![-1, -2, -3, 4, 5, -6, -7, 8, -9, -10],
+			lits![1, -2, -3, -4, -5, 6, -7, 8, -9, -10],
+			lits![-1, 2, -3, -4, -5, 6, -7, 8, -9, -10],
+			lits![-1, -2, 3, -4, -5, 6, -7, 8, -9, -10],
+			lits![-1, -2, -3, 4, -5, 6, -7, 8, -9, -10],
+			lits![1, -2, -3, -4, 5, 6, -7, 8, -9, -10],
+			lits![-1, 2, -3, -4, 5, 6, -7, 8, -9, -10],
+			lits![-1, -2, 3, -4, 5, 6, -7, 8, -9, -10],
+			lits![-1, -2, -3, 4, 5, 6, -7, 8, -9, -10],
+			lits![1, -2, -3, -4, -5, -6, 7, 8, -9, -10],
+			lits![-1, 2, -3, -4, -5, -6, 7, 8, -9, -10],
+			lits![-1, -2, 3, -4, -5, -6, 7, 8, -9, -10],
+			lits![-1, -2, -3, 4, -5, -6, 7, 8, -9, -10],
+			lits![1, -2, -3, -4, 5, -6, 7, 8, -9, -10],
+			lits![-1, 2, -3, -4, 5, -6, 7, 8, -9, -10],
+			lits![-1, -2, 3, -4, 5, -6, 7, 8, -9, -10],
+			lits![-1, -2, -3, 4, 5, -6, 7, 8, -9, -10],
+			lits![1, -2, -3, -4, -5, 6, 7, 8, -9, -10],
+			lits![-1, 2, -3, -4, -5, 6, 7, 8, -9, -10],
+			lits![-1, -2, 3, -4, -5, 6, 7, 8, -9, -10],
+			lits![-1, -2, -3, 4, -5, 6, 7, 8, -9, -10],
+			lits![1, -2, -3, -4, 5, 6, 7, 8, -9, -10],
+			lits![-1, 2, -3, -4, 5, 6, 7, 8, -9, -10],
+			lits![-1, -2, 3, -4, 5, 6, 7, 8, -9, -10],
+			lits![-1, -2, -3, 4, 5, 6, 7, 8, -9, -10],
+			lits![1, 2, -3, -4, -5, -6, -7, 8, 9, -10],
+			lits![1, -2, 3, -4, -5, -6, -7, 8, 9, -10],
+			lits![-1, 2, 3, -4, -5, -6, -7, 8, 9, -10],
+			lits![1, -2, -3, 4, -5, -6, -7, 8, 9, -10],
+			lits![-1, 2, -3, 4, -5, -6, -7, 8, 9, -10],
+			lits![-1, -2, 3, 4, -5, -6, -7, 8, 9, -10],
+			lits![1, 2, -3, -4, 5, -6, -7, 8, 9, -10],
+			lits![1, -2, 3, -4, 5, -6, -7, 8, 9, -10],
+			lits![-1, 2, 3, -4, 5, -6, -7, 8, 9, -10],
+			lits![1, -2, -3, 4, 5, -6, -7, 8, 9, -10],
+			lits![-1, 2, -3, 4, 5, -6, -7, 8, 9, -10],
+			lits![-1, -2, 3, 4, 5, -6, -7, 8, 9, -10],
+			lits![1, 2, -3, -4, -5, 6, -7, 8, 9, -10],
+			lits![1, -2, 3, -4, -5, 6, -7, 8, 9, -10],
+			lits![-1, 2, 3, -4, -5, 6, -7, 8, 9, -10],
+			lits![1, -2, -3, 4, -5, 6, -7, 8, 9, -10],
+			lits![-1, 2, -3, 4, -5, 6, -7, 8, 9, -10],
+			lits![-1, -2, 3, 4, -5, 6, -7, 8, 9, -10],
+			lits![1, 2, -3, -4, 5, 6, -7, 8, 9, -10],
+			lits![1, -2, 3, -4, 5, 6, -7, 8, 9, -10],
+			lits![-1, 2, 3, -4, 5, 6, -7, 8, 9, -10],
+			lits![1, -2, -3, 4, 5, 6, -7, 8, 9, -10],
+			lits![-1, 2, -3, 4, 5, 6, -7, 8, 9, -10],
+			lits![-1, -2, 3, 4, 5, 6, -7, 8, 9, -10],
+			lits![1, 2, -3, -4, -5, -6, 7, 8, 9, -10],
+			lits![1, -2, 3, -4, -5, -6, 7, 8, 9, -10],
+			lits![-1, 2, 3, -4, -5, -6, 7, 8, 9, -10],
+			lits![1, -2, -3, 4, -5, -6, 7, 8, 9, -10],
+			lits![-1, 2, -3, 4, -5, -6, 7, 8, 9, -10],
+			lits![-1, -2, 3, 4, -5, -6, 7, 8, 9, -10],
+			lits![1, 2, -3, -4, 5, -6, 7, 8, 9, -10],
+			lits![1, -2, 3, -4, 5, -6, 7, 8, 9, -10],
+			lits![-1, 2, 3, -4, 5, -6, 7, 8, 9, -10],
+			lits![1, -2, -3, 4, 5, -6, 7, 8, 9, -10],
+			lits![-1, 2, -3, 4, 5, -6, 7, 8, 9, -10],
+			lits![-1, -2, 3, 4, 5, -6, 7, 8, 9, -10],
+			lits![1, 2, -3, -4, -5, 6, 7, 8, 9, -10],
+			lits![1, -2, 3, -4, -5, 6, 7, 8, 9, -10],
+			lits![-1, 2, 3, -4, -5, 6, 7, 8, 9, -10],
+			lits![1, -2, -3, 4, -5, 6, 7, 8, 9, -10],
+			lits![-1, 2, -3, 4, -5, 6, 7, 8, 9, -10],
+			lits![-1, -2, 3, 4, -5, 6, 7, 8, 9, -10],
+			lits![1, 2, -3, -4, 5, 6, 7, 8, 9, -10],
+			lits![1, -2, 3, -4, 5, 6, 7, 8, 9, -10],
+			lits![-1, 2, 3, -4, 5, 6, 7, 8, 9, -10],
+			lits![1, -2, -3, 4, 5, 6, 7, 8, 9, -10],
+			lits![-1, 2, -3, 4, 5, 6, 7, 8, 9, -10],
+			lits![-1, -2, 3, 4, 5, 6, 7, 8, 9, -10],
+			lits![1, 2, 3, -4, -5, -6, -7, 8, 9, 10],
+			lits![1, 2, -3, 4, -5, -6, -7, 8, 9, 10],
+			lits![1, -2, 3, 4, -5, -6, -7, 8, 9, 10],
+			lits![-1, 2, 3, 4, -5, -6, -7, 8, 9, 10],
+			lits![1, 2, 3, -4, 5, -6, -7, 8, 9, 10],
+			lits![1, 2, -3, 4, 5, -6, -7, 8, 9, 10],
+			lits![1, -2, 3, 4, 5, -6, -7, 8, 9, 10],
+			lits![-1, 2, 3, 4, 5, -6, -7, 8, 9, 10],
+			lits![1, 2, 3, -4, -5, 6, -7, 8, 9, 10],
+			lits![1, 2, -3, 4, -5, 6, -7, 8, 9, 10],
+			lits![1, -2, 3, 4, -5, 6, -7, 8, 9, 10],
+			lits![-1, 2, 3, 4, -5, 6, -7, 8, 9, 10],
+			lits![1, 2, 3, -4, 5, 6, -7, 8, 9, 10],
+			lits![1, 2, -3, 4, 5, 6, -7, 8, 9, 10],
+			lits![1, -2, 3, 4, 5, 6, -7, 8, 9, 10],
+			lits![-1, 2, 3, 4, 5, 6, -7, 8, 9, 10],
+			lits![1, 2, 3, -4, -5, -6, 7, 8, 9, 10],
+			lits![1, 2, -3, 4, -5, -6, 7, 8, 9, 10],
+			lits![1, -2, 3, 4, -5, -6, 7, 8, 9, 10],
+			lits![-1, 2, 3, 4, -5, -6, 7, 8, 9, 10],
+			lits![1, 2, 3, -4, 5, -6, 7, 8, 9, 10],
+			lits![1, 2, -3, 4, 5, -6, 7, 8, 9, 10],
+			lits![1, -2, 3, 4, 5, -6, 7, 8, 9, 10],
+			lits![-1, 2, 3, 4, 5, -6, 7, 8, 9, 10],
+			lits![1, 2, 3, -4, -5, 6, 7, 8, 9, 10],
+			lits![1, 2, -3, 4, -5, 6, 7, 8, 9, 10],
+			lits![1, -2, 3, 4, -5, 6, 7, 8, 9, 10],
+			lits![-1, 2, 3, 4, -5, 6, 7, 8, 9, 10],
+			lits![1, 2, 3, -4, 5, 6, 7, 8, 9, 10],
+			lits![1, 2, -3, 4, 5, 6, 7, 8, 9, 10],
+			lits![1, -2, 3, 4, 5, 6, 7, 8, 9, 10],
+			lits![-1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
 		];
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
@@ -1172,220 +1158,221 @@ mod tests {
 	#[test]
 	fn test_5_3_sorted_eq() {
 		let mut db = TestDB::new(8);
-		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 3, String::from("y")).into();
+		let y: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 3, String::from("y")).into();
 		db.num_var += y.lits() as i32;
-		let con = &Sorted::new(&[1, 2, 3, 4, 5], LimitComp::Equal, &y);
+		let lits = lits![1, 2, 3, 4, 5];
+		let con = &Sorted::new(&lits, LimitComp::Equal, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 
 		let sols = vec![
-			vec![-1, -2, -3, -4, -5, -6, -7, -8, -9, -10, -11],
-			vec![-1, -2, -3, -4, -5, 6, -7, -8, -9, -10, -11],
-			vec![-1, -2, -3, -4, -5, -6, 7, -8, -9, -10, -11],
-			vec![-1, -2, -3, -4, -5, 6, 7, -8, -9, -10, -11],
-			vec![-1, -2, -3, -4, -5, -6, -7, 8, -9, -10, -11],
-			vec![-1, -2, -3, -4, -5, 6, -7, 8, -9, -10, -11],
-			vec![-1, -2, -3, -4, -5, -6, 7, 8, -9, -10, -11],
-			vec![-1, -2, -3, -4, -5, 6, 7, 8, -9, -10, -11],
-			vec![1, -2, -3, -4, -5, -6, -7, -8, 9, -10, -11],
-			vec![-1, 2, -3, -4, -5, -6, -7, -8, 9, -10, -11],
-			vec![-1, -2, 3, -4, -5, -6, -7, -8, 9, -10, -11],
-			vec![-1, -2, -3, 4, -5, -6, -7, -8, 9, -10, -11],
-			vec![-1, -2, -3, -4, 5, -6, -7, -8, 9, -10, -11],
-			vec![1, -2, -3, -4, -5, 6, -7, -8, 9, -10, -11],
-			vec![-1, 2, -3, -4, -5, 6, -7, -8, 9, -10, -11],
-			vec![-1, -2, 3, -4, -5, 6, -7, -8, 9, -10, -11],
-			vec![-1, -2, -3, 4, -5, 6, -7, -8, 9, -10, -11],
-			vec![-1, -2, -3, -4, 5, 6, -7, -8, 9, -10, -11],
-			vec![1, -2, -3, -4, -5, -6, 7, -8, 9, -10, -11],
-			vec![-1, 2, -3, -4, -5, -6, 7, -8, 9, -10, -11],
-			vec![-1, -2, 3, -4, -5, -6, 7, -8, 9, -10, -11],
-			vec![-1, -2, -3, 4, -5, -6, 7, -8, 9, -10, -11],
-			vec![-1, -2, -3, -4, 5, -6, 7, -8, 9, -10, -11],
-			vec![1, -2, -3, -4, -5, 6, 7, -8, 9, -10, -11],
-			vec![-1, 2, -3, -4, -5, 6, 7, -8, 9, -10, -11],
-			vec![-1, -2, 3, -4, -5, 6, 7, -8, 9, -10, -11],
-			vec![-1, -2, -3, 4, -5, 6, 7, -8, 9, -10, -11],
-			vec![-1, -2, -3, -4, 5, 6, 7, -8, 9, -10, -11],
-			vec![1, -2, -3, -4, -5, -6, -7, 8, 9, -10, -11],
-			vec![-1, 2, -3, -4, -5, -6, -7, 8, 9, -10, -11],
-			vec![-1, -2, 3, -4, -5, -6, -7, 8, 9, -10, -11],
-			vec![-1, -2, -3, 4, -5, -6, -7, 8, 9, -10, -11],
-			vec![-1, -2, -3, -4, 5, -6, -7, 8, 9, -10, -11],
-			vec![1, -2, -3, -4, -5, 6, -7, 8, 9, -10, -11],
-			vec![-1, 2, -3, -4, -5, 6, -7, 8, 9, -10, -11],
-			vec![-1, -2, 3, -4, -5, 6, -7, 8, 9, -10, -11],
-			vec![-1, -2, -3, 4, -5, 6, -7, 8, 9, -10, -11],
-			vec![-1, -2, -3, -4, 5, 6, -7, 8, 9, -10, -11],
-			vec![1, -2, -3, -4, -5, -6, 7, 8, 9, -10, -11],
-			vec![-1, 2, -3, -4, -5, -6, 7, 8, 9, -10, -11],
-			vec![-1, -2, 3, -4, -5, -6, 7, 8, 9, -10, -11],
-			vec![-1, -2, -3, 4, -5, -6, 7, 8, 9, -10, -11],
-			vec![-1, -2, -3, -4, 5, -6, 7, 8, 9, -10, -11],
-			vec![1, -2, -3, -4, -5, 6, 7, 8, 9, -10, -11],
-			vec![-1, 2, -3, -4, -5, 6, 7, 8, 9, -10, -11],
-			vec![-1, -2, 3, -4, -5, 6, 7, 8, 9, -10, -11],
-			vec![-1, -2, -3, 4, -5, 6, 7, 8, 9, -10, -11],
-			vec![-1, -2, -3, -4, 5, 6, 7, 8, 9, -10, -11],
-			vec![1, 2, -3, -4, -5, -6, -7, -8, 9, 10, -11],
-			vec![1, -2, 3, -4, -5, -6, -7, -8, 9, 10, -11],
-			vec![-1, 2, 3, -4, -5, -6, -7, -8, 9, 10, -11],
-			vec![1, -2, -3, 4, -5, -6, -7, -8, 9, 10, -11],
-			vec![-1, 2, -3, 4, -5, -6, -7, -8, 9, 10, -11],
-			vec![-1, -2, 3, 4, -5, -6, -7, -8, 9, 10, -11],
-			vec![1, -2, -3, -4, 5, -6, -7, -8, 9, 10, -11],
-			vec![-1, 2, -3, -4, 5, -6, -7, -8, 9, 10, -11],
-			vec![-1, -2, 3, -4, 5, -6, -7, -8, 9, 10, -11],
-			vec![-1, -2, -3, 4, 5, -6, -7, -8, 9, 10, -11],
-			vec![1, 2, -3, -4, -5, 6, -7, -8, 9, 10, -11],
-			vec![1, -2, 3, -4, -5, 6, -7, -8, 9, 10, -11],
-			vec![-1, 2, 3, -4, -5, 6, -7, -8, 9, 10, -11],
-			vec![1, -2, -3, 4, -5, 6, -7, -8, 9, 10, -11],
-			vec![-1, 2, -3, 4, -5, 6, -7, -8, 9, 10, -11],
-			vec![-1, -2, 3, 4, -5, 6, -7, -8, 9, 10, -11],
-			vec![1, -2, -3, -4, 5, 6, -7, -8, 9, 10, -11],
-			vec![-1, 2, -3, -4, 5, 6, -7, -8, 9, 10, -11],
-			vec![-1, -2, 3, -4, 5, 6, -7, -8, 9, 10, -11],
-			vec![-1, -2, -3, 4, 5, 6, -7, -8, 9, 10, -11],
-			vec![1, 2, -3, -4, -5, -6, 7, -8, 9, 10, -11],
-			vec![1, -2, 3, -4, -5, -6, 7, -8, 9, 10, -11],
-			vec![-1, 2, 3, -4, -5, -6, 7, -8, 9, 10, -11],
-			vec![1, -2, -3, 4, -5, -6, 7, -8, 9, 10, -11],
-			vec![-1, 2, -3, 4, -5, -6, 7, -8, 9, 10, -11],
-			vec![-1, -2, 3, 4, -5, -6, 7, -8, 9, 10, -11],
-			vec![1, -2, -3, -4, 5, -6, 7, -8, 9, 10, -11],
-			vec![-1, 2, -3, -4, 5, -6, 7, -8, 9, 10, -11],
-			vec![-1, -2, 3, -4, 5, -6, 7, -8, 9, 10, -11],
-			vec![-1, -2, -3, 4, 5, -6, 7, -8, 9, 10, -11],
-			vec![1, 2, -3, -4, -5, 6, 7, -8, 9, 10, -11],
-			vec![1, -2, 3, -4, -5, 6, 7, -8, 9, 10, -11],
-			vec![-1, 2, 3, -4, -5, 6, 7, -8, 9, 10, -11],
-			vec![1, -2, -3, 4, -5, 6, 7, -8, 9, 10, -11],
-			vec![-1, 2, -3, 4, -5, 6, 7, -8, 9, 10, -11],
-			vec![-1, -2, 3, 4, -5, 6, 7, -8, 9, 10, -11],
-			vec![1, -2, -3, -4, 5, 6, 7, -8, 9, 10, -11],
-			vec![-1, 2, -3, -4, 5, 6, 7, -8, 9, 10, -11],
-			vec![-1, -2, 3, -4, 5, 6, 7, -8, 9, 10, -11],
-			vec![-1, -2, -3, 4, 5, 6, 7, -8, 9, 10, -11],
-			vec![1, 2, -3, -4, -5, -6, -7, 8, 9, 10, -11],
-			vec![1, -2, 3, -4, -5, -6, -7, 8, 9, 10, -11],
-			vec![-1, 2, 3, -4, -5, -6, -7, 8, 9, 10, -11],
-			vec![1, -2, -3, 4, -5, -6, -7, 8, 9, 10, -11],
-			vec![-1, 2, -3, 4, -5, -6, -7, 8, 9, 10, -11],
-			vec![-1, -2, 3, 4, -5, -6, -7, 8, 9, 10, -11],
-			vec![1, -2, -3, -4, 5, -6, -7, 8, 9, 10, -11],
-			vec![-1, 2, -3, -4, 5, -6, -7, 8, 9, 10, -11],
-			vec![-1, -2, 3, -4, 5, -6, -7, 8, 9, 10, -11],
-			vec![-1, -2, -3, 4, 5, -6, -7, 8, 9, 10, -11],
-			vec![1, 2, -3, -4, -5, 6, -7, 8, 9, 10, -11],
-			vec![1, -2, 3, -4, -5, 6, -7, 8, 9, 10, -11],
-			vec![-1, 2, 3, -4, -5, 6, -7, 8, 9, 10, -11],
-			vec![1, -2, -3, 4, -5, 6, -7, 8, 9, 10, -11],
-			vec![-1, 2, -3, 4, -5, 6, -7, 8, 9, 10, -11],
-			vec![-1, -2, 3, 4, -5, 6, -7, 8, 9, 10, -11],
-			vec![1, -2, -3, -4, 5, 6, -7, 8, 9, 10, -11],
-			vec![-1, 2, -3, -4, 5, 6, -7, 8, 9, 10, -11],
-			vec![-1, -2, 3, -4, 5, 6, -7, 8, 9, 10, -11],
-			vec![-1, -2, -3, 4, 5, 6, -7, 8, 9, 10, -11],
-			vec![1, 2, -3, -4, -5, -6, 7, 8, 9, 10, -11],
-			vec![1, -2, 3, -4, -5, -6, 7, 8, 9, 10, -11],
-			vec![-1, 2, 3, -4, -5, -6, 7, 8, 9, 10, -11],
-			vec![1, -2, -3, 4, -5, -6, 7, 8, 9, 10, -11],
-			vec![-1, 2, -3, 4, -5, -6, 7, 8, 9, 10, -11],
-			vec![-1, -2, 3, 4, -5, -6, 7, 8, 9, 10, -11],
-			vec![1, -2, -3, -4, 5, -6, 7, 8, 9, 10, -11],
-			vec![-1, 2, -3, -4, 5, -6, 7, 8, 9, 10, -11],
-			vec![-1, -2, 3, -4, 5, -6, 7, 8, 9, 10, -11],
-			vec![-1, -2, -3, 4, 5, -6, 7, 8, 9, 10, -11],
-			vec![1, 2, -3, -4, -5, 6, 7, 8, 9, 10, -11],
-			vec![1, -2, 3, -4, -5, 6, 7, 8, 9, 10, -11],
-			vec![-1, 2, 3, -4, -5, 6, 7, 8, 9, 10, -11],
-			vec![1, -2, -3, 4, -5, 6, 7, 8, 9, 10, -11],
-			vec![-1, 2, -3, 4, -5, 6, 7, 8, 9, 10, -11],
-			vec![-1, -2, 3, 4, -5, 6, 7, 8, 9, 10, -11],
-			vec![1, -2, -3, -4, 5, 6, 7, 8, 9, 10, -11],
-			vec![-1, 2, -3, -4, 5, 6, 7, 8, 9, 10, -11],
-			vec![-1, -2, 3, -4, 5, 6, 7, 8, 9, 10, -11],
-			vec![-1, -2, -3, 4, 5, 6, 7, 8, 9, 10, -11],
-			vec![1, 2, 3, -4, -5, -6, -7, -8, 9, 10, 11],
-			vec![1, 2, -3, 4, -5, -6, -7, -8, 9, 10, 11],
-			vec![1, -2, 3, 4, -5, -6, -7, -8, 9, 10, 11],
-			vec![-1, 2, 3, 4, -5, -6, -7, -8, 9, 10, 11],
-			vec![1, 2, -3, -4, 5, -6, -7, -8, 9, 10, 11],
-			vec![1, -2, 3, -4, 5, -6, -7, -8, 9, 10, 11],
-			vec![-1, 2, 3, -4, 5, -6, -7, -8, 9, 10, 11],
-			vec![1, -2, -3, 4, 5, -6, -7, -8, 9, 10, 11],
-			vec![-1, 2, -3, 4, 5, -6, -7, -8, 9, 10, 11],
-			vec![-1, -2, 3, 4, 5, -6, -7, -8, 9, 10, 11],
-			vec![1, 2, 3, -4, -5, 6, -7, -8, 9, 10, 11],
-			vec![1, 2, -3, 4, -5, 6, -7, -8, 9, 10, 11],
-			vec![1, -2, 3, 4, -5, 6, -7, -8, 9, 10, 11],
-			vec![-1, 2, 3, 4, -5, 6, -7, -8, 9, 10, 11],
-			vec![1, 2, -3, -4, 5, 6, -7, -8, 9, 10, 11],
-			vec![1, -2, 3, -4, 5, 6, -7, -8, 9, 10, 11],
-			vec![-1, 2, 3, -4, 5, 6, -7, -8, 9, 10, 11],
-			vec![1, -2, -3, 4, 5, 6, -7, -8, 9, 10, 11],
-			vec![-1, 2, -3, 4, 5, 6, -7, -8, 9, 10, 11],
-			vec![-1, -2, 3, 4, 5, 6, -7, -8, 9, 10, 11],
-			vec![1, 2, 3, -4, -5, -6, 7, -8, 9, 10, 11],
-			vec![1, 2, -3, 4, -5, -6, 7, -8, 9, 10, 11],
-			vec![1, -2, 3, 4, -5, -6, 7, -8, 9, 10, 11],
-			vec![-1, 2, 3, 4, -5, -6, 7, -8, 9, 10, 11],
-			vec![1, 2, -3, -4, 5, -6, 7, -8, 9, 10, 11],
-			vec![1, -2, 3, -4, 5, -6, 7, -8, 9, 10, 11],
-			vec![-1, 2, 3, -4, 5, -6, 7, -8, 9, 10, 11],
-			vec![1, -2, -3, 4, 5, -6, 7, -8, 9, 10, 11],
-			vec![-1, 2, -3, 4, 5, -6, 7, -8, 9, 10, 11],
-			vec![-1, -2, 3, 4, 5, -6, 7, -8, 9, 10, 11],
-			vec![1, 2, 3, -4, -5, 6, 7, -8, 9, 10, 11],
-			vec![1, 2, -3, 4, -5, 6, 7, -8, 9, 10, 11],
-			vec![1, -2, 3, 4, -5, 6, 7, -8, 9, 10, 11],
-			vec![-1, 2, 3, 4, -5, 6, 7, -8, 9, 10, 11],
-			vec![1, 2, -3, -4, 5, 6, 7, -8, 9, 10, 11],
-			vec![1, -2, 3, -4, 5, 6, 7, -8, 9, 10, 11],
-			vec![-1, 2, 3, -4, 5, 6, 7, -8, 9, 10, 11],
-			vec![1, -2, -3, 4, 5, 6, 7, -8, 9, 10, 11],
-			vec![-1, 2, -3, 4, 5, 6, 7, -8, 9, 10, 11],
-			vec![-1, -2, 3, 4, 5, 6, 7, -8, 9, 10, 11],
-			vec![1, 2, 3, -4, -5, -6, -7, 8, 9, 10, 11],
-			vec![1, 2, -3, 4, -5, -6, -7, 8, 9, 10, 11],
-			vec![1, -2, 3, 4, -5, -6, -7, 8, 9, 10, 11],
-			vec![-1, 2, 3, 4, -5, -6, -7, 8, 9, 10, 11],
-			vec![1, 2, -3, -4, 5, -6, -7, 8, 9, 10, 11],
-			vec![1, -2, 3, -4, 5, -6, -7, 8, 9, 10, 11],
-			vec![-1, 2, 3, -4, 5, -6, -7, 8, 9, 10, 11],
-			vec![1, -2, -3, 4, 5, -6, -7, 8, 9, 10, 11],
-			vec![-1, 2, -3, 4, 5, -6, -7, 8, 9, 10, 11],
-			vec![-1, -2, 3, 4, 5, -6, -7, 8, 9, 10, 11],
-			vec![1, 2, 3, -4, -5, 6, -7, 8, 9, 10, 11],
-			vec![1, 2, -3, 4, -5, 6, -7, 8, 9, 10, 11],
-			vec![1, -2, 3, 4, -5, 6, -7, 8, 9, 10, 11],
-			vec![-1, 2, 3, 4, -5, 6, -7, 8, 9, 10, 11],
-			vec![1, 2, -3, -4, 5, 6, -7, 8, 9, 10, 11],
-			vec![1, -2, 3, -4, 5, 6, -7, 8, 9, 10, 11],
-			vec![-1, 2, 3, -4, 5, 6, -7, 8, 9, 10, 11],
-			vec![1, -2, -3, 4, 5, 6, -7, 8, 9, 10, 11],
-			vec![-1, 2, -3, 4, 5, 6, -7, 8, 9, 10, 11],
-			vec![-1, -2, 3, 4, 5, 6, -7, 8, 9, 10, 11],
-			vec![1, 2, 3, -4, -5, -6, 7, 8, 9, 10, 11],
-			vec![1, 2, -3, 4, -5, -6, 7, 8, 9, 10, 11],
-			vec![1, -2, 3, 4, -5, -6, 7, 8, 9, 10, 11],
-			vec![-1, 2, 3, 4, -5, -6, 7, 8, 9, 10, 11],
-			vec![1, 2, -3, -4, 5, -6, 7, 8, 9, 10, 11],
-			vec![1, -2, 3, -4, 5, -6, 7, 8, 9, 10, 11],
-			vec![-1, 2, 3, -4, 5, -6, 7, 8, 9, 10, 11],
-			vec![1, -2, -3, 4, 5, -6, 7, 8, 9, 10, 11],
-			vec![-1, 2, -3, 4, 5, -6, 7, 8, 9, 10, 11],
-			vec![-1, -2, 3, 4, 5, -6, 7, 8, 9, 10, 11],
-			vec![1, 2, 3, -4, -5, 6, 7, 8, 9, 10, 11],
-			vec![1, 2, -3, 4, -5, 6, 7, 8, 9, 10, 11],
-			vec![1, -2, 3, 4, -5, 6, 7, 8, 9, 10, 11],
-			vec![-1, 2, 3, 4, -5, 6, 7, 8, 9, 10, 11],
-			vec![1, 2, -3, -4, 5, 6, 7, 8, 9, 10, 11],
-			vec![1, -2, 3, -4, 5, 6, 7, 8, 9, 10, 11],
-			vec![-1, 2, 3, -4, 5, 6, 7, 8, 9, 10, 11],
-			vec![1, -2, -3, 4, 5, 6, 7, 8, 9, 10, 11],
-			vec![-1, 2, -3, 4, 5, 6, 7, 8, 9, 10, 11],
-			vec![-1, -2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+			lits![-1, -2, -3, -4, -5, -6, -7, -8, -9, -10, -11],
+			lits![-1, -2, -3, -4, -5, 6, -7, -8, -9, -10, -11],
+			lits![-1, -2, -3, -4, -5, -6, 7, -8, -9, -10, -11],
+			lits![-1, -2, -3, -4, -5, 6, 7, -8, -9, -10, -11],
+			lits![-1, -2, -3, -4, -5, -6, -7, 8, -9, -10, -11],
+			lits![-1, -2, -3, -4, -5, 6, -7, 8, -9, -10, -11],
+			lits![-1, -2, -3, -4, -5, -6, 7, 8, -9, -10, -11],
+			lits![-1, -2, -3, -4, -5, 6, 7, 8, -9, -10, -11],
+			lits![1, -2, -3, -4, -5, -6, -7, -8, 9, -10, -11],
+			lits![-1, 2, -3, -4, -5, -6, -7, -8, 9, -10, -11],
+			lits![-1, -2, 3, -4, -5, -6, -7, -8, 9, -10, -11],
+			lits![-1, -2, -3, 4, -5, -6, -7, -8, 9, -10, -11],
+			lits![-1, -2, -3, -4, 5, -6, -7, -8, 9, -10, -11],
+			lits![1, -2, -3, -4, -5, 6, -7, -8, 9, -10, -11],
+			lits![-1, 2, -3, -4, -5, 6, -7, -8, 9, -10, -11],
+			lits![-1, -2, 3, -4, -5, 6, -7, -8, 9, -10, -11],
+			lits![-1, -2, -3, 4, -5, 6, -7, -8, 9, -10, -11],
+			lits![-1, -2, -3, -4, 5, 6, -7, -8, 9, -10, -11],
+			lits![1, -2, -3, -4, -5, -6, 7, -8, 9, -10, -11],
+			lits![-1, 2, -3, -4, -5, -6, 7, -8, 9, -10, -11],
+			lits![-1, -2, 3, -4, -5, -6, 7, -8, 9, -10, -11],
+			lits![-1, -2, -3, 4, -5, -6, 7, -8, 9, -10, -11],
+			lits![-1, -2, -3, -4, 5, -6, 7, -8, 9, -10, -11],
+			lits![1, -2, -3, -4, -5, 6, 7, -8, 9, -10, -11],
+			lits![-1, 2, -3, -4, -5, 6, 7, -8, 9, -10, -11],
+			lits![-1, -2, 3, -4, -5, 6, 7, -8, 9, -10, -11],
+			lits![-1, -2, -3, 4, -5, 6, 7, -8, 9, -10, -11],
+			lits![-1, -2, -3, -4, 5, 6, 7, -8, 9, -10, -11],
+			lits![1, -2, -3, -4, -5, -6, -7, 8, 9, -10, -11],
+			lits![-1, 2, -3, -4, -5, -6, -7, 8, 9, -10, -11],
+			lits![-1, -2, 3, -4, -5, -6, -7, 8, 9, -10, -11],
+			lits![-1, -2, -3, 4, -5, -6, -7, 8, 9, -10, -11],
+			lits![-1, -2, -3, -4, 5, -6, -7, 8, 9, -10, -11],
+			lits![1, -2, -3, -4, -5, 6, -7, 8, 9, -10, -11],
+			lits![-1, 2, -3, -4, -5, 6, -7, 8, 9, -10, -11],
+			lits![-1, -2, 3, -4, -5, 6, -7, 8, 9, -10, -11],
+			lits![-1, -2, -3, 4, -5, 6, -7, 8, 9, -10, -11],
+			lits![-1, -2, -3, -4, 5, 6, -7, 8, 9, -10, -11],
+			lits![1, -2, -3, -4, -5, -6, 7, 8, 9, -10, -11],
+			lits![-1, 2, -3, -4, -5, -6, 7, 8, 9, -10, -11],
+			lits![-1, -2, 3, -4, -5, -6, 7, 8, 9, -10, -11],
+			lits![-1, -2, -3, 4, -5, -6, 7, 8, 9, -10, -11],
+			lits![-1, -2, -3, -4, 5, -6, 7, 8, 9, -10, -11],
+			lits![1, -2, -3, -4, -5, 6, 7, 8, 9, -10, -11],
+			lits![-1, 2, -3, -4, -5, 6, 7, 8, 9, -10, -11],
+			lits![-1, -2, 3, -4, -5, 6, 7, 8, 9, -10, -11],
+			lits![-1, -2, -3, 4, -5, 6, 7, 8, 9, -10, -11],
+			lits![-1, -2, -3, -4, 5, 6, 7, 8, 9, -10, -11],
+			lits![1, 2, -3, -4, -5, -6, -7, -8, 9, 10, -11],
+			lits![1, -2, 3, -4, -5, -6, -7, -8, 9, 10, -11],
+			lits![-1, 2, 3, -4, -5, -6, -7, -8, 9, 10, -11],
+			lits![1, -2, -3, 4, -5, -6, -7, -8, 9, 10, -11],
+			lits![-1, 2, -3, 4, -5, -6, -7, -8, 9, 10, -11],
+			lits![-1, -2, 3, 4, -5, -6, -7, -8, 9, 10, -11],
+			lits![1, -2, -3, -4, 5, -6, -7, -8, 9, 10, -11],
+			lits![-1, 2, -3, -4, 5, -6, -7, -8, 9, 10, -11],
+			lits![-1, -2, 3, -4, 5, -6, -7, -8, 9, 10, -11],
+			lits![-1, -2, -3, 4, 5, -6, -7, -8, 9, 10, -11],
+			lits![1, 2, -3, -4, -5, 6, -7, -8, 9, 10, -11],
+			lits![1, -2, 3, -4, -5, 6, -7, -8, 9, 10, -11],
+			lits![-1, 2, 3, -4, -5, 6, -7, -8, 9, 10, -11],
+			lits![1, -2, -3, 4, -5, 6, -7, -8, 9, 10, -11],
+			lits![-1, 2, -3, 4, -5, 6, -7, -8, 9, 10, -11],
+			lits![-1, -2, 3, 4, -5, 6, -7, -8, 9, 10, -11],
+			lits![1, -2, -3, -4, 5, 6, -7, -8, 9, 10, -11],
+			lits![-1, 2, -3, -4, 5, 6, -7, -8, 9, 10, -11],
+			lits![-1, -2, 3, -4, 5, 6, -7, -8, 9, 10, -11],
+			lits![-1, -2, -3, 4, 5, 6, -7, -8, 9, 10, -11],
+			lits![1, 2, -3, -4, -5, -6, 7, -8, 9, 10, -11],
+			lits![1, -2, 3, -4, -5, -6, 7, -8, 9, 10, -11],
+			lits![-1, 2, 3, -4, -5, -6, 7, -8, 9, 10, -11],
+			lits![1, -2, -3, 4, -5, -6, 7, -8, 9, 10, -11],
+			lits![-1, 2, -3, 4, -5, -6, 7, -8, 9, 10, -11],
+			lits![-1, -2, 3, 4, -5, -6, 7, -8, 9, 10, -11],
+			lits![1, -2, -3, -4, 5, -6, 7, -8, 9, 10, -11],
+			lits![-1, 2, -3, -4, 5, -6, 7, -8, 9, 10, -11],
+			lits![-1, -2, 3, -4, 5, -6, 7, -8, 9, 10, -11],
+			lits![-1, -2, -3, 4, 5, -6, 7, -8, 9, 10, -11],
+			lits![1, 2, -3, -4, -5, 6, 7, -8, 9, 10, -11],
+			lits![1, -2, 3, -4, -5, 6, 7, -8, 9, 10, -11],
+			lits![-1, 2, 3, -4, -5, 6, 7, -8, 9, 10, -11],
+			lits![1, -2, -3, 4, -5, 6, 7, -8, 9, 10, -11],
+			lits![-1, 2, -3, 4, -5, 6, 7, -8, 9, 10, -11],
+			lits![-1, -2, 3, 4, -5, 6, 7, -8, 9, 10, -11],
+			lits![1, -2, -3, -4, 5, 6, 7, -8, 9, 10, -11],
+			lits![-1, 2, -3, -4, 5, 6, 7, -8, 9, 10, -11],
+			lits![-1, -2, 3, -4, 5, 6, 7, -8, 9, 10, -11],
+			lits![-1, -2, -3, 4, 5, 6, 7, -8, 9, 10, -11],
+			lits![1, 2, -3, -4, -5, -6, -7, 8, 9, 10, -11],
+			lits![1, -2, 3, -4, -5, -6, -7, 8, 9, 10, -11],
+			lits![-1, 2, 3, -4, -5, -6, -7, 8, 9, 10, -11],
+			lits![1, -2, -3, 4, -5, -6, -7, 8, 9, 10, -11],
+			lits![-1, 2, -3, 4, -5, -6, -7, 8, 9, 10, -11],
+			lits![-1, -2, 3, 4, -5, -6, -7, 8, 9, 10, -11],
+			lits![1, -2, -3, -4, 5, -6, -7, 8, 9, 10, -11],
+			lits![-1, 2, -3, -4, 5, -6, -7, 8, 9, 10, -11],
+			lits![-1, -2, 3, -4, 5, -6, -7, 8, 9, 10, -11],
+			lits![-1, -2, -3, 4, 5, -6, -7, 8, 9, 10, -11],
+			lits![1, 2, -3, -4, -5, 6, -7, 8, 9, 10, -11],
+			lits![1, -2, 3, -4, -5, 6, -7, 8, 9, 10, -11],
+			lits![-1, 2, 3, -4, -5, 6, -7, 8, 9, 10, -11],
+			lits![1, -2, -3, 4, -5, 6, -7, 8, 9, 10, -11],
+			lits![-1, 2, -3, 4, -5, 6, -7, 8, 9, 10, -11],
+			lits![-1, -2, 3, 4, -5, 6, -7, 8, 9, 10, -11],
+			lits![1, -2, -3, -4, 5, 6, -7, 8, 9, 10, -11],
+			lits![-1, 2, -3, -4, 5, 6, -7, 8, 9, 10, -11],
+			lits![-1, -2, 3, -4, 5, 6, -7, 8, 9, 10, -11],
+			lits![-1, -2, -3, 4, 5, 6, -7, 8, 9, 10, -11],
+			lits![1, 2, -3, -4, -5, -6, 7, 8, 9, 10, -11],
+			lits![1, -2, 3, -4, -5, -6, 7, 8, 9, 10, -11],
+			lits![-1, 2, 3, -4, -5, -6, 7, 8, 9, 10, -11],
+			lits![1, -2, -3, 4, -5, -6, 7, 8, 9, 10, -11],
+			lits![-1, 2, -3, 4, -5, -6, 7, 8, 9, 10, -11],
+			lits![-1, -2, 3, 4, -5, -6, 7, 8, 9, 10, -11],
+			lits![1, -2, -3, -4, 5, -6, 7, 8, 9, 10, -11],
+			lits![-1, 2, -3, -4, 5, -6, 7, 8, 9, 10, -11],
+			lits![-1, -2, 3, -4, 5, -6, 7, 8, 9, 10, -11],
+			lits![-1, -2, -3, 4, 5, -6, 7, 8, 9, 10, -11],
+			lits![1, 2, -3, -4, -5, 6, 7, 8, 9, 10, -11],
+			lits![1, -2, 3, -4, -5, 6, 7, 8, 9, 10, -11],
+			lits![-1, 2, 3, -4, -5, 6, 7, 8, 9, 10, -11],
+			lits![1, -2, -3, 4, -5, 6, 7, 8, 9, 10, -11],
+			lits![-1, 2, -3, 4, -5, 6, 7, 8, 9, 10, -11],
+			lits![-1, -2, 3, 4, -5, 6, 7, 8, 9, 10, -11],
+			lits![1, -2, -3, -4, 5, 6, 7, 8, 9, 10, -11],
+			lits![-1, 2, -3, -4, 5, 6, 7, 8, 9, 10, -11],
+			lits![-1, -2, 3, -4, 5, 6, 7, 8, 9, 10, -11],
+			lits![-1, -2, -3, 4, 5, 6, 7, 8, 9, 10, -11],
+			lits![1, 2, 3, -4, -5, -6, -7, -8, 9, 10, 11],
+			lits![1, 2, -3, 4, -5, -6, -7, -8, 9, 10, 11],
+			lits![1, -2, 3, 4, -5, -6, -7, -8, 9, 10, 11],
+			lits![-1, 2, 3, 4, -5, -6, -7, -8, 9, 10, 11],
+			lits![1, 2, -3, -4, 5, -6, -7, -8, 9, 10, 11],
+			lits![1, -2, 3, -4, 5, -6, -7, -8, 9, 10, 11],
+			lits![-1, 2, 3, -4, 5, -6, -7, -8, 9, 10, 11],
+			lits![1, -2, -3, 4, 5, -6, -7, -8, 9, 10, 11],
+			lits![-1, 2, -3, 4, 5, -6, -7, -8, 9, 10, 11],
+			lits![-1, -2, 3, 4, 5, -6, -7, -8, 9, 10, 11],
+			lits![1, 2, 3, -4, -5, 6, -7, -8, 9, 10, 11],
+			lits![1, 2, -3, 4, -5, 6, -7, -8, 9, 10, 11],
+			lits![1, -2, 3, 4, -5, 6, -7, -8, 9, 10, 11],
+			lits![-1, 2, 3, 4, -5, 6, -7, -8, 9, 10, 11],
+			lits![1, 2, -3, -4, 5, 6, -7, -8, 9, 10, 11],
+			lits![1, -2, 3, -4, 5, 6, -7, -8, 9, 10, 11],
+			lits![-1, 2, 3, -4, 5, 6, -7, -8, 9, 10, 11],
+			lits![1, -2, -3, 4, 5, 6, -7, -8, 9, 10, 11],
+			lits![-1, 2, -3, 4, 5, 6, -7, -8, 9, 10, 11],
+			lits![-1, -2, 3, 4, 5, 6, -7, -8, 9, 10, 11],
+			lits![1, 2, 3, -4, -5, -6, 7, -8, 9, 10, 11],
+			lits![1, 2, -3, 4, -5, -6, 7, -8, 9, 10, 11],
+			lits![1, -2, 3, 4, -5, -6, 7, -8, 9, 10, 11],
+			lits![-1, 2, 3, 4, -5, -6, 7, -8, 9, 10, 11],
+			lits![1, 2, -3, -4, 5, -6, 7, -8, 9, 10, 11],
+			lits![1, -2, 3, -4, 5, -6, 7, -8, 9, 10, 11],
+			lits![-1, 2, 3, -4, 5, -6, 7, -8, 9, 10, 11],
+			lits![1, -2, -3, 4, 5, -6, 7, -8, 9, 10, 11],
+			lits![-1, 2, -3, 4, 5, -6, 7, -8, 9, 10, 11],
+			lits![-1, -2, 3, 4, 5, -6, 7, -8, 9, 10, 11],
+			lits![1, 2, 3, -4, -5, 6, 7, -8, 9, 10, 11],
+			lits![1, 2, -3, 4, -5, 6, 7, -8, 9, 10, 11],
+			lits![1, -2, 3, 4, -5, 6, 7, -8, 9, 10, 11],
+			lits![-1, 2, 3, 4, -5, 6, 7, -8, 9, 10, 11],
+			lits![1, 2, -3, -4, 5, 6, 7, -8, 9, 10, 11],
+			lits![1, -2, 3, -4, 5, 6, 7, -8, 9, 10, 11],
+			lits![-1, 2, 3, -4, 5, 6, 7, -8, 9, 10, 11],
+			lits![1, -2, -3, 4, 5, 6, 7, -8, 9, 10, 11],
+			lits![-1, 2, -3, 4, 5, 6, 7, -8, 9, 10, 11],
+			lits![-1, -2, 3, 4, 5, 6, 7, -8, 9, 10, 11],
+			lits![1, 2, 3, -4, -5, -6, -7, 8, 9, 10, 11],
+			lits![1, 2, -3, 4, -5, -6, -7, 8, 9, 10, 11],
+			lits![1, -2, 3, 4, -5, -6, -7, 8, 9, 10, 11],
+			lits![-1, 2, 3, 4, -5, -6, -7, 8, 9, 10, 11],
+			lits![1, 2, -3, -4, 5, -6, -7, 8, 9, 10, 11],
+			lits![1, -2, 3, -4, 5, -6, -7, 8, 9, 10, 11],
+			lits![-1, 2, 3, -4, 5, -6, -7, 8, 9, 10, 11],
+			lits![1, -2, -3, 4, 5, -6, -7, 8, 9, 10, 11],
+			lits![-1, 2, -3, 4, 5, -6, -7, 8, 9, 10, 11],
+			lits![-1, -2, 3, 4, 5, -6, -7, 8, 9, 10, 11],
+			lits![1, 2, 3, -4, -5, 6, -7, 8, 9, 10, 11],
+			lits![1, 2, -3, 4, -5, 6, -7, 8, 9, 10, 11],
+			lits![1, -2, 3, 4, -5, 6, -7, 8, 9, 10, 11],
+			lits![-1, 2, 3, 4, -5, 6, -7, 8, 9, 10, 11],
+			lits![1, 2, -3, -4, 5, 6, -7, 8, 9, 10, 11],
+			lits![1, -2, 3, -4, 5, 6, -7, 8, 9, 10, 11],
+			lits![-1, 2, 3, -4, 5, 6, -7, 8, 9, 10, 11],
+			lits![1, -2, -3, 4, 5, 6, -7, 8, 9, 10, 11],
+			lits![-1, 2, -3, 4, 5, 6, -7, 8, 9, 10, 11],
+			lits![-1, -2, 3, 4, 5, 6, -7, 8, 9, 10, 11],
+			lits![1, 2, 3, -4, -5, -6, 7, 8, 9, 10, 11],
+			lits![1, 2, -3, 4, -5, -6, 7, 8, 9, 10, 11],
+			lits![1, -2, 3, 4, -5, -6, 7, 8, 9, 10, 11],
+			lits![-1, 2, 3, 4, -5, -6, 7, 8, 9, 10, 11],
+			lits![1, 2, -3, -4, 5, -6, 7, 8, 9, 10, 11],
+			lits![1, -2, 3, -4, 5, -6, 7, 8, 9, 10, 11],
+			lits![-1, 2, 3, -4, 5, -6, 7, 8, 9, 10, 11],
+			lits![1, -2, -3, 4, 5, -6, 7, 8, 9, 10, 11],
+			lits![-1, 2, -3, 4, 5, -6, 7, 8, 9, 10, 11],
+			lits![-1, -2, 3, 4, 5, -6, 7, 8, 9, 10, 11],
+			lits![1, 2, 3, -4, -5, 6, 7, 8, 9, 10, 11],
+			lits![1, 2, -3, 4, -5, 6, 7, 8, 9, 10, 11],
+			lits![1, -2, 3, 4, -5, 6, 7, 8, 9, 10, 11],
+			lits![-1, 2, 3, 4, -5, 6, 7, 8, 9, 10, 11],
+			lits![1, 2, -3, -4, 5, 6, 7, 8, 9, 10, 11],
+			lits![1, -2, 3, -4, 5, 6, 7, 8, 9, 10, 11],
+			lits![-1, 2, 3, -4, 5, 6, 7, 8, 9, 10, 11],
+			lits![1, -2, -3, 4, 5, 6, 7, 8, 9, 10, 11],
+			lits![-1, 2, -3, 4, 5, 6, 7, 8, 9, 10, 11],
+			lits![-1, -2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
 		];
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
@@ -1395,9 +1382,10 @@ mod tests {
 	// #[test]
 	fn _test_5_6_sorted_eq() {
 		let mut db = TestDB::new(11);
-		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 5, String::from("y")).into();
+		let y: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 5, String::from("y")).into();
 		db.num_var += y.lits() as i32;
-		let con = &Sorted::new(&[1, 2, 3, 4, 5, 6], LimitComp::Equal, &y);
+		let lits = lits![1, 2, 3, 4, 5, 6];
+		let con = &Sorted::new(&lits, LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
@@ -1407,9 +1395,10 @@ mod tests {
 	// #[test]
 	fn _test_6_7_sorted_eq() {
 		let mut db = TestDB::new(13);
-		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 6, String::from("y")).into();
+		let y: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 6, String::from("y")).into();
 		db.num_var += y.lits() as i32;
-		let con = &Sorted::new(&[1, 2, 3, 4, 5, 6, 7], LimitComp::Equal, &y);
+		let lits = lits![1, 2, 3, 4, 5, 6, 7];
+		let con = &Sorted::new(&lits, LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
 		println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
@@ -1419,26 +1408,27 @@ mod tests {
 	#[test]
 	fn test_5_1_sorted_eq_negated() {
 		let mut db = TestDB::new(6);
-		let y: IntVarEnc<_, _> = IntVarOrd::from_bounds(&mut db, 0, 1, String::from("y")).into();
+		let y: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 1, String::from("y")).into();
 		db.num_var += y.lits() as i32;
-		let con = &Sorted::new(&[-1, -2, -3, -4, -5], LimitComp::LessEq, &y);
+		let lits = lits![-1, -2, -3, -4, -5];
+		let con = &Sorted::new(&lits, LimitComp::LessEq, &y);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 
 		let sols = vec![
-			vec![1, 2, 3, 4, 5, -6, -7],
-			vec![1, 2, 3, 4, 5, 6, -7],
-			vec![1, 2, 3, 4, -5, -6, 7],
-			vec![1, 2, 3, -4, 5, -6, 7],
-			vec![1, 2, -3, 4, 5, -6, 7],
-			vec![1, -2, 3, 4, 5, -6, 7],
-			vec![-1, 2, 3, 4, 5, -6, 7],
-			vec![1, 2, 3, 4, 5, -6, 7],
-			vec![1, 2, 3, 4, -5, 6, 7],
-			vec![1, 2, 3, -4, 5, 6, 7],
-			vec![1, 2, -3, 4, 5, 6, 7],
-			vec![1, -2, 3, 4, 5, 6, 7],
-			vec![-1, 2, 3, 4, 5, 6, 7],
-			vec![1, 2, 3, 4, 5, 6, 7],
+			lits![1, 2, 3, 4, 5, -6, -7],
+			lits![1, 2, 3, 4, 5, 6, -7],
+			lits![1, 2, 3, 4, -5, -6, 7],
+			lits![1, 2, 3, -4, 5, -6, 7],
+			lits![1, 2, -3, 4, 5, -6, 7],
+			lits![1, -2, 3, 4, 5, -6, 7],
+			lits![-1, 2, 3, 4, 5, -6, 7],
+			lits![1, 2, 3, 4, 5, -6, 7],
+			lits![1, 2, 3, 4, -5, 6, 7],
+			lits![1, 2, 3, -4, 5, 6, 7],
+			lits![1, 2, -3, 4, 5, 6, 7],
+			lits![1, -2, 3, 4, 5, 6, 7],
+			lits![-1, 2, 3, 4, 5, 6, 7],
+			lits![1, 2, 3, 4, 5, 6, 7],
 		];
 		let mut enc = get_sorted_encoder(SortedStrategy::Direct);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));

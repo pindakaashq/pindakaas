@@ -1,18 +1,21 @@
-use crate::int::{Consistency, Lin, Model};
-use crate::{int::IntVarEnc, ClauseDatabase, Coefficient, Encoder, Linear, Result};
+use std::{cell::RefCell, rc::Rc};
+
 use itertools::Itertools;
-use std::cell::RefCell;
-use std::rc::Rc;
+
+use crate::{
+	int::{Consistency, IntVarEnc, Lin, Model},
+	ClauseDatabase, Coeff, Encoder, Linear, Result,
+};
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)
 #[derive(Clone, Default)]
-pub struct SwcEncoder<C: Coefficient> {
+pub struct SwcEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,
-	cutoff: Option<C>,
+	cutoff: Option<Coeff>,
 }
 
-impl<C: Coefficient> SwcEncoder<C> {
+impl SwcEncoder {
 	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
@@ -21,48 +24,43 @@ impl<C: Coefficient> SwcEncoder<C> {
 		self.add_propagation = c;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Option<C>) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for SwcEncoder<C> {
+impl<DB: ClauseDatabase> Encoder<DB, Linear> for SwcEncoder {
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
-		// self.cutoff = -C::one();
+	fn encode(&mut self, db: &mut DB, lin: &Linear) -> Result {
+		// self.cutoff = -1;
 		// self.add_consistency = true;
-		let mut model = Model::new();
+		let mut model = Model::default();
 		let xs = lin
 			.terms
 			.iter()
 			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
+			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
 			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
-			.collect::<Vec<_>>();
+			.collect_vec();
 		let n = xs.len();
 
 		// TODO not possible to fix since both closures use db?
 		#[allow(clippy::needless_collect)] // TODO no idea how to avoid collect
-		let ys = std::iter::once(model.new_constant(C::zero()))
+		let ys = std::iter::once(model.new_constant(0))
 			.chain(
 				(1..n)
-					.map(|_| {
-						model.new_var(
-							num::iter::range_inclusive(-*lin.k, C::zero()).collect(),
-							self.add_consistency,
-						)
-					})
+					.map(|_| model.new_var((-(*lin.k)..=0).collect(), self.add_consistency))
 					.take(n),
 			)
-			.collect::<Vec<_>>()
+			.collect_vec()
 			.into_iter()
 			.chain(std::iter::once(model.new_constant(-*lin.k)))
 			.map(|y| Rc::new(RefCell::new(y)))
-			.collect::<Vec<_>>();
+			.collect_vec();
 
 		ys.into_iter()
 			.tuple_windows()
@@ -85,12 +83,12 @@ mod tests {
 
 	use super::*;
 	use crate::{
-		helpers::tests::assert_sol,
+		helpers::tests::{assert_sol, lits},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
-			LimitComp,
+			LimitComp, PosCoeff,
 		},
-		Encoder,
+		Encoder, Lit,
 	};
 
 	linear_test_suite!(SwcEncoder::default());

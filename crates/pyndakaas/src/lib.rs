@@ -1,64 +1,23 @@
-use std::{
-	fmt::Display,
-	num::ParseIntError,
-	ops::{Add, DerefMut, Mul},
-	path::PathBuf,
-	str::FromStr,
-};
+use std::{fmt::Display, ops::DerefMut, path::PathBuf};
 
-use base::{Encoder, LinExp, LinearConstraint, LinearEncoder, Literal};
-use num::{One, Zero};
+use base::{ClauseDatabase, Encoder, LinExp, LinearConstraint, LinearEncoder};
 use pindakaas as base;
 use pyo3::{exceptions::PyArithmeticError, prelude::*};
 
 #[pyclass]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Lit(i32);
-impl Literal for Lit {
-	fn negate(&self) -> Self {
-		Lit(-self.0)
-	}
-	fn is_negated(&self) -> bool {
+pub struct Lit(base::Lit);
+impl Lit {
+	pub fn is_negated(&self) -> bool {
 		self.0.is_negated()
 	}
-	fn var(&self) -> Self {
-		Lit(self.0.abs())
+	pub fn var(&self) -> Self {
+		Self(self.0.var().into()) // TODO
 	}
 }
 impl Display for Lit {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		self.0.fmt(f)
-	}
-}
-impl FromStr for Lit {
-	type Err = ParseIntError;
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Ok(Lit(i32::from_str(s)?))
-	}
-}
-impl Zero for Lit {
-	fn zero() -> Self {
-		Lit(0)
-	}
-	fn is_zero(&self) -> bool {
-		self.0 == 0
-	}
-}
-impl One for Lit {
-	fn one() -> Self {
-		Lit(1)
-	}
-}
-impl Add for Lit {
-	type Output = Lit;
-	fn add(self, rhs: Self) -> Self::Output {
-		Lit(self.0 + rhs.0)
-	}
-}
-impl Mul for Lit {
-	type Output = Lit;
-	fn mul(self, rhs: Self) -> Self::Output {
-		Lit(self.0 * rhs.0)
 	}
 }
 type Clause = Vec<Lit>;
@@ -75,7 +34,7 @@ fn module(_py: Python, m: &PyModule) -> PyResult<()> {
 fn adder_encode(mut db: PyRefMut<'_, Cnf>) -> Result<(), PyErr> {
 	let pref = db.deref_mut();
 	let db = &mut pref.0;
-	let x = LinExp::from_slices(&[1, 2, 3], &[Lit(1), Lit(2), Lit(3)]);
+	let x = LinExp::from_slices(&[1, 2, 3], &[db.new_var(), db.new_var(), db.new_var()]);
 	let con = LinearConstraint::new(x, base::Comparator::Equal, 2);
 	let mut enc: LinearEncoder = LinearEncoder::default();
 	enc.encode(db, &con)
@@ -83,7 +42,7 @@ fn adder_encode(mut db: PyRefMut<'_, Cnf>) -> Result<(), PyErr> {
 }
 
 #[pyclass(name = "CNF")]
-struct Cnf(base::Cnf<Lit>);
+struct Cnf(base::Cnf);
 
 #[pymethods]
 impl Cnf {
@@ -102,9 +61,10 @@ impl Cnf {
 
 	fn __iter__(&self) -> ClauseIter {
 		// FIXME: It would be great if this could be made lazily instead of copying everything when creating the iterator
-		ClauseIter {
-			inner: Vec::from_iter(self.0.iter().map(Vec::from)).into_iter(),
-		}
+		// ClauseIter {
+		// 	inner: Vec::from_iter(self.0.iter().map(Vec::from)).into_iter(),
+		// }
+		todo!()
 	}
 }
 
