@@ -1,5 +1,7 @@
 use crate::{
 	helpers::{add_clauses_for, negate_cnf},
+	linear::log_enc_add_,
+	trace::new_var,
 	BddEncoder, Comparator, Unsatisfiable,
 };
 use itertools::Itertools;
@@ -14,7 +16,7 @@ use iset::IntervalMap;
 
 use crate::{ClauseDatabase, Coefficient, Literal};
 
-use super::{enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, IntVarOrd};
+use super::{enc::GROUND_BINARY_AT_LB, scm::SCM, IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
 
 // TODO usize -> intId struct
 
@@ -150,7 +152,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					[x, y] => Ok(vec![Lin::new(
 						&[x.clone(), y.clone()],
 						con.cmp,
-						C::zero(),
+						con.k,
 						None,
 					)]),
 					_ if con.is_tern() => Ok(vec![con]),
@@ -305,6 +307,119 @@ impl<C: Coefficient> From<Rc<RefCell<IntVar<C>>>> for Term<C> {
 impl<C: Coefficient> Term<C> {
 	pub fn new(c: C, x: Rc<RefCell<IntVar<C>>>) -> Self {
 		Self { c, x }
+	}
+
+	fn encode<DB: ClauseDatabase>(
+		&self,
+		db: &mut DB,
+		enc: &IntVarEnc<DB::Lit, C>,
+	) -> Result<IntVarEnc<DB::Lit, C>, Unsatisfiable> {
+		if self.c == C::zero() {
+			Ok(IntVarEnc::Const(C::zero()))
+		} else if self.c == C::one() {
+			Ok(enc.clone())
+		} else {
+			match enc {
+				IntVarEnc::Ord(o) => {
+					assert!(!self.c.is_negative(), "TODO: negative coefficients");
+					Ok(IntVarEnc::Ord(IntVarOrd::from_views(
+						db,
+						std::iter::once((self.lb(), None))
+							.chain(
+								o.xs.iter(..).map(|(iv, lit)| {
+									((iv.end - C::one()) * self.c, Some(lit.clone()))
+								}),
+							)
+							.tuple_windows()
+							.map(|((a, _), (b, lit))| ((a + C::one())..(b + C::one()), lit))
+							.collect(),
+						format!("{}*{}", self.c, o.lbl.clone()),
+					)))
+				}
+				IntVarEnc::Bin(x_enc) => {
+					let mut c = self.c.clone();
+					// TODO shift by zeroes..
+					let mut sh = C::zero();
+					while c.is_even() {
+						sh += C::one();
+						c = c.div(C::one() + C::one());
+					}
+					let scm = SCM
+						.iter()
+						.find_map(|(mul, scm)| (C::from(*mul).unwrap() == c).then_some(scm))
+						.unwrap_or(&"");
+
+					let mut ys = [(
+						C::zero(),
+						x_enc
+							.xs
+							.iter()
+							.cloned()
+							.map(LitOrConst::<DB::Lit>::from)
+							.collect::<Vec<_>>(),
+					)]
+					.into_iter()
+					.collect::<HashMap<_, _>>();
+
+					let bits = x_enc.lits();
+
+					let get_and_shift = |db: &mut DB,
+					                     ys: &mut HashMap<C, Vec<LitOrConst<DB::Lit>>>,
+					                     i: C,
+					                     sh: C| {
+						ys.entry(i)
+							.or_insert_with(|| {
+								num::iter::range(C::zero(), sh)
+									.map(|_| LitOrConst::Const(false))
+									.chain((0..bits).map(|_j| {
+										LitOrConst::<DB::Lit>::from(new_var!(
+											db,
+											format!("y_{i}_{_j}")
+										))
+									}))
+									.collect()
+							})
+							.clone()
+					};
+
+					fn parse_c<C: Coefficient>(i: &str) -> C {
+						i.parse::<C>()
+							.unwrap_or_else(|_| panic!("Could not parse dom value {i}"))
+					}
+					for rca in scm.split(";") {
+						if rca.is_empty() {
+							break;
+						}
+						let (z, x, add, y) = match rca.split(",").collect::<Vec<_>>()[..] {
+							[i, i1, sh1, add, i2, sh2] => (
+								get_and_shift(db, &mut ys, parse_c(i), C::zero()),
+								get_and_shift(db, &mut ys, parse_c(i1), parse_c(sh1)),
+								match add {
+									"+" => true,
+									"-" => false,
+									_ => unreachable!(),
+								},
+								get_and_shift(db, &mut ys, parse_c(i2), parse_c(sh2)),
+							),
+							_ => unreachable!(),
+						};
+
+						if add {
+							log_enc_add_(db, &x, &y, &crate::LimitComp::Equal, &z) // x+y=z
+						} else {
+							log_enc_add_(db, &y, &z, &crate::LimitComp::Equal, &x) // x-y=z == x=z+y
+						}?;
+					}
+
+					let xs = get_and_shift(db, &mut ys, self.c, sh);
+					Ok(IntVarEnc::Bin(IntVarBin::from_lits(
+						&xs,
+						format!("{c}*{}", self.x.borrow().lbl()),
+					)))
+				}
+				IntVarEnc::Const(c) => Ok(IntVarEnc::Const(*c * self.c)),
+			}
+		}
 	}
 
 	pub fn lb(&self) -> C {

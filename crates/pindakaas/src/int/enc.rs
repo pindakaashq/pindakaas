@@ -27,6 +27,15 @@ pub(crate) enum LitOrConst<Lit: Literal> {
 	Const(bool),
 }
 
+impl<Lit: Literal> From<Option<Lit>> for LitOrConst<Lit> {
+	fn from(item: Option<Lit>) -> Self {
+		match item {
+			Some(l) => LitOrConst::Lit(l),
+			None => LitOrConst::Const(false),
+		}
+	}
+}
+
 impl<Lit: Literal> From<Lit> for LitOrConst<Lit> {
 	fn from(item: Lit) -> Self {
 		LitOrConst::Lit(item)
@@ -48,6 +57,7 @@ impl<Lit: Literal> Display for LitOrConst<Lit> {
 	}
 }
 
+// TODO should be Not
 impl<Lit: Literal> Neg for LitOrConst<Lit> {
 	type Output = Self;
 
@@ -303,13 +313,22 @@ impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
-	pub(crate) xs: Vec<Lit>,
+	pub(crate) xs: Vec<LitOrConst<Lit>>,
 	lb: C,
 	ub: C,
 	lbl: String,
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
+	pub fn from_lits(xs: &[LitOrConst<Lit>], lbl: String) -> Self {
+		let bits = xs.len();
+		Self {
+			xs: xs.to_vec(),
+			lb: C::zero(),
+			ub: unsigned_binary_range_ub(bits),
+			lbl,
+		}
+	}
 	// TODO change to with_label or something
 	pub fn from_bounds<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
@@ -319,7 +338,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	) -> Self {
 		Self {
 			xs: (0..IntVar::required_bits(lb, ub))
-				.map(|_i| new_var!(db, format!("{}^{}", lbl, _i)))
+				.map(|_i| (new_var!(db, format!("{}^{}", lbl, _i))).into())
 				.collect(),
 			lb,
 			ub,
@@ -341,7 +360,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				.as_slice()
 		));
 		Self {
-			xs: terms.into_iter().map(|(l, _)| l).collect(),
+			xs: terms.into_iter().map(|(l, _)| l.into()).collect(),
 			lb: *lb, // TODO support non-zero
 			ub: *ub,
 			lbl,
@@ -424,7 +443,10 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				Some(
 					as_binary(v.into(), Some(self.lits()))
 						.into_iter()
-						.zip(self.xs.iter())
+						.zip(self.xs.iter().map(|xi| match xi {
+							LitOrConst::Lit(xi) => xi,
+							LitOrConst::Const(_) => todo!(),
+						}))
 						// if >=, find 0s, if <=, find 1s
 						.filter_map(|(b, x)| (b != geq).then_some(x))
 						.map(|x| if geq { x.clone() } else { x.negate() })
@@ -436,20 +458,28 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	}
 
 	fn as_lin_exp(&self) -> LinExp<Lit, C> {
+		let mut lb = self.lb;
 		let mut k = C::one();
 		let two = C::one() + C::one();
 		let terms = self
 			.xs
 			.iter()
-			.map(|x| {
-				let term = (x.clone(), k);
+			.filter_map(|x| {
+				let term = match x {
+					LitOrConst::Lit(l) => Some((l.clone(), k)),
+					LitOrConst::Const(true) => {
+						lb += k;
+						None
+					}
+					LitOrConst::Const(false) => None,
+				};
 				k *= two;
 				term
 			})
 			.collect::<Vec<_>>();
-		let lin_exp = LinExp::new().add_bounded_log_encoding(terms.as_slice(), self.lb, self.ub);
+		let lin_exp = LinExp::new().add_bounded_log_encoding(terms.as_slice(), lb, self.ub);
 		if GROUND_BINARY_AT_LB {
-			lin_exp.add_constant(self.lb)
+			lin_exp.add_constant(lb)
 		} else {
 			lin_exp
 		}
@@ -816,33 +846,6 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 			IntVarEnc::Ord(o) => o.lits(),
 			IntVarEnc::Bin(b) => b.lits(),
 			IntVarEnc::Const(_) => 0,
-		}
-	}
-
-	#[allow(dead_code)]
-	pub fn multiply<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB, rhs: C) -> Self {
-		assert!(!rhs.is_negative(), "TODO: negative coefficients");
-		if rhs == C::zero() {
-			IntVarEnc::Const(C::zero())
-		} else if rhs == C::one() {
-			self.clone()
-		} else {
-			match self {
-				IntVarEnc::Ord(o) => IntVarEnc::Ord(IntVarOrd::from_views(
-					db,
-					std::iter::once((self.lb(), None))
-						.chain(
-							o.xs.iter(..)
-								.map(|(iv, lit)| ((iv.end - C::one()) * rhs, Some(lit.clone()))),
-						)
-						.tuple_windows()
-						.map(|((a, _), (b, lit))| ((a + C::one())..(b + C::one()), lit))
-						.collect(),
-					format!("{}*{}", rhs, o.lbl.clone()),
-				)),
-				IntVarEnc::Bin(_) => todo!(),
-				IntVarEnc::Const(c) => IntVarEnc::Const(*c * rhs),
-			}
 		}
 	}
 

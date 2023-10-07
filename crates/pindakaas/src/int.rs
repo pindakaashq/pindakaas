@@ -3,6 +3,7 @@ mod display;
 mod enc;
 mod helpers;
 mod model;
+mod scm;
 
 use itertools::Itertools;
 use std::collections::BTreeSet;
