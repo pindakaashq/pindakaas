@@ -27,6 +27,11 @@ tracing = { version = "0.1", optional = true }
 minisat = { git = "https://github.com/luteberget/minisat-rs.git", optional = true } # waiting on release for minisat::Lit::var()
 splr = { version = "0.17", optional = true }
 
+[build-dependencies]
+itertools = "0.11"
+tar = "0.4"
+flate2 = "1.0"
+
 [dev-dependencies]
 splr = { version = "0.17", features = ["incremental_solver"] }
 traced_test = { path = "../traced_test" }
