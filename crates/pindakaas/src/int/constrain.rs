@@ -3,7 +3,7 @@ use itertools::Itertools;
 use crate::helpers::{add_clauses_for, negate_cnf};
 use crate::{
 	helpers::as_binary,
-	linear::{lex_geq_const, lex_leq_const, log_enc_add, log_enc_add_, LinExp},
+	linear::{lex_geq_const, lex_leq_const, log_enc_add_, LinExp},
 	trace::emit_clause,
 	Coefficient, Literal,
 };
@@ -165,12 +165,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					// put z_bin on the left, const on the right
 					Comparator::LessEq => lex_geq_const(
 						db,
-						z_bin
-							.xs
-							.iter()
-							.map(|x| Some(x.clone()))
-							.collect::<Vec<_>>()
-							.as_slice(),
+						&z_bin.xs,
 						if GROUND_BINARY_AT_LB {
 							lhs - z_bin.lb()
 						} else {
@@ -206,22 +201,15 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				}
 				.into();
 				match cmp {
-					Comparator::LessEq => lex_leq_const(
-						db,
-						x_bin
-							.xs
-							.iter()
-							.map(|x| Some(x.clone()))
-							.collect::<Vec<_>>()
-							.as_slice(),
-						rhs,
-						x_bin.lits(),
-					),
+					Comparator::LessEq => lex_leq_const(db, &x_bin.xs, rhs, x_bin.lits()),
 					Comparator::Equal => as_binary(rhs, Some(x_bin.lits()))
 						.into_iter()
 						.zip(x_bin.xs.iter())
-						.try_for_each(|(b, x)| {
-							emit_clause!(db, &[if b { x.clone() } else { x.negate() }])
+						.try_for_each(|(b, x)| match x {
+							LitOrConst::Lit(x) => {
+								emit_clause!(db, &[if b { x.clone() } else { x.negate() }])
+							}
+							LitOrConst::Const(x) => (*x == b).then_some(()).ok_or(Unsatisfiable),
 						}),
 					Comparator::GreaterEq => todo!(),
 				}
@@ -259,7 +247,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Bin(y_bin), IntVarEnc::Bin(z_bin)) => {
 				// y and z are also bin ~ use adder
 				match cmp {
-					Comparator::Equal => log_enc_add(
+					Comparator::Equal => log_enc_add_(
 						db,
 						&x_bin.xs,
 						&y_bin.xs,

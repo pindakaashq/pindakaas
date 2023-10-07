@@ -135,7 +135,12 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 
 		// Enforce less-than constraint
 		if lin.cmp == LimitComp::LessEq {
-			lex_leq_const(db, sum.as_slice(), lin.k.clone(), bits)?;
+			lex_leq_const(
+				db,
+				&sum.into_iter().map(|l| l.into()).collect::<Vec<_>>(),
+				lin.k.clone(),
+				bits,
+			)?;
 		}
 		Ok(())
 	}
@@ -148,10 +153,18 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 )]
 pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
-	x: &[Option<DB::Lit>],
+	x: &[LitOrConst<DB::Lit>],
 	k: PosCoeff<C>,
 	bits: usize,
 ) -> Result {
+	let x = x
+		.iter()
+		.map(|xi| match xi {
+			LitOrConst::Lit(xi) => Some(xi),
+			LitOrConst::Const(false) => None,
+			LitOrConst::Const(true) => todo!(),
+		})
+		.collect::<Vec<_>>();
 	let k = as_binary(k, Some(bits));
 	// For every zero bit in k:
 	// - either the `x` bit is also zero, or
@@ -174,10 +187,18 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 #[cfg_attr(feature = "trace", tracing::instrument(name = "lex_geq", skip_all))]
 pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
-	x: &[Option<DB::Lit>],
+	x: &[LitOrConst<DB::Lit>],
 	k: PosCoeff<C>,
 	bits: usize,
 ) -> Result {
+	let x = x
+		.iter()
+		.map(|xi| match xi {
+			LitOrConst::Lit(xi) => Some(xi.clone()),
+			LitOrConst::Const(false) => None,
+			LitOrConst::Const(true) => todo!(),
+		})
+		.collect::<Vec<_>>();
 	let k = as_binary(k, Some(bits));
 	for i in 0..bits {
 		if k[i] && x[i].is_some() {
@@ -195,7 +216,7 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 /// Constrains the slice `z`, to be the result of adding `x` to `y`, all encoded using the log encoding.
 ///
 /// TODO: Should this use the IntEncoding::Log input??
-pub(crate) fn log_enc_add<DB: ClauseDatabase>(
+pub(crate) fn _log_enc_add<DB: ClauseDatabase>(
 	db: &mut DB,
 	x: &[DB::Lit],
 	y: &[DB::Lit],

@@ -44,7 +44,6 @@ fn scm() -> Result<Vec<(Bits, String)>, std::io::Error> {
 				.collect_tuple()
 				.unwrap();
 			assert_eq!(bits, BITS);
-			// p!("{}", v);
 			(v, scm)
 		})
 		.sorted()
