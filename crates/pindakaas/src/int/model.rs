@@ -2,7 +2,7 @@ use crate::{
 	helpers::{add_clauses_for, negate_cnf},
 	linear::log_enc_add_,
 	trace::new_var,
-	BddEncoder, Comparator, Unsatisfiable,
+	BddEncoder, Comparator, LimitComp, Unsatisfiable,
 };
 use itertools::Itertools;
 use std::{
@@ -309,6 +309,7 @@ impl<C: Coefficient> Term<C> {
 		Self { c, x }
 	}
 
+	#[allow(dead_code)]
 	fn encode<DB: ClauseDatabase>(
 		&self,
 		db: &mut DB,
@@ -337,29 +338,22 @@ impl<C: Coefficient> Term<C> {
 					)))
 				}
 				IntVarEnc::Bin(x_enc) => {
-					let mut c = self.c.clone();
+					let mut c = self.c;
 					// TODO shift by zeroes..
 					let mut sh = C::zero();
 					while c.is_even() {
 						sh += C::one();
 						c = c.div(C::one() + C::one());
 					}
+
 					let scm = SCM
 						.iter()
 						.find_map(|(mul, scm)| (C::from(*mul).unwrap() == c).then_some(scm))
 						.unwrap_or(&"");
 
-					let mut ys = [(
-						C::zero(),
-						x_enc
-							.xs
-							.iter()
-							.cloned()
-							.map(LitOrConst::<DB::Lit>::from)
-							.collect::<Vec<_>>(),
-					)]
-					.into_iter()
-					.collect::<HashMap<_, _>>();
+					let mut ys = [(C::zero(), x_enc.xs(false))]
+						.into_iter()
+						.collect::<HashMap<_, _>>();
 
 					let bits = x_enc.lits();
 
@@ -386,11 +380,12 @@ impl<C: Coefficient> Term<C> {
 						i.parse::<C>()
 							.unwrap_or_else(|_| panic!("Could not parse dom value {i}"))
 					}
-					for rca in scm.split(";") {
+
+					for rca in scm.split(';') {
 						if rca.is_empty() {
 							break;
 						}
-						let (z, x, add, y) = match rca.split(",").collect::<Vec<_>>()[..] {
+						let (z, x, add, y) = match rca.split(',').collect::<Vec<_>>()[..] {
 							[i, i1, sh1, add, i2, sh2] => (
 								get_and_shift(db, &mut ys, parse_c(i), C::zero()),
 								get_and_shift(db, &mut ys, parse_c(i1), parse_c(sh1)),
@@ -405,9 +400,9 @@ impl<C: Coefficient> Term<C> {
 						};
 
 						if add {
-							log_enc_add_(db, &x, &y, &crate::LimitComp::Equal, &z) // x+y=z
+							log_enc_add_(db, &x, &y, &LimitComp::Equal, &z) // x+y=z
 						} else {
-							log_enc_add_(db, &y, &z, &crate::LimitComp::Equal, &x) // x-y=z == x=z+y
+							log_enc_add_(db, &y, &z, &LimitComp::Equal, &x) // x-y=z == x=z+y
 						}?;
 					}
 
@@ -790,11 +785,18 @@ impl<C: Coefficient> IntVar<C> {
 		*self.dom.last().unwrap()
 	}
 
-	pub fn required_bits(lb: C, ub: C) -> u32 {
+	/// Number of required (non-fixed) lits
+	pub fn required_lits(lb: C, ub: C) -> u32 {
 		if GROUND_BINARY_AT_LB {
 			C::zero().leading_zeros() - ((ub - lb).leading_zeros())
+		} else if !lb.is_negative() {
+			C::zero().leading_zeros() - ub.leading_zeros()
 		} else {
-			C::zero().leading_zeros() - (ub.leading_zeros())
+			let lb_two_comp = -(lb + C::one());
+			std::cmp::max(
+				C::zero().leading_zeros() - lb_two_comp.leading_zeros() + 1,
+				C::zero().leading_zeros() - ub.leading_zeros() + 1,
+			)
 		}
 	}
 

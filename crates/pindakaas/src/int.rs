@@ -17,8 +17,6 @@ use crate::{
 	linear::Constraint, CheckError, Coefficient, LinExp as PbLinExp, Literal, Unsatisfiable,
 };
 
-use self::enc::GROUND_BINARY_AT_LB;
-
 impl<Lit: Literal, C: Coefficient> PbLinExp<Lit, C> {
 	pub(crate) fn assign(&self, solution: &[Lit]) -> Result<C, CheckError<Lit>> {
 		let evaluate = |assignments: &Vec<(Lit, C, Lit)>| {
@@ -41,12 +39,9 @@ impl<Lit: Literal, C: Coefficient> PbLinExp<Lit, C> {
 				Some(Constraint::ImplicationChain) =>  assignments.iter().map(|(lit,_,a)| lit == a).tuple_windows().all(|(a, b)| a.cmp(&b).is_ge()),
 				Some(Constraint::Domain { lb, ub }) => {
 					// divide by first coeff to get int assignment
+                    // TODO what if there are two constraint groups?
 					let a = evaluate(&assignments).div(assignments[0].1);
-					if GROUND_BINARY_AT_LB {
-						a <= ub - lb
-					} else {
-						lb <= a && a <= ub
-					}
+                    lb <= a && a <= ub
 				},
 				None => true
 			};
@@ -73,7 +68,7 @@ pub(crate) fn display_dom<C: Coefficient>(dom: &BTreeSet<C>) -> String {
 			"{{{},..,{ub}}} ({}|{})",
 			dom.iter().take(ELIPSIZE).join(","),
 			dom.len(),
-			IntVar::required_bits(lb, ub)
+			IntVar::required_lits(lb, ub)
 		)
 	} else {
 		format!("{{{}}}", dom.iter().join(","))

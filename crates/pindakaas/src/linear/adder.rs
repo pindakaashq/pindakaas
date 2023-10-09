@@ -157,30 +157,18 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 	k: PosCoeff<C>,
 	bits: usize,
 ) -> Result {
-	let x = x
-		.iter()
-		.map(|xi| match xi {
-			LitOrConst::Lit(xi) => Some(xi),
-			LitOrConst::Const(false) => None,
-			LitOrConst::Const(true) => todo!(),
-		})
-		.collect::<Vec<_>>();
-	let k = as_binary(k, Some(bits));
 	// For every zero bit in k:
 	// - either the `x` bit is also zero, or
 	// - a higher `x` bit is zero that was one in k.
-	for i in 0..bits {
-		if !k[i] && x[i].is_some() {
-			emit_clause!(
-				db,
-				&(i..bits)
-					.filter_map(|j| if j == i || k[j] { x[j].clone() } else { None })
-					.map(|lit| lit.negate())
-					.collect::<Vec<DB::Lit>>()
-			)?;
-		}
-	}
-	Ok(())
+	let k = as_binary(k, Some(bits));
+	(0..bits).filter(|i| !k[*i]).try_for_each(|i| {
+		clause(
+			db,
+			&(i..bits)
+				.filter_map(|j| (j == i || k[j]).then(|| -x[j].clone()))
+				.collect::<Vec<_>>(),
+		)
+	})
 }
 
 /// Uses lexicographic constraint to constrain x:B >= k
@@ -191,26 +179,15 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 	k: PosCoeff<C>,
 	bits: usize,
 ) -> Result {
-	let x = x
-		.iter()
-		.map(|xi| match xi {
-			LitOrConst::Lit(xi) => Some(xi.clone()),
-			LitOrConst::Const(false) => None,
-			LitOrConst::Const(true) => todo!(),
-		})
-		.collect::<Vec<_>>();
 	let k = as_binary(k, Some(bits));
-	for i in 0..bits {
-		if k[i] && x[i].is_some() {
-			emit_clause!(
-				db,
-				&(i..bits)
-					.filter_map(|j| if j == i || !k[j] { x[j].clone() } else { None })
-					.collect::<Vec<DB::Lit>>()
-			)?;
-		}
-	}
-	Ok(())
+	(0..bits).filter(|i| k[*i]).try_for_each(|i| {
+		clause(
+			db,
+			&(i..bits)
+				.filter_map(|j| (j == i || !k[j]).then(|| x[j].clone()))
+				.collect::<Vec<_>>(),
+		)
+	})
 }
 
 /// Constrains the slice `z`, to be the result of adding `x` to `y`, all encoded using the log encoding.
@@ -282,6 +259,11 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 				.map(|_i| LitOrConst::Lit(new_var!(db, crate::trace::subscripted_name("c", _i))))
 				.chain(std::iter::once(LitOrConst::Const(true)))
 				.collect::<Vec<_>>();
+
+			assert!(
+				y.iter().all(|yi| matches!(yi, LitOrConst::Const(false))),
+				"Expected {y:?} to be zero for x<=z lex comparison"
+			);
 
 			// higher i -> more significant
 			for i in 0..n {

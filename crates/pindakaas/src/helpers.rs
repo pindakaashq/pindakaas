@@ -14,12 +14,23 @@ pub(crate) fn is_powers_of_two<C: Coefficient>(coefs: &[C]) -> bool {
 		.all(|(i, c)| c == &(num::pow(C::from(2).unwrap(), i) * mult))
 }
 
-pub(crate) fn unsigned_binary_range_ub<C: Coefficient>(bits: usize) -> C {
-	(0..bits).fold(C::zero(), |a, i| a + (num::pow(C::from(2).unwrap(), i)))
+/// Two's complement encoding range: -(2^(bits-1))..2^(bits-1)-1
+pub(crate) fn two_comp_bounds<C: Coefficient>(bits: usize) -> (C, C) {
+	let ub = num::pow(C::from(2).unwrap(), bits - 1); // value of most significant (sign) bit
+	(
+		-ub,           // just sign bit (1000..)
+		ub - C::one(), // all except sign bits = most significant bit (10000..) - 1 = 01111..
+	)
 }
+
+/// 2^bits - 1
+pub(crate) fn unsigned_binary_range_ub<C: Coefficient>(bits: usize) -> C {
+	num::pow(C::from(2).unwrap(), bits) - C::one()
+}
+
 /// Convert `k` to unsigned binary in `bits`
 pub(crate) fn as_binary<C: Coefficient>(k: PosCoeff<C>, bits: Option<usize>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| IntVar::required_bits(C::zero(), *k) as usize);
+	let bits = bits.unwrap_or_else(|| IntVar::required_lits(C::zero(), *k) as usize);
 	assert!(
 		*k <= unsigned_binary_range_ub(bits),
 		"{} cannot be represented in {bits} bits",
