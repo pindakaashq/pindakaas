@@ -1,12 +1,8 @@
 use itertools::Itertools;
 
 use crate::helpers::{add_clauses_for, negate_cnf};
-use crate::{
-	helpers::as_binary,
-	linear::{lex_geq_const, lex_leq_const, log_enc_add_, LinExp},
-	trace::emit_clause,
-	Coefficient, Literal,
-};
+use crate::linear::log_enc_add_;
+use crate::{helpers::as_binary, linear::LinExp, Coefficient, Literal};
 use crate::{CheckError, Checker, ClauseDatabase, Comparator, Encoder, Unsatisfiable};
 use std::fmt;
 
@@ -163,85 +159,47 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				let lhs = *x_con + *y_con;
 				match cmp {
 					// put z_bin on the left, const on the right
-					Comparator::LessEq => lex_geq_const(
-						db,
-						&z_bin.xs,
-						if GROUND_BINARY_AT_LB {
-							lhs - z_bin.lb()
-						} else {
-							lhs
-						}
-						.into(),
-						z_bin.lits(),
-					),
-					Comparator::Equal => self.encode(
-						db,
-						&TernLeConstraint {
-							x: z,
-							y: &IntVarEnc::Const(C::zero()),
-							cmp: &(*cmp).clone(),
-							z: &IntVarEnc::Const(lhs),
-						},
-					),
-					Comparator::GreaterEq => todo!(),
+					Comparator::LessEq => z_bin.encode_geq(db, lhs, false),
+					Comparator::Equal => z_bin.encode_eq(db, lhs),
+					Comparator::GreaterEq => z_bin.encode_leq(db, lhs, false),
 				}
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y_con), IntVarEnc::Const(z_con))
 			| (IntVarEnc::Const(y_con), IntVarEnc::Bin(x_bin), IntVarEnc::Const(z_con)) => {
 				// and rest is const ~ lex constraint
-				// assert!(
-				// 	cmp == &Comparator::LessEq,
-				// 	"Only support <= for x:B+y:Constant ? z:Constant"
-				// );
-
-				let rhs = if GROUND_BINARY_AT_LB {
-					*z_con - *y_con - x_bin.lb()
-				} else {
-					*z_con - *y_con
-				}
-				.into();
+				let rhs = *z_con - *y_con;
 				match cmp {
-					Comparator::LessEq => lex_leq_const(db, &x_bin.xs, rhs, x_bin.lits()),
-					Comparator::Equal => as_binary(rhs, Some(x_bin.lits()))
-						.into_iter()
-						.zip(x_bin.xs.iter())
-						.try_for_each(|(b, x)| match x {
-							LitOrConst::Lit(x) => {
-								emit_clause!(db, &[if b { x.clone() } else { x.negate() }])
-							}
-							LitOrConst::Const(x) => (*x == b).then_some(()).ok_or(Unsatisfiable),
-						}),
+					Comparator::LessEq => x_bin.encode_leq(db, rhs, false),
+					Comparator::Equal => x_bin.encode_eq(db, rhs),
 					Comparator::GreaterEq => todo!(),
 				}
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y_const), IntVarEnc::Bin(z_bin))
 			| (IntVarEnc::Const(y_const), IntVarEnc::Bin(x_bin), IntVarEnc::Bin(z_bin)) => {
-				let x_bin = if matches!(cmp, Comparator::LessEq) {
+				let (x_bin, y_const) = if matches!(cmp, Comparator::LessEq) {
 					let x_bin = x_bin.add(db, self, *y_const)?;
 					x_bin.consistent(db)?;
-					x_bin
+					(x_bin, C::zero())
 				} else {
-					x_bin.clone()
+					(
+						x_bin.clone(),
+						// TODO unclear why this.
+						if GROUND_BINARY_AT_LB {
+							C::zero()
+						} else {
+							*y_const
+						},
+					)
 				};
 				log_enc_add_(
 					db,
-					&x_bin
-						.xs
-						.iter()
-						.cloned()
-						.map(LitOrConst::from)
-						.collect::<Vec<_>>(),
-					&as_binary((*y_const).into(), Some(x_bin.lits()))
+					&x_bin.xs(false).into_iter().collect::<Vec<_>>(),
+					&as_binary(y_const.into(), Some(x_bin.lits()))
 						.into_iter()
 						.map(LitOrConst::Const)
 						.collect::<Vec<_>>(),
 					&(*cmp).try_into().unwrap(),
-					&z_bin
-						.xs
-						.iter()
-						.cloned()
-						.map(LitOrConst::from)
-						.collect::<Vec<_>>(),
+					&z_bin.xs(false).into_iter().collect::<Vec<_>>(),
 				)
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Bin(y_bin), IntVarEnc::Bin(z_bin)) => {
@@ -249,10 +207,10 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				match cmp {
 					Comparator::Equal => log_enc_add_(
 						db,
-						&x_bin.xs,
-						&y_bin.xs,
+						&x_bin.xs(false),
+						&y_bin.xs(false),
 						&(*cmp).try_into().unwrap(),
-						&z_bin.xs,
+						&z_bin.xs(false),
 					),
 					Comparator::LessEq => {
 						let xy = x.add(db, self, y, None, Some(z.ub()))?;
@@ -415,12 +373,23 @@ pub mod tests {
 	use super::*;
 	use crate::{
 		helpers::tests::{assert_sol, assert_unsat, TestDB},
-		int::{IntVar, IntVarOrd},
+		int::{enc::GROUND_BINARY_AT_LB, IntVar, IntVarOrd},
 	};
 	use iset::{interval_set, IntervalSet};
 
 	#[cfg(feature = "trace")]
 	use traced_test::test;
+
+	impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
+		/// Return number of lits in encoding
+		pub(crate) fn lits(&self) -> usize {
+			match self {
+				IntVarEnc::Ord(o) => o.lits(),
+				IntVarEnc::Bin(b) => b.lits(),
+				IntVarEnc::Const(_) => 0,
+			}
+		}
+	}
 
 	macro_rules! test_int_lin {
 		($encoder:expr,$x:expr,$y:expr,$cmp:expr,$z:expr) => {
@@ -665,55 +634,99 @@ pub mod tests {
 		assert_eq!(c.geq(45..46), vec![vec![]]);
 	}
 
-	// TODO adapt to 0-grounded binary
-	// #[test]
-	fn _bin_1_test() {
+	#[test]
+	fn required_bits_test() {
+		if GROUND_BINARY_AT_LB {
+			assert_eq!(IntVar::required_lits(2, 9), 3); // 8 vals => 3 bits
+			assert_eq!(IntVar::required_lits(2, 10), 4); // 9 vals => 4 bits
+			assert_eq!(IntVar::required_lits(3, 10), 3); // 8 vals => 3 bits
+		} else {
+			assert_eq!(IntVar::required_lits(2, 9), 4);
+			assert_eq!(IntVar::required_lits(2, 10), 4);
+			assert_eq!(IntVar::required_lits(3, 10), 4);
+
+			// neg lb
+			assert_eq!(IntVar::required_lits(-7, 2), 4); // -7 = 1001 => 4 bits
+			assert_eq!(IntVar::required_lits(-7, 9), 5); // 9 > 7 => 5 bits
+			assert_eq!(IntVar::required_lits(2, 9), 4); // 4 b/c no sign bit
+		}
+	}
+
+	#[test]
+	fn bin_as_lin_exp_test() {
+		if GROUND_BINARY_AT_LB {
+			let mut db = TestDB::new(0);
+			let x = get_bin_x::<_, i32>(&mut db, 2, 12, true, "x".to_string());
+			let x_lin: LinExp<i32, i32> = LinExp::from(&x);
+
+			assert_eq!(x_lin.assign(&[-1, -2, -3, -4]), Ok(2));
+			assert_eq!(x_lin.assign(&[1, -2, -3, -4]), Ok(2 + 1));
+			assert_eq!(x_lin.assign(&[1, 2, -3, -4]), Ok(2 + 3));
+			assert_eq!(x_lin.assign(&[-1, 2, -3, 4]), Ok(2 + 10));
+			assert_eq!(
+				x_lin.assign(&[1, 2, -3, 4]),
+				Err(CheckError::Unsatisfiable(Unsatisfiable)) // 2 + 11 = 13
+			);
+			assert_eq!(
+				x_lin.assign(&[1, 2, 3, 4]),
+				Err(CheckError::Unsatisfiable(Unsatisfiable))
+			);
+		} else {
+			let mut db = TestDB::new(0);
+			let x = get_bin_x::<_, i32>(&mut db, -4, 12, true, "x".to_string());
+			let x_lin: LinExp<i32, i32> = LinExp::from(&x);
+			assert_eq!(x_lin.assign(&[-1, -2, -3, -4, -5]), Ok(0));
+			assert_eq!(x_lin.assign(&[-1, 2, -3, -4, -5]), Ok(2));
+			assert_eq!(x_lin.assign(&[1, 2, -3, -4, -5]), Ok(3));
+			assert_eq!(x_lin.assign(&[1, -2, 3, -4, -5]), Ok(5));
+			assert_eq!(x_lin.assign(&[-1, -2, 3, 4, -5]), Ok(12));
+			assert_eq!(
+				x_lin.assign(&[1, -2, 3, 4, -5]), // 13
+				Err(CheckError::Unsatisfiable(Unsatisfiable))
+			);
+			assert_eq!(x_lin.assign(&[1, 2, 3, -4, -5]), Ok(7));
+			assert_eq!(x_lin.assign(&[-1, -2, 3, 4, 5]), Ok(-4));
+		}
+	}
+
+	#[test]
+	fn bin_1_test() {
 		let mut db = TestDB::new(0);
-		let x = get_bin_x::<_, i32>(&mut db, 2, 12, true, "x".to_string());
-		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
+		let x = if GROUND_BINARY_AT_LB {
+			get_bin_x::<_, i32>(&mut db, 2, 12, true, "x".to_string())
+		} else {
+			get_bin_x::<_, i32>(&mut db, -4, 6, true, "x".to_string())
+		};
 
-		assert_eq!(x.lits(), 4);
-		assert_eq!(x.lb(), 2);
-		assert_eq!(x.ub(), 12);
+		if GROUND_BINARY_AT_LB {
+			assert_eq!(x.lits(), 4);
+			assert_eq!(x.lb(), 2);
+			assert_eq!(x.ub(), 12);
 
-		assert_eq!(IntVar::required_bits(2, 9), 3); // 8 vals => 3 bits
-		assert_eq!(IntVar::required_bits(2, 10), 4); // 9 vals => 4 bits
-		assert_eq!(IntVar::required_bits(3, 10), 3); // 8 vals => 3 bits
+			// geq looks zeroes of at (start+1..) end-2 - lb
+			assert_eq!(x.geq(3..4), vec![vec![1, 2, 3, 4]]); // 4-2 - 2 = 4 == 0000 (right-to-left!)
+			assert_eq!(x.geq(7..8), vec![vec![1, 2, 4]]); // 8-2 - 2 = 4 == 0100
+			assert_eq!(x.geq(7..9), vec![vec![1, 2, 4], vec![2, 4]]); // and 9-2 -2 = 5 = 0101
+			assert_eq!(x.geq(5..6), vec![vec![1, 3, 4]]); // 6-2 - 2 = 2 == 0010
+			assert_eq!(x.geq(6..7), vec![vec![3, 4]]); // 7-2 - 2 = 3 == 0011
 
-		// geq looks zeroes of at (start+1..) end-2 - lb
-		assert_eq!(x.geq(3..4), vec![vec![1, 2, 3, 4]]); // 4-2 - 2 = 4 == 0000 (right-to-left!)
-		assert_eq!(x.geq(7..8), vec![vec![1, 2, 4]]); // 8-2 - 2 = 4 == 0100
-		assert_eq!(x.geq(7..9), vec![vec![1, 2, 4], vec![2, 4]]); // and 9-2 -2 = 5 = 0101
-		assert_eq!(x.geq(5..6), vec![vec![1, 3, 4]]); // 6-2 - 2 = 2 == 0010
-		assert_eq!(x.geq(6..7), vec![vec![3, 4]]); // 7-2 - 2 = 3 == 0011
+			// leq looks at ones at start+1 - lb?
+			assert_eq!(x.leq(6..7), vec![vec![-1, -3]]); // 6+1 - 2 = 5 == 0101
+			assert_eq!(x.leq(6..8), vec![vec![-1, -3], vec![-2, -3]]); // and 7+1 - 2 = 6 == 0110
+			assert_eq!(
+				x.leq(6..9),
+				vec![vec![-1, -3], vec![-2, -3], vec![-1, -2, -3]]
+			); // and 8+1 -2 = 7 == 0111
+			assert_eq!(x.leq(5..8), vec![vec![-3], vec![-1, -3], vec![-2, -3]]); // and 5+1 -2 = 4 == 0100
 
-		// leq looks at ones at start+1 - lb?
-		assert_eq!(x.leq(6..7), vec![vec![-1, -3]]); // 6+1 - 2 = 5 == 0101
-		assert_eq!(x.leq(6..8), vec![vec![-1, -3], vec![-2, -3]]); // and 7+1 - 2 = 6 == 0110
-		assert_eq!(
-			x.leq(6..9),
-			vec![vec![-1, -3], vec![-2, -3], vec![-1, -2, -3]]
-		); // and 8+1 -2 = 7 == 0111
-		assert_eq!(x.leq(5..8), vec![vec![-3], vec![-1, -3], vec![-2, -3]]); // and 5+1 -2 = 4 == 0100
+			assert_eq!(x.geq(1..5), vec![vec![1, 2, 3, 4], vec![2, 3, 4]]); // trues and 0000 and 0001
+			assert_eq!(x.geq(15..20), vec![vec![1, 2], vec![2], vec![1], vec![]]); // 16-2 - 2 = 12 = 1100, 1101, 1110, false
 
-		assert_eq!(x.geq(1..5), vec![vec![1, 2, 3, 4], vec![2, 3, 4]]); // trues and 0000 and 0001
-		assert_eq!(x.geq(15..20), vec![vec![1, 2], vec![2], vec![1], vec![]]); // 16-2 - 2 = 12 = 1100, 1101, 1110, false
-
-		assert_eq!(x.leq(-2..3), vec![vec![], vec![-1]]); //
-		assert_eq!(x.leq(15..20), vec![vec![-2, -3, -4], vec![-1, -2, -3, -4]]); // 15+1 -2 = 14 = 1110, 1111, true
-
-		assert_eq!(x_lin.assign(&[-1, -2, -3, -4]), Ok(2));
-		assert_eq!(x_lin.assign(&[1, -2, -3, -4]), Ok(2 + 1));
-		assert_eq!(x_lin.assign(&[1, 2, -3, -4]), Ok(2 + 3));
-		assert_eq!(x_lin.assign(&[-1, 2, -3, 4]), Ok(2 + 10));
-		assert_eq!(
-			x_lin.assign(&[1, 2, -3, 4]),
-			Err(CheckError::Unsatisfiable(Unsatisfiable)) // 2 + 11 = 13
-		);
-		assert_eq!(
-			x_lin.assign(&[1, 2, 3, 4]),
-			Err(CheckError::Unsatisfiable(Unsatisfiable))
-		);
+			assert_eq!(x.leq(-2..3), vec![vec![], vec![-1]]); //
+			assert_eq!(x.leq(15..20), vec![vec![-2, -3, -4], vec![-1, -2, -3, -4]]); // 15+1 -2 = 14 = 1110, 1111, true
+		} else {
+			// TODO
+		}
 
 		let tern = TernLeConstraint {
 			x: &x,

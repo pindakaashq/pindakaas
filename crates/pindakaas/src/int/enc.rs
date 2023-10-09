@@ -5,14 +5,15 @@ use super::display_dom;
 use itertools::Itertools;
 use std::fmt::Display;
 
+use crate::helpers::{two_comp_bounds, unsigned_binary_range_ub};
 use crate::int::{IntVar, TernLeConstraint, TernLeEncoder};
+use crate::linear::{lex_geq_const, lex_leq_const};
 use crate::Comparator;
 use crate::{
-	helpers::{as_binary, is_powers_of_two, unsigned_binary_range_ub},
+	helpers::{as_binary, is_powers_of_two},
 	linear::{LinExp, Part},
 	trace::{emit_clause, new_var},
-	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
-	Unsatisfiable,
+	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff,
 };
 use std::{
 	collections::HashSet,
@@ -73,9 +74,10 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarOrd<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}:O ∈ {}",
+			"{}:O ∈ {} [{}]",
 			self.lbl,
-			display_dom(&self.dom().iter(..).map(|d| d.end - C::one()).collect())
+			display_dom(&self.dom().iter(..).map(|d| d.end - C::one()).collect()),
+			self.lits()
 		)
 	}
 }
@@ -167,7 +169,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	}
 
 	#[allow(dead_code)]
-	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
+	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> crate::Result {
 		ImplicationChainEncoder::default()._encode(db, &self.consistency())
 	}
 
@@ -288,7 +290,7 @@ impl ImplicationChainEncoder {
 		&mut self,
 		db: &mut DB,
 		ic: &ImplicationChainConstraint<DB::Lit>,
-	) -> Result {
+	) -> crate::Result {
 		for (a, b) in ic.lits.iter().tuple_windows() {
 			emit_clause!(db, &[b.negate(), a.clone()])?
 		}
@@ -298,14 +300,14 @@ impl ImplicationChainEncoder {
 
 impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
 	type Lit = Lit;
-	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
+	fn check(&self, solution: &[Self::Lit]) -> crate::Result<(), CheckError<Self::Lit>> {
 		self.lits.iter().tuple_windows().try_for_each(|(a, b)| {
 			let a = Self::assign(a, solution);
 			let b = Self::assign(b, solution);
 			if b.is_negated() || !a.is_negated() {
 				Ok(())
 			} else {
-				Err(CheckError::Unsatisfiable(Unsatisfiable))
+				Err(CheckError::Unsatisfiable(crate::Unsatisfiable))
 			}
 		})
 	}
@@ -313,7 +315,7 @@ impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
-	pub(crate) xs: Vec<LitOrConst<Lit>>,
+	xs: Vec<LitOrConst<Lit>>,
 	lb: C,
 	ub: C,
 	lbl: String,
@@ -321,14 +323,20 @@ pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	pub fn from_lits(xs: &[LitOrConst<Lit>], lbl: String) -> Self {
+		if GROUND_BINARY_AT_LB {
+			panic!("Cannot create offset binary encoding `from_lits` without a given lower bound.")
+		}
+
 		let bits = xs.len();
+		let (lb, ub) = two_comp_bounds(bits);
 		Self {
 			xs: xs.to_vec(),
-			lb: C::zero(),
-			ub: unsigned_binary_range_ub(bits),
+			lb,
+			ub,
 			lbl,
 		}
 	}
+
 	// TODO change to with_label or something
 	pub fn from_bounds<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
@@ -337,8 +345,11 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		lbl: String,
 	) -> Self {
 		Self {
-			xs: (0..IntVar::required_bits(lb, ub))
+			xs: (0..IntVar::required_lits(lb, ub))
 				.map(|_i| (new_var!(db, format!("{}^{}", lbl, _i))).into())
+				.chain(
+					(!GROUND_BINARY_AT_LB && !lb.is_negative()).then_some(LitOrConst::Const(false)),
+				)
 				.collect(),
 			lb,
 			ub,
@@ -360,35 +371,93 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				.as_slice()
 		));
 		Self {
-			xs: terms.into_iter().map(|(l, _)| l.into()).collect(),
+			xs: terms
+				.into_iter()
+				.map(|(l, _)| l.into())
+				.chain([LitOrConst::Const(false)])
+				.collect(),
 			lb: *lb, // TODO support non-zero
 			ub: *ub,
 			lbl,
 		}
 	}
 
-	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
-		let mut encoder = TernLeEncoder::default();
-		if !GROUND_BINARY_AT_LB {
-			encoder.encode(
-				db,
-				&TernLeConstraint {
-					x: &IntVarEnc::Const(self.lb),
-					y: &IntVarEnc::Const(C::zero()),
-					cmp: &Comparator::LessEq,
-					z: &IntVarEnc::Bin(self.clone()),
-				},
-			)?;
+	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> crate::Result {
+		self.encode_geq(db, self.lb, true)?;
+		self.encode_leq(db, self.ub, true)?;
+		Ok(())
+	}
+
+	/// Normalize k to its value in unsigned binary relative to this encoding
+	pub(crate) fn normalize(&self, k: C) -> C {
+		if GROUND_BINARY_AT_LB {
+			k - self.lb()
+		} else {
+			// encoding is grounded at the lb of the two comp representation
+			k - two_comp_bounds(self.bits()).0
 		}
-		encoder.encode(
-			db,
-			&TernLeConstraint {
-				x: &IntVarEnc::Bin(self.clone()),
-				y: &IntVarEnc::Const(C::zero()),
-				cmp: &Comparator::LessEq,
-				z: &IntVarEnc::Const(self.ub),
-			},
-		)
+	}
+
+	pub(crate) fn encode_eq<DB: ClauseDatabase<Lit = Lit>>(
+		&self,
+		db: &mut DB,
+		k: C,
+	) -> crate::Result {
+		as_binary(self.normalize(k).into(), Some(self.bits()))
+			.into_iter()
+			.zip(self.xs(true).iter())
+			.try_for_each(|(b, x)| match x {
+				LitOrConst::Lit(x) => {
+					emit_clause!(db, &[if b { x.clone() } else { x.negate() }])
+				}
+				LitOrConst::Const(x) => (*x == b).then_some(()).ok_or(crate::Unsatisfiable),
+			})
+	}
+
+	pub(crate) fn encode_leq<DB: ClauseDatabase<Lit = Lit>>(
+		&self,
+		db: &mut DB,
+		k: C,
+		force: bool,
+	) -> crate::Result {
+		if k < self.lb() {
+			Err(crate::Unsatisfiable)
+		} else if k >= self.ub() && !force {
+			Ok(())
+		} else {
+			lex_leq_const(db, &self.xs(true), self.normalize(k).into(), self.bits())
+		}
+	}
+
+	pub(crate) fn encode_geq<DB: ClauseDatabase<Lit = Lit>>(
+		&self,
+		db: &mut DB,
+		k: C,
+		force: bool,
+	) -> crate::Result {
+		if k > self.ub() {
+			Err(crate::Unsatisfiable)
+		} else if k <= self.lb() && !force {
+			Ok(())
+		} else {
+			lex_geq_const(db, &self.xs(true), self.normalize(k).into(), self.bits())
+		}
+	}
+
+	/// Get bits; option to invert the sign bit to create an unsigned binary representation offset by `-2^(k-1)`
+	pub(crate) fn xs(&self, to_unsigned: bool) -> Vec<LitOrConst<Lit>> {
+		if GROUND_BINARY_AT_LB {
+			self.xs.clone()
+		} else {
+			self.xs[..self.xs.len() - 1]
+				.iter()
+				.cloned()
+				.chain({
+					let sign = self.xs.last().unwrap().clone();
+					[if to_unsigned { -sign } else { sign }]
+				})
+				.collect()
+		}
 	}
 
 	fn div(&self, _: &C) -> IntVarEnc<Lit, C> {
@@ -418,16 +487,12 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	}
 
 	fn ineq(&self, v: Range<C>, geq: bool) -> Vec<Vec<Lit>> {
-		// TODO could *maybe* be domain lb/ub
-		let v = if GROUND_BINARY_AT_LB {
-			(v.start - self.lb())..(v.end - self.lb())
-		} else {
-			v
-		};
+		let v = self.normalize(v.start)..self.normalize(v.end);
 
 		// The range 0..(2^n)-1 covered by the (unsigned) binary representation
+		// let (range_lb, range_ub) = two_comp_bounds(self.bits());
 		let range_lb = C::zero();
-		let range_ub = unsigned_binary_range_ub::<C>(self.lits());
+		let range_ub = unsigned_binary_range_ub::<C>(self.bits());
 
 		num::iter::range(
 			std::cmp::max(range_lb - C::one(), v.start),
@@ -440,35 +505,38 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			} else if v > range_ub {
 				geq.then_some(vec![])
 			} else {
-				Some(
-					as_binary(v.into(), Some(self.lits()))
-						.into_iter()
-						.zip(self.xs.iter().map(|xi| match xi {
-							LitOrConst::Lit(xi) => xi,
-							LitOrConst::Const(_) => todo!(),
-						}))
-						// if >=, find 0s, if <=, find 1s
-						.filter_map(|(b, x)| (b != geq).then_some(x))
-						.map(|x| if geq { x.clone() } else { x.negate() })
-						.collect(),
-				)
+				as_binary(v.into(), Some(self.bits()))
+					.into_iter()
+					.zip(self.xs(true).into_iter())
+					// if >=, find 0's, if <=, find 1's
+					.filter_map(|(b, x)| (b != geq).then_some(x))
+					// if <=, negate 1's to not 1's
+					.map(|x| if geq { x } else { -x })
+					// filter out fixed literals (possibly satisfying clause)
+					.filter_map(|x| match x {
+						LitOrConst::Lit(x) => Some(Ok(x)),
+						LitOrConst::Const(true) => Some(Err(())), // clause satisfied
+						LitOrConst::Const(false) => None,         // literal falsified
+					})
+					.collect::<Result<Vec<_>, _>>()
+					.ok()
 			}
 		})
 		.collect()
 	}
 
 	fn as_lin_exp(&self) -> LinExp<Lit, C> {
-		let mut lb = self.lb;
 		let mut k = C::one();
+		let mut add = C::zero(); // resulting from fixed terms
 		let two = C::one() + C::one();
 		let terms = self
-			.xs
-			.iter()
+			.xs(true)
+			.into_iter()
 			.filter_map(|x| {
 				let term = match x {
-					LitOrConst::Lit(l) => Some((l.clone(), k)),
+					LitOrConst::Lit(l) => Some((l, k)),
 					LitOrConst::Const(true) => {
-						lb += k;
+						add += k;
 						None
 					}
 					LitOrConst::Const(false) => None,
@@ -477,15 +545,33 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				term
 			})
 			.collect::<Vec<_>>();
-		let lin_exp = LinExp::new().add_bounded_log_encoding(terms.as_slice(), lb, self.ub);
-		if GROUND_BINARY_AT_LB {
-			lin_exp.add_constant(lb)
+
+		let offset: C = if GROUND_BINARY_AT_LB {
+			self.lb
 		} else {
-			lin_exp
-		}
+			two_comp_bounds(self.bits()).0
+		};
+
+		let lin_exp = LinExp::new().add_bounded_log_encoding(
+			terms.as_slice(),
+			// The Domain constraint bounds only account for the unfixed part of the offset binary notation
+			self.lb - offset - add,
+			self.ub - offset - add,
+		);
+
+		// The offset and the fixed value `add` are added to the constant
+		lin_exp.add_constant(add + offset)
 	}
 
 	pub(crate) fn lits(&self) -> usize {
+		self.xs
+			.iter()
+			.filter(|x| matches!(x, LitOrConst::Lit(_)))
+			.count()
+	}
+
+	/// Number of bits in the encoding
+	pub(crate) fn bits(&self) -> usize {
 		self.xs.len()
 	}
 
@@ -494,7 +580,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		db: &mut DB,
 		encoder: &mut TernLeEncoder,
 		y: C,
-	) -> Result<Self> {
+	) -> crate::Result<Self> {
 		if y.is_zero() {
 			Ok(self.clone())
 		} else if GROUND_BINARY_AT_LB {
@@ -642,9 +728,9 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		db: &mut DB,
 		dom: &[C],
 		lbl: String,
-	) -> Result<IntVarEnc<DB::Lit, C>> {
+	) -> crate::Result<IntVarEnc<DB::Lit, C>> {
 		match dom {
-			[] => Err(Unsatisfiable),
+			[] => Err(crate::Unsatisfiable),
 			[d] => Ok(IntVarEnc::Const(*d)),
 			dom => Ok(IntVarOrd::from_dom(db, dom, lbl).into()),
 		}
@@ -659,7 +745,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		ub: Option<C>,
 		// cmp: &LimitComp,
 		// enc: &'a mut dyn Encoder<DB, TernLeConstraint<'a, DB, C>>,
-	) -> Result<IntVarEnc<Lit, C>> {
+	) -> crate::Result<IntVarEnc<Lit, C>> {
 		let comp_lb = self.lb() + y.lb();
 		let lb = std::cmp::max(lb.unwrap_or(comp_lb), comp_lb);
 
@@ -804,7 +890,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		}
 	}
 
-	pub(crate) fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
+	pub(crate) fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> crate::Result {
 		match self {
 			IntVarEnc::Ord(o) => o.consistent(db),
 			IntVarEnc::Bin(b) => b.consistent(db),
@@ -839,17 +925,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		}
 	}
 
-	/// Return number of lits in encoding
-	#[allow(dead_code)]
-	pub(crate) fn lits(&self) -> usize {
-		match self {
-			IntVarEnc::Ord(o) => o.lits(),
-			IntVarEnc::Bin(b) => b.lits(),
-			IntVarEnc::Const(_) => 0,
-		}
-	}
-
-	pub(crate) fn assign(&self, solution: &[Lit]) -> Result<C, CheckError<Lit>> {
+	pub(crate) fn assign(&self, solution: &[Lit]) -> crate::Result<C, CheckError<Lit>> {
 		LinExp::from(self).assign(solution)
 	}
 }
