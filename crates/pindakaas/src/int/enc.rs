@@ -388,6 +388,15 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		Ok(())
 	}
 
+	pub(crate) fn complement(self) -> Self {
+		Self {
+			xs: self.xs.into_iter().map(|x| -x).collect(),
+			lb: C::one() - self.ub,
+			ub: C::one() - self.lb,
+			lbl: format!("!{}", self.lbl),
+		}
+	}
+
 	/// Normalize k to its value in unsigned binary relative to this encoding
 	pub(crate) fn normalize(&self, k: C) -> C {
 		if GROUND_BINARY_AT_LB {
