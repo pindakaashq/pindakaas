@@ -7,6 +7,63 @@ use crate::{
 	Encoder, LinExp, Lit, Result, Unsatisfiable, Valuation,
 };
 
+macro_rules! maybe_std_concat {
+	($e:literal) => {
+		concat!($e)
+	};
+	($e:expr) => {
+		$e
+	};
+}
+pub(crate) use maybe_std_concat;
+
+macro_rules! concat_slices {
+    ([$init:expr; $T:ty]: $($s:expr),+ $(,)?) => {{
+        $(
+            const _: &[$T] = $s; // require constants
+        )*
+        const LEN: usize = $( $s.len() + )* 0;
+        const ARR: [$T; LEN] = {
+            let mut arr: [$T; LEN] = [$init; LEN];
+            let mut base: usize = 0;
+            $({
+                let mut i = 0;
+                while i < $s.len() {
+                    arr[base + i] = $s[i];
+                    i += 1;
+                }
+                base += $s.len();
+            })*
+            if base != LEN { panic!("invalid length"); }
+            arr
+        };
+        &ARR
+    }};
+
+    ([$T:ty]: $($s:expr),+ $(,)?) => {
+        $crate::helpers::concat_slices!([0; $T]: $($s),+)
+    };
+}
+pub(crate) use concat_slices;
+
+#[doc(hidden)]
+macro_rules! const_concat {
+	() => { "" };
+
+	($($e:expr),+) => {{
+			$crate::helpers::const_concat!(@impl $($crate::helpers::maybe_std_concat!($e)),+)
+	}};
+
+	(@impl $($e:expr),+) => {{
+			$(
+					const _: &str = $e;
+			)*
+			let slice: &[u8] = $crate::helpers::concat_slices!([u8]: $($e.as_bytes()),+);
+			unsafe { std::str::from_utf8_unchecked(slice) }
+	}};
+}
+pub(crate) use const_concat;
+
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
 pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool {
 	let mut it = coefs.into_iter().enumerate();
@@ -274,7 +331,6 @@ pub mod tests {
 		);
 	}
 	pub(crate) use lits;
-
 	#[test]
 	fn test_assert_macros() {
 		#[derive(Default)]

@@ -27,20 +27,25 @@ mod cardinality_one;
 pub(crate) mod helpers;
 mod int;
 mod linear;
-pub mod solvers;
+mod solver;
 mod sorted;
 pub mod trace;
 
-pub use cardinality::{Cardinality, SortingNetworkEncoder};
-pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
-pub use linear::{
-	AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear, LinearAggregator,
-	LinearConstraint, LinearEncoder, SwcEncoder, TotalizerEncoder,
-};
-use solvers::VarFactory;
-pub use sorted::{SortedEncoder, SortedStrategy};
-
 use crate::trace::subscript_number;
+pub use crate::{
+	cardinality::{Cardinality, SortingNetworkEncoder},
+	cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder},
+	linear::{
+		AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear,
+		LinearAggregator, LinearConstraint, LinearEncoder, SwcEncoder, TotalizerEncoder,
+	},
+	solver::{
+		libloading::{IpasirLibrary, IpasirSolver},
+		splr::SplrSolver,
+		Solver, VarFactory,
+	},
+	sorted::{SortedEncoder, SortedStrategy},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Var(NonZeroI32);
@@ -273,13 +278,17 @@ pub enum IntEncoding<'a> {
 /// and a [`Self::new_var`] method.
 pub trait ClauseDatabase {
 	/// Method to be used to receive a new Boolean variable that can be used in
-	/// the encoding of a constraint.
+	/// the encoding of a problem or constriant.
 	fn new_var(&mut self) -> Lit;
 
-	/// Add a clause to the `ClauseDatabase`. The sink is allowed to return
-	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to
-	/// be unsatisfiable. This is used as a signal to the encoder that any
-	/// subsequent encoding effort can be abandoned.
+	/// Add a clause to the `ClauseDatabase`. The databae is allowed to return
+	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
+	/// unsatisfiable. This is used as a signal to the encoder that any subsequent
+	/// encoding effort can be abandoned.
+	///
+	/// Clauses added this way cannot be removed. The addition of removable
+	/// clauses can be simulated using activation literals and solving the problem
+	/// under assumptions.
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result;
 }
 
