@@ -150,13 +150,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 						todo!("Untested code: fixing of vars from unary constraints");
 						// Ok(vec![])
 					}
-					[x, y] => Ok(vec![Lin::new(
-						&[x.clone(), y.clone()],
-						con.cmp,
-						con.k,
-						None,
-					)]),
-					_ if con.is_tern() => Ok(vec![con]),
+					_ if con.exp.terms.len() < 3 || con.is_tern() => Ok(vec![con]),
 					_ => {
 						let new_model =
 							BddEncoder::default().decompose::<Lit>(con, model.num_var)?;
@@ -322,100 +316,122 @@ impl<C: Coefficient> Term<C> {
 		} else {
 			match enc {
 				IntVarEnc::Ord(o) => {
-					assert!(!self.c.is_negative(), "TODO: negative coefficients");
-					Ok(IntVarEnc::Ord(IntVarOrd::from_views(
-						db,
-						std::iter::once((self.lb(), None))
-							.chain(
-								o.xs.iter(..).map(|(iv, lit)| {
-									((iv.end - C::one()) * self.c, Some(lit.clone()))
-								}),
-							)
-							.tuple_windows()
-							.map(|((a, _), (b, lit))| ((a + C::one())..(b + C::one()), lit))
-							.collect(),
-						format!("{}*{}", self.c, o.lbl.clone()),
-					)))
+					if self.c.is_negative() {
+						let self_abs = self.clone() * -C::one();
+						return self_abs.encode(
+							db,
+							&IntVarEnc::Ord(IntVarOrd {
+								xs: o
+									.xs
+									.iter(..)
+									.collect::<Vec<_>>()
+									.into_iter()
+									.map(|(iv, lit)| {
+										(
+											(-iv.end + C::one() + C::one())
+												..(-iv.start + C::one() + C::one()),
+											lit.negate(),
+										)
+									})
+									.collect(),
+								lbl: format!("-1*{}", o.lbl),
+							}),
+						);
+					} else {
+						Ok(IntVarEnc::Ord(IntVarOrd::from_views(
+							db,
+							o.xs.iter(..)
+								.map(|(iv, lit)| {
+									(
+										(iv.start * self.c)
+											..((iv.end - C::one()) * self.c + C::one()),
+										Some(lit.clone()),
+									)
+								})
+								.collect(),
+							format!("{}*{}", self.c, o.lbl.clone()),
+						)))
 				}
 				IntVarEnc::Bin(x_enc) => {
 					if self.c.is_negative() {
-						let self_abs = Term {
-							x: self.x.clone(),
-							c: self.c.abs(),
-						};
+						let self_abs = self.clone() * -C::one();
 
-						return self_abs.encode(db, enc).map(|x| match x {
+						self_abs.encode(db, enc).map(|x| match x {
 							IntVarEnc::Bin(x_enc) => IntVarEnc::Bin(x_enc.complement()),
 							_ => unreachable!(),
-						});
-					}
-
-					let mut c = self.c;
-					// TODO shift by zeroes..
-					let mut sh = C::zero();
-					while c.is_even() {
-						sh += C::one();
-						c = c.div(C::one() + C::one());
-					}
-
-					let scm = SCM
-						.iter()
-						.find_map(|(mul, scm)| (C::from(*mul).unwrap() == c).then_some(scm))
-						.unwrap_or(&"");
-
-					// TODO store `c` value i/o of node index
-					let mut ys = [(C::zero(), x_enc.xs(false))]
-						.into_iter()
-						.collect::<HashMap<_, _>>();
-
-					let get_and_shift = |ys: &HashMap<C, Vec<LitOrConst<DB::Lit>>>, i: C, sh: C| {
-						num::iter::range(C::zero(), sh)
-							.map(|_| LitOrConst::Const(false))
-							.chain(ys[&i].clone())
-							.collect::<Vec<_>>()
-					};
-
-					fn parse_c<C: Coefficient>(i: &str) -> C {
-						i.parse::<C>()
-							.unwrap_or_else(|_| panic!("Could not parse dom value {i}"))
-					}
-
-					for rca in scm.split(';') {
-						if rca.is_empty() {
-							break;
+						})
+					} else {
+						let mut c = self.c;
+						// TODO shift by zeroes..
+						let mut sh = C::zero();
+						while c.is_even() {
+							sh += C::one();
+							c = c.div(C::one() + C::one());
 						}
-						let (z_i, x, add, y) = match rca.split(',').collect::<Vec<_>>()[..] {
-							[i, i1, sh1, add, i2, sh2] => (
-								parse_c::<C>(i),
-								get_and_shift(&ys, parse_c(i1), parse_c(sh1)),
-								match add {
-									"+" => true,
-									"-" => false,
-									_ => unreachable!(),
-								},
-								get_and_shift(&ys, parse_c(i2), parse_c(sh2)),
-							),
-							_ => unreachable!(),
-						};
 
-						let z = (0..(std::cmp::max(x.len(), y.len()) + 1))
-							.map(|_j| {
-								LitOrConst::<DB::Lit>::from(new_var!(db, format!("y_{z_i}_{_j}")))
-							})
-							.collect::<Vec<_>>();
-						if add {
-							log_enc_add_(db, &x, &y, &LimitComp::Equal, &z) // x+y=z
-						} else {
-							log_enc_add_(db, &y, &z, &LimitComp::Equal, &x) // x-y=z == x=z+y
-						}?;
-						ys.insert(z_i, z);
+						let scm = SCM
+							.iter()
+							.find_map(|(mul, scm)| (C::from(*mul).unwrap() == c).then_some(scm))
+							.unwrap_or(&"");
+
+						// TODO store `c` value i/o of node index
+						let mut ys = [(C::zero(), x_enc.xs(false))]
+							.into_iter()
+							.collect::<HashMap<_, _>>();
+
+						let get_and_shift =
+							|ys: &HashMap<C, Vec<LitOrConst<DB::Lit>>>, i: C, sh: C| {
+								num::iter::range(C::zero(), sh)
+									.map(|_| LitOrConst::Const(false))
+									.chain(ys[&i].clone())
+									.collect::<Vec<_>>()
+							};
+
+						fn parse_c<C: Coefficient>(i: &str) -> C {
+							i.parse::<C>()
+								.unwrap_or_else(|_| panic!("Could not parse dom value {i}"))
+						}
+
+						for rca in scm.split(';') {
+							if rca.is_empty() {
+								break;
+							}
+							let (z_i, x, add, y) = match rca.split(',').collect::<Vec<_>>()[..] {
+								[i, i1, sh1, add, i2, sh2] => (
+									parse_c::<C>(i),
+									get_and_shift(&ys, parse_c(i1), parse_c(sh1)),
+									match add {
+										"+" => true,
+										"-" => false,
+										_ => unreachable!(),
+									},
+									get_and_shift(&ys, parse_c(i2), parse_c(sh2)),
+								),
+								_ => unreachable!(),
+							};
+
+							let z = (0..(std::cmp::max(x.len(), y.len()) + 1))
+								.map(|_j| {
+									LitOrConst::<DB::Lit>::from(new_var!(
+										db,
+										format!("y_{z_i}_{_j}")
+									))
+								})
+								.collect::<Vec<_>>();
+							if add {
+								log_enc_add_(db, &x, &y, &LimitComp::Equal, &z) // x+y=z
+							} else {
+								log_enc_add_(db, &y, &z, &LimitComp::Equal, &x) // x-y=z == x=z+y
+							}?;
+							ys.insert(z_i, z);
+						}
+
+						let xs = get_and_shift(&ys, *ys.keys().max().unwrap(), sh);
+						Ok(IntVarEnc::Bin(IntVarBin::from_lits(
+							&xs,
+							format!("{c}*{}", self.x.borrow().lbl()),
+						)))
 					}
-
-					let xs = get_and_shift(&ys, *ys.keys().max().unwrap(), sh);
-					Ok(IntVarEnc::Bin(IntVarBin::from_lits(
-						&xs,
-						format!("{c}*{}", self.x.borrow().lbl()),
-					)))
 				}
 				IntVarEnc::Const(c) => Ok(IntVarEnc::Const(*c * self.c)),
 			}
@@ -1066,7 +1082,7 @@ End
 		);
 	}
 
-	mod lp_ge_pb_unit {
+	mod lp_ge_pb_triv {
 		lp_test_case!(
 			r"
 Subject To
