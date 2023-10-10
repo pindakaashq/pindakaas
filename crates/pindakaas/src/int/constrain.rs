@@ -212,20 +212,14 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 						&(*cmp).try_into().unwrap(),
 						&z_bin.xs(false),
 					),
-					Comparator::LessEq => {
+					ineq => {
 						let xy = x.add(db, self, y, None, Some(z.ub()))?;
 						xy.consistent(db)?; // TODO can be removed if grounding is correct
 						self.encode(
 							db,
-							&TernLeConstraint::new(
-								&xy,
-								&IntVarEnc::Const(C::zero()),
-								&Comparator::LessEq,
-								z,
-							),
+							&TernLeConstraint::new(&xy, &IntVarEnc::Const(C::zero()), ineq, z),
 						)
 					}
-					Comparator::GreaterEq => todo!(),
 				}
 			}
 			(IntVarEnc::Bin(_), IntVarEnc::Bin(_), _) => {
