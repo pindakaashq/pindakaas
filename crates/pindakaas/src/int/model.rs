@@ -733,10 +733,9 @@ impl<C: Coefficient> IntVar<C> {
 					.collect::<IntervalMap<_, _>>();
 				IntVarEnc::Ord(IntVarOrd::from_views(db, dom, self.lbl()))
 			} else {
-				let y = IntVarBin::from_bounds(
+				let y = IntVarBin::from_dom(
 					db,
-					*self.dom.first().unwrap(),
-					*self.dom.last().unwrap(),
+					&self.dom.iter().cloned().collect::<Vec<_>>()[..],
 					self.lbl(),
 				);
 				IntVarEnc::Bin(y)

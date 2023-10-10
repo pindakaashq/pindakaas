@@ -3,6 +3,7 @@ use rustc_hash::FxHashMap;
 
 use super::display_dom;
 use itertools::Itertools;
+use std::collections::BTreeSet;
 use std::fmt::Display;
 
 use crate::helpers::{two_comp_bounds, unsigned_binary_range_ub};
@@ -316,12 +317,12 @@ impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 	xs: Vec<LitOrConst<Lit>>,
-	lb: C,
-	ub: C,
+	dom: BTreeSet<C>, // TODO deduplicate after IntVarEnc is part of IntVar
 	lbl: String,
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
+	#[allow(dead_code)]
 	pub fn from_lits(xs: &[LitOrConst<Lit>], lbl: String) -> Self {
 		if GROUND_BINARY_AT_LB {
 			panic!("Cannot create offset binary encoding `from_lits` without a given lower bound.")
@@ -331,10 +332,31 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		let (lb, ub) = two_comp_bounds(bits);
 		Self {
 			xs: xs.to_vec(),
-			lb,
-			ub,
+			dom: num::range_inclusive(lb, ub).collect(),
 			lbl,
 		}
+	}
+
+	pub fn from_dom<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, dom: &[C], lbl: String) -> Self {
+		debug_assert!(&dom.iter().tuple_windows().all(|(a, b)| a <= b));
+		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
+		Self {
+			xs: Self::xs_from_bounds(db, lb, ub, &lbl),
+			dom: dom.iter().cloned().collect(),
+			lbl,
+		}
+	}
+
+	fn xs_from_bounds<DB: ClauseDatabase<Lit = Lit>>(
+		db: &mut DB,
+		lb: C,
+		ub: C,
+		_lbl: &str,
+	) -> Vec<LitOrConst<Lit>> {
+		(0..IntVar::required_lits(lb, ub))
+			.map(|_i| (new_var!(db, format!("{}^{}", _lbl, _i))).into())
+			.chain((!GROUND_BINARY_AT_LB && !lb.is_negative()).then_some(LitOrConst::Const(false)))
+			.collect()
 	}
 
 	// TODO change to with_label or something
@@ -345,14 +367,8 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		lbl: String,
 	) -> Self {
 		Self {
-			xs: (0..IntVar::required_lits(lb, ub))
-				.map(|_i| (new_var!(db, format!("{}^{}", lbl, _i))).into())
-				.chain(
-					(!GROUND_BINARY_AT_LB && !lb.is_negative()).then_some(LitOrConst::Const(false)),
-				)
-				.collect(),
-			lb,
-			ub,
+			xs: Self::xs_from_bounds(db, lb, ub, &lbl),
+			dom: num::range_inclusive(lb, ub).collect(),
 			lbl,
 		}
 	}
@@ -376,23 +392,27 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				.map(|(l, _)| l.into())
 				.chain([LitOrConst::Const(false)])
 				.collect(),
-			lb: *lb, // TODO support non-zero
-			ub: *ub,
+			dom: num::range_inclusive(*lb, *ub).collect(),
 			lbl,
 		}
 	}
 
 	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> crate::Result {
-		self.encode_geq(db, self.lb, true)?;
-		self.encode_leq(db, self.ub, true)?;
+		self.encode_geq(db, self.lb(), true)?;
+		self.encode_leq(db, self.ub(), true)?;
+		for gap in self.dom.iter().tuple_windows().collect::<Vec<(&C, &C)>>() {
+			dbg!(&gap);
+			for k in num::range_inclusive(*gap.0 + C::one(), *gap.1 - C::one()) {
+				self.encode_neq(db, k)?;
+			}
+		}
 		Ok(())
 	}
 
 	pub(crate) fn complement(self) -> Self {
 		Self {
 			xs: self.xs.into_iter().map(|x| -x).collect(),
-			lb: C::one() - self.ub,
-			ub: C::one() - self.lb,
+			dom: self.dom.into_iter().map(|d| C::one() - d).collect(),
 			lbl: format!("!{}", self.lbl),
 		}
 	}
@@ -405,6 +425,20 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			// encoding is grounded at the lb of the two comp representation
 			k - two_comp_bounds(self.bits()).0
 		}
+	}
+
+	/// Return conjunction of bits equivalent where `x=k`
+	fn eq(&self, k: C) -> crate::Result<Vec<Lit>, crate::Unsatisfiable> {
+		as_binary(self.normalize(k).into(), Some(self.bits()))
+			.into_iter()
+			.zip(self.xs(true).iter())
+			.map(|(b, x)| if b { x.clone() } else { -x.clone() })
+			.flat_map(|x| match x {
+				LitOrConst::Lit(lit) => Some(Ok(lit)),
+				LitOrConst::Const(true) => None,
+				LitOrConst::Const(false) => Some(Err(crate::Unsatisfiable)),
+			})
+			.collect()
 	}
 
 	pub(crate) fn encode_eq<DB: ClauseDatabase<Lit = Lit>>(
@@ -436,6 +470,15 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		} else {
 			lex_leq_const(db, &self.xs(true), self.normalize(k).into(), self.bits())
 		}
+	}
+
+	pub(crate) fn encode_neq<DB: ClauseDatabase<Lit = Lit>>(
+		&self,
+		db: &mut DB,
+		k: C,
+	) -> crate::Result {
+		dbg!(&k);
+		emit_clause!(db, &self.eq(k)?.iter().map(Lit::negate).collect::<Vec<_>>())
 	}
 
 	pub(crate) fn encode_geq<DB: ClauseDatabase<Lit = Lit>>(
@@ -474,17 +517,18 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	}
 
 	fn dom(&self) -> IntervalSet<C> {
-		num::iter::range_inclusive(self.lb, self.ub)
+		// TODO for now, do not add in gaps since it may interfere with coupling
+		num::iter::range_inclusive(self.lb(), self.ub())
 			.map(|i| i..(i + C::one()))
 			.collect()
 	}
 
 	pub(crate) fn lb(&self) -> C {
-		self.lb
+		*self.dom.first().unwrap()
 	}
 
 	pub(crate) fn ub(&self) -> C {
-		self.ub
+		*self.dom.last().unwrap()
 	}
 
 	pub(crate) fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
@@ -556,7 +600,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			.collect::<Vec<_>>();
 
 		let offset: C = if GROUND_BINARY_AT_LB {
-			self.lb
+			self.lb()
 		} else {
 			two_comp_bounds(self.bits()).0
 		};
@@ -564,8 +608,8 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		let lin_exp = LinExp::new().add_bounded_log_encoding(
 			terms.as_slice(),
 			// The Domain constraint bounds only account for the unfixed part of the offset binary notation
-			self.lb - offset - add,
-			self.ub - offset - add,
+			self.lb() - offset - add,
+			self.ub() - offset - add,
 		);
 
 		// The offset and the fixed value `add` are added to the constant
@@ -592,18 +636,10 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	) -> crate::Result<Self> {
 		if y.is_zero() {
 			Ok(self.clone())
-		} else if GROUND_BINARY_AT_LB {
-			Ok(IntVarBin {
-				xs: self.xs.clone(),
-				lb: self.lb() + y,
-				ub: self.ub() + y,
-				lbl: format!("{}+{}", self.lbl, y),
-			})
 		} else {
-			let z_bin = IntVarBin::from_bounds(
+			let z_bin = IntVarBin::from_dom(
 				db,
-				self.lb() + y,
-				self.ub() + y,
+				&self.dom.iter().cloned().map(|d| d + y).collect::<Vec<_>>(),
 				format!("{}+{}", self.lbl, y),
 			);
 
