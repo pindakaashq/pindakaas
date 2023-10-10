@@ -37,10 +37,10 @@ fn scm() -> Result<Vec<(Bits, String)>, std::io::Error> {
 				.unwrap()
 				.to_str()
 				.unwrap()
-				.split("_")
+				.split('_')
 				.collect::<Vec<_>>()
 				.into_iter()
-				.map(|x| dbg!(x).to_string().parse::<Bits>().unwrap())
+				.map(|x| x.to_string().parse::<Bits>().unwrap())
 				.collect_tuple()
 				.unwrap();
 			assert_eq!(bits, BITS);
@@ -57,7 +57,7 @@ pub fn main() {
 	let scm = scm().unwrap();
 
 	let o = format!(
-		"pub(crate) const SCM: [(u32, &str); {}] = [\n{}\n];",
+		"pub(crate) static SCM: [(u32, &str); {}] = [\n{}\n];",
 		scm.len(),
 		scm.iter()
 			.map(|(c, scm)| format!("\t({}, \"{}\")", c, scm))

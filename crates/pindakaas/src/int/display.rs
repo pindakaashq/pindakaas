@@ -53,6 +53,7 @@ impl<C: Coefficient> Display for Lin<C> {
 		}
 	}
 }
+
 impl<C: Coefficient> fmt::Display for IntVar<C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{} ∈ {}", self.lbl(), display_dom(&self.dom))
