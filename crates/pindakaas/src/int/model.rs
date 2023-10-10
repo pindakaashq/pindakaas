@@ -338,6 +338,18 @@ impl<C: Coefficient> Term<C> {
 					)))
 				}
 				IntVarEnc::Bin(x_enc) => {
+					if self.c.is_negative() {
+						let self_abs = Term {
+							x: self.x.clone(),
+							c: self.c.abs(),
+						};
+
+						return self_abs.encode(db, enc).map(|x| match x {
+							IntVarEnc::Bin(x_enc) => IntVarEnc::Bin(x_enc.complement()),
+							_ => unreachable!(),
+						});
+					}
+
 					let mut c = self.c;
 					// TODO shift by zeroes..
 					let mut sh = C::zero();
@@ -351,29 +363,16 @@ impl<C: Coefficient> Term<C> {
 						.find_map(|(mul, scm)| (C::from(*mul).unwrap() == c).then_some(scm))
 						.unwrap_or(&"");
 
+					// TODO store `c` value i/o of node index
 					let mut ys = [(C::zero(), x_enc.xs(false))]
 						.into_iter()
 						.collect::<HashMap<_, _>>();
 
-					let bits = x_enc.lits();
-
-					let get_and_shift = |db: &mut DB,
-					                     ys: &mut HashMap<C, Vec<LitOrConst<DB::Lit>>>,
-					                     i: C,
-					                     sh: C| {
-						ys.entry(i)
-							.or_insert_with(|| {
-								num::iter::range(C::zero(), sh)
-									.map(|_| LitOrConst::Const(false))
-									.chain((0..bits).map(|_j| {
-										LitOrConst::<DB::Lit>::from(new_var!(
-											db,
-											format!("y_{i}_{_j}")
-										))
-									}))
-									.collect()
-							})
-							.clone()
+					let get_and_shift = |ys: &HashMap<C, Vec<LitOrConst<DB::Lit>>>, i: C, sh: C| {
+						num::iter::range(C::zero(), sh)
+							.map(|_| LitOrConst::Const(false))
+							.chain(ys[&i].clone())
+							.collect::<Vec<_>>()
 					};
 
 					fn parse_c<C: Coefficient>(i: &str) -> C {
@@ -385,28 +384,34 @@ impl<C: Coefficient> Term<C> {
 						if rca.is_empty() {
 							break;
 						}
-						let (z, x, add, y) = match rca.split(',').collect::<Vec<_>>()[..] {
+						let (z_i, x, add, y) = match rca.split(',').collect::<Vec<_>>()[..] {
 							[i, i1, sh1, add, i2, sh2] => (
-								get_and_shift(db, &mut ys, parse_c(i), C::zero()),
-								get_and_shift(db, &mut ys, parse_c(i1), parse_c(sh1)),
+								parse_c::<C>(i),
+								get_and_shift(&ys, parse_c(i1), parse_c(sh1)),
 								match add {
 									"+" => true,
 									"-" => false,
 									_ => unreachable!(),
 								},
-								get_and_shift(db, &mut ys, parse_c(i2), parse_c(sh2)),
+								get_and_shift(&ys, parse_c(i2), parse_c(sh2)),
 							),
 							_ => unreachable!(),
 						};
 
+						let z = (0..(std::cmp::max(x.len(), y.len()) + 1))
+							.map(|_j| {
+								LitOrConst::<DB::Lit>::from(new_var!(db, format!("y_{z_i}_{_j}")))
+							})
+							.collect::<Vec<_>>();
 						if add {
 							log_enc_add_(db, &x, &y, &LimitComp::Equal, &z) // x+y=z
 						} else {
 							log_enc_add_(db, &y, &z, &LimitComp::Equal, &x) // x-y=z == x=z+y
 						}?;
+						ys.insert(z_i, z);
 					}
 
-					let xs = get_and_shift(db, &mut ys, self.c, sh);
+					let xs = get_and_shift(&ys, *ys.keys().max().unwrap(), sh);
 					Ok(IntVarEnc::Bin(IntVarBin::from_lits(
 						&xs,
 						format!("{c}*{}", self.x.borrow().lbl()),
@@ -594,7 +599,11 @@ impl<C: Coefficient> Lin<C> {
 
 	pub(crate) fn is_tern(&self) -> bool {
 		let cs = self.exp.terms.iter().map(|term| term.c).collect::<Vec<_>>();
-		cs[0].is_positive() && cs[1].is_positive() && cs[2].is_negative() && self.k.is_zero()
+		cs.len() == 3
+			&& cs[0].is_positive()
+			&& cs[1].is_positive()
+			&& cs[2].is_negative()
+			&& self.k.is_zero()
 	}
 
 	fn check<Lit: Literal>(&self, a: &HashMap<usize, C>) -> Result<(), CheckError<Lit>> {
