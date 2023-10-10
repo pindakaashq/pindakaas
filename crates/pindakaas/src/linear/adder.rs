@@ -293,6 +293,7 @@ fn clause<DB: ClauseDatabase>(db: &mut DB, lits: &[LitOrConst<DB::Lit>]) -> Resu
 	if let Ok(clause) = lits
 		.iter()
 		.filter_map(|lit| match lit {
+			// TODO does this one exit early on Err? Or did we wrap it the wrong way around?
 			LitOrConst::Lit(lit) => Some(Ok(lit.clone())),
 			LitOrConst::Const(true) => Some(Err(())), // clause satisfied
 			LitOrConst::Const(false) => None,         // literal falsified
