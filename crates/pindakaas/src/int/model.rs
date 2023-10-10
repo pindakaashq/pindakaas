@@ -875,6 +875,7 @@ mod tests {
 			#[test]
 			fn test_lp() {
 				let mut model = Model::<i32, i32>::from_string($lp.into(), Format::Lp).unwrap();
+				println!("model = {model}");
 
 				let vars = model.vars();
 				let sols = vars
@@ -888,6 +889,7 @@ mod tests {
 							.collect::<HashMap<_, _>>()
 					})
 					.filter(|a| model.check_assignment(a).is_ok())
+					.map(|sol| sol.into_iter().collect::<Vec<_>>())
 					.collect::<Vec<_>>();
 
 				let mut db = TestDB::new(0);
@@ -919,32 +921,46 @@ mod tests {
 						// Check principal constraints
 						model
 							.check_assignment(&int_assignment)
-							.map(|_| int_assignment)
+							.map(|_| int_assignment.into_iter().collect::<Vec<_>>())
 					})
 					.collect::<Vec<_>>();
 
-				let extra_int_assignments = int_assignments
-					.iter()
-					.filter(|a| !sols.contains(a))
-					.cloned()
-					.collect::<Vec<_>>();
-
-				let missing_int_assignments = sols
-					.iter()
-					.filter(|a| !int_assignments.contains(a))
-					.cloned()
-					.collect::<Vec<_>>();
-
-				fn show_int_assignments(a: &Vec<HashMap<usize, i32>>) -> Vec<String> {
-					a.iter()
-						.map(|a| {
-							a.iter()
-								.sorted()
-								.map(|(id, a)| format!("x_{id}={a}"))
-								.join(", ")
+				let canonicalize = |a: Vec<Vec<(usize, i32)>>| {
+					a.into_iter()
+						.map(|a| a.iter().sorted().cloned().collect::<Vec<_>>())
+						.sorted_by_key(|assignments| {
+							assignments
+								.iter()
+								.cloned()
+								.map(|(_, value)| value)
+								.collect::<Vec<_>>()
 						})
-						.collect()
-				}
+						.collect::<Vec<_>>()
+				};
+
+				let sols = canonicalize(sols);
+				let int_assignments = canonicalize(int_assignments);
+
+				let extra_int_assignments = canonicalize(
+					int_assignments
+						.iter()
+						.filter(|a| !sols.contains(a))
+						.cloned()
+						.collect::<Vec<_>>(),
+				);
+
+				let missing_int_assignments = canonicalize(
+					sols.iter()
+						.filter(|a| !int_assignments.contains(a))
+						.cloned()
+						.collect::<Vec<_>>(),
+				);
+
+				let show_int_assignments = |a: &Vec<Vec<(usize, i32)>>| {
+					a.iter()
+						.map(|a| a.iter().map(|(id, a)| format!("x_{id}={a}")).join(", "))
+						.collect::<Vec<_>>()
+				};
 
 				// TODO find violated constraints for extra assignments
 				assert!(
