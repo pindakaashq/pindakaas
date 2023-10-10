@@ -1,10 +1,11 @@
 use crate::{
 	helpers::{add_clauses_for, negate_cnf},
+	int::{TernLeConstraint, TernLeEncoder},
 	linear::log_enc_add_,
 	trace::new_var,
-	BddEncoder, Comparator, LimitComp, Unsatisfiable,
+	BddEncoder, Comparator, Encoder, LimitComp, Unsatisfiable,
 };
-use itertools::Itertools;
+use itertools::{Itertools, Position};
 use std::{
 	cell::RefCell,
 	collections::{BTreeSet, HashMap},
@@ -309,7 +310,6 @@ impl<C: Coefficient> Term<C> {
 		Self { c, x }
 	}
 
-	#[allow(dead_code)]
 	fn encode<DB: ClauseDatabase>(
 		&self,
 		db: &mut DB,
@@ -646,14 +646,6 @@ impl<C: Coefficient> Lin<C> {
 		// TODO assert simplified/simplify
 		// assert!(self._is_simplified());
 
-		match self.cmp {
-			Comparator::Equal => vec![true, false],
-			Comparator::LessEq => vec![true],
-			Comparator::GreaterEq => vec![false],
-		}
-		.into_iter()
-		.try_for_each(|is_leq| {
-			encs[0..encs.len() - 1]
 				.iter()
 				.zip(&self.exp.terms)
 				.map(|(enc, term)| {
@@ -666,34 +658,96 @@ impl<C: Coefficient> Lin<C> {
 				.multi_cartesian_product()
 				.try_for_each(|geqs| {
 					let rhs = geqs
+
+		let encs = self
+			.exp
+			.terms
+			.iter()
+			.zip(encs)
+			.with_position()
+			.flat_map(|(pos, (x, enc))| match pos {
+				Position::Last if self.exp.terms.len() == 3 => {
+					assert!(self.k.is_zero());
+					(x.clone() * -C::one()).encode(db, &enc)
+				}
+				_ => x.encode(db, &enc),
+			})
+			.collect::<Vec<_>>();
+
+		let mut encoder = TernLeEncoder::default();
+		// TODO generalize n-ary encoding; currently using fallback of TernLeEncoder
+		return match &encs[..] {
+			[] => return Ok(()),
+			[x] => {
+				let y = IntVarEnc::Const(C::zero());
+				let z = IntVarEnc::Const(self.k);
+				encoder.encode(db, &TernLeConstraint::new(x, &y, &self.cmp, &z))
+			}
+			[x, y] => {
+				let z = IntVarEnc::Const(self.k);
+				encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, &z))
+			}
+			[x, y, z] => {
+				assert!(self.k.is_zero());
+				encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, z))
+			}
+			_ => {
+				assert!(
+					!encs.iter().any(|enc| matches!(enc, IntVarEnc::Bin(_))),
+					"TODO"
+				);
+
+				// TODO support binary
+				match self.cmp {
+					Comparator::Equal => vec![true, false],
+					Comparator::LessEq => vec![true],
+					Comparator::GreaterEq => vec![false],
+				}
+				.into_iter()
+				.try_for_each(|is_leq| {
+					encs[0..encs.len() - 1]
 						.iter()
 						.zip(&self.exp.terms)
-						.map(|((d, _), term)| {
+						.map(|(enc, term)| {
 							if is_leq == term.c.is_positive() {
-								term.c * (d.end - C::one())
+								enc.geqs()
 							} else {
-								term.c * d.start
+								enc.leqs()
 							}
 						})
-						.fold(self.k, C::sub);
+						.multi_cartesian_product()
+						.try_for_each(|geqs| {
+							let rhs = geqs
+								.iter()
+								.zip(&self.exp.terms)
+								.map(|((d, _), term)| {
+									if is_leq == term.c.is_positive() {
+										term.c * (d.end - C::one())
+									} else {
+										term.c * d.start
+									}
+								})
+								.fold(self.k, C::sub);
 
-					let conditions = geqs
-						.iter()
-						.map(|(_, cnf)| negate_cnf(cnf.clone()))
-						.collect::<Vec<_>>();
+							let conditions = geqs
+								.iter()
+								.map(|(_, cnf)| negate_cnf(cnf.clone()))
+								.collect::<Vec<_>>();
 
-					let (last_enc, last_c) =
-						(&encs[encs.len() - 1], &self.exp.terms[encs.len() - 1].c);
+							let (last_enc, last_c) =
+								(&encs[encs.len() - 1], &self.exp.terms[encs.len() - 1].c);
 
-					let last = if is_leq == last_c.is_positive() {
-						last_enc.leq_(rhs.div_ceil(last_c))
-					} else {
-						last_enc.geq_(rhs.div_floor(last_c))
-					};
+							let last = if is_leq == last_c.is_positive() {
+								last_enc.leq_(rhs.div_ceil(last_c))
+							} else {
+								last_enc.geq_(rhs.div_floor(last_c))
+							};
 
-					add_clauses_for(db, conditions.iter().cloned().chain([last]).collect())
+							add_clauses_for(db, conditions.iter().cloned().chain([last]).collect())
+						})
 				})
-		})
+			}
+		};
 	}
 }
 
