@@ -5,7 +5,7 @@ use crate::{
 	int::LitOrConst,
 	linear::{LimitComp, PosCoeff},
 	trace::{emit_clause, new_var},
-	ClauseDatabase, Coefficient, Encoder, Linear, Literal, Result, Unsatisfiable,
+	ClauseDatabase, Coefficient, Comparator, Encoder, Linear, Literal, Result, Unsatisfiable,
 };
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
@@ -190,31 +190,12 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 	})
 }
 
-/// Constrains the slice `z`, to be the result of adding `x` to `y`, all encoded using the log encoding.
-///
-/// TODO: Should this use the IntEncoding::Log input??
-pub(crate) fn _log_enc_add<DB: ClauseDatabase>(
-	db: &mut DB,
-	x: &[DB::Lit],
-	y: &[DB::Lit],
-	cmp: &LimitComp,
-	z: &[DB::Lit],
-) -> Result {
-	log_enc_add_(
-		db,
-		&x.iter().cloned().map(LitOrConst::from).collect::<Vec<_>>(),
-		&y.iter().cloned().map(LitOrConst::from).collect::<Vec<_>>(),
-		cmp,
-		&z.iter().cloned().map(LitOrConst::from).collect::<Vec<_>>(),
-	)
-}
-
 #[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} {cmp} {z:?}"))))]
 pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 	db: &mut DB,
 	x: &[LitOrConst<DB::Lit>],
 	y: &[LitOrConst<DB::Lit>],
-	cmp: &LimitComp,
+	cmp: &Comparator,
 	z: &[LitOrConst<DB::Lit>],
 ) -> Result {
 	let n = itertools::max([x.len(), y.len(), z.len()]).unwrap();
@@ -226,7 +207,7 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 	};
 
 	match cmp {
-		LimitComp::Equal => {
+		Comparator::Equal => {
 			let c = &std::iter::once(LitOrConst::Const(false))
 				.chain((1..n).map(|_i| {
 					LitOrConst::Lit(new_var!(db, crate::trace::subscripted_name("c", _i)))
@@ -254,7 +235,7 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 			}
 			Ok(())
 		}
-		LimitComp::LessEq => {
+		ineq => {
 			let c = &(0..n)
 				.map(|_i| LitOrConst::Lit(new_var!(db, crate::trace::subscripted_name("c", _i))))
 				.chain(std::iter::once(LitOrConst::Const(true)))
@@ -278,11 +259,13 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 				clause(db, &[bit(c, i), -bit(c, i + 1), bit(x, i), bit(z, i)])?;
 				clause(db, &[bit(c, i), -bit(c, i + 1), -bit(x, i), -bit(z, i)])?;
 
-				// if preceding bits are equal, then x<=z
-				clause(db, &[-bit(c, i + 1), -bit(x, i), bit(z, i)])?;
+				// if preceding bits are equal, then x<=z (or x>=z)
+				match ineq {
+					Comparator::LessEq => clause(db, &[-bit(c, i + 1), -bit(x, i), bit(z, i)]),
+					Comparator::GreaterEq => clause(db, &[-bit(c, i + 1), bit(x, i), -bit(z, i)]),
+					Comparator::Equal => unreachable!(),
+				}?;
 			}
-
-			clause(db, &[-bit(x, n - 1), bit(z, n - 1)])?;
 
 			Ok(())
 		}
