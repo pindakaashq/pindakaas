@@ -932,297 +932,307 @@ mod tests {
 		model.encode(&mut cnf, None).unwrap();
 	}
 
+	use crate::{helpers::tests::TestDB, Format};
+	use itertools::Itertools;
+
+	use std::collections::HashMap;
+
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
-	macro_rules! lp_test_case {
-		($lp:expr) => {
-			use crate::{helpers::tests::TestDB, Format, Model};
-			use itertools::Itertools;
-			use std::collections::HashMap;
+	fn test_lp(lp: &str) {
+		let mut model = Model::<i32, i32>::from_string(lp.into(), Format::Lp).unwrap();
+		// println!("model = {model}");
 
-			#[test]
-			fn test_lp() {
-				let mut model = Model::<i32, i32>::from_string($lp.into(), Format::Lp).unwrap();
-				println!("model = {model}");
+		let vars = model.vars();
+		let sols = vars
+			.iter()
+			.map(|var| var.borrow().dom.clone().into_iter().collect::<Vec<_>>())
+			.multi_cartesian_product()
+			.map(|a| {
+				vars.iter()
+					.map(|var| var.borrow().id.clone())
+					.zip(a)
+					.collect::<HashMap<_, _>>()
+			})
+			.filter(|a| model.check_assignment(a).is_ok())
+			.map(|sol| sol.into_iter().collect::<Vec<_>>())
+			.collect::<Vec<_>>();
 
-				let vars = model.vars();
-				let sols = vars
+		let mut db = TestDB::new(0);
+		let decomposition = model.encode(&mut db, None).unwrap();
+
+		// println!("decomposition = {}", decomposition);
+
+		// Count principal variables
+		let principal_enc_vars = vars
+			.iter()
+			.map(|var| (var.borrow().id, &decomposition.vars[&var.borrow().id]))
+			.collect::<HashMap<_, _>>();
+
+		db.num_var = principal_enc_vars
+			.iter()
+			.map(|(_, var)| var.lits())
+			.sum::<usize>() as i32;
+
+		let lit_assignments = db.solve().into_iter().sorted().collect::<Vec<_>>();
+
+		let int_assignments = lit_assignments
+			.iter()
+			.flat_map(|lit_assignment| {
+				let int_assignment = principal_enc_vars
 					.iter()
-					.map(|var| var.borrow().dom.clone().into_iter().collect::<Vec<_>>())
-					.multi_cartesian_product()
-					.map(|a| {
-						vars.iter()
-							.map(|var| var.borrow().id.clone())
-							.zip(a)
-							.collect::<HashMap<_, _>>()
-					})
-					.filter(|a| model.check_assignment(a).is_ok())
-					.map(|sol| sol.into_iter().collect::<Vec<_>>())
-					.collect::<Vec<_>>();
-
-				let mut db = TestDB::new(0);
-				let decomposition = model.encode(&mut db, None).unwrap();
-
-				println!("decomposition = {}", decomposition);
-
-				// Count principal variables
-				let principal_enc_vars = vars
-					.iter()
-					.map(|var| (var.borrow().id, &decomposition.vars[&var.borrow().id]))
+					.flat_map(|(id, var)| var.assign(&lit_assignment).map(|a| (*id, a)))
 					.collect::<HashMap<_, _>>();
 
-				db.num_var = principal_enc_vars
-					.iter()
-					.map(|(_, var)| var.lits())
-					.sum::<usize>() as i32;
+				// Check principal constraints
+				model
+					.check_assignment(&int_assignment)
+					.map(|_| int_assignment.into_iter().collect::<Vec<_>>())
+			})
+			.collect::<Vec<_>>();
 
-				let lit_assignments = db.solve().into_iter().sorted().collect::<Vec<_>>();
-
-				let int_assignments = lit_assignments
-					.iter()
-					.flat_map(|lit_assignment| {
-						let int_assignment = principal_enc_vars
-							.iter()
-							.flat_map(|(id, var)| var.assign(&lit_assignment).map(|a| (*id, a)))
-							.collect::<HashMap<_, _>>();
-
-						// Check principal constraints
-						model
-							.check_assignment(&int_assignment)
-							.map(|_| int_assignment.into_iter().collect::<Vec<_>>())
-					})
-					.collect::<Vec<_>>();
-
-				let canonicalize = |a: Vec<Vec<(usize, i32)>>| {
-					a.into_iter()
-						.map(|a| a.iter().sorted().cloned().collect::<Vec<_>>())
-						.sorted_by_key(|assignments| {
-							assignments
-								.iter()
-								.cloned()
-								.map(|(_, value)| value)
-								.collect::<Vec<_>>()
-						})
-						.collect::<Vec<_>>()
-				};
-
-				let sols = canonicalize(sols);
-				let int_assignments = canonicalize(int_assignments);
-
-				let extra_int_assignments = canonicalize(
-					int_assignments
+		let canonicalize = |a: Vec<Vec<(usize, i32)>>| {
+			a.into_iter()
+				.map(|a| a.iter().sorted().cloned().collect::<Vec<_>>())
+				.sorted_by_key(|assignments| {
+					assignments
 						.iter()
-						.filter(|a| !sols.contains(a))
 						.cloned()
-						.collect::<Vec<_>>(),
-				);
-
-				let missing_int_assignments = canonicalize(
-					sols.iter()
-						.filter(|a| !int_assignments.contains(a))
-						.cloned()
-						.collect::<Vec<_>>(),
-				);
-
-				let show_int_assignments = |a: &Vec<Vec<(usize, i32)>>| {
-					a.iter()
-						.map(|a| a.iter().map(|(id, a)| format!("x_{id}={a}")).join(", "))
+						.map(|(_, value)| value)
 						.collect::<Vec<_>>()
-				};
+				})
+				.collect::<Vec<_>>()
+		};
 
-				// TODO find violated constraints for extra assignments
-				assert!(
-					extra_int_assignments.is_empty() && missing_int_assignments.is_empty(),
-					"
+		let sols = canonicalize(sols);
+		let int_assignments = canonicalize(int_assignments);
+
+		// TODO unnecessary canonicalize?
+		let extra_int_assignments = canonicalize(
+			int_assignments
+				.iter()
+				.filter(|a| !sols.contains(a))
+				.cloned()
+				.collect::<Vec<_>>(),
+		);
+
+		let missing_int_assignments = canonicalize(
+			sols.iter()
+				.filter(|a| !int_assignments.contains(a))
+				.cloned()
+				.collect::<Vec<_>>(),
+		);
+
+		let show_int_assignments = |a: &Vec<Vec<(usize, i32)>>| {
+			a.iter()
+				.map(|a| a.iter().map(|(id, a)| format!("x_{}={}", id, a)).join(", "))
+				.collect::<Vec<_>>()
+		};
+
+		// TODO find violated constraints for extra assignments
+		assert!(
+			extra_int_assignments.is_empty() && missing_int_assignments.is_empty(),
+			"
 Extra solutions:
 {}
 Missing solutions:
 {}",
-					show_int_assignments(&extra_int_assignments)
-						.iter()
-						.map(|a| format!("+ {a}"))
-						.join("\n"),
-					show_int_assignments(&missing_int_assignments)
-						.iter()
-						.map(|a| format!("- {a}"))
-						.join("\n"),
-				);
+			show_int_assignments(&extra_int_assignments)
+				.iter()
+				.map(|a| format!("+ {}", a))
+				.join("\n"),
+			show_int_assignments(&missing_int_assignments)
+				.iter()
+				.map(|a| format!("- {}", a))
+				.join("\n"),
+		);
 
-				assert_eq!(int_assignments, sols);
-			}
-		};
+		assert_eq!(int_assignments, sols);
 	}
 
-	mod lp_le_1 {
-		lp_test_case!(
+	#[test]
+	fn test_lp_le_1() {
+		test_lp(
 			r"
 Subject To
-  c0: + 2 x1 + 3 x2 + 5 x3 <= 6
+c0: + 2 x1 + 3 x2 + 5 x3 <= 6
 Binary
-  x1
-  x2
-  x3
+x1
+x2
+x3
 End
-"
+",
 		);
 	}
 
-	mod lp_le_2 {
-		lp_test_case!(
+	#[test]
+	fn test_lp_le_2() {
+		test_lp(
 			r"
 Subject To
-  c0: + 1 x1 + 2 x2 - 1 x3 <= 0
+c0: + 1 x1 + 2 x2 - 1 x3 <= 0
 Bounds
-  0 <= x1 <= 2
-  0 <= x2 <= 2
-  0 <= x3 <= 2
+0 <= x1 <= 2
+0 <= x2 <= 2
+0 <= x3 <= 2
 End
-"
-		);
+",
+		)
 	}
 
-	mod lp_ge_pb_triv {
-		lp_test_case!(
+	#[test]
+	fn test_lp_ge_pb_triv() {
+		test_lp(
 			r"
 Subject To
-  c0: + 1 x1 + 2 x2 + 1 x3 >= -2
+c0: + 1 x1 + 2 x2 + 1 x3 >= -2
 Bounds
-  0 <= x1 <= 1
-  0 <= x2 <= 1
-  0 <= x3 <= 1
+0 <= x1 <= 1
+0 <= x2 <= 1
+0 <= x3 <= 1
 End
-"
+",
 		);
 	}
 
-	mod lp_ge_pb_neg {
-		lp_test_case!(
+	#[test]
+	fn test_lp_ge_pb_neg() {
+		test_lp(
 			r"
 Subject To
-  c0: + 1 x1 + 2 x2 - 1 x3 >= 0
+c0: + 1 x1 + 2 x2 - 1 x3 >= 0
 Bounds
-  0 <= x1 <= 1
-  0 <= x2 <= 1
-  0 <= x3 <= 1
+0 <= x1 <= 1
+0 <= x2 <= 1
+0 <= x3 <= 1
 End
-"
+",
 		);
 	}
 
-	mod lp_ge_neg {
-		lp_test_case!(
+	#[test]
+	fn test_lp_ge_neg() {
+		test_lp(
 			r"
 Subject To
-  c0: + 1 x1 + 2 x2 - 1 x3 >= 0
+c0: + 1 x1 + 2 x2 - 1 x3 >= 0
 Bounds
-  0 <= x1 <= 3
-  0 <= x2 <= 4
-  0 <= x3 <= 5
+0 <= x1 <= 3
+0 <= x2 <= 4
+0 <= x3 <= 5
 End
-"
+",
 		);
 	}
 
-	mod lp_ge_neg_2 {
-		lp_test_case!(
+	#[test]
+	fn test_lp_ge_neg_2() {
+		test_lp(
 			r"
 Subject To
-  c0: + 1 x1 + 2 x2 - 3 x3 >= 0
+c0: + 1 x1 + 2 x2 - 3 x3 >= 0
 Bounds
-  -2 <= x1 <= 3
-  -1 <= x2 <= 4
-  -2 <= x3 <= 5
+-2 <= x1 <= 3
+-1 <= x2 <= 4
+-2 <= x3 <= 5
 End
-"
+",
 		);
 	}
 
-	mod lp_le_neg_last {
-		lp_test_case!(
+	#[test]
+	fn test_lp_le_neg_last() {
+		test_lp(
 			r"
 Subject To
-  c0: + 1 x1 + 2 x2 - 3 x3 <= 0
+c0: + 1 x1 + 2 x2 - 3 x3 <= 0
 Bounds
-  -2 <= x1 <= 3
-  -1 <= x2 <= 4
-  -2 <= x3 <= 5
+-2 <= x1 <= 3
+-1 <= x2 <= 4
+-2 <= x3 <= 5
 End
-"
+",
 		);
 	}
 
-	mod lp_le_3 {
-		lp_test_case!(
+	#[test]
+	fn test_lp_le_3() {
+		test_lp(
 			r"
 Subject To
-  c0: + 1 x1 + 1 x2 - 1 x3 <= 0
+c0: + 1 x1 + 1 x2 - 1 x3 <= 0
 Doms
-  x1 in 0,2
-  x2 in 0,3
-  x3 in 0,2,3,5
+x1 in 0,2
+x2 in 0,3
+x3 in 0,2,3,5
 End
-"
+",
 		);
 	}
 
-	mod lp_2 {
-		lp_test_case!(
+	#[test]
+	fn test_lp_2() {
+		test_lp(
 			r"
 Subject To
-  c0: + 2 x1 + 3 x2 + 5 x3 >= 6
+c0: + 2 x1 + 3 x2 + 5 x3 >= 6
 Binary
-  x1
-  x2
-  x3
+x1
+x2
+x3
 End
-"
+",
 		);
 	}
 
-	mod lp_3 {
-		lp_test_case!(
+	#[test]
+	fn test_lp_3() {
+		test_lp(
 			"
 Subject To
-  c0: + 2 x1 -3 x2 = 0
+c0: + 2 x1 -3 x2 = 0
 Bounds
-  0 <= x1 <= 3
-  0 <= x2 <= 5
+0 <= x1 <= 3
+0 <= x2 <= 5
 End
-"
+",
 		);
 	}
 
-	mod lp_4 {
-		lp_test_case!(
+	#[test]
+	fn test_lp_4() {
+		test_lp(
 			"
 Subject To
-  c0: + 2 x1 - 3 x2 = 0
+c0: + 2 x1 - 3 x2 = 0
 Bounds
-  0 <= x1 <= 3
-  0 <= x2 <= 5
+0 <= x1 <= 3
+0 <= x2 <= 5
 End
-"
+",
 		);
 	}
 
-	mod lp_4_xs {
-		lp_test_case!(
+	#[test]
+	fn test_lp_4_xs() {
+		test_lp(
 			"
 Subject To
-  c0: + 2 x1 - 3 x2 + 2 x3 - 4 x4 <= 6
+c0: + 2 x1 - 3 x2 + 2 x3 - 4 x4 <= 6
 Bounds
-  0 <= x1 <= 1
-  0 <= x2 <= 1
-  0 <= x3 <= 1
-  0 <= x4 <= 1
+0 <= x1 <= 1
+0 <= x2 <= 1
+0 <= x3 <= 1
+0 <= x4 <= 1
 End
-"
+",
 		);
 	}
 
-	mod soh {
-		lp_test_case!(
+	#[test]
+	fn test_soh() {
+		test_lp(
 			"
 Subject To
 c0: + 1 x1 - 1 x3 >= 0
@@ -1234,7 +1244,49 @@ Bounds
 0 <= x3 <= 3
 0 <= x4 <= 3
 End
-"
+",
+		);
+	}
+
+	#[test]
+	fn test_lp_scm_1() {
+		test_lp(
+			r"
+Subject To
+c0: x1 - 4 x2 = 0
+Bounds
+0 <= x1 <= 4
+0 <= x2 <= 4
+End
+",
+		);
+	}
+
+	#[test]
+	fn test_lp_scm_2() {
+		test_lp(
+			r"
+Subject To
+c0: x1 - 11 x2 = 0
+Bounds
+0 <= x1 <= 33
+0 <= x2 <= 4
+End
+",
+		);
+	}
+
+	#[test]
+	fn test_lp_scm_3() {
+		test_lp(
+			r"
+Subject To
+c0: x1 - 43 x2 = 0
+Bounds
+0 <= x1 <= 2000
+0 <= x2 <= 4
+End
+",
 		);
 	}
 }
