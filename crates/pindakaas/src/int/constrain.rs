@@ -155,24 +155,21 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					Err(Unsatisfiable)
 				}
 			}
-			(IntVarEnc::Const(x_con), IntVarEnc::Const(y_con), IntVarEnc::Bin(z_bin)) => {
-				let lhs = *x_con + *y_con;
-				match cmp {
-					// put z_bin on the left, const on the right
-					Comparator::LessEq => z_bin.encode_geq(db, lhs, false),
-					Comparator::Equal => z_bin.encode_eq(db, lhs),
-					Comparator::GreaterEq => z_bin.encode_leq(db, lhs, false),
-				}
-			}
+			(IntVarEnc::Const(x_con), IntVarEnc::Const(y_con), IntVarEnc::Bin(z_bin)) => z_bin
+				.encode_unary_constraint(
+					db,
+					&match cmp {
+						Comparator::Equal => Comparator::Equal,
+						Comparator::LessEq => Comparator::GreaterEq,
+						Comparator::GreaterEq => Comparator::LessEq,
+					},
+					*x_con + *y_con,
+					false,
+				),
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y_con), IntVarEnc::Const(z_con))
 			| (IntVarEnc::Const(y_con), IntVarEnc::Bin(x_bin), IntVarEnc::Const(z_con)) => {
 				// and rest is const ~ lex constraint
-				let rhs = *z_con - *y_con;
-				match cmp {
-					Comparator::LessEq => x_bin.encode_leq(db, rhs, false),
-					Comparator::Equal => x_bin.encode_eq(db, rhs),
-					Comparator::GreaterEq => todo!(),
-				}
+				x_bin.encode_unary_constraint(db, cmp, *z_con - *y_con, false)
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y_const), IntVarEnc::Bin(z_bin))
 			| (IntVarEnc::Const(y_const), IntVarEnc::Bin(x_bin), IntVarEnc::Bin(z_bin)) => {
