@@ -397,11 +397,11 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		}
 	}
 
+	/// Enforce domain on the encoding variables (bounds and gaps)
 	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> crate::Result {
-		self.encode_geq(db, self.lb(), true)?;
-		self.encode_leq(db, self.ub(), true)?;
+		self.encode_unary_constraint(db, &Comparator::GreaterEq, self.lb(), true)?;
+		self.encode_unary_constraint(db, &Comparator::LessEq, self.ub(), true)?;
 		for gap in self.dom.iter().tuple_windows().collect::<Vec<(&C, &C)>>() {
-			dbg!(&gap);
 			for k in num::range_inclusive(*gap.0 + C::one(), *gap.1 - C::one()) {
 				self.encode_neq(db, k)?;
 			}
@@ -441,34 +441,37 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			.collect()
 	}
 
-	pub(crate) fn encode_eq<DB: ClauseDatabase<Lit = Lit>>(
+	/// Encode `x # k` where `# ∈ ≤,=,≥`
+	pub(crate) fn encode_unary_constraint<DB: ClauseDatabase<Lit = Lit>>(
 		&self,
 		db: &mut DB,
-		k: C,
-	) -> crate::Result {
-		as_binary(self.normalize(k).into(), Some(self.bits()))
-			.into_iter()
-			.zip(self.xs(true).iter())
-			.try_for_each(|(b, x)| match x {
-				LitOrConst::Lit(x) => {
-					emit_clause!(db, &[if b { x.clone() } else { x.negate() }])
-				}
-				LitOrConst::Const(x) => (*x == b).then_some(()).ok_or(crate::Unsatisfiable),
-			})
-	}
-
-	pub(crate) fn encode_leq<DB: ClauseDatabase<Lit = Lit>>(
-		&self,
-		db: &mut DB,
+		cmp: &Comparator,
 		k: C,
 		force: bool,
 	) -> crate::Result {
-		if k < self.lb() {
-			Err(crate::Unsatisfiable)
-		} else if k >= self.ub() && !force {
-			Ok(())
-		} else {
-			lex_leq_const(db, &self.xs(true), self.normalize(k).into(), self.bits())
+		match cmp {
+			Comparator::LessEq => {
+				if k < self.lb() {
+					Err(crate::Unsatisfiable)
+				} else if k >= self.ub() && !force {
+					Ok(())
+				} else {
+					lex_leq_const(db, &self.xs(true), self.normalize(k).into(), self.bits())
+				}
+			}
+			Comparator::Equal => self
+				.eq(k)?
+				.into_iter()
+				.try_for_each(|cls| emit_clause!(db, &[cls])),
+			Comparator::GreaterEq => {
+				if k > self.ub() {
+					Err(crate::Unsatisfiable)
+				} else if k <= self.lb() && !force {
+					Ok(())
+				} else {
+					lex_geq_const(db, &self.xs(true), self.normalize(k).into(), self.bits())
+				}
+			}
 		}
 	}
 
@@ -477,23 +480,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		db: &mut DB,
 		k: C,
 	) -> crate::Result {
-		dbg!(&k);
 		emit_clause!(db, &self.eq(k)?.iter().map(Lit::negate).collect::<Vec<_>>())
-	}
-
-	pub(crate) fn encode_geq<DB: ClauseDatabase<Lit = Lit>>(
-		&self,
-		db: &mut DB,
-		k: C,
-		force: bool,
-	) -> crate::Result {
-		if k > self.ub() {
-			Err(crate::Unsatisfiable)
-		} else if k <= self.lb() && !force {
-			Ok(())
-		} else {
-			lex_geq_const(db, &self.xs(true), self.normalize(k).into(), self.bits())
-		}
 	}
 
 	/// Get bits; option to invert the sign bit to create an unsigned binary representation offset by `-2^(k-1)`
