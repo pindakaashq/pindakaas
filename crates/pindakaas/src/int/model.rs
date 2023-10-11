@@ -3,7 +3,7 @@ use crate::{
 	int::{TernLeConstraint, TernLeEncoder},
 	linear::log_enc_add_,
 	trace::new_var,
-	BddEncoder, Comparator, Encoder, LimitComp, Unsatisfiable,
+	BddEncoder, Comparator, Encoder, Unsatisfiable,
 };
 use itertools::{Itertools, Position};
 use std::{
@@ -172,10 +172,13 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	) -> Result<Self, Unsatisfiable> {
 		// Create decomposed model and its aux vars
 		// TODO fix 2 failing unit tests for decomposed models
-		const DECOMPOSE: bool = false;
+		println!("model = {}", self);
+		const DECOMPOSE: bool = true;
 
 		let mut decomposition = if DECOMPOSE {
-			self.clone().decompose()?
+			let decomposition = self.clone().decompose()?;
+			println!("decomposition = {}", decomposition);
+			decomposition
 		} else {
 			self.clone()
 		};
@@ -351,6 +354,7 @@ impl<C: Coefficient> Term<C> {
 								.collect(),
 							format!("{}*{}", self.c, o.lbl.clone()),
 						)))
+					}
 				}
 				IntVarEnc::Bin(x_enc) => {
 					if self.c.is_negative() {
@@ -419,9 +423,9 @@ impl<C: Coefficient> Term<C> {
 								})
 								.collect::<Vec<_>>();
 							if add {
-								log_enc_add_(db, &x, &y, &LimitComp::Equal, &z) // x+y=z
+								log_enc_add_(db, &x, &y, &Comparator::Equal, &z) // x+y=z
 							} else {
-								log_enc_add_(db, &y, &z, &LimitComp::Equal, &x) // x-y=z == x=z+y
+								log_enc_add_(db, &y, &z, &Comparator::Equal, &x) // x-y=z == x=z+y
 							}?;
 							ys.insert(z_i, z);
 						}
@@ -662,18 +666,28 @@ impl<C: Coefficient> Lin<C> {
 		// TODO assert simplified/simplify
 		// assert!(self._is_simplified());
 
+		/*
+		   TODO in progress
+		if false && encs.iter().all(|enc| matches!(enc, IntVarEnc::Bin(_))) {
+			let encs = self
+				.exp
+				.terms
 				.iter()
-				.zip(&self.exp.terms)
-				.map(|(enc, term)| {
-					if is_leq == term.c.is_positive() {
-						enc.geqs()
-					} else {
-						enc.leqs()
-					}
+				.zip(&encs)
+				.flat_map(|(term, enc)| term.encode(db, enc))
+				.collect::<Vec<_>>();
+			let _aux = encs
+				.iter()
+				.scan(IntVarEnc::Const(C::zero()), |state, x| {
+					*state = x
+						.add(db, &mut TernLeEncoder::default(), state, None, None)
+						.unwrap();
+					Some(state.clone())
 				})
-				.multi_cartesian_product()
-				.try_for_each(|geqs| {
-					let rhs = geqs
+				.collect::<Vec<_>>();
+			return Ok(());
+		}
+		*/
 
 		let encs = self
 			.exp
@@ -712,7 +726,6 @@ impl<C: Coefficient> Lin<C> {
 					!encs.iter().any(|enc| matches!(enc, IntVarEnc::Bin(_))),
 					"TODO"
 				);
-
 				// TODO support binary
 				match self.cmp {
 					Comparator::Equal => vec![true, false],

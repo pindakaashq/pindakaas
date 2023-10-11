@@ -173,7 +173,8 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y_const), IntVarEnc::Bin(z_bin))
 			| (IntVarEnc::Const(y_const), IntVarEnc::Bin(x_bin), IntVarEnc::Bin(z_bin)) => {
-				let (x_bin, y_const) = if matches!(cmp, Comparator::LessEq) {
+				let (x_bin, y_const) = if matches!(cmp, Comparator::LessEq | Comparator::GreaterEq)
+				{
 					let x_bin = x_bin.add(db, self, *y_const)?;
 					x_bin.consistent(db)?;
 					(x_bin, C::zero())
@@ -195,7 +196,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 						.into_iter()
 						.map(LitOrConst::Const)
 						.collect::<Vec<_>>(),
-					&(*cmp).try_into().unwrap(),
+					cmp,
 					&z_bin.xs(false).into_iter().collect::<Vec<_>>(),
 				)
 			}
@@ -206,11 +207,12 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 						db,
 						&x_bin.xs(false),
 						&y_bin.xs(false),
-						&(*cmp).try_into().unwrap(),
+						cmp,
 						&z_bin.xs(false),
 					),
 					ineq => {
-						let xy = x.add(db, self, y, None, Some(z.ub()))?;
+						// TODO could add Some(z.ub()) IF cmp == Equal?
+						let xy = x.add(db, self, y, None, None)?;
 						xy.consistent(db)?; // TODO can be removed if grounding is correct
 						self.encode(
 							db,
@@ -222,7 +224,8 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			(IntVarEnc::Bin(_), IntVarEnc::Bin(_), _) => {
 				// y/y is bin but z is not bin ~ redundantly encode y + z_bin in 0..z # z and z_bin <= z
 				// TODO better coupling ;
-				let z_bin = x.add(db, self, y, None, Some(z.ub()))?;
+				// TODO could add Some(z.ub()) IF cmp == Equal?
+				let z_bin = x.add(db, self, y, None, None)?;
 				z_bin.consistent(db)?;
 				self.encode(
 					db,
@@ -244,6 +247,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					format!("{}{cmp}y:B", y_ord.lbl),
 				);
 
+				// channel
 				self.encode(
 					db,
 					&TernLeConstraint::new(
@@ -287,18 +291,20 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				)?;
 
 				// x + c <= z == z-c >= x == /\ (z'<=a -> x<=a)
-				for (c_a, z_leq_c_a) in z.leqs() {
-					// TODO alt; just propagate by adding lex constraint
-					let c_a = if z_leq_c_a.is_empty() {
-						c_a.start..(x.ub() + C::one())
-					} else {
-						c_a
-					};
+				if cmp == &Comparator::LessEq || cmp == &Comparator::Equal {
+					for (c_a, z_leq_c_a) in z.leqs() {
+						// TODO alt; just propagate by adding lex constraint
+						let c_a = if z_leq_c_a.is_empty() {
+							c_a.start..(x.ub() + C::one())
+						} else {
+							c_a
+						};
 
-					let x_leq_c_a = x_bin.leq(c_a.clone());
-					add_clauses_for(db, vec![negate_cnf(z_leq_c_a.clone()), x_leq_c_a])?;
+						let x_leq_c_a = x_bin.leq(c_a.clone());
+						add_clauses_for(db, vec![negate_cnf(z_leq_c_a.clone()), x_leq_c_a])?;
+					}
 				}
-				if cmp == &Comparator::Equal {
+				if cmp == &Comparator::GreaterEq || cmp == &Comparator::Equal {
 					for (c_a, z_geq_c_a) in z.geqs() {
 						let c_a = if z_geq_c_a.is_empty() {
 							x.lb()..c_a.end
@@ -313,27 +319,28 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			}
 			(x, y, z) => {
 				// couple or constrain x:E + y:E <= z:E
-				for (c_a, x_geq_c_a) in x.geqs() {
-					for (c_b, y_geq_c_b) in y.geqs() {
-						// TODO is the max actually correct/good?
-						let c_c = (std::cmp::max(c_a.start, c_b.start))
-							..(((c_a.end - C::one()) + (c_b.end - C::one())) + C::one());
+				if cmp == &Comparator::LessEq || cmp == &Comparator::Equal {
+					for (c_a, x_geq_c_a) in x.geqs() {
+						for (c_b, y_geq_c_b) in y.geqs() {
+							// TODO is the max actually correct/good?
+							let c_c = (std::cmp::max(c_a.start, c_b.start))
+								..(((c_a.end - C::one()) + (c_b.end - C::one())) + C::one());
 
-						let z_geq_c_c = z.geq(c_c.clone());
+							let z_geq_c_c = z.geq(c_c.clone());
 
-						add_clauses_for(
-							db,
-							vec![
-								negate_cnf(x_geq_c_a.clone()),
-								negate_cnf(y_geq_c_b),
-								z_geq_c_c,
-							],
-						)?;
+							add_clauses_for(
+								db,
+								vec![
+									negate_cnf(x_geq_c_a.clone()),
+									negate_cnf(y_geq_c_b),
+									z_geq_c_c,
+								],
+							)?;
+						}
 					}
 				}
-
 				// x<=a /\ y<=b -> z<=a+b
-				if cmp == &Comparator::Equal {
+				if cmp == &Comparator::GreaterEq || cmp == &Comparator::Equal {
 					for (c_a, x_leq_c_a) in x.leqs() {
 						for (c_b, y_leq_c_b) in y.leqs() {
 							let c_c = (c_a.start + c_b.start)
@@ -583,6 +590,10 @@ pub mod tests {
 
 	mod int_lin_le {
 		int_lin_test_suite!(TernLeEncoder::default(), Comparator::LessEq);
+	}
+
+	mod int_lin_ge {
+		int_lin_test_suite!(TernLeEncoder::default(), Comparator::GreaterEq);
 	}
 
 	mod int_lin_eq {
