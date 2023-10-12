@@ -15,15 +15,15 @@ cached = "0.46"
 iset = "0.2"
 itertools = "0.11"
 rustc-hash = "1.1"
+# Dynamically load solver libraries (through IPASIR interfaces)
+libloading = "0.8"
 
 # Optional encoding tracing capabilities
 tracing = { version = "0.1", optional = true }
 
-# Optional library to dynamically load solver libraries (through IPASIR interfaces)
-libloading = { version = "0.8", optional = true }
-
 # Optional Solver Interfaces
 splr = { version = "0.17", optional = true }
+pindakaas-cadical = { path = "../pindakaas-cadical", optional = true }
 
 [dev-dependencies]
 splr = { version = "0.17", features = ["incremental_solver"] }
@@ -31,4 +31,5 @@ traced_test = { path = "../traced_test" }
 
 [features]
 trace = ["tracing"]
+cadical = ["pindakaas-cadical"]
 default = []

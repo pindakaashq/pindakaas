@@ -7,6 +7,7 @@ use crate::{
 	Encoder, LinExp, Lit, Result, Unsatisfiable, Valuation,
 };
 
+#[allow(unused_macros)]
 macro_rules! maybe_std_concat {
 	($e:literal) => {
 		concat!($e)
@@ -15,8 +16,10 @@ macro_rules! maybe_std_concat {
 		$e
 	};
 }
+#[allow(unused_imports)]
 pub(crate) use maybe_std_concat;
 
+#[allow(unused_macros)]
 macro_rules! concat_slices {
     ([$init:expr; $T:ty]: $($s:expr),+ $(,)?) => {{
         $(
@@ -44,9 +47,10 @@ macro_rules! concat_slices {
         $crate::helpers::concat_slices!([0; $T]: $($s),+)
     };
 }
+#[allow(unused_imports)]
 pub(crate) use concat_slices;
 
-#[doc(hidden)]
+#[allow(unused_macros)]
 macro_rules! const_concat {
 	() => { "" };
 
@@ -62,6 +66,7 @@ macro_rules! const_concat {
 			unsafe { std::str::from_utf8_unchecked(slice) }
 	}};
 }
+#[allow(unused_imports)]
 pub(crate) use const_concat;
 
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
