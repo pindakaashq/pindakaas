@@ -21,13 +21,14 @@ use std::{
 };
 
 use itertools::{Itertools, Position};
+use solver::VarFactory;
 
 mod cardinality;
 mod cardinality_one;
 pub(crate) mod helpers;
 mod int;
 mod linear;
-mod solver;
+pub mod solver;
 mod sorted;
 pub mod trace;
 
@@ -38,11 +39,6 @@ pub use crate::{
 	linear::{
 		AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear,
 		LinearAggregator, LinearConstraint, LinearEncoder, SwcEncoder, TotalizerEncoder,
-	},
-	solver::{
-		libloading::{IpasirLibrary, IpasirSolver},
-		splr::SplrSolver,
-		Solver, VarFactory,
 	},
 	sorted::{SortedEncoder, SortedStrategy},
 };

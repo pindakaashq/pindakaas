@@ -3,8 +3,8 @@ use std::num::NonZeroI32;
 pub use splr::Solver as SplrSolver;
 use splr::{Certificate, SatSolverIF, SolveIF, SolverError::*, VERSION};
 
-use super::{SolveResult, SolverAction};
-use crate::{helpers::const_concat, ClauseDatabase, Cnf, Lit, Solver};
+use super::{SolveResult, Solver, SolverAction};
+use crate::{helpers::const_concat, ClauseDatabase, Cnf, Lit};
 
 impl ClauseDatabase for SplrSolver {
 	fn new_var(&mut self) -> Lit {

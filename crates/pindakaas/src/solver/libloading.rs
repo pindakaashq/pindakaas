@@ -6,8 +6,11 @@ use std::{
 
 use libloading::{Library, Symbol};
 
-use super::{FailFn, SolveResult, SolverAction};
-use crate::{ClauseDatabase, Lit, Result, Solver, Valuation, VarFactory};
+use super::{
+	get_trampoline0, get_trampoline1, ExplIter, FailFn, SolveResult, Solver, SolverAction,
+	VarFactory,
+};
+use crate::{ClauseDatabase, Lit, Result, Valuation};
 
 pub struct IpasirLibrary {
 	lib: Library,
@@ -233,8 +236,9 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 			};
 			let data = &mut wrapped_cb as *mut _ as *mut c_void;
 			(self.set_terminate_fn)(self.slv, data, Some(get_trampoline0(&wrapped_cb)));
+		} else {
+			(self.set_terminate_fn)(self.slv, ptr::null_mut(), None);
 		}
-		(self.set_terminate_fn)(self.slv, ptr::null_mut(), None);
 	}
 
 	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(
@@ -252,41 +256,6 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 			(self.set_learn_fn)(self.slv, data, max_len, Some(get_trampoline1(&wrapped_cb)));
 		} else {
 			(self.set_learn_fn)(self.slv, ptr::null_mut(), max_len, None);
-		}
-	}
-}
-
-type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
-unsafe extern "C" fn trampoline0<R, F: FnMut() -> R>(user_data: *mut c_void) -> R {
-	let user_data = &mut *(user_data as *mut F);
-	user_data()
-}
-fn get_trampoline0<R, F: FnMut() -> R>(_closure: &F) -> CB0<R> {
-	trampoline0::<R, F>
-}
-type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;
-unsafe extern "C" fn trampoline1<R, A, F: FnMut(A) -> R>(user_data: *mut c_void, arg1: A) -> R {
-	let user_data = &mut *(user_data as *mut F);
-	user_data(arg1)
-}
-fn get_trampoline1<R, A, F: FnMut(A) -> R>(_closure: &F) -> CB1<R, A> {
-	trampoline1::<R, A, F>
-}
-/// Iterator over the elements of a null-terminated i32 array
-#[derive(Debug, Clone, Copy)]
-struct ExplIter(*const i32);
-impl Iterator for ExplIter {
-	type Item = i32;
-	#[inline]
-	fn next(&mut self) -> Option<Self::Item> {
-		unsafe {
-			if *self.0 == 0 {
-				None
-			} else {
-				let ptr = self.0;
-				self.0 = ptr.offset(1);
-				Some(*ptr)
-			}
 		}
 	}
 }

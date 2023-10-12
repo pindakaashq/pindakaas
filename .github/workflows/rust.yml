@@ -36,7 +36,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Install Rust toolchain
         run: |
           rustup toolchain install --profile minimal --no-self-update ${{ env.RUST_CHANNEL }}
@@ -48,7 +50,9 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Install Rust toolchain
         run: |
           rustup toolchain install --profile minimal --component clippy --no-self-update ${{ env.RUST_CHANNEL }}
@@ -60,7 +64,9 @@ jobs:
   format:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Install Rust toolchain
         run: |
           rustup toolchain install --profile minimal --component rustfmt --no-self-update ${{ env.RUST_FMT_CHANNEL }}
@@ -70,7 +76,9 @@ jobs:
   semver:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Check semver
         uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
