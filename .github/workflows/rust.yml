@@ -73,13 +73,14 @@ jobs:
           rustup default ${{ env.RUST_CHANNEL }}
       - name: Run cargo format
         run: cargo +nightly fmt --all --check
-  semver:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-      - name: Check semver
-        uses: obi1kenobi/cargo-semver-checks-action@v2
-        with:
-          crate-name: pindakaas
+  # TODO: Re-enable after first release
+  # semver:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         submodules: true
+  #     - name: Check semver
+  #       uses: obi1kenobi/cargo-semver-checks-action@v2
+  #       with:
+  #         crate-name: pindakaas

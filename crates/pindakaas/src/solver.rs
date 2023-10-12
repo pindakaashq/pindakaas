@@ -4,11 +4,12 @@ use crate::{ClauseDatabase, Lit, Valuation, Var};
 
 pub mod libloading;
 
-#[cfg(feature = "splr")]
-pub mod splr;
-
 #[cfg(feature = "cadical")]
 pub mod cadical;
+#[cfg(feature = "intel-sat")]
+pub mod intel_sat;
+#[cfg(feature = "splr")]
+pub mod splr;
 
 pub trait Solver: ClauseDatabase {
 	/// Return the name and the version of SAT solving library.

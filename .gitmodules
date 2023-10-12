@@ -1,3 +1,6 @@
 [submodule "crates/pindakaas-cadical/vendor/cadical"]
 	path = crates/pindakaas-cadical/vendor/cadical
 	url = https://github.com/arminbiere/cadical.git
+[submodule "crates/pindakaas-intel-sat/vendor/intel_sat"]
+	path = crates/pindakaas-intel-sat/vendor/intel_sat
+	url = https://github.com/alexander-nadel/intel_sat_solver.git

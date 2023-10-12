@@ -1,6 +1,6 @@
 use super::ipasir_solver;
 
-ipasir_solver!(pindakaas_cadical, Cadical);
+ipasir_solver!(pindakaas_intel_sat, IntelSat);
 
 #[cfg(test)]
 mod tests {
@@ -15,8 +15,8 @@ mod tests {
 	};
 
 	#[test]
-	fn test_cadical() {
-		let mut slv = Cadical::default();
+	fn test_intel_sat() {
+		let mut slv = IntelSat::default();
 		let a = slv.new_var();
 		let b = slv.new_var();
 		PairwiseEncoder::default()
