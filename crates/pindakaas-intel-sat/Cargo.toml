@@ -8,6 +8,7 @@ exclude = ["vendor/intel_sat"]
 include = ["vendor/intel_sat/*.cc"]
 
 [build-dependencies]
+pindakaas-build-macros = { path = "../pindakaas-build-macros" }
 cc = { version = "1.0", features = ["parallel"] }
 
 [dependencies]

@@ -181,13 +181,14 @@ macro_rules! ipasir_solver {
 					10 => {
 						// 10 -> Sat
 						let val_fn = |lit: crate::Lit| {
-							let lit: i32 = lit.into();
-							let val = unsafe { $loc::ipasir_val(self.ptr, lit) };
-							match val {
-								_ if val == lit => Some(true),
-								_ if val == -lit => Some(false),
+							let var: i32 = lit.var().into();
+							// WARN: Always ask about variable (positive) literal, otherwise solvers sometimes seem incorrect
+							let ret = unsafe { $loc::ipasir_val(self.ptr, var) };
+							match ret {
+								_ if ret == var => Some(!lit.is_negated()),
+								_ if ret == -var => Some(lit.is_negated()),
 								_ => {
-									debug_assert_eq!(val, 0); // zero according to spec, both value are valid
+									debug_assert_eq!(ret, 0); // zero according to spec, both value are valid
 									None
 								}
 							}

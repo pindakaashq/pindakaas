@@ -1,3 +1,5 @@
+use pindakaas_build_macros::change_ipasir_prefix;
+
 fn main() {
 	let src = [
 		"vendor/intel_sat/Topi.cc",
@@ -17,8 +19,7 @@ fn main() {
 
 	let mut builder = cc::Build::new();
 	let build = builder.cpp(true).flag_if_supported("-std=c++20");
+	change_ipasir_prefix(build, "intel_sat");
 
-	build.files(src);
-
-	build.compile("intel_sat");
+	build.files(src).compile("intel_sat");
 }

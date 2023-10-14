@@ -33,7 +33,6 @@ fn main() {
 		"vendor/cadical/src/gates.cpp",
 		"vendor/cadical/src/instantiate.cpp",
 		"vendor/cadical/src/internal.cpp",
-		"vendor/cadical/src/ipasir.cpp",
 		"vendor/cadical/src/limit.cpp",
 		"vendor/cadical/src/logging.cpp",
 		"vendor/cadical/src/lookahead.cpp",
@@ -86,6 +85,11 @@ fn main() {
 		.define("NUNLOCKED", None)
 		.define("NTRACING", None)
 		.define("QUIET", None);
+
+	assert_eq!(
+		env!("CARGO_PKG_VERSION"),
+		include_str!("vendor/cadical/VERSION").trim()
+	);
 
 	build.files(src);
 
