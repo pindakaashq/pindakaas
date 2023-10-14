@@ -17,6 +17,8 @@ mod tests {
 	#[test]
 	fn test_cadical() {
 		let mut slv = Cadical::default();
+		assert!(slv.signature().starts_with("cadical"));
+
 		let a = slv.new_var();
 		let b = slv.new_var();
 		PairwiseEncoder::default()

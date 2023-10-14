@@ -3,7 +3,7 @@ use std::ffi::{c_char, c_int, c_void};
 use pindakaas_build_macros::ipasir_definitions;
 
 // Standard IPASIR definitions
-ipasir_definitions!();
+ipasir_definitions!(ccadical);
 
 // Additional C-API functions in CaDiCaL
 extern "C" {
