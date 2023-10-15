@@ -373,9 +373,17 @@ impl<C: Coefficient> Term<C> {
 							c = c.div(C::one() + C::one());
 						}
 
+						// TODO make option
+						const MIN_ADD: bool = true;
+
 						let scm = SCM
 							.iter()
-							.find_map(|(mul, scm)| (C::from(*mul).unwrap() == c).then_some(scm))
+							.find_map(|(bits, mul, scm)| {
+								// TODO bits or lits?
+								(*bits == if MIN_ADD { x_enc.bits() } else { 0 }
+									&& C::from(*mul).unwrap() == c)
+									.then_some(scm)
+							})
 							.unwrap_or(&"");
 
 						// TODO store `c` value i/o of node index
