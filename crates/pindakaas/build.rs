@@ -12,11 +12,7 @@ use std::path::Path;
 use flate2::read::GzDecoder;
 use tar::Archive;
 
-const BITS: u32 = 16;
-
-type Bits = u32;
-
-fn scm() -> Result<Vec<(Bits, String)>, std::io::Error> {
+fn scm() -> Result<Vec<(usize, u32, String)>, std::io::Error> {
 	Archive::new(GzDecoder::new(fs::File::open(Path::new(
 		"./res/scm.tar.gz",
 	))?))
@@ -40,11 +36,9 @@ fn scm() -> Result<Vec<(Bits, String)>, std::io::Error> {
 				.split('_')
 				.collect::<Vec<_>>()
 				.into_iter()
-				.map(|x| x.to_string().parse::<Bits>().unwrap())
 				.collect_tuple()
 				.unwrap();
-			assert_eq!(bits, BITS);
-			(v, scm)
+			(bits.parse().unwrap(), v.parse().unwrap(), scm)
 		})
 		.sorted()
 		.collect())
@@ -57,10 +51,10 @@ pub fn main() {
 	let scm = scm().unwrap();
 
 	let o = format!(
-		"pub(crate) static SCM: [(u32, &str); {}] = [\n{}\n];",
+		"pub(crate) static SCM: [(usize, u32, &str); {}] = [\n{}\n];",
 		scm.len(),
 		scm.iter()
-			.map(|(c, scm)| format!("\t({}, \"{}\")", c, scm))
+			.map(|(x, c, scm)| format!("\t({}, {}, \"{}\")", x, c, scm))
 			.join(",\n")
 	);
 	fs::write("./src/int/scm.rs", o).unwrap();
