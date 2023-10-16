@@ -21,10 +21,19 @@ use super::{enc::GROUND_BINARY_AT_LB, scm::SCM, IntVarBin, IntVarEnc, IntVarOrd,
 
 // TODO usize -> intId struct
 
+#[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
+pub struct IntVarId(usize);
+
+impl std::fmt::Display for IntVarId {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
+
 // TODO should we keep IntVar i/o IntVarEnc?
 #[derive(Debug, Clone)]
 pub struct Model<Lit: Literal, C: Coefficient> {
-	pub(crate) vars: HashMap<usize, IntVarEnc<Lit, C>>,
+	pub(crate) vars: HashMap<IntVarId, IntVarEnc<Lit, C>>,
 	pub(crate) cons: Vec<Lin<C>>,
 	pub(crate) num_var: usize,
 	pub(crate) obj: Obj<C>,
@@ -104,7 +113,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.then(|| {
 				self.num_var += 1;
 				Rc::new(RefCell::new(IntVar {
-					id: self.num_var,
+					id: IntVarId(self.num_var),
 					dom: dom.iter().cloned().collect(),
 					add_consistency,
 					views: HashMap::default(),
@@ -509,7 +518,7 @@ impl<C: Coefficient> Lin<C> {
 		self.exp.terms.iter().map(Term::ub).fold(C::zero(), C::add)
 	}
 
-	pub(crate) fn propagate(&mut self, consistency: &Consistency) -> Vec<usize> {
+	pub(crate) fn propagate(&mut self, consistency: &Consistency) -> Vec<IntVarId> {
 		let mut changed = vec![];
 		match consistency {
 			Consistency::None => unreachable!(),
@@ -634,7 +643,7 @@ impl<C: Coefficient> Lin<C> {
 			&& self.k.is_zero()
 	}
 
-	fn check<Lit: Literal>(&self, a: &HashMap<usize, C>) -> Result<(), CheckError<Lit>> {
+	fn check<Lit: Literal>(&self, a: &HashMap<IntVarId, C>) -> Result<(), CheckError<Lit>> {
 		let lhs = self
 			.exp
 			.terms
@@ -674,127 +683,137 @@ impl<C: Coefficient> Lin<C> {
 		// TODO assert simplified/simplify
 		// assert!(self._is_simplified());
 
-		/*
-		   TODO in progress
-		if false && encs.iter().all(|enc| matches!(enc, IntVarEnc::Bin(_))) {
-			let encs = self
+		if encs.iter().all(|enc| matches!(enc, IntVarEnc::Bin(_))) {
+			return self
 				.exp
 				.terms
 				.iter()
 				.zip(&encs)
 				.flat_map(|(term, enc)| term.encode(db, enc))
-				.collect::<Vec<_>>();
-			let _aux = encs
-				.iter()
-				.scan(IntVarEnc::Const(C::zero()), |state, x| {
-					*state = x
-						.add(db, &mut TernLeEncoder::default(), state, None, None)
-						.unwrap();
+				.collect::<Vec<_>>()
+				.into_iter()
+				// TODO replace first element for xs[1]
+				.scan(Ok(IntVarEnc::Const(C::zero())), |state, x| {
+					*state = x.add(
+						db,
+						&mut TernLeEncoder::default(),
+						state.as_ref().unwrap(),
+						None,
+						Some(self.k),
+					);
 					Some(state.clone())
 				})
-				.collect::<Vec<_>>();
-			return Ok(());
+				// Remap Ok(IntVarEnc) to Ok(()) to make it crate::Result
+				.try_for_each(|x| x.map(|_| ()));
+			// .collect::<Vec<_>>();
 		}
-		*/
+		dbg!(&self, &encs);
 
-		let encs = self
-			.exp
-			.terms
-			.iter()
-			.zip(encs)
-			.with_position()
-			.flat_map(|(pos, (x, enc))| match pos {
-				Position::Last if self.exp.terms.len() == 3 => {
-					assert!(self.k.is_zero());
-					(x.clone() * -C::one()).encode(db, &enc)
-				}
-				_ => x.encode(db, &enc),
-			})
-			.collect::<Vec<_>>();
-
-		let mut encoder = TernLeEncoder::default();
-		// TODO generalize n-ary encoding; currently using fallback of TernLeEncoder
-		return match &encs[..] {
-			[] => return Ok(()),
-			[x] => {
-				let y = IntVarEnc::Const(C::zero());
-				let z = IntVarEnc::Const(self.k);
-				encoder.encode(db, &TernLeConstraint::new(x, &y, &self.cmp, &z))
-			}
-			[x, y] => {
-				let z = IntVarEnc::Const(self.k);
-				encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, &z))
-			}
-			[x, y, z] => {
-				assert!(self.k.is_zero());
-				encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, z))
-			}
-			_ => {
-				assert!(
-					!encs.iter().any(|enc| matches!(enc, IntVarEnc::Bin(_))),
-					"TODO"
-				);
-				// TODO support binary
-				match self.cmp {
-					Comparator::Equal => vec![true, false],
-					Comparator::LessEq => vec![true],
-					Comparator::GreaterEq => vec![false],
-				}
-				.into_iter()
-				.try_for_each(|is_leq| {
-					encs[0..encs.len() - 1]
-						.iter()
-						.zip(&self.exp.terms)
-						.map(|(enc, term)| {
-							if is_leq == term.c.is_positive() {
-								enc.geqs()
-							} else {
-								enc.leqs()
-							}
-						})
-						.multi_cartesian_product()
-						.try_for_each(|geqs| {
-							let rhs = geqs
-								.iter()
-								.zip(&self.exp.terms)
-								.map(|((d, _), term)| {
-									if is_leq == term.c.is_positive() {
-										term.c * (d.end - C::one())
-									} else {
-										term.c * d.start
-									}
-								})
-								.fold(self.k, C::sub);
-
-							let conditions = geqs
-								.iter()
-								.map(|(_, cnf)| negate_cnf(cnf.clone()))
-								.collect::<Vec<_>>();
-
-							let (last_enc, last_c) =
-								(&encs[encs.len() - 1], &self.exp.terms[encs.len() - 1].c);
-
-							let last = if is_leq == last_c.is_positive() {
-								last_enc.leq_(rhs.div_ceil(last_c))
-							} else {
-								last_enc.geq_(rhs.div_floor(last_c))
-							};
-
-							add_clauses_for(db, conditions.iter().cloned().chain([last]).collect())
-						})
+		todo!();
+		#[allow(unreachable_code)]
+		{
+			let encs = self
+				.exp
+				.terms
+				.iter()
+				.zip(encs)
+				.with_position()
+				.flat_map(|(pos, (x, enc))| match pos {
+					Position::Last if self.exp.terms.len() == 3 => {
+						assert!(self.k.is_zero());
+						(x.clone() * -C::one()).encode(db, &enc)
+					}
+					_ => x.encode(db, &enc),
 				})
-			}
-		};
+				.collect::<Vec<_>>();
+
+			let mut encoder = TernLeEncoder::default();
+			// TODO generalize n-ary encoding; currently using fallback of TernLeEncoder
+			return match &encs[..] {
+				[] => return Ok(()),
+				[x] => {
+					let y = IntVarEnc::Const(C::zero());
+					let z = IntVarEnc::Const(self.k);
+					encoder.encode(db, &TernLeConstraint::new(x, &y, &self.cmp, &z))
+				}
+				[x, y] => {
+					let z = IntVarEnc::Const(self.k);
+					encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, &z))
+				}
+				[x, y, z] => {
+					assert!(self.k.is_zero());
+					encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, z))
+				}
+				_ => {
+					assert!(
+						!encs.iter().any(|enc| matches!(enc, IntVarEnc::Bin(_))),
+						"TODO"
+					);
+					// TODO support binary
+					match self.cmp {
+						Comparator::Equal => vec![true, false],
+						Comparator::LessEq => vec![true],
+						Comparator::GreaterEq => vec![false],
+					}
+					.into_iter()
+					.try_for_each(|is_leq| {
+						encs[0..encs.len() - 1]
+							.iter()
+							.zip(&self.exp.terms)
+							.map(|(enc, term)| {
+								if is_leq == term.c.is_positive() {
+									enc.geqs()
+								} else {
+									enc.leqs()
+								}
+							})
+							.multi_cartesian_product()
+							.try_for_each(|geqs| {
+								let rhs = geqs
+									.iter()
+									.zip(&self.exp.terms)
+									.map(|((d, _), term)| {
+										if is_leq == term.c.is_positive() {
+											term.c * (d.end - C::one())
+										} else {
+											term.c * d.start
+										}
+									})
+									.fold(self.k, C::sub);
+
+								let conditions = geqs
+									.iter()
+									.map(|(_, cnf)| negate_cnf(cnf.clone()))
+									.collect::<Vec<_>>();
+
+								let (last_enc, last_c) =
+									(&encs[encs.len() - 1], &self.exp.terms[encs.len() - 1].c);
+
+								let last = if is_leq == last_c.is_positive() {
+									last_enc.leq_(rhs.div_ceil(last_c))
+								} else {
+									last_enc.geq_(rhs.div_floor(last_c))
+								};
+
+								add_clauses_for(
+									db,
+									conditions.iter().cloned().chain([last]).collect(),
+								)
+							})
+					})
+				}
+			};
+		}
 	}
 }
 
 // TODO perhaps id can be used by replacing vars HashMap to just vec
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IntVar<C: Coefficient> {
-	pub(crate) id: usize,
+	pub(crate) id: IntVarId,
 	pub(crate) dom: BTreeSet<C>, // TODO implement rangelist
 	pub(crate) add_consistency: bool,
-	pub(crate) views: HashMap<C, (usize, C)>,
+	pub(crate) views: HashMap<C, (IntVarId, C)>,
 	lbl: Option<String>,
 }
 
@@ -806,7 +825,7 @@ impl<C: Coefficient> IntVar<C> {
 	fn encode<DB: ClauseDatabase>(
 		&self,
 		db: &mut DB,
-		views: &mut HashMap<(usize, C), DB::Lit>,
+		views: &mut HashMap<(IntVarId, C), DB::Lit>,
 		prefer_order: bool,
 	) -> IntVarEnc<DB::Lit, C> {
 		if self.is_constant() {
@@ -920,7 +939,10 @@ mod tests {
 	use crate::{Cnf, Lin, Model};
 
 	impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
-		fn check_assignment(&self, assignment: &HashMap<usize, C>) -> Result<(), CheckError<Lit>> {
+		fn check_assignment(
+			&self,
+			assignment: &HashMap<IntVarId, C>,
+		) -> Result<(), CheckError<Lit>> {
 			self.cons
 				.iter()
 				.try_for_each(|con| con.check::<Lit>(assignment))
@@ -1013,7 +1035,7 @@ mod tests {
 			})
 			.collect::<Vec<_>>();
 
-		let canonicalize = |a: Vec<Vec<(usize, i32)>>| {
+		let canonicalize = |a: Vec<Vec<(IntVarId, i32)>>| {
 			a.into_iter()
 				.map(|a| a.iter().sorted().cloned().collect::<Vec<_>>())
 				.sorted_by_key(|assignments| {
@@ -1045,7 +1067,7 @@ mod tests {
 				.collect::<Vec<_>>(),
 		);
 
-		let show_int_assignments = |a: &Vec<Vec<(usize, i32)>>| {
+		let show_int_assignments = |a: &Vec<Vec<(IntVarId, i32)>>| {
 			a.iter()
 				.map(|a| a.iter().map(|(id, a)| format!("x_{}={}", id, a)).join(", "))
 				.collect::<Vec<_>>()
