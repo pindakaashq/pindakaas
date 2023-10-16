@@ -69,6 +69,8 @@ macro_rules! ipasir_definitions {
 	};
 }
 
+/// Function that renames the standard `ipasir_` when using the `cc` crate to
+/// avoid conflicts when linking.
 pub fn change_ipasir_prefix(build: &mut Build, prefix: &str) {
 	build
 		.define("ipasir_signature", format!("{prefix}_signature").as_ref())

@@ -1,9 +1,6 @@
-use super::{ipasir_learn_callback, ipasir_solve_assuming, ipasir_solver, ipasir_term_callback};
+use super::ipasir_solver;
 
-ipasir_solver!(pindakaas_intel_sat, IntelSat);
-ipasir_solve_assuming!(pindakaas_intel_sat, IntelSat);
-ipasir_learn_callback!(pindakaas_intel_sat, IntelSat);
-ipasir_term_callback!(pindakaas_intel_sat, IntelSat);
+ipasir_solver!(pindakaas_kissat, Kissat);
 
 #[cfg(test)]
 mod tests {
@@ -18,9 +15,10 @@ mod tests {
 	};
 
 	#[test]
-	fn test_intel_sat() {
-		let mut slv = IntelSat::default();
-		assert!(slv.signature().starts_with("IntelSat"));
+	fn test_kissat() {
+		let mut slv = Kissat::default();
+		assert!(slv.signature().starts_with("kissat"));
+
 		let a = slv.new_var();
 		let b = slv.new_var();
 		PairwiseEncoder::default()

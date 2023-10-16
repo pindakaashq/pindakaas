@@ -1,12 +1,12 @@
 use std::num::NonZeroI32;
 
-pub use splr::Solver as SplrSolver;
+pub use splr::Solver as Splr;
 use splr::{Certificate, SatSolverIF, SolveIF, SolverError::*, VERSION};
 
-use super::{SolveResult, Solver, SolverAction};
+use super::{SolveResult, Solver};
 use crate::{helpers::const_concat, ClauseDatabase, Cnf, Lit};
 
-impl ClauseDatabase for SplrSolver {
+impl ClauseDatabase for Splr {
 	fn new_var(&mut self) -> Lit {
 		let var = self.add_var();
 		let var: i32 = var.try_into().expect("exhausted variable pool");
@@ -28,17 +28,13 @@ impl ClauseDatabase for SplrSolver {
 	}
 }
 
-impl Solver for SplrSolver {
+impl Solver for Splr {
 	fn signature(&self) -> &str {
 		const SPLR_SIG: &str = const_concat!("SPLR-", VERSION);
 		SPLR_SIG
 	}
 
-	fn solve<SolCb: FnOnce(&dyn crate::Valuation), FailCb: FnOnce(&super::FailFn<'_>)>(
-		&mut self,
-		on_sol: SolCb,
-		on_fail: FailCb,
-	) -> SolveResult {
+	fn solve<SolCb: FnOnce(&dyn crate::Valuation)>(&mut self, on_sol: SolCb) -> SolveResult {
 		match SolveIF::solve(self) {
 			Ok(Certificate::UNSAT) => SolveResult::Unsat,
 			Ok(Certificate::SAT(sol)) => {
@@ -58,67 +54,21 @@ impl Solver for SplrSolver {
 			Err(e) => match e {
 				InvalidLiteral => panic!("clause referenced a non-existing variable"),
 				Inconsistent => SolveResult::Unsat,
-				RootLevelConflict((l, _)) => {
-					let i: i32 = l.into();
-					on_fail(&|x| i32::from(x.var()) == i.abs());
-					SolveResult::Unsat
-				}
+				RootLevelConflict(_) => SolveResult::Unsat,
 				TimeOut | OutOfMemory => SolveResult::Unknown,
 				_ => panic!("an error occurred within the splr solver"),
 			},
 		}
 	}
-
-	fn solve_assuming<
-		I: IntoIterator<Item = Lit>,
-		SolCb: FnOnce(&dyn crate::Valuation),
-		FailCb: FnOnce(&super::FailFn<'_>),
-	>(
-		&mut self,
-		assumptions: I,
-		on_sol: SolCb,
-		on_fail: FailCb,
-	) -> SolveResult {
-		let mut copy = self.clone();
-		for l in assumptions {
-			match copy.add_assignment(l.into()) {
-				Ok(_) => {}
-				Err(e) => match e {
-					InvalidLiteral => panic!("clause referenced a non-existing variable"),
-					Inconsistent => {
-						let fail = |x| l == x;
-						on_fail(&fail);
-						return SolveResult::Unsat;
-					}
-					_ => unreachable!(),
-				},
-			}
-		}
-		Solver::solve(&mut copy, on_sol, on_fail)
-	}
-
-	fn set_terminate_callback<F: FnMut() -> SolverAction>(&mut self, _cb: Option<F>) {
-		unimplemented!("SPLR does not support setting a callback that is checked to determine whether to terminate termination")
-	}
-
-	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(
-		&mut self,
-		_max_len: usize,
-		_cb: Option<F>,
-	) {
-		unimplemented!(
-			"SPLR does not support setting a callback that is called when learning a new clause"
-		)
-	}
 }
 
-impl From<Cnf> for SplrSolver {
+impl From<Cnf> for Splr {
 	fn from(cnf: Cnf) -> Self {
 		use splr::{
 			types::{CNFDescription, Instantiate},
 			Config,
 		};
-		let mut slv = SplrSolver::instantiate(
+		let mut slv = Splr::instantiate(
 			&Config::default(),
 			&CNFDescription {
 				num_of_variables: cnf.nvar.emited_vars(),

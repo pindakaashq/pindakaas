@@ -7,8 +7,8 @@ use std::{
 use libloading::{Library, Symbol};
 
 use super::{
-	get_trampoline0, get_trampoline1, ExplIter, FailFn, SolveResult, Solver, SolverAction,
-	VarFactory,
+	get_trampoline0, get_trampoline1, ExplIter, FailFn, LearnCallback, SolveAssuming, SolveResult,
+	Solver, SolverAction, TermCallback, VarFactory,
 };
 use crate::{ClauseDatabase, Lit, Result, Valuation};
 
@@ -169,11 +169,7 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 			.unwrap()
 	}
 
-	fn solve<SolCb: FnOnce(&dyn Valuation), FailCb: FnOnce(&FailFn<'_>)>(
-		&mut self,
-		on_sol: SolCb,
-		on_fail: FailCb,
-	) -> SolveResult {
+	fn solve<SolCb: FnOnce(&dyn Valuation)>(&mut self, on_sol: SolCb) -> SolveResult {
 		let res = (self.solve_fn)(self.slv);
 		match res {
 			10 => {
@@ -193,23 +189,16 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 				on_sol(&val_fn);
 				SolveResult::Sat
 			}
-			20 => {
-				// 20 -> Unsat
-				let fail_fn = |lit: Lit| {
-					let lit: i32 = lit.into();
-					let failed = (self.failed_fn)(self.slv, lit);
-					failed != 0
-				};
-				on_fail(&fail_fn);
-				SolveResult::Unsat
-			}
+			20 => SolveResult::Unsat, // 20 -> Unsat
 			_ => {
 				debug_assert_eq!(res, 0); // According to spec should be 0, unknown
 				SolveResult::Unknown
 			}
 		}
 	}
+}
 
+impl<'lib> SolveAssuming for IpasirSolver<'lib> {
 	fn solve_assuming<
 		I: IntoIterator<Item = Lit>,
 		SolCb: FnOnce(&dyn Valuation),
@@ -223,9 +212,22 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 		for i in assumptions {
 			(self.assume_fn)(self.slv, i.into());
 		}
-		self.solve(on_sol, on_fail)
+		match self.solve(on_sol) {
+			SolveResult::Unsat => {
+				let fail_fn = |lit: Lit| {
+					let lit: i32 = lit.into();
+					let failed = (self.failed_fn)(self.slv, lit);
+					failed != 0
+				};
+				on_fail(&fail_fn);
+				SolveResult::Unsat
+			}
+			r => r,
+		}
 	}
+}
 
+impl<'lib> TermCallback for IpasirSolver<'lib> {
 	fn set_terminate_callback<F: FnMut() -> SolverAction>(&mut self, cb: Option<F>) {
 		if let Some(mut cb) = cb {
 			let mut wrapped_cb = || -> c_int {
@@ -240,22 +242,20 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 			(self.set_terminate_fn)(self.slv, ptr::null_mut(), None);
 		}
 	}
+}
 
-	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(
-		&mut self,
-		max_len: usize,
-		cb: Option<F>,
-	) {
-		let max_len = max_len as c_int;
+impl<'lib> LearnCallback for IpasirSolver<'lib> {
+	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(&mut self, cb: Option<F>) {
+		const MAX_LEN: std::ffi::c_int = 512;
 		if let Some(mut cb) = cb {
 			let mut wrapped_cb = |clause: *const i32| {
 				let mut iter = ExplIter(clause).map(|i: i32| Lit(NonZeroI32::new(i).unwrap()));
 				cb(&mut iter)
 			};
 			let data = &mut wrapped_cb as *mut _ as *mut c_void;
-			(self.set_learn_fn)(self.slv, data, max_len, Some(get_trampoline1(&wrapped_cb)));
+			(self.set_learn_fn)(self.slv, data, MAX_LEN, Some(get_trampoline1(&wrapped_cb)));
 		} else {
-			(self.set_learn_fn)(self.slv, ptr::null_mut(), max_len, None);
+			(self.set_learn_fn)(self.slv, ptr::null_mut(), MAX_LEN, None);
 		}
 	}
 }

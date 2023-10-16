@@ -1,6 +1,9 @@
-use super::ipasir_solver;
+use super::{ipasir_learn_callback, ipasir_solve_assuming, ipasir_solver, ipasir_term_callback};
 
 ipasir_solver!(pindakaas_cadical, Cadical);
+ipasir_solve_assuming!(pindakaas_cadical, Cadical);
+ipasir_learn_callback!(pindakaas_cadical, Cadical);
+ipasir_term_callback!(pindakaas_cadical, Cadical);
 
 #[cfg(test)]
 mod tests {
@@ -30,15 +33,12 @@ mod tests {
 				},
 			)
 			.unwrap();
-		let res = slv.solve(
-			|value| {
-				assert!(
-					(value(!a).unwrap() && value(b).unwrap())
-						|| (value(a).unwrap() && value(!b).unwrap()),
-				)
-			},
-			|_| {},
-		);
+		let res = slv.solve(|value| {
+			assert!(
+				(value(!a).unwrap() && value(b).unwrap())
+					|| (value(a).unwrap() && value(!b).unwrap()),
+			)
+		});
 		assert_eq!(res, SolveResult::Sat);
 	}
 }
