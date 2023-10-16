@@ -150,13 +150,16 @@ impl<C: Coefficient> BddEncoder<C> {
 					.collect::<Vec<_>>();
 				model
 					.new_var(&dom, self.add_consistency, Some(format!("bdd_{}", i)))
-					.map(|y| {
-						y.borrow_mut().views = views
-							.into_iter()
-							.map(|(val, view)| (val, (y.borrow().id + 1, view)))
-							.collect();
-						y
-					})
+					.map(|var| (var, views))
+			})
+			.tuple_windows()
+			.map(|((y, views), (y_next, _))| {
+				// Views are always from one y to the next
+				y.borrow_mut().views = views
+					.into_iter()
+					.map(|(val, view)| (val, (y_next.borrow().id, view)))
+					.collect();
+				y
 			})
 			.map(Term::from)
 			.collect::<Vec<_>>();
