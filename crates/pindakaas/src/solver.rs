@@ -8,23 +8,30 @@ pub mod libloading;
 pub mod cadical;
 #[cfg(feature = "intel-sat")]
 pub mod intel_sat;
+#[cfg(feature = "kissat")]
+pub mod kissat;
 #[cfg(feature = "splr")]
 pub mod splr;
 
 pub trait Solver: ClauseDatabase {
-	/// Return the name and the version of SAT solving library.
+	/// Return the name and the version of SAT solver.
 	fn signature(&self) -> &str;
 
 	/// Solve the formula with specified clauses.
 	///
 	/// If the search is interrupted (see [`set_terminate_callback`]) the function
 	/// returns unknown
-	fn solve<SolCb: FnOnce(&dyn Valuation), FailCb: FnOnce(&FailFn<'_>)>(
-		&mut self,
-		on_sol: SolCb,
-		on_fail: FailCb,
-	) -> SolveResult;
+	fn solve<SolCb: FnOnce(&dyn Valuation)>(&mut self, on_sol: SolCb) -> SolveResult;
+}
 
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+pub enum SolveResult {
+	Sat,
+	Unsat,
+	Unknown,
+}
+
+pub trait SolveAssuming: Solver {
 	/// Solve the formula with specified clauses under the given assumptions.
 	///
 	/// If the search is interrupted (see [`set_terminate_callback`]) the function
@@ -39,33 +46,6 @@ pub trait Solver: ClauseDatabase {
 		on_sol: SolCb,
 		on_fail: FailCb,
 	) -> SolveResult;
-
-	/// Set a callback function used to indicate a termination requirement to the
-	/// solver.
-	///
-	/// The solver will periodically call this function and check its return value
-	/// during the search. Subsequent calls to this method override the previously
-	/// set callback function.
-	fn set_terminate_callback<F: FnMut() -> SolverAction>(&mut self, cb: Option<F>);
-
-	/// Set a callback function used to extract learned clauses up to a given
-	/// length from the solver.
-	///
-	/// The solver will call this function for each learned clause that satisfies
-	/// the maximum length (literal count) condition. Subsequent calls to this
-	/// method override the previously set callback function.
-	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(
-		&mut self,
-		max_len: usize,
-		cb: Option<F>,
-	);
-}
-
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
-pub enum SolveResult {
-	Sat,
-	Unsat,
-	Unknown,
 }
 
 /// Check if the given assumption literal was used to prove the unsatisfiability
@@ -75,14 +55,33 @@ pub enum SolveResult {
 /// of is not specified.
 pub type FailFn<'a> = dyn Fn(Lit) -> bool + 'a;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct VarFactory {
-	pub(crate) next_var: Option<Var>,
+pub trait LearnCallback: Solver {
+	/// Set a callback function used to extract learned clauses up to a given
+	/// length from the solver.
+	///
+	/// WARNING: Subsequent calls to this method override the previously set
+	/// callback function.
+	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(&mut self, cb: Option<F>);
+}
+
+pub trait TermCallback: Solver {
+	/// Set a callback function used to indicate a termination requirement to the
+	/// solver.
+	///
+	/// The solver will periodically call this function and check its return value
+	/// during the search. Subsequent calls to this method override the previously
+	/// set callback function.
+	fn set_terminate_callback<F: FnMut() -> SolverAction>(&mut self, cb: Option<F>);
 }
 
 pub enum SolverAction {
 	Continue,
 	Terminate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct VarFactory {
+	pub(crate) next_var: Option<Var>,
 }
 
 impl VarFactory {
@@ -129,7 +128,7 @@ macro_rules! ipasir_solver {
 			fn default() -> Self {
 				Self {
 					ptr: unsafe { $loc::ipasir_init() },
-					vars: crate::solver::VarFactory::default(),
+					vars: $crate::solver::VarFactory::default(),
 				}
 			}
 		}
@@ -140,15 +139,15 @@ macro_rules! ipasir_solver {
 			}
 		}
 
-		impl crate::ClauseDatabase for $name {
-			fn new_var(&mut self) -> crate::Lit {
+		impl $crate::ClauseDatabase for $name {
+			fn new_var(&mut self) -> $crate::Lit {
 				self.vars.next().expect("variable pool exhaused").into()
 			}
 
-			fn add_clause<I: IntoIterator<Item = crate::Lit>>(
+			fn add_clause<I: IntoIterator<Item = $crate::Lit>>(
 				&mut self,
 				clause: I,
-			) -> crate::Result {
+			) -> $crate::Result {
 				let mut added = false;
 				for lit in clause.into_iter() {
 					unsafe { $loc::ipasir_add(self.ptr, lit.into()) };
@@ -161,26 +160,22 @@ macro_rules! ipasir_solver {
 			}
 		}
 
-		impl crate::solver::Solver for $name {
+		impl $crate::solver::Solver for $name {
 			fn signature(&self) -> &str {
 				unsafe { std::ffi::CStr::from_ptr($loc::ipasir_signature()) }
 					.to_str()
 					.unwrap()
 			}
 
-			fn solve<
-				SolCb: FnOnce(&dyn crate::Valuation),
-				FailCb: FnOnce(&crate::solver::FailFn<'_>),
-			>(
+			fn solve<SolCb: FnOnce(&dyn $crate::Valuation)>(
 				&mut self,
 				on_sol: SolCb,
-				on_fail: FailCb,
-			) -> crate::solver::SolveResult {
+			) -> $crate::solver::SolveResult {
 				let res = unsafe { $loc::ipasir_solve(self.ptr) };
 				match res {
 					10 => {
 						// 10 -> Sat
-						let val_fn = |lit: crate::Lit| {
+						let val_fn = |lit: $crate::Lit| {
 							let var: i32 = lit.var().into();
 							// WARN: Always ask about variable (positive) literal, otherwise solvers sometimes seem incorrect
 							let ret = unsafe { $loc::ipasir_val(self.ptr, var) };
@@ -194,88 +189,13 @@ macro_rules! ipasir_solver {
 							}
 						};
 						on_sol(&val_fn);
-						crate::solver::SolveResult::Sat
+						$crate::solver::SolveResult::Sat
 					}
-					20 => {
-						// 20 -> Unsat
-						let fail_fn = |lit: crate::Lit| {
-							let lit: i32 = lit.into();
-							let failed = unsafe { $loc::ipasir_failed(self.ptr, lit) };
-							failed != 0
-						};
-						on_fail(&fail_fn);
-						crate::solver::SolveResult::Unsat
-					}
+					20 => $crate::solver::SolveResult::Unsat, // 20 -> Unsat
 					_ => {
 						debug_assert_eq!(res, 0); // According to spec should be 0, unknown
-						crate::solver::SolveResult::Unknown
+						$crate::solver::SolveResult::Unknown
 					}
-				}
-			}
-
-			fn solve_assuming<
-				I: IntoIterator<Item = crate::Lit>,
-				SolCb: FnOnce(&dyn crate::Valuation),
-				FailCb: FnOnce(&crate::solver::FailFn<'_>),
-			>(
-				&mut self,
-				assumptions: I,
-				on_sol: SolCb,
-				on_fail: FailCb,
-			) -> crate::solver::SolveResult {
-				for i in assumptions {
-					unsafe { $loc::ipasir_assume(self.ptr, i.into()) }
-				}
-				self.solve(on_sol, on_fail)
-			}
-
-			fn set_terminate_callback<F: FnMut() -> crate::solver::SolverAction>(
-				&mut self,
-				cb: Option<F>,
-			) {
-				if let Some(mut cb) = cb {
-					let mut wrapped_cb = || -> std::ffi::c_int {
-						match cb() {
-							crate::solver::SolverAction::Continue => std::ffi::c_int::from(0),
-							crate::solver::SolverAction::Terminate => std::ffi::c_int::from(1),
-						}
-					};
-					let data = &mut wrapped_cb as *mut _ as *mut std::ffi::c_void;
-					unsafe {
-						$loc::ipasir_set_terminate(
-							self.ptr,
-							data,
-							Some(crate::solver::get_trampoline0(&wrapped_cb)),
-						)
-					}
-				} else {
-					unsafe { $loc::ipasir_set_terminate(self.ptr, std::ptr::null_mut(), None) }
-				}
-			}
-
-			fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = crate::Lit>)>(
-				&mut self,
-				max_len: usize,
-				cb: Option<F>,
-			) {
-				let max_len = max_len as std::ffi::c_int;
-				if let Some(mut cb) = cb {
-					let mut wrapped_cb = |clause: *const i32| {
-						let mut iter = crate::solver::ExplIter(clause)
-							.map(|i: i32| crate::Lit(std::num::NonZeroI32::new(i).unwrap()));
-						cb(&mut iter)
-					};
-					let data = &mut wrapped_cb as *mut _ as *mut std::ffi::c_void;
-					unsafe {
-						$loc::ipasir_set_learn(
-							self.ptr,
-							data,
-							max_len,
-							Some(crate::solver::get_trampoline1(&wrapped_cb)),
-						)
-					}
-				} else {
-					unsafe { $loc::ipasir_set_learn(self.ptr, std::ptr::null_mut(), max_len, None) }
 				}
 			}
 		}
@@ -283,6 +203,110 @@ macro_rules! ipasir_solver {
 }
 #[allow(unused_imports)]
 pub(crate) use ipasir_solver;
+
+#[allow(unused_macros)]
+macro_rules! ipasir_solve_assuming {
+	($loc:ident, $name:ident) => {
+		impl $crate::solver::SolveAssuming for $name {
+			fn solve_assuming<
+				I: IntoIterator<Item = $crate::Lit>,
+				SolCb: FnOnce(&dyn $crate::Valuation),
+				FailCb: FnOnce(&$crate::solver::FailFn<'_>),
+			>(
+				&mut self,
+				assumptions: I,
+				on_sol: SolCb,
+				on_fail: FailCb,
+			) -> $crate::solver::SolveResult {
+				use $crate::solver::Solver;
+				for i in assumptions {
+					unsafe { $loc::ipasir_assume(self.ptr, i.into()) }
+				}
+				match self.solve(on_sol) {
+					$crate::solver::SolveResult::Unsat => {
+						let fail_fn = |lit: $crate::Lit| {
+							let lit: i32 = lit.into();
+							let failed = unsafe { $loc::ipasir_failed(self.ptr, lit) };
+							failed != 0
+						};
+						on_fail(&fail_fn);
+						$crate::solver::SolveResult::Unsat
+					}
+					r => r,
+				}
+			}
+		}
+	};
+}
+#[allow(unused_imports)]
+pub(crate) use ipasir_solve_assuming;
+
+#[allow(unused_macros)]
+macro_rules! ipasir_learn_callback {
+	($loc:ident, $name:ident) => {
+		impl $crate::solver::LearnCallback for $name {
+			fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = $crate::Lit>)>(
+				&mut self,
+				cb: Option<F>,
+			) {
+				const MAX_LEN: std::ffi::c_int = 512;
+				if let Some(mut cb) = cb {
+					let mut wrapped_cb = |clause: *const i32| {
+						let mut iter = $crate::solver::ExplIter(clause)
+							.map(|i: i32| $crate::Lit(std::num::NonZeroI32::new(i).unwrap()));
+						cb(&mut iter)
+					};
+					let data = &mut wrapped_cb as *mut _ as *mut std::ffi::c_void;
+					unsafe {
+						$loc::ipasir_set_learn(
+							self.ptr,
+							data,
+							MAX_LEN,
+							Some($crate::solver::get_trampoline1(&wrapped_cb)),
+						)
+					}
+				} else {
+					unsafe { $loc::ipasir_set_learn(self.ptr, std::ptr::null_mut(), MAX_LEN, None) }
+				}
+			}
+		}
+	};
+}
+#[allow(unused_imports)]
+pub(crate) use ipasir_learn_callback;
+
+#[allow(unused_macros)]
+macro_rules! ipasir_term_callback {
+	($loc:ident, $name:ident) => {
+		impl $crate::solver::TermCallback for $name {
+			fn set_terminate_callback<F: FnMut() -> $crate::solver::SolverAction>(
+				&mut self,
+				cb: Option<F>,
+			) {
+				if let Some(mut cb) = cb {
+					let mut wrapped_cb = || -> std::ffi::c_int {
+						match cb() {
+							$crate::solver::SolverAction::Continue => std::ffi::c_int::from(0),
+							$crate::solver::SolverAction::Terminate => std::ffi::c_int::from(1),
+						}
+					};
+					let data = &mut wrapped_cb as *mut _ as *mut std::ffi::c_void;
+					unsafe {
+						$loc::ipasir_set_terminate(
+							self.ptr,
+							data,
+							Some($crate::solver::get_trampoline0(&wrapped_cb)),
+						)
+					}
+				} else {
+					unsafe { $loc::ipasir_set_terminate(self.ptr, std::ptr::null_mut(), None) }
+				}
+			}
+		}
+	};
+}
+#[allow(unused_imports)]
+pub(crate) use ipasir_term_callback;
 
 type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
 unsafe extern "C" fn trampoline0<R, F: FnMut() -> R>(user_data: *mut c_void) -> R {
