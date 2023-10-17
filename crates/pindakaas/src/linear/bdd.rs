@@ -56,6 +56,7 @@ impl<C: Coefficient> BddEncoder<C> {
 		};
 
 		// Ex. 2 x1 {0,2} + 3 x2 {0,3} + 5 x3 {0,5} <= 6
+		// NOTE: Example assumes `SORT_TERMS = false`
 
 		// We calculate the bounds of the partial sum
 		// Ex. [(0,0), (0,2), (0,5), (0,10)]
@@ -110,7 +111,6 @@ impl<C: Coefficient> BddEncoder<C> {
 				.collect::<IntervalMap<_, _>>()
 			})
 			.collect::<Vec<_>>();
-
 		// Ex. base case:
 		// []
 		// []
@@ -152,6 +152,9 @@ impl<C: Coefficient> BddEncoder<C> {
 					.new_var(&dom, self.add_consistency, Some(format!("bdd_{}", i)))
 					.map(|var| (var, views))
 			})
+			.collect::<Vec<_>>()
+			.into_iter()
+			.chain([(model.new_constant(C::zero()), HashMap::default())]) // Ensure final element is not cut off by tuple_windows
 			.tuple_windows()
 			.map(|((y, views), (y_next, _))| {
 				// Views are always from one y to the next
