@@ -192,9 +192,10 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				log_enc_add_(
 					db,
 					&x_bin.xs(false).into_iter().collect::<Vec<_>>(),
-					&as_binary(y_const.into(), Some(x_bin.lits()))
+					&as_binary::<DB::Lit, C>(y_const.into(), Some(x_bin.lits()))
 						.into_iter()
 						.map(LitOrConst::Const)
+						.chain([LitOrConst::Const(false)])
 						.collect::<Vec<_>>(),
 					cmp,
 					&z_bin.xs(false).into_iter().collect::<Vec<_>>(),
@@ -378,17 +379,6 @@ pub mod tests {
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
-	impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
-		/// Return number of lits in encoding
-		pub(crate) fn lits(&self) -> usize {
-			match self {
-				IntVarEnc::Ord(o) => o.lits(),
-				IntVarEnc::Bin(b) => b.lits(),
-				IntVarEnc::Const(_) => 0,
-			}
-		}
-	}
-
 	macro_rules! test_int_lin {
 		($encoder:expr,$x:expr,$y:expr,$cmp:expr,$z:expr) => {
 			use super::*;
@@ -516,7 +506,7 @@ pub mod tests {
 			let y = from_dom(&mut db, $y, &$encs[1], String::from("y"));
 			let z = from_dom(&mut db, $z, &$encs[2], String::from("z"));
 
-			db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+			db.num_var = (x.lits() + y.lits() + z.lits()) as Lit;
 
 			let tern = TernLeConstraint {
 				x: &x,
@@ -576,6 +566,10 @@ pub mod tests {
 				test_int_lin!($encoder, &[0, 1, 2, 3], &[2, 3], $cmp, &[2, 3, 4, 5]);
 			}
 
+			mod _test_01_02_01 {
+				test_int_lin!($encoder, &[0, 1], &[0, 2], $cmp, &[0, 1]);
+			}
+
 			mod _012478_0_0123456789 {
 				test_int_lin!(
 					$encoder,
@@ -629,37 +623,40 @@ pub mod tests {
 
 	#[test]
 	fn constant_test() {
-		let c: IntVarEnc<i32, _> = IntVarEnc::Const(42);
+		let c: IntVarEnc<Lit, _> = IntVarEnc::Const(42);
 		assert_eq!(c.lb(), 42);
 		assert_eq!(c.ub(), 42);
-		assert_eq!(c.geq(6..7), Vec::<Vec<i32>>::new());
+		assert_eq!(c.geq(6..7), Vec::<Vec<Lit>>::new());
 		assert_eq!(c.geq(45..46), vec![vec![]]);
 	}
 
 	#[test]
 	fn required_bits_test() {
 		if GROUND_BINARY_AT_LB {
-			assert_eq!(IntVar::required_lits(2, 9), 3); // 8 vals => 3 bits
-			assert_eq!(IntVar::required_lits(2, 10), 4); // 9 vals => 4 bits
-			assert_eq!(IntVar::required_lits(3, 10), 3); // 8 vals => 3 bits
+			assert_eq!(IntVar::<Lit, C>::required_lits(2, 9), 3); // 8 vals => 3 bits
+			assert_eq!(IntVar::<Lit, C>::required_lits(2, 10), 4); // 9 vals => 4 bits
+			assert_eq!(IntVar::<Lit, C>::required_lits(3, 10), 3); // 8 vals => 3 bits
 		} else {
-			assert_eq!(IntVar::required_lits(2, 9), 4);
-			assert_eq!(IntVar::required_lits(2, 10), 4);
-			assert_eq!(IntVar::required_lits(3, 10), 4);
+			assert_eq!(IntVar::<Lit, C>::required_lits(2, 9), 4);
+			assert_eq!(IntVar::<Lit, C>::required_lits(2, 10), 4);
+			assert_eq!(IntVar::<Lit, C>::required_lits(3, 10), 4);
 
 			// neg lb
-			assert_eq!(IntVar::required_lits(-7, 2), 4); // -7 = 1001 => 4 bits
-			assert_eq!(IntVar::required_lits(-7, 9), 5); // 9 > 7 => 5 bits
-			assert_eq!(IntVar::required_lits(2, 9), 4); // 4 b/c no sign bit
+			assert_eq!(IntVar::<Lit, C>::required_lits(-7, 2), 4); // -7 = 1001 => 4 bits
+			assert_eq!(IntVar::<Lit, C>::required_lits(-7, 9), 5); // 9 > 7 => 5 bits
+			assert_eq!(IntVar::<Lit, C>::required_lits(2, 9), 4); // 4 b/c no sign bit
 		}
 	}
+
+	type Lit = i32;
+	type C = i32;
 
 	#[test]
 	fn bin_as_lin_exp_test() {
 		if GROUND_BINARY_AT_LB {
 			let mut db = TestDB::new(0);
-			let x = get_bin_x::<_, i32>(&mut db, 2, 12, true, "x".to_string());
-			let x_lin: LinExp<i32, i32> = LinExp::from(&x);
+			let x = get_bin_x::<_, C>(&mut db, 2, 12, true, "x".to_string());
+			let x_lin: LinExp<Lit, C> = LinExp::from(&x);
 
 			assert_eq!(x_lin.assign(&[-1, -2, -3, -4]), Ok(2));
 			assert_eq!(x_lin.assign(&[1, -2, -3, -4]), Ok(2 + 1));
@@ -675,8 +672,8 @@ pub mod tests {
 			);
 		} else {
 			let mut db = TestDB::new(0);
-			let x = get_bin_x::<_, i32>(&mut db, -4, 12, true, "x".to_string());
-			let x_lin: LinExp<i32, i32> = LinExp::from(&x);
+			let x = get_bin_x::<_, C>(&mut db, -4, 12, true, "x".to_string());
+			let x_lin: LinExp<Lit, C> = LinExp::from(&x);
 			assert_eq!(x_lin.assign(&[-1, -2, -3, -4, -5]), Ok(0));
 			assert_eq!(x_lin.assign(&[-1, 2, -3, -4, -5]), Ok(2));
 			assert_eq!(x_lin.assign(&[1, 2, -3, -4, -5]), Ok(3));
@@ -695,9 +692,9 @@ pub mod tests {
 	fn bin_1_test() {
 		let mut db = TestDB::new(0);
 		let x = if GROUND_BINARY_AT_LB {
-			get_bin_x::<_, i32>(&mut db, 2, 12, true, "x".to_string())
+			get_bin_x::<_, C>(&mut db, 2, 12, true, "x".to_string())
 		} else {
-			get_bin_x::<_, i32>(&mut db, -4, 6, true, "x".to_string())
+			get_bin_x::<_, C>(&mut db, -4, 6, true, "x".to_string())
 		};
 
 		if GROUND_BINARY_AT_LB {
@@ -737,7 +734,7 @@ pub mod tests {
 			z: &IntVarEnc::Const(10),
 		}; // <= 10
 
-		db.num_var = x.lits() as i32;
+		db.num_var = x.lits() as Lit;
 
 		let sols = db.brute_force_solve(|sol| tern.check(sol).is_ok(), db.num_var);
 
@@ -748,7 +745,7 @@ pub mod tests {
 	fn bin_geq_2_test() {
 		let mut db = TestDB::new(0);
 		let x = IntVarBin::from_bounds(&mut db, 0, 12, "x".to_string());
-		db.num_var = x.lits() as i32;
+		db.num_var = x.lits() as Lit;
 		let tern = TernLeConstraint {
 			x: &IntVarEnc::Bin(x),
 			y: &IntVarEnc::Const(0),
@@ -770,7 +767,7 @@ pub mod tests {
 	#[test]
 	fn ord_geq_test() {
 		let mut db = TestDB::new(0);
-		let x = get_ord_x::<_, i32>(
+		let x = get_ord_x::<_, C>(
 			&mut db,
 			interval_set!(3..5, 5..7, 7..11),
 			true,
@@ -783,7 +780,7 @@ pub mod tests {
 		assert_eq!(x.geq(6..7), vec![vec![2]]);
 		assert_eq!(x.geq(4..7), vec![vec![2]]);
 
-		let x_lin: LinExp<i32, i32> = LinExp::from(&x);
+		let x_lin: LinExp<Lit, C> = LinExp::from(&x);
 		assert!(x_lin.assign(&[1, -2, 3]).is_err());
 		assert!(x_lin.assign(&[-1, 2, -3]).is_err());
 		assert_eq!(x_lin.assign(&[-1, -2, -3]), Ok(2));
@@ -798,7 +795,7 @@ pub mod tests {
 			z: &IntVarEnc::Const(6),
 		};
 
-		db.num_var = x.lits() as i32;
+		db.num_var = x.lits() as Lit;
 
 		assert_sol!(db => TernLeEncoder::default(), &tern =>
 		vec![
@@ -822,25 +819,25 @@ pub mod tests {
 			cmp: &Comparator::LessEq,
 			z: &z,
 		};
-		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as Lit;
 
 		// let sols = db.brute_force_solve(
 		// 	|sol| {
 		// 		tern.check(sol).is_ok()
 		// 			&& x.as_any()
-		// 				.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 				.downcast_ref::<IntVarOrd<Lit, C>>()
 		// 				.unwrap()
 		// 				._consistency()
 		// 				.check(sol)
 		// 				.is_ok() && y
 		// 			.as_any()
-		// 			.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 			.downcast_ref::<IntVarOrd<Lit, C>>()
 		// 			.unwrap()
 		// 			._consistency()
 		// 			.check(sol)
 		// 			.is_ok() && z
 		// 			.as_any()
-		// 			.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 			.downcast_ref::<IntVarOrd<Lit, C>>()
 		// 			.unwrap()
 		// 			._consistency()
 		// 			.check(sol)
@@ -883,7 +880,7 @@ pub mod tests {
 			cmp: &Comparator::LessEq,
 			z: &z,
 		};
-		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as Lit;
 
 		let sols = db.brute_force_solve(|sol| tern.check(sol).is_ok(), db.num_var);
 
@@ -907,25 +904,25 @@ pub mod tests {
 			cmp: &Comparator::LessEq,
 			z: &z,
 		};
-		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as Lit;
 
 		// let sols = db.brute_force_solve(
 		// 	|sol| {
 		// 		tern.check(sol).is_ok()
 		// 			&& x.as_any()
-		// 				.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 				.downcast_ref::<IntVarOrd<Lit, C>>()
 		// 				.unwrap()
 		// 				._consistency()
 		// 				.check(sol)
 		// 				.is_ok() && y
 		// 			.as_any()
-		// 			.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 			.downcast_ref::<IntVarOrd<Lit, C>>()
 		// 			.unwrap()
 		// 			._consistency()
 		// 			.check(sol)
 		// 			.is_ok() && z
 		// 			.as_any()
-		// 			.downcast_ref::<IntVarBin<i32, i32>>()
+		// 			.downcast_ref::<IntVarBin<Lit, C>>()
 		// 			.unwrap()
 		// 			._consistency()
 		// 			.check(sol)
@@ -977,7 +974,7 @@ pub mod tests {
 			cmp: &Comparator::LessEq,
 			z: &z,
 		};
-		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as Lit;
 
 		let sols = db.brute_force_solve(|sol| tern.check(sol).is_ok(), db.num_var);
 
@@ -1006,7 +1003,7 @@ pub mod tests {
 			cmp: &Comparator::LessEq,
 			z: &z,
 		};
-		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as Lit;
 
 		let sols = db.brute_force_solve(|sol| tern.check(sol).is_ok(), db.num_var);
 
@@ -1031,7 +1028,7 @@ pub mod tests {
 			cmp: &Comparator::LessEq,
 			z: &z,
 		};
-		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as Lit;
 
 		let sols = db.brute_force_solve(|sol| tern.check(sol).is_ok(), db.num_var);
 
@@ -1055,25 +1052,25 @@ pub mod tests {
 			cmp: &Comparator::Equal,
 			z: &z,
 		};
-		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as Lit;
 
 		// let sols = db.brute_force_solve(
 		// 	|sol| {
 		// 		tern.check(sol).is_ok()
 		// 			&& x.as_any()
-		// 				.downcast_ref::<IntVarBin<i32, i32>>()
+		// 				.downcast_ref::<IntVarBin<Lit, C>>()
 		// 				.unwrap()
 		// 				._consistency()
 		// 				.check(sol)
 		// 				.is_ok() && y
 		// 			.as_any()
-		// 			.downcast_ref::<IntVarBin<i32, i32>>()
+		// 			.downcast_ref::<IntVarBin<Lit, C>>()
 		// 			.unwrap()
 		// 			._consistency()
 		// 			.check(sol)
 		// 			.is_ok() && z
 		// 			.as_any()
-		// 			.downcast_ref::<IntVarBin<i32, i32>>()
+		// 			.downcast_ref::<IntVarBin<Lit, C>>()
 		// 			.unwrap()
 		// 			._consistency()
 		// 			.check(sol)
@@ -1115,25 +1112,25 @@ pub mod tests {
 			cmp: &Comparator::LessEq,
 			z: &z,
 		};
-		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
+		db.num_var = (x.lits() + y.lits() + z.lits()) as Lit;
 
 		// let sols = db.brute_force_solve(
 		// 	|sol| {
 		// 		tern.check(sol).is_ok()
 		// 			&& x.as_any()
-		// 				.downcast_ref::<IntVarBin<i32, i32>>()
+		// 				.downcast_ref::<IntVarBin<Lit, C>>()
 		// 				.unwrap()
 		// 				._consistency()
 		// 				.check(sol)
 		// 				.is_ok() && y
 		// 			.as_any()
-		// 			.downcast_ref::<IntVarOrd<i32, i32>>()
+		// 			.downcast_ref::<IntVarOrd<Lit, C>>()
 		// 			.unwrap()
 		// 			._consistency()
 		// 			.check(sol)
 		// 			.is_ok() && z
 		// 			.as_any()
-		// 			.downcast_ref::<IntVarBin<i32, i32>>()
+		// 			.downcast_ref::<IntVarBin<Lit, C>>()
 		// 			.unwrap()
 		// 			._consistency()
 		// 			.check(sol)

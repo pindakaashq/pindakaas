@@ -52,7 +52,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 					.flat_map(|i| {
 						let dom =
 							num::iter::range_inclusive(-*lin.k, C::zero()).collect::<Vec<_>>();
-						model.new_var(&dom, self.add_consistency, Some(format!("swc_{}", i)))
+						model.new_var(&dom, self.add_consistency, None, Some(format!("swc_{}", i)))
 					})
 					.take(n),
 			)

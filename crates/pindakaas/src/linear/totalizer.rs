@@ -94,6 +94,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 						let parent = model.new_var(
 							&dom,
 							self.add_consistency,
+							None,
 							Some(format!("gt_{}_{}", i, j)),
 						)?;
 

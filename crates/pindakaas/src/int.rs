@@ -55,7 +55,7 @@ impl<Lit: Literal, C: Coefficient> PbLinExp<Lit, C> {
 	}
 }
 
-pub(crate) fn display_dom<C: Coefficient>(dom: &BTreeSet<C>) -> String {
+pub(crate) fn display_dom<Lit: Literal, C: Coefficient>(dom: &BTreeSet<C>) -> String {
 	const ELIPSIZE: usize = 8;
 	if dom.is_empty() {
 		return String::from("{}");
@@ -68,7 +68,7 @@ pub(crate) fn display_dom<C: Coefficient>(dom: &BTreeSet<C>) -> String {
 			"{{{},..,{ub}}} ({}|{})",
 			dom.iter().take(ELIPSIZE).join(","),
 			dom.len(),
-			IntVar::required_lits(lb, ub)
+			IntVar::<Lit, C>::required_lits(lb, ub)
 		)
 	} else {
 		format!("{{{}}}", dom.iter().join(","))
