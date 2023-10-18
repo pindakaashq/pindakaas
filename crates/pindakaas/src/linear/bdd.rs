@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
 use iset::IntervalMap;
 use itertools::Itertools;
@@ -136,13 +136,19 @@ impl<C: Coefficient> BddEncoder<C> {
 			.enumerate()
 			.flat_map(|(i, nodes)| {
 				let mut views = HashMap::new();
+
+				let process_val = |iv: Range<C>| match lin.cmp {
+					Comparator::LessEq | Comparator::Equal => iv.end - C::one(),
+					Comparator::GreaterEq => iv.start,
+				};
+
 				let dom = nodes
 					.into_iter(..)
 					.filter_map(|(iv, node)| match node {
-						BddNode::Val => Some(iv.end - C::one()),
+						BddNode::Val => Some(process_val(iv)),
 						BddNode::Gap => None,
 						BddNode::View(view) => {
-							let val = iv.end - C::one();
+							let val = process_val(iv);
 							views.insert(val, view);
 							Some(val)
 						}
