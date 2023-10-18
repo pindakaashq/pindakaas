@@ -14,7 +14,8 @@ use crate::{
 	helpers::{as_binary, is_powers_of_two},
 	linear::{LinExp, Part},
 	trace::{emit_clause, new_var},
-	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff,
+	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
+	Unsatisfiable,
 };
 use std::{
 	collections::HashSet,
@@ -77,7 +78,11 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarOrd<Lit, C> {
 			f,
 			"{}:O ∈ {} [{}]",
 			self.lbl,
-			display_dom(&self.dom().iter(..).map(|d| d.end - C::one()).collect()),
+			&self
+				.dom()
+				.iter(..)
+				.map(|d| format!("{}..{}", d.start, d.end - C::one()))
+				.join(","),
 			self.lits()
 		)
 	}
@@ -91,7 +96,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 			f,
 			"{}:B ∈ {} [{}]",
 			self.lbl,
-			display_dom(&self.dom().iter(..).map(|d| d.end - C::one()).collect()),
+			display_dom::<Lit, C>(&self.dom().iter(..).map(|d| d.end - C::one()).collect()),
 			self.lits()
 		)
 	}
@@ -144,13 +149,14 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		lbl: String,
 	) -> Self {
 		assert!(!views.is_empty());
-		assert!(
-			views
-				.iter(..)
-				.tuple_windows()
-				.all(|(a, b)| a.0.end == b.0.start),
-			"Expecting contiguous domain of intervals but was {views:?}"
-		);
+
+		// assert!(
+		// 	views
+		// 		.iter(..)
+		// 		.tuple_windows()
+		// 		.all(|(a, b)| a.0.end == b.0.start),
+		// 	"Expecting contiguous domain of intervals but was {views:?}"
+		// );
 
 		let xs = views
 			.into_iter(..)
@@ -170,7 +176,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	}
 
 	#[allow(dead_code)]
-	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> crate::Result {
+	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
 		ImplicationChainEncoder::default()._encode(db, &self.consistency())
 	}
 
@@ -291,7 +297,7 @@ impl ImplicationChainEncoder {
 		&mut self,
 		db: &mut DB,
 		ic: &ImplicationChainConstraint<DB::Lit>,
-	) -> crate::Result {
+	) -> Result {
 		for (a, b) in ic.lits.iter().tuple_windows() {
 			emit_clause!(db, &[b.negate(), a.clone()])?
 		}
@@ -301,14 +307,14 @@ impl ImplicationChainEncoder {
 
 impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
 	type Lit = Lit;
-	fn check(&self, solution: &[Self::Lit]) -> crate::Result<(), CheckError<Self::Lit>> {
+	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
 		self.lits.iter().tuple_windows().try_for_each(|(a, b)| {
 			let a = Self::assign(a, solution);
 			let b = Self::assign(b, solution);
 			if b.is_negated() || !a.is_negated() {
 				Ok(())
 			} else {
-				Err(CheckError::Unsatisfiable(crate::Unsatisfiable))
+				Err(CheckError::Unsatisfiable(Unsatisfiable))
 			}
 		})
 	}
@@ -353,7 +359,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		ub: C,
 		_lbl: &str,
 	) -> Vec<LitOrConst<Lit>> {
-		(0..IntVar::required_lits(lb, ub))
+		(0..IntVar::<DB::Lit, C>::required_lits(lb, ub))
 			.map(|_i| (new_var!(db, format!("{}^{}", _lbl, _i))).into())
 			.chain((!GROUND_BINARY_AT_LB && !lb.is_negative()).then_some(LitOrConst::Const(false)))
 			.collect()
@@ -398,7 +404,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	}
 
 	/// Enforce domain on the encoding variables (bounds and gaps)
-	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> crate::Result {
+	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
 		self.encode_unary_constraint(db, &Comparator::GreaterEq, self.lb(), true)?;
 		self.encode_unary_constraint(db, &Comparator::LessEq, self.ub(), true)?;
 		for gap in self.dom.iter().tuple_windows().collect::<Vec<(&C, &C)>>() {
@@ -412,7 +418,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	pub(crate) fn complement(self) -> Self {
 		Self {
 			xs: self.xs.into_iter().map(|x| -x).collect(),
-			dom: self.dom.into_iter().map(|d| C::one() - d).collect(),
+			dom: self.dom.into_iter().map(|d| -d - C::one()).collect(),
 			lbl: format!("!{}", self.lbl),
 		}
 	}
@@ -428,15 +434,15 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	}
 
 	/// Return conjunction of bits equivalent where `x=k`
-	fn eq(&self, k: C) -> crate::Result<Vec<Lit>, crate::Unsatisfiable> {
-		as_binary(self.normalize(k).into(), Some(self.bits()))
+	fn eq(&self, k: C) -> Result<Vec<Lit>, Unsatisfiable> {
+		as_binary::<Lit, C>(self.normalize(k).into(), Some(self.bits()))
 			.into_iter()
 			.zip(self.xs(true).iter())
 			.map(|(b, x)| if b { x.clone() } else { -x.clone() })
 			.flat_map(|x| match x {
 				LitOrConst::Lit(lit) => Some(Ok(lit)),
 				LitOrConst::Const(true) => None,
-				LitOrConst::Const(false) => Some(Err(crate::Unsatisfiable)),
+				LitOrConst::Const(false) => Some(Err(Unsatisfiable)),
 			})
 			.collect()
 	}
@@ -448,11 +454,11 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		cmp: &Comparator,
 		k: C,
 		force: bool,
-	) -> crate::Result {
+	) -> Result {
 		match cmp {
 			Comparator::LessEq => {
 				if k < self.lb() {
-					Err(crate::Unsatisfiable)
+					Err(Unsatisfiable)
 				} else if k >= self.ub() && !force {
 					Ok(())
 				} else {
@@ -465,7 +471,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				.try_for_each(|cls| emit_clause!(db, &[cls])),
 			Comparator::GreaterEq => {
 				if k > self.ub() {
-					Err(crate::Unsatisfiable)
+					Err(Unsatisfiable)
 				} else if k <= self.lb() && !force {
 					Ok(())
 				} else {
@@ -475,11 +481,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		}
 	}
 
-	pub(crate) fn encode_neq<DB: ClauseDatabase<Lit = Lit>>(
-		&self,
-		db: &mut DB,
-		k: C,
-	) -> crate::Result {
+	pub(crate) fn encode_neq<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB, k: C) -> Result {
 		emit_clause!(db, &self.eq(k)?.iter().map(Lit::negate).collect::<Vec<_>>())
 	}
 
@@ -545,7 +547,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			} else if v > range_ub {
 				geq.then_some(vec![])
 			} else {
-				as_binary(v.into(), Some(self.bits()))
+				as_binary::<Lit, C>(v.into(), Some(self.bits()))
 					.into_iter()
 					.zip(self.xs(true).into_iter())
 					// if >=, find 0's, if <=, find 1's
@@ -620,7 +622,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		db: &mut DB,
 		encoder: &mut TernLeEncoder,
 		y: C,
-	) -> crate::Result<Self> {
+	) -> Result<Self> {
 		if y.is_zero() {
 			Ok(self.clone())
 		} else {
@@ -760,9 +762,9 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		db: &mut DB,
 		dom: &[C],
 		lbl: String,
-	) -> crate::Result<IntVarEnc<DB::Lit, C>> {
+	) -> Result<IntVarEnc<DB::Lit, C>> {
 		match dom {
-			[] => Err(crate::Unsatisfiable),
+			[] => Err(Unsatisfiable),
 			[d] => Ok(IntVarEnc::Const(*d)),
 			dom => Ok(IntVarOrd::from_dom(db, dom, lbl).into()),
 		}
@@ -777,7 +779,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		ub: Option<C>,
 		// cmp: &LimitComp,
 		// enc: &'a mut dyn Encoder<DB, TernLeConstraint<'a, DB, C>>,
-	) -> crate::Result<IntVarEnc<Lit, C>> {
+	) -> Result<IntVarEnc<Lit, C>> {
 		let comp_lb = self.lb() + y.lb();
 		let lb = std::cmp::max(lb.unwrap_or(comp_lb), comp_lb);
 
@@ -922,7 +924,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		}
 	}
 
-	pub(crate) fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> crate::Result {
+	pub(crate) fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
 		match self {
 			IntVarEnc::Ord(o) => o.consistent(db),
 			IntVarEnc::Bin(b) => b.consistent(db),
@@ -957,8 +959,18 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		}
 	}
 
-	pub(crate) fn assign(&self, solution: &[Lit]) -> crate::Result<C, CheckError<Lit>> {
+	pub(crate) fn assign(&self, solution: &[Lit]) -> Result<C, CheckError<Lit>> {
 		LinExp::from(self).assign(solution)
+	}
+
+	/// Return number of lits in encoding
+	#[allow(dead_code)]
+	pub(crate) fn lits(&self) -> usize {
+		match self {
+			IntVarEnc::Ord(o) => o.lits(),
+			IntVarEnc::Bin(b) => b.lits(),
+			IntVarEnc::Const(_) => 0,
+		}
 	}
 }
 

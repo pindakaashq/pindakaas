@@ -418,7 +418,7 @@ End
 			.sorted()
 			.flat_map(|(lp_id, dom)| {
 				model
-					.new_var(&dom, true, Some(lp_id.clone()))
+					.new_var(&dom, true, None, Some(lp_id.clone()))
 					.map(|x| (lp_id, x))
 			})
 			.collect::<HashMap<_, _>>();

@@ -3,19 +3,22 @@ use crate::{
 	int::{TernLeConstraint, TernLeEncoder},
 	linear::log_enc_add_,
 	trace::new_var,
-	BddEncoder, Comparator, Encoder, Unsatisfiable,
+	BddEncoder, CheckError, Checker, ClauseDatabase, Coefficient, Comparator, Encoder, Literal,
+	Result, Unsatisfiable,
 };
-use itertools::{Itertools, Position};
+use itertools::Itertools;
+use std::fmt::Display;
 use std::{
 	cell::RefCell,
+	cmp::Ordering,
 	collections::{BTreeSet, HashMap},
-	ops::Mul,
+	ops::{Index, Mul},
 	rc::Rc,
 };
 
-use iset::IntervalMap;
+const DECOMPOSE: bool = false;
 
-use crate::{ClauseDatabase, Coefficient, Literal};
+use iset::IntervalMap;
 
 use super::{enc::GROUND_BINARY_AT_LB, scm::SCM, IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
 
@@ -24,7 +27,7 @@ use super::{enc::GROUND_BINARY_AT_LB, scm::SCM, IntVarBin, IntVarEnc, IntVarOrd,
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct IntVarId(usize);
 
-impl std::fmt::Display for IntVarId {
+impl Display for IntVarId {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "{}", self.0)
 	}
@@ -33,11 +36,52 @@ impl std::fmt::Display for IntVarId {
 // TODO should we keep IntVar i/o IntVarEnc?
 #[derive(Debug, Clone)]
 pub struct Model<Lit: Literal, C: Coefficient> {
-	pub(crate) vars: HashMap<IntVarId, IntVarEnc<Lit, C>>,
-	pub(crate) cons: Vec<Lin<C>>,
+	pub(crate) cons: Vec<Lin<Lit, C>>,
 	pub(crate) num_var: usize,
-	pub(crate) obj: Obj<C>,
+	pub(crate) obj: Obj<Lit, C>,
 }
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Assignment<C: Coefficient>(HashMap<IntVarId, C>);
+
+impl<C: Coefficient> Ord for Assignment<C> {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.0.iter().sorted().cmp(other.0.iter().sorted())
+	}
+}
+
+impl<C: Coefficient> PartialOrd for Assignment<C> {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl<C: Coefficient> Index<&IntVarId> for Assignment<C> {
+	type Output = C;
+
+	fn index(&self, id: &IntVarId) -> &Self::Output {
+		&self.0[id]
+	}
+}
+
+impl<C: Coefficient> Display for Assignment<C> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"{}",
+			self.0
+				.iter()
+				.sorted()
+				.map(|(id, a)| format!("x_{}={}", id, a))
+				.join(", ")
+		)
+	}
+}
+
+impl<C: Coefficient> Assignment<C> {}
+// impl<C: Coefficient> Index for Assignment<C> {
+
+// }
 
 // TODO Domain will be used once (/if) this is added as encoder feature.
 #[allow(dead_code)]
@@ -50,30 +94,23 @@ pub enum Consistency {
 }
 
 #[derive(Debug, Clone)]
-pub enum Obj<C: Coefficient> {
-	Minimize(LinExp<C>),
-	Maximize(LinExp<C>),
+pub enum Obj<Lit: Literal, C: Coefficient> {
+	Minimize(LinExp<Lit, C>),
+	Maximize(LinExp<Lit, C>),
 	Satisfy,
 }
-
-use crate::{CheckError, Checker};
 
 impl<Lit: Literal, C: Coefficient> Checker for Model<Lit, C> {
 	type Lit = Lit;
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let a = self
-			.vars
-			.iter()
-			.flat_map(|(id, x)| x.assign(solution).map(|a| (*id, a)))
-			.collect::<HashMap<_, _>>();
-		self.cons.iter().try_for_each(|con| con.check::<Lit>(&a))
+		let a = self.assign(solution)?;
+		self.cons.iter().try_for_each(|con| con.check(&a))
 	}
 }
 
 impl<Lit: Literal, C: Coefficient> Default for Model<Lit, C> {
 	fn default() -> Self {
 		Self {
-			vars: HashMap::new(),
 			cons: vec![],
 			num_var: 0,
 			obj: Obj::Satisfy,
@@ -92,23 +129,24 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	pub(crate) fn add_int_var_enc(
 		&mut self,
 		x: IntVarEnc<Lit, C>,
-	) -> Result<Rc<RefCell<IntVar<C>>>, Unsatisfiable> {
+	) -> Result<Rc<RefCell<IntVar<Lit, C>>>, Unsatisfiable> {
 		let dom = x
 			.dom()
 			.iter(..)
 			.map(|d| d.end - C::one())
 			.collect::<Vec<_>>();
-		let var = self.new_var(&dom, false, None)?;
-		self.vars.insert(var.borrow().id, x);
+		let var = self.new_var(&dom, false, Some(x), None)?;
+		// self.vars.insert(var.borrow().id, x);
 		Ok(var)
 	}
 
-	pub fn new_var(
+	pub(crate) fn new_var(
 		&mut self,
 		dom: &[C],
 		add_consistency: bool,
+		e: Option<IntVarEnc<Lit, C>>,
 		lbl: Option<String>,
-	) -> Result<Rc<RefCell<IntVar<C>>>, Unsatisfiable> {
+	) -> Result<Rc<RefCell<IntVar<Lit, C>>>, Unsatisfiable> {
 		(!dom.is_empty())
 			.then(|| {
 				self.num_var += 1;
@@ -117,27 +155,30 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					dom: dom.iter().cloned().collect(),
 					add_consistency,
 					views: HashMap::default(),
+					e,
 					lbl,
 				}))
 			})
 			.ok_or(Unsatisfiable)
 	}
 
-	pub fn add_constraint(&mut self, constraint: Lin<C>) -> crate::Result {
+	pub fn add_constraint(&mut self, constraint: Lin<Lit, C>) -> Result {
 		self.cons.push(constraint);
 		Ok(())
 	}
 
-	pub fn new_constant(&mut self, c: C) -> Rc<RefCell<IntVar<C>>> {
-		self.new_var(&[c], false, None).unwrap()
+	pub fn new_constant(&mut self, c: C) -> Rc<RefCell<IntVar<Lit, C>>> {
+		self.new_var(&[c], false, None, None).unwrap()
 	}
 
 	// TODO pass Decomposer (with cutoff, etc..)
 	pub fn decompose(self) -> Result<Model<Lit, C>, Unsatisfiable> {
 		// TODO aggregate constants + encode trivial constraints
-		let mut model = Model::new(self.num_var);
-		model.vars = self.vars.clone(); // TODO we should design the interaction between the model (self) and the decomposed model better (by consuming self?)
-		model.cons = self
+		// let mut model = Model::new(self.num_var);
+		// model.vars = self.vars.clone(); // TODO we should design the interaction between the model (self) and the decomposed model better (by consuming self?)
+
+		let mut num_var = self.num_var;
+		let cons = self
 			.cons
 			.iter()
 			.cloned()
@@ -161,9 +202,8 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					}
 					_ if con.exp.terms.len() < 3 || con.is_tern() => Ok(vec![con]),
 					_ => {
-						let new_model =
-							BddEncoder::default().decompose::<Lit>(con, model.num_var)?;
-						model.vars.extend(new_model.vars);
+						let new_model = BddEncoder::default().decompose::<Lit>(con, num_var)?;
+						num_var = new_model.num_var;
 						Ok(new_model.cons)
 					}
 				}
@@ -171,7 +211,27 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.flatten_ok()
 			.flatten()
 			.collect::<Vec<_>>();
-		Ok(model)
+		Ok(Model {
+			cons,
+			num_var,
+			..self
+		})
+	}
+
+	pub fn encode_vars<DB: ClauseDatabase<Lit = Lit>>(
+		&mut self,
+		db: &mut DB,
+		cutoff: Option<C>,
+	) -> Result<(), Unsatisfiable> {
+		// Encode (or retrieve encoded) variables (in order of id so lits line up more nicely with variable order)
+		let mut all_views = HashMap::new();
+		self.vars()
+			.iter()
+			.sorted_by_key(|var| var.borrow().id)
+			.try_for_each(|var| {
+				let prefer_order = var.borrow().prefer_order(cutoff);
+				var.borrow_mut().encode(db, &mut all_views, prefer_order)
+			})
 	}
 
 	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(
@@ -180,61 +240,19 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		cutoff: Option<C>,
 	) -> Result<Self, Unsatisfiable> {
 		// Create decomposed model and its aux vars
-		// TODO fix 2 failing unit tests for decomposed models
-		println!("model = {}", self);
-		const DECOMPOSE: bool = true;
 
 		let mut decomposition = if DECOMPOSE {
-			let decomposition = self.clone().decompose()?;
-			println!("decomposition = {}", decomposition);
-			decomposition
+			self.clone().decompose()?
 		} else {
 			self.clone()
 		};
 
-		// Encode (or retrieve encoded) variables (in order of id)
-		let mut all_views = HashMap::new();
-		let enc_vars = decomposition
-			.vars()
-			.iter()
-			.filter(|var| !var.borrow().is_constant())
-			.sorted_by_key(|var| var.borrow().id)
-			.map(|var| {
-				(
-					var.borrow().id,
-					self.vars
-						.entry(var.borrow().id)
-						.or_insert_with(|| {
-							var.borrow().encode(
-								db,
-								&mut all_views,
-								var.borrow().prefer_order(cutoff),
-							)
-						})
-						.clone(),
-				)
-			})
-			.collect::<HashMap<_, _>>();
+		decomposition.encode_vars(db, cutoff)?;
 
 		for con in &decomposition.cons {
-			let enc = con
-				.exp
-				.terms
-				.iter()
-				.map(|term| {
-					let x = term.x.borrow();
-					if x.is_constant() {
-						x.encode(db, &mut all_views, x.prefer_order(cutoff))
-					} else {
-						enc_vars[&x.id].clone()
-					}
-				})
-				.collect();
-
-			con.encode(db, enc)?;
+			con.encode(db)?;
 		}
 
-		decomposition.vars = enc_vars;
 		Ok(decomposition)
 	}
 
@@ -257,45 +275,52 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	pub(crate) fn extend(&mut self, other: Model<Lit, C>) {
-		// TODO potentially, we could increment the other var ids by self.num_var here
-		self.vars.extend(other.vars);
 		self.num_var = other.num_var;
 		self.cons.extend(other.cons);
 	}
-	pub(crate) fn vars(&self) -> Vec<Rc<RefCell<IntVar<C>>>> {
+	pub(crate) fn vars(&self) -> Vec<Rc<RefCell<IntVar<Lit, C>>>> {
 		self.cons
 			.iter()
-			.flat_map(|con| {
-				con.exp
-					.terms
-					.iter()
-					.filter_map(|term| (!term.x.borrow().is_constant()).then(|| term.x.clone()))
-			})
+			.flat_map(|con| con.exp.terms.iter().map(|term| &term.x))
 			.unique_by(|x| x.borrow().id)
+			.cloned()
 			.collect()
+	}
+
+	pub fn assign(&self, a: &[Lit]) -> Result<Assignment<C>, CheckError<Lit>> {
+		self.vars()
+			.iter()
+			.map(|x| x.borrow().assign(a).map(|a| (x.borrow().id, a)))
+			.collect::<Result<HashMap<_, _>, _>>() // TODO weird it can't infer type
+			.map(|a| Assignment(a))
+	}
+
+	#[allow(dead_code)]
+	pub(crate) fn lits(&self) -> usize {
+		self.vars().iter().map(|x| x.borrow().lits()).sum::<usize>()
 	}
 }
 
 #[derive(Debug, Clone)]
-pub struct LinExp<C: Coefficient> {
-	pub(crate) terms: Vec<Term<C>>,
+pub struct LinExp<Lit: Literal, C: Coefficient> {
+	pub(crate) terms: Vec<Term<Lit, C>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Lin<C: Coefficient> {
-	pub exp: LinExp<C>,
+pub struct Lin<Lit: Literal, C: Coefficient> {
+	pub exp: LinExp<Lit, C>,
 	pub cmp: Comparator,
 	pub k: C,
 	pub lbl: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Term<C: Coefficient> {
+pub struct Term<Lit: Literal, C: Coefficient> {
 	pub c: C,
-	pub x: Rc<RefCell<IntVar<C>>>,
+	pub x: Rc<RefCell<IntVar<Lit, C>>>,
 }
 
-impl<C: Coefficient> Mul<C> for Term<C> {
+impl<Lit: Literal, C: Coefficient> Mul<C> for Term<Lit, C> {
 	type Output = Self;
 	fn mul(self, rhs: C) -> Self {
 		Self {
@@ -305,26 +330,27 @@ impl<C: Coefficient> Mul<C> for Term<C> {
 	}
 }
 
-impl<C: Coefficient> From<Rc<RefCell<IntVar<C>>>> for Term<C> {
-	fn from(value: Rc<RefCell<IntVar<C>>>) -> Self {
+impl<Lit: Literal, C: Coefficient> From<Rc<RefCell<IntVar<Lit, C>>>> for Term<Lit, C> {
+	fn from(value: Rc<RefCell<IntVar<Lit, C>>>) -> Self {
 		Term::new(C::one(), value)
 	}
 }
 
-impl<C: Coefficient> Term<C> {
-	pub fn new(c: C, x: Rc<RefCell<IntVar<C>>>) -> Self {
+impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
+	pub fn new(c: C, x: Rc<RefCell<IntVar<Lit, C>>>) -> Self {
 		Self { c, x }
 	}
 
-	fn encode<DB: ClauseDatabase>(
+	// TODO move enc into Term ?
+	fn encode<DB: ClauseDatabase<Lit = Lit>>(
 		&self,
 		db: &mut DB,
-		enc: &IntVarEnc<DB::Lit, C>,
-	) -> Result<IntVarEnc<DB::Lit, C>, Unsatisfiable> {
+		enc: &IntVarEnc<Lit, C>,
+	) -> Result<(IntVarEnc<Lit, C>, C), Unsatisfiable> {
 		if self.c == C::zero() {
-			Ok(IntVarEnc::Const(C::zero()))
+			Ok((IntVarEnc::Const(C::zero()), C::zero()))
 		} else if self.c == C::one() {
-			Ok(enc.clone())
+			Ok((enc.clone(), C::zero()))
 		} else {
 			match enc {
 				IntVarEnc::Ord(o) => {
@@ -350,29 +376,28 @@ impl<C: Coefficient> Term<C> {
 							}),
 						);
 					} else {
-						Ok(IntVarEnc::Ord(IntVarOrd::from_views(
-							db,
-							o.xs.iter(..)
-								.map(|(iv, lit)| {
-									(
-										(iv.start * self.c)
-											..((iv.end - C::one()) * self.c + C::one()),
-										Some(lit.clone()),
-									)
-								})
-								.collect(),
-							format!("{}*{}", self.c, o.lbl.clone()),
-						)))
+						todo!();
+						// Ok(IntVarEnc::Ord(IntVarOrd::from_views(
+						// 	db,
+						// 	o.xs.iter(..)
+						// 		.map(|(iv, lit)| {
+						// 			(
+						// 				(iv.start * self.c)
+						// 					..((iv.end - C::one()) * self.c + C::one()),
+						// 				Some(lit.clone()),
+						// 			)
+						// 		})
+						// 		.collect(),
+						// 	format!("{}*{}", self.c, o.lbl.clone()),
+						// )))
 					}
 				}
 				IntVarEnc::Bin(x_enc) => {
 					if self.c.is_negative() {
-						let self_abs = self.clone() * -C::one();
-
-						self_abs.encode(db, enc).map(|x| match x {
-							IntVarEnc::Bin(x_enc) => IntVarEnc::Bin(x_enc.complement()),
-							_ => unreachable!(),
-						})
+						let term = Term::new(-C::one() * self.c, self.x.clone());
+						let (term, c) =
+							term.encode(db, &IntVarEnc::Bin(x_enc.clone().complement()))?;
+						Ok((term, self.c + c))
 					} else {
 						let mut c = self.c;
 						// TODO shift by zeroes..
@@ -448,13 +473,16 @@ impl<C: Coefficient> Term<C> {
 						}
 
 						let xs = get_and_shift(&ys, *ys.keys().max().unwrap(), sh);
-						Ok(IntVarEnc::Bin(IntVarBin::from_lits(
-							&xs,
-							format!("{c}*{}", self.x.borrow().lbl()),
-						)))
+						Ok((
+							IntVarEnc::Bin(IntVarBin::from_lits(
+								&xs,
+								format!("{c}*{}", self.x.borrow().lbl()),
+							)),
+							C::zero(),
+						))
 					}
 				}
-				IntVarEnc::Const(c) => Ok(IntVarEnc::Const(*c * self.c)),
+				IntVarEnc::Const(c) => Ok((IntVarEnc::Const(*c * self.c), C::zero())),
 			}
 		}
 	}
@@ -487,8 +515,8 @@ impl<C: Coefficient> Term<C> {
 	}
 }
 
-impl<C: Coefficient> Lin<C> {
-	pub fn new(terms: &[Term<C>], cmp: Comparator, k: C, lbl: Option<String>) -> Self {
+impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
+	pub fn new(terms: &[Term<Lit, C>], cmp: Comparator, k: C, lbl: Option<String>) -> Self {
 		Lin {
 			exp: LinExp {
 				terms: terms.to_vec(),
@@ -499,7 +527,13 @@ impl<C: Coefficient> Lin<C> {
 		}
 	}
 
-	pub fn tern(x: Term<C>, y: Term<C>, cmp: Comparator, z: Term<C>, lbl: Option<String>) -> Self {
+	pub fn tern(
+		x: Term<Lit, C>,
+		y: Term<Lit, C>,
+		cmp: Comparator,
+		z: Term<Lit, C>,
+		lbl: Option<String>,
+	) -> Self {
 		Lin {
 			exp: LinExp {
 				terms: vec![x, y, Term::new(-z.c, z.x)],
@@ -643,7 +677,7 @@ impl<C: Coefficient> Lin<C> {
 			&& self.k.is_zero()
 	}
 
-	fn check<Lit: Literal>(&self, a: &HashMap<IntVarId, C>) -> Result<(), CheckError<Lit>> {
+	fn check(&self, a: &Assignment<C>) -> Result<(), CheckError<Lit>> {
 		let lhs = self
 			.exp
 			.terms
@@ -673,74 +707,82 @@ impl<C: Coefficient> Lin<C> {
 		feature = "trace",
 		tracing::instrument(name = "lin_encoder", skip_all, fields(constraint = format!("{}", self)))
 	)]
-	fn encode<DB: ClauseDatabase>(
-		&self,
-		db: &mut DB,
-		encs: Vec<IntVarEnc<DB::Lit, C>>,
-	) -> crate::Result {
+	fn encode<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
 		println!("self = {self}");
-
 		// TODO assert simplified/simplify
 		// assert!(self._is_simplified());
 
-		if encs.iter().all(|enc| matches!(enc, IntVarEnc::Bin(_))) {
-			return self
-				.exp
-				.terms
-				.iter()
-				.zip(&encs)
-				.flat_map(|(term, enc)| term.encode(db, enc))
-				.collect::<Vec<_>>()
-				.into_iter()
-				// TODO replace first element for xs[1]
-				.scan(Ok(IntVarEnc::Const(C::zero())), |state, x| {
-					*state = x.add(
-						db,
-						&mut TernLeEncoder::default(),
-						state.as_ref().unwrap(),
-						None,
-						Some(self.k),
-					);
-					Some(state.clone())
-				})
-				// Remap Ok(IntVarEnc) to Ok(()) to make it crate::Result
-				.try_for_each(|x| x.map(|_| ()));
-			// .collect::<Vec<_>>();
-		}
-		dbg!(&self, &encs);
+		if self
+			.exp
+			.terms
+			.iter()
+			.all(|term| matches!(term.x.borrow().e.as_ref().unwrap(), IntVarEnc::Bin(_)))
+		{
+			// TODO hard to do in a reduce ..
+			// TODO Replace 0 for first element
+			let mut y = IntVarEnc::Const(C::zero());
+			let mut encoder = TernLeEncoder::default();
+			let mut k = self.k;
+			for term in &self.exp.terms {
+				let (x, c) = term.encode(db, term.x.borrow().e.as_ref().unwrap())?;
+				y = x.add(
+					db,
+					&mut encoder,
+					&y,
+					None,
+					None,
+					// Some(self.k),
+				)?;
+				k += c;
+			}
 
-		todo!();
+			encoder.encode(
+				db,
+				&TernLeConstraint::new(
+					&y,
+					&IntVarEnc::Const(C::zero()),
+					&self.cmp,
+					&IntVarEnc::Const(k),
+				),
+			)?;
+
+			return Ok(());
+		}
+
 		#[allow(unreachable_code)]
 		{
 			let encs = self
 				.exp
 				.terms
 				.iter()
-				.zip(encs)
-				.with_position()
-				.flat_map(|(pos, (x, enc))| match pos {
-					Position::Last if self.exp.terms.len() == 3 => {
-						assert!(self.k.is_zero());
-						(x.clone() * -C::one()).encode(db, &enc)
-					}
-					_ => x.encode(db, &enc),
-				})
+				.map(|term| term.x.borrow().e.as_ref().unwrap().clone())
+				// .with_position()
+				// .flat_map(|(pos, term)| {
+				// 	let enc = term.x.borrow().e.as_ref().unwrap().clone();
+				// 	match pos {
+				// 		Position::Last if self.exp.terms.len() == 3 => {
+				// 			assert!(self.k.is_zero());
+				// 			(term.clone() * -C::one()).encode(db, &enc)
+				// 		}
+				// 		_ => term.encode(db, &enc),
+				// 	}
+				// })
 				.collect::<Vec<_>>();
 
 			let mut encoder = TernLeEncoder::default();
 			// TODO generalize n-ary encoding; currently using fallback of TernLeEncoder
 			return match &encs[..] {
 				[] => return Ok(()),
-				[x] => {
+				[x] if DECOMPOSE => {
 					let y = IntVarEnc::Const(C::zero());
 					let z = IntVarEnc::Const(self.k);
 					encoder.encode(db, &TernLeConstraint::new(x, &y, &self.cmp, &z))
 				}
-				[x, y] => {
+				[x, y] if DECOMPOSE => {
 					let z = IntVarEnc::Const(self.k);
 					encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, &z))
 				}
-				[x, y, z] => {
+				[x, y, z] if DECOMPOSE => {
 					assert!(self.k.is_zero());
 					encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, z))
 				}
@@ -808,27 +850,43 @@ impl<C: Coefficient> Lin<C> {
 }
 
 // TODO perhaps id can be used by replacing vars HashMap to just vec
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct IntVar<C: Coefficient> {
+// TODO why can't we derive Default without impl. for Lit (since it's in Option?)
+#[derive(Debug, Default, Clone)]
+pub struct IntVar<Lit: Literal, C: Coefficient> {
 	pub(crate) id: IntVarId,
 	pub(crate) dom: BTreeSet<C>, // TODO implement rangelist
 	pub(crate) add_consistency: bool,
 	pub(crate) views: HashMap<C, (IntVarId, C)>,
+	pub(crate) e: Option<IntVarEnc<Lit, C>>,
 	lbl: Option<String>,
 }
 
-impl<C: Coefficient> IntVar<C> {
+// TODO implement Eq so we don't compare .e
+
+impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
+	pub fn assign(&self, a: &[Lit]) -> Result<C, CheckError<Lit>> {
+		self.e.as_ref().unwrap().assign(a)
+	}
 	pub fn is_constant(&self) -> bool {
 		self.size() == 1
 	}
 
-	fn encode<DB: ClauseDatabase>(
-		&self,
+	#[allow(dead_code)]
+	pub(crate) fn lits(&self) -> usize {
+		self.e.as_ref().map(IntVarEnc::lits).unwrap_or(0)
+	}
+
+	fn encode<DB: ClauseDatabase<Lit = Lit>>(
+		&mut self,
 		db: &mut DB,
-		views: &mut HashMap<(IntVarId, C), DB::Lit>,
+		views: &mut HashMap<(IntVarId, C), Lit>,
 		prefer_order: bool,
-	) -> IntVarEnc<DB::Lit, C> {
-		if self.is_constant() {
+	) -> Result<(), Unsatisfiable> {
+		if self.e.is_some() {
+			return Ok(());
+		};
+
+		self.e = Some(if self.is_constant() {
 			IntVarEnc::Const(*self.dom.first().unwrap())
 		} else {
 			let x = if prefer_order {
@@ -866,7 +924,8 @@ impl<C: Coefficient> IntVar<C> {
 				}
 			}
 			x
-		}
+		});
+		Ok(())
 	}
 
 	pub(crate) fn dom(&self) -> std::collections::btree_set::Iter<C> {
@@ -874,7 +933,7 @@ impl<C: Coefficient> IntVar<C> {
 	}
 
 	// TODO should not be C i/o &C?
-	fn fix(&mut self, q: &C) -> crate::Result {
+	fn fix(&mut self, q: &C) -> Result {
 		if self.dom.contains(q) {
 			self.dom = [*q].into();
 			Ok(())
@@ -933,33 +992,30 @@ impl<C: Coefficient> IntVar<C> {
 
 #[cfg(test)]
 mod tests {
+	type Lit = i32;
+	type C = i32;
 
 	use super::*;
 	// use crate::{helpers::tests::TestDB, Cnf, Format, Lin, Model};
 	use crate::{Cnf, Lin, Model};
 
 	impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
-		fn check_assignment(
-			&self,
-			assignment: &HashMap<IntVarId, C>,
-		) -> Result<(), CheckError<Lit>> {
-			self.cons
-				.iter()
-				.try_for_each(|con| con.check::<Lit>(assignment))
+		fn check_assignment(&self, assignment: &Assignment<C>) -> Result<(), CheckError<Lit>> {
+			self.cons.iter().try_for_each(|con| con.check(assignment))
 		}
 	}
 
 	#[test]
 	fn model_test() {
-		let mut model = Model::<i32, i32>::default();
+		let mut model = Model::<Lit, C>::default();
 		let x1 = model
-			.new_var(&[0, 2], true, Some("x1".to_string()))
+			.new_var(&[0, 2], true, None, Some("x1".to_string()))
 			.unwrap();
 		let x2 = model
-			.new_var(&[0, 3], true, Some("x2".to_string()))
+			.new_var(&[0, 3], true, None, Some("x2".to_string()))
 			.unwrap();
 		let x3 = model
-			.new_var(&[0, 5], true, Some("x3".to_string()))
+			.new_var(&[0, 5], true, None, Some("x3".to_string()))
 			.unwrap();
 		let k = 6;
 		model
@@ -984,114 +1040,98 @@ mod tests {
 	use traced_test::test;
 
 	fn test_lp(lp: &str) {
-		let mut model = Model::<i32, i32>::from_string(lp.into(), Format::Lp).unwrap();
-		// println!("model = {model}");
+		// const CUTOFF: Option<C> = None;
+		const CUTOFF: Option<C> = Some(0);
+
+		let mut model = Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap();
+		println!("model = {model}");
+
+		let mut db = TestDB::new(0);
+		model.encode_vars(&mut db, CUTOFF).unwrap(); // Encode vars beforehand so db.num_var lines up
 
 		let vars = model.vars();
-		let sols = vars
+		let expected_assignments = vars
 			.iter()
 			.map(|var| var.borrow().dom.clone().into_iter().collect::<Vec<_>>())
 			.multi_cartesian_product()
 			.map(|a| {
-				vars.iter()
-					.map(|var| var.borrow().id.clone())
-					.zip(a)
-					.collect::<HashMap<_, _>>()
+				Assignment(
+					vars.iter()
+						.map(|var| var.borrow().id.clone())
+						.zip(a)
+						.collect::<HashMap<_, _>>(),
+				)
 			})
 			.filter(|a| model.check_assignment(a).is_ok())
-			.map(|sol| sol.into_iter().collect::<Vec<_>>())
+			// .map(|sol| sol.into_iter().collect::<Vec<_>>())
 			.collect::<Vec<_>>();
 
-		let mut db = TestDB::new(0);
-		let decomposition = model.encode(&mut db, None).unwrap();
+		let lit_assignments = if let Ok(decomposition) = model.encode(&mut db, CUTOFF) {
+			println!("decomposition = {}", decomposition);
 
-		// println!("decomposition = {}", decomposition);
+			// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
+			db.num_var = model.lits() as Lit;
+			db.solve().into_iter().sorted().collect::<Vec<_>>()
+		} else {
+			vec![]
+		};
 
-		// Count principal variables
-		let principal_enc_vars = vars
-			.iter()
-			.map(|var| (var.borrow().id, &decomposition.vars[&var.borrow().id]))
-			.collect::<HashMap<_, _>>();
-
-		db.num_var = principal_enc_vars
-			.iter()
-			.map(|(_, var)| var.lits())
-			.sum::<usize>() as i32;
-
-		let lit_assignments = db.solve().into_iter().sorted().collect::<Vec<_>>();
-
-		let int_assignments = lit_assignments
+		let actual_assignments = lit_assignments
 			.iter()
 			.flat_map(|lit_assignment| {
-				let int_assignment = principal_enc_vars
-					.iter()
-					.flat_map(|(id, var)| var.assign(&lit_assignment).map(|a| (*id, a)))
-					.collect::<HashMap<_, _>>();
-
-				// Check principal constraints
+				let expected_assignment = model.assign(lit_assignment)?;
 				model
-					.check_assignment(&int_assignment)
-					.map(|_| int_assignment.into_iter().collect::<Vec<_>>())
+					.check_assignment(&expected_assignment)
+					.map(|_| expected_assignment)
 			})
 			.collect::<Vec<_>>();
 
-		let canonicalize = |a: Vec<Vec<(IntVarId, i32)>>| {
-			a.into_iter()
-				.map(|a| a.iter().sorted().cloned().collect::<Vec<_>>())
-				.sorted_by_key(|assignments| {
-					assignments
-						.iter()
-						.cloned()
-						.map(|(_, value)| value)
-						.collect::<Vec<_>>()
-				})
-				.collect::<Vec<_>>()
-		};
+		let canonicalize = |a: Vec<Assignment<Lit>>| a.into_iter().sorted().collect::<Vec<_>>();
 
-		let sols = canonicalize(sols);
-		let int_assignments = canonicalize(int_assignments);
+		let expected_assignments = canonicalize(expected_assignments);
+		let actual_assignments = canonicalize(actual_assignments);
 
 		// TODO unnecessary canonicalize?
 		let extra_int_assignments = canonicalize(
-			int_assignments
+			actual_assignments
 				.iter()
-				.filter(|a| !sols.contains(a))
+				.filter(|a| !expected_assignments.contains(a))
 				.cloned()
 				.collect::<Vec<_>>(),
 		);
 
 		let missing_int_assignments = canonicalize(
-			sols.iter()
-				.filter(|a| !int_assignments.contains(a))
+			expected_assignments
+				.iter()
+				.filter(|a| !actual_assignments.contains(a))
 				.cloned()
 				.collect::<Vec<_>>(),
 		);
-
-		let show_int_assignments = |a: &Vec<Vec<(IntVarId, i32)>>| {
-			a.iter()
-				.map(|a| a.iter().map(|(id, a)| format!("x_{}={}", id, a)).join(", "))
-				.collect::<Vec<_>>()
-		};
 
 		// TODO find violated constraints for extra assignments
 		assert!(
 			extra_int_assignments.is_empty() && missing_int_assignments.is_empty(),
 			"
-Extra solutions:
+{}Extra solutions:
 {}
 Missing solutions:
 {}",
-			show_int_assignments(&extra_int_assignments)
+			if actual_assignments.is_empty() {
+				"Note: encoding is Unsatisfiable\n"
+			} else {
+				""
+			},
+			extra_int_assignments
 				.iter()
 				.map(|a| format!("+ {}", a))
 				.join("\n"),
-			show_int_assignments(&missing_int_assignments)
+			missing_int_assignments
 				.iter()
 				.map(|a| format!("- {}", a))
 				.join("\n"),
 		);
 
-		assert_eq!(int_assignments, sols);
+		assert_eq!(actual_assignments, expected_assignments);
 	}
 
 	#[test]
@@ -1214,6 +1254,7 @@ End
 		);
 	}
 
+	// TODO ! We are not handling >=/== correctly when decomposing as BDD; because the domain always uses the end of the interval; instead use start of interval if >=, and create 2 constraints for <= and >= if using ==
 	#[test]
 	fn test_lp_2() {
 		test_lp(
@@ -1234,10 +1275,10 @@ End
 		test_lp(
 			"
 Subject To
-c0: + 2 x1 -3 x2 = 0
+c0: + 1 x1 - 1 x2 = 0
 Bounds
-0 <= x1 <= 3
-0 <= x2 <= 5
+0 <= x1 <= 1
+0 <= x2 <= 1
 End
 ",
 		);
@@ -1268,6 +1309,23 @@ Bounds
 0 <= x2 <= 1
 0 <= x3 <= 1
 0 <= x4 <= 1
+End
+",
+		);
+	}
+
+	#[test]
+	fn test_lp_multiple_constraints() {
+		test_lp(
+			r"
+Subject To
+c0: + 2 x1 + 3 x2 + 5 x3 <= 6
+c1: + 2 x1 + 3 x2 + 5 x4 <= 5
+Binary
+x1
+x2
+x3
+x4
 End
 ",
 		);
@@ -1319,15 +1377,32 @@ End
 		);
 	}
 
+	// #[test]
+	// fn test_lp_scm_3() {
+	// 	test_lp(
+	// 		r"
+	// Subject To
+	// c0: x1 - 43 x2 = 0
+	// Bounds
+	// 0 <= x1 <= 2000
+	// 0 <= x2 <= 4
+	// End
+	// ",
+	// 	);
+	// }
+
 	#[test]
-	fn test_lp_scm_3() {
+	fn test_knapsack() {
 		test_lp(
 			r"
 Subject To
-c0: x1 - 43 x2 = 0
+c0: 2 x1 + 3 x2 + 11 x3 + 5 x4 <= 21
+c1: 3 x1 + 1 x2 + 14 x3 + 3 x4 >= 22
 Bounds
-0 <= x1 <= 2000
-0 <= x2 <= 4
+0 <= x1 <= 3
+0 <= x2 <= 3
+0 <= x3 <= 2
+0 <= x4 <= 4
 End
 ",
 		);

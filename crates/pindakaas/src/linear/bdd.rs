@@ -32,9 +32,9 @@ impl<C: Coefficient> BddEncoder<C> {
 
 	pub(crate) fn decompose<Lit: Literal>(
 		&mut self,
-		lin: Lin<C>,
+		lin: Lin<Lit, C>,
 		num_var: usize,
-	) -> crate::Result<Model<Lit, C>, Unsatisfiable> {
+	) -> Result<Model<Lit, C>, Unsatisfiable> {
 		let mut model = Model::<Lit, C>::new(num_var);
 
 		// sort by *decreasing* ub
@@ -46,7 +46,7 @@ impl<C: Coefficient> BddEncoder<C> {
 						.terms
 						.iter()
 						.cloned()
-						.sorted_by(|a: &Term<C>, b: &Term<C>| b.ub().cmp(&a.ub()))
+						.sorted_by(|a: &Term<Lit, C>, b: &Term<Lit, C>| b.ub().cmp(&a.ub()))
 						.collect(),
 				},
 				..lin
@@ -149,7 +149,7 @@ impl<C: Coefficient> BddEncoder<C> {
 					})
 					.collect::<Vec<_>>();
 				model
-					.new_var(&dom, self.add_consistency, Some(format!("bdd_{}", i)))
+					.new_var(&dom, self.add_consistency, None, Some(format!("bdd_{}", i)))
 					.map(|var| (var, views))
 			})
 			.collect::<Vec<_>>()
@@ -204,6 +204,7 @@ where
 			.map(Term::from)
 			.collect::<Vec<_>>();
 
+		// TODO pass BDD::decompose to Model::encode instead, since otherwise we risk decomposing twice
 		let decomposition = self.decompose::<DB::Lit>(
 			Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None),
 			model.num_var,
@@ -223,9 +224,9 @@ enum BddNode<C: Coefficient> {
 	View(C),
 }
 
-fn bdd<C: Coefficient>(
+fn bdd<Lit: Literal, C: Coefficient>(
 	i: usize,
-	xs: &Vec<Term<C>>,
+	xs: &Vec<Term<Lit, C>>,
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, BddNode<C>>>,
 ) -> (std::ops::Range<C>, BddNode<C>) {

@@ -15,19 +15,19 @@ impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 	}
 }
 
-impl<C: Coefficient> Display for Term<C> {
+impl<Lit: Literal, C: Coefficient> Display for Term<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "{:+}·{}", self.c, self.x.borrow())
 	}
 }
 
-impl<C: Coefficient> Display for LinExp<C> {
+impl<Lit: Literal, C: Coefficient> Display for LinExp<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "{}", self.terms.iter().join(" "))
 	}
 }
 
-impl<C: Coefficient> Display for Obj<C> {
+impl<Lit: Literal, C: Coefficient> Display for Obj<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Obj::Minimize(exp) => write!(f, "min {exp}"),
@@ -37,7 +37,7 @@ impl<C: Coefficient> Display for Obj<C> {
 	}
 }
 
-impl<C: Coefficient> Display for Lin<C> {
+impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		if self.is_tern() {
 			write!(
@@ -54,8 +54,8 @@ impl<C: Coefficient> Display for Lin<C> {
 	}
 }
 
-impl<C: Coefficient> fmt::Display for IntVar<C> {
+impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{} ∈ {}", self.lbl(), display_dom(&self.dom))
+		write!(f, "{} ∈ {}", self.lbl(), display_dom::<Lit, C>(&self.dom))
 	}
 }
