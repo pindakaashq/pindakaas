@@ -140,6 +140,33 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		Ok(var)
 	}
 
+	pub fn var(
+		&mut self,
+		dom: &[C],
+		lbl: Option<String>,
+	) -> Result<Rc<RefCell<IntVar<Lit, C>>>, Unsatisfiable> {
+		self.new_var(dom, true, None, lbl)
+	}
+
+	pub fn con(
+		&mut self,
+		terms: &[(C, Rc<RefCell<IntVar<Lit, C>>>)],
+		cmp: Comparator,
+		k: C,
+		lbl: Option<String>,
+	) -> Result {
+		self.add_constraint(Lin::new(
+			&terms
+				.iter()
+				.cloned()
+				.map(|(c, x)| Term::new(c, x))
+				.collect::<Vec<_>>(),
+			cmp,
+			k,
+			lbl,
+		))
+	}
+
 	pub(crate) fn new_var(
 		&mut self,
 		dom: &[C],
@@ -293,6 +320,83 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.map(|x| x.borrow().assign(a).map(|a| (x.borrow().id, a)))
 			.collect::<Result<HashMap<_, _>, _>>() // TODO weird it can't infer type
 			.map(|a| Assignment(a))
+	}
+
+	fn check_assignment(&self, assignment: &Assignment<C>) -> Result<(), CheckError<Lit>> {
+		self.cons.iter().try_for_each(|con| con.check(assignment))
+	}
+
+	pub fn check_assignments(
+		&self,
+		actual_assignments: &[Assignment<C>],
+	) -> Result<(), CheckError<Lit>> {
+		actual_assignments
+			.iter()
+			.try_for_each(|actual_assignment| self.check_assignment(actual_assignment))?;
+
+		let vars = self.vars();
+		let expected_assignments = vars
+			.iter()
+			.map(|var| var.borrow().dom.clone().into_iter().collect::<Vec<_>>())
+			.multi_cartesian_product()
+			.map(|a| {
+				Assignment(
+					vars.iter()
+						.map(|var| var.borrow().id)
+						.zip(a)
+						.collect::<HashMap<_, _>>(),
+				)
+			})
+			.filter(|a| self.check_assignment(a).is_ok())
+			.collect::<Vec<_>>();
+
+		let canonicalize = |a: &[Assignment<C>]| a.iter().sorted().cloned().collect::<Vec<_>>();
+
+		let expected_assignments = canonicalize(&expected_assignments);
+		let actual_assignments = canonicalize(actual_assignments);
+
+		// TODO unnecessary canonicalize?
+		let extra_int_assignments = canonicalize(
+			&actual_assignments
+				.iter()
+				.filter(|a| !expected_assignments.contains(a))
+				.cloned()
+				.collect::<Vec<_>>(),
+		);
+
+		let missing_int_assignments = canonicalize(
+			&expected_assignments
+				.iter()
+				.filter(|a| !actual_assignments.contains(a))
+				.cloned()
+				.collect::<Vec<_>>(),
+		);
+
+		assert!(
+			extra_int_assignments.is_empty() && missing_int_assignments.is_empty(),
+			"
+{}Extra solutions:
+{}
+Missing solutions:
+{}",
+			if actual_assignments.is_empty() {
+				"Note: encoding is Unsatisfiable\n"
+			} else {
+				""
+			},
+			extra_int_assignments
+				.iter()
+				.map(|a| format!("+ {}", a))
+				.join("\n"),
+			missing_int_assignments
+				.iter()
+				.map(|a| format!("- {}", a))
+				.join("\n"),
+		);
+
+		assert_eq!(actual_assignments, expected_assignments);
+
+		Ok(())
 	}
 
 	#[allow(dead_code)]
@@ -999,12 +1103,6 @@ mod tests {
 	// use crate::{helpers::tests::TestDB, Cnf, Format, Lin, Model};
 	use crate::{Cnf, Lin, Model};
 
-	impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
-		fn check_assignment(&self, assignment: &Assignment<C>) -> Result<(), CheckError<Lit>> {
-			self.cons.iter().try_for_each(|con| con.check(assignment))
-		}
-	}
-
 	#[test]
 	fn model_test() {
 		let mut model = Model::<Lit, C>::default();
@@ -1034,8 +1132,6 @@ mod tests {
 	use crate::{helpers::tests::TestDB, Format};
 	use itertools::Itertools;
 
-	use std::collections::HashMap;
-
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
@@ -1049,23 +1145,6 @@ mod tests {
 		let mut db = TestDB::new(0);
 		model.encode_vars(&mut db, CUTOFF).unwrap(); // Encode vars beforehand so db.num_var lines up
 
-		let vars = model.vars();
-		let expected_assignments = vars
-			.iter()
-			.map(|var| var.borrow().dom.clone().into_iter().collect::<Vec<_>>())
-			.multi_cartesian_product()
-			.map(|a| {
-				Assignment(
-					vars.iter()
-						.map(|var| var.borrow().id.clone())
-						.zip(a)
-						.collect::<HashMap<_, _>>(),
-				)
-			})
-			.filter(|a| model.check_assignment(a).is_ok())
-			// .map(|sol| sol.into_iter().collect::<Vec<_>>())
-			.collect::<Vec<_>>();
-
 		let lit_assignments = if let Ok(decomposition) = model.encode(&mut db, CUTOFF) {
 			println!("decomposition = {}", decomposition);
 
@@ -1078,60 +1157,10 @@ mod tests {
 
 		let actual_assignments = lit_assignments
 			.iter()
-			.flat_map(|lit_assignment| {
-				let expected_assignment = model.assign(lit_assignment)?;
-				model
-					.check_assignment(&expected_assignment)
-					.map(|_| expected_assignment)
-			})
+			.flat_map(|lit_assignment| model.assign(lit_assignment))
 			.collect::<Vec<_>>();
 
-		let canonicalize = |a: Vec<Assignment<Lit>>| a.into_iter().sorted().collect::<Vec<_>>();
-
-		let expected_assignments = canonicalize(expected_assignments);
-		let actual_assignments = canonicalize(actual_assignments);
-
-		// TODO unnecessary canonicalize?
-		let extra_int_assignments = canonicalize(
-			actual_assignments
-				.iter()
-				.filter(|a| !expected_assignments.contains(a))
-				.cloned()
-				.collect::<Vec<_>>(),
-		);
-
-		let missing_int_assignments = canonicalize(
-			expected_assignments
-				.iter()
-				.filter(|a| !actual_assignments.contains(a))
-				.cloned()
-				.collect::<Vec<_>>(),
-		);
-
-		// TODO find violated constraints for extra assignments
-		assert!(
-			extra_int_assignments.is_empty() && missing_int_assignments.is_empty(),
-			"
-{}Extra solutions:
-{}
-Missing solutions:
-{}",
-			if actual_assignments.is_empty() {
-				"Note: encoding is Unsatisfiable\n"
-			} else {
-				""
-			},
-			extra_int_assignments
-				.iter()
-				.map(|a| format!("+ {}", a))
-				.join("\n"),
-			missing_int_assignments
-				.iter()
-				.map(|a| format!("- {}", a))
-				.join("\n"),
-		);
-
-		assert_eq!(actual_assignments, expected_assignments);
+		assert_eq!(model.check_assignments(&actual_assignments), Ok(()));
 	}
 
 	#[test]
