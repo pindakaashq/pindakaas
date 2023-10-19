@@ -796,7 +796,26 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		} {
 			Ok(())
 		} else {
-			Err(CheckError::Unsatisfiable(Unsatisfiable))
+			Err(CheckError::Fail(format!(
+				"Inconsistency in {}: {} == {} !{} {}",
+				self.lbl.clone().unwrap_or_default(),
+				self.exp
+					.terms
+					.iter()
+					.map(|term| {
+						format!(
+							"{} * {}={} (={})",
+							term.c,
+							term.x.borrow().lbl(),
+							a[&term.x.borrow().id],
+							term.c * a[&term.x.borrow().id],
+						)
+					})
+					.join(" + "),
+				lhs,
+				self.cmp,
+				self.k
+			)))
 		}
 	}
 
