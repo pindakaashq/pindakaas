@@ -22,10 +22,10 @@ use iset::IntervalMap;
 
 use super::{enc::GROUND_BINARY_AT_LB, scm::SCM, IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
 
-// TODO usize -> intId struct
-
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct IntVarId(usize);
+
+type IntVarRef<Lit, C> = Rc<RefCell<IntVar<Lit, C>>>;
 
 impl Display for IntVarId {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -129,7 +129,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	pub(crate) fn add_int_var_enc(
 		&mut self,
 		x: IntVarEnc<Lit, C>,
-	) -> Result<Rc<RefCell<IntVar<Lit, C>>>, Unsatisfiable> {
+	) -> Result<IntVarRef<Lit, C>, Unsatisfiable> {
 		let dom = x
 			.dom()
 			.iter(..)
@@ -144,13 +144,13 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		&mut self,
 		dom: &[C],
 		lbl: Option<String>,
-	) -> Result<Rc<RefCell<IntVar<Lit, C>>>, Unsatisfiable> {
+	) -> Result<IntVarRef<Lit, C>, Unsatisfiable> {
 		self.new_var(dom, true, None, lbl)
 	}
 
 	pub fn con(
 		&mut self,
-		terms: &[(C, Rc<RefCell<IntVar<Lit, C>>>)],
+		terms: &[(C, IntVarRef<Lit, C>)],
 		cmp: Comparator,
 		k: C,
 		lbl: Option<String>,
@@ -173,7 +173,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		add_consistency: bool,
 		e: Option<IntVarEnc<Lit, C>>,
 		lbl: Option<String>,
-	) -> Result<Rc<RefCell<IntVar<Lit, C>>>, Unsatisfiable> {
+	) -> Result<IntVarRef<Lit, C>, Unsatisfiable> {
 		(!dom.is_empty())
 			.then(|| {
 				self.num_var += 1;
@@ -194,7 +194,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		Ok(())
 	}
 
-	pub fn new_constant(&mut self, c: C) -> Rc<RefCell<IntVar<Lit, C>>> {
+	pub fn new_constant(&mut self, c: C) -> IntVarRef<Lit, C> {
 		self.new_var(&[c], false, None, None).unwrap()
 	}
 
@@ -305,7 +305,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		self.num_var = other.num_var;
 		self.cons.extend(other.cons);
 	}
-	pub(crate) fn vars(&self) -> Vec<Rc<RefCell<IntVar<Lit, C>>>> {
+	pub(crate) fn vars(&self) -> Vec<IntVarRef<Lit, C>> {
 		self.cons
 			.iter()
 			.flat_map(|con| con.exp.terms.iter().map(|term| &term.x))
@@ -421,7 +421,7 @@ pub struct Lin<Lit: Literal, C: Coefficient> {
 #[derive(Debug, Clone)]
 pub struct Term<Lit: Literal, C: Coefficient> {
 	pub c: C,
-	pub x: Rc<RefCell<IntVar<Lit, C>>>,
+	pub x: IntVarRef<Lit, C>,
 }
 
 impl<Lit: Literal, C: Coefficient> Mul<C> for Term<Lit, C> {
@@ -434,14 +434,14 @@ impl<Lit: Literal, C: Coefficient> Mul<C> for Term<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> From<Rc<RefCell<IntVar<Lit, C>>>> for Term<Lit, C> {
-	fn from(value: Rc<RefCell<IntVar<Lit, C>>>) -> Self {
+impl<Lit: Literal, C: Coefficient> From<IntVarRef<Lit, C>> for Term<Lit, C> {
+	fn from(value: IntVarRef<Lit, C>) -> Self {
 		Term::new(C::one(), value)
 	}
 }
 
 impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
-	pub fn new(c: C, x: Rc<RefCell<IntVar<Lit, C>>>) -> Self {
+	pub fn new(c: C, x: IntVarRef<Lit, C>) -> Self {
 		Self { c, x }
 	}
 
