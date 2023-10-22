@@ -1,8 +1,7 @@
 use crate::{
 	helpers::{add_clauses_for, negate_cnf},
 	int::{TernLeConstraint, TernLeEncoder},
-	linear::log_enc_add_,
-	trace::new_var,
+	linear::log_enc_add_fn,
 	BddEncoder, CheckError, Checker, ClauseDatabase, Coefficient, Comparator, Encoder, Literal,
 	Result, Unsatisfiable,
 };
@@ -23,7 +22,7 @@ use iset::IntervalMap;
 use super::{enc::GROUND_BINARY_AT_LB, scm::SCM, IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
 
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
-pub struct IntVarId(usize);
+pub struct IntVarId(pub usize);
 
 type IntVarRef<Lit, C> = Rc<RefCell<IntVar<Lit, C>>>;
 
@@ -33,16 +32,22 @@ impl Display for IntVarId {
 	}
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ModelConfig {
+	pub scm_add: bool,
+}
+
 // TODO should we keep IntVar i/o IntVarEnc?
 #[derive(Debug, Clone)]
 pub struct Model<Lit: Literal, C: Coefficient> {
 	pub(crate) cons: Vec<Lin<Lit, C>>,
 	pub(crate) num_var: usize,
 	pub(crate) obj: Obj<Lit, C>,
+	config: ModelConfig,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Assignment<C: Coefficient>(HashMap<IntVarId, C>);
+pub struct Assignment<C: Coefficient>(pub HashMap<IntVarId, C>);
 
 impl<C: Coefficient> Ord for Assignment<C> {
 	fn cmp(&self, other: &Self) -> Ordering {
@@ -114,6 +119,7 @@ impl<Lit: Literal, C: Coefficient> Default for Model<Lit, C> {
 			cons: vec![],
 			num_var: 0,
 			obj: Obj::Satisfy,
+			config: ModelConfig::default(),
 		}
 	}
 }
@@ -212,7 +218,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.map(|con| -> Result<Vec<_>, Unsatisfiable> {
 				match &con.exp.terms[..] {
 					[] => Ok(vec![]),
-					[term] => {
+					[term] if false => {
 						match con.cmp {
 							Comparator::LessEq => {
 								term.x.borrow_mut().le(&C::zero());
@@ -274,10 +280,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			self.clone()
 		};
 
+		// TODO can make Model non-mutable if this is moved
 		decomposition.encode_vars(db, cutoff)?;
 
 		for con in &decomposition.cons {
-			con.encode(db)?;
+			con.encode(db, &self.config)?;
 		}
 
 		Ok(decomposition)
@@ -322,10 +329,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.map(|a| Assignment(a))
 	}
 
-	fn check_assignment(&self, assignment: &Assignment<C>) -> Result<(), CheckError<Lit>> {
+	pub fn check_assignment(&self, assignment: &Assignment<C>) -> Result<(), CheckError<Lit>> {
 		self.cons.iter().try_for_each(|con| con.check(assignment))
 	}
 
+	/// Expecting actual_assignments to contain all solutions of the model
 	pub fn check_assignments(
 		&self,
 		actual_assignments: &[Assignment<C>],
@@ -399,9 +407,12 @@ Missing solutions:
 		Ok(())
 	}
 
-	#[allow(dead_code)]
-	pub(crate) fn lits(&self) -> usize {
+	pub fn lits(&self) -> usize {
 		self.vars().iter().map(|x| x.borrow().lits()).sum::<usize>()
+	}
+
+	pub fn with_config(self, config: ModelConfig) -> Self {
+		Model { config, ..self }
 	}
 }
 
@@ -450,6 +461,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		&self,
 		db: &mut DB,
 		enc: &IntVarEnc<Lit, C>,
+		config: &ModelConfig,
 	) -> Result<(IntVarEnc<Lit, C>, C), Unsatisfiable> {
 		if self.c == C::zero() {
 			Ok((IntVarEnc::Const(C::zero()), C::zero()))
@@ -478,6 +490,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 									.collect(),
 								lbl: format!("-1*{}", o.lbl),
 							}),
+							config,
 						);
 					} else {
 						todo!();
@@ -500,7 +513,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					if self.c.is_negative() {
 						let term = Term::new(-C::one() * self.c, self.x.clone());
 						let (term, c) =
-							term.encode(db, &IntVarEnc::Bin(x_enc.clone().complement()))?;
+							term.encode(db, &IntVarEnc::Bin(x_enc.clone().complement()), config)?;
 						Ok((term, self.c + c))
 					} else {
 						let mut c = self.c;
@@ -511,18 +524,18 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 							c = c.div(C::one() + C::one());
 						}
 
-						// TODO make option
-						const MIN_ADD: bool = true;
-
-						let scm = SCM
-							.iter()
-							.find_map(|(bits, mul, scm)| {
-								// TODO bits or lits?
-								(*bits == if MIN_ADD { x_enc.bits() } else { 0 }
-									&& C::from(*mul).unwrap() == c)
-									.then_some(scm)
-							})
-							.unwrap_or(&"");
+						let scm = if c == C::one() {
+							""
+						} else {
+							SCM.iter()
+								.find_map(|(bits, mul, scm)| {
+									// TODO bits or lits?
+									(*bits == if config.scm_add { x_enc.lits() } else { 0 }
+										&& C::from(*mul).unwrap() == c)
+										.then_some(scm)
+								})
+								.unwrap()
+						};
 
 						// TODO store `c` value i/o of node index
 						let mut ys = [(C::zero(), x_enc.xs(false))]
@@ -533,7 +546,13 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 							|ys: &HashMap<C, Vec<LitOrConst<DB::Lit>>>, i: C, sh: C| {
 								num::iter::range(C::zero(), sh)
 									.map(|_| LitOrConst::Const(false))
-									.chain(ys[&i].clone())
+									.chain(
+										ys.get(&i)
+											.unwrap_or_else(|| {
+												panic!("ys[{i}] does not exist in {ys:?}")
+											})
+											.clone(),
+									)
 									.collect::<Vec<_>>()
 							};
 
@@ -560,19 +579,14 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 								_ => unreachable!(),
 							};
 
-							let z = (0..(std::cmp::max(x.len(), y.len()) + 1))
-								.map(|_j| {
-									LitOrConst::<DB::Lit>::from(new_var!(
-										db,
-										format!("y_{z_i}_{_j}")
-									))
-								})
-								.collect::<Vec<_>>();
-							if add {
-								log_enc_add_(db, &x, &y, &Comparator::Equal, &z) // x+y=z
+							// If subtracting, use 2-comp of y and set initial carry to true
+							let (y, c) = if add {
+								(y, false)
 							} else {
-								log_enc_add_(db, &y, &z, &Comparator::Equal, &x) // x-y=z == x=z+y
-							}?;
+								(y.into_iter().map(|l| -l).collect(), true)
+							};
+
+							let z = log_enc_add_fn(db, &x, &y, &Comparator::Equal, c.into())?;
 							ys.insert(z_i, z);
 						}
 
@@ -830,7 +844,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		feature = "trace",
 		tracing::instrument(name = "lin_encoder", skip_all, fields(constraint = format!("{}", self)))
 	)]
-	fn encode<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
+	fn encode<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB, config: &ModelConfig) -> Result {
 		println!("self = {self}");
 		// TODO assert simplified/simplify
 		// assert!(self._is_simplified());
@@ -847,7 +861,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			let mut encoder = TernLeEncoder::default();
 			let mut k = self.k;
 			for term in &self.exp.terms {
-				let (x, c) = term.encode(db, term.x.borrow().e.as_ref().unwrap())?;
+				let (x, c) = term.encode(db, term.x.borrow().e.as_ref().unwrap(), config)?;
 				y = x.add(
 					db,
 					&mut encoder,
@@ -1154,11 +1168,13 @@ mod tests {
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
-	fn test_lp(lp: &str) {
+	fn test_lp(lp: &str, config: ModelConfig) {
 		// const CUTOFF: Option<C> = None;
 		const CUTOFF: Option<C> = Some(0);
 
-		let mut model = Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap();
+		let mut model = Model::<Lit, C>::from_string(lp.into(), Format::Lp)
+			.unwrap()
+			.with_config(config);
 		println!("model = {model}");
 
 		let mut db = TestDB::new(0);
@@ -1194,6 +1210,7 @@ x2
 x3
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1209,6 +1226,7 @@ Bounds
 0 <= x3 <= 2
 End
 ",
+			ModelConfig::default(),
 		)
 	}
 
@@ -1224,6 +1242,7 @@ Bounds
 0 <= x3 <= 1
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1239,6 +1258,7 @@ Bounds
 0 <= x3 <= 1
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1254,6 +1274,7 @@ Bounds
 0 <= x3 <= 5
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1269,6 +1290,7 @@ Bounds
 -2 <= x3 <= 5
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1284,6 +1306,7 @@ Bounds
 -2 <= x3 <= 5
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1299,6 +1322,7 @@ x2 in 0,3
 x3 in 0,2,3,5
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1315,6 +1339,7 @@ x2
 x3
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1329,6 +1354,7 @@ Bounds
 0 <= x2 <= 1
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1343,6 +1369,7 @@ Bounds
 0 <= x2 <= 5
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1359,6 +1386,7 @@ Bounds
 0 <= x4 <= 1
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1376,6 +1404,7 @@ x3
 x4
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1394,6 +1423,7 @@ Bounds
 0 <= x4 <= 3
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1408,6 +1438,7 @@ Bounds
 0 <= x2 <= 4
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1422,6 +1453,7 @@ Bounds
 0 <= x2 <= 4
 End
 ",
+			ModelConfig::default(),
 		);
 	}
 
@@ -1440,19 +1472,41 @@ End
 	// }
 
 	#[test]
-	fn test_knapsack() {
-		test_lp(
-			r"
+	fn test_scm_4_117() {
+		let lp = r"
+	Subject To
+	c0: 117 x_1 = 0
+	Bounds
+	0 <= x_1 <= 15
+	End
+	";
+		test_lp(lp, ModelConfig { scm_add: false });
+		test_lp(lp, ModelConfig { scm_add: true });
+	}
+
+	#[test]
+	fn test_scm_4_9() {
+		let lp = r"
 Subject To
-c0: 2 x1 + 3 x2 + 11 x3 + 5 x4 <= 21
-c1: 3 x1 + 1 x2 + 14 x3 + 3 x4 >= 22
+  c0: 9 x_1 = 0
 Bounds
-0 <= x1 <= 3
-0 <= x2 <= 3
-0 <= x3 <= 2
-0 <= x4 <= 4
+  0 <= x_1 <= 7
 End
-",
-		);
+";
+		test_lp(lp, ModelConfig { scm_add: false });
+		// test_lp(lp, ModelConfig { scm_add: true });
+	}
+
+	#[test]
+	fn test_scm_4_43() {
+		let lp = r"
+Subject To
+  c0: 43 x_1 = 0
+Bounds
+  0 <= x_1 <= 7
+End
+";
+		test_lp(lp, ModelConfig { scm_add: false });
+		test_lp(lp, ModelConfig { scm_add: true });
 	}
 }

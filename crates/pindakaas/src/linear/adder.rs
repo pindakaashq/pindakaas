@@ -1,3 +1,4 @@
+use num::Integer;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -190,6 +191,141 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 	})
 }
 
+// TODO Implement Mul/Add for Lit (once merged with new Lit struct)
+fn carry<DB: ClauseDatabase>(
+	db: &mut DB,
+	xs: &[LitOrConst<DB::Lit>],
+	_lbl: String,
+) -> Result<LitOrConst<DB::Lit>> {
+	// The carry is true iff at least 2 out of 3 `xs` are true
+	let (xs, trues) = filter_fixed_sum(xs);
+	let carry = match &xs[..] {
+		[] => (trues >= 2).into(), // trues is {0,1,2,3}
+		[x] => match trues {
+			0 => false.into(),
+			1 => x.clone().into(),
+			2 => true.into(),
+			_ => unimplemented!(), // /unreachable
+		},
+		[x, y] => match trues {
+			0 => {
+				let and = new_var!(db, _lbl);
+				emit_clause!(db, &[x.negate(), y.negate(), and.clone()])?;
+				emit_clause!(db, &[x.clone(), and.negate()])?;
+				emit_clause!(db, &[y.clone(), and.negate()])?;
+				and.into()
+			}
+			1 => {
+				let or = new_var!(db, _lbl);
+				emit_clause!(db, &[x.clone(), y.clone(), or.negate()])?;
+				emit_clause!(db, &[x.negate(), or.clone()])?;
+				emit_clause!(db, &[y.negate(), or.clone()])?;
+				or.into()
+			}
+			_ => unimplemented!(), // /unreachable
+		},
+		[x, y, z] => {
+			assert!(trues == 0);
+			let carry = new_var!(db, _lbl);
+
+			emit_clause!(db, &[x.clone(), y.clone(), carry.negate()])?; // 2 false -> ~carry
+			emit_clause!(db, &[x.clone(), z.clone(), carry.negate()])?; // " ..
+			emit_clause!(db, &[y.clone(), z.clone(), carry.negate()])?;
+
+			emit_clause!(db, &[x.negate(), y.negate(), carry.clone()])?; // 2 true -> carry
+			emit_clause!(db, &[x.negate(), z.negate(), carry.clone()])?; // " ..
+			emit_clause!(db, &[y.negate(), z.negate(), carry.clone()])?;
+			carry.into()
+		}
+		_ => unimplemented!(),
+	};
+	Ok(carry)
+}
+
+fn filter_fixed_sum<Lit: Literal>(xs: &[LitOrConst<Lit>]) -> (Vec<Lit>, usize) {
+	let mut trues = 0;
+	(
+		xs.iter()
+			.filter_map(|x| match x {
+				LitOrConst::Lit(l) => Some(l.clone()),
+				LitOrConst::Const(true) => {
+					trues += 1;
+					None
+				}
+				LitOrConst::Const(false) => None,
+			})
+			.collect(),
+		trues,
+	)
+}
+
+fn xor<DB: ClauseDatabase>(
+	db: &mut DB,
+	xs: &[LitOrConst<DB::Lit>],
+	_lbl: String,
+) -> Result<LitOrConst<DB::Lit>> {
+	let (xs, trues) = filter_fixed_sum(xs);
+
+	let is_even = match &xs[..] {
+		[] => LitOrConst::Const(false), // TODO ?? why not `true`?
+		[x] => LitOrConst::Lit(x.clone()),
+		[x, y] => {
+			assert!(trues <= 1);
+			let is_even = new_var!(db, _lbl);
+
+			emit_clause!(db, &[x.clone(), y.clone(), is_even.negate()])?; // 0
+			emit_clause!(db, &[x.negate(), y.negate(), is_even.negate()])?; // 2
+
+			emit_clause!(db, &[x.negate(), y.clone(), is_even.clone()])?; // 1
+			emit_clause!(db, &[x.clone(), y.negate(), is_even.clone()])?; // 1
+			LitOrConst::Lit(is_even)
+		}
+		[x, y, z] => {
+			assert!(trues == 0);
+			let is_even = new_var!(db, _lbl);
+
+			emit_clause!(db, &[x.clone(), y.clone(), z.clone(), is_even.negate()])?; // 0
+			emit_clause!(db, &[x.clone(), y.negate(), z.negate(), is_even.negate()])?; // 2
+			emit_clause!(db, &[x.negate(), y.clone(), z.negate(), is_even.negate()])?; // 2
+			emit_clause!(db, &[x.negate(), y.negate(), z.clone(), is_even.negate()])?; // 2
+
+			emit_clause!(db, &[x.negate(), y.negate(), z.negate(), is_even.clone()])?; // 3
+			emit_clause!(db, &[x.negate(), y.clone(), z.clone(), is_even.clone()])?; // 1
+			emit_clause!(db, &[x.clone(), y.negate(), z.clone(), is_even.clone()])?; // 1
+			emit_clause!(db, &[x.clone(), y.clone(), z.negate(), is_even.clone()])?; // 1
+			LitOrConst::Lit(is_even)
+		}
+		_ => unimplemented!(),
+	};
+
+	// If trues is odd, negate sum
+	Ok(if trues.is_even() { is_even } else { -is_even })
+}
+
+#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?}"))))]
+pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
+	db: &mut DB,
+	x: &[LitOrConst<DB::Lit>],
+	y: &[LitOrConst<DB::Lit>],
+	_cmp: &Comparator,
+	mut c: LitOrConst<DB::Lit>,
+) -> Result<Vec<LitOrConst<DB::Lit>>> {
+	(0..itertools::max([x.len(), y.len()]).unwrap())
+		.map(|i| {
+			let (xi, yi) = (bit(x, i), bit(y, i));
+			let z = xor(db, &[xi.clone(), yi.clone(), c.clone()], format!("z_{}", i));
+			c = carry(db, &[xi, yi, c.clone()], format!("c_{}", i + 1))?;
+			z
+		})
+		.collect()
+}
+
+fn bit<Lit: Literal>(x: &[LitOrConst<Lit>], i: usize) -> LitOrConst<Lit> {
+	x.get(i)
+		.map(LitOrConst::<Lit>::clone)
+		.unwrap_or_else(|| x.last().unwrap().clone()) // 2 comp's sign extend (TODO maybe more efficient to just min(i, len(x)-1)
+}
+
 #[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} {cmp} {z:?}"))))]
 pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 	db: &mut DB,
@@ -199,12 +335,6 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 	z: &[LitOrConst<DB::Lit>],
 ) -> Result {
 	let n = itertools::max([x.len(), y.len(), z.len()]).unwrap();
-
-	let bit = |x: &[LitOrConst<DB::Lit>], i: usize| -> LitOrConst<DB::Lit> {
-		x.get(i)
-			.map(LitOrConst::<DB::Lit>::clone)
-			.unwrap_or_else(|| x.last().unwrap().clone()) // 2 comp's sign extend (TODO maybe more efficient to just min(i, len(x)-1)
-	};
 
 	match cmp {
 		Comparator::Equal => {
