@@ -1,9 +1,8 @@
-use itertools::Itertools;
-
 use crate::helpers::{add_clauses_for, negate_cnf};
 use crate::linear::log_enc_add_;
 use crate::{helpers::as_binary, linear::LinExp, Coefficient, Literal};
 use crate::{CheckError, Checker, ClauseDatabase, Comparator, Encoder, Unsatisfiable};
+use itertools::Itertools;
 use std::fmt;
 
 use super::enc::GROUND_BINARY_AT_LB;
@@ -107,42 +106,39 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 		tracing::instrument(name = "tern_le_encoder", skip_all, fields(constraint = format!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z)))
 	)]
 	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint<DB::Lit, C>) -> crate::Result {
-		#[cfg(debug_assertions)]
-		{
-			const PRINT_TESTCASES: bool = false;
-			if PRINT_TESTCASES {
-				println!(" // {tern}");
-				let x = tern
-					.x
-					.dom()
-					.iter(..)
-					.map(|iv| iv.end - C::one())
-					.collect::<Vec<_>>();
-				let y = tern
-					.y
-					.dom()
-					.iter(..)
-					.map(|iv| iv.end - C::one())
-					.collect::<Vec<_>>();
-				let z = tern
-					.z
-					.dom()
-					.iter(..)
-					.map(|iv| iv.end - C::one())
-					.collect::<Vec<_>>();
-				println!(
-					"mod _test_{}_{}_{} {{
+		const PRINT_TESTCASES: bool = false;
+		if PRINT_TESTCASES {
+			println!(" // {tern}");
+			let x = tern
+				.x
+				.dom()
+				.iter(..)
+				.map(|iv| iv.end - C::one())
+				.collect::<Vec<_>>();
+			let y = tern
+				.y
+				.dom()
+				.iter(..)
+				.map(|iv| iv.end - C::one())
+				.collect::<Vec<_>>();
+			let z = tern
+				.z
+				.dom()
+				.iter(..)
+				.map(|iv| iv.end - C::one())
+				.collect::<Vec<_>>();
+			println!(
+				"mod _test_{}_{}_{} {{
                 test_int_lin!($encoder, &[{}], &[{}], $cmp, &[{}]);
                 }}
                 ",
-					x.iter().join(""),
-					y.iter().join(""),
-					z.iter().join(""),
-					x.iter().join(", "),
-					y.iter().join(", "),
-					z.iter().join(", "),
-				);
-			}
+				x.iter().join(""),
+				y.iter().join(""),
+				z.iter().join(""),
+				x.iter().join(", "),
+				y.iter().join(", "),
+				z.iter().join(", "),
+			);
 		}
 
 		let TernLeConstraint { x, y, cmp, z } = *tern;
