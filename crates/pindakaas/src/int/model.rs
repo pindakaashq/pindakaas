@@ -1012,7 +1012,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		self.e = Some(if self.is_constant() {
 			IntVarEnc::Const(*self.dom.first().unwrap())
 		} else {
-			let x = if prefer_order {
+			let e = if prefer_order {
 				let dom = self
 					.dom
 					.iter()
@@ -1033,20 +1033,20 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			};
 
 			if self.add_consistency {
-				x.consistent(db).unwrap();
+				e.consistent(db).unwrap();
 			}
 
 			for view in self
 				.views
 				.iter()
-				.map(|(c, (id, val))| ((*id, *val), x.geq(*c..(*c + C::one()))))
+				.map(|(c, (id, val))| ((*id, *val), e.geq(*c..(*c + C::one()))))
 			{
 				// TODO refactor
 				if !view.1.is_empty() {
 					views.insert(view.0, view.1[0][0].clone());
 				}
 			}
-			x
+			e
 		});
 		Ok(())
 	}
