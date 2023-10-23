@@ -311,15 +311,23 @@ pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 	mut c: LitOrConst<DB::Lit>,
 ) -> Result<Vec<LitOrConst<DB::Lit>>> {
 	assert!(cmp == &Comparator::Equal);
-	// TODO +1 is sub-optimal (for subtractions?)
-	(0..(itertools::max([xs.len(), ys.len()]).unwrap()) + 1)
+	let zs = (0..(itertools::max([xs.len(), ys.len()]).unwrap()) + 1)
 		.map(|i| {
 			let (x, y) = (bit(xs, i), bit(ys, i));
 			let z = xor(db, &[x.clone(), y.clone(), c.clone()], format!("z_{}", i));
 			c = carry(db, &[x, y, c.clone()], format!("c_{}", i + 1))?;
 			z
 		})
-		.collect()
+		.collect::<Result<Vec<_>>>()?;
+
+	// Remove last bit if equal to second-to-last bit
+	let zs = if zs.len() > 1 && zs[zs.len() - 1] == zs[zs.len() - 2] {
+		zs[..(zs.len() - 1)].to_vec()
+	} else {
+		zs
+	};
+
+	Ok(zs)
 }
 
 fn bit<Lit: Literal>(x: &[LitOrConst<Lit>], i: usize) -> LitOrConst<Lit> {
