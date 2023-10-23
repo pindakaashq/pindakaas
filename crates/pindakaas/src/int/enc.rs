@@ -412,7 +412,6 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		Ok(())
 	}
 
-
 	/// Normalize k to its value in unsigned binary relative to this encoding
 	pub(crate) fn normalize(&self, k: C) -> C {
 		if GROUND_BINARY_AT_LB {
@@ -809,6 +808,19 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 				);
 				}
 
+				const RETAIN_GAPS: bool = false;
+				let dom = if RETAIN_GAPS {
+					x_bin
+						.dom
+						.iter()
+						.cartesian_product(y_bin.dom.iter())
+						.map(|(a, b)| *a + *b)
+						.collect::<Vec<_>>()
+				} else {
+					num::iter::range_inclusive(x_bin.lb() + y_bin.lb(), x_bin.ub() + y_bin.ub())
+						.collect::<Vec<_>>()
+				};
+
 				let z = IntVarEnc::Bin(IntVarBin::from_lits(
 					&log_enc_add_fn(
 						db,
@@ -817,12 +829,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 						&Comparator::Equal,
 						LitOrConst::Const(false),
 					)?,
-					&x_bin
-						.dom
-						.iter()
-						.cartesian_product(y_bin.dom.iter())
-						.map(|(a, b)| *a + *b)
-						.collect::<Vec<_>>(),
+					&dom,
 					format!("{}+{}", x_bin.lbl, y_bin.lbl),
 				));
 				Ok(z)
