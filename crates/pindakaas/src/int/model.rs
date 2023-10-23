@@ -337,10 +337,20 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	pub fn check_assignments(
 		&self,
 		actual_assignments: &[Assignment<C>],
-	) -> Result<(), CheckError<Lit>> {
-		actual_assignments
+	) -> Result<(), Vec<CheckError<Lit>>> {
+		let errs = actual_assignments
 			.iter()
-			.try_for_each(|actual_assignment| self.check_assignment(actual_assignment))?;
+			.filter_map(
+				|actual_assignment| match self.check_assignment(actual_assignment) {
+					Err(e) => Some(e),
+					_ => None,
+				},
+			)
+			.collect::<Vec<_>>();
+
+		if !errs.is_empty() {
+			return Err(errs);
+		}
 
 		let vars = self.vars();
 		let expected_assignments = vars
@@ -383,19 +393,18 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		assert!(
 			extra_int_assignments.is_empty() && missing_int_assignments.is_empty(),
 			"
-{}Extra solutions:
+Extra solutions:
 {}
 Missing solutions:
 {}",
 			if actual_assignments.is_empty() {
-				"Note: encoding is Unsatisfiable\n"
+				String::from("  Unsatisfiable")
 			} else {
-				""
+				extra_int_assignments
+					.iter()
+					.map(|a| format!("+ {}", a))
+					.join("\n")
 			},
-			extra_int_assignments
-				.iter()
-				.map(|a| format!("+ {}", a))
-				.join("\n"),
 			missing_int_assignments
 				.iter()
 				.map(|a| format!("- {}", a))
@@ -849,7 +858,6 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		tracing::instrument(name = "lin_encoder", skip_all, fields(constraint = format!("{}", self)))
 	)]
 	fn encode<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB, config: &ModelConfig) -> Result {
-		println!("self = {self}");
 		// TODO assert simplified/simplify
 		// assert!(self._is_simplified());
 
