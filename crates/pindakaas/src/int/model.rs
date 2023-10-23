@@ -32,7 +32,7 @@ impl Display for IntVarId {
 	}
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModelConfig {
 	pub scm_add: bool,
 }
@@ -510,95 +510,99 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					}
 				}
 				IntVarEnc::Bin(x_enc) => {
-					if self.c.is_negative() {
-						let term = Term::new(-C::one() * self.c, self.x.clone());
-						let (term, c) =
-							term.encode(db, &IntVarEnc::Bin(x_enc.clone().complement()), config)?;
-						Ok((term, self.c + c))
+					// handle negative coefficient
+					let (mut c, xs, k) = if !self.c.is_negative() {
+						(self.c, x_enc.xs(false), C::zero())
 					} else {
-						let mut c = self.c;
-						// TODO shift by zeroes..
-						let mut sh = C::zero();
-						while c.is_even() {
-							sh += C::one();
-							c = c.div(C::one() + C::one());
-						}
+						(
+							-self.c,
+							x_enc.xs(false).into_iter().map(|x| -x).collect(), // 2-comp
+							-self.c, // return constant addition `-c` because `-c*x = c* -x = c* (1-~x) = c - c*~x`
+						)
+					};
 
-						let scm = if c == C::one() {
-							""
-						} else {
-							SCM.iter()
-								.find_map(|(bits, mul, scm)| {
-									// TODO bits or lits?
-									(*bits == if config.scm_add { x_enc.lits() } else { 0 }
-										&& C::from(*mul).unwrap() == c)
-										.then_some(scm)
-								})
-								.unwrap()
+					// TODO shift by zeroes..
+					let mut sh = C::zero();
+					while c.is_even() {
+						sh += C::one();
+						c = c.div(C::one() + C::one());
+					}
+
+					let lits = if config.scm_add { x_enc.lits() } else { 0 };
+					let scm = if c == C::one() {
+						""
+					} else {
+						SCM.iter()
+							.find_map(|(bits, mul, scm)| {
+								// TODO bits or lits?
+								(*bits == lits && C::from(*mul).unwrap() == c).then_some(scm)
+							})
+							.unwrap_or_else(|| panic!("Missing SCM entry for c={c}, lits={lits}"))
+					};
+
+					// TODO store `c` value i/o of node index
+					let mut ys = [(C::zero(), xs)].into_iter().collect::<HashMap<_, _>>();
+
+					let get_and_shift = |ys: &HashMap<C, Vec<LitOrConst<DB::Lit>>>, i: C, sh: C| {
+						num::iter::range(C::zero(), sh)
+							.map(|_| LitOrConst::Const(false))
+							.chain(
+								ys.get(&i)
+									.unwrap_or_else(|| panic!("ys[{i}] does not exist in {ys:?}"))
+									.clone(),
+							)
+							.collect::<Vec<_>>()
+					};
+
+					fn parse_c<C: Coefficient>(i: &str) -> C {
+						i.parse::<C>()
+							.unwrap_or_else(|_| panic!("Could not parse dom value {i}"))
+					}
+
+					for rca in scm.split(';') {
+						if rca.is_empty() {
+							break;
+						}
+						let (z_i, x, add, y) = match rca.split(',').collect::<Vec<_>>()[..] {
+							[i, i1, sh1, add, i2, sh2] => (
+								parse_c::<C>(i),
+								get_and_shift(&ys, parse_c(i1), parse_c(sh1)),
+								match add {
+									"+" => true,
+									"-" => false,
+									_ => unreachable!(),
+								},
+								get_and_shift(&ys, parse_c(i2), parse_c(sh2)),
+							),
+							_ => unreachable!(),
 						};
 
-						// TODO store `c` value i/o of node index
-						let mut ys = [(C::zero(), x_enc.xs(false))]
-							.into_iter()
-							.collect::<HashMap<_, _>>();
+						// If subtracting, use 2-comp of y and set initial carry to true
+						let (y, c) = if add {
+							(y, false)
+						} else {
+							(y.into_iter().map(|l| -l).collect(), true)
+						};
 
-						let get_and_shift =
-							|ys: &HashMap<C, Vec<LitOrConst<DB::Lit>>>, i: C, sh: C| {
-								num::iter::range(C::zero(), sh)
-									.map(|_| LitOrConst::Const(false))
-									.chain(
-										ys.get(&i)
-											.unwrap_or_else(|| {
-												panic!("ys[{i}] does not exist in {ys:?}")
-											})
-											.clone(),
-									)
-									.collect::<Vec<_>>()
-							};
-
-						fn parse_c<C: Coefficient>(i: &str) -> C {
-							i.parse::<C>()
-								.unwrap_or_else(|_| panic!("Could not parse dom value {i}"))
-						}
-
-						for rca in scm.split(';') {
-							if rca.is_empty() {
-								break;
-							}
-							let (z_i, x, add, y) = match rca.split(',').collect::<Vec<_>>()[..] {
-								[i, i1, sh1, add, i2, sh2] => (
-									parse_c::<C>(i),
-									get_and_shift(&ys, parse_c(i1), parse_c(sh1)),
-									match add {
-										"+" => true,
-										"-" => false,
-										_ => unreachable!(),
-									},
-									get_and_shift(&ys, parse_c(i2), parse_c(sh2)),
-								),
-								_ => unreachable!(),
-							};
-
-							// If subtracting, use 2-comp of y and set initial carry to true
-							let (y, c) = if add {
-								(y, false)
-							} else {
-								(y.into_iter().map(|l| -l).collect(), true)
-							};
-
-							let z = log_enc_add_fn(db, &x, &y, &Comparator::Equal, c.into())?;
-							ys.insert(z_i, z);
-						}
-
-						let xs = get_and_shift(&ys, *ys.keys().max().unwrap(), sh);
-						Ok((
-							IntVarEnc::Bin(IntVarBin::from_lits(
-								&xs,
-								format!("{c}*{}", self.x.borrow().lbl()),
-							)),
-							C::zero(),
-						))
+						let z = log_enc_add_fn(db, &x, &y, &Comparator::Equal, c.into())?;
+						ys.insert(z_i, z);
 					}
+
+					let xs = get_and_shift(&ys, *ys.keys().max().unwrap(), sh);
+					Ok((
+						IntVarEnc::Bin(IntVarBin::from_lits(
+							&xs,
+							&self
+								.x
+								.borrow()
+								.dom
+								.iter()
+								.map(|d| -k + self.c * *d)
+								.collect::<Vec<_>>(),
+							format!("{}*{}", self.c, self.x.borrow().lbl()),
+						)),
+						k,
+					))
 				}
 				IntVarEnc::Const(c) => Ok((IntVarEnc::Const(*c * self.c), C::zero())),
 			}
@@ -862,6 +866,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			let mut k = self.k;
 			for term in &self.exp.terms {
 				let (x, c) = term.encode(db, term.x.borrow().e.as_ref().unwrap(), config)?;
+				// TODO x.add should use log_enc_add_fn
 				y = x.add(
 					db,
 					&mut encoder,
@@ -870,7 +875,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					None,
 					// Some(self.k),
 				)?;
-				k += c;
+				k -= c;
 			}
 
 			encoder.encode(
@@ -1133,7 +1138,6 @@ mod tests {
 	type C = i32;
 
 	use super::*;
-	// use crate::{helpers::tests::TestDB, Cnf, Format, Lin, Model};
 	use crate::{Cnf, Lin, Model};
 
 	#[test]
@@ -1247,7 +1251,21 @@ End
 	}
 
 	#[test]
-	fn test_lp_ge_pb_neg() {
+	fn test_lp_ge_pb_neg_1() {
+		test_lp(
+			r"
+Subject To
+c0: - 1 x1 >= 0
+Bounds
+0 <= x1 <= 1
+End
+",
+			ModelConfig::default(),
+		);
+	}
+
+	#[test]
+	fn test_lp_ge_pb_neg_2() {
 		test_lp(
 			r"
 Subject To
@@ -1385,7 +1403,7 @@ Bounds
 0 <= x3 <= 1
 0 <= x4 <= 1
 End
-",
+	",
 			ModelConfig::default(),
 		);
 	}
@@ -1507,6 +1525,20 @@ Bounds
 End
 ";
 		test_lp(lp, ModelConfig { scm_add: false });
+		test_lp(lp, ModelConfig { scm_add: true });
+	}
+
+	#[test]
+	fn test_incon() {
+		// 59 * x_1=0 (=0) + 46 * x_2=7 (=322) + 132 * x_3=4 (=528) + 50 * x_4=4 (=200) + 7 * x_5=0 (=0) == 1050 !≤ 931
+		let lp = r"
+Subject To
+  c0: 11 x_1 + 11 x_2 <= 20
+Bounds
+  0 <= x_1 <= 3
+  0 <= x_2 <= 3
+End
+";
 		test_lp(lp, ModelConfig { scm_add: true });
 	}
 }

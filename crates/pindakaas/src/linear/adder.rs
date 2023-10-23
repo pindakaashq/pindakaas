@@ -302,19 +302,21 @@ fn xor<DB: ClauseDatabase>(
 	Ok(if trues.is_even() { is_even } else { -is_even })
 }
 
-#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?}"))))]
+#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{xs:?} + {ys:?}"))))]
 pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 	db: &mut DB,
-	x: &[LitOrConst<DB::Lit>],
-	y: &[LitOrConst<DB::Lit>],
-	_cmp: &Comparator,
+	xs: &[LitOrConst<DB::Lit>],
+	ys: &[LitOrConst<DB::Lit>],
+	cmp: &Comparator,
 	mut c: LitOrConst<DB::Lit>,
 ) -> Result<Vec<LitOrConst<DB::Lit>>> {
-	(0..itertools::max([x.len(), y.len()]).unwrap())
+	assert!(cmp == &Comparator::Equal);
+	// TODO +1 is sub-optimal (for subtractions?)
+	(0..(itertools::max([xs.len(), ys.len()]).unwrap()) + 1)
 		.map(|i| {
-			let (xi, yi) = (bit(x, i), bit(y, i));
-			let z = xor(db, &[xi.clone(), yi.clone(), c.clone()], format!("z_{}", i));
-			c = carry(db, &[xi, yi, c.clone()], format!("c_{}", i + 1))?;
+			let (x, y) = (bit(xs, i), bit(ys, i));
+			let z = xor(db, &[x.clone(), y.clone(), c.clone()], format!("z_{}", i));
+			c = carry(db, &[x, y, c.clone()], format!("c_{}", i + 1))?;
 			z
 		})
 		.collect()
