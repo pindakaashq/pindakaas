@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 pub(crate) use constrain::{TernLeConstraint, TernLeEncoder};
 pub(crate) use enc::{IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
 pub use helpers::Format;
-pub use model::{Assignment, Consistency, IntVar, IntVarId, Lin, LinExp, Model, Term};
+pub use model::{Assignment, Consistency, IntVar, IntVarId, Lin, LinExp, Model, ModelConfig, Term};
 
 use crate::{
 	linear::Constraint, CheckError, Coefficient, LinExp as PbLinExp, Literal, Unsatisfiable,

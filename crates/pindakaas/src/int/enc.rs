@@ -8,7 +8,7 @@ use std::fmt::Display;
 
 use crate::helpers::{two_comp_bounds, unsigned_binary_range_ub};
 use crate::int::{IntVar, TernLeConstraint, TernLeEncoder};
-use crate::linear::{lex_geq_const, lex_leq_const};
+use crate::linear::{lex_geq_const, lex_leq_const, log_enc_add_fn};
 use crate::Comparator;
 use crate::{
 	helpers::{as_binary, is_powers_of_two},
@@ -76,7 +76,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarOrd<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}:O ∈ {} [{}]",
+			"({}):O ∈ {} [{}]",
 			self.lbl,
 			&self
 				.dom()
@@ -94,7 +94,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}:B ∈ {} [{}]",
+			"({}):B ∈ {} [{}]",
 			self.lbl,
 			display_dom::<Lit, C>(&self.dom().iter(..).map(|d| d.end - C::one()).collect()),
 			self.lits()
@@ -328,17 +328,14 @@ pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
-	#[allow(dead_code)]
-	pub fn from_lits(xs: &[LitOrConst<Lit>], lbl: String) -> Self {
+	pub fn from_lits(xs: &[LitOrConst<Lit>], dom: &[C], lbl: String) -> Self {
 		if GROUND_BINARY_AT_LB {
 			panic!("Cannot create offset binary encoding `from_lits` without a given lower bound.")
 		}
 
-		let bits = xs.len();
-		let (lb, ub) = two_comp_bounds(bits);
 		Self {
 			xs: xs.to_vec(),
-			dom: num::range_inclusive(lb, ub).collect(),
+			dom: dom.iter().cloned().collect(),
 			lbl,
 		}
 	}
@@ -415,13 +412,6 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		Ok(())
 	}
 
-	pub(crate) fn complement(self) -> Self {
-		Self {
-			xs: self.xs.into_iter().map(|x| -x).collect(),
-			dom: self.dom.into_iter().map(|d| -d - C::one()).collect(),
-			lbl: format!("!{}", self.lbl),
-		}
-	}
 
 	/// Normalize k to its value in unsigned binary relative to this encoding
 	pub(crate) fn normalize(&self, k: C) -> C {
@@ -818,21 +808,23 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 					"Not implemented addition for unequal lbs for zero-grounded binary encodings"
 				);
 				}
-				let z = IntVarEnc::Bin(IntVarBin::from_bounds(
-					db,
-					lb,
-					ub,
+
+				let z = IntVarEnc::Bin(IntVarBin::from_lits(
+					&log_enc_add_fn(
+						db,
+						&x_bin.xs(false),
+						&y_bin.xs(false),
+						&Comparator::Equal,
+						LitOrConst::Const(false),
+					)?,
+					&x_bin
+						.dom
+						.iter()
+						.cartesian_product(y_bin.dom.iter())
+						.map(|(a, b)| *a + *b)
+						.collect::<Vec<_>>(),
 					format!("{}+{}", x_bin.lbl, y_bin.lbl),
 				));
-				encoder.encode(
-					db,
-					&TernLeConstraint {
-						x: &IntVarEnc::Bin(x_bin.clone()),
-						y,
-						cmp: &Comparator::Equal,
-						z: &z,
-					},
-				)?;
 				Ok(z)
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y))
