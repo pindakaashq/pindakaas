@@ -1,5 +1,5 @@
 use crate::{
-	helpers::{add_clauses_for, negate_cnf},
+	helpers::{add_clauses_for, as_binary, negate_cnf},
 	int::{TernLeConstraint, TernLeEncoder},
 	linear::log_enc_add_fn,
 	BddEncoder, CheckError, Checker, ClauseDatabase, Coefficient, Comparator, Encoder, Literal,
@@ -19,7 +19,7 @@ const DECOMPOSE: bool = false;
 
 use iset::IntervalMap;
 
-use super::{enc::GROUND_BINARY_AT_LB, scm::SCM, IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
+use super::{scm::SCM, IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
 
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct IntVarId(pub usize);
@@ -1112,21 +1112,6 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 
 	pub(crate) fn ub(&self) -> C {
 		*self.dom.last().unwrap()
-	}
-
-	/// Number of required (non-fixed) lits
-	pub fn required_lits(lb: C, ub: C) -> u32 {
-		if GROUND_BINARY_AT_LB {
-			C::zero().leading_zeros() - ((ub - lb).leading_zeros())
-		} else if !lb.is_negative() {
-			C::zero().leading_zeros() - ub.leading_zeros()
-		} else {
-			let lb_two_comp = -(lb + C::one());
-			std::cmp::max(
-				C::zero().leading_zeros() - lb_two_comp.leading_zeros() + 1,
-				C::zero().leading_zeros() - ub.leading_zeros() + 1,
-			)
-		}
 	}
 
 	fn prefer_order(&self, cutoff: Option<C>) -> bool {

@@ -9,6 +9,7 @@ use std::{
 use bzip2::read::BzDecoder;
 
 use crate::{
+	int::enc::GROUND_BINARY_AT_LB,
 	int::model::{LinExp, Obj, Term},
 	Coefficient, Comparator, Lin, Literal, Model,
 };
@@ -18,6 +19,21 @@ use itertools::Itertools;
 pub enum Format {
 	Lp,
 	Opb,
+}
+
+/// Number of required (non-fixed) lits for IntVarBin
+pub(crate) fn required_lits<C: Coefficient>(lb: C, ub: C) -> u32 {
+	if GROUND_BINARY_AT_LB {
+		C::zero().leading_zeros() - ((ub - lb).leading_zeros())
+	} else if !lb.is_negative() {
+		C::zero().leading_zeros() - ub.leading_zeros()
+	} else {
+		let lb_two_comp = -(lb + C::one());
+		std::cmp::max(
+			C::zero().leading_zeros() - lb_two_comp.leading_zeros() + 1,
+			C::zero().leading_zeros() - ub.leading_zeros() + 1,
+		)
+	}
 }
 
 impl<Lit: Literal, C: Coefficient> Model<Lit, C> {

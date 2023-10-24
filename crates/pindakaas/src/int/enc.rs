@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use std::fmt::Display;
 
 use crate::helpers::{two_comp_bounds, unsigned_binary_range_ub};
-use crate::int::{IntVar, TernLeConstraint, TernLeEncoder};
+use crate::int::{helpers::required_lits, TernLeConstraint, TernLeEncoder};
 use crate::linear::{lex_geq_const, lex_leq_const, log_enc_add_fn};
 use crate::Comparator;
 use crate::{
@@ -356,7 +356,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		ub: C,
 		_lbl: &str,
 	) -> Vec<LitOrConst<Lit>> {
-		(0..IntVar::<DB::Lit, C>::required_lits(lb, ub))
+		(0..required_lits(lb, ub))
 			.map(|_i| (new_var!(db, format!("{}^{}", _lbl, _i))).into())
 			.chain((!GROUND_BINARY_AT_LB && !lb.is_negative()).then_some(LitOrConst::Const(false)))
 			.collect()
@@ -424,7 +424,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 
 	/// Return conjunction of bits equivalent where `x=k`
 	fn eq(&self, k: C) -> Result<Vec<Lit>, Unsatisfiable> {
-		as_binary::<Lit, C>(self.normalize(k).into(), Some(self.bits()))
+		as_binary(self.normalize(k).into(), Some(self.bits()))
 			.into_iter()
 			.zip(self.xs(true).iter())
 			.map(|(b, x)| if b { x.clone() } else { -x.clone() })
@@ -536,7 +536,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			} else if v > range_ub {
 				geq.then_some(vec![])
 			} else {
-				as_binary::<Lit, C>(v.into(), Some(self.bits()))
+				as_binary(v.into(), Some(self.bits()))
 					.into_iter()
 					.zip(self.xs(true).into_iter())
 					// if >=, find 0's, if <=, find 1's
