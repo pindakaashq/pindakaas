@@ -557,7 +557,9 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 							.map(|_| LitOrConst::Const(false))
 							.chain(
 								ys.get(&i)
-									.unwrap_or_else(|| panic!("ys[{i}] does not exist in {ys:?}"))
+									.unwrap_or_else(|| {
+										panic!("ys[{i}] does not exist in {ys:?} when encoding SCM {c}*x of {lits} lits")
+									})
 									.clone(),
 							)
 							.collect::<Vec<_>>()
