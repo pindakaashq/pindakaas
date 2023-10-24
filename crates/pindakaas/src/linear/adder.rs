@@ -205,7 +205,7 @@ fn carry<DB: ClauseDatabase>(
 			0 => false.into(),
 			1 => x.clone().into(),
 			2 => true.into(),
-			_ => unimplemented!(), // /unreachable
+			_ => unreachable!(),
 		},
 		[x, y] => match trues {
 			0 => {
@@ -222,7 +222,7 @@ fn carry<DB: ClauseDatabase>(
 				emit_clause!(db, &[y.negate(), or.clone()])?;
 				or.into()
 			}
-			_ => unimplemented!(), // /unreachable
+			_ => unreachable!(),
 		},
 		[x, y, z] => {
 			assert!(trues == 0);
@@ -237,7 +237,7 @@ fn carry<DB: ClauseDatabase>(
 			emit_clause!(db, &[y.negate(), z.negate(), carry.clone()])?;
 			carry.into()
 		}
-		_ => unimplemented!(),
+		_ => unreachable!(),
 	};
 	Ok(carry)
 }
