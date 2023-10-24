@@ -188,7 +188,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				log_enc_add_(
 					db,
 					&x_bin.xs(false).into_iter().collect::<Vec<_>>(),
-					&as_binary::<DB::Lit, C>(y_const.into(), Some(x_bin.lits()))
+					&as_binary(y_const.into(), Some(x_bin.lits()))
 						.into_iter()
 						.map(LitOrConst::Const)
 						.chain([LitOrConst::Const(false)])
@@ -368,7 +368,7 @@ pub mod tests {
 	use super::*;
 	use crate::{
 		helpers::tests::{assert_sol, assert_unsat, TestDB},
-		int::{enc::GROUND_BINARY_AT_LB, IntVar, IntVarOrd},
+		int::{enc::GROUND_BINARY_AT_LB, required_lits, IntVarOrd},
 	};
 	use iset::{interval_set, IntervalSet};
 
@@ -629,18 +629,18 @@ pub mod tests {
 	#[test]
 	fn required_bits_test() {
 		if GROUND_BINARY_AT_LB {
-			assert_eq!(IntVar::<Lit, C>::required_lits(2, 9), 3); // 8 vals => 3 bits
-			assert_eq!(IntVar::<Lit, C>::required_lits(2, 10), 4); // 9 vals => 4 bits
-			assert_eq!(IntVar::<Lit, C>::required_lits(3, 10), 3); // 8 vals => 3 bits
+			assert_eq!(required_lits(2, 9), 3); // 8 vals => 3 bits
+			assert_eq!(required_lits(2, 10), 4); // 9 vals => 4 bits
+			assert_eq!(required_lits(3, 10), 3); // 8 vals => 3 bits
 		} else {
-			assert_eq!(IntVar::<Lit, C>::required_lits(2, 9), 4);
-			assert_eq!(IntVar::<Lit, C>::required_lits(2, 10), 4);
-			assert_eq!(IntVar::<Lit, C>::required_lits(3, 10), 4);
+			assert_eq!(required_lits(2, 9), 4);
+			assert_eq!(required_lits(2, 10), 4);
+			assert_eq!(required_lits(3, 10), 4);
 
 			// neg lb
-			assert_eq!(IntVar::<Lit, C>::required_lits(-7, 2), 4); // -7 = 1001 => 4 bits
-			assert_eq!(IntVar::<Lit, C>::required_lits(-7, 9), 5); // 9 > 7 => 5 bits
-			assert_eq!(IntVar::<Lit, C>::required_lits(2, 9), 4); // 4 b/c no sign bit
+			assert_eq!(required_lits(-7, 2), 4); // -7 = 1001 => 4 bits
+			assert_eq!(required_lits(-7, 9), 5); // 9 > 7 => 5 bits
+			assert_eq!(required_lits(2, 9), 4); // 4 b/c no sign bit
 		}
 	}
 

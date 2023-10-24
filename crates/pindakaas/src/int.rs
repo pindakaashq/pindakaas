@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 
 pub(crate) use constrain::{TernLeConstraint, TernLeEncoder};
 pub(crate) use enc::{IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
+pub(crate) use helpers::required_lits;
 pub use helpers::Format;
 pub use model::{Assignment, Consistency, IntVar, IntVarId, Lin, LinExp, Model, ModelConfig, Term};
 
@@ -68,7 +69,7 @@ pub(crate) fn display_dom<Lit: Literal, C: Coefficient>(dom: &BTreeSet<C>) -> St
 			"{{{},..,{ub}}} ({}|{})",
 			dom.iter().take(ELIPSIZE).join(","),
 			dom.len(),
-			IntVar::<Lit, C>::required_lits(lb, ub)
+			required_lits(lb, ub)
 		)
 	} else {
 		format!("{{{}}}", dom.iter().join(","))

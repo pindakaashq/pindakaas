@@ -29,7 +29,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 		// The number of relevant bits in k
 		let bits = (C::zero().leading_zeros() - lin.k.leading_zeros()) as usize;
 		let first_zero = lin.k.trailing_ones() as usize;
-		let mut k = as_binary::<DB::Lit, C>(lin.k.clone(), Some(bits));
+		let mut k = as_binary(lin.k.clone(), Some(bits));
 		debug_assert!(k[bits - 1]);
 
 		// Create structure with which coefficients use which bits
@@ -161,7 +161,7 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 	// For every zero bit in k:
 	// - either the `x` bit is also zero, or
 	// - a higher `x` bit is zero that was one in k.
-	let k = as_binary::<DB::Lit, C>(k, Some(bits));
+	let k = as_binary(k, Some(bits));
 	(0..bits).filter(|i| !k[*i]).try_for_each(|i| {
 		clause(
 			db,
@@ -180,7 +180,7 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 	k: PosCoeff<C>,
 	bits: usize,
 ) -> Result {
-	let k = as_binary::<DB::Lit, C>(k, Some(bits));
+	let k = as_binary(k, Some(bits));
 	(0..bits).filter(|i| k[*i]).try_for_each(|i| {
 		clause(
 			db,
