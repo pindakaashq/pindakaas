@@ -161,15 +161,17 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 	// For every zero bit in k:
 	// - either the `x` bit is also zero, or
 	// - a higher `x` bit is zero that was one in k.
-	let k = as_binary(k, Some(bits));
-	(0..bits).filter(|i| !k[*i]).try_for_each(|i| {
-		clause(
-			db,
-			&(i..bits)
-				.filter_map(|j| (j == i || k[j]).then(|| -x[j].clone()))
-				.collect::<Vec<_>>(),
-		)
-	})
+	let k = as_binary(k, None);
+	(0..bits)
+		.filter(|i| !k.get(*i).unwrap_or(&false))
+		.try_for_each(|i| {
+			clause(
+				db,
+				&(i..bits)
+					.filter_map(|j| (j == i || *k.get(j).unwrap_or(&false)).then(|| -x[j].clone()))
+					.collect::<Vec<_>>(),
+			)
+		})
 }
 
 /// Uses lexicographic constraint to constrain x:B >= k
@@ -180,15 +182,17 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 	k: PosCoeff<C>,
 	bits: usize,
 ) -> Result {
-	let k = as_binary(k, Some(bits));
-	(0..bits).filter(|i| k[*i]).try_for_each(|i| {
-		clause(
-			db,
-			&(i..bits)
-				.filter_map(|j| (j == i || !k[j]).then(|| x[j].clone()))
-				.collect::<Vec<_>>(),
-		)
-	})
+	let k = as_binary(k, None);
+	(0..bits)
+		.filter(|i| *k.get(*i).unwrap_or(&false))
+		.try_for_each(|i| {
+			clause(
+				db,
+				&(i..bits)
+					.filter_map(|j| (j == i || !k.get(j).unwrap_or(&false)).then(|| x[j].clone()))
+					.collect::<Vec<_>>(),
+			)
+		})
 }
 
 // TODO Implement Mul/Add for Lit (once merged with new Lit struct)

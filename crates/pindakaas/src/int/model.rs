@@ -33,8 +33,16 @@ impl Display for IntVarId {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Scm {
+	#[default]
+	Add,
+	Rca,
+	Pow,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModelConfig {
-	pub scm_add: bool,
+	pub scm: Scm,
 }
 
 // TODO should we keep IntVar i/o IntVarEnc?
@@ -471,11 +479,11 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		db: &mut DB,
 		enc: &IntVarEnc<Lit, C>,
 		config: &ModelConfig,
-	) -> Result<(IntVarEnc<Lit, C>, C), Unsatisfiable> {
+	) -> Result<(Vec<IntVarEnc<Lit, C>>, C), Unsatisfiable> {
 		if self.c == C::zero() {
-			Ok((IntVarEnc::Const(C::zero()), C::zero()))
+			Ok((vec![IntVarEnc::Const(C::zero())], C::zero()))
 		} else if self.c == C::one() {
-			Ok((enc.clone(), C::zero()))
+			Ok((vec![enc.clone()], C::zero()))
 		} else {
 			match enc {
 				IntVarEnc::Ord(o) => {
@@ -537,16 +545,62 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 						c = c.div(C::one() + C::one());
 					}
 
-					let lits = if config.scm_add { x_enc.lits() } else { 0 };
-					let scm = if c == C::one() {
-						""
-					} else {
-						SCM.iter()
-							.find_map(|(bits, mul, scm)| {
-								// TODO bits or lits?
-								(*bits == lits && C::from(*mul).unwrap() == c).then_some(scm)
+					let lits = match config.scm {
+						Scm::Add => x_enc.lits(),
+						Scm::Rca | Scm::Pow => 0,
+					};
+
+					let scm = match config.scm {
+						Scm::Add | Scm::Rca => (c > C::one())
+							.then(|| {
+								SCM.iter()
+									.find_map(|(bits, mul, scm)| {
+										(*bits == lits && C::from(*mul).unwrap() == c)
+											.then_some(scm)
+									})
+									.unwrap_or_else(|| {
+										panic!("Missing SCM entry for c={c}, lits={lits}")
+									})
+									.to_vec()
 							})
-							.unwrap_or_else(|| panic!("Missing SCM entry for c={c}, lits={lits}"))
+							.unwrap_or_default(),
+						Scm::Pow => {
+							// assert!(k == C::zero());
+							return Ok((
+								as_binary(c.into(), None)
+									.into_iter()
+									.enumerate()
+									.filter_map(|(shift, b)| {
+										b.then_some(sh + C::from(shift).unwrap())
+									})
+									.map(|sh| {
+										let xs = num::iter::range(C::zero(), sh)
+											.map(|_| LitOrConst::Const(false))
+											.chain(xs.clone())
+											.collect::<Vec<_>>();
+										IntVarEnc::Bin(IntVarBin::from_lits(
+											&xs,
+											None,
+											// &self
+											// 	.x
+											// 	.borrow()
+											// 	.dom
+											// 	.iter()
+											// 	.cloned()
+											// 	.map(|d| {
+											// 		// num::pow(C::from(2).unwrap(), usizesh)
+											// 		num::range_inclusive(C::zero(), sh)
+											// 			.fold(d, |a, _| C::from(2).unwrap() * a)
+											// 	})
+											// 	// .map(|d| (-k).shl(sh) + d.shl(sh))
+											// 	.collect::<Vec<_>>(),
+											format!("{}<<{}", self.x.borrow().lbl(), sh.clone()),
+										))
+									})
+									.collect(),
+								k,
+							));
+						}
 					};
 
 					// TODO store `c` value i/o of node index
@@ -565,28 +619,20 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 							.collect::<Vec<_>>()
 					};
 
-					fn parse_c<C: Coefficient>(i: &str) -> C {
-						i.parse::<C>()
-							.unwrap_or_else(|_| panic!("Could not parse dom value {i}"))
-					}
-
-					for rca in scm.split(';') {
-						if rca.is_empty() {
-							break;
-						}
-						let (z_i, x, add, y) = match rca.split(',').collect::<Vec<_>>()[..] {
-							[i, i1, sh1, add, i2, sh2] => (
-								parse_c::<C>(i),
-								get_and_shift(&ys, parse_c(i1), parse_c(sh1)),
-								match add {
-									"+" => true,
-									"-" => false,
-									_ => unreachable!(),
-								},
-								get_and_shift(&ys, parse_c(i2), parse_c(sh2)),
-							),
-							_ => unreachable!(),
-						};
+					for rca in scm {
+						let (i, i1, sh1, i2, sh2) = (
+							C::from(rca.i).unwrap(),
+							C::from(rca.i1).unwrap(),
+							C::from(rca.sh1).unwrap(),
+							C::from(rca.i2).unwrap(),
+							C::from(rca.sh2).unwrap(),
+						);
+						let (z_i, x, add, y) = (
+							i,
+							get_and_shift(&ys, i1, sh1),
+							rca.add,
+							get_and_shift(&ys, i2, sh2),
+						);
 
 						// If subtracting, use 2-comp of y and set initial carry to true
 						let (y, c) = if add {
@@ -601,21 +647,15 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 
 					let xs = get_and_shift(&ys, *ys.keys().max().unwrap(), sh);
 					Ok((
-						IntVarEnc::Bin(IntVarBin::from_lits(
+						vec![IntVarEnc::Bin(IntVarBin::from_lits(
 							&xs,
-							&self
-								.x
-								.borrow()
-								.dom
-								.iter()
-								.map(|d| -k + self.c * *d)
-								.collect::<Vec<_>>(),
+							None,
 							format!("{}*{}", self.c, self.x.borrow().lbl()),
-						)),
+						))],
 						k,
 					))
 				}
-				IntVarEnc::Const(c) => Ok((IntVarEnc::Const(*c * self.c), C::zero())),
+				IntVarEnc::Const(c) => Ok((vec![IntVarEnc::Const(*c * self.c)], C::zero())),
 			}
 		}
 	}
@@ -874,10 +914,22 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			let mut y = IntVarEnc::Const(C::zero());
 			let mut encoder = TernLeEncoder::default();
 			let mut k = self.k;
-			for term in &self.exp.terms {
-				let (x, c) = term.encode(db, term.x.borrow().e.as_ref().unwrap(), config)?;
+			let encs = self
+				.exp
+				.terms
+				.iter()
+				.map(|term| {
+					term.encode(db, term.x.borrow().e.as_ref().unwrap(), config)
+						.map(|(xs, c)| {
+							k -= c;
+							xs
+						})
+				})
+				.collect::<Result<Vec<_>, _>>()?;
+
+			for enc in encs.into_iter().flatten() {
 				// TODO x.add should use log_enc_add_fn
-				y = x.add(
+				y = enc.add(
 					db,
 					&mut encoder,
 					&y,
@@ -885,7 +937,6 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					None,
 					// Some(self.k),
 				)?;
-				k -= c;
 			}
 
 			encoder.encode(
@@ -1167,13 +1218,25 @@ mod tests {
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
+	const MODEL_CONFIGS: [ModelConfig; 3] = [
+		ModelConfig { scm: Scm::Add },
+		ModelConfig { scm: Scm::Rca },
+		ModelConfig { scm: Scm::Pow },
+	];
+
+	fn test_lp_for_configs(lp: &str) {
+		for config in MODEL_CONFIGS {
+			test_lp(lp, config);
+		}
+	}
+
 	fn test_lp(lp: &str, config: ModelConfig) {
 		// const CUTOFF: Option<C> = None;
 		const CUTOFF: Option<C> = Some(0);
 
 		let mut model = Model::<Lit, C>::from_string(lp.into(), Format::Lp)
 			.unwrap()
-			.with_config(config);
+			.with_config(config.clone());
 		println!("model = {model}");
 
 		let mut db = TestDB::new(0);
@@ -1194,12 +1257,18 @@ mod tests {
 			.flat_map(|lit_assignment| model.assign(lit_assignment))
 			.collect::<Vec<_>>();
 
-		assert_eq!(model.check_assignments(&actual_assignments), Ok(()));
+		let check = model.check_assignments(&actual_assignments);
+		if let Err(errs) = check {
+			for err in errs {
+				println!("{err}");
+			}
+			panic!("Test failed for {config:?} and {lp}");
+		}
 	}
 
 	#[test]
 	fn test_lp_le_1() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: + 2 x1 + 3 x2 + 5 x3 <= 6
@@ -1209,13 +1278,12 @@ x2
 x3
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_le_2() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: + 1 x1 + 2 x2 - 1 x3 <= 0
@@ -1225,13 +1293,12 @@ Bounds
 0 <= x3 <= 2
 End
 ",
-			ModelConfig::default(),
 		)
 	}
 
 	#[test]
 	fn test_lp_ge_pb_triv() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: + 1 x1 + 2 x2 + 1 x3 >= -2
@@ -1241,13 +1308,12 @@ Bounds
 0 <= x3 <= 1
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_ge_pb_neg_1() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: - 1 x1 >= 0
@@ -1255,13 +1321,12 @@ Bounds
 0 <= x1 <= 1
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_ge_pb_neg_2() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: + 1 x1 + 2 x2 - 1 x3 >= 0
@@ -1271,13 +1336,12 @@ Bounds
 0 <= x3 <= 1
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_ge_neg() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: + 1 x1 + 2 x2 - 1 x3 >= 0
@@ -1287,13 +1351,12 @@ Bounds
 0 <= x3 <= 5
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_ge_neg_2() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: + 1 x1 + 2 x2 - 3 x3 >= 0
@@ -1303,13 +1366,12 @@ Bounds
 -2 <= x3 <= 5
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_le_neg_last() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: + 1 x1 + 2 x2 - 3 x3 <= 0
@@ -1319,13 +1381,12 @@ Bounds
 -2 <= x3 <= 5
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_le_3() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: + 1 x1 + 1 x2 - 1 x3 <= 0
@@ -1335,14 +1396,13 @@ x2 in 0,3
 x3 in 0,2,3,5
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	// TODO ! We are not handling >=/== correctly when decomposing as BDD; because the domain always uses the end of the interval; instead use start of interval if >=, and create 2 constraints for <= and >= if using ==
 	#[test]
 	fn test_lp_2() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: + 2 x1 + 3 x2 + 5 x3 >= 6
@@ -1352,13 +1412,12 @@ x2
 x3
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_3() {
-		test_lp(
+		test_lp_for_configs(
 			"
 Subject To
 c0: + 1 x1 - 1 x2 = 0
@@ -1367,13 +1426,12 @@ Bounds
 0 <= x2 <= 1
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_4() {
-		test_lp(
+		test_lp_for_configs(
 			"
 Subject To
 c0: + 2 x1 - 3 x2 = 0
@@ -1382,13 +1440,12 @@ Bounds
 0 <= x2 <= 5
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_4_xs() {
-		test_lp(
+		test_lp_for_configs(
 			"
 Subject To
 c0: + 2 x1 - 3 x2 + 2 x3 - 4 x4 <= 6
@@ -1399,13 +1456,12 @@ Bounds
 0 <= x4 <= 1
 End
 	",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_multiple_constraints() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: + 2 x1 + 3 x2 + 5 x3 <= 6
@@ -1417,13 +1473,12 @@ x3
 x4
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_soh() {
-		test_lp(
+		test_lp_for_configs(
 			"
 Subject To
 c0: + 1 x1 - 1 x3 >= 0
@@ -1436,13 +1491,12 @@ Bounds
 0 <= x4 <= 3
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_scm_1() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: x1 - 4 x2 = 0
@@ -1451,13 +1505,12 @@ Bounds
 0 <= x2 <= 4
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
 	#[test]
 	fn test_lp_scm_2() {
-		test_lp(
+		test_lp_for_configs(
 			r"
 Subject To
 c0: x1 - 11 x2 = 0
@@ -1466,7 +1519,6 @@ Bounds
 0 <= x2 <= 4
 End
 ",
-			ModelConfig::default(),
 		);
 	}
 
@@ -1485,6 +1537,30 @@ End
 	// }
 
 	#[test]
+	fn test_scm_3_11() {
+		let lp = r"
+	Subject To
+	c0: 11 x_1 = 0
+	Bounds
+	0 <= x_1 <= 15
+	End
+	";
+		test_lp_for_configs(lp);
+	}
+
+	#[test]
+	fn test_scm_3_43() {
+		let lp = r"
+	Subject To
+	c0: 43 x_1 = 0
+	Bounds
+	0 <= x_1 <= 15
+	End
+	";
+		test_lp_for_configs(lp);
+	}
+
+	#[test]
 	fn test_scm_4_117() {
 		let lp = r"
 	Subject To
@@ -1493,8 +1569,7 @@ End
 	0 <= x_1 <= 15
 	End
 	";
-		test_lp(lp, ModelConfig { scm_add: false });
-		test_lp(lp, ModelConfig { scm_add: true });
+		test_lp_for_configs(lp);
 	}
 
 	#[test]
@@ -1506,7 +1581,7 @@ Bounds
   0 <= x_1 <= 7
 End
 ";
-		test_lp(lp, ModelConfig { scm_add: false });
+		test_lp_for_configs(lp);
 		// test_lp(lp, ModelConfig { scm_add: true });
 	}
 
@@ -1519,8 +1594,7 @@ Bounds
   0 <= x_1 <= 7
 End
 ";
-		test_lp(lp, ModelConfig { scm_add: false });
-		test_lp(lp, ModelConfig { scm_add: true });
+		test_lp_for_configs(lp);
 	}
 
 	#[test]
@@ -1534,6 +1608,19 @@ Bounds
   0 <= x_2 <= 3
 End
 ";
-		test_lp(lp, ModelConfig { scm_add: true });
+		test_lp_for_configs(lp);
+	}
+
+	#[test]
+	fn test_lp_tmp() {
+		// 59 * x_1=0 (=0) + 46 * x_2=7 (=322) + 132 * x_3=4 (=528) + 50 * x_4=4 (=200) + 7 * x_5=0 (=0) == 1050 !≤ 931
+		let lp = r"
+Subject To
+  c0: 2 x_1 <= 200
+Bounds
+  0 <= x_1 <= 7
+End
+";
+		test_lp_for_configs(lp);
 	}
 }

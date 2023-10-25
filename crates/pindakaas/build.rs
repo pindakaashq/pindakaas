@@ -12,7 +12,7 @@ use std::path::Path;
 use flate2::read::GzDecoder;
 use tar::Archive;
 
-fn scm() -> Result<Vec<(usize, u32, String)>, std::io::Error> {
+fn scm() -> Result<Vec<(usize, u32, Vec<ScmNode>)>, std::io::Error> {
 	Archive::new(GzDecoder::new(fs::File::open(Path::new(
 		"./res/scm.tar.gz",
 	))?))
@@ -27,7 +27,22 @@ fn scm() -> Result<Vec<(usize, u32, String)>, std::io::Error> {
 				.unwrap()
 				.lines()
 				.filter(|line| !(line.is_empty() || line.starts_with('#')))
-				.join(";");
+				.map(|line| match line.split(',').collect::<Vec<_>>()[..] {
+					[i, i1, sh1, add, i2, sh2] => ScmNode {
+						i: i.parse().unwrap(),
+						i1: i1.parse().unwrap(),
+						sh1: sh1.parse().unwrap(),
+						add: match add {
+							"+" => true,
+							"-" => false,
+							_ => unreachable!(),
+						},
+						i2: i2.parse().unwrap(),
+						sh2: sh2.parse().unwrap(),
+					},
+					_ => panic!("Unexpected line {line}"),
+				})
+				.collect();
 			let (bits, v) = path
 				.file_stem()
 				.unwrap()
@@ -40,8 +55,20 @@ fn scm() -> Result<Vec<(usize, u32, String)>, std::io::Error> {
 				.unwrap();
 			(bits.parse().unwrap(), v.parse().unwrap(), scm)
 		})
-		.sorted()
+		.sorted_by_key(|(b, c, _)| (*b, *c))
 		.collect())
+}
+
+//  TODO ? <C: Coefficient>
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(crate) struct ScmNode {
+	i: u32,
+	i1: u32,
+	sh1: u32,
+	add: bool,
+	i2: u32,
+	sh2: u32,
 }
 
 pub fn main() {
@@ -50,11 +77,21 @@ pub fn main() {
 
 	let scm = scm().unwrap();
 
+	let scm_node_def = r"#[derive(Debug, Clone)]
+pub(crate) struct ScmNode {
+pub(crate) i: u32,
+pub(crate) i1: u32,
+pub(crate) sh1: u32,
+pub(crate) add: bool,
+pub(crate) i2: u32,
+pub(crate) sh2: u32,
+}";
 	let o = format!(
-		"pub(crate) static SCM: [(usize, u32, &str); {}] = [\n{}\n];",
+		"{scm_node_def}
+        pub(crate) static SCM: [(usize, u32, &[ScmNode]); {}] = [\n{}\n];",
 		scm.len(),
 		scm.iter()
-			.map(|(x, c, scm)| format!("\t({}, {}, \"{}\")", x, c, scm))
+			.map(|(x, c, scm)| format!("\t({}, {}, &{:?})", x, c, scm))
 			.join(",\n")
 	);
 	fs::write("./src/int/scm.rs", o).unwrap();
