@@ -13,11 +13,19 @@ use flate2::read::GzDecoder;
 use tar::Archive;
 
 fn scm() -> Result<Vec<(usize, u32, Vec<ScmNode>)>, std::io::Error> {
-	Archive::new(GzDecoder::new(fs::File::open(Path::new(
-		"./res/scm.tar.gz",
-	))?))
-	.unpack("./res/")
-	.unwrap();
+	if Path::new("./res/scm").exists() {
+		fs::remove_dir_all("./res/scm")?;
+		fs::create_dir("./res/scm")?;
+	} else {
+		fs::create_dir("./res/scm")?;
+	}
+
+	let db = Path::new("./res/scm.tar.gz");
+	assert!(db.exists());
+
+	Archive::new(GzDecoder::new(fs::File::open(db)?))
+		.unpack("./res/")
+		.unwrap();
 
 	Ok(fs::read_dir("./res/scm")?
 		.into_iter()

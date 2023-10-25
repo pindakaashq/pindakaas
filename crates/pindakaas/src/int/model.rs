@@ -558,49 +558,35 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 										(*bits == lits && C::from(*mul).unwrap() == c)
 											.then_some(scm)
 									})
-									.unwrap_or_else(|| {
-										panic!("Missing SCM entry for c={c}, lits={lits}")
-									})
-									.to_vec()
+									.map(|v| v.to_vec())
 							})
-							.unwrap_or_default(),
-						Scm::Pow => {
-							// assert!(k == C::zero());
-							return Ok((
-								as_binary(c.into(), None)
-									.into_iter()
-									.enumerate()
-									.filter_map(|(shift, b)| {
-										b.then_some(sh + C::from(shift).unwrap())
-									})
-									.map(|sh| {
-										let xs = num::iter::range(C::zero(), sh)
-											.map(|_| LitOrConst::Const(false))
-											.chain(xs.clone())
-											.collect::<Vec<_>>();
-										IntVarEnc::Bin(IntVarBin::from_lits(
-											&xs,
-											None,
-											// &self
-											// 	.x
-											// 	.borrow()
-											// 	.dom
-											// 	.iter()
-											// 	.cloned()
-											// 	.map(|d| {
-											// 		// num::pow(C::from(2).unwrap(), usizesh)
-											// 		num::range_inclusive(C::zero(), sh)
-											// 			.fold(d, |a, _| C::from(2).unwrap() * a)
-											// 	})
-											// 	// .map(|d| (-k).shl(sh) + d.shl(sh))
-											// 	.collect::<Vec<_>>(),
-											format!("{}<<{}", self.x.borrow().lbl(), sh.clone()),
-										))
-									})
-									.collect(),
-								k,
-							));
-						}
+							.unwrap_or_default(),// default to empty recipe if c == 1
+						Scm::Pow => None,
+					};
+
+                    // if we have no recipe for this particular (b,c) key, in which case we fallback to Pow
+					let scm = if let Some(scm) = scm {
+						scm
+					} else {
+						return Ok((
+							as_binary(c.into(), None)
+								.into_iter()
+								.enumerate()
+								.filter_map(|(shift, b)| b.then_some(sh + C::from(shift).unwrap()))
+								.map(|sh| {
+									let xs = num::iter::range(C::zero(), sh)
+										.map(|_| LitOrConst::Const(false))
+										.chain(xs.clone())
+										.collect::<Vec<_>>();
+									IntVarEnc::Bin(IntVarBin::from_lits(
+										&xs,
+										None,
+										format!("{}<<{}", self.x.borrow().lbl(), sh.clone()),
+									))
+								})
+								.collect(),
+							k,
+						));
 					};
 
 					// TODO store `c` value i/o of node index
@@ -1619,6 +1605,19 @@ Subject To
   c0: 2 x_1 <= 200
 Bounds
   0 <= x_1 <= 7
+End
+";
+		test_lp_for_configs(lp);
+	}
+
+	#[test]
+	fn test_lp_scm_recipe() {
+		// || thread 'main' panicked at 'ys[1] does not exist in {0: [Lit(1), Lit(2), Lit(3), Lit(4), Lit(5), Const(false)]} when encoding SCM 731*x of 5 lits', /home/hbie0002/Projects/pbc/bin/pindakaas/crates/pindakaas/src/int/model.rs:615:41
+		let lp = r"
+Subject To
+  c0: 731 x_1 = 0
+Bounds
+  0 <= x_1 <= 31
 End
 ";
 		test_lp_for_configs(lp);
