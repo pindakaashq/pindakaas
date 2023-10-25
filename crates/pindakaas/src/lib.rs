@@ -39,7 +39,7 @@ pub mod trace;
 
 pub use cardinality::{Cardinality, SortingNetworkEncoder};
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
-pub use int::{Assignment, Consistency, Format, IntVarId, Lin, Model, ModelConfig, Term};
+pub use int::{Assignment, Consistency, Format, IntVarId, Lin, Model, ModelConfig, Scm, Term};
 pub use linear::{
 	AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear, LinearAggregator,
 	LinearConstraint, LinearEncoder, PosCoeff, SwcEncoder, TotalizerEncoder,
@@ -101,7 +101,7 @@ impl fmt::Display for Unsatisfiable {
 
 /// Result is a type alias for [`std::result::Result`] that by default returns
 /// an empty value, or the [`Unsatisfiable`] error type.
-pub type Result<T = (), E = Unsatisfiable> = anyhow::Result<T, E>;
+pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
 /// Encoder is the central trait implemented for all the encoding algorithms
 pub trait Encoder<DB: ClauseDatabase, Constraint> {

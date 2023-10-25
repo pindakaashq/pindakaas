@@ -24,16 +24,17 @@ pub(crate) fn two_comp_bounds<C: Coefficient>(bits: usize) -> (C, C) {
 }
 
 /// 2^bits - 1
-pub(crate) fn unsigned_binary_range_ub<C: Coefficient>(bits: usize) -> C {
-	num::pow(C::from(2).unwrap(), bits) - C::one()
+pub(crate) fn unsigned_binary_range_ub<C: Coefficient>(bits: usize) -> Option<C> {
+	num::checked_pow(C::from(2).unwrap(), bits).map(|c| c - C::one())
 }
 
 /// Convert `k` to unsigned binary in `bits`
 pub(crate) fn as_binary<C: Coefficient>(k: PosCoeff<C>, bits: Option<usize>) -> Vec<bool> {
 	let bits = bits.unwrap_or_else(|| required_lits(C::zero(), *k) as usize);
+	let range_ub = unsigned_binary_range_ub(bits).unwrap();
 	assert!(
-		*k <= unsigned_binary_range_ub(bits),
-		"{} cannot be represented in {bits} bits",
+		*k <= range_ub,
+		"{} cannot be represented in {bits} bits, which can represent only up to {range_ub}",
 		*k,
 	);
 	(0..bits)
