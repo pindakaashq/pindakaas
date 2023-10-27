@@ -539,9 +539,9 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					};
 
 					// TODO shift by zeroes..
-					let mut sh = C::zero();
+					let mut sh = 0;
 					while c.is_even() {
-						sh += C::one();
+						sh += 1;
 						c = c.div(C::one() + C::one());
 					}
 
@@ -560,58 +560,73 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 									})
 									.map(|v| v.to_vec())
 							})
-							.unwrap_or_default(),// default to empty recipe if c == 1
+							.unwrap_or_default(), // default to empty recipe if c == 1
 						Scm::Pow => None,
 					};
 
-                    // if we have no recipe for this particular (b,c) key, in which case we fallback to Pow
-					let scm = if let Some(scm) = scm {
-						scm
-					} else {
-						return Ok((
-							as_binary(c.into(), None)
-								.into_iter()
-								.enumerate()
-								.filter_map(|(shift, b)| b.then_some(sh + C::from(shift).unwrap()))
-								.map(|sh| {
-									let xs = num::iter::range(C::zero(), sh)
-										.map(|_| LitOrConst::Const(false))
-										.chain(xs.clone())
-										.collect::<Vec<_>>();
-									IntVarEnc::Bin(IntVarBin::from_lits(
-										&xs,
-										None,
-										format!("{}<<{}", self.x.borrow().lbl(), sh.clone()),
-									))
-								})
-								.collect(),
-							k,
-						));
-					};
+					// if we have no recipe for this particular (b,c) key, in which case we fallback to Pow
+					let scm =
+						if let Some(scm) = scm {
+							scm
+						} else {
+							return Ok((
+								as_binary(c.into(), None)
+									.into_iter()
+									.enumerate()
+									.filter_map(|(shift, b)| b.then_some(sh + shift))
+									.map(|sh| {
+										let xs = num::iter::range(C::zero(), C::from(sh).unwrap())
+											.map(|_| LitOrConst::Const(false))
+											.chain(xs.clone())
+											.collect::<Vec<_>>();
+										IntVarEnc::Bin(IntVarBin::from_lits(
+											&xs,
+											&self
+												.x
+												.borrow()
+												.dom
+												.iter()
+												.map(|d| d.shl(sh))
+												.map(|d| {
+													if self.c.is_negative() {
+														-d + self.c
+													} else {
+														d
+													}
+												})
+												.collect::<Vec<_>>(),
+											format!("{}<<{}", self.x.borrow().lbl(), sh.clone()),
+										))
+									})
+									.collect(),
+								k,
+							));
+						};
 
 					// TODO store `c` value i/o of node index
 					let mut ys = [(C::zero(), xs)].into_iter().collect::<HashMap<_, _>>();
 
-					let get_and_shift = |ys: &HashMap<C, Vec<LitOrConst<DB::Lit>>>, i: C, sh: C| {
-						num::iter::range(C::zero(), sh)
-							.map(|_| LitOrConst::Const(false))
-							.chain(
-								ys.get(&i)
-									.unwrap_or_else(|| {
-										panic!("ys[{i}] does not exist in {ys:?} when encoding SCM {c}*x of {lits} lits")
-									})
-									.clone(),
-							)
-							.collect::<Vec<_>>()
-					};
+					let get_and_shift =
+						|ys: &HashMap<C, Vec<LitOrConst<DB::Lit>>>, i: C, sh: usize| {
+							(0..=sh)
+								.map(|_| LitOrConst::Const(false))
+								.chain(
+									ys.get(&i)
+										.unwrap_or_else(|| {
+											panic!("ys[{i}] does not exist in {ys:?} when encoding SCM {c}*x of {lits} lits")
+										})
+										.clone(),
+								)
+								.collect::<Vec<_>>()
+						};
 
 					for rca in scm {
 						let (i, i1, sh1, i2, sh2) = (
 							C::from(rca.i).unwrap(),
 							C::from(rca.i1).unwrap(),
-							C::from(rca.sh1).unwrap(),
+							rca.sh1 as usize,
 							C::from(rca.i2).unwrap(),
-							C::from(rca.sh2).unwrap(),
+							rca.sh2 as usize,
 						);
 						let (z_i, x, add, y) = (
 							i,
@@ -635,7 +650,13 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					Ok((
 						vec![IntVarEnc::Bin(IntVarBin::from_lits(
 							&xs,
-							None,
+							&self
+								.x
+								.borrow()
+								.dom
+								.iter()
+								.map(|d| -k + self.c * *d)
+								.collect::<Vec<_>>(),
 							format!("{}*{}", self.c, self.x.borrow().lbl()),
 						))],
 						k,
@@ -1212,7 +1233,7 @@ mod tests {
 
 	fn test_lp_for_configs(lp: &str) {
 		for config in MODEL_CONFIGS {
-			test_lp(lp, config);
+			test_lp(lp, config.clone());
 		}
 	}
 
