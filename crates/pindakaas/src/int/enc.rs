@@ -343,8 +343,19 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			panic!("Cannot create offset binary encoding `from_lits` without a given lower bound.")
 		}
 
+		let mut xs = xs.to_vec();
+		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
+		if !lb.is_negative() {
+			// if lb is >=0
+			xs.push(LitOrConst::Const(false));
+		} else if ub.is_negative() {
+			// if ub is < 0
+			xs.push(LitOrConst::Const(true));
+		}
+
+
 		Self {
-			xs: xs.to_vec(),
+			xs,
 			dom: dom.iter().cloned().collect(),
 			lbl,
 		}
@@ -853,6 +864,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 						&y_bin.xs(false),
 						&Comparator::Equal,
 						LitOrConst::Const(false),
+						Some(required_lits(*dom.first().unwrap(), *dom.last().unwrap())),
 					)?,
 					&dom,
 					format!("{}+{}", x_bin.lbl, y_bin.lbl),

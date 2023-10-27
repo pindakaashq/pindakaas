@@ -627,7 +627,7 @@ pub mod tests {
 	}
 
 	#[test]
-	fn required_bits_test() {
+	fn required_lits_test() {
 		if GROUND_BINARY_AT_LB {
 			assert_eq!(required_lits(2, 9), 3); // 8 vals => 3 bits
 			assert_eq!(required_lits(2, 10), 4); // 9 vals => 4 bits

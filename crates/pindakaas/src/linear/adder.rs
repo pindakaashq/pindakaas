@@ -168,11 +168,18 @@ fn to_bits<C: Coefficient>(k: C, bits: usize) -> Vec<bool> {
 			.into_iter()
 			.map(LitOrConst::from)
 			.collect::<Vec<_>>();
-		log_enc_add_fn(&mut Cnf::new(0), &k, &one, &Comparator::Equal, false.into())
-			.unwrap()
-			.into_iter()
-			.map(|x| bool::try_from(x).unwrap())
-			.collect::<Vec<_>>()
+		log_enc_add_fn(
+			&mut Cnf::new(0),
+			&k,
+			&one,
+			&Comparator::Equal,
+			false.into(),
+			None,
+		)
+		.unwrap()
+		.into_iter()
+		.map(|x| bool::try_from(x).unwrap())
+		.collect::<Vec<_>>()
 	};
 	// First, sign-extend to get the required number fo bits
 	let k = k[..k.len() - 1]
@@ -354,9 +361,11 @@ pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 	ys: &[LitOrConst<DB::Lit>],
 	cmp: &Comparator,
 	mut c: LitOrConst<DB::Lit>,
+	bits: Option<usize>,
 ) -> Result<Vec<LitOrConst<DB::Lit>>> {
 	assert!(cmp == &Comparator::Equal);
-	let zs = (0..(itertools::max([xs.len(), ys.len()]).unwrap()) + 1)
+	let bits = bits.unwrap_or(itertools::max([xs.len(), ys.len()]).unwrap() + 1);
+	let zs = (0..bits)
 		.map(|i| {
 			let (x, y) = (bit(xs, i), bit(ys, i));
 			let z = xor(db, &[x.clone(), y.clone(), c.clone()], format!("z_{}", i));
