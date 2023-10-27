@@ -939,13 +939,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			while encs.len() > 1 {
 				let x = encs.pop().unwrap();
 				let z = if let Some(y) = encs.pop() {
-					x.add(
-						db,
-						&mut encoder,
-						&y,
-						None,
-						None,
-					)?
+					x.add(db, &mut encoder, &y, None, None)?
 				} else {
 					x
 				};
