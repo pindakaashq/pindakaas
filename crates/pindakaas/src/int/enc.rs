@@ -353,7 +353,6 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			xs.push(LitOrConst::Const(true));
 		}
 
-
 		Self {
 			xs,
 			dom: dom.iter().cloned().collect(),
