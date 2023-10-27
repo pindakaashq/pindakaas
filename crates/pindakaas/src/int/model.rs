@@ -918,38 +918,52 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		{
 			// TODO hard to do in a reduce ..
 			// TODO Replace 0 for first element
-			let mut y = IntVarEnc::Const(C::zero());
 			let mut encoder = TernLeEncoder::default();
 			let mut k = self.k;
-			let encs = self
+			let mut encs = self
 				.exp
 				.terms
 				.iter()
-				.map(|term| {
+				.flat_map(|term| {
 					term.encode(db, term.x.borrow().e.as_ref().unwrap(), config)
 						.map(|(xs, c)| {
 							k -= c;
 							xs
 						})
 				})
-				.collect::<Result<Vec<_>, _>>()?;
+				.flatten()
+				.collect::<Vec<_>>();
+			// TODO use binary heap
 
-			for enc in encs.into_iter().flatten() {
-				// TODO x.add should use log_enc_add_fn
-				y = enc.add(
-					db,
-					&mut encoder,
-					&y,
-					None,
-					None,
-					// Some(self.k),
-				)?;
+			encs.sort_by_key(IntVarEnc::ub);
+			while encs.len() > 1 {
+				let x = encs.pop().unwrap();
+				let z = if let Some(y) = encs.pop() {
+					x.add(
+						db,
+						&mut encoder,
+						&y,
+						None,
+						None,
+					)?
+				} else {
+					x
+				};
+
+				encs.insert(
+					encs.iter()
+						.position(|enc| z.ub() < enc.ub())
+						.unwrap_or(encs.len()),
+					z,
+				);
+				debug_assert!(encs.windows(2).all(|x| x[0].ub() <= x[1].ub()));
 			}
 
+			assert!(encs.len() == 1);
 			encoder.encode(
 				db,
 				&TernLeConstraint::new(
-					&y,
+					&encs.pop().unwrap(),
 					&IntVarEnc::Const(C::zero()),
 					&self.cmp,
 					&IntVarEnc::Const(k),
