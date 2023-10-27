@@ -608,7 +608,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 
 					let get_and_shift =
 						|ys: &HashMap<C, Vec<LitOrConst<DB::Lit>>>, i: C, sh: usize| {
-							(0..=sh)
+							(0..sh)
 								.map(|_| LitOrConst::Const(false))
 								.chain(
 									ys.get(&i)
