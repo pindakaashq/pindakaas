@@ -51,6 +51,16 @@ impl<Lit: Literal> From<bool> for LitOrConst<Lit> {
 	}
 }
 
+impl<Lit: Literal> TryFrom<LitOrConst<Lit>> for bool {
+	type Error = ();
+	fn try_from(item: LitOrConst<Lit>) -> Result<Self, Self::Error> {
+		match item {
+			LitOrConst::Const(b) => Ok(b),
+			_ => Err(()),
+		}
+	}
+}
+
 impl<Lit: Literal> Display for LitOrConst<Lit> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -323,19 +333,19 @@ impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 	xs: Vec<LitOrConst<Lit>>,
-	dom: Option<BTreeSet<C>>, // TODO deduplicate after IntVarEnc is part of IntVar
+	dom: BTreeSet<C>, // TODO deduplicate after IntVarEnc is part of IntVar
 	lbl: String,
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
-	pub fn from_lits(xs: &[LitOrConst<Lit>], dom: Option<&[C]>, lbl: String) -> Self {
+	pub fn from_lits(xs: &[LitOrConst<Lit>], dom: &[C], lbl: String) -> Self {
 		if GROUND_BINARY_AT_LB {
 			panic!("Cannot create offset binary encoding `from_lits` without a given lower bound.")
 		}
 
 		Self {
 			xs: xs.to_vec(),
-			dom: dom.map(|dom| dom.iter().cloned().collect()),
+			dom: dom.iter().cloned().collect(),
 			lbl,
 		}
 	}
@@ -345,7 +355,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
 		Self {
 			xs: Self::xs_from_bounds(db, lb, ub, &lbl),
-			dom: Some(dom.iter().cloned().collect()),
+			dom: dom.iter().cloned().collect(),
 			lbl,
 		}
 	}
@@ -371,7 +381,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	) -> Self {
 		Self {
 			xs: Self::xs_from_bounds(db, lb, ub, &lbl),
-			dom: Some(num::range_inclusive(lb, ub).collect()),
+			dom: num::range_inclusive(lb, ub).collect(),
 			lbl,
 		}
 	}
@@ -395,7 +405,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				.map(|(l, _)| l.into())
 				.chain([LitOrConst::Const(false)])
 				.collect(),
-			dom: Some(num::range_inclusive(*lb, *ub).collect()),
+			dom: num::range_inclusive(*lb, *ub).collect(),
 			lbl,
 		}
 	}
@@ -404,14 +414,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
 		self.encode_unary_constraint(db, &Comparator::GreaterEq, self.lb(), true)?;
 		self.encode_unary_constraint(db, &Comparator::LessEq, self.ub(), true)?;
-		for gap in self
-			.dom
-			.as_ref()
-			.unwrap()
-			.iter()
-			.tuple_windows()
-			.collect::<Vec<(&C, &C)>>()
-		{
+		for gap in self.dom.iter().tuple_windows().collect::<Vec<(&C, &C)>>() {
 			for k in num::range_inclusive(*gap.0 + C::one(), *gap.1 - C::one()) {
 				self.encode_neq(db, k)?;
 			}
@@ -443,7 +446,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			.collect()
 	}
 
-	/// Encode `x # k` where `# ∈ ≤,=,≥`
+	/// Encode `x # k` where `# ∈ {≤,=,≥}`
 	pub(crate) fn encode_unary_constraint<DB: ClauseDatabase<Lit = Lit>>(
 		&self,
 		db: &mut DB,
@@ -458,7 +461,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				} else if k >= self.ub() && !force {
 					Ok(())
 				} else {
-					lex_leq_const(db, &self.xs(true), self.normalize(k).into(), self.bits())
+					lex_leq_const(db, &self.xs(true), k, self.bits())
 				}
 			}
 			Comparator::Equal => self
@@ -471,7 +474,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				} else if k <= self.lb() && !force {
 					Ok(())
 				} else {
-					lex_geq_const(db, &self.xs(true), self.normalize(k).into(), self.bits())
+					lex_geq_const(db, &self.xs(true), k, self.bits())
 				}
 			}
 		}
@@ -503,11 +506,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 
 	/// Returns domain values, possibly computed
 	fn dom_(&self) -> Vec<C> {
-		if let Some(dom) = self.dom.as_ref() {
-			dom.iter().cloned().collect()
-		} else {
-			num::range_inclusive(self.lb(), self.ub()).collect()
-		}
+		self.dom.iter().cloned().collect()
 	}
 
 	fn dom(&self) -> IntervalSet<C> {
@@ -518,21 +517,11 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	}
 
 	pub(crate) fn lb(&self) -> C {
-		if let Some(dom) = self.dom.as_ref() {
-			*dom.first().unwrap()
-		} else {
-			let (_, add) = self.filter_fixed();
-			add
-		}
+		*self.dom.first().unwrap()
 	}
 
 	pub(crate) fn ub(&self) -> C {
-		if let Some(dom) = self.dom.as_ref() {
-			*dom.last().unwrap()
-		} else {
-			let (terms, add) = self.filter_fixed();
-			terms.iter().map(|(_, c)| *c).fold(add, C::add)
-		}
+		*self.dom.last().unwrap()
 	}
 
 	pub(crate) fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
@@ -584,8 +573,6 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 
 	/// Return a linear expression of non-fixed literals and their coefficient, and a constant `add` resulting from the fixed literals
 	fn filter_fixed(&self) -> (Vec<(Lit, C)>, C) {
-		let mut k = C::one();
-		let two = C::one() + C::one();
 		let mut add = C::zero(); // resulting from fixed terms
 
 		let offset: C = if GROUND_BINARY_AT_LB {
@@ -597,17 +584,14 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		(
 			self.xs(true)
 				.into_iter()
-				.filter_map(|x| {
-					let term = match x {
-						LitOrConst::Lit(l) => Some((l, k)),
-						LitOrConst::Const(true) => {
-							add += k;
-							None
-						}
-						LitOrConst::Const(false) => None,
-					};
-					k *= two;
-					term
+				.enumerate()
+				.filter_map(|(k, x)| match x {
+					LitOrConst::Lit(l) => Some((l, C::one().shl(k))),
+					LitOrConst::Const(true) => {
+						add += C::one().shl(k);
+						None
+					}
+					LitOrConst::Const(false) => None,
 				})
 				.collect::<Vec<_>>(),
 			add + offset,
@@ -808,26 +792,28 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		// cmp: &LimitComp,
 		// enc: &'a mut dyn Encoder<DB, TernLeConstraint<'a, DB, C>>,
 	) -> Result<IntVarEnc<Lit, C>> {
-		let comp_lb = self.lb() + y.lb();
-		let lb = std::cmp::max(lb.unwrap_or(comp_lb), comp_lb);
-
-		let comp_ub = self.ub() + y.ub();
-		let ub = std::cmp::min(ub.unwrap_or(comp_ub), comp_ub);
-
 		match (self, y) {
 			(IntVarEnc::Const(a), IntVarEnc::Const(b)) => Ok(IntVarEnc::Const(*a + *b)),
 			// TODO only used in sorters which enforce the constraints later!
 			(IntVarEnc::Const(c), x) | (x, IntVarEnc::Const(c)) if c.is_zero() => Ok(x.clone()),
-			(IntVarEnc::Ord(x), IntVarEnc::Ord(y)) => Ok(IntVarEnc::Ord(IntVarOrd::from_syms(
-				db,
-				ord_plus_ord_le_ord_sparse_dom(
-					x.dom().iter(..).map(|d| d.end - C::one()).collect(),
-					y.dom().iter(..).map(|d| d.end - C::one()).collect(),
-					lb,
-					ub,
-				),
-				format!("{}+{}", x.lbl, y.lbl),
-			))),
+			(IntVarEnc::Ord(x), IntVarEnc::Ord(y)) => {
+				let comp_lb = self.lb() + y.lb();
+				let lb = std::cmp::max(lb.unwrap_or(comp_lb), comp_lb);
+
+				let comp_ub = self.ub() + y.ub();
+				let ub = std::cmp::min(ub.unwrap_or(comp_ub), comp_ub);
+
+				Ok(IntVarEnc::Ord(IntVarOrd::from_syms(
+					db,
+					ord_plus_ord_le_ord_sparse_dom(
+						x.dom().iter(..).map(|d| d.end - C::one()).collect(),
+						y.dom().iter(..).map(|d| d.end - C::one()).collect(),
+						lb,
+						ub,
+					),
+					format!("{}+{}", x.lbl, y.lbl),
+				)))
+			}
 			(IntVarEnc::Ord(x), IntVarEnc::Const(y)) | (IntVarEnc::Const(y), IntVarEnc::Ord(x)) => {
 				let xs =
 					x.xs.clone()
@@ -841,32 +827,23 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 				.into())
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Bin(y_bin)) => {
-				if GROUND_BINARY_AT_LB && comp_lb != x_bin.lb() + y_bin.lb() {
+				if GROUND_BINARY_AT_LB && self.lb() + y.lb() != x_bin.lb() + y_bin.lb() {
 					unimplemented!(
 					"Not implemented addition for unequal lbs for zero-grounded binary encodings"
 				);
 				}
 
 				const RETAIN_GAPS: bool = false;
-				let dom = if x_bin.dom.is_none() && y_bin.dom.is_none() {
-					None
-				} else if RETAIN_GAPS {
-					Some(
-						x_bin
-							.dom_()
-							.iter()
-							.cartesian_product(y_bin.dom_().iter())
-							.map(|(a, b)| *a + *b)
-							.collect::<Vec<_>>(),
-					)
+				let dom = if RETAIN_GAPS {
+					x_bin
+						.dom_()
+						.iter()
+						.cartesian_product(y_bin.dom_().iter())
+						.map(|(a, b)| *a + *b)
+						.collect::<Vec<_>>()
 				} else {
-					Some(
-						num::iter::range_inclusive(
-							x_bin.lb() + y_bin.lb(),
-							x_bin.ub() + y_bin.ub(),
-						)
-						.collect::<Vec<_>>(),
-					)
+					num::iter::range_inclusive(x_bin.lb() + y_bin.lb(), x_bin.ub() + y_bin.ub())
+						.collect::<Vec<_>>()
 				};
 
 				let z = IntVarEnc::Bin(IntVarBin::from_lits(
@@ -877,7 +854,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 						&Comparator::Equal,
 						LitOrConst::Const(false),
 					)?,
-					dom.as_deref(),
+					&dom,
 					format!("{}+{}", x_bin.lbl, y_bin.lbl),
 				));
 				Ok(z)

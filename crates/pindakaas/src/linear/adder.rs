@@ -4,9 +4,9 @@ use rustc_hash::FxHashMap;
 use crate::{
 	helpers::{as_binary, XorConstraint, XorEncoder},
 	int::LitOrConst,
-	linear::{LimitComp, PosCoeff},
+	linear::LimitComp,
 	trace::{emit_clause, new_var},
-	ClauseDatabase, Coefficient, Comparator, Encoder, Linear, Literal, Result, Unsatisfiable,
+	ClauseDatabase, Cnf, Coefficient, Comparator, Encoder, Linear, Literal, Result, Unsatisfiable,
 };
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
@@ -139,12 +139,51 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 			lex_leq_const(
 				db,
 				&sum.into_iter().map(|l| l.into()).collect::<Vec<_>>(),
-				lin.k.clone(),
+				*lin.k,
 				bits,
 			)?;
 		}
 		Ok(())
 	}
+}
+
+fn to_bits<C: Coefficient>(k: C, bits: usize) -> Vec<bool> {
+	// get k represented as 2-comp in the min. number of bits
+	let k = if !k.is_negative() {
+		// 2-comp for non-negative x = unsigned(x) ++ [false sign bit]
+		as_binary(k.into(), None)
+			.into_iter()
+			.chain([false]) // sign bit
+			.collect()
+	} else {
+		// 2-comp for negative x = negate(unsigned(|x|) ) + one
+		// Ex. negate(unsigned(|-2|)) + one = negate(0+10) + one = 101 + one = 110 = -4+2+0 = -2
+		let k = as_binary((k.abs()).into(), None)
+			.into_iter()
+			.chain([false])
+			.map(|b| LitOrConst::from(!b)) // negate
+			.collect::<Vec<_>>();
+		// add 1
+		let one = as_binary(C::one().into(), Some(k.len()))
+			.into_iter()
+			.map(LitOrConst::from)
+			.collect::<Vec<_>>();
+		log_enc_add_fn(&mut Cnf::new(0), &k, &one, &Comparator::Equal, false.into())
+			.unwrap()
+			.into_iter()
+			.map(|x| bool::try_from(x).unwrap())
+			.collect::<Vec<_>>()
+	};
+	// First, sign-extend to get the required number fo bits
+	let k = k[..k.len() - 1]
+		.iter()
+		.copied()
+		.chain(vec![*k.last().unwrap(); bits.saturating_sub(k.len())])
+		// and negate just the last bit to get lexicographic binary
+		.chain([!k.last().unwrap()])
+		.collect::<Vec<_>>();
+
+	k
 }
 
 /// Uses lexicographic constraint to constrain x:B ≦ k
@@ -155,13 +194,14 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	x: &[LitOrConst<DB::Lit>],
-	k: PosCoeff<C>,
+	k: C,
 	bits: usize,
 ) -> Result {
 	// For every zero bit in k:
 	// - either the `x` bit is also zero, or
 	// - a higher `x` bit is zero that was one in k.
-	let k = as_binary(k, None);
+	let k = to_bits(k, bits);
+
 	(0..bits)
 		.filter(|i| !k.get(*i).unwrap_or(&false))
 		.try_for_each(|i| {
@@ -179,10 +219,11 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	x: &[LitOrConst<DB::Lit>],
-	k: PosCoeff<C>,
+	k: C,
 	bits: usize,
 ) -> Result {
-	let k = as_binary(k, None);
+	let k = to_bits(k, bits);
+
 	(0..bits)
 		.filter(|i| *k.get(*i).unwrap_or(&false))
 		.try_for_each(|i| {
