@@ -22,8 +22,8 @@ pub enum Format {
 }
 
 /// Number of required (non-fixed) lits for IntVarBin
-pub(crate) fn required_lits<C: Coefficient>(lb: C, ub: C) -> u32 {
-	if GROUND_BINARY_AT_LB {
+pub(crate) fn required_lits<C: Coefficient>(lb: C, ub: C) -> usize {
+	(if GROUND_BINARY_AT_LB {
 		C::zero().leading_zeros() - ((ub - lb).leading_zeros())
 	} else if !lb.is_negative() {
 		C::zero().leading_zeros() - ub.leading_zeros()
@@ -33,7 +33,7 @@ pub(crate) fn required_lits<C: Coefficient>(lb: C, ub: C) -> u32 {
 			C::zero().leading_zeros() - lb_two_comp.leading_zeros() + 1,
 			C::zero().leading_zeros() - ub.leading_zeros() + 1,
 		)
-	}
+	}) as usize
 }
 
 impl<Lit: Literal, C: Coefficient> Model<Lit, C> {

@@ -642,7 +642,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 							(y.into_iter().map(|l| -l).collect(), true)
 						};
 
-						let z = log_enc_add_fn(db, &x, &y, &Comparator::Equal, c.into())?;
+						let z = log_enc_add_fn(db, &x, &y, &Comparator::Equal, c.into(), None)?;
 						ys.insert(z_i, z);
 					}
 
@@ -1225,7 +1225,7 @@ mod tests {
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
-	const MODEL_CONFIGS: [ModelConfig; 3] = [
+	const MODEL_CONFIGS: &[ModelConfig] = &[
 		ModelConfig { scm: Scm::Add },
 		ModelConfig { scm: Scm::Rca },
 		ModelConfig { scm: Scm::Pow },

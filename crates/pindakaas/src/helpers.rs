@@ -30,7 +30,7 @@ pub(crate) fn unsigned_binary_range_ub<C: Coefficient>(bits: usize) -> Option<C>
 
 /// Convert `k` to unsigned binary in `bits`
 pub(crate) fn as_binary<C: Coefficient>(k: PosCoeff<C>, bits: Option<usize>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| required_lits(C::zero(), *k) as usize);
+	let bits = bits.unwrap_or_else(|| required_lits(C::zero(), *k));
 	// let range_ub = unsigned_binary_range_ub(bits).unwrap();
 	// assert!(
 	// 	*k <= range_ub,
