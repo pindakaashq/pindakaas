@@ -56,7 +56,9 @@ pub use sorted::{SortedEncoder, SortedStrategy};
 ///
 ///  - [`std::cmp::Eq`] and [`std::hash::Hash`] to allow PB constraints to be
 ///    simplified
-pub trait Literal: fmt::Debug + Clone + Eq + Hash {
+pub trait Literal:
+	fmt::Debug + Clone + Eq + Ord + PartialOrd + Hash + Zero + One + FromStr + Display
+{
 	/// Returns the negation of the literal in its current form
 	fn negate(&self) -> Self;
 	/// Returns `true` when the literal a negated boolean variable.
@@ -70,7 +72,22 @@ pub trait Literal: fmt::Debug + Clone + Eq + Hash {
 		}
 	}
 }
-impl<T: Signed + fmt::Debug + Clone + Eq + Hash + Neg<Output = Self> + LitMarker> Literal for T {
+impl<
+		T: Signed
+			+ fmt::Debug
+			+ Clone
+			+ Eq
+			+ Ord
+			+ PartialOrd
+			+ Hash
+			+ Neg<Output = Self>
+			+ LitMarker
+			+ Zero
+			+ One
+			+ Display
+			+ FromStr,
+	> Literal for T
+{
 	fn is_negated(&self) -> bool {
 		self.is_negative()
 	}
@@ -272,7 +289,7 @@ impl<'a, DB: ClauseDatabase> ClauseDatabase for ConditionalDatabase<'a, DB> {
 /// It can be used to create formulas manually, to store the results from
 /// encoders, read formulas from a file, and write them to a file
 #[derive(Clone, Debug)]
-pub struct Cnf<Lit: Literal + Zero + One = i32> {
+pub struct Cnf<Lit: Literal = i32> {
 	/// The last variable created by [`new_var`]
 	last_var: Lit,
 	/// The literals from *all* clauses
@@ -308,8 +325,15 @@ impl<Lit: Literal + Zero + One + Display> Cnf<Lit> {
 		write!(file, "{self}")
 	}
 
-	pub fn variables(&self) -> Lit {
-		self.last_var.clone()
+	pub fn vars(&self) -> impl Iterator<Item = Lit> {
+		self.iter()
+			.flat_map(|cl| cl.iter().map(|lit| lit.var()))
+			.sorted()
+			.dedup()
+	}
+
+	pub fn variables(&self) -> usize {
+		self.vars().count()
 	}
 
 	pub fn clauses(&self) -> usize {
@@ -407,7 +431,7 @@ impl<Lit: Literal + Zero + One + Display, C: Coefficient> Wcnf<Lit, C> {
 		write!(file, "{self}")
 	}
 
-	pub fn variables(&self) -> Lit {
+	pub fn variables(&self) -> usize {
 		self.cnf.variables()
 	}
 

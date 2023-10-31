@@ -81,6 +81,7 @@ pub(crate) struct ScmNode {
 
 pub fn main() {
 	println!("cargo:rerun-if-changed=res/scm.tar.gz");
+	println!("cargo:rerun-if-changed=res/ecm.tar.gz");
 	println!("cargo:rerun-if-changed=build.rs");
 
 	let scm = scm().unwrap();
@@ -103,4 +104,11 @@ pub(crate) sh2: u32,
 			.join(",\n")
 	);
 	fs::write("./src/int/scm.rs", o).unwrap();
+
+	let db = Path::new("./res/ecm.tar.gz");
+	assert!(db.exists());
+
+	Archive::new(GzDecoder::new(fs::File::open(db).unwrap()))
+		.unpack("./res/")
+		.unwrap();
 }

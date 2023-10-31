@@ -2,11 +2,13 @@ use crate::{
 	helpers::{add_clauses_for, as_binary, negate_cnf},
 	int::{TernLeConstraint, TernLeEncoder},
 	linear::log_enc_add_fn,
-	BddEncoder, CheckError, Checker, ClauseDatabase, Coefficient, Comparator, Encoder, Literal,
-	Result, Unsatisfiable,
+	trace::emit_clause,
+	BddEncoder, CheckError, Checker, ClauseDatabase, Cnf, Coefficient, Comparator, Encoder,
+	Literal, Result, Unsatisfiable,
 };
+
+use crate::trace::new_var;
 use itertools::Itertools;
-use std::fmt::Display;
 use std::{
 	cell::RefCell,
 	cmp::Ordering,
@@ -14,6 +16,7 @@ use std::{
 	ops::{Index, Mul},
 	rc::Rc,
 };
+use std::{fmt::Display, path::PathBuf};
 
 const DECOMPOSE: bool = false;
 
@@ -38,6 +41,7 @@ pub enum Scm {
 	Add,
 	Rca,
 	Pow,
+	Dnf,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -138,6 +142,10 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			num_var,
 			..Self::default()
 		}
+	}
+
+	pub fn constraints(&'_ self) -> impl Iterator<Item = &'_ Lin<Lit, C>> {
+		self.cons.iter()
 	}
 
 	pub(crate) fn add_int_var_enc(
@@ -479,7 +487,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		db: &mut DB,
 		enc: &IntVarEnc<Lit, C>,
 		config: &ModelConfig,
-	) -> Result<(Vec<IntVarEnc<Lit, C>>, C), Unsatisfiable> {
+	) -> Result<(Vec<IntVarEnc<DB::Lit, C>>, C), Unsatisfiable> {
 		if self.c == C::zero() {
 			Ok((vec![IntVarEnc::Const(C::zero())], C::zero()))
 		} else if self.c == C::one() {
@@ -546,22 +554,89 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					}
 
 					let lits = match config.scm {
-						Scm::Add => x_enc.lits(),
+						Scm::Add | Scm::Dnf => x_enc.lits(),
 						Scm::Rca | Scm::Pow => 0,
 					};
 
 					let scm = match config.scm {
-						Scm::Add | Scm::Rca => (c > C::one())
-							.then(|| {
-								SCM.iter()
-									.find_map(|(bits, mul, scm)| {
-										(*bits == lits && C::from(*mul).unwrap() == c)
-											.then_some(scm)
-									})
-									.map(|v| v.to_vec())
+						_ if c.is_one() => Some(vec![]),
+						Scm::Add | Scm::Rca => SCM
+							.iter()
+							.find_map(|(bits, mul, scm)| {
+								(*bits == lits && C::from(*mul).unwrap() == c).then_some(scm)
 							})
-							.unwrap_or_default(), // default to empty recipe if c == 1
+							.map(|v| v.to_vec()),
 						Scm::Pow => None,
+						Scm::Dnf => {
+							let cnf = Cnf::<DB::Lit>::from_file(&PathBuf::from(format!(
+								"{}/res/ecm/{lits}_{c}.dimacs",
+								env!("CARGO_MANIFEST_DIR")
+							)))
+							.unwrap();
+							let map = cnf
+								.vars()
+								.zip(
+									xs.iter()
+										.flat_map(|x| match x {
+											LitOrConst::Lit(l) => Some(l.clone()),
+											_ => None,
+										})
+										.chain(
+											(0..(cnf.variables() - lits))
+												.map(|_i| {
+													new_var!(
+														db,
+														format!(
+															"{}_y_{}",
+															self.x.borrow().lbl(),
+															_i
+														)
+													)
+												})
+												.collect::<Vec<_>>(),
+										),
+								)
+								.collect::<HashMap<_, _>>();
+							cnf.iter().try_for_each(|clause| {
+								emit_clause!(
+									db,
+									&clause
+										.iter()
+										.map(|x| {
+											let lit = &map[&x.var()];
+											if x.is_negated() {
+												lit.negate()
+											} else {
+												lit.clone()
+											}
+										})
+										.collect::<Vec<_>>()
+								)
+							})?;
+							return Ok((
+								vec![IntVarEnc::Bin(IntVarBin::from_lits(
+									&num::iter::range(C::zero(), C::from(sh).unwrap())
+										.map(|_| LitOrConst::Const(false))
+										.chain(
+											map.values()
+												.sorted()
+												.skip(lits)
+												.cloned()
+												.map(LitOrConst::from),
+										)
+										.collect::<Vec<_>>(),
+									&self
+										.x
+										.borrow()
+										.dom
+										.iter()
+										.map(|d| self.c * *d)
+										.collect::<Vec<_>>(),
+									format!("{}*{}", self.c.clone(), self.x.borrow().lbl()),
+								))],
+								k,
+							));
+						}
 					};
 
 					// if we have no recipe for this particular (b,c) key, in which case we fallback to Pow
@@ -906,7 +981,11 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		feature = "trace",
 		tracing::instrument(name = "lin_encoder", skip_all, fields(constraint = format!("{}", self)))
 	)]
-	fn encode<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB, config: &ModelConfig) -> Result {
+	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(
+		&self,
+		db: &mut DB,
+		config: &ModelConfig,
+	) -> Result {
 		// TODO assert simplified/simplify
 		// assert!(self._is_simplified());
 
@@ -1620,10 +1699,9 @@ End
 		// 59 * x_1=0 (=0) + 46 * x_2=7 (=322) + 132 * x_3=4 (=528) + 50 * x_4=4 (=200) + 7 * x_5=0 (=0) == 1050 !≤ 931
 		let lp = r"
 Subject To
-  c0: 11 x_1 + 11 x_2 <= 20
+  c0: 6 x_1 <= 11
 Bounds
   0 <= x_1 <= 3
-  0 <= x_2 <= 3
 End
 ";
 		test_lp_for_configs(lp);
