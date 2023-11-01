@@ -56,6 +56,11 @@ impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 
 impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{} ∈ {}", self.lbl(), display_dom::<Lit, C>(&self.dom))
+		write!(
+			f,
+			"{} ∈ {}",
+			self.lbl(),
+			display_dom::<Lit, C>(&self.dom.iter().collect::<Vec<_>>()) // display_dom::<Lit, C>(&self.dom.values())
+		)
 	}
 }

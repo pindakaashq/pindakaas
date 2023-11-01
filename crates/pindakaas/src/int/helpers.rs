@@ -480,7 +480,7 @@ End
 						|| lin
 							.terms
 							.iter()
-							.all(|term| term.x.borrow().dom().count() == 1)
+							.all(|term| term.x.borrow().dom.size() == C::one())
 				} =>
 			{
 				Obj::Satisfy

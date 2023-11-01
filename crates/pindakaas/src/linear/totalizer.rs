@@ -85,8 +85,8 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 								.dom
 								.iter()
 								.cartesian_product(right.borrow().dom.iter())
-								.map(|(&a, &b)| a + b)
-								.filter(|&d| d <= k)
+								.map(|(a, b)| a + b)
+								.filter(|d| d <= &k)
 								.sorted()
 								.dedup()
 								.collect()

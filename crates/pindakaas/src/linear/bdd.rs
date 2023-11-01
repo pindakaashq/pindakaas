@@ -175,7 +175,7 @@ impl<C: Coefficient> BddEncoder<C> {
 
 		let mut ys = ys.into_iter();
 		let first = ys.next().unwrap();
-		assert!(first.size() == 1);
+		assert!(first.size() == C::one());
 		lin.exp
 			.terms
 			.iter()
