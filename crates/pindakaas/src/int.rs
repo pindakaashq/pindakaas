@@ -1,14 +1,15 @@
 mod constrain;
 mod display;
+mod dom;
 mod enc;
 mod helpers;
 mod model;
 mod scm;
 
 use itertools::Itertools;
-use std::collections::BTreeSet;
 
 pub(crate) use constrain::{TernLeConstraint, TernLeEncoder};
+pub use dom::Dom;
 pub(crate) use enc::{IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
 pub(crate) use helpers::required_lits;
 pub use helpers::Format;
@@ -58,7 +59,7 @@ impl<Lit: Literal, C: Coefficient> PbLinExp<Lit, C> {
 	}
 }
 
-pub(crate) fn display_dom<Lit: Literal, C: Coefficient>(dom: &BTreeSet<C>) -> String {
+pub(crate) fn display_dom<Lit: Literal, C: Coefficient>(dom: &[C]) -> String {
 	const ELIPSIZE: usize = 8;
 	if dom.is_empty() {
 		return String::from("{}");

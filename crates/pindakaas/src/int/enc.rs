@@ -3,11 +3,10 @@ use rustc_hash::FxHashMap;
 
 use super::display_dom;
 use itertools::Itertools;
-use std::collections::BTreeSet;
 use std::fmt::Display;
 
 use crate::helpers::{two_comp_bounds, unsigned_binary_range_ub};
-use crate::int::{helpers::required_lits, TernLeConstraint, TernLeEncoder};
+use crate::int::{helpers::required_lits, Dom, TernLeConstraint, TernLeEncoder};
 use crate::linear::{lex_geq_const, lex_leq_const, log_enc_add_fn};
 use crate::Comparator;
 use crate::{
@@ -50,6 +49,8 @@ impl<Lit: Literal> From<bool> for LitOrConst<Lit> {
 		LitOrConst::Const(item)
 	}
 }
+
+const RETAIN_GAPS: bool = false;
 
 impl<Lit: Literal> TryFrom<LitOrConst<Lit>> for bool {
 	type Error = ();
@@ -106,7 +107,13 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 			f,
 			"({}):B ∈ {} [{}]",
 			self.lbl,
-			display_dom::<Lit, C>(&self.dom().iter(..).map(|d| d.end - C::one()).collect()),
+			&display_dom::<Lit, C>(
+				&self
+					.dom()
+					.iter(..)
+					.map(|d| d.end - C::one())
+					.collect::<Vec<_>>()
+			),
 			self.lits()
 		)
 	}
@@ -333,18 +340,18 @@ impl<Lit: Literal> Checker for ImplicationChainConstraint<Lit> {
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarBin<Lit: Literal, C: Coefficient> {
 	xs: Vec<LitOrConst<Lit>>,
-	dom: BTreeSet<C>, // TODO deduplicate after IntVarEnc is part of IntVar
+	pub(crate) dom: Dom<C>, // TODO deduplicate after IntVarEnc is part of IntVar
 	lbl: String,
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
-	pub fn from_lits(xs: &[LitOrConst<Lit>], dom: &[C], lbl: String) -> Self {
+	pub fn from_lits(xs: &[LitOrConst<Lit>], dom: Dom<C>, lbl: String) -> Self {
 		if GROUND_BINARY_AT_LB {
 			panic!("Cannot create offset binary encoding `from_lits` without a given lower bound.")
 		}
 
 		let mut xs = xs.to_vec();
-		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
+		let (lb, ub) = (dom.lb(), dom.ub());
 		if !lb.is_negative() {
 			// if lb is >=0
 			xs.push(LitOrConst::Const(false));
@@ -353,19 +360,13 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			xs.push(LitOrConst::Const(true));
 		}
 
-		Self {
-			xs,
-			dom: dom.iter().cloned().collect(),
-			lbl,
-		}
+		Self { xs, dom, lbl }
 	}
 
-	pub fn from_dom<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, dom: &[C], lbl: String) -> Self {
-		debug_assert!(&dom.iter().tuple_windows().all(|(a, b)| a <= b));
-		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
+	pub fn from_dom<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, dom: Dom<C>, lbl: String) -> Self {
 		Self {
-			xs: Self::xs_from_bounds(db, lb, ub, &lbl),
-			dom: dom.iter().cloned().collect(),
+			xs: Self::xs_from_bounds(db, dom.lb(), dom.ub(), &lbl),
+			dom,
 			lbl,
 		}
 	}
@@ -391,7 +392,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	) -> Self {
 		Self {
 			xs: Self::xs_from_bounds(db, lb, ub, &lbl),
-			dom: num::range_inclusive(lb, ub).collect(),
+			dom: Dom::from_bounds(lb, ub),
 			lbl,
 		}
 	}
@@ -415,7 +416,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				.map(|(l, _)| l.into())
 				.chain([LitOrConst::Const(false)])
 				.collect(),
-			dom: num::range_inclusive(*lb, *ub).collect(),
+			dom: Dom::from_bounds(*lb, *ub),
 			lbl,
 		}
 	}
@@ -424,8 +425,8 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
 		self.encode_unary_constraint(db, &Comparator::GreaterEq, self.lb(), true)?;
 		self.encode_unary_constraint(db, &Comparator::LessEq, self.ub(), true)?;
-		for gap in self.dom.iter().tuple_windows().collect::<Vec<(&C, &C)>>() {
-			for k in num::range_inclusive(*gap.0 + C::one(), *gap.1 - C::one()) {
+		for (a, b) in self.dom.ranges.iter().tuple_windows() {
+			for k in num::range_inclusive(a.1 + C::one(), b.0 - C::one()) {
 				self.encode_neq(db, k)?;
 			}
 		}
@@ -514,11 +515,6 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		todo!()
 	}
 
-	/// Returns domain values, possibly computed
-	fn dom_(&self) -> Vec<C> {
-		self.dom.iter().cloned().collect()
-	}
-
 	fn dom(&self) -> IntervalSet<C> {
 		// TODO for now, do not add in gaps since it may interfere with coupling
 		num::iter::range_inclusive(self.lb(), self.ub())
@@ -527,11 +523,11 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	}
 
 	pub(crate) fn lb(&self) -> C {
-		*self.dom.first().unwrap()
+		self.dom.lb()
 	}
 
 	pub(crate) fn ub(&self) -> C {
-		*self.dom.last().unwrap()
+		self.dom.ub()
 	}
 
 	pub(crate) fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
@@ -643,16 +639,8 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		if y.is_zero() {
 			Ok(self.clone())
 		} else {
-			let z_bin = IntVarBin::from_dom(
-				db,
-				&self
-					.dom_()
-					.iter()
-					.cloned()
-					.map(|d| d + y)
-					.collect::<Vec<_>>(),
-				format!("{}+{}", self.lbl, y),
-			);
+			let z_bin =
+				IntVarBin::from_dom(db, self.dom.clone().add(y), format!("{}+{}", self.lbl, y));
 
 			encoder.encode(
 				db,
@@ -843,17 +831,20 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 				);
 				}
 
-				const RETAIN_GAPS: bool = false;
 				let dom = if RETAIN_GAPS {
-					x_bin
-						.dom_()
-						.iter()
-						.cartesian_product(y_bin.dom_().iter())
-						.map(|(a, b)| *a + *b)
-						.collect::<Vec<_>>()
+					todo!()
+				// Dom::from_slice(
+				// 	&self
+				// 		.x
+				// 		.borrow()
+				// 		.dom
+				// 		.iter()
+				// 		.cartesian_product(y.borrow().dom.iter())
+				// 		.map(|(a, b)| *a + *b)
+				// 		.collect::<Vec<_>>(),
+				// )
 				} else {
-					num::iter::range_inclusive(x_bin.lb() + y_bin.lb(), x_bin.ub() + y_bin.ub())
-						.collect::<Vec<_>>()
+					Dom::from_bounds(x_bin.lb() + y_bin.lb(), x_bin.ub() + y_bin.ub())
 				};
 
 				let z = IntVarEnc::Bin(IntVarBin::from_lits(
@@ -863,9 +854,9 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 						&y_bin.xs(false),
 						&Comparator::Equal,
 						LitOrConst::Const(false),
-						Some(required_lits(*dom.first().unwrap(), *dom.last().unwrap())),
+						Some(required_lits(dom.lb(), dom.ub())),
 					)?,
-					&dom,
+					dom,
 					format!("{}+{}", x_bin.lbl, y_bin.lbl),
 				));
 				Ok(z)
