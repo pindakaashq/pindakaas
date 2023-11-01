@@ -647,6 +647,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					let scm = if let Some(scm) = scm {
 						scm
 					} else {
+						assert!(matches!(config.scm, Scm::Pow), "Current SCM DB is complete");
 						return Ok((
 							as_binary(c.into(), None)
 								.into_iter()
