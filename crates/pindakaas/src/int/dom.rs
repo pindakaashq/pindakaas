@@ -9,17 +9,16 @@ pub struct Dom<C: Coefficient> {
 
 impl<C: Coefficient> Dom<C> {
 	pub fn from_slice(ds: &[C]) -> Self {
-		let mut ds = ds.into_iter();
-		let k = ds.next().unwrap().clone();
+		let mut ds = ds.iter();
+		let k = *ds.next().unwrap();
 		let mut k = (k, k);
 		let mut ranges = ds
-			.into_iter()
 			.flat_map(|&d| {
 				if d - k.1 == C::one() {
 					k.1 = d;
 					None
 				} else {
-					let res = k.clone();
+					let res = k;
 					k = (d, d);
 					Some(res)
 				}
@@ -80,7 +79,7 @@ impl<C: Coefficient> Dom<C> {
 
 	pub fn ge(&mut self, d: C) {
 		if let Some(r) = self.range(d) {
-			self.ranges = self.ranges[r..].into_iter().cloned().collect();
+			self.ranges = self.ranges[r..].to_vec();
 			if self.ranges[0].0 < d {
 				self.ranges[0].0 = d;
 			}
@@ -89,7 +88,7 @@ impl<C: Coefficient> Dom<C> {
 
 	pub fn le(&mut self, d: C) {
 		if let Some(r) = self.ranges.iter().position(|r| d <= r.1) {
-			self.ranges = self.ranges[..=r].into_iter().cloned().collect();
+			self.ranges = self.ranges[..=r].to_vec();
 			let n = self.ranges.len() - 1;
 			if self.ranges[n].1 > d {
 				self.ranges[n].1 = d;
