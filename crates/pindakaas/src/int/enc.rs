@@ -107,7 +107,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 			f,
 			"({}):B ∈ {} [{}]",
 			self.lbl,
-			&display_dom::<Lit, C>(
+			&display_dom(
 				&self
 					.dom()
 					.iter(..)
@@ -559,7 +559,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			} else {
 				as_binary(v.into(), Some(self.bits()))
 					.into_iter()
-					.zip(self.xs(true).into_iter())
+					.zip(self.xs(true))
 					// if >=, find 0's, if <=, find 1's
 					.filter_map(|(b, x)| (b != geq).then_some(x))
 					// if <=, negate 1's to not 1's
@@ -684,7 +684,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 					FxHashMap::with_capacity_and_hasher(terms.len(), BuildHasherDefault::default());
 				for (coef, lit) in terms {
 					debug_assert!(coef <= ub);
-					h.entry(*coef).or_insert_with(Vec::new).push(lit);
+					h.entry(*coef).or_default().push(lit);
 				}
 
 				let dom = std::iter::once((C::zero(), vec![]))

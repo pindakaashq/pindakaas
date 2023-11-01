@@ -28,7 +28,6 @@ fn scm() -> Result<Vec<(usize, u32, Vec<ScmNode>)>, std::io::Error> {
 		.unwrap();
 
 	Ok(fs::read_dir("./res/scm")?
-		.into_iter()
 		.map(|f| {
 			let path = f.unwrap().path();
 			let scm = fs::read_to_string(&path)

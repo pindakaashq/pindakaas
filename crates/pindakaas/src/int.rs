@@ -59,7 +59,7 @@ impl<Lit: Literal, C: Coefficient> PbLinExp<Lit, C> {
 	}
 }
 
-pub(crate) fn display_dom<Lit: Literal, C: Coefficient>(dom: &[C]) -> String {
+pub(crate) fn display_dom<C: Coefficient>(dom: &[C]) -> String {
 	const ELIPSIZE: usize = 8;
 	if dom.is_empty() {
 		return String::from("{}");

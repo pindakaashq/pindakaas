@@ -60,7 +60,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 			f,
 			"{} ∈ {}",
 			self.lbl(),
-			display_dom::<Lit, C>(&self.dom.iter().collect::<Vec<_>>()) // display_dom::<Lit, C>(&self.dom.values())
+			display_dom(&self.dom.iter().collect::<Vec<_>>()) // display_dom::<Lit, C>(&self.dom.values())
 		)
 	}
 }

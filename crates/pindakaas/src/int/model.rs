@@ -482,6 +482,8 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	}
 
 	// TODO move enc into Term ?
+	// TODO clippy
+	#[allow(clippy::type_complexity)]
 	fn encode<DB: ClauseDatabase<Lit = Lit>>(
 		&self,
 		db: &mut DB,
@@ -1227,7 +1229,6 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		});
 		Ok(())
 	}
-
 
 	// TODO should not be C i/o &C?
 	fn fix(&mut self, q: &C) -> Result {

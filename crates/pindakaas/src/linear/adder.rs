@@ -215,7 +215,8 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 			clause(
 				db,
 				&(i..bits)
-					.filter_map(|j| (j == i || *k.get(j).unwrap_or(&false)).then(|| -x[j].clone()))
+					.filter(|j| (*j == i || *k.get(*j).unwrap_or(&false)))
+					.map(|j| -x[j].clone())
 					.collect::<Vec<_>>(),
 			)
 		})
@@ -237,7 +238,8 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 			clause(
 				db,
 				&(i..bits)
-					.filter_map(|j| (j == i || !k.get(j).unwrap_or(&false)).then(|| x[j].clone()))
+					.filter(|j| (*j == i || !k.get(*j).unwrap_or(&false)))
+					.map(|j| x[j].clone())
 					.collect::<Vec<_>>(),
 			)
 		})
