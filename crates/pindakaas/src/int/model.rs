@@ -1735,7 +1735,4 @@ End
 ";
 		test_lp_for_configs(lp);
 	}
-";
-		test_lp_for_configs(lp);
-	}
 }
