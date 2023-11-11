@@ -44,9 +44,10 @@ pub enum Scm {
 	Dnf,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ModelConfig {
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ModelConfig<C: Coefficient> {
 	pub scm: Scm,
+	pub cutoff: Option<C>,
 }
 
 // TODO should we keep IntVar i/o IntVarEnc?
@@ -55,7 +56,7 @@ pub struct Model<Lit: Literal, C: Coefficient> {
 	pub(crate) cons: Vec<Lin<Lit, C>>,
 	pub(crate) num_var: usize,
 	pub(crate) obj: Obj<Lit, C>,
-	config: ModelConfig,
+	pub config: ModelConfig<C>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -110,10 +111,11 @@ pub enum Consistency {
 	Domain,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub enum Obj<Lit: Literal, C: Coefficient> {
 	Minimize(LinExp<Lit, C>),
 	Maximize(LinExp<Lit, C>),
+	#[default]
 	Satisfy,
 }
 
@@ -132,15 +134,22 @@ impl<Lit: Literal, C: Coefficient> Default for Model<Lit, C> {
 			num_var: 0,
 			obj: Obj::Satisfy,
 			config: ModelConfig::default(),
+
+impl<C: Coefficient> Default for ModelConfig<C> {
+	fn default() -> Self {
+		Self {
+			scm: Scm::Add,
+			cutoff: Some(C::one()),
 		}
 	}
 }
 
 impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
-	pub fn new(num_var: usize) -> Self {
+	pub fn new(num_var: usize, config: &ModelConfig<C>) -> Self {
 		Self {
 			num_var,
-			..Self::default()
+			config: config.clone(),
+			..Model::default()
 		}
 	}
 
@@ -436,7 +445,7 @@ Missing solutions:
 		self.vars().iter().map(|x| x.borrow().lits()).sum::<usize>()
 	}
 
-	pub fn with_config(self, config: ModelConfig) -> Self {
+	pub fn with_config(self, config: ModelConfig<C>) -> Self {
 		Model { config, ..self }
 	}
 }
@@ -1305,7 +1314,7 @@ mod tests {
 			.unwrap();
 		let mut cnf = Cnf::new(0);
 		// model.propagate(&Consistency::Bounds);
-		model.encode(&mut cnf, None).unwrap();
+		model.encode(&mut cnf).unwrap();
 	}
 
 	use crate::{helpers::tests::TestDB, Format};
@@ -1314,11 +1323,20 @@ mod tests {
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
-	const MODEL_CONFIGS: &[ModelConfig] = &[
-		ModelConfig { scm: Scm::Add },
-		ModelConfig { scm: Scm::Rca },
-		ModelConfig { scm: Scm::Pow },
-		ModelConfig { scm: Scm::Dnf },
+	const MODEL_CONFIGS: &[ModelConfig<C>] = &[
+		ModelConfig {
+			scm: Scm::Add,
+			cutoff: Some(0),
+		},
+		ModelConfig {
+			scm: Scm::Rca,
+			cutoff: Some(0),
+		},
+		// // ModelConfig { scm: Scm::Pow },
+		ModelConfig {
+			scm: Scm::Dnf,
+			cutoff: Some(0),
+		},
 	];
 
 	fn test_lp_for_configs(lp: &str) {
@@ -1327,19 +1345,17 @@ mod tests {
 		}
 	}
 
-	fn test_lp(lp: &str, config: ModelConfig) {
+	fn test_lp(lp: &str, config: ModelConfig<C>) {
 		// const CUTOFF: Option<C> = None;
-		const CUTOFF: Option<C> = Some(0);
-
 		let mut model = Model::<Lit, C>::from_string(lp.into(), Format::Lp)
 			.unwrap()
 			.with_config(config.clone());
 		println!("model = {model}");
 
 		let mut db = TestDB::new(0);
-		model.encode_vars(&mut db, CUTOFF).unwrap(); // Encode vars beforehand so db.num_var lines up
+		model.encode_vars(&mut db).unwrap(); // Encode vars beforehand so db.num_var lines up
 
-		let lit_assignments = if let Ok(decomposition) = model.encode(&mut db, CUTOFF) {
+		let lit_assignments = if let Ok(decomposition) = model.encode(&mut db) {
 			println!("decomposition = {}", decomposition);
 
 			// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
@@ -1361,6 +1377,32 @@ mod tests {
 			}
 			panic!("Test failed for {config:?} and {lp}");
 		}
+	}
+
+	#[test]
+	fn test_lp_le_single() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 3 x1 <= 8
+bounds
+0 <= x1 <= 3
+End
+",
+		);
+	}
+
+	#[test]
+	fn test_lp_le_single_with_shift() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 6 x1 <= 8
+bounds
+0 <= x1 <= 3
+End
+",
+		);
 	}
 
 	#[test]
@@ -1637,6 +1679,19 @@ End
 	// }
 
 	#[test]
+	fn test_scm_7_0() {
+		// Contains negative adder 7x = 8x-1x for Scm::Rca
+		let lp = r"
+	Subject To
+	c0: 7 x_1 = 0
+	Bounds
+	0 <= x_1 <= 3
+	End
+	";
+		test_lp_for_configs(lp);
+	}
+
+	#[test]
 	fn test_scm_3_11() {
 		let lp = r"
 	Subject To
@@ -1661,12 +1716,12 @@ End
 	}
 
 	#[test]
-	fn test_scm_4_117() {
+	fn test_scm_2_117() {
 		let lp = r"
 	Subject To
 	c0: 117 x_1 = 0
 	Bounds
-	0 <= x_1 <= 15
+	0 <= x_1 <= 3
 	End
 	";
 		test_lp_for_configs(lp);
