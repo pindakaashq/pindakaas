@@ -3,6 +3,7 @@ use crate::int::Lin;
 use crate::int::Model;
 use crate::Comparator;
 use crate::Literal;
+use crate::ModelConfig;
 
 use itertools::Itertools;
 
@@ -50,7 +51,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
 		let mut model = self.build_totalizer(xs, &lin.cmp.clone().into(), *lin.k)?;
 		model.propagate(&self.add_propagation);
-		model.encode(db, self.cutoff)?;
+		model.encode(db)?;
 		Ok(())
 	}
 }
@@ -63,6 +64,10 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 		k: C,
 	) -> Result<Model<Lit, C>> {
 		let mut model = Model::default();
+		model.config = ModelConfig {
+			cutoff: self.cutoff,
+			..ModelConfig::default()
+		};
 		let mut layer = xs
 			.into_iter()
 			.flat_map(|x| model.add_int_var_enc(x))

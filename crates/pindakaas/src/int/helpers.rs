@@ -510,7 +510,7 @@ mod tests {
 		)
 		.unwrap();
 		let mut cnf = Cnf::new(0);
-		model.encode(&mut cnf, None).unwrap();
+		model.encode(&mut cnf).unwrap();
 		println!("opb = {}", model.to_text(Format::Opb));
 	}
 
@@ -531,7 +531,7 @@ End
 		let mut cnf = Cnf::new(0);
 		println!("model = {model}");
 
-		model.encode(&mut cnf, None).unwrap();
+		model.encode(&mut cnf).unwrap();
 		println!("lp = {}", model.to_text(Format::Lp));
 		// assert_eq!(lp, model.to_text(Format::Lp));
 	}

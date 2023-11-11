@@ -3,6 +3,7 @@ use std::{collections::HashMap, ops::Range};
 use iset::IntervalMap;
 use itertools::Itertools;
 
+use crate::{int::Dom, Comparator, Literal, ModelConfig, Unsatisfiable};
 #[allow(unused_imports)]
 use crate::{
 	int::{IntVarEnc, IntVarOrd, Lin, LinExp, Model, Term},
@@ -35,7 +36,13 @@ impl<C: Coefficient> BddEncoder<C> {
 		lin: Lin<Lit, C>,
 		num_var: usize,
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		let mut model = Model::<Lit, C>::new(num_var);
+		let mut model = Model::<Lit, C>::new(
+			num_var,
+			&ModelConfig {
+				cutoff: self.cutoff,
+				..ModelConfig::default()
+			},
+		);
 
 		// sort by *decreasing* ub
 		let lin = if SORT_TERMS {
@@ -46,7 +53,7 @@ impl<C: Coefficient> BddEncoder<C> {
 						.terms
 						.iter()
 						.cloned()
-						.sorted_by(|a: &Term<Lit, C>, b: &Term<Lit, C>| b.ub().cmp(&a.ub()))
+						.sorted_by_key(|term| std::cmp::Reverse(term.borrow().ub()))
 						.collect(),
 				},
 				..lin
@@ -201,6 +208,10 @@ where
 	)]
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		let mut model = Model::default();
+		model.config = ModelConfig {
+			cutoff: self.cutoff,
+			..ModelConfig::default()
+		};
 		let xs = lin
 			.terms
 			.iter()

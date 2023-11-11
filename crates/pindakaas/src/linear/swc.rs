@@ -1,4 +1,5 @@
 use crate::int::{Consistency, Lin, Model, Term};
+use crate::ModelConfig;
 use crate::{int::IntVarEnc, ClauseDatabase, Coefficient, Encoder, Linear, Result};
 use itertools::Itertools;
 
@@ -34,6 +35,10 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 		// self.cutoff = -C::one();
 		// self.add_consistency = true;
 		let mut model = Model::default();
+		model.config = ModelConfig {
+			cutoff: self.cutoff,
+			..ModelConfig::default()
+		};
 		let xs = lin
 			.terms
 			.iter()
@@ -72,7 +77,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			});
 
 		model.propagate(&self.add_propagation);
-		model.encode(db, self.cutoff)?;
+		model.encode(db)?;
 		Ok(())
 	}
 }
