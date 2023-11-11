@@ -134,6 +134,9 @@ impl<Lit: Literal, C: Coefficient> Default for Model<Lit, C> {
 			num_var: 0,
 			obj: Obj::Satisfy,
 			config: ModelConfig::default(),
+		}
+	}
+}
 
 impl<C: Coefficient> Default for ModelConfig<C> {
 	fn default() -> Self {
@@ -279,7 +282,6 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	pub fn encode_vars<DB: ClauseDatabase<Lit = Lit>>(
 		&mut self,
 		db: &mut DB,
-		cutoff: Option<C>,
 	) -> Result<(), Unsatisfiable> {
 		// Encode (or retrieve encoded) variables (in order of id so lits line up more nicely with variable order)
 		let mut all_views = HashMap::new();
@@ -287,7 +289,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.iter()
 			.sorted_by_key(|var| var.borrow().id)
 			.try_for_each(|var| {
-				let prefer_order = var.borrow().prefer_order(cutoff);
+				let prefer_order = var.borrow().prefer_order(self.config.cutoff);
 				var.borrow_mut().encode(db, &mut all_views, prefer_order)
 			})
 	}
@@ -295,7 +297,6 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(
 		&mut self,
 		db: &mut DB,
-		cutoff: Option<C>,
 	) -> Result<Self, Unsatisfiable> {
 		// Create decomposed model and its aux vars
 
@@ -306,7 +307,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		};
 
 		// TODO can make Model non-mutable if this is moved
-		decomposition.encode_vars(db, cutoff)?;
+		decomposition.encode_vars(db)?;
 
 		for con in &decomposition.cons {
 			con.encode(db, &self.config)?;
@@ -497,7 +498,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		&self,
 		db: &mut DB,
 		enc: &IntVarEnc<Lit, C>,
-		config: &ModelConfig,
+		config: &ModelConfig<C>,
 	) -> Result<(Vec<IntVarEnc<DB::Lit, C>>, C), Unsatisfiable> {
 		if self.c == C::zero() {
 			Ok((vec![IntVarEnc::Const(C::zero())], C::zero()))
@@ -1004,7 +1005,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(
 		&self,
 		db: &mut DB,
-		config: &ModelConfig,
+		config: &ModelConfig<C>,
 	) -> Result {
 		// TODO assert simplified/simplify
 		// assert!(self._is_simplified());

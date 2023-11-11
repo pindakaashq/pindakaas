@@ -39,9 +39,7 @@ pub mod trace;
 
 pub use cardinality::{Cardinality, SortingNetworkEncoder};
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
-pub use int::{
-	Assignment, Consistency, Format, IntVarId, Lin, Model, ModelConfig, Scm, Term, TermRef,
-};
+pub use int::{Assignment, Consistency, Format, IntVarId, Lin, Model, ModelConfig, Scm, Term};
 pub use linear::{
 	AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear, LinearAggregator,
 	LinearConstraint, LinearEncoder, PosCoeff, SwcEncoder, TotalizerEncoder,
