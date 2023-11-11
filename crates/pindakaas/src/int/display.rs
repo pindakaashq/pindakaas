@@ -28,7 +28,15 @@ impl<Lit: Literal, C: Coefficient> Display for LinExp<Lit, C> {
 
 impl<Lit: Literal, C: Coefficient> Display for Term<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{:+}·{}", self.c, self.x.borrow())
+		if self.c.is_zero() {
+			write!(f, "+ 0")
+		} else if self.c.is_one() {
+			write!(f, "+ ({})", self.x.borrow())
+		} else if self.c.is_positive() {
+			write!(f, "+ {}·({})", self.c, self.x.borrow())
+		} else {
+			write!(f, "- ({}·{})", self.c.abs(), self.x.borrow())
+		}
 	}
 }
 
@@ -44,18 +52,18 @@ impl<Lit: Literal, C: Coefficient> Display for Obj<Lit, C> {
 
 impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		if self.is_tern() {
-			write!(
-				f,
-				"{} {} {} {}",
-				self.exp.terms[0],
-				self.exp.terms[1],
-				self.cmp,
-				self.exp.terms[2].clone() * -C::one(),
-			)
-		} else {
-			write!(f, "{} {} {}", self.exp, self.cmp, self.k,)
-		}
+		// if self.is_tern() && false {
+		// 	write!(
+		// 		f,
+		// 		"{} {} {} {}",
+		// 		self.exp.terms[0].borrow(),
+		// 		self.exp.terms[1].borrow(),
+		// 		self.cmp,
+		// 		self.exp.terms[2].borrow().clone() * -C::one(),
+		// 	)
+		// } else {
+		write!(f, "{} {} {}", self.exp, self.cmp, self.k,)
+		// }
 	}
 }
 
