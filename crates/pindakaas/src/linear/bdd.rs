@@ -3,14 +3,13 @@ use std::{collections::HashMap, ops::Range};
 use iset::IntervalMap;
 use itertools::Itertools;
 
-use crate::{int::Dom, Comparator, Literal, ModelConfig, Unsatisfiable};
 #[allow(unused_imports)]
 use crate::{
 	int::{IntVarEnc, IntVarOrd, Lin, LinExp, Model, Term},
 	linear::LimitComp,
 	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
-use crate::{Comparator, Literal, Unsatisfiable};
+use crate::{Comparator, Literal, ModelConfig, Unsatisfiable};
 
 const SORT_TERMS: bool = true;
 
@@ -53,7 +52,7 @@ impl<C: Coefficient> BddEncoder<C> {
 						.terms
 						.iter()
 						.cloned()
-						.sorted_by_key(|term| std::cmp::Reverse(term.borrow().ub()))
+						.sorted_by_key(|term| std::cmp::Reverse(term.ub()))
 						.collect(),
 				},
 				..lin
@@ -229,7 +228,7 @@ where
 
 		model.extend(decomposition);
 
-		model.encode(db, self.cutoff)?;
+		model.encode(db)?;
 		Ok(())
 	}
 }

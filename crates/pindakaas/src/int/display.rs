@@ -15,15 +15,20 @@ impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Display for Term<Lit, C> {
+impl<Lit: Literal, C: Coefficient> Display for LinExp<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{:+}·{}", self.c, self.x.borrow())
+		let s = self.terms.iter().join(" ");
+		if &s[..2] == "+ " {
+			write!(f, "{}", &s[2..])
+		} else {
+			write!(f, "{}", s)
+		}
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Display for LinExp<Lit, C> {
+impl<Lit: Literal, C: Coefficient> Display for Term<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{}", self.terms.iter().join(" "))
+		write!(f, "{:+}·{}", self.c, self.x.borrow())
 	}
 }
 
