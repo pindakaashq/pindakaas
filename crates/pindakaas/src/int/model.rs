@@ -338,7 +338,8 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		self.num_var = other.num_var;
 		self.cons.extend(other.cons);
 	}
-	pub(crate) fn vars(&self) -> Vec<IntVarRef<Lit, C>> {
+
+	pub fn vars(&self) -> Vec<IntVarRef<Lit, C>> {
 		self.cons
 			.iter()
 			.flat_map(|con| con.exp.terms.iter().map(|term| &term.x))
@@ -453,7 +454,7 @@ Missing solutions:
 
 #[derive(Debug, Clone)]
 pub struct LinExp<Lit: Literal, C: Coefficient> {
-	pub(crate) terms: Vec<Term<Lit, C>>,
+	pub terms: Vec<Term<Lit, C>>,
 }
 
 #[derive(Debug, Clone)]
@@ -1171,8 +1172,8 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 // TODO why can't we derive Default without impl. for Lit (since it's in Option?)
 #[derive(Debug, Clone)]
 pub struct IntVar<Lit: Literal, C: Coefficient> {
-	pub(crate) id: IntVarId,
-	pub(crate) dom: Dom<C>, // TODO implement rangelist
+	pub id: IntVarId,
+	pub dom: Dom<C>,
 	pub(crate) add_consistency: bool,
 	pub(crate) views: HashMap<C, (IntVarId, C)>,
 	pub(crate) e: Option<IntVarEnc<Lit, C>>,
