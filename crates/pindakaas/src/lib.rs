@@ -179,7 +179,7 @@ impl<F: Fn(Lit) -> Option<bool>> Valuation for F {}
 
 /// Encoder is the central trait implemented for all the encoding algorithms
 pub trait Encoder<DB: ClauseDatabase, Constraint> {
-	fn encode(&mut self, db: &mut DB, con: &Constraint) -> Result;
+	fn encode(&self, db: &mut DB, con: &Constraint) -> Result;
 }
 
 /// Checker is a trait implemented by types that represent constraints. The
@@ -286,6 +286,13 @@ pub trait ClauseDatabase {
 	/// clauses can be simulated using activation literals and solving the problem
 	/// under assumptions.
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result;
+
+	fn encode<C, E: Encoder<Self, C>>(&mut self, constraint: &C, encoder: &E) -> Result
+	where
+		Self: Sized,
+	{
+		encoder.encode(self, constraint)
+	}
 }
 
 // TODO: Add usage and think about interface

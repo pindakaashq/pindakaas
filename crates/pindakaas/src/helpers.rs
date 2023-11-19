@@ -156,7 +156,7 @@ impl<'a, DB: ClauseDatabase> Encoder<DB, XorConstraint<'a>> for XorEncoder {
 			constraint = itertools::join(xor.lits.iter().map(crate::trace::trace_print_lit), " ⊻ ")
 		))
 	)]
-	fn encode(&mut self, db: &mut DB, xor: &XorConstraint) -> Result {
+	fn encode(&self, db: &mut DB, xor: &XorConstraint) -> Result {
 		match *xor.lits {
 			[a] => emit_clause!(db, [a]),
 			[a, b] => {

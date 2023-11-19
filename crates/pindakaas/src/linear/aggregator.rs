@@ -32,7 +32,7 @@ impl LinearAggregator {
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	pub fn aggregate<DB: ClauseDatabase>(
-		&mut self,
+		&self,
 		db: &mut DB,
 		lin: &LinearConstraint,
 	) -> Result<LinVariant> {

@@ -29,7 +29,7 @@ impl SortingNetworkEncoder {
 }
 
 impl<DB: ClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
-	fn encode(&mut self, db: &mut DB, card: &Cardinality) -> Result {
+	fn encode(&self, db: &mut DB, card: &Cardinality) -> Result {
 		self.sorted_encoder.encode(
 			db,
 			&Sorted::new(
