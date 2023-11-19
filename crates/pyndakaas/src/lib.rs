@@ -36,7 +36,7 @@ fn adder_encode(mut db: PyRefMut<'_, Cnf>) -> Result<(), PyErr> {
 	let db = &mut pref.0;
 	let x = LinExp::from_slices(&[1, 2, 3], &[db.new_var(), db.new_var(), db.new_var()]);
 	let con = LinearConstraint::new(x, base::Comparator::Equal, 2);
-	let mut enc: LinearEncoder = LinearEncoder::default();
+	let enc: LinearEncoder = LinearEncoder::default();
 	enc.encode(db, &con)
 		.map_err(|_e| PyArithmeticError::new_err("Unsatisfiable"))
 }

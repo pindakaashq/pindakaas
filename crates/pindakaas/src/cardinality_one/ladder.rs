@@ -11,7 +11,7 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for LadderEncoder {
 	feature = "trace",
 	tracing::instrument(name = "ladder_encoder", skip_all, fields(constraint = card1.trace_print()))
 )]
-	fn encode(&mut self, db: &mut DB, card1: &CardinalityOne) -> Result {
+	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
 		// TODO could be slightly optimised to not introduce fixed lits
 		let mut a = db.new_var(); // y_v-1
 		if card1.cmp == LimitComp::Equal {

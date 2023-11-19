@@ -39,7 +39,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for TotalizerEncoder {
 		feature = "trace",
 		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, lin: &Linear) -> Result {
+	fn encode(&self, db: &mut DB, lin: &Linear) -> Result {
 		let xs = lin
 			.terms
 			.iter()

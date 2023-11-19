@@ -35,7 +35,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for SwcEncoder {
 		feature = "trace",
 		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, lin: &Linear) -> Result {
+	fn encode(&self, db: &mut DB, lin: &Linear) -> Result {
 		// self.cutoff = -1;
 		// self.add_consistency = true;
 		let mut model = Model::default();

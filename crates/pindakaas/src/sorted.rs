@@ -87,7 +87,7 @@ impl<'a> Checker for Sorted<'a> {
 }
 
 impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_>> for SortedEncoder {
-	fn encode(&mut self, db: &mut DB, sorted: &Sorted) -> Result {
+	fn encode(&self, db: &mut DB, sorted: &Sorted) -> Result {
 		let xs = sorted
 			.xs
 			.iter()
@@ -108,7 +108,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_>> for SortedEncoder {
 }
 
 impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for SortedEncoder {
-	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint) -> Result {
+	fn encode(&self, db: &mut DB, tern: &TernLeConstraint) -> Result {
 		let TernLeConstraint { x, y, cmp, z } = tern;
 		if tern.is_fixed()? {
 			Ok(())
@@ -124,12 +124,7 @@ impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for SortedEncoder {
 }
 
 impl SortedEncoder {
-	fn next_int_var<DB: ClauseDatabase>(
-		&mut self,
-		db: &mut DB,
-		ub: Coeff,
-		lbl: String,
-	) -> IntVarEnc {
+	fn next_int_var<DB: ClauseDatabase>(&self, db: &mut DB, ub: Coeff, lbl: String) -> IntVarEnc {
 		// TODO We always have the view x>=1 <-> y>=1, which is now realized using equiv
 		if ub == 0 {
 			IntVarEnc::Const(0)
@@ -144,7 +139,7 @@ impl SortedEncoder {
 
 	/// The sorted/merged base case of x1{0,1}+x2{0,1}<=y{0,1,2}
 	fn smerge<DB: ClauseDatabase>(
-		&mut self,
+		&self,
 		db: &mut DB,
 		x1: &IntVarEnc,
 		x2: &IntVarEnc,
@@ -154,14 +149,14 @@ impl SortedEncoder {
 		// we let x2 take the place of z_ceil, so we need to add 1 to both sides
 		let x2 = x2.add(
 			db,
-			&mut TernLeEncoder::default(),
+			&TernLeEncoder::default(),
 			&IntVarEnc::Const(1),
 			None,
 			None,
 		)?;
 		let y = y.add(
 			db,
-			&mut TernLeEncoder::default(),
+			&TernLeEncoder::default(),
 			&IntVarEnc::Const(1),
 			None,
 			None,
@@ -170,7 +165,7 @@ impl SortedEncoder {
 	}
 
 	fn sorted<DB: ClauseDatabase>(
-		&mut self,
+		&self,
 		db: &mut DB,
 		xs: &[IntVarEnc],
 		cmp: &LimitComp,
@@ -255,7 +250,7 @@ impl SortedEncoder {
 	}
 
 	fn sort<DB: ClauseDatabase>(
-		&mut self,
+		&self,
 		db: &mut DB,
 		xs: &[IntVarEnc],
 		cmp: &LimitComp,
@@ -275,7 +270,7 @@ impl SortedEncoder {
 	}
 
 	fn merged<DB: ClauseDatabase>(
-		&mut self,
+		&self,
 		db: &mut DB,
 		x1: &IntVarEnc,
 		x2: &IntVarEnc,
@@ -320,7 +315,7 @@ impl SortedEncoder {
 					let x1_ceil = x1
 						.add(
 							db,
-							&mut TernLeEncoder::default(),
+							&TernLeEncoder::default(),
 							&IntVarEnc::Const(1),
 							None,
 							None,
@@ -331,7 +326,7 @@ impl SortedEncoder {
 					let x2_ceil = x2
 						.add(
 							db,
-							&mut TernLeEncoder::default(),
+							&TernLeEncoder::default(),
 							&IntVarEnc::Const(1),
 							None,
 							None,
@@ -339,14 +334,14 @@ impl SortedEncoder {
 						.div(2);
 
 					let z_floor =
-						x1_floor.add(db, &mut TernLeEncoder::default(), &x2_floor, None, None)?;
+						x1_floor.add(db, &TernLeEncoder::default(), &x2_floor, None, None)?;
 					self.encode(
 						db,
 						&TernLeConstraint::new(&x1_floor, &x2_floor, cmp.clone(), &z_floor),
 					)?;
 
 					let z_ceil =
-						x1_ceil.add(db, &mut TernLeEncoder::default(), &x2_ceil, None, None)?;
+						x1_ceil.add(db, &TernLeEncoder::default(), &x2_ceil, None, None)?;
 					self.encode(
 						db,
 						&TernLeConstraint::new(&x1_ceil, &x2_ceil, cmp.clone(), &z_ceil),
@@ -364,7 +359,7 @@ impl SortedEncoder {
 	}
 
 	fn comp<DB: ClauseDatabase>(
-		&mut self,
+		&self,
 		db: &mut DB,
 		x: &IntVarEnc,
 		y: &IntVarEnc,
@@ -513,7 +508,7 @@ mod tests {
 		let z: IntVarEnc = IntVarOrd::from_bounds(&mut db, 0, 2, String::from("z")).into();
 		db.num_var = (x.lits() + y.lits() + z.lits()) as i32;
 		let con = TernLeConstraint::new(&x, &y, LimitComp::Equal, &z);
-		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
+		let enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
 		let sols = vec![
 			lits![-1, -2, -3, -4],
@@ -550,7 +545,7 @@ mod tests {
 			lits![1, 2, -3, 4, 5, 6],
 			lits![1, 2, 3, 4, 5, 6],
 		];
-		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
+		let enc = get_sorted_encoder(SortedStrategy::Recursive);
 		assert_sol!(db => enc, con => sols);
 	}
 
@@ -628,7 +623,7 @@ mod tests {
 			lits![1, 2, 3, -4, 5, 6, 7, 8, 9],
 			lits![1, 2, 3, 4, 5, 6, 7, 8, 9],
 		];
-		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
+		let enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
 		assert_sol!(db => enc, con => sols);
 	}
@@ -672,7 +667,7 @@ mod tests {
 			lits![1, -2, 3, 4, 5, 6, 7],
 			lits![-1, 2, 3, 4, 5, 6, 7],
 		];
-		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
+		let enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
 		assert_sol!(db => enc, con => sols);
 	}
@@ -943,7 +938,7 @@ mod tests {
 			lits![1, 2, 3, 4, -5, 6, 7, 8, 9, 10, 11, 12],
 			lits![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
 		];
-		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
+		let enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
 		assert_sol!(db => enc, con => sols);
 	}
@@ -1003,7 +998,7 @@ mod tests {
 			lits![-1, 2, -3, 4, 5, 6, 7, 8],
 			lits![-1, -2, 3, 4, 5, 6, 7, 8],
 		];
-		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
+		let enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
 		assert_sol!(db => enc, con => sols);
 	}
@@ -1139,7 +1134,7 @@ mod tests {
 			lits![1, -2, 3, 4, 5, 6, 7, 8, 9, 10],
 			lits![-1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
 		];
-		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
+		let enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
 		assert_sol!(db => enc, con => sols);
 	}
@@ -1374,7 +1369,7 @@ mod tests {
 			lits![-1, 2, -3, 4, 5, 6, 7, 8, 9, 10, 11],
 			lits![-1, -2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
 		];
-		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
+		let enc = get_sorted_encoder(SortedStrategy::Recursive);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
 		assert_sol!(db => enc, con => sols);
 	}
@@ -1387,7 +1382,7 @@ mod tests {
 		let lits = lits![1, 2, 3, 4, 5, 6];
 		let con = &Sorted::new(&lits, LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
-		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
+		let enc = get_sorted_encoder(SortedStrategy::Recursive);
 		println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
 		assert_sol!(db => enc, con => sols);
 	}
@@ -1400,7 +1395,7 @@ mod tests {
 		let lits = lits![1, 2, 3, 4, 5, 6, 7];
 		let con = &Sorted::new(&lits, LimitComp::Equal, &y);
 		let sols = db.generate_solutions(|sol| con.check(sol).is_ok(), db.num_var);
-		let mut enc = get_sorted_encoder(SortedStrategy::Recursive);
+		let enc = get_sorted_encoder(SortedStrategy::Recursive);
 		println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
 		assert_sol!(db => enc, con => sols);
 	}
@@ -1430,7 +1425,7 @@ mod tests {
 			lits![-1, 2, 3, 4, 5, 6, 7],
 			lits![1, 2, 3, 4, 5, 6, 7],
 		];
-		let mut enc = get_sorted_encoder(SortedStrategy::Direct);
+		let enc = get_sorted_encoder(SortedStrategy::Direct);
 		// println!("\nlet sols = {};", TestDB::_print_solutions(&sols));
 		assert_sol!(db => enc, con => sols);
 	}

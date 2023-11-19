@@ -15,7 +15,7 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for PairwiseEncoder {
 		feature = "trace",
 		tracing::instrument(name = "pairwise_encoder", skip_all, fields(constraint = card1.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, card1: &CardinalityOne) -> Result {
+	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
 		// Add clause to ensure "at least one" literal holds
 		if card1.cmp == LimitComp::Equal {
 			at_least_one_clause(db, card1)?

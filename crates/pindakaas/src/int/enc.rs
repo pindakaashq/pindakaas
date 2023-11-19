@@ -316,7 +316,7 @@ impl IntVarBin {
 	}
 
 	pub fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> Result {
-		let mut encoder = TernLeEncoder::default();
+		let encoder = TernLeEncoder::default();
 		if !GROUND_BINARY_AT_LB {
 			encoder.encode(
 				db,
@@ -405,7 +405,7 @@ impl IntVarBin {
 	pub(crate) fn add<DB: ClauseDatabase>(
 		&self,
 		db: &mut DB,
-		encoder: &mut TernLeEncoder,
+		encoder: &TernLeEncoder,
 		y: Coeff,
 	) -> Result<Self> {
 		if y == 0 {
@@ -523,52 +523,64 @@ impl IntVarEnc {
 						(acc, lit)
 					})
 					.tuple_windows()
-					.map(|((prev, _), (coef, lit))| {
-						((prev + 1)..(coef + 1), Some(lit))
-					})
+					.map(|((prev, _), (coef, lit))| ((prev + 1)..(coef + 1), Some(lit)))
 					.collect::<IntervalMap<_, _>>();
 				vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, lbl))]
 			}
 			Part::Dom(terms, l, u) => {
-					// TODO account for bounds (or even better, create IntVarBin)
-					// TODO old method (which at least respected bounds)
+				// TODO account for bounds (or even better, create IntVarBin)
+				// TODO old method (which at least respected bounds)
 				if COUPLE_DOM_PART_TO_ORD {
-					let x_bin = IntVarBin::from_terms(terms.iter().copied().map(|(l, i)| (l, i)).collect(), *l, *u, String::from("x"));
-					let x_ord = IntVarEnc::Ord(IntVarOrd::from_bounds(db, x_bin.lb(), x_bin.ub(), String::from("x")));
+					let x_bin = IntVarBin::from_terms(
+						terms.iter().copied().map(|(l, i)| (l, i)).collect(),
+						*l,
+						*u,
+						String::from("x"),
+					);
+					let x_ord = IntVarEnc::Ord(IntVarOrd::from_bounds(
+						db,
+						x_bin.lb(),
+						x_bin.ub(),
+						String::from("x"),
+					));
 
 					TernLeEncoder::default()
 						.encode(
 							db,
 							&TernLeConstraint::new(
 								&x_ord,
-							&IntVarEnc::Const(0),
-							LimitComp::LessEq,
-							&x_bin.into(),
-						),
-					).unwrap();
+								&IntVarEnc::Const(0),
+								LimitComp::LessEq,
+								&x_bin.into(),
+							),
+						)
+						.unwrap();
 					vec![x_ord]
 				} else {
-					terms.iter().enumerate().map(|(i,(lit, coef))| {IntVarEnc::Ord(IntVarOrd::from_views(
-						db,
-						interval_map! { 1..(**coef+1) => Some(*lit) },
-						format!("{lbl}^{i}")
-						))}
-					).collect()
+					terms
+						.iter()
+						.enumerate()
+						.map(|(i, (lit, coef))| {
+							IntVarEnc::Ord(IntVarOrd::from_views(
+								db,
+								interval_map! { 1..(**coef+1) => Some(*lit) },
+								format!("{lbl}^{i}"),
+							))
+						})
+						.collect()
 				}
-			}
+			} // TODO Not so easy to transfer a binary encoded int var
+			  // Part::Dom(terms, l, u) => {
+			  // let coef = (terms[0].1);
+			  // let false_ if (coef > 1).then(|| let false_ = Some(new_var!(db)); emit_clause!(&[-false_]); false_ });
+			  // let terms = (1..coef).map(|_| false_.clone()).chain(terms.to_vec());
 
-			// TODO Not so easy to transfer a binary encoded int var
-			// Part::Dom(terms, l, u) => {
-			// let coef = (terms[0].1);
-			// let false_ if (coef > 1).then(|| let false_ = Some(new_var!(db)); emit_clause!(&[-false_]); false_ });
-			// let terms = (1..coef).map(|_| false_.clone()).chain(terms.to_vec());
-
-			// IntVarEnc::Bin(IntVarBin::from_terms(
-			// 	terms.to_vec(),
-			// 	l.clone(),
-			// 	u.clone(),
-			// 	String::from("x"),
-			// ))},
+			  // IntVarEnc::Bin(IntVarBin::from_terms(
+			  // 	terms.to_vec(),
+			  // 	l.clone(),
+			  // 	u.clone(),
+			  // 	String::from("x"),
+			  // ))},
 		}
 	}
 
@@ -588,7 +600,7 @@ impl IntVarEnc {
 	pub(crate) fn add<DB: ClauseDatabase>(
 		&self,
 		db: &mut DB,
-		encoder: &mut TernLeEncoder,
+		encoder: &TernLeEncoder,
 		y: &IntVarEnc,
 		lb: Option<Coeff>,
 		ub: Option<Coeff>,

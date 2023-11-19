@@ -129,7 +129,7 @@ impl From<CardinalityOne> for Linear {
 
 // Automatically implement Cardinality encoding when you can encode Linear constraints
 impl<DB: ClauseDatabase, Enc: Encoder<DB, Linear> + LinMarker> Encoder<DB, Cardinality> for Enc {
-	fn encode(&mut self, db: &mut DB, con: &Cardinality) -> crate::Result {
+	fn encode(&self, db: &mut DB, con: &Cardinality) -> crate::Result {
 		self.encode(db, &Linear::from(con.clone()))
 	}
 }
@@ -609,7 +609,7 @@ impl<DB: ClauseDatabase, Enc: Encoder<DB, LinVariant>> Encoder<DB, LinearConstra
 		feature = "trace",
 		tracing::instrument(name = "linear_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, lin: &LinearConstraint) -> Result {
+	fn encode(&self, db: &mut DB, lin: &LinearConstraint) -> Result {
 		let variant = self.agg.aggregate(db, lin)?;
 		self.enc.encode(db, &variant)
 	}
@@ -654,7 +654,7 @@ impl<
 		AmoEnc: Encoder<DB, CardinalityOne>,
 	> Encoder<DB, LinVariant> for StaticLinEncoder<LinEnc, CardEnc, AmoEnc>
 {
-	fn encode(&mut self, db: &mut DB, lin: &LinVariant) -> Result {
+	fn encode(&self, db: &mut DB, lin: &LinVariant) -> Result {
 		match &lin {
 			LinVariant::Linear(lin) => self.lin_enc.encode(db, lin),
 			LinVariant::Cardinality(card) => self.card_enc.encode(db, card),

@@ -16,7 +16,7 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 		feature = "trace",
 		tracing::instrument(name = "bitwise_encoder", skip_all, fields(constraint = card1.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, card1: &CardinalityOne) -> Result {
+	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
 		let size = card1.lits.len();
 		let bits = (usize::BITS - (size - 1).leading_zeros()) as usize;
 

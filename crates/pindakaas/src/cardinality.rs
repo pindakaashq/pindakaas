@@ -49,7 +49,7 @@ impl Checker for Cardinality {
 impl<DB: ClauseDatabase, Enc: Encoder<DB, Cardinality> + CardMarker> Encoder<DB, CardinalityOne>
 	for Enc
 {
-	fn encode(&mut self, db: &mut DB, con: &CardinalityOne) -> crate::Result {
+	fn encode(&self, db: &mut DB, con: &CardinalityOne) -> crate::Result {
 		self.encode(db, &Cardinality::from(con.clone()))
 	}
 }

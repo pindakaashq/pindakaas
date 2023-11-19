@@ -80,7 +80,7 @@ impl<'a, DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'a>> for TernLeEncoder
 		feature = "trace",
 		tracing::instrument(name = "tern_le_encoder", skip_all, fields(constraint = format!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z)))
 	)]
-	fn encode(&mut self, db: &mut DB, tern: &TernLeConstraint) -> crate::Result {
+	fn encode(&self, db: &mut DB, tern: &TernLeConstraint) -> crate::Result {
 		#[cfg(debug_assertions)]
 		{
 			const PRINT_TESTCASES: bool = false;

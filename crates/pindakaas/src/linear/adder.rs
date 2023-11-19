@@ -18,7 +18,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for AdderEncoder {
 		feature = "trace",
 		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, lin: &Linear) -> Result {
+	fn encode(&self, db: &mut DB, lin: &Linear) -> Result {
 		let pair = &lin
 			.terms
 			.iter()
