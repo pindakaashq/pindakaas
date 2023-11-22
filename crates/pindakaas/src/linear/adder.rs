@@ -246,6 +246,8 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 }
 
 // TODO Implement Mul/Add for Lit (once merged with new Lit struct)
+
+#[cfg_attr(feature = "trace", tracing::instrument(name = "carry", skip_all, fields(constraint = format!("{xs:?} >= 2"))))]
 fn carry<DB: ClauseDatabase>(
 	db: &mut DB,
 	xs: &[LitOrConst<DB::Lit>],
@@ -313,6 +315,7 @@ fn filter_fixed_sum<Lit: Literal>(xs: &[LitOrConst<Lit>]) -> (Vec<Lit>, usize) {
 	)
 }
 
+#[cfg_attr(feature = "trace", tracing::instrument(name = "xor", skip_all, fields(constraint = format!("(+) {xs:?}"))))]
 fn xor<DB: ClauseDatabase>(
 	db: &mut DB,
 	xs: &[LitOrConst<DB::Lit>],

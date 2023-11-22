@@ -34,10 +34,12 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
 		// self.cutoff = -C::one();
 		// self.add_consistency = true;
-		let mut model = Model::default();
-		model.config = ModelConfig {
-			cutoff: self.cutoff,
-			..ModelConfig::default()
+		let mut model = Model {
+			config: ModelConfig {
+				cutoff: self.cutoff,
+				..ModelConfig::default()
+			},
+			..Model::default()
 		};
 		let xs = lin
 			.terms
@@ -76,7 +78,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 					.push(Lin::tern(x, y_next, lin.cmp.clone().into(), y_curr, None));
 			});
 
-		model.propagate(&self.add_propagation);
+		model.propagate(&self.add_propagation)?;
 		model.encode(db)?;
 		Ok(())
 	}

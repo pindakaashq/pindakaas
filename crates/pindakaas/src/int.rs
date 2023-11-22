@@ -14,7 +14,8 @@ pub(crate) use enc::{IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
 pub(crate) use helpers::required_lits;
 pub use helpers::Format;
 pub use model::{
-	Assignment, Consistency, IntVar, IntVarId, Lin, LinExp, Model, ModelConfig, Scm, Term,
+	Assignment, Consistency, Decomposer, IntVar, IntVarId, Lin, LinExp, Model, ModelConfig, Scm,
+	Term,
 };
 
 use crate::{

@@ -8,7 +8,6 @@ use std::fmt::Display;
 use crate::helpers::{two_comp_bounds, unsigned_binary_range_ub};
 use crate::int::{helpers::required_lits, Dom, TernLeConstraint, TernLeEncoder};
 use crate::linear::{lex_geq_const, lex_leq_const, log_enc_add_fn};
-use crate::Comparator;
 use crate::{
 	helpers::{as_binary, is_powers_of_two},
 	linear::{LinExp, Part},
@@ -16,6 +15,7 @@ use crate::{
 	CheckError, Checker, ClauseDatabase, Coefficient, Encoder, Literal, PosCoeff, Result,
 	Unsatisfiable,
 };
+use crate::{Cnf, Comparator};
 use std::{
 	collections::HashSet,
 	fmt,
@@ -123,6 +123,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 pub(crate) struct IntVarOrd<Lit: Literal, C: Coefficient> {
 	pub(crate) xs: IntervalMap<C, Lit>,
 	pub(crate) lbl: String,
+	pub(crate) lb: C,
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
@@ -141,15 +142,15 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		)
 	}
 
+	fn interval_set_from_dom(dom: &[C]) -> IntervalSet<C> {
+		dom.iter()
+			.tuple_windows()
+			.map(|(&a, &b)| (a + C::one())..(b + C::one()))
+			.collect()
+	}
+
 	pub fn from_dom<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, dom: &[C], lbl: String) -> Self {
-		Self::from_syms(
-			db,
-			dom.iter()
-				.tuple_windows()
-				.map(|(&a, &b)| (a + C::one())..(b + C::one()))
-				.collect(),
-			lbl,
-		)
+		Self::from_syms(db, Self::interval_set_from_dom(dom), lbl)
 	}
 
 	pub fn from_syms<DB: ClauseDatabase<Lit = Lit>>(
@@ -175,6 +176,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		// 	"Expecting contiguous domain of intervals but was {views:?}"
 		// );
 
+		let lb = views.intervals(..).next().unwrap().start - C::one();
 		let xs = views
 			.into_iter(..)
 			.map(|(v, lit)| {
@@ -183,7 +185,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 				(v, lit.unwrap_or_else(|| new_var!(db, lbl)))
 			})
 			.collect::<IntervalMap<_, _>>();
-		Self { xs, lbl }
+		Self { xs, lb, lbl }
 	}
 
 	pub fn consistency(&self) -> ImplicationChainConstraint<Lit> {
@@ -205,24 +207,22 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			.into_iter(..)
 			.filter(|(c, _)| (c.end - C::one()).is_even())
 			.map(|(c, l)| (((c.end - C::one()) / (C::one() + C::one())), l))
-			.map(|(c, l)| (c..(c + C::one()), l))
+			.map(|(c, l)| (c..(c + C::one()), Some(l)))
 			.collect::<IntervalMap<_, _>>();
 
 		if xs.is_empty() {
 			IntVarEnc::Const(self.lb() / *c)
 		} else {
-			IntVarOrd {
+			IntVarEnc::Ord(IntVarOrd::from_views(
+				&mut Cnf::<Lit>::default(),
 				xs,
-				lbl: self.lbl.clone(),
-			}
-			.into()
+				self.lbl.clone(),
+			))
 		}
 	}
 
 	pub fn dom(&self) -> IntervalSet<C> {
-		std::iter::once(self.lb()..(self.lb() + C::one()))
-			.chain(self.xs.intervals(..))
-			.collect()
+		self.xs().into_iter().map(|(iv, _)| iv).collect()
 	}
 
 	pub fn leqs(&self) -> Vec<(Range<C>, Vec<Vec<Lit>>)> {
@@ -238,14 +238,24 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			.collect()
 	}
 
+	fn lb_iv(&self) -> Range<C> {
+		self.lb..self.xs.intervals(..).next().unwrap().start
+	}
+	pub fn xs(&self) -> Vec<(Range<C>, Option<Lit>)> {
+		std::iter::once((self.lb_iv(), None))
+			.chain(self.xs.iter(..).map(|(v, x)| (v, Some(x.clone()))))
+			.collect()
+	}
+
 	pub fn geqs(&self) -> Vec<(Range<C>, Vec<Vec<Lit>>)> {
-		std::iter::once((self.lb()..(self.lb() + C::one()), vec![]))
-			.chain(self.xs.iter(..).map(|(v, x)| (v, vec![vec![x.clone()]])))
+		self.xs()
+			.into_iter()
+			.map(|(iv, l)| (iv, l.map(|l| vec![vec![l]]).unwrap_or_default()))
 			.collect()
 	}
 
 	pub fn lb(&self) -> C {
-		self.xs.range().unwrap().start - C::one()
+		self.lb
 	}
 
 	pub fn ub(&self) -> C {
@@ -254,7 +264,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 
 	pub fn leq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		let v = v.start + C::one(); // [x<=v] = [x < v+1]
-		if v <= self.lb() {
+		if v <= self.lb_iv().end - C::one() {
 			vec![vec![]]
 		} else if v > self.ub() {
 			vec![]
@@ -268,10 +278,10 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 
 	pub fn geq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		let v = v.end - C::one();
-		if v <= self.lb() {
-			vec![]
+		if v <= self.lb_iv().end - C::one() {
+			vec![] // true
 		} else if v > self.ub() {
-			vec![vec![]]
+			vec![vec![]] // false
 		} else {
 			match self.xs.overlap(v).collect::<Vec<_>>()[..] {
 				[(_, x)] => vec![vec![x.clone()]],
@@ -300,6 +310,21 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	pub fn lits(&self) -> usize {
 		self.xs.len()
 	}
+
+	pub fn mul<DB: ClauseDatabase<Lit = Lit>>(self, _: &mut DB, c: C) -> Self {
+		let mut xs = self.xs().into_iter().map(|(iv, lit)| {
+			(
+				(((iv.start - C::one()) * c) + C::one())..(((iv.end - C::one()) * c) + C::one()),
+				lit,
+			)
+		});
+		let lb = xs.next().unwrap().0.start;
+
+		Self {
+			xs: xs.map(|(iv, lit)| (iv, lit.unwrap())).collect(),
+			lb,
+			lbl: format!("{}*{}", c, self.lbl.clone()),
+		}
 }
 
 pub(crate) struct ImplicationChainConstraint<Lit: Literal> {
@@ -820,6 +845,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 						.collect();
 				Ok(IntVarOrd {
 					xs,
+					lb: self.lb() + *y,
 					lbl: format!("{}+{}", x.lbl, y),
 				}
 				.into())
@@ -904,9 +930,9 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 			IntVarEnc::Const(c) => {
 				let v = v.start + C::one(); // [x<=v] = [x < v+1]
 				if v <= *c {
-					vec![vec![]]
+					vec![vec![]] // false?
 				} else {
-					vec![]
+					vec![] // true?
 				}
 			}
 		}

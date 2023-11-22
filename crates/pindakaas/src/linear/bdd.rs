@@ -206,10 +206,12 @@ where
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
-		let mut model = Model::default();
-		model.config = ModelConfig {
-			cutoff: self.cutoff,
-			..ModelConfig::default()
+		let mut model = Model {
+			config: ModelConfig {
+				cutoff: self.cutoff,
+				..ModelConfig::default()
+			},
+			..Model::default()
 		};
 		let xs = lin
 			.terms
