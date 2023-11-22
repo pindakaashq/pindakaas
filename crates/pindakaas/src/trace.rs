@@ -43,6 +43,9 @@ pub(crate) use emit_clause;
 
 #[cfg(feature = "trace")]
 mod subscriber {
+
+	const SHOW_DIMACS_ID: bool = false;
+
 	use std::{
 		fmt,
 		io::{stderr, BufWriter, Stderr, Write},
@@ -228,7 +231,11 @@ mod subscriber {
 								if !pos {
 									label.insert(0, '¬')
 								};
-								label
+								if SHOW_DIMACS_ID {
+									format!("{} ({})", label, lit)
+								} else {
+									label
+								}
 							}),
 							" ∨ ",
 						);

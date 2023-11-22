@@ -8,7 +8,7 @@ use crate::{
 };
 
 use crate::trace::new_var;
-use itertools::Itertools;
+use itertools::{Itertools, Position};
 use std::{
 	cell::RefCell,
 	cmp::Ordering,
@@ -18,7 +18,7 @@ use std::{
 };
 use std::{fmt::Display, path::PathBuf};
 
-const DECOMPOSE: bool = false;
+const DECOMPOSE: bool = true;
 
 use iset::IntervalMap;
 
@@ -45,9 +45,18 @@ pub enum Scm {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Decomposer {
+	Gt,
+	Swc,
+	Bdd,
+	Rca,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModelConfig<C: Coefficient> {
 	pub scm: Scm,
 	pub cutoff: Option<C>,
+	pub decomposer: Decomposer,
 }
 
 // TODO should we keep IntVar i/o IntVarEnc?
@@ -142,7 +151,8 @@ impl<C: Coefficient> Default for ModelConfig<C> {
 	fn default() -> Self {
 		Self {
 			scm: Scm::Add,
-			cutoff: Some(C::one()),
+			cutoff: None,
+			decomposer: Decomposer::Bdd,
 		}
 	}
 }
@@ -263,7 +273,12 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					}
 					_ if con.exp.terms.len() < 3 || con.is_tern() => Ok(vec![con]),
 					_ => {
-						let new_model = BddEncoder::default().decompose::<Lit>(con, num_var)?;
+						let new_model = match self.config.decomposer {
+							Decomposer::Bdd => BddEncoder::default().decompose::<Lit>(con, num_var),
+							Decomposer::Gt => todo!(),
+							Decomposer::Swc => todo!(),
+							Decomposer::Rca => unreachable!(),
+						}?;
 						num_var = new_model.num_var;
 						Ok(new_model.cons)
 					}
@@ -316,14 +331,14 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		Ok(decomposition)
 	}
 
-	pub fn propagate(&mut self, consistency: &Consistency) {
+	pub fn propagate(&mut self, consistency: &Consistency) -> Result<(), Unsatisfiable> {
 		// TODO for Gt/Bdd we actually know we can start propagation at the last constraint
 		let mut queue = BTreeSet::from_iter(0..self.cons.len());
 		if consistency == &Consistency::None {
-			return;
+			return Ok(());
 		}
 		while let Some(con) = queue.pop_last() {
-			let changed = self.cons[con].propagate(consistency);
+			let changed = self.cons[con].propagate(consistency)?;
 			queue.extend(self.cons.iter().enumerate().filter_map(|(i, con)| {
 				con.exp
 					.terms
@@ -332,6 +347,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					.then_some(i)
 			}));
 		}
+		Ok(())
 	}
 
 	pub(crate) fn extend(&mut self, other: Model<Lit, C>) {
@@ -374,10 +390,6 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 				},
 			)
 			.collect::<Vec<_>>();
-
-		if !errs.is_empty() {
-			return Err(errs);
-		}
 
 		let vars = self.vars();
 		let expected_assignments = vars
@@ -423,7 +435,10 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 Extra solutions:
 {}
 Missing solutions:
-{}",
+{}
+Inconsistencies:
+{}
+",
 			if actual_assignments.is_empty() {
 				String::from("  Unsatisfiable")
 			} else {
@@ -436,6 +451,7 @@ Missing solutions:
 				.iter()
 				.map(|a| format!("- {}", a))
 				.join("\n"),
+			errs.iter().map(|err| format!("  {}", err)).join("\n")
 		);
 
 		assert_eq!(actual_assignments, expected_assignments);
@@ -498,9 +514,9 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	fn encode<DB: ClauseDatabase<Lit = Lit>>(
 		&self,
 		db: &mut DB,
-		enc: &IntVarEnc<Lit, C>,
 		config: &ModelConfig<C>,
 	) -> Result<(Vec<IntVarEnc<DB::Lit, C>>, C), Unsatisfiable> {
+		let enc = self.x.borrow().e.as_ref().unwrap().clone();
 		if self.c == C::zero() {
 			Ok((vec![IntVarEnc::Const(C::zero())], C::zero()))
 		} else if self.c == C::one() {
@@ -512,39 +528,10 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 						let self_abs = self.clone() * -C::one();
 						return self_abs.encode(
 							db,
-							&IntVarEnc::Ord(IntVarOrd {
-								xs: o
-									.xs
-									.iter(..)
-									.collect::<Vec<_>>()
-									.into_iter()
-									.map(|(iv, lit)| {
-										(
-											(-iv.end + C::one() + C::one())
-												..(-iv.start + C::one() + C::one()),
-											lit.negate(),
-										)
-									})
-									.collect(),
-								lbl: format!("-1*{}", o.lbl),
-							}),
 							config,
 						);
 					} else {
-						todo!();
-						// Ok(IntVarEnc::Ord(IntVarOrd::from_views(
-						// 	db,
-						// 	o.xs.iter(..)
-						// 		.map(|(iv, lit)| {
-						// 			(
-						// 				(iv.start * self.c)
-						// 					..((iv.end - C::one()) * self.c + C::one()),
-						// 				Some(lit.clone()),
-						// 			)
-						// 		})
-						// 		.collect(),
-						// 	format!("{}*{}", self.c, o.lbl.clone()),
-						// )))
+						Ok((vec![IntVarEnc::Ord(o.mul(db, self.c))], C::zero()))
 					}
 				}
 				IntVarEnc::Bin(x_enc) => {
@@ -658,7 +645,10 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					let scm = if let Some(scm) = scm {
 						scm
 					} else {
-						assert!(matches!(config.scm, Scm::Pow), "Current SCM DB is complete");
+						assert!(
+							matches!(config.scm, Scm::Pow),
+							"Current SCM DB is complete but could not find {c} for {lits}"
+						);
 						return Ok((
 							as_binary(c.into(), None)
 								.into_iter()
@@ -756,7 +746,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 						k,
 					))
 				}
-				IntVarEnc::Const(c) => Ok((vec![IntVarEnc::Const(*c * self.c)], C::zero())),
+				IntVarEnc::Const(c) => Ok((vec![IntVarEnc::Const(c * self.c)], C::zero())),
 			}
 		}
 	}
@@ -826,7 +816,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		self.exp.terms.iter().map(Term::ub).fold(C::zero(), C::add)
 	}
 
-	pub(crate) fn propagate(&mut self, consistency: &Consistency) -> Vec<IntVarId> {
+	pub(crate) fn propagate(
+		&mut self,
+		consistency: &Consistency,
+	) -> Result<Vec<IntVarId>, Unsatisfiable> {
 		let mut changed = vec![];
 		match consistency {
 			Consistency::None => unreachable!(),
@@ -858,7 +851,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 							changed.push(id);
 							fixpoint = false;
 						}
-						assert!(x.size() > C::zero());
+						if x.size() == C::zero() {
+							return Err(Unsatisfiable);
+						}
 					}
 				}
 
@@ -889,11 +884,13 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 						changed.push(id);
 						fixpoint = false;
 					}
-					assert!(x.size() > C::zero());
+					if x.size() == C::zero() {
+						return Err(Unsatisfiable);
+					}
 				}
 
 				if fixpoint {
-					return changed;
+					return Ok(changed);
 				}
 			},
 			Consistency::Domain => {
@@ -1011,160 +1008,143 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		// TODO assert simplified/simplify
 		// assert!(self._is_simplified());
 
-		if self
+		let mut k = self.k;
+		let mut encs = self
 			.exp
 			.terms
 			.iter()
-			.all(|term| matches!(term.x.borrow().e.as_ref().unwrap(), IntVarEnc::Bin(_)))
-		{
-			// TODO hard to do in a reduce ..
-			// TODO Replace 0 for first element
-			let mut encoder = TernLeEncoder::default();
-			let mut k = self.k;
-			let mut encs = self
+			.cloned()
+			.with_position()
+			// assuming all terns!
+			.map(|pos| match pos {
+				(Position::Last, term) => term * -C::one(),
+				(_, term) => term,
+			})
+			.flat_map(|term| {
+				term.encode(db, config).map(|(xs, c)| {
+					k -= c;
+					xs
+				})
+			})
+			.flatten()
+			.collect::<Vec<_>>();
+		let mut encoder = TernLeEncoder::default();
+		// TODO use binary heap
+
+		if config.decomposer == Decomposer::Rca {
+			if self
 				.exp
 				.terms
 				.iter()
-				.flat_map(|term| {
-					term.encode(db, term.x.borrow().e.as_ref().unwrap(), config)
-						.map(|(xs, c)| {
-							k -= c;
-							xs
-						})
-				})
-				.flatten()
-				.collect::<Vec<_>>();
-			// TODO use binary heap
+				.all(|term| matches!(term.x.borrow().e.as_ref().unwrap(), IntVarEnc::Bin(_)))
+			{
+				// TODO hard to do in a reduce ..
+				// TODO Replace 0 for first element
 
-			encs.sort_by_key(IntVarEnc::ub);
-			while encs.len() > 1 {
-				let x = encs.pop().unwrap();
-				let z = if let Some(y) = encs.pop() {
-					x.add(db, &mut encoder, &y, None, None)?
-				} else {
-					x
-				};
+				encs.sort_by_key(IntVarEnc::ub);
+				while encs.len() > 1 {
+					let x = encs.pop().unwrap();
+					let z = if let Some(y) = encs.pop() {
+						x.add(db, &mut encoder, &y, None, None)?
+					} else {
+						x
+					};
 
-				encs.insert(
-					encs.iter()
-						.position(|enc| z.ub() < enc.ub())
-						.unwrap_or(encs.len()),
-					z,
-				);
-				debug_assert!(encs.windows(2).all(|x| x[0].ub() <= x[1].ub()));
+					encs.insert(
+						encs.iter()
+							.position(|enc| z.ub() < enc.ub())
+							.unwrap_or(encs.len()),
+						z,
+					);
+					debug_assert!(encs.windows(2).all(|x| x[0].ub() <= x[1].ub()));
+				}
+
+				assert!(encs.len() == 1);
+				encoder.encode(
+					db,
+					&TernLeConstraint::new(
+						&encs.pop().unwrap(),
+						&IntVarEnc::Const(C::zero()),
+						&self.cmp,
+						&IntVarEnc::Const(k),
+					),
+				)?;
 			}
-
-			assert!(encs.len() == 1);
-			encoder.encode(
-				db,
-				&TernLeConstraint::new(
-					&encs.pop().unwrap(),
-					&IntVarEnc::Const(C::zero()),
-					&self.cmp,
-					&IntVarEnc::Const(k),
-				),
-			)?;
-
 			return Ok(());
 		}
 
-		#[allow(unreachable_code)]
-		{
-			let encs = self
-				.exp
-				.terms
-				.iter()
-				.map(|term| term.x.borrow().e.as_ref().unwrap().clone())
-				// .with_position()
-				// .flat_map(|(pos, term)| {
-				// 	let enc = term.x.borrow().e.as_ref().unwrap().clone();
-				// 	match pos {
-				// 		Position::Last if self.exp.terms.len() == 3 => {
-				// 			assert!(self.k.is_zero());
-				// 			(term.clone() * -C::one()).encode(db, &enc)
-				// 		}
-				// 		_ => term.encode(db, &enc),
-				// 	}
-				// })
-				.collect::<Vec<_>>();
-
-			let mut encoder = TernLeEncoder::default();
-			// TODO generalize n-ary encoding; currently using fallback of TernLeEncoder
-			return match &encs[..] {
-				[] => return Ok(()),
-				[x] if DECOMPOSE => {
-					let y = IntVarEnc::Const(C::zero());
-					let z = IntVarEnc::Const(self.k);
-					encoder.encode(db, &TernLeConstraint::new(x, &y, &self.cmp, &z))
+		// TODO generalize n-ary encoding; currently using fallback of TernLeEncoder
+		return match &encs[..] {
+			[] => return Ok(()),
+			[x] if DECOMPOSE => {
+				let y = IntVarEnc::Const(C::zero());
+				let z = IntVarEnc::Const(self.k);
+				encoder.encode(db, &TernLeConstraint::new(x, &y, &self.cmp, &z))
+			}
+			[x, y] if DECOMPOSE => {
+				let z = IntVarEnc::Const(self.k);
+				encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, &z))
+			}
+			[x, y, z] if DECOMPOSE => {
+				assert!(self.k.is_zero());
+				encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, z))
+			}
+			_ => {
+				assert!(
+					!encs.iter().any(|enc| matches!(enc, IntVarEnc::Bin(_))),
+					"TODO"
+				);
+				// TODO support binary
+				match self.cmp {
+					Comparator::Equal => vec![true, false],
+					Comparator::LessEq => vec![true],
+					Comparator::GreaterEq => vec![false],
 				}
-				[x, y] if DECOMPOSE => {
-					let z = IntVarEnc::Const(self.k);
-					encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, &z))
-				}
-				[x, y, z] if DECOMPOSE => {
-					assert!(self.k.is_zero());
-					encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, z))
-				}
-				_ => {
-					assert!(
-						!encs.iter().any(|enc| matches!(enc, IntVarEnc::Bin(_))),
-						"TODO"
-					);
-					// TODO support binary
-					match self.cmp {
-						Comparator::Equal => vec![true, false],
-						Comparator::LessEq => vec![true],
-						Comparator::GreaterEq => vec![false],
-					}
-					.into_iter()
-					.try_for_each(|is_leq| {
-						encs[0..encs.len() - 1]
-							.iter()
-							.zip(&self.exp.terms)
-							.map(|(enc, term)| {
-								if is_leq == term.c.is_positive() {
-									enc.geqs()
-								} else {
-									enc.leqs()
-								}
-							})
-							.multi_cartesian_product()
-							.try_for_each(|geqs| {
-								let rhs = geqs
-									.iter()
-									.zip(&self.exp.terms)
-									.map(|((d, _), term)| {
-										if is_leq == term.c.is_positive() {
-											term.c * (d.end - C::one())
-										} else {
-											term.c * d.start
-										}
-									})
-									.fold(self.k, C::sub);
+				.into_iter()
+				.try_for_each(|is_leq| {
+					encs[0..encs.len() - 1]
+						.iter()
+						.zip(&self.exp.terms)
+						.map(|(enc, term)| {
+							if is_leq == term.c.is_positive() {
+								enc.geqs()
+							} else {
+								enc.leqs()
+							}
+						})
+						.multi_cartesian_product()
+						.try_for_each(|geqs| {
+							let rhs = geqs
+								.iter()
+								.zip(&self.exp.terms)
+								.map(|((d, _), term)| {
+									if is_leq == term.c.is_positive() {
+										term.c * (d.end - C::one())
+									} else {
+										term.c * d.start
+									}
+								})
+								.fold(self.k, C::sub);
 
-								let conditions = geqs
-									.iter()
-									.map(|(_, cnf)| negate_cnf(cnf.clone()))
-									.collect::<Vec<_>>();
+							let conditions = geqs
+								.iter()
+								.map(|(_, cnf)| negate_cnf(cnf.clone()))
+								.collect::<Vec<_>>();
 
-								let (last_enc, last_c) =
-									(&encs[encs.len() - 1], &self.exp.terms[encs.len() - 1].c);
+							let (last_enc, last_c) =
+								(&encs[encs.len() - 1], &self.exp.terms[encs.len() - 1].c);
 
-								let last = if is_leq == last_c.is_positive() {
-									last_enc.leq_(rhs.div_ceil(last_c))
-								} else {
-									last_enc.geq_(rhs.div_floor(last_c))
-								};
+							let last = if is_leq == last_c.is_positive() {
+								last_enc.leq_(rhs.div_ceil(last_c))
+							} else {
+								last_enc.geq_(rhs.div_floor(last_c))
+							};
 
-								add_clauses_for(
-									db,
-									conditions.iter().cloned().chain([last]).collect(),
-								)
-							})
-					})
-				}
-			};
-		}
+							add_clauses_for(db, conditions.iter().cloned().chain([last]).collect())
+						})
+				})
+			}
+		};
 	}
 }
 
@@ -1328,16 +1308,8 @@ mod tests {
 	const MODEL_CONFIGS: &[ModelConfig<C>] = &[
 		ModelConfig {
 			scm: Scm::Add,
-			cutoff: Some(0),
-		},
-		ModelConfig {
-			scm: Scm::Rca,
-			cutoff: Some(0),
-		},
-		// // ModelConfig { scm: Scm::Pow },
-		ModelConfig {
-			scm: Scm::Dnf,
-			cutoff: Some(0),
+			cutoff: None,
+			decomposer: Decomposer::Bdd,
 		},
 	];
 
