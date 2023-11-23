@@ -325,6 +325,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			lb,
 			lbl: format!("{}*{}", c, self.lbl.clone()),
 		}
+	}
 }
 
 pub(crate) struct ImplicationChainConstraint<Lit: Literal> {
