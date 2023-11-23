@@ -68,6 +68,7 @@ pub struct ModelConfig<C: Coefficient> {
 	pub cutoff: Option<C>,
 	pub decomposer: Decomposer,
 	pub add_consistency: bool,
+	pub propagate: Consistency,
 }
 
 // TODO should we keep IntVar i/o IntVarEnc?
@@ -123,7 +124,7 @@ impl<C: Coefficient> Assignment<C> {}
 
 // TODO Domain will be used once (/if) this is added as encoder feature.
 #[allow(dead_code)]
-#[derive(Default, Clone, PartialEq)]
+#[derive(Debug, Default, Eq, Ord, PartialOrd, Hash, Clone, PartialEq)]
 pub enum Consistency {
 	None,
 	#[default]
@@ -296,6 +297,8 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		} else {
 			self.clone()
 		};
+
+		self.propagate(&self.config.propagate.clone())?;
 
 		// TODO can make Model non-mutable if this is moved
 		decomposition.encode_vars(db)?;
@@ -1321,12 +1324,21 @@ mod tests {
 			scm: Scm::Add,
 			cutoff: None,
 			decomposer: Decomposer::Bdd,
+			propagate: Consistency::None,
+			add_consistency: false,
+		},
+		ModelConfig {
+			scm: Scm::Add,
+			cutoff: None,
+			decomposer: Decomposer::Bdd,
+			propagate: Consistency::None,
 			add_consistency: true,
 		},
 		ModelConfig {
 			scm: Scm::Add,
 			cutoff: None,
 			decomposer: Decomposer::Bdd,
+			propagate: Consistency::Bounds,
 			add_consistency: false,
 		},
 	];
