@@ -74,7 +74,7 @@ pub struct ModelConfig<C: Coefficient> {
 // TODO should we keep IntVar i/o IntVarEnc?
 #[derive(Debug, Clone)]
 pub struct Model<Lit: Literal, C: Coefficient> {
-	pub(crate) cons: Vec<Lin<Lit, C>>,
+	pub cons: Vec<Lin<Lit, C>>,
 	pub(crate) num_var: usize,
 	pub(crate) obj: Obj<Lit, C>,
 	pub config: ModelConfig<C>,
