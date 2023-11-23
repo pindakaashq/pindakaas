@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 #[allow(unused_imports)]
 use crate::{
-	int::{IntVarEnc, IntVarOrd, Lin, LinExp, Model, Term},
+	int::{Decompose, IntVarEnc, IntVarOrd, Lin, LinExp, Model, Term},
 	linear::LimitComp,
 	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
@@ -29,19 +29,16 @@ impl<C: Coefficient> BddEncoder<C> {
 		self.cutoff = c;
 		self
 	}
+}
 
-	pub(crate) fn decompose<Lit: Literal>(
+impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
+	fn decompose(
 		&mut self,
 		lin: Lin<Lit, C>,
 		num_var: usize,
+		model_config: &ModelConfig<C>,
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		let mut model = Model::<Lit, C>::new(
-			num_var,
-			&ModelConfig {
-				cutoff: self.cutoff,
-				..ModelConfig::default()
-			},
-		);
+		let mut model = Model::<Lit, C>::new(num_var, model_config);
 
 		// sort by *decreasing* ub
 		let lin = if SORT_TERMS {
@@ -161,7 +158,12 @@ impl<C: Coefficient> BddEncoder<C> {
 					})
 					.collect::<Vec<_>>();
 				model
-					.new_var(&dom, self.add_consistency, None, Some(format!("bdd_{}", i)))
+					.new_var(
+						&dom,
+						model.config.add_consistency,
+						None,
+						Some(format!("bdd_{}", i)),
+					)
 					.map(|var| (var, views))
 			})
 			.collect::<Vec<_>>()
@@ -195,7 +197,6 @@ impl<C: Coefficient> BddEncoder<C> {
 		Ok(model)
 	}
 }
-
 impl<DB, C> Encoder<DB, Linear<DB::Lit, C>> for BddEncoder<C>
 where
 	DB: ClauseDatabase,
@@ -223,9 +224,10 @@ where
 			.collect::<Vec<_>>();
 
 		// TODO pass BDD::decompose to Model::encode instead, since otherwise we risk decomposing twice
-		let decomposition = self.decompose::<DB::Lit>(
+		let decomposition = self.decompose(
 			Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None),
 			model.num_var,
+			&model.config,
 		)?;
 
 		model.extend(decomposition);
