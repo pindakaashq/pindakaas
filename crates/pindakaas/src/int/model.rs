@@ -35,6 +35,15 @@ impl Display for IntVarId {
 	}
 }
 
+pub trait Decompose<Lit: Literal, C: Coefficient> {
+	fn decompose(
+		&mut self,
+		lin: Lin<Lit, C>,
+		num_var: usize,
+		model_config: &ModelConfig<C>,
+	) -> Result<Model<Lit, C>, Unsatisfiable>;
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Scm {
 	#[default]
@@ -44,19 +53,21 @@ pub enum Scm {
 	Dnf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Decomposer {
 	Gt,
 	Swc,
+	#[default]
 	Bdd,
 	Rca,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModelConfig<C: Coefficient> {
 	pub scm: Scm,
 	pub cutoff: Option<C>,
 	pub decomposer: Decomposer,
+	pub add_consistency: bool,
 }
 
 // TODO should we keep IntVar i/o IntVarEnc?
@@ -147,16 +158,6 @@ impl<Lit: Literal, C: Coefficient> Default for Model<Lit, C> {
 	}
 }
 
-impl<C: Coefficient> Default for ModelConfig<C> {
-	fn default() -> Self {
-		Self {
-			scm: Scm::Add,
-			cutoff: None,
-			decomposer: Decomposer::Bdd,
-		}
-	}
-}
-
 impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	pub fn new(num_var: usize, config: &ModelConfig<C>) -> Self {
 		Self {
@@ -242,7 +243,6 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		self.new_var(&[c], false, None, None).unwrap()
 	}
 
-	// TODO pass Decomposer (with cutoff, etc..)
 	pub fn decompose(self) -> Result<Model<Lit, C>, Unsatisfiable> {
 		// TODO aggregate constants + encode trivial constraints
 		// let mut model = Model::new(self.num_var);
@@ -253,36 +253,12 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.cons
 			.iter()
 			.cloned()
-			.map(|con| -> Result<Vec<_>, Unsatisfiable> {
-				match &con.exp.terms[..] {
-					[] => Ok(vec![]),
-					[term] if false => {
-						match con.cmp {
-							Comparator::LessEq => {
-								term.x.borrow_mut().le(&C::zero());
-							}
-							Comparator::Equal => {
-								term.x.borrow_mut().fix(&C::zero())?;
-							}
-							Comparator::GreaterEq => {
-								term.x.borrow_mut().ge(&C::zero());
-							}
-						};
-						todo!("Untested code: fixing of vars from unary constraints");
-						// Ok(vec![])
-					}
-					_ if con.exp.terms.len() < 3 || con.is_tern() => Ok(vec![con]),
-					_ => {
-						let new_model = match self.config.decomposer {
-							Decomposer::Bdd => BddEncoder::default().decompose::<Lit>(con, num_var),
-							Decomposer::Gt => todo!(),
-							Decomposer::Swc => todo!(),
-							Decomposer::Rca => unreachable!(),
-						}?;
-						num_var = new_model.num_var;
-						Ok(new_model.cons)
-					}
-				}
+			.map(|con| {
+				con.decompose(&self.config, num_var)
+					.map(|(cons, new_num_var)| {
+						num_var = new_num_var;
+						cons
+					})
 			})
 			.flatten_ok()
 			.flatten()
@@ -808,6 +784,41 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		}
 	}
 
+	pub fn decompose(
+		self,
+		model_config: &ModelConfig<C>,
+		num_var: usize,
+	) -> Result<(Vec<Lin<Lit, C>>, usize), Unsatisfiable> {
+		match &self.exp.terms[..] {
+			[] => Ok((vec![], num_var)),
+			[term] if false => {
+				match self.cmp {
+					Comparator::LessEq => {
+						term.x.borrow_mut().le(&C::zero());
+					}
+					Comparator::Equal => {
+						term.x.borrow_mut().fix(&C::zero())?;
+					}
+					Comparator::GreaterEq => {
+						term.x.borrow_mut().ge(&C::zero());
+					}
+				};
+				todo!("Untested code: fixing of vars from unary constraints");
+				// Ok(vec![])
+			}
+			_ if self.exp.terms.len() < 3 || self.is_tern() => Ok((vec![self], num_var)),
+			_ => {
+				let new_model = match model_config.decomposer {
+					Decomposer::Bdd => BddEncoder::default().decompose(self, num_var, model_config),
+					Decomposer::Gt => todo!(),
+					Decomposer::Swc => todo!(),
+					Decomposer::Rca => unreachable!(),
+				}?;
+				Ok((new_model.cons, new_model.num_var))
+			}
+		}
+	}
+
 	pub fn lb(&self) -> C {
 		self.exp.terms.iter().map(Term::lb).fold(C::zero(), C::add)
 	}
@@ -1310,6 +1321,13 @@ mod tests {
 			scm: Scm::Add,
 			cutoff: None,
 			decomposer: Decomposer::Bdd,
+			add_consistency: true,
+		},
+		ModelConfig {
+			scm: Scm::Add,
+			cutoff: None,
+			decomposer: Decomposer::Bdd,
+			add_consistency: false,
 		},
 	];
 
