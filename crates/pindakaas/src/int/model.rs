@@ -4,7 +4,7 @@ use crate::{
 	linear::log_enc_add_fn,
 	trace::emit_clause,
 	BddEncoder, CheckError, Checker, ClauseDatabase, Cnf, Coefficient, Comparator, Encoder,
-	Literal, Result, Unsatisfiable,
+	Literal, Result, SwcEncoder, TotalizerEncoder, Unsatisfiable,
 };
 
 use crate::trace::new_var;
@@ -126,8 +126,8 @@ impl<C: Coefficient> Assignment<C> {}
 #[allow(dead_code)]
 #[derive(Debug, Default, Eq, Ord, PartialOrd, Hash, Clone, PartialEq)]
 pub enum Consistency {
-	None,
 	#[default]
+	None,
 	Bounds,
 	Domain,
 }
@@ -355,24 +355,9 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		self.cons.iter().try_for_each(|con| con.check(assignment))
 	}
 
-	/// Expecting actual_assignments to contain all solutions of the model
-	pub fn check_assignments(
-		&self,
-		actual_assignments: &[Assignment<C>],
-	) -> Result<(), Vec<CheckError<Lit>>> {
-		let errs = actual_assignments
-			.iter()
-			.filter_map(
-				|actual_assignment| match self.check_assignment(actual_assignment) {
-					Err(e) => Some(e),
-					_ => None,
-				},
-			)
-			.collect::<Vec<_>>();
-
+	pub(crate) fn brute_force_solve(&self) -> Vec<Assignment<C>> {
 		let vars = self.vars();
-		let expected_assignments = vars
-			.iter()
+		vars.iter()
 			.map(|var| var.borrow().dom.iter().collect::<Vec<_>>())
 			.multi_cartesian_product()
 			.map(|a| {
@@ -384,7 +369,28 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 				)
 			})
 			.filter(|a| self.check_assignment(a).is_ok())
+			.collect()
+	}
+
+	/// Expecting actual_assignments to contain all solutions of the model
+	pub fn check_assignments(
+		&self,
+		actual_assignments: &[Assignment<C>],
+		expected_assignments: Option<&[Assignment<C>]>,
+	) -> Result<(), Vec<CheckError<Lit>>> {
+		let errs = actual_assignments
+			.iter()
+			.filter_map(
+				|actual_assignment| match self.check_assignment(actual_assignment) {
+					Err(e) => Some(e),
+					_ => None,
+				},
+			)
 			.collect::<Vec<_>>();
+
+		let expected_assignments = expected_assignments
+			.map(|expected_assignments| expected_assignments.to_vec())
+			.unwrap_or_else(|| self.brute_force_solve());
 
 		let canonicalize = |a: &[Assignment<C>]| a.iter().sorted().cloned().collect::<Vec<_>>();
 
@@ -411,6 +417,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		assert!(
 			extra_int_assignments.is_empty() && missing_int_assignments.is_empty(),
 			"
+{:?}
 Extra solutions:
 {}
 Missing solutions:
@@ -418,6 +425,7 @@ Missing solutions:
 Inconsistencies:
 {}
 ",
+			self.config,
 			if actual_assignments.is_empty() {
 				String::from("  Unsatisfiable")
 			} else {
@@ -490,7 +498,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	// TODO move enc into Term ?
 	// TODO clippy
 	#[allow(clippy::type_complexity)]
-	fn encode<DB: ClauseDatabase<Lit = Lit>>(
+	pub(crate) fn encode<DB: ClauseDatabase<Lit = Lit>>(
 		&self,
 		db: &mut DB,
 		config: &ModelConfig<C>,
@@ -813,8 +821,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			_ => {
 				let new_model = match model_config.decomposer {
 					Decomposer::Bdd => BddEncoder::default().decompose(self, num_var, model_config),
-					Decomposer::Gt => todo!(),
-					Decomposer::Swc => todo!(),
+					Decomposer::Gt => {
+						TotalizerEncoder::default().decompose(self, num_var, model_config)
+					}
+					Decomposer::Swc => SwcEncoder::default().decompose(self, num_var, model_config),
 					Decomposer::Rca => unreachable!(),
 				}?;
 				Ok((new_model.cons, new_model.num_var))
@@ -839,69 +849,78 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			Consistency::None => unreachable!(),
 			Consistency::Bounds => loop {
 				let mut fixpoint = true;
-				if self.cmp == Comparator::Equal {
-					let xs_ub = self.ub() - self.k;
-					for term in &self.exp.terms {
-						let mut x = term.x.borrow_mut();
-						let size = x.size();
-
-						let id = x.id;
-						let x_ub = if term.c.is_positive() {
-							x.dom.ub()
-						} else {
-							x.dom.lb()
-						};
-
-						// c*d >= x_ub*c + xs_ub := d >= x_ub - xs_ub/c
-						let b = x_ub - (xs_ub / term.c);
-
-						if !term.c.is_negative() {
-							x.ge(&b);
-						} else {
-							x.le(&b);
-						}
-
-						if x.size() < size {
-							changed.push(id);
-							fixpoint = false;
-						}
-						if x.size() == C::zero() {
-							return Err(Unsatisfiable);
-						}
-					}
+				match self.cmp {
+					Comparator::Equal => vec![true, false],
+					Comparator::LessEq => vec![true],
+					Comparator::GreaterEq => vec![false],
 				}
+				.into_iter()
+				.try_for_each(|is_leq| {
+					if is_leq {
+						let rs_lb = self.lb() - self.k;
+						for term in &self.exp.terms {
+							let mut x = term.x.borrow_mut();
+							let size = x.size();
+							let x_lb = if term.c.is_positive() {
+								x.dom.lb()
+							} else {
+								x.dom.ub()
+							};
 
-				let rs_lb = self.lb() - self.k;
-				for term in &self.exp.terms {
-					let mut x = term.x.borrow_mut();
-					let size = x.size();
-					let x_lb = if term.c.is_positive() {
-						x.dom.lb()
+							let id = x.id;
+
+							// c*d <= c*x_lb - rs_lb
+							// d <= x_lb - (rs_lb / c) (or d >= .. if d<0)
+							let b = x_lb - (rs_lb / term.c);
+
+							if term.c.is_negative() {
+								x.ge(&b);
+							} else {
+								x.le(&b);
+							}
+
+							if x.size() < size {
+								//println!("Pruned {}", size - x.size());
+								changed.push(id);
+								fixpoint = false;
+							}
+							if x.size() == C::zero() {
+								return Err(Unsatisfiable);
+							}
+						}
 					} else {
-						x.dom.ub()
-					};
+						let xs_ub = self.ub() - self.k;
+						for term in &self.exp.terms {
+							let mut x = term.x.borrow_mut();
+							let size = x.size();
 
-					let id = x.id;
+							let id = x.id;
+							let x_ub = if term.c.is_positive() {
+								x.dom.ub()
+							} else {
+								x.dom.lb()
+							};
 
-					// c*d <= c*x_lb - rs_lb
-					// d <= x_lb - (rs_lb / c) (or d >= .. if d<0)
-					let b = x_lb - (rs_lb / term.c);
+							// c*d >= x_ub*c + xs_ub := d >= x_ub - xs_ub/c
+							let b = x_ub - (xs_ub / term.c);
 
-					if term.c.is_negative() {
-						x.ge(&b);
-					} else {
-						x.le(&b);
+							if !term.c.is_negative() {
+								x.ge(&b);
+							} else {
+								x.le(&b);
+							}
+
+							if x.size() < size {
+								changed.push(id);
+								fixpoint = false;
+							}
+							if x.size() == C::zero() {
+								return Err(Unsatisfiable);
+							}
+						}
 					}
-
-					if x.size() < size {
-						//println!("Pruned {}", size - x.size());
-						changed.push(id);
-						fixpoint = false;
-					}
-					if x.size() == C::zero() {
-						return Err(Unsatisfiable);
-					}
-				}
+					Ok(())
+				})?;
 
 				if fixpoint {
 					return Ok(changed);
@@ -1314,46 +1333,46 @@ mod tests {
 	}
 
 	use crate::{helpers::tests::TestDB, Format};
-	use itertools::Itertools;
+	use itertools::{iproduct, Itertools};
 
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
-	const MODEL_CONFIGS: &[ModelConfig<C>] = &[
-		ModelConfig {
-			scm: Scm::Add,
-			cutoff: None,
-			decomposer: Decomposer::Bdd,
-			propagate: Consistency::None,
-			add_consistency: false,
-		},
-		ModelConfig {
-			scm: Scm::Add,
-			cutoff: None,
-			decomposer: Decomposer::Bdd,
-			propagate: Consistency::None,
-			add_consistency: true,
-		},
-		ModelConfig {
-			scm: Scm::Add,
-			cutoff: None,
-			decomposer: Decomposer::Bdd,
-			propagate: Consistency::Bounds,
-			add_consistency: false,
-		},
-	];
+	fn get_model_configs() -> Vec<ModelConfig<C>> {
+		iproduct!(
+			[Scm::Add, Scm::Rca, Scm::Pow, Scm::Dnf],
+			[Decomposer::Gt, Decomposer::Swc, Decomposer::Bdd],
+			[Consistency::None, Consistency::Bounds],
+			[false, true]
+		)
+		.map(
+			|(scm, decomposer, propagate, add_consistency)| ModelConfig {
+				scm: scm.clone(),
+				decomposer: decomposer.clone(),
+				propagate: propagate.clone(),
+				add_consistency,
+				..ModelConfig::default()
+			},
+		)
+		.collect()
+	}
 
 	fn test_lp_for_configs(lp: &str) {
-		for config in MODEL_CONFIGS {
-			test_lp(lp, config.clone());
+		let model = Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap();
+		let expected_assignments = model.brute_force_solve();
+		for config in get_model_configs() {
+			test_lp(
+				lp,
+				Model::<Lit, C>::from_string(lp.into(), Format::Lp)
+					.unwrap()
+					.with_config(config),
+				Some(&expected_assignments),
+			)
 		}
 	}
 
-	fn test_lp(lp: &str, config: ModelConfig<C>) {
+	fn test_lp(lp: &str, mut model: Model<Lit, C>, expected_assignments: Option<&[Assignment<C>]>) {
 		// const CUTOFF: Option<C> = None;
-		let mut model = Model::<Lit, C>::from_string(lp.into(), Format::Lp)
-			.unwrap()
-			.with_config(config.clone());
 		println!("model = {model}");
 
 		let mut db = TestDB::new(0);
@@ -1374,12 +1393,12 @@ mod tests {
 			.flat_map(|lit_assignment| model.assign(lit_assignment))
 			.collect::<Vec<_>>();
 
-		let check = model.check_assignments(&actual_assignments);
+		let check = model.check_assignments(&actual_assignments, expected_assignments);
 		if let Err(errs) = check {
 			for err in errs {
 				println!("{err}");
 			}
-			panic!("Test failed for {config:?} and {lp}");
+			panic!("Test failed for {:?} and {lp}", model.config);
 		}
 	}
 

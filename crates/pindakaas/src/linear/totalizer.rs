@@ -1,9 +1,12 @@
 use crate::int::Consistency;
+use crate::int::Decompose;
 use crate::int::Lin;
 use crate::int::Model;
+use crate::int::Term;
 use crate::Comparator;
 use crate::Literal;
 use crate::ModelConfig;
+use crate::Unsatisfiable;
 
 use itertools::Itertools;
 
@@ -34,46 +37,17 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for TotalizerEncoder<C> {
-	#[cfg_attr(
-		feature = "trace",
-		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
-	)]
-	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
-		let xs = lin
-			.terms
-			.iter()
-			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
-			.sorted_by_key(|x| x.ub())
-			.collect::<Vec<_>>();
+impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
+	fn decompose(
+		&mut self,
+		lin: Lin<Lit, C>,
+		num_var: usize,
+		model_config: &ModelConfig<C>,
+	) -> Result<Model<Lit, C>, Unsatisfiable> {
+		let mut model = Model::<Lit, C>::new(num_var, model_config);
 
-		// The totalizer encoding constructs a binary tree starting from a layer of leaves
-		let mut model = self.build_totalizer(xs, &lin.cmp.clone().into(), *lin.k)?;
-		model.propagate(&self.add_propagation)?;
-		model.encode(db)?;
-		Ok(())
-	}
-}
+		let mut layer = lin.exp.terms.iter().cloned().collect_vec();
 
-impl<C: Coefficient> TotalizerEncoder<C> {
-	fn build_totalizer<Lit: Literal>(
-		&self,
-		xs: Vec<IntVarEnc<Lit, C>>,
-		cmp: &Comparator,
-		k: C,
-	) -> Result<Model<Lit, C>> {
-		let mut model = Model {
-			config: ModelConfig {
-				cutoff: self.cutoff,
-				..ModelConfig::default()
-			},
-			..Model::default()
-		};
-		let mut layer = xs
-			.into_iter()
-			.flat_map(|x| model.add_int_var_enc(x))
-			.collect::<Vec<_>>();
 		let mut i = 0;
 
 		while layer.len() > 1 {
@@ -86,17 +60,16 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 					[left, right] => {
 						let at_root = layer.len() == 2;
 						let dom = if at_root {
-							vec![k]
+							vec![lin.k]
 						} else {
-							left.borrow()
-								.dom
-								.iter()
-								.cartesian_product(right.borrow().dom.iter())
+							left.dom()
+								.into_iter()
+								.cartesian_product(right.dom().into_iter())
 								.map(|(a, b)| a + b)
-								.filter(|d| d <= &k)
+								.filter(|d| d <= &lin.k) // TODO depends on cmp and on signs!
 								.sorted()
 								.dedup()
-								.collect()
+								.collect::<Vec<_>>()
 						};
 						let parent = model.new_var(
 							&dom,
@@ -106,17 +79,17 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 						)?;
 
 						model.add_constraint(Lin::tern(
-							left.clone().into(),
-							right.clone().into(),
+							left.clone(),
+							right.clone(),
 							if !at_root && EQUALIZE_INTERMEDIATES {
 								Comparator::Equal
 							} else {
-								*cmp
+								lin.cmp
 							},
 							parent.clone().into(),
 							None,
 						))?;
-						next_layer.push(parent);
+						next_layer.push(parent.into());
 					}
 					_ => panic!(),
 				}
@@ -126,6 +99,44 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 		}
 
 		Ok(model)
+	}
+}
+
+impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for TotalizerEncoder<C> {
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
+	)]
+	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
+		// TODO move options from encoder to model config?
+		let mut model = Model {
+			config: ModelConfig {
+				cutoff: self.cutoff,
+				propagate: self.add_propagation.clone(),
+				add_consistency: self.add_consistency,
+				..ModelConfig::default()
+			},
+			..Model::default()
+		};
+
+		let xs = lin
+			.terms
+			.iter()
+			.enumerate()
+			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
+			.sorted_by_key(|x| x.ub())
+			.map(|x| (model.add_int_var_enc(x).map(Term::from)))
+			.collect::<Result<Vec<_>>>()?;
+
+		// The totalizer encoding constructs a binary tree starting from a layer of leaves
+		let decomposition = self.decompose(
+			Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None),
+			model.num_var,
+			&model.config,
+		)?;
+		model.extend(decomposition);
+		model.encode(db)?;
+		Ok(())
 	}
 }
 

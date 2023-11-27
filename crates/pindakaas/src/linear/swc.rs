@@ -1,6 +1,6 @@
-use crate::int::{Consistency, Lin, Model, Term};
-use crate::ModelConfig;
+use crate::int::{Consistency, Decompose, Lin, Model, Term};
 use crate::{int::IntVarEnc, ClauseDatabase, Coefficient, Encoder, Linear, Result};
+use crate::{Literal, ModelConfig, Unsatisfiable};
 use itertools::Itertools;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)
@@ -26,29 +26,16 @@ impl<C: Coefficient> SwcEncoder<C> {
 	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for SwcEncoder<C> {
-	#[cfg_attr(
-		feature = "trace",
-		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
-	)]
-	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
-		// self.cutoff = -C::one();
-		// self.add_consistency = true;
-		let mut model = Model {
-			config: ModelConfig {
-				cutoff: self.cutoff,
-				..ModelConfig::default()
-			},
-			..Model::default()
-		};
-		let xs = lin
-			.terms
-			.iter()
-			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
-			.flat_map(|x| model.add_int_var_enc(x))
-			.map(Term::from)
-			.collect::<Vec<_>>();
+impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for SwcEncoder<C> {
+	fn decompose(
+		&mut self,
+		lin: Lin<Lit, C>,
+		num_var: usize,
+		model_config: &ModelConfig<C>,
+	) -> Result<Model<Lit, C>, Unsatisfiable> {
+		let mut model = Model::<Lit, C>::new(num_var, model_config);
+		let xs = lin.exp.terms.clone();
+
 		let n = xs.len();
 
 		// TODO not possible to fix since both closures use db?
@@ -57,15 +44,14 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.chain(
 				(1..n)
 					.flat_map(|i| {
-						let dom =
-							num::iter::range_inclusive(-*lin.k, C::zero()).collect::<Vec<_>>();
+						let dom = num::iter::range_inclusive(-lin.k, C::zero()).collect::<Vec<_>>();
 						model.new_var(&dom, self.add_consistency, None, Some(format!("swc_{}", i)))
 					})
 					.take(n),
 			)
 			.collect::<Vec<_>>()
 			.into_iter()
-			.chain(std::iter::once(model.new_constant(-*lin.k)))
+			.chain(std::iter::once(model.new_constant(-lin.k)))
 			.map(Term::from)
 			.collect::<Vec<_>>();
 
@@ -73,12 +59,43 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.tuple_windows()
 			.zip(xs)
 			.for_each(|((y_curr, y_next), x)| {
-				model
-					.cons
-					.push(Lin::tern(x, y_next, lin.cmp.clone().into(), y_curr, None));
+				model.cons.push(Lin::tern(x, y_next, lin.cmp, y_curr, None));
 			});
 
-		model.propagate(&self.add_propagation)?;
+		Ok(model)
+	}
+}
+
+impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for SwcEncoder<C> {
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
+	)]
+	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
+		let mut model = Model {
+			config: ModelConfig {
+				cutoff: self.cutoff,
+				propagate: self.add_propagation.clone(),
+				add_consistency: self.add_consistency,
+				..ModelConfig::default()
+			},
+			..Model::default()
+		};
+
+		let xs = lin
+			.terms
+			.iter()
+			.enumerate()
+			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
+			.map(|x| (model.add_int_var_enc(x).map(Term::from)))
+			.collect::<Result<Vec<_>>>()?;
+
+		let decomposition = self.decompose(
+			Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None),
+			model.num_var,
+			&model.config,
+		)?;
+		model.extend(decomposition);
 		model.encode(db)?;
 		Ok(())
 	}

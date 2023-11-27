@@ -210,18 +210,19 @@ where
 		let mut model = Model {
 			config: ModelConfig {
 				cutoff: self.cutoff,
+				add_consistency: self.add_consistency,
 				..ModelConfig::default()
 			},
 			..Model::default()
 		};
+
 		let xs = lin
 			.terms
 			.iter()
 			.enumerate()
 			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
-			.flat_map(|x| model.add_int_var_enc(x))
-			.map(Term::from)
-			.collect::<Vec<_>>();
+			.map(|x| (model.add_int_var_enc(x).map(Term::from)))
+			.collect::<Result<Vec<_>>>()?;
 
 		// TODO pass BDD::decompose to Model::encode instead, since otherwise we risk decomposing twice
 		let decomposition = self.decompose(
