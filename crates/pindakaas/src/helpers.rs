@@ -5,6 +5,10 @@ use crate::{
 use itertools::Itertools;
 use std::collections::HashSet;
 
+pub(crate) fn is_sorted<T: Ord>(xs: &[T]) -> bool {
+	xs.windows(2).all(|x| x[0] <= x[1])
+}
+
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
 pub(crate) fn is_powers_of_two<C: Coefficient>(coefs: &[C]) -> bool {
 	let mult = coefs[0];
