@@ -1,6 +1,6 @@
 use num::iter::RangeInclusive;
 
-use crate::Coefficient;
+use crate::{helpers::is_sorted, Coefficient};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dom<C: Coefficient> {
@@ -9,6 +9,7 @@ pub struct Dom<C: Coefficient> {
 
 impl<C: Coefficient> Dom<C> {
 	pub fn from_slice(ds: &[C]) -> Self {
+		debug_assert!(is_sorted(ds));
 		let mut ds = ds.iter();
 		let k = *ds.next().unwrap();
 		let mut k = (k, k);
@@ -26,7 +27,9 @@ impl<C: Coefficient> Dom<C> {
 			.collect::<Vec<_>>();
 		ranges.push(k);
 
-		Self { ranges }
+		let self_ = Self { ranges };
+		debug_assert!(self_.invariant(), "{self_:?}");
+		self_
 	}
 
 	pub fn from_bounds(lb: C, ub: C) -> Self {
@@ -45,21 +48,10 @@ impl<C: Coefficient> Dom<C> {
 	}
 
 	pub fn iter(&self) -> DomIterator<C> {
-		// pub fn values(&self) -> Vec<C> {
-		// self.ranges
-		// 	.iter()
-		// 	.flat_map(|(lb, ub)| num::range_inclusive(*lb, *ub))
-		// 	.collect()
 		let mut ranges = self.ranges.iter();
 		let r = ranges.next().unwrap();
 		let r = num::iter::range_inclusive(r.0, r.1);
 		DomIterator { ranges, range: r }
-		// DomIterator {
-		// 	ranges: self.ranges.iter(),
-		// 	i: 0,
-		// 	j: self.ranges[0].0,
-		// 	k: self.ranges[0].1,
-		// }
 	}
 
 	// TODO binary search
@@ -79,21 +71,31 @@ impl<C: Coefficient> Dom<C> {
 
 	pub fn ge(&mut self, d: C) {
 		if let Some(r) = self.range(d) {
-			self.ranges = self.ranges[r..].to_vec();
-			if self.ranges[0].0 < d {
-				self.ranges[0].0 = d;
+			if self.ranges[r].1 < d {
+				self.ranges = self.ranges[(r + 1)..].to_vec();
+			} else {
+				self.ranges = self.ranges[r..].to_vec();
+				if self.ranges[0].0 < d {
+					self.ranges[0].0 = d;
+				}
 			}
 		}
+		debug_assert!(self.invariant(), "{self:?}");
 	}
 
 	pub fn le(&mut self, d: C) {
 		if let Some(r) = self.ranges.iter().position(|r| d <= r.1) {
-			self.ranges = self.ranges[..=r].to_vec();
-			let n = self.ranges.len() - 1;
-			if self.ranges[n].1 > d {
-				self.ranges[n].1 = d;
+			if self.ranges[r].0 > d {
+				self.ranges = self.ranges[..r].to_vec();
+			} else {
+				self.ranges = self.ranges[..=r].to_vec();
+				let n = self.ranges.len() - 1;
+				if self.ranges[n].1 > d {
+					self.ranges[n].1 = d;
+				}
 			}
 		}
+		debug_assert!(self.invariant(), "{self:?}");
 	}
 
 	pub fn size(&self) -> C {
@@ -111,6 +113,17 @@ impl<C: Coefficient> Dom<C> {
 				.map(|(lb, ub)| ((lb + rhs), ub + rhs))
 				.collect(),
 		}
+	}
+
+	fn invariant(&self) -> bool {
+		!self.ranges.is_empty()
+			&& is_sorted(
+				&self
+					.ranges
+					.iter()
+					.flat_map(|r| [r.0, r.1])
+					.collect::<Vec<_>>(),
+			)
 	}
 }
 
