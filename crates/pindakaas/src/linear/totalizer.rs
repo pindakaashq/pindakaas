@@ -66,7 +66,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
 								.into_iter()
 								.cartesian_product(right.dom().into_iter())
 								.map(|(a, b)| a + b)
-								.filter(|d| d <= &lin.k) // TODO depends on cmp and on signs!
+								.filter(|d| lin.cmp == Comparator::GreaterEq || d <= &lin.k) // TODO depends on cmp and on signs!
 								.sorted()
 								.dedup()
 								.collect::<Vec<_>>()
