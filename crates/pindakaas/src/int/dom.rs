@@ -9,7 +9,7 @@ pub struct Dom<C: Coefficient> {
 
 impl<C: Coefficient> Dom<C> {
 	pub fn from_slice(ds: &[C]) -> Self {
-		debug_assert!(is_sorted(ds));
+		debug_assert!(is_sorted(ds), "{ds:?}");
 		let mut ds = ds.iter();
 		let k = *ds.next().unwrap();
 		let mut k = (k, k);
@@ -116,14 +116,13 @@ impl<C: Coefficient> Dom<C> {
 	}
 
 	fn invariant(&self) -> bool {
-		!self.ranges.is_empty()
-			&& is_sorted(
-				&self
-					.ranges
-					.iter()
-					.flat_map(|r| [r.0, r.1])
-					.collect::<Vec<_>>(),
-			)
+		is_sorted(
+			&self
+				.ranges
+				.iter()
+				.flat_map(|r| [r.0, r.1])
+				.collect::<Vec<_>>(),
+		)
 	}
 }
 
