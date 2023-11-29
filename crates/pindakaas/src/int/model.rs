@@ -27,7 +27,7 @@ use super::{scm::SCM, IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct IntVarId(pub usize);
 
-type IntVarRef<Lit, C> = Rc<RefCell<IntVar<Lit, C>>>;
+pub type IntVarRef<Lit, C> = Rc<RefCell<IntVar<Lit, C>>>;
 
 impl Display for IntVarId {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -76,7 +76,7 @@ pub struct ModelConfig<C: Coefficient> {
 pub struct Model<Lit: Literal, C: Coefficient> {
 	pub cons: Vec<Lin<Lit, C>>,
 	pub(crate) num_var: usize,
-	pub(crate) obj: Obj<Lit, C>,
+	pub obj: Obj<Lit, C>,
 	pub config: ModelConfig<C>,
 }
 
@@ -134,10 +134,27 @@ pub enum Consistency {
 
 #[derive(Default, Debug, Clone)]
 pub enum Obj<Lit: Literal, C: Coefficient> {
-	Minimize(LinExp<Lit, C>),
-	Maximize(LinExp<Lit, C>),
 	#[default]
 	Satisfy,
+	Minimize(LinExp<Lit, C>),
+	Maximize(LinExp<Lit, C>),
+}
+
+impl<Lit: Literal, C: Coefficient> Obj<Lit, C> {
+	pub fn obj(&self) -> Option<&LinExp<Lit, C>> {
+		match self {
+			Obj::Minimize(exp) | Obj::Maximize(exp) => Some(exp),
+			Obj::Satisfy => None,
+		}
+	}
+
+	pub fn is_satisfy(&self) -> bool {
+		matches!(self, Obj::Satisfy)
+	}
+
+	pub fn is_maximize(&self) -> bool {
+		matches!(self, Obj::Maximize(_))
+	}
 }
 
 impl<Lit: Literal, C: Coefficient> Checker for Model<Lit, C> {
@@ -292,15 +309,10 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	) -> Result<Self, Unsatisfiable> {
 		// Create decomposed model and its aux vars
 
-		let mut decomposition = if DECOMPOSE {
-			self.clone().decompose()?
-		} else {
-			self.clone()
-		};
+		let mut decomposition = self.clone().decompose()?;
 
 		self.propagate(&self.config.propagate.clone())?;
 
-		// TODO can make Model non-mutable if this is moved
 		decomposition.encode_vars(db)?;
 
 		for con in &decomposition.cons {
@@ -441,7 +453,12 @@ Inconsistencies:
 			errs.iter().map(|err| format!("  {}", err)).join("\n")
 		);
 
-		assert_eq!(actual_assignments, expected_assignments);
+		assert_eq!(actual_assignments,
+                   expected_assignments,
+                   "It seems the actual and expected assignments are not identical sets:\nactual:\n{}\n expected:\n{}",
+                   actual_assignments.iter().join("\n"),
+                   expected_assignments.iter().join("\n")
+                  );
 
 		Ok(())
 	}
@@ -510,17 +527,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			Ok((vec![enc.clone()], C::zero()))
 		} else {
 			match enc {
-				IntVarEnc::Ord(o) => {
-					if self.c.is_negative() {
-						let self_abs = self.clone() * -C::one();
-						return self_abs.encode(
-							db,
-							config,
-						);
-					} else {
-						Ok((vec![IntVarEnc::Ord(o.mul(db, self.c))], C::zero()))
-					}
-				}
+				IntVarEnc::Ord(o) => Ok((vec![IntVarEnc::Ord(o.mul(db, self.c))], C::zero())),
 				IntVarEnc::Bin(x_enc) => {
 					// handle negative coefficient
 					let (mut c, xs, k) = if !self.c.is_negative() {
@@ -817,7 +824,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				todo!("Untested code: fixing of vars from unary constraints");
 				// Ok(vec![])
 			}
-			_ if self.exp.terms.len() < 3 || self.is_tern() => Ok((vec![self], num_var)),
+			_ if self.exp.terms.len() <= 3 => Ok((vec![self], num_var)),
 			_ => {
 				let new_model = match model_config.decomposer {
 					Decomposer::Bdd => BddEncoder::default().decompose(self, num_var, model_config),
@@ -975,7 +982,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		}
 	}
 
-	pub(crate) fn is_tern(&self) -> bool {
+	pub(crate) fn _is_tern(&self) -> bool {
 		let cs = self.exp.terms.iter().map(|term| term.c).collect::<Vec<_>>();
 		cs.len() == 3
 			&& cs[0].is_positive()
@@ -1029,6 +1036,24 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			.all(|term| !term.c.is_zero() && !term.x.borrow().is_constant())
 	}
 
+	fn into_tern(self) -> Self {
+		Lin {
+			exp: LinExp {
+				terms: self
+					.exp
+					.terms
+					.into_iter()
+					.with_position()
+					.map(|pos| match pos {
+						(Position::Last, term) => term * -C::one(),
+						(_, term) => term, // also matches Only element; so unary constraints are not minused
+					})
+					.collect(),
+			},
+			..self
+		}
+	}
+
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "lin_encoder", skip_all, fields(constraint = format!("{}", self)))
@@ -1041,30 +1066,25 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		// TODO assert simplified/simplify
 		// assert!(self._is_simplified());
 
-		let mut k = self.k;
-		let mut encs = self
-			.exp
-			.terms
-			.iter()
-			.cloned()
-			.with_position()
-			// assuming all terns!
-			.map(|pos| match pos {
-				(Position::Last, term) => term * -C::one(),
-				(_, term) => term,
-			})
-			.flat_map(|term| {
-				term.encode(db, config).map(|(xs, c)| {
-					k -= c;
-					xs
-				})
-			})
-			.flatten()
-			.collect::<Vec<_>>();
 		let mut encoder = TernLeEncoder::default();
 		// TODO use binary heap
 
 		if config.decomposer == Decomposer::Rca {
+			let mut k = self.k;
+			let mut encs = self
+				.clone()
+				.exp
+				.terms
+				.into_iter()
+				.flat_map(|term| {
+					term.encode(db, config).map(|(xs, c)| {
+						k -= c;
+						xs
+					})
+				})
+				.flatten()
+				.collect::<Vec<_>>();
+
 			if self
 				.exp
 				.terms
@@ -1106,27 +1126,60 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			return Ok(());
 		}
 
+		// Encodes terms into ternary constrain (i.e. last term is multiplied by -1)
+		let mut k = self.k;
+		let encs = self
+			.clone()
+			.into_tern()
+			.exp
+			.terms
+			.into_iter()
+			.flat_map(|term| {
+				term.encode(db, config).map(|(xs, c)| {
+					k -= c;
+					xs
+				})
+			})
+			.flatten()
+			.collect::<Vec<_>>();
+
 		// TODO generalize n-ary encoding; currently using fallback of TernLeEncoder
 		return match &encs[..] {
 			[] => return Ok(()),
-			[x] if DECOMPOSE => {
-				let y = IntVarEnc::Const(C::zero());
-				let z = IntVarEnc::Const(self.k);
-				encoder.encode(db, &TernLeConstraint::new(x, &y, &self.cmp, &z))
-			}
-			[x, y] if DECOMPOSE => {
-				let z = IntVarEnc::Const(self.k);
-				encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, &z))
-			}
+			[x] if DECOMPOSE => encoder.encode(
+				db,
+				&TernLeConstraint::new(
+					x,
+					&IntVarEnc::Const(C::zero()),
+					&self.cmp,
+					&IntVarEnc::Const(self.k),
+				),
+			),
+			[x, z] if DECOMPOSE => encoder.encode(
+				db,
+				&TernLeConstraint::new(x, &IntVarEnc::Const(-self.k), &self.cmp, z),
+			),
 			[x, y, z] if DECOMPOSE => {
-				assert!(self.k.is_zero());
-				encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, z))
+				let z = z.add(db, &mut encoder, &IntVarEnc::Const(self.k), None, None)?;
+				encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, &z))
 			}
 			_ => {
 				assert!(
 					!encs.iter().any(|enc| matches!(enc, IntVarEnc::Bin(_))),
 					"TODO"
 				);
+
+				// just get encoding; does not need to handle terms coefficient here
+				let encs = self
+					.clone()
+					.exp
+					.terms
+					.into_iter()
+					.map(|term| {
+						term.x.borrow_mut().encode(db, &mut HashMap::new(), true)?;
+						Ok(term.x.borrow().e.as_ref().unwrap().clone())
+					})
+					.collect::<Result<Vec<_>>>()?;
 				// TODO support binary
 				match self.cmp {
 					Comparator::Equal => vec![true, false],
@@ -1277,11 +1330,11 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		self.dom.size()
 	}
 
-	pub(crate) fn lb(&self) -> C {
+	pub fn lb(&self) -> C {
 		self.dom.lb()
 	}
 
-	pub(crate) fn ub(&self) -> C {
+	pub fn ub(&self) -> C {
 		self.dom.ub()
 	}
 
@@ -1372,7 +1425,6 @@ mod tests {
 	}
 
 	fn test_lp(lp: &str, mut model: Model<Lit, C>, expected_assignments: Option<&[Assignment<C>]>) {
-		// const CUTOFF: Option<C> = None;
 		println!("model = {model}");
 
 		let mut db = TestDB::new(0);
