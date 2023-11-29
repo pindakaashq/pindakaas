@@ -117,7 +117,11 @@ impl<C: Coefficient> Display for Assignment<C> {
 	}
 }
 
-impl<C: Coefficient> Assignment<C> {}
+impl<C: Coefficient> Assignment<C> {
+	pub(crate) fn partialize(self, max_var: &IntVarId) -> Self {
+		Self(self.0.into_iter().filter(|(k, _)| k <= max_var).collect())
+	}
+}
 // impl<C: Coefficient> Index for Assignment<C> {
 
 // }
@@ -367,8 +371,9 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		self.cons.iter().try_for_each(|con| con.check(assignment))
 	}
 
-	pub(crate) fn brute_force_solve(&self) -> Vec<Assignment<C>> {
+	pub(crate) fn brute_force_solve(&self, max_var: Option<IntVarId>) -> Vec<Assignment<C>> {
 		let vars = self.vars();
+		let max_var = max_var.unwrap_or(IntVarId(self.num_var));
 		vars.iter()
 			.map(|var| var.borrow().dom.iter().collect::<Vec<_>>())
 			.multi_cartesian_product()
@@ -381,6 +386,9 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 				)
 			})
 			.filter(|a| self.check_assignment(a).is_ok())
+			.map(|a| a.partialize(&max_var))
+			.sorted() // need to sort to make unique since HashMap cannot derive Hash
+			.dedup()
 			.collect()
 	}
 
@@ -394,7 +402,10 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.iter()
 			.filter_map(
 				|actual_assignment| match self.check_assignment(actual_assignment) {
-					Err(e) => Some(e),
+					Err(CheckError::Fail(e)) => {
+						Some(CheckError::Fail(format!("Inconsistency: {e}")))
+					}
+					Err(e) => panic!("Unexpected err: {e}"),
 					_ => None,
 				},
 			)
@@ -402,7 +413,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 		let expected_assignments = expected_assignments
 			.map(|expected_assignments| expected_assignments.to_vec())
-			.unwrap_or_else(|| self.brute_force_solve());
+			.unwrap_or_else(|| self.brute_force_solve(None));
 
 		let canonicalize = |a: &[Assignment<C>]| a.iter().sorted().cloned().collect::<Vec<_>>();
 
@@ -426,32 +437,34 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 				.collect::<Vec<_>>(),
 		);
 
-		assert!(
-			extra_int_assignments.is_empty() && missing_int_assignments.is_empty(),
-			"
+		if !extra_int_assignments.is_empty() || !missing_int_assignments.is_empty() {
+			return Err(errs
+				.into_iter()
+				.chain([CheckError::Fail(format!(
+					"
 {:?}
 Extra solutions:
 {}
 Missing solutions:
 {}
 Inconsistencies:
-{}
 ",
-			self.config,
-			if actual_assignments.is_empty() {
-				String::from("  Unsatisfiable")
-			} else {
-				extra_int_assignments
-					.iter()
-					.map(|a| format!("+ {}", a))
-					.join("\n")
-			},
-			missing_int_assignments
-				.iter()
-				.map(|a| format!("- {}", a))
-				.join("\n"),
-			errs.iter().map(|err| format!("  {}", err)).join("\n")
-		);
+					self.config,
+					if actual_assignments.is_empty() {
+						String::from("  Unsatisfiable")
+					} else {
+						extra_int_assignments
+							.iter()
+							.map(|a| format!("+ {}", a))
+							.join("\n")
+					},
+					missing_int_assignments
+						.iter()
+						.map(|a| format!("- {}", a))
+						.join("\n")
+				))])
+				.collect());
+		}
 
 		assert_eq!(actual_assignments,
                    expected_assignments,
@@ -1412,7 +1425,7 @@ mod tests {
 
 	fn test_lp_for_configs(lp: &str) {
 		let model = Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap();
-		let expected_assignments = model.brute_force_solve();
+		let expected_assignments = model.brute_force_solve(None);
 		for config in get_model_configs() {
 			test_lp(
 				lp,
@@ -1433,6 +1446,23 @@ mod tests {
 		let lit_assignments = if let Ok(decomposition) = model.encode(&mut db) {
 			println!("decomposition = {}", decomposition);
 
+			// Check decomposition
+			const CHECK_DECOMPOSITION: bool = true;
+			if CHECK_DECOMPOSITION {
+				if let Err(errs) = model.check_assignments(
+					&decomposition.brute_force_solve(Some(IntVarId(model.num_var))),
+					expected_assignments,
+				) {
+					for err in errs {
+						println!("Decomposition error:\n{err}");
+					}
+					panic!(
+						"Decomposition is incorrect. Test failed for {:?} and {lp}",
+						model.config
+					);
+				}
+			}
+
 			// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
 			db.num_var = model.lits() as Lit;
 			db.solve().into_iter().sorted().collect::<Vec<_>>()
@@ -1450,7 +1480,10 @@ mod tests {
 			for err in errs {
 				println!("{err}");
 			}
-			panic!("Test failed for {:?} and {lp}", model.config);
+			panic!(
+				"Encoding is incorrect. Test failed for {:?} and {lp}",
+				model.config
+			);
 		}
 	}
 
