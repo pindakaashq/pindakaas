@@ -631,7 +631,7 @@ impl<Lit: Literal + Zero + One, C: Coefficient> Wcnf<Lit, C> {
 	}
 }
 
-impl<Lit: Literal + Zero + One> ClauseDatabase for Wcnf<Lit> {
+impl<Lit: Literal + Zero + One, C: Coefficient> ClauseDatabase for Wcnf<Lit, C> {
 	type Lit = Lit;
 	fn new_var(&mut self) -> Self::Lit {
 		self.cnf.new_var()
