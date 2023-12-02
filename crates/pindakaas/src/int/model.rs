@@ -641,6 +641,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 											.dom
 											.iter()
 											.map(|d| self.c * d)
+											.sorted()
 											.collect::<Vec<_>>(),
 									),
 									format!("{}*{}", self.c.clone(), self.x.borrow().lbl()),
@@ -748,6 +749,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 									.dom
 									.iter()
 									.map(|d| -k + self.c * d)
+									.sorted()
 									.collect::<Vec<_>>(),
 							),
 							format!("{}*{}", self.c, self.x.borrow().lbl()),
@@ -1085,6 +1087,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		// TODO use binary heap
 
 		if config.decomposer == Decomposer::Rca {
+			assert!(config.cutoff == Some(C::zero()));
 			let mut k = self.k;
 			let mut encs = self
 				.clone()
@@ -1412,13 +1415,19 @@ mod tests {
 			[Decomposer::Gt, Decomposer::Swc, Decomposer::Bdd],
 			[Consistency::None, Consistency::Bounds],
 			[false, true]
+			[Scm::Rca],
+			[Decomposer::Rca],
+			[Consistency::None],
+			[false],
+			[Some(0)] // [None, Some(0), Some(2)]
 		)
 		.map(
-			|(scm, decomposer, propagate, add_consistency)| ModelConfig {
+			|(scm, decomposer, propagate, add_consistency, cutoff)| ModelConfig {
 				scm: scm.clone(),
 				decomposer: decomposer.clone(),
 				propagate: propagate.clone(),
 				add_consistency,
+				cutoff,
 				..ModelConfig::default()
 			},
 		)
