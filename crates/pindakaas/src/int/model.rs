@@ -579,7 +579,9 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 								"{}/res/ecm/{lits}_{c}.dimacs",
 								env!("CARGO_MANIFEST_DIR")
 							)))
-							.unwrap();
+							.unwrap_or_else(|_| {
+								panic!("Could not find Dnf method cnf for {lits}_{c}")
+							});
 							let map = cnf
 								.vars()
 								.zip(
@@ -845,7 +847,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 						TotalizerEncoder::default().decompose(self, num_var, model_config)
 					}
 					Decomposer::Swc => SwcEncoder::default().decompose(self, num_var, model_config),
-					Decomposer::Rca => unreachable!(),
+					Decomposer::Rca => return Ok((vec![self], num_var)), // dodgy skip decomposition for SCM
 				}?;
 				Ok((new_model.cons, new_model.num_var))
 			}
