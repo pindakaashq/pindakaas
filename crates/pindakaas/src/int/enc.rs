@@ -507,7 +507,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			k - self.lb()
 		} else {
 			// encoding is grounded at the lb of the two comp representation
-			k - two_comp_bounds(self.bits()).0
+			k.checked_sub(&two_comp_bounds(self.bits()).0).unwrap()
 		}
 	}
 
