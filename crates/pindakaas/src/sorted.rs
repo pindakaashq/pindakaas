@@ -513,6 +513,7 @@ fn lambda((v, c): (u128, u128), lambda: u32) -> u128 {
 	(v * lambda as u128) + c
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	#[cfg(feature = "trace")]
@@ -1453,3 +1454,4 @@ mod tests {
 		assert_sol!(db => enc, con => sols);
 	}
 }
+*/

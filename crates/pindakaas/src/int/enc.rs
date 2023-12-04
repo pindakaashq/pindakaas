@@ -124,7 +124,7 @@ pub(crate) struct IntVarOrd<Lit: Literal, C: Coefficient> {
 	pub(crate) xs: IntervalMap<C, Lit>,
 	pub(crate) lbl: String,
 	pub(crate) lb: C,
-	pub(crate) ub: C,
+	pub(crate) ub_iv: Range<C>,
 }
 
 impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
@@ -178,7 +178,9 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		// );
 
 		let lb = views.intervals(..).next().unwrap().start - C::one(); // lb just before the first literal
-		let ub = views.intervals(..).last().unwrap().end - C::one(); // but ub is the end interval of last literal!
+		let ub = views.intervals(..).last().unwrap().end; // but ub is the end interval of last literal!
+
+		let ub_iv = ub..(ub + C::one()); // becomes interval of size 1
 
 		let xs = views
 			.into_iter(..)
@@ -188,7 +190,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 				(v, lit.unwrap_or_else(|| new_var!(db, lbl)))
 			})
 			.collect::<IntervalMap<_, _>>();
-		Self { xs, lb, ub, lbl }
+		Self { xs, lb, ub_iv, lbl }
 	}
 
 	pub fn consistency(&self) -> ImplicationChainConstraint<Lit> {
@@ -265,7 +267,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	}
 
 	fn ub_iv(&self) -> Range<C> {
-		self.xs.intervals(..).last().unwrap().end..(self.ub + C::one())
+		self.ub_iv.clone()
 	}
 
 	pub fn lb(&self) -> C {
@@ -273,7 +275,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	}
 
 	pub fn ub(&self) -> C {
-		self.ub
+		self.ub_iv.start - C::one()
 	}
 
 	pub fn leq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
@@ -359,12 +361,12 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 			.iter()
 			.map(|(iv, lit)| (iv.clone(), lit[0][0].clone()))
 			.collect();
-		let ub = xs_vec[xs_vec.len() - 1].0.end - C::one();
+		let ub_iv = xs_vec[xs_vec.len() - 1].0.clone();
 
 		Self {
 			xs,
 			lb,
-			ub,
+			ub_iv,
 			lbl: format!("{}*{}", c, self.lbl.clone()),
 		}
 	}
@@ -889,7 +891,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 				Ok(IntVarOrd {
 					xs,
 					lb: self.lb() + *y,
-					ub: self.ub() + *y,
+					ub_iv: (x.ub_iv.start + *y)..(x.ub_iv.end + *y),
 					lbl: format!("{}+{}", x.lbl, y),
 				}
 				.into())

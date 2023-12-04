@@ -1372,7 +1372,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 #[cfg(test)]
 mod tests {
 	type Lit = i32;
-	type C = i32;
+	type C = i64;
 
 	use super::*;
 	use crate::{Cnf, Lin, Model};
