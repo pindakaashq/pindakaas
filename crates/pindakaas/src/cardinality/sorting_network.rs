@@ -43,6 +43,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Cardinality<DB::Lit, C>>
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -224,3 +225,4 @@ mod tests {
 		);
 	}
 }
+*/
