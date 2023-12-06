@@ -33,6 +33,7 @@ impl<C: Coefficient> Dom<C> {
 	}
 
 	pub fn from_bounds(lb: C, ub: C) -> Self {
+		debug_assert!(lb <= ub);
 		Self {
 			ranges: vec![(lb, ub)],
 		}
@@ -111,6 +112,17 @@ impl<C: Coefficient> Dom<C> {
 				.ranges
 				.into_iter()
 				.map(|(lb, ub)| ((lb + rhs), ub + rhs))
+				.collect(),
+		}
+	}
+
+	pub(crate) fn mul(self, rhs: C) -> Self {
+		assert!(!rhs.is_negative());
+		Dom {
+			ranges: self
+				.ranges
+				.into_iter()
+				.map(|(lb, ub)| ((lb * rhs), ub * rhs))
 				.collect(),
 		}
 	}

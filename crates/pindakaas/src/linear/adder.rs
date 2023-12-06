@@ -1,12 +1,14 @@
 use num::Integer;
 use rustc_hash::FxHashMap;
 
+use crate::int::helpers::{sign_extend, to_lex_bits};
+
 use crate::{
 	helpers::{as_binary, XorConstraint, XorEncoder},
 	int::LitOrConst,
 	linear::LimitComp,
 	trace::{emit_clause, new_var},
-	ClauseDatabase, Cnf, Coefficient, Comparator, Encoder, Linear, Literal, Result, Unsatisfiable,
+	ClauseDatabase, Coefficient, Comparator, Encoder, Linear, Literal, Result, Unsatisfiable,
 };
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
@@ -147,56 +149,10 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Add
 	}
 }
 
-fn to_bits<C: Coefficient>(k: C, bits: usize) -> Vec<bool> {
-	// get k represented as 2-comp in the min. number of bits
-	let k = if !k.is_negative() {
-		// 2-comp for non-negative x = unsigned(x) ++ [false sign bit]
-		as_binary(k.into(), None)
-			.into_iter()
-			.chain([false]) // sign bit
-			.collect()
-	} else {
-		// 2-comp for negative x = negate(unsigned(|x|) ) + one
-		// Ex. negate(unsigned(|-2|)) + one = negate(0+10) + one = 101 + one = 110 = -4+2+0 = -2
-		let k = as_binary((k.abs()).into(), None)
-			.into_iter()
-			.chain([false])
-			.map(|b| LitOrConst::from(!b)) // negate
-			.collect::<Vec<_>>();
-		// add 1
-		let one = as_binary(C::one().into(), Some(k.len()))
-			.into_iter()
-			.map(LitOrConst::from)
-			.collect::<Vec<_>>();
-		log_enc_add_fn(
-			&mut Cnf::new(0),
-			&k,
-			&one,
-			&Comparator::Equal,
-			false.into(),
-			None,
-		)
-		.unwrap()
-		.into_iter()
-		.map(|x| bool::try_from(x).unwrap())
-		.collect::<Vec<_>>()
-	};
-	// First, sign-extend to get the required number fo bits
-	let k = k[..k.len() - 1]
-		.iter()
-		.copied()
-		.chain(vec![*k.last().unwrap(); bits.saturating_sub(k.len())])
-		// and negate just the last bit to get lexicographic binary
-		.chain([!k.last().unwrap()])
-		.collect::<Vec<_>>();
-
-	k
-}
-
 /// Uses lexicographic constraint to constrain x:B ≦ k
 #[cfg_attr(
 	feature = "trace",
-	tracing::instrument(name = "lex_lesseq_const", skip_all)
+	tracing::instrument(name = "lex_leq_const", skip_all, fields(constraint = format!("{x:?} <= {k}")))
 )]
 pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
@@ -223,14 +179,17 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 }
 
 /// Uses lexicographic constraint to constrain x:B >= k
-#[cfg_attr(feature = "trace", tracing::instrument(name = "lex_geq", skip_all))]
+#[cfg_attr(
+	feature = "trace",
+	tracing::instrument(name = "lex_geq_const", skip_all, fields(constraint = format!("{x:?} >= {k} over {bits} bits")))
+)]
 pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 	db: &mut DB,
 	x: &[LitOrConst<DB::Lit>],
 	k: C,
 	bits: usize,
 ) -> Result {
-	let k = to_bits(k, bits);
+	let k = to_lex_bits(k, bits, false);
 
 	(0..bits)
 		.filter(|i| *k.get(*i).unwrap_or(&false))
@@ -440,6 +399,11 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 				.chain(std::iter::once(LitOrConst::Const(true)))
 				.collect::<Vec<_>>();
 
+			// Ensure z/x have same length
+			// let x = &sign_extend(x, LitOrConst::Const(false), n);
+			// let z = &sign_extend(z, LitOrConst::Const(false), n);
+			let x = &sign_extend(x, -(x.last().unwrap().clone()), n);
+			let z = &sign_extend(z, -(z.last().unwrap().clone()), n);
 			assert!(
 				y.iter().all(|yi| matches!(yi, LitOrConst::Const(false))),
 				"Expected {y:?} to be zero for x<=z lex comparison"
@@ -628,6 +592,24 @@ mod tests {
 		Cardinality, CardinalityOne, Comparator, Encoder, LinExp, LinearConstraint, LinearEncoder,
 		PairwiseEncoder,
 	};
+
+	#[test]
+	fn test_lex_geq() {
+		let mut db = TestDB::new(5);
+		let x = &[
+			LitOrConst::from(db.new_var()),
+			LitOrConst::from(db.new_var()),
+			LitOrConst::from(false),
+		];
+		let y = &[LitOrConst::from(false)];
+		let z = &[
+			LitOrConst::from(db.new_var()),
+			LitOrConst::from(db.new_var()),
+			LitOrConst::from(db.new_var()),
+		];
+		log_enc_add_(&mut db, x, y, &Comparator::GreaterEq, z).unwrap();
+
+	}
 
 	#[test]
 	fn test_pb_encode() {

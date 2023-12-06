@@ -132,9 +132,9 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
                 test_int_lin!($encoder, &[{}], &[{}], $cmp, &[{}]);
                 }}
                 ",
-				x.iter().join(""),
-				y.iter().join(""),
-				z.iter().join(""),
+				x.iter().join("").replace("-", "_"),
+				y.iter().join("").replace("-", "_"),
+				z.iter().join("").replace("-", "_"),
 				x.iter().join(", "),
 				y.iter().join(", "),
 				z.iter().join(", "),
@@ -181,20 +181,26 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 						if GROUND_BINARY_AT_LB {
 							C::zero()
 						} else {
-							*y_const
+							z_bin.normalize(*y_const)
 						},
 					)
 				};
 				log_enc_add_(
 					db,
-					&x_bin.xs(false).into_iter().collect::<Vec<_>>(),
-					&as_binary(y_const.into(), Some(x_bin.lits()))
+					&x_bin
+						.xs(cmp != &Comparator::Equal)
+						.into_iter()
+						.collect::<Vec<_>>(),
+					&as_binary(y_const.into(), Some(x_bin.lits())) // 0
 						.into_iter()
 						.map(LitOrConst::Const)
 						.chain([LitOrConst::Const(false)])
 						.collect::<Vec<_>>(),
 					cmp,
-					&z_bin.xs(false).into_iter().collect::<Vec<_>>(),
+					&z_bin
+						.xs(cmp != &Comparator::Equal)
+						.into_iter()
+						.collect::<Vec<_>>(),
 				)
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Bin(y_bin), IntVarEnc::Bin(z_bin)) => {
@@ -641,6 +647,8 @@ pub mod tests {
 			assert_eq!(required_lits(-7, 2), 4); // -7 = 1001 => 4 bits
 			assert_eq!(required_lits(-7, 9), 5); // 9 > 7 => 5 bits
 			assert_eq!(required_lits(2, 9), 4); // 4 b/c no sign bit
+
+			assert_eq!(required_lits(-4, -3), 3); // 8 vals => 3 bits
 		}
 	}
 
@@ -758,6 +766,13 @@ pub mod tests {
 		vec![1, -2, 3, -4], // 5
 		vec![-1, 2, 3, -4],// 6
 		]);
+	}
+
+	#[test]
+	fn bin_neg_test() {
+		let mut db = TestDB::new(0);
+		let x = IntVarBin::from_bounds(&mut db, -4, -3, "x".to_string());
+		x.consistent(&mut db).unwrap();
 	}
 
 	#[test]

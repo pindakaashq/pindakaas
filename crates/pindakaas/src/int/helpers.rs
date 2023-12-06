@@ -9,12 +9,15 @@ use std::{
 use bzip2::read::BzDecoder;
 
 use crate::{
+	helpers::{as_binary, two_comp_bounds},
 	int::enc::GROUND_BINARY_AT_LB,
 	int::model::{LinExp, Obj, Term},
 	Coefficient, Comparator, Lin, Literal, Model,
 };
 use flate2::bufread::GzDecoder;
 use itertools::Itertools;
+
+use super::LitOrConst;
 
 pub enum Format {
 	Lp,
@@ -29,11 +32,39 @@ pub(crate) fn required_lits<C: Coefficient>(lb: C, ub: C) -> usize {
 		C::zero().leading_zeros() - ub.leading_zeros()
 	} else {
 		let lb_two_comp = -(lb + C::one());
-		std::cmp::max(
-			C::zero().leading_zeros() - lb_two_comp.leading_zeros() + 1,
-			C::zero().leading_zeros() - ub.leading_zeros() + 1,
-		)
+		let lb_two_comp = C::zero().leading_zeros() - lb_two_comp.leading_zeros() + 1;
+		if ub.is_negative() {
+			lb_two_comp
+		} else {
+			std::cmp::max(
+				lb_two_comp,
+				C::zero().leading_zeros() - ub.leading_zeros() + 1,
+			)
+		}
 	}) as usize
+}
+
+/// Return a linear expression of non-fixed literals and their coefficient, and a constant `add` resulting from the fixed literals
+pub(crate) fn filter_fixed<Lit: Literal, C: Coefficient>(
+	xs: &[LitOrConst<Lit>],
+) -> (Vec<(Lit, C)>, C) {
+	let mut add = C::zero(); // resulting from fixed terms
+
+	let offset = two_comp_bounds(xs.len()).0;
+	(
+		xs.into_iter()
+			.enumerate()
+			.filter_map(|(k, x)| match x {
+				LitOrConst::Lit(l) => Some((l.clone(), C::one().shl(k))),
+				LitOrConst::Const(true) => {
+					add += C::one().shl(k);
+					None
+				}
+				LitOrConst::Const(false) => None,
+			})
+			.collect::<Vec<_>>(),
+		add + offset,
+	)
 }
 
 impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
@@ -492,6 +523,68 @@ End
 	}
 }
 
+pub(crate) fn to_lex_bits<C: Coefficient>(k: C, bits: usize, two_comp: bool) -> Vec<bool> {
+	// first, get k represented as 2-comp in the min. number of bits
+	assert!(bits >= required_lits(k, k));
+	let ks = if !k.is_negative() {
+		// 2-comp for non-negative x = unsigned(x) ++ [false sign bit]
+		as_binary(k.into(), None)
+			.into_iter()
+			.chain([false]) // sign bit
+			.collect()
+	} else {
+		// 2-comp for negative x = negate(unsigned(|x|) ) + one
+		// Ex. negate(unsigned(|-2|)) + one = negate(0+10) + one = 101 + one = 110 = -4+2+0 = -2
+		let k = as_binary((k.abs() - C::one()).into(), None)
+			.into_iter()
+			.chain([false])
+			.map(|b| !b)
+			.collect::<Vec<_>>();
+		k
+	let ks = ks[..ks.len() - 1]
+		.iter()
+		.copied()
+		// First, sign-extend to get the required number of bits
+		.chain(vec![*ks.last().unwrap(); bits.saturating_sub(ks.len())])
+		// and add/negate just the last bit to get two-comp/lexicographic binary
+		.chain([{
+			let last = *ks.last().unwrap();
+			if two_comp {
+				last
+			} else {
+				!last
+			}
+		}])
+		.collect::<Vec<_>>();
+
+	// debug_assert_eq!(
+	// 	filter_fixed::<i32, C>(
+	// 		&ks.iter()
+	// 			.cloned()
+	// 			.map(|b| LitOrConst::from(b))
+	// 			.collect_vec()
+	// 	)
+	// 	.1,
+	// 	k,
+	// 	"Computed lex-binary {ks:?} is not equivalent to {k}"
+	// );
+
+	ks
+}
+
+pub(crate) fn sign_extend<Lit: Literal>(
+	ks: &[LitOrConst<Lit>],
+	s: LitOrConst<Lit>,
+	n: usize,
+) -> Vec<LitOrConst<Lit>> {
+	ks[..ks.len() - 1]
+		.into_iter()
+		.cloned()
+		.chain(vec![s; n.saturating_sub(ks.len())])
+		.chain([ks.last().unwrap().clone()])
+		.collect()
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -534,5 +627,12 @@ End
 		model.encode(&mut cnf).unwrap();
 		println!("lp = {}", model.to_text(Format::Lp));
 		// assert_eq!(lp, model.to_text(Format::Lp));
+	}
+
+	#[test]
+	fn test_to_bits() {
+		assert_eq!(to_lex_bits(-3, 3, false), &[true, false, false]);
+		assert_eq!(to_lex_bits(-4, 3, false), &[false, false, false]);
+		assert_eq!(to_lex_bits(1, 2, true), &[true, false]);
 	}
 }
