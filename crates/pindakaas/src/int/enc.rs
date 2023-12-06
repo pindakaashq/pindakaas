@@ -1,5 +1,7 @@
 use super::display_dom;
-use crate::helpers::negate_cnf;
+use super::helpers::to_lex_bits;
+use crate::helpers::{is_sorted, negate_cnf};
+use crate::int::helpers::filter_fixed;
 use iset::{interval_map, interval_set, IntervalMap, IntervalSet};
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
@@ -134,6 +136,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		ub: C,
 		lbl: String,
 	) -> Self {
+		assert!(lb <= ub);
 		Self::from_dom(
 			db,
 			num::iter::range_inclusive(lb, ub)
@@ -144,6 +147,7 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	}
 
 	fn interval_set_from_dom(dom: &[C]) -> IntervalSet<C> {
+		assert!(is_sorted(dom));
 		dom.iter()
 			.tuple_windows()
 			.map(|(&a, &b)| (a + C::one())..(b + C::one()))
@@ -647,35 +651,8 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		.collect()
 	}
 
-	/// Return a linear expression of non-fixed literals and their coefficient, and a constant `add` resulting from the fixed literals
-	fn filter_fixed(&self) -> (Vec<(Lit, C)>, C) {
-		let mut add = C::zero(); // resulting from fixed terms
-
-		let offset: C = if GROUND_BINARY_AT_LB {
-			self.lb()
-		} else {
-			two_comp_bounds(self.bits()).0
-		};
-
-		(
-			self.xs(true)
-				.into_iter()
-				.enumerate()
-				.filter_map(|(k, x)| match x {
-					LitOrConst::Lit(l) => Some((l, C::one().shl(k))),
-					LitOrConst::Const(true) => {
-						add += C::one().shl(k);
-						None
-					}
-					LitOrConst::Const(false) => None,
-				})
-				.collect::<Vec<_>>(),
-			add + offset,
-		)
-	}
-
 	fn as_lin_exp(&self) -> LinExp<Lit, C> {
-		let (terms, add) = self.filter_fixed();
+		let (terms, add) = filter_fixed(&self.xs(true));
 
 		let lin_exp = LinExp::new().add_bounded_log_encoding(
 			terms.as_slice(),
@@ -703,25 +680,29 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 	pub(crate) fn add<DB: ClauseDatabase<Lit = Lit>>(
 		&self,
 		db: &mut DB,
-		encoder: &mut TernLeEncoder,
+		_: &mut TernLeEncoder,
 		y: C,
 	) -> Result<Self> {
 		if y.is_zero() {
 			Ok(self.clone())
 		} else {
-			let z_bin =
-				IntVarBin::from_dom(db, self.dom.clone().add(y), format!("{}+{}", self.lbl, y));
+			let dom = self.dom.clone().add(y);
+			Ok(IntVarBin::from_lits(
+				&log_enc_add_fn(
+					db,
+					&self.clone().xs(false),
+					&to_lex_bits(y, required_lits(dom.lb(), dom.ub()), true)
+						.into_iter()
+						.map(LitOrConst::Const)
+						.collect_vec(),
+					&Comparator::Equal,
+					LitOrConst::Const(false),
+					None,
+				)?,
+				dom,
+				format!("{}+{}", self.lbl, y),
+			))
 
-			encoder.encode(
-				db,
-				&TernLeConstraint {
-					x: &IntVarEnc::Bin(self.clone()),
-					y: &IntVarEnc::Const(y),
-					cmp: &Comparator::Equal,
-					z: &IntVarEnc::Bin(z_bin.clone()),
-				},
-			)?;
-			Ok(z_bin)
 		}
 	}
 }
@@ -843,6 +824,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		dom: &[C],
 		lbl: String,
 	) -> Result<IntVarEnc<DB::Lit, C>> {
+		assert!(is_sorted(dom));
 		match dom {
 			[] => Err(Unsatisfiable),
 			[d] => Ok(IntVarEnc::Const(*d)),

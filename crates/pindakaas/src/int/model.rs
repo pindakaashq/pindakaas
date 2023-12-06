@@ -543,13 +543,38 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				IntVarEnc::Ord(o) => Ok((vec![IntVarEnc::Ord(o.mul(db, self.c))], C::zero())),
 				IntVarEnc::Bin(x_enc) => {
 					// handle negative coefficient
-					let (mut c, xs, k) = if !self.c.is_negative() {
-						(self.c, x_enc.xs(false), C::zero())
+					let (mut c, xs, k, dom) = if !self.c.is_negative() {
+						(
+							self.c,
+							x_enc.xs(false),
+							C::zero(),
+							Dom::from_slice(
+								&self
+									.x
+									.borrow()
+									.dom
+									.iter()
+									.map(|d| self.c * d)
+									.sorted()
+									.collect::<Vec<_>>(),
+							),
+						)
 					} else {
 						(
 							-self.c,
 							x_enc.xs(false).into_iter().map(|x| -x).collect(), // 2-comp
 							-self.c, // return constant addition `-c` because `-c*x = c* -x = c* (1-~x) = c - c*~x`
+							Dom::from_slice(
+								&self
+									.x
+									.borrow()
+									.dom
+									.iter()
+									// .map(|d| self.c * (d - C::one()))
+									.map(|d| self.c * d + self.c) // -1 * {0,1} = {-2,-1}
+									.sorted()
+									.collect::<Vec<_>>(),
+							),
 						)
 					};
 
@@ -634,16 +659,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 												.map(LitOrConst::from),
 										)
 										.collect::<Vec<_>>(),
-									Dom::from_slice(
-										&self
-											.x
-											.borrow()
-											.dom
-											.iter()
-											.map(|d| self.c * d)
-											.sorted()
-											.collect::<Vec<_>>(),
-									),
+									dom,
 									format!("{}*{}", self.c.clone(), self.x.borrow().lbl()),
 								))],
 								k,
@@ -671,22 +687,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 										.collect::<Vec<_>>();
 									IntVarEnc::Bin(IntVarBin::from_lits(
 										&xs,
-										Dom::from_slice(
-											&self
-												.x
-												.borrow()
-												.dom
-												.iter()
-												.map(|d| d.shl(sh))
-												.map(|d| {
-													if self.c.is_negative() {
-														-d + self.c
-													} else {
-														d
-													}
-												})
-												.collect::<Vec<_>>(),
-										),
+										dom.clone().mul(C::one().shl(sh)),
 										format!("{}<<{}", self.x.borrow().lbl(), sh.clone()),
 									))
 								})
@@ -742,16 +743,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					Ok((
 						vec![IntVarEnc::Bin(IntVarBin::from_lits(
 							&xs,
-							Dom::from_slice(
-								&self
-									.x
-									.borrow()
-									.dom
-									.iter()
-									.map(|d| -k + self.c * d)
-									.sorted()
-									.collect::<Vec<_>>(),
-							),
+							dom,
 							format!("{}*{}", self.c, self.x.borrow().lbl()),
 						))],
 						k,
@@ -1102,6 +1094,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				})
 				.flatten()
 				.collect::<Vec<_>>();
+			assert!(encs.iter().all(|e| matches!(e, IntVarEnc::Bin(_))));
 
 			if self
 				.exp
@@ -1170,15 +1163,15 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					x,
 					&IntVarEnc::Const(C::zero()),
 					&self.cmp,
-					&IntVarEnc::Const(self.k),
+					&IntVarEnc::Const(k),
 				),
 			),
 			[x, z] if DECOMPOSE => encoder.encode(
 				db,
-				&TernLeConstraint::new(x, &IntVarEnc::Const(-self.k), &self.cmp, z),
+				&TernLeConstraint::new(x, &IntVarEnc::Const(-k), &self.cmp, z),
 			),
 			[x, y, z] if DECOMPOSE => {
-				let z = z.add(db, &mut encoder, &IntVarEnc::Const(self.k), None, None)?;
+				let z = z.add(db, &mut encoder, &IntVarEnc::Const(k), None, None)?;
 				encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, &z))
 			}
 			_ => {
@@ -1468,8 +1461,8 @@ mod tests {
 						println!("Decomposition error:\n{err}");
 					}
 					panic!(
-						"Decomposition is incorrect. Test failed for {:?} and {lp}",
-						model.config
+						"Decomposition is incorrect. Test failed for {:?} and {lp}\n{model}\n{decomposition}",
+						model.config,
 					);
 				}
 			}
