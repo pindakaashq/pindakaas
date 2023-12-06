@@ -155,19 +155,23 @@ impl<'a, Lit: Literal> Checker for XorConstraint<'a, Lit> {
 pub mod tests {
 	type Lit = i32; // TODO replace all i32s for Lit
 
+	use rand::distributions::Alphanumeric;
+	use rand::{thread_rng, Rng};
+	use splr::solver::SolverResult;
 	use splr::{
 		types::{CNFDescription, Instantiate},
 		Certificate, Config, SatSolverIF, SolveIF, Solver, SolverError,
 	};
 	use std::{
 		collections::{HashMap, HashSet},
+		process::Command,
 		thread::panicking,
 	};
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;
-	use crate::{linear::LimitComp, CardinalityOne, Encoder, LadderEncoder, Unsatisfiable};
+	use crate::{linear::LimitComp, CardinalityOne, Cnf, Encoder, LadderEncoder, Unsatisfiable};
 
 	macro_rules! assert_enc {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
@@ -364,6 +368,7 @@ pub mod tests {
 		solutions: Option<Vec<Vec<i32>>>,
 		check: Option<fn(&[i32]) -> bool>,
 		unchecked: bool,
+		cnf: Cnf<Lit>,
 		expected_vars: Option<usize>,
 		expected_cls: Option<usize>,
 		expected_lits: Option<usize>,
@@ -387,6 +392,7 @@ pub mod tests {
 					},
 				),
 				num_var,
+				cnf: Cnf::new(num_var),
 				clauses: None,
 				solutions: None,
 				check: None,
@@ -485,9 +491,96 @@ pub mod tests {
 			}
 		}
 
+		pub fn cadical(&mut self) -> SolverResult {
+			let mut status: Option<SolverResult> = None;
+
+			let dimacs = {
+				let rng = thread_rng();
+				let dimacs = format!(
+					"./tmp/{}.dimacs",
+					rng.sample_iter(&Alphanumeric)
+						.take(7)
+						.map(char::from)
+						.collect::<String>()
+				);
+				std::fs::write(&dimacs, format!("{}", self.cnf)).unwrap();
+				dimacs
+			};
+
+			let output = Command::new(format!("../../../cadical/build/cadical"))
+				.arg(dimacs)
+				.arg("-t")
+				.arg("10")
+				.output()
+				.unwrap();
+
+			let out = String::from_utf8(output.stdout.clone()).unwrap();
+			let err = String::from_utf8(output.stderr.clone()).unwrap();
+			if output.status.code().unwrap_or(-1) == -1 {
+				panic!("CADICAL {}\n{}\n", out, err);
+			}
+
+			for line in String::from_utf8(output.stdout.clone()).unwrap().lines() {
+				let mut tokens = line.split_whitespace();
+				match tokens.next() {
+					None | Some("c") => {
+						if let Some("UNKNOWN") = tokens.next() {
+							panic!("CADICAL unknown!")
+						} else {
+							continue;
+						}
+					}
+					Some("s") => match tokens.next() {
+						Some("SATISFIABLE") => {
+							status = Some(SolverResult::Ok(Certificate::SAT(vec![])))
+						}
+						Some("UNSATISFIABLE") => {
+							status = Some(SolverResult::Ok(Certificate::UNSAT))
+						}
+						Some("UNKNOWN") | Some("INDETERMINATE") => panic!("CADICAL unknown"),
+						status => panic!("CADICAL Unknown status: {status:?}"),
+					},
+					Some("v") => {
+						tokens
+							.flat_map(|t| t.parse::<Lit>())
+							.filter(|t| {
+								let var = t.abs();
+								0 < var && t.abs() <= self.num_var
+							})
+							.for_each(|lit| {
+								if let Some(SolverResult::Ok(Certificate::SAT(solution))) =
+									&mut status
+								{
+									solution.push(lit);
+								} else {
+									panic!("CADICAL ERR")
+								}
+							});
+					}
+					line => panic!("CADICAL Unexpected slv output: {:?}", line),
+				}
+			}
+			status.unwrap_or_else(|| {
+				panic!(
+					"CADICAL No status set in SAT output:\n{}",
+					String::from_utf8(output.stdout).unwrap()
+				)
+			})
+		}
+
+		fn call_solver(&mut self) -> SolverResult {
+			const USE_SPLR: bool = false;
+			if USE_SPLR {
+				self.slv.solve()
+			} else {
+				self.cadical()
+			}
+		}
+
 		pub fn solve(&mut self) -> Vec<Vec<i32>> {
 			let mut from_slv: Vec<Vec<i32>> = Vec::new();
-			while let Ok(Certificate::SAT(model)) = self.slv.solve() {
+
+			while let Ok(Certificate::SAT(model)) = self.call_solver() {
 				let solution = if ONLY_OUTPUT {
 					model
 						.clone()
@@ -501,6 +594,7 @@ pub mod tests {
 				from_slv.push(solution.clone());
 
 				let nogood: Vec<i32> = solution.iter().map(|l| -l).collect();
+				self.cnf.add_clause(&nogood).unwrap();
 				match SatSolverIF::add_clause(&mut self.slv, nogood) {
 					Err(SolverError::Inconsistent | SolverError::EmptyClause) => {
 						break;
@@ -637,6 +731,7 @@ pub mod tests {
 		type Lit = i32;
 
 		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
+			self.cnf.add_clause(cl)?;
 			let mut cl = Vec::from(cl);
 
 			cl.sort_by_key(|a| a.abs());
@@ -735,12 +830,21 @@ pub mod tests {
 				}
 			}
 
-			match match cl.len() {
+			let res = match match cl.len() {
 				0 => return Err(Unsatisfiable),
 				1 => self.slv.add_assignment(cl[0]),
 				_ => SatSolverIF::add_clause(&mut self.slv, cl),
 			} {
-				Ok(_) => Ok(()),
+				Ok(_) => {
+					const FIND_UNSAT: bool = false;
+					if FIND_UNSAT {
+						if let SolverResult::Ok(Certificate::UNSAT) = self.call_solver() {
+							return Err(Unsatisfiable);
+						}
+					}
+
+					Ok(())
+				}
 				Err(err) => match err {
 					SolverError::EmptyClause => Ok(()),
 					SolverError::RootLevelConflict(_) => Err(Unsatisfiable),
@@ -748,11 +852,14 @@ pub mod tests {
 						panic!("unexpected solver error: {:?}", err);
 					}
 				},
-			}
+			};
+
+			res
 		}
 
 		fn new_var(&mut self) -> Self::Lit {
 			let res = self.slv.add_var() as i32;
+			self.cnf.new_var();
 
 			if let Some(num) = &mut self.expected_vars {
 				assert!(*num > 0, "unexpected number of new variables");
