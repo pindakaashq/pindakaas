@@ -424,15 +424,20 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 			panic!("Cannot create offset binary encoding `from_lits` without a given lower bound.")
 		}
 
-		let mut xs = xs.to_vec();
-		let (lb, ub) = (dom.lb(), dom.ub());
-		if !lb.is_negative() {
-			// if lb is >=0
-			xs.push(LitOrConst::Const(false));
-		} else if ub.is_negative() {
-			// if ub is < 0
-			xs.push(LitOrConst::Const(true));
-		}
+		let lits = required_lits(dom.lb(), dom.ub());
+		assert!(xs.len() >= lits);
+
+		let xs = xs.to_vec();
+		// TODO ..
+		// let mut xs = xs.to_vec();
+		// let (lb, ub) = (dom.lb(), dom.ub());
+		// if !lb.is_negative() {
+		// 	// if lb is >=0
+		// 	xs.push(LitOrConst::Const(false));
+		// } else if ub.is_negative() {
+		// 	// if ub is < 0
+		// 	xs.push(LitOrConst::Const(true));
+		// }
 
 		Self { xs, dom, lbl }
 	}
@@ -702,7 +707,6 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 				dom,
 				format!("{}+{}", self.lbl, y),
 			))
-
 		}
 	}
 }
@@ -908,7 +912,8 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 						&y_bin.xs(false),
 						&Comparator::Equal,
 						LitOrConst::Const(false),
-						Some(required_lits(dom.lb(), dom.ub())),
+						// Some(required_lits(dom.lb(), dom.ub())), // TODO how to calculate required bits without risking cutting of the necessary sign bit;
+						None,
 					)?,
 					dom,
 					format!("{}+{}", x_bin.lbl, y_bin.lbl),

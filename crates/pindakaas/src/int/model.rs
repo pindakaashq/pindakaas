@@ -570,8 +570,9 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 									.borrow()
 									.dom
 									.iter()
-									// .map(|d| self.c * (d - C::one()))
-									.map(|d| self.c * d + self.c) // -1 * {0,1} = {-2,-1}
+									.map(|d| self.c * d + self.c)
+									// -1 * {0,1} = {-1,0} = {-2,-1} + 1
+									// [b,F] in {0,1} = [!b,T] in {-2,-1}
 									.sorted()
 									.collect::<Vec<_>>(),
 							),
@@ -1137,17 +1138,25 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			return Ok(());
 		}
 
-		// Encodes terms into ternary constrain (i.e. last term is multiplied by -1)
 		let mut k = self.k;
 		let encs = self
 			.clone()
+			// Encodes terms into ternary constrain (i.e. last term is multiplied by -1)
 			.into_tern()
 			.exp
 			.terms
 			.into_iter()
-			.flat_map(|term| {
+			.with_position()
+			.flat_map(|(pos, term)| {
 				term.encode(db, config).map(|(xs, c)| {
-					k -= c;
+					match pos {
+						Position::Last => {
+							k += c;
+						}
+						_ => {
+							k -= c;
+						}
+					}
 					xs
 				})
 			})
@@ -1392,6 +1401,7 @@ mod tests {
 			))
 			.unwrap();
 		let mut cnf = Cnf::new(0);
+
 		// model.propagate(&Consistency::Bounds);
 		model.encode(&mut cnf).unwrap();
 	}
