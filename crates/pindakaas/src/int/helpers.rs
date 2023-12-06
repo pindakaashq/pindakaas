@@ -525,7 +525,7 @@ End
 
 pub(crate) fn to_lex_bits<C: Coefficient>(k: C, bits: usize, two_comp: bool) -> Vec<bool> {
 	// first, get k represented as 2-comp in the min. number of bits
-	assert!(bits >= required_lits(k, k));
+	// assert!(bits >= required_lits(k, k));
 	let ks = if !k.is_negative() {
 		// 2-comp for non-negative x = unsigned(x) ++ [false sign bit]
 		as_binary(k.into(), None)
@@ -541,6 +541,7 @@ pub(crate) fn to_lex_bits<C: Coefficient>(k: C, bits: usize, two_comp: bool) -> 
 			.map(|b| !b)
 			.collect::<Vec<_>>();
 		k
+	};
 	let ks = ks[..ks.len() - 1]
 		.iter()
 		.copied()

@@ -172,7 +172,8 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				let (x_bin, y_const) = if matches!(cmp, Comparator::LessEq | Comparator::GreaterEq)
 				{
 					let x_bin = x_bin.add(db, self, *y_const)?;
-					x_bin.consistent(db)?;
+					// TODO .. means maybe domains are incorrect if we cannot enforce them?
+					// x_bin.consistent(db)?;
 					(x_bin, C::zero())
 				} else {
 					(
@@ -216,7 +217,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					ineq => {
 						// TODO could add Some(z.ub()) IF cmp == Equal?
 						let xy = x.add(db, self, y, None, None)?;
-						xy.consistent(db)?; // TODO can be removed if grounding is correct
+						// xy.consistent(db)?; // TODO can be removed if grounding is correct
 						self.encode(
 							db,
 							&TernLeConstraint::new(&xy, &IntVarEnc::Const(C::zero()), ineq, z),

@@ -163,7 +163,7 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 	// For every zero bit in k:
 	// - either the `x` bit is also zero, or
 	// - a higher `x` bit is zero that was one in k.
-	let k = to_bits(k, bits);
+	let k = to_lex_bits(k, bits, false);
 
 	(0..bits)
 		.filter(|i| !k.get(*i).unwrap_or(&false))
