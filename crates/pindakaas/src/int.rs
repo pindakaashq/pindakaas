@@ -2,7 +2,7 @@ mod constrain;
 mod display;
 mod dom;
 mod enc;
-mod helpers;
+pub(crate) mod helpers;
 mod model;
 mod scm;
 
