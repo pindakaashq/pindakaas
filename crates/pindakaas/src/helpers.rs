@@ -376,6 +376,7 @@ pub mod tests {
 		expecting_no_equivalences: Option<HashMap<Lit, Lit>>,
 	}
 
+	const USE_SPLR: bool = false;
 	const ONLY_OUTPUT: bool = true;
 
 	impl TestDB {
@@ -492,6 +493,7 @@ pub mod tests {
 		}
 
 		pub fn cadical(&mut self) -> SolverResult {
+			const REMOVE_DIMACS: bool = true;
 			let mut status: Option<SolverResult> = None;
 
 			let dimacs = {
@@ -508,11 +510,15 @@ pub mod tests {
 			};
 
 			let output = Command::new(format!("../../../cadical/build/cadical"))
-				.arg(dimacs)
+				.arg(&dimacs)
 				.arg("-t")
 				.arg("10")
 				.output()
 				.unwrap();
+
+			if REMOVE_DIMACS {
+				std::fs::remove_file(dimacs).unwrap();
+			}
 
 			let out = String::from_utf8(output.stdout.clone()).unwrap();
 			let err = String::from_utf8(output.stderr.clone()).unwrap();
@@ -569,7 +575,6 @@ pub mod tests {
 		}
 
 		fn call_solver(&mut self) -> SolverResult {
-			const USE_SPLR: bool = false;
 			if USE_SPLR {
 				self.slv.solve()
 			} else {
@@ -594,15 +599,18 @@ pub mod tests {
 				from_slv.push(solution.clone());
 
 				let nogood: Vec<i32> = solution.iter().map(|l| -l).collect();
-				self.cnf.add_clause(&nogood).unwrap();
-				match SatSolverIF::add_clause(&mut self.slv, nogood) {
-					Err(SolverError::Inconsistent | SolverError::EmptyClause) => {
-						break;
-					}
-					Err(e) => {
-						panic!("unexpected solver error: {}", e);
-					}
-					Ok(_) => self.slv.reset(),
+				if USE_SPLR {
+					match SatSolverIF::add_clause(&mut self.slv, nogood) {
+						Err(SolverError::Inconsistent | SolverError::EmptyClause) => {
+							break;
+						}
+						Err(e) => {
+							panic!("unexpected solver error: {}", e);
+						}
+						Ok(_) => self.slv.reset(),
+					};
+				} else {
+					self.cnf.add_clause(&nogood).unwrap(); // TODO ret
 				}
 			}
 			for sol in &mut from_slv {
@@ -731,7 +739,6 @@ pub mod tests {
 		type Lit = i32;
 
 		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
-			self.cnf.add_clause(cl)?;
 			let mut cl = Vec::from(cl);
 
 			cl.sort_by_key(|a| a.abs());
@@ -830,31 +837,44 @@ pub mod tests {
 				}
 			}
 
-			let res = match match cl.len() {
-				0 => return Err(Unsatisfiable),
-				1 => self.slv.add_assignment(cl[0]),
-				_ => SatSolverIF::add_clause(&mut self.slv, cl),
-			} {
-				Ok(_) => {
-					const FIND_UNSAT: bool = false;
-					if FIND_UNSAT {
-						if let SolverResult::Ok(Certificate::UNSAT) = self.call_solver() {
-							return Err(Unsatisfiable);
+			const FIND_UNSAT: bool = false;
+			if USE_SPLR {
+				let res = match match cl.len() {
+					0 => return Err(Unsatisfiable),
+					// 1 => self.slv.add_assignment(cl[0]),
+					_ => SatSolverIF::add_clause(&mut self.slv, cl),
+				} {
+					Ok(_) => {
+						if FIND_UNSAT {
+							if let SolverResult::Ok(Certificate::UNSAT) = self.call_solver() {
+								return Err(Unsatisfiable);
+							}
 						}
-					}
 
-					Ok(())
+						Ok(())
+					}
+					Err(err) => match err {
+						SolverError::EmptyClause => Ok(()),
+						SolverError::RootLevelConflict(_) => Err(Unsatisfiable),
+						err => {
+							panic!("unexpected solver error: {:?}", err);
+						}
+					},
+				};
+
+				res
+			} else {
+				if FIND_UNSAT {
+					if let SolverResult::Ok(Certificate::UNSAT) = self.call_solver() {
+						return Err(Unsatisfiable);
+					}
 				}
-				Err(err) => match err {
-					SolverError::EmptyClause => Ok(()),
-					SolverError::RootLevelConflict(_) => Err(Unsatisfiable),
-					err => {
-						panic!("unexpected solver error: {:?}", err);
-					}
-				},
-			};
-
-			res
+				if cl.is_empty() {
+					Err(Unsatisfiable)
+				} else {
+					self.cnf.add_clause(&cl)
+				}
+			}
 		}
 
 		fn new_var(&mut self) -> Self::Lit {
