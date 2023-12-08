@@ -871,77 +871,76 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			Consistency::None => unreachable!(),
 			Consistency::Bounds => loop {
 				let mut fixpoint = true;
-				match self.cmp {
-					Comparator::Equal => vec![true, false],
-					Comparator::LessEq => vec![true],
-					Comparator::GreaterEq => vec![false],
-				}
-				.into_iter()
-				.try_for_each(|is_leq| {
-					if is_leq {
-						let rs_lb = self.lb() - self.k;
-						for term in &self.exp.terms {
-							let mut x = term.x.borrow_mut();
-							let size = x.size();
-							let x_lb = if term.c.is_positive() {
-								x.dom.lb()
-							} else {
-								x.dom.ub()
-							};
+				self.cmp.split().into_iter().try_for_each(|cmp| {
+					match cmp {
+						Comparator::LessEq => {
+							let rs_lb = self.lb() - self.k;
+							for term in &self.exp.terms {
+								let mut x = term.x.borrow_mut();
+								let size = x.size();
+								let x_lb = if term.c.is_positive() {
+									x.dom.lb()
+								} else {
+									x.dom.ub()
+								};
 
-							let id = x.id;
+								let id = x.id;
 
-							// c*d <= c*x_lb - rs_lb
-							// d <= x_lb - (rs_lb / c) (or d >= .. if d<0)
-							let b = x_lb - (rs_lb / term.c);
+								// c*d <= c*x_lb - rs_lb
+								// d <= x_lb - (rs_lb / c) (or d >= .. if d<0)
+								let b = x_lb - (rs_lb / term.c);
 
-							if term.c.is_negative() {
-								x.ge(&b);
-							} else {
-								x.le(&b);
+								if term.c.is_negative() {
+									x.ge(&b);
+								} else {
+									x.le(&b);
+								}
+
+								if x.size() < size {
+									//println!("Pruned {}", size - x.size());
+									changed.push(id);
+									fixpoint = false;
+								}
+								if x.size() == C::zero() {
+									return Err(Unsatisfiable);
+								}
 							}
-
-							if x.size() < size {
-								//println!("Pruned {}", size - x.size());
-								changed.push(id);
-								fixpoint = false;
-							}
-							if x.size() == C::zero() {
-								return Err(Unsatisfiable);
-							}
+							Ok(())
 						}
-					} else {
-						let xs_ub = self.ub() - self.k;
-						for term in &self.exp.terms {
-							let mut x = term.x.borrow_mut();
-							let size = x.size();
+						Comparator::GreaterEq => {
+							let xs_ub = self.ub() - self.k;
+							for term in &self.exp.terms {
+								let mut x = term.x.borrow_mut();
+								let size = x.size();
 
-							let id = x.id;
-							let x_ub = if term.c.is_positive() {
-								x.dom.ub()
-							} else {
-								x.dom.lb()
-							};
+								let id = x.id;
+								let x_ub = if term.c.is_positive() {
+									x.dom.ub()
+								} else {
+									x.dom.lb()
+								};
 
-							// c*d >= x_ub*c + xs_ub := d >= x_ub - xs_ub/c
-							let b = x_ub - (xs_ub / term.c);
+								// c*d >= x_ub*c + xs_ub := d >= x_ub - xs_ub/c
+								let b = x_ub - (xs_ub / term.c);
 
-							if !term.c.is_negative() {
-								x.ge(&b);
-							} else {
-								x.le(&b);
+								if !term.c.is_negative() {
+									x.ge(&b);
+								} else {
+									x.le(&b);
+								}
+
+								if x.size() < size {
+									changed.push(id);
+									fixpoint = false;
+								}
+								if x.size() == C::zero() {
+									return Err(Unsatisfiable);
+								}
 							}
-
-							if x.size() < size {
-								changed.push(id);
-								fixpoint = false;
-							}
-							if x.size() == C::zero() {
-								return Err(Unsatisfiable);
-							}
+							Ok(())
 						}
+						_ => unreachable!(),
 					}
-					Ok(())
 				})?;
 
 				if fixpoint {
@@ -1419,15 +1418,25 @@ mod tests {
 
 	fn get_model_configs() -> Vec<ModelConfig<C>> {
 		iproduct!(
-			[Scm::Add, Scm::Rca, Scm::Pow, Scm::Dnf],
-			[Decomposer::Gt, Decomposer::Swc, Decomposer::Bdd],
-			[Consistency::None, Consistency::Bounds],
-			[false, true]
-			[Scm::Rca],
-			[Decomposer::Rca],
+			// [Scm::Add, Scm::Rca, Scm::Pow, Scm::Dnf],
+			// [Decomposer::Gt, Decomposer::Swc, Decomposer::Bdd],
+			// [Consistency::None, Consistency::Bounds],
+			// [false, true],
+			// [None] // smaller number of tests
+			// [None, Some(0), Some(2)]
+			// [Scm::Add],
+			// [Decomposer::Swc],
+			// [Consistency::None],
+			// [false],
+			// [Some(0)] // [None, Some(0), Some(2)]
+			[Scm::Add],
+			[Decomposer::Gt],
+			// [Decomposer::Gt, Decomposer::Swc, Decomposer::Bdd],
+			// [Consistency::None],
 			[Consistency::None],
 			[false],
-			[Some(0)] // [None, Some(0), Some(2)]
+			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
+			[None] // [None, Some(0), Some(2)]
 		)
 		.map(
 			|(scm, decomposer, propagate, add_consistency, cutoff)| ModelConfig {
@@ -1486,6 +1495,7 @@ mod tests {
 			db.num_var = model.lits() as Lit;
 			db.solve().into_iter().sorted().collect::<Vec<_>>()
 		} else {
+			// TODO if Unsat is unexpected, show which (decomposition?) constraint is causing unsat
 			vec![]
 		};
 
@@ -1547,6 +1557,20 @@ End
 		);
 	}
 
+	#[test]
+	fn test_int_lin_le_2() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 4 x1 + 1 x2 <= 4
+Binary
+x1
+x2
+End
+",
+		);
+	}
+
 	// #[test]
 	fn _test_lp_le_2() {
 		test_lp_for_configs(
@@ -1560,6 +1584,21 @@ Bounds
 End
 ",
 		)
+	}
+
+	#[test]
+	fn test_int_lin_ge_1() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 2 x1 + 3 x2 + 2 x3 >= 4
+Binary
+x1
+x2
+x3
+End
+",
+		);
 	}
 
 	#[test]

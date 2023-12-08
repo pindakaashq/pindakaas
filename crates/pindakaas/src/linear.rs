@@ -277,6 +277,15 @@ pub enum Comparator {
 	GreaterEq,
 }
 
+impl Comparator {
+	pub(crate) fn split(&self) -> Vec<Comparator> {
+		match self {
+			Comparator::Equal => vec![Comparator::LessEq, Comparator::GreaterEq],
+			_ => vec![self.clone()],
+		}
+	}
+}
+
 impl fmt::Display for Comparator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {

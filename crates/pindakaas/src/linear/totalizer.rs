@@ -51,7 +51,8 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
 		let mut i = 0;
 
 		while layer.len() > 1 {
-			let mut next_layer = Vec::<_>::new();
+			let mut next_layer = Vec::new();
+			let lin_ub = layer.iter().map(|x| x.ub()).reduce(C::add).unwrap();
 			for (j, children) in layer.chunks(2).enumerate() {
 				match children {
 					[x] => {
@@ -62,11 +63,18 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
 						let dom = if at_root {
 							vec![lin.k]
 						} else {
+							let lb = lin.k - (lin_ub - left.ub() - right.ub()) - C::one();
 							left.dom()
 								.into_iter()
 								.cartesian_product(right.dom().into_iter())
 								.map(|(a, b)| a + b)
-								.filter(|d| lin.cmp == Comparator::GreaterEq || d <= &lin.k) // TODO depends on cmp and on signs!
+								.filter(|d| {
+									lin.cmp.split().into_iter().all(|cmp| match cmp {
+										Comparator::LessEq => d <= &lin.k,
+										Comparator::GreaterEq => d >= &lb,
+										_ => unreachable!(),
+									})
+								})
 								.sorted()
 								.dedup()
 								.collect::<Vec<_>>()
