@@ -411,6 +411,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			)
 			.collect::<Vec<_>>();
 
+		// Throw early if expected_assignments need to be computed
+		if !errs.is_empty() && expected_assignments.is_none() {
+			return Err(errs);
+		}
+
 		let expected_assignments = expected_assignments
 			.map(|expected_assignments| expected_assignments.to_vec())
 			.unwrap_or_else(|| self.brute_force_solve(None));
@@ -688,7 +693,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 										.collect::<Vec<_>>();
 									IntVarEnc::Bin(IntVarBin::from_lits(
 										&xs,
-										dom.clone().mul(C::one().shl(sh)),
+										x_enc.dom.clone().mul(C::one().shl(sh)),
 										format!("{}<<{}", self.x.borrow().lbl(), sh.clone()),
 									))
 								})
@@ -1185,8 +1190,8 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			}
 			_ => {
 				assert!(
-					!encs.iter().any(|enc| matches!(enc, IntVarEnc::Bin(_))),
-					"TODO"
+					encs.iter().all(|enc| matches!(enc, IntVarEnc::Bin(_))),
+					"TODO: {encs:?}"
 				);
 
 				// just get encoding; does not need to handle terms coefficient here
@@ -1528,7 +1533,7 @@ End
 	}
 
 	#[test]
-	fn test_lp_le_1() {
+	fn test_int_lin_le_1() {
 		test_lp_for_configs(
 			r"
 Subject To

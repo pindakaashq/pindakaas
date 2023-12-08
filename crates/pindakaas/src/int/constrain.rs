@@ -1,6 +1,7 @@
 use crate::helpers::{add_clauses_for, negate_cnf};
+use crate::int::helpers::to_lex_bits;
 use crate::linear::log_enc_add_;
-use crate::{helpers::as_binary, linear::LinExp, Coefficient, Literal};
+use crate::{linear::LinExp, Coefficient, Literal};
 use crate::{CheckError, Checker, ClauseDatabase, Comparator, Encoder, Unsatisfiable};
 use itertools::Itertools;
 use std::fmt;
@@ -174,15 +175,15 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					let x_bin = x_bin.add(db, self, *y_const)?;
 					// TODO .. means maybe domains are incorrect if we cannot enforce them?
 					// x_bin.consistent(db)?;
-					(x_bin, C::zero())
+					(x_bin, to_lex_bits(C::zero(), z_bin.bits(), true))
 				} else {
 					(
 						x_bin.clone(),
 						// TODO unclear why this.
 						if GROUND_BINARY_AT_LB {
-							C::zero()
+							todo!()
 						} else {
-							z_bin.normalize(*y_const)
+							to_lex_bits(*y_const, z_bin.bits(), true)
 						},
 					)
 				};
@@ -192,11 +193,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 						.xs(cmp != &Comparator::Equal)
 						.into_iter()
 						.collect::<Vec<_>>(),
-					&as_binary(y_const.into(), Some(x_bin.lits())) // 0
-						.into_iter()
-						.map(LitOrConst::Const)
-						.chain([LitOrConst::Const(false)])
-						.collect::<Vec<_>>(),
+					&y_const.into_iter().map(LitOrConst::from).collect_vec(),
 					cmp,
 					&z_bin
 						.xs(cmp != &Comparator::Equal)
@@ -217,7 +214,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					ineq => {
 						// TODO could add Some(z.ub()) IF cmp == Equal?
 						let xy = x.add(db, self, y, None, None)?;
-						// xy.consistent(db)?; // TODO can be removed if grounding is correct
+						// xy.consistent(db)?;
 						self.encode(
 							db,
 							&TernLeConstraint::new(&xy, &IntVarEnc::Const(C::zero()), ineq, z),
@@ -230,7 +227,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				// TODO better coupling ;
 				// TODO could add Some(z.ub()) IF cmp == Equal?
 				let z_bin = x.add(db, self, y, None, None)?;
-				z_bin.consistent(db)?;
+				// z_bin.consistent(db)?;
 				self.encode(
 					db,
 					&TernLeConstraint::new(
@@ -262,7 +259,6 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 					),
 				)
 				.unwrap();
-				y_bin.consistent(db)?;
 				self.encode(
 					db,
 					&TernLeConstraint::new(&x_bin.clone().into(), &y_bin.into(), cmp, z),
@@ -274,7 +270,6 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 				// Avoid too many coupling clause
 				let xy_ord = x.add(db, self, y, None, None)?;
 				// TODO why necessary?
-				xy_ord.consistent(db)?;
 
 				// TODO `x:O.add(y:O)` does not add clauses yet
 				self.encode(db, &TernLeConstraint::new(x, y, cmp, &xy_ord))?;
@@ -496,6 +491,22 @@ pub mod tests {
 						IntVarEncoding::Bin,
 						IntVarEncoding::Bin,
 						IntVarEncoding::Ord
+					]
+				);
+			}
+
+			#[test]
+			fn b_b_b() {
+				test_int_lin_encs!(
+					$encoder,
+					$x,
+					$y,
+					$cmp,
+					$z,
+					&[
+						IntVarEncoding::Bin,
+						IntVarEncoding::Bin,
+						IntVarEncoding::Bin
 					]
 				);
 			}
@@ -900,70 +911,6 @@ pub mod tests {
 
 
 		);
-	}
-
-	#[test]
-	fn ord_plus_ord_le_bin_test() {
-		let mut db = TestDB::new(0);
-		let (x, y, z) = (
-			get_ord_x(&mut db, interval_set!(1..3), true, "x".to_string()),
-			get_ord_x(&mut db, interval_set!(1..4), true, "y".to_string()),
-			get_bin_x(&mut db, 0, 6, true, "z".to_string()),
-		);
-		let tern = TernLeConstraint {
-			x: &x,
-			y: &y,
-			cmp: &Comparator::LessEq,
-			z: &z,
-		};
-		db.num_var = (x.lits() + y.lits() + z.lits()) as Lit;
-
-		// let sols = db.brute_force_solve(
-		// 	|sol| {
-		// 		tern.check(sol).is_ok()
-		// 			&& x.as_any()
-		// 				.downcast_ref::<IntVarOrd<Lit, C>>()
-		// 				.unwrap()
-		// 				._consistency()
-		// 				.check(sol)
-		// 				.is_ok() && y
-		// 			.as_any()
-		// 			.downcast_ref::<IntVarOrd<Lit, C>>()
-		// 			.unwrap()
-		// 			._consistency()
-		// 			.check(sol)
-		// 			.is_ok() && z
-		// 			.as_any()
-		// 			.downcast_ref::<IntVarBin<Lit, C>>()
-		// 			.unwrap()
-		// 			._consistency()
-		// 			.check(sol)
-		// 			.is_ok()
-		// 	},
-		// 	db.num_var,
-		// );
-
-		assert_sol!(db => TernLeEncoder::default(), &tern =>
-		vec![
-		  vec![-1, -2, -3, -4, -5],
-		  vec![-1, -2, 3, -4, -5],
-		  vec![-1, -2, -3, 4, -5],
-		  vec![1, -2, -3, 4, -5],
-		  vec![-1, -2, 3, 4, -5],
-		  vec![1, -2, 3, 4, -5],
-		  vec![-1, 2, 3, 4, -5],
-		  vec![-1, -2, -3, -4, 5],
-		  vec![1, -2, -3, -4, 5],
-		  vec![-1, 2, -3, -4, 5],
-		  vec![-1, -2, 3, -4, 5],
-		  vec![1, -2, 3, -4, 5],
-		  vec![-1, 2, 3, -4, 5],
-		  vec![1, 2, 3, -4, 5],
-		  vec![-1, -2, -3, 4, 5],
-		  vec![1, -2, -3, 4, 5],
-		  vec![-1, 2, -3, 4, 5],
-		  vec![1, 2, -3, 4, 5],
-		]);
 	}
 
 	#[test]

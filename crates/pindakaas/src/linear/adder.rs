@@ -404,6 +404,7 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 			// let z = &sign_extend(z, LitOrConst::Const(false), n);
 			let x = &sign_extend(x, -(x.last().unwrap().clone()), n);
 			let z = &sign_extend(z, -(z.last().unwrap().clone()), n);
+
 			assert!(
 				y.iter().all(|yi| matches!(yi, LitOrConst::Const(false))),
 				"Expected {y:?} to be zero for x<=z lex comparison"
@@ -608,7 +609,6 @@ mod tests {
 			LitOrConst::from(db.new_var()),
 		];
 		log_enc_add_(&mut db, x, y, &Comparator::GreaterEq, z).unwrap();
-
 	}
 
 	#[test]
