@@ -452,7 +452,10 @@ Extra solutions:
 {}
 Missing solutions:
 {}
-Inconsistencies:
+Expected assignments:
+{}
+Actual assignments:
+{}
 ",
 					self.config,
 					if actual_assignments.is_empty() {
@@ -466,7 +469,9 @@ Inconsistencies:
 					missing_int_assignments
 						.iter()
 						.map(|a| format!("- {}", a))
-						.join("\n")
+						.join("\n"),
+					expected_assignments.iter().join("\n"),
+					actual_assignments.iter().join("\n"),
 				))])
 				.collect());
 		}
@@ -1485,6 +1490,53 @@ mod tests {
 
 		let lit_assignments = if let Ok(decomposition) = model.encode(&mut db) {
 			println!("decomposition = {}", decomposition);
+			const CHECK_CONSTRAINTS: bool = false;
+			if CHECK_CONSTRAINTS {
+				for constraint in decomposition.constraints() {
+					println!("constraint = {}", constraint);
+					let mut con_model = model.clone();
+					con_model.cons = con_model
+						.cons
+						.into_iter()
+						.filter(|con| con.lbl == constraint.lbl)
+						.collect();
+					let mut con_db = db.clone();
+					con_model.add_constraint(constraint.clone()).unwrap();
+					con_model.encode_vars(&mut con_db).unwrap();
+					constraint.encode(&mut con_db, &model.config).unwrap();
+					con_model.num_var = constraint
+						.exp
+						.terms
+						.iter()
+						.map(|term| term.x.borrow().id.0)
+						.max()
+						.unwrap();
+					// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
+					con_db.num_var = con_db.cnf.vars().last().unwrap();
+					let lit_assignments = con_db.solve().into_iter().sorted().collect::<Vec<_>>();
+
+					let actual_assignments = lit_assignments
+						.iter()
+						.flat_map(|lit_assignment| con_model.assign(lit_assignment))
+						.sorted()
+						.dedup()
+						.collect::<Vec<_>>();
+
+					if let Err(errs) = con_model.check_assignments(
+						&actual_assignments,
+						None,
+						// Some(&con_model.brute_force_solve(Some(IntVarId(con_model.num_var)))),
+					) {
+						for err in errs {
+							println!("Constraint encoding error:\n{constraint}\n{err}");
+						}
+						panic!(
+							"Constraint is incorrect. Test failed for {:?} and {lp}\n{con_model}",
+							model.config,
+						);
+					}
+				}
+			}
 
 			// Check decomposition
 			const CHECK_DECOMPOSITION: bool = true;

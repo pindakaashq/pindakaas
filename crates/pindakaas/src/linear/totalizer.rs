@@ -95,7 +95,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
 								lin.cmp
 							},
 							parent.clone().into(),
-							None,
+							Some(format!("gt_{}_{}", i, j)),
 						))?;
 						next_layer.push(parent.into());
 					}
