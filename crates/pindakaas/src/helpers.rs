@@ -358,6 +358,7 @@ pub mod tests {
 	/// The maximum number of variable to generate expected solutions for
 	const GENERATE_EXPECTED_SOLUTIONS: i32 = 0;
 
+	#[derive(Clone)]
 	pub(crate) struct TestDB {
 		slv: Solver,
 		/// Number of variables available when solver is created
@@ -368,7 +369,7 @@ pub mod tests {
 		solutions: Option<Vec<Vec<i32>>>,
 		check: Option<fn(&[i32]) -> bool>,
 		unchecked: bool,
-		cnf: Cnf<Lit>,
+		pub(crate) cnf: Cnf<Lit>,
 		expected_vars: Option<usize>,
 		expected_cls: Option<usize>,
 		expected_lits: Option<usize>,
