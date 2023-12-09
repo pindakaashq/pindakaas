@@ -1083,7 +1083,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		let mut encoder = TernLeEncoder::default();
 		// TODO use binary heap
 
-		if config.decomposer == Decomposer::Rca {
+		if config.decomposer == Decomposer::Rca || config.scm == Scm::Pow {
 			assert!(config.cutoff == Some(C::zero()));
 			let mut k = self.k;
 			let mut encs = self
@@ -1094,12 +1094,24 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				.flat_map(|term| {
 					term.encode(db, config).map(|(xs, c)| {
 						k -= c;
-						xs
+						xs.into_iter()
+							.filter(|x| {
+								if let IntVarEnc::Const(c) = x {
+									k -= *c;
+									false
+								} else {
+									true
+								}
+							})
+							.collect_vec()
 					})
 				})
 				.flatten()
 				.collect::<Vec<_>>();
-			assert!(encs.iter().all(|e| matches!(e, IntVarEnc::Bin(_))));
+			assert!(
+				encs.iter().all(|e| matches!(e, IntVarEnc::Bin(_))),
+				"{encs:?}"
+			);
 
 			if self
 				.exp
@@ -1189,7 +1201,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			}
 			_ => {
 				assert!(
-					encs.iter().all(|enc| matches!(enc, IntVarEnc::Bin(_))),
+					encs.iter().all(|enc| matches!(enc, IntVarEnc::Ord(_))),
 					"TODO: {encs:?}"
 				);
 
