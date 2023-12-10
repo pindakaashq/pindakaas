@@ -45,7 +45,12 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for SwcEncoder<C> {
 				(1..n)
 					.flat_map(|i| {
 						let dom = num::iter::range_inclusive(-lin.k, C::zero()).collect::<Vec<_>>();
-						model.new_var(&dom, self.add_consistency, None, Some(format!("swc_{}", i)))
+						model.new_var(
+							&dom,
+							model.config.add_consistency,
+							None,
+							Some(format!("swc_{}", i)),
+						)
 					})
 					.take(n),
 			)
