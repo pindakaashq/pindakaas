@@ -315,7 +315,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 		let mut decomposition = self.clone().decompose()?;
 
-		self.propagate(&self.config.propagate.clone())?;
+		decomposition.propagate(&self.config.propagate.clone())?;
 
 		decomposition.encode_vars(db)?;
 
