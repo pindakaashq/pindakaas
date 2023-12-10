@@ -81,7 +81,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
 						};
 						let parent = model.new_var(
 							&dom,
-							self.add_consistency,
+							model.config.add_consistency,
 							None,
 							Some(format!("gt_{}_{}", i, j)),
 						)?;
