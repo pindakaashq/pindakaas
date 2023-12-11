@@ -203,12 +203,18 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Bin(y_bin), IntVarEnc::Bin(z_bin)) => {
 				// y and z are also bin ~ use adder
+				const EQUALIZE_INTERMEDIATES: bool = true;
+				let cmp = if EQUALIZE_INTERMEDIATES {
+					Comparator::Equal
+				} else {
+					cmp.clone()
+				};
 				match cmp {
 					Comparator::Equal => log_enc_add_(
 						db,
 						&x_bin.xs(false),
 						&y_bin.xs(false),
-						cmp,
+						&cmp,
 						&z_bin.xs(false),
 					),
 					ineq => {
@@ -217,7 +223,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 						// xy.consistent(db)?;
 						self.encode(
 							db,
-							&TernLeConstraint::new(&xy, &IntVarEnc::Const(C::zero()), ineq, z),
+							&TernLeConstraint::new(&xy, &IntVarEnc::Const(C::zero()), &ineq, z),
 						)
 					}
 				}
