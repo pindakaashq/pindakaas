@@ -35,7 +35,7 @@ pub mod trace;
 use crate::trace::subscript_number;
 pub use crate::{
 	cardinality::{Cardinality, SortingNetworkEncoder},
-	cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder},
+	cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
 	linear::{
 		AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear,
 		LinearAggregator, LinearConstraint, LinearEncoder, SwcEncoder, TotalizerEncoder,
