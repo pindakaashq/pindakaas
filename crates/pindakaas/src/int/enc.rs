@@ -531,12 +531,7 @@ impl IntVarEnc {
 				// TODO account for bounds (or even better, create IntVarBin)
 				// TODO old method (which at least respected bounds)
 				if COUPLE_DOM_PART_TO_ORD {
-					let x_bin = IntVarBin::from_terms(
-						terms.iter().copied().map(|(l, i)| (l, i)).collect(),
-						*l,
-						*u,
-						String::from("x"),
-					);
+					let x_bin = IntVarBin::from_terms(terms.to_vec(), *l, *u, String::from("x"));
 					let x_ord = IntVarEnc::Ord(IntVarOrd::from_bounds(
 						db,
 						x_bin.lb(),
