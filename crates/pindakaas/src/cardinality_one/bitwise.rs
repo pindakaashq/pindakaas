@@ -2,7 +2,9 @@ use itertools::Itertools;
 
 use super::at_least_one_clause;
 use crate::{
-	linear::LimitComp, trace::emit_clause, CardinalityOne, ClauseDatabase, Encoder, Result,
+	linear::LimitComp,
+	trace::{emit_clause, new_var},
+	CardinalityOne, ClauseDatabase, Encoder, Result,
 };
 
 /// An encoder for [`CardinalityOne`] constraints that uses a logarithm
@@ -26,7 +28,7 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 		}
 
 		// Create a log encoded selection variable
-		let signals = (0..bits).map(|_| db.new_var()).collect_vec();
+		let signals = (0..bits).map(|_| new_var!(db)).collect_vec();
 
 		// Enforce that literal can only be true when selected
 		for (i, lit) in card1.lits.iter().enumerate() {

@@ -147,7 +147,7 @@ pub trait Propagator {
 }
 
 pub trait SolvingActions {
-	fn new_var(&mut self) -> Lit;
+	fn new_var(&mut self) -> Var;
 	fn add_observed_var(&mut self, var: Var);
 	fn is_decision(&mut self, lit: Lit) -> bool;
 }
@@ -173,7 +173,8 @@ impl VarFactory {
 		}
 	}
 
-	pub fn next_range(&mut self, size: usize) -> Option<RangeInclusive<Var>> {
+	/// Return the next [`size`] variables that can be stored as an inclusive range.
+	pub fn new_var_range(&mut self, size: usize) -> Option<RangeInclusive<Var>> {
 		let Some(start) = self.next_var else {
 			return None;
 		};

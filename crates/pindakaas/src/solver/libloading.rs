@@ -11,7 +11,7 @@ use super::{
 	FailFn, LearnCallback, Propagator, SlvTermSignal, SolveAssuming, SolveResult, Solver,
 	SolvingActions, TermCallback, VarFactory,
 };
-use crate::{ClauseDatabase, Lit, Result, Valuation};
+use crate::{ClauseDatabase, Lit, Result, Valuation, Var};
 
 pub struct IpasirLibrary {
 	lib: Library,
@@ -146,8 +146,8 @@ impl<'lib> Drop for IpasirSolver<'lib> {
 }
 
 impl<'lib> ClauseDatabase for IpasirSolver<'lib> {
-	fn new_var(&mut self) -> Lit {
-		self.next_var.next().expect("variable pool exhaused").into()
+	fn new_var(&mut self) -> Var {
+		self.next_var.next().expect("variable pool exhaused")
 	}
 
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, clause: I) -> Result {

@@ -34,7 +34,14 @@ fn module(_py: Python, m: &PyModule) -> PyResult<()> {
 fn adder_encode(mut db: PyRefMut<'_, Cnf>) -> Result<(), PyErr> {
 	let pref = db.deref_mut();
 	let db = &mut pref.0;
-	let x = LinExp::from_slices(&[1, 2, 3], &[db.new_var(), db.new_var(), db.new_var()]);
+	let x = LinExp::from_slices(
+		&[1, 2, 3],
+		&[
+			db.new_var().into(),
+			db.new_var().into(),
+			db.new_var().into(),
+		],
+	);
 	let con = LinearConstraint::new(x, base::Comparator::Equal, 2);
 	let enc: LinearEncoder = LinearEncoder::default();
 	enc.encode(db, &con)

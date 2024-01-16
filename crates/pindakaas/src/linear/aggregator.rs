@@ -8,7 +8,7 @@ use crate::{
 	int::IntVarOrd,
 	linear::{Constraint, LimitComp, Part, PosCoeff},
 	sorted::{Sorted, SortedEncoder},
-	trace::emit_clause,
+	trace::{emit_clause, new_var},
 	Cardinality, CardinalityOne, ClauseDatabase, Coeff, Comparator, Encoder, LinExp, LinVariant,
 	Linear, LinearConstraint, Lit, Result, Unsatisfiable,
 };
@@ -150,7 +150,7 @@ impl LinearAggregator {
 							let q = -*min_coef;
 
 							// add aux var y and constrain y <-> ( ~x1 /\ ~x2 /\ .. )
-							let y = db.new_var();
+							let y = new_var!(db);
 
 							// ~x1 /\ ~x2 /\ .. -> y == x1 \/ x2 \/ .. \/ y
 							emit_clause!(
@@ -1279,11 +1279,7 @@ mod tests {
 					}
 				}
 				LinVariant::Trivial => {
-					if let LinVariant::Trivial = other {
-						true
-					} else {
-						false
-					}
+					matches!(other, LinVariant::Trivial)
 				}
 			}
 		}

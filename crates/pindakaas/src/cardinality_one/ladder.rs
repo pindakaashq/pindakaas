@@ -1,5 +1,7 @@
 use crate::{
-	linear::LimitComp, trace::emit_clause, CardinalityOne, ClauseDatabase, Encoder, Result,
+	linear::LimitComp,
+	trace::{emit_clause, new_var},
+	CardinalityOne, ClauseDatabase, Encoder, Result,
 };
 
 /// An encoder for an At Most One constraints that TODO
@@ -13,12 +15,12 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for LadderEncoder {
 )]
 	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
 		// TODO could be slightly optimised to not introduce fixed lits
-		let mut a = db.new_var(); // y_v-1
+		let mut a = new_var!(db); // y_v-1
 		if card1.cmp == LimitComp::Equal {
 			emit_clause!(db, [a])?;
 		}
 		for x in card1.lits.iter() {
-			let b = db.new_var(); // y_v
+			let b = new_var!(db); // y_v
 			emit_clause!(db, [!b, a])?; // y_v -> y_v-1
 
 			// "Channelling" clauses for x_v <-> (y_v-1 /\ ¬y_v)

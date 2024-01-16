@@ -526,7 +526,7 @@ pub mod tests {
 				.collect()
 		}
 
-		pub fn _print_solutions(sols: &Vec<Vec<Lit>>) -> String {
+		pub fn _print_solutions(sols: &[Vec<Lit>]) -> String {
 			format!(
 				"vec![\n{}\n]",
 				sols.iter()
@@ -811,7 +811,7 @@ pub mod tests {
 			}
 		}
 
-		fn new_var(&mut self) -> Lit {
+		fn new_var(&mut self) -> Var {
 			let res = self.slv.add_var() as i32;
 
 			if let Some(num) = &mut self.expected_vars {
@@ -822,7 +822,7 @@ pub mod tests {
 			if OUTPUT_SPLR {
 				eprintln!("let x{} = slv.add_var() as i32;", res);
 			}
-			Lit(NonZeroI32::new(res).unwrap())
+			Var(NonZeroI32::new(res).unwrap())
 		}
 	}
 }

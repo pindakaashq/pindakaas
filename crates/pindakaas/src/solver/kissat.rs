@@ -35,8 +35,8 @@ mod tests {
 		let mut slv = Kissat::default();
 		assert!(slv.signature().starts_with("kissat"));
 
-		let a = slv.new_var();
-		let b = slv.new_var();
+		let a = slv.new_var().into();
+		let b = slv.new_var().into();
 		PairwiseEncoder::default()
 			.encode(
 				&mut slv,

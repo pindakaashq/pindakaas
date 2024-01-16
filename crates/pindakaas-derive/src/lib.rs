@@ -221,7 +221,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			}
 
 			impl crate::solver::SolvingActions for #ident {
-				fn new_var(&mut self) -> crate::Lit {
+				fn new_var(&mut self) -> crate::Var {
 					<#ident as crate::ClauseDatabase>::new_var(self)
 				}
 				fn add_observed_var(&mut self, var: crate::Var) {
@@ -244,8 +244,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		}
 
 		impl crate::ClauseDatabase for #ident {
-			fn new_var(&mut self) -> crate::Lit {
-				#vars .next().expect("variable pool exhaused").into()
+			fn new_var(&mut self) -> crate::Var {
+				#vars .next().expect("variable pool exhaused")
 			}
 
 			fn add_clause<I: IntoIterator<Item = crate::Lit>>(
@@ -261,6 +261,13 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					unsafe { #krate::ipasir_add( #ptr , 0) };
 				}
 				Ok(())
+			}
+		}
+
+		impl #ident {
+			/// Return the next [`size`] variables that can be stored as an inclusive range.
+			pub fn new_var_range(&mut self, size: usize) -> std::ops::RangeInclusive<crate::Var> {
+				self.vars.new_var_range(size).expect("variable pool exhaused")
 			}
 		}
 
