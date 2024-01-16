@@ -24,9 +24,6 @@ void ccadical_remove_observed_var(CCaDiCaL *, int var);
 void ccadical_reset_observed_vars(CCaDiCaL *);
 bool ccadical_is_decision(CCaDiCaL *, int lit);
 
-void ccadical_phase(CCaDiCaL *, int lit);
-void ccadical_unphase(CCaDiCaL *, int lit);
-
 CCaDiCaLPropagator *ccadical_prop_init(void *state);
 void ccadical_prop_release(CCaDiCaLPropagator *);
 void ccadical_prop_lazy(CCaDiCaLPropagator *, bool is_lazy);
@@ -55,6 +52,11 @@ void ccadical_prop_set_has_external_clause(
     CCaDiCaLPropagator *, bool (*has_external_clause)(void *state));
 void ccadical_prop_set_add_external_clause_lit(
     CCaDiCaLPropagator *, int (*add_external_clause_lit)(void *state));
+
+// Additional C bindings for C++ Cadical
+
+void ccadical_phase(CCaDiCaL *, int lit);
+void ccadical_unphase(CCaDiCaL *, int lit);
 
 /*------------------------------------------------------------------------*/
 

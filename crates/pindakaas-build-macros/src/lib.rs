@@ -80,12 +80,10 @@ macro_rules! ipasir_up_definitions {
 				pub fn [<$prefix _remove_observed_var>](slv: *mut std::ffi::c_void, var: i32);
 				pub fn [<$prefix _reset_observed_vars>](slv: *mut std::ffi::c_void);
 				pub fn [<$prefix _is_decision>](slv: *mut std::ffi::c_void, lit: i32) -> bool;
-				pub fn [<$prefix _phase>](slv: *mut std::ffi::c_void, lit: i32);
-				pub fn [<$prefix _unphase>](slv: *mut std::ffi::c_void, lit: i32);
 				pub fn [<$prefix _prop_init>](state: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
 				pub fn [<$prefix _prop_release>](prop: *mut std::ffi::c_void);
 				pub fn [<$prefix _prop_lazy>](prop: *mut std::ffi::c_void, is_lazy: bool);
-				pub fn [<$prefix _prop_set_notify_assignment>](prop: *mut std::ffi::c_void, cb: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const i32, bool)>);
+				pub fn [<$prefix _prop_set_notify_assignment>](prop: *mut std::ffi::c_void, cb: Option<unsafe extern "C" fn(*mut std::ffi::c_void, i32, bool)>);
 				pub fn [<$prefix _prop_set_notify_new_decision_level>](prop: *mut std::ffi::c_void, cb: Option<unsafe extern "C" fn(*mut std::ffi::c_void)>);
 				pub fn [<$prefix _prop_set_notify_backtrack>](prop: *mut std::ffi::c_void, cb: Option<unsafe extern "C" fn(*mut std::ffi::c_void, usize)>);
 				pub fn [<$prefix _prop_set_check_model>](prop: *mut std::ffi::c_void, cb: Option<unsafe extern "C" fn(*mut std::ffi::c_void, usize, *const i32) -> bool>);
@@ -113,12 +111,6 @@ macro_rules! ipasir_up_definitions {
 			pub unsafe fn ipasir_is_decision(slv: *mut std::ffi::c_void, lit: i32) -> bool {
 				[<$prefix _is_decision>](slv, lit)
 			}
-			pub unsafe fn ipasir_phase(slv: *mut std::ffi::c_void, lit: i32) {
-				[<$prefix _phase>](slv, lit)
-			}
-			pub unsafe fn ipasir_unphase(slv: *mut std::ffi::c_void, lit: i32) {
-				[<$prefix _unphase>](slv, lit)
-			}
 			pub unsafe fn ipasir_prop_init(state: *mut std::ffi::c_void) -> *mut std::ffi::c_void {
 				[<$prefix _prop_init>](state)
 			}
@@ -128,7 +120,7 @@ macro_rules! ipasir_up_definitions {
 			pub unsafe fn ipasir_prop_lazy(prop: *mut std::ffi::c_void, is_lazy: bool) {
 				[<$prefix _prop_lazy>](prop, is_lazy)
 			}
-			pub unsafe fn ipasir_prop_set_notify_assignment(prop: *mut std::ffi::c_void, cb: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const i32, bool)>) {
+			pub unsafe fn ipasir_prop_set_notify_assignment(prop: *mut std::ffi::c_void, cb: Option<unsafe extern "C" fn(*mut std::ffi::c_void, i32, bool)>) {
 				[<$prefix _prop_set_notify_assignment>](prop, cb)
 			}
 			pub unsafe fn ipasir_prop_set_notify_new_decision_level(prop: *mut std::ffi::c_void, cb: Option<unsafe extern "C" fn(*mut std::ffi::c_void)>) {
@@ -179,8 +171,6 @@ pub fn change_ipasir_prefix(build: &mut Build, prefix: &str) {
 		"_remove_observed_var",
 		"_reset_observed_vars",
 		"_is_decision",
-		"_phase",
-		"_unphase",
 		"_prop_init",
 		"_prop_release",
 		"_prop_lazy",
