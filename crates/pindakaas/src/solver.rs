@@ -1,4 +1,4 @@
-use std::{ffi::c_void, num::NonZeroI32};
+use std::{ffi::c_void, num::NonZeroI32, ops::RangeInclusive};
 
 use crate::{ClauseDatabase, Lit, Valuation, Var};
 
@@ -79,7 +79,7 @@ pub enum SolverAction {
 	Terminate,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VarFactory {
 	pub(crate) next_var: Option<Var>,
 }
@@ -92,6 +92,25 @@ impl VarFactory {
 			x.0.get() as usize - 1
 		} else {
 			Self::MAX_VARS
+		}
+	}
+
+	pub fn next_range(&mut self, size: usize) -> Option<RangeInclusive<Var>> {
+		let Some(start) = self.next_var else {
+			return None;
+		};
+		match size {
+			0 => Some(Var(NonZeroI32::new(2).unwrap())..=Var(NonZeroI32::new(1).unwrap())),
+			_ if size > NonZeroI32::MAX.get() as usize => None,
+			_ => {
+				let size = NonZeroI32::new(size as i32).unwrap();
+				if let Some(end) = start.checked_add(size) {
+					self.next_var = end.checked_add(NonZeroI32::new(1).unwrap());
+					Some(start..=end)
+				} else {
+					None
+				}
+			}
 		}
 	}
 }
@@ -115,198 +134,6 @@ impl Iterator for VarFactory {
 		var
 	}
 }
-
-#[allow(unused_macros)]
-macro_rules! ipasir_solver {
-	($loc:ident, $name:ident) => {
-		pub struct $name {
-			ptr: *mut std::ffi::c_void,
-			vars: $crate::solver::VarFactory,
-		}
-
-		impl Default for $name {
-			fn default() -> Self {
-				Self {
-					ptr: unsafe { $loc::ipasir_init() },
-					vars: $crate::solver::VarFactory::default(),
-				}
-			}
-		}
-
-		impl Drop for $name {
-			fn drop(&mut self) {
-				unsafe { $loc::ipasir_release(self.ptr) }
-			}
-		}
-
-		impl $crate::ClauseDatabase for $name {
-			fn new_var(&mut self) -> $crate::Lit {
-				self.vars.next().expect("variable pool exhaused").into()
-			}
-
-			fn add_clause<I: IntoIterator<Item = $crate::Lit>>(
-				&mut self,
-				clause: I,
-			) -> $crate::Result {
-				let mut added = false;
-				for lit in clause.into_iter() {
-					unsafe { $loc::ipasir_add(self.ptr, lit.into()) };
-					added = true;
-				}
-				if added {
-					unsafe { $loc::ipasir_add(self.ptr, 0) };
-				}
-				Ok(())
-			}
-		}
-
-		impl $crate::solver::Solver for $name {
-			fn signature(&self) -> &str {
-				unsafe { std::ffi::CStr::from_ptr($loc::ipasir_signature()) }
-					.to_str()
-					.unwrap()
-			}
-
-			fn solve<SolCb: FnOnce(&dyn $crate::Valuation)>(
-				&mut self,
-				on_sol: SolCb,
-			) -> $crate::solver::SolveResult {
-				let res = unsafe { $loc::ipasir_solve(self.ptr) };
-				match res {
-					10 => {
-						// 10 -> Sat
-						let val_fn = |lit: $crate::Lit| {
-							let var: i32 = lit.var().into();
-							// WARN: Always ask about variable (positive) literal, otherwise solvers sometimes seem incorrect
-							let ret = unsafe { $loc::ipasir_val(self.ptr, var) };
-							match ret {
-								_ if ret == var => Some(!lit.is_negated()),
-								_ if ret == -var => Some(lit.is_negated()),
-								_ => {
-									debug_assert_eq!(ret, 0); // zero according to spec, both value are valid
-									None
-								}
-							}
-						};
-						on_sol(&val_fn);
-						$crate::solver::SolveResult::Sat
-					}
-					20 => $crate::solver::SolveResult::Unsat, // 20 -> Unsat
-					_ => {
-						debug_assert_eq!(res, 0); // According to spec should be 0, unknown
-						$crate::solver::SolveResult::Unknown
-					}
-				}
-			}
-		}
-	};
-}
-#[allow(unused_imports)]
-pub(crate) use ipasir_solver;
-
-#[allow(unused_macros)]
-macro_rules! ipasir_solve_assuming {
-	($loc:ident, $name:ident) => {
-		impl $crate::solver::SolveAssuming for $name {
-			fn solve_assuming<
-				I: IntoIterator<Item = $crate::Lit>,
-				SolCb: FnOnce(&dyn $crate::Valuation),
-				FailCb: FnOnce(&$crate::solver::FailFn<'_>),
-			>(
-				&mut self,
-				assumptions: I,
-				on_sol: SolCb,
-				on_fail: FailCb,
-			) -> $crate::solver::SolveResult {
-				use $crate::solver::Solver;
-				for i in assumptions {
-					unsafe { $loc::ipasir_assume(self.ptr, i.into()) }
-				}
-				match self.solve(on_sol) {
-					$crate::solver::SolveResult::Unsat => {
-						let fail_fn = |lit: $crate::Lit| {
-							let lit: i32 = lit.into();
-							let failed = unsafe { $loc::ipasir_failed(self.ptr, lit) };
-							failed != 0
-						};
-						on_fail(&fail_fn);
-						$crate::solver::SolveResult::Unsat
-					}
-					r => r,
-				}
-			}
-		}
-	};
-}
-#[allow(unused_imports)]
-pub(crate) use ipasir_solve_assuming;
-
-#[allow(unused_macros)]
-macro_rules! ipasir_learn_callback {
-	($loc:ident, $name:ident) => {
-		impl $crate::solver::LearnCallback for $name {
-			fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = $crate::Lit>)>(
-				&mut self,
-				cb: Option<F>,
-			) {
-				const MAX_LEN: std::ffi::c_int = 512;
-				if let Some(mut cb) = cb {
-					let mut wrapped_cb = |clause: *const i32| {
-						let mut iter = $crate::solver::ExplIter(clause)
-							.map(|i: i32| $crate::Lit(std::num::NonZeroI32::new(i).unwrap()));
-						cb(&mut iter)
-					};
-					let data = &mut wrapped_cb as *mut _ as *mut std::ffi::c_void;
-					unsafe {
-						$loc::ipasir_set_learn(
-							self.ptr,
-							data,
-							MAX_LEN,
-							Some($crate::solver::get_trampoline1(&wrapped_cb)),
-						)
-					}
-				} else {
-					unsafe { $loc::ipasir_set_learn(self.ptr, std::ptr::null_mut(), MAX_LEN, None) }
-				}
-			}
-		}
-	};
-}
-#[allow(unused_imports)]
-pub(crate) use ipasir_learn_callback;
-
-#[allow(unused_macros)]
-macro_rules! ipasir_term_callback {
-	($loc:ident, $name:ident) => {
-		impl $crate::solver::TermCallback for $name {
-			fn set_terminate_callback<F: FnMut() -> $crate::solver::SolverAction>(
-				&mut self,
-				cb: Option<F>,
-			) {
-				if let Some(mut cb) = cb {
-					let mut wrapped_cb = || -> std::ffi::c_int {
-						match cb() {
-							$crate::solver::SolverAction::Continue => std::ffi::c_int::from(0),
-							$crate::solver::SolverAction::Terminate => std::ffi::c_int::from(1),
-						}
-					};
-					let data = &mut wrapped_cb as *mut _ as *mut std::ffi::c_void;
-					unsafe {
-						$loc::ipasir_set_terminate(
-							self.ptr,
-							data,
-							Some($crate::solver::get_trampoline0(&wrapped_cb)),
-						)
-					}
-				} else {
-					unsafe { $loc::ipasir_set_terminate(self.ptr, std::ptr::null_mut(), None) }
-				}
-			}
-		}
-	};
-}
-#[allow(unused_imports)]
-pub(crate) use ipasir_term_callback;
 
 type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
 unsafe extern "C" fn trampoline0<R, F: FnMut() -> R>(user_data: *mut c_void) -> R {

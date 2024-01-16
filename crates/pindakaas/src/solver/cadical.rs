@@ -1,9 +1,22 @@
-use super::{ipasir_learn_callback, ipasir_solve_assuming, ipasir_solver, ipasir_term_callback};
+use pindakaas_derive::IpasirSolver;
 
-ipasir_solver!(pindakaas_cadical, Cadical);
-ipasir_solve_assuming!(pindakaas_cadical, Cadical);
-ipasir_learn_callback!(pindakaas_cadical, Cadical);
-ipasir_term_callback!(pindakaas_cadical, Cadical);
+use super::VarFactory;
+
+#[derive(IpasirSolver)]
+#[ipasir(krate = pindakaas_cadical, assumptions, learn_callback, term_callback)]
+pub struct Cadical {
+	ptr: *mut std::ffi::c_void,
+	vars: VarFactory,
+}
+
+impl Default for Cadical {
+	fn default() -> Self {
+		Self {
+			ptr: unsafe { pindakaas_cadical::ipasir_init() },
+			vars: VarFactory::default(),
+		}
+	}
+}
 
 #[cfg(test)]
 mod tests {
