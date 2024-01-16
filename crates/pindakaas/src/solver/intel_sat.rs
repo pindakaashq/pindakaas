@@ -34,8 +34,8 @@ mod tests {
 	fn test_intel_sat() {
 		let mut slv = IntelSat::default();
 		assert!(slv.signature().starts_with("IntelSat"));
-		let a = slv.new_var();
-		let b = slv.new_var();
+		let a = slv.new_var().into();
+		let b = slv.new_var().into();
 		PairwiseEncoder::default()
 			.encode(
 				&mut slv,

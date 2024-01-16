@@ -39,7 +39,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		linear::LimitComp,
-		solver::{SolveResult, Solver},
+		solver::{PropagatingSolver, Propagator, SolveResult, Solver},
 		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder,
 	};
 
@@ -48,8 +48,8 @@ mod tests {
 		let mut slv = Cadical::default();
 		assert!(slv.signature().starts_with("cadical"));
 
-		let a = slv.new_var();
-		let b = slv.new_var();
+		let a = slv.new_var().into();
+		let b = slv.new_var().into();
 		PairwiseEncoder::default()
 			.encode(
 				&mut slv,
