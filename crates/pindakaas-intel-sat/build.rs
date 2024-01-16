@@ -11,6 +11,7 @@ fn main() {
 		"vendor/intel_sat/TopiConflictAnalysis.cc",
 		"vendor/intel_sat/TopiDebugPrinting.cc",
 		"vendor/intel_sat/TopiDecision.cc",
+		"vendor/intel_sat/TopiInprocess.cc",
 		"vendor/intel_sat/TopiRestart.cc",
 		"vendor/intel_sat/TopiWL.cc",
 		"vendor/intel_sat/Topor.cc",
