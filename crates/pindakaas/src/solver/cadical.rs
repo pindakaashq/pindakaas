@@ -1,12 +1,14 @@
 use pindakaas_derive::IpasirSolver;
 
 use super::VarFactory;
+use crate::Lit;
 
 #[derive(IpasirSolver)]
-#[ipasir(krate = pindakaas_cadical, assumptions, learn_callback, term_callback)]
+#[ipasir(krate = pindakaas_cadical, assumptions, learn_callback, term_callback, ipasir_up)]
 pub struct Cadical {
 	ptr: *mut std::ffi::c_void,
 	vars: VarFactory,
+	prop: Option<Box<CadicalProp>>,
 }
 
 impl Default for Cadical {
@@ -14,7 +16,18 @@ impl Default for Cadical {
 		Self {
 			ptr: unsafe { pindakaas_cadical::ipasir_init() },
 			vars: VarFactory::default(),
+			prop: None,
 		}
+	}
+}
+
+impl Cadical {
+	pub fn phase(&mut self, lit: Lit) {
+		unsafe { pindakaas_cadical::ccadical_phase(self.ptr, lit.0.get()) }
+	}
+
+	pub fn unphase(&mut self, lit: Lit) {
+		unsafe { pindakaas_cadical::ccadical_unphase(self.ptr, lit.0.get()) }
 	}
 }
 

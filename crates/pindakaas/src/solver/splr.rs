@@ -105,16 +105,12 @@ mod tests {
 				},
 			)
 			.unwrap();
-		let res = Solver::solve(
-			&mut slv,
-			|value| {
-				assert!(
-					(value(!a).unwrap() && value(b).unwrap())
-						|| (value(a).unwrap() && value(!b).unwrap()),
-				)
-			},
-			|_| {},
-		);
+		let res = Solver::solve(&mut slv, |value| {
+			assert!(
+				(value(!a).unwrap() && value(b).unwrap())
+					|| (value(a).unwrap() && value(!b).unwrap()),
+			)
+		});
 		assert_eq!(res, SolveResult::Sat);
 	}
 }

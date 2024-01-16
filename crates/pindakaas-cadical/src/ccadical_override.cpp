@@ -109,13 +109,6 @@ bool ccadical_is_decision(CCaDiCaL *slv, int lit) {
   return ((Wrapper *)slv)->solver->is_decision(lit);
 }
 
-void ccadical_phase(CCaDiCaL *slv, int lit) {
-  ((Wrapper *)slv)->solver->phase(lit);
-}
-void ccadical_unphase(CCaDiCaL *slv, int lit) {
-  ((Wrapper *)slv)->solver->unphase(lit);
-}
-
 CCaDiCaLPropagator *ccadical_prop_init(void *state) {
   return (CCaDiCaLPropagator *)new PropagatorWrapper(state);
 }
@@ -171,5 +164,12 @@ void ccadical_prop_set_add_external_clause_lit(
     CCaDiCaLPropagator *prop, int (*add_external_clause_lit)(void *state)) {
   ((PropagatorWrapper *)prop)->add_external_clause_lit_fn =
       add_external_clause_lit;
+}
+
+void ccadical_phase(CCaDiCaL *slv, int lit) {
+  ((Wrapper *)slv)->solver->phase(lit);
+}
+void ccadical_unphase(CCaDiCaL *slv, int lit) {
+  ((Wrapper *)slv)->solver->unphase(lit);
 }
 }

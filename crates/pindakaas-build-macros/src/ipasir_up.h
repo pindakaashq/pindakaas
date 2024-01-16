@@ -63,9 +63,6 @@ void ipasir_reset_observed_vars(void *solver);
 //
 bool ipasir_is_decision(void *solver, int32_t lit);
 
-void ipasir_phase(void *solver, int32_t lit);
-void ipasir_unphase(void *solver, int32_t lit);
-
 void *ipasir_prop_init(void *state);
 void ipasir_prop_release(void *prop);
 

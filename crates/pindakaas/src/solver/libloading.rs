@@ -1,4 +1,5 @@
 use std::{
+	collections::VecDeque,
 	ffi::{c_char, c_int, c_void, CStr},
 	num::NonZeroI32,
 	ptr,
@@ -7,8 +8,8 @@ use std::{
 use libloading::{Library, Symbol};
 
 use super::{
-	get_trampoline0, get_trampoline1, ExplIter, FailFn, LearnCallback, SolveAssuming, SolveResult,
-	Solver, SolverAction, TermCallback, VarFactory,
+	FailFn, LearnCallback, Propagator, SlvTermSignal, SolveAssuming, SolveResult, Solver,
+	SolvingActions, TermCallback, VarFactory,
 };
 use crate::{ClauseDatabase, Lit, Result, Valuation};
 
@@ -228,12 +229,12 @@ impl<'lib> SolveAssuming for IpasirSolver<'lib> {
 }
 
 impl<'lib> TermCallback for IpasirSolver<'lib> {
-	fn set_terminate_callback<F: FnMut() -> SolverAction>(&mut self, cb: Option<F>) {
+	fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>) {
 		if let Some(mut cb) = cb {
 			let mut wrapped_cb = || -> c_int {
 				match cb() {
-					SolverAction::Continue => c_int::from(0),
-					SolverAction::Terminate => c_int::from(1),
+					SlvTermSignal::Continue => c_int::from(0),
+					SlvTermSignal::Terminate => c_int::from(1),
 				}
 			};
 			let data = &mut wrapped_cb as *mut _ as *mut c_void;
@@ -257,5 +258,180 @@ impl<'lib> LearnCallback for IpasirSolver<'lib> {
 		} else {
 			(self.set_learn_fn)(self.slv, ptr::null_mut(), MAX_LEN, None);
 		}
+	}
+}
+type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
+unsafe extern "C" fn trampoline0<R, F: FnMut() -> R>(user_data: *mut c_void) -> R {
+	let user_data = &mut *(user_data as *mut F);
+	user_data()
+}
+pub(crate) fn get_trampoline0<R, F: FnMut() -> R>(_closure: &F) -> CB0<R> {
+	trampoline0::<R, F>
+}
+type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;
+unsafe extern "C" fn trampoline1<R, A, F: FnMut(A) -> R>(user_data: *mut c_void, arg1: A) -> R {
+	let user_data = &mut *(user_data as *mut F);
+	user_data(arg1)
+}
+pub(crate) fn get_trampoline1<R, A, F: FnMut(A) -> R>(_closure: &F) -> CB1<R, A> {
+	trampoline1::<R, A, F>
+}
+/// Iterator over the elements of a null-terminated i32 array
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ExplIter(pub(crate) *const i32);
+impl Iterator for ExplIter {
+	type Item = i32;
+	#[inline]
+	fn next(&mut self) -> Option<Self::Item> {
+		unsafe {
+			if *self.0 == 0 {
+				None
+			} else {
+				let ptr = self.0;
+				self.0 = ptr.offset(1);
+				Some(*ptr)
+			}
+		}
+	}
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NoProp;
+impl Propagator for NoProp {}
+
+pub(crate) struct IpasirPropStore {
+	/// Rust Propagator
+	pub(crate) prop: Box<dyn Propagator>,
+	/// IPASIR solver pointer
+	pub(crate) slv: *mut dyn SolvingActions,
+	/// Propagation queue
+	pub(crate) pqueue: VecDeque<crate::Lit>,
+	/// Reason clause queue
+	pub(crate) rqueue: VecDeque<crate::Lit>,
+	pub(crate) explaining: Option<Lit>,
+	/// External clause queue
+	pub(crate) cqueue: Option<VecDeque<crate::Lit>>,
+}
+
+impl IpasirPropStore {
+	pub(crate) fn new(prop: Box<dyn Propagator>, slv: *mut dyn SolvingActions) -> Self {
+		Self {
+			prop,
+			slv,
+			pqueue: VecDeque::default(),
+			rqueue: VecDeque::default(),
+			explaining: None,
+			cqueue: None,
+		}
+	}
+}
+
+// --- Callback functions for C propagator interface ---
+
+pub(crate) unsafe extern "C" fn ipasir_notify_assignment_cb(
+	state: *mut c_void,
+	lit: i32,
+	is_fixed: bool,
+) {
+	let prop = &mut *(state as *mut IpasirPropStore);
+	let lit = crate::Lit(std::num::NonZeroI32::new(lit).unwrap());
+	prop.prop.notify_assignment(lit, is_fixed)
+}
+pub(crate) unsafe extern "C" fn ipasir_notify_new_decision_level_cb(state: *mut c_void) {
+	let prop = &mut *(state as *mut IpasirPropStore);
+	prop.prop.notify_new_decision_level()
+}
+pub(crate) unsafe extern "C" fn ipasir_notify_backtrack_cb(state: *mut c_void, level: usize) {
+	let prop = &mut *(state as *mut IpasirPropStore);
+	prop.pqueue.clear();
+	prop.explaining = None;
+	prop.rqueue.clear();
+	prop.cqueue = None;
+	prop.prop.notify_backtrack(level);
+}
+pub(crate) unsafe extern "C" fn ipasir_check_model_cb(
+	state: *mut c_void,
+	len: usize,
+	model: *const i32,
+) -> bool {
+	let prop = &mut *(state as *mut IpasirPropStore);
+	let sol = std::slice::from_raw_parts(model, len);
+	let value = |l: Lit| {
+		let abs: Lit = l.var().into();
+		let v = Into::<i32>::into(abs) as usize;
+		if v <= sol.len() {
+			// TODO: is this correct here?
+			debug_assert_eq!(sol[v - 1].abs(), l.var().into());
+			Some(sol[v - 1] == l.into())
+		} else {
+			None
+		}
+	};
+	prop.prop.check_model(&value)
+}
+pub(crate) unsafe extern "C" fn ipasir_decide_cb(state: *mut c_void) -> i32 {
+	let prop = &mut *(state as *mut IpasirPropStore);
+	if let Some(l) = prop.prop.decide() {
+		l.0.into()
+	} else {
+		0
+	}
+}
+pub(crate) unsafe extern "C" fn ipasir_propagate_cb(state: *mut c_void) -> i32 {
+	let prop = &mut *(state as *mut IpasirPropStore);
+	if prop.pqueue.is_empty() {
+		let slv = &mut *prop.slv;
+		prop.pqueue = prop.prop.propagate(slv).into()
+	}
+	if let Some(l) = prop.pqueue.pop_front() {
+		l.0.into()
+	} else {
+		0 // No propagation
+	}
+}
+pub(crate) unsafe extern "C" fn ipasir_add_reason_clause_lit_cb(
+	state: *mut c_void,
+	propagated_lit: i32,
+) -> i32 {
+	let prop = &mut *(state as *mut IpasirPropStore);
+	let lit = crate::Lit(std::num::NonZeroI32::new(propagated_lit).unwrap());
+	debug_assert!(prop.explaining.is_none() || prop.explaining == Some(lit));
+	// TODO: Can this be prop.explaining.is_none()?
+	if prop.explaining != Some(lit) {
+		prop.rqueue = prop.prop.add_reason_clause(lit).into();
+		prop.explaining = Some(lit);
+	}
+	if let Some(l) = prop.rqueue.pop_front() {
+		l.0.into()
+	} else {
+		// End of explanation
+		prop.explaining = None;
+		0
+	}
+}
+pub(crate) unsafe extern "C" fn ipasir_has_external_clause_cb(state: *mut c_void) -> bool {
+	let prop = &mut *(state as *mut IpasirPropStore);
+	prop.cqueue = prop.prop.add_external_clause().map(Vec::into);
+	prop.cqueue.is_some()
+}
+
+pub(crate) unsafe extern "C" fn ipasir_add_external_clause_lit_cb(state: *mut c_void) -> i32 {
+	let prop = &mut *(state as *mut IpasirPropStore);
+	if prop.cqueue.is_none() {
+		debug_assert!(false);
+		// This function shouldn't be called when "has_clause" returned false.
+		prop.cqueue = prop.prop.add_external_clause().map(Vec::into);
+	}
+	if let Some(queue) = &mut prop.cqueue {
+		if let Some(l) = queue.pop_front() {
+			l.0.get()
+		} else {
+			prop.cqueue = None;
+			0 // End of clause
+		}
+	} else {
+		debug_assert!(false);
+		// Even after re-assessing, no additional clause was found. Just return 0
+		0
 	}
 }
