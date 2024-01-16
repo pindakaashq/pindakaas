@@ -52,11 +52,7 @@ impl Var {
 	}
 
 	fn checked_add(&self, b: NonZeroI32) -> Option<Var> {
-		if let Some(v) = self.0.get().checked_add(b.get()) {
-			Some(Var(NonZeroI32::new(v).unwrap()))
-		} else {
-			None
-		}
+		self.0.get().checked_add(b.get()).map(|v| Var(NonZeroI32::new(v).unwrap()))
 	}
 }
 
@@ -279,7 +275,7 @@ pub enum IntEncoding<'a> {
 pub trait ClauseDatabase {
 	/// Method to be used to receive a new Boolean variable that can be used in
 	/// the encoding of a problem or constriant.
-	fn new_var(&mut self) -> Lit;
+	fn new_var(&mut self) -> Var;
 
 	/// Add a clause to the `ClauseDatabase`. The databae is allowed to return
 	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
@@ -310,7 +306,7 @@ impl<'a, DB: ClauseDatabase> ConditionalDatabase<'a, DB> {
 	}
 }
 impl<'a, DB: ClauseDatabase> ClauseDatabase for ConditionalDatabase<'a, DB> {
-	fn new_var(&mut self) -> Lit {
+	fn new_var(&mut self) -> Var {
 		self.db.new_var()
 	}
 
@@ -608,8 +604,8 @@ impl Wcnf {
 }
 
 impl ClauseDatabase for Cnf {
-	fn new_var(&mut self) -> Lit {
-		self.nvar.next().expect("exhausted variable pool").into()
+	fn new_var(&mut self) -> Var {
+		self.nvar.next().expect("exhausted variable pool")
 	}
 
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
@@ -643,7 +639,7 @@ impl Wcnf {
 }
 
 impl ClauseDatabase for Wcnf {
-	fn new_var(&mut self) -> Lit {
+	fn new_var(&mut self) -> Var {
 		self.cnf.new_var()
 	}
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {

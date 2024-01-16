@@ -6,21 +6,21 @@ macro_rules! new_var {
 	($db:expr) => {{
 		let var = $db.new_var();
 		tracing::info!(var = ?var, "new variable");
-		var
+		$crate::Lit::from(var)
 	}};
 	($db:expr, $lbl:expr) => {{
 		let var = $db.new_var();
 		tracing::info!(var = ?var, label = $lbl, "new variable");
-		var
+		$crate::Lit::from(var)
 	}};
 }
 #[cfg(not(feature = "trace"))]
 macro_rules! new_var {
 	($db:expr) => {
-		$db.new_var()
+		$crate::Lit::from($db.new_var())
 	};
 	($db:expr, $lbl:expr) => {
-		$db.new_var()
+		$crate::Lit::from($db.new_var())
 	};
 }
 pub(crate) use new_var;
