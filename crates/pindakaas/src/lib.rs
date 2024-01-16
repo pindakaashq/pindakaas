@@ -48,11 +48,24 @@ pub struct Var(pub(crate) NonZeroI32);
 
 impl Var {
 	fn next_var(&self) -> Option<Var> {
-		self.checked_add(NonZeroI32::new(1).unwrap())
+		const ONE: NonZeroI32 = unsafe { NonZeroI32::new_unchecked(1) };
+		self.checked_add(ONE)
+	}
+
+	fn prev_var(&self) -> Option<Var> {
+		let prev = self.0.get() - 1;
+		if prev >= 0 {
+			Some(Var(NonZeroI32::new(prev).unwrap()))
+		} else {
+			None
+		}
 	}
 
 	fn checked_add(&self, b: NonZeroI32) -> Option<Var> {
-		self.0.get().checked_add(b.get()).map(|v| Var(NonZeroI32::new(v).unwrap()))
+		self.0
+			.get()
+			.checked_add(b.get())
+			.map(|v| Var(NonZeroI32::new(v).unwrap()))
 	}
 }
 

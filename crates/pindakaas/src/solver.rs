@@ -1,6 +1,6 @@
-use std::{num::NonZeroI32, ops::RangeInclusive};
+use std::num::NonZeroI32;
 
-use crate::{ClauseDatabase, Lit, Valuation, Var};
+use crate::{helpers::VarRange, ClauseDatabase, Lit, Valuation, Var};
 
 pub mod libloading;
 
@@ -74,6 +74,7 @@ pub trait TermCallback: Solver {
 	fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>);
 }
 
+#[cfg(feature = "ipasir-up")]
 pub trait PropagatingSolver: Solver {
 	/// Set Propagator implementation which allows to learn, propagate and
 	/// backtrack based on external constraints.
@@ -96,6 +97,7 @@ pub trait PropagatingSolver: Solver {
 	fn reset_observed_vars(&mut self);
 }
 
+#[cfg(feature = "ipasir-up")]
 pub trait Propagator {
 	/// This method is called checked only when the propagator is connected. When
 	/// a Propagator is marked as lazy, it is only asked to check complete
@@ -108,14 +110,20 @@ pub trait Propagator {
 	/// variables. The notification is not necessarily eager. It usually happens
 	/// before the call of propagator callbacks and when a driving clause is
 	/// leading to an assignment.
-	fn notify_assignment(&mut self, _lit: Lit, _is_fixed: bool) {}
+	fn notify_assignment(&mut self, lit: Lit, is_fixed: bool) {
+		let _ = lit;
+		let _ = is_fixed;
+	}
 	fn notify_new_decision_level(&mut self) {}
-	fn notify_backtrack(&mut self, _new_level: usize) {}
+	fn notify_backtrack(&mut self, new_level: usize) {
+		let _ = new_level;
+	}
 
 	/// Method called to check the found complete solution (after solution
 	/// reconstruction). If it returns false, the propagator must provide an
 	/// external clause during the next callback.
-	fn check_model(&mut self, _value: &dyn Valuation) -> bool {
+	fn check_model(&mut self, value: &dyn Valuation) -> bool {
+		let _ = value;
 		true
 	}
 
@@ -129,14 +137,16 @@ pub trait Propagator {
 	/// current assignment. It returns queue of literals to be propagated in order,
 	/// if an empty queue is returned it indicates that there is no propagation
 	/// under the current assignment.
-	fn propagate(&mut self, _slv: &mut dyn SolvingActions) -> Vec<Lit> {
+	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Vec<Lit> {
+		let _ = slv;
 		Vec::new()
 	}
 
 	/// Ask the external propagator for the reason clause of a previous external
 	/// propagation step (done by [`Propagator::propagate`]). The clause must
 	/// contain the propagated literal.
-	fn add_reason_clause(&mut self, _propagated_lit: Lit) -> Vec<Lit> {
+	fn add_reason_clause(&mut self, propagated_lit: Lit) -> Vec<Lit> {
+		let _ = propagated_lit;
 		Vec::new()
 	}
 
@@ -146,6 +156,7 @@ pub trait Propagator {
 	}
 }
 
+#[cfg(feature = "ipasir-up")]
 pub trait SolvingActions {
 	fn new_var(&mut self) -> Var;
 	fn add_observed_var(&mut self, var: Var);
@@ -174,18 +185,23 @@ impl VarFactory {
 	}
 
 	/// Return the next [`size`] variables that can be stored as an inclusive range.
-	pub fn new_var_range(&mut self, size: usize) -> Option<RangeInclusive<Var>> {
+	pub fn new_var_range(&mut self, size: usize) -> Option<VarRange> {
 		let Some(start) = self.next_var else {
 			return None;
 		};
 		match size {
-			0 => Some(Var(NonZeroI32::new(2).unwrap())..=Var(NonZeroI32::new(1).unwrap())),
+			0 => Some(VarRange::new(
+				Var(NonZeroI32::new(2).unwrap()),
+				Var(NonZeroI32::new(1).unwrap()),
+			)),
 			_ if size > NonZeroI32::MAX.get() as usize => None,
 			_ => {
-				let size = NonZeroI32::new(size as i32).unwrap();
+				// Size is reduced by 1 since it includes self.next_var
+				let size = NonZeroI32::new((size - 1) as i32).unwrap();
 				if let Some(end) = start.checked_add(size) {
-					self.next_var = end.checked_add(NonZeroI32::new(1).unwrap());
-					Some(start..=end)
+					// Set self.next_var to one after end
+					self.next_var = end.next_var();
+					Some(VarRange::new(start, end))
 				} else {
 					None
 				}
