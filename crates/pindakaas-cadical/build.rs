@@ -70,7 +70,6 @@ fn main() {
 		"vendor/cadical/src/subsume.cpp",
 		"vendor/cadical/src/terminal.cpp",
 		"vendor/cadical/src/ternary.cpp",
-		"vendor/cadical/src/trail.cpp",
 		"vendor/cadical/src/transred.cpp",
 		"vendor/cadical/src/veripbtracer.cpp",
 		"vendor/cadical/src/util.cpp",
