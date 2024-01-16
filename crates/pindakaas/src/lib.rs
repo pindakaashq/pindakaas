@@ -44,15 +44,19 @@ pub use crate::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Var(NonZeroI32);
+pub struct Var(pub(crate) NonZeroI32);
 
 impl Var {
 	fn next_var(&self) -> Option<Var> {
-		let v = self.0.get();
-		if let Some(v) = v.checked_add(1) {
-			return Some(Var(v.try_into().unwrap()));
+		self.checked_add(NonZeroI32::new(1).unwrap())
+	}
+
+	fn checked_add(&self, b: NonZeroI32) -> Option<Var> {
+		if let Some(v) = self.0.get().checked_add(b.get()) {
+			Some(Var(NonZeroI32::new(v).unwrap()))
+		} else {
+			None
 		}
-		None
 	}
 }
 

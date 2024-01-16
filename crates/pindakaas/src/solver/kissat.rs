@@ -1,6 +1,22 @@
-use super::ipasir_solver;
+use pindakaas_derive::IpasirSolver;
 
-ipasir_solver!(pindakaas_kissat, Kissat);
+use super::VarFactory;
+
+#[derive(IpasirSolver)]
+#[ipasir(krate = pindakaas_kissat)]
+pub struct Kissat {
+	ptr: *mut std::ffi::c_void,
+	vars: VarFactory,
+}
+
+impl Default for Kissat {
+	fn default() -> Self {
+		Self {
+			ptr: unsafe { pindakaas_kissat::ipasir_init() },
+			vars: VarFactory::default(),
+		}
+	}
+}
 
 #[cfg(test)]
 mod tests {
