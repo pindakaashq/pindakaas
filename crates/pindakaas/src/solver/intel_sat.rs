@@ -1,9 +1,22 @@
-use super::{ipasir_learn_callback, ipasir_solve_assuming, ipasir_solver, ipasir_term_callback};
+use pindakaas_derive::IpasirSolver;
 
-ipasir_solver!(pindakaas_intel_sat, IntelSat);
-ipasir_solve_assuming!(pindakaas_intel_sat, IntelSat);
-ipasir_learn_callback!(pindakaas_intel_sat, IntelSat);
-ipasir_term_callback!(pindakaas_intel_sat, IntelSat);
+use super::VarFactory;
+
+#[derive(IpasirSolver)]
+#[ipasir(krate = pindakaas_intel_sat, assumptions, learn_callback, term_callback)]
+pub struct IntelSat {
+	ptr: *mut std::ffi::c_void,
+	vars: VarFactory,
+}
+
+impl Default for IntelSat {
+	fn default() -> Self {
+		Self {
+			ptr: unsafe { pindakaas_intel_sat::ipasir_init() },
+			vars: VarFactory::default(),
+		}
+	}
+}
 
 #[cfg(test)]
 mod tests {
