@@ -1,4 +1,4 @@
-use std::{ffi::c_void, num::NonZeroI32, ops::RangeInclusive};
+use std::{num::NonZeroI32, ops::RangeInclusive};
 
 use crate::{ClauseDatabase, Lit, Valuation, Var};
 
@@ -71,10 +71,88 @@ pub trait TermCallback: Solver {
 	/// The solver will periodically call this function and check its return value
 	/// during the search. Subsequent calls to this method override the previously
 	/// set callback function.
-	fn set_terminate_callback<F: FnMut() -> SolverAction>(&mut self, cb: Option<F>);
+	fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>);
 }
 
-pub enum SolverAction {
+pub trait PropagatingSolver: Solver {
+	/// Set Propagator implementation which allows to learn, propagate and
+	/// backtrack based on external constraints.
+	///
+	/// Only one Propagator can be connected. This Propagator is notified of all
+	/// changes to which it has subscribed, using the [`add_observed_var`] method.
+	///
+	/// If a previous propagator was set, then it is returned.
+	///
+	/// # Warning
+	///
+	/// Calling this method automatically resets the observed variable set.
+	fn set_external_propagator(
+		&mut self,
+		prop: Option<Box<dyn Propagator>>,
+	) -> Option<Box<dyn Propagator>>;
+
+	fn add_observed_var(&mut self, var: Var);
+	fn remove_observed_var(&mut self, var: Var);
+	fn reset_observed_vars(&mut self);
+}
+
+pub trait Propagator {
+	/// This method is called checked only when the propagator is connected. When
+	/// a Propagator is marked as lazy, it is only asked to check complete
+	/// assignments.
+	fn is_lazy(&self) -> bool {
+		false
+	}
+
+	/// Method called to notify the propagator about assignments to observed
+	/// variables. The notification is not necessarily eager. It usually happens
+	/// before the call of propagator callbacks and when a driving clause is
+	/// leading to an assignment.
+	fn notify_assignment(&mut self, _lit: Lit, _is_fixed: bool) {}
+	fn notify_new_decision_level(&mut self) {}
+	fn notify_backtrack(&mut self, _new_level: usize) {}
+
+	/// Method called to check the found complete solution (after solution
+	/// reconstruction). If it returns false, the propagator must provide an
+	/// external clause during the next callback.
+	fn check_model(&mut self, _value: &dyn Valuation) -> bool {
+		true
+	}
+
+	/// Method called when the solver asks for the next decision literal. If it
+	/// returns None, the solver makes its own choice.
+	fn decide(&mut self) -> Option<Lit> {
+		None
+	}
+
+	/// Method to ask the propagator if there is an propagation to make under the
+	/// current assignment. It returns queue of literals to be propagated in order,
+	/// if an empty queue is returned it indicates that there is no propagation
+	/// under the current assignment.
+	fn propagate(&mut self, _slv: &mut dyn SolvingActions) -> Vec<Lit> {
+		Vec::new()
+	}
+
+	/// Ask the external propagator for the reason clause of a previous external
+	/// propagation step (done by [`Propagator::propagate`]). The clause must
+	/// contain the propagated literal.
+	fn add_reason_clause(&mut self, _propagated_lit: Lit) -> Vec<Lit> {
+		Vec::new()
+	}
+
+	/// Method to ask whether there is an external clause to add to the solver.
+	fn add_external_clause(&mut self) -> Option<Vec<Lit>> {
+		None
+	}
+}
+
+pub trait SolvingActions {
+	fn new_var(&mut self) -> Lit;
+	fn add_observed_var(&mut self, var: Var);
+	fn is_decision(&mut self, lit: Lit) -> bool;
+}
+
+pub enum SlvTermSignal {
 	Continue,
 	Terminate,
 }
@@ -132,40 +210,5 @@ impl Iterator for VarFactory {
 			self.next_var = var.next_var();
 		}
 		var
-	}
-}
-
-type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
-unsafe extern "C" fn trampoline0<R, F: FnMut() -> R>(user_data: *mut c_void) -> R {
-	let user_data = &mut *(user_data as *mut F);
-	user_data()
-}
-fn get_trampoline0<R, F: FnMut() -> R>(_closure: &F) -> CB0<R> {
-	trampoline0::<R, F>
-}
-type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;
-unsafe extern "C" fn trampoline1<R, A, F: FnMut(A) -> R>(user_data: *mut c_void, arg1: A) -> R {
-	let user_data = &mut *(user_data as *mut F);
-	user_data(arg1)
-}
-fn get_trampoline1<R, A, F: FnMut(A) -> R>(_closure: &F) -> CB1<R, A> {
-	trampoline1::<R, A, F>
-}
-/// Iterator over the elements of a null-terminated i32 array
-#[derive(Debug, Clone, Copy)]
-struct ExplIter(*const i32);
-impl Iterator for ExplIter {
-	type Item = i32;
-	#[inline]
-	fn next(&mut self) -> Option<Self::Item> {
-		unsafe {
-			if *self.0 == 0 {
-				None
-			} else {
-				let ptr = self.0;
-				self.0 = ptr.offset(1);
-				Some(*ptr)
-			}
-		}
 	}
 }
