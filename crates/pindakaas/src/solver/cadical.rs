@@ -8,6 +8,7 @@ use crate::Lit;
 pub struct Cadical {
 	ptr: *mut std::ffi::c_void,
 	vars: VarFactory,
+	#[cfg(feature = "ipasir-up")]
 	prop: Option<Box<CadicalProp>>,
 }
 
@@ -16,6 +17,7 @@ impl Default for Cadical {
 		Self {
 			ptr: unsafe { pindakaas_cadical::ipasir_init() },
 			vars: VarFactory::default(),
+			#[cfg(feature = "ipasir-up")]
 			prop: None,
 		}
 	}
@@ -39,7 +41,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		linear::LimitComp,
-		solver::{PropagatingSolver, Propagator, SolveResult, Solver},
+		solver::{SolveResult, Solver},
 		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder,
 	};
 
@@ -66,5 +68,90 @@ mod tests {
 			)
 		});
 		assert_eq!(res, SolveResult::Sat);
+	}
+
+	#[cfg(feature = "ipasir-up")]
+	#[test]
+	fn test_ipasir_up() {
+		use itertools::Itertools;
+
+		use crate::{
+			helpers::tests::lits,
+			solver::{PropagatingSolver, Propagator, VarRange},
+		};
+
+		let mut slv = Cadical::default();
+
+		let vars = slv.new_var_range(5);
+
+		struct Dist2 {
+			vars: VarRange,
+			tmp: Vec<Vec<Lit>>,
+		}
+		impl Propagator for Dist2 {
+			fn is_lazy(&self) -> bool {
+				true
+			}
+			fn check_model(&mut self, value: &dyn crate::Valuation) -> bool {
+				let mut vars = self.vars.clone();
+				while let Some(v) = vars.next() {
+					if value(v.into()).unwrap_or(true) {
+						let next_2 = vars.clone().take(2);
+						for o in next_2 {
+							if value(o.into()).unwrap_or(true) {
+								self.tmp.push(vec![!v, !o]);
+							}
+						}
+					}
+				}
+				self.tmp.is_empty()
+			}
+			fn add_external_clause(&mut self) -> Option<Vec<Lit>> {
+				self.tmp.pop()
+			}
+		}
+
+		let p = Box::new(Dist2 {
+			vars: vars.clone(),
+			tmp: Vec::new(),
+		});
+		slv.set_external_propagator(Some(p));
+		slv.add_clause(vars.clone().map_into()).unwrap();
+		for v in vars.clone() {
+			slv.add_observed_var(v)
+		}
+
+		let mut solns = Vec::new();
+		while slv.solve(|value| {
+			let sol: Vec<Lit> = vars
+				.clone()
+				.map(|v| {
+					if value(v.into()).unwrap() {
+						v.into()
+					} else {
+						!v
+					}
+				})
+				.collect_vec();
+			solns.push(sol);
+		}) == SolveResult::Sat
+		{
+			slv.add_clause(solns.last().unwrap().iter().map(|l| !l))
+				.unwrap()
+		}
+		solns.sort();
+		assert_eq!(
+			solns,
+			vec![
+				lits![1, -2, -3, 4, -5],
+				lits![1, -2, -3, -4, 5],
+				lits![1, -2, -3, -4, -5],
+				lits![-1, 2, -3, -4, 5],
+				lits![-1, 2, -3, -4, -5],
+				lits![-1, -2, 3, -4, -5],
+				lits![-1, -2, -3, 4, -5],
+				lits![-1, -2, -3, -4, 5],
+			]
+		);
 	}
 }
