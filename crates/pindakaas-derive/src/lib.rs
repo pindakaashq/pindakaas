@@ -147,6 +147,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			None => quote! { self.prop },
 		};
 		quote! {
+			#[cfg(feature = "ipasir-up")]
 			pub(crate) struct #prop_ident {
 				/// Rust Propagator Storage
 				prop: Box<crate::solver::libloading::IpasirPropStore>,
@@ -154,12 +155,14 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				wrapper: *mut std::ffi::c_void,
 			}
 
+			#[cfg(feature = "ipasir-up")]
 			impl Drop for #prop_ident {
 				fn drop(&mut self) {
 					unsafe { #krate::ipasir_prop_release(self.wrapper) };
 				}
 			}
 
+			#[cfg(feature = "ipasir-up")]
 			impl #prop_ident {
 				pub(crate) fn new(prop: Box<dyn crate::solver::Propagator>, slv: *mut dyn crate::solver::SolvingActions) -> Self {
 					// Construct wrapping structures
@@ -182,6 +185,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				}
 			}
 
+			#[cfg(feature = "ipasir-up")]
 			impl crate::solver::PropagatingSolver for #ident {
 				fn set_external_propagator(
 					&mut self,
@@ -220,6 +224,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				}
 			}
 
+			#[cfg(feature = "ipasir-up")]
 			impl crate::solver::SolvingActions for #ident {
 				fn new_var(&mut self) -> crate::Var {
 					<#ident as crate::ClauseDatabase>::new_var(self)
@@ -266,7 +271,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 
 		impl #ident {
 			/// Return the next [`size`] variables that can be stored as an inclusive range.
-			pub fn new_var_range(&mut self, size: usize) -> std::ops::RangeInclusive<crate::Var> {
+			pub fn new_var_range(&mut self, size: usize) -> crate::helpers::VarRange {
 				self.vars.new_var_range(size).expect("variable pool exhaused")
 			}
 		}

@@ -1,10 +1,15 @@
-use std::collections::HashSet;
+use std::{
+	cmp::max,
+	collections::HashSet,
+	iter::FusedIterator,
+	ops::{Bound, RangeBounds, RangeInclusive},
+};
 
 use itertools::Itertools;
 
 use crate::{
 	int::IntVar, linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase, Coeff,
-	Encoder, LinExp, Lit, Result, Unsatisfiable, Valuation,
+	Encoder, LinExp, Lit, Result, Unsatisfiable, Valuation, Var,
 };
 
 #[allow(unused_macros)]
@@ -193,6 +198,74 @@ impl<'a> Checker for XorConstraint<'a> {
 		} else {
 			Err(Unsatisfiable.into())
 		}
+	}
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct VarRange {
+	start: Var,
+	end: Var,
+}
+
+impl VarRange {
+	pub fn new(start: Var, end: Var) -> Self {
+		Self { start, end }
+	}
+}
+
+impl Iterator for VarRange {
+	type Item = Var;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if self.start <= self.end {
+			let item = self.start;
+			self.start = self.start.next_var().unwrap();
+			Some(item)
+		} else {
+			None
+		}
+	}
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		let size = max(self.end.0.get() - self.start.0.get(), 0) as usize;
+		(size, Some(size))
+	}
+	fn count(self) -> usize {
+		let (lower, upper) = self.size_hint();
+		debug_assert_eq!(upper, Some(lower));
+		lower
+	}
+}
+impl FusedIterator for VarRange {}
+impl ExactSizeIterator for VarRange {
+	fn len(&self) -> usize {
+		let (lower, upper) = self.size_hint();
+		debug_assert_eq!(upper, Some(lower));
+		lower
+	}
+}
+impl DoubleEndedIterator for VarRange {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		if self.start <= self.end {
+			let item = self.end;
+			self.end = self.end.prev_var().unwrap();
+			Some(item)
+		} else {
+			None
+		}
+	}
+}
+impl RangeBounds<Var> for VarRange {
+	fn start_bound(&self) -> Bound<&Var> {
+		Bound::Included(&self.start)
+	}
+
+	fn end_bound(&self) -> Bound<&Var> {
+		Bound::Included(&self.end)
+	}
+}
+impl From<RangeInclusive<Var>> for VarRange {
+	fn from(value: RangeInclusive<Var>) -> Self {
+		VarRange::new(*value.start(), *value.end())
 	}
 }
 
