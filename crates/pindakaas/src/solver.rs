@@ -107,12 +107,18 @@ pub trait Propagator {
 	}
 
 	/// Method called to notify the propagator about assignments to observed
-	/// variables. The notification is not necessarily eager. It usually happens
-	/// before the call of propagator callbacks and when a driving clause is
-	/// leading to an assignment.
-	fn notify_assignment(&mut self, lit: Lit, is_fixed: bool) {
-		let _ = lit;
-		let _ = is_fixed;
+	/// variables.
+	///
+	/// The notification is not necessarily eager. It usually happens before the
+	/// call of propagator callbacks and when a driving clause is leading to an
+	/// assignment.
+	///
+	/// If [`persistent`] is set to `true`, then the assignment is known to
+	/// persist through backtracking.
+	fn notify_assignment(&mut self, var: Var, val: bool, persistent: bool) {
+		let _ = var;
+		let _ = val;
+		let _ = persistent;
 	}
 	fn notify_new_decision_level(&mut self) {}
 	fn notify_backtrack(&mut self, new_level: usize) {
