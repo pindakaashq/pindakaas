@@ -344,7 +344,8 @@ pub(crate) unsafe extern "C" fn ipasir_notify_assignment_cb(
 ) {
 	let prop = &mut *(state as *mut IpasirPropStore);
 	let lit = crate::Lit(std::num::NonZeroI32::new(lit).unwrap());
-	prop.prop.notify_assignment(lit, is_fixed)
+	prop.prop
+		.notify_assignment(lit.var(), !lit.is_negated(), is_fixed)
 }
 #[cfg(feature = "ipasir-up")]
 pub(crate) unsafe extern "C" fn ipasir_notify_new_decision_level_cb(state: *mut c_void) {
