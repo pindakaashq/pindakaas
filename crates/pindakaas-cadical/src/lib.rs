@@ -1,9 +1,10 @@
 use std::ffi::{c_char, c_int, c_void};
 
-use pindakaas_build_macros::ipasir_definitions;
+use pindakaas_build_macros::{ipasir_definitions, ipasir_up_definitions};
 
 // Standard IPASIR definitions
 ipasir_definitions!(ccadical);
+ipasir_up_definitions!(ccadical);
 
 // Additional C-API functions in CaDiCaL
 extern "C" {

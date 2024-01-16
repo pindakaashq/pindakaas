@@ -8,7 +8,7 @@ fn main() {
 		"vendor/cadical/src/backward.cpp",
 		"vendor/cadical/src/bins.cpp",
 		"vendor/cadical/src/block.cpp",
-		"vendor/cadical/src/ccadical.cpp",
+		// "vendor/cadical/src/ccadical.cpp", // included by src/ccadical_override.cpp
 		"vendor/cadical/src/checker.cpp",
 		"vendor/cadical/src/clause.cpp",
 		"vendor/cadical/src/collect.cpp",
@@ -78,6 +78,7 @@ fn main() {
 		"vendor/cadical/src/vivify.cpp",
 		"vendor/cadical/src/walk.cpp",
 		"vendor/cadical/src/watch.cpp",
+		"src/ccadical_override.cpp",
 	];
 
 	let mut builder = cc::Build::new();
