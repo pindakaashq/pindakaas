@@ -1,3 +1,4 @@
+use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
 use pindakaas_derive::IpasirSolver;
 
 use super::VarFactory;
@@ -23,13 +24,25 @@ impl Default for Cadical {
 	}
 }
 
+impl Clone for Cadical {
+	fn clone(&self) -> Self {
+		let ptr = unsafe { ccadical_copy(self.ptr) };
+		Self {
+			ptr,
+			vars: self.vars,
+			#[cfg(feature = "ipasir-up")]
+			prop: None,
+		}
+	}
+}
+
 impl Cadical {
 	pub fn phase(&mut self, lit: Lit) {
-		unsafe { pindakaas_cadical::ccadical_phase(self.ptr, lit.0.get()) }
+		unsafe { ccadical_phase(self.ptr, lit.0.get()) }
 	}
 
 	pub fn unphase(&mut self, lit: Lit) {
-		unsafe { pindakaas_cadical::ccadical_unphase(self.ptr, lit.0.get()) }
+		unsafe { ccadical_unphase(self.ptr, lit.0.get()) }
 	}
 }
 
@@ -68,6 +81,14 @@ mod tests {
 			)
 		});
 		assert_eq!(res, SolveResult::Sat);
+		// Test clone implementation
+		let mut cp = slv.clone();
+		cp.solve(|value| {
+			assert!(
+				(value(!a).unwrap() && value(b).unwrap())
+					|| (value(a).unwrap() && value(!b).unwrap()),
+			)
+		});
 	}
 
 	#[cfg(feature = "ipasir-up")]
