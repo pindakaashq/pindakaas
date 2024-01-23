@@ -172,4 +172,10 @@ void ccadical_phase(CCaDiCaL *slv, int lit) {
 void ccadical_unphase(CCaDiCaL *slv, int lit) {
   ((Wrapper *)slv)->solver->unphase(lit);
 }
+
+CCaDiCaL *ccadical_copy(CCaDiCaL *slv) {
+  auto *cp = new Wrapper();
+  ((Wrapper *)slv)->solver->copy(*cp->solver);
+  return (CCaDiCaL *)cp;
+}
 }
