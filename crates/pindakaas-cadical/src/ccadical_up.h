@@ -57,6 +57,7 @@ void ccadical_prop_set_add_external_clause_lit(
 
 void ccadical_phase(CCaDiCaL *, int lit);
 void ccadical_unphase(CCaDiCaL *, int lit);
+CCaDiCaL *ccadical_copy(CCaDiCaL *slv);
 
 /*------------------------------------------------------------------------*/
 
