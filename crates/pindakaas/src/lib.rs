@@ -20,6 +20,7 @@ use std::{
 	path::Path,
 };
 
+use helpers::VarRange;
 use itertools::{Itertools, Position};
 use solver::VarFactory;
 
@@ -381,6 +382,12 @@ impl Cnf {
 	pub fn literals(&self) -> usize {
 		self.size.iter().sum()
 	}
+
+	pub fn new_var_range(&mut self, size: usize) -> VarRange {
+		self.nvar
+			.new_var_range(size)
+			.expect("exhausted variable pool")
+	}
 }
 
 impl From<Cnf> for Wcnf {
@@ -648,6 +655,10 @@ impl Wcnf {
 
 	pub fn iter(&self) -> impl Iterator<Item = (&[Lit], &Option<Coeff>)> {
 		self.cnf.iter().zip(self.weights.iter())
+	}
+
+	pub fn new_var_range(&mut self, size: usize) -> VarRange {
+		self.cnf.new_var_range(size)
 	}
 }
 
