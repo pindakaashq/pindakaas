@@ -21,6 +21,8 @@ struct IpasirOpts {
 	term_callback: bool,
 	#[darling(default)]
 	ipasir_up: bool,
+	#[darling(default = "default_true")]
+	has_default: bool,
 }
 
 #[proc_macro_derive(IpasirSolver, attributes(ipasir))]
@@ -34,7 +36,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		Some(x) => quote! { self. #x },
 		None => quote! { self.ptr },
 	};
-	let vars = match opts.vars {
+	let vars = match opts.vars.clone() {
 		Some(x) => quote! { self. #x },
 		None => quote! { self.vars },
 	};
@@ -241,6 +243,27 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		quote!()
 	};
 
+	let from_cnf = if opts.has_default {
+		let var_member = match opts.vars {
+			Some(x) => quote! { #x },
+			None => quote! { vars },
+		};
+		quote! {
+			impl From<crate::Cnf> for #ident {
+				fn from(value: crate::Cnf) -> #ident {
+					let mut slv: #ident = Default::default();
+					slv. #var_member = value.nvar;
+					for cl in value.iter() {
+						let _ = crate::ClauseDatabase::add_clause(&mut slv, cl.iter().copied());
+					}
+					slv
+				}
+			}
+		}
+	} else {
+		quote!()
+	};
+
 	quote! {
 		impl Drop for #ident {
 			fn drop(&mut self) {
@@ -272,7 +295,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		impl #ident {
 			/// Return the next [`size`] variables that can be stored as an inclusive range.
 			pub fn new_var_range(&mut self, size: usize) -> crate::helpers::VarRange {
-				self.vars.new_var_range(size).expect("variable pool exhaused")
+				#vars .new_var_range(size).expect("variable pool exhaused")
 			}
 		}
 
@@ -316,10 +339,15 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			}
 		}
 
+		#from_cnf
 		#assumptions
 		#term_callback
 		#learn_callback
 		#ipasir_up
 	}
 	.into()
+}
+
+fn default_true() -> bool {
+	true
 }
