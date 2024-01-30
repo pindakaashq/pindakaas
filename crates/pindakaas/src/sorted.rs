@@ -1,3 +1,4 @@
+#![allow(unused_imports, unused_variables, dead_code)]
 use crate::{
 	helpers::{add_clauses_for, negate_cnf},
 	int::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
@@ -73,24 +74,25 @@ impl<'a, Lit: Literal, C: Coefficient> Sorted<'a, Lit, C> {
 impl<'a, Lit: Literal, C: Coefficient> Checker for Sorted<'a, Lit, C> {
 	type Lit = Lit;
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let lhs = LinExp::from_terms(
-			self.xs
-				.iter()
-				.map(|x| (x.clone(), C::one()))
-				.collect::<Vec<_>>()
-				.as_slice(),
-		)
-		.assign(solution)?;
+		todo!();
+		// let lhs = LinExp::from_terms(
+		// 	self.xs
+		// 		.iter()
+		// 		.map(|x| (x.clone(), C::one()))
+		// 		.collect::<Vec<_>>()
+		// 		.as_slice(),
+		// )
+		// .assign(solution)?;
 
-		let rhs = LinExp::<_, _>::from(self.y).assign(solution)?;
+		// let rhs = LinExp::<_, _>::from(self.y).assign(solution)?;
 
-		if (self.cmp == LimitComp::LessEq && lhs <= rhs)
-			|| (self.cmp == LimitComp::Equal && lhs == rhs)
-		{
-			Ok(())
-		} else {
-			Err(CheckError::Unsatisfiable(Unsatisfiable))
-		}
+		// if (self.cmp == LimitComp::LessEq && lhs <= rhs)
+		// 	|| (self.cmp == LimitComp::Equal && lhs == rhs)
+		// {
+		// 	Ok(())
+		// } else {
+		// 	Err(CheckError::Unsatisfiable(Unsatisfiable))
+		// }
 	}
 }
 
@@ -102,12 +104,14 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Sorted<'_, DB::Lit, C>> for
 			.map(|x| Some(x.clone()))
 			.enumerate()
 			.map(|(i, x)| {
-				IntVarOrd::from_views(
-					db,
-					interval_map! { C::one()..(C::one()+C::one()) => x },
-					format!("x_{}", i + 1),
-				)
-				.into()
+				// OrdEnc::from_lits(&[x])
+				todo!();
+				// IntVarOrd::from_views(
+				// 	db,
+				// 	interval_map! { C::one()..(C::one()+C::one()) => x },
+				// 	format!("x_{}", i + 1),
+				// )
+				// .into()
 			})
 			.collect::<Vec<_>>();
 
@@ -152,7 +156,8 @@ impl SortedEncoder {
 			if self.add_consistency {
 				y.consistent(db).unwrap();
 			}
-			y.into()
+			todo!();
+			// y.into()
 		}
 	}
 
@@ -183,6 +188,7 @@ impl SortedEncoder {
 		self.comp(db, x1, &x2, cmp, &y, C::one())
 	}
 
+	#[allow(unreachable_code)]
 	fn sorted<DB: ClauseDatabase, C: Coefficient>(
 		&mut self,
 		db: &mut DB,
@@ -191,81 +197,84 @@ impl SortedEncoder {
 		y: &IntVarEnc<DB::Lit, C>,
 		_lvl: usize,
 	) -> Result {
-		let (n, m) = (xs.len(), y.ub());
-		let direct = false;
+		todo!();
+		/*
+			let (n, m) = (xs.len(), y.ub());
+			let direct = false;
 
-		// TODO: Add tracing
-		// eprintln!(
-		// 	"{:_lvl$}sorted([{}] {} {}, {})",
-		// 	"",
-		// 	xs.iter().join(", "),
-		// 	cmp,
-		// 	y,
-		// 	direct,
-		// 	_lvl = _lvl
-		// );
+			// TODO: Add tracing
+			// eprintln!(
+			// 	"{:_lvl$}sorted([{}] {} {}, {})",
+			// 	"",
+			// 	xs.iter().join(", "),
+			// 	cmp,
+			// 	y,
+			// 	direct,
+			// 	_lvl = _lvl
+			// );
 
-		debug_assert!(xs.iter().all(|x| x.ub() == C::one()));
-		if direct {
-			return num::range_inclusive(C::one(), m + C::one()).try_for_each(|k| {
-				xs.iter()
-					.map(|x| x.geq(C::one()..(C::one() + C::one()))[0][0].clone())
-					.combinations(k.to_usize().unwrap())
-					.try_for_each(|lits| {
-						let cl = lits
-							.into_iter()
-							.map(|lit| lit.negate())
-							.chain(y.geq(k..(k + C::one()))[0].iter().cloned())
-							.collect::<Vec<_>>();
-						emit_clause!(db, cl.as_slice())
-					})
-			});
-		}
-		match xs {
-			[] => Ok(()),
-			[x] => TernLeEncoder::default().encode(
-				db,
-				&TernLeConstraint {
-					x,
-					y: &IntVarEnc::Const(C::zero()),
-					cmp: &(cmp.clone()).into(),
-					z: y,
-				},
-			),
-			[x1, x2] if m <= C::one() + C::one() => self.smerge(db, x1, x2, cmp, y),
-			xs => {
-				let n = match self.sort_n {
-					SortN::One => 1,
-					SortN::DivTwo => n / 2,
-				};
-				let y1 = self.sort(
+			debug_assert!(xs.iter().all(|x| x.ub() == C::one()));
+			if direct {
+				return num::range_inclusive(C::one(), m + C::one()).try_for_each(|k| {
+					xs.iter()
+						.map(|x| x.geq(C::one()..(C::one() + C::one()))[0][0].clone())
+						.combinations(k.to_usize().unwrap())
+						.try_for_each(|lits| {
+							let cl = lits
+								.into_iter()
+								.map(|lit| lit.negate())
+								.chain(y.geq(k..(k + C::one()))[0].iter().cloned())
+								.collect::<Vec<_>>();
+							emit_clause!(db, cl.as_slice())
+						})
+				});
+			}
+			match xs {
+				[] => Ok(()),
+				[x] => TernLeEncoder::default().encode(
 					db,
-					&xs[..n],
-					cmp,
-					std::cmp::min((0..n).fold(C::zero(), |a, _| a + C::one()), y.ub()),
-					String::from("y1"),
-					_lvl,
-				);
-				let y2 = self.sort(
-					db,
-					&xs[n..],
-					cmp,
-					std::cmp::min((n..xs.len()).fold(C::zero(), |a, _| a + C::one()), y.ub()),
-					String::from("y2"),
-					_lvl,
-				);
+					&TernLeConstraint {
+						x,
+						y: &IntVarEnc::Const(C::zero()),
+						cmp: &(cmp.clone()).into(),
+						z: y,
+					},
+				),
+				[x1, x2] if m <= C::one() + C::one() => self.smerge(db, x1, x2, cmp, y),
+				xs => {
+					let n = match self.sort_n {
+						SortN::One => 1,
+						SortN::DivTwo => n / 2,
+					};
+					let y1 = self.sort(
+						db,
+						&xs[..n],
+						cmp,
+						std::cmp::min((0..n).fold(C::zero(), |a, _| a + C::one()), y.ub()),
+						String::from("y1"),
+						_lvl,
+					);
+					let y2 = self.sort(
+						db,
+						&xs[n..],
+						cmp,
+						std::cmp::min((n..xs.len()).fold(C::zero(), |a, _| a + C::one()), y.ub()),
+						String::from("y2"),
+						_lvl,
+					);
 
-				if let Some(y1) = y1 {
-					if let Some(y2) = y2 {
-						self.merged(db, &y1, &y2, cmp, y, _lvl + 1)
+					if let Some(y1) = y1 {
+						if let Some(y2) = y2 {
+							self.merged(db, &y1, &y2, cmp, y, _lvl + 1)
+						} else {
+							Ok(())
+						}
 					} else {
 						Ok(())
 					}
-				} else {
-					Ok(())
 				}
 			}
-		}
+		*/
 	}
 
 	fn sort<DB: ClauseDatabase, C: Coefficient>(
@@ -297,95 +306,98 @@ impl SortedEncoder {
 		y: &IntVarEnc<DB::Lit, C>,
 		_lvl: usize,
 	) -> Result {
-		let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
-		let (strat, _cost) = merged_cost(
-			a.to_u128().unwrap(),
-			b.to_u128().unwrap(),
-			c.to_u128().unwrap(),
-			self.strategy.clone(),
-		);
+		todo!();
+		/*
+			let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
+			let (strat, _cost) = merged_cost(
+				a.to_u128().unwrap(),
+				b.to_u128().unwrap(),
+				c.to_u128().unwrap(),
+				self.strategy.clone(),
+			);
 
-		// TODO: Add tracing
-		// eprintln!(
-		//	"{:_lvl$}merged({}, {}, {}, {:?})",
-		//	"",
-		//	x1,
-		//	x2,
-		//	y,
-		//	_cost,
-		//	_lvl = _lvl
-		// );
+			// TODO: Add tracing
+			// eprintln!(
+			//	"{:_lvl$}merged({}, {}, {}, {:?})",
+			//	"",
+			//	x1,
+			//	x2,
+			//	y,
+			//	_cost,
+			//	_lvl = _lvl
+			// );
 
-		match strat {
-			SortedStrategy::Direct => {
-				let cmp = self.overwrite_direct_cmp.as_ref().unwrap_or(cmp).clone();
-				TernLeEncoder::default().encode(
-					db,
-					&TernLeConstraint {
-						x: x1,
-						y: x2,
-						cmp: &(cmp).into(),
-						z: y, // TODO no consistency implemented for this bound yet
-					},
-				)
-			}
-			SortedStrategy::Recursive => {
-				if a.is_zero() && b.is_zero() {
-					Ok(())
-				} else if a.is_one() && b.is_one() && c <= C::one() + C::one() {
-					self.smerge(db, x1, x2, cmp, y)
-				} else {
-					let two = C::one() + C::one();
-					let x1_floor = x1.div(&two);
-					let x1_ceil = x1
-						.add(
-							db,
-							&mut TernLeEncoder::default(),
-							&IntVarEnc::Const(C::one()),
-							None,
-							None,
-						)?
-						.div(&two);
-
-					let x2_floor = x2.div(&two);
-					let x2_ceil = x2
-						.add(
-							db,
-							&mut TernLeEncoder::default(),
-							&IntVarEnc::Const(C::one()),
-							None,
-							None,
-						)?
-						.div(&two);
-
-					let z_floor =
-						x1_floor.add(db, &mut TernLeEncoder::default(), &x2_floor, None, None)?;
-					self.encode(
+			match strat {
+				SortedStrategy::Direct => {
+					let cmp = self.overwrite_direct_cmp.as_ref().unwrap_or(cmp).clone();
+					TernLeEncoder::default().encode(
 						db,
-						&TernLeConstraint::new(
-							&x1_floor,
-							&x2_floor,
-							&(cmp.clone()).into(),
-							&z_floor,
-						),
-					)?;
-
-					let z_ceil =
-						x1_ceil.add(db, &mut TernLeEncoder::default(), &x2_ceil, None, None)?;
-					self.encode(
-						db,
-						&TernLeConstraint::new(&x1_ceil, &x2_ceil, &(cmp.clone()).into(), &z_ceil),
-					)?;
-
-					for c in num::iter::range_inclusive(C::zero(), c) {
-						self.comp(db, &z_floor, &z_ceil, cmp, y, c)?;
-					}
-
-					Ok(())
+						&TernLeConstraint {
+							x: x1,
+							y: x2,
+							cmp: &(cmp).into(),
+							z: y, // TODO no consistency implemented for this bound yet
+						},
+					)
 				}
+				SortedStrategy::Recursive => {
+					if a.is_zero() && b.is_zero() {
+						Ok(())
+					} else if a.is_one() && b.is_one() && c <= C::one() + C::one() {
+						self.smerge(db, x1, x2, cmp, y)
+					} else {
+						let two = C::one() + C::one();
+						let x1_floor = x1.div(&two);
+						let x1_ceil = x1
+							.add(
+								db,
+								&mut TernLeEncoder::default(),
+								&IntVarEnc::Const(C::one()),
+								None,
+								None,
+							)?
+							.div(&two);
+
+						let x2_floor = x2.div(&two);
+						let x2_ceil = x2
+							.add(
+								db,
+								&mut TernLeEncoder::default(),
+								&IntVarEnc::Const(C::one()),
+								None,
+								None,
+							)?
+							.div(&two);
+
+						let z_floor =
+							x1_floor.add(db, &mut TernLeEncoder::default(), &x2_floor, None, None)?;
+						self.encode(
+							db,
+							&TernLeConstraint::new(
+								&x1_floor,
+								&x2_floor,
+								&(cmp.clone()).into(),
+								&z_floor,
+							),
+						)?;
+
+						let z_ceil =
+							x1_ceil.add(db, &mut TernLeEncoder::default(), &x2_ceil, None, None)?;
+						self.encode(
+							db,
+							&TernLeConstraint::new(&x1_ceil, &x2_ceil, &(cmp.clone()).into(), &z_ceil),
+						)?;
+
+						for c in num::iter::range_inclusive(C::zero(), c) {
+							self.comp(db, &z_floor, &z_ceil, cmp, y, c)?;
+						}
+
+						Ok(())
+					}
+				}
+				_ => unreachable!(),
 			}
-			_ => unreachable!(),
-		}
+		*/
 	}
 
 	fn comp<DB: ClauseDatabase, C: Coefficient>(
@@ -397,6 +409,8 @@ impl SortedEncoder {
 		z: &IntVarEnc<DB::Lit, C>,
 		c: C,
 	) -> Result {
+		todo!();
+		/*
 		let cmp = self.overwrite_recursive_cmp.as_ref().unwrap_or(cmp);
 		let to_iv = |c: C| c..(c + C::one());
 		let empty_clause: Vec<Vec<DB::Lit>> = vec![Vec::new()];
@@ -429,6 +443,7 @@ impl SortedEncoder {
 			add_clauses_for(db, vec![x, y, negate_cnf(z1)])?;
 		}
 		Ok(())
+		*/
 	}
 }
 

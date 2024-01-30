@@ -1,5 +1,6 @@
 use crate::int::Consistency;
 use crate::int::Decompose;
+use crate::int::IntVar;
 use crate::int::Lin;
 use crate::int::Model;
 use crate::int::Term;
@@ -10,7 +11,7 @@ use crate::Unsatisfiable;
 
 use itertools::Itertools;
 
-use crate::{int::IntVarEnc, ClauseDatabase, Coefficient, Encoder, Linear, Result};
+use crate::{ClauseDatabase, Coefficient, Encoder, Linear, Result};
 
 const EQUALIZE_INTERMEDIATES: bool = false;
 
@@ -131,10 +132,13 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			.terms
 			.iter()
 			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
-			.sorted_by_key(|x| x.ub())
-			.map(|x| (model.add_int_var_enc(x).map(Term::from)))
+			.map(|(i, part)| {
+				IntVar::from_part(db, &mut model, part, lin.k.clone(), format!("x_{i}"))
+					.map(Term::from)
+			})
 			.collect::<Result<Vec<_>>>()?;
+
+		let xs = xs.into_iter().sorted_by_key(Term::ub).collect_vec();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
 		let decomposition = self.decompose(

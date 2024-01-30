@@ -3,13 +3,13 @@ use std::{collections::HashMap, ops::Range};
 use iset::IntervalMap;
 use itertools::Itertools;
 
+use crate::{int::IntVar, Comparator, Literal, ModelConfig, Unsatisfiable};
 #[allow(unused_imports)]
 use crate::{
 	int::{Decompose, IntVarEnc, IntVarOrd, Lin, LinExp, Model, Term},
 	linear::LimitComp,
 	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
-use crate::{Comparator, Literal, ModelConfig, Unsatisfiable};
 
 const SORT_TERMS: bool = true;
 
@@ -220,9 +220,11 @@ where
 			.terms
 			.iter()
 			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
-			.map(|x| (model.add_int_var_enc(x).map(Term::from)))
-			.collect::<Result<Vec<_>>>()?;
+			.map(|(i, part)| {
+				IntVar::from_part(db, &mut model, part, lin.k.clone(), format!("x_{i}"))
+					.map(Term::from)
+			})
+			.collect::<Result<Vec<_>, _>>()?;
 
 		// TODO pass BDD::decompose to Model::encode instead, since otherwise we risk decomposing twice
 		let decomposition = self.decompose(

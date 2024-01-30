@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 use rustc_hash::FxHashMap;
 use std::hash::BuildHasherDefault;
 
@@ -478,21 +479,24 @@ impl LinearAggregator {
 				.into_iter()
 			{
 				if self.sort_same_coefficients >= 2 && lits.len() >= self.sort_same_coefficients {
-					let c = *k / coef;
+					todo!();
+				/*
+				let c = *k / coef;
 
-					let y = IntVarOrd::from_bounds(db, C::zero(), c, String::from("s")).into();
-					self.sorted_encoder
-						.encode(db, &Sorted::new(&lits, cmp.clone(), &y))
-						.unwrap();
+				let y = IntVarOrd::from_bounds(db, C::zero(), c, String::from("s")).into();
+				self.sorted_encoder
+					.encode(db, &Sorted::new(&lits, cmp.clone(), &y))
+					.unwrap();
 
-					let lin_exp = LinExp::from(&y);
-					partition.push(Part::Ic(
-						lin_exp
-							.terms
-							.into_iter()
-							.map(|(lit, _)| (lit, coef.into()))
-							.collect(),
-					));
+				let lin_exp = LinExp::from(&y);
+				partition.push(Part::Ic(
+					lin_exp
+						.terms
+						.into_iter()
+						.map(|(lit, _)| (lit, coef.into()))
+						.collect(),
+				));
+				*/
 				} else {
 					for x in lits {
 						partition.push(Part::Amo(vec![(x, coef.into())]));

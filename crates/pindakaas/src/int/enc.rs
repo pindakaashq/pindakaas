@@ -1,5 +1,7 @@
+#![allow(unused_imports, unused_variables, dead_code)]
 use super::display_dom;
 use super::helpers::to_lex_bits;
+use super::ord::OrdEnc;
 use crate::helpers::{is_sorted, negate_cnf};
 use crate::int::helpers::filter_fixed;
 use iset::{interval_map, interval_set, IntervalMap, IntervalSet};
@@ -209,6 +211,8 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 	}
 
 	pub fn div(&self, c: &C) -> IntVarEnc<Lit, C> {
+		todo!();
+		/*
 		assert!(*c == C::one() + C::one(), "Can only divide IntVarOrd by 2");
 		let xs = self
 			.xs
@@ -222,12 +226,15 @@ impl<Lit: Literal, C: Coefficient> IntVarOrd<Lit, C> {
 		if xs.is_empty() {
 			IntVarEnc::Const(self.lb() / *c)
 		} else {
-			IntVarEnc::Ord(IntVarOrd::from_views(
+			IntVarEnc::Ord(
+				IntVarOrd::from_views(
 				&mut Cnf::<Lit>::default(),
 				xs,
 				self.lbl.clone(),
-			))
+			)
+				)
 		}
+		*/
 	}
 
 	pub fn dom(&self) -> IntervalSet<C> {
@@ -656,7 +663,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		.collect()
 	}
 
-	fn as_lin_exp(&self) -> LinExp<Lit, C> {
+	pub(crate) fn as_lin_exp(&self) -> LinExp<Lit, C> {
 		let (terms, add) = filter_fixed(&self.xs(true));
 
 		let lin_exp = LinExp::new().add_bounded_log_encoding(
@@ -713,115 +720,12 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 
 #[derive(Debug, Clone)]
 pub(crate) enum IntVarEnc<Lit: Literal, C: Coefficient> {
-	Ord(IntVarOrd<Lit, C>),
+	Ord(OrdEnc<Lit>),
 	Bin(IntVarBin<Lit, C>),
 	Const(C),
 }
 
-const COUPLE_DOM_PART_TO_ORD: bool = false;
-
 impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
-	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
-	pub fn from_part<DB: ClauseDatabase<Lit = Lit>>(
-		db: &mut DB,
-		xs: &Part<Lit, PosCoeff<C>>,
-		ub: PosCoeff<C>,
-		lbl: String,
-	) -> Vec<Self> {
-		match xs {
-			Part::Amo(terms) => {
-				let terms: Vec<(PosCoeff<C>, Lit)> = terms
-					.iter()
-					.map(|(lit, coef)| (coef.clone(), lit.clone()))
-					.collect();
-				// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
-				let mut h: FxHashMap<C, Vec<Lit>> =
-					FxHashMap::with_capacity_and_hasher(terms.len(), BuildHasherDefault::default());
-				for (coef, lit) in terms {
-					debug_assert!(coef <= ub);
-					h.entry(*coef).or_default().push(lit);
-				}
-
-				let dom = std::iter::once((C::zero(), vec![]))
-					.chain(h)
-					.sorted_by(|(a, _), (b, _)| a.cmp(b))
-					.tuple_windows()
-					.map(|((prev, _), (coef, lits))| {
-						let interval = (prev + C::one())..(coef + C::one());
-						if lits.len() == 1 {
-							(interval, Some(lits[0].clone()))
-						} else {
-							let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
-							for lit in lits {
-								emit_clause!(db, &[lit.negate(), o.clone()]).unwrap();
-							}
-							(interval, Some(o))
-						}
-					})
-					.collect::<IntervalMap<_, _>>();
-				vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, lbl))]
-			}
-			// Leaves built from Ic/Dom groups are guaranteed to have unique values
-			Part::Ic(terms) => {
-				let mut acc = C::zero(); // running sum
-				let dom = std::iter::once(&(terms[0].0.clone(), C::zero().into()))
-					.chain(terms.iter())
-					.map(|(lit, coef)| {
-						acc += **coef;
-						debug_assert!(acc <= *ub);
-						(acc, lit.clone())
-					})
-					.tuple_windows()
-					.map(|((prev, _), (coef, lit))| {
-						((prev + C::one())..(coef + C::one()), Some(lit))
-					})
-					.collect::<IntervalMap<_, _>>();
-				vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, lbl))]
-			}
-			Part::Dom(terms, l, u) => {
-                // TODO account for bounds (or even better, create IntVarBin)
-                if COUPLE_DOM_PART_TO_ORD {
-                    // TODO old method (which at least respected bounds)
-				let x_bin =
-					IntVarBin::from_terms(terms.to_vec(), l.clone(), u.clone(), String::from("x"));
-				let x_ord = IntVarEnc::Ord(IntVarOrd::from_bounds(db, x_bin.lb(), x_bin.ub(), String::from("x")));
-
-				TernLeEncoder::default()
-					.encode(
-						db,
-						&TernLeConstraint::new(
-                            &x_ord,
-							&IntVarEnc::Const(C::zero()),
-                            &Comparator::LessEq,
-							&x_bin.into(),
-						),
-					)
-					.unwrap();
-                vec![x_ord]
-                } else {
-                terms.iter().enumerate().map(|(i,(lit, coef))| {IntVarEnc::Ord(IntVarOrd::from_views(
-                                db,
-                                interval_map! { C::one()..(**coef+C::one()) => Some(lit.clone()) },
-                                format!("{lbl}^{i}")
-                                ))}).collect()
-                }
-			}
-
-            // TODO Not so easy to transfer a binary encoded int var
-			// Part::Dom(terms, l, u) => {
-			// let coef = (terms[0].1);
-			// let false_ if (coef > 1).then(|| let false_ = Some(new_var!(db)); emit_clause!(&[-false_]); false_ });
-			// let terms = (1..coef).map(|_| false_.clone()).chain(terms.to_vec());
-
-			// IntVarEnc::Bin(IntVarBin::from_terms(
-			// 	terms.to_vec(),
-			// 	l.clone(),
-			// 	u.clone(),
-			// 	String::from("x"),
-			// ))},
-		}
-	}
-
 	#[allow(dead_code)]
 	pub(crate) fn from_dom<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
@@ -832,7 +736,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		match dom {
 			[] => Err(Unsatisfiable),
 			[d] => Ok(IntVarEnc::Const(*d)),
-			dom => Ok(IntVarOrd::from_dom(db, dom, lbl).into()),
+			dom => Ok(OrdEnc::new(db, &Dom::from_slice(dom)).into()),
 		}
 	}
 
@@ -846,6 +750,8 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		// cmp: &LimitComp,
 		// enc: &'a mut dyn Encoder<DB, TernLeConstraint<'a, DB, C>>,
 	) -> Result<IntVarEnc<Lit, C>> {
+		todo!()
+		/*
 		match (self, y) {
 			(IntVarEnc::Const(a), IntVarEnc::Const(b)) => Ok(IntVarEnc::Const(*a + *b)),
 			// TODO only used in sorters which enforce the constraints later!
@@ -926,8 +832,10 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 			}
 			_ => todo!("{self} + {y}"),
 		}
+		*/
 	}
 
+	/*
 	pub(crate) fn leqs(&self) -> Vec<(Range<C>, Vec<Vec<Lit>>)> {
 		match self {
 			IntVarEnc::Ord(o) => o.leqs(),
@@ -949,7 +857,9 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 				.collect(),
 		}
 	}
+	*/
 
+	/*
 	/// Returns cnf constraining `x<=v`
 	pub(crate) fn leq_(&self, v: C) -> Vec<Vec<Lit>> {
 		self.leq(v..(v + C::one()))
@@ -958,7 +868,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 	/// Returns cnf constraining `x<=a..b`
 	pub(crate) fn leq(&self, v: Range<C>) -> Vec<Vec<Lit>> {
 		match self {
-			IntVarEnc::Ord(o) => o.leq(v),
+			IntVarEnc::Ord(o) => o.ineq(v, &Comparator::LessEq),
 			IntVarEnc::Bin(b) => b.leq(v),
 			IntVarEnc::Const(c) => {
 				let v = v.start + C::one(); // [x<=v] = [x < v+1]
@@ -991,7 +901,9 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 			}
 		}
 	}
+	*/
 
+	/*
 	pub(crate) fn div(&self, c: &C) -> IntVarEnc<Lit, C> {
 		match self {
 			IntVarEnc::Ord(o) => o.div(c),
@@ -1008,6 +920,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 			IntVarEnc::Const(c) => interval_set!(*c..(*c + C::one())),
 		}
 	}
+	*/
 
 	pub(crate) fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
 		match self {
@@ -1017,6 +930,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		}
 	}
 
+	/*
 	#[allow(dead_code)]
 	pub(crate) fn lb(&self) -> C {
 		match self {
@@ -1035,18 +949,19 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 			// _ => self.dom().range().unwrap().end - C::one(),
 		}
 	}
+	*/
 
-	pub(crate) fn as_lin_exp(&self) -> LinExp<Lit, C> {
-		match self {
-			IntVarEnc::Ord(o) => o.as_lin_exp(),
-			IntVarEnc::Bin(b) => b.as_lin_exp(),
-			IntVarEnc::Const(c) => LinExp::new().add_constant(*c),
-		}
-	}
+	// pub(crate) fn as_lin_exp(&self) -> LinExp<Lit, C> {
+	// 	match self {
+	// 		IntVarEnc::Ord(o) => o.as_lin_exp(),
+	// 		IntVarEnc::Bin(b) => b.as_lin_exp(),
+	// 		IntVarEnc::Const(c) => LinExp::new().add_constant(*c),
+	// 	}
+	// }
 
-	pub(crate) fn assign(&self, solution: &[Lit]) -> Result<C, CheckError<Lit>> {
-		LinExp::from(self).assign(solution)
-	}
+	// pub(crate) fn assign(&self, solution: &[Lit]) -> Result<C, CheckError<Lit>> {
+	// 	LinExp::from(self).assign(solution)
+	// }
 
 	/// Return number of lits in encoding
 	#[allow(dead_code)]
@@ -1065,8 +980,8 @@ impl<Lit: Literal, C: Coefficient> From<IntVarBin<Lit, C>> for IntVarEnc<Lit, C>
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> From<IntVarOrd<Lit, C>> for IntVarEnc<Lit, C> {
-	fn from(o: IntVarOrd<Lit, C>) -> Self {
+impl<Lit: Literal, C: Coefficient> From<OrdEnc<Lit>> for IntVarEnc<Lit, C> {
+	fn from(o: OrdEnc<Lit>) -> Self {
 		Self::Ord(o)
 	}
 }

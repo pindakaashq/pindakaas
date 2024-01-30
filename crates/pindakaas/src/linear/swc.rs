@@ -1,5 +1,5 @@
-use crate::int::{Consistency, Decompose, Lin, Model, Term};
-use crate::{int::IntVarEnc, ClauseDatabase, Coefficient, Encoder, Linear, Result};
+use crate::int::{Consistency, Decompose, IntVar, Lin, Model, Term};
+use crate::{ClauseDatabase, Coefficient, Encoder, Linear, Result};
 use crate::{Literal, ModelConfig, Unsatisfiable};
 use itertools::Itertools;
 
@@ -91,8 +91,10 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.terms
 			.iter()
 			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k.clone(), format!("x_{i}")))
-			.map(|x| (model.add_int_var_enc(x).map(Term::from)))
+			.map(|(i, part)| {
+				IntVar::from_part(db, &mut model, part, lin.k.clone(), format!("x_{i}"))
+					.map(Term::from)
+			})
 			.collect::<Result<Vec<_>>>()?;
 
 		let decomposition = self.decompose(

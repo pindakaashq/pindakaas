@@ -4,6 +4,7 @@ mod dom;
 mod enc;
 pub(crate) mod helpers;
 mod model;
+mod ord;
 mod scm;
 
 use itertools::Itertools;

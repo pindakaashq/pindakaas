@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use num::iter::RangeInclusive;
 
 use crate::{helpers::is_sorted, Coefficient};
@@ -70,6 +71,52 @@ impl<C: Coefficient> Dom<C> {
 		self.ranges.iter().position(|r| d <= r.1)
 	}
 
+	// TODO use RangeInclusive
+	/// Find position of first domain value >= k/c (or <= k/c)
+	/// Returns Some(0) if first (and all) domain values satisfy the predicate, or None if no domain value satisfy the predicate (respectively, true and false)
+	pub(crate) fn ineq(&self, k: C, c: C, up: bool) -> Option<usize> {
+		// let up = (cmp == &Comparator::GreaterEq) == self.c.is_positive();
+		let k = if up {
+			k.div_ceil(&c)
+		} else {
+			// c.div_floor(&self.c) + C::one()
+			k.div_floor(&c)
+		};
+		let ds = self.iter().collect::<Vec<_>>();
+		let n = ds.len();
+		let ds = if up {
+			ds.iter().collect::<Vec<_>>()
+		} else {
+			ds.iter().rev().collect::<Vec<_>>()
+		};
+		ds.into_iter()
+			.copied()
+			.position(|d| if up { d >= k } else { d <= k })
+			.map(|pos| {
+				if up {
+					pos
+				} else if pos == 0 {
+					// transform Some(n) into Some(0)
+					0
+				} else {
+					n - pos
+				}
+			})
+
+		// TODO faster method, to test
+		// self.ranges.iter().fold_while(0, |r, acc| {
+		// 	let r_card = r.1 - r.0 + 1; // cardinality of range
+		// 	if c <= r.1 {
+		// 		itertools::FoldWhile::Done(acc + r_card)
+		// 	} else {
+		// 		itertools::FoldWhile::Continue(acc + std::cmp::min(1, (c - r.0)))
+		// 	}
+		// })
+		// self.[self.x.borrow().dom.iter().position(|d| d == c).unwrap() - 1]
+	}
+
+	// fn position(&self, d: C) -> Option<usize> {}
+
 	pub fn ge(&mut self, d: C) {
 		if let Some(r) = self.range(d) {
 			if self.ranges[r].1 < d {
@@ -85,7 +132,7 @@ impl<C: Coefficient> Dom<C> {
 	}
 
 	pub fn le(&mut self, d: C) {
-		if let Some(r) = self.ranges.iter().position(|r| d <= r.1) {
+		if let Some(r) = self.range(d) {
 			if self.ranges[r].0 > d {
 				self.ranges = self.ranges[..r].to_vec();
 			} else {

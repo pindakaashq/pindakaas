@@ -52,7 +52,7 @@ pub(crate) fn filter_fixed<Lit: Literal, C: Coefficient>(
 
 	let offset = two_comp_bounds(xs.len()).0;
 	(
-		xs.into_iter()
+		xs.iter()
 			.enumerate()
 			.filter_map(|(k, x)| match x {
 				LitOrConst::Lit(l) => Some((l.clone(), C::one().shl(k))),
@@ -535,12 +535,11 @@ pub(crate) fn to_lex_bits<C: Coefficient>(k: C, bits: usize, two_comp: bool) -> 
 	} else {
 		// 2-comp for negative x = negate(unsigned(|x|) ) + one
 		// Ex. negate(unsigned(|-2|)) + one = negate(0+10) + one = 101 + one = 110 = -4+2+0 = -2
-		let k = as_binary((k.abs() - C::one()).into(), None)
+		as_binary((k.abs() - C::one()).into(), None)
 			.into_iter()
 			.chain([false])
 			.map(|b| !b)
-			.collect::<Vec<_>>();
-		k
+			.collect::<Vec<_>>()
 	};
 	let ks = ks[..ks.len() - 1]
 		.iter()
@@ -579,7 +578,7 @@ pub(crate) fn sign_extend<Lit: Literal>(
 	n: usize,
 ) -> Vec<LitOrConst<Lit>> {
 	ks[..ks.len() - 1]
-		.into_iter()
+		.iter()
 		.cloned()
 		.chain(vec![s; n.saturating_sub(ks.len())])
 		.chain([ks.last().unwrap().clone()])
