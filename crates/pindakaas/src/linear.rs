@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-	int::IntVarEnc, Cardinality, CardinalityOne, CheckError, Checker, ClauseDatabase, Coefficient,
+	int::IntVar, Cardinality, CardinalityOne, CheckError, Checker, ClauseDatabase, Coefficient,
 	Encoder, IntEncoding, Literal, PairwiseEncoder, Result, Unsatisfiable,
 };
 
@@ -248,11 +248,17 @@ impl<Lit: Literal, C: Coefficient> LinearConstraint<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> From<&IntVarEnc<Lit, C>> for LinExp<Lit, C> {
-	fn from(x: &IntVarEnc<Lit, C>) -> Self {
+impl<Lit: Literal, C: Coefficient> From<&IntVar<Lit, C>> for LinExp<Lit, C> {
+	fn from(x: &IntVar<Lit, C>) -> Self {
 		x.as_lin_exp()
 	}
 }
+
+// impl<Lit: Literal, C: Coefficient> From<&IntVarEnc<Lit, C>> for LinExp<Lit, C> {
+// 	fn from(x: &IntVarEnc<Lit, C>) -> Self {
+// 		x.as_lin_exp()
+// 	}
+// }
 
 impl<Lit: Literal, C: Coefficient> Checker for LinearConstraint<Lit, C> {
 	type Lit = Lit;
@@ -281,7 +287,14 @@ impl Comparator {
 	pub(crate) fn split(&self) -> Vec<Comparator> {
 		match self {
 			Comparator::Equal => vec![Comparator::LessEq, Comparator::GreaterEq],
-			_ => vec![self.clone()],
+			_ => vec![*self],
+		}
+	}
+	pub(crate) fn reverse(&self) -> Comparator {
+		match *self {
+			Comparator::LessEq => Comparator::GreaterEq,
+			Comparator::Equal => panic!("Cannot reverse {self}"),
+			Comparator::GreaterEq => Comparator::LessEq,
 		}
 	}
 }
