@@ -1,3 +1,4 @@
+mod bin;
 mod constrain;
 mod display;
 mod dom;
