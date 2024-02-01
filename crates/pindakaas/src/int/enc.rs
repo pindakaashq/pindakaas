@@ -1,4 +1,5 @@
 #![allow(unused_imports, unused_variables, dead_code)]
+use super::bin::BinEnc;
 use super::display_dom;
 use super::helpers::to_lex_bits;
 use super::ord::OrdEnc;
@@ -721,7 +722,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 #[derive(Debug, Clone)]
 pub(crate) enum IntVarEnc<Lit: Literal, C: Coefficient> {
 	Ord(OrdEnc<Lit>),
-	Bin(IntVarBin<Lit, C>),
+	Bin(BinEnc<Lit>),
 	Const(C),
 }
 
@@ -922,10 +923,14 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 	}
 	*/
 
-	pub(crate) fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
+	pub(crate) fn consistent<DB: ClauseDatabase<Lit = Lit>>(
+		&self,
+		db: &mut DB,
+		dom: &Dom<C>,
+	) -> Result {
 		match self {
 			IntVarEnc::Ord(o) => o.consistent(db),
-			IntVarEnc::Bin(b) => b.consistent(db),
+			IntVarEnc::Bin(b) => b.consistent(db, dom),
 			IntVarEnc::Const(_) => Ok(()),
 		}
 	}
@@ -974,8 +979,8 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> From<IntVarBin<Lit, C>> for IntVarEnc<Lit, C> {
-	fn from(b: IntVarBin<Lit, C>) -> Self {
+impl<Lit: Literal, C: Coefficient> From<BinEnc<Lit>> for IntVarEnc<Lit, C> {
+	fn from(b: BinEnc<Lit>) -> Self {
 		Self::Bin(b)
 	}
 }

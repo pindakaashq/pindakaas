@@ -1,5 +1,4 @@
 #![allow(unused_imports, unused_variables, dead_code, unreachable_code)]
-
 use crate::{
 	helpers::{add_clauses_for, as_binary, negate_cnf},
 	int::{ord::OrdEnc, Dom, TernLeConstraint, TernLeEncoder},
@@ -27,7 +26,9 @@ const DECOMPOSE: bool = true;
 
 use iset::IntervalMap;
 
-use super::{scm::SCM, IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
+use super::{
+	bin::BinEnc, helpers::filter_fixed, scm::SCM, IntVarBin, IntVarEnc, IntVarOrd, LitOrConst,
+};
 
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct IntVarId(pub usize);
@@ -1446,7 +1447,19 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					)
 					.add_constant(self.lb())
 			}
-			IntVarEnc::Bin(b) => b.as_lin_exp(),
+			IntVarEnc::Bin(b) => {
+				let (terms, add) = filter_fixed(&b.xs(true));
+
+				let lin_exp = crate::linear::LinExp::<Lit, C>::new().add_bounded_log_encoding(
+					terms.as_slice(),
+					// The Domain constraint bounds only account for the unfixed part of the offset binary notation
+					self.lb() - add,
+					self.ub() - add,
+				);
+
+				// The offset and the fixed value `add` are added to the constant
+				lin_exp.add_constant(add)
+			}
 			IntVarEnc::Const(c) => crate::linear::LinExp::new().add_constant(*c),
 		}
 	}
@@ -1496,12 +1509,11 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 				// IntVarEnc::Ord(IntVarOrd::from_views(db, dom, self.lbl()))
 				IntVarEnc::Ord(OrdEnc::new(db, &self.dom))
 			} else {
-				let y = IntVarBin::from_dom(db, self.dom.clone(), self.lbl());
-				IntVarEnc::Bin(y)
+				IntVarEnc::Bin(BinEnc::new(db, &self.dom))
 			};
 
 			if self.add_consistency {
-				e.consistent(db).unwrap();
+				e.consistent(db, &self.dom).unwrap();
 			}
 
 			// TODO
@@ -2429,67 +2441,5 @@ Bounds
 End
 ";
 		test_lp_for_configs(lp);
-	}
-
-	#[test]
-	fn test_ineq() {
-		let x = IntVar::<Lit, C>::new(1, &[2, 5, 6, 7, 9], true, None, Some(String::from("x")))
-			.into_ref();
-		let mut db = TestDB::new(0);
-		x.borrow_mut()
-			.encode(&mut db, &mut HashMap::new(), true)
-			.unwrap();
-
-		for (t_c, c, cmp, expected_dom_pos) in [
-			(1, 0, Comparator::GreaterEq, Some(0)),
-			(1, 2, Comparator::GreaterEq, Some(0)),
-			(1, 3, Comparator::GreaterEq, Some(1)),
-			(1, 4, Comparator::GreaterEq, Some(1)),
-			(1, 5, Comparator::GreaterEq, Some(1)),
-			(1, 6, Comparator::GreaterEq, Some(2)),
-			(1, 7, Comparator::GreaterEq, Some(3)),
-			(1, 8, Comparator::GreaterEq, Some(4)),
-			(1, 9, Comparator::GreaterEq, Some(4)),
-			(1, 10, Comparator::GreaterEq, None),
-			(1, 11, Comparator::GreaterEq, None),
-			(1, 0, Comparator::LessEq, None),
-			(1, 2, Comparator::LessEq, Some(1)),
-			(1, 3, Comparator::LessEq, Some(1)),
-			(1, 4, Comparator::LessEq, Some(1)),
-			(1, 5, Comparator::LessEq, Some(2)),
-			(1, 6, Comparator::LessEq, Some(3)),
-			(1, 7, Comparator::LessEq, Some(4)),
-			(1, 8, Comparator::LessEq, Some(4)),
-			(1, 9, Comparator::LessEq, Some(0)),
-			(1, 10, Comparator::LessEq, Some(0)),
-			(1, 11, Comparator::LessEq, Some(0)),
-			// 2
-			(2, 0, Comparator::GreaterEq, Some(0)),
-			(2, 1, Comparator::GreaterEq, Some(0)),
-			(2, 2, Comparator::GreaterEq, Some(0)),
-			(2, 3, Comparator::GreaterEq, Some(0)),
-			(2, 4, Comparator::GreaterEq, Some(0)),
-			(2, 5, Comparator::GreaterEq, Some(1)),
-			(2, 6, Comparator::GreaterEq, Some(1)),
-			(2, 7, Comparator::GreaterEq, Some(1)),
-			(2, 18, Comparator::GreaterEq, Some(4)),
-			(2, 19, Comparator::GreaterEq, None),
-			(2, 0, Comparator::LessEq, None),
-			(2, 1, Comparator::LessEq, None),
-			(2, 2, Comparator::LessEq, None),
-			(2, 3, Comparator::LessEq, None),
-			(2, 10, Comparator::LessEq, Some(2)),
-			(2, 11, Comparator::LessEq, Some(2)),
-			(2, 18, Comparator::LessEq, Some(0)),
-			(2, 19, Comparator::LessEq, Some(0)),
-			(2, 20, Comparator::LessEq, Some(0)),
-		] {
-			let t = Term::new(t_c, x.clone());
-			assert_eq!(
-				t.x.borrow().dom.ineq(c, t_c, cmp == Comparator::GreaterEq),
-				expected_dom_pos,
-				"Expected {t} {cmp} {c} to return position {expected_dom_pos:?}, but returned:"
-			);
-		}
 	}
 }

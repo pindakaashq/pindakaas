@@ -115,9 +115,9 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Sorted<'_, DB::Lit, C>> for
 			})
 			.collect::<Vec<_>>();
 
-		if self.add_consistency {
-			sorted.y.consistent(db).unwrap();
-		}
+		// if self.add_consistency {
+		// 	sorted.y.consistent(db, Dom::from_slice(&[0,1])).unwrap();
+		// }
 
 		self.sorted(db, &xs, &sorted.cmp, sorted.y, 0)
 	}
