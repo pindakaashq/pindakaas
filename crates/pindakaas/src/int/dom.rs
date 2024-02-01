@@ -1,4 +1,7 @@
 #![allow(dead_code)]
+use std::fmt::Display;
+
+use itertools::Itertools;
 use num::iter::RangeInclusive;
 
 use crate::{helpers::is_sorted, Coefficient};
@@ -191,6 +194,29 @@ pub struct DomIterator<'a, C: Coefficient> {
 	range: RangeInclusive<C>,
 }
 
+impl<C: Coefficient> Display for Dom<C> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let dom = self.iter().collect::<Vec<_>>();
+		const ELIPSIZE: usize = 8;
+		if dom.is_empty() {
+			return writeln!(f, "{{}}");
+		}
+		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
+		if dom.len() > ELIPSIZE && C::from(dom.len()).unwrap() == ub - lb + C::one() {
+			writeln!(f, "{}..{}", dom.first().unwrap(), dom.last().unwrap())
+		} else if dom.len() > ELIPSIZE {
+			writeln!(
+				f,
+				"{{{},..,{ub}}} ({})",
+				dom.iter().take(ELIPSIZE).join(","),
+				dom.len()
+			)
+		} else {
+			writeln!(f, "{{{}}}", dom.iter().join(","))
+		}
+	}
+}
+
 impl<'a, C: Coefficient> Iterator for DomIterator<'a, C> {
 	type Item = C;
 
@@ -217,6 +243,8 @@ impl<'a, C: Coefficient> Iterator for DomIterator<'a, C> {
 #[cfg(test)]
 mod tests {
 	type C = i32;
+
+	use crate::Comparator;
 
 	use super::*;
 
@@ -263,5 +291,61 @@ mod tests {
 				ranges: vec![(4, 6), (10, 12), (14, 14)],
 			}
 		);
+	}
+
+	#[test]
+	fn test_ineq() {
+		let dom = Dom::from_slice(&[2, 5, 6, 7, 9]);
+
+		for (c, k, cmp, expected_dom_pos) in [
+			(1, 0, Comparator::GreaterEq, Some(0)),
+			(1, 2, Comparator::GreaterEq, Some(0)),
+			(1, 3, Comparator::GreaterEq, Some(1)),
+			(1, 4, Comparator::GreaterEq, Some(1)),
+			(1, 5, Comparator::GreaterEq, Some(1)),
+			(1, 6, Comparator::GreaterEq, Some(2)),
+			(1, 7, Comparator::GreaterEq, Some(3)),
+			(1, 8, Comparator::GreaterEq, Some(4)),
+			(1, 9, Comparator::GreaterEq, Some(4)),
+			(1, 10, Comparator::GreaterEq, None),
+			(1, 11, Comparator::GreaterEq, None),
+			(1, 0, Comparator::LessEq, None),
+			(1, 2, Comparator::LessEq, Some(1)),
+			(1, 3, Comparator::LessEq, Some(1)),
+			(1, 4, Comparator::LessEq, Some(1)),
+			(1, 5, Comparator::LessEq, Some(2)),
+			(1, 6, Comparator::LessEq, Some(3)),
+			(1, 7, Comparator::LessEq, Some(4)),
+			(1, 8, Comparator::LessEq, Some(4)),
+			(1, 9, Comparator::LessEq, Some(0)),
+			(1, 10, Comparator::LessEq, Some(0)),
+			(1, 11, Comparator::LessEq, Some(0)),
+			// 2
+			(2, 0, Comparator::GreaterEq, Some(0)),
+			(2, 1, Comparator::GreaterEq, Some(0)),
+			(2, 2, Comparator::GreaterEq, Some(0)),
+			(2, 3, Comparator::GreaterEq, Some(0)),
+			(2, 4, Comparator::GreaterEq, Some(0)),
+			(2, 5, Comparator::GreaterEq, Some(1)),
+			(2, 6, Comparator::GreaterEq, Some(1)),
+			(2, 7, Comparator::GreaterEq, Some(1)),
+			(2, 18, Comparator::GreaterEq, Some(4)),
+			(2, 19, Comparator::GreaterEq, None),
+			(2, 0, Comparator::LessEq, None),
+			(2, 1, Comparator::LessEq, None),
+			(2, 2, Comparator::LessEq, None),
+			(2, 3, Comparator::LessEq, None),
+			(2, 10, Comparator::LessEq, Some(2)),
+			(2, 11, Comparator::LessEq, Some(2)),
+			(2, 18, Comparator::LessEq, Some(0)),
+			(2, 19, Comparator::LessEq, Some(0)),
+			(2, 20, Comparator::LessEq, Some(0)),
+		] {
+			assert_eq!(
+				dom.ineq(k, c, cmp == Comparator::GreaterEq),
+				expected_dom_pos,
+				"Expected {dom} {cmp} {c}/{k} to return position {expected_dom_pos:?}, but returned:"
+			);
+		}
 	}
 }

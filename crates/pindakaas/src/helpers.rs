@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, unused_macros, unused_imports)]
 use crate::{
 	int::required_lits, linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase,
 	Coefficient, Encoder, LinExp, Literal, Result, Unsatisfiable,

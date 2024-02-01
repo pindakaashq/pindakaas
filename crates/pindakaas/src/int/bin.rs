@@ -10,13 +10,12 @@ use crate::{
 use super::{enc::GROUND_BINARY_AT_LB, required_lits, Dom, LitOrConst};
 
 #[derive(Debug, Clone)]
-pub(crate) struct BinEnc<'a, Lit: Literal, C: Coefficient> {
+pub(crate) struct BinEnc<Lit: Literal> {
 	x: Vec<LitOrConst<Lit>>,
-	dom: &'a Dom<C>,
 }
 
-impl<'a, Lit: Literal, C: Coefficient> BinEnc<'a, Lit, C> {
-	pub fn new<DB: ClauseDatabase<Lit = Lit>>(db: &mut DB, dom: &'a Dom<C>) -> Self {
+impl<Lit: Literal> BinEnc<Lit> {
+	pub fn new<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(db: &mut DB, dom: &Dom<C>) -> Self {
 		let (lb, ub) = (dom.lb(), dom.ub());
 		Self {
 			x: (0..required_lits(lb, ub))
@@ -25,7 +24,6 @@ impl<'a, Lit: Literal, C: Coefficient> BinEnc<'a, Lit, C> {
 					(!GROUND_BINARY_AT_LB && !lb.is_negative()).then_some(LitOrConst::Const(false)),
 				)
 				.collect(),
-			dom,
 		}
 	}
 
@@ -39,6 +37,7 @@ impl<'a, Lit: Literal, C: Coefficient> BinEnc<'a, Lit, C> {
 	// pub fn iter(&self) -> impl Iterator<Item = Vec<Lit>> {
 	pub fn ineqs(&self, up: bool) -> Vec<Vec<Vec<Lit>>> {
 		todo!();
+		// TODO should be able to call ineq(0..2^bits)
 		// if up {
 		// 	[vec![]]
 		// 		.into_iter()
@@ -53,20 +52,29 @@ impl<'a, Lit: Literal, C: Coefficient> BinEnc<'a, Lit, C> {
 		// }
 	}
 
-	/// From domain position to cnf
-	pub(crate) fn ineq(&self, p: Option<usize>, up: bool) -> Vec<Vec<Lit>> {
-		todo!();
-		// match p {
-		// 	Some(0) => vec![],    // true
-		// 	None => vec![vec![]], // false
-		// 	Some(p) => {
-		// 		vec![vec![if up {
-		// 			self.x[p - 1].clone()
-		// 		} else {
-		// 			self.x[p - 1].negate()
-		// 		}]]
-		// 	} // lit
-		// }
+	/// From range to cnf>=k.1 assuming x>=k.0 (or cnf<=k.0)
+	pub(crate) fn ineq<C: Coefficient>(&self, k: (C, C), geq: bool) -> Vec<Vec<Lit>> {
+		assert!(geq);
+		num::iter::range_inclusive(k.0, k.1 - C::one())
+			.filter_map(|v| {
+
+				as_binary(v.into(), Some(self.bits()))
+					.into_iter()
+					.zip(self.xs(true))
+					// if >=, find 0's, if <=, find 1's
+					.filter_map(|(b, x)| (b != geq).then_some(x))
+					// if <=, negate 1's to not 1's
+					.map(|x| if geq { x } else { -x })
+					// filter out fixed literals (possibly satisfying clause)
+					.filter_map(|x| match x {
+						LitOrConst::Lit(x) => Some(Ok(x)),
+						LitOrConst::Const(true) => Some(Err(())), // clause satisfied
+						LitOrConst::Const(false) => None,         // literal falsified
+					})
+					.collect::<Result<Vec<_>, _>>()
+					.ok()
+			})
+			.collect()
 	}
 
 	/// Get bits; option to invert the sign bit to create an unsigned binary representation offset by `-2^(k-1)`
@@ -74,54 +82,60 @@ impl<'a, Lit: Literal, C: Coefficient> BinEnc<'a, Lit, C> {
 		if GROUND_BINARY_AT_LB {
 			self.x.clone()
 		} else {
-			self.x[..self.x.len() - 1]
-				.iter()
-				.cloned()
-				.chain({
-					let sign = self.x.last().unwrap().clone();
-					[if to_unsigned { -sign } else { sign }]
-				})
-				.collect()
+			self.x.clone()
+			// self.x[..self.x.len() - 1]
+			// 	.iter()
+			// 	.cloned()
+			// 	.chain({
+			// 		let sign = self.x.last().unwrap().clone();
+			// 		[if to_unsigned { -sign } else { sign }]
+			// 	})
+			// 	.collect()
 		}
 	}
 
-	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> crate::Result {
-		self.encode_unary_constraint(db, &Comparator::GreaterEq, self.dom.lb(), true)?;
-		self.encode_unary_constraint(db, &Comparator::LessEq, self.dom.ub(), true)?;
-		for (a, b) in self.dom.ranges.iter().tuple_windows() {
+	pub fn consistent<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(
+		&self,
+		db: &mut DB,
+		dom: &Dom<C>,
+	) -> crate::Result {
+		self.encode_unary_constraint(db, &Comparator::GreaterEq, dom.lb(), dom, true)?;
+		self.encode_unary_constraint(db, &Comparator::LessEq, dom.ub(), dom, true)?;
+		for (a, b) in dom.ranges.iter().tuple_windows() {
 			for k in num::range_inclusive(a.1 + C::one(), b.0 - C::one()) {
-				self.encode_neq(db, k)?;
+				self.encode_neq(db, k, dom)?;
 			}
 		}
 		Ok(())
 	}
 
 	/// Encode `x # k` where `# ∈ {≤,=,≥}`
-	pub(crate) fn encode_unary_constraint<DB: ClauseDatabase<Lit = Lit>>(
+	pub(crate) fn encode_unary_constraint<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(
 		&self,
 		db: &mut DB,
 		cmp: &Comparator,
 		k: C,
+		dom: &Dom<C>,
 		force: bool,
 	) -> crate::Result {
 		match cmp {
 			Comparator::LessEq => {
-				if k < self.dom.lb() {
+				if k < dom.lb() {
 					Err(Unsatisfiable)
-				} else if k >= self.dom.ub() && !force {
+				} else if k >= dom.ub() && !force {
 					Ok(())
 				} else {
 					lex_leq_const(db, &self.xs(true), k, self.bits())
 				}
 			}
 			Comparator::Equal => self
-				.eq(k)?
+				.eq(k, dom)?
 				.into_iter()
 				.try_for_each(|cls| emit_clause!(db, &[cls])),
 			Comparator::GreaterEq => {
-				if k > self.dom.ub() {
+				if k > dom.ub() {
 					Err(Unsatisfiable)
-				} else if k <= self.dom.lb() && !force {
+				} else if k <= dom.lb() && !force {
 					Ok(())
 				} else {
 					lex_geq_const(db, &self.xs(true), k, self.bits())
@@ -131,8 +145,8 @@ impl<'a, Lit: Literal, C: Coefficient> BinEnc<'a, Lit, C> {
 	}
 
 	/// Return conjunction of bits equivalent where `x=k`
-	fn eq(&self, k: C) -> Result<Vec<Lit>, Unsatisfiable> {
-		as_binary(self.normalize(k).into(), Some(self.bits()))
+	fn eq<C: Coefficient>(&self, k: C, dom: &Dom<C>) -> Result<Vec<Lit>, Unsatisfiable> {
+		as_binary(self.normalize(k, dom).into(), Some(self.bits()))
 			.into_iter()
 			.zip(self.xs(true).iter())
 			.map(|(b, x)| if b { x.clone() } else { -x.clone() })
@@ -145,21 +159,25 @@ impl<'a, Lit: Literal, C: Coefficient> BinEnc<'a, Lit, C> {
 	}
 
 	/// Normalize k to its value in unsigned binary relative to this encoding
-	pub(crate) fn normalize(&self, k: C) -> C {
+	pub(crate) fn normalize<C: Coefficient>(&self, k: C, dom: &Dom<C>) -> C {
 		if GROUND_BINARY_AT_LB {
-			k - self.dom.lb()
+			k - dom.lb()
 		} else {
 			// encoding is grounded at the lb of the two comp representation
 			k.checked_sub(&two_comp_bounds(self.bits()).0).unwrap()
 		}
 	}
 
-	pub(crate) fn encode_neq<DB: ClauseDatabase<Lit = Lit>>(
+	pub(crate) fn encode_neq<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(
 		&self,
 		db: &mut DB,
 		k: C,
+		dom: &Dom<C>,
 	) -> crate::Result {
-		emit_clause!(db, &self.eq(k)?.iter().map(Lit::negate).collect::<Vec<_>>())
+		emit_clause!(
+			db,
+			&self.eq(k, dom)?.iter().map(Lit::negate).collect::<Vec<_>>()
+		)
 	}
 
 	// pub(crate) fn as_lin_exp<C: Coefficient>(&self) -> LinExp<Lit, C> {
@@ -192,7 +210,7 @@ impl<'a, Lit: Literal, C: Coefficient> BinEnc<'a, Lit, C> {
 	}
 }
 
-impl<'a, Lit: Literal, C: Coefficient> std::fmt::Display for BinEnc<'a, Lit, C> {
+impl<Lit: Literal> std::fmt::Display for BinEnc<Lit> {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		write!(f, "[{}]", self.x.iter().join(", "))
 	}
@@ -227,26 +245,19 @@ mod tests {
 		let mut db = TestDB::new(0);
 		let dom = Dom::from_slice(&[2, 5, 6, 7, 9]);
 		let x = BinEnc::new(&mut db, &dom);
-		dbg!(&x);
 
-		for (up, dom_pos, expected_cnf) in [
-			(true, Some(0), vec![]),
-			(true, Some(1), vec![vec![1]]),
-			(true, Some(2), vec![vec![2]]),
-			(true, Some(3), vec![vec![3]]),
-			(true, Some(4), vec![vec![4]]),
-			(true, None, vec![vec![]]),
-			(false, Some(0), vec![]),
-			(false, Some(1), vec![vec![-1]]),
-			(false, Some(2), vec![vec![-2]]),
-			(false, Some(3), vec![vec![-3]]),
-			(false, Some(4), vec![vec![-4]]),
-			(false, None, vec![vec![]]),
+		for (up, ks, expected_cnf) in [
+			(true, (0, 1), vec![vec![1, 2, 3, 4]]),
+			(
+				true,
+				(0, 3),
+				vec![vec![1, 2, 3, 4], vec![2, 3, 4], vec![1, 3, 4]],
+			),
 		] {
 			assert_eq!(
-				x.ineq(dom_pos, up),
+				x.ineq(ks, up),
 				expected_cnf,
-				"Domain pos {dom_pos:?} with up {up} was expected to return {expected_cnf:?}"
+				"ks {ks:?} with up {up} was expected to return {expected_cnf:?}"
 			);
 		}
 	}

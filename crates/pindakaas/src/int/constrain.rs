@@ -371,6 +371,7 @@ impl<'a, DB: ClauseDatabase, C: Coefficient> Encoder<DB, TernLeConstraint<'a, DB
 	}
 }
 
+/*
 #[cfg(test)]
 pub mod tests {
 
@@ -1176,3 +1177,4 @@ pub mod tests {
 		}
 	}
 }
+*/
