@@ -1,13 +1,13 @@
 use itertools::Itertools;
 
 use crate::{
-	helpers::{as_binary, two_comp_bounds},
+	helpers::{as_binary, two_comp_bounds, unsigned_binary_range_ub},
 	linear::{lex_geq_const, lex_leq_const},
 	trace::{emit_clause, new_var},
 	ClauseDatabase, Coefficient, Comparator, Literal, Unsatisfiable,
 };
 
-use super::{enc::GROUND_BINARY_AT_LB, required_lits, Dom, LitOrConst};
+use super::{enc::GROUND_BINARY_AT_LB, Dom, LitOrConst};
 
 #[derive(Debug, Clone)]
 pub(crate) struct BinEnc<Lit: Literal> {
@@ -15,14 +15,15 @@ pub(crate) struct BinEnc<Lit: Literal> {
 }
 
 impl<Lit: Literal> BinEnc<Lit> {
-	pub fn new<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(db: &mut DB, dom: &Dom<C>) -> Self {
-		let (lb, ub) = (dom.lb(), dom.ub());
+	pub fn new<DB: ClauseDatabase<Lit = Lit>>(
+		db: &mut DB,
+		lits: usize,
+		_lbl: Option<String>,
+	) -> Self {
+		let _lbl = _lbl.unwrap_or(String::from("b"));
 		Self {
-			x: (0..required_lits(lb, ub))
-				.map(|_i| (new_var!(db, format!("b^{}", _i))).into())
-				.chain(
-					(!GROUND_BINARY_AT_LB && !lb.is_negative()).then_some(LitOrConst::Const(false)),
-				)
+			x: (0..lits)
+				.map(|_i| new_var!(db, format!("{_lbl}^{_i}")).into())
 				.collect(),
 		}
 	}
@@ -35,8 +36,33 @@ impl<Lit: Literal> BinEnc<Lit> {
 	// }
 
 	// pub fn iter(&self) -> impl Iterator<Item = Vec<Lit>> {
-	pub fn ineqs(&self, up: bool) -> Vec<Vec<Vec<Lit>>> {
-		todo!();
+	pub fn ineqs<C: Coefficient>(&self, up: bool, dom: &Dom<C>) -> Vec<Vec<Vec<Lit>>> {
+		// TODO exchange for dom bounds
+		if up {
+			[vec![]]
+				.into_iter()
+				.chain(
+					num::iter::range_inclusive(
+						C::zero(),
+						unsigned_binary_range_ub::<C>(self.bits()).unwrap(),
+					)
+					.map(|k| self.normalize(k, dom))
+					.map(|k| self.ineq((k, k + C::one()), up)),
+					// .map(|k| self.ineq((C::zero(), k + C::one()), up)),
+				)
+				.collect()
+		} else {
+			// let range_ub = unsigned_binary_range_ub::<C>(self.bits()).unwrap();
+			num::iter::range_inclusive(
+				C::one(),
+				unsigned_binary_range_ub::<C>(self.bits()).unwrap(),
+			)
+			.map(|k| self.normalize(k, dom))
+			.map(|k| self.ineq((k - C::one(), k), up))
+			// .map(|k| self.ineq((k - C::one(), range_ub), up))
+			.chain([vec![]])
+			.collect()
+		}
 		// TODO should be able to call ineq(0..2^bits)
 		// if up {
 		// 	[vec![]]
@@ -52,19 +78,36 @@ impl<Lit: Literal> BinEnc<Lit> {
 		// }
 	}
 
-	/// From range to cnf>=k.1 assuming x>=k.0 (or cnf<=k.0)
-	pub(crate) fn ineq<C: Coefficient>(&self, k: (C, C), geq: bool) -> Vec<Vec<Lit>> {
-		assert!(geq);
-		num::iter::range_inclusive(k.0, k.1 - C::one())
+	/// Return cnf constraining cnf>=ks.1 assuming x>=ks.0 (or cnf<=ks.0 assuming x<=ks.1)
+	pub(crate) fn ineq<C: Coefficient>(&self, ks: (C, C), up: bool) -> Vec<Vec<Lit>> {
+		// Go through x>=k.0+1..k.1 (or x<=k.0..k.1-1)
+		// (We don't constrain x>=k.0 of course)
+		// Do not constrain <lb (or >ub)
+		let range_lb = C::zero();
+		let range_ub = unsigned_binary_range_ub::<C>(self.bits()).unwrap();
+		let ks = if up {
+			(
+				std::cmp::max(range_lb + C::one(), ks.0 + C::one()),
+				std::cmp::min(ks.1, range_ub + C::one()),
+			)
+		} else {
+			(
+				std::cmp::max(range_lb - C::one(), ks.0),
+				std::cmp::min(range_ub - C::one(), ks.1 - C::one()),
+			)
+		};
+		num::iter::range_inclusive(ks.0, ks.1)
 			.filter_map(|v| {
+				// x>=v == x>v-1 (or x<=v == x<v+1)
+				let v = if up { v - C::one() } else { v + C::one() };
 
 				as_binary(v.into(), Some(self.bits()))
 					.into_iter()
-					.zip(self.xs(true))
+					.zip(self.x.iter().cloned())
 					// if >=, find 0's, if <=, find 1's
-					.filter_map(|(b, x)| (b != geq).then_some(x))
+					.filter_map(|(b, x)| (b != up).then_some(x))
 					// if <=, negate 1's to not 1's
-					.map(|x| if geq { x } else { -x })
+					.map(|x| if up { x } else { -x })
 					// filter out fixed literals (possibly satisfying clause)
 					.filter_map(|x| match x {
 						LitOrConst::Lit(x) => Some(Ok(x)),
@@ -82,7 +125,6 @@ impl<Lit: Literal> BinEnc<Lit> {
 		if GROUND_BINARY_AT_LB {
 			self.x.clone()
 		} else {
-			self.x.clone()
 			// self.x[..self.x.len() - 1]
 			// 	.iter()
 			// 	.cloned()
@@ -91,6 +133,14 @@ impl<Lit: Literal> BinEnc<Lit> {
 			// 		[if to_unsigned { -sign } else { sign }]
 			// 	})
 			// 	.collect()
+			self.x[..self.x.len() - 1]
+				.iter()
+				.cloned()
+				.chain({
+					let sign = self.x.last().unwrap().clone();
+					[if to_unsigned { -sign } else { sign }]
+				})
+				.collect()
 		}
 	}
 
@@ -116,13 +166,13 @@ impl<Lit: Literal> BinEnc<Lit> {
 		cmp: &Comparator,
 		k: C,
 		dom: &Dom<C>,
-		force: bool,
+		_force: bool,
 	) -> crate::Result {
 		match cmp {
 			Comparator::LessEq => {
 				if k < dom.lb() {
 					Err(Unsatisfiable)
-				} else if k >= dom.ub() && !force {
+				} else if k >= dom.ub() {
 					Ok(())
 				} else {
 					lex_leq_const(db, &self.xs(true), k, self.bits())
@@ -135,7 +185,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 			Comparator::GreaterEq => {
 				if k > dom.ub() {
 					Err(Unsatisfiable)
-				} else if k <= dom.lb() && !force {
+				} else if k <= dom.lb() {
 					Ok(())
 				} else {
 					lex_geq_const(db, &self.xs(true), k, self.bits())
@@ -164,7 +214,12 @@ impl<Lit: Literal> BinEnc<Lit> {
 			k - dom.lb()
 		} else {
 			// encoding is grounded at the lb of the two comp representation
-			k.checked_sub(&two_comp_bounds(self.bits()).0).unwrap()
+			// (this increases k by subtracting the (negative) lower bound)
+			if !dom.lb().is_negative() {
+				k
+			} else {
+				k.checked_sub(&two_comp_bounds::<C>(self.bits()).0).unwrap()
+			}
 		}
 	}
 
@@ -180,22 +235,25 @@ impl<Lit: Literal> BinEnc<Lit> {
 		)
 	}
 
-	// pub(crate) fn as_lin_exp<C: Coefficient>(&self) -> LinExp<Lit, C> {
-	// 	let mut acc = self.lb();
-	// 	LinExp::new()
-	// 		.add_chain(
-	// 			&self
-	// 				.xs
-	// 				.iter(..)
-	// 				.map(|(iv, lit)| {
-	// 					let v = iv.end - C::one() - acc;
-	// 					acc += v;
-	// 					(lit.clone(), v)
-	// 				})
-	// 				.collect::<Vec<_>>(),
-	// 		)
-	// 		.add_constant(self.lb())
-	// }
+	pub(crate) fn as_lin_exp<C: Coefficient>(&self) -> (Vec<(Lit, C)>, C) {
+		let mut add = C::zero(); // resulting from fixed terms
+
+		(
+			self.x
+				.iter()
+				.enumerate()
+				.filter_map(|(k, x)| match x {
+					LitOrConst::Lit(l) => Some((l.clone(), C::one().shl(k))),
+					LitOrConst::Const(true) => {
+						add += C::one().shl(k);
+						None
+					}
+					LitOrConst::Const(false) => None,
+				})
+				.collect::<Vec<_>>(),
+			add,
+		)
+	}
 
 	pub(crate) fn lits(&self) -> usize {
 		self.x
@@ -230,7 +288,7 @@ impl<Lit: Literal> std::fmt::Display for BinEnc<Lit> {
 #[cfg(test)]
 mod tests {
 	// type Lit = i32;
-	// type C = i64;
+	type C = i32;
 
 	use super::*;
 	use crate::helpers::tests::TestDB;
@@ -243,8 +301,10 @@ mod tests {
 		// let x = IntVar::<Lit, C>::new(1, &[2, 5, 6, 7, 9], true, None, Some(String::from("x")))
 		// 	.into_ref();
 		let mut db = TestDB::new(0);
-		let dom = Dom::from_slice(&[2, 5, 6, 7, 9]);
-		let x = BinEnc::new(&mut db, &dom);
+		// let dom = Dom::from_slice(&[2, 5, 6, 7, 9]);
+		let x = BinEnc::new(&mut db, 4, Some(String::from("x")));
+		// dbg!(&x.as_lin_exp::<C>());
+		// dbg!(&x.ineqs::<C>(true, &dom));
 
 		for (up, ks, expected_cnf) in [
 			(true, (0, 1), vec![vec![1, 2, 3, 4]]),
@@ -253,6 +313,9 @@ mod tests {
 				(0, 3),
 				vec![vec![1, 2, 3, 4], vec![2, 3, 4], vec![1, 3, 4]],
 			),
+			(true, (14, 17), vec![vec![1], vec![]]),
+			(true, (0, 0), vec![]),
+			(false, (15, 16), vec![]),
 		] {
 			assert_eq!(
 				x.ineq(ks, up),
@@ -260,5 +323,13 @@ mod tests {
 				"ks {ks:?} with up {up} was expected to return {expected_cnf:?}"
 			);
 		}
+	}
+
+	#[test]
+	fn test_ineq_2() {
+		let mut db = TestDB::new(0);
+		// let dom = Dom::from_slice(&[0, 1]);
+		let x = BinEnc::new(&mut db, 1, Some(String::from("x")));
+		dbg!(&x.ineq::<C>((0, 1), true));
 	}
 }

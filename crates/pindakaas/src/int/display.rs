@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use crate::{Coefficient, Lin, Literal, Model, Term};
 use itertools::Itertools;
 
-use super::{display_dom, model::Obj, IntVar, LinExp};
+use super::{model::Obj, IntVar, LinExp};
 
 impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -69,11 +69,6 @@ impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 
 impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"{} ∈ {}",
-			self.lbl(),
-			display_dom(&self.dom.iter().collect::<Vec<_>>()) // display_dom::<Lit, C>(&self.dom.values())
-		)
+		write!(f, "{} ∈ {}", self.lbl(), self.dom)
 	}
 }

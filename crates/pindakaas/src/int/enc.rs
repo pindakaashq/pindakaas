@@ -737,7 +737,7 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		match dom {
 			[] => Err(Unsatisfiable),
 			[d] => Ok(IntVarEnc::Const(*d)),
-			dom => Ok(OrdEnc::new(db, &Dom::from_slice(dom)).into()),
+			dom => Ok(OrdEnc::new(db, &Dom::from_slice(dom), Some(&lbl)).into()),
 		}
 	}
 

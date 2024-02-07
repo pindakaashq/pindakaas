@@ -203,16 +203,16 @@ impl<C: Coefficient> Display for Dom<C> {
 		}
 		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
 		if dom.len() > ELIPSIZE && C::from(dom.len()).unwrap() == ub - lb + C::one() {
-			writeln!(f, "{}..{}", dom.first().unwrap(), dom.last().unwrap())
+			write!(f, "{}..{}", dom.first().unwrap(), dom.last().unwrap())
 		} else if dom.len() > ELIPSIZE {
-			writeln!(
+			write!(
 				f,
 				"{{{},..,{ub}}} ({})",
 				dom.iter().take(ELIPSIZE).join(","),
 				dom.len()
 			)
 		} else {
-			writeln!(f, "{{{}}}", dom.iter().join(","))
+			write!(f, "{{{}}}", dom.iter().join(","))
 		}
 	}
 }

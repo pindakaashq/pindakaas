@@ -36,12 +36,12 @@ pub(crate) fn unsigned_binary_range_ub<C: Coefficient>(bits: usize) -> Option<C>
 /// Convert `k` to unsigned binary in `bits`
 pub(crate) fn as_binary<C: Coefficient>(k: PosCoeff<C>, bits: Option<usize>) -> Vec<bool> {
 	let bits = bits.unwrap_or_else(|| required_lits(C::zero(), *k));
-	// let range_ub = unsigned_binary_range_ub(bits).unwrap();
-	// assert!(
-	// 	*k <= range_ub,
-	// 	"{} cannot be represented in {bits} bits, which can represent only up to {range_ub}",
-	// 	*k,
-	// );
+	let range_ub = unsigned_binary_range_ub(bits).unwrap();
+	assert!(
+		*k <= range_ub,
+		"{} cannot be represented in {bits} bits, which can represent only up to {range_ub}",
+		*k,
+	);
 	(0..bits)
 		.map(|b| *k & (C::one() << b) != C::zero())
 		.collect::<Vec<_>>()

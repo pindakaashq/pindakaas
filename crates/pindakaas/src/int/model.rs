@@ -1,6 +1,6 @@
 #![allow(unused_imports, unused_variables, dead_code, unreachable_code)]
 use crate::{
-	helpers::{add_clauses_for, as_binary, negate_cnf},
+	helpers::{add_clauses_for, as_binary, negate_cnf, two_comp_bounds},
 	int::{ord::OrdEnc, Dom, TernLeConstraint, TernLeEncoder},
 	linear::{log_enc_add_fn, Part},
 	trace::emit_clause,
@@ -27,7 +27,8 @@ const DECOMPOSE: bool = true;
 use iset::IntervalMap;
 
 use super::{
-	bin::BinEnc, helpers::filter_fixed, scm::SCM, IntVarBin, IntVarEnc, IntVarOrd, LitOrConst,
+	bin::BinEnc, helpers::filter_fixed, required_lits, scm::SCM, IntVarBin, IntVarEnc, IntVarOrd,
+	LitOrConst,
 };
 
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
@@ -570,13 +571,11 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 
 	pub fn ineqs(&self, cmp: &Comparator) -> Vec<(C, Vec<Vec<Lit>>)> {
 		// TODO merge or handle repeated literals
+		let up = self.handle_polarity(cmp);
+		let dom = &self.x.borrow().dom;
 		match self.x.borrow().e.as_ref().unwrap() {
-			IntVarEnc::Ord(o) => self
-				.dom()
-				.into_iter()
-				.zip(o.ineqs(self.handle_polarity(cmp)))
-				.collect(),
-			IntVarEnc::Bin(_) => todo!(),
+			IntVarEnc::Ord(o) => self.dom().into_iter().zip(o.ineqs(up)).collect(),
+			IntVarEnc::Bin(b) => self.dom().into_iter().zip(b.ineqs::<C>(up, dom)).collect(),
 			IntVarEnc::Const(_) => todo!(),
 		}
 	}
@@ -586,7 +585,28 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		let up = self.handle_polarity(cmp);
 		match self.x.borrow().e.as_ref().unwrap() {
 			IntVarEnc::Ord(o) => o.ineq(self.x.borrow().dom.ineq(k, self.c, up), up),
-			IntVarEnc::Bin(_) => todo!(),
+			IntVarEnc::Bin(b) => {
+				let dom = &self.x.borrow().dom;
+				// TODO move this out of o.ineq
+				let k = if up {
+					k.div_ceil(&self.c)
+				} else {
+					k.div_floor(&self.c)
+				};
+				let ks = if up { (dom.lb(), k) } else { (k, dom.ub()) };
+				// let ks = if up {
+				// 	(dom.lb(), std::cmp::min(k, dom.ub() + C::one()))
+				// } else {
+				// 	(std::cmp::max(k, dom.lb() - C::one()), dom.ub())
+				// };
+				// let ks = if up {
+				// 	(k - C::one(), k)
+				// } else {
+				// 	(k, k + C::one())
+				// };
+				let ks = (b.normalize(ks.0, dom), b.normalize(ks.1, dom));
+				b.ineq(ks, up)
+			}
 			IntVarEnc::Const(_) => todo!(),
 		}
 		// self.x[c].clone()
@@ -1156,24 +1176,27 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				.try_for_each(|conditions| {
 					// calculate x>=k-sum(conditions)
 					let k = self.k - conditions.iter().map(|(c, _)| *c).fold(C::zero(), C::add);
+					let cons = consequent.ineq(k, &cmp);
 
-					// println!(
-					// 	"TODO POLARITY : {} -> {}{}",
-					// 	conditions
-					// 		.iter()
-					// 		// .zip(terms)
-					// 		.map(|c| format!("{}{} {:?}", cmp.reverse(), c.0, c.1))
-					// 		.join(" /\\ "),
-					// 	cmp,
-					// 	k
-					// );
+					println!(
+						"{} -> {}*x{}{} {:?}",
+						conditions
+							.iter()
+							// .zip(terms)
+							.map(|c| format!("x{}{} {:?}", cmp.reverse(), c.0, c.1))
+							.join(" /\\ "),
+						consequent.c,
+						cmp,
+						k,
+						cons
+					);
 
 					add_clauses_for(
 						db,
 						conditions
 							.iter()
 							.map(|(_, cnf)| negate_cnf(cnf.clone())) // negate conditions
-							.chain([consequent.ineq(k, &cmp)])
+							.chain([cons])
 							.collect(),
 					)
 				})
@@ -1448,7 +1471,13 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					.add_constant(self.lb())
 			}
 			IntVarEnc::Bin(b) => {
-				let (terms, add) = filter_fixed(&b.xs(true));
+				let (terms, add) = b.as_lin_exp::<C>();
+				// The offset and the fixed value `add` are added to the constant
+				let add = if !self.dom.lb().is_negative() {
+					add
+				} else {
+					add.checked_add(&two_comp_bounds::<C>(b.bits()).0).unwrap()
+				};
 
 				let lin_exp = crate::linear::LinExp::<Lit, C>::new().add_bounded_log_encoding(
 					terms.as_slice(),
@@ -1457,7 +1486,6 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					self.ub() - add,
 				);
 
-				// The offset and the fixed value `add` are added to the constant
 				lin_exp.add_constant(add)
 			}
 			IntVarEnc::Const(c) => crate::linear::LinExp::new().add_constant(*c),
@@ -1507,9 +1535,13 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 				// 	.map(|v| (v.clone(), views.get(&(self.id, v.end - C::one())).cloned()))
 				// 	.collect::<IntervalMap<_, _>>();
 				// IntVarEnc::Ord(IntVarOrd::from_views(db, dom, self.lbl()))
-				IntVarEnc::Ord(OrdEnc::new(db, &self.dom))
+				IntVarEnc::Ord(OrdEnc::new(db, &self.dom, self.lbl.as_ref()))
 			} else {
-				IntVarEnc::Bin(BinEnc::new(db, &self.dom))
+				IntVarEnc::Bin(BinEnc::new(
+					db,
+					required_lits::<C>(self.dom.lb(), self.dom.ub()),
+					self.lbl.clone(),
+				))
 			};
 
 			if self.add_consistency {
@@ -1791,7 +1823,7 @@ mod tests {
 			[Consistency::None],
 			[false],
 			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
-			[None] // [None, Some(0), Some(2)]
+			[Some(0)] // [None, Some(0), Some(2)]
 		)
 		.map(
 			|(scm, decomposer, propagate, add_consistency, cutoff)| ModelConfig {
@@ -1932,6 +1964,32 @@ End
 	}
 
 	#[test]
+	fn test_lp_ge_single() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 3 x1 >= 1
+bounds
+0 <= x1 <= 3
+End
+",
+		);
+	}
+
+	#[test]
+	fn test_lp_le_single_w_neg_dom() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 3 x1 <= 8
+bounds
+-2 <= x1 <= 3
+End
+",
+		);
+	}
+
+	#[test]
 	fn test_lp_le_single_with_shift() {
 		test_lp_for_configs(
 			r"
@@ -2027,6 +2085,21 @@ End
 		)
 	}
 
+	/// Shows the problem for current binary ineq method
+	#[test]
+	fn test_int_lin_le_3() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 1 x1 + 2 x2 <= 4
+Bounds
+0 <= x1 <= 3
+0 <= x2 <= 1
+End
+",
+		);
+	}
+
 	#[test]
 	fn test_int_lin_le_1_neg_coefs_1() {
 		test_lp_for_configs(
@@ -2062,11 +2135,38 @@ End
 		test_lp_for_configs(
 			r"
 Subject To
-c0: + 2 x1 + 3 x2 + 5 x3 = 11
+c0: + 2 x1 + 3 x2 = 5
+Binary
+x1
+x2
+End
+",
+		);
+	}
+
+	#[test]
+	fn test_int_lin_eq_tmp() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 1 x1 - 1 x2 <= 0
 Bounds
 0 <= x1 <= 3
 0 <= x2 <= 3
-0 <= x3 <= 3
+End
+",
+		);
+	}
+
+	#[test]
+	fn test_int_lin_eq_3() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 1 x1 + 1 x2 = 2
+Bounds
+0 <= x1 <= 1
+0 <= x2 <= 1
 End
 ",
 		);
