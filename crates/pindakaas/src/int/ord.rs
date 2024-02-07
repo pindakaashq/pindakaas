@@ -13,9 +13,19 @@ pub(crate) struct OrdEnc<Lit: Literal> {
 }
 
 impl<Lit: Literal> OrdEnc<Lit> {
-	pub fn new<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(db: &mut DB, dom: &Dom<C>) -> Self {
+	pub fn new<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(
+		db: &mut DB,
+		dom: &Dom<C>,
+		_lbl: Option<&String>,
+	) -> Self {
+		let _lbl = _lbl.cloned().unwrap_or(String::from("b"));
 		Self {
-			x: dom.iter().skip(1).map(|_| new_var!(db)).collect(),
+			x: dom
+				.iter()
+				.skip(1)
+				.into_iter()
+				.map(|_v| new_var!(db, format!("{_lbl}≥{_v}")))
+				.collect(),
 		}
 	}
 
@@ -119,7 +129,7 @@ mod tests {
 		// let x = IntVar::<Lit, C>::new(1, &[2, 5, 6, 7, 9], true, None, Some(String::from("x")))
 		// 	.into_ref();
 		let mut db = TestDB::new(0);
-		let x = OrdEnc::new(&mut db, &Dom::from_slice(&[2, 5, 6, 7, 9]));
+		let x = OrdEnc::new(&mut db, &Dom::from_slice(&[2, 5, 6, 7, 9]), None);
 
 		for (up, dom_pos, expected_cnf) in [
 			(true, Some(0), vec![]),
