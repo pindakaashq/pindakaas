@@ -1,4 +1,4 @@
-use std::num::NonZeroI32;
+use std::{marker::PhantomData, num::NonZeroI32};
 
 use crate::{helpers::VarRange, ClauseDatabase, Lit, Valuation, Var};
 
@@ -19,9 +19,9 @@ pub trait Solver: ClauseDatabase {
 
 	/// Solve the formula with specified clauses.
 	///
-	/// If the search is interrupted (see [`set_terminate_callback`]) the function
+	/// If the search is interrupted (see [`SolveArgs::term_callback`]) the method
 	/// returns unknown
-	fn solve<SolCb: FnOnce(&dyn Valuation)>(&mut self, on_sol: SolCb) -> SolveResult;
+	fn solve(&mut self, args: SolveArgs<Self>) -> SolveResult;
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
@@ -31,22 +31,95 @@ pub enum SolveResult {
 	Unknown,
 }
 
-pub trait SolveAssuming: Solver {
-	/// Solve the formula with specified clauses under the given assumptions.
-	///
-	/// If the search is interrupted (see [`set_terminate_callback`]) the function
-	/// returns unknown
-	fn solve_assuming<
-		I: IntoIterator<Item = Lit>,
-		SolCb: FnOnce(&dyn Valuation),
-		FailCb: FnOnce(&FailFn<'_>),
-	>(
-		&mut self,
-		assumptions: I,
-		on_sol: SolCb,
-		on_fail: FailCb,
-	) -> SolveResult;
+/// Argument builder of the [`Solver::solve`] method
+///
+/// This argument builder makes it easy to specify only some (non-default)
+/// arguments and ensures only implemented functionality is exposed.
+#[derive(Default)]
+pub struct SolveArgs<'a, T: Solver + ?Sized> {
+	slv: PhantomData<T>,
+	on_sol: Option<BoxSolCb<'a>>,
+	on_fail: Option<BoxFailCb<'a>>,
+	assumptions: Option<Box<dyn Iterator<Item = Lit> + 'a>>,
+	learn_cb: Option<LearnCbRef<'a>>,
+	term_cb: Option<&'a mut dyn FnMut() -> SlvTermSignal>,
+	prop: Option<&'a mut dyn Propagator>,
 }
+
+type BoxSolCb<'a> = Box<dyn FnOnce(&dyn Valuation) + 'a>;
+type BoxFailCb<'a> = Box<dyn FnOnce(&FailFn<'_>) + 'a>;
+type LearnCbRef<'a> = &'a mut dyn FnMut(&mut dyn Iterator<Item = Lit>);
+
+impl<'a, T: Solver> SolveArgs<'a, T> {
+	pub fn on_sol<F: FnOnce(&dyn Valuation) + 'a>(mut self, cb: F) -> Self {
+		self.on_sol = Some(Box::new(cb));
+		self
+	}
+	pub fn take_on_sol(&mut self) -> Option<BoxSolCb<'a>> {
+		self.on_sol.take()
+	}
+}
+
+impl<'a, T: SolveAssuming> SolveArgs<'a, T> {
+	pub fn assuming<O: IntoIterator<IntoIter = I>, I: Iterator<Item = Lit> + 'a>(
+		mut self,
+		assumptions: O,
+	) -> Self {
+		self.assumptions = Some(Box::new(assumptions.into_iter()));
+		self
+	}
+
+	pub fn take_assumptions(&mut self) -> Option<Box<dyn Iterator<Item = Lit> + 'a>> {
+		self.assumptions.take()
+	}
+
+	pub fn on_fail<FailCb: FnOnce(&FailFn<'_>) + 'a>(mut self, cb: FailCb) -> Self {
+		self.on_fail = Some(Box::new(cb));
+		self
+	}
+
+	pub fn take_on_fail(&mut self) -> Option<BoxFailCb<'a>> {
+		self.on_fail.take()
+	}
+}
+
+impl<'a, T: CallbackOnLearn> SolveArgs<'a, T> {
+	pub fn learn_callback(mut self, cb: LearnCbRef<'a>) -> Self {
+		self.learn_cb = Some(cb);
+		self
+	}
+	pub fn take_learn_callback(&mut self) -> Option<LearnCbRef<'a>> {
+		self.learn_cb.take()
+	}
+}
+
+impl<'a, T: CheckTermCallback> SolveArgs<'a, T> {
+	pub fn term_callback(mut self, cb: &'a mut dyn FnMut() -> SlvTermSignal) -> Self {
+		self.term_cb = Some(cb);
+		self
+	}
+	pub fn take_term_callback(&mut self) -> Option<&'a mut dyn FnMut() -> SlvTermSignal> {
+		self.term_cb.take()
+	}
+}
+
+#[cfg(feature = "ipasir-up")]
+impl<'a, T: PropagatingSolver> SolveArgs<'a, T> {
+	pub fn with_propagator(mut self, prop: &'a mut dyn Propagator) -> Self {
+		self.prop = Some(prop);
+		self
+	}
+
+	pub fn take_propagator(&mut self) -> Option<&'a mut dyn Propagator> {
+		self.prop.take()
+	}
+}
+
+/// Trait implementation by [`Solver`]s that promises to assume all literals
+/// given by [`SolveArgs::assumptions`], allowing the user to question which
+/// ones caused failures, using [`SolveArgs::on_fail`], when the solve status is
+/// [`SolveResult::Unsat`].
+pub trait SolveAssuming: Solver {}
 
 /// Check if the given assumption literal was used to prove the unsatisfiability
 /// of the formula under the assumptions used for the last SAT search.
@@ -55,43 +128,20 @@ pub trait SolveAssuming: Solver {
 /// of is not specified.
 pub type FailFn<'a> = dyn Fn(Lit) -> bool + 'a;
 
-pub trait LearnCallback: Solver {
-	/// Set a callback function used to extract learned clauses up to a given
-	/// length from the solver.
-	///
-	/// WARNING: Subsequent calls to this method override the previously set
-	/// callback function.
-	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(&mut self, cb: Option<F>);
-}
+/// Trait implemented by [`Solver`]s that promise to call the
+/// [`SolveArgs::learn_callback`] callback function on learned clauses.
+pub trait CallbackOnLearn: Solver {}
 
-pub trait TermCallback: Solver {
-	/// Set a callback function used to indicate a termination requirement to the
-	/// solver.
-	///
-	/// The solver will periodically call this function and check its return value
-	/// during the search. Subsequent calls to this method override the previously
-	/// set callback function.
-	fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>);
-}
+/// Trait implemented by [`Solver`]s that promise to occassionally call the
+/// [`SolveArgs::term_callback`] callback function to see whether the solving
+/// process should be interrupted.
+pub trait CheckTermCallback: Solver {}
 
+/// Trait implemented by solvers that allow the connection of an external
+/// [`Propagator`] which allows to learn, propagate and backtrack based on
+/// external constraints.
 #[cfg(feature = "ipasir-up")]
 pub trait PropagatingSolver: Solver {
-	/// Set Propagator implementation which allows to learn, propagate and
-	/// backtrack based on external constraints.
-	///
-	/// Only one Propagator can be connected. This Propagator is notified of all
-	/// changes to which it has subscribed, using the [`add_observed_var`] method.
-	///
-	/// If a previous propagator was set, then it is returned.
-	///
-	/// # Warning
-	///
-	/// Calling this method automatically resets the observed variable set.
-	fn set_external_propagator(
-		&mut self,
-		prop: Option<Box<dyn Propagator>>,
-	) -> Option<Box<dyn Propagator>>;
-
 	fn add_observed_var(&mut self, var: Var);
 	fn remove_observed_var(&mut self, var: Var);
 	fn reset_observed_vars(&mut self);

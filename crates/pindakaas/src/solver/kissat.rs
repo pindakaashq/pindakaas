@@ -46,12 +46,12 @@ mod tests {
 				},
 			)
 			.unwrap();
-		let res = slv.solve(|value| {
+		let res = slv.solve(SolveArgs::default().on_sol(|value| {
 			assert!(
 				(value(!a).unwrap() && value(b).unwrap())
 					|| (value(a).unwrap() && value(!b).unwrap()),
 			)
-		});
+		}));
 		assert_eq!(res, SolveResult::Sat);
 	}
 }

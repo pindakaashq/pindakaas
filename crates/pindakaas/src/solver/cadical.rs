@@ -9,8 +9,6 @@ use crate::Lit;
 pub struct Cadical {
 	ptr: *mut std::ffi::c_void,
 	vars: VarFactory,
-	#[cfg(feature = "ipasir-up")]
-	prop: Option<Box<CadicalProp>>,
 }
 
 impl Default for Cadical {
@@ -18,8 +16,6 @@ impl Default for Cadical {
 		Self {
 			ptr: unsafe { pindakaas_cadical::ipasir_init() },
 			vars: VarFactory::default(),
-			#[cfg(feature = "ipasir-up")]
-			prop: None,
 		}
 	}
 }
@@ -30,8 +26,6 @@ impl Clone for Cadical {
 		Self {
 			ptr,
 			vars: self.vars,
-			#[cfg(feature = "ipasir-up")]
-			prop: None,
 		}
 	}
 }
@@ -54,7 +48,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		linear::LimitComp,
-		solver::{SolveResult, Solver},
+		solver::{SolveArgs, SolveResult, Solver},
 		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder,
 	};
 
@@ -74,21 +68,21 @@ mod tests {
 				},
 			)
 			.unwrap();
-		let res = slv.solve(|value| {
+		let res = slv.solve(SolveArgs::default().on_sol(|value| {
 			assert!(
 				(value(!a).unwrap() && value(b).unwrap())
 					|| (value(a).unwrap() && value(!b).unwrap()),
 			)
-		});
+		}));
 		assert_eq!(res, SolveResult::Sat);
 		// Test clone implementation
 		let mut cp = slv.clone();
-		cp.solve(|value| {
+		cp.solve(SolveArgs::default().on_sol(|value| {
 			assert!(
 				(value(!a).unwrap() && value(b).unwrap())
 					|| (value(a).unwrap() && value(!b).unwrap()),
 			)
-		});
+		}));
 	}
 
 	#[cfg(feature = "ipasir-up")]
@@ -132,30 +126,33 @@ mod tests {
 			}
 		}
 
-		let p = Box::new(Dist2 {
+		let mut p = Dist2 {
 			vars: vars.clone(),
 			tmp: Vec::new(),
-		});
-		slv.set_external_propagator(Some(p));
+		};
 		slv.add_clause(vars.clone().map_into()).unwrap();
 		for v in vars.clone() {
 			slv.add_observed_var(v)
 		}
 
 		let mut solns = Vec::new();
-		while slv.solve(|value| {
-			let sol: Vec<Lit> = vars
-				.clone()
-				.map(|v| {
-					if value(v.into()).unwrap() {
-						v.into()
-					} else {
-						!v
-					}
+		while slv.solve(
+			SolveArgs::default()
+				.on_sol(|value| {
+					let sol: Vec<Lit> = vars
+						.clone()
+						.map(|v| {
+							if value(v.into()).unwrap() {
+								v.into()
+							} else {
+								!v
+							}
+						})
+						.collect_vec();
+					solns.push(sol);
 				})
-				.collect_vec();
-			solns.push(sol);
-		}) == SolveResult::Sat
+				.with_propagator(&mut p),
+		) == SolveResult::Sat
 		{
 			slv.add_clause(solns.last().unwrap().iter().map(|l| !l))
 				.unwrap()

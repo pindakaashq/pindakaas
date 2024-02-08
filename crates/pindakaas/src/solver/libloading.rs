@@ -9,12 +9,12 @@ use std::{
 use libloading::{Library, Symbol};
 
 use super::{
-	FailFn, LearnCallback, SlvTermSignal, SolveAssuming, SolveResult, Solver, TermCallback,
-	VarFactory,
+	CallbackOnLearn, CheckTermCallback, SlvTermSignal, SolveArgs, SolveAssuming, SolveResult,
+	Solver, VarFactory,
 };
 #[cfg(feature = "ipasir-up")]
 use super::{Propagator, SolvingActions};
-use crate::{ClauseDatabase, Lit, Result, Valuation, Var};
+use crate::{ClauseDatabase, Lit, Result, Var};
 
 pub struct IpasirLibrary {
 	lib: Library,
@@ -173,8 +173,41 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 			.unwrap()
 	}
 
-	fn solve<SolCb: FnOnce(&dyn Valuation)>(&mut self, on_sol: SolCb) -> SolveResult {
+	fn solve(&mut self, mut args: SolveArgs<Self>) -> SolveResult {
+		// Set solving argument
+		if let Some(assumptions) = args.take_assumptions() {
+			for i in assumptions {
+				(self.assume_fn)(self.slv, i.into());
+			}
+		}
+		if let Some(cb) = args.take_term_callback() {
+			let mut wrapped_cb = || -> c_int {
+				match cb() {
+					SlvTermSignal::Continue => c_int::from(0),
+					SlvTermSignal::Terminate => c_int::from(1),
+				}
+			};
+			let data = &mut wrapped_cb as *mut _ as *mut c_void;
+			(self.set_terminate_fn)(self.slv, data, Some(get_trampoline0(&wrapped_cb)));
+		}
+		const LEARN_MAX_LEN: std::ffi::c_int = 512;
+		if let Some(cb) = args.take_learn_callback() {
+			let mut wrapped_cb = |clause: *const i32| {
+				let mut iter = ExplIter(clause).map(|i: i32| Lit(NonZeroI32::new(i).unwrap()));
+				cb(&mut iter)
+			};
+			let data = &mut wrapped_cb as *mut _ as *mut c_void;
+			(self.set_learn_fn)(
+				self.slv,
+				data,
+				LEARN_MAX_LEN,
+				Some(get_trampoline1(&wrapped_cb)),
+			);
+		}
 		let res = (self.solve_fn)(self.slv);
+		// Reset arguments
+		(self.set_terminate_fn)(self.slv, ptr::null_mut(), None);
+		(self.set_learn_fn)(self.slv, ptr::null_mut(), LEARN_MAX_LEN, None);
 		match res {
 			10 => {
 				// 10 -> Sat
@@ -190,10 +223,23 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 						}
 					}
 				};
-				on_sol(&val_fn);
+				if let Some(on_sol) = args.take_on_sol() {
+					on_sol(&val_fn);
+				}
 				SolveResult::Sat
 			}
-			20 => SolveResult::Unsat, // 20 -> Unsat
+			20 => {
+				// 20 -> Unsat
+				if let Some(on_fail) = args.take_on_fail() {
+					let fail_fn = |lit: Lit| {
+						let lit: i32 = lit.into();
+						let failed = (self.failed_fn)(self.slv, lit);
+						failed != 0
+					};
+					on_fail(&fail_fn);
+				}
+				SolveResult::Unsat
+			}
 			_ => {
 				debug_assert_eq!(res, 0); // According to spec should be 0, unknown
 				SolveResult::Unknown
@@ -202,67 +248,11 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 	}
 }
 
-impl<'lib> SolveAssuming for IpasirSolver<'lib> {
-	fn solve_assuming<
-		I: IntoIterator<Item = Lit>,
-		SolCb: FnOnce(&dyn Valuation),
-		FailCb: FnOnce(&FailFn<'_>),
-	>(
-		&mut self,
-		assumptions: I,
-		on_sol: SolCb,
-		on_fail: FailCb,
-	) -> SolveResult {
-		for i in assumptions {
-			(self.assume_fn)(self.slv, i.into());
-		}
-		match self.solve(on_sol) {
-			SolveResult::Unsat => {
-				let fail_fn = |lit: Lit| {
-					let lit: i32 = lit.into();
-					let failed = (self.failed_fn)(self.slv, lit);
-					failed != 0
-				};
-				on_fail(&fail_fn);
-				SolveResult::Unsat
-			}
-			r => r,
-		}
-	}
-}
+impl<'lib> SolveAssuming for IpasirSolver<'lib> {}
 
-impl<'lib> TermCallback for IpasirSolver<'lib> {
-	fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>) {
-		if let Some(mut cb) = cb {
-			let mut wrapped_cb = || -> c_int {
-				match cb() {
-					SlvTermSignal::Continue => c_int::from(0),
-					SlvTermSignal::Terminate => c_int::from(1),
-				}
-			};
-			let data = &mut wrapped_cb as *mut _ as *mut c_void;
-			(self.set_terminate_fn)(self.slv, data, Some(get_trampoline0(&wrapped_cb)));
-		} else {
-			(self.set_terminate_fn)(self.slv, ptr::null_mut(), None);
-		}
-	}
-}
+impl<'lib> CheckTermCallback for IpasirSolver<'lib> {}
 
-impl<'lib> LearnCallback for IpasirSolver<'lib> {
-	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(&mut self, cb: Option<F>) {
-		const MAX_LEN: std::ffi::c_int = 512;
-		if let Some(mut cb) = cb {
-			let mut wrapped_cb = |clause: *const i32| {
-				let mut iter = ExplIter(clause).map(|i: i32| Lit(NonZeroI32::new(i).unwrap()));
-				cb(&mut iter)
-			};
-			let data = &mut wrapped_cb as *mut _ as *mut c_void;
-			(self.set_learn_fn)(self.slv, data, MAX_LEN, Some(get_trampoline1(&wrapped_cb)));
-		} else {
-			(self.set_learn_fn)(self.slv, ptr::null_mut(), MAX_LEN, None);
-		}
-	}
-}
+impl<'lib> CallbackOnLearn for IpasirSolver<'lib> {}
 type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
 unsafe extern "C" fn trampoline0<R, F: FnMut() -> R>(user_data: *mut c_void) -> R {
 	let user_data = &mut *(user_data as *mut F);
@@ -306,9 +296,9 @@ pub(crate) struct NoProp;
 impl Propagator for NoProp {}
 
 #[cfg(feature = "ipasir-up")]
-pub(crate) struct IpasirPropStore {
+pub(crate) struct IpasirPropStore<'a> {
 	/// Rust Propagator
-	pub(crate) prop: Box<dyn Propagator>,
+	pub(crate) prop: &'a mut dyn Propagator,
 	/// IPASIR solver pointer
 	pub(crate) slv: *mut dyn SolvingActions,
 	/// Propagation queue
@@ -321,8 +311,8 @@ pub(crate) struct IpasirPropStore {
 }
 
 #[cfg(feature = "ipasir-up")]
-impl IpasirPropStore {
-	pub(crate) fn new(prop: Box<dyn Propagator>, slv: *mut dyn SolvingActions) -> Self {
+impl<'a> IpasirPropStore<'a> {
+	pub(crate) fn new(prop: &'a mut dyn Propagator, slv: *mut dyn SolvingActions) -> Self {
 		Self {
 			prop,
 			slv,
