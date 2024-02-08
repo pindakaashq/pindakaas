@@ -1,5 +1,5 @@
 #[cfg(feature = "ipasir-up")]
-use std::collections::VecDeque;
+use std::{any::Any, collections::VecDeque};
 use std::{
 	ffi::{c_char, c_int, c_void, CStr},
 	num::NonZeroI32,
@@ -303,7 +303,14 @@ impl Iterator for ExplIter {
 pub(crate) struct NoProp;
 
 #[cfg(feature = "ipasir-up")]
-impl Propagator for NoProp {}
+impl Propagator for NoProp {
+	fn as_any(&self) -> &dyn Any {
+		self
+	}
+	fn as_mut_any(&mut self) -> &mut dyn Any {
+		self
+	}
+}
 
 #[cfg(feature = "ipasir-up")]
 pub(crate) struct IpasirPropStore {

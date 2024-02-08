@@ -94,6 +94,8 @@ mod tests {
 	#[cfg(feature = "ipasir-up")]
 	#[test]
 	fn test_ipasir_up() {
+		use std::any::Any;
+
 		use itertools::Itertools;
 
 		use crate::{
@@ -129,6 +131,13 @@ mod tests {
 			}
 			fn add_external_clause(&mut self) -> Option<Vec<Lit>> {
 				self.tmp.pop()
+			}
+
+			fn as_any(&self) -> &dyn Any {
+				self
+			}
+			fn as_mut_any(&mut self) -> &mut dyn Any {
+				self
 			}
 		}
 
@@ -174,5 +183,6 @@ mod tests {
 				lits![-1, -2, -3, -4, 5],
 			]
 		);
+		assert!(slv.propagator::<Dist2>().unwrap().tmp.is_empty())
 	}
 }
