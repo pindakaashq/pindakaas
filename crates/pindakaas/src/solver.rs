@@ -1,3 +1,5 @@
+#[cfg(feature = "ipasir-up")]
+use std::any::Any;
 use std::num::NonZeroI32;
 
 use crate::{helpers::VarRange, ClauseDatabase, Lit, Valuation, Var};
@@ -92,6 +94,18 @@ pub trait PropagatingSolver: Solver {
 		prop: Option<Box<dyn Propagator>>,
 	) -> Option<Box<dyn Propagator>>;
 
+	/// Access the external propagator given the to solver
+	///
+	/// This method will return [`None`] if no propagator is set, or if the
+	/// propagator is not of type [`P`].
+	fn propagator<P: Propagator + 'static>(&self) -> Option<&P>;
+
+	/// Get mutable access to the external propagator given the to solver
+	///
+	/// This method will return [`None`] if no propagator is set, or if the
+	/// propagator is not of type [`P`].
+	fn propagator_mut<P: Propagator + 'static>(&mut self) -> Option<&mut P>;
+
 	fn add_observed_var(&mut self, var: Var);
 	fn remove_observed_var(&mut self, var: Var);
 	fn reset_observed_vars(&mut self);
@@ -160,6 +174,53 @@ pub trait Propagator {
 	fn add_external_clause(&mut self) -> Option<Vec<Lit>> {
 		None
 	}
+
+	/// Method to help access to the propagator when given to the solver.
+	///
+	/// See [`PropagatingSolver::propagator`].
+	///
+	/// # Note
+	///
+	/// This method can generally be implemented as
+	/// ```rust
+	/// use std::any::Any;
+	/// use pindakaas::solver::Propagator;
+	///
+	/// struct A;
+	///
+	/// impl Propagator for A {
+	///   fn as_any(&self) -> &dyn Any {
+	///     self
+	///   }
+	///
+	/// #  fn as_mut_any(&mut self) -> &mut dyn Any { self }
+	/// }
+	///
+	/// ```
+	fn as_any(&self) -> &dyn Any;
+
+	/// Method to help access to the propagator when given to the solver.
+	///
+	/// See [`PropagatingSolver::propagator`].
+	///
+	/// # Note
+	///
+	/// This method can generally be implemented as
+	/// ```rust
+	/// use std::any::Any;
+	/// use pindakaas::solver::Propagator;
+	///
+	/// struct A;
+	///
+	/// impl Propagator for A {
+	///   fn as_mut_any(&mut self) -> &mut dyn Any {
+	///     self
+	///   }
+	/// #  fn as_any(&self) -> &dyn Any { self }
+	/// }
+	///
+	/// ```
+	fn as_mut_any(&mut self) -> &mut dyn Any;
 }
 
 #[cfg(feature = "ipasir-up")]

@@ -215,6 +215,13 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					}
 				}
 
+				fn propagator<P: crate::solver::Propagator + 'static>(&self) -> Option<&P> {
+					#prop_member.as_ref().map(|p| p.prop.prop.as_any().downcast_ref()).flatten()
+				}
+				fn propagator_mut<P: crate::solver::Propagator + 'static>(&mut self) -> Option<&mut P> {
+					#prop_member.as_mut().map(|p| p.prop.prop.as_mut_any().downcast_mut()).flatten()
+				}
+
 				fn add_observed_var(&mut self, var: crate::Var){
 					unsafe { #krate::ipasir_add_observed_var( #ptr, var.0.get()) };
 				}
