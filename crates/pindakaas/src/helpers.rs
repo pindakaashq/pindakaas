@@ -83,12 +83,18 @@ pub(crate) fn negate_cnf<Lit: Literal>(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> 
 		vec![vec![]]
 	} else if clauses.contains(&vec![]) {
 		vec![]
-	} else {
-		assert!(clauses.len() == 1);
+	} else if clauses.len() == 1 {
 		clauses
 			.into_iter()
 			.map(|clause| clause.into_iter().map(|lit| lit.negate()).collect())
 			.collect()
+	} else if clauses.iter().all(|c| c.len() == 1) {
+		vec![clauses
+			.into_iter()
+			.flat_map(|clause| clause.into_iter().map(|lit| lit.negate()))
+			.collect()]
+	} else {
+		unimplemented!("Negating CNF {clauses:?} leads to complex expression")
 	}
 }
 

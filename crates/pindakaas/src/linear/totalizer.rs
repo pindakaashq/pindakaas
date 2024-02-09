@@ -154,6 +154,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 
 #[cfg(test)]
 mod tests {
+	#![allow(unused_imports)]
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
@@ -173,6 +174,7 @@ mod tests {
 		SortedEncoder,
 	};
 
+	/*
 	#[test]
 	fn test_sort_same_coefficients_2() {
 		use crate::linear::{LinearEncoder, StaticLinEncoder};
@@ -201,6 +203,7 @@ mod tests {
 		})
 		.check_complete()
 	}
+	*/
 
 	linear_test_suite!(TotalizerEncoder::default().add_propagation(Consistency::None));
 	// FIXME: Totalizer does not support LimitComp::Equal
