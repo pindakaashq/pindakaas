@@ -1,11 +1,3 @@
-#[cfg(feature = "ipasir-up")]
-use std::any::Any;
-use std::num::NonZeroI32;
-
-use crate::{helpers::VarRange, ClauseDatabase, Lit, Valuation, Var};
-
-pub mod libloading;
-
 #[cfg(feature = "cadical")]
 pub mod cadical;
 #[cfg(feature = "intel-sat")]
@@ -14,6 +6,15 @@ pub mod intel_sat;
 pub mod kissat;
 #[cfg(feature = "splr")]
 pub mod splr;
+
+pub mod libloading;
+
+#[cfg(feature = "ipasir-up")]
+use std::any::Any;
+use std::num::NonZeroI32;
+
+pub use crate::helpers::VarRange;
+use crate::{ClauseDatabase, Lit, Valuation, Var};
 
 pub trait Solver: ClauseDatabase {
 	/// Return the name and the version of SAT solver.
