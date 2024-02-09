@@ -519,6 +519,39 @@ Actual assignments:
 	pub fn with_config(self, config: ModelConfig<C>) -> Self {
 		Model { config, ..self }
 	}
+
+	pub fn deep_clone(&self) -> Self {
+		// pff; cannot call deep_clone recursively on all the constraints, as it will deep_clone recurring variables multiple times
+		let vars = self
+			.vars()
+			.iter()
+			.map(|x| (x.borrow().id, Rc::new(RefCell::new((*x.borrow()).clone()))))
+			.collect::<HashMap<_, _>>();
+		#[allow(clippy::needless_update)]
+		Self {
+			cons: self
+				.cons
+				.iter()
+				.cloned()
+				.map(|con| Lin {
+					exp: LinExp {
+						terms: con
+							.exp
+							.terms
+							.into_iter()
+							.map(|term| Term {
+								x: vars[&term.x.borrow().id].clone(),
+								..term
+							})
+							.collect(),
+						..con.exp
+					},
+					..con
+				})
+				.collect(),
+			..self.clone()
+		}
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -573,7 +606,13 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		// TODO merge or handle repeated literals
 		let up = self.handle_polarity(cmp);
 		let dom = &self.x.borrow().dom;
-		match self.x.borrow().e.as_ref().unwrap() {
+		match self
+			.x
+			.borrow()
+			.e
+			.as_ref()
+			.unwrap_or_else(|| panic!("{} was not encoded", self.x.borrow()))
+		{
 			IntVarEnc::Ord(o) => self.dom().into_iter().zip(o.ineqs(up)).collect(),
 			IntVarEnc::Bin(b) => self.dom().into_iter().zip(b.ineqs::<C>(up, dom)).collect(),
 			IntVarEnc::Const(_) => todo!(),
@@ -1842,87 +1881,139 @@ mod tests {
 		let model = Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap();
 		let expected_assignments = model.brute_force_solve(None);
 		for config in get_model_configs() {
-			test_lp(
-				lp,
-				Model::<Lit, C>::from_string(lp.into(), Format::Lp)
-					.unwrap()
-					.with_config(config),
-				Some(&expected_assignments),
-			)
+			// let model = model.deep_clone().with_config(config);
+			// TODO actually, we should find all encs of the decomp as well!
+			for encs in (0..model.num_var)
+				.map(|_| vec![true, false])
+				.multi_cartesian_product()
+			{
+				let model = model.deep_clone();
+
+				let mut all_views = HashMap::new();
+
+				let mut db = TestDB::new(0);
+				model
+					.vars()
+					.iter()
+					.sorted_by_key(|var| var.borrow().id)
+					.zip(encs)
+					.try_for_each(|(var, enc)| {
+						var.borrow_mut().encode(&mut db, &mut all_views, enc)
+					})
+					.unwrap();
+
+				test_lp(lp, db, model, Some(&expected_assignments))
+			}
+
+			/*
+			// let model = Model::<Lit, C>::from_string(lp.into(), Format::Lp)
+			// 	.unwrap()
+			// 	.with_config(config);
+			let model = model.deep_clone();
+			let mut all_views = HashMap::new();
+
+			let mut db = TestDB::new(0);
+			model
+				.vars()
+				.iter()
+				.sorted_by_key(|var| var.borrow().id)
+				.try_for_each(|var| {
+					let v = var.borrow_mut().encode(&mut db, &mut all_views, true);
+					v
+				})
+				.unwrap();
+
+			test_lp(lp, db, model, Some(&expected_assignments))
+			*/
+		}
+	}
+	fn check_constraints(model: &Model<Lit, C>, decomposition: &Model<Lit, C>, db: &TestDB) {
+		for constraint in decomposition.constraints() {
+			println!("constraint = {}", constraint);
+			let mut con_model = model.clone();
+			con_model.cons = con_model
+				.cons
+				.into_iter()
+				.filter(|con| con.lbl == constraint.lbl)
+				.collect();
+			let mut con_db = db.clone();
+			con_model.add_constraint(constraint.clone()).unwrap();
+			con_model.encode_vars(&mut con_db).unwrap();
+			constraint.encode(&mut con_db, &model.config).unwrap();
+			con_model.num_var = constraint
+				.exp
+				.terms
+				.iter()
+				.map(|term| term.x.borrow().id.0)
+				.max()
+				.unwrap();
+			// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
+			con_db.num_var = con_db.cnf.vars().last().unwrap();
+			let lit_assignments = con_db.solve().into_iter().sorted().collect::<Vec<_>>();
+
+			let actual_assignments = lit_assignments
+				.iter()
+				.flat_map(|lit_assignment| con_model.assign(lit_assignment))
+				.sorted()
+				.dedup()
+				.collect::<Vec<_>>();
+
+			if let Err(errs) = con_model.check_assignments(
+				&actual_assignments,
+				None,
+				// Some(&con_model.brute_force_solve(Some(IntVarId(con_model.num_var)))),
+			) {
+				for err in errs {
+					println!("Constraint encoding error:\n{constraint}\n{err}");
+				}
+				panic!(
+					"Constraint is incorrect. Test failed for {:?}\n{con_model}",
+					model.config,
+				);
+			}
 		}
 	}
 
-	fn test_lp(lp: &str, mut model: Model<Lit, C>, expected_assignments: Option<&[Assignment<C>]>) {
+	fn check_decomposition(
+		model: &Model<Lit, C>,
+		decomposition: &Model<Lit, C>,
+		expected_assignments: Option<&[Assignment<C>]>,
+	) {
+		if let Err(errs) = model.check_assignments(
+			&decomposition.brute_force_solve(Some(IntVarId(model.num_var))),
+			expected_assignments,
+		) {
+			for err in errs {
+				println!("Decomposition error:\n{err}");
+			}
+			panic!(
+				"Decomposition is incorrect. Test failed for {:?}\n{model}\n{decomposition}",
+				model.config,
+			);
+		}
+	}
+
+	fn test_lp(
+		lp: &str,
+		mut db: TestDB,
+		mut model: Model<Lit, C>,
+		expected_assignments: Option<&[Assignment<C>]>,
+	) {
 		println!("model = {model}");
 
-		let mut db = TestDB::new(0);
-		model.encode_vars(&mut db).unwrap(); // Encode vars beforehand so db.num_var lines up
 
 		let lit_assignments = if let Ok(decomposition) = model.encode(&mut db) {
 			println!("decomposition = {}", decomposition);
+
 			const CHECK_CONSTRAINTS: bool = false;
 			if CHECK_CONSTRAINTS {
-				for constraint in decomposition.constraints() {
-					println!("constraint = {}", constraint);
-					let mut con_model = model.clone();
-					con_model.cons = con_model
-						.cons
-						.into_iter()
-						.filter(|con| con.lbl == constraint.lbl)
-						.collect();
-					let mut con_db = db.clone();
-					con_model.add_constraint(constraint.clone()).unwrap();
-					con_model.encode_vars(&mut con_db).unwrap();
-					constraint.encode(&mut con_db, &model.config).unwrap();
-					con_model.num_var = constraint
-						.exp
-						.terms
-						.iter()
-						.map(|term| term.x.borrow().id.0)
-						.max()
-						.unwrap();
-					// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
-					con_db.num_var = con_db.cnf.vars().last().unwrap();
-					let lit_assignments = con_db.solve().into_iter().sorted().collect::<Vec<_>>();
-
-					let actual_assignments = lit_assignments
-						.iter()
-						.flat_map(|lit_assignment| con_model.assign(lit_assignment))
-						.sorted()
-						.dedup()
-						.collect::<Vec<_>>();
-
-					if let Err(errs) = con_model.check_assignments(
-						&actual_assignments,
-						None,
-						// Some(&con_model.brute_force_solve(Some(IntVarId(con_model.num_var)))),
-					) {
-						for err in errs {
-							println!("Constraint encoding error:\n{constraint}\n{err}");
-						}
-						panic!(
-							"Constraint is incorrect. Test failed for {:?} and {lp}\n{con_model}",
-							model.config,
-						);
-					}
-				}
+				check_constraints(&model, &decomposition, &db);
 			}
 
 			// Check decomposition
 			const CHECK_DECOMPOSITION: bool = false;
 			if CHECK_DECOMPOSITION {
-				if let Err(errs) = model.check_assignments(
-					&decomposition.brute_force_solve(Some(IntVarId(model.num_var))),
-					expected_assignments,
-				) {
-					for err in errs {
-						println!("Decomposition error:\n{err}");
-					}
-					panic!(
-						"Decomposition is incorrect. Test failed for {:?} and {lp}\n{model}\n{decomposition}",
-						model.config,
-					);
-				}
+				check_decomposition(&model, &decomposition, expected_assignments);
 			}
 
 			// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
@@ -2359,7 +2450,7 @@ End
 			r"
 Subject To
 c0: + 2 x1 + 3 x2 + 5 x3 <= 6
-c1: + 2 x1 + 3 x2 + 5 x4 <= 5
+c1: + 2 x1 + 3 x2 + 5 x4 >= 5
 Binary
 x1
 x2

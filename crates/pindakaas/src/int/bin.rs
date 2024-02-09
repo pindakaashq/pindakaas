@@ -35,6 +35,32 @@ impl<Lit: Literal> BinEnc<Lit> {
 	// 	}
 	// }
 
+	pub fn ineqs<C: Coefficient>(&self, up: bool, dom: &Dom<C>) -> Vec<Vec<Vec<Lit>>> {
+		// TODO exchange for dom bounds? And add or ignore gaps?
+		num::iter::range_inclusive(
+			C::zero(),
+			unsigned_binary_range_ub::<C>(self.bits()).unwrap(),
+		)
+		.map(|k| self.normalize(k, dom))
+		.map(|k| {
+			as_binary(k.into(), Some(self.bits()))
+				.into_iter()
+				.zip(self.x.iter().cloned())
+				// if >=, find 1's, if <=, find 0's
+				.filter_map(|(b, x)| (b == up).then_some(x))
+				// if <=, negate 1's to not 1's
+				.map(|x| if up { x } else { -x })
+				.map(|x| match x {
+					LitOrConst::Lit(x) => vec![x],
+					LitOrConst::Const(_) => unreachable!(),
+				})
+				.collect()
+		})
+		.collect()
+	}
+
+	// TODO think about whether we need this old version. The new version probably does not account for gaps?
+	/*
 	// pub fn iter(&self) -> impl Iterator<Item = Vec<Lit>> {
 	pub fn ineqs<C: Coefficient>(&self, up: bool, dom: &Dom<C>) -> Vec<Vec<Vec<Lit>>> {
 		// TODO exchange for dom bounds
@@ -77,6 +103,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 		// 		.collect()
 		// }
 	}
+	*/
 
 	/// Return cnf constraining cnf>=ks.1 assuming x>=ks.0 (or cnf<=ks.0 assuming x<=ks.1)
 	pub(crate) fn ineq<C: Coefficient>(&self, ks: (C, C), up: bool) -> Vec<Vec<Lit>> {
@@ -292,19 +319,11 @@ mod tests {
 
 	use super::*;
 	use crate::helpers::tests::TestDB;
+
 	#[test]
 	fn test_ineq() {
-		// let mut model = Model::<Lit, C>::default();
-		// let x = model
-		// 	.new_var(&[2, 5, 6, 7, 9], true, None, Some(String::from("x")))
-		// 	.unwrap();
-		// let x = IntVar::<Lit, C>::new(1, &[2, 5, 6, 7, 9], true, None, Some(String::from("x")))
-		// 	.into_ref();
 		let mut db = TestDB::new(0);
-		// let dom = Dom::from_slice(&[2, 5, 6, 7, 9]);
 		let x = BinEnc::new(&mut db, 4, Some(String::from("x")));
-		// dbg!(&x.as_lin_exp::<C>());
-		// dbg!(&x.ineqs::<C>(true, &dom));
 
 		for (up, ks, expected_cnf) in [
 			(true, (0, 1), vec![vec![1, 2, 3, 4]]),
@@ -326,10 +345,13 @@ mod tests {
 	}
 
 	#[test]
-	fn test_ineq_2() {
+	fn test_ineqs() {
 		let mut db = TestDB::new(0);
-		// let dom = Dom::from_slice(&[0, 1]);
-		let x = BinEnc::new(&mut db, 1, Some(String::from("x")));
-		dbg!(&x.ineq::<C>((0, 1), true));
+		let dom = Dom::from_slice(&[0, 1, 2, 3]);
+		let x = BinEnc::new(&mut db, 2, Some(String::from("x")));
+		assert_eq!(
+			x.ineqs::<C>(true, &dom),
+			vec![vec![], vec![vec![1]], vec![vec![2]], vec![vec![1], vec![2]]]
+		);
 	}
 }

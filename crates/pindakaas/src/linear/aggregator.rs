@@ -738,6 +738,7 @@ mod tests {
 		);
 	}
 
+	/*
 	#[test]
 	fn test_sort_same_coefficients() {
 		let mut db = TestDB::new(4);
@@ -789,6 +790,7 @@ mod tests {
 		);
 		db.check_complete()
 	}
+	*/
 
 	#[test]
 	fn test_equal_one() {

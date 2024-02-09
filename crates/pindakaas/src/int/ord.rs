@@ -23,7 +23,6 @@ impl<Lit: Literal> OrdEnc<Lit> {
 			x: dom
 				.iter()
 				.skip(1)
-				.into_iter()
 				.map(|_v| new_var!(db, format!("{_lbl}≥{_v}")))
 				.collect(),
 		}
