@@ -44,7 +44,8 @@ pub(crate) use emit_clause;
 #[cfg(feature = "trace")]
 mod subscriber {
 
-	const SHOW_DIMACS_ID: bool = false;
+	const SHOW_DIMACS_ID: bool = true;
+	const SHOW_DUR: bool = false;
 
 	use std::{
 		fmt,
@@ -268,12 +269,17 @@ mod subscriber {
 			let visitor = stack.pop().unwrap();
 			assert_eq!(&visitor.ident, span); // FIXME: Deal with out of order execution
 			if let Some(start) = visitor.start {
-				let dur = Instant::now() - start;
 				self.indented_output(
 					stack.len(),
 					&format!(
-						"╰─╴time: {dur:?} vars: {} clauses: {}",
-						visitor.vars, visitor.clauses
+						"╰─╴{}vars: {} clauses: {}",
+						if SHOW_DUR {
+							format!("time: {:?} ", Instant::now() - start)
+						} else {
+							String::from("")
+						},
+						visitor.vars,
+						visitor.clauses
 					),
 				)
 			}
@@ -342,15 +348,15 @@ mod subscriber {
 
 	impl Visit for EventVisitor {
 		fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-			let value = Some(format!("{value:?}"));
+			let value = format!("{value:?}");
 			match field.name() {
-				"message" => match value.unwrap().as_str() {
+				"message" => match value.as_str() {
 					"new variable" => self.kind = Some(EventKind::NewVar),
 					"emit clause" => self.kind = Some(EventKind::Clause),
 					_ => {}
 				},
-				"var" => self.var = value,
-				"clause" => self.clause = value,
+				"var" => self.var = Some(value),
+				"clause" => self.clause = Some(value),
 				_ => {}
 			}
 		}

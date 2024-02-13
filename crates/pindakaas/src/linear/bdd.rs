@@ -235,7 +235,7 @@ where
 
 		model.extend(decomposition);
 
-		model.encode(db)?;
+		model.encode(db, false)?;
 		Ok(())
 	}
 }

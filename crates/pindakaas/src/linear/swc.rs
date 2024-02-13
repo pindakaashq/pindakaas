@@ -103,7 +103,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			&model.config,
 		)?;
 		model.extend(decomposition);
-		model.encode(db)?;
+		model.encode(db, false)?;
 		Ok(())
 	}
 }

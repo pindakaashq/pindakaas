@@ -1,7 +1,7 @@
 use num::Integer;
 use rustc_hash::FxHashMap;
 
-use crate::int::helpers::{sign_extend, to_lex_bits};
+use crate::int::helpers::sign_extend;
 
 use crate::{
 	helpers::{as_binary, XorConstraint, XorEncoder},
@@ -163,7 +163,8 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase, C: Coefficient>(
 	// For every zero bit in k:
 	// - either the `x` bit is also zero, or
 	// - a higher `x` bit is zero that was one in k.
-	let k = to_lex_bits(k, bits, false);
+
+	let k = as_binary::<C>(k.into(), Some(bits));
 
 	(0..bits)
 		.filter(|i| !k.get(*i).unwrap_or(&false))
@@ -189,7 +190,7 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase, C: Coefficient>(
 	k: C,
 	bits: usize,
 ) -> Result {
-	let k = to_lex_bits(k, bits, false);
+	let k = as_binary::<C>(k.into(), Some(bits));
 
 	(0..bits)
 		.filter(|i| *k.get(*i).unwrap_or(&false))
