@@ -53,7 +53,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
 
 		while layer.len() > 1 {
 			let mut next_layer = Vec::new();
-			let lin_ub = layer.iter().map(|x| x.ub()).reduce(C::add).unwrap();
+			// let lin_ub = layer.iter().map(|x| x.ub()).reduce(C::add).unwrap();
 			for (j, children) in layer.chunks(2).enumerate() {
 				match children {
 					[x] => {
@@ -64,18 +64,18 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
 						let dom = if at_root {
 							vec![lin.k]
 						} else {
-							let lb = lin.k - (lin_ub - left.ub() - right.ub()) - C::one();
+							// let lb = lin.k - (lin_ub - left.ub() - right.ub()) - C::one();
 							left.dom()
 								.into_iter()
 								.cartesian_product(right.dom().into_iter())
 								.map(|(a, b)| a + b)
-								.filter(|d| {
-									lin.cmp.split().into_iter().all(|cmp| match cmp {
-										Comparator::LessEq => d <= &lin.k,
-										Comparator::GreaterEq => d >= &lb,
-										_ => unreachable!(),
-									})
-								})
+								// .filter(|d| {
+								// 	lin.cmp.split().into_iter().all(|cmp| match cmp {
+								// 		Comparator::LessEq => d <= &lin_ub,
+								// 		Comparator::GreaterEq => d >= &lb,
+								// 		_ => unreachable!(),
+								// 	})
+								// })
 								.sorted()
 								.dedup()
 								.collect::<Vec<_>>()
@@ -87,7 +87,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
 							Some(format!("gt_{}_{}", i, j)),
 						)?;
 
-						model.add_constraint(Lin::tern(
+						let con = Lin::tern(
 							left.clone(),
 							right.clone(),
 							if !at_root && EQUALIZE_INTERMEDIATES {
@@ -97,7 +97,10 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
 							},
 							parent.clone().into(),
 							Some(format!("gt_{}_{}", i, j)),
-						))?;
+						);
+
+						// con.propagate(&Consistency::Bounds)?;
+						model.add_constraint(con)?;
 						next_layer.push(parent.into());
 					}
 					_ => panic!(),
@@ -147,7 +150,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 			&model.config,
 		)?;
 		model.extend(decomposition);
-		model.encode(db)?;
+		model.encode(db, false)?;
 		Ok(())
 	}
 }

@@ -365,7 +365,7 @@ pub mod tests {
 	/// The maximum number of variable to generate expected solutions for
 	const GENERATE_EXPECTED_SOLUTIONS: i32 = 0;
 
-	#[derive(Clone)]
+	#[derive(Clone, Debug)]
 	pub(crate) struct TestDB {
 		slv: Solver,
 		/// Number of variables available when solver is created

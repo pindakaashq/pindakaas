@@ -603,7 +603,7 @@ mod tests {
 		)
 		.unwrap();
 		let mut cnf = Cnf::new(0);
-		model.encode(&mut cnf).unwrap();
+		model.encode(&mut cnf, true).unwrap();
 		println!("opb = {}", model.to_text(Format::Opb));
 	}
 
@@ -615,7 +615,8 @@ Subject To
   c1: 2 x + 3 y + 5 z <= 6
 Binary
   x
-  y
+Doms
+  y in 0,1
 Bounds
   0 <= z <= 1
 End
@@ -624,7 +625,7 @@ End
 		let mut cnf = Cnf::new(0);
 		println!("model = {model}");
 
-		model.encode(&mut cnf).unwrap();
+		model.encode(&mut cnf, true).unwrap();
 		println!("lp = {}", model.to_text(Format::Lp));
 		// assert_eq!(lp, model.to_text(Format::Lp));
 	}

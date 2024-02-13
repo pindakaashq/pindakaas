@@ -1,6 +1,6 @@
 use std::fmt::{self, Display};
 
-use crate::{Coefficient, Lin, Literal, Model, Term};
+use crate::{int::IntVarEnc, Coefficient, Lin, Literal, Model, Term};
 use itertools::Itertools;
 
 use super::{model::Obj, IntVar, LinExp};
@@ -32,6 +32,8 @@ impl<Lit: Literal, C: Coefficient> Display for Term<Lit, C> {
 			write!(f, "+ 0")
 		} else if self.c.is_one() {
 			write!(f, "+ ({})", self.x.borrow())
+		} else if self.c == -C::one() {
+			write!(f, "- ({})", self.x.borrow())
 		} else if self.c.is_positive() {
 			write!(f, "+ {}·({})", self.c, self.x.borrow())
 		} else {
@@ -69,6 +71,17 @@ impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 
 impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{} ∈ {}", self.lbl(), self.dom)
+		write!(
+			f,
+			"{}{} ∈ {}",
+			self.lbl(),
+			match self.e {
+				Some(IntVarEnc::Bin(_)) => ":B",
+				Some(IntVarEnc::Ord(_)) => ":O",
+				Some(IntVarEnc::Const(_)) => unreachable!(),
+				None => "",
+			},
+			self.dom
+		)
 	}
 }

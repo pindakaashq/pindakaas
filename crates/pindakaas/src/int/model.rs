@@ -1,6 +1,6 @@
 #![allow(unused_imports, unused_variables, dead_code, unreachable_code)]
 use crate::{
-	helpers::{add_clauses_for, as_binary, negate_cnf, two_comp_bounds},
+	helpers::{add_clauses_for, as_binary, negate_cnf, two_comp_bounds, unsigned_binary_range_ub},
 	int::{ord::OrdEnc, Dom, TernLeConstraint, TernLeEncoder},
 	linear::{log_enc_add_fn, Part},
 	trace::emit_clause,
@@ -331,10 +331,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(
 		&mut self,
 		db: &mut DB,
+		decompose: bool,
 	) -> Result<Self, Unsatisfiable> {
 		// Create decomposed model and its aux vars
 
-		let mut decomposition = if DECOMPOSE {
+		let mut decomposition = if decompose {
 			self.clone().decompose()?
 		} else {
 			self.clone()
@@ -389,7 +390,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		self.vars()
 			.iter()
 			.map(|x| x.borrow().assign(a).map(|a| (x.borrow().id, a)))
-			.collect::<Result<HashMap<_, _>, _>>() // TODO weird it can't infer type
+			.collect::<Result<HashMap<_, _>, _>>()
 			.map(|a| Assignment(a))
 	}
 
@@ -448,8 +449,18 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 		let canonicalize = |a: &[Assignment<C>]| a.iter().sorted().cloned().collect::<Vec<_>>();
 
+		let check_unique = |a: &[Assignment<C>], mess: &str| {
+			assert!(
+				a.iter().sorted().tuple_windows().all(|(a, b)| a != b),
+				"Expected unique {mess} assignments but got:\n{}",
+				a.iter().map(|a| format!("{}", a)).join("\n")
+			)
+		};
+
 		let expected_assignments = canonicalize(&expected_assignments);
+		check_unique(&expected_assignments, "expected");
 		let actual_assignments = canonicalize(actual_assignments);
+		check_unique(&actual_assignments, "actual");
 
 		// TODO unnecessary canonicalize?
 		let extra_int_assignments = canonicalize(
@@ -605,7 +616,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	pub fn ineqs(&self, cmp: &Comparator) -> Vec<(C, Vec<Vec<Lit>>)> {
 		// TODO merge or handle repeated literals
 		let up = self.handle_polarity(cmp);
-		let dom = &self.x.borrow().dom;
+		let x_dom = &self.x.borrow().dom;
 		match self
 			.x
 			.borrow()
@@ -614,7 +625,35 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			.unwrap_or_else(|| panic!("{} was not encoded", self.x.borrow()))
 		{
 			IntVarEnc::Ord(o) => self.dom().into_iter().zip(o.ineqs(up)).collect(),
-			IntVarEnc::Bin(b) => self.dom().into_iter().zip(b.ineqs::<C>(up, dom)).collect(),
+			IntVarEnc::Bin(b) => {
+				let is_two_comp = x_dom.lb().is_negative();
+				let range = if is_two_comp {
+					two_comp_bounds(b.bits())
+				} else {
+					(C::zero(), unsigned_binary_range_ub::<C>(b.bits()).unwrap())
+				};
+				num::iter::range_inclusive(range.0, range.1)
+					.map(|k| (k, b.normalize(k, x_dom)))
+					.map(|(v, k)| {
+						(
+							self.c * v,
+							as_binary(k.into(), Some(b.bits()))
+								.into_iter()
+								.zip(b.x.iter().cloned())
+								// if >=, find 1's, if <=, find 0's
+								.filter_map(|(b, x)| (b == up).then_some(x))
+								// if <=, negate 1's to not 1's
+								.map(|x| if up { x } else { -x })
+								.map(|x| match x {
+									LitOrConst::Lit(x) => vec![x],
+									LitOrConst::Const(_) => unreachable!(),
+								})
+								.collect_vec(),
+						)
+					})
+					.collect()
+
+			}
 			IntVarEnc::Const(_) => todo!(),
 		}
 	}
@@ -966,7 +1005,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				todo!("Untested code: fixing of vars from unary constraints");
 				// Ok(vec![])
 			}
-			_ if self.exp.terms.len() <= 3 => Ok((vec![self], num_var)),
+			_ if self.exp.terms.len() <= 2 || self.is_tern() => Ok((vec![self], num_var)),
 			_ => {
 				let new_model = match model_config.decomposer {
 					Decomposer::Bdd => BddEncoder::default().decompose(self, num_var, model_config),
@@ -1123,13 +1162,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		}
 	}
 
-	pub(crate) fn _is_tern(&self) -> bool {
+	pub(crate) fn is_tern(&self) -> bool {
 		let cs = self.exp.terms.iter().map(|term| term.c).collect::<Vec<_>>();
-		cs.len() == 3
-			&& cs[0].is_positive()
-			&& cs[1].is_positive()
-			&& cs[2].is_negative()
-			&& self.k.is_zero()
+		cs.len() == 3 && cs[2] == -C::one() && self.k.is_zero()
 	}
 
 	fn check(&self, a: &Assignment<C>) -> Result<(), CheckError<Lit>> {
@@ -1217,18 +1252,26 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					let k = self.k - conditions.iter().map(|(c, _)| *c).fold(C::zero(), C::add);
 					let cons = consequent.ineq(k, &cmp);
 
-					println!(
-						"{} -> {}*x{}{} {:?}",
-						conditions
-							.iter()
-							// .zip(terms)
-							.map(|c| format!("x{}{} {:?}", cmp.reverse(), c.0, c.1))
-							.join(" /\\ "),
-						consequent.c,
-						cmp,
-						k,
-						cons
-					);
+					// println!(
+					// 	"{} -> {}*{}{}{} {:?}",
+					// 	conditions
+					// 		.iter()
+					// 		.skip(1)
+					// 		.zip(&self.exp.terms)
+					// 		.map(|(c, t)| format!(
+					// 			"{}{}{} {:?}",
+					// 			t.x.borrow().lbl(),
+					// 			cmp.reverse(),
+					// 			c.0,
+					// 			c.1
+					// 		))
+					// 		.join(" /\\ "),
+					// 	consequent.c,
+					// 	self.exp.terms.last().unwrap().x.borrow().lbl(),
+					// 	cmp,
+					// 	k,
+					// 	cons
+					// );
 
 					add_clauses_for(
 						db,
@@ -1241,14 +1284,6 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				})
 		})
 	}
-
-	// let handle_polarity = |cmp: &Comparator, c: &C| {
-	// 	if c.is_positive() == (cmp == &Comparator::GreaterEq) {
-	// 		Comparator::GreaterEq
-	// 	} else {
-	// 		Comparator::LessEq
-	// 	}
-	// };
 
 	/*
 		#[cfg_attr(
@@ -1831,7 +1866,7 @@ mod tests {
 		let mut cnf = Cnf::new(0);
 
 		// model.propagate(&Consistency::Bounds);
-		model.encode(&mut cnf).unwrap();
+		model.encode(&mut cnf, true).unwrap();
 	}
 
 	use crate::{helpers::tests::TestDB, Format};
@@ -1855,12 +1890,15 @@ mod tests {
 			// [Some(0)] // [None, Some(0), Some(2)]
 			[Scm::Add],
 			// [Decomposer::Bdd],
-			[Decomposer::Gt],
-			// [Decomposer::Gt, Decomposer::Swc, Decomposer::Bdd],
+			// [Decomposer::Rca],
+			// [Decomposer::Swc],
+			// [Decomposer::Gt],
+			[Decomposer::Gt, Decomposer::Swc, Decomposer::Bdd],
 			// [Consistency::None],
 			// [Consistency::None, Consistency::Bounds],
 			[Consistency::None],
-			[false],
+			// [false],
+			[true],
 			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
 			[Some(0)] // [None, Some(0), Some(2)]
 		)
@@ -1883,11 +1921,12 @@ mod tests {
 		for config in get_model_configs() {
 			// let model = model.deep_clone().with_config(config);
 			// TODO actually, we should find all encs of the decomp as well!
-			for encs in (0..model.num_var)
+			for var_encs in (0..model.num_var)
 				.map(|_| vec![true, false])
 				.multi_cartesian_product()
+			// .take(1)
 			{
-				let model = model.deep_clone();
+				let model = model.deep_clone().with_config(config.clone());
 
 				let mut all_views = HashMap::new();
 
@@ -1896,7 +1935,7 @@ mod tests {
 					.vars()
 					.iter()
 					.sorted_by_key(|var| var.borrow().id)
-					.zip(encs)
+					.zip(var_encs)
 					.try_for_each(|(var, enc)| {
 						var.borrow_mut().encode(&mut db, &mut all_views, enc)
 					})
@@ -1995,16 +2034,15 @@ mod tests {
 
 	fn test_lp(
 		lp: &str,
-		mut db: TestDB,
-		mut model: Model<Lit, C>,
+		db: TestDB,
+		model: Model<Lit, C>,
 		expected_assignments: Option<&[Assignment<C>]>,
 	) {
 		println!("model = {model}");
 
+		let lit_assignments = if let Ok(decomposition) = model.clone().decompose() {
 
-		let lit_assignments = if let Ok(decomposition) = model.encode(&mut db) {
-			println!("decomposition = {}", decomposition);
-
+			// TODO move into var_encs loop
 			const CHECK_CONSTRAINTS: bool = false;
 			if CHECK_CONSTRAINTS {
 				check_constraints(&model, &decomposition, &db);
@@ -2016,29 +2054,67 @@ mod tests {
 				check_decomposition(&model, &decomposition, expected_assignments);
 			}
 
-			// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
-			db.num_var = model.lits() as Lit;
-			db.solve().into_iter().sorted().collect::<Vec<_>>()
+			let var_encs_gen = (model.num_var..decomposition.num_var)
+				.map(|_| vec![true, false])
+				.multi_cartesian_product()
+				// .take(1)
+				.collect_vec();
+			for var_encs in if var_encs_gen.is_empty() {
+				vec![vec![]].into_iter()
+			} else {
+				var_encs_gen.into_iter()
+			} {
+				let mut decomposition = decomposition.deep_clone();
+
+				let mut all_views = HashMap::new();
+				let mut decomp_db = db.clone();
+				decomposition
+					.vars()
+					.iter()
+					.sorted_by_key(|var| var.borrow().id)
+					.filter(|x| x.borrow().id.0 > model.num_var)
+					.zip(var_encs)
+					.try_for_each(|(var, var_enc)| {
+						var.borrow_mut()
+							.encode(&mut decomp_db, &mut all_views, var_enc)
+					})
+					.unwrap();
+				println!("decomposition = {}", decomposition);
+				// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
+				decomp_db.num_var = model.lits() as Lit;
+				// encode and solve
+				let lit_assignments = decomposition
+					.encode(&mut decomp_db, false)
+					.map(|_| decomp_db.solve().into_iter().sorted().collect::<Vec<_>>())
+					.unwrap_or_default();
+				assert_eq!(
+					lit_assignments.iter().unique().count(),
+					lit_assignments.len(),
+					"Expected lit assignments to be unique, but was {lit_assignments:?}"
+				);
+
+				let actual_assignments = lit_assignments
+					.iter()
+					.flat_map(|lit_assignment| model.assign(lit_assignment))
+					.collect::<Vec<_>>();
+
+
+				let check = model.check_assignments(&actual_assignments, expected_assignments);
+				if let Err(errs) = check {
+					for err in errs {
+						println!("{err}");
+					}
+					panic!(
+						"Encoding is incorrect. Test failed for {:?} and {lp}",
+						model.config
+					);
+				}
+			}
 		} else {
 			// TODO if Unsat is unexpected, show which (decomposition?) constraint is causing unsat
-			vec![]
+			todo!();
+			// vec![]
 		};
-
-		let actual_assignments = lit_assignments
-			.iter()
-			.flat_map(|lit_assignment| model.assign(lit_assignment))
-			.collect::<Vec<_>>();
-
-		let check = model.check_assignments(&actual_assignments, expected_assignments);
-		if let Err(errs) = check {
-			for err in errs {
-				println!("{err}");
-			}
-			panic!(
-				"Encoding is incorrect. Test failed for {:?} and {lp}",
-				model.config
-			);
-		}
 	}
 
 	#[test]
@@ -2049,6 +2125,20 @@ Subject To
 c0: + 3 x1 <= 8
 bounds
 0 <= x1 <= 3
+End
+",
+		);
+	}
+
+	#[test]
+	fn test_lp_le_single_gaps() {
+		test_lp_for_configs(
+			r"
+Subject To
+  c0: + 1 x1 <= 6
+\  c0: + 2 x1 <= 2
+doms
+  x1 in 0,2,3,5
 End
 ",
 		);
@@ -2120,6 +2210,21 @@ End
 	}
 
 	#[test]
+	fn test_lp_le_double_w_const() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 2 x1 + 3 x2 - 1 x3 <= 0
+bounds
+0 <= x1 <= 1
+0 <= x2 <= 1
+4 <= x3 <= 4
+End
+",
+		);
+	}
+
+	#[test]
 	fn test_int_lin_ge_single() {
 		test_lp_for_configs(
 			r"
@@ -2137,11 +2242,10 @@ End
 		test_lp_for_configs(
 			r"
 Subject To
-c0: + 2 x1 + 3 x2 + 5 x3 <= 6
+c0: + 2 x1 + 3 x2 <= 4
 Binary
 x1
 x2
-x3
 End
 ",
 		);
@@ -2211,7 +2315,7 @@ End
 		test_lp_for_configs(
 			r"
 Subject To
-c0: - 2 x1 + 3 x2 - 5 x3 <= 2
+c0: 2 x1 + 3 x2 - 5 x3 <= 2
 Binary
 x1
 x2

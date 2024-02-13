@@ -11,7 +11,7 @@ use super::{enc::GROUND_BINARY_AT_LB, Dom, LitOrConst};
 
 #[derive(Debug, Clone)]
 pub(crate) struct BinEnc<Lit: Literal> {
-	x: Vec<LitOrConst<Lit>>,
+	pub(crate) x: Vec<LitOrConst<Lit>>,
 }
 
 impl<Lit: Literal> BinEnc<Lit> {
@@ -34,30 +34,6 @@ impl<Lit: Literal> BinEnc<Lit> {
 	// 		x: x.iter().cloned().map(LitOrConst::from).collect(),
 	// 	}
 	// }
-
-	pub fn ineqs<C: Coefficient>(&self, up: bool, dom: &Dom<C>) -> Vec<Vec<Vec<Lit>>> {
-		// TODO exchange for dom bounds? And add or ignore gaps?
-		num::iter::range_inclusive(
-			C::zero(),
-			unsigned_binary_range_ub::<C>(self.bits()).unwrap(),
-		)
-		.map(|k| self.normalize(k, dom))
-		.map(|k| {
-			as_binary(k.into(), Some(self.bits()))
-				.into_iter()
-				.zip(self.x.iter().cloned())
-				// if >=, find 1's, if <=, find 0's
-				.filter_map(|(b, x)| (b == up).then_some(x))
-				// if <=, negate 1's to not 1's
-				.map(|x| if up { x } else { -x })
-				.map(|x| match x {
-					LitOrConst::Lit(x) => vec![x],
-					LitOrConst::Const(_) => unreachable!(),
-				})
-				.collect()
-		})
-		.collect()
-	}
 
 	// TODO think about whether we need this old version. The new version probably does not account for gaps?
 	/*
@@ -147,30 +123,20 @@ impl<Lit: Literal> BinEnc<Lit> {
 			.collect()
 	}
 
-	/// Get bits; option to invert the sign bit to create an unsigned binary representation offset by `-2^(k-1)`
-	pub(crate) fn xs(&self, to_unsigned: bool) -> Vec<LitOrConst<Lit>> {
+	/// Get encoding as unsigned binary representation (if negative dom values, offset by `-2^(k-1)`)
+	pub(crate) fn xs(&self) -> Vec<LitOrConst<Lit>> {
 		if GROUND_BINARY_AT_LB {
-			self.x.clone()
+			todo!();
+		// self.x.clone()
 		} else {
-			// self.x[..self.x.len() - 1]
-			// 	.iter()
-			// 	.cloned()
-			// 	.chain({
-			// 		let sign = self.x.last().unwrap().clone();
-			// 		[if to_unsigned { -sign } else { sign }]
-			// 	})
-			// 	.collect()
-			self.x[..self.x.len() - 1]
-				.iter()
-				.cloned()
-				.chain({
-					let sign = self.x.last().unwrap().clone();
-					[if to_unsigned { -sign } else { sign }]
-				})
-				.collect()
+			self.x.clone()
 		}
 	}
 
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "binary_consistency", skip_all, fields(constraint = format!("{}", self)))
+	)]
 	pub fn consistent<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(
 		&self,
 		db: &mut DB,
@@ -186,23 +152,31 @@ impl<Lit: Literal> BinEnc<Lit> {
 		Ok(())
 	}
 
+	fn has_sign_bit<C: Coefficient>(dom: &Dom<C>) -> bool {
+		dom.lb().is_negative()
+	}
+
 	/// Encode `x # k` where `# ∈ {≤,=,≥}`
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "unary", skip_all, fields(constraint = format!("{} {cmp} {k}", self)))
+	)]
 	pub(crate) fn encode_unary_constraint<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(
 		&self,
 		db: &mut DB,
 		cmp: &Comparator,
 		k: C,
 		dom: &Dom<C>,
-		_force: bool,
+		force: bool,
 	) -> crate::Result {
 		match cmp {
 			Comparator::LessEq => {
 				if k < dom.lb() {
 					Err(Unsatisfiable)
-				} else if k >= dom.ub() {
+				} else if k >= dom.ub() && !force {
 					Ok(())
 				} else {
-					lex_leq_const(db, &self.xs(true), k, self.bits())
+					lex_leq_const(db, &self.xs(), self.normalize(k, dom), self.bits())
 				}
 			}
 			Comparator::Equal => self
@@ -212,10 +186,10 @@ impl<Lit: Literal> BinEnc<Lit> {
 			Comparator::GreaterEq => {
 				if k > dom.ub() {
 					Err(Unsatisfiable)
-				} else if k <= dom.lb() {
+				} else if k <= dom.lb() && !force {
 					Ok(())
 				} else {
-					lex_geq_const(db, &self.xs(true), k, self.bits())
+					lex_geq_const(db, &self.xs(), self.normalize(k, dom), self.bits())
 				}
 			}
 		}
@@ -225,7 +199,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 	fn eq<C: Coefficient>(&self, k: C, dom: &Dom<C>) -> Result<Vec<Lit>, Unsatisfiable> {
 		as_binary(self.normalize(k, dom).into(), Some(self.bits()))
 			.into_iter()
-			.zip(self.xs(true).iter())
+			.zip(self.xs().iter())
 			.map(|(b, x)| if b { x.clone() } else { -x.clone() })
 			.flat_map(|x| match x {
 				LitOrConst::Lit(lit) => Some(Ok(lit)),
@@ -242,14 +216,18 @@ impl<Lit: Literal> BinEnc<Lit> {
 		} else {
 			// encoding is grounded at the lb of the two comp representation
 			// (this increases k by subtracting the (negative) lower bound)
-			if !dom.lb().is_negative() {
-				k
-			} else {
+			if Self::has_sign_bit(dom) {
 				k.checked_sub(&two_comp_bounds::<C>(self.bits()).0).unwrap()
+			} else {
+				k
 			}
 		}
 	}
 
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "unary", skip_all, fields(constraint = format!("{} != {k}", self)))
+	)]
 	pub(crate) fn encode_neq<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(
 		&self,
 		db: &mut DB,
@@ -315,7 +293,7 @@ impl<Lit: Literal> std::fmt::Display for BinEnc<Lit> {
 #[cfg(test)]
 mod tests {
 	// type Lit = i32;
-	type C = i32;
+	// type C = i32;
 
 	use super::*;
 	use crate::helpers::tests::TestDB;
@@ -344,14 +322,14 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn test_ineqs() {
-		let mut db = TestDB::new(0);
-		let dom = Dom::from_slice(&[0, 1, 2, 3]);
-		let x = BinEnc::new(&mut db, 2, Some(String::from("x")));
-		assert_eq!(
-			x.ineqs::<C>(true, &dom),
-			vec![vec![], vec![vec![1]], vec![vec![2]], vec![vec![1], vec![2]]]
-		);
-	}
+	// #[test]
+	// fn test_ineqs() {
+	// 	let mut db = TestDB::new(0);
+	// 	let dom = Dom::from_slice(&[0, 1, 2, 3]);
+	// 	let x = BinEnc::new(&mut db, 2, Some(String::from("x")));
+	// 	assert_eq!(
+	// 		x.ineqs::<C>(true, &dom),
+	// 		vec![vec![], vec![vec![1]], vec![vec![2]], vec![vec![1], vec![2]]]
+	// 	);
+	// }
 }
