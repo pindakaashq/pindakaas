@@ -1,4 +1,4 @@
-use crate::int::{Consistency, Decompose, IntVar, Lin, Model, Term};
+use crate::int::{Consistency, Decompose, Dom, IntVar, Lin, Model, Term};
 use crate::{ClauseDatabase, Coefficient, Encoder, Linear, Result};
 use crate::{Literal, ModelConfig, Unsatisfiable};
 use itertools::Itertools;
@@ -38,25 +38,31 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for SwcEncoder<C> {
 
 		let n = xs.len();
 
-		// TODO not possible to fix since both closures use db?
-		#[allow(clippy::needless_collect)] // TODO no idea how to avoid collect
-		let ys = std::iter::once(model.new_constant(C::zero()))
-			.chain(
-				(1..n)
-					.flat_map(|i| {
-						let dom = num::iter::range_inclusive(-lin.k, C::zero()).collect::<Vec<_>>();
-						model.new_var(
-							&dom,
-							model.config.add_consistency,
-							None,
-							Some(format!("swc_{}", i)),
-						)
-					})
-					.take(n),
-			)
-			.collect::<Vec<_>>()
+		let ys = [(C::zero(), C::zero())]
 			.into_iter()
-			.chain(std::iter::once(model.new_constant(-lin.k)))
+			.chain(
+				lin.exp
+					.terms
+					.iter()
+					.map(|term| (term.lb(), term.ub()))
+					.take(n - 1)
+					.scan((C::zero(), C::zero()), |state, (lb, ub)| {
+						*state = (state.0 - ub, state.1 - lb);
+						Some(*state)
+					}),
+			)
+			.chain([(-lin.k, -lin.k)])
+			.enumerate()
+			.map(|(i, (lb, ub))| {
+				model
+					.new_var_from_dom(
+						Dom::from_bounds(lb, ub),
+						model.config.add_consistency,
+						None,
+						Some(format!("swc_{}", i)),
+					)
+					.unwrap()
+			})
 			.map(Term::from)
 			.collect::<Vec<_>>();
 
@@ -66,6 +72,9 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for SwcEncoder<C> {
 			.for_each(|((y_curr, y_next), x)| {
 				model.cons.push(Lin::tern(x, y_next, lin.cmp, y_curr, None));
 			});
+
+		// TODO !!
+		// model.propagate(&Consistency::Bounds)?;
 
 		Ok(model)
 	}

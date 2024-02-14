@@ -99,7 +99,6 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
 							Some(format!("gt_{}_{}", i, j)),
 						);
 
-						// con.propagate(&Consistency::Bounds)?;
 						model.add_constraint(con)?;
 						next_layer.push(parent.into());
 					}

@@ -256,9 +256,9 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		))
 	}
 
-	pub(crate) fn new_var(
+	pub(crate) fn new_var_from_dom(
 		&mut self,
-		dom: &[C],
+		dom: Dom<C>,
 		add_consistency: bool,
 		e: Option<IntVarEnc<Lit, C>>,
 		lbl: Option<String>,
@@ -266,7 +266,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		(!dom.is_empty())
 			.then(|| {
 				self.num_var += 1;
-				Rc::new(RefCell::new(IntVar::new(
+				Rc::new(RefCell::new(IntVar::from_dom(
 					self.num_var,
 					dom,
 					add_consistency,
@@ -275,6 +275,16 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 				)))
 			})
 			.ok_or(Unsatisfiable)
+	}
+
+	pub(crate) fn new_var(
+		&mut self,
+		dom: &[C],
+		add_consistency: bool,
+		e: Option<IntVarEnc<Lit, C>>,
+		lbl: Option<String>,
+	) -> Result<IntVarRef<Lit, C>, Unsatisfiable> {
+		self.new_var_from_dom(Dom::from_slice(dom), add_consistency, e, lbl)
 	}
 
 	pub fn add_constraint(&mut self, constraint: Lin<Lit, C>) -> Result {
@@ -652,7 +662,6 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 						)
 					})
 					.collect()
-
 			}
 			IntVarEnc::Const(_) => todo!(),
 		}
@@ -1239,6 +1248,11 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		db: &mut DB,
 		config: &ModelConfig<C>,
 	) -> Result {
+		const PRINT_COUPLING: bool = true;
+		if PRINT_COUPLING {
+			println!("{self}");
+		}
+
 		self.cmp.split().into_iter().try_for_each(|cmp| {
 			let conditions = &self.exp.terms[..self.exp.terms.len() - 1];
 			let consequent = self.exp.terms.last().unwrap();
@@ -1252,26 +1266,28 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					let k = self.k - conditions.iter().map(|(c, _)| *c).fold(C::zero(), C::add);
 					let cons = consequent.ineq(k, &cmp);
 
-					// println!(
-					// 	"{} -> {}*{}{}{} {:?}",
-					// 	conditions
-					// 		.iter()
-					// 		.skip(1)
-					// 		.zip(&self.exp.terms)
-					// 		.map(|(c, t)| format!(
-					// 			"{}{}{} {:?}",
-					// 			t.x.borrow().lbl(),
-					// 			cmp.reverse(),
-					// 			c.0,
-					// 			c.1
-					// 		))
-					// 		.join(" /\\ "),
-					// 	consequent.c,
-					// 	self.exp.terms.last().unwrap().x.borrow().lbl(),
-					// 	cmp,
-					// 	k,
-					// 	cons
-					// );
+					if PRINT_COUPLING {
+						println!(
+							"\t{} -> {}*{}{}{} {:?}",
+							conditions
+								.iter()
+								.skip(1)
+								.zip(&self.exp.terms)
+								.map(|(c, t)| format!(
+									"{}{}{} {:?}",
+									t.x.borrow().lbl(),
+									cmp.reverse(),
+									c.0,
+									c.1
+								))
+								.join(" /\\ "),
+							consequent.c,
+							self.exp.terms.last().unwrap().x.borrow().lbl(),
+							cmp,
+							k,
+							cons
+						);
+					}
 
 					add_clauses_for(
 						db,
@@ -1513,9 +1529,19 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		e: Option<IntVarEnc<Lit, C>>,
 		lbl: Option<String>,
 	) -> Self {
+		Self::from_dom(id, Dom::from_slice(dom), add_consistency, e, lbl)
+	}
+
+	pub(crate) fn from_dom(
+		id: usize,
+		dom: Dom<C>,
+		add_consistency: bool,
+		e: Option<IntVarEnc<Lit, C>>,
+		lbl: Option<String>,
+	) -> Self {
 		Self {
 			id: IntVarId(id),
-			dom: Dom::from_slice(dom),
+			dom,
 			add_consistency,
 			views: HashMap::default(),
 			e,
@@ -1889,11 +1915,12 @@ mod tests {
 			// [false],
 			// [Some(0)] // [None, Some(0), Some(2)]
 			[Scm::Add],
-			// [Decomposer::Bdd],
-			// [Decomposer::Rca],
-			// [Decomposer::Swc],
-			// [Decomposer::Gt],
-			[Decomposer::Gt, Decomposer::Swc, Decomposer::Bdd],
+			[
+				Decomposer::Gt,
+				Decomposer::Swc,
+				Decomposer::Bdd,
+				Decomposer::Rca
+			],
 			// [Consistency::None],
 			// [Consistency::None, Consistency::Bounds],
 			[Consistency::None],
@@ -2041,7 +2068,6 @@ mod tests {
 		println!("model = {model}");
 
 		let lit_assignments = if let Ok(decomposition) = model.clone().decompose() {
-
 			// TODO move into var_encs loop
 			const CHECK_CONSTRAINTS: bool = false;
 			if CHECK_CONSTRAINTS {
@@ -2080,6 +2106,7 @@ mod tests {
 					})
 					.unwrap();
 				println!("decomposition = {}", decomposition);
+
 				// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
 				decomp_db.num_var = model.lits() as Lit;
 				// encode and solve
@@ -2098,6 +2125,7 @@ mod tests {
 					.flat_map(|lit_assignment| model.assign(lit_assignment))
 					.collect::<Vec<_>>();
 
+				// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
 
 				let check = model.check_assignments(&actual_assignments, expected_assignments);
 				if let Err(errs) = check {
