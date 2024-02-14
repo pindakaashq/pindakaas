@@ -1946,8 +1946,13 @@ mod tests {
 		let model = Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap();
 		let expected_assignments = model.brute_force_solve(None);
 		for config in get_model_configs() {
-			// let model = model.deep_clone().with_config(config);
-			// TODO actually, we should find all encs of the decomp as well!
+			assert!(
+				model.num_var <= 10,
+				"Attempting to test many (2^{}) var enc specs",
+				model.num_var
+			);
+
+			// TODO possibly skip enc_spec on constants
 			for var_encs in (0..model.num_var)
 				.map(|_| vec![true, false])
 				.multi_cartesian_product()
@@ -1970,27 +1975,6 @@ mod tests {
 
 				test_lp(lp, db, model, Some(&expected_assignments))
 			}
-
-			/*
-			// let model = Model::<Lit, C>::from_string(lp.into(), Format::Lp)
-			// 	.unwrap()
-			// 	.with_config(config);
-			let model = model.deep_clone();
-			let mut all_views = HashMap::new();
-
-			let mut db = TestDB::new(0);
-			model
-				.vars()
-				.iter()
-				.sorted_by_key(|var| var.borrow().id)
-				.try_for_each(|var| {
-					let v = var.borrow_mut().encode(&mut db, &mut all_views, true);
-					v
-				})
-				.unwrap();
-
-			test_lp(lp, db, model, Some(&expected_assignments))
-			*/
 		}
 	}
 	fn check_constraints(model: &Model<Lit, C>, decomposition: &Model<Lit, C>, db: &TestDB) {
@@ -2085,6 +2069,13 @@ mod tests {
 				.multi_cartesian_product()
 				// .take(1)
 				.collect_vec();
+
+			assert!(
+				var_encs_gen.len() <= 50,
+				"Attempting to test many ({}) var enc specs",
+				var_encs_gen.len()
+			);
+
 			for var_encs in if var_encs_gen.is_empty() {
 				vec![vec![]].into_iter()
 			} else {
@@ -2581,13 +2572,12 @@ End
 		test_lp_for_configs(
 			r"
 Subject To
-c0: + 2 x1 + 3 x2 + 5 x3 <= 6
-c1: + 2 x1 + 3 x2 + 5 x4 >= 5
+c0: + 2 x1 + 3 x2 <= 6
+c1: + 2 x1 + 5 x3 >= 5
 Binary
 x1
 x2
 x3
-x4
 End
 ",
 		);
