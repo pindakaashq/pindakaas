@@ -12,6 +12,9 @@ pub struct Dom<C: Coefficient> {
 }
 
 impl<C: Coefficient> Dom<C> {
+	pub fn constant(d: C) -> Self {
+		Self::from_slice(&[d])
+	}
 	pub fn from_slice(ds: &[C]) -> Self {
 		debug_assert!(is_sorted(ds), "{ds:?}");
 		let mut ds = ds.iter();
@@ -57,6 +60,10 @@ impl<C: Coefficient> Dom<C> {
 		let r = ranges.next().unwrap();
 		let r = num::iter::range_inclusive(r.0, r.1);
 		DomIterator { ranges, range: r }
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.ranges.is_empty()
 	}
 
 	// TODO binary search
