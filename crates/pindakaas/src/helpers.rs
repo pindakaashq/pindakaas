@@ -2,6 +2,7 @@ use std::{
 	cmp::max,
 	collections::HashSet,
 	iter::FusedIterator,
+	num::NonZeroI32,
 	ops::{Bound, RangeBounds, RangeInclusive},
 };
 
@@ -208,8 +209,33 @@ pub struct VarRange {
 }
 
 impl VarRange {
+	/// Create a range starting from [`start`] and ending at [`end`] (inclusive)
 	pub fn new(start: Var, end: Var) -> Self {
 		Self { start, end }
+	}
+
+	/// Performs the indexing operation into the variable range
+	pub fn index(&self, index: usize) -> Var {
+		if index >= self.len() {
+			panic!("out of bounds access");
+		}
+		if index == 0 {
+			self.start
+		} else {
+			let index = NonZeroI32::new(index as i32).unwrap();
+			self.start.checked_add(index).unwrap()
+		}
+	}
+
+	/// Find the index of a variable within the range
+	pub fn find(&self, var: Var) -> Option<usize> {
+		if !self.contains(&var) {
+			None
+		} else {
+			let offset = (var.0.get() - self.start.0.get()) as usize;
+			debug_assert!(offset <= self.len());
+			Some(offset)
+		}
 	}
 }
 
@@ -226,7 +252,7 @@ impl Iterator for VarRange {
 		}
 	}
 	fn size_hint(&self) -> (usize, Option<usize>) {
-		let size = max(self.end.0.get() - self.start.0.get(), 0) as usize;
+		let size = max(self.end.0.get() - self.start.0.get() + 1, 0) as usize;
 		(size, Some(size))
 	}
 	fn count(self) -> usize {
