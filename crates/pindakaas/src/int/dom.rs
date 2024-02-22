@@ -214,7 +214,7 @@ impl<C: Coefficient> Display for Dom<C> {
 		} else if dom.len() > ELIPSIZE {
 			write!(
 				f,
-				"{{{},..,{ub}}} ({})",
+				"{{{},..,{ub}}} |{}|",
 				dom.iter().take(ELIPSIZE).join(","),
 				dom.len()
 			)

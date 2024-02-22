@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use itertools::Itertools;
 
 use crate::{
@@ -25,6 +27,22 @@ impl<Lit: Literal> BinEnc<Lit> {
 			x: (0..lits)
 				.map(|_i| new_var!(db, format!("{_lbl}^{_i}")).into())
 				.collect(),
+		}
+	}
+
+	pub fn two_comp<C: Coefficient>(&self, dom: &Dom<C>) -> Vec<LitOrConst<Lit>> {
+		if dom.lb().is_negative() {
+			self.x[..self.x.len() - 1]
+				.iter()
+				.cloned()
+				.chain([-self.x.last().unwrap().clone()])
+				.collect()
+		} else {
+			self.x
+				.iter()
+				.cloned()
+				.chain([LitOrConst::Const(false)])
+				.collect()
 		}
 	}
 

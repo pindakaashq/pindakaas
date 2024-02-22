@@ -1,4 +1,5 @@
 #![allow(unused_imports, unused_variables, dead_code, unreachable_code)]
+use crate::linear::log_enc_add_;
 use crate::{
 	helpers::{add_clauses_for, as_binary, negate_cnf, two_comp_bounds, unsigned_binary_range_ub},
 	int::{ord::OrdEnc, Dom, TernLeConstraint, TernLeEncoder},
@@ -575,7 +576,7 @@ Actual assignments:
 	}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LinExp<Lit: Literal, C: Coefficient> {
 	pub terms: Vec<Term<Lit, C>>,
 }
@@ -597,6 +598,7 @@ pub struct Term<Lit: Literal, C: Coefficient> {
 impl<Lit: Literal, C: Coefficient> Mul<C> for Term<Lit, C> {
 	type Output = Self;
 	fn mul(self, rhs: C) -> Self {
+		assert!(self.x.borrow().e.is_none());
 		Self {
 			x: self.x,
 			c: self.c * rhs,
@@ -955,7 +957,15 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 
 	// TODO [?] correct way to return iter?
 	pub(crate) fn dom(&self) -> Vec<C> {
-		self.x.borrow().dom.iter().map(|d| self.c * d).collect()
+		if self.c.is_zero() {
+			vec![C::zero()]
+		} else {
+			let mut d = self.x.borrow().dom.iter().map(|d| self.c * d).collect_vec();
+			if self.c.is_negative() {
+				d.reverse() // TODO implement reverse iterator
+			}
+			d
+		}
 	}
 
 	pub(crate) fn size(&self) -> C {
@@ -1014,16 +1024,89 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				todo!("Untested code: fixing of vars from unary constraints");
 				// Ok(vec![])
 			}
-			_ if self.exp.terms.len() <= 2 || self.is_tern() => Ok((vec![self], num_var)),
+			// _ if self.exp.terms.len() <= 2 || self.is_tern() => Ok((vec![self], num_var)),
 			_ => {
-				let new_model = match model_config.decomposer {
+				let decomp = match model_config.decomposer {
 					Decomposer::Bdd => BddEncoder::default().decompose(self, num_var, model_config),
 					Decomposer::Gt => {
 						TotalizerEncoder::default().decompose(self, num_var, model_config)
 					}
 					Decomposer::Swc => SwcEncoder::default().decompose(self, num_var, model_config),
-					Decomposer::Rca => return Ok((vec![self], num_var)), // dodgy skip decomposition for SCM
+					Decomposer::Rca => {
+						let mut model = Model::<Lit, C>::new(num_var, model_config);
+						model.add_constraint(self)?;
+						Ok(model)
+					}
 				}?;
+
+				let new_model = decomp.cons.into_iter().fold(
+					Model::<Lit, C>::new(num_var, &decomp.config),
+					|mut con_model, con| {
+						let encs = con
+							.exp
+							.terms
+							.iter()
+							.map(|t| t.x.borrow().prefer_order(con_model.config.cutoff))
+							.collect_vec();
+						if encs.iter().all(|e| !e) {
+							let new_con = Lin {
+								exp: LinExp {
+									terms: con
+										.exp
+										.terms
+										.iter()
+										.with_position()
+										.map(|(position, t)| {
+											if t.c.abs().is_one() {
+												return t.clone();
+											}
+											let t = match position {
+												Position::Last => t.clone() * -C::one(),
+												_ => t.clone(),
+											};
+											let y = con_model
+												.new_var(
+													&t.dom(),
+													false, // TODO decide consistency
+													None,
+													Some(format!(
+														"scm-{}·{}",
+														t.c,
+														t.x.borrow().lbl()
+													)),
+												)
+												.unwrap();
+
+											con_model
+												.add_constraint(Lin {
+													exp: LinExp {
+														terms: vec![
+															t.clone(),
+															Term::new(-C::one(), y.clone()),
+														],
+													},
+													cmp: Comparator::Equal,
+													k: C::zero(),
+													lbl: con
+														.lbl
+														.clone()
+														.map(|lbl| (format!("scm-{}", lbl))),
+												})
+												.unwrap();
+											Term::from(y)
+										})
+										.collect(),
+								},
+								..con
+							};
+							con_model.add_constraint(new_con).unwrap();
+						}
+
+						con_model
+					},
+				);
+				println!("new_model = {}", new_model);
+
 				Ok((new_model.cons, new_model.num_var))
 			}
 		}
@@ -1248,57 +1331,123 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		db: &mut DB,
 		config: &ModelConfig<C>,
 	) -> Result {
-		const PRINT_COUPLING: bool = true;
+		const PRINT_COUPLING: bool = false;
 		if PRINT_COUPLING {
 			println!("{self}");
 		}
 
-		self.cmp.split().into_iter().try_for_each(|cmp| {
-			let conditions = &self.exp.terms[..self.exp.terms.len() - 1];
-			let consequent = self.exp.terms.last().unwrap();
-
-			[vec![(C::zero(), vec![])]] // handle empty conditions
-				.into_iter()
-				.chain(conditions.iter().map(|term| term.ineqs(&cmp.reverse())))
-				.multi_cartesian_product()
-				.try_for_each(|conditions| {
-					// calculate x>=k-sum(conditions)
-					let k = self.k - conditions.iter().map(|(c, _)| *c).fold(C::zero(), C::add);
-					let cons = consequent.ineq(k, &cmp);
-
-					if PRINT_COUPLING {
-						println!(
-							"\t{} -> {}*{}{}{} {:?}",
-							conditions
-								.iter()
-								.skip(1)
-								.zip(&self.exp.terms)
-								.map(|(c, t)| format!(
-									"{}{}{} {:?}",
-									t.x.borrow().lbl(),
-									cmp.reverse(),
-									c.0,
-									c.1
-								))
-								.join(" /\\ "),
-							consequent.c,
-							self.exp.terms.last().unwrap().x.borrow().lbl(),
-							cmp,
-							k,
-							cons
-						);
-					}
-
-					add_clauses_for(
+		// TODO only one cmp == Equality (and exchange equalities)
+		let term_encs = self
+			.exp
+			.terms
+			.iter()
+			.map(|t| (t, t.x.borrow().clone().e.unwrap())) // TODO hopefully does not clone inner enc?
+			.collect_vec();
+		match &term_encs[..] {
+			// [Some(&IntVarEnc::Bin(ref x)), Some(&IntVarEnc::Bin(ref y)), Some(&IntVarEnc::Bin(ref z))] =>
+			[(Term { c, .. }, IntVarEnc::Bin(x_enc)), (Term { c: y_c, .. }, IntVarEnc::Bin(y_enc))]
+				if *y_c == -C::one() =>
+			{
+				let lits = x_enc.lits();
+				let sh = c.trailing_zeros();
+				let c = c.shr(sh as usize);
+				let cnf = Cnf::<DB::Lit>::from_file(&PathBuf::from(format!(
+					"{}/res/ecm/{lits}_{c}.dimacs",
+					env!("CARGO_MANIFEST_DIR")
+				)))
+				.unwrap_or_else(|_| panic!("Could not find Dnf method cnf for {lits}_{c}"));
+				let map = cnf
+					.vars()
+					.zip(x_enc.x.iter().chain(y_enc.x.iter()).flat_map(|x| match x {
+						LitOrConst::Lit(l) => Some(l.clone()),
+						_ => None,
+					}))
+					.collect::<HashMap<_, _>>();
+				cnf.iter().try_for_each(|clause| {
+					emit_clause!(
 						db,
-						conditions
+						&clause
 							.iter()
-							.map(|(_, cnf)| negate_cnf(cnf.clone())) // negate conditions
-							.chain([cons])
-							.collect(),
+							.map(|x| {
+								let lit = &map[&x.var()];
+								if x.is_negated() {
+									lit.negate()
+								} else {
+									lit.clone()
+								}
+							})
+							.collect::<Vec<_>>()
 					)
 				})
-		})
+			}
+			[(_, IntVarEnc::Bin(_)), (_, IntVarEnc::Bin(_)), (_, IntVarEnc::Bin(_))] => {
+				let (x, y, z) = &self
+					.exp
+					.terms
+					.iter()
+					// .with_position()
+					.map(|t| {
+						match t.x.borrow().e.as_ref() {
+							Some(IntVarEnc::Bin(b)) => b.two_comp(&t.x.borrow().dom),
+							_ => unreachable!(),
+						}
+					})
+					.collect_tuple()
+					.unwrap();
+
+				assert!(self.exp.terms.iter().all(|t| t.c.abs().is_one()), "{self}");
+				log_enc_add_(db, x, y, &self.cmp, z)
+			}
+			_ => {
+				self.cmp.split().into_iter().try_for_each(|cmp| {
+					let conditions = &self.exp.terms[..self.exp.terms.len() - 1];
+					let consequent = self.exp.terms.last().unwrap();
+
+					[vec![(C::zero(), vec![])]] // handle empty conditions
+						.into_iter()
+						.chain(conditions.iter().map(|term| term.ineqs(&cmp.reverse())))
+						.multi_cartesian_product()
+						.try_for_each(|conditions| {
+							// calculate x>=k-sum(conditions)
+							let k =
+								self.k - conditions.iter().map(|(c, _)| *c).fold(C::zero(), C::add);
+							let cons = consequent.ineq(k, &cmp);
+
+							if PRINT_COUPLING {
+								println!(
+									"\t{} -> {}*{}{}{} {:?}",
+									conditions
+										.iter()
+										.skip(1)
+										.zip(&self.exp.terms)
+										.map(|(c, t)| format!(
+											"{}{}{} {:?}",
+											t.x.borrow().lbl(),
+											cmp.reverse(),
+											c.0,
+											c.1
+										))
+										.join(" /\\ "),
+									consequent.c,
+									self.exp.terms.last().unwrap().x.borrow().lbl(),
+									cmp,
+									k,
+									cons
+								);
+							}
+
+							add_clauses_for(
+								db,
+								conditions
+									.iter()
+									.map(|(_, cnf)| negate_cnf(cnf.clone())) // negate conditions
+									.chain([cons])
+									.collect(),
+							)
+						})
+				})
+			}
+		}
 	}
 
 	/*
@@ -1942,6 +2091,9 @@ mod tests {
 		.collect()
 	}
 
+	// const VAR_ENCS: &[bool] = &[true, false];
+	const VAR_ENCS: &[bool] = &[false];
+
 	fn test_lp_for_configs(lp: &str) {
 		let model = Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap();
 		let expected_assignments = model.brute_force_solve(None);
@@ -1954,7 +2106,7 @@ mod tests {
 
 			// TODO possibly skip enc_spec on constants
 			for var_encs in (0..model.num_var)
-				.map(|_| vec![true, false])
+				.map(|_| VAR_ENCS)
 				.multi_cartesian_product()
 			// .take(1)
 			{
@@ -1968,8 +2120,8 @@ mod tests {
 					.iter()
 					.sorted_by_key(|var| var.borrow().id)
 					.zip(var_encs)
-					.try_for_each(|(var, enc)| {
-						var.borrow_mut().encode(&mut db, &mut all_views, enc)
+					.try_for_each(|(var, var_enc)| {
+						var.borrow_mut().encode(&mut db, &mut all_views, *var_enc)
 					})
 					.unwrap();
 
@@ -1979,7 +2131,6 @@ mod tests {
 	}
 	fn check_constraints(model: &Model<Lit, C>, decomposition: &Model<Lit, C>, db: &TestDB) {
 		for constraint in decomposition.constraints() {
-			println!("constraint = {}", constraint);
 			let mut con_model = model.clone();
 			con_model.cons = con_model
 				.cons
@@ -2059,13 +2210,13 @@ mod tests {
 			}
 
 			// Check decomposition
-			const CHECK_DECOMPOSITION: bool = false;
+			const CHECK_DECOMPOSITION: bool = true;
 			if CHECK_DECOMPOSITION {
 				check_decomposition(&model, &decomposition, expected_assignments);
 			}
 
 			let var_encs_gen = (model.num_var..decomposition.num_var)
-				.map(|_| vec![true, false])
+				.map(|_| VAR_ENCS)
 				.multi_cartesian_product()
 				// .take(1)
 				.collect_vec();
@@ -2093,7 +2244,7 @@ mod tests {
 					.zip(var_encs)
 					.try_for_each(|(var, var_enc)| {
 						var.borrow_mut()
-							.encode(&mut decomp_db, &mut all_views, var_enc)
+							.encode(&mut decomp_db, &mut all_views, *var_enc)
 					})
 					.unwrap();
 				println!("decomposition = {}", decomposition);
@@ -2261,10 +2412,11 @@ End
 		test_lp_for_configs(
 			r"
 Subject To
-c0: + 2 x1 + 3 x2 <= 4
+c0: + 2 x1 + 3 x2 + 5 x3 <= 6
 Binary
 x1
 x2
+x3
 End
 ",
 		);
@@ -2315,34 +2467,21 @@ End
 	}
 
 	#[test]
-	fn test_int_lin_le_1_neg_coefs_1() {
-		test_lp_for_configs(
-			r"
+	fn test_int_lin_le_4_unit_tern() {
+		let lp = r"
 Subject To
-c0: - 2 x1 - 3 x2 + 5 x3 <= 2
-Binary
-x1
-x2
-x3
+  c0: 4 x_1 + 1 x_2 - 1 x_3 = 0
+  \ c0: 1 x_1 + 1 x_2 - 1 x_3 = 0
+  \ c0: 3 x_1 + 1 x_2 = 0
+Bounds
+  0 <= x_1 <= 3
+  0 <= x_2 <= 3
+  0 <= x_3 <= 3
 End
-",
-		);
+";
+		test_lp_for_configs(lp);
 	}
 
-	#[test]
-	fn test_int_lin_le_1_neg_coefs_2() {
-		test_lp_for_configs(
-			r"
-Subject To
-c0: 2 x1 + 3 x2 - 5 x3 <= 2
-Binary
-x1
-x2
-x3
-End
-",
-		);
-	}
 
 	#[test]
 	fn test_int_lin_eq_1() {
@@ -2754,5 +2893,18 @@ Bounds
 End
 ";
 		test_lp_for_configs(lp);
+	}
+
+	#[test]
+	fn test_ineqs() {
+		let mut db = TestDB::new(0);
+		let mut model = Model::<Lit, C>::default();
+		let t = Term::new(1, model.new_var(&[-2, 3, 5], true, None, None).unwrap());
+		t.x.borrow_mut()
+			.encode(&mut db, &mut HashMap::new(), false)
+			.unwrap();
+		dbg!(t.ineqs(&Comparator::LessEq));
+
+		// let x = BinEnc::new(&mut db, 4, Some(String::from("x")));
 	}
 }
