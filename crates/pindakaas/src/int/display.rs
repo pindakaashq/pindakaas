@@ -5,12 +5,17 @@ use itertools::Itertools;
 
 use super::{model::Obj, IntVar, LinExp};
 
+const SHOW_IDS: bool = false;
+
 impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		for con in &self.cons {
 			writeln!(f, "{}", con)?;
 		}
-		writeln!(f, "obj: {}", self.obj)?;
+		if !self.obj.is_satisfy() {
+			writeln!(f, "obj: {}", self.obj)?;
+		}
+		writeln!(f, "num_var: {}", self.num_var)?;
 		Ok(())
 	}
 }
@@ -73,7 +78,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}{} ∈ {}",
+			"{}{}{} ∈ {}",
 			self.lbl(),
 			match self.e {
 				Some(IntVarEnc::Bin(_)) => ":B",
@@ -81,7 +86,12 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 				Some(IntVarEnc::Const(_)) => unreachable!(),
 				None => "",
 			},
-			self.dom
+			if SHOW_IDS {
+				format!("#{}", self.id)
+			} else {
+				String::from("")
+			},
+			self.dom,
 		)
 	}
 }
