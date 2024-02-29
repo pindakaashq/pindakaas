@@ -144,8 +144,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 	/// Get encoding as unsigned binary representation (if negative dom values, offset by `-2^(k-1)`)
 	pub(crate) fn xs(&self) -> Vec<LitOrConst<Lit>> {
 		if GROUND_BINARY_AT_LB {
-			todo!();
-		// self.x.clone()
+			self.x.clone()
 		} else {
 			self.x.clone()
 		}

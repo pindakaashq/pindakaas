@@ -104,7 +104,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarOrd<Lit, C> {
 	}
 }
 
-pub(crate) const GROUND_BINARY_AT_LB: bool = false;
+pub(crate) const GROUND_BINARY_AT_LB: bool = true;
 
 impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
