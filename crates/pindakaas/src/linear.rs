@@ -16,7 +16,7 @@ mod swc;
 pub(crate) mod totalizer;
 
 pub use adder::AdderEncoder;
-pub(crate) use adder::{lex_geq_const, lex_leq_const, log_enc_add_, log_enc_add_fn};
+pub(crate) use adder::{clause, lex_geq_const, lex_leq_const, log_enc_add_, log_enc_add_fn};
 pub use aggregator::LinearAggregator;
 pub use bdd::BddEncoder;
 pub use swc::SwcEncoder;

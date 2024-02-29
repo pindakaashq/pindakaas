@@ -437,7 +437,7 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 	}
 }
 
-fn clause<DB: ClauseDatabase>(db: &mut DB, lits: &[LitOrConst<DB::Lit>]) -> Result {
+pub(crate) fn clause<DB: ClauseDatabase>(db: &mut DB, lits: &[LitOrConst<DB::Lit>]) -> Result {
 	if let Ok(clause) = lits
 		.iter()
 		.filter_map(|lit| match lit {

@@ -3,7 +3,7 @@ use crate::linear::log_enc_add_;
 use crate::{
 	helpers::{add_clauses_for, as_binary, negate_cnf, two_comp_bounds, unsigned_binary_range_ub},
 	int::{ord::OrdEnc, Dom, TernLeConstraint, TernLeEncoder},
-	linear::{log_enc_add_fn, Part},
+	linear::{clause, log_enc_add_fn, Part},
 	trace::emit_clause,
 	BddEncoder, CheckError, Checker, ClauseDatabase, Cnf, Coefficient, Comparator, Encoder,
 	LimitComp, Literal, PosCoeff, Result, SwcEncoder, TotalizerEncoder, Unsatisfiable,
@@ -335,7 +335,9 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.sorted_by_key(|var| var.borrow().id)
 			.try_for_each(|var| {
 				let prefer_order = var.borrow().prefer_order(self.config.cutoff);
-				var.borrow_mut().encode(db, &mut all_views, prefer_order)
+				var.borrow_mut()
+					.encode(db, &mut all_views, prefer_order)
+					.map(|_| ())
 			})
 	}
 
@@ -355,7 +357,6 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 		decomposition.propagate(&self.config.propagate.clone())?;
 
-		decomposition.encode_vars(db)?;
 
 		for con in &decomposition.cons {
 			con.encode(db, &self.config)?;
@@ -646,22 +647,24 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				};
 				num::iter::range_inclusive(range.0, range.1)
 					.map(|k| (k, b.normalize(k, x_dom)))
-					.map(|(v, k)| {
-						(
-							self.c * v,
-							as_binary(k.into(), Some(b.bits()))
-								.into_iter()
-								.zip(b.x.iter().cloned())
-								// if >=, find 1's, if <=, find 0's
-								.filter_map(|(b, x)| (b == up).then_some(x))
-								// if <=, negate 1's to not 1's
-								.map(|x| if up { x } else { -x })
-								.map(|x| match x {
-									LitOrConst::Lit(x) => vec![x],
-									LitOrConst::Const(_) => unreachable!(),
-								})
-								.collect_vec(),
-						)
+					.flat_map(|(v, k)| {
+						as_binary(k.into(), Some(b.bits()))
+							.into_iter()
+							.zip(b.x.iter().cloned())
+							// if >=, find 1's, if <=, find 0's
+							.filter_map(|(b, x)| (b == up).then_some(x))
+							// if <=, negate 1's to not 1's
+							.map(|x| if up { x } else { -x })
+							.filter_map(|x| match x {
+								// THIS IS A CONJUNCTION
+								// TODO make this a bit more clear (maybe simplify function for Cnf)
+								LitOrConst::Lit(x) => Some(Ok(vec![x])),
+								LitOrConst::Const(true) => None,           // literal satisfied
+								LitOrConst::Const(false) => Some(Err(())), // clause falsified
+							})
+							.collect::<Result<Vec<_>, _>>()
+							.ok()
+							.map(|cnf| (self.c * v, cnf))
 					})
 					.collect()
 			}
@@ -1040,7 +1043,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				}?;
 
 				let new_model = decomp.cons.into_iter().fold(
-					Model::<Lit, C>::new(num_var, &decomp.config),
+					Model::<Lit, C>::new(decomp.num_var, &decomp.config),
 					|mut con_model, con| {
 						let encs = con
 							.exp
@@ -1060,10 +1063,6 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 											if t.c.abs().is_one() {
 												return t.clone();
 											}
-											let t = match position {
-												Position::Last => t.clone() * -C::one(),
-												_ => t.clone(),
-											};
 											let y = con_model
 												.new_var(
 													&t.dom(),
@@ -1341,28 +1340,54 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			.exp
 			.terms
 			.iter()
-			.map(|t| (t, t.x.borrow().clone().e.unwrap())) // TODO hopefully does not clone inner enc?
+			.map(|t| (t, false))
+			// TODO hopefully does not clone inner enc?
 			.collect_vec();
-		match &term_encs[..] {
+		match (&term_encs[..], self.cmp) {
 			// [Some(&IntVarEnc::Bin(ref x)), Some(&IntVarEnc::Bin(ref y)), Some(&IntVarEnc::Bin(ref z))] =>
-			[(Term { c, .. }, IntVarEnc::Bin(x_enc)), (Term { c: y_c, .. }, IntVarEnc::Bin(y_enc))]
-				if *y_c == -C::one() =>
+			([(Term { c, x }, false)], _) if c.is_one() => {
+				let x_enc = x.borrow_mut().encode_bin(db)?; // avoid BorrowMutError
+				x_enc.encode_unary_constraint(db, &self.cmp, self.k, &x.borrow().dom, true)
+			}
+			([(Term { c, x }, false), (Term { c: y_c, x: y }, false)], Comparator::Equal)
+				if *y_c == -C::one() && self.k.is_zero() =>
 			{
+				let x_enc = x.borrow_mut().encode_bin(db)?;
 				let lits = x_enc.lits();
 				let sh = c.trailing_zeros();
 				let c = c.shr(sh as usize);
+				if c.is_one() {
+					y.borrow_mut().e = Some(IntVarEnc::Bin(BinEnc {
+						x: (0..sh)
+							.map(|_| LitOrConst::Const(false))
+							.chain(x_enc.x.iter().cloned())
+							.collect(),
+					}));
+					return Ok(());
+				}
+
 				let cnf = Cnf::<DB::Lit>::from_file(&PathBuf::from(format!(
 					"{}/res/ecm/{lits}_{c}.dimacs",
 					env!("CARGO_MANIFEST_DIR")
 				)))
 				.unwrap_or_else(|_| panic!("Could not find Dnf method cnf for {lits}_{c}"));
+				// TODO could replace with some arithmetic
 				let map = cnf
 					.vars()
-					.zip(x_enc.x.iter().chain(y_enc.x.iter()).flat_map(|x| match x {
-						LitOrConst::Lit(l) => Some(l.clone()),
-						_ => None,
-					}))
+					.zip_longest(x_enc.x.iter())
+					.flat_map(|x| match x {
+						itertools::EitherOrBoth::Both(x, y) => match y {
+							LitOrConst::Lit(y) => Some((x, y.clone())),
+							LitOrConst::Const(_) => None,
+						},
+						itertools::EitherOrBoth::Left(x) => {
+							Some((x.clone(), new_var!(db, format!("scm_{x}"))))
+						}
+						itertools::EitherOrBoth::Right(_) => unreachable!(),
+					})
 					.collect::<HashMap<_, _>>();
+
+				// add clauses according to Dnf
 				cnf.iter().try_for_each(|clause| {
 					emit_clause!(
 						db,
@@ -1378,27 +1403,51 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 							})
 							.collect::<Vec<_>>()
 					)
-				})
+				})?;
+
+				// set encoding of y
+				assert!(y.borrow().e.is_none());
+				let y_enc = IntVarEnc::Bin(BinEnc {
+					x: (0..sh)
+						.map(|_| LitOrConst::Const(false))
+						.chain(
+							map.values()
+								.sorted()
+								.skip(lits)
+								.map(|lit| LitOrConst::Lit(lit.clone())),
+						)
+						.collect(),
+				});
+				if y.borrow().add_consistency {
+					y_enc.consistent(db, &y.borrow().dom)?;
+				}
+				y.borrow_mut().e = Some(y_enc);
+
+				Ok(())
 			}
-			[(_, IntVarEnc::Bin(_)), (_, IntVarEnc::Bin(_)), (_, IntVarEnc::Bin(_))] => {
+			([(x, false), (y, false), (z, false)], Comparator::Equal)
+				if [x.c, y.c, z.c] == [C::one(), C::one(), -C::one()] =>
+			{
+				// TODO do not have to encode z if we use functional addition!
 				let (x, y, z) = &self
 					.exp
 					.terms
 					.iter()
 					// .with_position()
-					.map(|t| {
-						match t.x.borrow().e.as_ref() {
-							Some(IntVarEnc::Bin(b)) => b.two_comp(&t.x.borrow().dom),
-							_ => unreachable!(),
-						}
-					})
+					.map(|t| (t, t.x.borrow_mut().encode_bin(db).unwrap()))
+					.map(|(t, b)| b.two_comp(&t.x.borrow().dom))
 					.collect_tuple()
 					.unwrap();
 
-				assert!(self.exp.terms.iter().all(|t| t.c.abs().is_one()), "{self}");
 				log_enc_add_(db, x, y, &self.cmp, z)
 			}
 			_ => {
+				// encode all variables
+				self.exp
+					.terms
+					.iter()
+					.try_for_each(|t| t.x.borrow_mut().encode_bin(db).map(|_| ()))?;
+
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					let conditions = &self.exp.terms[..self.exp.terms.len() - 1];
 					let consequent = self.exp.terms.last().unwrap();
@@ -1760,19 +1809,36 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		self.e.as_ref().map(IntVarEnc::lits).unwrap_or(0)
 	}
 
+	fn encode_bin<DB: ClauseDatabase<Lit = Lit>>(
+		&mut self,
+		db: &mut DB,
+	) -> Result<BinEnc<Lit>, Unsatisfiable> {
+		self.encode(db, &mut HashMap::default(), false)
+			.map(|e| match e {
+				IntVarEnc::Bin(b) => b,
+				_ => unreachable!(),
+			})
+	}
+
 	fn encode<DB: ClauseDatabase<Lit = Lit>>(
 		&mut self,
 		db: &mut DB,
 		views: &mut HashMap<(IntVarId, C), Lit>,
 		prefer_order: bool,
-	) -> Result<(), Unsatisfiable> {
-		if self.e.is_some() {
-			return Ok(());
+	) -> Result<IntVarEnc<Lit, C>, Unsatisfiable> {
+		if let Some(e) = self.e.as_ref() {
+			return Ok(e.clone());
 		};
 
-		self.e = Some(if self.is_constant() {
+		let e = if self.is_constant() {
 			// IntVarEnc::Const(self.dom.lb())
-			IntVarEnc::Ord(OrdEnc::from_lits(&[]))
+			if prefer_order {
+				IntVarEnc::Ord(OrdEnc::from_lits(&[]))
+			} else {
+				let c = self.lb();
+				assert!(c.is_zero());
+				IntVarEnc::Bin(BinEnc::new(db, 0, None))
+			}
 		} else {
 			let e = if prefer_order {
 				// let dom = self
@@ -1810,8 +1876,9 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			// 			}
 
 			e
-		});
-		Ok(())
+		};
+		self.e = Some(e.clone());
+		Ok(e)
 	}
 
 	// TODO should not be C i/o &C?
@@ -2121,7 +2188,9 @@ mod tests {
 					.sorted_by_key(|var| var.borrow().id)
 					.zip(var_encs)
 					.try_for_each(|(var, var_enc)| {
-						var.borrow_mut().encode(&mut db, &mut all_views, *var_enc)
+						var.borrow_mut()
+							.encode(&mut db, &mut all_views, *var_enc)
+							.map(|_| ())
 					})
 					.unwrap();
 
@@ -2234,19 +2303,7 @@ mod tests {
 			} {
 				let mut decomposition = decomposition.deep_clone();
 
-				let mut all_views = HashMap::new();
 				let mut decomp_db = db.clone();
-				decomposition
-					.vars()
-					.iter()
-					.sorted_by_key(|var| var.borrow().id)
-					.filter(|x| x.borrow().id.0 > model.num_var)
-					.zip(var_encs)
-					.try_for_each(|(var, var_enc)| {
-						var.borrow_mut()
-							.encode(&mut decomp_db, &mut all_views, *var_enc)
-					})
-					.unwrap();
 				println!("decomposition = {}", decomposition);
 
 				// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
