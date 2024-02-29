@@ -1014,105 +1014,102 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		model_config: &ModelConfig<C>,
 		num_var: usize,
 	) -> Result<(Vec<Lin<Lit, C>>, usize), Unsatisfiable> {
-		match &self.exp.terms[..] {
-			[] => Ok((vec![], num_var)),
-			[term] if false => {
-				match self.cmp {
-					Comparator::LessEq => {
-						term.x.borrow_mut().le(&C::zero());
-					}
-					Comparator::Equal => {
-						term.x.borrow_mut().fix(&C::zero())?;
-					}
-					Comparator::GreaterEq => {
-						term.x.borrow_mut().ge(&C::zero());
-					}
-				};
-				todo!("Untested code: fixing of vars from unary constraints");
-				// Ok(vec![])
+		let decomp = match &self.exp.terms[..] {
+			[] => return Ok((vec![], num_var)),
+			// [term] if false => {
+			// 	match self.cmp {
+			// 		Comparator::LessEq => {
+			// 			term.x.borrow_mut().le(&C::zero());
+			// 		}
+			// 		Comparator::Equal => {
+			// 			term.x.borrow_mut().fix(&C::zero())?;
+			// 		}
+			// 		Comparator::GreaterEq => {
+			// 			term.x.borrow_mut().ge(&C::zero());
+			// 		}
+			// 	};
+			// 	todo!("Untested code: fixing of vars from unary constraints");
+			// 	// Ok(vec![])
+			// }
+			_ if self.exp.terms.len() <= 2
+				|| self.is_tern()
+				|| model_config.decomposer == Decomposer::Rca =>
+			{
+				let mut model = Model::<Lit, C>::new(num_var, model_config);
+				model.add_constraint(self)?;
+				Ok(model)
 			}
-			// _ if self.exp.terms.len() <= 2 || self.is_tern() => Ok((vec![self], num_var)),
-			_ => {
-				let decomp = match model_config.decomposer {
-					Decomposer::Bdd => BddEncoder::default().decompose(self, num_var, model_config),
-					Decomposer::Gt => {
-						TotalizerEncoder::default().decompose(self, num_var, model_config)
-					}
-					Decomposer::Swc => SwcEncoder::default().decompose(self, num_var, model_config),
-					Decomposer::Rca => {
-						let mut model = Model::<Lit, C>::new(num_var, model_config);
-						model.add_constraint(self)?;
-						Ok(model)
-					}
-				}?;
+			_ => match model_config.decomposer {
+				Decomposer::Bdd => BddEncoder::default().decompose(self, num_var, model_config),
+				Decomposer::Gt => {
+					TotalizerEncoder::default().decompose(self, num_var, model_config)
+				}
+				Decomposer::Swc => SwcEncoder::default().decompose(self, num_var, model_config),
+				Decomposer::Rca => unreachable!(),
+			},
+		}?;
 
-				let new_model = decomp.cons.into_iter().fold(
-					Model::<Lit, C>::new(decomp.num_var, &decomp.config),
-					|mut con_model, con| {
-						let encs = con
-							.exp
-							.terms
-							.iter()
-							.map(|t| t.x.borrow().prefer_order(con_model.config.cutoff))
-							.collect_vec();
-						if encs.iter().all(|e| !e) {
-							let new_con = Lin {
-								exp: LinExp {
-									terms: con
-										.exp
-										.terms
-										.iter()
-										.with_position()
-										.map(|(position, t)| {
-											if t.c.abs().is_one() {
-												return t.clone();
-											}
-											let y = con_model
-												.new_var(
-													&t.dom(),
-													false, // TODO decide consistency
-													None,
-													Some(format!(
-														"scm-{}·{}",
-														t.c,
-														t.x.borrow().lbl()
-													)),
-												)
-												.unwrap();
 
-											con_model
-												.add_constraint(Lin {
-													exp: LinExp {
-														terms: vec![
-															t.clone(),
-															Term::new(-C::one(), y.clone()),
-														],
-													},
-													cmp: Comparator::Equal,
-													k: C::zero(),
-													lbl: con
-														.lbl
-														.clone()
-														.map(|lbl| (format!("scm-{}", lbl))),
-												})
-												.unwrap();
-											Term::from(y)
+		let new_model = decomp.cons.into_iter().fold(
+			Model::<Lit, C>::new(decomp.num_var, &decomp.config),
+			|mut con_model, con| {
+				let encs = con
+					.exp
+					.terms
+					.iter()
+					.map(|t| t.x.borrow().prefer_order(con_model.config.cutoff))
+					.collect_vec();
+				if encs.iter().all(|e| !e) {
+					let new_con = Lin {
+						exp: LinExp {
+							terms: con
+								.exp
+								.terms
+								.iter()
+								.with_position()
+								.map(|(position, t)| {
+									if t.c.abs().is_one() {
+										return t.clone();
+									}
+									let y = con_model
+										.new_var(
+											&t.dom(),
+											false,
+											None,
+											Some(format!("scm-{}·{}", t.c, t.x.borrow().lbl())),
+										)
+										.unwrap();
+
+									con_model
+										.add_constraint(Lin {
+											exp: LinExp {
+												terms: vec![
+													t.clone(),
+													Term::new(-C::one(), y.clone()),
+												],
+											},
+											cmp: Comparator::Equal,
+											k: C::zero(),
+											lbl: con
+												.lbl
+												.clone()
+												.map(|lbl| (format!("scm-{}", lbl))),
 										})
-										.collect(),
-								},
-								..con
-							};
-							con_model.add_constraint(new_con).unwrap();
-						}
+										.unwrap();
+									Term::from(y)
+								})
+								.collect(),
+						},
+						..con
+					};
+					con_model.add_constraint(new_con).unwrap();
+				}
 
-						con_model
-					},
-				);
-				println!("new_model = {}", new_model);
+				con_model
+			},
+		);
 
-				Ok((new_model.cons, new_model.num_var))
-			}
-		}
+		Ok((new_model.cons, new_model.num_var))
 	}
 
 	pub fn lb(&self) -> C {
@@ -1347,8 +1344,8 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			.map(|t| (t, false))
 			// TODO hopefully does not clone inner enc?
 			.collect_vec();
+
 		match (&term_encs[..], self.cmp) {
-			// [Some(&IntVarEnc::Bin(ref x)), Some(&IntVarEnc::Bin(ref y)), Some(&IntVarEnc::Bin(ref z))] =>
 			([(Term { c, x }, false)], _) if c.is_one() => {
 				let x_enc = x.borrow_mut().encode_bin(db)?; // avoid BorrowMutError
 				x_enc.encode_unary_constraint(db, &self.cmp, self.k, &x.borrow().dom, false)
