@@ -1,4 +1,5 @@
 #![allow(unused_imports, unused_variables, dead_code, unreachable_code)]
+use crate::int::enc::GROUND_BINARY_AT_LB;
 use crate::linear::log_enc_add_;
 use crate::{
 	helpers::{add_clauses_for, as_binary, negate_cnf, two_comp_bounds, unsigned_binary_range_ub},
@@ -357,7 +358,6 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 		decomposition.propagate(&self.config.propagate.clone())?;
 
-
 		for con in &decomposition.cons {
 			con.encode(db, &self.config)?;
 		}
@@ -639,14 +639,18 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		{
 			IntVarEnc::Ord(o) => self.dom().into_iter().zip(o.ineqs(up)).collect(),
 			IntVarEnc::Bin(b) => {
-				let is_two_comp = x_dom.lb().is_negative();
-				let range = if is_two_comp {
-					two_comp_bounds(b.bits())
-				} else {
+				let range = if GROUND_BINARY_AT_LB {
 					(C::zero(), unsigned_binary_range_ub::<C>(b.bits()).unwrap())
+				} else {
+					let is_two_comp = x_dom.lb().is_negative();
+					if is_two_comp {
+						two_comp_bounds(b.bits())
+					} else {
+						(C::zero(), unsigned_binary_range_ub::<C>(b.bits()).unwrap())
+					}
 				};
 				num::iter::range_inclusive(range.0, range.1)
-					.map(|k| (k, b.normalize(k, x_dom)))
+					.map(|k| (k + x_dom.lb(), k))
 					.flat_map(|(v, k)| {
 						as_binary(k.into(), Some(b.bits()))
 							.into_iter()
@@ -1347,7 +1351,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			// [Some(&IntVarEnc::Bin(ref x)), Some(&IntVarEnc::Bin(ref y)), Some(&IntVarEnc::Bin(ref z))] =>
 			([(Term { c, x }, false)], _) if c.is_one() => {
 				let x_enc = x.borrow_mut().encode_bin(db)?; // avoid BorrowMutError
-				x_enc.encode_unary_constraint(db, &self.cmp, self.k, &x.borrow().dom, true)
+				x_enc.encode_unary_constraint(db, &self.cmp, self.k, &x.borrow().dom, false)
 			}
 			([(Term { c, x }, false), (Term { c: y_c, x: y }, false)], Comparator::Equal)
 				if *y_c == -C::one() && self.k.is_zero() =>
@@ -1428,6 +1432,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			([(x, false), (y, false), (z, false)], Comparator::Equal)
 				if [x.c, y.c, z.c] == [C::one(), C::one(), -C::one()] =>
 			{
+				assert!(
+					x.lb() + y.lb() == z.ub(),
+					"LBs for addition not matching: {self}"
+				);
 				// TODO do not have to encode z if we use functional addition!
 				let (x, y, z) = &self
 					.exp
@@ -1771,17 +1779,25 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			IntVarEnc::Bin(b) => {
 				let (terms, add) = b.as_lin_exp::<C>();
 				// The offset and the fixed value `add` are added to the constant
-				let add = if !self.dom.lb().is_negative() {
+				let add = if GROUND_BINARY_AT_LB {
+					add + self.lb()
+				} else if !self.dom.lb().is_negative() {
 					add
 				} else {
 					add.checked_add(&two_comp_bounds::<C>(b.bits()).0).unwrap()
 				};
 
+				let (lb, ub) = if GROUND_BINARY_AT_LB {
+					(C::zero() + add, self.ub() - self.lb() + add)
+				} else {
+					(self.lb() - add, self.ub() - add)
+				};
+
 				let lin_exp = crate::linear::LinExp::<Lit, C>::new().add_bounded_log_encoding(
 					terms.as_slice(),
 					// The Domain constraint bounds only account for the unfixed part of the offset binary notation
-					self.lb() - add,
-					self.ub() - add,
+					lb,
+					ub,
 				);
 
 				lin_exp.add_constant(add)
@@ -1835,8 +1851,6 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			if prefer_order {
 				IntVarEnc::Ord(OrdEnc::from_lits(&[]))
 			} else {
-				let c = self.lb();
-				assert!(c.is_zero());
 				IntVarEnc::Bin(BinEnc::new(db, 0, None))
 			}
 		} else {
