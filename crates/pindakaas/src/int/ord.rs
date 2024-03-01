@@ -105,17 +105,6 @@ impl<Lit: Literal> std::fmt::Display for OrdEnc<Lit> {
 	}
 }
 
-// #[derive(Clone)]
-// pub struct OrdEncIterator {
-//     i: usize
-// }
-
-impl<Lit: Literal> Default for OrdEnc<Lit> {
-	fn default() -> Self {
-		OrdEnc { x: Vec::default() }
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	// type Lit = i32;
