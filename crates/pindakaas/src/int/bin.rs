@@ -30,6 +30,10 @@ impl<Lit: Literal> BinEnc<Lit> {
 		}
 	}
 
+	pub fn from_lits(x: &[LitOrConst<Lit>]) -> Self {
+		Self { x: x.to_vec() }
+	}
+
 	pub fn two_comp<C: Coefficient>(&self, dom: &Dom<C>) -> Vec<LitOrConst<Lit>> {
 		if dom.lb().is_negative() {
 			self.x[..self.x.len() - 1]

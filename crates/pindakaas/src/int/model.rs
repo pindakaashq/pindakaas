@@ -335,10 +335,8 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.iter()
 			.sorted_by_key(|var| var.borrow().id)
 			.try_for_each(|var| {
-				let prefer_order = var.borrow().prefer_order(self.config.cutoff);
-				var.borrow_mut()
-					.encode(db, &mut all_views, prefer_order)
-					.map(|_| ())
+				var.borrow_mut().decide_encoding(self.config.cutoff);
+				var.borrow_mut().encode(db, &mut all_views).map(|_| ())
 			})
 	}
 
@@ -637,8 +635,8 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			.as_ref()
 			.unwrap_or_else(|| panic!("{} was not encoded", self.x.borrow()))
 		{
-			IntVarEnc::Ord(o) => self.dom().into_iter().zip(o.ineqs(up)).collect(),
-			IntVarEnc::Bin(b) => {
+			IntVarEnc::Ord(Some(o)) => self.dom().into_iter().zip(o.ineqs(up)).collect(),
+			IntVarEnc::Bin(Some(b)) => {
 				let range = if GROUND_BINARY_AT_LB {
 					(C::zero(), unsigned_binary_range_ub::<C>(b.bits()).unwrap())
 				} else {
@@ -654,7 +652,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					.flat_map(|(v, k)| {
 						as_binary(k.into(), Some(b.bits()))
 							.into_iter()
-							.zip(b.x.iter().cloned())
+							.zip(b.xs().iter().cloned())
 							// if >=, find 1's, if <=, find 0's
 							.filter_map(|(b, x)| (b == up).then_some(x))
 							// if <=, negate 1's to not 1's
@@ -672,6 +670,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					})
 					.collect()
 			}
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
 			IntVarEnc::Const(_) => todo!(),
 		}
 	}
@@ -680,8 +679,8 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		// we get the position of a*x >= c == x >= ceil(c/a) if cmp = >= and a >= 0; either might flip it to x <= floor(c/a)
 		let up = self.handle_polarity(cmp);
 		match self.x.borrow().e.as_ref().unwrap() {
-			IntVarEnc::Ord(o) => o.ineq(self.x.borrow().dom.ineq(k, self.c, up), up),
-			IntVarEnc::Bin(b) => {
+			IntVarEnc::Ord(Some(o)) => o.ineq(self.x.borrow().dom.ineq(k, self.c, up), up),
+			IntVarEnc::Bin(Some(b)) => {
 				let dom = &self.x.borrow().dom;
 				// TODO move this out of o.ineq
 				let k = if up {
@@ -704,6 +703,8 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				b.ineq(ks, up)
 			}
 			IntVarEnc::Const(_) => todo!(),
+
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
 		}
 		// self.x[c].clone()
 		// if (cmp == &Comparator::LessEq) == self.c.is_positive() {
@@ -1057,10 +1058,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					.exp
 					.terms
 					.iter()
-					.map(|t| t.x.borrow().prefer_order(con_model.config.cutoff))
+					.map(|t| t.x.borrow_mut().decide_encoding(con_model.config.cutoff))
 					.collect_vec();
-				if encs.iter().all(|e| !e) {
-					let new_con = Lin {
+				let new_con = if encs.iter().all(|e| matches!(e, IntVarEnc::Bin(_))) {
+					Lin {
 						exp: LinExp {
 							terms: con
 								.exp
@@ -1075,7 +1076,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 										.new_var(
 											&t.dom(),
 											false,
-											None,
+											Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
 											Some(format!("scm-{}·{}", t.c, t.x.borrow().lbl())),
 										)
 										.unwrap();
@@ -1101,9 +1102,12 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								.collect(),
 						},
 						..con
-					};
-					con_model.add_constraint(new_con).unwrap();
-				}
+					}
+				} else {
+					con.clone()
+				};
+
+				con_model.add_constraint(new_con.clone()).unwrap();
 
 				con_model
 			},
@@ -1341,29 +1345,34 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			.exp
 			.terms
 			.iter()
-			.map(|t| (t, false))
+			.map(|t| (t, t.x.borrow().e.clone()))
 			// TODO hopefully does not clone inner enc?
 			.collect_vec();
 
 		match (&term_encs[..], self.cmp) {
-			([(Term { c, x }, false)], _) if c.is_one() => {
+			([(Term { c, x }, Some(IntVarEnc::Bin(_)))], _) if c.is_one() => {
 				let x_enc = x.borrow_mut().encode_bin(db)?; // avoid BorrowMutError
 				x_enc.encode_unary_constraint(db, &self.cmp, self.k, &x.borrow().dom, false)
 			}
-			([(Term { c, x }, false), (Term { c: y_c, x: y }, false)], Comparator::Equal)
-				if *y_c == -C::one() && self.k.is_zero() =>
+			// SCM
+			(
+				[(Term { c, x }, _), (Term { c: y_c, x: y }, Some(IntVarEnc::Bin(None)))],
+				Comparator::Equal,
+			) if *y_c == -C::one()
+				&& self.k.is_zero()
+				&& matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) =>
 			{
 				let x_enc = x.borrow_mut().encode_bin(db)?;
 				let lits = x_enc.lits();
 				let sh = c.trailing_zeros();
 				let c = c.shr(sh as usize);
 				if c.is_one() {
-					y.borrow_mut().e = Some(IntVarEnc::Bin(BinEnc {
-						x: (0..sh)
+					y.borrow_mut().e = Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+						&(0..sh)
 							.map(|_| LitOrConst::Const(false))
-							.chain(x_enc.x.iter().cloned())
-							.collect(),
-					}));
+							.chain(x_enc.xs().iter().cloned())
+							.collect_vec(),
+					))));
 					return Ok(());
 				}
 
@@ -1375,7 +1384,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				// TODO could replace with some arithmetic
 				let map = cnf
 					.vars()
-					.zip_longest(x_enc.x.iter())
+					.zip_longest(x_enc.xs().iter())
 					.flat_map(|x| match x {
 						itertools::EitherOrBoth::Both(x, y) => match y {
 							LitOrConst::Lit(y) => Some((x, y.clone())),
@@ -1407,9 +1416,8 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				})?;
 
 				// set encoding of y
-				assert!(y.borrow().e.is_none());
-				let y_enc = IntVarEnc::Bin(BinEnc {
-					x: (0..sh)
+				let y_enc = IntVarEnc::Bin(Some(BinEnc::from_lits(
+					&(0..sh)
 						.map(|_| LitOrConst::Const(false))
 						.chain(
 							map.values()
@@ -1417,8 +1425,8 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								.skip(lits)
 								.map(|lit| LitOrConst::Lit(lit.clone())),
 						)
-						.collect(),
-				});
+						.collect_vec(),
+				)));
 				if y.borrow().add_consistency {
 					y_enc.consistent(db, &y.borrow().dom)?;
 				}
@@ -1426,9 +1434,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				Ok(())
 			}
-			([(x, false), (y, false), (z, false)], Comparator::Equal)
-				if [x.c, y.c, z.c] == [C::one(), C::one(), -C::one()] =>
-			{
+			(
+				[(x, Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_))), (z, Some(IntVarEnc::Bin(_)))],
+				Comparator::Equal,
+			) if [x.c, y.c, z.c] == [C::one(), C::one(), -C::one()] => {
 				assert!(
 					x.lb() + y.lb() == z.ub(),
 					"LBs for addition not matching: {self}"
@@ -1448,10 +1457,11 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			}
 			_ => {
 				// encode all variables
-				self.exp
-					.terms
-					.iter()
-					.try_for_each(|t| t.x.borrow_mut().encode_bin(db).map(|_| ()))?;
+				self.exp.terms.iter().try_for_each(|t| {
+					t.x.borrow_mut()
+						.encode(db, &mut HashMap::default())
+						.map(|_| ())
+				})?;
 
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					let conditions = &self.exp.terms[..self.exp.terms.len() - 1];
@@ -1759,7 +1769,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 
 	pub(crate) fn as_lin_exp(&self) -> crate::linear::LinExp<Lit, C> {
 		match self.e.as_ref().unwrap() {
-			IntVarEnc::Ord(o) => {
+			IntVarEnc::Ord(Some(o)) => {
 				crate::linear::LinExp::new()
 					.add_chain(
 						&self
@@ -1773,7 +1783,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					)
 					.add_constant(self.lb())
 			}
-			IntVarEnc::Bin(b) => {
+			IntVarEnc::Bin(Some(b)) => {
 				let (terms, add) = b.as_lin_exp::<C>();
 				// The offset and the fixed value `add` are added to the constant
 				let add = if GROUND_BINARY_AT_LB {
@@ -1799,6 +1809,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 
 				lin_exp.add_constant(add)
 			}
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
 			IntVarEnc::Const(c) => crate::linear::LinExp::new().add_constant(*c),
 		}
 	}
@@ -1817,7 +1828,6 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		self.size() == C::one()
 	}
 
-	#[allow(dead_code)]
 	pub(crate) fn lits(&self) -> usize {
 		self.e.as_ref().map(IntVarEnc::lits).unwrap_or(0)
 	}
@@ -1826,68 +1836,38 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		&mut self,
 		db: &mut DB,
 	) -> Result<BinEnc<Lit>, Unsatisfiable> {
-		self.encode(db, &mut HashMap::default(), false)
-			.map(|e| match e {
-				IntVarEnc::Bin(b) => b,
-				_ => unreachable!(),
-			})
+		self.encode(db, &mut HashMap::default()).map(|e| match e {
+			IntVarEnc::Bin(Some(b)) => b,
+			_ => unreachable!(),
+		})
 	}
 
 	fn encode<DB: ClauseDatabase<Lit = Lit>>(
 		&mut self,
 		db: &mut DB,
 		views: &mut HashMap<(IntVarId, C), Lit>,
-		prefer_order: bool,
 	) -> Result<IntVarEnc<Lit, C>, Unsatisfiable> {
-		if let Some(e) = self.e.as_ref() {
-			return Ok(e.clone());
+		// cache instantiated encoding
+		let e = match self.e {
+			Some(IntVarEnc::Ord(Some(_))) | Some(IntVarEnc::Bin(Some(_))) => {
+				return Ok(self.e.as_ref().unwrap().clone());
+			}
+			Some(IntVarEnc::Ord(_)) | None => {
+				IntVarEnc::Ord(Some(OrdEnc::new(db, &self.dom, self.lbl.as_ref())))
+			}
+			Some(IntVarEnc::Bin(_)) => IntVarEnc::Bin(Some(BinEnc::new(
+				db,
+				required_lits::<C>(self.dom.lb(), self.dom.ub()),
+				self.lbl.clone(),
+			))),
+			Some(IntVarEnc::Const(_)) => todo!(),
 		};
 
-		let e = if self.is_constant() {
-			// IntVarEnc::Const(self.dom.lb())
-			if prefer_order {
-				IntVarEnc::Ord(OrdEnc::from_lits(&[]))
-			} else {
-				IntVarEnc::Bin(BinEnc::new(db, 0, None))
-			}
-		} else {
-			let e = if prefer_order {
-				// let dom = self
-				// 	.dom
-				// 	.iter()
-				// 	.sorted()
-				// 	.tuple_windows()
-				// 	.map(|(a, b)| (a + C::one())..(b + C::one()))
-				// 	.map(|v| (v.clone(), views.get(&(self.id, v.end - C::one())).cloned()))
-				// 	.collect::<IntervalMap<_, _>>();
-				// IntVarEnc::Ord(IntVarOrd::from_views(db, dom, self.lbl()))
-				IntVarEnc::Ord(OrdEnc::new(db, &self.dom, self.lbl.as_ref()))
-			} else {
-				IntVarEnc::Bin(BinEnc::new(
-					db,
-					required_lits::<C>(self.dom.lb(), self.dom.ub()),
-					self.lbl.clone(),
-				))
-			};
+		if self.add_consistency {
+			e.consistent(db, &self.dom).unwrap();
+		}
 
-			if self.add_consistency {
-				e.consistent(db, &self.dom).unwrap();
-			}
 
-			// TODO
-			// 			for view in self
-			// 				.views
-			// 				.iter()
-			// 				.map(|(c, (id, val))| ((*id, *val), e.geq(*c..(*c + C::one()))))
-			// 			{
-			// 				// TODO refactor
-			// 				if !view.1.is_empty() {
-			// 					views.insert(view.0, view.1[0][0].clone());
-			// 				}
-			// 			}
-
-			e
-		};
 		self.e = Some(e.clone());
 		Ok(e)
 	}
@@ -1922,12 +1902,22 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		self.dom.ub()
 	}
 
-	fn prefer_order(&self, cutoff: Option<C>) -> bool {
-		match cutoff {
-			None => true,
-			Some(cutoff) if cutoff == C::zero() => false,
-			Some(cutoff) => self.dom.size() < cutoff,
+	fn decide_encoding(&mut self, cutoff: Option<C>) -> IntVarEnc<Lit, C> {
+		if let Some(e) = self.e.as_ref() {
+			return e.clone();
 		}
+		self.e = Some(match cutoff {
+			None => IntVarEnc::Ord(None),
+			Some(cutoff) if cutoff == C::zero() => IntVarEnc::Bin(None),
+			Some(cutoff) => {
+				if self.dom.size() < cutoff {
+					IntVarEnc::Ord(None)
+				} else {
+					IntVarEnc::Bin(None)
+				}
+			}
+		});
+		self.e.clone().unwrap()
 	}
 
 	pub fn lbl(&self) -> String {
@@ -1980,9 +1970,9 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 				model.new_var(
 					&[C::zero()].into_iter().chain(dom).collect_vec(),
 					false,
-					Some(IntVarEnc::Ord(OrdEnc::from_lits(
+					Some(IntVarEnc::Ord(Some(OrdEnc::from_lits(
 						&lits.iter().flatten().cloned().collect_vec(),
-					))),
+					)))),
 					Some(lbl),
 				)
 				// Ok(model)
@@ -2011,9 +2001,9 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 				model.new_var(
 					&dom,
 					false,
-					Some(IntVarEnc::Ord(OrdEnc::from_lits(
+					Some(IntVarEnc::Ord(Some(OrdEnc::from_lits(
 						&lits.iter().flatten().cloned().collect_vec(),
-					))),
+					)))),
 					Some(lbl),
 				)
 				// Ok(model)
@@ -2170,7 +2160,7 @@ mod tests {
 	}
 
 	// const VAR_ENCS: &[bool] = &[true, false];
-	const VAR_ENCS: &[bool] = &[false];
+	const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
 
 	fn test_lp_for_configs(lp: &str) {
 		let model = Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap();
@@ -2199,9 +2189,8 @@ mod tests {
 					.sorted_by_key(|var| var.borrow().id)
 					.zip(var_encs)
 					.try_for_each(|(var, var_enc)| {
-						var.borrow_mut()
-							.encode(&mut db, &mut all_views, *var_enc)
-							.map(|_| ())
+						var.borrow_mut().e = Some(var_enc.clone());
+						var.borrow_mut().encode(&mut db, &mut all_views).map(|_| ())
 					})
 					.unwrap();
 
@@ -2314,7 +2303,22 @@ mod tests {
 			} {
 				let mut decomposition = decomposition.deep_clone();
 
+				let mut all_views = HashMap::new();
 				let mut decomp_db = db.clone();
+				decomposition
+					.vars()
+					.iter()
+					.sorted_by_key(|var| var.borrow().id)
+					.filter(|x| x.borrow().id.0 > model.num_var)
+					.zip(var_encs)
+					.filter(|(x, _)| x.borrow().e.is_none()) // skip those with fixed enc
+					.try_for_each(|(var, var_enc)| {
+						var.borrow_mut().e = Some(var_enc.clone());
+						var.borrow_mut()
+							.encode(&mut decomp_db, &mut all_views)
+							.map(|_| ())
+					})
+					.unwrap();
 				println!("decomposition = {}", decomposition);
 
 				// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
@@ -2968,8 +2972,9 @@ End
 		let mut db = TestDB::new(0);
 		let mut model = Model::<Lit, C>::default();
 		let t = Term::new(1, model.new_var(&[-2, 3, 5], true, None, None).unwrap());
+		t.x.borrow_mut().e = Some(IntVarEnc::Bin(None));
 		t.x.borrow_mut()
-			.encode(&mut db, &mut HashMap::new(), false)
+			.encode(&mut db, &mut HashMap::new())
 			.unwrap();
 		dbg!(t.ineqs(&Comparator::LessEq));
 

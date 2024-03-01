@@ -721,8 +721,8 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 
 #[derive(Debug, Clone)]
 pub(crate) enum IntVarEnc<Lit: Literal, C: Coefficient> {
-	Ord(OrdEnc<Lit>),
-	Bin(BinEnc<Lit>),
+	Ord(Option<OrdEnc<Lit>>),
+	Bin(Option<BinEnc<Lit>>),
 	Const(C),
 }
 
@@ -929,8 +929,9 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 		dom: &Dom<C>,
 	) -> Result {
 		match self {
-			IntVarEnc::Ord(o) => o.consistent(db),
-			IntVarEnc::Bin(b) => b.consistent(db, dom),
+			IntVarEnc::Ord(Some(o)) => o.consistent(db),
+			IntVarEnc::Bin(Some(b)) => b.consistent(db, dom),
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
 			IntVarEnc::Const(_) => Ok(()),
 		}
 	}
@@ -969,11 +970,11 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 	// }
 
 	/// Return number of lits in encoding
-	#[allow(dead_code)]
 	pub(crate) fn lits(&self) -> usize {
 		match self {
-			IntVarEnc::Ord(o) => o.lits(),
-			IntVarEnc::Bin(b) => b.lits(),
+			IntVarEnc::Ord(Some(o)) => o.lits(),
+			IntVarEnc::Bin(Some(b)) => b.lits(),
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
 			IntVarEnc::Const(_) => 0,
 		}
 	}
@@ -981,21 +982,22 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 
 impl<Lit: Literal, C: Coefficient> From<BinEnc<Lit>> for IntVarEnc<Lit, C> {
 	fn from(b: BinEnc<Lit>) -> Self {
-		Self::Bin(b)
+		Self::Bin(Some(b))
 	}
 }
 
 impl<Lit: Literal, C: Coefficient> From<OrdEnc<Lit>> for IntVarEnc<Lit, C> {
 	fn from(o: OrdEnc<Lit>) -> Self {
-		Self::Ord(o)
+		Self::Ord(Some(o))
 	}
 }
 
 impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarEnc<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			IntVarEnc::Ord(o) => o.fmt(f),
-			IntVarEnc::Bin(b) => b.fmt(f),
+			IntVarEnc::Ord(Some(o)) => o.fmt(f),
+			IntVarEnc::Bin(Some(b)) => b.fmt(f),
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
 			IntVarEnc::Const(o) => write!(f, "{o:?}"),
 		}
 	}
