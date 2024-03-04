@@ -28,7 +28,7 @@ impl<C: Coefficient> SwcEncoder<C> {
 
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for SwcEncoder<C> {
 	fn decompose(
-		&mut self,
+		&self,
 		lin: Lin<Lit, C>,
 		num_var: usize,
 		model_config: &ModelConfig<C>,

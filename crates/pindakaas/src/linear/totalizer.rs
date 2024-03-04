@@ -40,7 +40,7 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
 	fn decompose(
-		&mut self,
+		&self,
 		lin: Lin<Lit, C>,
 		num_var: usize,
 		model_config: &ModelConfig<C>,
