@@ -1075,7 +1075,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 									let y = con_model
 										.new_var(
 											&t.dom(),
-											false,
+											model_config.add_consistency,
 											Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
 											Some(format!("scm-{}·{}", t.c, t.x.borrow().lbl())),
 										)
@@ -1363,6 +1363,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				&& matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) =>
 			{
 				let x_enc = x.borrow_mut().encode_bin(db)?;
+				assert!(matches!(y.borrow().e, Some(IntVarEnc::Bin(None))));
 				let lits = x_enc.lits();
 				let sh = c.trailing_zeros();
 				let c = c.shr(sh as usize);
@@ -2141,8 +2142,8 @@ mod tests {
 			// [Consistency::None],
 			// [Consistency::None, Consistency::Bounds],
 			[Consistency::None],
-			// [false],
-			[true],
+			[false],
+			// [true],
 			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
 			[Some(0)] // [None, Some(0), Some(2)]
 		)
@@ -2284,23 +2285,44 @@ mod tests {
 				check_decomposition(&model, &decomposition, expected_assignments);
 			}
 
-			let var_encs_gen = (model.num_var..decomposition.num_var)
-				.map(|_| VAR_ENCS)
-				.multi_cartesian_product()
-				// .take(1)
+			let var_enc_ids = decomposition
+				.vars()
+				.iter()
+				.sorted_by_key(|var| var.borrow().id)
+				// If this var is part of decomp
+				.filter(|x| x.borrow().id.0 > model.num_var)
+				// If not encoded and no encoding preference (e.g. scm), assign and encode
+				.filter(|x| x.borrow().e.is_none())
+				.map(|x| x.borrow().id.0)
 				.collect_vec();
 
 			assert!(
-				var_encs_gen.len() <= 50,
-				"Attempting to test many ({}) var enc specs",
-				var_encs_gen.len()
+				var_enc_ids.len() <= 50,
+				"Attempting to test many ({}) var enc specs ({:?})",
+				var_enc_ids.len(),
+				var_enc_ids
 			);
 
-			for var_encs in if var_encs_gen.is_empty() {
-				vec![vec![]].into_iter()
+			let var_encs_gen = var_enc_ids
+				.iter()
+				.map(|_| VAR_ENCS)
+				.multi_cartesian_product()
+				.map(|var_encs| {
+					var_enc_ids
+						.iter()
+						.cloned()
+						.zip(var_encs)
+						.collect::<HashMap<_, _>>()
+				})
+				.collect_vec();
+
+			let var_encs_gen = if var_encs_gen.is_empty() {
+				vec![HashMap::default()]
 			} else {
-				var_encs_gen.into_iter()
-			} {
+				var_encs_gen
+			};
+
+			for var_encs in var_encs_gen {
 				let mut decomposition = decomposition.deep_clone();
 
 				let mut all_views = HashMap::new();
@@ -2308,15 +2330,15 @@ mod tests {
 				decomposition
 					.vars()
 					.iter()
-					.sorted_by_key(|var| var.borrow().id)
-					.filter(|x| x.borrow().id.0 > model.num_var)
-					.zip(var_encs)
-					.filter(|(x, _)| x.borrow().e.is_none()) // skip those with fixed enc
-					.try_for_each(|(var, var_enc)| {
-						var.borrow_mut().e = Some(var_enc.clone());
-						var.borrow_mut()
-							.encode(&mut decomp_db, &mut all_views)
-							.map(|_| ())
+					.try_for_each(|x| {
+						if let Some(var_enc) = var_encs.get(&x.borrow().id.0) {
+							x.borrow_mut().e = Some((*var_enc).clone());
+							x.borrow_mut()
+								.encode(&mut decomp_db, &mut all_views)
+								.map(|_| ())
+						} else {
+							Ok(())
+						}
 					})
 					.unwrap();
 				println!("decomposition = {}", decomposition);
