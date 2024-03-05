@@ -12,7 +12,7 @@ impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 		if SHOW_IDS {
 			writeln!(f, "num_var: {}", self.num_var)?;
 		} else {
-			writeln!(f, "")?;
+			writeln!(f)?;
 		}
 		for con in &self.cons {
 			writeln!(f, "\t{}", con)?;

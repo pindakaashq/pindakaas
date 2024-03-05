@@ -1690,7 +1690,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 									last.x.borrow_mut().dom = Dom::from_bounds(lb, ub);
 
 									LinExp {
-										terms: firsts.into_iter().chain([last]).cloned().collect(),
+										terms: firsts.iter().chain([last]).cloned().collect(),
 									}
 								} else {
 									unreachable!()
