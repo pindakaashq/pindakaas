@@ -154,10 +154,6 @@ impl<Lit: Literal> BinEnc<Lit> {
 		}
 	}
 
-	#[cfg_attr(
-		feature = "trace",
-		tracing::instrument(name = "binary_consistency", skip_all, fields(constraint = format!("{}", self)))
-	)]
 	pub fn consistent<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(
 		&self,
 		db: &mut DB,

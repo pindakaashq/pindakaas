@@ -1335,10 +1335,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 						)
 						.collect_vec(),
 				)));
-				if y.borrow().add_consistency {
-					y_enc.consistent(db, &y.borrow().dom)?;
-				}
 				y.borrow_mut().e = Some(y_enc);
+				if y.borrow().add_consistency {
+					y.borrow().consistent(db)?;
+				}
 
 				Ok(())
 			}
@@ -1387,7 +1387,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 							if PRINT_COUPLING {
 								println!(
-									"\t{} -> {}*{}{}{} {:?}",
+									"\t({}) -> {}*{}{}{} {:?}",
 									conditions
 										.iter()
 										.skip(1)
@@ -1707,6 +1707,17 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		Rc::new(RefCell::new(self))
 	}
 
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "consistency", skip_all, fields(constraint = format!("{}", self)))
+	)]
+	pub(crate) fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
+		self.e
+			.as_ref()
+			.map(|e| e.consistent(db, &self.dom))
+			.unwrap_or(Ok(()))
+	}
+
 	pub(crate) fn as_lin_exp(&self) -> crate::linear::LinExp<Lit, C> {
 		match self.e.as_ref().unwrap() {
 			IntVarEnc::Ord(Some(o)) => {
@@ -1803,12 +1814,13 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			Some(IntVarEnc::Const(_)) => todo!(),
 		};
 
+		self.e = Some(e.clone());
+
 		if self.add_consistency {
-			e.consistent(db, &self.dom).unwrap();
+			self.consistent(db)?;
 		}
 
 
-		self.e = Some(e.clone());
 		Ok(e)
 	}
 

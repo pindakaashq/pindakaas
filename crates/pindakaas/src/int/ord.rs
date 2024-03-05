@@ -63,10 +63,6 @@ impl<Lit: Literal> OrdEnc<Lit> {
 		}
 	}
 
-	#[cfg_attr(
-		feature = "trace",
-		tracing::instrument(name = "order_consistency", skip_all, fields(constraint = format!("{}", self)))
-	)]
 	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> crate::Result {
 		self.x.iter().tuple_windows().try_for_each(|(a, b)| {
 			if a.var() != b.var() {
