@@ -147,11 +147,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 
 	/// Get encoding as unsigned binary representation (if negative dom values, offset by `-2^(k-1)`)
 	pub(crate) fn xs(&self) -> Vec<LitOrConst<Lit>> {
-		if GROUND_BINARY_AT_LB {
-			self.x.clone()
-		} else {
-			self.x.clone()
-		}
+		self.x.clone()
 	}
 
 	pub fn consistent<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(
