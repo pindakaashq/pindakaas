@@ -9,13 +9,17 @@ const SHOW_IDS: bool = false;
 
 impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		if SHOW_IDS {
+			writeln!(f, "num_var: {}", self.num_var)?;
+		} else {
+			writeln!(f, "")?;
+		}
 		for con in &self.cons {
-			writeln!(f, "{}", con)?;
+			writeln!(f, "\t{}", con)?;
 		}
 		if !self.obj.is_satisfy() {
-			writeln!(f, "obj: {}", self.obj)?;
+			writeln!(f, "\tobj: {}", self.obj)?;
 		}
-		writeln!(f, "num_var: {}", self.num_var)?;
 		Ok(())
 	}
 }
@@ -23,7 +27,7 @@ impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 impl<Lit: Literal, C: Coefficient> Display for LinExp<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let s = self.terms.iter().join(" ");
-		if &s[..2] == "+ " {
+		if s.len() >= 2 && &s[..2] == "+ " {
 			write!(f, "{}", &s[2..])
 		} else {
 			write!(f, "{}", s)
@@ -59,18 +63,26 @@ impl<Lit: Literal, C: Coefficient> Display for Obj<Lit, C> {
 
 impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		// if self.is_tern() && false {
-		// 	write!(
-		// 		f,
-		// 		"{} {} {} {}",
-		// 		self.exp.terms[0].borrow(),
-		// 		self.exp.terms[1].borrow(),
-		// 		self.cmp,
-		// 		self.exp.terms[2].borrow().clone() * -C::one(),
-		// 	)
-		// } else {
-		write!(f, "{} {} {}", self.exp, self.cmp, self.k,)
-		// }
+		if self.k.is_zero() {
+			// Put in LinExp to avoid printing '+' at start
+			if let Some((rhs, lhs)) = self.exp.terms.split_last() {
+				write!(
+					f,
+					"{} {} {}",
+					LinExp {
+						terms: lhs.to_vec()
+					},
+					self.cmp,
+					LinExp {
+						terms: vec![rhs.clone() * -C::one()]
+					},
+				)
+			} else {
+				panic!();
+			}
+		} else {
+			write!(f, "{} {} {}", self.exp, self.cmp, self.k,)
+		}
 	}
 }
 
