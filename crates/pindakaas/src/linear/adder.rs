@@ -352,7 +352,8 @@ pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 fn bit<Lit: Literal>(x: &[LitOrConst<Lit>], i: usize) -> LitOrConst<Lit> {
 	x.get(i)
 		.map(LitOrConst::<Lit>::clone)
-		.unwrap_or_else(|| x.last().unwrap().clone()) // 2 comp's sign extend (TODO maybe more efficient to just min(i, len(x)-1)
+		.unwrap_or_else(|| LitOrConst::Const(false))
+	// .unwrap_or_else(|| x.last().unwrap().clone()) // TODO use this if using 2 comp
 }
 
 #[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} {cmp} {z:?}"))))]
