@@ -3,7 +3,7 @@ use std::{collections::HashMap, ops::Range};
 use iset::IntervalMap;
 use itertools::Itertools;
 
-use crate::{int::IntVar, Comparator, Literal, ModelConfig, Unsatisfiable};
+use crate::{int::IntVar, Comparator, Decomposer, Literal, ModelConfig, Unsatisfiable};
 #[allow(unused_imports)]
 use crate::{
 	int::{Decompose, IntVarEnc, IntVarOrd, Lin, LinExp, Model, Term},
@@ -211,6 +211,7 @@ where
 			config: ModelConfig {
 				cutoff: self.cutoff,
 				add_consistency: self.add_consistency,
+				decomposer: Decomposer::Bdd,
 				..ModelConfig::default()
 			},
 			..Model::default()

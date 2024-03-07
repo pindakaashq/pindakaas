@@ -1,5 +1,5 @@
 use crate::int::{Consistency, Decompose, Dom, IntVar, Lin, Model, Term};
-use crate::{ClauseDatabase, Coefficient, Encoder, Linear, Result};
+use crate::{ClauseDatabase, Coefficient, Decomposer, Encoder, Linear, Result};
 use crate::{Literal, ModelConfig, Unsatisfiable};
 use itertools::Itertools;
 
@@ -91,6 +91,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 				cutoff: self.cutoff,
 				propagate: self.add_propagation.clone(),
 				add_consistency: self.add_consistency,
+				decomposer: Decomposer::Swc,
 				..ModelConfig::default()
 			},
 			..Model::default()

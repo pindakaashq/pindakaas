@@ -428,6 +428,13 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 				)
 			})
 			.filter(|a| self.check_assignment(a).is_ok())
+			// .filter(|a| {
+			// 	matches!(
+			// 		self.check_assignment(a),
+			// 		// Err(CheckError::VarInconsistency(_)) | Ok(())
+			// 		Ok(())
+			// 	)
+			// })
 			.map(|a| a.partialize(&max_var))
 			.sorted() // need to sort to make unique since HashMap cannot derive Hash
 			.dedup()
@@ -447,6 +454,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					Err(CheckError::Fail(e)) => {
 						Some(CheckError::Fail(format!("Inconsistency: {e}")))
 					}
+					// Err(CheckError::VarInconsistency(_)) => None,
 					Err(e) => panic!("Unexpected err: {e}"),
 					_ => None,
 				},
@@ -2138,12 +2146,12 @@ mod tests {
 				Decomposer::Gt,
 				// Decomposer::Swc,
 				Decomposer::Bdd,
-				// Decomposer::Rca
+				Decomposer::Rca
 			],
 			// [Consistency::None],
 			// [Consistency::None, Consistency::Bounds],
 			[Consistency::None],
-			[false], // TODO consistency might not be necessary for Bin
+			[true], // TODO consistency might not be necessary for Bin
 			// [true],
 			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
 			[false, true], // equalize terns
@@ -2204,7 +2212,6 @@ mod tests {
 			}
 		}
 	}
-
 
 	fn check_decomposition(
 		model: &Model<Lit, C>,
@@ -2333,15 +2340,15 @@ mod tests {
 				} {
 					let mut con_db = decomp_db.clone();
 
-					// // TODO probably cannot test constraints in isolation without making all vars consistent
-					if CHECK_CONSTRAINTS
-						&& decomposition
-							.vars()
-							.iter()
-							.any(|x| !x.borrow().add_consistency)
-					{
-						continue;
-					}
+					// // // TODO probably cannot test constraints in isolation without making all vars consistent
+					// if CHECK_CONSTRAINTS
+					// 	&& decomposition
+					// 		.vars()
+					// 		.iter()
+					// 		.any(|x| !x.borrow().add_consistency)
+					// {
+					// 	continue;
+					// }
 
 					// for x in decomposition
 					// 	.vars()
@@ -2380,13 +2387,13 @@ mod tests {
 					let checker = if CHECK_CONSTRAINTS {
 						&decomposition
 					} else {
+						// &decomposition // TODO useful for checking AUX var assignments?
 						&model
 					};
 
 					let actual_assignments = lit_assignments
 						.iter()
 						.flat_map(|lit_assignment| checker.assign(lit_assignment))
-						.dedup() // TODO removing this requires solving for a set of literals maybe?
 						.collect::<Vec<_>>();
 
 					// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
