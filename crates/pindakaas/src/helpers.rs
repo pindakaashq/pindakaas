@@ -556,11 +556,8 @@ pub mod tests {
 					},
 					Some("v") => {
 						tokens
+							.take_while(|t| *t != "0") // skip 0 delimiter
 							.flat_map(|t| t.parse::<Lit>())
-							.filter(|t| {
-								let var = t.abs();
-								0 < var && t.abs() <= self.num_var
-							})
 							.for_each(|lit| {
 								if let Some(SolverResult::Ok(Certificate::SAT(solution))) =
 									&mut status
@@ -576,8 +573,9 @@ pub mod tests {
 			}
 			status.unwrap_or_else(|| {
 				panic!(
-					"CADICAL No status set in SAT output:\n{}",
-					String::from_utf8(output.stdout).unwrap()
+					"CADICAL No status set in SAT output:\n{}\n{}",
+					String::from_utf8(output.stdout).unwrap(),
+					String::from_utf8(output.stderr).unwrap(),
 				)
 			})
 		}
@@ -590,15 +588,22 @@ pub mod tests {
 			}
 		}
 
-		pub fn solve(&mut self) -> Vec<Vec<i32>> {
+		pub fn solve(&mut self, output: Option<HashSet<i32>>) -> Vec<Vec<i32>> {
 			let mut from_slv: Vec<Vec<i32>> = Vec::new();
+			let output = output.unwrap_or_else(|| (1..=self.num_var).collect());
+
+			// TODO optimize by considering additional output vars as free
+			self.cnf.last_var = std::cmp::max(
+				self.cnf.vars().max().unwrap_or(0),
+				output.iter().max().unwrap().clone(),
+			);
 
 			while let Ok(Certificate::SAT(model)) = self.call_solver() {
 				let solution = if ONLY_OUTPUT {
 					model
 						.clone()
 						.into_iter()
-						.filter(|l| l.abs() <= self.num_var)
+						.filter(|l| output.contains(&l.abs()))
 						.collect()
 				} else {
 					model
@@ -653,7 +658,7 @@ pub mod tests {
 				eprintln!("let result: Vec<Vec<i32>> = slv.iter().collect();");
 			}
 
-			let mut from_slv = self.solve();
+			let mut from_slv = self.solve(None);
 
 			if let Some(check) = &self.check {
 				for sol in &mut from_slv {
@@ -672,6 +677,7 @@ pub mod tests {
 						.map(|sol| {
 							sol.iter()
 								.filter(|l| l.abs() <= self.num_var)
+								// .filter(|l| output.contains(&l.abs())) // TODO could consider adding this; but is only used so far for model-based tests
 								.cloned()
 								.collect::<Vec<_>>()
 						})

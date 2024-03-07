@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use itertools::Itertools;
 
 use crate::{
@@ -90,8 +92,8 @@ impl<Lit: Literal> OrdEnc<Lit> {
 	// 		.add_constant(self.lb())
 	// }
 
-	pub(crate) fn lits(&self) -> usize {
-		self.x.len()
+	pub(crate) fn lits(&self) -> HashSet<Lit> {
+		self.x.clone().into_iter().map(|lit| lit.var()).collect()
 	}
 }
 

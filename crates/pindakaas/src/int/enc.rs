@@ -969,13 +969,12 @@ impl<Lit: Literal, C: Coefficient> IntVarEnc<Lit, C> {
 	// 	LinExp::from(self).assign(solution)
 	// }
 
-	/// Return number of lits in encoding
-	pub(crate) fn lits(&self) -> usize {
+	/// Return set of lits in encoding
+	pub(crate) fn lits(&self) -> HashSet<Lit> {
 		match self {
 			IntVarEnc::Ord(Some(o)) => o.lits(),
 			IntVarEnc::Bin(Some(b)) => b.lits(),
-			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
-			IntVarEnc::Const(_) => 0,
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) | IntVarEnc::Const(_) => HashSet::default(),
 		}
 	}
 }
