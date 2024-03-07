@@ -181,6 +181,7 @@ impl<Lit: Literal> fmt::Display for Incomplete<Lit> {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
 pub enum CheckError<Lit: Literal> {
 	Unsatisfiable(Unsatisfiable),
+	VarInconsistency(String),
 	Incomplete(Incomplete<Lit>),
 	Fail(String),
 }
@@ -191,6 +192,7 @@ impl<Lit: Literal> fmt::Display for CheckError<Lit> {
 			CheckError::Fail(err) => err.fmt(f),
 			CheckError::Unsatisfiable(err) => err.fmt(f),
 			CheckError::Incomplete(err) => err.fmt(f),
+			CheckError::VarInconsistency(err) => err.fmt(f),
 		}
 	}
 }

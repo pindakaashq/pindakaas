@@ -5,6 +5,7 @@ use crate::int::Lin;
 use crate::int::Model;
 use crate::int::Term;
 use crate::Comparator;
+use crate::Decomposer;
 use crate::Literal;
 use crate::ModelConfig;
 use crate::Unsatisfiable;
@@ -125,6 +126,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 				cutoff: self.cutoff,
 				propagate: self.add_propagation.clone(),
 				add_consistency: self.add_consistency,
+				decomposer: Decomposer::Gt,
 				..ModelConfig::default()
 			},
 			..Model::default()

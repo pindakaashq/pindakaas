@@ -91,7 +91,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}{}{} ∈ {} [{}]",
+			"{}{}{} ∈ {} {}",
 			self.lbl(),
 			match self.e {
 				Some(IntVarEnc::Bin(_)) => ":B",
@@ -106,7 +106,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 			},
 			self.dom,
 			if SHOW_LITS {
-				self.lits().iter().sorted().join(", ")
+				format!("[{}]", self.lits().iter().sorted().join(", "))
 			} else {
 				String::new()
 			},
