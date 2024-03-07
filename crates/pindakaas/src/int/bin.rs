@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use std::collections::HashSet;
+
 use itertools::Itertools;
 
 use crate::{
@@ -273,11 +275,15 @@ impl<Lit: Literal> BinEnc<Lit> {
 		)
 	}
 
-	pub(crate) fn lits(&self) -> usize {
+	pub(crate) fn lits(&self) -> HashSet<Lit> {
 		self.x
-			.iter()
-			.filter(|x| matches!(x, LitOrConst::Lit(_)))
-			.count()
+			.clone()
+			.into_iter()
+			.filter_map(|x| match x {
+				LitOrConst::Lit(x) => Some(x.var()),
+				LitOrConst::Const(_) => None,
+			})
+			.collect()
 	}
 
 	/// Number of bits in the encoding
