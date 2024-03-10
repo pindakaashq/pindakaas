@@ -317,17 +317,19 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		decomposer: impl Decompose<Lit, C>,
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
 		let mut num_var = self.num_var;
-		Ok(self
-			.cons
+		self.cons
 			.iter()
 			.cloned()
 			// .map(|con| con.decompose(&self.config, self.num_var).unwrap())
 			.map(|con| {
-				let decomp = decomposer.decompose(con, num_var, &self.config).unwrap();
-				num_var = decomp.num_var; // TODO find better solution for this
-				decomp
+				decomposer
+					.decompose(con, num_var, &self.config)
+					.map(|decomp| {
+						num_var = decomp.num_var; // TODO find better solution for this
+						decomp
+					})
 			})
-			.collect::<Model<_, _>>())
+			.try_collect()
 	}
 
 	pub fn encode_vars<DB: ClauseDatabase<Lit = Lit>>(
