@@ -10,7 +10,7 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 use std::fmt::Display;
 
-use crate::helpers::{two_comp_bounds, unsigned_binary_range_ub};
+use crate::helpers::{two_comp_bounds, unsigned_binary_range};
 use crate::int::{helpers::required_lits, Dom, TernLeConstraint, TernLeEncoder};
 use crate::linear::{lex_geq_const, lex_leq_const, log_enc_add_fn};
 use crate::{
@@ -629,9 +629,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 		let v = self.normalize(v.start)..self.normalize(v.end);
 
 		// The range 0..(2^n)-1 covered by the (unsigned) binary representation
-		// let (range_lb, range_ub) = two_comp_bounds(self.bits());
-		let range_lb = C::zero();
-		let range_ub = unsigned_binary_range_ub::<C>(self.bits()).unwrap();
+		let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
 
 		num::iter::range(
 			std::cmp::max(range_lb - C::one(), v.start),

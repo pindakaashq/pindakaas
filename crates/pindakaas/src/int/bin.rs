@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use itertools::Itertools;
 
 use crate::{
-	helpers::{as_binary, two_comp_bounds, unsigned_binary_range_ub},
+	helpers::{as_binary, two_comp_bounds, unsigned_binary_range},
 	linear::{lex_geq_const, lex_leq_const},
 	trace::{emit_clause, new_var},
 	ClauseDatabase, Coefficient, Comparator, Literal, Unsatisfiable,
@@ -110,8 +110,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 		// Go through x>=k.0+1..k.1 (or x<=k.0..k.1-1)
 		// (We don't constrain x>=k.0 of course)
 		// Do not constrain <lb (or >ub)
-		let range_lb = C::zero();
-		let range_ub = unsigned_binary_range_ub::<C>(self.bits()).unwrap();
+		let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
 		let ks = if up {
 			(
 				std::cmp::max(range_lb + C::one(), ks.0 + C::one()),
