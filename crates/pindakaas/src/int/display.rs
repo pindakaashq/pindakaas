@@ -64,7 +64,7 @@ impl<Lit: Literal, C: Coefficient> Display for Obj<Lit, C> {
 
 impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		if self.k.is_zero() {
+		if self.k.is_zero() && self.exp.terms.len() > 1 {
 			// Put in LinExp to avoid printing '+' at start
 			if let Some((rhs, lhs)) = self.exp.terms.split_last() {
 				write!(
