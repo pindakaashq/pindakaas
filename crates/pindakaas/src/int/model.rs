@@ -631,7 +631,12 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	}
 
 	fn handle_polarity(&self, cmp: &Comparator) -> bool {
-		(cmp == &Comparator::GreaterEq) == self.c.is_positive()
+		// (cmp == &Comparator::GreaterEq) == self.c.is_positive()
+		match cmp {
+			Comparator::GreaterEq => self.c.is_positive(),
+			Comparator::LessEq => !self.c.is_positive(),
+			Comparator::Equal => unimplemented!(),
+		}
 	}
 
 	// pub fn constant(c: C) -> Self {
@@ -651,7 +656,8 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		{
 			IntVarEnc::Ord(Some(o)) => self.dom().into_iter().zip(o.ineqs(up)).collect(),
 			IntVarEnc::Bin(Some(b)) => {
-				let range = if GROUND_BINARY_AT_LB {
+				// go over x's bounds
+				let (range_lb, range_ub) = if GROUND_BINARY_AT_LB {
 					(C::zero(), x_dom.ub() - x_dom.lb())
 				} else {
 					let is_two_comp = x_dom.lb().is_negative();
@@ -662,11 +668,28 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					}
 				};
 
-				// get all conjunctions for every term's domain value
+				// omit first/last if up/!up from range
+				let range = if up {
+					// also omit first 'hard-coded' x>=lb() == true literal
+					(range_lb + C::one(), range_ub)
+				} else {
+					// same for x<=ub() == true
+					(range_lb, range_ub - C::one())
+				};
+
+				// get all conjunctions for every term's domain value (except first/last if up/!up)
 				// TODO for now, all value within term's BOUNDS
-				b.ineqs(up, range)
-					.into_iter()
-					// b.ineqs returns range values -> (de!)normalize to x's dom values and then to term's values (by multiplying by coefficient)
+				let xs = b.ineqs(up, range);
+
+				// hard-code first (or last) fixed term bound literal
+				let xs = if up {
+					[(range_lb, vec![])].into_iter().chain(xs).collect_vec()
+				} else {
+					xs.into_iter().chain([(range_ub, vec![])]).collect_vec()
+				};
+
+				// b.ineqs returns range values -> (de!)normalize to x's dom values and then to term's values (by multiplying by coefficient)
+				xs.into_iter()
 					.map(|(k, cnf)| ((k + x_dom.lb()) * self.c, cnf))
 					.collect()
 			}
@@ -675,32 +698,41 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		}
 	}
 
+	/// Return CNF for c*x>=k (or c*x<=k)
 	pub fn ineq(&self, k: C, cmp: &Comparator) -> Vec<Vec<Lit>> {
 		// we get the position of a*x >= c == x >= ceil(c/a) if cmp = >= and a >= 0; either might flip it to x <= floor(c/a)
 		let up = self.handle_polarity(cmp);
+
+		// TODO
+		// if (up && self.lb() <= k) || (!up && self.ub() >= k) {
+		// 	return vec![];
+		// } else if (up && self.ub() > k) || (!up && self.lb() < k) {
+		// 	return vec![vec![]];
+		// }
+
+		let k = if up {
+			k.div_ceil(&self.c)
+		} else {
+			k.div_floor(&self.c)
+		};
+
+		// TODO move into IntVar since self.c is taken care off?
 		match self.x.borrow().e.as_ref().unwrap() {
-			IntVarEnc::Ord(Some(o)) => o.ineq(self.x.borrow().dom.ineq(k, self.c, up), up),
+			IntVarEnc::Ord(Some(o)) => o.ineq(self.x.borrow().dom.ineq(k, up), up),
 			IntVarEnc::Bin(Some(b)) => {
-				let x_dom = &self.x.borrow().dom;
-				// TODO move this out of o.ineq
-				let k = if up {
-					k.div_ceil(&self.c)
-				} else {
-					k.div_floor(&self.c)
-				};
-				let ks = if up { (x_dom.lb(), k) } else { (k, x_dom.ub()) };
-				// let ks = if up {
-				// 	(dom.lb(), std::cmp::min(k, dom.ub() + C::one()))
-				// } else {
-				// 	(std::cmp::max(k, dom.lb() - C::one()), dom.ub())
-				// };
-				// let ks = if up {
-				// 	(k - C::one(), k)
-				// } else {
-				// 	(k, k + C::one())
-				// };
-				let ks = (b.normalize(ks.0, x_dom), b.normalize(ks.1, x_dom));
-				b.ineq(ks, up)
+				// x>=k == ¬(x<k) == ¬(x<=k-1) (or x<=k == ¬(x>=k+1))
+				let k = if up { k - C::one() } else { k + C::one() };
+				let k = b.normalize(k, &self.x.borrow().dom);
+
+				let (range_lb, range_ub) = unsigned_binary_range(b.bits());
+				let k = if up { (range_lb, k) } else { (k, range_ub) };
+				let k = (std::cmp::max(range_lb, k.0), std::cmp::min(range_ub, k.1)); // TODO temp
+
+				b.ineqs(!up, k)
+					.into_iter()
+					.map(|(_, cnf)| cnf)
+					.flat_map(|cnf| negate_cnf(cnf))
+					.collect()
 			}
 			IntVarEnc::Const(_) => todo!(),
 
@@ -2137,7 +2169,7 @@ mod tests {
 			// [Consistency::None],
 			// [Consistency::None, Consistency::Bounds],
 			[Consistency::None],
-			[false, true],
+			[false, true], // consistency
 			// [true],
 			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
 			[false, true], // equalize terns

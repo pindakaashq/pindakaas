@@ -52,142 +52,39 @@ impl<Lit: Literal> BinEnc<Lit> {
 		}
 	}
 
+	/// Returns conjunction for x>=k (or x<=k if !up)
+	pub fn ineq<C: Coefficient>(&self, up: bool, k: C) -> Vec<Vec<Lit>> {
+		as_binary(k.into(), Some(self.bits()))
+			.into_iter()
+			.zip(self.xs().iter().cloned())
+			// if >=, find 1's, if <=, find 0's
+			.filter_map(|(b, x)| (b == up).then_some(x))
+			// if <=, negate 1's to not 1's
+			.map(|x| if up { x } else { -x })
+			.filter_map(|x| match x {
+				// THIS IS A CONJUNCTION
+				// TODO make this a bit more clear (maybe simplify function for Cnf)
+				LitOrConst::Lit(x) => Some(Ok(vec![x])),
+				LitOrConst::Const(true) => None, // literal satisfied
+				LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
+			})
+			.try_collect()
+			.unwrap_or(vec![vec![]])
+	}
+
 	pub fn ineqs<C: Coefficient>(
 		&self,
 		up: bool,
 		(range_lb, range_ub): (C, C),
 	) -> Vec<(C, Vec<Vec<Lit>>)> {
-		let range = if up {
-			// also omit first 'hard-coded' x>=lb() == true literal
-			(range_lb + C::one(), range_ub)
-		} else {
-			// same for x<=ub() == true
-			(range_lb, range_ub - C::one())
-		};
-
 		assert!({
 			let r = unsigned_binary_range::<C>(self.bits());
-			range.0 >= r.0 && range.1 <= r.1
-		});
-		// get all conjunctions for every term's domain value
-		let xs = num::iter::range_inclusive(range.0, range.1).flat_map(|k| {
-			as_binary(k.into(), Some(self.bits()))
-				.into_iter()
-				.zip(self.xs().iter().cloned())
-				// if >=, find 1's, if <=, find 0's
-				.filter_map(|(b, x)| (b == up).then_some(x))
-				// if <=, negate 1's to not 1's
-				.map(|x| if up { x } else { -x })
-				.filter_map(|x| match x {
-					// THIS IS A CONJUNCTION
-					// TODO make this a bit more clear (maybe simplify function for Cnf)
-					LitOrConst::Lit(x) => Some(Ok(vec![x])),
-					LitOrConst::Const(true) => None,           // literal satisfied
-					LitOrConst::Const(false) => Some(Err(())), // clause falsified
-				})
-				.try_collect()
-				.map(|cnf| (k, cnf))
+			range_lb >= r.0 && range_ub <= r.1
 		});
 
-		// hard-code first (or last) fixed term bound literal
-		if up {
-			[(range_lb, vec![])].into_iter().chain(xs).collect()
-		} else {
-			xs.chain([(range_ub, vec![])]).collect()
-		}
-	}
-
-	// pub fn from_lits(x: &[Lit]) -> Self {
-	// todo!();
-	// 	Self {
-	// 		x: x.iter().cloned().map(LitOrConst::from).collect(),
-	// 	}
-	// }
-
-	// TODO think about whether we need this old version. The new version probably does not account for gaps?
-	/*
-	// pub fn iter(&self) -> impl Iterator<Item = Vec<Lit>> {
-	pub fn ineqs<C: Coefficient>(&self, up: bool, dom: &Dom<C>) -> Vec<Vec<Vec<Lit>>> {
-		// TODO exchange for dom bounds
-		if up {
-			[vec![]]
-				.into_iter()
-				.chain(
-					num::iter::range_inclusive(
-						C::zero(),
-						unsigned_binary_range_ub::<C>(self.bits()).unwrap(),
-					)
-					.map(|k| self.normalize(k, dom))
-					.map(|k| self.ineq((k, k + C::one()), up)),
-					// .map(|k| self.ineq((C::zero(), k + C::one()), up)),
-				)
-				.collect()
-		} else {
-			// let range_ub = unsigned_binary_range_ub::<C>(self.bits()).unwrap();
-			num::iter::range_inclusive(
-				C::one(),
-				unsigned_binary_range_ub::<C>(self.bits()).unwrap(),
-			)
-			.map(|k| self.normalize(k, dom))
-			.map(|k| self.ineq((k - C::one(), k), up))
-			// .map(|k| self.ineq((k - C::one(), range_ub), up))
-			.chain([vec![]])
-			.collect()
-		}
-		// TODO should be able to call ineq(0..2^bits)
-		// if up {
-		// 	[vec![]]
-		// 		.into_iter()
-		// 		.chain(self.x.iter().map(|x| vec![vec![x.clone()]]))
-		// 		.collect()
-		// } else {
-		// 	self.x
-		// 		.iter()
-		// 		.map(|x| vec![vec![x.negate()]])
-		// 		.chain([vec![]])
-		// 		.collect()
-		// }
-	}
-	*/
-
-	/// Return cnf constraining cnf>=ks.1 assuming x>=ks.0 (or cnf<=ks.0 assuming x<=ks.1)
-	pub(crate) fn ineq<C: Coefficient>(&self, ks: (C, C), up: bool) -> Vec<Vec<Lit>> {
-		// Go through x>=k.0+1..k.1 (or x<=k.0..k.1-1)
-		// (We don't constrain x>=k.0 of course)
-		// Do not constrain <lb (or >ub)
-		let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
-		let ks = if up {
-			(
-				std::cmp::max(range_lb + C::one(), ks.0 + C::one()),
-				std::cmp::min(ks.1, range_ub + C::one()),
-			)
-		} else {
-			(
-				std::cmp::max(range_lb - C::one(), ks.0),
-				std::cmp::min(range_ub - C::one(), ks.1 - C::one()),
-			)
-		};
-		num::iter::range_inclusive(ks.0, ks.1)
-			.filter_map(|v| {
-				// x>=v == x>v-1 (or x<=v == x<v+1)
-				let v = if up { v - C::one() } else { v + C::one() };
-
-				as_binary(v.into(), Some(self.bits()))
-					.into_iter()
-					.zip(self.x.iter().cloned())
-					// if >=, find 0's, if <=, find 1's
-					.filter_map(|(b, x)| (b != up).then_some(x))
-					// if <=, negate 1's to not 1's
-					.map(|x| if up { x } else { -x })
-					// filter out fixed literals (possibly satisfying clause)
-					.filter_map(|x| match x {
-						LitOrConst::Lit(x) => Some(Ok(x)),
-						LitOrConst::Const(true) => Some(Err(())), // clause satisfied
-						LitOrConst::Const(false) => None,         // literal falsified
-					})
-					.collect::<Result<Vec<_>, _>>()
-					.ok()
-			})
+		// get all conjunctions for every value in the given range
+		num::iter::range_inclusive(range_lb, range_ub)
+			.map(|k| (k, self.ineq(up, k)))
 			.collect()
 	}
 
@@ -359,26 +256,31 @@ mod tests {
 	// type C = i32;
 
 	use super::*;
-	use crate::helpers::tests::TestDB;
+	use crate::helpers::{negate_cnf, tests::TestDB};
 
 	#[test]
-	fn test_ineq() {
+	fn test_ineq2() {
 		let mut db = TestDB::new(0);
-		let x = BinEnc::new(&mut db, 4, Some(String::from("x")));
+		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
 
+		dbg!(&x.ineq(false, 2));
+		dbg!(&negate_cnf(x.ineq(false, 2)));
 		for (up, ks, expected_cnf) in [
-			(true, (0, 1), vec![vec![1, 2, 3, 4]]),
-			(
-				true,
-				(0, 3),
-				vec![vec![1, 2, 3, 4], vec![2, 3, 4], vec![1, 3, 4]],
-			),
-			(true, (14, 17), vec![vec![1], vec![]]),
-			(true, (0, 0), vec![]),
-			(false, (15, 16), vec![]),
+			(true, 0, vec![]),
+			(true, 1, vec![vec![1]]),
+			(true, 2, vec![vec![2]]),
+			(true, 3, vec![vec![1], vec![2]]),
+			// (
+			// 	true,
+			// 	(0, 3),
+			// 	vec![vec![1, 2, 3, 4], vec![2, 3, 4], vec![1, 3, 4]],
+			// ),
+			// (true, (14, 17), vec![vec![1], vec![]]),
+			// (true, (0, 0), vec![]),
+			// (false, (15, 16), vec![]),
 		] {
 			assert_eq!(
-				x.ineq(ks, up),
+				x.ineq(up, ks),
 				expected_cnf,
 				"ks {ks:?} with up {up} was expected to return {expected_cnf:?}"
 			);
