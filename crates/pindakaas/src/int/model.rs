@@ -650,7 +650,15 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			IntVarEnc::Ord(Some(o)) => self.dom().into_iter().zip(o.ineqs(up)).collect(),
 			IntVarEnc::Bin(Some(b)) => {
 				let range = if GROUND_BINARY_AT_LB {
-					(C::zero(), unsigned_binary_range_ub::<C>(b.bits()).unwrap())
+					// we don't go through the full range; only within x's domain bounds
+					let range_ub = x_dom.ub() - x_dom.lb();
+					if up {
+						// also omit first 'hard-coded' x>=lb() == true literal
+						(C::one(), range_ub)
+					} else {
+						// same for x<=ub() == true
+						(C::zero(), range_ub - C::one())
+					}
 				} else {
 					let is_two_comp = x_dom.lb().is_negative();
 					if is_two_comp {
@@ -659,7 +667,10 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 						(C::zero(), unsigned_binary_range_ub::<C>(b.bits()).unwrap())
 					}
 				};
-				num::iter::range_inclusive(range.0, range.1)
+				assert!(range.1 <= unsigned_binary_range_ub::<C>(b.bits()).unwrap());
+
+				// get all conjunctions for every term's domain value
+				let xs = num::iter::range_inclusive(range.0, range.1)
 					.map(|k| (k + x_dom.lb(), k))
 					.flat_map(|(v, k)| {
 						as_binary(k.into(), Some(b.bits()))
@@ -679,8 +690,17 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 							.collect::<Result<Vec<_>, _>>()
 							.ok()
 							.map(|cnf| (self.c * v, cnf))
-					})
-					.collect()
+					});
+
+				// hard-code first (or last) fixed term bound literal
+				if up {
+					[(self.c * x_dom.lb(), vec![])]
+						.into_iter()
+						.chain(xs)
+						.collect()
+				} else {
+					xs.chain([(self.c * x_dom.ub(), vec![])]).collect()
+				}
 			}
 			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
 			IntVarEnc::Const(_) => todo!(),
@@ -1644,7 +1664,6 @@ pub struct EqualizeTernariesDecomposer {
 	equalize_ternaries: bool,
 }
 
-
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 	fn decompose(
 		&self,
@@ -1877,7 +1896,6 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		if self.add_consistency {
 			self.consistent(db)?;
 		}
-
 
 		Ok(e)
 	}
@@ -2612,7 +2630,6 @@ End
 ";
 		test_lp_for_configs(lp);
 	}
-
 
 	#[test]
 	fn test_int_lin_eq_1() {
