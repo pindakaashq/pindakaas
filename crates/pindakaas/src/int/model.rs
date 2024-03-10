@@ -2,7 +2,7 @@
 use crate::int::enc::GROUND_BINARY_AT_LB;
 use crate::linear::log_enc_add_;
 use crate::{
-	helpers::{add_clauses_for, as_binary, negate_cnf, two_comp_bounds, unsigned_binary_range_ub},
+	helpers::{add_clauses_for, as_binary, negate_cnf, two_comp_bounds, unsigned_binary_range},
 	int::{ord::OrdEnc, scm::ScmDecomposer, Dom, TernLeConstraint, TernLeEncoder},
 	linear::{clause, log_enc_add_fn, Part},
 	trace::emit_clause,
@@ -664,10 +664,10 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					if is_two_comp {
 						two_comp_bounds(b.bits())
 					} else {
-						(C::zero(), unsigned_binary_range_ub::<C>(b.bits()).unwrap())
+						unsigned_binary_range::<C>(b.bits())
 					}
 				};
-				assert!(range.1 <= unsigned_binary_range_ub::<C>(b.bits()).unwrap());
+				assert!(range.1 <= unsigned_binary_range::<C>(b.bits()).1);
 
 				// get all conjunctions for every term's domain value
 				let xs = num::iter::range_inclusive(range.0, range.1)
