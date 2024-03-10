@@ -52,6 +52,51 @@ impl<Lit: Literal> BinEnc<Lit> {
 		}
 	}
 
+	pub fn ineqs<C: Coefficient>(
+		&self,
+		up: bool,
+		(range_lb, range_ub): (C, C),
+	) -> Vec<(C, Vec<Vec<Lit>>)> {
+		let range = if up {
+			// also omit first 'hard-coded' x>=lb() == true literal
+			(range_lb + C::one(), range_ub)
+		} else {
+			// same for x<=ub() == true
+			(range_lb, range_ub - C::one())
+		};
+
+		assert!({
+			let r = unsigned_binary_range::<C>(self.bits());
+			range.0 >= r.0 && range.1 <= r.1
+		});
+		// get all conjunctions for every term's domain value
+		let xs = num::iter::range_inclusive(range.0, range.1).flat_map(|k| {
+			as_binary(k.into(), Some(self.bits()))
+				.into_iter()
+				.zip(self.xs().iter().cloned())
+				// if >=, find 1's, if <=, find 0's
+				.filter_map(|(b, x)| (b == up).then_some(x))
+				// if <=, negate 1's to not 1's
+				.map(|x| if up { x } else { -x })
+				.filter_map(|x| match x {
+					// THIS IS A CONJUNCTION
+					// TODO make this a bit more clear (maybe simplify function for Cnf)
+					LitOrConst::Lit(x) => Some(Ok(vec![x])),
+					LitOrConst::Const(true) => None,           // literal satisfied
+					LitOrConst::Const(false) => Some(Err(())), // clause falsified
+				})
+				.try_collect()
+				.map(|cnf| (k, cnf))
+		});
+
+		// hard-code first (or last) fixed term bound literal
+		if up {
+			[(range_lb, vec![])].into_iter().chain(xs).collect()
+		} else {
+			xs.chain([(range_ub, vec![])]).collect()
+		}
+	}
+
 	// pub fn from_lits(x: &[Lit]) -> Self {
 	// todo!();
 	// 	Self {
