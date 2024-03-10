@@ -652,15 +652,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			IntVarEnc::Ord(Some(o)) => self.dom().into_iter().zip(o.ineqs(up)).collect(),
 			IntVarEnc::Bin(Some(b)) => {
 				let range = if GROUND_BINARY_AT_LB {
-					// we don't go through the full range; only within x's domain bounds
-					let range_ub = x_dom.ub() - x_dom.lb();
-					if up {
-						// also omit first 'hard-coded' x>=lb() == true literal
-						(C::one(), range_ub)
-					} else {
-						// same for x<=ub() == true
-						(C::zero(), range_ub - C::one())
-					}
+					(C::zero(), x_dom.ub() - x_dom.lb())
 				} else {
 					let is_two_comp = x_dom.lb().is_negative();
 					if is_two_comp {
@@ -669,40 +661,14 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 						unsigned_binary_range::<C>(b.bits())
 					}
 				};
-				assert!(range.1 <= unsigned_binary_range::<C>(b.bits()).1);
 
 				// get all conjunctions for every term's domain value
-				let xs = num::iter::range_inclusive(range.0, range.1)
-					.map(|k| (k + x_dom.lb(), k))
-					.flat_map(|(v, k)| {
-						as_binary(k.into(), Some(b.bits()))
-							.into_iter()
-							.zip(b.xs().iter().cloned())
-							// if >=, find 1's, if <=, find 0's
-							.filter_map(|(b, x)| (b == up).then_some(x))
-							// if <=, negate 1's to not 1's
-							.map(|x| if up { x } else { -x })
-							.filter_map(|x| match x {
-								// THIS IS A CONJUNCTION
-								// TODO make this a bit more clear (maybe simplify function for Cnf)
-								LitOrConst::Lit(x) => Some(Ok(vec![x])),
-								LitOrConst::Const(true) => None,           // literal satisfied
-								LitOrConst::Const(false) => Some(Err(())), // clause falsified
-							})
-							.collect::<Result<Vec<_>, _>>()
-							.ok()
-							.map(|cnf| (self.c * v, cnf))
-					});
-
-				// hard-code first (or last) fixed term bound literal
-				if up {
-					[(self.c * x_dom.lb(), vec![])]
-						.into_iter()
-						.chain(xs)
-						.collect()
-				} else {
-					xs.chain([(self.c * x_dom.ub(), vec![])]).collect()
-				}
+				// TODO for now, all value within term's BOUNDS
+				b.ineqs(up, range)
+					.into_iter()
+					// b.ineqs returns range values -> (de!)normalize to x's dom values and then to term's values (by multiplying by coefficient)
+					.map(|(k, cnf)| ((k + x_dom.lb()) * self.c, cnf))
+					.collect()
 			}
 			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
 			IntVarEnc::Const(_) => todo!(),
@@ -715,14 +681,14 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		match self.x.borrow().e.as_ref().unwrap() {
 			IntVarEnc::Ord(Some(o)) => o.ineq(self.x.borrow().dom.ineq(k, self.c, up), up),
 			IntVarEnc::Bin(Some(b)) => {
-				let dom = &self.x.borrow().dom;
+				let x_dom = &self.x.borrow().dom;
 				// TODO move this out of o.ineq
 				let k = if up {
 					k.div_ceil(&self.c)
 				} else {
 					k.div_floor(&self.c)
 				};
-				let ks = if up { (dom.lb(), k) } else { (k, dom.ub()) };
+				let ks = if up { (x_dom.lb(), k) } else { (k, x_dom.ub()) };
 				// let ks = if up {
 				// 	(dom.lb(), std::cmp::min(k, dom.ub() + C::one()))
 				// } else {
@@ -733,7 +699,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				// } else {
 				// 	(k, k + C::one())
 				// };
-				let ks = (b.normalize(ks.0, dom), b.normalize(ks.1, dom));
+				let ks = (b.normalize(ks.0, x_dom), b.normalize(ks.1, x_dom));
 				b.ineq(ks, up)
 			}
 			IntVarEnc::Const(_) => todo!(),
@@ -2171,7 +2137,7 @@ mod tests {
 			// [Consistency::None],
 			// [Consistency::None, Consistency::Bounds],
 			[Consistency::None],
-			[true], // TODO consistency might not be necessary for Bin
+			[false, true],
 			// [true],
 			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
 			[false, true], // equalize terns
