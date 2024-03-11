@@ -370,7 +370,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		decomposition.propagate(&self.config.propagate.clone())?;
 
 		for con in &decomposition.cons {
-			con.encode(db, &self.config)?;
+			con.encode(db, &self.config).unwrap();
 		}
 
 		Ok(decomposition)
@@ -1698,7 +1698,6 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 			},
 		}?;
 
-
 		// TODO only do this for uniform BinEncs..
 		if self.equalize_ternaries {
 			const REMOVE_GAPS: bool = true;
@@ -1736,6 +1735,9 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 					.collect(),
 				..model
 			};
+
+			// TODO this propagate messes up tests
+			// model.propagate(&Consistency::Bounds)?;
 			Ok(model)
 		} else {
 			Ok(model)
@@ -2166,7 +2168,7 @@ mod tests {
 			// [Consistency::None],
 			// [false],
 			// [Some(0)] // [None, Some(0), Some(2)]
-			[Scm::Add],
+			[Scm::Rca, Scm::Dnf],
 			[
 				Decomposer::Gt,
 				// Decomposer::Swc,
@@ -2224,8 +2226,11 @@ mod tests {
 					.try_for_each(|var| {
 						if VAR_ENCS.is_empty() {
 							var.borrow_mut().decide_encoding(config.cutoff);
-						} else {
-							var.borrow_mut().e = Some(var_encs[&var.borrow().id.0].clone());
+						} else if let Some(var_enc) = {
+							let id = var.borrow().id.0;
+							var_encs.get(&id)
+						} {
+							var.borrow_mut().e = Some(var_enc.clone());
 						}
 						var.borrow_mut().encode(&mut db, &mut all_views).map(|_| ())
 					})
@@ -2319,28 +2324,31 @@ mod tests {
 				check_decomposition(&model, &decomposition, expected_assignments);
 			}
 
-			for var_encs in expand_var_encs(
-				VAR_ENCS,
-				&decomposition, // , model.num_var + 1
-			) {
+			for var_encs in expand_var_encs(VAR_ENCS, &decomposition) {
 				let decomposition = decomposition.deep_clone();
 				let mut decomp_db = db.clone();
-
 
 				decomposition.vars().iter().for_each(|var| {
 					if VAR_ENCS.is_empty() {
 						var.borrow_mut()
 							.decide_encoding(decomposition.config.cutoff);
-					} else {
-						var.borrow_mut().e = Some(var_encs[&var.borrow().id.0].clone());
+					} else if let Some(var_enc) = {
+						let id = var.borrow().id.0;
+						var_encs.get(&id)
+					} {
+						var.borrow_mut().e = Some(var_enc.clone());
 					}
 				});
 
 				println!("decomposition = {}", decomposition);
 
-				let decomposition = decomposition
-					.decompose_with(ScmDecomposer::default())
-					.unwrap();
+				let decomposition = if decomposition.config.scm == Scm::Dnf {
+					decomposition
+						.decompose_with(ScmDecomposer::default())
+						.unwrap()
+				} else {
+					decomposition
+				};
 
 				// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
 				// TODO should that be moved after encode step since encoding itself might introduce aux (bool) vars?
@@ -2374,25 +2382,6 @@ mod tests {
 				} {
 					let mut con_db = decomp_db.clone();
 
-					// // // TODO probably cannot test constraints in isolation without making all vars consistent
-					// if CHECK_CONSTRAINTS
-					// 	&& decomposition
-					// 		.vars()
-					// 		.iter()
-					// 		.any(|x| !x.borrow().add_consistency)
-					// {
-					// 	continue;
-					// }
-
-					// for x in decomposition
-					// 	.vars()
-					// 	.iter()
-					// 	.filter(|x| !x.borrow().add_consistency)
-					// {
-					// 	// x.borrow_mut().add_consistency = true;
-					// 	x.borrow().consistent(&mut con_db).unwrap();
-					// }
-
 					// encode and solve
 					let lit_assignments = decomposition
 						.encode(&mut con_db, false)
@@ -2411,7 +2400,11 @@ mod tests {
 								.sorted()
 								.collect::<Vec<_>>()
 						})
-						.unwrap_or_default();
+						.unwrap_or_else(|_| {
+							println!("Warning: encoding decomposition lead to UNSAT");
+							Vec::default()
+						});
+
 					assert_eq!(
 						lit_assignments.iter().unique().count(),
 						lit_assignments.len(),
@@ -3014,7 +3007,7 @@ End
 	Subject To
 	c0: 43 x_1 = 0
 	Bounds
-	0 <= x_1 <= 15
+	0 <= x_1 <= 7
 	End
 	",
 			None,

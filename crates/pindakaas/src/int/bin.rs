@@ -5,9 +5,9 @@ use std::collections::HashSet;
 use itertools::Itertools;
 
 use crate::{
-	helpers::{as_binary, two_comp_bounds, unsigned_binary_range},
+	helpers::{add_clauses_for, as_binary, negate_cnf, two_comp_bounds, unsigned_binary_range},
 	linear::{lex_geq_const, lex_leq_const},
-	trace::{emit_clause, new_var},
+	trace::new_var,
 	ClauseDatabase, Coefficient, Comparator, Literal, Unsatisfiable,
 };
 
@@ -135,10 +135,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 					lex_leq_const(db, &self.xs(), self.normalize(k, dom), self.bits())
 				}
 			}
-			Comparator::Equal => self
-				.eq(k, dom)?
-				.into_iter()
-				.try_for_each(|cls| emit_clause!(db, &[cls])),
+			Comparator::Equal => add_clauses_for(db, vec![self.eq(k, dom)]),
 			Comparator::GreaterEq => {
 				if k > dom.ub() {
 					Err(Unsatisfiable)
@@ -152,17 +149,18 @@ impl<Lit: Literal> BinEnc<Lit> {
 	}
 
 	/// Return conjunction of bits equivalent where `x=k`
-	fn eq<C: Coefficient>(&self, k: C, dom: &Dom<C>) -> Result<Vec<Lit>, Unsatisfiable> {
+	fn eq<C: Coefficient>(&self, k: C, dom: &Dom<C>) -> Vec<Vec<Lit>> {
 		as_binary(self.normalize(k, dom).into(), Some(self.bits()))
 			.into_iter()
 			.zip(self.xs().iter())
 			.map(|(b, x)| if b { x.clone() } else { -x.clone() })
 			.flat_map(|x| match x {
-				LitOrConst::Lit(lit) => Some(Ok(lit)),
+				LitOrConst::Lit(lit) => Some(Ok(vec![lit])),
 				LitOrConst::Const(true) => None,
 				LitOrConst::Const(false) => Some(Err(Unsatisfiable)),
 			})
-			.collect()
+			.try_collect()
+			.unwrap_or(vec![vec![]])
 	}
 
 	/// Normalize k to its value in unsigned binary relative to this encoding
@@ -190,10 +188,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 		k: C,
 		dom: &Dom<C>,
 	) -> crate::Result {
-		emit_clause!(
-			db,
-			&self.eq(k, dom)?.iter().map(Lit::negate).collect::<Vec<_>>()
-		)
+		add_clauses_for(db, vec![negate_cnf::<Lit>(self.eq(k, dom))])
 	}
 
 	pub(crate) fn as_lin_exp<C: Coefficient>(&self) -> (Vec<(Lit, C)>, C) {
