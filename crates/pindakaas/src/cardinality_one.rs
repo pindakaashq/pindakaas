@@ -52,7 +52,7 @@ pub(crate) fn at_least_one_clause<DB: ClauseDatabase>(
 pub(crate) mod tests {
 	macro_rules! card1_test_suite {
 		($encoder:expr) => {
-            const LARGE_N: i32 = 50;
+            const LARGE_N: i32 = 20;
 			// ------ At Most One testing ------
 			#[test]
 			fn test_amo_pair() {

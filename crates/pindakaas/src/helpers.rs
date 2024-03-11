@@ -752,10 +752,15 @@ pub mod tests {
 		}
 	}
 
+	const MAX_CLAUSES: usize = 200;
 	impl ClauseDatabase for TestDB {
-		type Lit = i32;
+		type Lit = Lit;
 
 		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
+			assert!(
+				self.cnf.clauses() <= MAX_CLAUSES,
+				"More than {MAX_CLAUSES} clauses added for single unit test"
+			);
 			let mut cl = Vec::from(cl);
 
 			cl.sort_by_key(|a| a.abs());
