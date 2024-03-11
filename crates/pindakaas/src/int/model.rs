@@ -302,14 +302,20 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		let lin_decomposer = LinDecomposer {
 			equalize_ternaries: self.config.equalize_ternaries,
 		};
-		self.decompose_with(lin_decomposer).map(|model| {
+		let model = self.decompose_with(lin_decomposer).map(|model| {
 			model.constraints().for_each(|con| {
 				con.exp.terms.iter().for_each(|t| {
 					t.x.borrow_mut().decide_encoding(model.config.cutoff);
 				})
 			});
 			model
-		})
+		})?;
+
+		if matches!(&model.config.scm, Scm::Dnf) {
+			model.decompose_with(ScmDecomposer::default())
+		} else {
+			Ok(model)
+		}
 	}
 
 	pub fn decompose_with(
@@ -390,6 +396,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	pub(crate) fn extend(&mut self, other: Model<Lit, C>) {
+		self.config = other.config;
 		self.num_var = other.num_var;
 		self.cons.extend(other.cons);
 	}
@@ -2194,10 +2201,10 @@ mod tests {
 	// const VAR_ENCS: &[bool] = &[true, false];
 	const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
 
-	fn test_lp_for_configs(lp: &str) {
+	fn test_lp_for_configs(lp: &str, configs: Option<Vec<ModelConfig<C>>>) {
 		let model = Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap();
 		let expected_assignments = model.brute_force_solve(None);
-		for config in get_model_configs() {
+		for config in configs.unwrap_or_else(get_model_configs) {
 			assert!(
 				model.num_var <= 10,
 				"Attempting to test many (2^{}) var enc specs",
@@ -2205,11 +2212,7 @@ mod tests {
 			);
 
 			// TODO possibly skip enc_spec on constants
-			for var_encs in (0..model.num_var)
-				.map(|_| VAR_ENCS)
-				.multi_cartesian_product()
-			// .take(1)
-			{
+			for var_encs in expand_var_encs(VAR_ENCS, &model) {
 				let model = model.deep_clone().with_config(config.clone());
 
 				let mut all_views = HashMap::new();
@@ -2218,10 +2221,12 @@ mod tests {
 				model
 					.vars()
 					.iter()
-					.sorted_by_key(|var| var.borrow().id)
-					.zip(var_encs)
-					.try_for_each(|(var, var_enc)| {
-						var.borrow_mut().e = Some(var_enc.clone());
+					.try_for_each(|var| {
+						if VAR_ENCS.is_empty() {
+							var.borrow_mut().decide_encoding(config.cutoff);
+						} else {
+							var.borrow_mut().e = Some(var_encs[&var.borrow().id.0].clone());
+						}
 						var.borrow_mut().encode(&mut db, &mut all_views).map(|_| ())
 					})
 					.unwrap();
@@ -2250,6 +2255,50 @@ mod tests {
 		}
 	}
 
+	fn expand_var_encs(
+		var_encs: &[IntVarEnc<Lit, C>],
+		model: &Model<Lit, C>,
+	) -> Vec<HashMap<usize, IntVarEnc<Lit, C>>> {
+		if var_encs.is_empty() {
+			return vec![HashMap::default()];
+		}
+		let var_enc_ids = model
+			.vars()
+			.iter()
+			.sorted_by_key(|var| var.borrow().id)
+			// If not encoded and no encoding preference (e.g. scm), assign and encode
+			// TODO maybe remove constants (although some bugs might arise from the different encodings of constants
+			.filter(|x| x.borrow().e.is_none())
+			.map(|x| x.borrow().id.0)
+			.collect_vec();
+
+		assert!(
+			var_enc_ids.len() <= 50,
+			"Attempting to test many ({}) var enc specs ({:?})",
+			var_enc_ids.len(),
+			var_enc_ids
+		);
+
+		let var_encs_gen = var_enc_ids
+			.iter()
+			.map(|_| VAR_ENCS)
+			.multi_cartesian_product()
+			.map(|var_encs| {
+				var_enc_ids
+					.iter()
+					.cloned()
+					.zip(var_encs.into_iter().cloned())
+					.collect::<HashMap<_, _>>()
+			})
+			.collect_vec();
+
+		if var_encs_gen.is_empty() {
+			vec![HashMap::default()]
+		} else {
+			var_encs_gen
+		}
+	}
+
 	fn test_lp(
 		lp: &str,
 		db: TestDB,
@@ -2270,53 +2319,20 @@ mod tests {
 				check_decomposition(&model, &decomposition, expected_assignments);
 			}
 
-			let var_enc_ids = decomposition
-				.vars()
-				.iter()
-				.sorted_by_key(|var| var.borrow().id)
-				// If this var is part of decomp
-				.filter(|x| x.borrow().id.0 > model.num_var)
-				// If not encoded and no encoding preference (e.g. scm), assign and encode
-				// TODO maybe remove constants (although some bugs might arise from the different encodings of constants
-				.filter(|x| x.borrow().e.is_none())
-				.map(|x| x.borrow().id.0)
-				.collect_vec();
-
-			assert!(
-				var_enc_ids.len() <= 50,
-				"Attempting to test many ({}) var enc specs ({:?})",
-				var_enc_ids.len(),
-				var_enc_ids
-			);
-
-			let var_encs_gen = var_enc_ids
-				.iter()
-				.map(|_| VAR_ENCS)
-				.multi_cartesian_product()
-				.map(|var_encs| {
-					var_enc_ids
-						.iter()
-						.cloned()
-						.zip(var_encs)
-						.collect::<HashMap<_, _>>()
-				})
-				.collect_vec();
-
-			let var_encs_gen = if var_encs_gen.is_empty() {
-				vec![HashMap::default()]
-			} else {
-				var_encs_gen
-			};
-
-			for var_encs in var_encs_gen {
+			for var_encs in expand_var_encs(
+				VAR_ENCS,
+				&decomposition, // , model.num_var + 1
+			) {
 				let decomposition = decomposition.deep_clone();
 				let mut decomp_db = db.clone();
 
-				decomposition.vars().iter().for_each(|x| {
-					// avoids BorrowMutError
-					let var_enc = var_encs.get(&x.borrow().id.0);
-					if let Some(var_enc) = var_enc {
-						x.borrow_mut().e = Some((*var_enc).clone());
+
+				decomposition.vars().iter().for_each(|var| {
+					if VAR_ENCS.is_empty() {
+						var.borrow_mut()
+							.decide_encoding(decomposition.config.cutoff);
+					} else {
+						var.borrow_mut().e = Some(var_encs[&var.borrow().id.0].clone());
 					}
 				});
 
@@ -2446,6 +2462,7 @@ bounds
 0 <= x1 <= 3
 End
 ",
+			None,
 		);
 	}
 
@@ -2460,6 +2477,7 @@ doms
   x1 in 0,2,3,5
 End
 ",
+			None,
 		);
 	}
 
@@ -2473,6 +2491,7 @@ bounds
 0 <= x1 <= 3
 End
 ",
+			None,
 		);
 	}
 
@@ -2486,6 +2505,7 @@ bounds
 -2 <= x1 <= 3
 End
 ",
+			None,
 		);
 	}
 
@@ -2499,6 +2519,7 @@ bounds
 0 <= x1 <= 3
 End
 ",
+			None,
 		);
 	}
 
@@ -2512,6 +2533,7 @@ Binary
 x1
 End
 ",
+			None,
 		);
 	}
 
@@ -2525,6 +2547,7 @@ Binary
 x1
 End
 ",
+			None,
 		);
 	}
 
@@ -2540,6 +2563,7 @@ bounds
 4 <= x3 <= 4
 End
 ",
+			None,
 		);
 	}
 
@@ -2553,6 +2577,7 @@ Binary
 x1
 End
 ",
+			None,
 		);
 	}
 
@@ -2568,6 +2593,7 @@ x2
 x3
 End
 ",
+			None,
 		);
 	}
 
@@ -2582,6 +2608,7 @@ x1
 x2
 End
 ",
+			None,
 		);
 	}
 
@@ -2597,6 +2624,7 @@ Bounds
 0 <= x3 <= 2
 End
 ",
+			None,
 		)
 	}
 
@@ -2612,12 +2640,14 @@ Bounds
 0 <= x2 <= 1
 End
 ",
+			None,
 		);
 	}
 
 	#[test]
 	fn test_int_lin_le_4_unit_tern() {
-		let lp = r"
+		test_lp_for_configs(
+			r"
 Subject To
   c0: 4 x_1 + 1 x_2 - 1 x_3 = 0
   \ c0: 1 x_1 + 1 x_2 - 1 x_3 = 0
@@ -2627,8 +2657,9 @@ Bounds
   0 <= x_2 <= 3
   0 <= x_3 <= 3
 End
-";
-		test_lp_for_configs(lp);
+",
+			None,
+		);
 	}
 
 	#[test]
@@ -2642,6 +2673,7 @@ x1
 x2
 End
 ",
+			None,
 		);
 	}
 
@@ -2656,6 +2688,7 @@ Bounds
 0 <= x2 <= 3
 End
 ",
+			None,
 		);
 	}
 
@@ -2670,6 +2703,7 @@ Bounds
 0 <= x2 <= 1
 End
 ",
+			None,
 		);
 	}
 
@@ -2685,6 +2719,7 @@ x2
 x3
 End
 ",
+			None,
 		);
 	}
 
@@ -2700,6 +2735,7 @@ Bounds
 0 <= x3 <= 1
 End
 ",
+			None,
 		);
 	}
 
@@ -2713,6 +2749,7 @@ Bounds
 0 <= x1 <= 1
 End
 ",
+			None,
 		);
 	}
 
@@ -2728,6 +2765,7 @@ Bounds
 0 <= x3 <= 1
 End
 ",
+			None,
 		);
 	}
 
@@ -2743,6 +2781,7 @@ Bounds
 0 <= x3 <= 5
 End
 ",
+			None,
 		);
 	}
 
@@ -2760,7 +2799,7 @@ End
 	-2 <= x3 <= 5
 	End
 	",
-			);
+			None);
 		}
 
 		#[test]
@@ -2775,7 +2814,7 @@ End
 	-2 <= x3 <= 5
 	End
 	",
-			);
+			None);
 		}
 		*/
 
@@ -2791,6 +2830,7 @@ x2 in 0,3
 x3 in 0,2,3,5
 End
 ",
+			None,
 		);
 	}
 
@@ -2807,6 +2847,7 @@ x2
 x3
 End
 ",
+			None,
 		);
 	}
 
@@ -2821,6 +2862,7 @@ Bounds
 0 <= x2 <= 1
 End
 ",
+			None,
 		);
 	}
 
@@ -2835,6 +2877,7 @@ Bounds
 0 <= x2 <= 5
 End
 ",
+			None,
 		);
 	}
 
@@ -2851,6 +2894,7 @@ Bounds
 0 <= x4 <= 1
 End
 	",
+			None,
 		);
 	}
 
@@ -2867,6 +2911,7 @@ x2
 x3
 End
 ",
+			None,
 		);
 	}
 
@@ -2885,6 +2930,7 @@ Bounds
 0 <= x4 <= 3
 End
 ",
+			None,
 		);
 	}
 
@@ -2899,6 +2945,7 @@ Bounds
 0 <= x2 <= 4
 End
 ",
+			None,
 		);
 	}
 
@@ -2913,6 +2960,7 @@ Bounds
 0 <= x2 <= 4
 End
 ",
+			None,
 		);
 	}
 
@@ -2933,114 +2981,148 @@ End
 	#[test]
 	fn test_scm_7_0() {
 		// Contains negative adder 7x = 8x-1x for Scm::Rca
-		let lp = r"
+		test_lp_for_configs(
+			r"
 	Subject To
 	c0: 7 x_1 = 0
 	Bounds
 	0 <= x_1 <= 3
 	End
-	";
-		test_lp_for_configs(lp);
+	",
+			None,
+		);
 	}
 
 	#[test]
 	fn test_scm_3_11() {
-		let lp = r"
+		test_lp_for_configs(
+			r"
 	Subject To
 	c0: 11 x_1 = 0
 	Bounds
 	0 <= x_1 <= 15
 	End
-	";
-		test_lp_for_configs(lp);
+	",
+			None,
+		);
 	}
 
 	#[test]
 	fn test_scm_3_43() {
-		let lp = r"
+		test_lp_for_configs(
+			r"
 	Subject To
 	c0: 43 x_1 = 0
 	Bounds
 	0 <= x_1 <= 15
 	End
-	";
-		test_lp_for_configs(lp);
+	",
+			None,
+		);
 	}
 
 	#[test]
 	fn test_scm_2_117() {
-		let lp = r"
+		test_lp_for_configs(
+			r"
 	Subject To
 	c0: 117 x_1 = 0
 	Bounds
 	0 <= x_1 <= 3
 	End
-	";
-		test_lp_for_configs(lp);
+	",
+			None,
+		);
 	}
 
 	#[test]
 	fn test_scm_4_9() {
-		let lp = r"
+		test_lp_for_configs(
+			r"
 Subject To
   c0: 9 x_1 = 0
 Bounds
   0 <= x_1 <= 7
 End
-";
-		test_lp_for_configs(lp);
+",
+			None,
+		);
 		// test_lp(lp, ModelConfig { scm_add: true });
 	}
 
 	#[test]
 	fn test_scm_4_43() {
-		let lp = r"
+		test_lp_for_configs(
+			r"
 Subject To
   c0: 43 x_1 = 0
 Bounds
   0 <= x_1 <= 7
 End
-";
-		test_lp_for_configs(lp);
+",
+			None,
+		);
 	}
 
 	#[test]
 	fn test_incon() {
 		// 59 * x_1=0 (=0) + 46 * x_2=7 (=322) + 132 * x_3=4 (=528) + 50 * x_4=4 (=200) + 7 * x_5=0 (=0) == 1050 !≤ 931
-		let lp = r"
+		test_lp_for_configs(
+			r"
 Subject To
   c0: 6 x_1 <= 11
 Bounds
   0 <= x_1 <= 3
 End
-";
-		test_lp_for_configs(lp);
+",
+			None,
+		);
 	}
 
 	#[test]
 	fn test_lp_tmp() {
 		// 59 * x_1=0 (=0) + 46 * x_2=7 (=322) + 132 * x_3=4 (=528) + 50 * x_4=4 (=200) + 7 * x_5=0 (=0) == 1050 !≤ 931
-		let lp = r"
+		test_lp_for_configs(
+			r"
 Subject To
   c0: 2 x_1 <= 200
 Bounds
   0 <= x_1 <= 7
 End
-";
-		test_lp_for_configs(lp);
+",
+			None,
+		);
 	}
 
 	#[test]
-	fn test_lp_scm_recipe() {
-		// || thread 'main' panicked at 'ys[1] does not exist in {0: [Lit(1), Lit(2), Lit(3), Lit(4), Lit(5), Const(false)]} when encoding SCM 731*x of 5 lits', /home/hbie0002/Projects/pbc/bin/pindakaas/crates/pindakaas/src/int/model.rs:615:41
-		let lp = r"
+	fn test_mixed_enc_bdd() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: Some(3),
+			decomposer: Decomposer::Bdd,
+			equalize_ternaries: false,
+			add_consistency: false,
+			propagate: Consistency::None,
+		};
+		test_lp_for_configs(
+			r"
 Subject To
-  c0: 731 x_1 = 0
-Bounds
-  0 <= x_1 <= 31
+    c0: 3 x_1 + 3 x_2 + 3 x_3 + 3 x_4 <= 7
+Binary
+    x_1
+    x_2
+    x_3
+    x_4
 End
-";
-		test_lp_for_configs(lp);
+	",
+			Some(vec![
+				base.clone(),
+				// ModelConfig {
+				// 	equalize_ternaries: true,
+				// 	..base
+				// },
+			]),
+		);
 	}
 
 	#[test]
