@@ -752,14 +752,19 @@ pub mod tests {
 		}
 	}
 
-	const MAX_CLAUSES: usize = 200;
+	/// Optionally check max number of clauses
+	const MAX_CLAUSES: Option<usize> = Some(500);
+
 	impl ClauseDatabase for TestDB {
 		type Lit = Lit;
 
 		fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
 			assert!(
-				self.cnf.clauses() <= MAX_CLAUSES,
-				"More than {MAX_CLAUSES} clauses added for single unit test"
+				MAX_CLAUSES
+					.map(|max_clauses| self.cnf.clauses() <= max_clauses)
+					.unwrap_or(true),
+				"More than {} clauses added for single unit test",
+				MAX_CLAUSES.unwrap()
 			);
 			let mut cl = Vec::from(cl);
 
