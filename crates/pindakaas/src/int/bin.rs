@@ -72,19 +72,48 @@ impl<Lit: Literal> BinEnc<Lit> {
 			.unwrap_or(vec![vec![]])
 	}
 
-	pub fn ineqs<C: Coefficient>(
-		&self,
-		up: bool,
-		(range_lb, range_ub): (C, C),
-	) -> Vec<(C, Vec<Vec<Lit>>)> {
-		assert!({
-			let r = unsigned_binary_range::<C>(self.bits());
-			range_lb >= r.0 && range_ub <= r.1
-		});
+	/// Return (k,x>=k) for all k in dom (or x<=k if !up) where each x>=k is a conjunction
+	pub fn ineqs<C: Coefficient>(&self, up: bool, dom: Dom<C>) -> Vec<(C, Vec<Vec<Lit>>)> {
+		assert!(
+			{
+				let r = unsigned_binary_range::<C>(self.bits());
+				dom.is_empty() || (dom.lb() >= r.0 && dom.ub() <= r.1)
+			},
+			"Cannot call BinEnc::ineqs({dom}) on {self}"
+		);
+
+		let dom = if dom.is_empty() {
+			return vec![];
+		} else {
+			// TODO for now, go through bounds, which creates redundant entries
+			num::iter::range_inclusive(dom.lb(), dom.ub())
+		}
+		.collect_vec();
 
 		// get all conjunctions for every value in the given range
-		num::iter::range_inclusive(range_lb, range_ub)
-			.map(|k| (k, self.ineq(up, k)))
+		let ks = if up {
+			let range_lb = *dom.first().unwrap();
+			std::iter::once(range_lb - C::one())
+				.chain(dom.iter().cloned())
+				.collect_vec()
+		} else {
+			let range_ub = *dom.last().unwrap();
+			dom.iter()
+				.cloned()
+				.chain(std::iter::once(range_ub + C::one()))
+				.collect_vec()
+		};
+
+		ks.into_iter()
+			.tuple_windows()
+			.map(|(a, b)| {
+				// for two dom elements {..,a,b,..}, return (b, x>=a+1)
+				if up {
+					(b, self.ineq(up, a + C::one()))
+				} else {
+					(a, self.ineq(up, b - C::one()))
+				}
+			})
 			.collect()
 	}
 
@@ -254,7 +283,16 @@ mod tests {
 	use crate::helpers::{negate_cnf, tests::TestDB};
 
 	#[test]
-	fn test_ineq2() {
+	fn test_ineqs() {
+		let mut db = TestDB::new(0);
+		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
+
+		dbg!(&x.ineqs(true, Dom::from_slice(&[0, 2, 3, 5])));
+		// panic!();
+	}
+
+	#[test]
+	fn test_ineq() {
 		let mut db = TestDB::new(0);
 		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
 

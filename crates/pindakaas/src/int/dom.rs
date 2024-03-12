@@ -40,9 +40,13 @@ impl<C: Coefficient> Dom<C> {
 	}
 
 	pub fn from_bounds(lb: C, ub: C) -> Self {
-		debug_assert!(lb <= ub);
-		Self {
-			ranges: vec![(lb, ub)],
+		// debug_assert!(lb <= ub, "Tried to instantiate empty domain {lb}..{ub}");
+		if ub < lb {
+			Self { ranges: vec![] }
+		} else {
+			Self {
+				ranges: vec![(lb, ub)],
+			}
 		}
 	}
 
@@ -57,7 +61,8 @@ impl<C: Coefficient> Dom<C> {
 
 	pub fn iter(&self) -> DomIterator<C> {
 		let mut ranges = self.ranges.iter();
-		let r = ranges.next().unwrap();
+		let empty = (C::one(), C::zero()); // TODO nicer way to do this (using iter::empty?)
+		let r = ranges.next().unwrap_or(&empty);
 		let r = num::iter::range_inclusive(r.0, r.1);
 		DomIterator { ranges, range: r }
 	}
