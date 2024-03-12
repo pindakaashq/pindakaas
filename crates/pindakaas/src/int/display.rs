@@ -108,7 +108,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 			if SHOW_LITS {
 				format!("[{}]", self.lits().iter().sorted().join(", "))
 			} else {
-				format!("|{}|", self.lits().len())
+				format!("{}L", self.lits().len())
 			},
 		)
 	}

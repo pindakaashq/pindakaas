@@ -675,29 +675,29 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					}
 				};
 
-				// omit first/last if up/!up from range
-				let range = if up {
-					// also omit first 'hard-coded' x>=lb() == true literal
-					(range_lb + C::one(), range_ub)
-				} else {
-					// same for x<=ub() == true
-					(range_lb, range_ub - C::one())
-				};
+				// normalize domain
+				let dom = x_dom.clone().add(-self.lb());
 
-				// get all conjunctions for every term's domain value (except first/last if up/!up)
-				// TODO for now, all value within term's BOUNDS
-				let xs = b.ineqs(up, range);
+				// get conjunction for every k in lb..dom (or k in dom..ub)
+				let xs = b.ineqs(up, dom);
 
 				// hard-code first (or last) fixed term bound literal
 				let xs = if up {
-					[(range_lb, vec![])].into_iter().chain(xs).collect_vec()
+					[(range_lb, vec![])]
+						.into_iter()
+						.chain(xs[1..].iter().cloned())
+						.collect_vec()
 				} else {
-					xs.into_iter().chain([(range_ub, vec![])]).collect_vec()
+					xs[..xs.len() - 1]
+						.iter()
+						.cloned()
+						.chain([(range_ub, vec![])])
+						.collect_vec()
 				};
 
 				// b.ineqs returns range values -> (de!)normalize to x's dom values and then to term's values (by multiplying by coefficient)
 				xs.into_iter()
-					.map(|(k, cnf)| ((k + x_dom.lb()) * self.c, cnf))
+					.map(|(k, conjunction)| ((k + x_dom.lb()) * self.c, conjunction))
 					.collect()
 			}
 			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
@@ -727,13 +727,14 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		match self.x.borrow().e.as_ref().unwrap() {
 			IntVarEnc::Ord(Some(o)) => o.ineq(self.x.borrow().dom.ineq(k, up), up),
 			IntVarEnc::Bin(Some(b)) => {
-				// x>=k == ¬(x<k) == ¬(x<=k-1) (or x<=k == ¬(x>=k+1))
+				// x>=k == ¬(x<k) == ¬(x<=k-1) (or x<=k == ¬(x>k) == ¬(x>=k+1))
 				let k = if up { k - C::one() } else { k + C::one() };
 				let k = b.normalize(k, &self.x.borrow().dom);
 
 				let (range_lb, range_ub) = unsigned_binary_range(b.bits());
 				let k = if up { (range_lb, k) } else { (k, range_ub) };
 				let k = (std::cmp::max(range_lb, k.0), std::cmp::min(range_ub, k.1)); // TODO temp
+				let k = Dom::from_bounds(k.0, k.1);
 
 				b.ineqs(!up, k)
 					.into_iter()
@@ -1947,7 +1948,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			None => IntVarEnc::Ord(None),
 			Some(cutoff) if cutoff == C::zero() => IntVarEnc::Bin(None),
 			Some(cutoff) => {
-				if self.dom.size() < cutoff {
+				if self.dom.size() <= cutoff {
 					IntVarEnc::Ord(None)
 				} else {
 					IntVarEnc::Bin(None)
@@ -3091,7 +3092,7 @@ End
 	fn test_mixed_enc_bdd() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Some(3),
+			cutoff: Some(2),
 			decomposer: Decomposer::Bdd,
 			equalize_ternaries: false,
 			add_consistency: false,
@@ -3100,7 +3101,7 @@ End
 		test_lp_for_configs(
 			r"
 Subject To
-    c0: 3 x_1 + 3 x_2 + 3 x_3 + 3 x_4 <= 7
+    c0: 2 x_1 + 2 x_2 + 2 x_3 + 2 x_4 <= 5
 Binary
     x_1
     x_2
