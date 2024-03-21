@@ -1,0 +1,242 @@
+{
+  "Slurm": {
+    "name": "scm-full",
+    "seeds": 1,
+    "build": false,
+    "enc_timeout": 120.0,
+    "solver_timeout": 180.0,
+    "grace_timeout": 180.0,
+    "nodelist": "Critical",
+    "experiments": [
+      {
+        "int_encodings": [
+          "Bin"
+        ],
+        "pb_encodings": [
+          "Adder"
+        ],
+        "con_encodings": [
+          "Include"
+        ],
+        "add_consistencies": [
+          "Skip"
+        ],
+        "cutoffs": [
+          0
+        ],
+        "sort_same_coefficientss": [
+          0
+        ],
+        "systems": [
+          "Pbc"
+        ],
+        "split_eqs": [
+          false
+        ],
+        "propagates": [
+          false
+        ],
+        "scms": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "skip": false
+      },
+      {
+        "int_encodings": [
+          "Bin"
+        ],
+        "pb_encodings": [
+          "Bdd"
+        ],
+        "con_encodings": [
+          "Include"
+        ],
+        "add_consistencies": [
+          "Skip"
+        ],
+        "cutoffs": [
+          0
+        ],
+        "sort_same_coefficientss": [
+          0
+        ],
+        "systems": [
+          "MiniZinc"
+        ],
+        "split_eqs": [
+          false
+        ],
+        "propagates": [
+          false
+        ],
+        "scms": [
+          0
+        ],
+        "skip": false
+      }
+    ],
+    "sat_cmd": "./bin/cadical/build/cadical",
+    "check": true,
+    "problems": [
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 15,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 31,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 63,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 127,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 255,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 511,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 1023,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 2047,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 4095,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 8191,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 16383,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 32767,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 65535,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      }
+    ]
+  }
+}

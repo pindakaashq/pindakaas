@@ -1,0 +1,13 @@
+[
+  "./experiments/scm-full/stats/encodes/18551.json",
+  [
+    {
+      "status": "Unknown",
+      "solution": null,
+      "assignment": null,
+      "time": 180.19916,
+      "cost": null,
+      "check": null
+    }
+  ]
+]

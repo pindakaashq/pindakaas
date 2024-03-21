@@ -1,0 +1,62 @@
+{
+  "preamble": {
+    "benchmark": "pbp",
+    "linestyle": 3,
+    "prog_alias": "\\texttt{{espresso}}",
+    "program": "BinAdderIncludeSkipBin0PbcEqNoneDnf"
+  },
+  "stats": {
+    "10": {
+      "status": true,
+      "y": 4516202.0
+    },
+    "11": {
+      "status": true,
+      "y": 7477975.0
+    },
+    "12": {
+      "status": true,
+      "y": 12330303.0
+    },
+    "13": {
+      "status": true,
+      "y": null
+    },
+    "14": {
+      "status": true,
+      "y": null
+    },
+    "15": {
+      "status": true,
+      "y": null
+    },
+    "16": {
+      "status": true,
+      "y": null
+    },
+    "4": {
+      "status": true,
+      "y": 414346.8125
+    },
+    "5": {
+      "status": true,
+      "y": 541329.625
+    },
+    "6": {
+      "status": true,
+      "y": 750886.875
+    },
+    "7": {
+      "status": true,
+      "y": 1104382.75
+    },
+    "8": {
+      "status": true,
+      "y": 1710916.25
+    },
+    "9": {
+      "status": true,
+      "y": 2747580.0
+    }
+  }
+}

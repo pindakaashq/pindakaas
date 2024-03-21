@@ -1,0 +1,37 @@
+{
+  "Encode": {
+    "instance": {
+      "problem": {
+        "Mbkp": {
+          "n_": 15,
+          "bound": 63,
+          "m_": 100,
+          "q_": 2047,
+          "family": 1,
+          "s_": 100,
+          "seed": 3,
+          "skip_obj": true
+        }
+      },
+      "i": 38,
+      "lp": "./experiments/scm-full/lps/15_63_100_2047_13_100_2_sat.lp"
+    },
+    "int_encoding": "Bin",
+    "pb_encoding": "Bdd",
+    "con_encoding": "Include",
+    "add_consistency": "Skip",
+    "cutoff": 0,
+    "sort_same_coefficients": 0,
+    "system": "MiniZinc",
+    "split_eq": false,
+    "propagate": false,
+    "scm": "Add",
+    "aux_out": "./experiments/scm-full/aux/03190",
+    "sat_cmd": "./bin/cadical/build/cadical",
+    "solve_seed": 1,
+    "enc_timeout": 120.0,
+    "solver_timeout": 180.0,
+    "check": true,
+    "stats": "./experiments/scm-full/stats/03190.json"
+  }
+}

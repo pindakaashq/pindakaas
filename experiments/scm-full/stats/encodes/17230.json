@@ -1,0 +1,44 @@
+{
+  "instance": {
+    "problem": {
+      "Mbkp": {
+        "n_": 15,
+        "bound": 32767,
+        "m_": 100,
+        "q_": 2047,
+        "family": 1,
+        "s_": 100,
+        "seed": 3,
+        "skip_obj": true
+      }
+    },
+    "i": 146,
+    "lp": "./experiments/scm-full/lps/15_32767_100_2047_49_100_2_sat.lp"
+  },
+  "experiment": {
+    "pb_encoding": "Bdd",
+    "system": "MiniZinc",
+    "int_encoding": "Bin",
+    "con_encoding": "Include",
+    "add_consistency": "Skip",
+    "sort_same_coefficients": 0,
+    "split_eq": false,
+    "propagate": false,
+    "model_config": {
+      "scm": "Add",
+      "cutoff": 0,
+      "decomposer": "Bdd",
+      "add_consistency": false,
+      "propagate": "None"
+    }
+  },
+  "statics": {
+    "vars": 214229,
+    "cls": 1533739,
+    "lits": 6929520
+  },
+  "pb_statics": null,
+  "principal": 214229,
+  "time": 3.948861,
+  "dimacs": "./experiments/scm-full/aux/17230.picat.dimacs"
+}

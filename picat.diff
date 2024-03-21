@@ -1,0 +1,49 @@
+diff --git a/fzn_picat_sat.pi b/fzn_picat_sat.pi
+index cff8a59..54152d1 100644
+--- a/fzn_picat_sat.pi
++++ b/fzn_picat_sat.pi
+@@ -23,7 +23,7 @@ main(Args) =>
+     (process_args(Args,File),nonvar(File) ->
+         true
+     ;
+-        printf("Usage: fzn_picat [-a][-f][-p N][-n N] FlatZincFile%n"),halt
++        printf("Usage: fzn_picat [-e][-a][-f][-p N][-n N] FlatZincFile%n"),halt
+     ),
+     printf("%% solving(%w)%n",File),
+     get_global_map().put(count_solutions,0),
+@@ -36,6 +36,9 @@ process_args(["-a"|As],File) =>
+ process_args(["-f"|As],File) =>
+     get_heap_map().put(fzn_free_order,1),
+     process_args(As,File).
++process_args(["-e",D|As],File) =>
++    get_heap_map().put(dump,D),
++    process_args(As,File).
+ process_args(["-n",N|As],File) =>
+     % get N solutions
+     NInt = N.my_str_to_int(),
+@@ -261,7 +264,7 @@ proc_solve_annotations(SolveType,_SolveAnns,_SymTable,PVars,SVars,OutAnns) =>
+ %    detach_annotations(SolveAnns,_,Anns),
+ %    solve_annotations_to_label_args(Anns,SymTable,LabelCalls,[]),   % ignore annotations when sat is used
+     HMap = get_heap_map(),
+-    (HMap.has_key(nthreads) -> NThreads = HMap.get(nthreads),Options = [$threads(NThreads)]; Options = []),
++    (HMap.has_key(dump) -> D = HMap.get(dump),Options = [$dump(D)]; Options = []),
+     proc_solve(SolveType,_LabelCalls,PVars,SVars,OutAnns.reverse(),Options).
+ 
+ proc_solve(all,_LabelCalls,PVars,_SVars,ROutAnns,Options) ?=>
+diff --git a/picat.msc.in b/picat.msc.in
+index 682ec73..3883817 100644
+--- a/picat.msc.in
++++ b/picat.msc.in
+@@ -2,9 +2,9 @@
+   "id": "org.picat-lang.picat",
+   "name": "Picat SAT",
+   "description": "Picat SAT solving engine",
+-  "version": "3.0.2",
+-  "mznlib": "MZNLIB_LOCATION",
+-  "executable": "EXECUTABLE_LOCATION",
++  "version": "3.5.0",
++  "mznlib": "../Picat/fzn_picat/mznlib",
++  "executable": "../Picat/fzn_picat/picat.sh",
+   "tags": ["sat", "int"],
+   "stdFlags": ["-a", "-f", "-n", "-p"],
+   "extraFlags": [],

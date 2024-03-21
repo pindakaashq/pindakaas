@@ -1,0 +1,13 @@
+[
+  "./experiments/scm-full/stats/encodes/01781.json",
+  [
+    {
+      "status": "Unsat",
+      "solution": null,
+      "assignment": null,
+      "time": 55.307316,
+      "cost": null,
+      "check": null
+    }
+  ]
+]

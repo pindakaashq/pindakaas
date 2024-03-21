@@ -1,63 +1,25 @@
-<p align="center">
-  <img
-    src="./assets/logo.svg"
-    alt="pindakaas logo"
-    height="300">
+# PBC/Pindakaas for reproducing CPAIOR'24, "Single Constant Multiplication for SAT"
 
-  <p align="center">
-    A library to transform pseudo-Boolean and integer constraints into conjunctive normal form.
-    <br />
-    <br />
-    <a href="https://crates.io/crates/pindakaas"><img src="https://img.shields.io/crates/v/pindakaas.svg"></a>
-    <a href="https://crates.io/crates/pindakaas"><img src="https://docs.rs/pindakaas/badge.svg"></a>
-  </p>
-</p>
+Hendrik Bierlee, Jip J. Dekker, Vitaly Lagoon, Peter J. Stuckey, Guido Tack
 
+Corresponding author: Hendrik 'Henk' Bierlee (hendrik.bierlee@monash.edu)
 
-## Supported Constraints
+Dependencies:
 
-- At most one (AMO)
-  - Bitwise encoding
-  - Ladder encoding
-  - Pairwise encoding
-- Cardinality constraints
-  - Sorting Network encoding
-- Boolean linear
-  - Adder encoding
-  - BDD encoding
-  - Sequential Weight Counter encoding
-  - Totalizer encoding
-- Integer (linear)
-  - Direct / Domain / Unary encoding
-  - Order encoding
-  - Binary encoding
+- Rust >= 1.75 (for main implementation)
+- Python >=3 (for plotting)
+- MiniZinc >=2.8 (available on PATH)
+- Slurm (optional
 
-## Installation and usage
+Results from the paper are in `scm-full.zip`
 
-Although the main pindakaas library is written in rust, it is also available from Python. (A C(++) interface is also under consideration).
+The experiments can be run locally by changing the nodelist to "Local" in "./experiments/scm-full/slurm.json", otherwise they are executed on slurm with `--nodelist critical001` (requires a small change in `src/slurm.rs` to change this nodelist name). Once this is done, run and analyze these commands:
 
-### Rust
-
-```bash
-cargo add pindakaas
 ```
+chmod +x ./build.sh
+./build.sh
+cargo run --release load ./experiments/scm-full/slurm.json
 
-### Python
-
-```bash
-pip install pindakaas
+# after experiments are done, check and plot:
+cargo run analyze --check --plot ./experiments/scm-full
 ```
-
-## Acknowledgements
-
-The encoding algorithms implemented in this library are based partially on the following academic research.
-
-- **TODO**
-
-This library is also heavily inspired by PBLib, an earlier library containing different encoding algorithms for pseudo-Boolean constraints. More information about PBLib can be found in its [accompanying publication](https://doi.org/10.1007/978-3-319-24318-4_2), and the source code for the library can be found on [GitHub](https://github.com/RealPete/PBLib)
-
-This research was partially funded by the Australian Government through the Australian Research Council Industrial Transformation Training Centre in Optimisation Technologies, Integrated Methodologies, and Applications ([OPTIMA](https://optima.org.au)), Project ID IC200100009
-
-## License
-
-This library is made available under the [MPL-2.0](https://choosealicense.com/licenses/mpl-2.0/) license.
