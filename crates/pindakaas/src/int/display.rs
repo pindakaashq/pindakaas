@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use super::{model::Obj, IntVar, LinExp};
 
-const SHOW_IDS: bool = false;
+pub(crate) const SHOW_IDS: bool = false;
 const SHOW_LITS: bool = false;
 
 impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
@@ -91,18 +91,13 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}{}{} ∈ {} {}",
+			"{}{} ∈ {} {}",
 			self.lbl(),
 			match self.e {
 				Some(IntVarEnc::Bin(_)) => ":B",
 				Some(IntVarEnc::Ord(_)) => ":O",
 				Some(IntVarEnc::Const(_)) => unreachable!(),
 				None => "",
-			},
-			if SHOW_IDS {
-				format!("#{}", self.id)
-			} else {
-				String::new()
 			},
 			self.dom,
 			if SHOW_LITS {

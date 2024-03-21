@@ -1,4 +1,5 @@
 #![allow(unused_imports, unused_variables, dead_code, unreachable_code)]
+use crate::int::display::SHOW_IDS;
 use crate::int::enc::GROUND_BINARY_AT_LB;
 use crate::linear::log_enc_add_;
 use crate::{
@@ -494,11 +495,39 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		let actual_assignments = canonicalize(actual_assignments);
 		check_unique(&actual_assignments, "actual");
 
+		let principals = expected_assignments
+			.first()
+			.unwrap()
+			.0
+			.keys()
+			.collect::<HashSet<_>>();
+
+		let principal_actual_assignments = canonicalize(
+			&actual_assignments
+				.iter()
+				.map(|a| {
+					Assignment(
+						a.0.clone()
+							.into_iter()
+							.filter(|(id, _)| principals.contains(id))
+							.collect(),
+					)
+				})
+				.dedup()
+				.collect::<Vec<_>>(),
+		);
 		// TODO unnecessary canonicalize?
 		let extra_int_assignments = canonicalize(
 			&actual_assignments
 				.iter()
-				.filter(|a| !expected_assignments.contains(a))
+				.filter(|a| {
+					!expected_assignments.contains(&Assignment(
+						a.0.clone()
+							.into_iter()
+							.filter(|(id, _)| principals.contains(id))
+							.collect(),
+					))
+				})
 				.cloned()
 				.collect::<Vec<_>>(),
 		);
@@ -506,7 +535,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		let missing_int_assignments = canonicalize(
 			&expected_assignments
 				.iter()
-				.filter(|a| !actual_assignments.contains(a))
+				.filter(|a| !principal_actual_assignments.contains(a))
 				.cloned()
 				.collect::<Vec<_>>(),
 		);
@@ -545,10 +574,10 @@ Actual assignments:
 				.collect());
 		}
 
-		assert_eq!(actual_assignments,
+		assert_eq!(principal_actual_assignments,
                    expected_assignments,
                    "It seems the actual and expected assignments are not identical sets:\nactual:\n{}\n expected:\n{}",
-                   actual_assignments.iter().join("\n"),
+                   principal_actual_assignments.iter().join("\n"),
                    expected_assignments.iter().join("\n")
                   );
 
@@ -710,11 +739,6 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		// we get the position of a*x >= c == x >= ceil(c/a) if cmp = >= and a >= 0; either might flip it to x <= floor(c/a)
 		let up = self.handle_polarity(cmp);
 
-		// TODO
-		// if (up && self.lb() <= k) || (!up && self.ub() >= k) {
-		// 	return vec![];
-		// } else if (up && self.ub() > k) || (!up && self.lb() < k) {
-		// 	return vec![vec![]];
 		// }
 
 		let k = if up {
@@ -1959,7 +1983,17 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 	}
 
 	pub fn lbl(&self) -> String {
-		self.lbl.clone().unwrap_or_else(|| format!("x{}", self.id))
+		String::from(if let Some(lbl) = self.lbl.as_ref() {
+			format!(
+				"{}{}",
+				lbl,
+				SHOW_IDS
+					.then(|| format!("#{}", self.id))
+					.unwrap_or_default()
+			)
+		} else {
+			format!("x#{}", self.id)
+		})
 	}
 
 	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
@@ -2357,6 +2391,7 @@ mod tests {
 
 				// TODO move into var_encs loop
 				const CHECK_CONSTRAINTS: bool = false;
+				const SHOW_AUX: bool = true;
 
 				for (mut decomposition, expected_assignments) in if CHECK_CONSTRAINTS {
 					decomposition
@@ -2389,7 +2424,7 @@ mod tests {
 						.map(|_| {
 							println!("checking decomposition = {}", decomposition);
 
-							let output = if CHECK_CONSTRAINTS {
+							let output = if CHECK_CONSTRAINTS || SHOW_AUX {
 								decomposition.lits()
 							} else {
 								model.lits()
@@ -2412,7 +2447,7 @@ mod tests {
 						"Expected lit assignments to be unique, but was {lit_assignments:?}"
 					);
 
-					let checker = if CHECK_CONSTRAINTS {
+					let checker = if CHECK_CONSTRAINTS || SHOW_AUX {
 						&decomposition
 					} else {
 						// &decomposition // TODO useful for checking AUX var assignments?
