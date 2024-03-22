@@ -569,7 +569,7 @@ impl Formula {
                 fzn.set_extension("fzn");
                 cmd(
                     &format!(
-                        "minizinc -c --solver picat {} --fzn {}",
+                        "minizinc -c --solver ./bin/solvers/picat.msc {} --fzn {}",
                         mzn.display(),
                         fzn.display()
                     ),

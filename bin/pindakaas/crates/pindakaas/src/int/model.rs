@@ -575,12 +575,13 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 							.map(|v| v.to_vec()),
 						Scm::Pow => None,
 						Scm::Dnf => {
-							let cnf = Cnf::<DB::Lit>::from_file(&PathBuf::from(format!(
+                            let p = PathBuf::from(format!(
 								"{}/res/ecm/{lits}_{c}.dimacs",
 								env!("CARGO_MANIFEST_DIR")
-							)))
+							));
+							let cnf = Cnf::<DB::Lit>::from_file(&p)
 							.unwrap_or_else(|_| {
-								panic!("Could not find Dnf method cnf for {lits}_{c}")
+								panic!("Could not find Dnf method cnf for {lits}_{c} in {}", p.display())
 							});
 							let map = cnf
 								.vars()

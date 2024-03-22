@@ -43,14 +43,13 @@ EOF
         mkdir -p $solvers
 
         minizinc="minizinc"
-        echo "{ \"mzn_solver_path\": [\"$root/bin/solvers\"] }" > $HOME/.minizinc/Preferences.json
 
 	cp picat.msc.in "$solvers/picat.msc"
 	cd $solvers
 
         cd $root
         
-	echo "var 1..10: x; constraint x >= 5;" | $minizinc --solver picat --fzn ./bin/Picat/knapsack.picat.fzn -c -
+	echo "var 1..10: x; constraint x >= 5;" | $minizinc --solver bin/solvers/picat.msc --fzn ./bin/Picat/knapsack.picat.fzn -c -
         cat ./bin/Picat/knapsack.picat.fzn
         ./bin/Picat/picat ./bin/Picat/fzn_picat/fzn_picat_sat.pi -e ./bin/Picat/knapsack.picat.dimacs ./bin/Picat/knapsack.picat.fzn
         cat ./bin/Picat/knapsack.picat.dimacs

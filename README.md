@@ -9,7 +9,7 @@ Dependencies:
 - Rust >= 1.75 (for main implementation)
 - Python >=3 (for plotting)
 - MiniZinc >=2.8 (available on PATH)
-- Slurm (optional
+- Slurm (optional)
 
 Results from the paper are in `scm-full.zip`
 
@@ -23,3 +23,5 @@ cargo run --release load ./experiments/scm-full/slurm.json
 # after experiments are done, check and plot:
 cargo run analyze --check --plot ./experiments/scm-full
 ```
+
+Note: Picat-SAT will be downloaded for Linux by the build scripts
