@@ -1,0 +1,62 @@
+{
+  "preamble": {
+    "benchmark": "pbp",
+    "linestyle": 1,
+    "prog_alias": "\\texttt{{min-k}}",
+    "program": "BinAdderIncludeSkipBin0PbcEqNoneRca"
+  },
+  "stats": {
+    "10": {
+      "status": true,
+      "y": 182626.671875
+    },
+    "11": {
+      "status": true,
+      "y": 194117.234375
+    },
+    "12": {
+      "status": true,
+      "y": 205520.765625
+    },
+    "13": {
+      "status": true,
+      "y": 216487.921875
+    },
+    "14": {
+      "status": true,
+      "y": 227454.15625
+    },
+    "15": {
+      "status": true,
+      "y": 238420.03125
+    },
+    "16": {
+      "status": true,
+      "y": 249386.03125
+    },
+    "4": {
+      "status": true,
+      "y": 105365.3359375
+    },
+    "5": {
+      "status": true,
+      "y": 119567.828125
+    },
+    "6": {
+      "status": true,
+      "y": 132551.046875
+    },
+    "7": {
+      "status": true,
+      "y": 145916.140625
+    },
+    "8": {
+      "status": true,
+      "y": 158845.578125
+    },
+    "9": {
+      "status": true,
+      "y": 170969.453125
+    }
+  }
+}

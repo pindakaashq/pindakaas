@@ -1,0 +1,42 @@
+[package]
+name = "pindakaas"
+description = "Encoding Integer and Pseudo Boolean constraints into CNF"
+version = "0.1.0"
+authors = [
+	"Jip J. Dekker <jip.dekker@monash.edu>",
+	"Hendrik 'Henk' Bierlee <hendrik.bierlee@monash.edu>",
+]
+license = "MPL-2.0"
+
+edition = "2021"
+
+[dependencies]
+cached = "0.46"
+ipasir = { version = "0.3", features = ["ffi"] }
+iset = "0.2"
+itertools = "0.11"
+rustc-hash = "1.1.0"
+num = "0.4"
+bzip2 = "0.4"
+flate2 = "1.0"
+
+# Optional encoding tracing capabilities
+tracing = { version = "0.1", optional = true }
+
+# Optional Solver Interfaces
+minisat = { git = "https://github.com/luteberget/minisat-rs.git", optional = true } # waiting on release for minisat::Lit::var()
+splr = { version = "0.17", optional = true }
+
+[build-dependencies]
+itertools = "0.11"
+tar = "0.4"
+flate2 = "1.0"
+
+[dev-dependencies]
+splr = { version = "0.17", features = ["incremental_solver"] }
+traced_test = { path = "../traced_test" }
+rand = "0.8.5"
+
+[features]
+trace = ["tracing"]
+default = []

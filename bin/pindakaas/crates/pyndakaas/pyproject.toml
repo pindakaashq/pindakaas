@@ -1,0 +1,16 @@
+[build-system]
+requires = ["maturin>=0.11,<0.12"]
+build-backend = "maturin"
+
+[project]
+name = "pindakaas"
+description = "Encoding Integer and Pseudo Boolean constraints into CNF"
+requires-python = ">=3.8"
+classifiers = [
+	"License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+	"Development Status :: 3 - Alpha",
+	"Intended Audience :: Developers",
+	"Intended Audience :: Science/Research",
+	"Programming Language :: Python",
+	"Programming Language :: Rust",
+]

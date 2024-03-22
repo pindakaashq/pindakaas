@@ -1,0 +1,62 @@
+{
+  "preamble": {
+    "benchmark": "pbp",
+    "linestyle": 4,
+    "prog_alias": "\\texttt{{picat}}",
+    "program": "BinBddIncludeSkipBin0MiniZincEqNoneAdd"
+  },
+  "stats": {
+    "10": {
+      "status": true,
+      "y": 1085113.75
+    },
+    "11": {
+      "status": true,
+      "y": 1167220.75
+    },
+    "12": {
+      "status": true,
+      "y": 1279191.0
+    },
+    "13": {
+      "status": true,
+      "y": 1360176.0
+    },
+    "14": {
+      "status": true,
+      "y": 1471554.375
+    },
+    "15": {
+      "status": true,
+      "y": 1552238.625
+    },
+    "16": {
+      "status": true,
+      "y": 1663534.875
+    },
+    "4": {
+      "status": true,
+      "y": 543793.5625
+    },
+    "5": {
+      "status": true,
+      "y": 909203.75
+    },
+    "6": {
+      "status": true,
+      "y": 694176.0
+    },
+    "7": {
+      "status": true,
+      "y": 776987.5625
+    },
+    "8": {
+      "status": true,
+      "y": 890075.4375
+    },
+    "9": {
+      "status": true,
+      "y": 972409.0625
+    }
+  }
+}

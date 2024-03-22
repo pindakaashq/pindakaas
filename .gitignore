@@ -1,0 +1,16 @@
+target
+results
+
+tex/*.out
+tex/*.aux
+tex/*.fdb_latexmk
+tex/*.fls
+tex/*.log
+tex/*.temp
+tex/*.lock
+tex/*.bbl
+tex/*.blg
+tex/*.pdf
+*.out
+*.dimacs
+scm.csv

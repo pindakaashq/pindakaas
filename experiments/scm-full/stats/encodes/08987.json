@@ -1,0 +1,44 @@
+{
+  "instance": {
+    "problem": {
+      "Mbkp": {
+        "n_": 15,
+        "bound": 511,
+        "m_": 100,
+        "q_": 2047,
+        "family": 1,
+        "s_": 100,
+        "seed": 3,
+        "skip_obj": true
+      }
+    },
+    "i": 298,
+    "lp": "./experiments/scm-full/lps/15_511_100_2047_100_100_1_sat.lp"
+  },
+  "experiment": {
+    "pb_encoding": "Adder",
+    "system": "Pbc",
+    "int_encoding": "Bin",
+    "con_encoding": "Include",
+    "add_consistency": "Skip",
+    "sort_same_coefficients": 0,
+    "split_eq": false,
+    "propagate": false,
+    "model_config": {
+      "scm": "Rca",
+      "cutoff": 0,
+      "decomposer": "Rca",
+      "add_consistency": false,
+      "propagate": "None"
+    }
+  },
+  "statics": {
+    "vars": 171141,
+    "cls": 991789,
+    "lits": 3369058
+  },
+  "pb_statics": null,
+  "principal": 135,
+  "time": 0.2558152,
+  "dimacs": null
+}
