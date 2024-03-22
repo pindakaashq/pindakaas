@@ -37,7 +37,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::process::Command;
 
-const PYTHON: &str = "nix-shell";
+const PYTHON: &str = "python";
 const MKPLOT: &str = "./bin/mkplot/mkplot.py";
 
 const TEX: bool = true;
@@ -1631,7 +1631,7 @@ impl Mkplot {
         .collect::<Vec<_>>();
 
         let mkplot_cactus = &mkplot_cactus.join(" ");
-        let args = ["./bin/mkplot/shell.nix", "--run", mkplot_cactus];
+        let args = [mkplot_cactus];
 
         let output = Command::new(PYTHON).args(args).output().unwrap();
         const OUTPUT_MKPLOT: bool = true;
