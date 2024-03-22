@@ -5,29 +5,6 @@ echo "Checking installation of MiniZinc (>=2.8.3) and availability on PATH. If e
 minizinc --version
 
 root=$(pwd)
-mkdir -p bin
-
-if [[ -d ".git" ]]; then
-	echo "skipping pull"
-	# git pull
-	#git log --oneline  @{1}..
-	# git -C ./bin/pindakaas checkout feature/refactor-linear-encoding
-	# git -C ./bin/pindakaas pull 
-	#git -C ./bin/pindakaas log --oneline  @{1}..
-fi
-
-if [[ ! -d "./bin/pindakaas" ]]; then
-  cd bin
-  git clone git@github.com:pindakaashq/pindakaas.git -b feature/refactor-linear-encoding
-  cargo check
-  cd ..
-fi
-
-if [[ ! -d "./bin/cadical" ]]; then
-  cd bin
-  git clone --depth 1 --branch rel-1.9.1 https://github.com/arminbiere/cadical.git
-  cd ..
-fi
 
 if [[ ! -d "./bin/cadical/build" ]]; then
 	cd ./bin/cadical/
@@ -35,22 +12,7 @@ if [[ ! -d "./bin/cadical/build" ]]; then
 	cd ../..
 fi
 
-# if [[ ! -d "./bin/fun-scop" ]]; then
-#   cd bin
-#   wget https://tsoh.org/sCOP/scop-for-xcsp18-180731.tar.gz
-#   tar -xf scop-for-xcsp18-180731.tar.gz
-#   rm scop-for-xcsp18-180731.tar.gz
-#   cd ..
-# fi
-
-if [[ ! -d "./bin/pblib" ]]; then
-	cd ./bin/pblib
-	chmod +x ./build.sh
-	./build.sh
-	cd ../..
-fi
-
-if [[ ! -d "./bin/mkplot" ]]; then
+if [[ ! -d "./bin/mkplot/venv" ]]; then
         mkdir bin/mkplot
 	cd ./bin/mkplot
 	python -m venv venv
@@ -94,14 +56,5 @@ EOF
         cat ./bin/Picat/knapsack.picat.dimacs
 fi
 
-cargo build --release
-
-exp="./experiments/rand-eqs-a"
-
-cat << EOF
-- Build successful; run \`cargo run --release load \`$exp/slurm.json\` to reproduce experiments.
-- Savile Row 1.9.2 is not included as it is not released at the time of writing. If it is not available in ./bin/savilerow_1.9.2, remove SavileRow from \`$exp\slurm.json\`.
-- Change the nodelist field in slurm.json to \`Local\` to run locally if no slurm cluster is available.
-- After completion (or to analyze run logs in $exp shown in the manuscript), run \`cargo run --release analyze $exp --check --plot\` to check solutions, plot results and compile csv.
-EOF
+cargo check
 
