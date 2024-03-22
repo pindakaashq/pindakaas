@@ -1,0 +1,83 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	Development	//
+Cactus	cactus.py	/^class Cactus(Plot, object):$/;"	c
+Cactus	mkplot.py	/^from cactus import Cactus$/;"	i
+JSONException	statutil.py	/^class JSONException(Exception):$/;"	c
+Plot	cactus.py	/^from plot import Plot$/;"	i
+Plot	plot.py	/^class Plot():$/;"	c
+Plot	scatter.py	/^from plot import Plot$/;"	i
+Scatter	mkplot.py	/^from scatter import Scatter$/;"	i
+Scatter	scatter.py	/^class Scatter(Plot, object):$/;"	c
+ScatterException	scatter.py	/^class ScatterException(Exception):$/;"	c
+Stat	statutil.py	/^class Stat:$/;"	c
+StatArray	statutil.py	/^class StatArray:$/;"	c
+__getitem__	statutil.py	/^    def __getitem__(self, key):$/;"	m	class:StatArray	file:
+__init__	cactus.py	/^    def __init__(self, options):$/;"	m	class:Cactus
+__init__	plot.py	/^    def __init__(self, options):$/;"	m	class:Plot
+__init__	scatter.py	/^    def __init__(self, options):$/;"	m	class:Scatter
+__init__	statutil.py	/^    def __init__(self, filename=None):$/;"	m	class:Stat
+__init__	statutil.py	/^    def __init__(self, files=None):$/;"	m	class:StatArray
+__iter__	statutil.py	/^    def __iter__(self):$/;"	m	class:StatArray	file:
+__len__	statutil.py	/^    def __len__(self):$/;"	m	class:StatArray	file:
+cluster	statutil.py	/^    def cluster(self, use_key=['program', 'prog_args']):$/;"	m	class:StatArray
+compare	statutil.py	/^    def compare(self, cmp_key=None):$/;"	m	class:StatArray
+create	cactus.py	/^    def create(self, data):$/;"	m	class:Cactus
+create	scatter.py	/^    def create(self, data):$/;"	m	class:Scatter
+csv	load.py	/^import csv$/;"	i
+getopt	mkplot.py	/^import getopt$/;"	i
+json	cactus.py	/^import json$/;"	i
+json	load.py	/^import json$/;"	i
+json	mkplot.py	/^import json$/;"	i
+json	scatter.py	/^import json$/;"	i
+json	statutil.py	/^import json$/;"	i
+list	statutil.py	/^    def list(self, crit=None):$/;"	m	class:Stat
+list	statutil.py	/^    def list(self, crit=None):$/;"	m	class:StatArray
+list_simple	statutil.py	/^    def list_simple(self, to_list='all'):$/;"	m	class:StatArray
+load_csv	load.py	/^def load_csv(names, stats, options):$/;"	f
+load_data	load.py	/^def load_data(files, options):$/;"	f
+load_data	mkplot.py	/^from load import load_data$/;"	i
+load_json	load.py	/^def load_json(stat_arr, options):$/;"	f
+make_vbs	statutil.py	/^    def make_vbs(self, addit_key=None):$/;"	m	class:StatArray
+math	cactus.py	/^import math$/;"	i
+math	scatter.py	/^import math$/;"	i
+matplotlib	cactus.py	/^import matplotlib.pyplot as plt$/;"	i
+matplotlib	mkplot.py	/^import matplotlib$/;"	i
+matplotlib	plot.py	/^import matplotlib.pyplot as plt$/;"	i
+matplotlib	scatter.py	/^import matplotlib.pyplot as plt$/;"	i
+mpl_version	cactus.py	/^from matplotlib import __version__ as mpl_version$/;"	i
+mpl_version	scatter.py	/^from matplotlib import __version__ as mpl_version$/;"	i
+np	cactus.py	/^import numpy as np$/;"	i
+np	plot.py	/^import numpy as np$/;"	i
+np	scatter.py	/^import numpy as np$/;"	i
+os	cactus.py	/^import os$/;"	i
+os	mkplot.py	/^import os$/;"	i
+os	plot.py	/^import os$/;"	i
+parse_options	mkplot.py	/^def parse_options():$/;"	f
+plt	cactus.py	/^import matplotlib.pyplot as plt$/;"	i
+plt	plot.py	/^import matplotlib.pyplot as plt$/;"	i
+plt	scatter.py	/^import matplotlib.pyplot as plt$/;"	i
+print_function	mkplot.py	/^from __future__ import print_function$/;"	i
+print_function	statutil.py	/^from __future__ import print_function$/;"	i
+pylab	cactus.py	/^        import pylab$/;"	i
+range	scatter.py	/^from six.moves import range$/;"	i
+read	statutil.py	/^    def read(self, filename=None):$/;"	m	class:Stat
+read	statutil.py	/^    def read(self, files=None):$/;"	m	class:StatArray
+six	cactus.py	/^import six$/;"	i
+six	load.py	/^import six$/;"	i
+six	scatter.py	/^import six$/;"	i
+sort_key	load.py	/^    def sort_key(x):$/;"	f	function:load_json
+statutil	load.py	/^import statutil$/;"	i
+sys	cactus.py	/^        import sys$/;"	i
+sys	load.py	/^import sys$/;"	i
+sys	mkplot.py	/^import sys$/;"	i
+sys	statutil.py	/^import sys$/;"	i
+unclaster	statutil.py	/^    def unclaster(self):$/;"	m	class:StatArray
+update	statutil.py	/^    def update(self, success=None, failure=None):$/;"	m	class:Stat
+update	statutil.py	/^    def update(self, success=None, failure=None):$/;"	m	class:StatArray
+usage	mkplot.py	/^def usage():$/;"	f
+write	statutil.py	/^    def write(self, files=None):$/;"	m	class:StatArray
+write	statutil.py	/^    def write(self, to=None):$/;"	m	class:Stat
