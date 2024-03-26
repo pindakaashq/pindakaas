@@ -297,6 +297,13 @@ impl Comparator {
 			Comparator::GreaterEq => Comparator::LessEq,
 		}
 	}
+
+	pub(crate) fn is_ineq(&self) -> bool {
+		match *self {
+			Comparator::Equal => false,
+			Comparator::LessEq | Comparator::GreaterEq => true,
+		}
+	}
 }
 
 impl fmt::Display for Comparator {
