@@ -693,9 +693,11 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		{
 			IntVarEnc::Ord(Some(o)) => self.dom().into_iter().zip(o.ineqs(up)).collect(),
 			IntVarEnc::Bin(Some(b)) => {
+				// TODO not (particularly) optimized for the domain of x, but this is tricky as the domain values go outside the binary encoding ranges
 				// go over x's bounds
 				let (range_lb, range_ub) = if GROUND_BINARY_AT_LB {
-					(C::zero(), x_dom.ub() - x_dom.lb())
+					// (C::zero(), x_dom.ub() - x_dom.lb())
+					unsigned_binary_range(b.bits())
 				} else {
 					let is_two_comp = x_dom.lb().is_negative();
 					if is_two_comp {
@@ -706,7 +708,9 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				};
 
 				// normalize domain
-				let dom = x_dom.clone().add(-self.lb());
+				// TODO
+				// let dom = x_dom.clone().add(-self.lb());
+				let dom = Dom::from_bounds(range_lb, range_ub);
 
 				// get conjunction for every k in lb..dom (or k in dom..ub)
 				let xs = b.ineqs(up, dom);
@@ -2339,11 +2343,20 @@ mod tests {
 			[false, true], // consistency
 			// [true],
 			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
-			[false], // equalize terns
-			[None]   // [None, Some(0), Some(2)]
+			[false],       // equalize terns
+			[None],        // [None, Some(0), Some(2)]
+			[false, true]  // equalize_uniform_bin_ineqs
 		)
 		.map(
-			|(scm, decomposer, propagate, add_consistency, equalize_ternaries, cutoff)| {
+			|(
+				scm,
+				decomposer,
+				propagate,
+				add_consistency,
+				equalize_ternaries,
+				cutoff,
+				equalize_uniform_bin_ineqs,
+			)| {
 				ModelConfig {
 					scm: scm.clone(),
 					decomposer: decomposer.clone(),
@@ -2351,7 +2364,7 @@ mod tests {
 					add_consistency,
 					equalize_ternaries,
 					cutoff,
-					equalize_uniform_bin_ineqs: true,
+					equalize_uniform_bin_ineqs,
 					..ModelConfig::default()
 				}
 			},
@@ -2494,7 +2507,16 @@ mod tests {
 				check_decomposition(&model, &decomposition, expected_assignments);
 			}
 
-			for var_encs in expand_var_encs(VAR_ENCS, &decomposition) {
+			const CHECK_DECOMPOSITION_I: Option<usize> = None;
+
+			for (i, var_encs) in {
+				let var_encs_gen = expand_var_encs(VAR_ENCS, &decomposition);
+				if let Some(i) = CHECK_DECOMPOSITION_I {
+					vec![(i, var_encs_gen[i].clone())]
+				} else {
+					var_encs_gen.into_iter().enumerate().collect_vec()
+				}
+			} {
 				let decomposition = decomposition.deep_clone();
 				let mut decomp_db = db.clone();
 
@@ -2556,7 +2578,7 @@ mod tests {
 					let lit_assignments = decomposition
 						.encode(&mut con_db, false)
 						.map(|_| {
-							println!("checking decomposition = {}", decomposition);
+							println!("checking decomposition #{i} = {}", decomposition);
 
 							let output = if CHECK_CONSTRAINTS || SHOW_AUX {
 								decomposition.lits()
