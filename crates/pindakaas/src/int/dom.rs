@@ -182,6 +182,18 @@ impl<C: Coefficient> Dom<C> {
 		}
 	}
 
+	// TODO optimize
+	pub(crate) fn union(self, rhs: Dom<C>) -> Self {
+		Dom::from_slice(
+			&[self.iter().collect_vec(), rhs.iter().collect_vec()]
+				.concat()
+				.into_iter()
+				.sorted()
+				.dedup()
+				.collect_vec(),
+		)
+	}
+
 	fn invariant(&self) -> bool {
 		is_sorted(
 			&self

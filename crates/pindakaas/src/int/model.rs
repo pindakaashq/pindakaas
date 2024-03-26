@@ -79,6 +79,8 @@ pub struct ModelConfig<C: Coefficient> {
 	pub equalize_ternaries: bool,
 	pub add_consistency: bool,
 	pub propagate: Consistency,
+	/// Rewrites x:B + y:B ≤ z:B to x:B + y:B = z':B ∧ y:B ≤ z:B
+	pub equalize_uniform_bin_ineqs: bool,
 }
 
 // TODO should we keep IntVar i/o IntVarEnc?
@@ -300,43 +302,42 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	pub fn decompose(self) -> Result<Model<Lit, C>, Unsatisfiable> {
-		let lin_decomposer = LinDecomposer {
-			equalize_ternaries: self.config.equalize_ternaries,
-		};
-		let model = self.decompose_with(lin_decomposer).map(|model| {
-			model.constraints().for_each(|con| {
-				con.exp.terms.iter().for_each(|t| {
-					t.x.borrow_mut().decide_encoding(model.config.cutoff);
-				})
-			});
-			model
-		})?;
+		let ModelConfig {
+			equalize_ternaries,
+			cutoff,
+			equalize_uniform_bin_ineqs,
+			scm,
+			..
+		} = self.config.clone();
 
-		if matches!(&model.config.scm, Scm::Dnf) {
-			model.decompose_with(ScmDecomposer::default())
-		} else {
-			Ok(model)
-		}
+		self.decompose_with(Some(LinDecomposer { equalize_ternaries }))?
+			.decompose_with(Some(EncSpecDecomposer { cutoff }))?
+			.decompose_with(equalize_uniform_bin_ineqs.then(UniformBinEqDecomposer::default))?
+			.decompose_with((scm == Scm::Dnf).then(ScmDecomposer::default))
 	}
 
 	pub fn decompose_with(
 		self,
-		decomposer: impl Decompose<Lit, C>,
+		decomposer: Option<impl Decompose<Lit, C>>,
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		let mut num_var = self.num_var;
-		self.cons
-			.iter()
-			.cloned()
-			// .map(|con| con.decompose(&self.config, self.num_var).unwrap())
-			.map(|con| {
-				decomposer
-					.decompose(con, num_var, &self.config)
-					.map(|decomp| {
-						num_var = decomp.num_var; // TODO find better solution for this
-						decomp
+		decomposer
+			.map(|decomposer| {
+				let mut num_var = self.num_var;
+				self.cons
+					.iter()
+					.cloned()
+					// .map(|con| con.decompose(&self.config, self.num_var).unwrap())
+					.map(|con| {
+						decomposer
+							.decompose(con, num_var, &self.config)
+							.map(|decomp| {
+								num_var = decomp.num_var; // TODO find better solution for this
+								decomp
+							})
 					})
+					.try_collect()
 			})
-			.try_collect()
+			.unwrap_or(Ok(self))
 	}
 
 	pub fn encode_vars<DB: ClauseDatabase<Lit = Lit>>(
@@ -1687,12 +1688,134 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 }
 
 #[derive(Default)]
-pub struct LinDecomposer {
-	equalize_ternaries: bool,
+pub struct UniformBinEqDecomposer {}
+
+impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for UniformBinEqDecomposer {
+	fn decompose(
+		&self,
+		con: Lin<Lit, C>,
+		num_var: usize,
+		model_config: &ModelConfig<C>,
+	) -> Result<Model<Lit, C>, Unsatisfiable> {
+		let mut model = Model::<Lit, C>::new(num_var, model_config);
+		if con.cmp.is_ineq()
+			&& con.exp.terms.len() == 3
+			&& con.k.is_zero() // TODO potentially could work for non-zero k
+			&& con
+				.exp
+				.terms
+				.iter()
+				.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
+		{
+			if let Some((last, firsts)) = con.exp.terms.split_last() {
+				// sum all but last term into lhs, where lb(lhs)=lb(sum(firsts)) (to match addition)
+				// but ub(lhs) is same if cmp # = <= (because its binding)
+				// if # = >=, the ub(lhs) is not binding so set to inf ~= lb(sum(firsts))
+				// but the lb(lhs) is, which might be set to low, so we constrain lhs>=lb later
+				let lhs = model
+					.new_var_from_dom(
+						{
+							let (lb, ub) =
+								firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
+									(lb + t.lb(), ub + t.ub())
+								});
+							match con.cmp {
+								Comparator::LessEq => Dom::from_bounds(lb, last.x.borrow().ub()),
+								Comparator::Equal => todo!(),
+								Comparator::GreaterEq => Dom::from_bounds(lb, ub),
+							}
+						},
+						true,                       // TODO should be able to set to model_confing.add_consistency
+						Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
+						Some(format!("eq-{}", last.x.borrow().lbl())), // None,
+					)
+					.unwrap();
+
+				// sum(firsts) = sum(lhs)
+				model.add_constraint(Lin {
+					exp: LinExp {
+						terms: firsts
+							.iter()
+							.cloned()
+							.chain([Term::new(-C::one(), lhs.clone())])
+							.collect(),
+					},
+					cmp: Comparator::Equal,
+					k: C::zero(),
+					lbl: con.lbl.clone().map(|lbl| (format!("eq-1-{}", lbl))),
+				})?;
+
+				// If # = >=, the original lb is binding!
+				if matches!(con.cmp, Comparator::GreaterEq) {
+					model.add_constraint(Lin {
+						exp: LinExp {
+							terms: [Term::new(C::one(), lhs.clone())].to_vec(),
+						},
+						cmp: Comparator::GreaterEq,
+						k: last.x.borrow().lb(),
+						lbl: con.lbl.clone().map(|lbl| (format!("eq-1-{}", lbl))),
+					})?;
+				}
+
+				// if possible, we change the domain of last.x so its binary encoding is grounded at the same lower bound as z_prime so we can constrain bitwise using lex constraint
+				// TODO otherwise, coupling will take care of it, but this is non-ideal
+				if matches!(last.x.borrow().e, Some(IntVarEnc::Bin(None))) {
+					let ub = last.x.borrow().ub();
+					let x_dom = last
+						.x
+						.borrow()
+						.dom
+						.clone()
+						.union(Dom::constant(lhs.borrow().lb()));
+					last.x.borrow_mut().dom = x_dom;
+				}
+
+				// lhs # rhs
+				model.add_constraint(Lin {
+					exp: LinExp {
+						terms: [Term::new(C::one(), lhs), last.clone()].to_vec(),
+					},
+					cmp: con.cmp,
+					k: C::zero(),
+					lbl: con.lbl.clone().map(|lbl| (format!("eq-2-{}", lbl))),
+				})?;
+			} else {
+				unreachable!()
+			}
+		} else {
+			model.add_constraint(con)?;
+		}
+		Ok(model)
+	}
 }
 
 #[derive(Default)]
-pub struct EqualizeTernariesDecomposer {
+pub struct EncSpecDecomposer<C: Coefficient> {
+	cutoff: Option<C>,
+}
+
+impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<C> {
+	fn decompose(
+		&self,
+		con: Lin<Lit, C>,
+		num_var: usize,
+		config: &ModelConfig<C>,
+	) -> Result<Model<Lit, C>, Unsatisfiable> {
+		con.exp.terms.iter().for_each(|t| {
+			t.x.borrow_mut().decide_encoding(config.cutoff);
+		});
+		Ok(Model {
+			cons: vec![con],
+			config: config.clone(),
+			num_var,
+			..Model::default()
+		})
+	}
+}
+
+#[derive(Default)]
+pub struct LinDecomposer {
+	/// Rewrites all but last equation x:B + y:B ≤ z:B to x:B + y:B = z:B
 	equalize_ternaries: bool,
 }
 
@@ -1983,7 +2106,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 	}
 
 	pub fn lbl(&self) -> String {
-		String::from(if let Some(lbl) = self.lbl.as_ref() {
+		if let Some(lbl) = self.lbl.as_ref() {
 			format!(
 				"{}{}",
 				lbl,
@@ -1993,7 +2116,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			)
 		} else {
 			format!("x#{}", self.id)
-		})
+		}
 	}
 
 	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
@@ -2216,8 +2339,8 @@ mod tests {
 			[false, true], // consistency
 			// [true],
 			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
-			[false, true], // equalize terns
-			[Some(0)]      // [None, Some(0), Some(2)]
+			[false], // equalize terns
+			[None]   // [None, Some(0), Some(2)]
 		)
 		.map(
 			|(scm, decomposer, propagate, add_consistency, equalize_ternaries, cutoff)| {
@@ -2228,6 +2351,7 @@ mod tests {
 					add_consistency,
 					equalize_ternaries,
 					cutoff,
+					equalize_uniform_bin_ineqs: true,
 					..ModelConfig::default()
 				}
 			},
@@ -2235,8 +2359,10 @@ mod tests {
 		.collect()
 	}
 
-	// const VAR_ENCS: &[bool] = &[true, false];
 	const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
+	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Bin(None)];
+	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None)];
+	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[];
 
 	fn test_lp_for_configs(lp: &str, configs: Option<Vec<ModelConfig<C>>>) {
 		let model = Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap();
@@ -2346,11 +2472,20 @@ mod tests {
 		expected_assignments: Option<&[Assignment<C>]>,
 	) {
 		println!("model = {model}");
+		let ModelConfig {
+			scm,
+			cutoff,
+			decomposer,
+			equalize_ternaries,
+			add_consistency,
+			propagate,
+			equalize_uniform_bin_ineqs,
+		} = model.config.clone();
 
-		let lit_assignments = if let Ok(decomposition) =
-			model.clone().decompose_with(LinDecomposer {
-				equalize_ternaries: model.config.equalize_ternaries,
-			}) {
+		let lit_assignments = if let Ok(decomposition) = model
+			.clone()
+			.decompose_with(Some(LinDecomposer { equalize_ternaries }))
+		{
 			// println!("decomposition = {}", decomposition);
 
 			// Check decomposition
@@ -2365,8 +2500,7 @@ mod tests {
 
 				decomposition.vars().iter().for_each(|var| {
 					if VAR_ENCS.is_empty() {
-						var.borrow_mut()
-							.decide_encoding(decomposition.config.cutoff);
+						var.borrow_mut().decide_encoding(cutoff);
 					} else if let Some(var_enc) = {
 						let id = var.borrow().id.0;
 						var_encs.get(&id)
@@ -2377,13 +2511,13 @@ mod tests {
 
 				println!("decomposition = {}", decomposition);
 
-				let decomposition = if decomposition.config.scm == Scm::Dnf {
-					decomposition
-						.decompose_with(ScmDecomposer::default())
-						.unwrap()
-				} else {
-					decomposition
-				};
+				let decomposition = decomposition
+					.decompose_with(
+						equalize_uniform_bin_ineqs.then(UniformBinEqDecomposer::default),
+					)
+					.unwrap()
+					.decompose_with(matches!(scm, Scm::Dnf).then(ScmDecomposer::default))
+					.unwrap();
 
 				// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
 				// TODO should that be moved after encode step since encoding itself might introduce aux (bool) vars?
@@ -2391,7 +2525,7 @@ mod tests {
 
 				// TODO move into var_encs loop
 				const CHECK_CONSTRAINTS: bool = false;
-				const SHOW_AUX: bool = true;
+				const SHOW_AUX: bool = false;
 
 				for (mut decomposition, expected_assignments) in if CHECK_CONSTRAINTS {
 					decomposition
@@ -3132,6 +3266,7 @@ End
 			equalize_ternaries: false,
 			add_consistency: false,
 			propagate: Consistency::None,
+			equalize_uniform_bin_ineqs: true,
 		};
 		test_lp_for_configs(
 			r"
