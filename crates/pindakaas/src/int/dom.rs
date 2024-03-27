@@ -264,6 +264,14 @@ mod tests {
 
 	use super::*;
 
+	// #[test]
+	// fn union_test() {
+	// 	let a: Vec<C> = vec![1, 2, 3, 7, 8, 9, 11];
+	// 	let b: Vec<C> = vec![4, 6, 8];
+	// 	let dom = Dom::from_slice(&[1, 2, 3, 7, 8, 9, 11]).union(Dom::from_slice(&[2, 3, 5, 15]));
+	// 	// assert_eq!(dom, Dom::from_slice([a, b].concat().sorted().dedup()));
+	// }
+
 	#[test]
 	fn dom_test() {
 		let ds: Vec<C> = vec![1, 2, 3, 7, 8, 9, 11];

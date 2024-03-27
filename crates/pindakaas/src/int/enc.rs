@@ -29,7 +29,7 @@ use std::{
 };
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum LitOrConst<Lit: Literal> {
+pub enum LitOrConst<Lit: Literal> {
 	Lit(Lit),
 	Const(bool),
 }
@@ -718,7 +718,7 @@ impl<Lit: Literal, C: Coefficient> IntVarBin<Lit, C> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum IntVarEnc<Lit: Literal, C: Coefficient> {
+pub enum IntVarEnc<Lit: Literal, C: Coefficient> {
 	Ord(Option<OrdEnc<Lit>>),
 	Bin(Option<BinEnc<Lit>>),
 	Const(C),
