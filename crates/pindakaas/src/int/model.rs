@@ -321,9 +321,27 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 				let model = con_decomposition
 					.decompose_with(Some(&enc))
 					.map(|models| models.into_iter().collect::<Model<_, _>>())?;
+
 				let (last, firsts) = model.cons.split_last().unwrap();
+				let (con_eqs, cons) = firsts.iter().cloned().partition(|con| {
+					con.exp
+						.terms
+						.iter()
+						.any(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
+				});
+				// .with_position()
+				// .partition(|(pos, con)| match pos {
+				// 	Position::First | Position::Middle => con
+				// 		.exp
+				// 		.terms
+				// 		.iter()
+				// 		.any(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_)))),
+
+				// 	Position::Last => false,
+				// });
+
 				Model {
-					cons: firsts.to_vec(),
+					cons: con_eqs,
 					..model.clone() // not wasteful I think because shouldn't clone cons
 				}
 				.decompose_with(
@@ -332,13 +350,15 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 						.as_ref(),
 				)
 				.map(|models| {
-					models
+					let mut model = models
 						.into_iter()
 						.chain([Model {
-							cons: vec![last.clone()],
+							cons: [cons, vec![last.clone()]].concat(),
 							..model
 						}])
-						.collect()
+						.collect::<Model<_, _>>();
+					model.cons.sort_by_key(|con| con.exp.terms[1].x.borrow().id); // dirty trick to restore order
+					model
 				})
 			})
 			.try_collect::<Model<_, _>, Model<_, _>, _>()?
@@ -1711,6 +1731,17 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 				cmp: Comparator::Equal,
 				exp: if REMOVE_GAPS {
 					if let Some((last, firsts)) = con.exp.terms.split_last() {
+						// 						let x_dom = last
+						// 							.x
+						// 							.borrow()
+						// 							.dom
+						// 							.clone()
+						// 							.union(Dom::from_slice(&[lb, ub]));
+						// 						last.x.borrow_mut().dom = x_dom;
+
+						// TODO avoid removing gaps on the order encoded vars?
+						// if matches!(last.x.borrow().e, Some(IntVarEnc::Bin(_))) {
+						// }
 						let (lb, ub) = firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
 							(lb + t.lb(), ub + t.ub())
 						});
@@ -2451,7 +2482,6 @@ mod tests {
 				model.deep_clone().with_config(config.clone()),
 				Some(&expected_assignments),
 			)
-
 		}
 	}
 
@@ -2602,7 +2632,6 @@ mod tests {
 				// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
 				// TODO should that be moved after encode step since encoding itself might introduce aux (bool) vars?
 				let mut con_db = db.clone();
-
 
 				let principal_vars = decomposition
 					.vars()
