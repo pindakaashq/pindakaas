@@ -14,7 +14,7 @@ use crate::{
 use super::{enc::GROUND_BINARY_AT_LB, Dom, LitOrConst};
 
 #[derive(Debug, Clone)]
-pub(crate) struct BinEnc<Lit: Literal> {
+pub struct BinEnc<Lit: Literal> {
 	pub(crate) x: Vec<LitOrConst<Lit>>,
 }
 
@@ -280,24 +280,23 @@ mod tests {
 	// type C = i32;
 
 	use super::*;
-	use crate::helpers::{negate_cnf, tests::TestDB};
+	use crate::helpers::tests::TestDB;
 
-	#[test]
-	fn test_ineqs() {
-		let mut db = TestDB::new(0);
-		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
-
-		dbg!(&x.ineqs(true, Dom::from_slice(&[0, 2, 3, 5])));
-		// panic!();
-	}
+	// #[test]
+	// fn test_ineqs() {
+	// 	let mut db = TestDB::new(0);
+	// 	let x_ = BinEnc::new(&mut db, 3, Some(String::from("x")));
+	// 	// &x.ineqs(true, Dom::from_slice(&[0, 2, 3, 5]));
+	// 	// panic!();
+	// }
 
 	#[test]
 	fn test_ineq() {
 		let mut db = TestDB::new(0);
 		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
 
-		dbg!(&x.ineq(false, 2));
-		dbg!(&negate_cnf(x.ineq(false, 2)));
+		// &x.ineq(false, 2);
+		// &negate_cnf(x.ineq(false, 2));
 		for (up, ks, expected_cnf) in [
 			(true, 0, vec![]),
 			(true, 1, vec![vec![1]]),

@@ -76,6 +76,7 @@ pub struct ModelConfig<C: Coefficient> {
 	pub scm: Scm,
 	pub cutoff: Option<C>,
 	pub decomposer: Decomposer,
+	/// Rewrites all but last equation x:B + y:B ≤ z:B to x:B + y:B = z:B
 	pub equalize_ternaries: bool,
 	pub add_consistency: bool,
 	pub propagate: Consistency,
@@ -301,7 +302,10 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		self.new_var(&[c], false, None, None).unwrap()
 	}
 
-	pub fn decompose(self) -> Result<Model<Lit, C>, Unsatisfiable> {
+	pub fn decompose(
+		self,
+		spec: Option<HashMap<IntVarId, IntVarEnc<Lit, C>>>,
+	) -> Result<Model<Lit, C>, Unsatisfiable> {
 		let ModelConfig {
 			equalize_ternaries,
 			cutoff,
@@ -310,16 +314,49 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			..
 		} = self.config.clone();
 
-		self.decompose_with(Some(LinDecomposer { equalize_ternaries }))?
-			.decompose_with(Some(EncSpecDecomposer { cutoff }))?
-			.decompose_with(equalize_uniform_bin_ineqs.then(UniformBinEqDecomposer::default))?
-			.decompose_with((scm == Scm::Dnf).then(ScmDecomposer::default))
+
+		let enc = EncSpecDecomposer { cutoff, spec };
+		self.decompose_with(Some(&LinDecomposer {}))?
+			.into_iter()
+			.map(|con_decomposition| {
+				let model = con_decomposition
+					.decompose_with(Some(&enc))
+					.map(|models| models.into_iter().collect::<Model<_, _>>())?;
+				let (last, firsts) = model.cons.split_last().unwrap();
+				Model {
+					cons: firsts.to_vec(),
+					..model.clone() // not wasteful I think because shouldn't clone cons
+				}
+				.decompose_with(
+					equalize_ternaries
+						.then(EqualizeTernsDecomposer::default)
+						.as_ref(),
+				)
+				.map(|models| {
+					models
+						.into_iter()
+						.chain([Model {
+							cons: vec![last.clone()],
+							..model
+						}])
+						.collect()
+				})
+			})
+			.try_collect::<Model<_, _>, Model<_, _>, _>()?
+			.decompose_with(
+				equalize_uniform_bin_ineqs
+					.then(UniformBinEqDecomposer::default)
+					.as_ref(),
+			)
+			.map(|models| models.into_iter().collect::<Model<_, _>>())?
+			.decompose_with((scm == Scm::Dnf).then(ScmDecomposer::default).as_ref())
+			.map(|models| models.into_iter().collect())
 	}
 
 	pub fn decompose_with(
 		self,
-		decomposer: Option<impl Decompose<Lit, C>>,
-	) -> Result<Model<Lit, C>, Unsatisfiable> {
+		decomposer: Option<&impl Decompose<Lit, C>>,
+	) -> Result<Vec<Model<Lit, C>>, Unsatisfiable> {
 		decomposer
 			.map(|decomposer| {
 				let mut num_var = self.num_var;
@@ -337,7 +374,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					})
 					.try_collect()
 			})
-			.unwrap_or(Ok(self))
+			.unwrap_or(Ok(vec![self])) // None -> identity decomposer
 	}
 
 	pub fn encode_vars<DB: ClauseDatabase<Lit = Lit>>(
@@ -363,11 +400,10 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		// Create decomposed model and its aux vars
 
 		let mut decomposition = if decompose {
-			self.clone().decompose()?
+			self.clone().decompose(None)?
 		} else {
 			self.clone()
 		};
-		println!("decomposition = {}", decomposition);
 
 		decomposition.propagate(&self.config.propagate.clone())?;
 
@@ -406,7 +442,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	pub fn vars(&self) -> Vec<IntVarRef<Lit, C>> {
 		self.cons
 			.iter()
-			.flat_map(|con| con.exp.terms.iter().map(|term| &term.x))
+			.flat_map(|con| con.exp.terms.iter().map(|term| &term.x)) // don't use con.vars() since this will do redundant canonicalizing
 			.unique_by(|x| x.borrow().id)
 			.cloned()
 			.collect()
@@ -1486,6 +1522,16 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		}
 	}
 
+	pub fn vars(&self) -> Vec<IntVarRef<Lit, C>> {
+		self.exp
+			.terms
+			.iter()
+			.map(|term| &term.x)
+			.unique_by(|x| x.borrow().id)
+			.cloned()
+			.collect()
+	}
+
 	/*
 		#[cfg_attr(
 			feature = "trace",
@@ -1692,6 +1738,46 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 }
 
 #[derive(Default)]
+pub struct EqualizeTernsDecomposer {}
+
+impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer {
+	fn decompose(
+		&self,
+		con: Lin<Lit, C>,
+		num_var: usize,
+		config: &ModelConfig<C>,
+	) -> Result<Model<Lit, C>, Unsatisfiable> {
+		const REMOVE_GAPS: bool = true;
+		Ok(Model {
+			cons: vec![Lin {
+				cmp: Comparator::Equal,
+				exp: if REMOVE_GAPS {
+					if let Some((last, firsts)) = con.exp.terms.split_last() {
+						let (lb, ub) = firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
+							(lb + t.lb(), ub + t.ub())
+						});
+						assert!(last.c.abs().is_one());
+						last.x.borrow_mut().dom = Dom::from_bounds(lb, ub);
+
+						LinExp {
+							terms: firsts.iter().chain([last]).cloned().collect(),
+						}
+					} else {
+						unreachable!()
+					}
+				} else {
+					con.exp
+				},
+				..con
+			}],
+			num_var,
+			config: config.clone(),
+			..Model::default()
+		})
+	}
+}
+
+#[derive(Default)]
 pub struct UniformBinEqDecomposer {}
 
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for UniformBinEqDecomposer {
@@ -1794,19 +1880,31 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for UniformBinEqDecomposer 
 }
 
 #[derive(Default)]
-pub struct EncSpecDecomposer<C: Coefficient> {
+pub struct EncSpecDecomposer<Lit: Literal, C: Coefficient> {
 	cutoff: Option<C>,
+	spec: Option<HashMap<IntVarId, IntVarEnc<Lit, C>>>,
 }
 
-impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<C> {
+impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, C> {
 	fn decompose(
 		&self,
 		con: Lin<Lit, C>,
 		num_var: usize,
 		config: &ModelConfig<C>,
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		con.exp.terms.iter().for_each(|t| {
-			t.x.borrow_mut().decide_encoding(config.cutoff);
+		con.vars().into_iter().for_each(|var| {
+			if let Some(spec) = self.spec.as_ref() {
+				// only encode var which are specified
+				if let Some(var_enc) = {
+					let id = var.borrow().id;
+					spec.get(&id)
+				} {
+					// overwriting encodings
+					var.borrow_mut().e = Some(var_enc.clone());
+				}
+			} else {
+				var.borrow_mut().decide_encoding(self.cutoff);
+			}
 		});
 		Ok(Model {
 			cons: vec![con],
@@ -1818,10 +1916,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<C> {
 }
 
 #[derive(Default)]
-pub struct LinDecomposer {
-	/// Rewrites all but last equation x:B + y:B ≤ z:B to x:B + y:B = z:B
-	equalize_ternaries: bool,
-}
+pub struct LinDecomposer {}
 
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 	fn decompose(
@@ -1830,7 +1925,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 		num_var: usize,
 		model_config: &ModelConfig<C>,
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		let model = match &con.exp.terms[..] {
+		match &con.exp.terms[..] {
 			[] => con
 				.check(&Assignment(HashMap::default()))
 				.map(|_| Model::<Lit, C>::new(num_var, model_config))
@@ -1848,51 +1943,6 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 				Decomposer::Swc => SwcEncoder::default().decompose(con, num_var, model_config),
 				Decomposer::Rca => unreachable!(),
 			},
-		}?;
-
-		// TODO only do this for uniform BinEncs..
-		if self.equalize_ternaries {
-			const REMOVE_GAPS: bool = true;
-			let model = Model {
-				cons: model
-					.cons
-					.into_iter()
-					.with_position()
-					.map(|(pos, con)| match pos {
-						Position::First | Position::Middle => Lin {
-							cmp: Comparator::Equal,
-							exp: if REMOVE_GAPS {
-								if let Some((last, firsts)) = con.exp.terms.split_last() {
-									let (lb, ub) = firsts
-										.iter()
-										.fold((C::zero(), C::zero()), |(lb, ub), t| {
-											(lb + t.lb(), ub + t.ub())
-										});
-									assert!(last.c.abs().is_one());
-									last.x.borrow_mut().dom = Dom::from_bounds(lb, ub);
-
-									LinExp {
-										terms: firsts.iter().chain([last]).cloned().collect(),
-									}
-								} else {
-									unreachable!()
-								}
-							} else {
-								con.exp
-							},
-							..con
-						},
-						Position::Last | Position::Only => con,
-					})
-					.collect(),
-				..model
-			};
-
-			// TODO this propagate messes up tests
-			// model.propagate(&Consistency::Bounds)?;
-			Ok(model)
-		} else {
-			Ok(model)
 		}
 	}
 }
@@ -2282,7 +2332,7 @@ mod tests {
 	type C = i64;
 
 	use super::*;
-	use crate::{Cnf, Lin, Model};
+	use crate::{Cnf, Lin, LinearEncoder, Model};
 
 	#[test]
 	fn model_test() {
@@ -2343,9 +2393,9 @@ mod tests {
 			[false, true], // consistency
 			// [true],
 			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
-			[false],       // equalize terns
+			[false, true], // equalize terns
 			[None],        // [None, Some(0), Some(2)]
-			[false, true]  // equalize_uniform_bin_ineqs
+			[false]        // equalize_uniform_bin_ineqs
 		)
 		.map(
 			|(
@@ -2401,7 +2451,7 @@ mod tests {
 						if VAR_ENCS.is_empty() {
 							var.borrow_mut().decide_encoding(config.cutoff);
 						} else if let Some(var_enc) = {
-							let id = var.borrow().id.0;
+							let id = var.borrow().id;
 							var_encs.get(&id)
 						} {
 							var.borrow_mut().e = Some(var_enc.clone());
@@ -2437,7 +2487,7 @@ mod tests {
 	fn expand_var_encs(
 		var_encs: &[IntVarEnc<Lit, C>],
 		model: &Model<Lit, C>,
-	) -> Vec<HashMap<usize, IntVarEnc<Lit, C>>> {
+	) -> Vec<HashMap<IntVarId, IntVarEnc<Lit, C>>> {
 		if var_encs.is_empty() {
 			return vec![HashMap::default()];
 		}
@@ -2448,7 +2498,7 @@ mod tests {
 			// If not encoded and no encoding preference (e.g. scm), assign and encode
 			// TODO maybe remove constants (although some bugs might arise from the different encodings of constants
 			.filter(|x| x.borrow().e.is_none())
-			.map(|x| x.borrow().id.0)
+			.map(|x| x.borrow().id)
 			.collect_vec();
 
 		assert!(
@@ -2495,146 +2545,126 @@ mod tests {
 			equalize_uniform_bin_ineqs,
 		} = model.config.clone();
 
-		let lit_assignments = if let Ok(decomposition) = model
-			.clone()
-			.decompose_with(Some(LinDecomposer { equalize_ternaries }))
-		{
-			// println!("decomposition = {}", decomposition);
+		const CHECK_DECOMPOSITION_I: Option<usize> = None;
 
-			// Check decomposition
+		for (i, var_encs) in {
+			let var_encs_gen = expand_var_encs(
+				VAR_ENCS,
+				&model
+					.clone()
+					.decompose_with(Some(&LinDecomposer::default()))
+					.map(|models| models.into_iter().collect::<Model<_, _>>())
+					.unwrap(),
+			);
+			if let Some(i) = CHECK_DECOMPOSITION_I {
+				vec![(i, var_encs_gen[i].clone())]
+			} else {
+				var_encs_gen.into_iter().enumerate().collect_vec()
+			}
+		} {
+			let spec = if VAR_ENCS.is_empty() {
+				None
+			} else {
+				Some(var_encs)
+			};
+
+			let decomposition = model.deep_clone().decompose(spec).unwrap();
 			const CHECK_DECOMPOSITION: bool = true;
 			if CHECK_DECOMPOSITION {
 				check_decomposition(&model, &decomposition, expected_assignments);
 			}
 
-			const CHECK_DECOMPOSITION_I: Option<usize> = None;
+			let mut decomp_db = db.clone();
 
-			for (i, var_encs) in {
-				let var_encs_gen = expand_var_encs(VAR_ENCS, &decomposition);
-				if let Some(i) = CHECK_DECOMPOSITION_I {
-					vec![(i, var_encs_gen[i].clone())]
-				} else {
-					var_encs_gen.into_iter().enumerate().collect_vec()
-				}
+
+
+			// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
+			// TODO should that be moved after encode step since encoding itself might introduce aux (bool) vars?
+			decomp_db.num_var = model.lits().iter().max().unwrap().clone() as Lit;
+
+			// TODO move into var_encs loop
+			const CHECK_CONSTRAINTS: bool = false;
+			const SHOW_AUX: bool = false;
+
+			for (mut decomposition, expected_assignments) in if CHECK_CONSTRAINTS {
+				decomposition
+					.constraints()
+					.map(|constraint| {
+						(
+							Model {
+								cons: vec![constraint.clone()],
+								num_var: constraint
+									.exp
+									.terms
+									.iter()
+									.map(|term| term.x.borrow().id.0)
+									.max()
+									.unwrap(),
+								..decomposition.deep_clone()
+							},
+							None,
+						)
+					})
+					.collect_vec()
+			} else {
+				vec![(decomposition.clone(), expected_assignments)]
 			} {
-				let decomposition = decomposition.deep_clone();
-				let mut decomp_db = db.clone();
+				let mut con_db = decomp_db.clone();
 
-				decomposition.vars().iter().for_each(|var| {
-					if VAR_ENCS.is_empty() {
-						var.borrow_mut().decide_encoding(cutoff);
-					} else if let Some(var_enc) = {
-						let id = var.borrow().id.0;
-						var_encs.get(&id)
-					} {
-						var.borrow_mut().e = Some(var_enc.clone());
-					}
-				});
+				// encode and solve
+				let lit_assignments = decomposition
+					.encode(&mut con_db, false)
+					.map(|_| {
+						println!("checking decomposition #{i} = {}", decomposition);
 
-				println!("decomposition = {}", decomposition);
+						let output = if CHECK_CONSTRAINTS || SHOW_AUX {
+							decomposition.lits()
+						} else {
+							model.lits()
+						};
 
-				let decomposition = decomposition
-					.decompose_with(
-						equalize_uniform_bin_ineqs.then(UniformBinEqDecomposer::default),
-					)
-					.unwrap()
-					.decompose_with(matches!(scm, Scm::Dnf).then(ScmDecomposer::default))
-					.unwrap();
+						con_db
+							.solve(Some(output))
+							.into_iter()
+							.sorted()
+							.collect::<Vec<_>>()
+					})
+					.unwrap_or_else(|_| {
+						println!("Warning: encoding decomposition lead to UNSAT");
+						Vec::default()
+					});
 
-				// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
-				// TODO should that be moved after encode step since encoding itself might introduce aux (bool) vars?
-				decomp_db.num_var = model.lits().iter().max().unwrap().clone() as Lit;
+				assert_eq!(
+					lit_assignments.iter().unique().count(),
+					lit_assignments.len(),
+					"Expected lit assignments to be unique, but was {lit_assignments:?}"
+				);
 
-				// TODO move into var_encs loop
-				const CHECK_CONSTRAINTS: bool = false;
-				const SHOW_AUX: bool = false;
-
-				for (mut decomposition, expected_assignments) in if CHECK_CONSTRAINTS {
-					decomposition
-						.constraints()
-						.map(|constraint| {
-							(
-								Model {
-									cons: vec![constraint.clone()],
-									num_var: constraint
-										.exp
-										.terms
-										.iter()
-										.map(|term| term.x.borrow().id.0)
-										.max()
-										.unwrap(),
-									..decomposition.deep_clone()
-								},
-								None,
-							)
-						})
-						.collect_vec()
+				let checker = if CHECK_CONSTRAINTS || SHOW_AUX {
+					&decomposition
 				} else {
-					vec![(decomposition.clone(), expected_assignments)]
-				} {
-					let mut con_db = decomp_db.clone();
+					&model
+				};
 
-					// encode and solve
-					let lit_assignments = decomposition
-						.encode(&mut con_db, false)
-						.map(|_| {
-							println!("checking decomposition #{i} = {}", decomposition);
+				let actual_assignments = lit_assignments
+					.iter()
+					.flat_map(|lit_assignment| checker.assign(lit_assignment))
+					.collect::<Vec<_>>();
 
-							let output = if CHECK_CONSTRAINTS || SHOW_AUX {
-								decomposition.lits()
-							} else {
-								model.lits()
-							};
+				// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
 
-							con_db
-								.solve(Some(output))
-								.into_iter()
-								.sorted()
-								.collect::<Vec<_>>()
-						})
-						.unwrap_or_else(|_| {
-							println!("Warning: encoding decomposition lead to UNSAT");
-							Vec::default()
-						});
-
-					assert_eq!(
-						lit_assignments.iter().unique().count(),
-						lit_assignments.len(),
-						"Expected lit assignments to be unique, but was {lit_assignments:?}"
-					);
-
-					let checker = if CHECK_CONSTRAINTS || SHOW_AUX {
-						&decomposition
-					} else {
-						// &decomposition // TODO useful for checking AUX var assignments?
-						&model
-					};
-
-					let actual_assignments = lit_assignments
-						.iter()
-						.flat_map(|lit_assignment| checker.assign(lit_assignment))
-						.collect::<Vec<_>>();
-
-					// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
-
-					let check =
-						checker.check_assignments(&actual_assignments, expected_assignments);
-					if let Err(errs) = check {
-						for err in errs {
-							println!("{err}");
-						}
-						panic!(
-							"Encoding is incorrect. Test failed for {:?} and {lp}",
-							model.config
-						);
+				let check = checker.check_assignments(&actual_assignments, expected_assignments);
+				if let Err(errs) = check {
+					for err in errs {
+						println!("{err}");
 					}
+					panic!(
+						"Encoding is incorrect. Test failed for {:?} and {lp}",
+						model.config
+					);
 				}
 			}
-		} else {
-			// TODO if Unsat is unexpected, show which (decomposition?) constraint is causing unsat
-			todo!("Decomposition was unsat");
-			// vec![]
-		};
+		}
 	}
 
 	#[test]
@@ -3285,15 +3315,16 @@ End
 			scm: Scm::Rca,
 			cutoff: Some(2),
 			decomposer: Decomposer::Bdd,
-			equalize_ternaries: false,
 			add_consistency: false,
 			propagate: Consistency::None,
-			equalize_uniform_bin_ineqs: true,
+			equalize_ternaries: true,
+			equalize_uniform_bin_ineqs: false,
 		};
 		test_lp_for_configs(
 			r"
 Subject To
     c0: 2 x_1 + 2 x_2 + 2 x_3 + 2 x_4 <= 5
+    \ c0: 2 x_1 + 2 x_2 + 2 x_3 <= 3
 Binary
     x_1
     x_2
@@ -3301,6 +3332,7 @@ Binary
     x_4
 End
 	",
+			// None,
 			Some(vec![
 				base.clone(),
 				// ModelConfig {

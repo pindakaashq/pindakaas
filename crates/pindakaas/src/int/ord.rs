@@ -10,7 +10,7 @@ use crate::{
 use super::Dom;
 
 #[derive(Debug, Clone)]
-pub(crate) struct OrdEnc<Lit: Literal> {
+pub struct OrdEnc<Lit: Literal> {
 	x: Vec<Lit>,
 }
 
