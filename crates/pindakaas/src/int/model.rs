@@ -1385,55 +1385,13 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					return Ok(());
 				}
 
-				let cnf = Cnf::<DB::Lit>::from_file(&PathBuf::from(format!(
-					"{}/res/ecm/{lits}_{c}.dimacs",
-					env!("CARGO_MANIFEST_DIR")
-				)))
-				.unwrap_or_else(|_| panic!("Could not find Dnf method cnf for {lits}_{c}"));
-				// TODO could replace with some arithmetic
-				let map = cnf
-					.vars()
-					.zip_longest(x_enc.xs().iter())
-					.flat_map(|x| match x {
-						itertools::EitherOrBoth::Both(x, y) => match y {
-							LitOrConst::Lit(y) => Some((x, y.clone())),
-							LitOrConst::Const(_) => None,
-						},
-						itertools::EitherOrBoth::Left(x) => {
-							Some((x.clone(), new_var!(db, format!("scm_{x}"))))
-						}
-						itertools::EitherOrBoth::Right(_) => unreachable!(),
-					})
-					.collect::<HashMap<_, _>>();
-
-				// add clauses according to Dnf
-				cnf.iter().try_for_each(|clause| {
-					emit_clause!(
-						db,
-						&clause
-							.iter()
-							.map(|x| {
-								let lit = &map[&x.var()];
-								if x.is_negated() {
-									lit.negate()
-								} else {
-									lit.clone()
-								}
-							})
-							.collect::<Vec<_>>()
-					)
-				})?;
+				let y_lits = scm_dnf(db, x_enc.xs(), lits, c)?;
 
 				// set encoding of y
 				let y_enc = IntVarEnc::Bin(Some(BinEnc::from_lits(
 					&(0..sh)
 						.map(|_| LitOrConst::Const(false))
-						.chain(
-							map.values()
-								.sorted()
-								.skip(lits)
-								.map(|lit| LitOrConst::Lit(lit.clone())),
-						)
+						.chain(y_lits.into_iter().map(LitOrConst::from))
 						.collect_vec(),
 				)));
 				y.borrow_mut().e = Some(y_enc);
@@ -2325,6 +2283,56 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 // 		Rc::new(RefCell::new(self.clone()))
 // 	}
 // }
+
+#[cfg_attr(
+	feature = "trace",
+	tracing::instrument(name = "scm_dnf", skip_all, fields(constraint = format!("DNF:{lits}_{c}")))
+)]
+fn scm_dnf<DB: ClauseDatabase, C: Coefficient>(
+	db: &mut DB,
+	xs: Vec<LitOrConst<DB::Lit>>,
+	lits: usize,
+	c: C,
+) -> Result<Vec<DB::Lit>, Unsatisfiable> {
+	let cnf = Cnf::<DB::Lit>::from_file(&PathBuf::from(format!(
+		"{}/res/ecm/{lits}_{c}.dimacs",
+		env!("CARGO_MANIFEST_DIR")
+	)))
+	.unwrap_or_else(|_| panic!("Could not find Dnf method cnf for {lits}_{c}"));
+	// TODO could replace with some arithmetic
+	let map = cnf
+		.vars()
+		.zip_longest(xs.iter())
+		.flat_map(|yx| match yx {
+			itertools::EitherOrBoth::Both(x, y) => match y {
+				LitOrConst::Lit(y) => Some((x, y.clone())),
+				LitOrConst::Const(_) => None,
+			},
+			itertools::EitherOrBoth::Left(x) => Some((x.clone(), new_var!(db, format!("scm_{x}")))),
+			itertools::EitherOrBoth::Right(_) => unreachable!(),
+		})
+		.collect::<HashMap<_, _>>();
+
+	// add clauses according to Dnf
+	cnf.iter().try_for_each(|clause| {
+		emit_clause!(
+			db,
+			&clause
+				.iter()
+				.map(|x| {
+					let lit = &map[&x.var()];
+					if x.is_negated() {
+						lit.negate()
+					} else {
+						lit.clone()
+					}
+				})
+				.collect::<Vec<_>>()
+		)
+	})?;
+
+	Ok(map.into_values().sorted().skip(lits).collect())
+}
 
 #[cfg(test)]
 mod tests {
