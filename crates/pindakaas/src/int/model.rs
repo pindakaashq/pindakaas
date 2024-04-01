@@ -514,7 +514,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		&self,
 		actual_assignments: &[Assignment<C>],
 		expected_assignments: Option<&[Assignment<C>]>,
-		lit_assignments: Option<Vec<Vec<Lit>>>,
+		lit_assignments: Option<&[Vec<Lit>]>,
 	) -> Result<(), Vec<CheckError<Lit>>> {
 		let errs = actual_assignments
 			.iter()
@@ -2734,7 +2734,7 @@ mod tests {
 					let check = checker.check_assignments(
 						&actual_assignments,
 						expected_assignments,
-						Some(lit_assignments),
+						Some(&lit_assignments),
 					);
 					if let Err(errs) = check {
 						for err in errs {
