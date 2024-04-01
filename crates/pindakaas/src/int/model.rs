@@ -2467,22 +2467,10 @@ mod tests {
 	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[];
 
 	fn test_lp_for_configs(lp: &str, configs: Option<Vec<ModelConfig<C>>>) {
-		let model = Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap();
-		let expected_assignments = model.brute_force_solve(None);
-		for config in configs.unwrap_or_else(get_model_configs) {
-			assert!(
-				model.num_var <= 10,
-				"Attempting to test many (2^{}) var enc specs",
-				model.num_var
-			);
-
-			test_lp(
-				lp,
-				TestDB::new(0),
-				model.deep_clone().with_config(config.clone()),
-				Some(&expected_assignments),
-			)
-		}
+		test_model(
+			Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap(),
+			Some(configs.unwrap_or_else(get_model_configs)),
+		)
 	}
 
 	fn check_decomposition(
@@ -2548,171 +2536,185 @@ mod tests {
 		}
 	}
 
-	fn test_lp(
-		lp: &str,
-		db: TestDB,
-		model: Model<Lit, C>,
-		expected_assignments: Option<&[Assignment<C>]>,
-	) {
-		println!("model = {model}");
-		let ModelConfig {
-			scm,
-			cutoff,
-			decomposer,
-			equalize_ternaries,
-			add_consistency,
-			propagate,
-			equalize_uniform_bin_ineqs,
-			..
-		} = model.config.clone();
+	fn test_model(model: Model<Lit, C>, configs: Option<Vec<ModelConfig<C>>>) {
+		let expected_assignments = model.brute_force_solve(None);
+		let expected_assignments = Some(&expected_assignments[..]);
+
+		// TODO merge with CHECK_DECOMPOSITION_I
+		const CHECK_CONFIG_I: Option<usize> = None;
+		// const CHECK_CONFIG_I: Option<usize> = Some(5);
 
 		const CHECK_DECOMPOSITION_I: Option<usize> = None;
+		// const CHECK_DECOMPOSITION_I: Option<usize> = Some(12);
 
-		for (i, var_encs) in {
-			let var_encs_gen = expand_var_encs(
-				VAR_ENCS,
-				model
-					.clone()
-					.decompose_with(Some(&LinDecomposer::default()))
-					.map(|models| models.into_iter().collect::<Model<_, _>>())
-					.unwrap()
-					.vars()
-					.into_iter()
-					.collect(),
-			);
-			if let Some(i) = CHECK_DECOMPOSITION_I {
-				vec![(i, var_encs_gen[i].clone())]
+		for (i, config) in {
+			let configs = configs.unwrap_or_else(|| vec![model.config.clone()]);
+
+			if let Some(i) = CHECK_CONFIG_I {
+				vec![(i, configs[i].clone())]
 			} else {
-				var_encs_gen.into_iter().enumerate().collect_vec()
+				configs.into_iter().enumerate().collect_vec()
 			}
 		} {
-			let spec = if VAR_ENCS.is_empty() {
-				None
-			} else {
-				Some(var_encs)
-			};
+			let model = model.deep_clone().with_config(config.clone());
+			println!("model = {model}");
+			let ModelConfig {
+				scm,
+				cutoff,
+				decomposer,
+				equalize_ternaries,
+				add_consistency,
+				propagate,
+				equalize_uniform_bin_ineqs,
+				..
+			} = model.config.clone();
 
-			let decomposition = model.clone().decompose(spec).unwrap();
-
-			println!("decomposition = {}", decomposition);
-
-			const CHECK_DECOMPOSITION: bool = true;
-			if CHECK_DECOMPOSITION {
-				check_decomposition(&model, &decomposition, expected_assignments);
-			}
-
-			// TODO move into var_encs loop
-			const CHECK_CONSTRAINTS: bool = false;
-			const SHOW_AUX: bool = true;
-
-			for (mut decomposition, expected_assignments) in if CHECK_CONSTRAINTS {
-				decomposition
-					.constraints()
-					.map(|constraint| {
-						(
-							Model {
-								cons: vec![constraint.clone()],
-								num_var: constraint
-									.exp
-									.terms
-									.iter()
-									.map(|term| term.x.borrow().id.0)
-									.max()
-									.unwrap(),
-								..decomposition.deep_clone()
-							},
-							None,
-						)
-					})
-					.collect_vec()
-			} else {
-				vec![(decomposition.clone(), expected_assignments)]
+			for (j, var_encs) in {
+				let var_encs_gen = expand_var_encs(
+					VAR_ENCS,
+					model
+						.clone()
+						.decompose_with(Some(&LinDecomposer::default()))
+						.map(|models| models.into_iter().collect::<Model<_, _>>())
+						.unwrap()
+						.vars()
+						.into_iter()
+						.collect(),
+				);
+				if let Some(j) = CHECK_DECOMPOSITION_I {
+					vec![(j, var_encs_gen[j].clone())]
+				} else {
+					var_encs_gen.into_iter().enumerate().collect_vec()
+				}
 			} {
-				// let mut con_db = decomp_db.clone();
-				// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
-				// TODO should that be moved after encode step since encoding itself might introduce aux (bool) vars?
-				let mut con_db = db.clone();
-
-				let principal_vars = decomposition
-					.vars()
-					.into_iter()
-					.filter(|x| x.borrow().id.0 <= model.num_var)
-					.map(|x| {
-						x.borrow_mut()
-							.encode(&mut con_db, &mut HashMap::default())
-							.unwrap();
-						(x.borrow().id.clone(), x.clone())
+				let decomposition = model
+					.clone()
+					.decompose(if VAR_ENCS.is_empty() {
+						None
+					} else {
+						Some(var_encs)
 					})
-					.collect::<HashMap<IntVarId, IntVarRef<Lit, C>>>();
+					.unwrap();
 
 				println!("decomposition = {}", decomposition);
 
-				// encode and solve
-				let lit_assignments = decomposition
-					.encode(&mut con_db, false)
-					.map(|_| {
-						println!("checking decomposition #{i} = {}", decomposition);
+				const CHECK_DECOMPOSITION: bool = true;
+				if CHECK_DECOMPOSITION {
+					check_decomposition(&model, &decomposition, expected_assignments);
+				}
 
-						let output = if CHECK_CONSTRAINTS || SHOW_AUX {
-							decomposition.lits()
-						} else {
-							principal_vars
-								.values()
-								.flat_map(|x| x.borrow().lits())
-								.collect()
-						};
+				// TODO move into var_encs loop
+				const CHECK_CONSTRAINTS: bool = false;
+				const SHOW_AUX: bool = true;
 
-						con_db
-							.solve(Some(output))
-							.into_iter()
-							.sorted()
-							.collect::<Vec<_>>()
-					})
-					.unwrap_or_else(|_| {
-						println!("Warning: encoding decomposition lead to UNSAT");
-						Vec::default()
-					});
-
-				assert_eq!(
-					lit_assignments.iter().unique().count(),
-					lit_assignments.len(),
-					"Expected lit assignments to be unique, but was {lit_assignments:?}"
-				);
-
-				// TODO find way to encode principal variables first (to remove extra solutions that only differe )
-
-				let checker = if CHECK_CONSTRAINTS || SHOW_AUX {
-					decomposition.clone()
+				for (mut decomposition, expected_assignments) in if CHECK_CONSTRAINTS {
+					decomposition
+						.constraints()
+						.map(|constraint| {
+							(
+								Model {
+									cons: vec![constraint.clone()],
+									num_var: constraint
+										.exp
+										.terms
+										.iter()
+										.map(|term| term.x.borrow().id.0)
+										.max()
+										.unwrap(),
+									..decomposition.deep_clone()
+								},
+								None,
+							)
+						})
+						.collect_vec()
 				} else {
-					// create a checker model with the constraints of the principal model and the encodings of the encoded decomposition
-					let principal = model.deep_clone();
-					principal.vars().into_iter().for_each(|x| {
-						let id = x.borrow().id;
-						x.borrow_mut().e = principal_vars[&id].borrow().e.clone();
-					});
-					principal
-				};
+					vec![(decomposition.clone(), expected_assignments)]
+				} {
+					// let mut con_db = decomp_db.clone();
+					// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
+					// TODO should that be moved after encode step since encoding itself might introduce aux (bool) vars?
+					let mut db = TestDB::new(0);
 
-				let actual_assignments = lit_assignments
-					.iter()
-					.flat_map(|lit_assignment| checker.assign(lit_assignment))
-					.collect::<Vec<_>>();
+					let principal_vars = decomposition
+						.vars()
+						.into_iter()
+						.filter(|x| x.borrow().id.0 <= model.num_var)
+						.map(|x| {
+							x.borrow_mut()
+								.encode(&mut db, &mut HashMap::default())
+								.unwrap();
+							(x.borrow().id.clone(), x.clone())
+						})
+						.collect::<HashMap<IntVarId, IntVarRef<Lit, C>>>();
 
-				// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
+					println!("decomposition = {}", decomposition);
 
-				let check = checker.check_assignments(
-					&actual_assignments,
-					expected_assignments,
-					Some(lit_assignments),
-				);
-				if let Err(errs) = check {
-					for err in errs {
-						println!("{err}");
-					}
-					panic!(
-						"Encoding is incorrect. Test failed for {:?} and {lp}",
-						model.config
+					// encode and solve
+					let lit_assignments = decomposition
+						.encode(&mut db, false)
+						.map(|_| {
+							println!(
+								"checking config #{i} = {:?}\ndecomposition #{j} = {}",
+								config, decomposition
+							);
+
+							let output = if CHECK_CONSTRAINTS || SHOW_AUX {
+								decomposition.lits()
+							} else {
+								principal_vars
+									.values()
+									.flat_map(|x| x.borrow().lits())
+									.collect()
+							};
+
+							db.solve(Some(output))
+								.into_iter()
+								.sorted()
+								.collect::<Vec<_>>()
+						})
+						.unwrap_or_else(|_| {
+							println!("Warning: encoding decomposition lead to UNSAT");
+							Vec::default()
+						});
+
+					assert_eq!(
+						lit_assignments.iter().unique().count(),
+						lit_assignments.len(),
+						"Expected lit assignments to be unique, but was {lit_assignments:?}"
 					);
+
+					// TODO find way to encode principal variables first (to remove extra solutions that only differe )
+
+					let checker = if CHECK_CONSTRAINTS || SHOW_AUX {
+						decomposition.clone()
+					} else {
+						// create a checker model with the constraints of the principal model and the encodings of the encoded decomposition
+						let principal = model.deep_clone();
+						principal.vars().into_iter().for_each(|x| {
+							let id = x.borrow().id;
+							x.borrow_mut().e = principal_vars[&id].borrow().e.clone();
+						});
+						principal
+					};
+
+					let actual_assignments = lit_assignments
+						.iter()
+						.flat_map(|lit_assignment| checker.assign(lit_assignment))
+						.collect::<Vec<_>>();
+
+					// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
+
+					let check = checker.check_assignments(
+						&actual_assignments,
+						expected_assignments,
+						Some(lit_assignments),
+					);
+					if let Err(errs) = check {
+						for err in errs {
+							println!("{err}");
+						}
+						panic!("Encoding is incorrect. Test failed for {:?}", model.config);
+					}
 				}
 			}
 		}
