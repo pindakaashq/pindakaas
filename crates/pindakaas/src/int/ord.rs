@@ -35,17 +35,17 @@ impl<Lit: Literal> OrdEnc<Lit> {
 	}
 
 	// pub fn iter(&self) -> impl Iterator<Item = Vec<Lit>> {
-	pub fn ineqs(&self, up: bool) -> Vec<Vec<Vec<Lit>>> {
+	pub fn ineqs(&self, up: bool) -> Vec<(Vec<Vec<Lit>>, bool)> {
 		if up {
-			[vec![]]
+			[(vec![], false)]
 				.into_iter()
-				.chain(self.x.iter().map(|x| vec![vec![x.clone()]]))
+				.chain(self.x.iter().map(|x| (vec![vec![x.clone()]], true)))
 				.collect()
 		} else {
 			self.x
 				.iter()
-				.map(|x| vec![vec![x.negate()]])
-				.chain([vec![]])
+				.map(|x| (vec![vec![x.negate()]], true))
+				.chain([(vec![], false)])
 				.collect()
 		}
 	}

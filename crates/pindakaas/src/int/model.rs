@@ -770,7 +770,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	// Self::new(C::one(), Rc::new(RefCell::new(IntVar::new)))
 	// }
 
-	pub fn ineqs(&self, cmp: &Comparator) -> Vec<(C, Vec<Vec<Lit>>)> {
+	pub fn ineqs(&self, cmp: &Comparator) -> Vec<(C, Vec<Vec<Lit>>, bool)> {
 		// TODO merge or handle repeated literals
 		let up = self.handle_polarity(cmp);
 		let x_dom = &self.x.borrow().dom;
@@ -781,7 +781,14 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			.as_ref()
 			.unwrap_or_else(|| panic!("{} was not encoded", self.x.borrow()))
 		{
-			IntVarEnc::Ord(Some(o)) => self.dom().into_iter().zip(o.ineqs(up)).collect(),
+			IntVarEnc::Ord(Some(o)) => self
+				.dom()
+				.into_iter()
+				.zip(o.ineqs(up))
+				.map(|(c, (dnf, is_implied))| {
+					(c, dnf, is_implied && self.x.borrow().add_consistency)
+				})
+				.collect(),
 			IntVarEnc::Bin(Some(b)) => {
 				// TODO not (particularly) optimized for the domain of x, but this is tricky as the domain values go outside the binary encoding ranges
 				// go over x's bounds
@@ -822,6 +829,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				// b.ineqs returns range values -> (de!)normalize to x's dom values and then to term's values (by multiplying by coefficient)
 				xs.into_iter()
 					.map(|(k, conjunction)| ((k + x_dom.lb()) * self.c, conjunction))
+					.map(|(c, cnf)| (c, cnf, false))
 					.collect()
 			}
 			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
@@ -1495,15 +1503,19 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					let (last, firsts) = &self.exp.terms.split_last().unwrap();
+					let mut last_consequents: Option<Vec<Vec<Lit>>> = None;
 
-					[vec![(C::zero(), vec![])]] // handle empty conditions
+					[vec![(C::zero(), vec![], true)]] // handle empty conditions
 						.into_iter()
 						.chain(firsts.iter().map(|term| term.ineqs(&cmp.reverse())))
 						.multi_cartesian_product()
 						.try_for_each(|conditions| {
 							// calculate c*last_x # k-sum(conditions)
-							let k =
-								self.k - conditions.iter().map(|(c, _)| *c).fold(C::zero(), C::add);
+							let k = self.k
+								- conditions
+									.iter()
+									.map(|(c, _, _)| *c)
+									.fold(C::zero(), C::add);
 
 							if PRINT_COUPLING {
 								print!(
@@ -1512,12 +1524,13 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 										.iter()
 										.skip(1) // skip "empty conditions" fixed ineq
 										.zip(&self.exp.terms)
-										.map(|(c, t)| format!(
-											"{}{}{} {:?}",
+										.map(|((c, cnf, is_implied), t)| format!(
+											"{}{}{} {:?}{}",
 											t.x.borrow().lbl(),
 											cmp.reverse(),
-											c.0,
-											c.1
+											c,
+											cnf,
+											is_implied.then_some("^").unwrap_or_default()
 										))
 										.join(" /\\ "),
 									last.c,
@@ -1528,15 +1541,33 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 							}
 							let consequents = last.ineq(k, &cmp);
 
+							let is_same = last_consequents
+								.as_ref()
+								.map(|last_consequents| *last_consequents == consequents)
+								.unwrap_or_default();
+							let all_implied =
+								is_same && conditions.iter().all(|(_, _, is_implied)| *is_implied);
+
+							last_consequents = Some(consequents.clone());
+
 							if PRINT_COUPLING {
-								println!(" {:?}", consequents);
+								println!(
+									" {:?}{}{}",
+									consequents,
+									is_same.then_some("^").unwrap_or_default(),
+									all_implied.then_some(" *").unwrap_or_default()
+								);
+							}
+
+							if all_implied {
+								return Ok(());
 							}
 
 							add_clauses_for(
 								db,
 								conditions
 									.iter()
-									.map(|(_, cnf)| negate_cnf(cnf.clone())) // negate conditions
+									.map(|(_, cnf, _)| negate_cnf(cnf.clone())) // negate conditions
 									.chain([consequents])
 									.collect(),
 							)
@@ -2054,7 +2085,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 							.zip(o.ineqs(true))
 							.tuple_windows()
 							// Every lit adds the difference
-							.map(|((prev, _), (v, cnf))| (cnf[0][0].clone(), v - prev))
+							.map(|((prev, (_, _)), (v, (cnf, _)))| (cnf[0][0].clone(), v - prev))
 							.collect::<Vec<_>>(),
 					)
 					.add_constant(self.lb())
