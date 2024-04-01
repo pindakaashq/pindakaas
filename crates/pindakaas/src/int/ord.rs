@@ -95,6 +95,10 @@ impl<Lit: Literal> OrdEnc<Lit> {
 	pub(crate) fn lits(&self) -> HashSet<Lit> {
 		self.x.clone().into_iter().map(|lit| lit.var()).collect()
 	}
+
+	pub(crate) fn iter(&self) -> impl Iterator<Item = &Lit> {
+		self.x.iter()
+	}
 }
 
 impl<Lit: Literal> std::fmt::Display for OrdEnc<Lit> {

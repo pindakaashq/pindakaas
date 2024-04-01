@@ -327,8 +327,10 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					con.exp
 						.terms
 						.iter()
-						.any(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
+						.skip(1)
+						.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
 				});
+				// TODO ub still too high, does not adhere to k (but actually not to next ub if <=, or next lb if >=)
 				// .with_position()
 				// .partition(|(pos, con)| match pos {
 				// 	Position::First | Position::Middle => con
@@ -427,7 +429,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		decomposition.propagate(&self.config.propagate.clone())?;
 
 		for con in &decomposition.cons {
-			con.encode(db, &self.config).unwrap();
+			con.encode(db, &self.config)?;
 		}
 
 		Ok(decomposition)
@@ -721,6 +723,36 @@ impl<Lit: Literal, C: Coefficient> From<IntVarRef<Lit, C>> for Term<Lit, C> {
 impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	pub fn new(c: C, x: IntVarRef<Lit, C>) -> Self {
 		Self { c, x }
+	}
+
+	fn encode_bin<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result<BinEnc<Lit>> {
+		let e = self.x.borrow().e.clone();
+		let lit_to_bin_enc = |lit: DB::Lit| {
+			BinEnc::from_lits(
+				&as_binary(self.c.abs().into(), None)
+					.into_iter()
+					.map(|bit| LitOrConst::from(bit.then_some(lit.clone()))) // if true, return Lit(lit), if false, return Const(false)
+					.collect_vec(),
+			)
+		};
+		match e {
+			Some(IntVarEnc::Ord(Some(x_ord))) => {
+				if let &[lit] = &x_ord.iter().take(2).collect_vec()[..] {
+					Ok(lit_to_bin_enc(lit.clone()))
+				} else {
+					todo!("Need full scm for {self}: {self:?}")
+				}
+			}
+			Some(IntVarEnc::Bin(Some(x_bin))) if x_bin.x.len() == 1 => {
+				if let [LitOrConst::Lit(lit)] = &x_bin.x.clone()[..] {
+					Ok(lit_to_bin_enc(lit.clone()))
+				} else {
+					unreachable!()
+				}
+			}
+			_ if self.c.is_one() => self.x.borrow_mut().encode_bin(db),
+			_ => todo!("{self}: {self:?}"),
+		}
 	}
 
 	fn handle_polarity(&self, cmp: &Comparator) -> bool {
@@ -1088,16 +1120,12 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			})
 	}
 
-	// TODO [?] correct way to return iter?
+	// TODO [?] correct way to return an iter with this if-else which returns different iter types?
 	pub(crate) fn dom(&self) -> Vec<C> {
 		if self.c.is_zero() {
 			vec![C::zero()]
 		} else {
-			let mut d = self.x.borrow().dom.iter().map(|d| self.c * d).collect_vec();
-			if self.c.is_negative() {
-				d.reverse() // TODO implement reverse iterator
-			}
-			d
+			self.x.borrow().dom.iter().map(|d| self.c * d).collect_vec()
 		}
 	}
 
@@ -1422,20 +1450,19 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				Ok(())
 			}
 			(
-				[(x, Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_))), (z, Some(IntVarEnc::Bin(_)))],
+				[(x, Some(IntVarEnc::Ord(_)) | Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_))), (z, Some(IntVarEnc::Bin(_)))],
 				Comparator::Equal,
-			) if [x.c, y.c, z.c] == [C::one(), C::one(), -C::one()] => {
+			) if [y.c, z.c] == [C::one(), -C::one()] => {
 				assert!(
 					x.lb() + y.lb() == ((*z).clone() * -C::one()).lb(),
 					"LBs for addition not matching: {self}"
 				);
+
 				// TODO do not have to encode z if we use functional addition!
-				let (x, y, z) = &self
-					.exp
-					.terms
-					.iter()
-					// .with_position()
-					.map(|t| t.x.borrow_mut().encode_bin(db).unwrap().xs())
+				let z = (*z).clone() * -C::one();
+				let (x, y, z) = &[x, y, &z] // .with_position()
+					.into_iter()
+					.map(|t| t.encode_bin(db).unwrap().xs())
 					.collect_tuple()
 					.unwrap();
 
@@ -3333,6 +3360,20 @@ End
 	}
 
 	#[test]
+	fn test_scm_4_neg_43() {
+		test_lp_for_configs(
+			r"
+Subject To
+  c0: -43 x_1 = 0
+Bounds
+  0 <= x_1 <= 7
+End
+",
+			None,
+		);
+	}
+
+	#[test]
 	fn test_incon() {
 		// 59 * x_1=0 (=0) + 46 * x_2=7 (=322) + 132 * x_3=4 (=528) + 50 * x_4=4 (=200) + 7 * x_5=0 (=0) == 1050 !≤ 931
 		test_lp_for_configs(
@@ -3362,6 +3403,23 @@ End
 		);
 	}
 
+	#[test]
+	fn test_imp() {
+		// - (x1:O ∈ |0..1| 1L) ≥ - (x2:O ∈ |0..1| 1L)
+		test_lp_for_configs(
+			r"
+Subject To
+  c0: - x1 - x2 >= 0
+  \ c0: - x1 + x2 >= 0
+  \ c0: x1 - x2 <= 0
+Binary
+  x1
+  x2
+End
+",
+			None,
+		);
+	}
 	#[test]
 	fn test_mixed_enc_bdd() {
 		let base = ModelConfig {
