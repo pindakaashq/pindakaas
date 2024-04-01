@@ -221,7 +221,7 @@ End
 		let mut k: Option<C> = None;
 		let mut is_positive: bool = true;
 
-		for (i, line) in s.lines().enumerate() {
+		for line in s.lines() {
 			match format {
 				Format::Lp => {
 					match line
@@ -446,7 +446,7 @@ End
 								con,
 								cmp.unwrap(),
 								k.unwrap(),
-								Some(lbl.unwrap_or_else(|| i.to_string()).to_string()),
+								Some(lbl.unwrap_or_else(|| format!("c{}", cons.len()))),
 							));
 							con = (vec![], vec![]);
 							lbl = None;
