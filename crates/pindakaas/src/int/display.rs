@@ -7,6 +7,8 @@ use super::{model::Obj, IntVar, LinExp};
 
 pub(crate) const SHOW_IDS: bool = false;
 const SHOW_LITS: bool = false;
+/// Whether to rewrite x1 + .. + xn # 0 as x1 + .. + x_(n-1) # - xn
+const SHOW_K_0: bool = true;
 
 impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -64,12 +66,18 @@ impl<Lit: Literal, C: Coefficient> Display for Obj<Lit, C> {
 
 impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		if self.k.is_zero() && self.exp.terms.len() > 1 {
+		let lbl = self
+			.lbl
+			.as_ref()
+			.map(|lbl| format!("{}: ", lbl))
+			.unwrap_or_default();
+		if SHOW_K_0 && self.k.is_zero() && self.exp.terms.len() > 1 {
 			// Put in LinExp to avoid printing '+' at start
 			if let Some((rhs, lhs)) = self.exp.terms.split_last() {
 				write!(
 					f,
-					"{} {} {}",
+					"{}\t{} {} {}",
+					lbl,
 					LinExp {
 						terms: lhs.to_vec()
 					},
@@ -82,7 +90,7 @@ impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 				panic!();
 			}
 		} else {
-			write!(f, "{} {} {}", self.exp, self.cmp, self.k,)
+			write!(f, "{}{} {} {}", lbl, self.exp, self.cmp, self.k,)
 		}
 	}
 }
