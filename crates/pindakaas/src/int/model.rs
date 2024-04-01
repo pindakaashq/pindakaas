@@ -25,6 +25,7 @@ use std::{
 };
 use std::{fmt::Display, path::PathBuf};
 
+const PRINT_COUPLING: bool = false;
 const DECOMPOSE: bool = true;
 
 use iset::IntervalMap;
@@ -728,6 +729,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	fn encode_bin<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result<BinEnc<Lit>> {
 		let e = self.x.borrow().e.clone();
 		let lit_to_bin_enc = |lit: DB::Lit| {
+			assert!(self.c.is_positive(), "TODO neg scm");
 			BinEnc::from_lits(
 				&as_binary(self.c.abs().into(), None)
 					.into_iter()
@@ -839,6 +841,19 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		} else {
 			k.div_floor(&self.c)
 		};
+
+		if PRINT_COUPLING {
+			print!(
+				" (= {}{}{})",
+				self.x.borrow().lbl(),
+				if up {
+					Comparator::GreaterEq
+				} else {
+					Comparator::LessEq
+				},
+				k
+			)
+		}
 
 		// TODO move into IntVar since self.c is taken care off?
 		match self.x.borrow().e.as_ref().unwrap() {
@@ -1391,7 +1406,6 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		db: &mut DB,
 		config: &ModelConfig<C>,
 	) -> Result {
-		const PRINT_COUPLING: bool = false;
 		if PRINT_COUPLING {
 			println!("{self}");
 		}
@@ -1420,6 +1434,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			{
 				let x_enc = x.borrow_mut().encode_bin(db)?;
 				assert!(matches!(y.borrow().e, Some(IntVarEnc::Bin(None))));
+				assert!(c.is_positive(), "TODO neg scm");
 				let lits = x_enc.lits().len(); // TODO use max(), but requires coercing Lit to usize later for skip(..)
 				let sh = c.trailing_zeros();
 				let c = c.shr(sh as usize);
@@ -1476,26 +1491,26 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 						.map(|_| ())
 				})?;
 
+				// TODO try putting biggest domain last
+
 				self.cmp.split().into_iter().try_for_each(|cmp| {
-					let conditions = &self.exp.terms[..self.exp.terms.len() - 1];
-					let consequent = self.exp.terms.last().unwrap();
+					let (last, firsts) = &self.exp.terms.split_last().unwrap();
 
 					[vec![(C::zero(), vec![])]] // handle empty conditions
 						.into_iter()
-						.chain(conditions.iter().map(|term| term.ineqs(&cmp.reverse())))
+						.chain(firsts.iter().map(|term| term.ineqs(&cmp.reverse())))
 						.multi_cartesian_product()
 						.try_for_each(|conditions| {
-							// calculate x>=k-sum(conditions)
+							// calculate c*last_x # k-sum(conditions)
 							let k =
 								self.k - conditions.iter().map(|(c, _)| *c).fold(C::zero(), C::add);
-							let cons = consequent.ineq(k, &cmp);
 
 							if PRINT_COUPLING {
-								println!(
-									"\t({}) -> {}*{}{}{} {:?}",
+								print!(
+									"\t({}) -> ({}*{}){}{}",
 									conditions
 										.iter()
-										.skip(1)
+										.skip(1) // skip "empty conditions" fixed ineq
 										.zip(&self.exp.terms)
 										.map(|(c, t)| format!(
 											"{}{}{} {:?}",
@@ -1505,12 +1520,16 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 											c.1
 										))
 										.join(" /\\ "),
-									consequent.c,
-									self.exp.terms.last().unwrap().x.borrow().lbl(),
+									last.c,
+									last.x.borrow(),
 									cmp,
 									k,
-									cons
 								);
+							}
+							let consequents = last.ineq(k, &cmp);
+
+							if PRINT_COUPLING {
+								println!(" {:?}", consequents);
 							}
 
 							add_clauses_for(
@@ -1518,7 +1537,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								conditions
 									.iter()
 									.map(|(_, cnf)| negate_cnf(cnf.clone())) // negate conditions
-									.chain([cons])
+									.chain([consequents])
 									.collect(),
 							)
 						})
@@ -1767,11 +1786,13 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 						// 						last.x.borrow_mut().dom = x_dom;
 
 						// TODO avoid removing gaps on the order encoded vars?
+						// let firsts = firsts.iter().map(|x| x.).collect_vec();
+
 						// if matches!(last.x.borrow().e, Some(IntVarEnc::Bin(_))) {
-						// }
 						let (lb, ub) = firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
 							(lb + t.lb(), ub + t.ub())
 						});
+						// }
 						assert!(last.c.abs().is_one());
 						last.x.borrow_mut().dom = Dom::from_bounds(lb, ub);
 
