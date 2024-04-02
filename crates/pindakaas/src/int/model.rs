@@ -819,7 +819,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 						.chain(xs[1..].iter().cloned())
 						.collect_vec()
 				} else {
-					xs[..xs.len() - 1]
+					xs[1..]
 						.iter()
 						.cloned()
 						.chain([(range_ub, vec![], false)])
@@ -829,7 +829,11 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				// b.ineqs returns range values -> (de!)normalize to x's dom values and then to term's values (by multiplying by coefficient)
 				xs.into_iter()
 					.map(|(k, conjunction, is_implied)| {
-						((k + x_dom.lb()) * self.c, conjunction, is_implied)
+						(
+							(k + x_dom.lb()) * self.c,
+							conjunction,
+							self.x.borrow().add_consistency && is_implied,
+						)
 					})
 					.collect()
 			}
@@ -1810,6 +1814,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 				cmp: Comparator::Equal,
 				exp: if REMOVE_GAPS {
 					if let Some((last, firsts)) = con.exp.terms.split_last() {
+						assert!(last.c.abs().is_one());
 						// 						let x_dom = last
 						// 							.x
 						// 							.borrow()
@@ -1822,6 +1827,8 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 						// let firsts = firsts.iter().map(|x| x.).collect_vec();
 
 						// if matches!(last.x.borrow().e, Some(IntVarEnc::Bin(_))) {
+						// }
+
 						let (lb, ub) = firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
 							(lb + t.lb(), ub + t.ub())
 						});
