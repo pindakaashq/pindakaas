@@ -188,14 +188,15 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 			.terms
 			.iter()
 			.zip(ys)
-			.try_fold(first, |curr, (term, next)| {
+			.enumerate()
+			.try_fold(first, |curr, (i, (term, next))| {
 				model
 					.add_constraint(Lin::tern(
 						term.clone(),
 						curr,
 						lin.cmp,
 						next.clone(),
-						lin.lbl.as_ref().map(|lbl| format!("bdd_{}", lbl)),
+						lin.lbl.as_ref().map(|lbl| format!("bdd_{}_{}", i, lbl)),
 					))
 					.map(|_| next)
 			})?;

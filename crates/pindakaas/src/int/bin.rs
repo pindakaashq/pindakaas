@@ -293,7 +293,6 @@ impl<Lit: Literal> std::fmt::Display for BinEnc<Lit> {
 #[cfg(test)]
 mod tests {
 	// type Lit = i32;
-	// type C = i32;
 
 	use super::*;
 	use crate::helpers::tests::TestDB;
@@ -335,14 +334,17 @@ mod tests {
 		}
 	}
 
-	// #[test]
-	// fn test_ineqs() {
-	// 	let mut db = TestDB::new(0);
-	// 	let dom = Dom::from_slice(&[0, 1, 2, 3]);
-	// 	let x = BinEnc::new(&mut db, 2, Some(String::from("x")));
-	// 	assert_eq!(
-	// 		x.ineqs::<C>(true, &dom),
-	// 		vec![vec![], vec![vec![1]], vec![vec![2]], vec![vec![1], vec![2]]]
-	// 	);
-	// }
+	type C = i32;
+	#[test]
+	fn test_ineqs() {
+		let mut db = TestDB::new(0);
+		let dom = Dom::from_slice(&[0, 1, 2, 3]);
+		let x = BinEnc::new(&mut db, 2, Some(String::from("x")));
+		// dbg!(x.ineqs::<C>(true, dom));
+		dbg!(x.ineqs::<C>(false, dom));
+		// assert_eq!(
+		// 	x.ineqs::<C>(true, &dom),
+		// 	vec![vec![], vec![vec![1]], vec![vec![2]], vec![vec![1], vec![2]]]
+		// );
+	}
 }
