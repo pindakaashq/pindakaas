@@ -10,8 +10,8 @@ use bzip2::read::BzDecoder;
 
 use crate::{
 	helpers::{as_binary, two_comp_bounds},
-	int::enc::GROUND_BINARY_AT_LB,
 	int::model::{LinExp, Obj, Term},
+	int::{enc::GROUND_BINARY_AT_LB, IntVarEnc},
 	Coefficient, Comparator, Lin, Literal, Model,
 };
 use flate2::bufread::GzDecoder;
@@ -194,10 +194,12 @@ End
 			Doms,
 			Minimize,
 			Maximize,
+			Encs,
 			// Satisfy,
 		}
 
 		let mut vars: HashMap<String, Vec<C>> = HashMap::new();
+		let mut encs: HashMap<String, IntVarEnc<Lit, C>> = HashMap::new();
 
 		let mut cons: Vec<(ParseLinExp<C>, Comparator, C, Option<String>)> = vec![];
 
@@ -261,6 +263,9 @@ End
 						["doms"] => {
 							state = State::Doms;
 						}
+						["encs"] => {
+							state = State::Encs;
+						}
 						["generals" | "general" | "gen" | "semi-continuous" | "semis" | "semi"] => {
 							return Err(String::from(
 								"Generals/semi-continuous sections not supported",
@@ -306,6 +311,16 @@ End
 							xs.iter().for_each(|x| {
 								set_doms(x, &[C::zero(), C::one()], &mut vars);
 							});
+						}
+						[var, enc] if state == State::Encs => {
+							let enc = match *enc {
+								"b" => IntVarEnc::Bin(None),
+								"o" => IntVarEnc::Ord(None),
+								e => panic!("Unknown encoding spec {e}"),
+							};
+							encs.entry(var.to_string())
+								.and_modify(|e| *e = enc.clone())
+								.or_insert(enc);
 						}
 						line if matches!(
 							state,
@@ -465,7 +480,7 @@ End
 			.sorted()
 			.flat_map(|(lp_id, dom)| {
 				model
-					.new_var(&dom, true, None, Some(lp_id.clone()))
+					.new_var(&dom, true, encs.get(&lp_id).cloned(), Some(lp_id.clone()))
 					.map(|x| (lp_id, x))
 			})
 			.collect::<HashMap<_, _>>();
@@ -619,6 +634,8 @@ Doms
   y in 0,1
 Bounds
   0 <= z <= 1
+Encs
+  x O
 End
 ";
 		let mut model = Model::<i32, i32>::from_string(lp.into(), Format::Lp).unwrap();
