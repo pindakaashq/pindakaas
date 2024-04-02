@@ -26,7 +26,6 @@ use std::{
 use std::{fmt::Display, path::PathBuf};
 
 const PRINT_COUPLING: bool = false;
-const DECOMPOSE: bool = true;
 
 use iset::IntervalMap;
 
@@ -2630,16 +2629,19 @@ mod tests {
 
 		// TODO merge with CHECK_DECOMPOSITION_I
 		const CHECK_CONFIG_I: Option<usize> = None;
-		// const CHECK_CONFIG_I: Option<usize> = Some(5);
-
 		const CHECK_DECOMPOSITION_I: Option<usize> = None;
-		// const CHECK_DECOMPOSITION_I: Option<usize> = Some(12);
 
 		for (i, config) in {
 			let configs = configs.unwrap_or_else(|| vec![model.config.clone()]);
 
 			if let Some(i) = CHECK_CONFIG_I {
-				vec![(i, configs[i].clone())]
+				vec![(
+					i,
+					configs
+						.get(i)
+						.expect("CHECK_CONFIG_I is not set to None")
+						.clone(),
+				)]
 			} else {
 				configs.into_iter().enumerate().collect_vec()
 			}
@@ -2670,7 +2672,13 @@ mod tests {
 						.collect(),
 				);
 				if let Some(j) = CHECK_DECOMPOSITION_I {
-					vec![(j, var_encs_gen[j].clone())]
+					vec![(
+						j,
+						var_encs_gen
+							.get(j)
+							.expect("CHECK_DECOMPOSITION_I is not set to None")
+							.clone(),
+					)]
 				} else {
 					var_encs_gen.into_iter().enumerate().collect_vec()
 				}
