@@ -71,7 +71,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 	}
 
 	/// Return (k,x>=k) for all k in dom (or x<=k if !up) where each x>=k is a conjunction
-	pub fn ineqs<C: Coefficient>(&self, up: bool, dom: Dom<C>) -> Vec<(C, Vec<Vec<Lit>>)> {
+	pub fn ineqs<C: Coefficient>(&self, up: bool, dom: Dom<C>) -> Vec<(C, Vec<Vec<Lit>>, bool)> {
 		assert!(
 			{
 				let r = unsigned_binary_range::<C>(self.bits());
@@ -111,6 +111,14 @@ impl<Lit: Literal> BinEnc<Lit> {
 				} else {
 					(a, self.ineq(up, b - C::one()))
 				}
+			})
+			.map(|(k, cnf)| {
+				(
+					k,
+					cnf,
+					// powers of two imply all subsequent k's until next power of two
+					!(k.is_zero() || k.is_one() || k.trailing_zeros() > 0),
+				)
 			})
 			.collect()
 	}
