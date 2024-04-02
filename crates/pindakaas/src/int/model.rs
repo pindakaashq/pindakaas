@@ -814,7 +814,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 
 				// hard-code first (or last) fixed term bound literal
 				let xs = if up {
-					[(range_lb, vec![])]
+					[(range_lb, vec![], false)]
 						.into_iter()
 						.chain(xs[1..].iter().cloned())
 						.collect_vec()
@@ -822,14 +822,15 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					xs[..xs.len() - 1]
 						.iter()
 						.cloned()
-						.chain([(range_ub, vec![])])
+						.chain([(range_ub, vec![], false)])
 						.collect_vec()
 				};
 
 				// b.ineqs returns range values -> (de!)normalize to x's dom values and then to term's values (by multiplying by coefficient)
 				xs.into_iter()
-					.map(|(k, conjunction)| ((k + x_dom.lb()) * self.c, conjunction))
-					.map(|(c, cnf)| (c, cnf, false))
+					.map(|(k, conjunction, is_implied)| {
+						((k + x_dom.lb()) * self.c, conjunction, is_implied)
+					})
 					.collect()
 			}
 			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
@@ -878,7 +879,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 
 				b.ineqs(!up, k)
 					.into_iter()
-					.map(|(_, cnf)| cnf)
+					.map(|(_, cnf, _)| cnf)
 					.flat_map(|cnf| negate_cnf(cnf))
 					.collect()
 			}
@@ -1492,6 +1493,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				log_enc_add_(db, x, y, &self.cmp, z)
 			}
 			_ => {
+				const SKIP_IMPLIED_CLAUSES: bool = true;
 				// encode all variables
 				self.exp.terms.iter().try_for_each(|t| {
 					t.x.borrow_mut()
@@ -1559,7 +1561,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								);
 							}
 
-							if all_implied {
+							if SKIP_IMPLIED_CLAUSES && all_implied {
 								return Ok(());
 							}
 
