@@ -57,7 +57,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 			.zip(self.xs().iter().cloned())
 			// if >=, find 1's, if <=, find 0's
 			.filter_map(|(b, x)| (b == up).then_some(x))
-			// if <=, negate 1's to not 1's
+			// if <=, negate lits at 0's
 			.map(|x| if up { x } else { -x })
 			.filter_map(|x| match x {
 				// THIS IS A CONJUNCTION
@@ -99,6 +99,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 			dom.iter()
 				.cloned()
 				.chain(std::iter::once(range_ub + C::one()))
+				.rev()
 				.collect_vec()
 		};
 
@@ -109,7 +110,8 @@ impl<Lit: Literal> BinEnc<Lit> {
 				if up {
 					(b, self.ineq(up, a + C::one()))
 				} else {
-					(a, self.ineq(up, b - C::one()))
+					(b, self.ineq(up, a - C::one()))
+					// old (before reverse): (a, self.ineq(up, b - C::one()))
 				}
 			})
 			.map(|(k, cnf)| {
@@ -117,7 +119,15 @@ impl<Lit: Literal> BinEnc<Lit> {
 					k,
 					cnf,
 					// powers of two imply all subsequent k's until next power of two
-					!(k.is_zero() || k.is_one() || k.trailing_zeros() > 0),
+					{
+						let k = if up {
+							k
+						} else {
+							unsigned_binary_range::<C>(self.bits()).1 - k
+						};
+
+						!(k.is_zero() || k.is_one() || k.trailing_zeros() > 0)
+					},
 				)
 			})
 			.collect()
