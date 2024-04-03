@@ -376,17 +376,11 @@ pub(crate) unsafe extern "C" fn ipasir_check_model_cb(
 ) -> bool {
 	let prop = &mut *(state as *mut IpasirPropStore);
 	let sol = std::slice::from_raw_parts(model, len);
-	let value = |l: Lit| {
-		let abs: Lit = l.var().into();
-		let v = Into::<i32>::into(abs) as usize;
-		if v <= sol.len() {
-			// TODO: is this correct here?
-			debug_assert_eq!(sol[v - 1].abs(), l.var().into());
-			Some(sol[v - 1] == l.into())
-		} else {
-			None
-		}
-	};
+	let sol: std::collections::HashMap<Var, bool> = sol
+		.iter()
+		.map(|&i| (Var(NonZeroI32::new(i.abs()).unwrap()), i >= 0))
+		.collect();
+	let value = |l: Lit| sol.get(&l.var()).copied();
 	prop.prop.check_model(&value)
 }
 #[cfg(feature = "ipasir-up")]

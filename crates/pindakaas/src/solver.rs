@@ -254,9 +254,7 @@ impl VarFactory {
 
 	/// Return the next [`size`] variables that can be stored as an inclusive range.
 	pub fn new_var_range(&mut self, size: usize) -> Option<VarRange> {
-		let Some(start) = self.next_var else {
-			return None;
-		};
+		let start = self.next_var?;
 		match size {
 			0 => Some(VarRange::new(
 				Var(NonZeroI32::new(2).unwrap()),
