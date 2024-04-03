@@ -1,6 +1,7 @@
 #![allow(unused_imports, unused_variables, dead_code, unreachable_code)]
 use crate::int::display::SHOW_IDS;
 use crate::int::enc::GROUND_BINARY_AT_LB;
+use crate::int::helpers::nearest_power_of_two;
 use crate::linear::log_enc_add_;
 use crate::{
 	helpers::{add_clauses_for, as_binary, negate_cnf, two_comp_bounds, unsigned_binary_range},
@@ -840,8 +841,8 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		}
 	}
 
-	/// Return CNF for c*x>=k (or c*x<=k)
-	pub fn ineq(&self, k: C, cmp: &Comparator) -> Vec<Vec<Lit>> {
+	/// Process inequality c*x>=k into x<=k/c (or c*x<=k into c>=k/c), returning new k and up
+	pub fn ineq(&self, k: C, cmp: &Comparator) -> (C, bool) {
 		// we get the position of a*x >= c == x >= ceil(c/a) if cmp = >= and a >= 0; either might flip it to x <= floor(c/a)
 		let up = self.handle_polarity(cmp);
 
@@ -852,70 +853,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		} else {
 			k.div_floor(&self.c)
 		};
-
-		if PRINT_COUPLING {
-			print!(
-				" (= {}{}{})",
-				self.x.borrow().lbl(),
-				if up {
-					Comparator::GreaterEq
-				} else {
-					Comparator::LessEq
-				},
-				k
-			)
-		}
-
-		// TODO move into IntVar since self.c is taken care off?
-		match self.x.borrow().e.as_ref().unwrap() {
-			IntVarEnc::Ord(Some(o)) => o.ineq(self.x.borrow().dom.ineq(k, up), up),
-			IntVarEnc::Bin(Some(b)) => {
-				// x>=k == ¬(x<k) == ¬(x<=k-1) (or x<=k == ¬(x>k) == ¬(x>=k+1))
-				let k = if up { k - C::one() } else { k + C::one() };
-				let k = b.normalize(k, &self.x.borrow().dom);
-
-				let (range_lb, range_ub) = unsigned_binary_range(b.bits());
-				let ks = if up { (range_lb, k) } else { (k, range_ub) };
-				let ks = (std::cmp::max(range_lb, ks.0), std::cmp::min(range_ub, ks.1)); // TODO temp
-
-				if PRINT_COUPLING {
-					print!(
-						" (== NOT ({}{}{}))",
-						self.x.borrow().lbl(),
-						if !up {
-							Comparator::GreaterEq
-						} else {
-							Comparator::LessEq
-						},
-						k
-					)
-				}
-
-				let ks = Dom::from_bounds(ks.0, ks.1);
-
-				let ineqs = b
-					.ineqs(!up, ks)
-					.into_iter()
-					.with_position()
-					.flat_map(|(pos, (_, cnf, is_implied))| {
-						(
-							// this cnf contains redundant clauses
-							!is_implied
-								|| matches!(pos, Position::First | Position::Only)
-								|| !REMOVE_IMPLIED_CLAUSES
-						)
-							.then_some(cnf)
-					})
-					.collect_vec();
-				if PRINT_COUPLING {
-					print!(" (== NOT {:?})", ineqs);
-				};
-				ineqs.into_iter().flat_map(|cnf| negate_cnf(cnf)).collect()
-			}
-			IntVarEnc::Const(_) => todo!(),
-
-			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
-		}
+		(k, up)
 	}
 
 	/*
@@ -1527,13 +1465,15 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				// TODO try putting biggest domain last
 
+				let mut covered = None;
+				let mut last_consequence = None;
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					let (last, firsts) = &self.exp.terms.split_last().unwrap();
 					[vec![(C::zero(), vec![], true)]] // handle empty conditions
 						.into_iter()
 						.chain(firsts.iter().map(|term| term.ineqs(&cmp.reverse())))
 						.multi_cartesian_product()
-						.map(|conditions| {
+						.flat_map(|conditions| {
 							// calculate c*last_x !# k-sum(conditions)
 							let k = self.k
 								- conditions
@@ -1563,30 +1503,55 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 									k,
 								);
 							}
-							let consequence = last.ineq(k, &cmp);
+
+							let (k, up) = last.ineq(k, &cmp);
 							if PRINT_COUPLING {
-								println!(" {:?}", consequence);
+								print!(
+									" (= {}{}{})",
+									last.x.borrow().lbl(),
+									if up {
+										Comparator::GreaterEq
+									} else {
+										Comparator::LessEq
+									},
+									k
+								)
+							}
+
+							// if let Some(covered) = covered {
+							// 	if {
+							// 		if up {
+							// 			k <= covered
+							// 		} else {
+							// 			k >= covered
+							// 		}
+							// 	} && conditions.iter().all(|(_, _, is_implied)| *is_implied)
+							// 		// && REMOVE_IMPLIED_CLAUSES
+							// 	// && false
+							// 	{
+							// 		println!(" SKIP {k} <= {covered}");
+							// 		return None;
+							// 	}
+							// }
+
+							let (new_covered, consequence) = last.x.borrow().ineq(k, up);
+
+							if conditions.iter().all(|(_, _, is_implied)| *is_implied)
+								&& last_consequence
+									.as_ref()
+									.map(|c| &consequence == c)
+									.unwrap_or_default()
+							{
+								return None;
+							}
+							last_consequence = Some(consequence.clone());
+
+							covered = Some(new_covered);
+
+							if PRINT_COUPLING {
+								println!(" {:?} COV {}", consequence, covered.as_ref().unwrap());
 							}
 							Some((conditions, consequence))
-						})
-						.chain([None])
-						.tuple_windows()
-						.flat_map(|(curr, next)| {
-							if let Some((next_conditions, next_consequence)) = next {
-								let (_, curr_consequence) = curr.as_ref().unwrap();
-								let all_implied =
-									next_conditions.iter().all(|(_, _, is_implied)| *is_implied)
-										&& curr_consequence == &next_consequence; // TODO replace by checking implication i/o equivalence
-
-								if REMOVE_IMPLIED_CLAUSES && all_implied {
-									return None; // skip curr
-								}
-								curr
-							} else {
-								// always post last iteration
-								curr
-							}
-
 						})
 						.try_for_each(|(conditions, consequence)| {
 							add_clauses_for(
@@ -2101,6 +2066,63 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			.as_ref()
 			.map(|e| e.consistent(db, &self.dom))
 			.unwrap_or(Ok(()))
+	}
+
+	/// Return CNF for c*x>=k (or c*x<=k)
+	pub fn ineq(&self, k: C, up: bool) -> (C, Vec<Vec<Lit>>) {
+		// TODO move into IntVar since self.c is taken care off?
+		match self.e.as_ref().unwrap() {
+			IntVarEnc::Ord(Some(o)) => {
+				let p = self.dom.ineq(k, up);
+				(k, o.ineq(p, up))
+			}
+			IntVarEnc::Bin(Some(b)) => {
+				// x>=k == ¬(x<k) == ¬(x<=k-1) (or x<=k == ¬(x>k) == ¬(x>=k+1))
+				let k = if up { k - C::one() } else { k + C::one() };
+				let k = b.normalize(k, &self.dom);
+				let covered = nearest_power_of_two(k, up) + self.lb(); // de-normalize
+
+				let (range_lb, range_ub) = unsigned_binary_range(b.bits());
+				let ks = if up { (range_lb, k) } else { (k, range_ub) };
+				let ks = (std::cmp::max(range_lb, ks.0), std::cmp::min(range_ub, ks.1)); // TODO temp
+
+				if PRINT_COUPLING {
+					print!(
+						" (== NOT ({}{}{}))",
+						self.lbl(),
+						if !up {
+							Comparator::GreaterEq
+						} else {
+							Comparator::LessEq
+						},
+						k
+					)
+				}
+
+				let ks = Dom::from_bounds(ks.0, ks.1);
+
+				(
+					covered,
+					b.ineqs(!up, ks)
+						.into_iter()
+						.with_position()
+						.flat_map(|(pos, (k, cnf, is_implied))| {
+							(
+								// this cnf contains redundant clauses
+								!is_implied
+									|| matches!(pos, Position::First | Position::Only)
+									|| !REMOVE_IMPLIED_CLAUSES
+							)
+								.then_some(cnf)
+						})
+						.flat_map(negate_cnf)
+						.collect(),
+				)
+			}
+			IntVarEnc::Const(_) => todo!(),
+
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
+		}
 	}
 
 	pub(crate) fn as_lin_exp(&self) -> crate::linear::LinExp<Lit, C> {
