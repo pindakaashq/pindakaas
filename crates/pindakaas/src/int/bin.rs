@@ -123,6 +123,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 						let k = if up {
 							k
 						} else {
+							// invert if going down
 							unsigned_binary_range::<C>(self.bits()).1 - k
 						};
 
