@@ -875,11 +875,26 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				let k = b.normalize(k, &self.x.borrow().dom);
 
 				let (range_lb, range_ub) = unsigned_binary_range(b.bits());
-				let k = if up { (range_lb, k) } else { (k, range_ub) };
-				let k = (std::cmp::max(range_lb, k.0), std::cmp::min(range_ub, k.1)); // TODO temp
-				let k = Dom::from_bounds(k.0, k.1);
+				let ks = if up { (range_lb, k) } else { (k, range_ub) };
+				let ks = (std::cmp::max(range_lb, ks.0), std::cmp::min(range_ub, ks.1)); // TODO temp
 
-				b.ineqs(!up, k)
+				if PRINT_COUPLING {
+					print!(
+						" (== NOT ({}{}{}))",
+						self.x.borrow().lbl(),
+						if !up {
+							Comparator::GreaterEq
+						} else {
+							Comparator::LessEq
+						},
+						k
+					)
+				}
+
+				let ks = Dom::from_bounds(ks.0, ks.1);
+
+				let ineqs = b
+					.ineqs(!up, ks)
 					.into_iter()
 					.with_position()
 					.flat_map(|(pos, (_, cnf, is_implied))| {
@@ -891,8 +906,11 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 						)
 							.then_some(cnf)
 					})
-					.flat_map(|cnf| negate_cnf(cnf))
-					.collect()
+					.collect_vec();
+				if PRINT_COUPLING {
+					print!(" (== NOT {:?})", ineqs);
+				};
+				ineqs.into_iter().flat_map(|cnf| negate_cnf(cnf)).collect()
 			}
 			IntVarEnc::Const(_) => todo!(),
 
@@ -1511,14 +1529,12 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					let (last, firsts) = &self.exp.terms.split_last().unwrap();
-					let mut last_consequents: Option<Vec<Vec<Lit>>> = None;
-
 					[vec![(C::zero(), vec![], true)]] // handle empty conditions
 						.into_iter()
 						.chain(firsts.iter().map(|term| term.ineqs(&cmp.reverse())))
 						.multi_cartesian_product()
-						.try_for_each(|conditions| {
-							// calculate c*last_x # k-sum(conditions)
+						.map(|conditions| {
+							// calculate c*last_x !# k-sum(conditions)
 							let k = self.k
 								- conditions
 									.iter()
@@ -1547,36 +1563,38 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 									k,
 								);
 							}
-							let consequents = last.ineq(k, &cmp);
-
-							let is_same = last_consequents
-								.as_ref()
-								.map(|last_consequents| *last_consequents == consequents)
-								.unwrap_or_default();
-							let all_implied =
-								is_same && conditions.iter().all(|(_, _, is_implied)| *is_implied);
-
-							last_consequents = Some(consequents.clone());
-
+							let consequence = last.ineq(k, &cmp);
 							if PRINT_COUPLING {
-								println!(
-									" {:?}{}{}",
-									consequents,
-									is_same.then_some("^").unwrap_or_default(),
-									all_implied.then_some(" *").unwrap_or_default()
-								);
+								println!(" {:?}", consequence);
+							}
+							Some((conditions, consequence))
+						})
+						.chain([None])
+						.tuple_windows()
+						.flat_map(|(curr, next)| {
+							if let Some((next_conditions, next_consequence)) = next {
+								let (_, curr_consequence) = curr.as_ref().unwrap();
+								let all_implied =
+									next_conditions.iter().all(|(_, _, is_implied)| *is_implied)
+										&& curr_consequence == &next_consequence; // TODO replace by checking implication i/o equivalence
+
+								if REMOVE_IMPLIED_CLAUSES && all_implied {
+									return None; // skip curr
+								}
+								curr
+							} else {
+								// always post last iteration
+								curr
 							}
 
-							if REMOVE_IMPLIED_CLAUSES && all_implied {
-								return Ok(());
-							}
-
+						})
+						.try_for_each(|(conditions, consequence)| {
 							add_clauses_for(
 								db,
 								conditions
 									.iter()
 									.map(|(_, cnf, _)| negate_cnf(cnf.clone())) // negate conditions
-									.chain([consequents])
+									.chain([consequence])
 									.collect(),
 							)
 						})
