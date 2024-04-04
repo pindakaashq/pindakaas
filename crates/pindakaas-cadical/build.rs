@@ -21,6 +21,7 @@ fn main() {
 		"vendor/cadical/src/decide.cpp",
 		"vendor/cadical/src/decompose.cpp",
 		"vendor/cadical/src/deduplicate.cpp",
+		"vendor/cadical/src/drattracer.cpp",
 		"vendor/cadical/src/elim.cpp",
 		"vendor/cadical/src/ema.cpp",
 		"vendor/cadical/src/extend.cpp",
