@@ -375,7 +375,11 @@ pub(crate) unsafe extern "C" fn ipasir_check_model_cb(
 	model: *const i32,
 ) -> bool {
 	let prop = &mut *(state as *mut IpasirPropStore);
-	let sol = std::slice::from_raw_parts(model, len);
+	let sol = if len > 0 {
+		std::slice::from_raw_parts(model, len)
+	} else {
+		&[]
+	};
 	let sol: std::collections::HashMap<Var, bool> = sol
 		.iter()
 		.map(|&i| (Var(NonZeroI32::new(i.abs()).unwrap()), i >= 0))
