@@ -260,6 +260,10 @@ impl VarFactory {
 				Var(NonZeroI32::new(2).unwrap()),
 				Var(NonZeroI32::new(1).unwrap()),
 			)),
+			1 => {
+				self.next_var = start.next_var();
+				Some(VarRange::new(start, start))
+			}
 			_ if size > NonZeroI32::MAX.get() as usize => None,
 			_ => {
 				// Size is reduced by 1 since it includes self.next_var
@@ -293,5 +297,35 @@ impl Iterator for VarFactory {
 			self.next_var = var.next_var();
 		}
 		var
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::num::NonZeroI32;
+
+	use crate::Var;
+
+	use super::VarFactory;
+
+	#[test]
+	fn test_var_range() {
+		let mut factory = VarFactory::default();
+
+		let range = factory.new_var_range(0).unwrap();
+		assert_eq!(range.len(), 0);
+		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(1).unwrap())));
+
+		let range = factory.new_var_range(1).unwrap();
+		assert_eq!(range.len(), 1);
+		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(2).unwrap())));
+
+		let range = factory.new_var_range(2).unwrap();
+		assert_eq!(range.len(), 2);
+		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(4).unwrap())));
+
+		let range = factory.new_var_range(100).unwrap();
+		assert_eq!(range.len(), 100);
+		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(104).unwrap())));
 	}
 }
