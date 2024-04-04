@@ -251,9 +251,39 @@ impl VarFactory {
 			Self::MAX_VARS
 		}
 	}
+}
 
-	/// Return the next [`size`] variables that can be stored as an inclusive range.
-	pub fn new_var_range(&mut self, size: usize) -> Option<VarRange> {
+impl Default for VarFactory {
+	fn default() -> Self {
+		Self {
+			next_var: Some(Var(NonZeroI32::new(1).unwrap())),
+		}
+	}
+}
+
+impl Iterator for VarFactory {
+	type Item = Var;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let var = self.next_var;
+		if let Some(var) = var {
+			self.next_var = var.next_var();
+		}
+		var
+	}
+}
+
+/// Allow request for sequential ranges of variables.
+pub trait NextVarRange {
+	/// Request the next sequential range of variables.
+	///
+	/// The method is can return [`None`] if the range of the requested [`size`] is not
+	/// available.
+	fn next_var_range(&mut self, size: usize) -> Option<VarRange>;
+}
+
+impl NextVarRange for VarFactory {
+	fn next_var_range(&mut self, size: usize) -> Option<VarRange> {
 		let start = self.next_var?;
 		match size {
 			0 => Some(VarRange::new(
@@ -280,51 +310,32 @@ impl VarFactory {
 	}
 }
 
-impl Default for VarFactory {
-	fn default() -> Self {
-		Self {
-			next_var: Some(Var(NonZeroI32::new(1).unwrap())),
-		}
-	}
-}
-
-impl Iterator for VarFactory {
-	type Item = Var;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		let var = self.next_var;
-		if let Some(var) = var {
-			self.next_var = var.next_var();
-		}
-		var
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use std::num::NonZeroI32;
 
-	use crate::Var;
-
-	use super::VarFactory;
+	use crate::{
+		solver::{NextVarRange, VarFactory},
+		Var,
+	};
 
 	#[test]
 	fn test_var_range() {
 		let mut factory = VarFactory::default();
 
-		let range = factory.new_var_range(0).unwrap();
+		let range = factory.next_var_range(0).unwrap();
 		assert_eq!(range.len(), 0);
 		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(1).unwrap())));
 
-		let range = factory.new_var_range(1).unwrap();
+		let range = factory.next_var_range(1).unwrap();
 		assert_eq!(range.len(), 1);
 		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(2).unwrap())));
 
-		let range = factory.new_var_range(2).unwrap();
+		let range = factory.next_var_range(2).unwrap();
 		assert_eq!(range.len(), 2);
 		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(4).unwrap())));
 
-		let range = factory.new_var_range(100).unwrap();
+		let range = factory.next_var_range(100).unwrap();
 		assert_eq!(range.len(), 100);
 		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(104).unwrap())));
 	}

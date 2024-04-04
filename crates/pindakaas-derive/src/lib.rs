@@ -299,10 +299,9 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			}
 		}
 
-		impl #ident {
-			/// Return the next [`size`] variables that can be stored as an inclusive range.
-			pub fn new_var_range(&mut self, size: usize) -> crate::helpers::VarRange {
-				#vars .new_var_range(size).expect("variable pool exhaused")
+		impl crate::solver::NextVarRange for #ident {
+			fn next_var_range(&mut self, size: usize) -> Option<crate::helpers::VarRange> {
+				#vars .next_var_range(size)
 			}
 		}
 
