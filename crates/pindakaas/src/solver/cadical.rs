@@ -100,12 +100,12 @@ mod tests {
 
 		use crate::{
 			helpers::tests::lits,
-			solver::{PropagatingSolver, Propagator, VarRange},
+			solver::{NextVarRange, PropagatingSolver, Propagator, VarRange},
 		};
 
 		let mut slv = Cadical::default();
 
-		let vars = slv.new_var_range(5);
+		let vars = slv.next_var_range(5).unwrap();
 
 		struct Dist2 {
 			vars: VarRange,

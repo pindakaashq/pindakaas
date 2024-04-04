@@ -22,7 +22,7 @@ use std::{
 
 use helpers::VarRange;
 use itertools::{Itertools, Position};
-use solver::VarFactory;
+use solver::{NextVarRange, VarFactory};
 
 mod cardinality;
 mod cardinality_one;
@@ -382,11 +382,11 @@ impl Cnf {
 	pub fn literals(&self) -> usize {
 		self.size.iter().sum()
 	}
+}
 
-	pub fn new_var_range(&mut self, size: usize) -> VarRange {
-		self.nvar
-			.new_var_range(size)
-			.expect("exhausted variable pool")
+impl NextVarRange for Cnf {
+	fn next_var_range(&mut self, size: usize) -> Option<VarRange> {
+		self.nvar.next_var_range(size)
 	}
 }
 
@@ -656,10 +656,6 @@ impl Wcnf {
 	pub fn iter(&self) -> impl Iterator<Item = (&[Lit], &Option<Coeff>)> {
 		self.cnf.iter().zip(self.weights.iter())
 	}
-
-	pub fn new_var_range(&mut self, size: usize) -> VarRange {
-		self.cnf.new_var_range(size)
-	}
 }
 
 impl ClauseDatabase for Wcnf {
@@ -668,6 +664,12 @@ impl ClauseDatabase for Wcnf {
 	}
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
 		self.add_weighted_clause(cl, None)
+	}
+}
+
+impl NextVarRange for Wcnf {
+	fn next_var_range(&mut self, size: usize) -> Option<VarRange> {
+		self.cnf.next_var_range(size)
 	}
 }
 
