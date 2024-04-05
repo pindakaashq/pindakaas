@@ -772,7 +772,51 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	// Self::new(C::one(), Rc::new(RefCell::new(IntVar::new)))
 	// }
 
-	pub fn ineqs(&self, cmp: &Comparator) -> Vec<(C, Vec<Vec<Lit>>, bool)> {
+	pub fn ineqs(&self, up: bool) -> Vec<(C, Vec<Vec<Lit>>)> {
+		match self
+			.x
+			.borrow()
+			.e
+			.as_ref()
+			.unwrap_or_else(|| panic!("{} was not encoded", self.x.borrow()))
+		{
+			IntVarEnc::Ord(Some(x_ord)) => {
+				// go through False lit first
+				let es: Vec<_> = if up {
+					std::iter::once(vec![vec![]]) // x>=ub(x)+1
+						.chain(
+							// x>=ub(x), x>=ub(x)-1, .., x>=lb(x)+1
+							x_ord.x.clone().into_iter().map(|l| vec![vec![l]]).rev(),
+						)
+						.collect()
+				} else {
+					std::iter::once(vec![vec![]]) // x<=lb(x)-1
+						.chain(
+							// x<=lb(x), x<=lb(x)+1, .., x<=ub(x)-1
+							x_ord.x.clone().into_iter().map(|l| vec![vec![l.negate()]]), // .map(Option::Some),
+						)
+						.collect()
+				};
+
+				let ds: Vec<_> = if up {
+					self.x
+						.borrow()
+						.dom
+						.iter()
+						.collect_vec()
+						.into_iter()
+						.rev()
+						.collect()
+				} else {
+					self.x.borrow().dom.iter().collect()
+				};
+				ds.into_iter().zip(es).collect()
+			}
+			_ => todo!(),
+		}
+	}
+
+	pub fn _ineqs(&self, cmp: &Comparator) -> Vec<(C, Vec<Vec<Lit>>, bool)> {
 		// TODO merge or handle repeated literals
 		let up = self.handle_polarity(cmp);
 		let x_dom = &self.x.borrow().dom;
@@ -841,20 +885,6 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		}
 	}
 
-	/// Process inequality c*x>=k into x<=k/c (or c*x<=k into c>=k/c), returning new k and up
-	pub fn ineq(&self, k: C, cmp: &Comparator) -> (C, bool) {
-		// we get the position of a*x >= c == x >= ceil(c/a) if cmp = >= and a >= 0; either might flip it to x <= floor(c/a)
-		let up = self.handle_polarity(cmp);
-
-		// }
-
-		let k = if up {
-			k.div_ceil(&self.c)
-		} else {
-			k.div_floor(&self.c)
-		};
-		(k, up)
-	}
 
 	/*
 		// TODO move enc into Term ?
@@ -1480,7 +1510,8 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				// let mut last_consequence = None;
 				// let mut last_k = None;
 				self.cmp.split().into_iter().try_for_each(|cmp| {
-					let cnf = self.encode_rec(&terms, &cmp, self.k);
+					// TODO move to closure to add DB?
+					let cnf = Self::encode_rec(&terms, &cmp, self.k);
 					if PRINT_COUPLING {
 						println!(
 							"CNF\n{}",
@@ -1593,14 +1624,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		}
 	}
 
-	fn encode_rec(&self, terms: &[Term<Lit, C>], cmp: &Comparator, k: C) -> Vec<Vec<Lit>> {
+	fn encode_rec(terms: &[Term<Lit, C>], cmp: &Comparator, k: C) -> Vec<Vec<Lit>> {
 		if let Some((head, tail)) = terms.split_first() {
 			let up = head.c.is_positive() == (cmp == &Comparator::GreaterEq);
-			let e = match head.x.borrow().e.as_ref() {
-				Some(IntVarEnc::Ord(Some(o))) => o.clone(),
-				_ => todo!(),
-			};
-
 			if tail.is_empty() {
 				let k_ = if up {
 					k.div_ceil(&head.c)
@@ -1608,12 +1634,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					k.div_floor(&head.c.clone()) + C::one()
 				};
 
-				let p = head.x.borrow().dom.ineq(k_, true);
-				let l = e.ineq(p, up);
-
 				if PRINT_COUPLING {
-					println!(
-						"{}({}*{} {cmp} {k}) (= {}({} {cmp} {k_})) p({p:?}) == {l:?}",
+					print!(
+						"{}({}*{} {cmp} {k}) (= {}({} {cmp} {k_}))",
 						if up { " " } else { "!" },
 						head.c,
 						head.x.borrow(),
@@ -1621,52 +1644,19 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 						head.x.borrow(),
 					);
 				}
+
+				let (_, l) = head.x.borrow().ineq(k_, up);
 				l
 			} else {
-				// go through False lit first
-				let es: Vec<_> = if up {
-					std::iter::once(None) // x>=ub(x)+1
-						.chain(
-							// x>=ub(x), x>=ub(x)-1, .., x>=lb(x)+1
-							e.x.clone().into_iter().map(Option::Some).rev(),
-						)
-						.collect()
-				} else {
-					std::iter::once(None) // x<=lb(x)-1
-						.chain(
-							// x<=lb(x), x<=lb(x)+1, .., x<=ub(x)-1
-							e.x.clone().into_iter().map(Option::Some),
-						)
-						.collect()
-				};
-
-				let ds: Vec<_> = if up {
-					head.x
-						.borrow()
-						.dom
-						.iter()
-						.collect_vec()
-						.into_iter()
-						.rev()
-						.collect()
-				} else {
-					head.x.borrow().dom.iter().collect()
-				};
-
 				let mut stop = false;
-				ds.into_iter()
-					.zip(es)
-					.map_while(|(d, l)| {
+				head.ineqs(up)
+					.into_iter()
+					.map_while(|(d, conditions)| {
 						if stop {
 							return None;
 						}
 
 						// l = x>=d+1, ~l = ~(x>=d+1) = x<d+1 = x<=d
-						let l = if up {
-							l.map(|l| l.clone())
-						} else {
-							l.map(|l| l.negate())
-						};
 						let k_ = k - head.c * d;
 
 						if PRINT_COUPLING {
@@ -1675,21 +1665,23 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								head.c,
 								head.x.borrow(),
 								d,
-								l
+								conditions
 							);
 						}
 
-						let clause = self
-							.encode_rec(tail, cmp, k_)
+						let clause = Self::encode_rec(tail, cmp, k_)
 							.into_iter()
-							.map(move |r| {
-								l.clone().into_iter().chain(r.clone().into_iter()).collect()
+							.map(move |r| match &conditions[..] {
+								[clause] => clause.iter().cloned().chain(r).collect(),
+								_ => todo!(),
 							})
 							.collect_vec();
 
+						// TODO or if r contains empty clause?
 						if clause == vec![vec![]] {
 							stop = true;
 						}
+
 						Some(clause)
 					})
 					.flatten()
@@ -2205,8 +2197,12 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		// TODO move into IntVar since self.c is taken care off?
 		match self.e.as_ref().unwrap() {
 			IntVarEnc::Ord(Some(o)) => {
-				let p = self.dom.ineq(k, up);
-				(k, o.ineq(p, up))
+				let p = self.dom.ineq(k, true);
+				let l = o.ineq(p, up);
+				if PRINT_COUPLING {
+					println!("== {l:?}",);
+				}
+				(k, l)
 			}
 			IntVarEnc::Bin(Some(b)) => {
 				// x>=k == ¬(x<k) == ¬(x<=k-1) (or x<=k == ¬(x>k) == ¬(x>=k+1))
