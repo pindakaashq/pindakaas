@@ -1463,12 +1463,36 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 						.map(|_| ())
 				})?;
 
+				const SORT_BY_COEF: bool = true;
+				let terms = if SORT_BY_COEF {
+					self.exp
+						.terms
+						.iter()
+						.cloned()
+						.sorted_by_key(|t| -t.c)
+						.collect_vec()
+				} else {
+					self.exp.terms.clone()
+				};
 				// TODO try putting biggest domain last
 
-				let mut covered = None;
-				let mut last_consequence = None;
+				// let mut covered = None;
+				// let mut last_consequence = None;
+				// let mut last_k = None;
 				self.cmp.split().into_iter().try_for_each(|cmp| {
-					let (last, firsts) = &self.exp.terms.split_last().unwrap();
+					let cnf = self.encode_rec(&terms, &cmp, self.k);
+					if PRINT_COUPLING {
+						println!(
+							"CNF\n{}",
+							cnf.iter().map(|c| c.iter().join(", ")).join("\n")
+						);
+					}
+					for c in cnf {
+						emit_clause!(db, &c)?;
+					}
+					Ok(())
+					/*
+					let (last, firsts) = &terms.split_last().unwrap();
 					[vec![(C::zero(), vec![], true)]] // handle empty conditions
 						.into_iter()
 						.chain(firsts.iter().map(|term| term.ineqs(&cmp.reverse())))
@@ -1563,8 +1587,116 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 									.collect(),
 							)
 						})
+						*/
 				})
 			}
+		}
+	}
+
+	fn encode_rec(&self, terms: &[Term<Lit, C>], cmp: &Comparator, k: C) -> Vec<Vec<Lit>> {
+		if let Some((head, tail)) = terms.split_first() {
+			let up = head.c.is_positive() == (cmp == &Comparator::GreaterEq);
+			let e = match head.x.borrow().e.as_ref() {
+				Some(IntVarEnc::Ord(Some(o))) => o.clone(),
+				_ => todo!(),
+			};
+
+			if tail.is_empty() {
+				let k_ = if up {
+					k.div_ceil(&head.c)
+				} else {
+					k.div_floor(&head.c.clone()) + C::one()
+				};
+
+				let p = head.x.borrow().dom.ineq(k_, true);
+				let l = e.ineq(p, up);
+
+				if PRINT_COUPLING {
+					println!(
+						"{}({}*{} {cmp} {k}) (= {}({} {cmp} {k_})) p({p:?}) == {l:?}",
+						if up { " " } else { "!" },
+						head.c,
+						head.x.borrow(),
+						if up { " " } else { "!" },
+						head.x.borrow(),
+					);
+				}
+				l
+			} else {
+				// go through False lit first
+				let es: Vec<_> = if up {
+					std::iter::once(None) // x>=ub(x)+1
+						.chain(
+							// x>=ub(x), x>=ub(x)-1, .., x>=lb(x)+1
+							e.x.clone().into_iter().map(Option::Some).rev(),
+						)
+						.collect()
+				} else {
+					std::iter::once(None) // x<=lb(x)-1
+						.chain(
+							// x<=lb(x), x<=lb(x)+1, .., x<=ub(x)-1
+							e.x.clone().into_iter().map(Option::Some),
+						)
+						.collect()
+				};
+
+				let ds: Vec<_> = if up {
+					head.x
+						.borrow()
+						.dom
+						.iter()
+						.collect_vec()
+						.into_iter()
+						.rev()
+						.collect()
+				} else {
+					head.x.borrow().dom.iter().collect()
+				};
+
+				let mut stop = false;
+				ds.into_iter()
+					.zip(es)
+					.map_while(|(d, l)| {
+						if stop {
+							return None;
+						}
+
+						// l = x>=d+1, ~l = ~(x>=d+1) = x<d+1 = x<=d
+						let l = if up {
+							l.map(|l| l.clone())
+						} else {
+							l.map(|l| l.negate())
+						};
+						let k_ = k - head.c * d;
+
+						if PRINT_COUPLING {
+							println!(
+								"{}*({} {cmp} {}) = [{:?}] (k= {k} -> {k_})",
+								head.c,
+								head.x.borrow(),
+								d,
+								l
+							);
+						}
+
+						let clause = self
+							.encode_rec(tail, cmp, k_)
+							.into_iter()
+							.map(move |r| {
+								l.clone().into_iter().chain(r.clone().into_iter()).collect()
+							})
+							.collect_vec();
+
+						if clause == vec![vec![]] {
+							stop = true;
+						}
+						Some(clause)
+					})
+					.flatten()
+					.collect()
+			}
+		} else {
+			unreachable!();
 		}
 	}
 
@@ -2591,9 +2723,9 @@ mod tests {
 		.collect()
 	}
 
-	const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
+	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
 	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Bin(None)];
-	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None)];
+	const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None)];
 	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[];
 
 	fn test_lp_for_configs(lp: &str, configs: Option<Vec<ModelConfig<C>>>) {
@@ -3559,7 +3691,7 @@ Doms
     \ x_2 in 0,1,2,3
 Encs
     x_1 O
-    x_2 B
+    x_2 O
 End
 	",
 			// None,
@@ -3570,6 +3702,233 @@ End
 				// 	..base
 				// },
 			]),
+		);
+	}
+
+	#[test]
+	fn test_sugar() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		test_lp_for_configs(
+			r"
+Subject To
+  c0: 1 x1 + 2 x2 + 3 x3 + 4 x4 + 5 x5 <= 6
+Bounds
+  0 <= x1 <= 1
+  0 <= x2 <= 1
+  0 <= x3 <= 1
+  0 <= x4 <= 1
+  0 <= x5 <= 1
+End
+	",
+			// None,
+			Some(vec![
+				base.clone(),
+				// ModelConfig {
+				// 	equalize_ternaries: true,
+				// 	..base
+				// },
+			]),
+		);
+	}
+
+	#[test]
+	fn test_sugar_2() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		test_lp_for_configs(
+			r"
+Subject To
+  c0: 2 x1 + 3 x2 >= 20
+Bounds
+  0 <= x1 <= 8
+  0 <= x2 <= 8
+End
+	",
+			Some(vec![base.clone()]),
+		);
+	}
+
+	#[test]
+	fn test_sugar_3() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: - 1 x1 - 1 x2 >= 0
+	Bounds
+	  0 <= x1 <= 1
+	  0 <= x2 <= 1
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+	}
+
+	#[test]
+	fn test_sugar_4() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: 1 x + 1 y >= 0
+	Bounds
+	  0 <= x <= 2
+	  -2 <= y <= 0
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+	}
+
+	#[test]
+	fn test_sugar_le() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: 1 x1 <= 0
+	Bounds
+	  0 <= x1 <= 1
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+	}
+
+	#[test]
+	fn test_sugar_pbc() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		test_lp_for_configs(
+			r"
+Subject To
+  c0: 5 x1 + 4 x2 + 3 x3 + 2 x4 + 1 x5 >= 6
+Bounds
+  0 <= x1 <= 1
+  0 <= x2 <= 1
+  0 <= x3 <= 1
+  0 <= x4 <= 1
+  0 <= x5 <= 1
+End
+	",
+			Some(vec![base.clone()]),
+		);
+
+		// || CNF
+		// || 1, 2, 3, 4
+		// || 1, 2, 3
+		// || 1, 2, 4
+		// || 1, 2, 5
+		// || 1, 3, 4
+		// || 2, 3, 4, 5
+
+		// cnf (ScopOrd)= p cnf 5 5
+		// 5 2 1 0
+		// 2 1 4 0
+		// 2 1 3 0
+		// 3 1 4 0
+		// 5 4 3 2 0
+	}
+
+	#[test]
+	fn test_sugar_singles() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: 1 x1 >= 1
+	Bounds
+	  0 <= x1 <= 1
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: -1 x1 >= 0
+	Bounds
+	  0 <= x1 <= 1
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: 1 x1 <= 0
+	Bounds
+	  0 <= x1 <= 1
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: - 1 x1 <= -1
+	Bounds
+	  0 <= x1 <= 1
+	End
+	",
+			Some(vec![base.clone()]),
 		);
 	}
 

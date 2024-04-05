@@ -379,4 +379,12 @@ mod tests {
 	// 				);
 	// 		}
 	// 	}
+
+	#[test]
+	fn test_ineq_tmp() {
+		let dom = Dom::from_slice(&[0, 1]);
+		assert_eq!(dom.ineq(0, true), Some(0));
+		assert_eq!(dom.ineq(1, true), Some(1));
+		assert_eq!(dom.ineq(2, true), None);
+	}
 }
