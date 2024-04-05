@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use itertools::Itertools;
 
 use crate::{
+	helpers::negate_cnf,
 	trace::{emit_clause, new_var},
 	ClauseDatabase, Coefficient, Literal,
 };
@@ -11,7 +12,7 @@ use super::Dom;
 
 #[derive(Debug, Clone)]
 pub struct OrdEnc<Lit: Literal> {
-	x: Vec<Lit>,
+	pub(crate) x: Vec<Lit>,
 }
 
 impl<Lit: Literal> OrdEnc<Lit> {
@@ -52,16 +53,21 @@ impl<Lit: Literal> OrdEnc<Lit> {
 
 	/// From domain position to cnf
 	pub(crate) fn ineq(&self, p: Option<usize>, up: bool) -> Vec<Vec<Lit>> {
-		match p {
-			Some(0) => vec![],    // true
-			None => vec![vec![]], // false
+		let geq = match p {
+			Some(0) => {
+				vec![]
+			} // true
 			Some(p) => {
-				vec![vec![if up {
-					self.x[p - 1].clone()
-				} else {
-					self.x[p - 1].negate()
-				}]]
+				vec![vec![self.x[p - 1].clone()]]
 			} // lit
+			None => {
+				vec![vec![]]
+			} // false
+		};
+		if up {
+			geq
+		} else {
+			negate_cnf(geq)
 		}
 	}
 
@@ -132,12 +138,12 @@ mod tests {
 			(true, Some(3), vec![vec![3]]),
 			(true, Some(4), vec![vec![4]]),
 			(true, None, vec![vec![]]),
-			(false, Some(0), vec![]),
+			(false, Some(0), vec![vec![]]),
 			(false, Some(1), vec![vec![-1]]),
 			(false, Some(2), vec![vec![-2]]),
 			(false, Some(3), vec![vec![-3]]),
 			(false, Some(4), vec![vec![-4]]),
-			(false, None, vec![vec![]]),
+			(false, None, vec![]),
 		] {
 			assert_eq!(
 				x.ineq(dom_pos, up),
