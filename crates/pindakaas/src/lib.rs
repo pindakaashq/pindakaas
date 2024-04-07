@@ -55,7 +55,7 @@ impl Var {
 
 	fn prev_var(&self) -> Option<Var> {
 		let prev = self.0.get() - 1;
-		if prev >= 0 {
+		if prev > 0 {
 			Some(Var(NonZeroI32::new(prev).unwrap()))
 		} else {
 			None
