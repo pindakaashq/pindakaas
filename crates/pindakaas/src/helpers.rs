@@ -282,11 +282,10 @@ impl DoubleEndedIterator for VarRange {
 			let item = self.end;
 			if let Some(prev) = self.end.prev_var() {
 				self.end = prev;
-				Some(item)
 			} else {
 				*self = VarRange::empty();
-				None
 			}
+			Some(item)
 		} else {
 			None
 		}
