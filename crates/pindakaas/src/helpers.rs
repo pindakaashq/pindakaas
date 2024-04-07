@@ -214,6 +214,13 @@ impl VarRange {
 		Self { start, end }
 	}
 
+	pub fn empty() -> Self {
+		Self {
+			start: Var(NonZeroI32::new(2).unwrap()),
+			end: Var(NonZeroI32::new(1).unwrap()),
+		}
+	}
+
 	/// Performs the indexing operation into the variable range
 	pub fn index(&self, index: usize) -> Var {
 		if index >= self.len() {
@@ -273,8 +280,13 @@ impl DoubleEndedIterator for VarRange {
 	fn next_back(&mut self) -> Option<Self::Item> {
 		if self.start <= self.end {
 			let item = self.end;
-			self.end = self.end.prev_var().unwrap();
-			Some(item)
+			if let Some(prev) = self.end.prev_var() {
+				self.end = prev;
+				Some(item)
+			} else {
+				*self = VarRange::empty();
+				None
+			}
 		} else {
 			None
 		}
