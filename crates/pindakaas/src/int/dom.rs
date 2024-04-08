@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use std::fmt::Display;
 
+use itertools::FoldWhile::{Continue, Done};
 use itertools::Itertools;
 use num::iter::RangeInclusive;
 
@@ -48,6 +49,24 @@ impl<C: Coefficient> Dom<C> {
 				ranges: vec![(lb, ub)],
 			}
 		}
+	}
+
+	/// Get i'th domain value
+	pub fn d(&self, i: usize) -> C {
+		self.ranges
+			.iter()
+			.fold_while(C::from(i).unwrap(), |acc, (l, r)| {
+				dbg!(&acc);
+				dbg!(&l);
+				dbg!(&r);
+				let size = *r - *l + C::one();
+				if acc < size {
+					Done(*l + acc)
+				} else {
+					Continue(acc - size)
+				}
+			})
+			.into_inner()
 	}
 
 	// TODO return result
@@ -350,6 +369,14 @@ mod tests {
 	// 	}
 
 	#[test]
+	fn test_d_index() {
+		let dom = Dom::from_slice(&[0, 2, 5, 6]);
+		assert_eq!(dom.d(0), 0);
+		assert_eq!(dom.d(1), 2);
+		assert_eq!(dom.d(2), 5);
+		assert_eq!(dom.d(3), 6);
+	}
+
 	#[test]
 	fn test_ineq() {
 		let dom = Dom::from_slice(&[0, 1]);
