@@ -798,7 +798,6 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				dom.iter().collect()
 			};
 			ds.into_iter().zip(es).collect()
-
 		};
 		match self
 			.x
@@ -807,21 +806,18 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			.as_ref()
 			.unwrap_or_else(|| panic!("{} was not encoded", self.x.borrow()))
 		{
-			IntVarEnc::Ord(Some(x_ord)) => {
-				ineqs(
-					x_ord.x.clone().into_iter().map(|l| vec![l]).collect(),
-					self.x.borrow().dom.clone(),
-					up,
-				)
-			}
+			IntVarEnc::Ord(Some(x_ord)) => ineqs(
+				x_ord.x.clone().into_iter().map(|l| vec![l]).collect(),
+				self.x.borrow().dom.clone(),
+				up,
+			),
 			IntVarEnc::Bin(Some(x_bin)) => {
 				// TODO not (particularly) optimized for the domain of x, but this is tricky as the domain values go outside the binary encoding ranges
 				let (range_lb, range_ub) = unsigned_binary_range::<C>(x_bin.bits());
-				let (r_a, r_b) = (range_lb, range_ub - C::one());
 
 				ineqs(
-					num::iter::range_inclusive(r_a, r_b)
-						.map(|k| x_bin.ineq(true, if up { range_ub - k } else { k + C::one() }))
+					num::iter::range_inclusive(range_lb, range_ub - C::one())
+						.map(|k| x_bin.geq(if up { range_ub - k } else { k + C::one() }))
 						.collect(),
 					Dom::from_bounds(range_lb, range_ub).add(self.x.borrow().lb()), // denormalize
 					up,
@@ -2164,19 +2160,17 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					print!(" = x{}{k}", if up { ">=" } else { "<" },);
 				}
 				let (r_a, r_b) = if up {
-					(
-						range_ub + C::one() - k_,
-						range_ub,
-					)
+					(range_ub + C::one() - k_, range_ub)
 				} else {
 					(range_lb + k_, range_ub)
 				};
+
 				if PRINT_COUPLING {
 					print!("({r_a}..{r_b})");
 				}
 
 				let dnf = num::iter::range_inclusive(r_a, r_b)
-					.map(|k| x_bin.ineq(true, k))
+					.map(|k| x_bin.geq(k))
 					.collect_vec();
 				if up {
 					dnf
@@ -2192,7 +2186,6 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 							.collect()
 					}
 				}
-
 
 				// let covered = nearest_power_of_two(k_, up) + self.lb(); // de-normalize
 				// b.ineqs(up, Dom::from_bounds())
