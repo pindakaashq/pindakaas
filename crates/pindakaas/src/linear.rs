@@ -291,13 +291,13 @@ impl Comparator {
 		}
 	}
 
-	// pub(crate) fn reverse(&self) -> Comparator {
-	// 	match *self {
-	// 		Comparator::LessEq => Comparator::GreaterEq,
-	// 		Comparator::Equal => panic!("Cannot reverse {self}"),
-	// 		Comparator::GreaterEq => Comparator::LessEq,
-	// 	}
-	// }
+	pub(crate) fn reverse(&self) -> Comparator {
+		match *self {
+			Comparator::LessEq => Comparator::GreaterEq,
+			Comparator::Equal => panic!("Cannot reverse {self}"),
+			Comparator::GreaterEq => Comparator::LessEq,
+		}
+	}
 
 	pub(crate) fn is_ineq(&self) -> bool {
 		match *self {

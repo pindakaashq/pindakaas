@@ -28,7 +28,9 @@ use std::{fmt::Display, path::PathBuf};
 
 const PRINT_COUPLING: bool = false;
 /// In the coupling, skip redundant clauses of which every term is already implied
-const REMOVE_IMPLIED_CLAUSES: bool = true;
+const REMOVE_IMPLIED_CLAUSES: bool = false;
+/// Replace unary constraints by coupling
+const USE_COUPLING_IO_LEX: bool = false;
 
 use iset::IntervalMap;
 
@@ -559,10 +561,8 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 		let principals = expected_assignments
 			.first()
-			.unwrap()
-			.0
-			.keys()
-			.collect::<HashSet<_>>();
+			.map(|assignment| assignment.0.keys().collect::<HashSet<_>>())
+			.unwrap_or_default();
 
 		let principal_actual_assignments = canonicalize(
 			&actual_assignments
@@ -772,7 +772,34 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	// Self::new(C::one(), Rc::new(RefCell::new(IntVar::new)))
 	// }
 
-	pub fn ineqs(&self, up: bool) -> Vec<(C, Vec<Vec<Lit>>)> {
+	pub fn ineqs(&self, up: bool) -> Vec<(C, Vec<Lit>)> {
+		let ineqs = |es: Vec<Vec<Lit>>, dom: Dom<C>, up: bool| {
+			// go through False lit first
+			let es: Vec<_> = if up {
+				std::iter::once(vec![]) // x>=ub(x)+1
+					.chain(
+						// x>=ub(x), x>=ub(x)-1, .., x>=lb(x)+1
+						es.into_iter().rev(),
+					)
+					.collect()
+			} else {
+				std::iter::once(vec![]) // x<lb(x)
+					.chain(
+						// x<lb(x)+1, x<lb(x)+2, .., x<ub(x)
+						es.into_iter()
+							.map(|clause| clause.into_iter().map(|l| l.negate()).collect()),
+					)
+					.collect()
+			};
+
+			let ds: Vec<_> = if up {
+				dom.iter().collect_vec().into_iter().rev().collect()
+			} else {
+				dom.iter().collect()
+			};
+			ds.into_iter().zip(es).collect()
+
+		};
 		match self
 			.x
 			.borrow()
@@ -781,107 +808,26 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			.unwrap_or_else(|| panic!("{} was not encoded", self.x.borrow()))
 		{
 			IntVarEnc::Ord(Some(x_ord)) => {
-				// go through False lit first
-				let es: Vec<_> = if up {
-					std::iter::once(vec![vec![]]) // x>=ub(x)+1
-						.chain(
-							// x>=ub(x), x>=ub(x)-1, .., x>=lb(x)+1
-							x_ord.x.clone().into_iter().map(|l| vec![vec![l]]).rev(),
-						)
-						.collect()
-				} else {
-					std::iter::once(vec![vec![]]) // x<=lb(x)-1
-						.chain(
-							// x<=lb(x), x<=lb(x)+1, .., x<=ub(x)-1
-							x_ord.x.clone().into_iter().map(|l| vec![vec![l.negate()]]), // .map(Option::Some),
-						)
-						.collect()
-				};
-
-				let ds: Vec<_> = if up {
-					self.x
-						.borrow()
-						.dom
-						.iter()
-						.collect_vec()
-						.into_iter()
-						.rev()
-						.collect()
-				} else {
-					self.x.borrow().dom.iter().collect()
-				};
-				ds.into_iter().zip(es).collect()
+				ineqs(
+					x_ord.x.clone().into_iter().map(|l| vec![l]).collect(),
+					self.x.borrow().dom.clone(),
+					up,
+				)
 			}
-			_ => todo!(),
-		}
-	}
-
-	pub fn _ineqs(&self, cmp: &Comparator) -> Vec<(C, Vec<Vec<Lit>>, bool)> {
-		// TODO merge or handle repeated literals
-		let up = self.handle_polarity(cmp);
-		let x_dom = &self.x.borrow().dom;
-		match self
-			.x
-			.borrow()
-			.e
-			.as_ref()
-			.unwrap_or_else(|| panic!("{} was not encoded", self.x.borrow()))
-		{
-			IntVarEnc::Ord(Some(o)) => self
-				.dom()
-				.into_iter()
-				.zip(o.ineqs(up))
-				.map(|(c, (dnf, is_implied))| {
-					(c, dnf, is_implied && self.x.borrow().add_consistency)
-				})
-				.collect(),
-			IntVarEnc::Bin(Some(b)) => {
+			IntVarEnc::Bin(Some(x_bin)) => {
 				// TODO not (particularly) optimized for the domain of x, but this is tricky as the domain values go outside the binary encoding ranges
-				// go over x's bounds
-				let (range_lb, range_ub) = if GROUND_BINARY_AT_LB {
-					// (C::zero(), x_dom.ub() - x_dom.lb())
-					unsigned_binary_range(b.bits())
-				} else {
-					let is_two_comp = x_dom.lb().is_negative();
-					if is_two_comp {
-						two_comp_bounds(b.bits())
-					} else {
-						unsigned_binary_range::<C>(b.bits())
-					}
-				};
+				let (range_lb, range_ub) = unsigned_binary_range::<C>(x_bin.bits());
+				let (r_a, r_b) = (range_lb, range_ub - C::one());
 
-				// normalize domain
-				// TODO
-				// let dom = x_dom.clone().add(-self.lb());
-				let dom = Dom::from_bounds(range_lb, range_ub);
-
-				// get conjunction for every k in lb..dom (or k in dom..ub)
-				let xs = b.ineqs(up, dom);
-
-				// hard-code first (or last) fixed term bound literal
-				let xs = if up {
-					[(range_lb, vec![], false)]
-						.into_iter()
-						.chain(xs[1..].iter().cloned())
-						.collect_vec()
-				} else {
-					xs[1..]
-						.iter()
-						.cloned()
-						.chain([(range_ub, vec![], false)])
-						.collect_vec()
-				};
-
-				// b.ineqs returns range values -> (de!)normalize to x's dom values and then to term's values (by multiplying by coefficient)
-				xs.into_iter()
-					.map(|(k, conjunction, is_implied)| {
-						// TODO apparently is_imlied is not affected by add_consistency
-						((k + x_dom.lb()) * self.c, conjunction, is_implied)
-					})
-					.collect()
+				ineqs(
+					num::iter::range_inclusive(r_a, r_b)
+						.map(|k| x_bin.ineq(true, if up { range_ub - k } else { k + C::one() }))
+						.collect(),
+					Dom::from_bounds(range_lb, range_ub).add(self.x.borrow().lb()), // denormalize
+					up,
+				)
 			}
-			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
-			IntVarEnc::Const(_) => todo!(),
+			_ => unreachable!(),
 		}
 	}
 
@@ -1422,7 +1368,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			.collect_vec();
 
 		match (&term_encs[..], self.cmp) {
-			([(Term { c, x }, Some(IntVarEnc::Bin(_)))], _) if c.is_one() => {
+			([(Term { c, x }, Some(IntVarEnc::Bin(_)))], _)
+				if c.is_one() && !USE_COUPLING_IO_LEX =>
+			{
 				let x_enc = x.borrow_mut().encode_bin(db)?; // avoid BorrowMutError
 				x_enc.encode_unary_constraint(db, &self.cmp, self.k, &x.borrow().dom, false)
 			}
@@ -1513,10 +1461,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					// TODO move to closure to add DB?
 					let cnf = Self::encode_rec(&terms, &cmp, self.k);
 					if PRINT_COUPLING {
-						println!(
-							"CNF\n{}",
-							cnf.iter().map(|c| c.iter().join(", ")).join("\n")
-						);
+						println!("{}", cnf.iter().map(|c| c.iter().join(", ")).join("\n"));
 					}
 					for c in cnf {
 						emit_clause!(db, &c)?;
@@ -1636,16 +1581,26 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				if PRINT_COUPLING {
 					print!(
-						"{}({}*{} {cmp} {k}) (= {}({} {cmp} {k_}))",
+						"{}({}*{} {cmp} {k}) (= {}({} {} {k_}))",
 						if up { " " } else { "!" },
 						head.c,
 						head.x.borrow(),
 						if up { " " } else { "!" },
 						head.x.borrow(),
+						if head.c.is_positive() {
+							*cmp
+						} else {
+							cmp.reverse()
+						}
 					);
 				}
 
-				let (_, l) = head.x.borrow().ineq(k_, up);
+				let l = head.x.borrow().ineq(k_, up);
+
+				if PRINT_COUPLING {
+					println!("== {l:?}",);
+				}
+
 				l
 			} else {
 				let mut stop = false;
@@ -1669,20 +1624,18 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 							);
 						}
 
-						let clause = Self::encode_rec(tail, cmp, k_)
+
+						let cnf = Self::encode_rec(tail, cmp, k_)
 							.into_iter()
-							.map(move |r| match &conditions[..] {
-								[clause] => clause.iter().cloned().chain(r).collect(),
-								_ => todo!(),
-							})
+							.map(|r| conditions.clone().into_iter().chain(r).collect())
 							.collect_vec();
 
-						// TODO or if r contains empty clause?
-						if clause == vec![vec![]] {
+						// // TODO or if r contains empty clause?
+						if cnf == vec![vec![]] {
 							stop = true;
 						}
 
-						Some(clause)
+						Some(cnf)
 					})
 					.flatten()
 					.collect()
@@ -2193,59 +2146,82 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 	}
 
 	/// Return CNF for c*x>=k (or c*x<=k)
-	pub fn ineq(&self, k: C, up: bool) -> (C, Vec<Vec<Lit>>) {
+	pub fn ineq(&self, k: C, up: bool) -> Vec<Vec<Lit>> {
 		// TODO move into IntVar since self.c is taken care off?
 		match self.e.as_ref().unwrap() {
-			IntVarEnc::Ord(Some(o)) => {
-				let p = self.dom.ineq(k, true);
-				let l = o.ineq(p, up);
-				if PRINT_COUPLING {
-					println!("== {l:?}",);
-				}
-				(k, l)
-			}
-			IntVarEnc::Bin(Some(b)) => {
+			IntVarEnc::Ord(Some(o)) => o.ineq(self.dom.ineq(k, true), up),
+			IntVarEnc::Bin(Some(x_bin)) => {
 				// x>=k == ¬(x<k) == ¬(x<=k-1) (or x<=k == ¬(x>k) == ¬(x>=k+1))
-				let k = if up { k - C::one() } else { k + C::one() };
-				let k = b.normalize(k, &self.dom);
-				let covered = nearest_power_of_two(k, up) + self.lb(); // de-normalize
+				// or: x>=k == x>=(2^bits - k)
+				// returns Dnf e.q. (x1 \/ x0 /\ x0)
+				// x1 /\ x0 -> x>=3 -> x0 \/ x2
 
-				let (range_lb, range_ub) = unsigned_binary_range(b.bits());
-				let ks = if up { (range_lb, k) } else { (k, range_ub) };
-				let ks = (std::cmp::max(range_lb, ks.0), std::cmp::min(range_ub, ks.1)); // TODO temp
+				let k_ = x_bin.normalize(k, &self.dom);
 
+				// k = 0 ->
+				let (range_lb, range_ub) = unsigned_binary_range::<C>(x_bin.bits());
 				if PRINT_COUPLING {
-					print!(
-						" (== NOT ({}{}{}))",
-						self.lbl(),
-						if !up {
-							Comparator::GreaterEq
-						} else {
-							Comparator::LessEq
-						},
-						k
+					print!(" = x{}{k}", if up { ">=" } else { "<" },);
+				}
+				let (r_a, r_b) = if up {
+					(
+						range_ub + C::one() - k_,
+						range_ub,
 					)
+				} else {
+					(range_lb + k_, range_ub)
+				};
+				if PRINT_COUPLING {
+					print!("({r_a}..{r_b})");
 				}
 
-				let ks = Dom::from_bounds(ks.0, ks.1);
+				let dnf = num::iter::range_inclusive(r_a, r_b)
+					.map(|k| x_bin.ineq(true, k))
+					.collect_vec();
+				if up {
+					dnf
+				} else {
+					// negate dnf
+					if dnf.contains(&vec![]) {
+						vec![vec![]]
+					} else if dnf.is_empty() {
+						vec![]
+					} else {
+						dnf.into_iter()
+							.flat_map(|conjunct| negate_cnf(vec![conjunct]))
+							.collect()
+					}
+				}
 
-				(
-					covered,
-					b.ineqs(!up, ks)
-						.into_iter()
-						.with_position()
-						.flat_map(|(pos, (k, cnf, is_implied))| {
-							(
-								// this cnf contains redundant clauses
-								!is_implied
-									|| matches!(pos, Position::First | Position::Only)
-									|| !REMOVE_IMPLIED_CLAUSES
-							)
-								.then_some(cnf)
-						})
-						.flat_map(negate_cnf)
-						.collect(),
-				)
+
+				// let covered = nearest_power_of_two(k_, up) + self.lb(); // de-normalize
+				// b.ineqs(up, Dom::from_bounds())
+				// 	.into_iter()
+				// 	.map(|(_, cnf, _)| cnf)
+				// 	.collect()
+				// let ks = if up { (range_lb, k_) } else { (k_, range_ub) };
+				// let ks = (std::cmp::max(range_lb, ks.0), std::cmp::min(range_ub, ks.1)); // TODO temp
+
+				// let ks = Dom::from_bounds(ks.0, ks.1);
+
+				// (
+				// 	covered,
+				// 	b.ineqs(!up, ks)
+				// 		.into_iter()
+				// 		.with_position()
+				// 		.flat_map(|(pos, (k, dnf, is_implied))| {
+				// 			(
+				// 				// this cnf contains redundant clauses
+				// 				!is_implied
+				// 					|| matches!(pos, Position::First | Position::Only)
+				// 					|| !REMOVE_IMPLIED_CLAUSES
+				// 			)
+				// 				.then_some(dnf)
+				// 		})
+				// 		.flat_map(negate_cnf)
+				// 		.filter(|clause| !clause.is_empty())
+				// 		.collect(),
+				// )
 			}
 			IntVarEnc::Const(_) => todo!(),
 
@@ -3831,6 +3807,54 @@ End
 	}
 
 	#[test]
+	fn test_sugar_5() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: 1 x1 + 1 x2 >= 1
+    Binary
+      x1
+      x2
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+	}
+
+	#[test]
+	fn test_sugar_6() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: 1 x1 + 1 x2 >= 2
+    Binary
+      x1
+      x2
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+	}
+
+	#[test]
 	fn test_sugar_pbc() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
@@ -3928,6 +3952,73 @@ End
 		);
 	}
 
+	#[test]
+	fn test_sugar_singles_2() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: 1 x1 >= 2
+	Bounds
+	  0 <= x1 <= 3
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: -1 x1 >= -1
+	Bounds
+	  0 <= x1 <= 3
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: 1 x1 <= 2
+	Bounds
+	  0 <= x1 <= 3
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: 1 x1 >= 3
+	Bounds
+	  0 <= x1 <= 3
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: - 1 x1 <= -3
+	Bounds
+	  0 <= x1 <= 3
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+	}
+
 	// #[test]
 	// fn test_ineqs() {
 	// 	let mut db = TestDB::new(0);
@@ -3937,7 +4028,6 @@ End
 	// 	t.x.borrow_mut()
 	// 		.encode(&mut db, &mut HashMap::new())
 	// 		.unwrap();
-	// 	// dbg!(t.ineqs(&Comparator::LessEq));
 	// 	// let x = BinEnc::new(&mut db, 4, Some(String::from("x")));
 	// }
 }

@@ -3,13 +3,13 @@ use std::collections::HashSet;
 use itertools::Itertools;
 
 use crate::{
-	helpers::{add_clauses_for, as_binary, negate_cnf, two_comp_bounds, unsigned_binary_range},
+	helpers::{add_clauses_for, as_binary, negate_cnf, unsigned_binary_range},
 	linear::{lex_geq_const, lex_leq_const},
 	trace::new_var,
 	ClauseDatabase, Coefficient, Comparator, Literal, Unsatisfiable,
 };
 
-use super::{enc::GROUND_BINARY_AT_LB, Dom, LitOrConst};
+use super::{Dom, LitOrConst};
 
 #[derive(Debug, Clone)]
 pub struct BinEnc<Lit: Literal> {
@@ -51,7 +51,13 @@ impl<Lit: Literal> BinEnc<Lit> {
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
-	pub fn ineq<C: Coefficient>(&self, up: bool, k: C) -> Vec<Vec<Lit>> {
+	pub fn ineq<C: Coefficient>(&self, up: bool, k: C) -> Vec<Lit> {
+		assert!(up);
+		let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
+		if k > range_ub {
+			return vec![];
+		}
+		let k = k.clamp(range_lb, range_ub);
 		as_binary(k.into(), Some(self.bits()))
 			.into_iter()
 			.zip(self.xs().iter().cloned())
@@ -62,16 +68,16 @@ impl<Lit: Literal> BinEnc<Lit> {
 			.filter_map(|x| match x {
 				// THIS IS A CONJUNCTION
 				// TODO make this a bit more clear (maybe simplify function for Cnf)
-				LitOrConst::Lit(x) => Some(Ok(vec![x])),
+				LitOrConst::Lit(x) => Some(Ok(x)),
 				LitOrConst::Const(true) => None, // literal satisfied
 				LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
 			})
 			.try_collect()
-			.unwrap_or(vec![vec![]])
+			.unwrap_or_default()
 	}
 
 	/// Return (k,x>=k) for all k in dom (or x<=k if !up) where each x>=k is a conjunction
-	pub fn ineqs<C: Coefficient>(&self, up: bool, dom: Dom<C>) -> Vec<(C, Vec<Vec<Lit>>, bool)> {
+	pub fn ineqs<C: Coefficient>(&self, up: bool, dom: Dom<C>) -> Vec<(C, Vec<Lit>)> {
 		assert!(
 			{
 				let r = unsigned_binary_range::<C>(self.bits());
@@ -114,24 +120,19 @@ impl<Lit: Literal> BinEnc<Lit> {
 					// old (before reverse): (a, self.ineq(up, b - C::one()))
 				}
 			})
-			.map(|(k, cnf)| {
-				(
-					k,
-					cnf,
-					// powers of two imply all subsequent k's until next power of two
-					{
-						let k = if up {
-							k
-						} else {
-							// invert if going down
-							unsigned_binary_range::<C>(self.bits()).1 - k
-						};
-
-						!(k.is_zero() || k.is_one() || k.trailing_zeros() > 0)
-					},
-				)
-			})
 			.collect()
+
+		// // powers of two imply all subsequent k's until next power of two
+		// {
+		// 	let k = if up {
+		// 		k
+		// 	} else {
+		// 		// invert if going down
+		// 		unsigned_binary_range::<C>(self.bits()).1 - k
+		// 	};
+
+		// 	!(k.is_zero() || k.is_one() || k.trailing_zeros() > 0)
+		// },
 	}
 
 	/// Get encoding as unsigned binary representation (if negative dom values, offset by `-2^(k-1)`)
@@ -152,10 +153,6 @@ impl<Lit: Literal> BinEnc<Lit> {
 			}
 		}
 		Ok(())
-	}
-
-	fn has_sign_bit<C: Coefficient>(dom: &Dom<C>) -> bool {
-		dom.lb().is_negative()
 	}
 
 	/// Encode `x # k` where `# ∈ {≤,=,≥}`
@@ -211,17 +208,12 @@ impl<Lit: Literal> BinEnc<Lit> {
 
 	/// Normalize k to its value in unsigned binary relative to this encoding
 	pub(crate) fn normalize<C: Coefficient>(&self, k: C, dom: &Dom<C>) -> C {
-		if GROUND_BINARY_AT_LB {
-			k - dom.lb()
-		} else {
-			// encoding is grounded at the lb of the two comp representation
-			// (this increases k by subtracting the (negative) lower bound)
-			if Self::has_sign_bit(dom) {
-				k.checked_sub(&two_comp_bounds::<C>(self.bits()).0).unwrap()
-			} else {
-				k
-			}
-		}
+		k - dom.lb()
+	}
+
+	/// Normalize k to its value in unsigned binary relative to this encoding
+	pub(crate) fn _denormalize<C: Coefficient>(&self, k: C, dom: &Dom<C>) -> C {
+		k + dom.lb()
 	}
 
 	#[cfg_attr(
@@ -313,11 +305,11 @@ mod tests {
 
 		// &x.ineq(false, 2);
 		// &negate_cnf(x.ineq(false, 2));
-		for (up, ks, expected_cnf) in [
+		for (up, ks, expected_lits) in [
 			(true, 0, vec![]),
-			(true, 1, vec![vec![1]]),
-			(true, 2, vec![vec![2]]),
-			(true, 3, vec![vec![1], vec![2]]),
+			(true, 1, vec![1]),
+			(true, 2, vec![2]),
+			(true, 3, vec![1, 2]),
 			// (
 			// 	true,
 			// 	(0, 3),
@@ -329,8 +321,8 @@ mod tests {
 		] {
 			assert_eq!(
 				x.ineq(up, ks),
-				expected_cnf,
-				"ks {ks:?} with up {up} was expected to return {expected_cnf:?}"
+				expected_lits,
+				"ks {ks:?} with up {up} was expected to return {expected_lits:?}"
 			);
 		}
 	}
@@ -341,11 +333,9 @@ mod tests {
 		let mut db = TestDB::new(0);
 		let dom = Dom::from_slice(&[0, 1, 2, 3]);
 		let x = BinEnc::new(&mut db, 2, Some(String::from("x")));
-		// dbg!(x.ineqs::<C>(true, dom));
-		dbg!(x.ineqs::<C>(false, dom));
-		// assert_eq!(
-		// 	x.ineqs::<C>(true, &dom),
-		// 	vec![vec![], vec![vec![1]], vec![vec![2]], vec![vec![1], vec![2]]]
-		// );
+		assert_eq!(
+			x.ineqs::<C>(true, dom),
+			(vec![(0, vec![]), (1, vec![1]), (2, vec![2]), (3, vec![1, 2])])
+		);
 	}
 }
