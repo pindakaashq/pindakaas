@@ -51,88 +51,29 @@ impl<Lit: Literal> BinEnc<Lit> {
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
-	pub fn ineq<C: Coefficient>(&self, up: bool, k: C) -> Vec<Lit> {
-		assert!(up);
+	}
+
+	/// Returns conjunction for x>=k (or x<=k if !up)
+	pub fn geq<C: Coefficient>(&self, k: C) -> Vec<Lit> {
 		let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
 		if k > range_ub {
 			return vec![];
-		}
-		let k = k.clamp(range_lb, range_ub);
-		as_binary(k.into(), Some(self.bits()))
-			.into_iter()
-			.zip(self.xs().iter().cloned())
-			// if >=, find 1's, if <=, find 0's
-			.filter_map(|(b, x)| (b == up).then_some(x))
-			// if <=, negate lits at 0's
-			.map(|x| if up { x } else { -x })
-			.filter_map(|x| match x {
-				// THIS IS A CONJUNCTION
-				// TODO make this a bit more clear (maybe simplify function for Cnf)
-				LitOrConst::Lit(x) => Some(Ok(x)),
-				LitOrConst::Const(true) => None, // literal satisfied
-				LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
-			})
-			.try_collect()
-			.unwrap_or_default()
-	}
-
-	/// Return (k,x>=k) for all k in dom (or x<=k if !up) where each x>=k is a conjunction
-	pub fn ineqs<C: Coefficient>(&self, up: bool, dom: Dom<C>) -> Vec<(C, Vec<Lit>)> {
-		assert!(
-			{
-				let r = unsigned_binary_range::<C>(self.bits());
-				dom.is_empty() || (dom.lb() >= r.0 && dom.ub() <= r.1)
-			},
-			"Cannot call BinEnc::ineqs({dom}) on {self}"
-		);
-
-		let dom = if dom.is_empty() {
-			return vec![];
 		} else {
-			// TODO for now, go through bounds, which creates redundant entries
-			num::iter::range_inclusive(dom.lb(), dom.ub())
+			let k = k.clamp(range_lb, range_ub);
+			as_binary(k.into(), Some(self.bits()))
+				.into_iter()
+				.zip(self.xs().iter().cloned())
+				.filter_map(|(b, x)| b.then_some(x))
+				.filter_map(|x| match x {
+					// THIS IS A CONJUNCTION
+					// TODO make this a bit more clear (maybe simplify function for Cnf)
+					LitOrConst::Lit(x) => Some(Ok(x)),
+					LitOrConst::Const(true) => None, // literal satisfied
+					LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
+				})
+				.try_collect()
+				.unwrap_or_default()
 		}
-		.collect_vec();
-
-		// get all conjunctions for every value in the given range
-		let ks = if up {
-			let range_lb = *dom.first().unwrap();
-			std::iter::once(range_lb - C::one())
-				.chain(dom.iter().cloned())
-				.collect_vec()
-		} else {
-			let range_ub = *dom.last().unwrap();
-			dom.iter()
-				.cloned()
-				.chain(std::iter::once(range_ub + C::one()))
-				.rev()
-				.collect_vec()
-		};
-
-		ks.into_iter()
-			.tuple_windows()
-			.map(|(a, b)| {
-				// for two dom elements {..,a,b,..}, return (b, x>=a+1)
-				if up {
-					(b, self.ineq(up, a + C::one()))
-				} else {
-					(b, self.ineq(up, a - C::one()))
-					// old (before reverse): (a, self.ineq(up, b - C::one()))
-				}
-			})
-			.collect()
-
-		// // powers of two imply all subsequent k's until next power of two
-		// {
-		// 	let k = if up {
-		// 		k
-		// 	} else {
-		// 		// invert if going down
-		// 		unsigned_binary_range::<C>(self.bits()).1 - k
-		// 	};
-
-		// 	!(k.is_zero() || k.is_one() || k.trailing_zeros() > 0)
-		// },
 	}
 
 	/// Get encoding as unsigned binary representation (if negative dom values, offset by `-2^(k-1)`)
@@ -320,7 +261,7 @@ mod tests {
 			// (false, (15, 16), vec![]),
 		] {
 			assert_eq!(
-				x.ineq(up, ks),
+				x.geq(ks),
 				expected_lits,
 				"ks {ks:?} with up {up} was expected to return {expected_lits:?}"
 			);
