@@ -90,40 +90,9 @@ impl<C: Coefficient> Dom<C> {
 	/// Find position of first domain value >= k/c (or <= k/c)
 	/// Returns Some(0) if first (and all) domain values satisfy the predicate, or None if no domain value satisfy the predicate (respectively, true and false)
 	pub(crate) fn ineq(&self, k: C, up: bool) -> Option<usize> {
-		let ds = self.iter().collect::<Vec<_>>();
-		let n = ds.len();
-		let ds = if up {
-			ds.iter().collect::<Vec<_>>()
-		} else {
-			ds.iter().rev().collect::<Vec<_>>()
-		};
-		ds.into_iter()
-			.copied()
-			.position(|d| if up { d >= k } else { d <= k })
-			.map(|pos| {
-				if up {
-					pos
-				} else if pos == 0 {
-					// transform Some(n) into Some(0)
-					0
-				} else {
-					n - pos
-				}
-			})
-
-		// TODO faster method, to test
-		// self.ranges.iter().fold_while(0, |r, acc| {
-		// 	let r_card = r.1 - r.0 + 1; // cardinality of range
-		// 	if c <= r.1 {
-		// 		itertools::FoldWhile::Done(acc + r_card)
-		// 	} else {
-		// 		itertools::FoldWhile::Continue(acc + std::cmp::min(1, (c - r.0)))
-		// 	}
-		// })
-		// self.[self.x.borrow().dom.iter().position(|d| d == c).unwrap() - 1]
+		let k = if up { k } else { self.size() - k - C::one() };
+		self.iter().position(|d| d >= k)
 	}
-
-	// fn position(&self, d: C) -> Option<usize> {}
 
 	pub fn ge(&mut self, d: C) {
 		if let Some(r) = self.range(d) {
@@ -381,10 +350,31 @@ mod tests {
 	// 	}
 
 	#[test]
-	fn test_ineq_tmp() {
+	#[test]
+	fn test_ineq() {
 		let dom = Dom::from_slice(&[0, 1]);
+		assert_eq!(dom.ineq(-1, true), Some(0));
 		assert_eq!(dom.ineq(0, true), Some(0));
 		assert_eq!(dom.ineq(1, true), Some(1));
 		assert_eq!(dom.ineq(2, true), None);
+		assert_eq!(dom.ineq(3, true), None);
+
+		assert_eq!(dom.ineq(-2, false), None);
+		assert_eq!(dom.ineq(-1, false), None);
+		assert_eq!(dom.ineq(0, false), Some(1));
+		assert_eq!(dom.ineq(1, false), Some(0));
+		assert_eq!(dom.ineq(2, false), Some(0));
 	}
+
+	#[test]
+	fn test_ineq_holey() {
+		let dom = Dom::from_slice(&[0, 2, 5]);
+		assert_eq!(dom.ineq(0, true), Some(0));
+		assert_eq!(dom.ineq(1, true), Some(1));
+		assert_eq!(dom.ineq(2, true), Some(1));
+		assert_eq!(dom.ineq(3, true), Some(2));
+		assert_eq!(dom.ineq(5, true), Some(2));
+		assert_eq!(dom.ineq(6, true), None);
+	}
+
 }
