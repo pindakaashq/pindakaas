@@ -1,3 +1,4 @@
+use crate::Term;
 use std::{
 	collections::HashMap,
 	fs::File,
@@ -10,7 +11,8 @@ use bzip2::read::BzDecoder;
 
 use crate::{
 	helpers::{as_binary, two_comp_bounds},
-	int::model::{LinExp, Obj, Term},
+	int::model::Obj,
+	int::LinExp,
 	int::{enc::GROUND_BINARY_AT_LB, IntVarEnc},
 	Coefficient, Comparator, Lin, Literal, Model,
 };
