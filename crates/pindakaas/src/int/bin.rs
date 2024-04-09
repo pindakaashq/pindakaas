@@ -81,6 +81,32 @@ impl<Lit: Literal> BinEnc<Lit> {
 		}
 	}
 
+	// /// Returns conjunction for x>=k (or x<=k if !up)
+	// pub fn ineq<C: Coefficient>(&self, up: bool, k: C) -> Vec<Lit> {
+	// 	assert!(up);
+	// 	let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
+	// 	if k > range_ub {
+	// 		return vec![];
+	// 	}
+	// 	let k = k.clamp(range_lb, range_ub);
+	// 	as_binary(k.into(), Some(self.bits()))
+	// 		.into_iter()
+	// 		.zip(self.xs().iter().cloned())
+	// 		// if >=, find 1's, if <=, find 0's
+	// 		.filter_map(|(b, x)| (b == up).then_some(x))
+	// 		// if <=, negate lits at 0's
+	// 		.map(|x| if up { x } else { -x })
+	// 		.filter_map(|x| match x {
+	// 			// THIS IS A CONJUNCTION
+	// 			// TODO make this a bit more clear (maybe simplify function for Cnf)
+	// 			LitOrConst::Lit(x) => Some(Ok(x)),
+	// 			LitOrConst::Const(true) => None, // literal satisfied
+	// 			LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
+	// 		})
+	// 		.try_collect()
+	// 		.unwrap_or_default()
+	// }
+
 	/// Get encoding as unsigned binary representation (if negative dom values, offset by `-2^(k-1)`)
 	pub(crate) fn xs(&self) -> Vec<LitOrConst<Lit>> {
 		self.x.clone()
@@ -243,6 +269,13 @@ mod tests {
 	// 	// &x.ineqs(true, Dom::from_slice(&[0, 2, 3, 5]));
 	// 	// panic!();
 	// }
+
+	#[test]
+	fn test_geqs() {
+		let mut db = TestDB::new(0);
+		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
+		dbg!(&x._geqs(2, 4));
+	}
 
 	#[test]
 	fn test_ineq() {

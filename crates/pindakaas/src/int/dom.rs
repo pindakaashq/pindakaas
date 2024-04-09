@@ -106,10 +106,10 @@ impl<C: Coefficient> Dom<C> {
 	}
 
 	// TODO use RangeInclusive
-	/// Find position of first domain value >= k/c (or <= k/c)
-	/// Returns Some(0) if first (and all) domain values satisfy the predicate, or None if no domain value satisfy the predicate (respectively, true and false)
-	pub(crate) fn ineq(&self, k: C, up: bool) -> Option<usize> {
-		let k = if up { k } else { self.size() - k - C::one() };
+	/// Find position of first domain value >= k/c
+	/// Returns Some(0) if first (and all) domain values satisfy the predicate, or None if no domain value satisfy the predicate
+	pub(crate) fn geq(&self, k: C) -> Option<usize> {
+		// let k = if up { k } else { self.size() - k - C::one() };
 		self.iter().position(|d| d >= k)
 	}
 

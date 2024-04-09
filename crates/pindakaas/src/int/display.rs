@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
-use crate::{int::IntVarEnc, Coefficient, Lin, Literal, Model, Term};
+use crate::Lin;
+use crate::{int::IntVarEnc, Coefficient, Literal, Model, Term};
 use itertools::Itertools;
 
 use super::{model::Obj, IntVar, LinExp};
