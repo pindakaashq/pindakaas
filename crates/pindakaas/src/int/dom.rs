@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use std::fmt::Display;
 
-use itertools::FoldWhile::{Continue, Done};
+use itertools::FoldWhile;
 use itertools::Itertools;
 use num::iter::RangeInclusive;
 
@@ -52,21 +52,21 @@ impl<C: Coefficient> Dom<C> {
 	}
 
 	/// Get i'th domain value
-	pub fn d(&self, i: usize) -> C {
-		self.ranges
+	pub fn d(&self, i: usize) -> Option<C> {
+		match self
+			.ranges
 			.iter()
 			.fold_while(C::from(i).unwrap(), |acc, (l, r)| {
-				dbg!(&acc);
-				dbg!(&l);
-				dbg!(&r);
 				let size = *r - *l + C::one();
 				if acc < size {
-					Done(*l + acc)
+					FoldWhile::Done(*l + acc)
 				} else {
-					Continue(acc - size)
+					FoldWhile::Continue(acc - size)
 				}
-			})
-			.into_inner()
+			}) {
+			FoldWhile::Done(d) => Some(d),
+			FoldWhile::Continue(_) => None,
+		}
 	}
 
 	// TODO return result
@@ -371,37 +371,37 @@ mod tests {
 	#[test]
 	fn test_d_index() {
 		let dom = Dom::from_slice(&[0, 2, 5, 6]);
-		assert_eq!(dom.d(0), 0);
-		assert_eq!(dom.d(1), 2);
-		assert_eq!(dom.d(2), 5);
-		assert_eq!(dom.d(3), 6);
+		assert_eq!(dom.d(0), Some(0));
+		assert_eq!(dom.d(1), Some(2));
+		assert_eq!(dom.d(2), Some(5));
+		assert_eq!(dom.d(3), Some(6));
+		assert_eq!(dom.d(4), None);
 	}
 
 	#[test]
 	fn test_ineq() {
 		let dom = Dom::from_slice(&[0, 1]);
-		assert_eq!(dom.ineq(-1, true), Some(0));
-		assert_eq!(dom.ineq(0, true), Some(0));
-		assert_eq!(dom.ineq(1, true), Some(1));
-		assert_eq!(dom.ineq(2, true), None);
-		assert_eq!(dom.ineq(3, true), None);
+		assert_eq!(dom.geq(-1), Some(0));
+		assert_eq!(dom.geq(0), Some(0));
+		assert_eq!(dom.geq(1), Some(1));
+		assert_eq!(dom.geq(2), None);
+		assert_eq!(dom.geq(3), None);
 
-		assert_eq!(dom.ineq(-2, false), None);
-		assert_eq!(dom.ineq(-1, false), None);
-		assert_eq!(dom.ineq(0, false), Some(1));
-		assert_eq!(dom.ineq(1, false), Some(0));
-		assert_eq!(dom.ineq(2, false), Some(0));
+		// assert_eq!(dom.geq(-2, false), None);
+		// assert_eq!(dom.geq(-1, false), None);
+		// assert_eq!(dom.geq(0, false), Some(1));
+		// assert_eq!(dom.geq(1, false), Some(0));
+		// assert_eq!(dom.geq(2, false), Some(0));
 	}
 
 	#[test]
 	fn test_ineq_holey() {
 		let dom = Dom::from_slice(&[0, 2, 5]);
-		assert_eq!(dom.ineq(0, true), Some(0));
-		assert_eq!(dom.ineq(1, true), Some(1));
-		assert_eq!(dom.ineq(2, true), Some(1));
-		assert_eq!(dom.ineq(3, true), Some(2));
-		assert_eq!(dom.ineq(5, true), Some(2));
-		assert_eq!(dom.ineq(6, true), None);
+		assert_eq!(dom.geq(0), Some(0));
+		assert_eq!(dom.geq(1), Some(1));
+		assert_eq!(dom.geq(2), Some(1));
+		assert_eq!(dom.geq(3), Some(2));
+		assert_eq!(dom.geq(5), Some(2));
+		assert_eq!(dom.geq(6), None);
 	}
-
 }

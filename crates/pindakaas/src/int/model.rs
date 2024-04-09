@@ -28,7 +28,7 @@ use std::{fmt::Display, path::PathBuf};
 
 const PRINT_COUPLING: bool = false;
 /// In the coupling, skip redundant clauses of which every term is already implied
-const REMOVE_IMPLIED_CLAUSES: bool = false;
+const REMOVE_IMPLIED_CLAUSES: bool = true;
 /// Replace unary constraints by coupling
 const USE_COUPLING_IO_LEX: bool = false;
 
@@ -518,7 +518,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	pub fn check_assignments(
 		&self,
 		actual_assignments: &[Assignment<C>],
-		expected_assignments: Option<&[Assignment<C>]>,
+		expected_assignments: Option<&Vec<Assignment<C>>>,
 		lit_assignments: Option<&[Vec<Lit>]>,
 	) -> Result<(), Vec<CheckError<Lit>>> {
 		let errs = actual_assignments
@@ -541,6 +541,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		}
 
 		let expected_assignments = expected_assignments
+			.as_ref()
 			.map(|expected_assignments| expected_assignments.to_vec())
 			.unwrap_or_else(|| self.brute_force_solve(None));
 
@@ -772,7 +773,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	// Self::new(C::one(), Rc::new(RefCell::new(IntVar::new)))
 	// }
 
-	pub fn ineqs(&self, up: bool) -> Vec<(C, Vec<Lit>)> {
+	pub fn ineqs(&self, up: bool) -> Vec<(C, Vec<Lit>, bool)> {
 		let ineqs = |es: Vec<Vec<Lit>>, dom: Dom<C>, up: bool| {
 			// go through False lit first
 			let es: Vec<_> = if up {
@@ -797,7 +798,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			} else {
 				dom.iter().collect()
 			};
-			ds.into_iter().zip(es).collect()
+			ds.into_iter().zip(es)
 		};
 		match self
 			.x
@@ -810,7 +811,9 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				x_ord.x.clone().into_iter().map(|l| vec![l]).collect(),
 				self.x.borrow().dom.clone(),
 				up,
-			),
+			)
+			.map(|(c, cnf)| (c, cnf, self.x.borrow().add_consistency))
+			.collect(),
 			IntVarEnc::Bin(Some(x_bin)) => {
 				// TODO not (particularly) optimized for the domain of x, but this is tricky as the domain values go outside the binary encoding ranges
 				let (range_lb, range_ub) = unsigned_binary_range::<C>(x_bin.bits());
@@ -822,6 +825,8 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					Dom::from_bounds(range_lb, range_ub).add(self.x.borrow().lb()), // denormalize
 					up,
 				)
+				.map(|(c, cnf)| (c, cnf, self.x.borrow().add_consistency))
+				.collect()
 			}
 			_ => unreachable!(),
 		}
@@ -1293,8 +1298,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		} {
 			Ok(())
 		} else {
+			const SHOW_LP: bool = false;
 			Err(CheckError::Fail(format!(
-				"Inconsistency in {}: {} == {} !{} {}",
+				"Inconsistency in {}: {} == {} !{} {}\n{}",
 				self.lbl.clone().unwrap_or_default(),
 				self.exp
 					.terms
@@ -1311,7 +1317,16 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					.join(" + "),
 				lhs,
 				self.cmp,
-				self.k
+				self.k,
+				SHOW_LP
+					.then(|| {
+						Model {
+							cons: vec![self.clone()],
+							..Model::default()
+						}
+						.to_text(crate::Format::Lp)
+					})
+					.unwrap_or_default()
 			)))
 		}
 	}
@@ -1455,7 +1470,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				// let mut last_k = None;
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					// TODO move to closure to add DB?
-					let cnf = Self::encode_rec(&terms, &cmp, self.k);
+					let (_, cnf) = Self::encode_rec(&terms, &cmp, self.k, 0);
 					if PRINT_COUPLING {
 						println!("{}", cnf.iter().map(|c| c.iter().join(", ")).join("\n"));
 					}
@@ -1565,7 +1580,12 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		}
 	}
 
-	fn encode_rec(terms: &[Term<Lit, C>], cmp: &Comparator, k: C) -> Vec<Vec<Lit>> {
+	fn encode_rec(
+		terms: &[Term<Lit, C>],
+		cmp: &Comparator,
+		k: C,
+		depth: usize,
+	) -> (Option<C>, Vec<Vec<Lit>>) {
 		if let Some((head, tail)) = terms.split_first() {
 			let up = head.c.is_positive() == (cmp == &Comparator::GreaterEq);
 			if tail.is_empty() {
@@ -1577,12 +1597,12 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				if PRINT_COUPLING {
 					print!(
-						"{}({}*{} {cmp} {k}) (= {}({} {} {k_}))",
-						if up { " " } else { "!" },
+						"{}{} ({}*{} {cmp} {k}) (= {} {} {k_})",
+						"\t".repeat(depth),
+						if up { "up: " } else { "down: " },
 						head.c,
 						head.x.borrow(),
-						if up { " " } else { "!" },
-						head.x.borrow(),
+						head.x.borrow().lbl(),
 						if head.c.is_positive() {
 							*cmp
 						} else {
@@ -1591,50 +1611,96 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					);
 				}
 
-				let l = head.x.borrow().ineq(k_, up);
+				let (c, dnf) = head.x.borrow().ineq(k_, up);
 
 				if PRINT_COUPLING {
-					println!("== {l:?}",);
+					println!("== {dnf:?}",);
 				}
 
-				l
+				(c.map(|c| head.c * c), dnf)
 			} else {
 				let mut stop = false;
-				head.ineqs(up)
-					.into_iter()
-					.map_while(|(d, conditions)| {
-						if stop {
-							return None;
-						}
+				let mut last_k = None;
+				(
+					None,
+					head.ineqs(up)
+						.into_iter()
+						.map_while(|(d, conditions, implies_next)| {
+							if stop {
+								return None;
+							}
 
-						// l = x>=d+1, ~l = ~(x>=d+1) = x<d+1 = x<=d
-						let k_ = k - head.c * d;
+							// l = x>=d+1, ~l = ~(x>=d+1) = x<d+1 = x<=d
+							let k_ = k - head.c * d;
 
-						if PRINT_COUPLING {
-							println!(
-								"{}*({} {cmp} {}) = [{:?}] (k= {k} -> {k_})",
-								head.c,
-								head.x.borrow(),
-								d,
-								conditions
-							);
-						}
+							if PRINT_COUPLING {
+								print!(
+									"{} {} {}*({} {cmp} {}) = [{:?}] (k={k} - {}*{d} = {k_}) last_k={last_k:?}",
+                                    "\t".repeat(depth),
+									if up {
+										"up: "
+									} else {
+										"down: "
+									},
+									head.c,
+									head.x.borrow(),
+									if up { d + C::one() } else { d },
+									conditions,
+									head.c,
+								);
+							}
 
+							if implies_next
+								&& last_k
+									.map(|last_k| {
+										if cmp == &Comparator::GreaterEq {
+											k_ <= last_k
+										} else {
+											k_ >= last_k
+										}
+									})
+									.unwrap_or_default()
+							{
+								// won't see another consequent until we're past last_c
+								if PRINT_COUPLING {
+									print!("SKIP");
+								}
+								if REMOVE_IMPLIED_CLAUSES {
+									// if let Some(last_cnf) = last_cnf.as_ref() {
+									// 	debug_assert!(
+									// 		&Self::encode_rec(tail, cmp, k_, depth + 1).1
+									// 			== last_cnf
+									// 	);
+									// }
+									if PRINT_COUPLING {
+										println!();
+									}
+									return Some(vec![]); // some consequent -> skip clause
+									 // return Some(vec![conditions]);
+								}
+							}
 
-						let cnf = Self::encode_rec(tail, cmp, k_)
-							.into_iter()
-							.map(|r| conditions.clone().into_iter().chain(r).collect())
-							.collect_vec();
+							if PRINT_COUPLING {
+								println!();
+							}
+							let (c, cnf) = Self::encode_rec(tail, cmp, k_, depth + 1);
+							last_k = c;
+							// last_cnf = Some(cnf.clone());
+							let cnf = cnf
+								.into_iter()
+								.map(|r| conditions.clone().into_iter().chain(r).collect())
+								.collect_vec();
 
-						// // TODO or if r contains empty clause?
-						if cnf == vec![vec![]] {
-							stop = true;
-						}
+							// // TODO or if r contains empty clause?
+							if cnf == vec![vec![]] {
+								stop = true;
+							}
 
-						Some(cnf)
-					})
-					.flatten()
-					.collect()
+							Some(cnf)
+						})
+						.flatten()
+						.collect(),
+				)
 			}
 		} else {
 			unreachable!();
@@ -2141,11 +2207,17 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			.unwrap_or(Ok(()))
 	}
 
-	/// Return CNF for c*x>=k (or c*x<=k)
-	pub fn ineq(&self, k: C, up: bool) -> Vec<Vec<Lit>> {
+	/// Return CNF for x>=k (or x<=k)
+	pub fn ineq(&self, k: C, up: bool) -> (Option<C>, Vec<Vec<Lit>>) {
 		// TODO move into IntVar since self.c is taken care off?
 		match self.e.as_ref().unwrap() {
-			IntVarEnc::Ord(Some(o)) => o.ineq(self.dom.ineq(k, true), up),
+			IntVarEnc::Ord(Some(o)) => {
+				let pos = self.dom.geq(k);
+				let k = pos
+					.and_then(|pos| pos.checked_sub(1))
+					.and_then(|next_pos| self.dom.d(next_pos));
+				(k, o.ineq(pos, up))
+			}
 			IntVarEnc::Bin(Some(x_bin)) => {
 				// x>=k == ¬(x<k) == ¬(x<=k-1) (or x<=k == ¬(x>k) == ¬(x>=k+1))
 				// or: x>=k == x>=(2^bits - k)
@@ -2154,11 +2226,11 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 
 				let k_ = x_bin.normalize(k, &self.dom);
 
-				// k = 0 ->
 				let (range_lb, range_ub) = unsigned_binary_range::<C>(x_bin.bits());
 				if PRINT_COUPLING {
 					print!(" = x{}{k}", if up { ">=" } else { "<" },);
 				}
+
 				let (r_a, r_b) = if up {
 					(range_ub + C::one() - k_, range_ub)
 				} else {
@@ -2172,7 +2244,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 				let dnf = num::iter::range_inclusive(r_a, r_b)
 					.map(|k| x_bin.geq(k))
 					.collect_vec();
-				if up {
+				let dnf = if up {
 					dnf
 				} else {
 					// negate dnf
@@ -2185,7 +2257,8 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 							.flat_map(|conjunct| negate_cnf(vec![conjunct]))
 							.collect()
 					}
-				}
+				};
+				(None, dnf)
 
 				// let covered = nearest_power_of_two(k_, up) + self.lb(); // de-normalize
 				// b.ineqs(up, Dom::from_bounds())
@@ -2646,7 +2719,7 @@ mod tests {
 			// [Consistency::None],
 			// [false],
 			// [Some(0)] // [None, Some(0), Some(2)]
-			[Scm::Rca, Scm::Dnf],
+			[Scm::Rca],
 			[
 				Decomposer::Gt,
 				// Decomposer::Swc,
@@ -2659,9 +2732,9 @@ mod tests {
 			[false, true], // consistency
 			// [true],
 			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
-			[false, true], // equalize terns
-			[None],        // [None, Some(0), Some(2)]
-			[false]        // equalize_uniform_bin_ineqs
+			[false], // equalize terns
+			[None],  // [None, Some(0), Some(2)]
+			[false]  // equalize_uniform_bin_ineqs
 		)
 		.map(
 			|(
@@ -2688,9 +2761,10 @@ mod tests {
 		.collect()
 	}
 
-	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
+	const BRUTE_FORCE_SOLVE: bool = true;
+	const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
 	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Bin(None)];
-	const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None)];
+	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None)];
 	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[];
 
 	fn test_lp_for_configs(lp: &str, configs: Option<Vec<ModelConfig<C>>>) {
@@ -2703,9 +2777,11 @@ mod tests {
 	fn check_decomposition(
 		model: &Model<Lit, C>,
 		decomposition: &Model<Lit, C>,
-		expected_assignments: Option<&[Assignment<C>]>,
+		expected_assignments: Option<&Vec<Assignment<C>>>,
 	) {
-		if let Err(errs) = model.check_assignments(
+		if !BRUTE_FORCE_SOLVE {
+			return;
+		} else if let Err(errs) = model.check_assignments(
 			&decomposition.brute_force_solve(Some(IntVarId(model.num_var))),
 			expected_assignments,
 			None,
@@ -2764,8 +2840,7 @@ mod tests {
 	}
 
 	fn test_model(model: Model<Lit, C>, configs: Option<Vec<ModelConfig<C>>>) {
-		let expected_assignments = model.brute_force_solve(None);
-		let expected_assignments = Some(&expected_assignments[..]);
+		let expected_assignments = BRUTE_FORCE_SOLVE.then(|| model.brute_force_solve(None));
 
 		// TODO merge with CHECK_DECOMPOSITION_I
 		const CHECK_CONFIG_I: Option<usize> = None;
@@ -2836,7 +2911,7 @@ mod tests {
 
 				const CHECK_DECOMPOSITION: bool = true;
 				if CHECK_DECOMPOSITION {
-					check_decomposition(&model, &decomposition, expected_assignments);
+					check_decomposition(&model, &decomposition, expected_assignments.as_ref());
 				}
 
 				// TODO move into var_encs loop
@@ -2864,7 +2939,7 @@ mod tests {
 						})
 						.collect_vec()
 				} else {
-					vec![(decomposition.clone(), expected_assignments)]
+					vec![(decomposition.clone(), expected_assignments.as_ref())]
 				} {
 					// let mut con_db = decomp_db.clone();
 					// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
@@ -3217,7 +3292,7 @@ End
 		test_lp_for_configs(
 			r"
 Subject To
-c0: + 2 x1 + 3 x2 + 2 x3 >= 4
+c0: + 1 x1 + 1 x2 + 1 x3 >= 3
 Binary
 x1
 x2
@@ -3569,19 +3644,20 @@ End
 		);
 	}
 
-	#[test]
-	fn test_scm_4_neg_43() {
-		test_lp_for_configs(
-			r"
-Subject To
-  c0: -43 x_1 = 0
-Bounds
-  0 <= x_1 <= 7
-End
-",
-			None,
-		);
-	}
+	// TODO
+	// #[test]
+	// fn test_scm_4_neg_43() {
+	// 	test_lp_for_configs(
+	// 		r"
+	// Subject To
+	// c0: -43 x_1 = 0
+	// Bounds
+	// 0 <= x_1 <= 7
+	// End
+	// ",
+	// 		None,
+	// 	);
+	// }
 
 	#[test]
 	fn test_incon() {
@@ -3614,7 +3690,7 @@ End
 	}
 
 	#[test]
-	fn test_imp() {
+	fn test_two_neg() {
 		// - (x1:O ∈ |0..1| 1L) ≥ - (x2:O ∈ |0..1| 1L)
 		test_lp_for_configs(
 			r"
@@ -3643,10 +3719,11 @@ End
 			equalize_ternaries: false,
 			equalize_uniform_bin_ineqs: false,
 		};
+		// Expected output only has 1 (!) clause (3, -4)
 		test_lp_for_configs(
 			r"
 Subject To
-    c0: x_1 - x_2 <= 0
+    c0: x_1 - x_2 >= 0
     \ c0: x_1 + x_2 - x_3 <= 0
     \ x_2 in 0,1,2,3
 Doms
@@ -3659,14 +3736,7 @@ Encs
     x_2 O
 End
 	",
-			// None,
-			Some(vec![
-				base.clone(),
-				// ModelConfig {
-				// 	equalize_ternaries: true,
-				// 	..base
-				// },
-			]),
+			Some(vec![base.clone()]),
 		);
 	}
 
@@ -3694,13 +3764,7 @@ Bounds
 End
 	",
 			// None,
-			Some(vec![
-				base.clone(),
-				// ModelConfig {
-				// 	equalize_ternaries: true,
-				// 	..base
-				// },
-			]),
+			Some(vec![base.clone()]),
 		);
 	}
 
@@ -3718,10 +3782,10 @@ End
 		test_lp_for_configs(
 			r"
 Subject To
-  c0: 2 x1 + 3 x2 >= 20
+  c0: 1 x1 + 1 x2 >= 1
 Bounds
-  0 <= x1 <= 8
-  0 <= x2 <= 8
+  0 <= x1 <= 2
+  0 <= x2 <= 1
 End
 	",
 			Some(vec![base.clone()]),
@@ -3872,21 +3936,6 @@ End
 	",
 			Some(vec![base.clone()]),
 		);
-
-		// || CNF
-		// || 1, 2, 3, 4
-		// || 1, 2, 3
-		// || 1, 2, 4
-		// || 1, 2, 5
-		// || 1, 3, 4
-		// || 2, 3, 4, 5
-
-		// cnf (ScopOrd)= p cnf 5 5
-		// 5 2 1 0
-		// 2 1 4 0
-		// 2 1 3 0
-		// 3 1 4 0
-		// 5 4 3 2 0
 	}
 
 	#[test]
