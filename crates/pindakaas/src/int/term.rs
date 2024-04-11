@@ -1,12 +1,8 @@
-use crate::{
-	helpers::{as_binary, unsigned_binary_range},
-	int::LitOrConst,
-	ClauseDatabase, Coefficient, IntVarRef, Literal,
-};
+use crate::{helpers::as_binary, int::LitOrConst, ClauseDatabase, Coefficient, IntVarRef, Literal};
 use itertools::Itertools;
 use std::ops::Mul;
 
-use super::{bin::BinEnc, Dom, IntVarEnc};
+use super::{bin::BinEnc, IntVarEnc};
 
 #[derive(Debug, Clone)]
 pub struct Term<Lit: Literal, C: Coefficient> {
@@ -69,63 +65,8 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		}
 	}
 
-	pub fn ineqs(&self, up: bool) -> Vec<(C, Vec<Lit>, bool)> {
-		let ineqs = |es: Vec<Vec<Lit>>, dom: Dom<C>, up: bool| {
-			// go through False lit first
-			let es: Vec<_> = if up {
-				std::iter::once(vec![]) // x>=ub(x)+1
-					.chain(
-						// x>=ub(x), x>=ub(x)-1, .., x>=lb(x)+1
-						es.into_iter().rev(),
-					)
-					.collect()
-			} else {
-				std::iter::once(vec![]) // x<lb(x)
-					.chain(
-						// x<lb(x)+1, x<lb(x)+2, .., x<ub(x)
-						es.into_iter()
-							.map(|clause| clause.into_iter().map(|l| l.negate()).collect()),
-					)
-					.collect()
-			};
-
-			let ds: Vec<_> = if up {
-				dom.iter().collect_vec().into_iter().rev().collect()
-			} else {
-				dom.iter().collect()
-			};
-			ds.into_iter().zip(es)
-		};
-		match self
-			.x
-			.borrow()
-			.e
-			.as_ref()
-			.unwrap_or_else(|| panic!("{} was not encoded", self.x.borrow()))
-		{
-			IntVarEnc::Ord(Some(x_ord)) => ineqs(
-				x_ord.x.clone().into_iter().map(|l| vec![l]).collect(),
-				self.x.borrow().dom.clone(),
-				up,
-			)
-			.map(|(c, cnf)| (c, cnf, self.x.borrow().add_consistency))
-			.collect(),
-			IntVarEnc::Bin(Some(x_bin)) => {
-				// TODO not (particularly) optimized for the domain of x, but this is tricky as the domain values go outside the binary encoding ranges
-				let (range_lb, range_ub) = unsigned_binary_range::<C>(x_bin.bits());
-
-				ineqs(
-					num::iter::range_inclusive(range_lb, range_ub - C::one())
-						.map(|k| x_bin.geq(if up { range_ub - k } else { k + C::one() }))
-						.collect(),
-					Dom::from_bounds(range_lb, range_ub).add(self.x.borrow().lb()), // denormalize
-					up,
-				)
-				.map(|(c, cnf)| (c, cnf, self.x.borrow().add_consistency))
-				.collect()
-			}
-			_ => unreachable!(),
-		}
+	pub fn ineqs(&self, up: bool) -> Vec<(C, Vec<Lit>, C)> {
+		self.x.borrow().ineqs(up)
 	}
 
 	pub fn lb(&self) -> C {

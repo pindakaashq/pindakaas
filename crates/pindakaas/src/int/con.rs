@@ -376,11 +376,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			}
 			_ => {
 				// encode all variables
-				self.exp.terms.iter().try_for_each(|t| {
-					t.x.borrow_mut()
-						.encode(db, &mut HashMap::default())
-						.map(|_| ())
-				})?;
+				self.exp
+					.terms
+					.iter()
+					.try_for_each(|t| t.x.borrow_mut().encode(db, None).map(|_| ()))?;
 
 				const SORT_BY_COEF: bool = true;
 				let terms = if SORT_BY_COEF {
@@ -401,9 +400,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					// TODO move to closure to add DB?
 					let (_, cnf) = Self::encode_rec(&terms, &cmp, self.k, 0);
-					if PRINT_COUPLING {
-						println!("{}", cnf.iter().map(|c| c.iter().join(", ")).join("\n"));
-					}
+					// if PRINT_COUPLING {
+					// 	println!("{}", cnf.iter().map(|c| c.iter().join(", ")).join("\n"));
+					// }
 					for c in cnf {
 						emit_clause!(db, &c)?;
 					}
@@ -610,7 +609,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					);
 				}
 
-				let (c, dnf) = head.x.borrow().ineq(k_, up);
+				let (c, dnf) = head.x.borrow().ineq(k_, up, None);
 
 				if PRINT_COUPLING {
 					println!("== {dnf:?}",);
@@ -619,13 +618,14 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				(c.map(|c| head.c * c), dnf)
 			} else {
 				let mut stop = false;
-				let mut last_k = None;
-				// let mut last_cnf = None;
+				let mut last_a = None; // last antecedent implies till here
+				let mut last_k = None; // last consequent implies to here
+					   // let mut last_cnf = None;
 				(
 					None,
 					head.ineqs(up)
 						.into_iter()
-						.map_while(|(d, conditions, implies_next)| {
+						.map_while(|(d, conditions, implies)| {
 							if stop {
 								return None;
 							}
@@ -635,7 +635,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 							if PRINT_COUPLING {
 								print!(
-									"{} {} {}*({} {cmp} {}) = [{:?}] (k={k} - {}*{d} = {k_}) last_k={last_k:?}",
+									"{} {} {}*({} {cmp} {}) (->x{cmp}{implies}) = [{:?}] (k={k} - {}*{d} = {k_}) last_a={last_a:?} last_k={last_k:?}",
                                     "\t".repeat(depth),
 									if up {
 										"up: "
@@ -650,52 +650,49 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								);
 							}
 
-							if implies_next
-								&& last_k
-									// .map(|last_k| if up { k_ < last_k } else { k_ > last_k })
-									.map(|last_k| {
-										// if true {
-										if cmp == &Comparator::GreaterEq {
-											k_ <= last_k
-										} else {
-											k_ >= last_k
-										}
-									})
-									.unwrap_or_default()
-							{
-								// won't see another consequent until we're past last_c
-								if PRINT_COUPLING {
-									print!("SKIP");
-								}
-								match REMOVE_IMPLIED_CLAUSES {
-									true => {
-										// if let Some(last_cnf) = last_cnf.as_ref() {
-										// 	debug_assert!(
-										// 		&Self::encode_rec(tail, cmp, k_, depth + 1).1
-										// 			== last_cnf
-										// 	);
-										// }
-										if PRINT_COUPLING {
-											println!();
-										}
-										return Some(vec![]); // some consequent -> skip clause
-										 // return Some(vec![conditions]);
+							let antecedent_implies_next = last_a
+								.map(|last_a| {
+									// if cmp == &Comparator::GreaterEq {
+                                    // TODO  ?
+									if up {
+										d >= last_a
+									} else {
+										d <= last_a
 									}
-									false => (),
-								}
+								})
+								.unwrap_or_default();
+							let consequent_implies_next = last_k
+								.map(|last_k| {
+                                    k_ <= last_k
+								})
+								.unwrap_or_default();
+							if PRINT_COUPLING {
+								print!(" {}/{}", antecedent_implies_next, consequent_implies_next);
 							}
 
 							if PRINT_COUPLING {
 								println!();
 							}
+
 							let (c, cnf) = Self::encode_rec(tail, cmp, k_, depth + 1);
 							last_k = c;
-							// last_cnf = Some(cnf.clone());
+							last_a = Some(implies);
 							let cnf = cnf
 								.into_iter()
 								.map(|r| conditions.clone().into_iter().chain(r).collect())
 								.collect_vec();
 
+							if antecedent_implies_next && consequent_implies_next {
+								if PRINT_COUPLING {
+									println!("SKIP");
+								}
+								if REMOVE_IMPLIED_CLAUSES {
+									// if PRINT_COUPLING {
+									// 	println!();
+									// }
+									return Some(vec![]); // some consequent -> skip clause
+								}
+							}
 							// // TODO or if r contains empty clause?
 							if cnf == vec![vec![]] {
 								stop = true;

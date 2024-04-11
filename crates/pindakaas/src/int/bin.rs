@@ -50,11 +50,55 @@ impl<Lit: Literal> BinEnc<Lit> {
 		}
 	}
 
-	/// Returns conjunction for x>=k (or x<=k if !up)
-	pub(crate) fn _geqs<C: Coefficient>(&self, a: C, b: C) -> Vec<Vec<Lit>> {
-		num::iter::range_inclusive(a, b)
-			.map(|k| self.geq(k))
+	pub(crate) fn geq_implies<C: Coefficient>(&self, k: C) -> C {
+		if k.is_zero() {
+			// C::one()
+			C::zero()
+		} else {
+			let zeroes = usize::try_from((k).trailing_zeros()).unwrap();
+			C::one().shl(zeroes) - C::one()
+		}
+	}
+
+	/// Returns conjunction for x>=k, given x>=b
+	pub(crate) fn geqs<C: Coefficient>(&self, k: C, a: C) -> Vec<Vec<Lit>> {
+		let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
+
+		if k > range_ub {
+			vec![]
+		} else {
+			assert!(k <= a);
+			let k = k.clamp(range_lb, range_ub);
+			std::iter::successors(Some(k), |&k: &C| {
+				let k = k + if k.is_zero() {
+					C::one()
+				} else {
+					C::one().shl(usize::try_from((k).trailing_zeros()).unwrap())
+				};
+				if k < a {
+					Some(k)
+				} else {
+					None
+				}
+			})
+			.map(|k| {
+				as_binary(k.into(), Some(self.bits()))
+					.iter()
+					.zip(self.xs().iter().cloned())
+					// if >=, find 1's, if <=, find 0's
+					.filter_map(|(b, x)| b.then_some(x))
+					.filter_map(|x| match x {
+						// THIS IS A CONJUNCTION
+						// TODO make this a bit more clear (maybe simplify function for Cnf)
+						LitOrConst::Lit(x) => Some(Ok(x)),
+						LitOrConst::Const(true) => None, // literal satisfied
+						LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
+					})
+					.try_collect()
+					.unwrap_or_default()
+			})
 			.collect()
+		}
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
@@ -81,31 +125,39 @@ impl<Lit: Literal> BinEnc<Lit> {
 		}
 	}
 
-	// /// Returns conjunction for x>=k (or x<=k if !up)
-	// pub fn ineq<C: Coefficient>(&self, up: bool, k: C) -> Vec<Lit> {
-	// 	assert!(up);
-	// 	let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
-	// 	if k > range_ub {
-	// 		return vec![];
-	// 	}
-	// 	let k = k.clamp(range_lb, range_ub);
-	// 	as_binary(k.into(), Some(self.bits()))
-	// 		.into_iter()
-	// 		.zip(self.xs().iter().cloned())
-	// 		// if >=, find 1's, if <=, find 0's
-	// 		.filter_map(|(b, x)| (b == up).then_some(x))
-	// 		// if <=, negate lits at 0's
-	// 		.map(|x| if up { x } else { -x })
-	// 		.filter_map(|x| match x {
-	// 			// THIS IS A CONJUNCTION
-	// 			// TODO make this a bit more clear (maybe simplify function for Cnf)
-	// 			LitOrConst::Lit(x) => Some(Ok(x)),
-	// 			LitOrConst::Const(true) => None, // literal satisfied
-	// 			LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
-	// 		})
-	// 		.try_collect()
-	// 		.unwrap_or_default()
-	// }
+	/// Returns conjunction for x>=k (or x<=k if !up)
+	pub(crate) fn _ineqs<C: Coefficient>(&self, a: C, b: C, up: bool) -> Vec<Vec<Lit>> {
+		num::iter::range_inclusive(a, b)
+			.map(|k| self.ineq(k, up))
+			.collect()
+	}
+
+	/// Returns conjunction for x>=k (or x<=k if !up)
+	pub fn ineq<C: Coefficient>(&self, k: C, up: bool) -> Vec<Lit> {
+		assert!(up);
+		let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
+		if k > range_ub {
+			// return vec![];
+			return vec![];
+		}
+		let k = k.clamp(range_lb, range_ub);
+		as_binary(k.into(), Some(self.bits()))
+			.into_iter()
+			.zip(self.xs().iter().cloned())
+			// if >=, find 1's, if <=, find 0's
+			.filter_map(|(b, x)| (b == up).then_some(x))
+			// if <=, negate lits at 0's
+			.map(|x| if up { x } else { -x })
+			.filter_map(|x| match x {
+				// THIS IS A CONJUNCTION
+				// TODO make this a bit more clear (maybe simplify function for Cnf)
+				LitOrConst::Lit(x) => Some(Ok(x)),
+				LitOrConst::Const(true) => None, // literal satisfied
+				LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
+			})
+			.try_collect()
+			.unwrap_or_default()
+	}
 
 	/// Get encoding as unsigned binary representation (if negative dom values, offset by `-2^(k-1)`)
 	pub(crate) fn xs(&self) -> Vec<LitOrConst<Lit>> {
@@ -184,7 +236,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 	}
 
 	/// Normalize k to its value in unsigned binary relative to this encoding
-	pub(crate) fn _denormalize<C: Coefficient>(&self, k: C, dom: &Dom<C>) -> C {
+	pub(crate) fn denormalize<C: Coefficient>(&self, k: C, dom: &Dom<C>) -> C {
 		k + dom.lb()
 	}
 
@@ -274,7 +326,7 @@ mod tests {
 	fn test_geqs() {
 		let mut db = TestDB::new(0);
 		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
-		dbg!(&x._geqs(2, 4));
+		assert_eq!(x.geqs(1, 6), vec![vec![1], vec![2], vec![3]]);
 	}
 
 	#[test]

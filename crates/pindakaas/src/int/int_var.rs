@@ -103,93 +103,136 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			.unwrap_or(Ok(()))
 	}
 
-	/// Return CNF for x>=k (or x<=k)
-	pub fn ineq(&self, k: C, up: bool) -> (Option<C>, Vec<Vec<Lit>>) {
+	pub fn ineqs(&self, up: bool) -> Vec<(C, Vec<Lit>, C)> {
+		let ineqs = |es: Vec<Vec<Lit>>, dom: Dom<C>, up: bool| {
+			// go through False lit first
+			let es: Vec<_> = if up {
+				std::iter::once(vec![]) // x>=ub(x)+1
+					.chain(
+						// x>=ub(x), x>=ub(x)-1, .., x>=lb(x)+1
+						es.into_iter().rev(),
+					)
+					.collect()
+			} else {
+				std::iter::once(vec![]) // x<lb(x)
+					.chain(
+						// x<lb(x)+1, x<lb(x)+2, .., x<ub(x)
+						es.into_iter()
+							.map(|clause| clause.into_iter().map(|l| l.negate()).collect()),
+					)
+					.collect()
+			};
+
+			let ds: Vec<_> = if up {
+				dom.iter().collect_vec().into_iter().rev().collect()
+			} else {
+				dom.iter().collect()
+			};
+			ds.into_iter().zip(es)
+		};
+		match self
+			.e
+			.as_ref()
+			.unwrap_or_else(|| panic!("{} was not encoded", self))
+		{
+			IntVarEnc::Ord(Some(x_ord)) => ineqs(
+				x_ord.x.clone().into_iter().map(|l| vec![l]).collect(),
+				self.dom.clone(),
+				up,
+			)
+			.map(|(c, cnf)| {
+				(
+					c,
+					cnf,
+					if self.add_consistency {
+						self.lb()
+					// if up {
+					// 	self.lb()
+					// } else {
+					// 	self.ub()
+					// }
+					} else {
+						c
+					},
+				)
+			})
+			.collect(),
+			IntVarEnc::Bin(Some(x_bin)) => {
+				// TODO not (particularly) optimized for the domain of x, but this is tricky as the domain values go outside the binary encoding ranges
+				let (range_lb, range_ub) = unsigned_binary_range::<C>(x_bin.bits());
+
+				ineqs(
+					num::iter::range_inclusive(range_lb, range_ub - C::one())
+						.map(|k| x_bin.geq(if up { range_ub - k } else { k + C::one() }))
+						.collect(),
+					Dom::from_bounds(range_lb, range_ub).add(self.lb()), // denormalize
+					up,
+				)
+				.map(|(c, cnf)| {
+					(c, cnf, {
+						let k = if up { range_ub - c } else { c };
+						// let k = range_ub - c;
+						let k = x_bin.normalize(k, &self.dom);
+						let a = x_bin.geq_implies(k);
+						let k = if up { c - a } else { c + a };
+						x_bin.denormalize(k, &self.dom)
+					})
+				})
+				.collect()
+			}
+			_ => unreachable!(),
+		}
+	}
+
+	/// Return x>=k (given x>=a)
+	pub fn ineq(&self, k: C, up: bool, a: Option<C>) -> (Option<C>, Vec<Vec<Lit>>) {
 		// TODO move into IntVar since self.c is taken care off?
 		match self.e.as_ref().unwrap() {
 			IntVarEnc::Ord(Some(o)) => {
+				// TODO make use of a?
 				let pos = self.dom.geq(k);
-				// let pos_n = self
-				// 	.dom
-				// 	.ineq(if up { k + C::one() } else { k - C::one() }, true);
-				// let k = pos_n.map(|pos_n| self.dom.d(pos_n));
-				// dbg!(&pos);
 				if PRINT_COUPLING {
 					print!(" = d_{pos:?}");
 				}
-				// match pos {
-				// 	None => None,
-				// 	Some(p) => {
-				// 		if C::from(pos).unwrap() <= self.dom.size() - C::one() {
-				// 			self.dom.d(pos + 1).unwrap()
-				// 		} else {
-				// 			None
-				// 		}
-				// 	}
-				// };
-
-				let k = pos
-					.and_then(|pos| pos.checked_sub(1))
-					.and_then(|next_pos| self.dom.d(next_pos));
-				// print!(" -> d'_{next_pos}");
-
-				// let k = pos.map(|pos| {
-				// 	if C::from(pos).unwrap() == self.dom.size() - C::one() {
-				// 		self.dom.d(pos + 1).unwrap()
-				// 	} else {
-				// 		self.dom.ub()
-				// 	}
-				// });
-
-				(k, o.ineq(pos, up))
-				// let k = pos.map(|pos| {
-				// 	if up {
-				// 		if pos.is_zero() && k < self.dom.lb() {
-				// 			self.dom.lb()
-				// 		} else if C::from(pos).unwrap() < self.dom.size() - C::one() {
-				// 			self.dom.d(pos + 1).unwrap()
-				// 		} else {
-				// 			self.dom.ub()
-				// 		}
-				// 	} else {
-				// 		if pos.is_zero() && k > self.dom.ub() {
-				// 			self.dom.ub()
-				// 		} else if pos > 0 {
-				// 			self.dom.d(pos - 1).unwrap()
-				// 		} else {
-				// 			self.dom.lb()
-				// 		}
-				// 	}
-				// });
-				// .unwrap_or(if up { self.dom.lb() } else { self.dom.ub() });
+				let d = if let Some(pos) = pos {
+					let pos = if up {
+						Some(pos) // if larger than self.dom.size, then self.dom.d will return None
+					} else {
+						pos.checked_sub(1)
+					};
+					pos.and_then(|next_pos| self.dom.d(next_pos))
+				} else {
+					// TODO not sure if this should be ub/lb or None. This makes most sense looking at the test ineq_ord
+					if up {
+						None
+					} else {
+						Some(self.dom.ub())
+					}
+				};
+				let geq = o.geq(pos);
+				(d, if up { geq } else { negate_cnf(geq) })
 			}
 			IntVarEnc::Bin(Some(x_bin)) => {
 				// x>=k == ¬(x<k) == ¬(x<=k-1) (or x<=k == ¬(x>k) == ¬(x>=k+1))
 				// or: x>=k == x>=(2^bits - k)
 				// returns Dnf e.q. (x1 \/ x0 /\ x0)
 				// x1 /\ x0 -> x>=3 -> x0 \/ x2
-				// let k_ = if true { k - C::one() } else { k + C::one() };
-
-				let k_ = x_bin.normalize(k, &self.dom);
 
 				let (range_lb, range_ub) = unsigned_binary_range::<C>(x_bin.bits());
-				if PRINT_COUPLING {
-					print!(" = x{}{k}", if up { ">=" } else { "<" },);
-				}
-
+				let (k, a) = (
+					x_bin.normalize(k, &self.dom),
+					a.map(|a| x_bin.normalize(a, &self.dom)).unwrap_or(range_ub),
+				);
 				let (r_a, r_b) = if up {
-					(range_ub + C::one() - k_, range_ub)
+					// x>=k \/ x>=k+1 \/ .. \/ x>=r_b
+					(range_ub + C::one() - k, a)
 				} else {
-					(range_lb + k_, range_ub)
+					(range_lb + k, a)
 				};
 
-				if PRINT_COUPLING {
-					print!("({r_a}..{r_b})");
-				}
+				// TODO replace by ineqs..?
+				let dnf = x_bin.geqs(r_a, r_b);
 
-				let dnf = num::iter::range_inclusive(r_a, r_b)
-					.map(|k| x_bin.geq(k))
-					.collect_vec();
 				let dnf = if up {
 					dnf
 				} else {
@@ -205,35 +248,6 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					}
 				};
 				(None, dnf)
-
-				// let covered = nearest_power_of_two(k_, up) + self.lb(); // de-normalize
-				// b.ineqs(up, Dom::from_bounds())
-				// 	.into_iter()
-				// 	.map(|(_, cnf, _)| cnf)
-				// 	.collect()
-				// let ks = if up { (range_lb, k_) } else { (k_, range_ub) };
-				// let ks = (std::cmp::max(range_lb, ks.0), std::cmp::min(range_ub, ks.1)); // TODO temp
-
-				// let ks = Dom::from_bounds(ks.0, ks.1);
-
-				// (
-				// 	covered,
-				// 	b.ineqs(!up, ks)
-				// 		.into_iter()
-				// 		.with_position()
-				// 		.flat_map(|(pos, (k, dnf, is_implied))| {
-				// 			(
-				// 				// this cnf contains redundant clauses
-				// 				!is_implied
-				// 					|| matches!(pos, Position::First | Position::Only)
-				// 					|| !REMOVE_IMPLIED_CLAUSES
-				// 			)
-				// 				.then_some(dnf)
-				// 		})
-				// 		.flat_map(negate_cnf)
-				// 		.filter(|clause| !clause.is_empty())
-				// 		.collect(),
-				// )
 			}
 			IntVarEnc::Const(_) => todo!(),
 
@@ -310,7 +324,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		&mut self,
 		db: &mut DB,
 	) -> Result<BinEnc<Lit>, Unsatisfiable> {
-		self.encode(db, &mut HashMap::default()).map(|e| match e {
+		self.encode(db, None).map(|e| match e {
 			IntVarEnc::Bin(Some(b)) => b,
 			_ => unreachable!(),
 		})
@@ -319,7 +333,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 	pub(crate) fn encode<DB: ClauseDatabase<Lit = Lit>>(
 		&mut self,
 		db: &mut DB,
-		_views: &mut HashMap<(IntVarId, C), Lit>,
+		_views: Option<&mut HashMap<(IntVarId, C), Lit>>,
 	) -> Result<IntVarEnc<Lit, C>, Unsatisfiable> {
 		// cache instantiated encoding
 		let e = match self.e {
@@ -545,4 +559,89 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			  // ))},
 		}
 	}
+}
+
+#[cfg(test)]
+mod tests {
+	type Lit = i32;
+	type C = i32;
+
+	use super::*;
+
+	use crate::helpers::tests::TestDB;
+
+	#[test]
+	fn test_ineq_ord() {
+		(|| {
+			let mut db = TestDB::new(0);
+			let mut x = IntVar::<Lit, C>::from_dom(
+				0,
+				Dom::from_slice(&[5, 7, 8]),
+				true,
+				Some(IntVarEnc::Ord(None)),
+				Some(String::from("x")),
+			);
+			x.encode(&mut db, None)?;
+			assert_eq!(x.ineq(3, true, None), (Some(5), vec![]));
+			assert_eq!(x.ineq(5, true, None), (Some(5), vec![]));
+			assert_eq!(x.ineq(6, true, None), (Some(7), vec![vec![1]]));
+			assert_eq!(x.ineq(8, true, None), (Some(8), vec![vec![2]]));
+			assert_eq!(x.ineq(12, true, None), (None, vec![vec![]]));
+
+			// x < k
+			assert_eq!(x.ineq(3, false, None), (None, vec![vec![]]));
+			assert_eq!(x.ineq(5, false, None), (None, vec![vec![]]));
+			assert_eq!(x.ineq(6, false, None), (Some(5), vec![vec![-1]]));
+			assert_eq!(x.ineq(7, false, None), (Some(5), vec![vec![-1]]));
+			assert_eq!(x.ineq(8, false, None), (Some(7), vec![vec![-2]]));
+			assert_eq!(x.ineq(12, false, None), (Some(8), vec![]));
+			Ok::<_, Unsatisfiable>(())
+		})()
+		.unwrap();
+	}
+
+	#[test]
+	fn test_ineqs_bin() {
+		(|| {
+			let mut db = TestDB::new(0);
+			let mut x = IntVar::<Lit, C>::from_dom(
+				0,
+				Dom::from_slice(&[0, 1, 2, 3, 4, 5, 6, 7]),
+				true,
+				Some(IntVarEnc::Bin(None)),
+				Some(String::from("x")),
+			);
+			x.encode(&mut db, None)?;
+			assert_eq!(
+				x.ineqs(true),
+				vec![
+					(7, vec![], 7),        // +0
+					(6, vec![1], 6),       // +0
+					(5, vec![2], 4),       // +1
+					(4, vec![1, 2], 4),    // +0
+					(3, vec![3], 0),       // +3
+					(2, vec![1, 3], 2),    // +0
+					(1, vec![2, 3], 0),    // +0
+					(0, vec![1, 2, 3], 0)  // +0
+				]
+			);
+
+			assert_eq!(
+				x.ineqs(false),
+				vec![
+					(0, vec![], 0),           // +0
+					(1, vec![-1], 1),         // +0
+					(2, vec![-2], 3),         // +0
+					(3, vec![-1, -2], 3),     // +3
+					(4, vec![-3], 7),         // +0
+					(5, vec![-1, -3], 5),     // +1
+					(6, vec![-2, -3], 7),     // +0
+					(7, vec![-1, -2, -3], 7), // +0
+				]
+			);
+			Ok::<_, Unsatisfiable>(())
+		})()
+		.unwrap();
+	}
+
 }
