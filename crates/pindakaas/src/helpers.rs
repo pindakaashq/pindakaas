@@ -80,7 +80,7 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 	Ok(())
 }
 
-/// Negates CNF (flipping between empty clause and formula)
+/// Negates CNF (flipping between empty clause and empty formula)
 pub(crate) fn negate_cnf<Lit: Literal>(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
 	if clauses.is_empty() {
 		vec![vec![]]

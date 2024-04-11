@@ -28,6 +28,9 @@ use std::{
 };
 use std::{fmt::Display, path::PathBuf};
 
+#[cfg(feature = "trace")]
+pub(crate) const PRINT_COUPLING: bool = true;
+#[cfg(not(feature = "trace"))]
 pub(crate) const PRINT_COUPLING: bool = false;
 /// In the coupling, skip redundant clauses of which every term is already implied
 pub(crate) const REMOVE_IMPLIED_CLAUSES: bool = true;
@@ -399,13 +402,12 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		db: &mut DB,
 	) -> Result<(), Unsatisfiable> {
 		// Encode (or retrieve encoded) variables (in order of id so lits line up more nicely with variable order)
-		let mut all_views = HashMap::new();
 		self.vars()
 			.iter()
 			.sorted_by_key(|var| var.borrow().id)
 			.try_for_each(|var| {
 				var.borrow_mut().decide_encoding(self.config.cutoff);
-				var.borrow_mut().encode(db, &mut all_views).map(|_| ())
+				var.borrow_mut().encode(db, None).map(|_| ())
 			})
 	}
 
@@ -1198,9 +1200,7 @@ mod tests {
 						.into_iter()
 						.filter(|x| x.borrow().id.0 <= model.num_var)
 						.map(|x| {
-							x.borrow_mut()
-								.encode(&mut db, &mut HashMap::default())
-								.unwrap();
+							x.borrow_mut().encode(&mut db, None).unwrap();
 							(x.borrow().id.clone(), x.clone())
 						})
 						.collect::<HashMap<IntVarId, IntVarRef<Lit, C>>>();
@@ -1971,16 +1971,40 @@ End
 			r"
 Subject To
     c0: x_1 - x_2 >= 0
-    \ c0: x_1 + x_2 - x_3 <= 0
-    \ x_2 in 0,1,2,3
 Doms
     x_1 in 0,1,2,3
     x_2 in 0,3
-    \ x_1 in 0,2,3
-    \ x_2 in 0,1,2,3
 Encs
     x_1 O
     x_2 O
+End
+	",
+			Some(vec![base.clone()]),
+		);
+	}
+
+	#[test]
+	fn test_tmp_whiteboard() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		test_lp_for_configs(
+			r"
+Subject To
+    c0: x + y >= 10
+Bounds
+    0 <= x <= 15
+Doms
+    y in 0,5,7,9,10
+Encs
+    x B
+    y O
 End
 	",
 			Some(vec![base.clone()]),
