@@ -10,6 +10,7 @@ use crate::{
 };
 use itertools::Itertools;
 
+use super::helpers::filter_cnf;
 use super::{
 	model::{LinDecomposer, PRINT_COUPLING, REMOVE_IMPLIED_CLAUSES, USE_COUPLING_IO_LEX},
 	IntVarEnc, IntVarId,
@@ -620,7 +621,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				let mut stop = false;
 				let mut last_a = None; // last antecedent implies till here
 				let mut last_k = None; // last consequent implies to here
-					   // let mut last_cnf = None;
+				let mut last_cnf = None;
 				(
 					None,
 					head.ineqs(up)
@@ -663,7 +664,13 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								.unwrap_or_default();
 							let consequent_implies_next = last_k
 								.map(|last_k| {
-                                    k_ <= last_k
+                                    // k_ <= last_k
+									// if cmp == &Comparator::GreaterEq {
+									if up {
+										d >= last_k
+									} else {
+										d <= last_k
+									}
 								})
 								.unwrap_or_default();
 							if PRINT_COUPLING {
@@ -674,25 +681,53 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								println!();
 							}
 
+
 							let (c, cnf) = Self::encode_rec(tail, cmp, k_, depth + 1);
-							last_k = c;
-							last_a = Some(implies);
 							let cnf = cnf
 								.into_iter()
 								.map(|r| conditions.clone().into_iter().chain(r).collect())
 								.collect_vec();
 
-							if antecedent_implies_next && consequent_implies_next {
-								if PRINT_COUPLING {
-									println!("SKIP");
-								}
-								if REMOVE_IMPLIED_CLAUSES {
-									// if PRINT_COUPLING {
-									// 	println!();
-									// }
-									return Some(vec![]); // some consequent -> skip clause
-								}
-							}
+                            if PRINT_COUPLING {
+                                print!("cnf = {:?} given {:?} -> ", cnf, last_cnf);
+                            }
+
+                            let cnf = 
+                                if REMOVE_IMPLIED_CLAUSES && last_cnf.is_some()  {
+                                    filter_cnf(cnf, last_cnf.as_ref().unwrap())
+                                } else {
+                                    cnf.clone()
+                                };
+
+                            if PRINT_COUPLING {
+                                print!("cnf = {:?}", cnf);
+                            }
+							// if antecedent_implies_next && consequent_implies_next {
+							// if last_cnf.as_ref().map(|last_cnf : &Vec<Vec<Lit>> | !(last_cnf.is_empty()) &&  filter_cnf(&cnf, &last_cnf)).unwrap_or_default() {
+
+                                // // debug_assert!(last_cnf.clone().map(|last_cnf| is_cnf_superset(&last_cnf, &cnf))
+                                // //               .unwrap_or(true), "Expected {last_cnf:?} ⊆ {cnf:?}");
+
+							// 	if PRINT_COUPLING {
+							// 		println!("SKIP: {last_cnf:?} ⊆ {cnf:?}");
+							// 	}
+							// 	if REMOVE_IMPLIED_CLAUSES {
+							// 		// if PRINT_COUPLING {
+							// 		// 	println!();
+							// 		// }
+							// 		return Some(vec![]); // some consequent -> skip clause
+							// 	}
+							// }
+
+								// if PRINT_COUPLING {
+								// 	println!("NOSKIP: {last_cnf:?} !⊆ {cnf:?}");
+								// }
+
+
+                            last_cnf = Some(cnf.clone());
+							last_k = c;
+							last_a = Some(implies);
+
 							// // TODO or if r contains empty clause?
 							if cnf == vec![vec![]] {
 								stop = true;
