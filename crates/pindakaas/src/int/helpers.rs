@@ -615,6 +615,26 @@ pub(crate) fn sign_extend<Lit: Literal>(
 		.collect()
 }
 
+pub(crate) fn filter_cnf<Lit: Literal>(cnf: Vec<Vec<Lit>>, given: &Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
+	if given.is_empty() {
+		cnf
+	} else {
+		cnf.into_iter()
+			.filter(|clause| {
+				// remove clause
+				!given // if not redundant; if any given clause
+					.iter()
+					.any(|given_clause| is_clause_redundant(given_clause, clause))
+			})
+			.collect()
+	}
+}
+
+/// is clause a subset of b
+pub(crate) fn is_clause_redundant<Lit: Literal>(a: &Vec<Lit>, b: &Vec<Lit>) -> bool {
+	a.iter().all(|l| b.contains(l))
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -688,5 +708,23 @@ End
 		assert_eq!(nearest_power_of_two(6, false), 4);
 		assert_eq!(nearest_power_of_two(8, false), 8);
 		assert_eq!(nearest_power_of_two(9, false), 8);
+	}
+	#[test]
+	fn test_filter_cnf() {
+		// assert_eq!(
+		// 	filter_cnf(vec![vec![4, 6]], &vec![vec![2, 3, 5]]),
+		// 	vec![vec![4, 6]]
+		// );
+
+		// assert_eq!(
+		// 	filter_cnf(vec![vec![4, 5]], &vec![vec![1, 4, 5]]),
+		// Vec::<Vec<_>>::new()
+		// );
+
+		// a \/ b \/ c <= a \/ b
+		assert_eq!(
+			filter_cnf(vec![vec![1, 2, 3]], &vec![vec![1, 2], vec![4]]),
+			Vec::<Vec<_>>::new()
+		);
 	}
 }
