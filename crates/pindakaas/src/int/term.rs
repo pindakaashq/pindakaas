@@ -50,7 +50,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				if let &[lit] = &x_ord.iter().take(2).collect_vec()[..] {
 					Ok(lit_to_bin_enc(lit.clone()))
 				} else {
-					todo!("Need full scm for {self}: {self:?}")
+					todo!("Need full scm for {self}:\n{self:?}")
 				}
 			}
 			Some(IntVarEnc::Bin(Some(x_bin))) if x_bin.x.len() == 1 => {
