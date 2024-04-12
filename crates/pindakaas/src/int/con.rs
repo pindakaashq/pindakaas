@@ -401,9 +401,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					// TODO move to closure to add DB?
 					let (_, cnf) = Self::encode_rec(&terms, &cmp, self.k, 0);
-					// if PRINT_COUPLING {
-					// 	println!("{}", cnf.iter().map(|c| c.iter().join(", ")).join("\n"));
-					// }
+					if PRINT_COUPLING {
+						println!("{}", cnf.iter().map(|c| c.iter().join(", ")).join("\n"));
+					}
+
 					for c in cnf {
 						emit_clause!(db, &c)?;
 					}
@@ -688,29 +689,30 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								.map(|r| conditions.clone().into_iter().chain(r).collect())
 								.collect_vec();
 
-                            if PRINT_COUPLING {
-                                print!("cnf = {:?} given {:?} -> ", cnf, last_cnf);
-                            }
+                            // if PRINT_COUPLING {
+                            //     print!("cnf = {:?} given {:?} -> ", cnf, last_cnf);
+                            // }
 
-                            let cnf = 
-                                if REMOVE_IMPLIED_CLAUSES && last_cnf.is_some()  {
-                                    filter_cnf(cnf, last_cnf.as_ref().unwrap())
+                            // missing let-chain feature
+                            let cnf =
+                                if let (true, Some(last_cnf)) = (REMOVE_IMPLIED_CLAUSES, last_cnf.as_ref())  {
+                                    filter_cnf(cnf, last_cnf)
                                 } else {
                                     cnf.clone()
                                 };
 
-                            if PRINT_COUPLING {
-                                print!("cnf = {:?}", cnf);
-                            }
-							// if antecedent_implies_next && consequent_implies_next {
-							// if last_cnf.as_ref().map(|last_cnf : &Vec<Vec<Lit>> | !(last_cnf.is_empty()) &&  filter_cnf(&cnf, &last_cnf)).unwrap_or_default() {
+                            // if PRINT_COUPLING {
+                            //     print!("cnf = {:?}", cnf);
+                            // }
 
+							// if antecedent_implies_next && consequent_implies_next {
                                 // // debug_assert!(last_cnf.clone().map(|last_cnf| is_cnf_superset(&last_cnf, &cnf))
                                 // //               .unwrap_or(true), "Expected {last_cnf:?} ⊆ {cnf:?}");
 
 							// 	if PRINT_COUPLING {
 							// 		println!("SKIP: {last_cnf:?} ⊆ {cnf:?}");
 							// 	}
+
 							// 	if REMOVE_IMPLIED_CLAUSES {
 							// 		// if PRINT_COUPLING {
 							// 		// 	println!();

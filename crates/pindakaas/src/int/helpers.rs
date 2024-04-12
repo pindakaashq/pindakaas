@@ -631,7 +631,7 @@ pub(crate) fn filter_cnf<Lit: Literal>(cnf: Vec<Vec<Lit>>, given: &Vec<Vec<Lit>>
 }
 
 /// is clause a subset of b
-pub(crate) fn is_clause_redundant<Lit: Literal>(a: &Vec<Lit>, b: &Vec<Lit>) -> bool {
+pub(crate) fn is_clause_redundant<Lit: Literal>(a: &[Lit], b: &[Lit]) -> bool {
 	a.iter().all(|l| b.contains(l))
 }
 
