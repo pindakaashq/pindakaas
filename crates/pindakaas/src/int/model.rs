@@ -343,42 +343,47 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 						.any(|x| matches!(x.borrow().e, Some(IntVarEnc::Bin(_))))
 					{
 						if let Some((rhs, lhs)) = last.clone().exp.terms.split_last() {
-							let dom = lhs
-								.iter()
-								.map(|t| t.dom().into_iter())
-								.multi_cartesian_product()
-								.map(|cs| cs.into_iter().reduce(C::add).unwrap())
-								.sorted()
-								.dedup()
-								.collect_vec();
-							let y = model
-								.new_var(
-									&dom,
-									model.config.add_consistency,
-									Some(IntVarEnc::Bin(None)),
-									last.lbl.as_ref().map(|lbl| format!("last-lhs-{lbl}")),
-								)
-								.unwrap();
-							vec![
-								Lin {
-									exp: LinExp {
-										terms: lhs
-											.iter()
-											.cloned()
-											.chain(vec![Term::new(-C::one(), y.clone())])
-											.collect(),
+							if lhs.is_empty() {
+								vec![last.clone()]
+							} else {
+								let dom = lhs
+									.iter()
+									.map(|t| t.dom().into_iter())
+									.multi_cartesian_product()
+									.map(|cs| cs.into_iter().reduce(C::add).unwrap())
+									.sorted()
+									.dedup()
+									.collect_vec();
+								let y = model
+									.new_var(
+										&dom,
+										// model.config.add_consistency,
+										true,
+										Some(IntVarEnc::Bin(None)),
+										last.lbl.as_ref().map(|lbl| format!("last-lhs-{lbl}")),
+									)
+									.unwrap();
+								vec![
+									Lin {
+										exp: LinExp {
+											terms: lhs
+												.iter()
+												.cloned()
+												.chain(vec![Term::new(-C::one(), y.clone())])
+												.collect(),
+										},
+										cmp: Comparator::Equal,
+										k: C::zero(),
+										lbl: last.lbl.as_ref().map(|lbl| format!("last-{lbl}")),
 									},
-									cmp: Comparator::Equal,
-									k: C::zero(),
-									lbl: last.lbl.as_ref().map(|lbl| format!("last-{lbl}")),
-								},
-								Lin {
-									exp: LinExp {
-										terms: vec![Term::from(y), rhs.clone()],
+									Lin {
+										exp: LinExp {
+											terms: vec![Term::from(y), rhs.clone()],
+										},
+										..last.clone()
 									},
-									..last.clone()
-								},
-							]
+								]
+							}
 						} else {
 							unreachable!();
 						}
