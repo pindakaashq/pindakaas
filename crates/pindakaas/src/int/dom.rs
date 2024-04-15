@@ -7,7 +7,7 @@ use num::iter::RangeInclusive;
 
 use crate::{helpers::is_sorted, Coefficient};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Dom<C: Coefficient> {
 	pub(crate) ranges: Vec<(C, C)>,
 }
@@ -19,25 +19,28 @@ impl<C: Coefficient> Dom<C> {
 	pub fn from_slice(ds: &[C]) -> Self {
 		debug_assert!(is_sorted(ds), "{ds:?}");
 		let mut ds = ds.iter();
-		let k = *ds.next().unwrap();
-		let mut k = (k, k);
-		let mut ranges = ds
-			.flat_map(|&d| {
-				if d - k.1 == C::one() {
-					k.1 = d;
-					None
-				} else {
-					let res = k;
-					k = (d, d);
-					Some(res)
-				}
-			})
-			.collect::<Vec<_>>();
-		ranges.push(k);
+		if let Some(&k) = ds.next() {
+			let mut k = (k, k);
+			let mut ranges = ds
+				.flat_map(|&d| {
+					if d - k.1 == C::one() {
+						k.1 = d;
+						None
+					} else {
+						let res = k;
+						k = (d, d);
+						Some(res)
+					}
+				})
+				.collect::<Vec<_>>();
+			ranges.push(k);
 
-		let self_ = Self { ranges };
-		debug_assert!(self_.invariant(), "{self_:?}");
-		self_
+			let self_ = Self { ranges };
+			debug_assert!(self_.invariant(), "{self_:?}");
+			self_
+		} else {
+			Self::default()
+		}
 	}
 
 	pub fn from_bounds(lb: C, ub: C) -> Self {
