@@ -172,6 +172,7 @@ pub mod tests {
 		types::{CNFDescription, Instantiate},
 		Certificate, Config, SatSolverIF, SolveIF, Solver, SolverError,
 	};
+	use std::path::PathBuf;
 	use std::{
 		collections::{HashMap, HashSet},
 		process::Command,
@@ -509,13 +510,14 @@ pub mod tests {
 
 			let dimacs = {
 				let rng = thread_rng();
-				let dimacs = format!(
-					"./tmp/{}.dimacs",
+				let dimacs = PathBuf::from(format!(
+					"{}/tmp/{}.dimacs",
+					env!("CARGO_MANIFEST_DIR"),
 					rng.sample_iter(&Alphanumeric)
 						.take(7)
 						.map(char::from)
 						.collect::<String>()
-				);
+				));
 				std::fs::write(&dimacs, format!("{}", self.cnf)).unwrap();
 				dimacs
 			};
