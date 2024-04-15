@@ -271,13 +271,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		(!dom.is_empty())
 			.then(|| {
 				self.num_var += 1;
-				Rc::new(RefCell::new(IntVar::from_dom(
-					self.num_var,
-					dom,
-					add_consistency,
-					e,
-					lbl,
-				)))
+				IntVar::from_dom_as_ref(self.num_var, dom, add_consistency, e, lbl)
 			})
 			.ok_or(Unsatisfiable)
 	}
@@ -317,29 +311,21 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		self.decompose_with(Some(&LinDecomposer {}))?
 			.into_iter()
 			.map(|con_decomposition| {
-				let model = con_decomposition
+				let mut model = con_decomposition
 					.decompose_with(Some(&enc))
 					.map(|models| models.into_iter().collect::<Model<_, _>>())?;
+				println!("lin decomp = {}", model);
 
-				let (last, firsts) = model.cons.split_last().unwrap();
+				// split out uniform binary constraints
+				let cons = model.cons.clone();
+				let (last, firsts) = cons.split_last().unwrap();
 				let (con_eqs, cons) = firsts.iter().cloned().partition(|con| {
 					con.exp
 						.terms
 						.iter()
-						.skip(1)
-						.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
+						.any(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
 				});
 				// TODO ub still too high, does not adhere to k (but actually not to next ub if <=, or next lb if >=)
-				// .with_position()
-				// .partition(|(pos, con)| match pos {
-				// 	Position::First | Position::Middle => con
-				// 		.exp
-				// 		.terms
-				// 		.iter()
-				// 		.any(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_)))),
-
-				// 	Position::Last => false,
-				// });
 
 				Model {
 					cons: con_eqs,
@@ -351,10 +337,59 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 						.as_ref(),
 				)
 				.map(|models| {
+					let last = if last
+						.vars()
+						.iter()
+						.any(|x| matches!(x.borrow().e, Some(IntVarEnc::Bin(_))))
+					{
+						if let Some((rhs, lhs)) = last.clone().exp.terms.split_last() {
+							let dom = lhs
+								.iter()
+								.map(|t| t.dom().into_iter())
+								.multi_cartesian_product()
+								.map(|cs| cs.into_iter().reduce(C::add).unwrap())
+								.sorted()
+								.dedup()
+								.collect_vec();
+							let y = model
+								.new_var(
+									&dom,
+									model.config.add_consistency,
+									Some(IntVarEnc::Bin(None)),
+									last.lbl.as_ref().map(|lbl| format!("last-lhs-{lbl}")),
+								)
+								.unwrap();
+							vec![
+								Lin {
+									exp: LinExp {
+										terms: lhs
+											.iter()
+											.cloned()
+											.chain(vec![Term::new(-C::one(), y.clone())])
+											.collect(),
+									},
+									cmp: Comparator::Equal,
+									k: C::zero(),
+									lbl: last.lbl.as_ref().map(|lbl| format!("last-{lbl}")),
+								},
+								Lin {
+									exp: LinExp {
+										terms: vec![Term::from(y), rhs.clone()],
+									},
+									..last.clone()
+								},
+							]
+						} else {
+							unreachable!();
+						}
+					} else {
+						vec![last.clone()]
+					};
+
 					let mut model = models
 						.into_iter()
 						.chain([Model {
-							cons: [cons, vec![last.clone()]].concat(),
+							cons: [cons, last].concat(),
 							..model
 						}])
 						.collect::<Model<_, _>>();
@@ -840,12 +875,13 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for UniformBinEqDecomposer 
 	}
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct EncSpecDecomposer<Lit: Literal, C: Coefficient> {
 	cutoff: Option<C>,
 	spec: Option<HashMap<IntVarId, IntVarEnc<Lit, C>>>,
 }
 
+const COUPLE_SINGLE_VARS: bool = true;
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, C> {
 	fn decompose(
 		&self,
@@ -853,26 +889,98 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, 
 		num_var: usize,
 		config: &ModelConfig<C>,
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		con.vars().into_iter().for_each(|var| {
-			if let Some(spec) = self.spec.as_ref() {
-				// only encode var which are specified
-				if let Some(var_enc) = {
-					let id = var.borrow().id;
-					spec.get(&id)
-				} {
-					// overwriting encodings
-					var.borrow_mut().e = Some(var_enc.clone());
-				}
-			} else {
-				var.borrow_mut().decide_encoding(self.cutoff);
-			}
-		});
-		Ok(Model {
-			cons: vec![con],
+		let mut model = Model {
 			config: config.clone(),
 			num_var,
 			..Model::default()
-		})
+		};
+
+		let encs = con
+			.vars()
+			.into_iter()
+			.map(|x| {
+				if let Some(spec) = self.spec.as_ref() {
+					// only encode var which are specified
+					if let Some(var_enc) = {
+						let id = x.borrow().id;
+						spec.get(&id)
+					} {
+						// overwriting encodings
+						x.borrow_mut().e = Some(var_enc.clone());
+					}
+				} else {
+					x.borrow_mut().decide_encoding(self.cutoff);
+				}
+				(
+					x.clone(),
+					matches!(x.borrow().e.as_ref().unwrap(), IntVarEnc::Ord(_)),
+				)
+			})
+			.collect_vec();
+
+		let new_con =
+            // if mixed encoding, couple a single order encoded variables xi:O<=yi:B
+			if COUPLE_SINGLE_VARS && encs.iter().any(|(_, e)| *e) && encs.iter().any(|(_, e)| !e) {
+				Lin {
+					exp: LinExp {
+						terms: con
+							.exp
+							.terms
+							.into_iter()
+							.map(|t| {
+								let x_enc = t.x.borrow().e.clone();
+								let t_new = if let Some(IntVarEnc::Ord(None)) = x_enc {
+									if t.dom().len() <= 2 {
+										// constant or single-literal var, use view i/o coupling
+										t.x.borrow_mut().e = Some(IntVarEnc::Bin(None));
+										return Ok(t.clone());
+									}
+
+									// Create y:O <= x:B
+									let y = model.new_var_from_dom(
+										t.x.borrow().dom.clone(),
+										false, // TODO ? depend on config.add_consistency?
+										// Some(IntVarEnc::Ord(x_ord.clone())), // y:O
+										Some(IntVarEnc::Ord(None)), // y:O
+										t.x.borrow().lbl.clone().map(|lbl| format!("couple-{lbl}")),
+									)?;
+
+									// coupling constraint
+									model.add_constraint(Lin {
+										exp: LinExp {
+											terms: vec![
+												Term::new(C::one(), y.clone()),
+												Term::new(-C::one(), t.x.clone()),
+											],
+										},
+										cmp: con.cmp,
+										k: C::zero(),
+										lbl: con.lbl.clone().map(|lbl| format!("couple-{lbl}")),
+									})?;
+
+									Ok(Term {
+										x: t.x.clone(),
+
+										..t
+									})
+								} else {
+									Ok(t.clone())
+								}?;
+
+								t_new.x.borrow_mut().e = Some(IntVarEnc::Bin(None)); // REPLACE x's encoding since x will occur multiple times!
+								Ok(t_new)
+							})
+							.try_collect()?,
+					},
+
+					..con
+				}
+			} else {
+				con
+			};
+
+		model.add_constraint(new_con)?;
+		Ok(model)
 	}
 }
 

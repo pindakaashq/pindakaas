@@ -1,8 +1,11 @@
-use crate::{helpers::as_binary, int::LitOrConst, ClauseDatabase, Coefficient, IntVarRef, Literal};
+use crate::{
+	helpers::as_binary, int::LitOrConst, Coefficient, Comparator, IntLinExp as LinExp, IntVar,
+	IntVarRef, Lin, Literal, Model,
+};
 use itertools::Itertools;
 use std::ops::Mul;
 
-use super::{bin::BinEnc, IntVarEnc};
+use super::{bin::BinEnc, Dom, IntVarEnc};
 
 #[derive(Debug, Clone)]
 pub struct Term<Lit: Literal, C: Coefficient> {
@@ -31,28 +34,31 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		Self { c, x }
 	}
 
-	pub(crate) fn encode_bin<DB: ClauseDatabase<Lit = Lit>>(
-		&self,
-		db: &mut DB,
-	) -> crate::Result<BinEnc<Lit>> {
+	pub(crate) fn encode_bin(
+		self,
+		model: Option<&mut Model<Lit, C>>,
+		con_lbl: Option<String>,
+	) -> crate::Result<Self> {
 		let e = self.x.borrow().e.clone();
-		let lit_to_bin_enc = |lit: DB::Lit| {
+		let lit_to_bin_enc = |lit: Lit| {
 			assert!(self.c.is_positive(), "TODO neg scm");
-			BinEnc::from_lits(
+			let bin_enc = BinEnc::from_lits(
 				&as_binary(self.c.abs().into(), None)
 					.into_iter()
 					.map(|bit| LitOrConst::from(bit.then_some(lit.clone()))) // if true, return Lit(lit), if false, return Const(false)
 					.collect_vec(),
-			)
+			);
+			Term::from(IntVar::from_dom_as_ref(
+				0,
+				Dom::from_slice(&[C::zero(), self.c]),
+				false,
+				Some(IntVarEnc::Bin(Some(bin_enc))),
+				Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
+			))
 		};
+		let dom = &self.dom().iter().sorted().copied().collect_vec();
 		match e {
-			Some(IntVarEnc::Ord(Some(x_ord))) => {
-				if let &[lit] = &x_ord.iter().take(2).collect_vec()[..] {
-					Ok(lit_to_bin_enc(lit.clone()))
-				} else {
-					todo!("Need full scm for {self}:\n{self:?}")
-				}
-			}
+			Some(IntVarEnc::Bin(_)) if self.c.abs().is_one() => Ok(self),
 			Some(IntVarEnc::Bin(Some(x_bin))) if x_bin.x.len() == 1 => {
 				if let [LitOrConst::Lit(lit)] = &x_bin.x.clone()[..] {
 					Ok(lit_to_bin_enc(lit.clone()))
@@ -60,8 +66,50 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					unreachable!()
 				}
 			}
-			_ if self.c.is_one() => self.x.borrow_mut().encode_bin(db),
-			_ => todo!("{self}: {self:?}"),
+			Some(IntVarEnc::Ord(Some(x_ord))) => {
+				if let &[lit] = &x_ord.iter().take(2).collect_vec()[..] {
+					Ok(lit_to_bin_enc(lit.clone()))
+				} else {
+					todo!("Need full scm for {self}:\n{self:?}")
+				}
+			}
+			Some(IntVarEnc::Bin(Some(x_bin))) if self.c.trailing_zeros() > 0 => {
+				let sh = self.c.trailing_zeros();
+				self.x.borrow_mut().e = Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+					&(0..sh)
+						.map(|_| LitOrConst::Const(false))
+						.chain(x_bin.xs().iter().cloned())
+						.collect_vec(),
+				))));
+
+				Term::new(self.c.shr(sh as usize), self.x.clone()).encode_bin(model, con_lbl)
+			}
+
+			// Some(IntVarEnc::Bin(Some(_))) if self.c.abs().is_one() => Ok(self.x.clone()),
+			Some(IntVarEnc::Bin(None)) if model.is_some() => {
+				let model = model.unwrap();
+				let y = model
+					.new_var(
+						dom,
+						model.config.add_consistency,
+						Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
+						Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
+					)
+					.unwrap();
+
+				model
+					.add_constraint(Lin {
+						exp: LinExp {
+							terms: vec![self.clone(), Term::new(-C::one(), y.clone())],
+						},
+						cmp: Comparator::Equal,
+						k: C::zero(),
+						lbl: con_lbl.clone().map(|lbl| (format!("scm-{}", lbl))),
+					})
+					.unwrap();
+				Ok(Term::from(y))
+			}
+			_ => Ok(self),
 		}
 	}
 

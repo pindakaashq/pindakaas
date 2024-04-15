@@ -1,6 +1,6 @@
 use crate::{
-	int::IntVarEnc, Coefficient, Comparator, IntLinExp as LinExp, Lin, Literal, Model, ModelConfig,
-	Term, Unsatisfiable,
+	int::IntVarEnc, Coefficient, IntLinExp as LinExp, Lin, Literal, Model, ModelConfig,
+	Unsatisfiable,
 };
 
 use super::Decompose;
@@ -29,29 +29,9 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ScmDecomposer {
 						.terms
 						.iter()
 						.map(|t| {
-							if t.c.abs().is_one() {
-								return t.clone();
-							}
-							let y = model
-								.new_var(
-									&t.dom(),
-									model_config.add_consistency,
-									Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
-									Some(format!("scm-{}·{}", t.c, t.x.borrow().lbl())),
-								)
-								.unwrap();
-
-							model
-								.add_constraint(Lin {
-									exp: LinExp {
-										terms: vec![t.clone(), Term::new(-C::one(), y.clone())],
-									},
-									cmp: Comparator::Equal,
-									k: C::zero(),
-									lbl: con.lbl.clone().map(|lbl| (format!("scm-{}", lbl))),
-								})
-								.unwrap();
-							Term::from(y)
+							t.clone()
+								.encode_bin(Some(&mut model), con.lbl.clone())
+								.unwrap()
 						})
 						.collect(),
 				},

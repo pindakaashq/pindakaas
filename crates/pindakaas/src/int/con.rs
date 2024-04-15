@@ -317,39 +317,49 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				x_enc.encode_unary_constraint(db, &self.cmp, self.k, &x.borrow().dom, false)
 			}
 			// SCM
-			(
-				[(Term { c, x }, _), (Term { c: y_c, x: y }, Some(IntVarEnc::Bin(None)))],
-				Comparator::Equal,
-			) if *y_c == -C::one()
-				&& self.k.is_zero()
-				&& matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) =>
+			([(t, _), (Term { c: y_c, x: y }, Some(IntVarEnc::Bin(None)))], Comparator::Equal)
+				if *y_c == -C::one()
+					&& self.k.is_zero() && matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) =>
 			{
-				let x_enc = x.borrow_mut().encode_bin(db)?;
+				println!("con = {}", self);
+
+				t.x.borrow_mut().encode_bin(db)?;
+				let t_x = (*t).clone().encode_bin(None, None)?;
+				println!("t_x = {}", t_x);
+
+				// let x_enc_bin = t.en
 				assert!(matches!(y.borrow().e, Some(IntVarEnc::Bin(None))));
-				assert!(c.is_positive(), "TODO neg scm");
-				let lits = x_enc.lits().len(); // TODO use max(), but requires coercing Lit to usize later for skip(..)
-				let sh = c.trailing_zeros();
-				let c = c.shr(sh as usize);
-				if c.is_one() {
-					y.borrow_mut().e = Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+				assert!(t.c.is_positive(), "TODO neg scm");
+
+				// if c.is_one() {
+				// 	y.borrow_mut().e = Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+				// 		&(0..sh)
+				// 			.map(|_| LitOrConst::Const(false))
+				// 			.chain(x_enc.xs().iter().cloned())
+				// 			.collect_vec(),
+				// 	))));
+				// 	return Ok(());
+				// }
+
+				let y_enc = if t_x.c.is_one() {
+					t_x.x.borrow().e.clone()
+				} else {
+					let x_enc = t_x.x.borrow_mut().encode_bin(db)?;
+					let sh = 0;
+					// let sh = t_x.c.trailing_zeros();
+					let c = t_x.c.shr(sh as usize);
+					let lits = x_enc.lits().len(); // TODO use max(), but requires coercing Lit to usize later for skip(..)
+					let y_lits = Self::scm_dnf(db, x_enc.xs(), lits, c)?;
+
+					// set encoding of y
+					Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
 						&(0..sh)
 							.map(|_| LitOrConst::Const(false))
-							.chain(x_enc.xs().iter().cloned())
+							.chain(y_lits.into_iter().map(LitOrConst::from))
 							.collect_vec(),
-					))));
-					return Ok(());
-				}
-
-				let y_lits = Self::scm_dnf(db, x_enc.xs(), lits, c)?;
-
-				// set encoding of y
-				let y_enc = IntVarEnc::Bin(Some(BinEnc::from_lits(
-					&(0..sh)
-						.map(|_| LitOrConst::Const(false))
-						.chain(y_lits.into_iter().map(LitOrConst::from))
-						.collect_vec(),
-				)));
-				y.borrow_mut().e = Some(y_enc);
+					))))
+				};
+				y.borrow_mut().e = y_enc;
 				if y.borrow().add_consistency {
 					y.borrow().consistent(db)?;
 				}
@@ -357,7 +367,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				Ok(())
 			}
 			(
-				[(x, Some(IntVarEnc::Ord(_)) | Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_))), (z, Some(IntVarEnc::Bin(_)))],
+				[(x, Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_))), (z, Some(IntVarEnc::Bin(_)))],
 				Comparator::Equal,
 			) if [y.c, z.c] == [C::one(), -C::one()] => {
 				assert!(
@@ -369,7 +379,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				let z = (*z).clone() * -C::one();
 				let (x, y, z) = &[x, y, &z] // .with_position()
 					.into_iter()
-					.map(|t| t.encode_bin(db).unwrap().xs())
+					.map(|t| t.x.borrow_mut().encode_bin(db).unwrap().xs())
 					.collect_tuple()
 					.unwrap();
 
