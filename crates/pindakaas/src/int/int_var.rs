@@ -41,7 +41,7 @@ pub struct IntVar<Lit: Literal, C: Coefficient> {
 	pub(crate) views: HashMap<C, (IntVarId, C)>,
 	pub(crate) e: Option<IntVarEnc<Lit, C>>,
 	// pub(crate) x: OrdEnc<Lit>,
-	lbl: Option<String>,
+	pub(crate) lbl: Option<String>,
 }
 
 // TODO implement Eq so we don't compare .e
@@ -73,6 +73,22 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 	}
 
 	*/
+
+	pub(crate) fn from_dom_as_ref(
+		id: usize,
+		dom: Dom<C>,
+		add_consistency: bool,
+		e: Option<IntVarEnc<Lit, C>>,
+		lbl: Option<String>,
+	) -> IntVarRef<Lit, C> {
+		Rc::new(RefCell::new(Self::from_dom(
+			id,
+			dom,
+			add_consistency,
+			e,
+			lbl,
+		)))
+	}
 
 	pub(crate) fn from_dom(
 		id: usize,
@@ -326,7 +342,8 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 	) -> Result<BinEnc<Lit>, Unsatisfiable> {
 		self.encode(db, None).map(|e| match e {
 			IntVarEnc::Bin(Some(b)) => b,
-			_ => unreachable!(),
+			_ if self.is_constant() => BinEnc::from_lits(&[]),
+			_ => panic!("encode_bin called without binary encoding for {self}"),
 		})
 	}
 
