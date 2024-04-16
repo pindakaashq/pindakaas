@@ -86,7 +86,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					.collect_vec();
 				let y = model.new_var(
 					&dom,
-					false, // TODO ? depend on config.add_consistency?
+					false,                      // TODO ? depend on config.add_consistency?
 					Some(IntVarEnc::Bin(None)), // y:B
 					self.x
 						.borrow()
