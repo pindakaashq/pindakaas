@@ -93,7 +93,7 @@ pub struct Model<Lit: Literal, C: Coefficient> {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Assignment<C: Coefficient>(pub HashMap<IntVarId, C>);
+pub struct Assignment<C: Coefficient>(pub HashMap<IntVarId, (String, C)>);
 
 impl<C: Coefficient> Ord for Assignment<C> {
 	fn cmp(&self, other: &Self) -> Ordering {
@@ -108,7 +108,7 @@ impl<C: Coefficient> PartialOrd for Assignment<C> {
 }
 
 impl<C: Coefficient> Index<&IntVarId> for Assignment<C> {
-	type Output = C;
+	type Output = (String, C);
 
 	fn index(&self, id: &IntVarId) -> &Self::Output {
 		&self.0[id]
@@ -123,7 +123,7 @@ impl<C: Coefficient> Display for Assignment<C> {
 			self.0
 				.iter()
 				.sorted()
-				.map(|(id, a)| format!("x_{}={}", id, a))
+				.map(|(id, (lbl, a))| format!("{}={}", lbl, a))
 				.join(", ")
 		)
 	}
@@ -287,7 +287,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	pub fn add_constraint(&mut self, constraint: Lin<Lit, C>) -> Result {
-		self.cons.push(constraint);
+		self.cons.push(constraint.simplified());
 		Ok(())
 	}
 
@@ -308,12 +308,18 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		} = self.config.clone();
 
 		let enc = EncSpecDecomposer { cutoff, spec };
+		let mut num_var = None;
 		self.decompose_with(Some(&LinDecomposer {}))?
 			.into_iter()
-			.map(|con_decomposition| {
+			.map(|mut con_decomposition| {
+				if let Some(num_var) = num_var {
+					con_decomposition.num_var = num_var;
+				}
+
 				let mut model = con_decomposition
 					.decompose_with(Some(&enc))
 					.map(|models| models.into_iter().collect::<Model<_, _>>())?;
+
 				println!("lin decomp = {}", model);
 
 				// split out uniform binary constraints
@@ -323,7 +329,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					con.exp
 						.terms
 						.iter()
-						.any(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
+						.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
 				});
 				// TODO ub still too high, does not adhere to k (but actually not to next ub if <=, or next lb if >=)
 
@@ -337,56 +343,111 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 						.as_ref(),
 				)
 				.map(|models| {
-					let last = if last
-						.vars()
-						.iter()
-						.any(|x| matches!(x.borrow().e, Some(IntVarEnc::Bin(_))))
+					const REWRITE_LAST: bool = false;
+					let last = if REWRITE_LAST
+						&& last.cmp.is_ineq() && last.exp.terms.len() > 1
+						&& last
+							.vars()
+							.iter()
+							.any(|x| matches!(x.borrow().e, Some(IntVarEnc::Bin(_))))
+					// TODO all?
 					{
-						if let Some((rhs, lhs)) = last.clone().exp.terms.split_last() {
-							if lhs.is_empty() {
-								vec![last.clone()]
-							} else {
-								let dom = lhs
-									.iter()
-									.map(|t| t.dom().into_iter())
-									.multi_cartesian_product()
-									.map(|cs| cs.into_iter().reduce(C::add).unwrap())
-									.sorted()
-									.dedup()
-									.collect_vec();
-								let y = model
-									.new_var(
-										&dom,
-										// model.config.add_consistency,
-										true,
-										Some(IntVarEnc::Bin(None)),
-										last.lbl.as_ref().map(|lbl| format!("last-lhs-{lbl}")),
-									)
-									.unwrap();
-								vec![
-									Lin {
-										exp: LinExp {
-											terms: lhs
-												.iter()
-												.cloned()
-												.chain(vec![Term::new(-C::one(), y.clone())])
-												.collect(),
-										},
-										cmp: Comparator::Equal,
-										k: C::zero(),
-										lbl: last.lbl.as_ref().map(|lbl| format!("last-{lbl}")),
-									},
-									Lin {
-										exp: LinExp {
-											terms: vec![Term::from(y), rhs.clone()],
-										},
-										..last.clone()
-									},
-								]
-							}
+						let dom = Dom::from_slice(
+							&last
+								.exp
+								.terms
+								.iter()
+								.map(|t| t.dom().into_iter())
+								.multi_cartesian_product()
+								.map(|cs| cs.into_iter().reduce(C::add).unwrap())
+								.sorted()
+								.dedup()
+								.collect_vec(),
+						);
+
+						// match last.cmp {
+						// 	Comparator::LessEq => dom.le(last.k),
+						// 	Comparator::Equal => unreachable!(),
+						// 	Comparator::GreaterEq => dom.ge(last.k),
+						// };
+
+						let y = model
+							.new_var_from_dom(
+								dom,
+								model.config.add_consistency,
+								Some(IntVarEnc::Bin(None)),
+								last.lbl.as_ref().map(|lbl| format!("last-lhs-{lbl}")),
+							)
+							.unwrap();
+						vec![
+							Lin {
+								exp: LinExp {
+									terms: last
+										.exp
+										.terms
+										.iter()
+										.cloned()
+										.chain(vec![Term::new(-C::one(), y.clone())])
+										.collect(),
+								},
+								cmp: Comparator::Equal,
+								k: C::zero(),
+								lbl: last.lbl.as_ref().map(|lbl| format!("last-{lbl}")),
+							},
+							Lin {
+								exp: LinExp {
+									terms: vec![Term::from(y)],
+								},
+								..last.clone()
+							},
+						]
+					/*
+					if let Some((rhs, lhs)) = last.clone().exp.terms.split_last() {
+						if lhs.is_empty() {
+							vec![last.clone()]
 						} else {
-							unreachable!();
+							let dom = lhs
+								.iter()
+								.map(|t| t.dom().into_iter())
+								.multi_cartesian_product()
+								.map(|cs| cs.into_iter().reduce(C::add).unwrap())
+								.sorted()
+								.dedup()
+								.collect_vec();
+							let y = model
+								.new_var(
+									&dom,
+									// model.config.add_consistency,
+									true,
+									Some(IntVarEnc::Bin(None)),
+									last.lbl.as_ref().map(|lbl| format!("last-lhs-{lbl}")),
+								)
+								.unwrap();
+							vec![
+								Lin {
+									exp: LinExp {
+										terms: lhs
+											.iter()
+											.cloned()
+											.chain(vec![Term::new(-C::one(), y.clone())])
+											.collect(),
+									},
+									cmp: Comparator::Equal,
+									k: C::zero(),
+									lbl: last.lbl.as_ref().map(|lbl| format!("last-{lbl}")),
+								},
+								Lin {
+									exp: LinExp {
+										terms: vec![Term::from(y), rhs.clone()],
+									},
+									..last.clone()
+								},
+							]
 						}
+					} else {
+						unreachable!();
+					}
+						*/
 					} else {
 						vec![last.clone()]
 					};
@@ -398,7 +459,12 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 							..model
 						}])
 						.collect::<Model<_, _>>();
-					model.cons.sort_by_key(|con| con.exp.terms[1].x.borrow().id); // dirty trick to restore order
+					println!("model = {}", model);
+
+					model.cons.sort_by_key(|con| {
+						con.lbl.clone().unwrap()
+					}); // dirty trick to restore order
+					num_var = Some(model.num_var);
 					model
 				})
 			})
@@ -510,7 +576,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	pub fn assign(&self, a: &[Lit]) -> Result<Assignment<C>, CheckError<Lit>> {
 		self.vars()
 			.iter()
-			.map(|x| x.borrow().assign(a).map(|a| (x.borrow().id, a)))
+			.map(|x| {
+				x.borrow()
+					.assign(a)
+					.map(|a| (x.borrow().id, (x.borrow().lbl(), a)))
+			})
 			.collect::<Result<HashMap<_, _>, _>>()
 			.map(|a| Assignment(a))
 	}
@@ -528,8 +598,8 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.map(|a| {
 				Assignment(
 					vars.iter()
-						.map(|var| var.borrow().id)
 						.zip(a)
+						.map(|(var, a)| (var.borrow().id, (var.borrow().lbl(), a)))
 						.collect::<HashMap<_, _>>(),
 				)
 			})
@@ -553,6 +623,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		actual_assignments: &[Assignment<C>],
 		expected_assignments: Option<&Vec<Assignment<C>>>,
 		lit_assignments: Option<&[Vec<Lit>]>,
+		brute_force_solve: bool,
 	) -> Result<(), Vec<CheckError<Lit>>> {
 		let errs = actual_assignments
 			.iter()
@@ -569,8 +640,12 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.collect::<Vec<_>>();
 
 		// Throw early if expected_assignments need to be computed
-		if !errs.is_empty() && expected_assignments.is_none() {
-			return Err(errs);
+		if brute_force_solve || expected_assignments.is_none() {
+			if errs.is_empty() {
+				return Ok(());
+			} else {
+				return Err(errs);
+			}
 		}
 
 		let expected_assignments = expected_assignments
@@ -935,44 +1010,10 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, 
 							.map(|t| {
 								let x_enc = t.x.borrow().e.clone();
 								let t_new = if let Some(IntVarEnc::Ord(None)) = x_enc {
-									if t.dom().len() <= 2 {
-										// constant or single-literal var, use view i/o coupling
-										t.x.borrow_mut().e = Some(IntVarEnc::Bin(None));
-										return Ok(t.clone());
-									}
-
-									// Create y:O <= x:B
-									let y = model.new_var_from_dom(
-										t.x.borrow().dom.clone(),
-										false, // TODO ? depend on config.add_consistency?
-										// Some(IntVarEnc::Ord(x_ord.clone())), // y:O
-										Some(IntVarEnc::Ord(None)), // y:O
-										t.x.borrow().lbl.clone().map(|lbl| format!("couple-{lbl}")),
-									)?;
-
-									// coupling constraint
-									model.add_constraint(Lin {
-										exp: LinExp {
-											terms: vec![
-												Term::new(C::one(), y.clone()),
-												Term::new(-C::one(), t.x.clone()),
-											],
-										},
-										cmp: con.cmp,
-										k: C::zero(),
-										lbl: con.lbl.clone().map(|lbl| format!("couple-{lbl}")),
-									})?;
-
-									Ok(Term {
-										x: t.x.clone(),
-
-										..t
-									})
+                                    Ok(t.encode_bin(Some(&mut model), con.cmp, con.lbl.clone()).unwrap())
 								} else {
 									Ok(t.clone())
 								}?;
-
-								t_new.x.borrow_mut().e = Some(IntVarEnc::Bin(None)); // REPLACE x's encoding since x will occur multiple times!
 								Ok(t_new)
 							})
 							.try_collect()?,
@@ -1147,6 +1188,7 @@ mod tests {
 			&decomposition.brute_force_solve(Some(IntVarId(model.num_var))),
 			expected_assignments,
 			None,
+			BRUTE_FORCE_SOLVE,
 		) {
 			for err in errs {
 				println!("Decomposition error:\n{err}");
@@ -1345,6 +1387,7 @@ mod tests {
 						})
 						.unwrap_or_else(|_| {
 							println!("Warning: encoding decomposition lead to UNSAT");
+							// TODO panic based on expected_assignments.is_empty
 							Vec::default()
 						});
 
@@ -1379,6 +1422,7 @@ mod tests {
 						&actual_assignments,
 						expected_assignments,
 						Some(&lit_assignments),
+						BRUTE_FORCE_SOLVE,
 					);
 					if let Err(errs) = check {
 						for err in errs {
