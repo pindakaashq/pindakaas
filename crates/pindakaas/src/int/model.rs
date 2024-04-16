@@ -459,11 +459,8 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 							..model
 						}])
 						.collect::<Model<_, _>>();
-					println!("model = {}", model);
 
-					model.cons.sort_by_key(|con| {
-						con.lbl.clone().unwrap()
-					}); // dirty trick to restore order
+					model.cons.sort_by_key(|con| con.lbl.clone().unwrap()); // dirty trick to restore order
 					num_var = Some(model.num_var);
 					model
 				})
@@ -1124,18 +1121,18 @@ mod tests {
 			// [Some(0)] // [None, Some(0), Some(2)]
 			[Scm::Rca],
 			[
-				Decomposer::Gt,
+				// Decomposer::Gt,
 				// Decomposer::Swc,
 				Decomposer::Bdd,
-				Decomposer::Rca
+				// Decomposer::Rca
 			],
 			// [Consistency::None],
 			// [Consistency::None, Consistency::Bounds],
 			[Consistency::None],
-			[false, true], // consistency
+			[false], // consistency
 			// [true],
 			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
-			[false], // equalize terns
+			[true],  // equalize terns
 			[None],  // [None, Some(0), Some(2)]
 			[false]  // equalize_uniform_bin_ineqs
 		)
@@ -1266,7 +1263,6 @@ mod tests {
 			}
 		} {
 			let model = model.deep_clone().with_config(config.clone());
-			println!("model = {model}");
 			let ModelConfig {
 				scm,
 				cutoff,

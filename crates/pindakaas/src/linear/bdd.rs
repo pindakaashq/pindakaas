@@ -162,7 +162,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 						&dom,
 						model.config.add_consistency,
 						None,
-						Some(format!("bdd_{}", i)),
+						Some(format!("bdd_{:04}", i)),
 					)
 					.map(|var| (var, views))
 			})
@@ -196,7 +196,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 						curr,
 						lin.cmp,
 						next.clone(),
-						lin.lbl.as_ref().map(|lbl| format!("bdd_{}_{}", i, lbl)),
+						lin.lbl.as_ref().map(|lbl| format!("bdd_{:04}_{}", i, lbl)),
 					))
 					.map(|_| next)
 			})?;
