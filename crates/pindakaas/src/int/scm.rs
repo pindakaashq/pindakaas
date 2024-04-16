@@ -30,7 +30,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ScmDecomposer {
 						.iter()
 						.map(|t| {
 							t.clone()
-								.encode_bin(Some(&mut model), con.cmp.clone(), con.lbl.clone())
+								.encode_bin(Some(&mut model), con.cmp, con.lbl.clone())
 								.unwrap()
 						})
 						.collect(),
