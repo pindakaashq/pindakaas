@@ -430,8 +430,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 	}
 
 	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
-	#[allow(private_interfaces)]
-	pub fn from_part<DB: ClauseDatabase<Lit = Lit>>(
+	pub(crate) fn from_part<DB: ClauseDatabase<Lit = Lit>>(
 		db: &mut DB,
 		model: &mut Model<DB::Lit, C>,
 		xs: &Part<Lit, PosCoeff<C>>,
