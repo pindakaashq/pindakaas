@@ -214,11 +214,40 @@ impl VarRange {
 		Self { start, end }
 	}
 
+	/// Returns the lower bound of the variable range (inclusive).
+	///
+	/// Note: the value returned by this method is unspecified after the range
+	/// has been iterated to exhaustion.
+	pub fn start(&self) -> Var {
+		self.start
+	}
+
+	/// Returns the upper bound of the variable range (inclusive).
+	///
+	/// Note: the value returned by this method is unspecified after the range
+	/// has been iterated to exhaustion.
+	pub fn end(&self) -> Var {
+		self.end
+	}
+
+	/// Create an empty variable range
 	pub fn empty() -> Self {
 		Self {
 			start: Var(NonZeroI32::new(2).unwrap()),
 			end: Var(NonZeroI32::new(1).unwrap()),
 		}
+	}
+
+	/// Returns `true` if the range contains no items.
+	///
+	/// # Examples
+	///
+	/// ```
+	/// # use pindakaas::solver::VarRange;
+	/// assert!(VarRange::empty().is_empty());
+	/// ```
+	pub fn is_empty(&self) -> bool {
+		self.start > self.end
 	}
 
 	/// Performs the indexing operation into the variable range
