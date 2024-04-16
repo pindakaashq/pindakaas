@@ -37,6 +37,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	pub(crate) fn encode_bin(
 		self,
 		model: Option<&mut Model<Lit, C>>,
+		cmp: Comparator,
 		con_lbl: Option<String>,
 	) -> crate::Result<Self> {
 		let e = self.x.borrow().e.clone();
@@ -56,7 +57,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
 			))
 		};
-		let dom = &self.dom().iter().sorted().copied().collect_vec();
+		let dom = self.dom().iter().sorted().copied().collect_vec();
 		match e {
 			Some(IntVarEnc::Bin(_)) if self.c.abs().is_one() => Ok(self),
 			Some(IntVarEnc::Bin(Some(x_bin))) if x_bin.x.len() == 1 => {
@@ -66,23 +67,69 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					unreachable!()
 				}
 			}
-			Some(IntVarEnc::Ord(Some(x_ord))) => {
-				if let &[lit] = &x_ord.iter().take(2).collect_vec()[..] {
-					Ok(lit_to_bin_enc(lit.clone()))
-				} else {
-					todo!("Need full scm for {self}:\n{self:?}")
+			Some(IntVarEnc::Ord(x_ord)) => {
+				// let x_ord = x_ord.unwrap_or_else(|| t.x.borrow_mut().encode())
+				if let Some(x_ord) = x_ord {
+					if let &[lit] = &x_ord.iter().take(2).collect_vec()[..] {
+						return Ok(lit_to_bin_enc(lit.clone()));
+					}
 				}
+
+				let model = model.unwrap();
+				// Create y:O <= x:B
+				// Create a*x:O <= y:B
+				let up = self.c.is_positive();
+				let dom = dom
+					.into_iter()
+					.map(|d| if up { d } else { -d })
+					.sorted()
+					.collect_vec();
+				let y = model.new_var(
+					&dom,
+					false, // TODO ? depend on config.add_consistency?
+					Some(IntVarEnc::Bin(None)), // y:B
+					self.x
+						.borrow()
+						.lbl
+						.clone()
+						.map(|lbl| format!("couple-{lbl}")),
+				)?;
+
+				// coupling constraint
+				model.add_constraint(Lin {
+					exp: LinExp {
+						terms: vec![
+							// Term::new(self.c.abs(), self.x.clone()),
+							Term::new(if up { self.c } else { -self.c }, self.x.clone()),
+							Term::new(-C::one(), y.clone()),
+						],
+					},
+					cmp: if up { cmp } else { cmp.reverse() },
+					k: C::zero(),
+					lbl: con_lbl.clone().map(|lbl| format!("couple-{lbl}")),
+				})?;
+
+				Ok(Term::new(if up { C::one() } else { -C::one() }, y))
 			}
 			Some(IntVarEnc::Bin(Some(x_bin))) if self.c.trailing_zeros() > 0 => {
 				let sh = self.c.trailing_zeros();
-				self.x.borrow_mut().e = Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
-					&(0..sh)
-						.map(|_| LitOrConst::Const(false))
-						.chain(x_bin.xs().iter().cloned())
-						.collect_vec(),
-				))));
+				let y = model
+					.unwrap()
+					.new_var(
+						&dom,
+						// model.unwrap().config.add_consistency,
+						false,
+						Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+							&(0..sh)
+								.map(|_| LitOrConst::Const(false))
+								.chain(x_bin.xs().iter().cloned())
+								.collect_vec(),
+						)))),
+						Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
+					)
+					.unwrap();
 
-				Term::new(self.c.shr(sh as usize), self.x.clone()).encode_bin(model, con_lbl)
+				Ok(Term::from(y))
 			}
 
 			// Some(IntVarEnc::Bin(Some(_))) if self.c.abs().is_one() => Ok(self.x.clone()),
@@ -90,7 +137,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				let model = model.unwrap();
 				let y = model
 					.new_var(
-						dom,
+						&dom,
 						model.config.add_consistency,
 						Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
 						Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),

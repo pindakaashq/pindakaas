@@ -219,7 +219,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			.exp
 			.terms
 			.iter()
-			.map(|term| term.c * a[&term.x.borrow().id])
+			.map(|term| term.c * a[&term.x.borrow().id].1)
 			.fold(C::zero(), C::add);
 
 		if match self.cmp {
@@ -241,8 +241,8 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 							"{} * {}={} (={})",
 							term.c,
 							term.x.borrow().lbl(),
-							a[&term.x.borrow().id],
-							term.c * a[&term.x.borrow().id],
+							a[&term.x.borrow().id].1,
+							term.c * a[&term.x.borrow().id].1,
 						)
 					})
 					.join(" + "),
@@ -321,11 +321,8 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				if *y_c == -C::one()
 					&& self.k.is_zero() && matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) =>
 			{
-				println!("con = {}", self);
-
 				t.x.borrow_mut().encode_bin(db)?;
-				let t_x = (*t).clone().encode_bin(None, None)?;
-				println!("t_x = {}", t_x);
+				let t_x = (*t).clone().encode_bin(None, self.cmp, None)?;
 
 				// let x_enc_bin = t.en
 				assert!(matches!(y.borrow().e, Some(IntVarEnc::Bin(None))));
@@ -764,6 +761,29 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			.unique_by(|x| x.borrow().id)
 			.cloned()
 			.collect()
+	}
+
+	pub(crate) fn simplified(self) -> Lin<Lit, C> {
+		let mut k = self.k;
+		Lin {
+			exp: LinExp {
+				terms: self
+					.exp
+					.terms
+					.into_iter()
+					.filter_map(|t| {
+						if t.x.borrow().is_constant() {
+							k -= t.c * t.x.borrow().dom.lb();
+							None
+						} else {
+							Some(t)
+						}
+					})
+					.collect(),
+			},
+			k,
+			..self
+		}
 	}
 
 	/*

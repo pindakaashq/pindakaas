@@ -120,7 +120,7 @@ End
 						.join("\n"),
 					self.vars()
 						.into_iter()
-						.sorted_by_key(|x| x.borrow().lbl())
+						.sorted_by_key(|x| x.borrow().id)
 						.map(|x| {
 							let x = x.borrow();
 							format!("  {} <= {} <= {}", x.lb(), x.lbl(), x.ub())
