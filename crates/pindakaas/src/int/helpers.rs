@@ -1,6 +1,6 @@
 use crate::Term;
 use std::{
-	collections::HashMap,
+	collections::{hash_map::Entry, HashMap},
 	fs::File,
 	io::{BufReader, Read},
 	path::PathBuf,
@@ -490,47 +490,60 @@ End
 
 		let mut model = Model::default();
 
-		let vars = vars
-			.into_iter()
-			.sorted()
-			.flat_map(|(lp_id, dom)| {
-				model
-					.new_var(&dom, true, encs.get(&lp_id).cloned(), Some(lp_id.clone()))
-					.map(|x| (lp_id, x))
-			})
-			.collect::<HashMap<_, _>>();
-
-		let to_ilp_exp = |(int_vars, coefs): &ParseLinExp<C>| LinExp {
-			terms: coefs
-				.iter()
-				.zip(int_vars.iter().flat_map(|lp_id| {
-					vars.get(lp_id)
-						.ok_or(format!("Unbounded variable {lp_id}"))
-						.map(Rc::clone)
-				}))
-				.map(|(c, x)| Term::new(*c, x))
-				.collect(),
+		let add_var = |model: &mut Model<Lit, C>, lp_id: &str, dom: &[C]| {
+			let lp_id = lp_id.to_string();
+			model
+				.new_var(&dom, true, encs.get(&lp_id).cloned(), Some(lp_id.clone()))
+				.map(|x| (lp_id, x))
 		};
 
-		for (lin, cmp, k, lbl) in cons {
-			model
-				.add_constraint(Lin {
-					exp: to_ilp_exp(&lin),
-					cmp,
-					k,
-					lbl: lbl.clone(),
-				})
-				.map_err(|_| {
-					format!(
-						"LP was trivially unsatisfiable fo rconstraint {:?}: {:?}",
-						lbl, lin,
+		let mut vars = vars
+			.into_iter()
+			.sorted()
+			.flat_map(|(lp_id, dom)| add_var(&mut model, &lp_id, &dom))
+			.collect::<HashMap<_, _>>();
+
+		let mut to_ilp_exp =
+			|mut model: &mut Model<Lit, C>, (int_vars, coefs): &ParseLinExp<C>| LinExp {
+				terms: coefs
+					.iter()
+					.zip(
+						int_vars
+							.into_iter()
+							.map(|lp_id| match vars.entry(lp_id.clone()) {
+								Entry::Occupied(e) => Rc::clone(e.get()),
+								Entry::Vacant(e) => {
+									eprintln!("WARNING: unbounded variable's {lp_id} domain set to Binary");
+									let x = add_var(&mut model, &lp_id, &[C::zero(), C::one()])
+										.unwrap()
+										.1;
+									e.insert(x.clone());
+									x
+								}
+							}),
 					)
-				})?;
+					.map(|(c, x)| Term::new(*c, x))
+					.collect(),
+			};
+
+		for (lin, cmp, k, lbl) in cons {
+			let con = Lin {
+				exp: to_ilp_exp(&mut model, &lin),
+				cmp,
+				k,
+				lbl: lbl.clone(),
+			};
+			model.add_constraint(con).map_err(|_| {
+				format!(
+					"LP was trivially unsatisfiable fo rconstraint {:?}: {:?}",
+					lbl, lin,
+				)
+			})?;
 		}
 
 		let obj = match obj {
-			ParseObj::Maximize(lin) => Obj::Maximize(to_ilp_exp(&lin)),
-			ParseObj::Minimize(lin) => Obj::Minimize(to_ilp_exp(&lin)),
+			ParseObj::Maximize(lin) => Obj::Maximize(to_ilp_exp(&mut model, &lin)),
+			ParseObj::Minimize(lin) => Obj::Minimize(to_ilp_exp(&mut model, &lin)),
 			ParseObj::Satisfy => Obj::Satisfy,
 		};
 
