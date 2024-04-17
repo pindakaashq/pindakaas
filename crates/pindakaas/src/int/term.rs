@@ -110,15 +110,9 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 							Term::new(-C::one(), y.clone()),
 						],
 					},
-					cmp: if dom.len() <= 2 && false {
-						Comparator::Equal
-					} else if up {
-						cmp
-					} else {
-						cmp.reverse()
-					},
+					cmp: if up { cmp } else { cmp.reverse() },
 					k: C::zero(),
-					lbl: con_lbl.clone().map(|lbl| format!("0-couple-{lbl}")),
+					lbl: con_lbl.clone().map(|lbl| format!("couple-{lbl}")),
 				})?;
 
 				Ok(Term::new(if up { C::one() } else { -C::one() }, y))

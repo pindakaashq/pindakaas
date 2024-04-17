@@ -391,7 +391,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 									},
 									cmp: Comparator::Equal,
 									k: C::zero(),
-									lbl: last.lbl.as_ref().map(|lbl| format!("0-last-{lbl}")),
+									lbl: last.lbl.as_ref().map(|lbl| format!("last-{lbl}")),
 								},
 								Lin {
 									exp: LinExp {
