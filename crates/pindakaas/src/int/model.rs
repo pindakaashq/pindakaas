@@ -322,31 +322,26 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 				// split out uniform binary constraints
 				let cons = model.cons.clone();
-				if cons.is_empty() {
+				if model.cons.is_empty() {
 					return Ok(model);
 				}
-				let (last, firsts) = cons.split_last().unwrap();
 
-				let (con_eqs, cons) = firsts.iter().cloned().partition(|con| {
-					con.exp
-						.terms
-						.iter()
-						.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
-				});
+				let (last, firsts) = cons.split_last().unwrap();
 				// TODO ub still too high, does not adhere to k (but actually not to next ub if <=, or next lb if >=)
 
-				Model {
-					cons: con_eqs,
-					..model.clone() // not wasteful I think because shouldn't clone cons
+				let model: Model<Lit, C> = Model {
+					cons: firsts.to_vec(),
+					..model.clone()
 				}
 				.decompose_with(
 					equalize_ternaries
 						.then(EqualizeTernsDecomposer::default)
 						.as_ref(),
-				)
-				.map(|models| {
+				)?
+				.into_iter()
+				.chain(std::iter::once({
 					const REWRITE_LAST: bool = true;
-					let last = if REWRITE_LAST
+					if REWRITE_LAST
 						&& last.cmp.is_ineq() && last.exp.terms.len() > 1
 						&& last
 							.vars()
@@ -381,44 +376,43 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 								last.lbl.as_ref().map(|lbl| format!("last-lhs-{lbl}")),
 							)
 							.unwrap();
-						vec![
-							Lin {
-								exp: LinExp {
-									terms: last
-										.exp
-										.terms
-										.iter()
-										.cloned()
-										.chain(vec![Term::new(-C::one(), y.clone())])
-										.collect(),
-								},
-								cmp: Comparator::Equal,
-								k: C::zero(),
-								lbl: last.lbl.as_ref().map(|lbl| format!("last-{lbl}")),
-							},
-							Lin {
-								exp: LinExp {
-									terms: vec![Term::from(y)],
-								},
-								..last.clone()
-							},
-						]
-					} else {
-						vec![last.clone()]
-					};
 
-					let mut model = models
-						.into_iter()
-						.chain([Model {
-							cons: [cons, last].concat(),
+						Model {
+							cons: vec![
+								Lin {
+									exp: LinExp {
+										terms: last
+											.exp
+											.terms
+											.iter()
+											.cloned()
+											.chain(vec![Term::new(-C::one(), y.clone())])
+											.collect(),
+									},
+									cmp: Comparator::Equal,
+									k: C::zero(),
+									lbl: last.lbl.as_ref().map(|lbl| format!("0-last-{lbl}")),
+								},
+								Lin {
+									exp: LinExp {
+										terms: vec![Term::from(y)],
+									},
+									..last.clone()
+								},
+							],
 							..model
-						}])
-						.collect::<Model<_, _>>();
+						}
+					} else {
+						Model {
+							cons: vec![last.clone()],
+							..model
+						}
+					}
+				}))
+				.collect();
 
-					model.cons.sort_by_key(|con| con.lbl.clone().unwrap()); // dirty trick to restore order
-					num_var = Some(model.num_var);
-					model
-				})
+				num_var = Some(model.num_var);
+				Ok(model)
 			})
 			.try_collect::<Model<_, _>, Model<_, _>, _>()?
 			.decompose_with(
@@ -593,11 +587,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 		// Throw early if expected_assignments need to be computed
 		if brute_force_solve || expected_assignments.is_none() {
-			println!(
-				"All constraints hold for actual assignments:\n{}",
-				actual_assignments.iter().join("\n")
-			);
 			if errs.is_empty() {
+				println!(
+					"All constraints hold for actual assignments:\n{}",
+					actual_assignments.iter().join("\n")
+				);
 				return Ok(());
 			} else {
 				return Err(errs);
@@ -765,42 +759,34 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
 		const REMOVE_GAPS: bool = true;
 		Ok(Model {
-			cons: vec![Lin {
-				cmp: Comparator::Equal,
-				exp: if REMOVE_GAPS && con.exp.terms.len() > 1 {
-					if let Some((last, firsts)) = con.exp.terms.split_last() {
-						assert!(last.c.abs().is_one());
-						// 						let x_dom = last
-						// 							.x
-						// 							.borrow()
-						// 							.dom
-						// 							.clone()
-						// 							.union(Dom::from_slice(&[lb, ub]));
-						// 						last.x.borrow_mut().dom = x_dom;
+			cons: vec![if REMOVE_GAPS
+				&& con.exp.terms.len() >= 2
+				&& con.k.is_zero()
+				&& con
+					.exp
+					.terms
+					.iter()
+					.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
+			{
+				if let Some((last, firsts)) = con.exp.terms.split_last() {
 
-						// TODO avoid removing gaps on the order encoded vars?
-						// let firsts = firsts.iter().map(|x| x.).collect_vec();
+					let (lb, ub) = firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
+						(lb + t.lb(), ub + t.ub())
+					});
+					last.x.borrow_mut().dom = Dom::from_bounds(lb, ub);
 
-						// if matches!(last.x.borrow().e, Some(IntVarEnc::Bin(_))) {
-						// }
-
-						let (lb, ub) = firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
-							(lb + t.lb(), ub + t.ub())
-						});
-						// }
-						assert!(last.c.abs().is_one());
-						last.x.borrow_mut().dom = Dom::from_bounds(lb, ub);
-
-						LinExp {
+					Lin {
+						exp: LinExp {
 							terms: firsts.iter().chain([last]).cloned().collect(),
-						}
-					} else {
-						unreachable!()
+						},
+						cmp: Comparator::Equal,
+						..con
 					}
 				} else {
-					con.exp
-				},
-				..con
+					unreachable!()
+				}
+			} else {
+				con
 			}],
 			num_var,
 			config: config.clone(),
@@ -821,7 +807,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for UniformBinEqDecomposer 
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
 		let mut model = Model::<Lit, C>::new(num_var, model_config);
 		if con.cmp.is_ineq()
-			&& con.exp.terms.len() == 3
+			&& con.exp.terms.len() >= 3
 			&& con.k.is_zero() // TODO potentially could work for non-zero k
 			&& con
 				.exp
