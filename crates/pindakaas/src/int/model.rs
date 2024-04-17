@@ -2065,6 +2065,34 @@ End
 	}
 
 	#[test]
+	fn test_couple_single_var() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		// Expected output only has 1 (!) clause (3, -4)
+		test_lp_for_configs(
+			r"
+Subject To
+    c0: 2 x_1 + 3 x_2 <= 6
+Doms
+    x_1 in 0,1
+    x_2 in 0,1
+Encs
+    x_1 O
+    x_2 B
+End
+	",
+			Some(vec![base.clone()]),
+		);
+	}
+
+	#[test]
 	fn test_tmp_red() {
 		let base = ModelConfig {
 			scm: Scm::Rca,

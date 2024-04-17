@@ -41,17 +41,18 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		con_lbl: Option<String>,
 	) -> crate::Result<Self> {
 		let e = self.x.borrow().e.clone();
-		let lit_to_bin_enc = |lit: Lit| {
+		let lit_to_bin_enc = |a: C, lit: Lit, dom: &[C]| {
 			assert!(self.c.is_positive(), "TODO neg scm");
+			let c = a.abs() * self.c.abs();
 			let bin_enc = BinEnc::from_lits(
-				&as_binary(self.c.abs().into(), None)
+				&as_binary(c.into(), None)
 					.into_iter()
 					.map(|bit| LitOrConst::from(bit.then_some(lit.clone()))) // if true, return Lit(lit), if false, return Const(false)
 					.collect_vec(),
 			);
 			Term::from(IntVar::from_dom_as_ref(
 				0,
-				Dom::from_slice(&[C::zero(), self.c]),
+				Dom::from_slice(dom),
 				false,
 				Some(IntVarEnc::Bin(Some(bin_enc))),
 				Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
@@ -62,19 +63,24 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			Some(IntVarEnc::Bin(_)) if self.c.abs().is_one() => Ok(self),
 			Some(IntVarEnc::Bin(Some(x_bin))) if x_bin.x.len() == 1 => {
 				if let [LitOrConst::Lit(lit)] = &x_bin.x.clone()[..] {
-					Ok(lit_to_bin_enc(lit.clone()))
+					Ok(lit_to_bin_enc(C::one(), lit.clone(), &dom))
 				} else {
 					unreachable!()
 				}
 			}
-			Some(IntVarEnc::Ord(x_ord)) => {
-				// let x_ord = x_ord.unwrap_or_else(|| t.x.borrow_mut().encode())
-				if let Some(x_ord) = x_ord {
-					if let &[lit] = &x_ord.iter().take(2).collect_vec()[..] {
-						return Ok(lit_to_bin_enc(lit.clone()));
-					}
+			Some(IntVarEnc::Ord(Some(x_ord))) if x_ord.x.len() <= 1 => {
+				if let &[lit] = &x_ord.iter().take(2).collect_vec()[..] {
+					// also pass in normalized value of the one literal
+					return Ok(lit_to_bin_enc(
+						self.x.borrow().ub() - self.x.borrow().lb(),
+						lit.clone(),
+						&dom,
+					));
+				} else {
+					unreachable!()
 				}
-
+			}
+			Some(IntVarEnc::Ord(None)) => {
 				let model = model.unwrap();
 				// Create y:O <= x:B
 				// Create a*x:O <= y:B
@@ -104,9 +110,15 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 							Term::new(-C::one(), y.clone()),
 						],
 					},
-					cmp: if up { cmp } else { cmp.reverse() },
+					cmp: if dom.len() <= 2 && false {
+						Comparator::Equal
+					} else if up {
+						cmp
+					} else {
+						cmp.reverse()
+					},
 					k: C::zero(),
-					lbl: con_lbl.clone().map(|lbl| format!("couple-{lbl}")),
+					lbl: con_lbl.clone().map(|lbl| format!("0-couple-{lbl}")),
 				})?;
 
 				Ok(Term::new(if up { C::one() } else { -C::one() }, y))
