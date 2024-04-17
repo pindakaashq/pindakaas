@@ -769,9 +769,9 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 					.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
 			{
 				if let Some((last, firsts)) = con.exp.terms.split_last() {
-
+					// TODO avoid removing gaps on the order encoded vars?
 					let (lb, ub) = firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
-						(lb + t.lb(), ub + t.ub())
+						(lb + t.lb(), std::cmp::min(ub + t.ub(), -last.lb()))
 					});
 					last.x.borrow_mut().dom = Dom::from_bounds(lb, ub);
 
