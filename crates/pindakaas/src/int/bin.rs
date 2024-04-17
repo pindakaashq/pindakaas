@@ -1,12 +1,15 @@
-use std::collections::HashSet;
+use std::{
+	collections::{HashMap, HashSet},
+	path::PathBuf,
+};
 
 use itertools::Itertools;
 
 use crate::{
 	helpers::{add_clauses_for, as_binary, negate_cnf, unsigned_binary_range},
 	linear::{lex_geq_const, lex_leq_const},
-	trace::new_var,
-	ClauseDatabase, Coefficient, Comparator, Literal, Unsatisfiable,
+	trace::{emit_clause, new_var},
+	ClauseDatabase, Cnf, Coefficient, Comparator, Literal, Unsatisfiable,
 };
 
 use super::{Dom, LitOrConst};
@@ -287,6 +290,77 @@ impl<Lit: Literal> BinEnc<Lit> {
 	/// Number of bits in the encoding
 	pub(crate) fn bits(&self) -> usize {
 		self.x.len()
+	}
+
+	#[cfg_attr(
+	feature = "trace",
+	tracing::instrument(name = "scm_dnf", skip_all, fields(constraint = format!("DNF:{c}*{self}")))
+)]
+	pub(crate) fn scm_dnf<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(
+		&self,
+		db: &mut DB,
+		c: C,
+	) -> Result<Self, Unsatisfiable> {
+		if c.is_one() {
+			return Ok(self.clone());
+		}
+		// assume shifts; all Const(false) at front
+		let bits = self.bits(); // all
+		let lits = self.lits().len(); // unfixed
+		let xs = self
+			.xs()
+			.into_iter()
+			.skip(bits - lits)
+			.map(|x| match x {
+				LitOrConst::Lit(x) => x,
+				LitOrConst::Const(_) => panic!("Fixed bits not at front in {self}"),
+			})
+			.collect_vec();
+
+		let cnf = Cnf::<DB::Lit>::from_file(&PathBuf::from(format!(
+			"{}/res/ecm/{lits}_{c}.dimacs",
+			env!("CARGO_MANIFEST_DIR")
+		)))
+		.unwrap_or_else(|_| panic!("Could not find Dnf method cnf for {lits}_{c}"));
+		// TODO could replace with some arithmetic
+		let map = cnf
+			.vars()
+			.zip_longest(xs.iter())
+			.flat_map(|yx| match yx {
+				itertools::EitherOrBoth::Both(x, y) => Some((x, y.clone())),
+				itertools::EitherOrBoth::Left(x) => {
+					// var in CNF but not in x -> new var y
+					Some((x.clone(), new_var!(db, format!("scm_{x}"))))
+				}
+				itertools::EitherOrBoth::Right(_) => unreachable!(), // cnf has at least as many vars as xs
+			})
+			.collect::<HashMap<_, _>>();
+
+		// add clauses according to Dnf
+		cnf.iter().try_for_each(|clause| {
+			emit_clause!(
+				db,
+				&clause
+					.iter()
+					.map(|x| {
+						let lit = &map[&x.var()];
+						if x.is_negated() {
+							lit.negate()
+						} else {
+							lit.clone()
+						}
+					})
+					.collect::<Vec<_>>()
+			)
+		})?;
+
+		let lits = [false]
+			.repeat(bits - lits)
+			.into_iter()
+			.map(LitOrConst::from)
+			.chain(map.into_values().sorted().skip(lits).map(LitOrConst::from))
+			.collect_vec();
+		Ok(BinEnc::from_lits(&lits))
 	}
 }
 

@@ -92,7 +92,7 @@ pub struct Model<Lit: Literal, C: Coefficient> {
 	pub config: ModelConfig<C>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Assignment<C: Coefficient>(pub HashMap<IntVarId, (String, C)>);
 
 impl<C: Coefficient> Ord for Assignment<C> {
@@ -287,7 +287,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	pub fn add_constraint(&mut self, constraint: Lin<Lit, C>) -> Result {
-		self.cons.push(constraint.simplified());
+		self.cons.push(constraint.simplified()?);
 		Ok(())
 	}
 
@@ -324,7 +324,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 				// split out uniform binary constraints
 				let cons = model.cons.clone();
+				if cons.is_empty() {
+					return Ok(model);
+				}
 				let (last, firsts) = cons.split_last().unwrap();
+
 				let (con_eqs, cons) = firsts.iter().cloned().partition(|con| {
 					con.exp
 						.terms
@@ -401,53 +405,6 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 								..last.clone()
 							},
 						]
-					/*
-					if let Some((rhs, lhs)) = last.clone().exp.terms.split_last() {
-						if lhs.is_empty() {
-							vec![last.clone()]
-						} else {
-							let dom = lhs
-								.iter()
-								.map(|t| t.dom().into_iter())
-								.multi_cartesian_product()
-								.map(|cs| cs.into_iter().reduce(C::add).unwrap())
-								.sorted()
-								.dedup()
-								.collect_vec();
-							let y = model
-								.new_var(
-									&dom,
-									// model.config.add_consistency,
-									true,
-									Some(IntVarEnc::Bin(None)),
-									last.lbl.as_ref().map(|lbl| format!("last-lhs-{lbl}")),
-								)
-								.unwrap();
-							vec![
-								Lin {
-									exp: LinExp {
-										terms: lhs
-											.iter()
-											.cloned()
-											.chain(vec![Term::new(-C::one(), y.clone())])
-											.collect(),
-									},
-									cmp: Comparator::Equal,
-									k: C::zero(),
-									lbl: last.lbl.as_ref().map(|lbl| format!("last-{lbl}")),
-								},
-								Lin {
-									exp: LinExp {
-										terms: vec![Term::from(y), rhs.clone()],
-									},
-									..last.clone()
-								},
-							]
-						}
-					} else {
-						unreachable!();
-					}
-						*/
 					} else {
 						vec![last.clone()]
 					};
@@ -808,7 +765,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 		Ok(Model {
 			cons: vec![Lin {
 				cmp: Comparator::Equal,
-				exp: if REMOVE_GAPS {
+				exp: if REMOVE_GAPS && con.exp.terms.len() > 1 {
 					if let Some((last, firsts)) = con.exp.terms.split_last() {
 						assert!(last.c.abs().is_one());
 						// 						let x_dom = last
@@ -1119,7 +1076,7 @@ mod tests {
 			// [Consistency::None],
 			// [false],
 			// [Some(0)] // [None, Some(0), Some(2)]
-			[Scm::Rca],
+			[Scm::Dnf],
 			[
 				// Decomposer::Gt,
 				// Decomposer::Swc,
