@@ -208,7 +208,7 @@ impl<C: Coefficient> Display for Dom<C> {
 		let dom = self.iter().collect::<Vec<_>>();
 		const ELIPSIZE: usize = 8;
 		if dom.is_empty() {
-			return writeln!(f, "||");
+			return write!(f, "||");
 		}
 		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
 		if dom.len() > 1 && C::from(dom.len()).unwrap() == ub - lb + C::one() {
