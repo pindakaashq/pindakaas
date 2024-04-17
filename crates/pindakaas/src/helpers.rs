@@ -165,6 +165,7 @@ impl<'a, Lit: Literal> Checker for XorConstraint<'a, Lit> {
 pub mod tests {
 	type Lit = i32; // TODO replace all i32s for Lit
 
+	use num::Integer;
 	use rand::distributions::Alphanumeric;
 	use rand::{thread_rng, Rng};
 	use splr::solver::SolverResult;
@@ -390,6 +391,7 @@ pub mod tests {
 
 	const USE_SPLR: bool = false;
 	const ONLY_OUTPUT: bool = true;
+	const CHECK_FIRST_SOL: bool = false;
 
 	impl TestDB {
 		pub fn new(num_var: i32) -> TestDB {
@@ -615,6 +617,9 @@ pub mod tests {
 				};
 
 				from_slv.push(solution.clone());
+				if CHECK_FIRST_SOL {
+					break;
+				}
 
 				let nogood: Vec<i32> = solution.iter().map(|l| -l).collect();
 				if USE_SPLR {
@@ -866,7 +871,11 @@ pub mod tests {
 				}
 			}
 
-			const FIND_UNSAT: bool = false;
+			const FIND_UNSAT_EVERY: Option<usize> = None;
+			let find_unsat = FIND_UNSAT_EVERY
+				.map(|every| self.cnf.clauses().is_multiple_of(&every))
+				.unwrap_or_default();
+
 			if USE_SPLR {
 				let res = match match cl.len() {
 					0 => return Err(Unsatisfiable),
@@ -874,7 +883,7 @@ pub mod tests {
 					_ => SatSolverIF::add_clause(&mut self.slv, cl),
 				} {
 					Ok(_) => {
-						if FIND_UNSAT {
+						if find_unsat {
 							if let SolverResult::Ok(Certificate::UNSAT) = self.call_solver() {
 								return Err(Unsatisfiable);
 							}
@@ -893,7 +902,7 @@ pub mod tests {
 
 				res
 			} else {
-				if FIND_UNSAT {
+				if find_unsat {
 					if let SolverResult::Ok(Certificate::UNSAT) = self.call_solver() {
 						return Err(Unsatisfiable);
 					}
