@@ -1,12 +1,7 @@
-use std::{collections::HashMap, path::PathBuf};
-
 use crate::int::model::Decompose;
 use crate::{
-	int::{bin::BinEnc, LitOrConst},
-	linear::log_enc_add_,
-	trace::{emit_clause, new_var},
-	Assignment, CheckError, ClauseDatabase, Cnf, Coefficient, Comparator, Consistency, IntVarRef,
-	Literal, Model, ModelConfig, Result, Term, Unsatisfiable,
+	linear::log_enc_add_, trace::emit_clause, Assignment, CheckError, ClauseDatabase, Coefficient,
+	Comparator, Consistency, IntVarRef, Literal, Model, ModelConfig, Result, Term, Unsatisfiable,
 };
 use itertools::Itertools;
 
@@ -310,6 +305,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			.collect_vec();
 
 		match (&term_encs[..], self.cmp) {
+			([], _) => self
+				.check(&Assignment::default())
+				.map_err(|_| Unsatisfiable),
 			([(Term { c, x }, Some(IntVarEnc::Bin(_)))], _)
 				if c.is_one() && !USE_COUPLING_IO_LEX =>
 			{
@@ -321,46 +319,12 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				if *y_c == -C::one()
 					&& self.k.is_zero() && matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) =>
 			{
-				t.x.borrow_mut().encode_bin(db)?;
-				let t_x = (*t).clone().encode_bin(None, self.cmp, None)?;
-
-				// let x_enc_bin = t.en
-				assert!(matches!(y.borrow().e, Some(IntVarEnc::Bin(None))));
-				assert!(t.c.is_positive(), "TODO neg scm");
-
-				// if c.is_one() {
-				// 	y.borrow_mut().e = Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
-				// 		&(0..sh)
-				// 			.map(|_| LitOrConst::Const(false))
-				// 			.chain(x_enc.xs().iter().cloned())
-				// 			.collect_vec(),
-				// 	))));
-				// 	return Ok(());
-				// }
-
-				let y_enc = if t_x.c.is_one() {
-					t_x.x.borrow().e.clone()
-				} else {
-					let x_enc = t_x.x.borrow_mut().encode_bin(db)?;
-					let sh = 0;
-					// let sh = t_x.c.trailing_zeros();
-					let c = t_x.c.shr(sh as usize);
-					let lits = x_enc.lits().len(); // TODO use max(), but requires coercing Lit to usize later for skip(..)
-					let y_lits = Self::scm_dnf(db, x_enc.xs(), lits, c)?;
-
-					// set encoding of y
-					Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
-						&(0..sh)
-							.map(|_| LitOrConst::Const(false))
-							.chain(y_lits.into_iter().map(LitOrConst::from))
-							.collect_vec(),
-					))))
-				};
-				y.borrow_mut().e = y_enc;
-				if y.borrow().add_consistency {
-					y.borrow().consistent(db)?;
-				}
-
+				assert!(t.c.is_positive(), "neg scm: {self}");
+				t.x.borrow_mut().encode_bin(db)?; // encode x (if not encoded already)
+				let new_y = (*t).clone().encode_bin(None, self.cmp, None)?;
+				(*y).borrow_mut().e = Some(IntVarEnc::Bin(Some(
+					new_y.x.borrow_mut().encode_bin(db)?.scm_dnf(db, new_y.c)?,
+				)));
 				Ok(())
 			}
 			(
@@ -533,58 +497,6 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				})
 			}
 		}
-	}
-
-	#[cfg_attr(
-	feature = "trace",
-	tracing::instrument(name = "scm_dnf", skip_all, fields(constraint = format!("DNF:{lits}_{c}")))
-)]
-	fn scm_dnf<DB: ClauseDatabase>(
-		db: &mut DB,
-		xs: Vec<LitOrConst<DB::Lit>>,
-		lits: usize,
-		c: C,
-	) -> Result<Vec<DB::Lit>, Unsatisfiable> {
-		let cnf = Cnf::<DB::Lit>::from_file(&PathBuf::from(format!(
-			"{}/res/ecm/{lits}_{c}.dimacs",
-			env!("CARGO_MANIFEST_DIR")
-		)))
-		.unwrap_or_else(|_| panic!("Could not find Dnf method cnf for {lits}_{c}"));
-		// TODO could replace with some arithmetic
-		let map = cnf
-			.vars()
-			.zip_longest(xs.iter())
-			.flat_map(|yx| match yx {
-				itertools::EitherOrBoth::Both(x, y) => match y {
-					LitOrConst::Lit(y) => Some((x, y.clone())),
-					LitOrConst::Const(_) => None,
-				},
-				itertools::EitherOrBoth::Left(x) => {
-					Some((x.clone(), new_var!(db, format!("scm_{x}"))))
-				}
-				itertools::EitherOrBoth::Right(_) => unreachable!(),
-			})
-			.collect::<HashMap<_, _>>();
-
-		// add clauses according to Dnf
-		cnf.iter().try_for_each(|clause| {
-			emit_clause!(
-				db,
-				&clause
-					.iter()
-					.map(|x| {
-						let lit = &map[&x.var()];
-						if x.is_negated() {
-							lit.negate()
-						} else {
-							lit.clone()
-						}
-					})
-					.collect::<Vec<_>>()
-			)
-		})?;
-
-		Ok(map.into_values().sorted().skip(lits).collect())
 	}
 
 	fn encode_rec(
@@ -763,9 +675,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			.collect()
 	}
 
-	pub(crate) fn simplified(self) -> Lin<Lit, C> {
+	pub(crate) fn simplified(self) -> Result<Lin<Lit, C>> {
 		let mut k = self.k;
-		Lin {
+		let con = Lin {
 			exp: LinExp {
 				terms: self
 					.exp
@@ -783,6 +695,13 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			},
 			k,
 			..self
+		};
+		if con.exp.terms.is_empty() {
+			con.check(&Assignment::default())
+				.map(|_| con)
+				.map_err(|_| Unsatisfiable)
+		} else {
+			Ok(con)
 		}
 	}
 

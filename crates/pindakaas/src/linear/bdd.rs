@@ -182,24 +182,24 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 			.collect::<Vec<_>>();
 
 		let mut ys = ys.into_iter();
-		let first = ys.next().unwrap();
-		assert!(first.size() == C::one());
-		lin.exp
-			.terms
-			.iter()
-			.zip(ys)
-			.enumerate()
-			.try_fold(first, |curr, (i, (term, next))| {
-				model
-					.add_constraint(Lin::tern(
-						term.clone(),
-						curr,
-						lin.cmp,
-						next.clone(),
-						lin.lbl.as_ref().map(|lbl| format!("bdd_{:04}_{}", i, lbl)),
-					))
-					.map(|_| next)
-			})?;
+		if let Some(first) = ys.next() {
+			assert!(first.size() == C::one());
+
+			lin.exp.terms.iter().zip(ys).enumerate().try_fold(
+				first,
+				|curr, (i, (term, next))| {
+					model
+						.add_constraint(Lin::tern(
+							term.clone(),
+							curr,
+							lin.cmp,
+							next.clone(),
+							lin.lbl.as_ref().map(|lbl| format!("bdd_{:04}_{}", i, lbl)),
+						))
+						.map(|_| next)
+				},
+			)?;
+		}
 
 		Ok(model)
 	}

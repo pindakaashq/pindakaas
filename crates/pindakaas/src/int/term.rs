@@ -113,26 +113,21 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			}
 			Some(IntVarEnc::Bin(Some(x_bin))) if self.c.trailing_zeros() > 0 => {
 				let sh = self.c.trailing_zeros();
-				let y = model
-					.unwrap()
-					.new_var(
-						&dom,
-						// model.unwrap().config.add_consistency,
-						false,
-						Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
-							&(0..sh)
-								.map(|_| LitOrConst::Const(false))
-								.chain(x_bin.xs().iter().cloned())
-								.collect_vec(),
-						)))),
-						Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
-					)
-					.unwrap();
+				let y = IntVar::from_dom_as_ref(
+					0,
+					Dom::from_slice(&dom),
+					false, // view never needs consistency
+					Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+						&(0..sh)
+							.map(|_| LitOrConst::Const(false))
+							.chain(x_bin.xs().iter().cloned())
+							.collect_vec(),
+					)))),
+					Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
+				);
 
-				Ok(Term::from(y))
+				Term::new(self.c.shr(sh as usize), y).encode_bin(model, cmp, con_lbl)
 			}
-
-			// Some(IntVarEnc::Bin(Some(_))) if self.c.abs().is_one() => Ok(self.x.clone()),
 			Some(IntVarEnc::Bin(None)) if model.is_some() => {
 				let model = model.unwrap();
 				let y = model
