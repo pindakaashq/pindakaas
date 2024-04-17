@@ -320,8 +320,6 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 					.decompose_with(Some(&enc))
 					.map(|models| models.into_iter().collect::<Model<_, _>>())?;
 
-				println!("lin decomp = {}", model);
-
 				// split out uniform binary constraints
 				let cons = model.cons.clone();
 				if cons.is_empty() {
@@ -347,7 +345,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 						.as_ref(),
 				)
 				.map(|models| {
-					const REWRITE_LAST: bool = false;
+					const REWRITE_LAST: bool = true;
 					let last = if REWRITE_LAST
 						&& last.cmp.is_ineq() && last.exp.terms.len() > 1
 						&& last
@@ -595,6 +593,10 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 		// Throw early if expected_assignments need to be computed
 		if brute_force_solve || expected_assignments.is_none() {
+			println!(
+				"All constraints hold for actual assignments:\n{}",
+				actual_assignments.iter().join("\n")
+			);
 			if errs.is_empty() {
 				return Ok(());
 			} else {
@@ -1316,33 +1318,35 @@ mod tests {
 					println!("decomposition = {}", decomposition);
 
 					// encode and solve
-					let lit_assignments = decomposition
-						.encode(&mut db, false)
-						.map(|_| {
-							println!(
-								"checking config #{i} = {:?}\ndecomposition #{j} = {}",
-								config, decomposition
+					let lit_assignments =
+						decomposition
+							.encode(&mut db, false)
+							.map(|_| {
+								println!(
+								"checking config #{i} = {:?}\ndecomposition #{j} = {} [{}/{}/{}]",
+								config, decomposition,
+                                db.cnf.variables(), db.cnf.clauses(), db.cnf.literals()
 							);
 
-							let output = if CHECK_CONSTRAINTS || SHOW_AUX {
-								decomposition.lits()
-							} else {
-								principal_vars
-									.values()
-									.flat_map(|x| x.borrow().lits())
-									.collect()
-							};
+								let output = if CHECK_CONSTRAINTS || SHOW_AUX {
+									decomposition.lits()
+								} else {
+									principal_vars
+										.values()
+										.flat_map(|x| x.borrow().lits())
+										.collect()
+								};
 
-							db.solve(Some(output))
-								.into_iter()
-								.sorted()
-								.collect::<Vec<_>>()
-						})
-						.unwrap_or_else(|_| {
-							println!("Warning: encoding decomposition lead to UNSAT");
-							// TODO panic based on expected_assignments.is_empty
-							Vec::default()
-						});
+								db.solve(Some(output))
+									.into_iter()
+									.sorted()
+									.collect::<Vec<_>>()
+							})
+							.unwrap_or_else(|_| {
+								println!("Warning: encoding decomposition lead to UNSAT");
+								// TODO panic based on expected_assignments.is_empty
+								Vec::default()
+							});
 
 					assert_eq!(
 						lit_assignments.iter().unique().count(),
