@@ -295,6 +295,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		db: &mut DB,
 		_config: &ModelConfig<C>,
 	) -> Result {
+		const NEW_COUPLING: bool = true;
 		if PRINT_COUPLING {
 			println!("{self}");
 		}
@@ -362,6 +363,32 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					.unwrap();
 
 				log_enc_add_(db, x, y, &self.cmp, z)
+			}
+			([(x, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(_)))], cmp)
+				if y.c == -C::one()
+					&& cmp.is_ineq() && cmp == Comparator::LessEq
+					&& NEW_COUPLING =>
+			{
+				let y_enc = y.x.borrow_mut().encode_bin(db)?;
+
+				let up = match cmp {
+					Comparator::LessEq => false,
+					Comparator::Equal => unreachable!(),
+					Comparator::GreaterEq => true,
+				};
+
+				let xs = x.ineqs(up);
+
+				xs.into_iter()
+					.tuple_windows()
+					.try_for_each(|((c_a, _, _), (c_b, x, _))| {
+						let y = y_enc.ineqs(c_a, c_b, !up);
+						if PRINT_COUPLING {
+							println!("{c_a}..{c_b} -> {x:?}");
+							println!("{y:?}");
+						}
+						add_clauses_for(db, vec![vec![x.clone()], y])
+					})
 			}
 			_ => {
 				// encode all variables

@@ -1,3 +1,4 @@
+use crate::int::model::PRINT_COUPLING;
 use std::{
 	collections::{HashMap, HashSet},
 	path::PathBuf,
@@ -12,7 +13,7 @@ use crate::{
 	ClauseDatabase, Cnf, Coefficient, Comparator, Literal, Unsatisfiable,
 };
 
-use super::{Dom, LitOrConst};
+use super::{helpers::is_clause_redundant, Dom, LitOrConst};
 
 #[derive(Debug, Clone)]
 pub struct BinEnc<Lit: Literal> {
@@ -129,38 +130,55 @@ impl<Lit: Literal> BinEnc<Lit> {
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
-	pub(crate) fn _ineqs<C: Coefficient>(&self, a: C, b: C, up: bool) -> Vec<Vec<Lit>> {
-		num::iter::range_inclusive(a, b)
-			.map(|k| self._ineq(k, up))
+	pub(crate) fn ineqs<C: Coefficient>(&self, a: C, b: C, up: bool) -> Vec<Vec<Lit>> {
+		let (_, range_ub) = unsigned_binary_range::<C>(self.bits());
+		let (r_a, r_b) = if up {
+			(range_ub + C::one() - b, range_ub + C::one() - a)
+		} else {
+			(a, b)
+		};
+
+		if PRINT_COUPLING {
+			print!("\t {r_a}..{r_b} -> ");
+		}
+
+		let mut last: Option<Vec<Lit>> = None;
+		num::iter::range(r_a, r_b)
+			.map(|k| self.ineq(k, up))
+			.flat_map(|clause| match last.as_ref() {
+				Some(last) if is_clause_redundant(last, &clause) => None,
+				_ => {
+					last = Some(clause.clone());
+					Some(clause)
+				}
+			})
 			.collect()
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
-	pub fn _ineq<C: Coefficient>(&self, _k: C, _up: bool) -> Vec<Lit> {
-		todo!();
+	pub fn ineq<C: Coefficient>(&self, k: C, up: bool) -> Vec<Lit> {
 		// assert!(up);
-		// let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
 		// if k > range_ub {
 		// 	// return vec![];
 		// 	return vec![];
 		// }
 		// let k = k.clamp(range_lb, range_ub);
-		// as_binary(k.into(), Some(self.bits()))
-		// 	.into_iter()
-		// 	.zip(self.xs().iter().cloned())
-		// 	// if >=, find 1's, if <=, find 0's
-		// 	.filter_map(|(b, x)| (b == up).then_some(x))
-		// 	// if <=, negate lits at 0's
-		// 	.map(|x| if up { x } else { -x })
-		// 	.filter_map(|x| match x {
-		// 		// THIS IS A CONJUNCTION
-		// 		// TODO make this a bit more clear (maybe simplify function for Cnf)
-		// 		LitOrConst::Lit(x) => Some(Ok(x)),
-		// 		LitOrConst::Const(true) => None, // literal satisfied
-		// 		LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
-		// 	})
-		// 	.try_collect()
-		// 	.unwrap_or_default()
+		as_binary(k.into(), Some(self.bits()))
+			.into_iter()
+			.zip(self.xs().iter().cloned())
+			// if >=, find 1's, if <=, find 0's
+			.filter_map(|(b, x)| (b == up).then_some(x))
+			// if <=, negate lits at 0's
+			.map(|x| if up { x } else { -x })
+			.filter_map(|x| match x {
+				// THIS IS A CONJUNCTION
+				// TODO make this a bit more clear (maybe simplify function for Cnf)
+				LitOrConst::Lit(x) => Some(Ok(x)),
+				LitOrConst::Const(true) => None, // literal satisfied
+				LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
+			})
+			.try_collect()
+			.unwrap_or_default()
 	}
 
 	/// Get encoding as unsigned binary representation (if negative dom values, offset by `-2^(k-1)`)

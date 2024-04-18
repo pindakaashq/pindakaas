@@ -2104,15 +2104,44 @@ End
 			equalize_uniform_bin_ineqs: false,
 		};
 		// Expected output only has 1 (!) clause (3, -4)
+
 		test_lp_for_configs(
 			r"
 Subject To
     c0: x - y <= 0
 Doms
-    \ x in 0,2,5,7
-    \ y in 0,2,5,7
-    x in 0,1,2,3,4,5,6,7
-    y in 0,1,2,3,4,5,6,7
+    x in 0,1
+    y in 0,1
+Encs
+    x O
+    y B
+End
+	",
+			Some(vec![base.clone()]),
+		);
+
+		test_lp_for_configs(
+			r"
+Subject To
+    c0: x - y <= 0
+Doms
+    x in 0,1,2,3
+    y in 0,1,2,3
+Encs
+    x O
+    y B
+End
+	",
+			Some(vec![base.clone()]),
+		);
+
+		test_lp_for_configs(
+			r"
+Subject To
+    c0: x - y <= 0
+Doms
+    x in 0,2,5,7
+    y in 0,2,5,7
 Encs
     x O
     y B
