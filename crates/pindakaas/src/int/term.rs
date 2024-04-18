@@ -41,7 +41,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		con_lbl: Option<String>,
 	) -> crate::Result<Self> {
 		let e = self.x.borrow().e.clone();
-		let lit_to_bin_enc = |a: C, lit: Lit, dom: &[C]| {
+		let lit_to_bin_enc = |a: C, _cmp: Comparator, lit: Lit, dom: &[C]| {
 			assert!(self.c.is_positive(), "TODO neg scm");
 			let c = a.abs() * self.c.abs();
 			let bin_enc = BinEnc::from_lits(
@@ -63,7 +63,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			Some(IntVarEnc::Bin(_)) if self.c.abs().is_one() => Ok(self),
 			Some(IntVarEnc::Bin(Some(x_bin))) if x_bin.x.len() == 1 => {
 				if let [LitOrConst::Lit(lit)] = &x_bin.x.clone()[..] {
-					Ok(lit_to_bin_enc(C::one(), lit.clone(), &dom))
+					Ok(lit_to_bin_enc(C::one(), cmp, lit.clone(), &dom))
 				} else {
 					unreachable!()
 				}
@@ -73,6 +73,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					// also pass in normalized value of the one literal
 					return Ok(lit_to_bin_enc(
 						self.x.borrow().ub() - self.x.borrow().lb(),
+						cmp,
 						lit.clone(),
 						&dom,
 					));

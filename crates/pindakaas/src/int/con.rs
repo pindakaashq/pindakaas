@@ -1,3 +1,5 @@
+use crate::helpers::{add_clauses_for, negate_cnf};
+use crate::int::helpers::display_cnf;
 use crate::int::model::Decompose;
 use crate::{
 	linear::log_enc_add_, trace::emit_clause, Assignment, CheckError, ClauseDatabase, Coefficient,
@@ -7,7 +9,9 @@ use itertools::Itertools;
 
 use super::helpers::filter_cnf;
 use super::{
-	model::{LinDecomposer, PRINT_COUPLING, REMOVE_IMPLIED_CLAUSES, USE_COUPLING_IO_LEX},
+	model::{
+		LinDecomposer, PRINT_COUPLING, REMOVE_IMPLIED_CLAUSES, USE_COUPLING_IO_LEX, VIEW_COUPLING,
+	},
 	IntVarEnc, IntVarId,
 };
 
@@ -316,7 +320,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			}
 			// VIEW COUPLING
 			([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(None)))], _)
-				if y.c == -C::one() && t.x.borrow().dom.size() <= C::one() + C::one() =>
+				if y.c == -C::one()
+					&& t.x.borrow().dom.size() <= C::one() + C::one()
+					&& VIEW_COUPLING =>
 			{
 				t.x.borrow_mut().encode(db, None)?;
 				let view = (*t).clone().encode_bin(None, self.cmp, None)?;
@@ -330,6 +336,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			{
 				assert!(t.c.is_positive(), "neg scm: {self}");
 				t.x.borrow_mut().encode_bin(db)?; // encode x (if not encoded already)
+								  // encode y
 				let new_y = (*t).clone().encode_bin(None, self.cmp, None)?;
 				(*y).borrow_mut().e = Some(IntVarEnc::Bin(Some(
 					new_y.x.borrow_mut().encode_bin(db)?.scm_dnf(db, new_y.c)?,
@@ -382,7 +389,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					// TODO move to closure to add DB?
 					let (_, cnf) = Self::encode_rec(&terms, &cmp, self.k, 0);
 					if PRINT_COUPLING {
-						println!("{}", cnf.iter().map(|c| c.iter().join(", ")).join("\n"));
+						println!("{}", display_cnf(&cnf));
 					}
 
 					for c in cnf {
@@ -508,6 +515,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		}
 	}
 
+	// #[cfg_attr(
+	// 	feature = "trace",
+	// 	tracing::instrument(name = "encode_rec", skip_all, fields(constraint = format!("{} {} {}", terms.iter().join(" "), cmp, k)))
+	// )]
 	fn encode_rec(
 		terms: &[Term<Lit, C>],
 		cmp: &Comparator,
@@ -539,13 +550,13 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					);
 				}
 
-				let (c, dnf) = head.x.borrow().ineq(k_, up, None);
+				let (c, cnf) = head.x.borrow().ineq(k_, up, None);
 
 				if PRINT_COUPLING {
-					println!("== {dnf:?}",);
+					println!("== {cnf:?}",);
 				}
 
-				(c.map(|c| head.c * c), dnf)
+				(c.map(|c| head.c * c), cnf)
 			} else {
 				let mut stop = false;
 				let mut last_a = None; // last antecedent implies till here
@@ -622,12 +633,20 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
                             // }
 
                             // missing let-chain feature
+                            if PRINT_COUPLING {
+                            println!("{}", display_cnf(&cnf));
+                            println!("given:\n{}", display_cnf(last_cnf.as_ref().unwrap_or(&vec![])));
+                            }
+
                             let cnf =
                                 if let (true, Some(last_cnf)) = (REMOVE_IMPLIED_CLAUSES, last_cnf.as_ref())  {
                                     filter_cnf(cnf, last_cnf)
                                 } else {
                                     cnf.clone()
                                 };
+                            if PRINT_COUPLING {
+                            println!("filt:\n{}", display_cnf(&cnf));
+                            }
 
                             // if PRINT_COUPLING {
                             //     print!("cnf = {:?}", cnf);
