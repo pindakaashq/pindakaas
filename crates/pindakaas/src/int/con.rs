@@ -365,10 +365,11 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				log_enc_add_(db, x, y, &self.cmp, z)
 			}
 			([(x, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(_)))], cmp)
-				if y.c == -C::one()
-					&& cmp.is_ineq() && cmp == Comparator::LessEq
+				if x.c== C::one() && y.c == -C::one()
+					&& cmp.is_ineq()
 					&& NEW_COUPLING =>
 			{
+				x.x.borrow_mut().encode(db, None)?;
 				let y_enc = y.x.borrow_mut().encode_bin(db)?;
 
 				let up = match cmp {
@@ -378,13 +379,16 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				};
 
 				let xs = x.ineqs(up);
-
+				let dom = &y.x.borrow().dom;
 				xs.into_iter()
+					.map(|(c, x, _)| (y_enc.normalize(c, dom), x))
 					.tuple_windows()
-					.try_for_each(|((c_a, _, _), (c_b, x, _))| {
-						let y = y_enc.ineqs(c_a, c_b, !up);
+					.try_for_each(|((c_a, _), (c_b, x))| {
 						if PRINT_COUPLING {
 							println!("{c_a}..{c_b} -> {x:?}");
+						}
+						let y = y_enc.ineqs(c_a, c_b, !up);
+						if PRINT_COUPLING {
 							println!("{y:?}");
 						}
 						add_clauses_for(db, vec![vec![x.clone()], y])

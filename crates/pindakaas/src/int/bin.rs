@@ -131,28 +131,44 @@ impl<Lit: Literal> BinEnc<Lit> {
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
 	pub(crate) fn ineqs<C: Coefficient>(&self, a: C, b: C, up: bool) -> Vec<Vec<Lit>> {
+		const REMOVE_RED: bool = true;
 		let (_, range_ub) = unsigned_binary_range::<C>(self.bits());
 		let (r_a, r_b) = if up {
 			(range_ub + C::one() - b, range_ub + C::one() - a)
 		} else {
-			(a, b)
+			(range_ub - a, range_ub - b)
 		};
 
+		assert!(r_a <= r_b);
 		if PRINT_COUPLING {
 			print!("\t {r_a}..{r_b} -> ");
 		}
 
 		let mut last: Option<Vec<Lit>> = None;
-		num::iter::range(r_a, r_b)
+		let ineqs = num::iter::range(r_a, r_b)
 			.map(|k| self.ineq(k, up))
+			.collect_vec();
+
+		let ineqs = if up {
+			ineqs
+		} else {
+			ineqs.into_iter().rev().collect()
+		};
+		let ineqs = ineqs
+			.into_iter()
 			.flat_map(|clause| match last.as_ref() {
-				Some(last) if is_clause_redundant(last, &clause) => None,
+				Some(last) if is_clause_redundant(last, &clause) && REMOVE_RED => None,
 				_ => {
 					last = Some(clause.clone());
 					Some(clause)
 				}
 			})
-			.collect()
+			.collect();
+		if up {
+			ineqs
+		} else {
+			ineqs.into_iter().rev().collect()
+		}
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
