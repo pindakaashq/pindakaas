@@ -949,6 +949,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, 
 			})
 			.collect_vec();
 
+		let mut is_last_term = false;
 		let new_con =
             // if mixed encoding of more than 2 terms, couple each xi:O<=yi:B 
 			if COUPLE_SINGLE_VARS && encs.len() > 2 && encs.iter().any(|(_, e)| *e) && encs.iter().any(|(_, e)| !e) {
@@ -958,9 +959,12 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, 
 							.exp
 							.terms
 							.into_iter()
-							.map(|t| {
+                            .with_position()
+							.map(|(p,t)| {
+
 								let x_enc = t.x.borrow().e.clone();
 								let t_new = if let Some(IntVarEnc::Ord(None)) = x_enc {
+                                    is_last_term = matches!(p, Position::Last);
                                     Ok(t.encode_bin(Some(&mut model), con.cmp, con.lbl.clone()).unwrap())
 								} else {
 									Ok(t.clone())
@@ -976,8 +980,17 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, 
 				con
 			};
 
-		model.add_constraint(new_con)?;
-		Ok(model)
+		Ok(Model {
+			cons: if is_last_term {
+				[new_con]
+					.into_iter()
+					.chain(model.cons.into_iter())
+					.collect()
+			} else {
+				model.cons.into_iter().chain([new_con]).collect()
+			},
+			..model
+		})
 	}
 }
 
