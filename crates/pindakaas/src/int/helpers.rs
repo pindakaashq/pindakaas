@@ -628,6 +628,10 @@ pub(crate) fn sign_extend<Lit: Literal>(
 		.collect()
 }
 
+pub(crate) fn display_cnf<Lit: Literal>(cnf: &Vec<Vec<Lit>>) -> String {
+	format!("{}", cnf.iter().map(|c| c.iter().join(", ")).join("\n")).to_string()
+}
+
 pub(crate) fn filter_cnf<Lit: Literal>(cnf: Vec<Vec<Lit>>, given: &Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
 	if given.is_empty() {
 		cnf

@@ -246,7 +246,9 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					(range_lb + k, a)
 				};
 
-				// TODO replace by ineqs..?
+				if PRINT_COUPLING {
+					print!("{r_a}..{r_b} ");
+				}
 				let dnf = x_bin.geqs(r_a, r_b);
 
 				let dnf = if up {

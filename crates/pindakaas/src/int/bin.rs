@@ -131,35 +131,36 @@ impl<Lit: Literal> BinEnc<Lit> {
 	/// Returns conjunction for x>=k (or x<=k if !up)
 	pub(crate) fn _ineqs<C: Coefficient>(&self, a: C, b: C, up: bool) -> Vec<Vec<Lit>> {
 		num::iter::range_inclusive(a, b)
-			.map(|k| self.ineq(k, up))
+			.map(|k| self._ineq(k, up))
 			.collect()
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
-	pub fn ineq<C: Coefficient>(&self, k: C, up: bool) -> Vec<Lit> {
-		assert!(up);
-		let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
-		if k > range_ub {
-			// return vec![];
-			return vec![];
-		}
-		let k = k.clamp(range_lb, range_ub);
-		as_binary(k.into(), Some(self.bits()))
-			.into_iter()
-			.zip(self.xs().iter().cloned())
-			// if >=, find 1's, if <=, find 0's
-			.filter_map(|(b, x)| (b == up).then_some(x))
-			// if <=, negate lits at 0's
-			.map(|x| if up { x } else { -x })
-			.filter_map(|x| match x {
-				// THIS IS A CONJUNCTION
-				// TODO make this a bit more clear (maybe simplify function for Cnf)
-				LitOrConst::Lit(x) => Some(Ok(x)),
-				LitOrConst::Const(true) => None, // literal satisfied
-				LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
-			})
-			.try_collect()
-			.unwrap_or_default()
+	pub fn _ineq<C: Coefficient>(&self, _k: C, _up: bool) -> Vec<Lit> {
+		todo!();
+		// assert!(up);
+		// let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
+		// if k > range_ub {
+		// 	// return vec![];
+		// 	return vec![];
+		// }
+		// let k = k.clamp(range_lb, range_ub);
+		// as_binary(k.into(), Some(self.bits()))
+		// 	.into_iter()
+		// 	.zip(self.xs().iter().cloned())
+		// 	// if >=, find 1's, if <=, find 0's
+		// 	.filter_map(|(b, x)| (b == up).then_some(x))
+		// 	// if <=, negate lits at 0's
+		// 	.map(|x| if up { x } else { -x })
+		// 	.filter_map(|x| match x {
+		// 		// THIS IS A CONJUNCTION
+		// 		// TODO make this a bit more clear (maybe simplify function for Cnf)
+		// 		LitOrConst::Lit(x) => Some(Ok(x)),
+		// 		LitOrConst::Const(true) => None, // literal satisfied
+		// 		LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
+		// 	})
+		// 	.try_collect()
+		// 	.unwrap_or_default()
 	}
 
 	/// Get encoding as unsigned binary representation (if negative dom values, offset by `-2^(k-1)`)
