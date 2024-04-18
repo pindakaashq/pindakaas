@@ -1,4 +1,4 @@
-use crate::helpers::{add_clauses_for, negate_cnf};
+use crate::helpers::add_clauses_for;
 use crate::int::helpers::display_cnf;
 use crate::int::model::Decompose;
 use crate::{
