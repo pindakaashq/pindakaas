@@ -33,7 +33,7 @@ pub(crate) const PRINT_COUPLING: bool = true;
 #[cfg(not(feature = "trace"))]
 pub(crate) const PRINT_COUPLING: bool = false;
 /// In the coupling, skip redundant clauses of which every term is already implied
-pub(crate) const REMOVE_IMPLIED_CLAUSES: bool = false;
+pub(crate) const REMOVE_IMPLIED_CLAUSES: bool = true;
 /// Replace unary constraints by coupling
 pub(crate) const USE_COUPLING_IO_LEX: bool = false;
 
