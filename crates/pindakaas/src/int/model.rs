@@ -38,7 +38,7 @@ pub(crate) const REMOVE_IMPLIED_CLAUSES: bool = true;
 pub(crate) const USE_COUPLING_IO_LEX: bool = false;
 
 /// View coupling
-pub(crate) const VIEW_COUPLING: bool = false;
+pub(crate) const VIEW_COUPLING: bool = true;
 
 use iset::IntervalMap;
 

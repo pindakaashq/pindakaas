@@ -319,9 +319,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				x_enc.encode_unary_constraint(db, &self.cmp, self.k, &x.borrow().dom, false)
 			}
 			// VIEW COUPLING
-			([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(None)))], _)
+			([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(None)))], cmp)
 				if y.c == -C::one()
 					&& t.x.borrow().dom.size() <= C::one() + C::one()
+					&& cmp == Comparator::LessEq
 					&& VIEW_COUPLING =>
 			{
 				t.x.borrow_mut().encode(db, None)?;
