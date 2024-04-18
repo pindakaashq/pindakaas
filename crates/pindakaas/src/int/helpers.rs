@@ -493,7 +493,7 @@ End
 		let add_var = |model: &mut Model<Lit, C>, lp_id: &str, dom: &[C]| {
 			let lp_id = lp_id.to_string();
 			model
-				.new_var(&dom, true, encs.get(&lp_id).cloned(), Some(lp_id.clone()))
+				.new_var(dom, true, encs.get(&lp_id).cloned(), Some(lp_id.clone()))
 				.map(|x| (lp_id, x))
 		};
 
@@ -504,19 +504,18 @@ End
 			.collect::<HashMap<_, _>>();
 
 		let mut to_ilp_exp =
-			|mut model: &mut Model<Lit, C>, (int_vars, coefs): &ParseLinExp<C>| LinExp {
+			|model: &mut Model<Lit, C>, (int_vars, coefs): &ParseLinExp<C>| LinExp {
 				terms: coefs
 					.iter()
 					.zip(
 						int_vars
-							.into_iter()
+							.iter()
 							.map(|lp_id| match vars.entry(lp_id.clone()) {
 								Entry::Occupied(e) => Rc::clone(e.get()),
 								Entry::Vacant(e) => {
 									eprintln!("WARNING: unbounded variable's {lp_id} domain set to Binary");
-									let x = add_var(&mut model, &lp_id, &[C::zero(), C::one()])
-										.unwrap()
-										.1;
+									let x =
+										add_var(model, lp_id, &[C::zero(), C::one()]).unwrap().1;
 									e.insert(x.clone());
 									x
 								}
@@ -629,7 +628,10 @@ pub(crate) fn sign_extend<Lit: Literal>(
 }
 
 pub(crate) fn display_cnf<Lit: Literal>(cnf: &Vec<Vec<Lit>>) -> String {
-	format!("{}", cnf.iter().map(|c| c.iter().join(", ")).join("\n")).to_string()
+	cnf.iter()
+		.map(|c| c.iter().join(", "))
+		.join("\n")
+		.to_string()
 }
 
 pub(crate) fn filter_cnf<Lit: Literal>(cnf: Vec<Vec<Lit>>, given: &Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
