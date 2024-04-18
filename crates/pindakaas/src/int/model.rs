@@ -586,7 +586,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.collect::<Vec<_>>();
 
 		// Throw early if expected_assignments need to be computed
-		if brute_force_solve || expected_assignments.is_none() {
+		if !brute_force_solve || expected_assignments.is_none() {
 			if errs.is_empty() {
 				println!(
 					"All constraints hold for actual assignments:\n{}",
@@ -702,6 +702,11 @@ Actual assignments:
                    expected_assignments.iter().join("\n")
                   );
 
+		println!(
+			"Actual assignments are complete and correct:\n{}",
+			actual_assignments.iter().join("\n")
+		);
+
 		Ok(())
 	}
 
@@ -758,6 +763,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 		config: &ModelConfig<C>,
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
 		const REMOVE_GAPS: bool = true;
+
 		Ok(Model {
 			cons: vec![if REMOVE_GAPS
 				&& con.exp.terms.len() >= 2
