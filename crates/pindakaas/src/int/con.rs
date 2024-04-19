@@ -1,4 +1,4 @@
-use crate::helpers::add_clauses_for;
+use crate::helpers::{add_clauses_for, unsigned_binary_range};
 use crate::int::helpers::display_cnf;
 use crate::int::model::Decompose;
 use crate::{
@@ -364,12 +364,14 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				log_enc_add_(db, x, y, &self.cmp, z)
 			}
+			// COUPLING
 			([(x, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(_)))], cmp)
-				if x.c== C::one() && y.c == -C::one()
-					&& cmp.is_ineq()
-					&& NEW_COUPLING =>
+				if x.c == C::one() && y.c == -C::one() && cmp.is_ineq() && NEW_COUPLING =>
 			{
-				x.x.borrow_mut().encode(db, None)?;
+				if PRINT_COUPLING {
+					println!("NEW");
+				}
+				x.x.borrow_mut().encode_ord(db)?;
 				let y_enc = y.x.borrow_mut().encode_bin(db)?;
 
 				let up = match cmp {
@@ -378,14 +380,29 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					Comparator::GreaterEq => true,
 				};
 
-				let xs = x.ineqs(up);
+				let (range_lb, range_ub) = unsigned_binary_range::<C>(y_enc.bits());
 				let dom = &y.x.borrow().dom;
+
+				let mut xs = x
+					.ineqs(up)
+					.into_iter()
+					.map(|(c, x, _)| (y_enc.normalize(c - self.k, dom), x))
+					.collect_vec();
+
+				if up {
+					xs.reverse();
+					xs.push((range_ub + C::one(), vec![]));
+				} else {
+					xs.insert(0, (range_lb, vec![]));
+				};
+
 				xs.into_iter()
-					.map(|(c, x, _)| (y_enc.normalize(c, dom), x))
 					.tuple_windows()
-					.try_for_each(|((c_a, _), (c_b, x))| {
+					.try_for_each(|((c_a, x_a), (c_b, x_b))| {
+						let x = if up { x_a } else { x_b };
+						let (c_a, c_b) = (c_a + C::one(), c_b);
 						if PRINT_COUPLING {
-							println!("{c_a}..{c_b} -> {x:?}");
+							println!("{up} {c_a}..{c_b} -> {x:?}");
 						}
 						let y = y_enc.ineqs(c_a, c_b, !up);
 						if PRINT_COUPLING {

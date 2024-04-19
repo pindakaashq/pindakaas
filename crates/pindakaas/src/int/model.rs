@@ -2119,8 +2119,8 @@ End
 		// Expected output only has 1 (!) clause (3, -4)
 
 		for cmp in ["<=", ">="] {
-			test_lp_for_configs(
-				&format!(
+			for lp in [
+				format!(
 					"
 Subject To
     c0: x - y {} 0
@@ -2134,11 +2134,7 @@ End
 	",
 					cmp
 				),
-				Some(vec![base.clone()]),
-			);
-
-			test_lp_for_configs(
-				&format!(
+				format!(
 					"
 Subject To
     c0: x - y {} 0
@@ -2152,11 +2148,7 @@ End
 	",
 					cmp
 				),
-				Some(vec![base.clone()]),
-			);
-
-			test_lp_for_configs(
-				&format!(
+				format!(
 					"
 Subject To
     c0: x - y {} 0
@@ -2170,17 +2162,13 @@ End
 	",
 					cmp
 				),
-				Some(vec![base.clone()]),
-			);
-
-			test_lp_for_configs(
-				&format!(
+				format!(
 					"
 Subject To
     c0: x - y {} 0
 Doms
     x in 4,6
-    y in 1,2,3,4,5,6
+    y in 0,1,2,3,4,5,6
 Encs
     x O
     y B
@@ -2188,8 +2176,23 @@ End
 	",
 					cmp
 				),
-				Some(vec![base.clone()]),
-			);
+				format!(
+					"
+				Subject To
+				c0: x - y {} 0
+				Doms
+				x in 4,6
+				y in 2,3,4,5
+				Encs
+				x O
+				y B
+				End
+				",
+					cmp
+				),
+			] {
+				test_lp_for_configs(&lp, Some(vec![base.clone()]));
+			}
 		}
 		// bdd_1_c0: 	(bdd_2:O ∈ |4,6| 0L) ≥ (couple-bdd_2:B ∈ |1..6| 0L)
 	}
