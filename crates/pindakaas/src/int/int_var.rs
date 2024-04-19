@@ -338,6 +338,17 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		self.e.as_ref().map(|e| e.lits()).unwrap_or_default()
 	}
 
+	pub(crate) fn encode_ord<DB: ClauseDatabase<Lit = Lit>>(
+		&mut self,
+		db: &mut DB,
+	) -> Result<OrdEnc<Lit>, Unsatisfiable> {
+		self.encode(db, None).map(|e| match e {
+			IntVarEnc::Ord(Some(o)) => o,
+			_ if self.is_constant() => OrdEnc::from_lits(&[]),
+			_ => panic!("encode_ord called without binary encoding for {self}"),
+		})
+	}
+
 	pub(crate) fn encode_bin<DB: ClauseDatabase<Lit = Lit>>(
 		&mut self,
 		db: &mut DB,

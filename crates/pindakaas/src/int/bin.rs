@@ -130,45 +130,66 @@ impl<Lit: Literal> BinEnc<Lit> {
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
-	pub(crate) fn ineqs<C: Coefficient>(&self, a: C, b: C, up: bool) -> Vec<Vec<Lit>> {
+	pub(crate) fn ineqs<C: Coefficient>(&self, r_a: C, r_b: C, up: bool) -> Vec<Vec<Lit>> {
 		const REMOVE_RED: bool = true;
-		let (_, range_ub) = unsigned_binary_range::<C>(self.bits());
-		let (r_a, r_b) = if up {
-			(range_ub + C::one() - b, range_ub + C::one() - a)
-		} else {
-			(range_ub - a, range_ub - b)
-		};
-
-		assert!(r_a <= r_b);
+		let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
 		if PRINT_COUPLING {
-			print!("\t {r_a}..{r_b} -> ");
+			print!("\t {up} {r_a}..{r_b} [{range_lb}..{range_ub}] -> ");
 		}
 
-		let mut last: Option<Vec<Lit>> = None;
-		let ineqs = num::iter::range(r_a, r_b)
-			.map(|k| self.ineq(k, up))
+		if r_a <= range_lb {
+			if up {
+				return vec![];
+			} else {
+				return vec![vec![]];
+			}
+		}
+
+		if r_b > range_ub {
+			if up {
+				return vec![vec![]];
+			} else {
+				return vec![];
+			}
+		}
+
+		let ineqs = num::iter::range_inclusive(r_a, r_b)
+			.map(|k| self.ineq(if up { k - C::one() } else { k }, up))
 			.collect_vec();
+
+		let remove_red = |ineqs: Vec<Vec<Lit>>| {
+			let mut last: Option<Vec<Lit>> = None;
+			ineqs
+				.into_iter()
+				.flat_map(|clause| match last.as_ref() {
+					Some(last) if is_clause_redundant(last, &clause) && REMOVE_RED => None,
+					_ => {
+						last = Some(clause.clone());
+						Some(clause)
+					}
+				})
+				.collect_vec()
+		};
+
+		if ineqs == vec![vec![]] {
+			return vec![];
+		}
 
 		let ineqs = if up {
 			ineqs
 		} else {
 			ineqs.into_iter().rev().collect()
 		};
-		let ineqs = ineqs
-			.into_iter()
-			.flat_map(|clause| match last.as_ref() {
-				Some(last) if is_clause_redundant(last, &clause) && REMOVE_RED => None,
-				_ => {
-					last = Some(clause.clone());
-					Some(clause)
-				}
-			})
-			.collect();
-		if up {
-			ineqs
+
+		let ineqs = if up {
+			remove_red(ineqs.into_iter().rev().collect())
+				.into_iter()
+				.rev()
+				.collect_vec()
 		} else {
-			ineqs.into_iter().rev().collect()
-		}
+			remove_red(ineqs.into_iter().rev().collect())
+		};
+		ineqs
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
@@ -182,8 +203,9 @@ impl<Lit: Literal> BinEnc<Lit> {
 		as_binary(k.into(), Some(self.bits()))
 			.into_iter()
 			.zip(self.xs().iter().cloned())
-			// if >=, find 1's, if <=, find 0's
-			.filter_map(|(b, x)| (b == up).then_some(x))
+			// if >=, find 0's, if <=, find 0's
+			// .filter_map(|(b, x)| (b != up).then_some(x))
+			.filter_map(|(b, x)| (b != up).then_some(x))
 			// if <=, negate lits at 0's
 			.map(|x| if up { x } else { -x })
 			.filter_map(|x| match x {
