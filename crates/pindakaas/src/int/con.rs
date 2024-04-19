@@ -374,6 +374,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					println!("NEW");
 				}
 				x.x.borrow_mut().encode_ord(db)?;
+				if !_config.add_consistency {
+					x.x.borrow_mut().consistent(db)?;
+				}
 				let y_enc = y.x.borrow_mut().encode_bin(db)?;
 
 				let up = match cmp {
