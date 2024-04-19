@@ -181,15 +181,14 @@ impl<Lit: Literal> BinEnc<Lit> {
 			ineqs.into_iter().rev().collect()
 		};
 
-		let ineqs = if up {
+		if up {
 			remove_red(ineqs.into_iter().rev().collect())
 				.into_iter()
 				.rev()
 				.collect_vec()
 		} else {
 			remove_red(ineqs.into_iter().rev().collect())
-		};
-		ineqs
+		}
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)

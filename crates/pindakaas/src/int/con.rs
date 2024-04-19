@@ -7,11 +7,8 @@ use crate::{
 };
 use itertools::Itertools;
 
-use super::helpers::filter_cnf;
 use super::{
-	model::{
-		LinDecomposer, PRINT_COUPLING, REMOVE_IMPLIED_CLAUSES, USE_COUPLING_IO_LEX, VIEW_COUPLING,
-	},
+	model::{LinDecomposer, PRINT_COUPLING, USE_COUPLING_IO_LEX, VIEW_COUPLING},
 	IntVarEnc, IntVarId,
 };
 
@@ -610,7 +607,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				let mut stop = false;
 				let mut last_a = None; // last antecedent implies till here
 				let mut last_k = None; // last consequent implies to here
-				let mut last_cnf = None;
+					   // let mut last_cnf = None;
 				(
 					None,
 					head.ineqs(up)
@@ -684,15 +681,15 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
                             // missing let-chain feature
                             if PRINT_COUPLING {
                             println!("{}", display_cnf(&cnf));
-                            println!("given:\n{}", display_cnf(last_cnf.as_ref().unwrap_or(&vec![])));
+                            // println!("given:\n{}", display_cnf(last_cnf.unwrap_or(&vec![])));
                             }
 
-                            let cnf =
-                                if let (true, Some(last_cnf)) = (REMOVE_IMPLIED_CLAUSES, last_cnf.as_ref())  {
-                                    filter_cnf(cnf, last_cnf)
-                                } else {
-                                    cnf.clone()
-                                };
+                            // let cnf =
+                            //     if let (true, Some(last_cnf)) = (REMOVE_IMPLIED_CLAUSES, last_cnf)  {
+                            //         filter_cnf(cnf, last_cnf)
+                            //     } else {
+                            //         cnf.clone()
+                            //     };
                             if PRINT_COUPLING {
                             println!("filt:\n{}", display_cnf(&cnf));
                             }
@@ -722,7 +719,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								// }
 
 
-                            last_cnf = Some(cnf.clone());
+                            // last_cnf = Some(cnf.clone());
 							last_k = c;
 							last_a = Some(implies);
 
