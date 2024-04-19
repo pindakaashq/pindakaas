@@ -361,7 +361,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				log_enc_add_(db, x, y, &self.cmp, z)
 			}
-			// COUPLING
+			// COUPLE
 			([(x, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(_)))], cmp)
 				if x.c == C::one() && y.c == -C::one() && cmp.is_ineq() && NEW_COUPLING =>
 			{
@@ -388,7 +388,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				if up {
 					xs.reverse();
-					xs.push((range_ub + C::one(), vec![]));
+					xs.push((range_ub, vec![]));
 				} else {
 					xs.insert(0, (range_lb, vec![]));
 				};
