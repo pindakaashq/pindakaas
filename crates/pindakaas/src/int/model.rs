@@ -29,7 +29,7 @@ use std::{
 use std::{fmt::Display, path::PathBuf};
 
 #[cfg(feature = "trace")]
-pub(crate) const PRINT_COUPLING: bool = false;
+pub(crate) const PRINT_COUPLING: bool = true;
 #[cfg(not(feature = "trace"))]
 pub(crate) const PRINT_COUPLING: bool = false;
 /// In the coupling, skip redundant clauses of which every term is already implied
@@ -2179,7 +2179,21 @@ End
 				c0: x - y {} 0
 				Doms
 				x in 4,6
-				y in 2,3,4,5
+				y in 1,2,3,4,5,6,7
+				Encs
+				x O
+				y B
+				End
+				",
+					cmp
+				),
+				format!(
+					"
+				Subject To
+				c0: x - y {} 0
+				Doms
+				x in 4,6
+				y in 3,4,5,6,7
 				Encs
 				x O
 				y B
