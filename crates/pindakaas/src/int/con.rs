@@ -210,7 +210,11 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		cs.len() == 3 && cs[2] == -C::one() && self.k.is_zero()
 	}
 
-	pub(crate) fn check(&self, a: &Assignment<C>) -> Result<(), CheckError<Lit>> {
+	pub(crate) fn check(
+		&self,
+		a: &Assignment<C>,
+		lit_assignment: Option<&[Lit]>,
+	) -> Result<(), CheckError<Lit>> {
 		let lhs = self
 			.exp
 			.terms
@@ -234,11 +238,17 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					.iter()
 					.map(|term| {
 						format!(
-							"{} * {}={} (={})",
+							"{} * {}={} (={}) [{:?}]",
 							term.c,
 							term.x.borrow().lbl(),
 							a[&term.x.borrow().id].1,
 							term.c * a[&term.x.borrow().id].1,
+							lit_assignment
+								.map(|lit_assignment| lit_assignment
+									.iter()
+									.filter(|lit| term.x.borrow().lits().contains(&lit.var()))
+									.collect_vec())
+								.unwrap_or_default()
 						)
 					})
 					.join(" + "),
@@ -304,7 +314,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 		match (&term_encs[..], self.cmp) {
 			([], _) => self
-				.check(&Assignment::default())
+				.check(&Assignment::default(), None)
 				.map_err(|_| Unsatisfiable),
 			([(Term { c, x }, Some(IntVarEnc::Bin(_)))], _)
 				if c.is_one() && !USE_COUPLING_IO_LEX =>
@@ -766,7 +776,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			..self
 		};
 		if con.exp.terms.is_empty() {
-			con.check(&Assignment::default())
+			con.check(&Assignment::default(), None)
 				.map(|_| con)
 				.map_err(|_| Unsatisfiable)
 		} else {

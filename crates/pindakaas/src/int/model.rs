@@ -192,7 +192,9 @@ impl<Lit: Literal, C: Coefficient> Checker for Model<Lit, C> {
 	type Lit = Lit;
 	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
 		let a = self.assign(solution)?;
-		self.cons.iter().try_for_each(|con| con.check(&a))
+		self.cons
+			.iter()
+			.try_for_each(|con| con.check(&a, Some(solution)))
 	}
 }
 
@@ -534,8 +536,14 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.map(|a| Assignment(a))
 	}
 
-	pub fn check_assignment(&self, assignment: &Assignment<C>) -> Result<(), CheckError<Lit>> {
-		self.cons.iter().try_for_each(|con| con.check(assignment))
+	pub fn check_assignment(
+		&self,
+		assignment: &Assignment<C>,
+		lit_assignments: Option<&[Lit]>,
+	) -> Result<(), CheckError<Lit>> {
+		self.cons
+			.iter()
+			.try_for_each(|con| con.check(assignment, lit_assignments))
 	}
 
 	pub(crate) fn brute_force_solve(&self, max_var: Option<IntVarId>) -> Vec<Assignment<C>> {
@@ -552,7 +560,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 						.collect::<HashMap<_, _>>(),
 				)
 			})
-			.filter(|a| self.check_assignment(a).is_ok())
+			.filter(|a| self.check_assignment(a, None).is_ok())
 			// .filter(|a| {
 			// 	matches!(
 			// 		self.check_assignment(a),
@@ -574,18 +582,22 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		lit_assignments: Option<&[Vec<Lit>]>,
 		brute_force_solve: bool,
 	) -> Result<(), Vec<CheckError<Lit>>> {
+		// let lit_assignments = lit_assignments
+		// 	.map(|lit_assignments| &lit_assignments.iter().map(|l| Some(l)).collect_vec())
+		// 	.unwrap_or_else(|| &actual_assignments.iter().map(|_| None).collect_vec());
 		let errs = actual_assignments
 			.iter()
-			.filter_map(
-				|actual_assignment| match self.check_assignment(actual_assignment) {
+			// .zip(lit_assignments)
+			.filter_map(|actual_assignment| {
+				match self.check_assignment(actual_assignment, None) {
 					Err(CheckError::Fail(e)) => {
 						Some(CheckError::Fail(format!("Inconsistency: {e}")))
 					}
 					// Err(CheckError::VarInconsistency(_)) => None,
 					Err(e) => panic!("Unexpected err: {e}"),
 					_ => None,
-				},
-			)
+				}
+			})
 			.collect::<Vec<_>>();
 
 		// Throw early if expected_assignments need to be computed
@@ -1003,7 +1015,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
 		match &con.exp.terms[..] {
 			[] => con
-				.check(&Assignment(HashMap::default()))
+				.check(&Assignment(HashMap::default()), None)
 				.map(|_| Model::<Lit, C>::new(num_var, model_config))
 				.map_err(|_| Unsatisfiable),
 			_ if con.exp.terms.len() <= 2
