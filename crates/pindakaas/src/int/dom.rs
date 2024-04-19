@@ -206,22 +206,29 @@ impl<C: Coefficient> Display for Dom<C> {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		// TODO replaced {..} for |..| since logger interprets {/} wrong
 		let dom = self.iter().collect::<Vec<_>>();
-		const ELIPSIZE: usize = 8;
 		if dom.is_empty() {
 			return write!(f, "||");
 		}
 		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
+		const ELIPSIZE: Option<usize> = None;
+		let elipsize = ELIPSIZE.map(|e| dom.len() > e).unwrap_or_default();
 		if dom.len() > 1 && C::from(dom.len()).unwrap() == ub - lb + C::one() {
-			write!(f, "|{}..{}|", dom.first().unwrap(), dom.last().unwrap())
-		} else if dom.len() > ELIPSIZE {
+			write!(
+				f,
+				"|{}..{}| |{}|",
+				dom.first().unwrap(),
+				dom.last().unwrap(),
+				dom.len()
+			)
+		} else if elipsize {
 			write!(
 				f,
 				"|{},..,{ub}| |{}|",
-				dom.iter().take(ELIPSIZE).join(","),
+				dom.iter().take(ELIPSIZE.unwrap()).join(","),
 				dom.len()
 			)
 		} else {
-			write!(f, "|{}|", dom.iter().join(","))
+			write!(f, "|{}| |{}|", dom.iter().join(","), dom.len())
 		}
 	}
 }

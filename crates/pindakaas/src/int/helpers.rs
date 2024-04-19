@@ -503,6 +503,7 @@ End
 			.flat_map(|(lp_id, dom)| add_var(&mut model, &lp_id, &dom))
 			.collect::<HashMap<_, _>>();
 
+		const DEFAULT_01: bool = false;
 		let mut to_ilp_exp =
 			|model: &mut Model<Lit, C>, (int_vars, coefs): &ParseLinExp<C>| LinExp {
 				terms: coefs
@@ -510,14 +511,19 @@ End
 					.zip(
 						int_vars
 							.iter()
-							.map(|lp_id| match vars.entry(lp_id.clone()) {
-								Entry::Occupied(e) => Rc::clone(e.get()),
+							.flat_map(|lp_id| match vars.entry(lp_id.clone()) {
+								Entry::Occupied(e) => Some(Rc::clone(e.get())),
 								Entry::Vacant(e) => {
-									eprintln!("WARNING: unbounded variable's {lp_id} domain set to Binary");
-									let x =
-										add_var(model, lp_id, &[C::zero(), C::one()]).unwrap().1;
-									e.insert(x.clone());
-									x
+									if DEFAULT_01 {
+										eprintln!("WARNING: unbounded variable's {lp_id} domain set to Binary");
+										let x = add_var(model, lp_id, &[C::zero(), C::one()])
+											.unwrap()
+											.1;
+										e.insert(x.clone());
+										Some(x)
+									} else {
+										None
+									}
 								}
 							}),
 					)
@@ -534,7 +540,7 @@ End
 			};
 			model.add_constraint(con).map_err(|_| {
 				format!(
-					"LP was trivially unsatisfiable fo rconstraint {:?}: {:?}",
+					"LP was trivially unsatisfiable for constraint {:?}: {:?}",
 					lbl, lin,
 				)
 			})?;
