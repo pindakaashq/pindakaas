@@ -1,6 +1,5 @@
 #![allow(unused_imports, unused_variables, dead_code)]
 use super::bin::BinEnc;
-use super::display_dom;
 use super::helpers::to_lex_bits;
 use super::ord::OrdEnc;
 use crate::helpers::{is_sorted, negate_cnf};
@@ -108,19 +107,7 @@ pub(crate) const GROUND_BINARY_AT_LB: bool = true;
 
 impl<Lit: Literal, C: Coefficient> fmt::Display for IntVarBin<Lit, C> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"({}):B ∈ {} [{}]",
-			self.lbl,
-			&display_dom(
-				&self
-					.dom()
-					.iter(..)
-					.map(|d| d.end - C::one())
-					.collect::<Vec<_>>()
-			),
-			self.lits()
-		)
+		write!(f, "({}):B [{}]", self.lbl, self.lits())
 	}
 }
 

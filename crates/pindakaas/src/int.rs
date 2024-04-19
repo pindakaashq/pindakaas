@@ -11,8 +11,6 @@ mod ord;
 mod scm;
 mod term;
 
-use itertools::Itertools;
-
 pub use con::{Lin, LinExp};
 pub(crate) use constrain::{TernLeConstraint, TernLeEncoder};
 pub use dom::Dom;
@@ -67,25 +65,5 @@ impl<Lit: Literal, C: Coefficient> PbLinExp<Lit, C> {
 			// 	Err(CheckError::Unsatisfiable(Unsatisfiable))
 			// }
 		})
-	}
-}
-
-pub(crate) fn display_dom<C: Coefficient>(dom: &[C]) -> String {
-	const ELIPSIZE: usize = 8;
-	if dom.is_empty() {
-		return String::from("{}");
-	}
-	let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
-	if dom.len() > ELIPSIZE && C::from(dom.len()).unwrap() == ub - lb + C::one() {
-		format!("{}..{}", dom.first().unwrap(), dom.last().unwrap())
-	} else if dom.len() > ELIPSIZE {
-		format!(
-			"{{{},..,{ub}}} ({}|{})",
-			dom.iter().take(ELIPSIZE).join(","),
-			dom.len(),
-			required_lits(lb, ub)
-		)
-	} else {
-		format!("{{{}}}", dom.iter().join(","))
 	}
 }

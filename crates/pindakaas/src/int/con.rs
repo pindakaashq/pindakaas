@@ -293,10 +293,6 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		_config: &ModelConfig<C>,
 	) -> Result {
 		const NEW_COUPLING: bool = true;
-		if PRINT_COUPLING {
-			println!("{self}");
-		}
-
 		// TODO only one cmp == Equality (and exchange equalities)
 		let term_encs = self
 			.exp
@@ -425,7 +421,6 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				} else {
 					self.exp.terms.clone()
 				};
-				// TODO try putting biggest domain last
 
 				// let mut covered = None;
 				// let mut last_consequence = None;
@@ -636,36 +631,36 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								);
 							}
 
-							let antecedent_implies_next = last_a
-								.map(|last_a| {
-									// if cmp == &Comparator::GreaterEq {
-                                    // TODO  ?
-									if up {
-										d >= last_a
-									} else {
-										d <= last_a
-									}
-								})
-								.unwrap_or_default();
-							let consequent_implies_next = last_k
-								.map(|last_k| {
-                                    // k_ <= last_k
-									// if cmp == &Comparator::GreaterEq {
-									if up {
-										d >= last_k
-									} else {
-										d <= last_k
-									}
-								})
-								.unwrap_or_default();
-							if PRINT_COUPLING {
-								print!(" {}/{}", antecedent_implies_next, consequent_implies_next);
-							}
+							// let antecedent_implies_next = last_a
+							// 	.map(|last_a| {
+							// 		// if cmp == &Comparator::GreaterEq {
+                                    // // TODO  ?
+							// 		if up {
+							// 			d >= last_a
+							// 		} else {
+							// 			d <= last_a
+							// 		}
+							// 	})
+							// 	.unwrap_or_default();
+							// let consequent_implies_next = last_k
+							// 	.map(|last_k| {
+                                    // // k_ <= last_k
+							// 		// if cmp == &Comparator::GreaterEq {
+							// 		if up {
+							// 			d >= last_k
+							// 		} else {
+							// 			d <= last_k
+							// 		}
+							// 	})
+							// 	.unwrap_or_default();
+
+							// if PRINT_COUPLING {
+							// 	print!(" {}/{}", antecedent_implies_next, consequent_implies_next);
+							// }
 
 							if PRINT_COUPLING {
 								println!();
 							}
-
 
 							let (c, cnf) = Self::encode_rec(tail, cmp, k_, depth + 1);
 							let cnf = cnf
@@ -678,10 +673,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
                             // }
 
                             // missing let-chain feature
-                            if PRINT_COUPLING {
-                            println!("{}", display_cnf(&cnf));
-                            // println!("given:\n{}", display_cnf(last_cnf.unwrap_or(&vec![])));
-                            }
+                            // if PRINT_COUPLING {
+                            // println!("{}", display_cnf(&cnf));
+                            // // println!("given:\n{}", display_cnf(last_cnf.unwrap_or(&vec![])));
+                            // }
 
                             // let cnf =
                             //     if let (true, Some(last_cnf)) = (REMOVE_IMPLIED_CLAUSES, last_cnf)  {
@@ -689,9 +684,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
                             //     } else {
                             //         cnf.clone()
                             //     };
-                            if PRINT_COUPLING {
-                            println!("filt:\n{}", display_cnf(&cnf));
-                            }
+
+                            // if PRINT_COUPLING {
+                            // println!("filt:\n{}", display_cnf(&cnf));
+                            // }
 
                             // if PRINT_COUPLING {
                             //     print!("cnf = {:?}", cnf);
