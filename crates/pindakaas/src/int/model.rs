@@ -29,7 +29,7 @@ use std::{
 use std::{fmt::Display, path::PathBuf};
 
 #[cfg(feature = "trace")]
-pub(crate) const PRINT_COUPLING: bool = true;
+pub(crate) const PRINT_COUPLING: bool = false;
 #[cfg(not(feature = "trace"))]
 pub(crate) const PRINT_COUPLING: bool = false;
 /// In the coupling, skip redundant clauses of which every term is already implied
@@ -982,10 +982,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, 
 
 		Ok(Model {
 			cons: if is_last_term {
-				[new_con]
-					.into_iter()
-					.chain(model.cons.into_iter())
-					.collect()
+				[new_con].into_iter().chain(model.cons).collect()
 			} else {
 				model.cons.into_iter().chain([new_con]).collect()
 			},

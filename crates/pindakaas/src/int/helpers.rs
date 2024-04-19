@@ -627,27 +627,27 @@ pub(crate) fn sign_extend<Lit: Literal>(
 		.collect()
 }
 
-pub(crate) fn display_cnf<Lit: Literal>(cnf: &Vec<Vec<Lit>>) -> String {
+pub(crate) fn display_cnf<Lit: Literal>(cnf: &[Vec<Lit>]) -> String {
 	cnf.iter()
 		.map(|c| c.iter().join(", "))
 		.join("\n")
 		.to_string()
 }
 
-pub(crate) fn filter_cnf<Lit: Literal>(cnf: Vec<Vec<Lit>>, given: &Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
-	if given.is_empty() {
-		cnf
-	} else {
-		cnf.into_iter()
-			.filter(|clause| {
-				// remove clause
-				!given // if not redundant; if any given clause
-					.iter()
-					.any(|given_clause| is_clause_redundant(given_clause, clause))
-			})
-			.collect()
-	}
-}
+// pub(crate) fn filter_cnf<Lit: Literal>(cnf: &[Vec<Lit>], given: &Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
+// 	if given.is_empty() {
+// 		cnf
+// 	} else {
+// 		cnf.into_iter()
+// 			.filter(|clause| {
+// 				// remove clause
+// 				!given // if not redundant; if any given clause
+// 					.iter()
+// 					.any(|given_clause| is_clause_redundant(given_clause, clause))
+// 			})
+// 			.collect()
+// 	}
+// }
 
 /// is clause a subset of b
 pub(crate) fn is_clause_redundant<Lit: Literal>(a: &[Lit], b: &[Lit]) -> bool {
@@ -728,22 +728,23 @@ End
 		assert_eq!(nearest_power_of_two(8, false), 8);
 		assert_eq!(nearest_power_of_two(9, false), 8);
 	}
-	#[test]
-	fn test_filter_cnf() {
-		// assert_eq!(
-		// 	filter_cnf(vec![vec![4, 6]], &vec![vec![2, 3, 5]]),
-		// 	vec![vec![4, 6]]
-		// );
 
-		// assert_eq!(
-		// 	filter_cnf(vec![vec![4, 5]], &vec![vec![1, 4, 5]]),
-		// Vec::<Vec<_>>::new()
-		// );
+	// #[test]
+	// fn test_filter_cnf() {
+	// 	// assert_eq!(
+	// 	// 	filter_cnf(vec![vec![4, 6]], &vec![vec![2, 3, 5]]),
+	// 	// 	vec![vec![4, 6]]
+	// 	// );
 
-		// a \/ b \/ c <= a \/ b
-		assert_eq!(
-			filter_cnf(vec![vec![1, 2, 3]], &vec![vec![1, 2], vec![4]]),
-			Vec::<Vec<_>>::new()
-		);
-	}
+	// 	// assert_eq!(
+	// 	// 	filter_cnf(vec![vec![4, 5]], &vec![vec![1, 4, 5]]),
+	// 	// Vec::<Vec<_>>::new()
+	// 	// );
+
+	// 	// a \/ b \/ c <= a \/ b
+	// 	assert_eq!(
+	// 		filter_cnf(vec![vec![1, 2, 3]], &vec![vec![1, 2], vec![4]]),
+	// 		Vec::<Vec<_>>::new()
+	// 	);
+	// }
 }
