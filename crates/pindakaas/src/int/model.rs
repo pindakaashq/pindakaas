@@ -1138,6 +1138,7 @@ mod tests {
 	}
 
 	const BRUTE_FORCE_SOLVE: bool = true;
+	const ENCODE_ONLY: bool = true;
 	const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
 	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Bin(None)];
 	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None)];
@@ -1217,7 +1218,8 @@ mod tests {
 	}
 
 	fn test_model(model: Model<Lit, C>, configs: Option<Vec<ModelConfig<C>>>) {
-		let expected_assignments = BRUTE_FORCE_SOLVE.then(|| model.brute_force_solve(None));
+		let expected_assignments =
+			(ENCODE_ONLY && BRUTE_FORCE_SOLVE).then(|| model.brute_force_solve(None));
 
 		// TODO merge with CHECK_DECOMPOSITION_I
 		const CHECK_CONFIG_I: Option<usize> = None;
@@ -1354,10 +1356,11 @@ mod tests {
 										.collect()
 								};
 
-								db.solve(Some(output))
-									.into_iter()
-									.sorted()
-									.collect::<Vec<_>>()
+								if ENCODE_ONLY {
+									db.solve(Some(output)).into_iter().sorted().collect()
+								} else {
+									vec![]
+								}
 							})
 							.unwrap_or_else(|_| {
 								println!("Warning: encoding decomposition lead to UNSAT");
