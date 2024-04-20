@@ -210,7 +210,7 @@ impl<C: Coefficient> Display for Dom<C> {
 			return write!(f, "||");
 		}
 		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
-		const ELIPSIZE: Option<usize> = None;
+		const ELIPSIZE: Option<usize> = Some(8);
 		let elipsize = ELIPSIZE.map(|e| dom.len() > e).unwrap_or_default();
 		if dom.len() > 1 && C::from(dom.len()).unwrap() == ub - lb + C::one() {
 			write!(
