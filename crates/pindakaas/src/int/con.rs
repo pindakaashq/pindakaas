@@ -367,17 +367,17 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				log_enc_add_(db, x, y, &self.cmp, z)
 			}
 			// COUPLE
-			([(x, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(_)))], cmp)
-				if x.c == C::one() && y.c == -C::one() && cmp.is_ineq() && NEW_COUPLING =>
+			([(t_x, Some(IntVarEnc::Ord(_))), (t_y, Some(IntVarEnc::Bin(_)))], cmp)
+				if t_x.c.is_positive() && t_y.c == -C::one() && cmp.is_ineq() && NEW_COUPLING =>
 			{
 				if PRINT_COUPLING {
 					println!("NEW");
 				}
-				x.x.borrow_mut().encode_ord(db)?;
-				if !_config.add_consistency {
-					x.x.borrow_mut().consistent(db)?;
+				t_x.x.borrow_mut().encode_ord(db)?;
+				if !t_x.x.borrow().add_consistency {
+					t_x.x.borrow_mut().consistent(db)?;
 				}
-				let y_enc = y.x.borrow_mut().encode_bin(db)?;
+				let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
 
 				let up = match cmp {
 					Comparator::LessEq => false,
@@ -386,12 +386,12 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				};
 
 				let (range_lb, range_ub) = unsigned_binary_range::<C>(y_enc.bits());
-				let dom = &y.x.borrow().dom;
+				let dom = &t_y.x.borrow().dom;
 
-				let mut xs = x
+				let mut xs = t_x
 					.ineqs(up)
 					.into_iter()
-					.map(|(c, x, _)| (y_enc.normalize(c - self.k, dom), x))
+					.map(|(c, x, _)| (y_enc.normalize((t_x.c * c) - self.k, dom), x))
 					.collect_vec();
 
 				if up {
