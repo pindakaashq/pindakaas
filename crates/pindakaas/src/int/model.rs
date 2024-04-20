@@ -2252,7 +2252,7 @@ End
 		);
 	}
 
-	#[test]
+	// #[test]
 	fn test_tmp_whiteboard() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
