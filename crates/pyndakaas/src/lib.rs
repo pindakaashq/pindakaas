@@ -1,6 +1,6 @@
 use std::{
 	fmt::Display,
-	num::ParseIntError,
+	num::{ParseIntError, TryFromIntError},
 	ops::{Add, DerefMut, Mul},
 	path::PathBuf,
 	str::FromStr,
@@ -59,6 +59,13 @@ impl Mul for Lit {
 	type Output = Lit;
 	fn mul(self, rhs: Self) -> Self::Output {
 		Lit(self.0 * rhs.0)
+	}
+}
+impl TryInto<usize> for Lit {
+	type Error = TryFromIntError;
+
+	fn try_into(self) -> Result<usize, Self::Error> {
+		usize::try_from(self.0)
 	}
 }
 type Clause = Vec<Lit>;
