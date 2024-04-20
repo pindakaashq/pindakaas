@@ -82,17 +82,23 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				}
 			}
 			Some(IntVarEnc::Ord(None)) => {
+				const COUPLE_TERM: bool = false;
 				let model = model.unwrap();
 				// Create y:O <= x:B
 				// Create a*x:O <= y:B
 				let up = self.c.is_positive();
-				let dom = dom
-					.into_iter()
-					.map(|d| if up { d } else { -d })
-					.sorted()
-					.collect_vec();
-				let y = model.new_var(
-					&dom,
+				let dom = if COUPLE_TERM {
+					Dom::from_slice(
+						&dom.into_iter()
+							.map(|d| if up { d } else { -d })
+							.sorted()
+							.collect_vec(),
+					)
+				} else {
+					self.x.borrow().dom.clone()
+				};
+				let y = model.new_var_from_dom(
+					dom,
 					false,                      // TODO ? depend on config.add_consistency?
 					Some(IntVarEnc::Bin(None)), // y:B
 					self.x
@@ -107,7 +113,18 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					exp: LinExp {
 						terms: vec![
 							// Term::new(self.c.abs(), self.x.clone()),
-							Term::new(if up { self.c } else { -self.c }, self.x.clone()),
+							Term::new(
+								if COUPLE_TERM {
+									if up {
+										self.c
+									} else {
+										-self.c
+									}
+								} else {
+									C::one()
+								},
+								self.x.clone(),
+							),
 							Term::new(-C::one(), y.clone()),
 						],
 					},
@@ -116,7 +133,18 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					lbl: con_lbl.clone().map(|lbl| format!("couple-{lbl}")),
 				})?;
 
-				Ok(Term::new(if up { C::one() } else { -C::one() }, y))
+				Ok(Term::new(
+					if COUPLE_TERM {
+						if up {
+							C::one()
+						} else {
+							-C::one()
+						}
+					} else {
+						self.c
+					},
+					y,
+				))
 			}
 			Some(IntVarEnc::Bin(Some(x_bin))) if self.c.trailing_zeros() > 0 => {
 				let sh = self.c.trailing_zeros();
