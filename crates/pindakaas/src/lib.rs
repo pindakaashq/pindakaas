@@ -60,7 +60,7 @@ pub use sorted::{SortedEncoder, SortedStrategy};
 ///  - [`std::cmp::Eq`] and [`std::hash::Hash`] to allow PB constraints to be
 ///    simplified
 pub trait Literal:
-	fmt::Debug + Clone + Eq + Ord + PartialOrd + Hash + Zero + One + FromStr + Display
+	fmt::Debug + Clone + Eq + Ord + PartialOrd + Hash + Zero + One + FromStr + Display + TryInto<usize>
 {
 	/// Returns the negation of the literal in its current form
 	fn negate(&self) -> Self;
@@ -88,6 +88,7 @@ impl<
 			+ Zero
 			+ One
 			+ Display
+			+ TryInto<usize>
 			+ FromStr,
 	> Literal for T
 {
@@ -336,7 +337,10 @@ impl<Lit: Literal + Zero + One + Display> Cnf<Lit> {
 	}
 
 	pub fn variables(&self) -> usize {
-		self.vars().count()
+		self.last_var
+			.clone()
+			.try_into()
+			.unwrap_or_else(|_| panic!("Cannot convert Lit {} to usize", self.last_var))
 	}
 
 	pub fn clauses(&self) -> usize {
