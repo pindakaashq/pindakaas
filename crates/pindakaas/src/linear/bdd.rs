@@ -11,7 +11,14 @@ use crate::{
 	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
 
-const SORT_TERMS: bool = true;
+#[allow(dead_code)]
+enum BddSort {
+	Asc,
+	Dsc,
+	None,
+}
+
+const SORT_TERMS: BddSort = BddSort::Asc;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
 #[derive(Default, Clone)]
@@ -39,23 +46,24 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 		model_config: &ModelConfig<C>,
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
 		let mut model = Model::<Lit, C>::new(num_var, model_config);
+        
 
-		// sort by *decreasing* ub
-		let lin = if SORT_TERMS {
-			Lin {
-				exp: LinExp {
-					terms: lin
-						.exp
-						.terms
-						.iter()
-						.cloned()
-						.sorted_by_key(|term| std::cmp::Reverse(term.ub()))
-						.collect(),
-				},
-				..lin
-			}
-		} else {
-			lin
+		// traditionally, sort by *decreasing* ub
+		let lin = Lin {
+			exp: LinExp {
+				terms: lin
+					.exp
+					.terms
+					.iter()
+					.cloned()
+					.sorted_by_key(|term| match SORT_TERMS {
+						BddSort::Dsc => -term.ub(),
+						BddSort::Asc => term.ub(),
+						BddSort::None => C::zero(),
+					})
+					.collect(),
+			},
+			..lin
 		};
 
 		// Ex. 2 x1 {0,2} + 3 x2 {0,3} + 5 x3 {0,5} <= 6
