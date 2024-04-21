@@ -606,7 +606,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			if errs.is_empty() {
 				println!(
 					"All constraints hold for actual assignments:\n{}",
-					actual_assignments.iter().join("\n")
+					if actual_assignments.is_empty() {
+						String::from("Unsat")
+					} else {
+						actual_assignments.iter().join("\n")
+					}
 				);
 				return Ok(());
 			} else {
@@ -781,35 +785,52 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 		const REMOVE_GAPS: bool = true;
 
 		Ok(Model {
-			cons: vec![if REMOVE_GAPS
-				&& con.exp.terms.len() >= 2
-				&& con.k.is_zero()
-				&& con
-					.exp
-					.terms
-					.iter()
-					.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
-			{
-				if let Some((last, firsts)) = con.exp.terms.split_last() {
-					// TODO avoid removing gaps on the order encoded vars?
-					let (lb, ub) = firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
-						(lb + t.lb(), std::cmp::min(ub + t.ub(), -last.lb()))
-					});
-					last.x.borrow_mut().dom = Dom::from_bounds(lb, ub);
+			cons: vec![
+				if REMOVE_GAPS && con.exp.terms.len() >= 2 && con.k.is_zero() {
+					if con
+						.exp
+						.terms
+						.iter()
+						.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
+					{
+						if let Some((last, firsts)) = con.exp.terms.split_last() {
+							// TODO avoid removing gaps on the order encoded vars?
+							let (lb, ub) =
+								firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
+									(lb + t.lb(), std::cmp::min(ub + t.ub(), -last.lb()))
+								});
+							last.x.borrow_mut().dom = Dom::from_bounds(lb, ub);
 
-					Lin {
-						exp: LinExp {
-							terms: firsts.iter().chain([last]).cloned().collect(),
-						},
-						cmp: Comparator::Equal,
-						..con
+							Lin {
+								exp: LinExp {
+									terms: firsts.iter().chain([last]).cloned().collect(),
+								},
+								cmp: Comparator::Equal,
+								..con
+							}
+						} else {
+							unreachable!()
+						}
+					} else if matches!(
+						// terrible fix for updating domain of channelled vars
+						con.exp
+							.terms
+							.iter()
+							.map(|t| t.x.borrow().e.clone())
+							.collect_vec()[..],
+						[Some(IntVarEnc::Ord(None)), Some(IntVarEnc::Bin(None))]
+						if con.exp.terms[0].c.is_one() && con.exp.terms[1].c == -C::one() && USE_CHANNEL
+					) {
+						con.exp.terms[0].x.borrow_mut().dom =
+							con.exp.terms[1].x.borrow().dom.clone();
+						con
+					} else {
+						con
 					}
 				} else {
-					unreachable!()
-				}
-			} else {
-				con
-			}],
+					con
+				},
+			],
 			num_var,
 			config: config.clone(),
 			..Model::default()
