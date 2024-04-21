@@ -1,4 +1,4 @@
-use crate::int::model::PRINT_COUPLING;
+use crate::int::{helpers::remove_red, model::PRINT_COUPLING};
 use std::{
 	collections::{HashMap, HashSet},
 	path::PathBuf,
@@ -13,7 +13,7 @@ use crate::{
 	ClauseDatabase, Cnf, Coefficient, Comparator, Literal, Unsatisfiable,
 };
 
-use super::{helpers::is_clause_redundant, Dom, LitOrConst};
+use super::{Dom, LitOrConst};
 
 #[derive(Debug, Clone)]
 pub struct BinEnc<Lit: Literal> {
@@ -131,7 +131,6 @@ impl<Lit: Literal> BinEnc<Lit> {
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
 	pub(crate) fn ineqs<C: Coefficient>(&self, r_a: C, r_b: C, up: bool) -> Vec<Vec<Lit>> {
-		const REMOVE_RED: bool = true;
 		let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
 		if PRINT_COUPLING {
 			print!("\t {up} {r_a}..{r_b} [{range_lb}..{range_ub}] -> ");
@@ -156,20 +155,6 @@ impl<Lit: Literal> BinEnc<Lit> {
 		let ineqs = num::iter::range_inclusive(r_a, r_b)
 			.map(|k| self.ineq(if up { k - C::one() } else { k }, up))
 			.collect_vec();
-
-		let remove_red = |ineqs: Vec<Vec<Lit>>| {
-			let mut last: Option<Vec<Lit>> = None;
-			ineqs
-				.into_iter()
-				.flat_map(|clause| match last.as_ref() {
-					Some(last) if is_clause_redundant(last, &clause) && REMOVE_RED => None,
-					_ => {
-						last = Some(clause.clone());
-						Some(clause)
-					}
-				})
-				.collect_vec()
-		};
 
 		if ineqs == vec![vec![]] {
 			return vec![];

@@ -660,6 +660,24 @@ pub(crate) fn is_clause_redundant<Lit: Literal>(a: &[Lit], b: &[Lit]) -> bool {
 	a.iter().all(|l| b.contains(l))
 }
 
+pub(crate) fn remove_red<Lit: Literal>(cnf: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
+	const REMOVE_RED: bool = true;
+	if REMOVE_RED {
+		let mut last: Option<Vec<Lit>> = None;
+		cnf.into_iter()
+			.flat_map(|clause| match last.as_ref() {
+				Some(last) if is_clause_redundant(last, &clause) => None,
+				_ => {
+					last = Some(clause.clone());
+					Some(clause)
+				}
+			})
+			.collect()
+	} else {
+		cnf
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
