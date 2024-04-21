@@ -1,6 +1,6 @@
-use crate::helpers::{add_clauses_for, unsigned_binary_range};
-use crate::int::helpers::display_cnf;
-use crate::int::model::Decompose;
+use crate::helpers::{add_clauses_for, negate_cnf, unsigned_binary_range};
+use crate::int::helpers::{display_cnf, remove_red};
+use crate::int::model::{Decompose, USE_CHANNEL};
 use crate::{
 	linear::log_enc_add_, trace::emit_clause, Assignment, CheckError, ClauseDatabase, Coefficient,
 	Comparator, Consistency, IntVarRef, Literal, Model, ModelConfig, Result, Term, Unsatisfiable,
@@ -334,9 +334,12 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				Ok(())
 			}
 			// SCM
-			([(t, _), (Term { c: y_c, x: y }, Some(IntVarEnc::Bin(None)))], Comparator::Equal)
-				if *y_c == -C::one()
-					&& self.k.is_zero() && matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) =>
+			(
+				[(t, Some(IntVarEnc::Bin(_))), (Term { c: y_c, x: y }, Some(IntVarEnc::Bin(None)))],
+				Comparator::Equal,
+			) if *y_c == -C::one()
+				&& self.k.is_zero()
+				&& matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) =>
 			{
 				assert!(t.c.is_positive(), "neg scm: {self}");
 				t.x.borrow_mut().encode_bin(db)?; // encode x (if not encoded already)
@@ -366,10 +369,61 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				log_enc_add_(db, x, y, &self.cmp, z)
 			}
+			// CHANNEL
+			(
+				[(t_x, Some(IntVarEnc::Ord(_))), (t_y, Some(IntVarEnc::Bin(_)))],
+				Comparator::Equal,
+			) if t_x.c.is_one() && t_y.c == -C::one() && USE_CHANNEL => {
+				t_x.x.borrow_mut().encode_ord(db)?;
+				if !t_x.x.borrow().add_consistency {
+					t_x.x.borrow_mut().consistent(db)?;
+				}
+				let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
+
+				let (range_lb, range_ub) = unsigned_binary_range::<C>(y_enc.bits());
+				y_enc.x.iter().enumerate().try_for_each(|(i, y_i)| {
+					let r = C::one().shl(i);
+					let (l, u) = (range_lb.div(r), range_ub.div(r));
+					add_clauses_for(
+						db,
+						vec![remove_red(
+							num::iter::range_inclusive(l, u)
+								.sorted_by_key(|k| (k.is_even(), *k))
+								.filter_map(|k| {
+									let y_i = if k.is_even() {
+										-y_i.clone()
+									} else {
+										y_i.clone()
+									};
+									let a = y_enc.denormalize(r * k, &t_y.x.borrow().dom); // ??
+									let b = a + r;
+									let x_a = t_x.x.borrow().ineq(a, false, None).1;
+									let x_b = t_x.x.borrow().ineq(b, true, None).1;
+									if x_a == negate_cnf(x_b.clone()) {
+										None
+									} else {
+										Some(
+											[x_a, y_i.into(), x_b]
+												.into_iter()
+												.multi_cartesian_product()
+												.concat()
+												.into_iter()
+												// .into_iter()
+												.flatten()
+												.collect(),
+										)
+									}
+								})
+								.collect(),
+						)],
+					)
+				})
+			}
 			// COUPLE
-			([(t_x, Some(IntVarEnc::Ord(_))), (t_y, Some(IntVarEnc::Bin(_)))], cmp)
-				if t_x.c.is_positive() && t_y.c == -C::one() && cmp.is_ineq() && NEW_COUPLING =>
-			{
+			(
+				[(t_x, Some(IntVarEnc::Ord(_))), (t_y, Some(IntVarEnc::Bin(_)))],
+				Comparator::LessEq | Comparator::GreaterEq,
+			) if t_x.c.is_positive() && t_y.c == -C::one() && NEW_COUPLING => {
 				if PRINT_COUPLING {
 					println!("NEW");
 				}
@@ -379,7 +433,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				}
 				let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
 
-				let up = match cmp {
+				let up = match self.cmp {
 					Comparator::LessEq => false,
 					Comparator::Equal => unreachable!(),
 					Comparator::GreaterEq => true,
@@ -440,6 +494,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				// let mut last_k = None;
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					// TODO move to closure to add DB?
+
 					let (_, cnf) = Self::encode_rec(&terms, &cmp, self.k, 0);
 					if PRINT_COUPLING {
 						println!("{}", display_cnf(&cnf));

@@ -33,6 +33,16 @@ pub enum LitOrConst<Lit: Literal> {
 	Const(bool),
 }
 
+impl<Lit: Literal> From<LitOrConst<Lit>> for Vec<Vec<Lit>> {
+	fn from(a: LitOrConst<Lit>) -> Vec<Vec<Lit>> {
+		match a {
+			LitOrConst::Lit(l) => vec![vec![l]],
+			LitOrConst::Const(true) => vec![],
+			LitOrConst::Const(false) => vec![vec![]],
+		}
+	}
+}
+
 impl<Lit: Literal> From<Option<Lit>> for LitOrConst<Lit> {
 	fn from(item: Option<Lit>) -> Self {
 		match item {

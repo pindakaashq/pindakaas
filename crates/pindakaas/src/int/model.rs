@@ -39,7 +39,8 @@ pub(crate) const USE_COUPLING_IO_LEX: bool = false;
 
 /// View coupling
 pub(crate) const VIEW_COUPLING: bool = true;
-
+// Use channelling
+pub(crate) const USE_CHANNEL: bool = true;
 use iset::IntervalMap;
 
 use super::{
@@ -2130,7 +2131,7 @@ End
 		};
 		// Expected output only has 1 (!) clause (3, -4)
 
-		for cmp in ["<=", ">="] {
+		for cmp in ["=", "<=", ">="] {
 			for lp in [
 				format!(
 					"

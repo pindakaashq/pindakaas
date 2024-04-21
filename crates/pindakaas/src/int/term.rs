@@ -1,6 +1,7 @@
 use crate::{
-	helpers::as_binary, int::LitOrConst, Coefficient, Comparator, IntLinExp as LinExp, IntVar,
-	IntVarRef, Lin, Literal, Model,
+	helpers::as_binary,
+	int::{model::USE_CHANNEL, LitOrConst},
+	Coefficient, Comparator, IntLinExp as LinExp, IntVar, IntVarRef, Lin, Literal, Model,
 };
 use itertools::Itertools;
 use std::ops::Mul;
@@ -83,11 +84,12 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			}
 			Some(IntVarEnc::Ord(None)) => {
 				const COUPLE_TERM: bool = false;
+				let couple_term = USE_CHANNEL || COUPLE_TERM;
 				let model = model.unwrap();
 				// Create y:O <= x:B
 				// Create a*x:O <= y:B
 				let up = self.c.is_positive();
-				let dom = if COUPLE_TERM {
+				let dom = if couple_term {
 					Dom::from_slice(
 						&dom.into_iter()
 							.map(|d| if up { d } else { -d })
@@ -114,7 +116,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 						terms: vec![
 							// Term::new(self.c.abs(), self.x.clone()),
 							Term::new(
-								if COUPLE_TERM {
+								if couple_term {
 									if up {
 										self.c
 									} else {
@@ -128,13 +130,19 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 							Term::new(-C::one(), y.clone()),
 						],
 					},
-					cmp: if up { cmp } else { cmp.reverse() },
+					cmp: if USE_CHANNEL {
+						Comparator::Equal
+					} else if up {
+						cmp
+					} else {
+						cmp.reverse()
+					},
 					k: C::zero(),
 					lbl: con_lbl.clone().map(|lbl| format!("couple-{lbl}")),
 				})?;
 
 				Ok(Term::new(
-					if COUPLE_TERM {
+					if couple_term {
 						if up {
 							C::one()
 						} else {
