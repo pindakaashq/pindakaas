@@ -18,7 +18,7 @@ enum BddSort {
 	None,
 }
 
-const SORT_TERMS: BddSort = BddSort::Asc;
+const SORT_TERMS: BddSort = BddSort::Dsc;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
 #[derive(Default, Clone)]
@@ -46,7 +46,6 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 		model_config: &ModelConfig<C>,
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
 		let mut model = Model::<Lit, C>::new(num_var, model_config);
-        
 
 		// traditionally, sort by *decreasing* ub
 		let lin = Lin {
