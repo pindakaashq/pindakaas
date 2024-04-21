@@ -40,7 +40,7 @@ pub(crate) const USE_COUPLING_IO_LEX: bool = false;
 /// View coupling
 pub(crate) const VIEW_COUPLING: bool = true;
 // Use channelling
-pub(crate) const USE_CHANNEL: bool = true;
+pub(crate) const USE_CHANNEL: bool = false;
 use iset::IntervalMap;
 
 use super::{
@@ -811,16 +811,18 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 						} else {
 							unreachable!()
 						}
-					} else if matches!(
-						// terrible fix for updating domain of channelled vars
-						con.exp
-							.terms
-							.iter()
-							.map(|t| t.x.borrow().e.clone())
-							.collect_vec()[..],
-						[Some(IntVarEnc::Ord(None)), Some(IntVarEnc::Bin(None))]
-						if con.exp.terms[0].c.is_one() && con.exp.terms[1].c == -C::one() && USE_CHANNEL
-					) {
+					} else if USE_CHANNEL
+						&& matches!(
+							// terrible fix for updating domain of channelled vars
+							// TODO only works for one directions of the coupling
+							con.exp
+								.terms
+								.iter()
+								.map(|t| t.x.borrow().e.clone())
+								.collect_vec()[..],
+							[Some(IntVarEnc::Ord(None)), Some(IntVarEnc::Bin(None))]
+							if con.exp.terms[0].c.is_one() && con.exp.terms[1].c == -C::one() && USE_CHANNEL
+						) {
 						con.exp.terms[0].x.borrow_mut().dom =
 							con.exp.terms[1].x.borrow().dom.clone();
 						con

@@ -102,11 +102,21 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 			f,
 			"{}{} ∈ {} {}",
 			self.lbl(),
-			match self.e {
-				Some(IntVarEnc::Bin(_)) => ":B",
-				Some(IntVarEnc::Ord(_)) => ":O",
+			match self.e.as_ref() {
+				Some(IntVarEnc::Bin(x_bin)) => format!(
+					":B{}",
+					(if SHOW_LITS {
+						x_bin
+							.as_ref()
+							.map(|x_bin| format!(" [{x_bin}]"))
+							.unwrap_or_default()
+					} else {
+						String::new()
+					})
+				),
+				Some(IntVarEnc::Ord(_)) => ":O".to_string(),
 				Some(IntVarEnc::Const(_)) => unreachable!(),
-				None => "",
+				None => String::new(),
 			},
 			self.dom,
 			if SHOW_LITS {

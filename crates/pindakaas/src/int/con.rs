@@ -1,9 +1,12 @@
 use crate::helpers::{add_clauses_for, negate_cnf, unsigned_binary_range};
+use crate::int::bin::BinEnc;
 use crate::int::helpers::{display_cnf, remove_red};
 use crate::int::model::{Decompose, USE_CHANNEL};
+use crate::int::{required_lits, LitOrConst};
+use crate::linear::log_enc_add_fn;
 use crate::{
-	linear::log_enc_add_, trace::emit_clause, Assignment, CheckError, ClauseDatabase, Coefficient,
-	Comparator, Consistency, IntVarRef, Literal, Model, ModelConfig, Result, Term, Unsatisfiable,
+	trace::emit_clause, Assignment, CheckError, ClauseDatabase, Coefficient, Comparator,
+	Consistency, IntVarRef, Literal, Model, ModelConfig, Result, Term, Unsatisfiable,
 };
 use itertools::Itertools;
 
@@ -351,23 +354,26 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				Ok(())
 			}
 			(
-				[(x, Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_))), (z, Some(IntVarEnc::Bin(_)))],
+				[(x, Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_))), (z, Some(IntVarEnc::Bin(z_bin)))],
 				Comparator::Equal,
-			) if [y.c, z.c] == [C::one(), -C::one()] => {
+			) if [y.c, z.c] == [C::one(), -C::one()] && self.k.is_zero() => {
 				assert!(
-					x.lb() + y.lb() == ((*z).clone() * -C::one()).lb(),
+					x.lb() + y.lb() == z.x.borrow().dom.lb(),
 					"LBs for addition not matching: {self}"
 				);
 
-				// TODO do not have to encode z if we use functional addition!
-				let z = (*z).clone() * -C::one();
-				let (x, y, z) = &[x, y, &z] // .with_position()
+				let (x, y) = &[x, y]
 					.into_iter()
 					.map(|t| t.x.borrow_mut().encode_bin(db).unwrap().xs())
 					.collect_tuple()
 					.unwrap();
 
-				log_enc_add_(db, x, y, &self.cmp, z)
+				let lits = Some(required_lits(z.x.borrow().dom.lb(), z.x.borrow().dom.ub()));
+				assert!(z_bin.is_none());
+				z.x.borrow_mut().e = dbg!(Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+					&log_enc_add_fn(db, x, y, &self.cmp, LitOrConst::Const(false), lits).unwrap(),
+				)))));
+				Ok(())
 			}
 			// CHANNEL
 			(

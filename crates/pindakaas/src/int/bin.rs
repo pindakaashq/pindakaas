@@ -407,7 +407,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 
 impl<Lit: Literal> std::fmt::Display for BinEnc<Lit> {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		write!(f, "[{}]", self.x.iter().join(", "))
+		write!(f, "[{}]", self.x.iter().rev().join(", "))
 	}
 }
 
