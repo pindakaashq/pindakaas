@@ -329,7 +329,9 @@ pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 	bits: Option<usize>,
 ) -> Result<Vec<LitOrConst<DB::Lit>>> {
 	assert!(cmp == &Comparator::Equal);
-	let bits = bits.unwrap_or(itertools::max([xs.len(), ys.len()]).unwrap() + 1);
+	let max_bits = itertools::max([xs.len(), ys.len()]).unwrap() + 1;
+	let bits = bits.unwrap_or(max_bits);
+
 	let zs = (0..bits)
 		.map(|i| {
 			let (x, y) = (bit(xs, i), bit(ys, i));
@@ -338,6 +340,14 @@ pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 			z
 		})
 		.collect::<Result<Vec<_>>>()?;
+
+	// TODO avoid c being created by constraining (x+y+c >= 2 ) <-> false in last iteration if bits<max_bits
+	// prevent overflow
+	if bits < max_bits {
+		if let LitOrConst::Lit(c) = c {
+			emit_clause!(db, &[c.negate()])?;
+		}
+	}
 
 	// Remove last bit if equal to second-to-last bit
 	let zs = if zs.len() > 1 && zs[zs.len() - 1] == zs[zs.len() - 2] {
