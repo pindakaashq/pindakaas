@@ -370,9 +370,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				let lits = Some(required_lits(z.x.borrow().dom.lb(), z.x.borrow().dom.ub()));
 				assert!(z_bin.is_none());
-				z.x.borrow_mut().e = dbg!(Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+				z.x.borrow_mut().e = Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
 					&log_enc_add_fn(db, x, y, &self.cmp, LitOrConst::Const(false), lits).unwrap(),
-				)))));
+				))));
 				Ok(())
 			}
 			// CHANNEL
