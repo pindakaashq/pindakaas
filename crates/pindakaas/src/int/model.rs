@@ -1,40 +1,25 @@
-#![allow(unused_imports, unused_variables, dead_code, unreachable_code)]
 #![allow(clippy::absurd_extreme_comparisons)]
-use crate::int::display::SHOW_IDS;
-use crate::int::enc::GROUND_BINARY_AT_LB;
-use crate::int::helpers::nearest_power_of_two;
 use crate::int::{IntVar, IntVarId, IntVarRef, LinExp};
-use crate::linear::log_enc_add_;
 use crate::{
-	helpers::{add_clauses_for, as_binary, negate_cnf, two_comp_bounds, unsigned_binary_range},
-	int::{ord::OrdEnc, scm::ScmDecomposer, Dom, TernLeConstraint, TernLeEncoder},
-	linear::{clause, log_enc_add_fn, Part},
-	trace::emit_clause,
-	BddEncoder, CheckError, Checker, ClauseDatabase, Cnf, Coefficient, Comparator, Encoder,
-	LimitComp, Literal, PosCoeff, Result, SwcEncoder, TotalizerEncoder, Unsatisfiable,
+	int::{scm::ScmDecomposer, Dom},
+	BddEncoder, CheckError, Checker, ClauseDatabase, Coefficient, Comparator, Literal, Result,
+	SwcEncoder, TotalizerEncoder, Unsatisfiable,
 };
-use crate::{IntLinExp, Lin, Term};
-use iset::interval_map;
-use rustc_hash::FxHashMap;
-use std::hash::BuildHasherDefault;
-
-use crate::trace::new_var;
+use crate::{Lin, Term};
 use itertools::{Itertools, Position};
+use std::fmt::Display;
 use std::{
 	cell::RefCell,
 	cmp::Ordering,
 	collections::{BTreeSet, HashMap, HashSet},
-	ops::{Index, Mul},
+	ops::Index,
 	rc::Rc,
 };
-use std::{fmt::Display, path::PathBuf};
 
 #[cfg(feature = "trace")]
 pub(crate) const PRINT_COUPLING: u32 = 1;
 #[cfg(not(feature = "trace"))]
 pub(crate) const PRINT_COUPLING: u32 = 0;
-/// In the coupling, skip redundant clauses of which every term is already implied
-pub(crate) const REMOVE_IMPLIED_CLAUSES: bool = true;
 /// Replace unary constraints by coupling
 pub(crate) const USE_COUPLING_IO_LEX: bool = false;
 
@@ -42,11 +27,8 @@ pub(crate) const USE_COUPLING_IO_LEX: bool = false;
 pub(crate) const VIEW_COUPLING: bool = true;
 // Use channelling
 pub(crate) const USE_CHANNEL: bool = false;
-use iset::IntervalMap;
 
-use super::{
-	bin::BinEnc, helpers::filter_fixed, required_lits, IntVarBin, IntVarEnc, IntVarOrd, LitOrConst,
-};
+use super::IntVarEnc;
 
 pub trait Decompose<Lit: Literal, C: Coefficient> {
 	fn decompose(
@@ -128,7 +110,7 @@ impl<C: Coefficient> Display for Assignment<C> {
 			self.0
 				.iter()
 				.sorted()
-				.map(|(id, (lbl, a))| format!("{}={}", lbl, a))
+				.map(|(_, (lbl, a))| format!("{}={}", lbl, a))
 				.join(", ")
 		)
 	}
@@ -222,23 +204,6 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 	pub fn constraints(&'_ self) -> impl Iterator<Item = &'_ Lin<Lit, C>> {
 		self.cons.iter()
-	}
-
-	pub(crate) fn add_int_var_enc(
-		&mut self,
-		x: IntVarEnc<Lit, C>,
-	) -> Result<IntVarRef<Lit, C>, Unsatisfiable> {
-		todo!("cannot get dom anymore from IntVarEnc");
-		/*
-		let dom = x
-			.dom()
-			.iter(..)
-			.map(|d| d.end - C::one())
-			.collect::<Vec<_>>();
-		let var = self.new_var(&dom, false, Some(x), None)?;
-		// self.vars.insert(var.borrow().id, x);
-		Ok(var)
-		*/
 	}
 
 	pub fn var(
@@ -581,7 +546,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		&self,
 		actual_assignments: &[Assignment<C>],
 		expected_assignments: Option<&Vec<Assignment<C>>>,
-		lit_assignments: Option<&[Vec<Lit>]>,
+		_lit_assignments: Option<&[Vec<Lit>]>,
 		brute_force_solve: bool,
 	) -> Result<(), Vec<CheckError<Lit>>> {
 		// let lit_assignments = lit_assignments
@@ -913,7 +878,6 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for UniformBinEqDecomposer 
 				// if possible, we change the domain of last.x so its binary encoding is grounded at the same lower bound as z_prime so we can constrain bitwise using lex constraint
 				// TODO otherwise, coupling will take care of it, but this is non-ideal
 				if matches!(last.x.borrow().e, Some(IntVarEnc::Bin(None))) {
-					let ub = last.x.borrow().ub();
 					let x_dom = last
 						.x
 						.borrow()
@@ -1071,7 +1035,7 @@ mod tests {
 	type C = i64;
 
 	use super::*;
-	use crate::{Cnf, Lin, LinearEncoder, Model};
+	use crate::{Cnf, Lin, Model};
 
 	#[test]
 	fn model_test() {
@@ -1265,16 +1229,6 @@ mod tests {
 			}
 		} {
 			let model = model.deep_clone().with_config(config.clone());
-			let ModelConfig {
-				scm,
-				cutoff,
-				decomposer,
-				equalize_ternaries,
-				add_consistency,
-				propagate,
-				equalize_uniform_bin_ineqs,
-				..
-			} = model.config.clone();
 
 			for (j, var_encs) in {
 				let var_encs_gen = expand_var_encs(
@@ -1630,7 +1584,7 @@ End
 
 	// TODO
 	// #[test]
-	fn test_int_lin_le_4_unit_tern() {
+	fn _test_int_lin_le_4_unit_tern() {
 		test_lp_for_configs(
 			r"
 Subject To
@@ -1649,7 +1603,7 @@ End
 
 	// TODO
 	// #[test]
-	fn test_int_lin_eq_1() {
+	fn _test_int_lin_eq_1() {
 		test_lp_for_configs(
 			r"
 Subject To
@@ -2335,7 +2289,7 @@ End
 
 	// >500 cls
 	// #[test]
-	fn test_sugar() {
+	fn _test_sugar() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
 			cutoff: None,
@@ -2507,7 +2461,7 @@ End
 
 	// over 500 cls
 	// #[test]
-	fn test_sugar_pbc() {
+	fn _test_sugar_pbc() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
 			cutoff: None,
