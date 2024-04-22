@@ -1,4 +1,5 @@
 #![allow(unused_imports, unused_variables, dead_code, unreachable_code)]
+#![allow(clippy::absurd_extreme_comparisons)]
 use crate::int::display::SHOW_IDS;
 use crate::int::enc::GROUND_BINARY_AT_LB;
 use crate::int::helpers::nearest_power_of_two;
@@ -29,9 +30,9 @@ use std::{
 use std::{fmt::Display, path::PathBuf};
 
 #[cfg(feature = "trace")]
-pub(crate) const PRINT_COUPLING: bool = true;
+pub(crate) const PRINT_COUPLING: u32 = 0;
 #[cfg(not(feature = "trace"))]
-pub(crate) const PRINT_COUPLING: bool = false;
+pub(crate) const PRINT_COUPLING: u32 = 0;
 /// In the coupling, skip redundant clauses of which every term is already implied
 pub(crate) const REMOVE_IMPLIED_CLAUSES: bool = true;
 /// Replace unary constraints by coupling
@@ -794,7 +795,6 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 						.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
 					{
 						if let Some((last, firsts)) = con.exp.terms.split_last() {
-							// TODO avoid removing gaps on the order encoded vars?
 							let (lb, ub) =
 								firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
 									(lb + t.lb(), std::cmp::min(ub + t.ub(), -last.lb()))
@@ -2274,9 +2274,38 @@ End
 	",
 			Some(vec![base.clone()]),
 		);
+
+		test_lp_for_configs(
+			r"
+Subject To
+    c0: x_1 - x_2 <= 0
+Doms
+    x_1 in 0,1,2,3
+    x_2 in 0,3
+Encs
+    x_1 O
+    x_2 O
+End
+	",
+			Some(vec![base.clone()]),
+		);
+		test_lp_for_configs(
+			r"
+Subject To
+    c0: x_1 + x_2 <= 3
+Doms
+    x_1 in 0,1,2,3
+    x_2 in 0,3
+Encs
+    x_1 O
+    x_2 O
+End
+	",
+			Some(vec![base.clone()]),
+		);
 	}
 
-	// #[test]
+	#[test]
 	fn test_tmp_whiteboard() {
 		let base = ModelConfig {
 			scm: Scm::Rca,

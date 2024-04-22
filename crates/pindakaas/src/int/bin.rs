@@ -1,4 +1,6 @@
+#![allow(clippy::absurd_extreme_comparisons)]
 use crate::int::{helpers::remove_red, model::PRINT_COUPLING};
+
 use std::{
 	collections::{HashMap, HashSet},
 	path::PathBuf,
@@ -132,7 +134,7 @@ impl<Lit: Literal> BinEnc<Lit> {
 	/// Returns conjunction for x>=k (or x<=k if !up)
 	pub(crate) fn ineqs<C: Coefficient>(&self, r_a: C, r_b: C, up: bool) -> Vec<Vec<Lit>> {
 		let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());
-		if PRINT_COUPLING {
+		if PRINT_COUPLING >= 2 {
 			print!("\t {up} {r_a}..{r_b} [{range_lb}..{range_ub}] -> ");
 		}
 

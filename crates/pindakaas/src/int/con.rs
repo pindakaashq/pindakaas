@@ -1,3 +1,4 @@
+#![allow(clippy::absurd_extreme_comparisons)]
 use crate::helpers::{add_clauses_for, negate_cnf, unsigned_binary_range};
 use crate::int::bin::BinEnc;
 use crate::int::helpers::{display_cnf, remove_red};
@@ -14,6 +15,8 @@ use super::{
 	model::{LinDecomposer, PRINT_COUPLING, USE_COUPLING_IO_LEX, VIEW_COUPLING},
 	IntVarEnc, IntVarId,
 };
+
+static mut SKIPS: u32 = 0;
 
 #[derive(Debug, Clone, Default)]
 pub struct LinExp<Lit: Literal, C: Coefficient> {
@@ -430,7 +433,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				[(t_x, Some(IntVarEnc::Ord(_))), (t_y, Some(IntVarEnc::Bin(_)))],
 				Comparator::LessEq | Comparator::GreaterEq,
 			) if t_x.c.is_positive() && t_y.c == -C::one() && NEW_COUPLING => {
-				if PRINT_COUPLING {
+				if PRINT_COUPLING >= 2 {
 					println!("NEW");
 				}
 				t_x.x.borrow_mut().encode_ord(db)?;
@@ -466,11 +469,11 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					.try_for_each(|((c_a, x_a), (c_b, x_b))| {
 						let x = if up { x_a } else { x_b };
 						let (c_a, c_b) = (c_a + C::one(), c_b);
-						if PRINT_COUPLING {
+						if PRINT_COUPLING >= 2 {
 							println!("{up} {c_a}..{c_b} -> {x:?}");
 						}
 						let y = y_enc.ineqs(c_a, c_b, !up);
-						if PRINT_COUPLING {
+						if PRINT_COUPLING >= 2 {
 							println!("{y:?}");
 						}
 						add_clauses_for(db, vec![vec![x.clone()], y])
@@ -502,7 +505,13 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					// TODO move to closure to add DB?
 
 					let (_, cnf) = Self::encode_rec(&terms, &cmp, self.k, 0);
-					if PRINT_COUPLING {
+					if PRINT_COUPLING >= 1 {
+						unsafe {
+							println!("skips = {}", SKIPS);
+							SKIPS = 0;
+						}
+					}
+					if PRINT_COUPLING >= 3 {
 						println!("{}", display_cnf(&cnf));
 					}
 
@@ -648,7 +657,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					k.div_floor(&head.c.clone()) + C::one()
 				};
 
-				if PRINT_COUPLING {
+				if PRINT_COUPLING >= 2 {
 					print!(
 						"{}{} ({}*{} {cmp} {k}) (= {} {} {k_})",
 						"\t".repeat(depth),
@@ -666,13 +675,12 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				let (c, cnf) = head.x.borrow().ineq(k_, up, None);
 
-				if PRINT_COUPLING {
+				if PRINT_COUPLING >= 2 {
 					println!("== {cnf:?}",);
 				}
 
 				(c.map(|c| head.c * c), cnf)
 			} else {
-				let mut stop = false;
 				let mut last_a = None; // last antecedent implies till here
 				let mut last_k = None; // last consequent implies to here
 					   // let mut last_cnf = None;
@@ -681,14 +689,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					head.ineqs(up)
 						.into_iter()
 						.map_while(|(d, conditions, implies)| {
-							if stop {
-								return None;
-							}
-
 							// l = x>=d+1, ~l = ~(x>=d+1) = x<d+1 = x<=d
 							let k_ = k - head.c * d;
 
-							if PRINT_COUPLING {
+							if PRINT_COUPLING >= 2 {
 								print!(
 									"{} {} {}*({} {cmp} {}) (->x{cmp}{implies}) = [{:?}] (k={k} - {}*{d} = {k_}) last_a={last_a:?} last_k={last_k:?}",
                                     "\t".repeat(depth),
@@ -705,34 +709,31 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								);
 							}
 
-							// let antecedent_implies_next = last_a
-							// 	.map(|last_a| {
-							// 		// if cmp == &Comparator::GreaterEq {
-                                    // // TODO  ?
-							// 		if up {
-							// 			d >= last_a
-							// 		} else {
-							// 			d <= last_a
-							// 		}
-							// 	})
-							// 	.unwrap_or_default();
-							// let consequent_implies_next = last_k
-							// 	.map(|last_k| {
-                                    // // k_ <= last_k
-							// 		// if cmp == &Comparator::GreaterEq {
-							// 		if up {
-							// 			d >= last_k
-							// 		} else {
-							// 			d <= last_k
-							// 		}
-							// 	})
-							// 	.unwrap_or_default();
 
-							// if PRINT_COUPLING {
-							// 	print!(" {}/{}", antecedent_implies_next, consequent_implies_next);
-							// }
+							let antecedent_implies_next = last_a
+								.map(|last_a| {
+									if cmp == &Comparator::GreaterEq {
+										d >= last_a
+									} else {
+										d <= last_a
+									}
+								})
+								.unwrap_or_default();
+							let consequent_implies_next = last_k
+								.map(|last_k| {
+									if cmp == &Comparator::GreaterEq {
+                                        k_ <= last_k
+                                    } else {
+                                        k_ >= last_k
+                                    }
+								})
+								.unwrap_or_default();
 
-							if PRINT_COUPLING {
+							if PRINT_COUPLING >= 2 {
+								print!(" {}/{}", antecedent_implies_next, consequent_implies_next);
+							}
+
+							if PRINT_COUPLING >= 2 {
 								println!();
 							}
 
@@ -742,60 +743,27 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								.map(|r| conditions.clone().into_iter().chain(r).collect())
 								.collect_vec();
 
-                            // if PRINT_COUPLING {
-                            //     print!("cnf = {:?} given {:?} -> ", cnf, last_cnf);
-                            // }
 
-                            // missing let-chain feature
-                            // if PRINT_COUPLING {
-                            // println!("{}", display_cnf(&cnf));
-                            // // println!("given:\n{}", display_cnf(last_cnf.unwrap_or(&vec![])));
-                            // }
+							if antecedent_implies_next && consequent_implies_next  {
+                                if PRINT_COUPLING >= 2 {
+										println!("SKIP");
+                                }
+                                if PRINT_COUPLING >= 1 {
+                                unsafe {
+                                    SKIPS += 1;
+                                }
+                                }
+									return Some(vec![]); // some consequent -> skip clause
+							}
 
-                            // let cnf =
-                            //     if let (true, Some(last_cnf)) = (REMOVE_IMPLIED_CLAUSES, last_cnf)  {
-                            //         filter_cnf(cnf, last_cnf)
-                            //     } else {
-                            //         cnf.clone()
-                            //     };
-
-                            // if PRINT_COUPLING {
-                            // println!("filt:\n{}", display_cnf(&cnf));
-                            // }
-
-                            // if PRINT_COUPLING {
-                            //     print!("cnf = {:?}", cnf);
-                            // }
-
-							// if antecedent_implies_next && consequent_implies_next {
-                                // // debug_assert!(last_cnf.clone().map(|last_cnf| is_cnf_superset(&last_cnf, &cnf))
-                                // //               .unwrap_or(true), "Expected {last_cnf:?} ⊆ {cnf:?}");
-
-							// 	if PRINT_COUPLING {
-							// 		println!("SKIP: {last_cnf:?} ⊆ {cnf:?}");
-							// 	}
-
-							// 	if REMOVE_IMPLIED_CLAUSES {
-							// 		// if PRINT_COUPLING {
-							// 		// 	println!();
-							// 		// }
-							// 		return Some(vec![]); // some consequent -> skip clause
-							// 	}
-							// }
-
-								// if PRINT_COUPLING {
-								// 	println!("NOSKIP: {last_cnf:?} !⊆ {cnf:?}");
-								// }
-
-
-                            // last_cnf = Some(cnf.clone());
 							last_k = c;
 							last_a = Some(implies);
 
 							// // TODO or if r contains empty clause?
-							if cnf == vec![vec![]] {
-								stop = true;
-							}
+                            // TODO remove; probably redundant with antecedent stuff above
+							// if cnf == vec![vec![]] {
+							// 	stop = true;
+							// }
 
 							Some(cnf)
 						})
