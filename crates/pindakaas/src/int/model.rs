@@ -30,7 +30,7 @@ use std::{
 use std::{fmt::Display, path::PathBuf};
 
 #[cfg(feature = "trace")]
-pub(crate) const PRINT_COUPLING: u32 = 0;
+pub(crate) const PRINT_COUPLING: u32 = 1;
 #[cfg(not(feature = "trace"))]
 pub(crate) const PRINT_COUPLING: u32 = 0;
 /// In the coupling, skip redundant clauses of which every term is already implied

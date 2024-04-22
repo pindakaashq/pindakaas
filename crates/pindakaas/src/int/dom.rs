@@ -194,6 +194,9 @@ impl<C: Coefficient> Dom<C> {
 				.collect::<Vec<_>>(),
 		)
 	}
+	pub(crate) fn density(&self) -> f32 {
+		(self.size().to_f32().unwrap()) / (self.ub() - self.lb() + C::one()).to_f32().unwrap()
+	}
 }
 
 #[derive(Clone)]
@@ -210,26 +213,28 @@ impl<C: Coefficient> Display for Dom<C> {
 			return write!(f, "||");
 		}
 		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
-		const ELIPSIZE: Option<usize> = Some(8);
+		const ELIPSIZE: Option<usize> = Some(4);
 		let elipsize = ELIPSIZE.map(|e| dom.len() > e).unwrap_or_default();
+
+		let density = if dom.len() <= 1 {
+			String::from("")
+		} else {
+			format!("{:.0}%", self.density() * 100f32)
+		};
 		if dom.len() > 1 && C::from(dom.len()).unwrap() == ub - lb + C::one() {
-			write!(
-				f,
-				"|{}..{}| |{}|",
-				dom.first().unwrap(),
-				dom.last().unwrap(),
-				dom.len()
-			)
+			write!(f, "|{}..{}| |{}|", lb, ub, dom.len())?;
 		} else if elipsize {
 			write!(
 				f,
-				"|{},..,{ub}| |{}|",
-				dom.iter().take(ELIPSIZE.unwrap()).join(","),
-				dom.len()
-			)
+				"|{},..,{ub}| |{}|{}",
+				dom.iter().take(ELIPSIZE.unwrap() - 1).join(","),
+				dom.len(),
+				density
+			)?;
 		} else {
-			write!(f, "|{}| |{}|", dom.iter().join(","), dom.len())
+			write!(f, "|{}| |{}|{}", dom.iter().join(","), dom.len(), density)?;
 		}
+		Ok(())
 	}
 }
 
