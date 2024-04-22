@@ -83,7 +83,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				}
 			}
 			Some(IntVarEnc::Ord(None)) => {
-				const COUPLE_TERM: bool = false;
+				const COUPLE_TERM: bool = true;
 				let couple_term = USE_CHANNEL || COUPLE_TERM;
 				let model = model.unwrap();
 				// Create y:O <= x:B
@@ -176,7 +176,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				let y = model
 					.new_var(
 						&dom,
-						model.config.add_consistency,
+						false,
 						Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
 						Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
 					)

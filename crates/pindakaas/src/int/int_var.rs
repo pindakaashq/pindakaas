@@ -1,3 +1,4 @@
+#![allow(clippy::absurd_extreme_comparisons)]
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 use std::{
@@ -161,12 +162,11 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					c,
 					cnf,
 					if self.add_consistency {
-						self.lb()
-					// if up {
-					// 	self.lb()
-					// } else {
-					// 	self.ub()
-					// }
+						if up {
+							self.lb()
+						} else {
+							self.ub()
+						}
 					} else {
 						c
 					},
@@ -207,7 +207,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			IntVarEnc::Ord(Some(o)) => {
 				// TODO make use of a?
 				let pos = self.dom.geq(k);
-				if PRINT_COUPLING {
+				if PRINT_COUPLING >= 2 {
 					print!(" = d_{pos:?}");
 				}
 				let d = if let Some(pos) = pos {
@@ -246,7 +246,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					(range_lb + k, a)
 				};
 
-				if PRINT_COUPLING {
+				if PRINT_COUPLING >= 2 {
 					print!("{r_a}..{r_b} ");
 				}
 				let dnf = x_bin.geqs(r_a, r_b);
