@@ -46,19 +46,6 @@ pub(crate) fn required_lits<C: Coefficient>(lb: C, ub: C) -> usize {
 	}) as usize
 }
 
-pub(crate) fn nearest_power_of_two<C: Coefficient>(k: C, up: bool) -> C {
-	// find next power of one if up (or previous if going down)
-	if k.is_zero() {
-		C::zero()
-	} else {
-		C::one().rotate_right(if up {
-			(k - C::one()).leading_zeros() // rotate one less to get next power of two
-		} else {
-			k.leading_zeros() + 1 // rotate one more to get previous power of two
-		})
-	}
-}
-
 /// Return a linear expression of non-fixed literals and their coefficient, and a constant `add` resulting from the fixed literals
 pub(crate) fn filter_fixed<Lit: Literal, C: Coefficient>(
 	xs: &[LitOrConst<Lit>],
@@ -730,6 +717,19 @@ End
 		assert_eq!(to_lex_bits(-3, 3, false), &[true, false, false]);
 		assert_eq!(to_lex_bits(-4, 3, false), &[false, false, false]);
 		assert_eq!(to_lex_bits(1, 2, true), &[true, false]);
+	}
+
+	fn nearest_power_of_two<C: Coefficient>(k: C, up: bool) -> C {
+		// find next power of one if up (or previous if going down)
+		if k.is_zero() {
+			C::zero()
+		} else {
+			C::one().rotate_right(if up {
+				(k - C::one()).leading_zeros() // rotate one less to get next power of two
+			} else {
+				k.leading_zeros() + 1 // rotate one more to get previous power of two
+			})
+		}
 	}
 
 	#[test]
