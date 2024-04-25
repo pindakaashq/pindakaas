@@ -349,13 +349,7 @@ pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 		}
 	}
 
-	// Remove last bit if equal to second-to-last bit
-	let zs = if zs.len() > 1 && zs[zs.len() - 1] == zs[zs.len() - 2] {
-		zs[..(zs.len() - 1)].to_vec()
-	} else {
-		zs
-	};
-
+	// TODO Check if last bits are equal? But then might return unexpected number of bits
 	Ok(zs)
 }
 
