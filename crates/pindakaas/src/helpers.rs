@@ -391,7 +391,7 @@ pub mod tests {
 
 	const USE_SPLR: bool = false;
 	const ONLY_OUTPUT: bool = true;
-	const CHECK_FIRST_SOL: bool = false;
+	const CHECK_N_SOL: Option<u32> = None;
 
 	impl TestDB {
 		pub fn new(num_var: i32) -> TestDB {
@@ -605,6 +605,7 @@ pub mod tests {
 				output.iter().max().unwrap().clone(),
 			);
 
+			let mut k_sol = 0;
 			while let Ok(Certificate::SAT(model)) = self.call_solver() {
 				let solution = if ONLY_OUTPUT {
 					model
@@ -617,8 +618,12 @@ pub mod tests {
 				};
 
 				from_slv.push(solution.clone());
-				if CHECK_FIRST_SOL {
-					break;
+				if let Some(n) = CHECK_N_SOL {
+					if k_sol > n {
+						break;
+					} else {
+						k_sol += 1;
+					}
 				}
 
 				let nogood: Vec<i32> = solution.iter().map(|l| -l).collect();
