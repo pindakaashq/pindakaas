@@ -269,9 +269,9 @@ impl ImplicationChainEncoder {
 }
 
 impl Checker for ImplicationChainConstraint {
-	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError> {
+	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
 		for (a, b) in self.lits.iter().copied().tuple_windows() {
-			if value(a).unwrap_or(true) & !value(b).unwrap_or(false) {
+			if sol.value(a).unwrap_or(true) & !sol.value(b).unwrap_or(false) {
 				return Err(Unsatisfiable.into());
 			}
 		}

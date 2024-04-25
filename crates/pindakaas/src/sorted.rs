@@ -70,10 +70,10 @@ impl<'a> Sorted<'a> {
 }
 
 impl<'a> Checker for Sorted<'a> {
-	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError> {
+	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
 		let lhs = LinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
-			.value(&value)?;
-		let rhs = LinExp::from(self.y).value(&value)?;
+			.value(sol)?;
+		let rhs = LinExp::from(self.y).value(sol)?;
 
 		if match self.cmp {
 			LimitComp::LessEq => lhs <= rhs,

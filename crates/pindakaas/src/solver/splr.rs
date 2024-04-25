@@ -4,7 +4,7 @@ pub use splr::Solver as Splr;
 use splr::{Certificate, SatSolverIF, SolveIF, SolverError::*, VERSION};
 
 use super::{SolveResult, Solver};
-use crate::{helpers::const_concat, ClauseDatabase, Cnf, Lit, Var};
+use crate::{helpers::const_concat, ClauseDatabase, Cnf, Lit, Valuation, Var};
 
 impl ClauseDatabase for Splr {
 	fn new_var(&mut self) -> Var {
@@ -29,26 +29,18 @@ impl ClauseDatabase for Splr {
 }
 
 impl Solver for Splr {
+	type ValueFn = Certificate;
+
 	fn signature(&self) -> &str {
 		const SPLR_SIG: &str = const_concat!("SPLR-", VERSION);
 		SPLR_SIG
 	}
 
-	fn solve<SolCb: FnOnce(&dyn crate::Valuation)>(&mut self, on_sol: SolCb) -> SolveResult {
+	fn solve<SolCb: FnOnce(&Self::ValueFn)>(&mut self, on_sol: SolCb) -> SolveResult {
 		match SolveIF::solve(self) {
 			Ok(Certificate::UNSAT) => SolveResult::Unsat,
-			Ok(Certificate::SAT(sol)) => {
-				let value = |l: Lit| {
-					let abs: Lit = l.var().into();
-					let v = Into::<i32>::into(abs) as usize;
-					if v <= sol.len() {
-						debug_assert_eq!(sol[v - 1].abs(), l.var().into());
-						Some(sol[v - 1] == l.into())
-					} else {
-						None
-					}
-				};
-				on_sol(&value);
+			Ok(cert @ Certificate::SAT(_)) => {
+				on_sol(&cert);
 				SolveResult::Sat
 			}
 			Err(e) => match e {
@@ -58,6 +50,23 @@ impl Solver for Splr {
 				TimeOut | OutOfMemory => SolveResult::Unknown,
 				_ => panic!("an error occurred within the splr solver"),
 			},
+		}
+	}
+}
+
+impl Valuation for Certificate {
+	fn value(&self, lit: Lit) -> Option<bool> {
+		if let Certificate::SAT(sol) = self {
+			let var: Var = lit.var();
+			let v = Into::<i32>::into(var) as usize;
+			if v <= sol.len() {
+				debug_assert_eq!(sol[v - 1].abs(), lit.var().into());
+				Some(sol[v - 1] == lit.into())
+			} else {
+				None
+			}
+		} else {
+			panic!("value called on an unsatisfiable certificate")
 		}
 	}
 }

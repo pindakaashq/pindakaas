@@ -9,8 +9,8 @@ use std::{
 use libloading::{Library, Symbol};
 
 use super::{
-	FailFn, LearnCallback, SlvTermSignal, SolveAssuming, SolveResult, Solver, TermCallback,
-	VarFactory,
+	FailedAssumtions, LearnCallback, SlvTermSignal, SolveAssuming, SolveResult, Solver,
+	TermCallback, VarFactory,
 };
 #[cfg(feature = "ipasir-up")]
 use super::{Propagator, SolvingActions};
@@ -167,30 +167,20 @@ impl<'lib> ClauseDatabase for IpasirSolver<'lib> {
 }
 
 impl<'lib> Solver for IpasirSolver<'lib> {
+	type ValueFn = IpasirSol<'lib>;
+
 	fn signature(&self) -> &str {
 		unsafe { CStr::from_ptr((self.signature_fn)()) }
 			.to_str()
 			.unwrap()
 	}
 
-	fn solve<SolCb: FnOnce(&dyn Valuation)>(&mut self, on_sol: SolCb) -> SolveResult {
+	fn solve<SolCb: FnOnce(&Self::ValueFn)>(&mut self, on_sol: SolCb) -> SolveResult {
 		let res = (self.solve_fn)(self.slv);
 		match res {
 			10 => {
 				// 10 -> Sat
-				let val_fn = |lit: Lit| {
-					let lit: i32 = lit.into();
-					let val = (self.value_fn)(self.slv, lit);
-					match val {
-						_ if val == lit => Some(true),
-						_ if val == -lit => Some(false),
-						_ => {
-							debug_assert_eq!(val, 0); // zero according to spec, both value are valid
-							None
-						}
-					}
-				};
-				on_sol(&val_fn);
+				on_sol(&self.sol_obj());
 				SolveResult::Sat
 			}
 			20 => SolveResult::Unsat, // 20 -> Unsat
@@ -203,10 +193,12 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 }
 
 impl<'lib> SolveAssuming for IpasirSolver<'lib> {
+	type FailFn = IpasirFailed<'lib>;
+
 	fn solve_assuming<
 		I: IntoIterator<Item = Lit>,
-		SolCb: FnOnce(&dyn Valuation),
-		FailCb: FnOnce(&FailFn<'_>),
+		SolCb: FnOnce(&<Self as Solver>::ValueFn),
+		FailCb: FnOnce(&Self::FailFn),
 	>(
 		&mut self,
 		assumptions: I,
@@ -218,16 +210,59 @@ impl<'lib> SolveAssuming for IpasirSolver<'lib> {
 		}
 		match self.solve(on_sol) {
 			SolveResult::Unsat => {
-				let fail_fn = |lit: Lit| {
-					let lit: i32 = lit.into();
-					let failed = (self.failed_fn)(self.slv, lit);
-					failed != 0
-				};
-				on_fail(&fail_fn);
+				on_fail(&self.failed_obj());
 				SolveResult::Unsat
 			}
 			r => r,
 		}
+	}
+}
+
+impl<'lib> IpasirSolver<'lib> {
+	fn sol_obj(&self) -> IpasirSol<'lib> {
+		IpasirSol {
+			slv: self.slv,
+			value_fn: self.value_fn.clone(),
+		}
+	}
+	fn failed_obj(&self) -> IpasirFailed<'lib> {
+		IpasirFailed {
+			slv: self.slv,
+			failed_fn: self.failed_fn.clone(),
+		}
+	}
+}
+
+pub struct IpasirSol<'lib> {
+	slv: *mut c_void,
+	value_fn: Symbol<'lib, extern "C" fn(*mut c_void, i32) -> i32>,
+}
+
+impl Valuation for IpasirSol<'_> {
+	fn value(&self, lit: Lit) -> Option<bool> {
+		let lit: i32 = lit.into();
+		let val = (self.value_fn)(self.slv, lit);
+		match val {
+			_ if val == lit => Some(true),
+			_ if val == -lit => Some(false),
+			_ => {
+				debug_assert_eq!(val, 0); // zero according to spec, both value are valid
+				None
+			}
+		}
+	}
+}
+
+pub struct IpasirFailed<'lib> {
+	slv: *mut c_void,
+	failed_fn: Symbol<'lib, extern "C" fn(*mut c_void, i32) -> c_int>,
+}
+
+impl FailedAssumtions for IpasirFailed<'_> {
+	fn fail(&self, lit: Lit) -> bool {
+		let lit: i32 = lit.into();
+		let failed = (self.failed_fn)(self.slv, lit);
+		failed != 0
 	}
 }
 

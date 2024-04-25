@@ -27,7 +27,7 @@ mod tests {
 	use crate::{
 		linear::LimitComp,
 		solver::{SolveResult, Solver},
-		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder,
+		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder, Valuation,
 	};
 
 	#[test]
@@ -46,10 +46,10 @@ mod tests {
 				},
 			)
 			.unwrap();
-		let res = slv.solve(|value| {
+		let res = slv.solve(|model| {
 			assert!(
-				(value(!a).unwrap() && value(b).unwrap())
-					|| (value(a).unwrap() && value(!b).unwrap()),
+				(model.value(!a).unwrap() && model.value(b).unwrap())
+					|| (model.value(a).unwrap() && model.value(!b).unwrap()),
 			)
 		});
 		assert_eq!(res, SolveResult::Sat);

@@ -55,7 +55,7 @@ mod tests {
 	use crate::{
 		linear::LimitComp,
 		solver::{SolveResult, Solver},
-		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder,
+		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder, Valuation,
 	};
 
 	#[test]
@@ -74,19 +74,19 @@ mod tests {
 				},
 			)
 			.unwrap();
-		let res = slv.solve(|value| {
+		let res = slv.solve(|model| {
 			assert!(
-				(value(!a).unwrap() && value(b).unwrap())
-					|| (value(a).unwrap() && value(!b).unwrap()),
+				(model.value(!a).unwrap() && model.value(b).unwrap())
+					|| (model.value(a).unwrap() && model.value(!b).unwrap()),
 			)
 		});
 		assert_eq!(res, SolveResult::Sat);
 		// Test clone implementation
 		let mut cp = slv.clone();
-		cp.solve(|value| {
+		cp.solve(|model| {
 			assert!(
-				(value(!a).unwrap() && value(b).unwrap())
-					|| (value(a).unwrap() && value(!b).unwrap()),
+				(model.value(!a).unwrap() && model.value(b).unwrap())
+					|| (model.value(a).unwrap() && model.value(!b).unwrap()),
 			)
 		});
 	}
@@ -115,13 +115,13 @@ mod tests {
 			fn is_lazy(&self) -> bool {
 				true
 			}
-			fn check_model(&mut self, value: &dyn crate::Valuation) -> bool {
+			fn check_model(&mut self, model: &dyn crate::Valuation) -> bool {
 				let mut vars = self.vars.clone();
 				while let Some(v) = vars.next() {
-					if value(v.into()).unwrap_or(true) {
+					if model.value(v.into()).unwrap_or(true) {
 						let next_2 = vars.clone().take(2);
 						for o in next_2 {
-							if value(o.into()).unwrap_or(true) {
+							if model.value(o.into()).unwrap_or(true) {
 								self.tmp.push(vec![!v, !o]);
 							}
 						}
@@ -152,11 +152,11 @@ mod tests {
 		}
 
 		let mut solns = Vec::new();
-		while slv.solve(|value| {
+		while slv.solve(|model| {
 			let sol: Vec<Lit> = vars
 				.clone()
 				.map(|v| {
-					if value(v.into()).unwrap() {
+					if model.value(v.into()).unwrap() {
 						v.into()
 					} else {
 						!v
