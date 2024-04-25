@@ -17,6 +17,7 @@ pub use crate::helpers::VarRange;
 use crate::{ClauseDatabase, Lit, Valuation, Var};
 
 pub trait Solver: ClauseDatabase {
+	type ValueFn: Valuation;
 	/// Return the name and the version of SAT solver.
 	fn signature(&self) -> &str;
 
@@ -24,7 +25,7 @@ pub trait Solver: ClauseDatabase {
 	///
 	/// If the search is interrupted (see [`set_terminate_callback`]) the function
 	/// returns unknown
-	fn solve<SolCb: FnOnce(&dyn Valuation)>(&mut self, on_sol: SolCb) -> SolveResult;
+	fn solve<SolCb: FnOnce(&Self::ValueFn)>(&mut self, on_sol: SolCb) -> SolveResult;
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
@@ -35,14 +36,16 @@ pub enum SolveResult {
 }
 
 pub trait SolveAssuming: Solver {
+	type FailFn: FailedAssumtions;
+
 	/// Solve the formula with specified clauses under the given assumptions.
 	///
 	/// If the search is interrupted (see [`set_terminate_callback`]) the function
 	/// returns unknown
 	fn solve_assuming<
 		I: IntoIterator<Item = Lit>,
-		SolCb: FnOnce(&dyn Valuation),
-		FailCb: FnOnce(&FailFn<'_>),
+		SolCb: FnOnce(&Self::ValueFn),
+		FailCb: FnOnce(&Self::FailFn),
 	>(
 		&mut self,
 		assumptions: I,
@@ -51,12 +54,15 @@ pub trait SolveAssuming: Solver {
 	) -> SolveResult;
 }
 
-/// Check if the given assumption literal was used to prove the unsatisfiability
-/// of the formula under the assumptions used for the last SAT search.
-///
-/// Note that for literals 'lit' which are not assumption literals, the behavior
-/// of is not specified.
-pub type FailFn<'a> = dyn Fn(Lit) -> bool + 'a;
+/// Trait implemented by the object given to the callback on detecting failure
+pub trait FailedAssumtions {
+	/// Check if the given assumption literal was used to prove the unsatisfiability
+	/// of the formula under the assumptions used for the last SAT search.
+	///
+	/// Note that for literals 'lit' which are not assumption literals, the behavior
+	/// of is not specified.
+	fn fail(&self, lit: Lit) -> bool;
+}
 
 pub trait LearnCallback: Solver {
 	/// Set a callback function used to extract learned clauses up to a given

@@ -40,7 +40,7 @@ impl Cardinality {
 }
 
 impl Checker for Cardinality {
-	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError> {
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
 		Linear::from(self.clone()).check(value)
 	}
 }

@@ -258,7 +258,7 @@ impl LinearConstraint {
 }
 
 impl Checker for LinearConstraint {
-	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError> {
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
 		let lhs = self.exp.value(value)?;
 		if match self.cmp {
 			Comparator::LessEq => lhs <= self.k,
@@ -561,10 +561,10 @@ impl Mul<Coeff> for LinExp {
 }
 
 impl Checker for Linear {
-	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError> {
+	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
 		let mut sum = 0;
 		for (lit, coef) in self.terms.iter().flat_map(|p| p.iter().copied()) {
-			match value(lit) {
+			match sol.value(lit) {
 				Some(true) => sum += *coef,
 				None if self.cmp == LimitComp::LessEq => sum += *coef,
 				Some(false) => {}

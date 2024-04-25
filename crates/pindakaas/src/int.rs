@@ -13,13 +13,13 @@ use self::enc::GROUND_BINARY_AT_LB;
 use crate::{linear::Constraint, CheckError, Coeff, LinExp, Result, Unsatisfiable, Valuation};
 
 impl LinExp {
-	pub(crate) fn value<F: Valuation>(&self, value: F) -> Result<Coeff, CheckError> {
+	pub(crate) fn value<F: Valuation + ?Sized>(&self, sol: &F) -> Result<Coeff, CheckError> {
 		let mut total = self.add;
 		for (constraint, terms) in self.iter() {
 			// Calculate sum for constraint
 			let sum = terms
 				.iter()
-				.filter(|(lit, _)| value(*lit).expect("missing assignment to literal"))
+				.filter(|(lit, _)| sol.value(*lit).expect("missing assignment to literal"))
 				.map(|(_, i)| i)
 				.sum();
 			match constraint {
@@ -27,7 +27,7 @@ impl LinExp {
 					if sum != 0
 						&& terms
 							.iter()
-							.filter(|&(l, _)| value(*l).unwrap_or(true))
+							.filter(|&(l, _)| sol.value(*l).unwrap_or(true))
 							.count() > 1
 					{
 						return Err(Unsatisfiable.into());
@@ -38,7 +38,7 @@ impl LinExp {
 						.iter()
 						.map(|(l, _)| *l)
 						.tuple_windows()
-						.any(|(a, b)| !value(a).unwrap_or(false) & value(b).unwrap_or(true))
+						.any(|(a, b)| !sol.value(a).unwrap_or(false) & sol.value(b).unwrap_or(true))
 					{
 						return Err(Unsatisfiable.into());
 					}

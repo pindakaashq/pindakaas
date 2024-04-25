@@ -183,13 +183,20 @@ impl fmt::Display for Unsatisfiable {
 /// an empty value, or the [`Unsatisfiable`] error type.
 pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
-/// A function that gives the valuation/truth-value for a given literal in the
-/// current solution/model.
-///
-/// Note that the function can return None if the model/solution is independent
-/// of the given literal.
-pub trait Valuation: Fn(Lit) -> Option<bool> {}
-impl<F: Fn(Lit) -> Option<bool>> Valuation for F {}
+/// A trait implemented by types that can be used to represent a solution/model
+pub trait Valuation {
+	/// Returns the valuation/truth-value for a given literal in the
+	/// current solution/model.
+	///
+	/// Note that the function can return None if the model/solution is independent
+	/// of the given literal.
+	fn value(&self, lit: Lit) -> Option<bool>;
+}
+impl<F: Fn(Lit) -> Option<bool>> Valuation for F {
+	fn value(&self, lit: Lit) -> Option<bool> {
+		self(lit)
+	}
+}
 
 /// Encoder is the central trait implemented for all the encoding algorithms
 pub trait Encoder<DB: ClauseDatabase, Constraint> {
@@ -206,7 +213,7 @@ pub trait Checker {
 	///   the constraint,
 	/// - it returns [`Unsatisfiable`] when the assignment violates the
 	///   constraint
-	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError>;
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError>;
 }
 
 /// Incomplete is a error type returned by a [`Checker`] type when the

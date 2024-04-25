@@ -50,10 +50,10 @@ impl<'a> TernLeConstraint<'a> {
 }
 
 impl<'a> Checker for TernLeConstraint<'a> {
-	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError> {
-		let x = LinExp::from(self.x).value(&value)?;
-		let y = LinExp::from(self.y).value(&value)?;
-		let z = LinExp::from(self.z).value(&value)?;
+	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
+		let x = LinExp::from(self.x).value(sol)?;
+		let y = LinExp::from(self.y).value(sol)?;
+		let z = LinExp::from(self.z).value(sol)?;
 		if Self::check(x, y, &self.cmp, z) {
 			Ok(())
 		} else {
@@ -105,7 +105,7 @@ impl<'a, DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'a>> for TernLeEncoder
 
 		return match (x, y, z) {
 			(IntVarEnc::Const(_), IntVarEnc::Const(_), IntVarEnc::Const(_)) => {
-				if tern.check(|_| None).is_ok() {
+				if tern.check(&|_| None).is_ok() {
 					Ok(())
 				} else {
 					Err(Unsatisfiable)

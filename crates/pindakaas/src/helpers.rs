@@ -191,7 +191,7 @@ impl<'a> XorConstraint<'a> {
 }
 
 impl<'a> Checker for XorConstraint<'a> {
-	fn check<F: Valuation>(&self, value: F) -> Result<(), CheckError> {
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
 		let count = LinExp::from_terms(self.lits.iter().map(|&l| (l, 1)).collect_vec().as_slice())
 			.value(value)?;
 		if count % 2 == 1 {

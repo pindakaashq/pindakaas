@@ -42,12 +42,15 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 	};
 
 	let assumptions = if opts.assumptions {
+		let fail_ident = format_ident!("{}Failed", ident);
 		quote! {
 			impl crate::solver::SolveAssuming for #ident {
+				type FailFn = #fail_ident;
+
 				fn solve_assuming<
 					I: IntoIterator<Item = crate::Lit>,
-					SolCb: FnOnce(&dyn crate::Valuation),
-					FailCb: FnOnce(&crate::solver::FailFn<'_>),
+					SolCb: FnOnce(&Self::ValueFn),
+					FailCb: FnOnce(&Self::FailFn),
 				>(
 					&mut self,
 					assumptions: I,
@@ -60,16 +63,23 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					}
 					match self.solve(on_sol) {
 						crate::solver::SolveResult::Unsat => {
-							let fail_fn = |lit: crate::Lit| {
-								let lit: i32 = lit.into();
-								let failed = unsafe { #krate::ipasir_failed(#ptr, lit) };
-								failed != 0
-							};
+							let fail_fn = #fail_ident { ptr: #ptr };
 							on_fail(&fail_fn);
 							crate::solver::SolveResult::Unsat
 						}
 						r => r,
 					}
+				}
+			}
+
+			pub struct #fail_ident {
+				ptr: *mut std::ffi::c_void,
+			}
+			impl crate::solver::FailedAssumtions for #fail_ident {
+				fn fail(&self, lit: crate::Lit) -> bool {
+					let lit: i32 = lit.into();
+					let failed = unsafe { #krate::ipasir_failed(#ptr, lit) };
+					failed != 0
 				}
 			}
 		}
@@ -271,6 +281,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		quote!()
 	};
 
+	let sol_ident = format_ident!("{}Sol", ident);
 	quote! {
 		impl Drop for #ident {
 			fn drop(&mut self) {
@@ -306,13 +317,15 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		}
 
 		impl crate::solver::Solver for #ident {
+			type ValueFn = #sol_ident;
+
 			fn signature(&self) -> &str {
 				unsafe { std::ffi::CStr::from_ptr(#krate::ipasir_signature()) }
 					.to_str()
 					.unwrap()
 			}
 
-			fn solve<SolCb: FnOnce(&dyn crate::Valuation)>(
+			fn solve<SolCb: FnOnce(&Self::ValueFn)>(
 				&mut self,
 				on_sol: SolCb,
 			) -> crate::solver::SolveResult {
@@ -320,26 +333,35 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				match res {
 					10 => {
 						// 10 -> Sat
-						let val_fn = |lit: crate::Lit| {
-							let var: i32 = lit.var().into();
-							// WARN: Always ask about variable (positive) literal, otherwise solvers sometimes seem incorrect
-							let ret = unsafe { #krate::ipasir_val( #ptr , var) };
-							match ret {
-								_ if ret == var => Some(!lit.is_negated()),
-								_ if ret == -var => Some(lit.is_negated()),
-								_ => {
-									debug_assert_eq!(ret, 0); // zero according to spec, both value are valid
-									None
-								}
-							}
+						let model = #sol_ident {
+							ptr: #ptr,
 						};
-						on_sol(&val_fn);
+						on_sol(&model);
 						crate::solver::SolveResult::Sat
 					}
 					20 => crate::solver::SolveResult::Unsat, // 20 -> Unsat
 					_ => {
 						debug_assert_eq!(res, 0); // According to spec should be 0, unknown
 						crate::solver::SolveResult::Unknown
+					}
+				}
+			}
+		}
+
+		pub struct #sol_ident {
+			ptr: *mut std::ffi::c_void,
+		}
+		impl crate::Valuation for #sol_ident {
+			fn value(&self, lit: crate::Lit) -> Option<bool> {
+				let var: i32 = lit.var().into();
+				// WARN: Always ask about variable (positive) literal, otherwise solvers sometimes seem incorrect
+				let ret = unsafe { #krate::ipasir_val(self.ptr, var) };
+				match ret {
+					_ if ret == var => Some(!lit.is_negated()),
+					_ if ret == -var => Some(lit.is_negated()),
+					_ => {
+						debug_assert_eq!(ret, 0); // zero according to spec, both value are valid
+						None
 					}
 				}
 			}
