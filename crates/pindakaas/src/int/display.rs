@@ -8,7 +8,7 @@ use super::model::USE_CSE;
 use super::Cse;
 use super::{model::Obj, IntVar, LinExp};
 
-pub(crate) const SHOW_IDS: bool = true;
+pub(crate) const SHOW_IDS: bool = false;
 const SHOW_LITS: bool = false;
 /// Whether to rewrite x1 + .. + xn # 0 as x1 + .. + x_(n-1) # - xn
 const SHOW_K_0: bool = true;
