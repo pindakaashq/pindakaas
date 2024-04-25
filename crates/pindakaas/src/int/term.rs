@@ -55,7 +55,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		if USE_CSE {
 			if let Some(model) = &model {
 				// println!("CSE: {}", model.cse);
-				if let Some(t) = model.cse.0.get(&(self.x.borrow().id, self.c)) {
+				if let Some(t) = model.cse.0.get(&(self.x.borrow().id, self.c, cmp)) {
 					println!("HIT: ({self}) -> {t}");
 					return Ok(t.clone());
 				}
@@ -244,7 +244,10 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 
 		if USE_CSE {
 			if let Some(model) = model.as_mut() {
-				model.cse.0.insert((self.x.borrow().id, self.c), t.clone());
+				model
+					.cse
+					.0
+					.insert((self.x.borrow().id, self.c, cmp), t.clone());
 			}
 		}
 
