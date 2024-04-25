@@ -276,7 +276,7 @@ impl<Lit: Literal, C: Coefficient> Checker for LinearConstraint<Lit, C> {
 	}
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum Comparator {
 	LessEq,
 	Equal,

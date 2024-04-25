@@ -94,7 +94,7 @@ impl<Lit: Literal, C: Coefficient> From<Vec<Lin<Lit, C>>> for Model<Lit, C> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Cse<Lit: Literal, C: Coefficient>(
-	pub(crate) HashMap<(IntVarId, C), Term<Lit, C>>,
+	pub(crate) HashMap<(IntVarId, C, Comparator), Term<Lit, C>>,
 );
 
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
