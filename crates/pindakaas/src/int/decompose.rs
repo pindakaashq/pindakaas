@@ -456,7 +456,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 			cse,
 		} = model;
 
-		cons.into_iter().try_fold(
+		let lin_decomp = cons.into_iter().try_fold(
 			Model {
 				cons: vec![],
 				num_var,
@@ -488,7 +488,8 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 				model.extend(std::iter::once(decomp));
 				Ok(model)
 			},
-		)
+		)?;
+		Ok(lin_decomp)
 	}
 }
 

@@ -302,7 +302,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	/// Decompose every constraint
-	pub(crate) fn fold(self, decomposer: &impl Decompose<Lit, C>) -> Result<Model<Lit, C>> {
+	pub(crate) fn _fold(self, decomposer: &impl Decompose<Lit, C>) -> Result<Model<Lit, C>> {
 		self.cons.iter().cloned().try_fold(
 			Model {
 				cons: vec![],
@@ -1177,6 +1177,23 @@ End
 			r"
 Subject To
 c0: + 2 x1 + 3 x2 + 5 x3 <= 6
+Binary
+x1
+x2
+x3
+End
+",
+			None,
+		);
+	}
+
+	#[test]
+	fn test_int_lin_les() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 2 x1 + 3 x2 + 5 x3 <= 6
+c1: + 4 x1 + 2 x2 + 6 x3 <= 6
 Binary
 x1
 x2
