@@ -43,6 +43,7 @@ impl<C: Coefficient> BddEncoder<C> {
 
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 	fn decompose(&self, mut model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
+		assert!(model.cons.len() == 1);
 		let lin = model.cons.pop().unwrap();
 
 		// traditionally, sort by *decreasing* ub

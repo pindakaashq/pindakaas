@@ -447,54 +447,48 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 		// model_config: &ModelConfig<C>,
 		// cse: Option<Cse<Lit, C>>,
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		// model.decompose_with( Some(self))
-		// let Model { cons, .. } = model;
-		if let [con] = &model.cons[..] {
-			let con = con.clone();
-			match con.exp.terms[..] {
-				[] => con
-					.check(&Assignment(HashMap::default()), None)
-					.map(|_| Model {
-						cons: vec![con],
-						..model
-					})
-					.map_err(|_| Unsatisfiable),
-				_ if con.exp.terms.len() <= 2
-					|| con.is_tern() || model.config.decomposer == Decomposer::Rca =>
-				{
-					// let mut model = Model::<Lit, C>::new(num_var, model_config);
-					// model.add_constraint(con)?;
-					// Ok(model)
-					// Model::from(con)
-					Ok(Model {
-						cons: vec![con],
-						..model
-					})
-				}
-				_ => {
-					// let con_model = Model::from(con);
-					let con_model = Model {
-						cons: vec![con],
-						..model
-					};
-					match con_model.config.decomposer {
-						Decomposer::Bdd => BddEncoder::default().decompose(con_model),
-						Decomposer::Gt => TotalizerEncoder::default().decompose(con_model),
-						Decomposer::Swc => SwcEncoder::default().decompose(con_model),
-						Decomposer::Rca => unreachable!(),
-					}
-				}
-			}
-		} else {
-			model.fold(self)
-		}
+		// let cons = model.cons.iter().cloned().collect_vec();
+		let Model {
+			cons,
+			num_var,
+			obj,
+			config,
+			cse,
+		} = model;
 
-		// model
-		// 	.cons
-		// 	.iter()
-		// 	.cloned()
-		// 	.map()
-		// 	.collect()
+		cons.into_iter().try_fold(
+			Model {
+				cons: vec![],
+				num_var,
+				obj,
+				config,
+				cse,
+			},
+			|mut model, con| {
+				let decomp = match con.exp.terms[..] {
+					[] => {
+						let con_model = model.branch(con);
+						con_model
+							.check_assignment(&Assignment(HashMap::default()), None)
+							.map(|_| con_model)
+							.map_err(|_| Unsatisfiable)
+					}
+					_ if con.exp.terms.len() <= 2
+						|| con.is_tern() || model.config.decomposer == Decomposer::Rca =>
+					{
+						Ok(model.branch(con))
+					}
+					_ => match model.config.decomposer {
+						Decomposer::Bdd => BddEncoder::default().decompose(model.branch(con)),
+						Decomposer::Gt => TotalizerEncoder::default().decompose(model.branch(con)),
+						Decomposer::Swc => SwcEncoder::default().decompose(model.branch(con)),
+						Decomposer::Rca => unreachable!(),
+					},
+				}?;
+				model.extend(std::iter::once(decomp));
+				Ok(model)
+			},
+		)
 	}
 }
 
