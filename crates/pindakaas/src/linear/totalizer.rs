@@ -40,13 +40,8 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 }
 
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
-	fn decompose(
-		&self,
-		lin: Lin<Lit, C>,
-		num_var: usize,
-		model_config: &ModelConfig<C>,
-	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		let mut model = Model::<Lit, C>::new(num_var, model_config);
+	fn decompose(&self, mut model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
+		let lin = model.cons.first().unwrap().clone();
 
 		let mut layer = lin.exp.terms.iter().cloned().collect_vec();
 
@@ -145,12 +140,11 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Tot
 		let xs = xs.into_iter().sorted_by_key(Term::ub).collect_vec();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
-		let decomposition = self.decompose(
-			Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None),
-			model.num_var,
-			&model.config,
-		)?;
-		model.extend(decomposition);
+
+		let mut model = self.decompose(Model {
+			cons: vec![Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None)],
+			..model
+		})?;
 		model.encode(db, false)?;
 		Ok(())
 	}

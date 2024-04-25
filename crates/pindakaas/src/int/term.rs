@@ -1,6 +1,9 @@
 use crate::{
 	helpers::as_binary,
-	int::{model::USE_CHANNEL, LitOrConst},
+	int::{
+		model::{USE_CHANNEL, USE_CSE},
+		LitOrConst,
+	},
 	Coefficient, Comparator, IntLinExp as LinExp, IntVar, IntVarRef, Lin, Literal, Model,
 };
 use itertools::Itertools;
@@ -30,6 +33,14 @@ impl<Lit: Literal, C: Coefficient> From<IntVarRef<Lit, C>> for Term<Lit, C> {
 	}
 }
 
+impl<Lit: Literal, C: Coefficient> TryInto<IntVarRef<Lit, C>> for Term<Lit, C> {
+	type Error = ();
+
+	fn try_into(self) -> Result<IntVarRef<Lit, C>, Self::Error> {
+		self.c.is_one().then_some(self.x).ok_or(())
+	}
+}
+
 impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	pub fn new(c: C, x: IntVarRef<Lit, C>) -> Self {
 		Self { c, x }
@@ -37,10 +48,28 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 
 	pub(crate) fn encode_bin(
 		self,
-		model: Option<&mut Model<Lit, C>>,
+		mut model: Option<&mut Model<Lit, C>>,
 		cmp: Comparator,
 		con_lbl: Option<String>,
 	) -> crate::Result<Self> {
+		if USE_CSE {
+			if let Some(model) = &model {
+				// println!("CSE: {}", model.cse);
+				if let Some(t) = model.cse.0.get(&(self.x.borrow().id, self.c)) {
+					println!("HIT: ({self}) -> {t}");
+					return Ok(t.clone());
+				}
+			}
+		}
+
+		// let cse = match model
+		// 	.cse
+		// 	.entry((self.x.borrow().id, self.c))
+		// {
+		// 	Entry::Occupied(t) => return Ok(t.get().clone()),
+		// 	Entry::Vacant(e) => e,
+		// };
+
 		let e = self.x.borrow().e.clone();
 		let lit_to_bin_enc = |a: C, _cmp: Comparator, lit: Lit, dom: &[C]| {
 			assert!(self.c.is_positive(), "TODO neg scm");
@@ -51,20 +80,25 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					.map(|bit| LitOrConst::from(bit.then_some(lit.clone()))) // if true, return Lit(lit), if false, return Const(false)
 					.collect_vec(),
 			);
-			Term::from(IntVar::from_dom_as_ref(
+
+			let y = IntVar::from_dom_as_ref(
 				0,
 				Dom::from_slice(dom),
 				false,
 				Some(IntVarEnc::Bin(Some(bin_enc))),
 				Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
-			))
+			);
+
+			Ok(Term::from(y))
 		};
 		let dom = self.dom().iter().sorted().copied().collect_vec();
-		match e {
-			Some(IntVarEnc::Bin(_)) if self.c.abs().is_one() => Ok(self),
+		let t = match e {
+			Some(IntVarEnc::Bin(_)) if self.c.abs().is_one() => {
+				return Ok(self);
+			}
 			Some(IntVarEnc::Bin(Some(x_bin))) if x_bin.x.len() == 1 => {
 				if let [LitOrConst::Lit(lit)] = &x_bin.x.clone()[..] {
-					Ok(lit_to_bin_enc(C::one(), cmp, lit.clone(), &dom))
+					lit_to_bin_enc(C::one(), cmp, lit.clone(), &dom)
 				} else {
 					unreachable!()
 				}
@@ -72,22 +106,24 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			Some(IntVarEnc::Ord(Some(x_ord))) if x_ord.x.len() <= 1 => {
 				if let &[lit] = &x_ord.iter().take(2).collect_vec()[..] {
 					// also pass in normalized value of the one literal
-					return Ok(lit_to_bin_enc(
+					lit_to_bin_enc(
 						self.x.borrow().ub() - self.x.borrow().lb(),
 						cmp,
 						lit.clone(),
 						&dom,
-					));
+					)
 				} else {
 					unreachable!()
 				}
 			}
 			Some(IntVarEnc::Ord(None)) => {
+				/// Couple terms means coupling a*x:O <= y:B i/o x:O <= y:B (and using SCM later for a*y:B)
 				const COUPLE_TERM: bool = true;
 				let couple_term = USE_CHANNEL || COUPLE_TERM;
-				let model = model.unwrap();
+
+				let model = model.as_mut().unwrap();
+				// FCreate
 				// Create y:O <= x:B
-				// Create a*x:O <= y:B
 				let up = self.c.is_positive();
 				let dom = if couple_term {
 					Dom::from_slice(
@@ -101,7 +137,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				};
 				let y = model.new_var_from_dom(
 					dom,
-					false,                      // TODO ? depend on config.add_consistency?
+					false,
 					Some(IntVarEnc::Bin(None)), // y:B
 					self.x
 						.borrow()
@@ -154,25 +190,33 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					y,
 				))
 			}
-			Some(IntVarEnc::Bin(Some(x_bin))) if self.c.trailing_zeros() > 0 => {
-				let sh = self.c.trailing_zeros();
-				let y = IntVar::from_dom_as_ref(
-					0,
-					Dom::from_slice(&dom),
-					false, // view never needs consistency
-					Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
-						&(0..sh)
-							.map(|_| LitOrConst::Const(false))
-							.chain(x_bin.xs().iter().cloned())
-							.collect_vec(),
-					)))),
-					Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
-				);
-
-				Term::new(self.c.shr(sh as usize), y).encode_bin(model, cmp, con_lbl)
+			Some(IntVarEnc::Bin(Some(x_bin))) => {
+				// assert!(self.c.is_multiple_of(&C::from(2).unwrap()));
+				let sh = self.c.trailing_zeros() as usize;
+				return Ok(Term::new(
+					self.c.shr(sh),
+					IntVar::from_dom_as_ref(
+						0,
+						Dom::from_slice(&dom),
+						false, // view never needs consistency
+						Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+							&(0..sh)
+								.map(|_| LitOrConst::Const(false))
+								.chain(x_bin.xs().iter().cloned())
+								.collect_vec(),
+						)))),
+						Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
+					),
+				));
 			}
-			Some(IntVarEnc::Bin(None)) if model.is_some() => {
-				let model = model.unwrap();
+			Some(IntVarEnc::Bin(None)) if self.c.trailing_zeros() > 0 => {
+				let sh = self.c.trailing_zeros();
+				return Ok(Term::new(self.c.shr(sh as usize), self.x.clone())
+					.encode_bin(model, cmp, con_lbl)?
+					* C::one().shl(sh as usize));
+			}
+			Some(IntVarEnc::Bin(None)) => {
+				let model = model.as_mut().unwrap();
 				let y = model
 					.new_var(
 						&dom,
@@ -194,8 +238,16 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					.unwrap();
 				Ok(Term::from(y))
 			}
-			_ => Ok(self),
+			_ => return Ok(self),
+		}?;
+
+		if USE_CSE {
+			if let Some(model) = model.as_mut() {
+				model.cse.0.insert((self.x.borrow().id, self.c), t.clone());
+			}
 		}
+
+		Ok(t)
 	}
 
 	pub fn ineqs(&self, up: bool) -> Vec<(C, Vec<Lit>, C)> {

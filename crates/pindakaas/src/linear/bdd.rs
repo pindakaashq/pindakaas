@@ -3,10 +3,13 @@ use std::{collections::HashMap, ops::Range};
 use iset::IntervalMap;
 use itertools::Itertools;
 
-use crate::{int::IntVar, Comparator, Decomposer, Literal, ModelConfig, Unsatisfiable};
+use crate::{
+	int::{Decompose, IntVar},
+	Comparator, Decomposer, Literal, ModelConfig, Unsatisfiable,
+};
 #[allow(unused_imports)]
 use crate::{
-	int::{Decompose, IntVarEnc, IntVarOrd, Lin, LinExp, Model, Term},
+	int::{IntVarEnc, IntVarOrd, Lin, LinExp, Model, Term},
 	linear::LimitComp,
 	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
 };
@@ -39,13 +42,8 @@ impl<C: Coefficient> BddEncoder<C> {
 }
 
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
-	fn decompose(
-		&self,
-		lin: Lin<Lit, C>,
-		num_var: usize,
-		model_config: &ModelConfig<C>,
-	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		let mut model = Model::<Lit, C>::new(num_var, model_config);
+	fn decompose(&self, mut model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
+		let lin = model.cons.pop().unwrap();
 
 		// traditionally, sort by *decreasing* ub
 		let lin = Lin {
@@ -133,7 +131,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 		// [0..1 => Val, 2..2 => Val]
 		// [0..1 => Val, 2..5 => Val]
 		// [0..6 => Val, 7..10 => Gap]
-		bdd(0, &lin.exp.terms, C::zero(), &mut ys);
+		bdd(0, &lin.exp.terms, &lin.cmp, C::zero(), &mut ys);
 
 		// Turn BDD into integer variables and constraints
 		// Ex.
@@ -147,18 +145,13 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 			.flat_map(|(i, nodes)| {
 				let mut views = HashMap::new();
 
-				let process_val = |iv: Range<C>| match lin.cmp {
-					Comparator::LessEq | Comparator::Equal => iv.end - C::one(),
-					Comparator::GreaterEq => iv.start,
-				};
-
 				let dom = nodes
 					.into_iter(..)
 					.filter_map(|(iv, node)| match node {
-						BddNode::Val => Some(process_val(iv)),
+						BddNode::Val => Some(process_val(iv, &lin.cmp)),
 						BddNode::Gap => None,
 						BddNode::View(view) => {
-							let val = process_val(iv);
+							let val = process_val(iv, &lin.cmp);
 							views.insert(val, view);
 							Some(val)
 						}
@@ -196,13 +189,16 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 				first,
 				|curr, (i, (term, next))| {
 					model
-						.add_constraint(Lin::tern(
-							term.clone(),
-							curr,
-							lin.cmp,
-							next.clone(),
-							lin.lbl.as_ref().map(|lbl| format!("bdd_{}_{}", i + 1, lbl)),
-						))
+						.add_constraint(
+							Lin::tern(
+								term.clone(),
+								curr,
+								lin.cmp,
+								next.clone(),
+								lin.lbl.as_ref().map(|lbl| format!("bdd_{}_{}", i + 1, lbl)),
+							)
+							.simplified()?,
+						)
 						.map(|_| next)
 				},
 			)?;
@@ -211,6 +207,14 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 		Ok(model)
 	}
 }
+
+fn process_val<C: Coefficient>(iv: Range<C>, cmp: &Comparator) -> C {
+	match cmp {
+		Comparator::LessEq | Comparator::Equal => iv.end - C::one(),
+		Comparator::GreaterEq => iv.start,
+	}
+}
+
 impl<DB, C> Encoder<DB, Linear<DB::Lit, C>> for BddEncoder<C>
 where
 	DB: ClauseDatabase,
@@ -242,13 +246,12 @@ where
 			.collect::<Result<Vec<_>, _>>()?;
 
 		// TODO pass BDD::decompose to Model::encode instead, since otherwise we risk decomposing twice
-		let decomposition = self.decompose(
-			Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None),
-			model.num_var,
-			&model.config,
-		)?;
+		let mut model = self.decompose(Model {
+			cons: vec![Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None)],
+			..model
+		})?;
 
-		model.extend(decomposition);
+		// model.extend(decomposition);
 
 		model.encode(db, false)?;
 		Ok(())
@@ -265,6 +268,7 @@ enum BddNode<C: Coefficient> {
 fn bdd<Lit: Literal, C: Coefficient>(
 	i: usize,
 	xs: &Vec<Term<Lit, C>>,
+	_cmp: &Comparator,
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, BddNode<C>>>,
 ) -> (std::ops::Range<C>, BddNode<C>) {
@@ -273,13 +277,17 @@ fn bdd<Lit: Literal, C: Coefficient>(
 			let dom = xs[i].dom();
 			let children = dom
 				.iter()
-				.map(|v| (v, bdd(i + 1, xs, sum + *v, ws)))
+				.map(|v| (v, bdd(i + 1, xs, _cmp, sum + *v, ws)))
 				.collect::<Vec<_>>();
 
 			let is_gap = children.iter().all(|(_, (_, v))| v == &BddNode::Gap);
 
-			let view = (children.iter().map(|(_, (iv, _))| iv).all_equal())
-				.then(|| children.first().unwrap().1 .0.end - C::one());
+			let view = None;
+			// (children
+			// .iter()
+			// .flat_map(|(_, (iv, v))| (v == &BddNode::Val).then_some(iv))
+			// .all_equal() && false)
+			// .then(|| process_val(children.first().unwrap().1 .0.clone(), cmp));
 
 			let iv = children
 				.into_iter()
@@ -296,7 +304,7 @@ fn bdd<Lit: Literal, C: Coefficient>(
 			};
 
 			assert!(
-				ws[i].insert(iv.clone(), BddNode::Val).is_none(),
+				ws[i].insert(iv.clone(), node.clone()).is_none(),
 				"Duplicate interval {iv:?} inserted into {ws:?} layer {i}"
 			);
 			(iv, node)

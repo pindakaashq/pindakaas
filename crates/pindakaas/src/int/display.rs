@@ -4,10 +4,12 @@ use crate::Lin;
 use crate::{int::IntVarEnc, Coefficient, Literal, Model, Term};
 use itertools::Itertools;
 
+use super::model::USE_CSE;
+use super::Cse;
 use super::{model::Obj, IntVar, LinExp};
 
-pub(crate) const SHOW_IDS: bool = false;
-const SHOW_LITS: bool = false;
+pub(crate) const SHOW_IDS: bool = true;
+const SHOW_LITS: bool = true;
 /// Whether to rewrite x1 + .. + xn # 0 as x1 + .. + x_(n-1) # - xn
 const SHOW_K_0: bool = true;
 
@@ -23,6 +25,9 @@ impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 		}
 		if !self.obj.is_satisfy() {
 			writeln!(f, "\tobj: {}", self.obj)?;
+		}
+		if USE_CSE {
+			writeln!(f, "\tCSE: {}", self.cse)?;
 		}
 		Ok(())
 	}
@@ -125,6 +130,20 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 			} else {
 				format!("{}L", self.lits().len())
 			},
+		)
+	}
+}
+
+impl<Lit: Literal, C: Coefficient> Display for Cse<Lit, C> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(
+			f,
+			"{:?}",
+			self.0
+				.iter()
+				.sorted_by_key(|(k, _)| *k)
+				.map(|(k, v)| format!("{}*x{} -> {v}", k.1, k.0))
+				.join(", ")
 		)
 	}
 }

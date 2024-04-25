@@ -1,8 +1,7 @@
 #![allow(clippy::absurd_extreme_comparisons)]
-use crate::helpers::{add_clauses_for, negate_cnf, unsigned_binary_range};
+use crate::helpers::{add_clauses_for, unsigned_binary_range};
 use crate::int::bin::BinEnc;
-use crate::int::helpers::{display_cnf, remove_red};
-use crate::int::model::{Decompose, USE_CHANNEL};
+use crate::int::helpers::display_cnf;
 use crate::int::{required_lits, LitOrConst};
 use crate::linear::log_enc_add_fn;
 use crate::{
@@ -12,7 +11,7 @@ use crate::{
 use itertools::Itertools;
 
 use super::{
-	model::{LinDecomposer, PRINT_COUPLING, USE_COUPLING_IO_LEX, VIEW_COUPLING},
+	model::{PRINT_COUPLING, USE_COUPLING_IO_LEX, VIEW_COUPLING},
 	IntVarEnc, IntVarId,
 };
 
@@ -29,6 +28,93 @@ pub struct Lin<Lit: Literal, C: Coefficient> {
 	pub cmp: Comparator,
 	pub k: C,
 	pub lbl: Option<String>,
+}
+
+pub(crate) enum LinCase<Lit: Literal, C: Coefficient> {
+	Couple(Term<Lit, C>, Term<Lit, C>),
+	Fixed(Lin<Lit, C>),
+	Unary(IntVarRef<Lit, C>, Comparator, C),
+	Scm(Term<Lit, C>, IntVarRef<Lit, C>),
+	Rca(Term<Lit, C>, Term<Lit, C>, Term<Lit, C>),
+	Order,
+	Other,
+}
+
+impl<Lit: Literal, C: Coefficient> TryFrom<&Lin<Lit, C>> for LinCase<Lit, C> {
+	type Error = Unsatisfiable;
+
+	fn try_from(con: &Lin<Lit, C>) -> Result<Self, Unsatisfiable> {
+		let term_encs = con
+			.exp
+			.terms
+			.iter()
+			.map(|t| (t, t.x.borrow().e.clone()))
+			// TODO hopefully does not clone inner enc?
+			.collect_vec();
+
+		Ok(match (&term_encs[..], con.cmp) {
+			([], _) => LinCase::Fixed(con.clone()),
+			([(t, Some(IntVarEnc::Bin(_)))], cmp)
+				if (t.c.is_one() || t.c.is_multiple_of(&C::from(2).unwrap()))
+					&& !USE_COUPLING_IO_LEX =>
+			{
+				LinCase::Unary(
+					(*t).clone()
+						.encode_bin(None, cmp, None)?
+						.try_into()
+						.unwrap(),
+					cmp,
+					con.k,
+				)
+			}
+			// VIEW COUPLING
+			// ([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(None)))], _)
+			// // | ([(y, Some(IntVarEnc::Bin(None))), (t, Some(IntVarEnc::Ord(_)))], _)
+			// 	if y.c == -C::one()
+			// 		&& t.x.borrow().dom.size() <= C::one() + C::one()
+			// 		&& VIEW_COUPLING =>
+			// {
+			// 	// t.x.borrow_mut().encode(db, None)?;
+			// 	// // let view = (*t).clone().encode_bin(None, self.cmp, None)?;
+			// 	// let view = (*t).clone().encode_bin(None, self.cmp, None)?;
+			// 	// y.x.borrow_mut().e = view.0.x.borrow().e.clone();
+			// 	// Ok(())
+			// }
+			// SCM
+			(
+				[(t_x, Some(IntVarEnc::Bin(_))), (Term { c: y_c, x: y }, Some(IntVarEnc::Bin(None)))],
+				Comparator::Equal,
+			) if *y_c == -C::one()
+				&& con.k.is_zero()
+				&& matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) =>
+			{
+				LinCase::Scm((*t_x).clone(), y.clone())
+			}
+			([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(_)))], _)
+				if y.c == -C::one()
+                    && con.k.is_zero()
+					// && t.x.borrow().dom.size() <= C::one() + C::one()
+					&& VIEW_COUPLING =>
+			{
+				LinCase::Couple((*t).clone(), (*y).clone())
+			}
+
+			(
+				[(x, Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_))), (z, Some(IntVarEnc::Bin(_)))],
+				Comparator::Equal,
+			) if z.c.is_negative() && con.k.is_zero() => {
+				LinCase::Rca((*x).clone(), (*y).clone(), (*z).clone())
+			}
+			(encs, _)
+				if encs
+					.iter()
+					.all(|e| matches!(e.1, Some(IntVarEnc::Ord(_)) | None)) =>
+			{
+				LinCase::Order
+			}
+			_ => LinCase::Other,
+		})
+	}
 }
 
 impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
@@ -58,15 +144,6 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			k: C::zero(),
 			lbl,
 		}
-	}
-
-	pub fn decompose(
-		self,
-		model_config: &ModelConfig<C>,
-		num_var: usize,
-	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		LinDecomposer::default().decompose(self, num_var, model_config)
-		// let decomp = LinDecomposer::default().decompose(self, num_var, model_config)?;
 	}
 
 	pub fn lb(&self) -> C {
@@ -308,131 +385,15 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		db: &mut DB,
 		_config: &ModelConfig<C>,
 	) -> Result {
-		const NEW_COUPLING: bool = true;
-		// TODO only one cmp == Equality (and exchange equalities)
-		let term_encs = self
-			.exp
-			.terms
-			.iter()
-			.map(|t| (t, t.x.borrow().e.clone()))
-			// TODO hopefully does not clone inner enc?
-			.collect_vec();
-
-		match (&term_encs[..], self.cmp) {
-			([], _) => self
+		match LinCase::try_from(self)? {
+			LinCase::Fixed(con) => con
 				.check(&Assignment::default(), None)
 				.map_err(|_| Unsatisfiable),
-			([(Term { c, x }, Some(IntVarEnc::Bin(_)))], _)
-				if c.is_one() && !USE_COUPLING_IO_LEX =>
-			{
+			LinCase::Unary(x, cmp, k) => {
 				let x_enc = x.borrow_mut().encode_bin(db)?; // avoid BorrowMutError
-				x_enc.encode_unary_constraint(db, &self.cmp, self.k, &x.borrow().dom, false)
+				x_enc.encode_unary_constraint(db, &cmp, k, &x.borrow().dom, false)
 			}
-			// VIEW COUPLING
-			([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(None)))], _)
-				if y.c == -C::one()
-					&& t.x.borrow().dom.size() <= C::one() + C::one()
-					&& VIEW_COUPLING =>
-			{
-				t.x.borrow_mut().encode(db, None)?;
-				let view = (*t).clone().encode_bin(None, self.cmp, None)?;
-				y.x.borrow_mut().e = view.x.borrow().e.clone();
-				Ok(())
-			}
-			// SCM
-			(
-				[(t, Some(IntVarEnc::Bin(_))), (Term { c: y_c, x: y }, Some(IntVarEnc::Bin(None)))],
-				Comparator::Equal,
-			) if *y_c == -C::one()
-				&& self.k.is_zero()
-				&& matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) =>
-			{
-				assert!(t.c.is_positive(), "neg scm: {self}");
-				t.x.borrow_mut().encode_bin(db)?; // encode x (if not encoded already)
-								  // encode y
-				let new_y = (*t).clone().encode_bin(None, self.cmp, None)?;
-				(*y).borrow_mut().e = Some(IntVarEnc::Bin(Some(
-					new_y.x.borrow_mut().encode_bin(db)?.scm_dnf(db, new_y.c)?,
-				)));
-				Ok(())
-			}
-			(
-				[(x, Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_))), (z, Some(IntVarEnc::Bin(z_bin)))],
-				Comparator::Equal,
-			) if [y.c, z.c] == [C::one(), -C::one()] && self.k.is_zero() => {
-				assert!(
-					x.lb() + y.lb() == z.x.borrow().dom.lb(),
-					"LBs for addition not matching: {self}"
-				);
-
-				let (x, y) = &[x, y]
-					.into_iter()
-					.map(|t| t.x.borrow_mut().encode_bin(db).unwrap().xs())
-					.collect_tuple()
-					.unwrap();
-
-				let lits = Some(required_lits(z.x.borrow().dom.lb(), z.x.borrow().dom.ub()));
-				assert!(z_bin.is_none());
-				z.x.borrow_mut().e = Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
-					&log_enc_add_fn(db, x, y, &self.cmp, LitOrConst::Const(false), lits).unwrap(),
-				))));
-				Ok(())
-			}
-			// CHANNEL
-			(
-				[(t_x, Some(IntVarEnc::Ord(_))), (t_y, Some(IntVarEnc::Bin(_)))],
-				Comparator::Equal,
-			) if t_x.c.is_one() && t_y.c == -C::one() && USE_CHANNEL => {
-				t_x.x.borrow_mut().encode_ord(db)?;
-				if !t_x.x.borrow().add_consistency {
-					t_x.x.borrow_mut().consistent(db)?;
-				}
-				let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
-
-				let (range_lb, range_ub) = unsigned_binary_range::<C>(y_enc.bits());
-				y_enc.x.iter().enumerate().try_for_each(|(i, y_i)| {
-					let r = C::one().shl(i);
-					let (l, u) = (range_lb.div(r), range_ub.div(r));
-					add_clauses_for(
-						db,
-						vec![remove_red(
-							num::iter::range_inclusive(l, u)
-								.sorted_by_key(|k| (k.is_even(), *k))
-								.filter_map(|k| {
-									let y_i = if k.is_even() {
-										-y_i.clone()
-									} else {
-										y_i.clone()
-									};
-									let a = y_enc.denormalize(r * k, &t_y.x.borrow().dom); // ??
-									let b = a + r;
-									let x_a = t_x.x.borrow().ineq(a, false, None).1;
-									let x_b = t_x.x.borrow().ineq(b, true, None).1;
-									if x_a == negate_cnf(x_b.clone()) {
-										None
-									} else {
-										Some(
-											[x_a, y_i.into(), x_b]
-												.into_iter()
-												.multi_cartesian_product()
-												.concat()
-												.into_iter()
-												// .into_iter()
-												.flatten()
-												.collect(),
-										)
-									}
-								})
-								.collect(),
-						)],
-					)
-				})
-			}
-			// COUPLE
-			(
-				[(t_x, Some(IntVarEnc::Ord(_))), (t_y, Some(IntVarEnc::Bin(_)))],
-				Comparator::LessEq | Comparator::GreaterEq,
-			) if t_x.c.is_positive() && t_y.c == -C::one() && NEW_COUPLING => {
+			LinCase::Couple(t_x, t_y) => {
 				if PRINT_COUPLING >= 2 {
 					println!("NEW");
 				}
@@ -479,14 +440,79 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 						add_clauses_for(db, vec![vec![x.clone()], y])
 					})
 			}
-			_ => {
+			LinCase::Scm(t_x, y) => {
+				assert!(t_x.c.is_positive(), "neg scm: {self}");
+
+				t_x.x.borrow_mut().encode_bin(db)?; // encode x (if not encoded already)
+									// encode y
+
+				let tmp_y = t_x.clone().encode_bin(None, self.cmp, None)?;
+
+				// TODO make Term decompose and use encode_bin for actual encoding incl scm, but for now (since it's not given Db, call scm_dnf) here
+				(*y).borrow_mut().e = Some(IntVarEnc::Bin(Some(
+					tmp_y.x.borrow_mut().encode_bin(db)?.scm_dnf(db, tmp_y.c)?,
+				)));
+				Ok(())
+			}
+			LinCase::Rca(x, y, z) => {
+				assert!(
+					x.lb() + y.lb() == -z.ub(),
+					"LBs for addition not matching: {self}"
+				);
+
+				let z: IntVarRef<_, _> = (z * -C::one()).try_into().unwrap();
+				let lits = Some(required_lits(z.borrow().dom.lb(), z.borrow().dom.ub()));
+				// let lits = None;
+
+				let (x, y) = &[x, y]
+					.into_iter()
+					.map(|t| {
+						// encode
+						t.x.borrow_mut().encode(db, None).unwrap();
+						// encode term and return underlying var
+						let t = t.encode_bin(None, self.cmp, None).unwrap();
+						let x: IntVarRef<_, _> = t
+							.try_into()
+							.expect("Calling Term::encode_bin should return 1*y");
+						// x.clone().encode_bin(db).unwrap().xs()
+						if let Some(IntVarEnc::Bin(Some(x_enc))) = x.clone().borrow().e.clone() {
+							x_enc.xs()
+						} else {
+							unreachable!()
+						}
+					})
+					// .chain(z)
+					.collect_tuple()
+					.unwrap();
+
+				assert!(
+					matches!(z.borrow().e, Some(IntVarEnc::Bin(None))),
+					"Last var {} should not have been encoded yet",
+					z.borrow()
+				);
+				z.borrow_mut().e = Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+					&log_enc_add_fn(db, x, y, &self.cmp, LitOrConst::Const(false), lits).unwrap(),
+				))));
+				Ok(())
+			}
+			LinCase::Order => {
 				// encode all variables
 				self.exp
 					.terms
 					.iter()
 					.try_for_each(|t| t.x.borrow_mut().encode(db, None).map(|_| ()))?;
 
+				assert!(
+					self.exp.terms.iter().all(|t| match t.x.borrow().e {
+						Some(IntVarEnc::Ord(_)) => true,
+						Some(IntVarEnc::Bin(_)) => t.x.borrow().dom.size() <= C::one() + C::one(),
+						_ => false,
+					}),
+					"Non-order: {self}"
+				);
+
 				const SORT_BY_COEF: bool = true;
+				// const SORT_BY_COEF: bool = false;
 				let terms = if SORT_BY_COEF {
 					self.exp
 						.terms
@@ -498,12 +524,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					self.exp.terms.clone()
 				};
 
-				// let mut covered = None;
-				// let mut last_consequence = None;
-				// let mut last_k = None;
 				self.cmp.split().into_iter().try_for_each(|cmp| {
-					// TODO move to closure to add DB?
-
 					let (_, cnf) = Self::encode_rec(&terms, &cmp, self.k, 0);
 					if PRINT_COUPLING >= 1 {
 						unsafe {
@@ -519,123 +540,63 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 						emit_clause!(db, &c)?;
 					}
 					Ok(())
-					/*
-					let (last, firsts) = &terms.split_last().unwrap();
-					[vec![(C::zero(), vec![], true)]] // handle empty conditions
-						.into_iter()
-						.chain(firsts.iter().map(|term| term.ineqs(&cmp.reverse())))
-						.multi_cartesian_product()
-						.flat_map(|conditions| {
-							// calculate c*last_x !# k-sum(conditions)
-							let k = self.k
-								- conditions
-									.iter()
-									.map(|(c, _, _)| *c)
-									.fold(C::zero(), C::add);
-
-							if PRINT_COUPLING {
-								print!(
-									"\t({}) -> ({}*{}){}{}",
-									conditions
-										.iter()
-										.skip(1) // skip "empty conditions" fixed ineq
-										.zip(&self.exp.terms)
-										.map(|((c, cnf, is_implied), t)| format!(
-											"{}{}{} {:?}{}",
-											t.x.borrow().lbl(),
-											cmp.reverse(),
-											c,
-											cnf,
-											is_implied.then_some("^").unwrap_or_default()
-										))
-										.join(" /\\ "),
-									last.c,
-									last.x.borrow(),
-									cmp,
-									k,
-								);
-							}
-
-							let (k, up) = last.ineq(k, &cmp);
-							if PRINT_COUPLING {
-								print!(
-									" (= {}{}{})",
-									last.x.borrow().lbl(),
-									if up {
-										Comparator::GreaterEq
-									} else {
-										Comparator::LessEq
-									},
-									k
-								)
-							}
-
-							// if let Some(covered) = covered {
-							// 	if {
-							// 		if up {
-							// 			k <= covered
-							// 		} else {
-							// 			k >= covered
-							// 		}
-							// 	} && conditions.iter().all(|(_, _, is_implied)| *is_implied)
-							// 		// && REMOVE_IMPLIED_CLAUSES
-							// 	// && false
-							// 	{
-							// 		println!(" SKIP {k} <= {covered}");
-							// 		return None;
-							// 	}
-							// }
-
-							let (new_covered, consequence) = last.x.borrow().ineq(k, up);
-
-							if conditions.iter().all(|(_, _, is_implied)| *is_implied)
-								&& last_consequence
-									.as_ref()
-									.map(|c| &consequence == c)
-									.unwrap_or_default()
-							{
-								return None;
-							}
-							last_consequence = Some(consequence.clone());
-
-							covered = Some(new_covered);
-
-							if PRINT_COUPLING {
-								println!(" {:?} COV {}", consequence, covered.as_ref().unwrap());
-							}
-							Some((conditions, consequence))
-						})
-						// .chain([None])
-						// .tuple_windows()
-						// .flat_map(|(curr, next)| {
-						// 	if let Some((next_conditions, next_consequence)) = next {
-						// 		let (_, curr_consequence) = curr.as_ref().unwrap();
-						// 		let all_implied =
-						// 			next_conditions.iter().all(|(_, _, is_implied)| *is_implied)
-						// 				&& (curr_consequence == &next_consequence); // TODO replace by checking implication i/o equivalence
-						// 		if REMOVE_IMPLIED_CLAUSES && all_implied {
-						// 			return None; // skip curr
-						// 		}
-						// 		curr
-						// 	} else {
-						// 		// always post last iteration
-						// 		curr
-						// 	}
-						// })
-						.try_for_each(|(conditions, consequence)| {
-							add_clauses_for(
-								db,
-								conditions
-									.iter()
-									.map(|(_, cnf, _)| negate_cnf(cnf.clone())) // negate conditions
-									.chain([consequence])
-									.collect(),
-							)
-						})
-						*/
 				})
 			}
+			LinCase::Other => todo!("Cannot constrain: {self}"),
 		}
+
+		/*
+		// CHANNEL
+		(
+			[(t_x, Some(IntVarEnc::Ord(_))), (t_y, Some(IntVarEnc::Bin(_)))],
+			Comparator::Equal,
+		) if t_x.c.is_one() && t_y.c == -C::one() && USE_CHANNEL => {
+			t_x.x.borrow_mut().encode_ord(db)?;
+			if !t_x.x.borrow().add_consistency {
+				t_x.x.borrow_mut().consistent(db)?;
+			}
+			let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
+
+			let (range_lb, range_ub) = unsigned_binary_range::<C>(y_enc.bits());
+			y_enc.x.iter().enumerate().try_for_each(|(i, y_i)| {
+				let r = C::one().shl(i);
+				let (l, u) = (range_lb.div(r), range_ub.div(r));
+				add_clauses_for(
+					db,
+					vec![remove_red(
+						num::iter::range_inclusive(l, u)
+							.sorted_by_key(|k| (k.is_even(), *k))
+							.filter_map(|k| {
+								let y_i = if k.is_even() {
+									-y_i.clone()
+								} else {
+									y_i.clone()
+								};
+								let a = y_enc.denormalize(r * k, &t_y.x.borrow().dom); // ??
+								let b = a + r;
+								let x_a = t_x.x.borrow().ineq(a, false, None).1;
+								let x_b = t_x.x.borrow().ineq(b, true, None).1;
+								if x_a == negate_cnf(x_b.clone()) {
+									None
+								} else {
+									Some(
+										[x_a, y_i.into(), x_b]
+											.into_iter()
+											.multi_cartesian_product()
+											.concat()
+											.into_iter()
+											// .into_iter()
+											.flatten()
+											.collect(),
+									)
+								}
+							})
+							.collect(),
+					)],
+				)
+			})
+		}
+		*/
 	}
 
 	// #[cfg_attr(

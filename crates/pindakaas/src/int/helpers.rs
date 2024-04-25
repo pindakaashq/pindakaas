@@ -705,10 +705,7 @@ End
 ";
 		let mut model = Model::<i32, i32>::from_string(lp.into(), Format::Lp).unwrap();
 		let mut cnf = Cnf::new(0);
-		println!("model = {model}");
-
 		model.encode(&mut cnf, true).unwrap();
-		println!("lp = {}", model.to_text(Format::Lp));
 		// assert_eq!(lp, model.to_text(Format::Lp));
 	}
 
