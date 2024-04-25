@@ -196,8 +196,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 								lin.cmp,
 								next.clone(),
 								lin.lbl.as_ref().map(|lbl| format!("bdd_{}_{}", i + 1, lbl)),
-							)
-							.simplified()?,
+							), // TODO .simplified()?,
 						)
 						.map(|_| next)
 				},

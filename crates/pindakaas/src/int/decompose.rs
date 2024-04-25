@@ -26,23 +26,15 @@ pub(crate) trait Decompose<Lit: Literal, C: Coefficient> {
 pub struct EqualizeTernsDecomposer {}
 
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer {
-	fn decompose(
-		&self,
-		model: Model<Lit, C>,
-		// con: Lin<Lit, C>,
-		// num_var: usize,
-		// config: &ModelConfig<C>,
-		// cse: Option<Cse<Lit, C>>,
-	) -> Result<Model<Lit, C>, Unsatisfiable> {
+	fn decompose(&self, model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
 		const REMOVE_GAPS: bool = true;
 
 		let cons = model.cons.iter().cloned().collect_vec();
-
 		Ok(Model {
 			cons: cons
 				.into_iter()
 				.map(|con| {
-					if REMOVE_GAPS && con.exp.terms.len() >= 2 && con.k.is_zero() {
+					if REMOVE_GAPS && con.exp.terms.len() >= 2 && con.cmp.is_ineq() {
 						if con
 							.exp
 							.terms
@@ -52,29 +44,14 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 							if let Some((last, firsts)) = con.exp.terms.split_last() {
 								let (lb, ub) =
 									firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
-										(lb + t.lb(), std::cmp::min(ub + t.ub(), -last.lb()))
-										// // (lb + t.lb(), std::cmp::min(ub + t.ub(), -last.lb()))
-										// let (lb, ub) = (lb + t.lb(), (ub + t.ub()));
-
-										// match con.cmp {
-										// 	Comparator::LessEq => {
-										// 		(lb, std::cmp::min(ub, -last.lb()))
-										// 	}
-										// 	Comparator::GreaterEq => {
-										// 		(lb, std::cmp::min(ub, -last.lb()))
-										// 	}
-										// 	Comparator::Equal => unreachable!(),
-										// }
+										(lb + t.lb(), (ub + t.ub()))
 									});
+								let (lb, ub) = match con.cmp {
+									Comparator::LessEq => (lb, std::cmp::min(ub, -last.lb())),
+									Comparator::GreaterEq => (std::cmp::max(-last.ub(), lb), ub),
+									Comparator::Equal => unreachable!(),
+								};
 
-								// || decomposition =
-								// || 	bdd_1_c0: 	5·(x3:O ∈ |0..1| |2| 1L) ≤ (bdd_2:O ∈ |1,5| |2| 0L)
-								// || 	bdd_2_c0: 	3·(x2:O ∈ |0..1| |2| 1L) + (bdd_2:O ∈ |1,5| |2| 0L) ≤ (bdd_3:O ∈ |4,6| |2| 0L)
-								// || 	bdd_3_c0: 2·(x1:O ∈ |0..1| |2| 1L) + (bdd_3:O ∈ |4,6| |2| 0L) ≤ 6
-
-								// let last_lb = last.x.borrow().lb;
-								// if con.cmp == Comparator::LessEq {
-								// }
 								last.x.borrow_mut().dom = Dom::from_bounds(lb, ub);
 
 								Lin {
@@ -633,7 +610,6 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ScmDecomposer {
 						{
 							let (new_t, mut m) =
 								t.clone().encode_bin(con.cmp, con.lbl.clone()).unwrap();
-							dbg!(&new_t);
 							// let new_id = IntVarId(model.num_var + new_t.x.borrow().id.0);
 							let new_id = if m.num_var == 0 {
 								model.num_var += 1;
@@ -645,7 +621,6 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ScmDecomposer {
 							};
 							// let new_id = IntVarId(m.num_var + new_t.x.borrow().id.0);
 							// let new_id = IntVarId(m.num_var + new_t.x.borrow().id.0);
-							dbg!(&new_id);
 							new_t.x.borrow_mut().id = new_id;
 							// model.num_var += m.num_var;
 							// m.num_var = model.num_var;

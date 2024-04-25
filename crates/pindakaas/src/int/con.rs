@@ -2,8 +2,8 @@
 use crate::helpers::{add_clauses_for, unsigned_binary_range};
 use crate::int::bin::BinEnc;
 use crate::int::helpers::display_cnf;
-use crate::int::{required_lits, LitOrConst};
-use crate::linear::log_enc_add_fn;
+use crate::int::{required_lits, Dom, LitOrConst};
+use crate::linear::{lex_geq_const, lex_leq_const, log_enc_add_fn};
 use crate::{
 	trace::emit_clause, Assignment, CheckError, ClauseDatabase, Coefficient, Comparator,
 	Consistency, IntVarRef, Literal, Model, ModelConfig, Result, Term, Unsatisfiable,
@@ -394,9 +394,6 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				x_enc.encode_unary_constraint(db, &cmp, k, &x.borrow().dom, false)
 			}
 			LinCase::Couple(t_x, t_y) => {
-				if PRINT_COUPLING >= 2 {
-					println!("NEW");
-				}
 				t_x.x.borrow_mut().encode_ord(db)?;
 				if !t_x.x.borrow().add_consistency {
 					t_x.x.borrow_mut().consistent(db)?;
@@ -430,10 +427,10 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					.try_for_each(|((c_a, x_a), (c_b, x_b))| {
 						let x = if up { x_a } else { x_b };
 						let (c_a, c_b) = (c_a + C::one(), c_b);
+						let y = y_enc.ineqs(c_a, c_b, !up);
 						if PRINT_COUPLING >= 2 {
 							println!("{up} {c_a}..{c_b} -> {x:?}");
 						}
-						let y = y_enc.ineqs(c_a, c_b, !up);
 						if PRINT_COUPLING >= 2 {
 							println!("{y:?}");
 						}
@@ -456,14 +453,13 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			}
 			LinCase::Rca(x, y, z) => {
 				assert!(
-					x.lb() + y.lb() == -z.ub(),
+					x.lb() + y.lb() <= -z.ub(),
 					"LBs for addition not matching: {self}"
 				);
 
 				let z: IntVarRef<_, _> = (z * -C::one()).try_into().unwrap();
-				let lits = Some(required_lits(z.borrow().dom.lb(), z.borrow().dom.ub()));
-				// let lits = None;
 
+				let z_ground = x.lb() + y.lb();
 				let (x, y) = &[x, y]
 					.into_iter()
 					.map(|t| {
@@ -481,7 +477,6 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 							unreachable!()
 						}
 					})
-					// .chain(z)
 					.collect_tuple()
 					.unwrap();
 
@@ -490,9 +485,20 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					"Last var {} should not have been encoded yet",
 					z.borrow()
 				);
-				z.borrow_mut().e = Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+				let z_dom = Dom::from_bounds(z_ground, z.borrow().ub());
+
+				let z_lb = z.borrow().lb();
+				z.borrow_mut().dom = z_dom; // fix lower bound to ground
+				let lits = Some(required_lits(z_ground, z.borrow().dom.ub()));
+				let z_bin = BinEnc::from_lits(
 					&log_enc_add_fn(db, x, y, &self.cmp, LitOrConst::Const(false), lits).unwrap(),
-				))));
+				);
+
+				lex_geq_const(db, &z_bin.xs(), z_lb - z_ground, z_bin.bits())?;
+
+				// TODO only has to be done for last constraint of lin decomp..
+				lex_leq_const(db, &z_bin.xs(), z.borrow().ub() - z_ground, z_bin.bits())?;
+				z.borrow_mut().e = Some(IntVarEnc::Bin(Some(z_bin)));
 				Ok(())
 			}
 			LinCase::Order => {

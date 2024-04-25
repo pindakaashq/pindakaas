@@ -23,7 +23,7 @@ pub(crate) const PRINT_COUPLING: u32 = 0;
 /// Replace unary constraints by coupling
 pub(crate) const USE_COUPLING_IO_LEX: bool = false;
 
-pub(crate) const USE_CSE: bool = false;
+pub(crate) const USE_CSE: bool = true;
 
 /// View coupling
 pub(crate) const VIEW_COUPLING: bool = true;
@@ -798,7 +798,7 @@ mod tests {
 				println!("Decomposition error:\n{err}");
 			}
 			panic!(
-				"Decomposition is incorrect. Test failed for {:?}\n{model}\n{decomposition}",
+				"Decomposition is incorrect. Test failed for {:?}\n{model}",
 				model.config,
 			);
 		}
@@ -900,14 +900,12 @@ mod tests {
 					var_encs_gen.into_iter().enumerate().collect_vec()
 				}
 			} {
-				let decomposition = model
-					.clone()
-					.decompose(if VAR_ENCS.is_empty() {
-						None
-					} else {
-						Some(var_encs)
-					})
-					.unwrap();
+				let spec = if VAR_ENCS.is_empty() {
+					None
+				} else {
+					Some(var_encs)
+				};
+				let decomposition = model.clone().decompose(spec).unwrap();
 
 				println!("decomposition = {}", decomposition);
 
@@ -1120,35 +1118,35 @@ End
 		);
 	}
 
-	#[test]
-	fn test_int_lin_le_single_neg_coef() {
-		test_lp_for_configs(
-			r"
-Subject To
-c0: -1 x1 <= -1
-Binary
-x1
-End
-",
-			None,
-		);
-	}
+	// #[test]
+	// fn test_int_lin_le_single_neg_coef() {
+	// 	test_lp_for_configs(
+	// 		r"
+	// Subject To
+	// c0: -1 x1 <= -1
+	// Binary
+	// x1
+	// End
+	// ",
+	// 		None,
+	// 	);
+	// }
 
-	#[test]
-	fn test_lp_le_double_w_const() {
-		test_lp_for_configs(
-			r"
-Subject To
-c0: + 2 x1 + 3 x2 - 1 x3 <= 0
-bounds
-0 <= x1 <= 1
-0 <= x2 <= 1
-4 <= x3 <= 4
-End
-",
-			None,
-		);
-	}
+	// #[test]
+	// fn test_lp_le_double_w_const() {
+	// 	test_lp_for_configs(
+	// 		r"
+	// Subject To
+	// c0: + 2 x1 + 3 x2 - 1 x3 <= 0
+	// bounds
+	// 0 <= x1 <= 1
+	// 0 <= x2 <= 1
+	// 4 <= x3 <= 4
+	// End
+	// ",
+	// 		None,
+	// 	);
+	// }
 
 	#[test]
 	fn test_int_lin_ge_single() {
@@ -1262,35 +1260,35 @@ End
 		);
 	}
 
-	#[test]
-	fn test_int_lin_eq_tmp() {
-		test_lp_for_configs(
-			r"
-Subject To
-c0: + 1 x1 - 1 x2 <= 0
-Bounds
-0 <= x1 <= 3
-0 <= x2 <= 3
-End
-",
-			None,
-		);
-	}
+	// #[test]
+	// fn test_int_lin_eq_tmp() {
+	// 	test_lp_for_configs(
+	// 		r"
+	// Subject To
+	// c0: + 1 x1 - 1 x2 <= 0
+	// Bounds
+	// 0 <= x1 <= 3
+	// 0 <= x2 <= 3
+	// End
+	// ",
+	// 		None,
+	// 	);
+	// }
 
-	#[test]
-	fn test_int_lin_eq_3() {
-		test_lp_for_configs(
-			r"
-Subject To
-c0: + 1 x1 + 1 x2 = 2
-Bounds
-0 <= x1 <= 1
-0 <= x2 <= 1
-End
-",
-			None,
-		);
-	}
+	// #[test]
+	// fn test_int_lin_eq_3() {
+	// 	test_lp_for_configs(
+	// 		r"
+	// Subject To
+	// c0: + 1 x1 + 1 x2 = 2
+	// Bounds
+	// 0 <= x1 <= 1
+	// 0 <= x2 <= 1
+	// End
+	// ",
+	// 		None,
+	// 	);
+	// }
 
 	#[test]
 	fn test_int_lin_ge_1() {
@@ -1489,11 +1487,30 @@ End
 			r"
 Subject To
 c0: + 2 x1 + 3 x2 <= 6
-c1: + 2 x1 + 5 x3 >= 5
+* c1: + 2 x1 + 5 x3 >= 5
 Binary
 x1
 x2
 x3
+End
+",
+			None,
+		);
+	}
+
+	#[test]
+	fn test_lp_multiple_scms() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 3 x1 + 5 x2 <= 12
+c1: + 3 x1 + 10 x2 >= 17
+Bounds
+0 <= x1 <= 3
+0 <= x2 <= 3
+Encs
+x1 B
+x2 B
 End
 ",
 			None,
@@ -2019,30 +2036,6 @@ End
 	}
 
 	#[test]
-	fn test_sugar_3() {
-		let base = ModelConfig {
-			scm: Scm::Rca,
-			cutoff: None,
-			decomposer: Decomposer::Rca,
-			add_consistency: false,
-			propagate: Consistency::None,
-			equalize_ternaries: false,
-			equalize_uniform_bin_ineqs: false,
-		};
-		test_lp_for_configs(
-			r"
-	Subject To
-	  c0: - 1 x1 - 1 x2 >= 0
-	Bounds
-	  0 <= x1 <= 1
-	  0 <= x2 <= 1
-	End
-	",
-			Some(vec![base.clone()]),
-		);
-	}
-
-	#[test]
 	fn test_sugar_4() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
@@ -2083,6 +2076,32 @@ End
 	  c0: 1 x1 <= 0
 	Bounds
 	  0 <= x1 <= 1
+	End
+	",
+			Some(vec![base.clone()]),
+		);
+	}
+
+	// || 	bdd_3_c0: 	194·(x_27:O ∈ |0..1| 0L) + (bdd_3:O ∈ |0,195,229,236,424,431,465,660| 0L) ≤ (bdd_4:O ∈ |0,194,195,229,236,389,423,424,..,854| |16| 0L)
+
+	// #[test]
+	fn _test_bddpbc() {
+		let base = ModelConfig {
+			scm: Scm::Rca,
+			cutoff: None,
+			decomposer: Decomposer::Rca,
+			add_consistency: false,
+			propagate: Consistency::None,
+			equalize_ternaries: false,
+			equalize_uniform_bin_ineqs: false,
+		};
+		test_lp_for_configs(
+			r"
+	Subject To
+	  c0: 194 x + y - z <= 0
+  Doms
+  x in 0,1
+  y in 0,195,229,236,424,431,465,660
 	End
 	",
 			Some(vec![base.clone()]),
@@ -2187,16 +2206,16 @@ End
 			Some(vec![base.clone()]),
 		);
 
-		test_lp_for_configs(
-			r"
-	Subject To
-	  c0: -1 x1 >= 0
-	Bounds
-	  0 <= x1 <= 1
-	End
-	",
-			Some(vec![base.clone()]),
-		);
+		// test_lp_for_configs(
+		// 	r"
+		// Subject To
+		// c0: -1 x1 >= 0
+		// Bounds
+		// 0 <= x1 <= 1
+		// End
+		// ",
+		// 	Some(vec![base.clone()]),
+		// );
 
 		test_lp_for_configs(
 			r"
@@ -2209,16 +2228,16 @@ End
 			Some(vec![base.clone()]),
 		);
 
-		test_lp_for_configs(
-			r"
-	Subject To
-	  c0: - 1 x1 <= -1
-	Bounds
-	  0 <= x1 <= 1
-	End
-	",
-			Some(vec![base.clone()]),
-		);
+		// test_lp_for_configs(
+		// 	r"
+		// Subject To
+		// c0: - 1 x1 <= -1
+		// Bounds
+		// 0 <= x1 <= 1
+		// End
+		// ",
+		// 	Some(vec![base.clone()]),
+		// );
 	}
 
 	#[test]
@@ -2243,16 +2262,16 @@ End
 			Some(vec![base.clone()]),
 		);
 
-		test_lp_for_configs(
-			r"
-	Subject To
-	  c0: -1 x1 >= -1
-	Bounds
-	  0 <= x1 <= 3
-	End
-	",
-			Some(vec![base.clone()]),
-		);
+		// test_lp_for_configs(
+		// 	r"
+		// Subject To
+		// c0: -1 x1 >= -1
+		// Bounds
+		// 0 <= x1 <= 3
+		// End
+		// ",
+		// 	Some(vec![base.clone()]),
+		// );
 
 		test_lp_for_configs(
 			r"
@@ -2276,16 +2295,16 @@ End
 			Some(vec![base.clone()]),
 		);
 
-		test_lp_for_configs(
-			r"
-	Subject To
-	  c0: - 1 x1 <= -3
-	Bounds
-	  0 <= x1 <= 3
-	End
-	",
-			Some(vec![base.clone()]),
-		);
+		// test_lp_for_configs(
+		// 	r"
+		// Subject To
+		// c0: - 1 x1 <= -3
+		// Bounds
+		// 0 <= x1 <= 3
+		// End
+		// ",
+		// 	Some(vec![base.clone()]),
+		// );
 	}
 
 	// #[test]

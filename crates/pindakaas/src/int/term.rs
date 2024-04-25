@@ -62,6 +62,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			}
 		}
 
+		// TODO refactor
 		// let cse = match model
 		// 	.cse
 		// 	.entry((self.x.borrow().id, self.c))

@@ -155,9 +155,17 @@ impl<Lit: Literal> BinEnc<Lit> {
 		}
 
 		let ineqs = num::iter::range_inclusive(r_a, r_b)
-			.map(|k| self.ineq(if up { k - C::one() } else { k }, up))
+			.flat_map(|k| {
+				let k = if up { k - C::one() } else { k };
+				let ineq = self.ineq(k, up); // returns cnf
+				if PRINT_COUPLING >= 2 {
+					println!("{k} -> ineq = {:?}", ineq);
+				}
+				ineq
+			})
 			.collect_vec();
 
+		// // Returning CNF; so a single empty clause
 		if ineqs == vec![vec![]] {
 			return vec![];
 		}
@@ -179,14 +187,8 @@ impl<Lit: Literal> BinEnc<Lit> {
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
-	pub fn ineq<C: Coefficient>(&self, k: C, up: bool) -> Vec<Lit> {
-		// assert!(up);
-		// if k > range_ub {
-		// 	// return vec![];
-		// 	return vec![];
-		// }
-		// let k = k.clamp(range_lb, range_ub);
-		as_binary(k.into(), Some(self.bits()))
+	pub fn ineq<C: Coefficient>(&self, k: C, up: bool) -> Vec<Vec<Lit>> {
+		let clause: Result<Vec<_>, _> = as_binary(k.into(), Some(self.bits()))
 			.into_iter()
 			.zip(self.xs().iter().cloned())
 			// if >=, find 0's, if <=, find 0's
@@ -195,14 +197,18 @@ impl<Lit: Literal> BinEnc<Lit> {
 			// if <=, negate lits at 0's
 			.map(|x| if up { x } else { -x })
 			.filter_map(|x| match x {
-				// THIS IS A CONJUNCTION
-				// TODO make this a bit more clear (maybe simplify function for Cnf)
+				// This is a DISJUNCTION
 				LitOrConst::Lit(x) => Some(Ok(x)),
-				LitOrConst::Const(true) => None, // literal satisfied
-				LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
+				LitOrConst::Const(false) => None, // literal falsified
+				LitOrConst::Const(true) => Some(Err(Unsatisfiable)), // clause satisfied
 			})
-			.try_collect()
-			.unwrap_or_default()
+			.try_collect();
+
+		match clause {
+			Err(Unsatisfiable) => vec![],
+			Ok(clause) if clause.is_empty() => vec![],
+			Ok(clause) => vec![clause],
+		}
 	}
 
 	/// Get encoding as unsigned binary representation (if negative dom values, offset by `-2^(k-1)`)
