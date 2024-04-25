@@ -27,13 +27,8 @@ impl<C: Coefficient> SwcEncoder<C> {
 }
 
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for SwcEncoder<C> {
-	fn decompose(
-		&self,
-		lin: Lin<Lit, C>,
-		num_var: usize,
-		model_config: &ModelConfig<C>,
-	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		let mut model = Model::<Lit, C>::new(num_var, model_config);
+	fn decompose(&self, mut model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
+		let lin = model.cons.first().unwrap().clone();
 		let xs = lin.exp.terms.clone();
 
 		let n = xs.len();
@@ -107,12 +102,10 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			})
 			.collect::<Result<Vec<_>>>()?;
 
-		let decomposition = self.decompose(
-			Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None),
-			model.num_var,
-			&model.config,
-		)?;
-		model.extend(decomposition);
+		let mut model = self.decompose(Model {
+			cons: vec![Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None)],
+			..model
+		})?;
 		model.encode(db, false)?;
 		Ok(())
 	}

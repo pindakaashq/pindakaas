@@ -1,6 +1,7 @@
 mod bin;
 mod con;
 mod constrain;
+mod decompose;
 mod display;
 mod dom;
 mod enc;
@@ -8,17 +9,18 @@ pub(crate) mod helpers;
 mod int_var;
 mod model;
 mod ord;
-mod scm;
 mod term;
 
 pub use con::{Lin, LinExp};
 pub(crate) use constrain::{TernLeConstraint, TernLeEncoder};
+pub(crate) use decompose::Decompose;
 pub use dom::Dom;
 pub(crate) use enc::{IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
 pub(crate) use helpers::required_lits;
 pub use helpers::Format;
 pub use int_var::{IntVar, IntVarId, IntVarRef};
-pub use model::{Assignment, Consistency, Decompose, Decomposer, Model, ModelConfig, Obj, Scm};
+pub(crate) use model::Cse;
+pub use model::{Assignment, Consistency, Decomposer, Model, ModelConfig, Obj, Scm};
 pub use term::Term;
 
 use crate::{CheckError, Coefficient, LinExp as PbLinExp, Literal};
