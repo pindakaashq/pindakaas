@@ -663,6 +663,15 @@ Actual assignments:
 			..self.clone()
 		}
 	}
+
+	pub(crate) fn branch(&self, con: Lin<Lit, C>) -> Self {
+		Model {
+			cons: vec![con],
+			num_var: self.num_var,
+			config: self.config.clone(),
+			..Model::default()
+		}
+	}
 }
 
 // impl<Lit: Literal, C: Coefficient> AsRef<IntVarRef<Lit, C>> for IntVar<Lit, C> {
