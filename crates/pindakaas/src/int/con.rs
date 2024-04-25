@@ -753,7 +753,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			.collect()
 	}
 
-	pub(crate) fn simplified(self) -> Result<Lin<Lit, C>> {
+	pub(crate) fn _simplified(self) -> Result<Lin<Lit, C>> {
 		let mut k = self.k;
 		let con = Lin {
 			exp: LinExp {
