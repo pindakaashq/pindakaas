@@ -1,5 +1,5 @@
 #![allow(clippy::absurd_extreme_comparisons)]
-use crate::int::decompose::{Decompose, EncSpecDecomposer, LinDecomposer, ScmDecomposer};
+use crate::int::decompose::{Decompose, ModelDecomposer};
 use crate::int::{IntVar, IntVarId, IntVarRef, LinExp};
 use crate::{
 	int::Dom, CheckError, Checker, ClauseDatabase, Coefficient, Comparator, Literal, Result,
@@ -30,7 +30,6 @@ pub(crate) const VIEW_COUPLING: bool = true;
 // Use channelling
 pub(crate) const USE_CHANNEL: bool = false;
 
-use super::decompose::EqualizeTernsDecomposer;
 use super::IntVarEnc;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -68,10 +67,10 @@ pub struct ModelConfig<C: Coefficient> {
 #[derive(Debug, Clone)]
 pub struct Model<Lit: Literal, C: Coefficient> {
 	pub cons: Vec<Lin<Lit, C>>,
-	pub(crate) num_var: usize,
+	pub num_var: usize,
 	pub obj: Obj<Lit, C>,
 	pub config: ModelConfig<C>,
-	pub(crate) cse: Cse<Lit, C>,
+	pub cse: Cse<Lit, C>,
 }
 
 impl<Lit: Literal, C: Coefficient> From<Lin<Lit, C>> for Model<Lit, C> {
@@ -93,7 +92,7 @@ impl<Lit: Literal, C: Coefficient> From<Vec<Lin<Lit, C>>> for Model<Lit, C> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Cse<Lit: Literal, C: Coefficient>(
+pub struct Cse<Lit: Literal, C: Coefficient>(
 	pub(crate) HashMap<(IntVarId, C, Comparator), Term<Lit, C>>,
 );
 
@@ -302,22 +301,26 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	/// Decompose every constraint
-	pub(crate) fn _fold(self, decomposer: &impl Decompose<Lit, C>) -> Result<Model<Lit, C>> {
-		self.cons.iter().cloned().try_fold(
+	pub fn fold(self, decompose: impl Fn(Self) -> Result<Self>) -> Result<Model<Lit, C>> {
+		let Model {
+			cons,
+			num_var,
+			obj,
+			config,
+			cse,
+		} = self;
+
+		cons.into_iter().try_fold(
 			Model {
 				cons: vec![],
-				..self
+				num_var,
+				obj,
+				config,
+				cse,
 			},
-			|m, con| {
-				Ok([
-					m.clone(),
-					decomposer.decompose(Model {
-						cons: vec![con],
-						..m
-					})?,
-				]
-				.into_iter()
-				.collect())
+			|mut model, con| {
+				model.extend(std::iter::once(decompose(model.branch(con))?));
+				Ok(model)
 			},
 		)
 	}
@@ -336,22 +339,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		self,
 		spec: Option<HashMap<IntVarId, IntVarEnc<Lit, C>>>,
 	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		let ModelConfig {
-			equalize_ternaries,
-			cutoff,
-			scm,
-			..
-		} = self.config.clone();
-
-		// let mut num_var = None;
-		self.decompose_with(Some(&LinDecomposer {}))?
-			.decompose_with(Some(&EncSpecDecomposer { cutoff, spec }))?
-			.decompose_with(
-				equalize_ternaries
-					.then(EqualizeTernsDecomposer::default)
-					.as_ref(),
-			)?
-			.decompose_with((scm == Scm::Dnf).then(ScmDecomposer::default).as_ref())
+		ModelDecomposer { spec }.decompose(self)
 	}
 
 	pub fn encode_vars<DB: ClauseDatabase<Lit = Lit>>(
@@ -664,7 +652,7 @@ Actual assignments:
 		}
 	}
 
-	pub(crate) fn branch(&self, con: Lin<Lit, C>) -> Self {
+	pub fn branch(&self, con: Lin<Lit, C>) -> Self {
 		Model {
 			cons: vec![con],
 			num_var: self.num_var,
@@ -715,6 +703,7 @@ mod tests {
 		model.encode(&mut cnf, true).unwrap();
 	}
 
+	use crate::int::decompose::LinDecomposer;
 	use crate::{helpers::tests::TestDB, Format};
 	use itertools::{iproduct, Itertools};
 
