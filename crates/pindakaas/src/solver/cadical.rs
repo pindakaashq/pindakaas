@@ -100,7 +100,10 @@ mod tests {
 
 		use crate::{
 			helpers::tests::lits,
-			solver::{NextVarRange, PropagatingSolver, Propagator, PropagatorAccess, VarRange},
+			solver::{
+				NextVarRange, PropagatingSolver, Propagator, PropagatorAccess, SolvingActions,
+				VarRange,
+			},
 		};
 
 		let mut slv = Cadical::default();
@@ -115,7 +118,11 @@ mod tests {
 			fn is_lazy(&self) -> bool {
 				true
 			}
-			fn check_model(&mut self, model: &dyn crate::Valuation) -> bool {
+			fn check_model(
+				&mut self,
+				_slv: &mut dyn SolvingActions,
+				model: &dyn crate::Valuation,
+			) -> bool {
 				let mut vars = self.vars.clone();
 				while let Some(v) = vars.next() {
 					if model.value(v.into()).unwrap_or(true) {
@@ -129,7 +136,7 @@ mod tests {
 				}
 				self.tmp.is_empty()
 			}
-			fn add_external_clause(&mut self) -> Option<Vec<Lit>> {
+			fn add_external_clause(&mut self, _slv: &mut dyn SolvingActions) -> Option<Vec<Lit>> {
 				self.tmp.pop()
 			}
 
@@ -148,7 +155,7 @@ mod tests {
 		slv.set_external_propagator(Some(p));
 		slv.add_clause(vars.clone().map_into()).unwrap();
 		for v in vars.clone() {
-			slv.add_observed_var(v)
+			PropagatingSolver::add_observed_var(&mut slv, v)
 		}
 
 		let mut solns = Vec::new();

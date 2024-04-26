@@ -160,8 +160,9 @@ pub trait Propagator {
 	/// Method called to check the found complete solution (after solution
 	/// reconstruction). If it returns false, the propagator must provide an
 	/// external clause during the next callback.
-	fn check_model(&mut self, value: &dyn Valuation) -> bool {
+	fn check_model(&mut self, slv: &mut dyn SolvingActions, value: &dyn Valuation) -> bool {
 		let _ = value;
+		let _ = slv;
 		true
 	}
 
@@ -189,7 +190,8 @@ pub trait Propagator {
 	}
 
 	/// Method to ask whether there is an external clause to add to the solver.
-	fn add_external_clause(&mut self) -> Option<Vec<Lit>> {
+	fn add_external_clause(&mut self, slv: &mut dyn SolvingActions) -> Option<Vec<Lit>> {
+		let _ = slv;
 		None
 	}
 
