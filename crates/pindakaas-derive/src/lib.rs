@@ -274,7 +274,11 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					#sol_ident {
 						ptr: self.ptr,
 						#[cfg(feature = "ipasir-up")]
-						prop: if let Some(p) = &mut #prop_member { Some((&mut (p.prop)) as *mut _  as *mut std::ffi::c_void) } else { None },
+						prop: if let Some(p) = #prop_member .as_mut() {
+							Some((&mut (*p.prop)) as *mut _ as *mut std::ffi::c_void)
+						} else {
+							None
+						},
 					}
 				}
 			}
