@@ -420,7 +420,7 @@ pub(crate) unsafe extern "C" fn ipasir_check_model_cb(
 		.map(|&i| (Var(NonZeroI32::new(i.abs()).unwrap()), i >= 0))
 		.collect();
 	let value = |l: Lit| sol.get(&l.var()).copied();
-	prop.prop.check_model(&value)
+	prop.prop.check_model(&mut *prop.slv, &value)
 }
 #[cfg(feature = "ipasir-up")]
 pub(crate) unsafe extern "C" fn ipasir_decide_cb(state: *mut c_void) -> i32 {
@@ -468,7 +468,7 @@ pub(crate) unsafe extern "C" fn ipasir_add_reason_clause_lit_cb(
 #[cfg(feature = "ipasir-up")]
 pub(crate) unsafe extern "C" fn ipasir_has_external_clause_cb(state: *mut c_void) -> bool {
 	let prop = &mut *(state as *mut IpasirPropStore);
-	prop.cqueue = prop.prop.add_external_clause().map(Vec::into);
+	prop.cqueue = prop.prop.add_external_clause(&mut *prop.slv).map(Vec::into);
 	prop.cqueue.is_some()
 }
 #[cfg(feature = "ipasir-up")]
@@ -477,7 +477,7 @@ pub(crate) unsafe extern "C" fn ipasir_add_external_clause_lit_cb(state: *mut c_
 	if prop.cqueue.is_none() {
 		debug_assert!(false);
 		// This function shouldn't be called when "has_clause" returned false.
-		prop.cqueue = prop.prop.add_external_clause().map(Vec::into);
+		prop.cqueue = prop.prop.add_external_clause(&mut *prop.slv).map(Vec::into);
 	}
 	if let Some(queue) = &mut prop.cqueue {
 		if let Some(l) = queue.pop_front() {
