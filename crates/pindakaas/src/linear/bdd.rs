@@ -258,6 +258,7 @@ where
 	}
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 enum BddNode<C: Coefficient> {
 	Val,
@@ -272,45 +273,30 @@ fn bdd<Lit: Literal, C: Coefficient>(
 	sum: C,
 	ws: &mut Vec<IntervalMap<C, BddNode<C>>>,
 ) -> (std::ops::Range<C>, BddNode<C>) {
-	match &ws[i].overlap(sum).collect::<Vec<_>>()[..] {
-		[] => {
-			let dom = xs[i].dom();
-			let children = dom
+	// TODO assert at most one (not sure if
+	match &ws[i].overlap(sum).next() {
+		None => {
+			let (iv, node) = xs[i]
+				.dom()
 				.iter()
 				.map(|v| (v, bdd(i + 1, xs, _cmp, sum + *v, ws)))
-				.collect::<Vec<_>>();
-
-			let is_gap = children.iter().all(|(_, (_, v))| v == &BddNode::Gap);
-
-			let view = None;
-			// (children
-			// .iter()
-			// .flat_map(|(_, (iv, v))| (v == &BddNode::Val).then_some(iv))
-			// .all_equal() && false)
-			// .then(|| process_val(children.first().unwrap().1 .0.clone(), cmp));
-
-			let iv = children
-				.into_iter()
-				.map(|(v, (iv, _))| (iv.start - *v)..(iv.end - *v))
-				.reduce(|a, b| std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end))
+				.map(|(v, (iv, n))| ((iv.start - *v)..(iv.end - *v), n))
+				.reduce(|(iv_a, n_a), (iv_b, n_b)| {
+					(
+						std::cmp::max(iv_a.start, iv_b.start)..std::cmp::min(iv_a.end, iv_b.end),
+						if n_a == BddNode::Val { n_a } else { n_b },
+					)
+				})
 				.unwrap();
-
-			let node = if is_gap {
-				BddNode::Gap
-			} else if let Some(view) = view {
-				BddNode::View(view)
-			} else {
-				BddNode::Val
-			};
-
-			assert!(
-				ws[i].insert(iv.clone(), node.clone()).is_none(),
+			let duplicate = ws[i].insert(iv.clone(), node.clone());
+			debug_assert!(
+				duplicate.is_none(),
 				"Duplicate interval {iv:?} inserted into {ws:?} layer {i}"
 			);
 			(iv, node)
 		}
-		[(a, node)] => (a.clone(), (*node).clone()),
-		_ => panic!("ROBDD intervals should be disjoint, but were {:?}", ws[i]),
+		Some((a, node)) => (a.clone(), (*node).clone()),
+		// _ => panic!("ROBDD intervals should be disjoint, but were {:?}", ws[i]),
 	}
 }
 
