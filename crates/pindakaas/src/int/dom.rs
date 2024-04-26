@@ -120,7 +120,7 @@ impl<C: Coefficient> Dom<C> {
 				if k <= *b {
 					let k = std::cmp::max(*a, k);
 					let v = k - *a;
-					FoldWhile::Done((p + v, Some(v)))
+					FoldWhile::Done((p + v, Some(*a + v)))
 				} else {
 					FoldWhile::Continue((p + *b - *a + C::one(), None))
 				}
