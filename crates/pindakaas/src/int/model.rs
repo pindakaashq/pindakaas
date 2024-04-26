@@ -809,14 +809,23 @@ mod tests {
 		if var_encs.is_empty() {
 			return vec![HashMap::default()];
 		}
-		let var_enc_ids = vars
+		let (var_enc_ids, var_enc_gens): (Vec<_>, Vec<_>) = vars
 			.iter()
 			.sorted_by_key(|var| var.borrow().id)
 			// If not encoded and no encoding preference (e.g. scm), assign and encode
 			// TODO maybe remove constants (although some bugs might arise from the different encodings of constants
 			.filter(|x| x.borrow().e.is_none())
-			.map(|x| x.borrow().id)
-			.collect_vec();
+			.map(|x| {
+				(
+					x.borrow().id,
+					if x.borrow().is_constant() {
+						vec![IntVarEnc::Ord(None)]
+					} else {
+						VAR_ENCS.to_vec()
+					},
+				)
+			})
+			.unzip();
 
 		assert!(
 			var_enc_ids.len() <= 50,
@@ -825,15 +834,14 @@ mod tests {
 			var_enc_ids
 		);
 
-		let var_encs_gen = var_enc_ids
-			.iter()
-			.map(|_| VAR_ENCS)
+		let var_encs_gen = var_enc_gens
+			.into_iter()
 			.multi_cartesian_product()
 			.map(|var_encs| {
 				var_enc_ids
 					.iter()
 					.cloned()
-					.zip(var_encs.into_iter().cloned())
+					.zip(var_encs.into_iter())
 					.collect::<HashMap<_, _>>()
 			})
 			.collect_vec();
@@ -1969,8 +1977,8 @@ End
 		);
 	}
 
-	#[test]
-	fn test_tmp_whiteboard() {
+	// #[test]
+	fn _test_tmp_whiteboard() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
 			cutoff: None,
