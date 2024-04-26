@@ -210,13 +210,14 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 				if PRINT_COUPLING >= 2 {
 					print!(" = d_{pos:?}");
 				}
-				let d = if let Some(pos) = pos {
-					let pos = if up {
-						Some(pos) // if larger than self.dom.size, then self.dom.d will return None
+				let d = if let Some((pos, v)) = pos {
+					if up {
+						// Some(pos) // if larger than self.dom.size, then self.dom.d will return None
+						Some(v)
 					} else {
-						pos.checked_sub(1)
-					};
-					pos.and_then(|next_pos| self.dom.d(next_pos))
+						pos.checked_sub(1).and_then(|next_pos| self.dom.d(next_pos))
+					}
+				// pos.and_then(|next_pos| self.dom.d(next_pos))
 				} else {
 					// TODO not sure if this should be ub/lb or None. This makes most sense looking at the test ineq_ord
 					if up {
@@ -225,7 +226,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 						Some(self.dom.ub())
 					}
 				};
-				let geq = o.geq(pos);
+				let geq = o.geq(pos.map(|(pos, _)| pos));
 				(d, if up { geq } else { negate_cnf(geq) })
 			}
 			IntVarEnc::Bin(Some(x_bin)) => {
