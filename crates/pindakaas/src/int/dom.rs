@@ -112,8 +112,18 @@ impl<C: Coefficient> Dom<C> {
 	/// Find position of first domain value >= k/c
 	/// Returns Some(0) if first (and all) domain values satisfy the predicate, or None if no domain value satisfy the predicate
 	pub(crate) fn geq(&self, k: C) -> Option<usize> {
-		// let k = if up { k } else { self.size() - k - C::one() };
-		self.iter().position(|d| d >= k)
+		// naive: self.iter().position(|d| d >= k)
+		match self.ranges.iter().fold_while(C::zero(), |p, (a, b)| {
+			let k = std::cmp::max(*a, k);
+			if k <= *b {
+				FoldWhile::Done(p + k - *a)
+			} else {
+				FoldWhile::Continue(p + *b - *a + C::one())
+			}
+		}) {
+			FoldWhile::Done(p) => Some(p.to_usize().unwrap()),
+			FoldWhile::Continue(_) => None,
+		}
 	}
 
 	pub fn ge(&mut self, d: C) {
