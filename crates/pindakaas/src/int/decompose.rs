@@ -4,10 +4,11 @@ use crate::{
 	Assignment, BddEncoder, Coefficient, Comparator, Decomposer, IntLinExp as LinExp, IntVarId,
 	Lin, Literal, Model, SwcEncoder, Term, TotalizerEncoder, Unsatisfiable,
 };
+use crate::{ModelConfig, Scm};
 use itertools::{Itertools, Position};
 use std::collections::HashMap;
 
-pub(crate) trait Decompose<Lit: Literal, C: Coefficient> {
+pub trait Decompose<Lit: Literal, C: Coefficient> {
 	fn decompose(
 		&self,
 		// lin: Lin<Lit, C>,
@@ -432,6 +433,36 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, 
 		// 	..model
 		// })
 		*/
+	}
+}
+
+#[derive(Default, Debug)]
+pub struct ModelDecomposer<Lit: Literal, C: Coefficient> {
+	pub(crate) spec: Option<HashMap<IntVarId, IntVarEnc<Lit, C>>>,
+}
+
+impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ModelDecomposer<Lit, C> {
+	fn decompose(&self, model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
+		let ModelConfig {
+			equalize_ternaries,
+			cutoff,
+			scm,
+			..
+		} = model.config.clone();
+
+		// let mut num_var = None;
+		model
+			.decompose_with(Some(&LinDecomposer {}))?
+			.decompose_with(Some(&EncSpecDecomposer {
+				cutoff,
+				spec: self.spec.clone(),
+			}))?
+			.decompose_with(
+				equalize_ternaries
+					.then(EqualizeTernsDecomposer::default)
+					.as_ref(),
+			)?
+			.decompose_with((scm == Scm::Dnf).then(ScmDecomposer::default).as_ref())
 	}
 }
 

@@ -13,7 +13,7 @@ mod term;
 
 pub use con::{Lin, LinExp};
 pub(crate) use constrain::{TernLeConstraint, TernLeEncoder};
-pub(crate) use decompose::Decompose;
+pub use decompose::{Decompose, ModelDecomposer};
 pub use dom::Dom;
 pub(crate) use enc::{IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
 pub(crate) use helpers::required_lits;
