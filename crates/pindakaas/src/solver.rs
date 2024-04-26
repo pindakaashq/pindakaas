@@ -84,7 +84,10 @@ pub trait TermCallback: Solver {
 }
 
 #[cfg(feature = "ipasir-up")]
-pub trait PropagatingSolver: Solver {
+pub trait PropagatingSolver: Solver + PropagatorAccess + MutPropagatorAccess
+where
+	Self::ValueFn: PropagatorAccess,
+{
 	/// Set Propagator implementation which allows to learn, propagate and
 	/// backtrack based on external constraints.
 	///
@@ -101,21 +104,29 @@ pub trait PropagatingSolver: Solver {
 		prop: Option<Box<dyn Propagator>>,
 	) -> Option<Box<dyn Propagator>>;
 
+	fn add_observed_var(&mut self, var: Var);
+	fn remove_observed_var(&mut self, var: Var);
+	fn reset_observed_vars(&mut self);
+}
+
+/// Access the external propagator given the to solver
+#[cfg(feature = "ipasir-up")]
+pub trait PropagatorAccess {
 	/// Access the external propagator given the to solver
 	///
 	/// This method will return [`None`] if no propagator is set, or if the
 	/// propagator is not of type [`P`].
 	fn propagator<P: Propagator + 'static>(&self) -> Option<&P>;
+}
 
+/// Get mutable access to the external propagator given the to solver
+#[cfg(feature = "ipasir-up")]
+pub trait MutPropagatorAccess {
 	/// Get mutable access to the external propagator given the to solver
 	///
 	/// This method will return [`None`] if no propagator is set, or if the
 	/// propagator is not of type [`P`].
 	fn propagator_mut<P: Propagator + 'static>(&mut self) -> Option<&mut P>;
-
-	fn add_observed_var(&mut self, var: Var);
-	fn remove_observed_var(&mut self, var: Var);
-	fn reset_observed_vars(&mut self);
 }
 
 #[cfg(feature = "ipasir-up")]

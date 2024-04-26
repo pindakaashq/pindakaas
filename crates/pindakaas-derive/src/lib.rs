@@ -152,6 +152,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		quote!()
 	};
 
+	let sol_ident = format_ident!("{}Sol", ident);
 	let ipasir_up = if opts.ipasir_up {
 		let prop_ident = format_ident!("{}Prop", ident);
 		let prop_member = match opts.prop {
@@ -225,13 +226,6 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					}
 				}
 
-				fn propagator<P: crate::solver::Propagator + 'static>(&self) -> Option<&P> {
-					#prop_member.as_ref().map(|p| p.prop.prop.as_any().downcast_ref()).flatten()
-				}
-				fn propagator_mut<P: crate::solver::Propagator + 'static>(&mut self) -> Option<&mut P> {
-					#prop_member.as_mut().map(|p| p.prop.prop.as_mut_any().downcast_mut()).flatten()
-				}
-
 				fn add_observed_var(&mut self, var: crate::Var){
 					unsafe { #krate::ipasir_add_observed_var( #ptr, var.0.get()) };
 				}
@@ -240,6 +234,20 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				}
 				fn reset_observed_vars(&mut self) {
 					unsafe { #krate::ipasir_reset_observed_vars( #ptr ) };
+				}
+			}
+
+			#[cfg(feature = "ipasir-up")]
+			impl crate::solver::PropagatorAccess for #ident {
+				fn propagator<P: crate::solver::Propagator + 'static>(&self) -> Option<&P> {
+					#prop_member.as_ref().map(|p| p.prop.prop.as_any().downcast_ref()).flatten()
+				}
+			}
+
+			#[cfg(feature = "ipasir-up")]
+			impl crate::solver::MutPropagatorAccess for #ident {
+				fn propagator_mut<P: crate::solver::Propagator + 'static>(&mut self) -> Option<&mut P> {
+					#prop_member.as_mut().map(|p| p.prop.prop.as_mut_any().downcast_mut()).flatten()
 				}
 			}
 
@@ -255,9 +263,55 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					unsafe { #krate::ipasir_is_decision( #ptr, lit.0.get() ) }
 				}
 			}
+
+			pub struct #sol_ident {
+				ptr: *mut std::ffi::c_void,
+				#[cfg(feature = "ipasir-up")]
+				prop: Option<*mut std::ffi::c_void>,
+			}
+			impl #ident {
+				fn solver_solution_obj(&mut self) -> #sol_ident {
+					#sol_ident {
+						ptr: self.ptr,
+						#[cfg(feature = "ipasir-up")]
+						prop: if let Some(p) = &mut #prop_member { Some((&mut (p.prop)) as *mut _  as *mut std::ffi::c_void) } else { None },
+					}
+				}
+			}
+			#[cfg(feature = "ipasir-up")]
+			impl crate::solver::PropagatorAccess for #sol_ident {
+				fn propagator<P: crate::solver::Propagator + 'static>(&self) -> Option<&P> {
+					if let Some(prop) = self.prop {
+						let prop = unsafe { &*(prop as *const crate::solver::libloading::IpasirPropStore) };
+						prop.prop.as_any().downcast_ref()
+					} else {
+						None
+					}
+				}
+			}
+			#[cfg(feature = "ipasir-up")]
+			impl crate::solver::MutPropagatorAccess for #sol_ident {
+				fn propagator_mut<P: crate::solver::Propagator + 'static>(&mut self) -> Option<&mut P> {
+					if let Some(prop) = self.prop {
+						let prop = unsafe { &mut *(prop as *mut crate::solver::libloading::IpasirPropStore) };
+						prop.prop.as_mut_any().downcast_mut()
+					} else {
+						None
+					}
+				}
+			}
 		}
 	} else {
-		quote!()
+		quote! {
+			pub struct #sol_ident {
+				ptr: *mut std::ffi::c_void,
+			}
+			impl #ident {
+				fn solver_solution_obj(&self) -> #sol_ident {
+					#sol_ident { ptr: self.ptr }
+				}
+			}
+		}
 	};
 
 	let from_cnf = if opts.has_default {
@@ -281,7 +335,6 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		quote!()
 	};
 
-	let sol_ident = format_ident!("{}Sol", ident);
 	quote! {
 		impl Drop for #ident {
 			fn drop(&mut self) {
@@ -333,9 +386,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				match res {
 					10 => {
 						// 10 -> Sat
-						let model = #sol_ident {
-							ptr: #ptr,
-						};
+						let model = self.solver_solution_obj();
 						on_sol(&model);
 						crate::solver::SolveResult::Sat
 					}
@@ -348,9 +399,6 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			}
 		}
 
-		pub struct #sol_ident {
-			ptr: *mut std::ffi::c_void,
-		}
 		impl crate::Valuation for #sol_ident {
 			fn value(&self, lit: crate::Lit) -> Option<bool> {
 				let var: i32 = lit.var().into();

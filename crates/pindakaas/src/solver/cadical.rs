@@ -100,7 +100,7 @@ mod tests {
 
 		use crate::{
 			helpers::tests::lits,
-			solver::{NextVarRange, PropagatingSolver, Propagator, VarRange},
+			solver::{NextVarRange, PropagatingSolver, Propagator, PropagatorAccess, VarRange},
 		};
 
 		let mut slv = Cadical::default();
