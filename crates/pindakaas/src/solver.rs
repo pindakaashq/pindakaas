@@ -138,8 +138,8 @@ pub trait Propagator {
 		false
 	}
 
-	/// Method called to notify the propagator about assignments to observed
-	/// variables.
+	/// Method called to notify the propagator about assignments of literals
+	/// concerning observed variables.
 	///
 	/// The notification is not necessarily eager. It usually happens before the
 	/// call of propagator callbacks and when a driving clause is leading to an
@@ -147,9 +147,8 @@ pub trait Propagator {
 	///
 	/// If [`persistent`] is set to `true`, then the assignment is known to
 	/// persist through backtracking.
-	fn notify_assignment(&mut self, var: Var, val: bool, persistent: bool) {
-		let _ = var;
-		let _ = val;
+	fn notify_assignment(&mut self, lit: Lit, persistent: bool) {
+		let _ = lit;
 		let _ = persistent;
 	}
 	fn notify_new_decision_level(&mut self) {}
