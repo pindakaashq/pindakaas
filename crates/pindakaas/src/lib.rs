@@ -7,6 +7,16 @@
 //! set of booleans is *At Most One (AMO)* or *At Most K (AMK)*. Specialised
 //! encodings are used when these cases are detected.
 
+mod cardinality;
+mod cardinality_one;
+pub(crate) mod helpers;
+mod int;
+mod linear;
+mod propositional_logic;
+pub mod solver;
+mod sorted;
+pub mod trace;
+
 use std::{
 	clone::Clone,
 	cmp::{Eq, Ordering},
@@ -24,15 +34,6 @@ use helpers::VarRange;
 use itertools::{Itertools, Position};
 use solver::{NextVarRange, VarFactory};
 
-mod cardinality;
-mod cardinality_one;
-pub(crate) mod helpers;
-mod int;
-mod linear;
-pub mod solver;
-mod sorted;
-pub mod trace;
-
 use crate::trace::subscript_number;
 pub use crate::{
 	cardinality::{Cardinality, SortingNetworkEncoder},
@@ -41,6 +42,7 @@ pub use crate::{
 		AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear,
 		LinearAggregator, LinearConstraint, LinearEncoder, SwcEncoder, TotalizerEncoder,
 	},
+	propositional_logic::{Formula, TseitinEncoder},
 	sorted::{SortedEncoder, SortedStrategy},
 };
 
@@ -314,19 +316,17 @@ pub trait ClauseDatabase {
 	{
 		encoder.encode(self, constraint)
 	}
+
+	type CondDB: ClauseDatabase + ?Sized;
+	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB>;
 }
 
 // TODO: Add usage and think about interface
-pub struct ConditionalDatabase<'a, DB: ClauseDatabase> {
+pub struct ConditionalDatabase<'a, DB: ClauseDatabase + ?Sized> {
 	db: &'a mut DB,
-	conditions: &'a [Lit],
+	conditions: Vec<Lit>,
 }
-impl<'a, DB: ClauseDatabase> ConditionalDatabase<'a, DB> {
-	pub fn new(db: &'a mut DB, conditions: &'a [Lit]) -> Self {
-		Self { db, conditions }
-	}
-}
-impl<'a, DB: ClauseDatabase> ClauseDatabase for ConditionalDatabase<'a, DB> {
+impl<'a, DB: ClauseDatabase + ?Sized> ClauseDatabase for ConditionalDatabase<'a, DB> {
 	fn new_var(&mut self) -> Var {
 		self.db.new_var()
 	}
@@ -334,6 +334,15 @@ impl<'a, DB: ClauseDatabase> ClauseDatabase for ConditionalDatabase<'a, DB> {
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
 		let chain = self.conditions.iter().copied().chain(cl);
 		self.db.add_clause(chain)
+	}
+
+	type CondDB = DB;
+	fn with_conditions(&mut self, mut conditions: Vec<Lit>) -> ConditionalDatabase<DB> {
+		conditions.extend(self.conditions.iter().copied());
+		ConditionalDatabase {
+			db: self.db,
+			conditions,
+		}
 	}
 }
 
@@ -644,6 +653,14 @@ impl ClauseDatabase for Cnf {
 		}
 		Ok(())
 	}
+
+	type CondDB = Self;
+	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
+		ConditionalDatabase {
+			db: self,
+			conditions,
+		}
+	}
 }
 
 impl Wcnf {
@@ -671,6 +688,13 @@ impl ClauseDatabase for Wcnf {
 	}
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
 		self.add_weighted_clause(cl, None)
+	}
+	type CondDB = Self;
+	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
+		ConditionalDatabase {
+			db: self,
+			conditions,
+		}
 	}
 }
 

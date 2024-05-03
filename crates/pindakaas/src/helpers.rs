@@ -351,7 +351,10 @@ pub mod tests {
 	use traced_test::test;
 
 	use super::*;
-	use crate::{linear::LimitComp, CardinalityOne, Encoder, LadderEncoder, Unsatisfiable, Var};
+	use crate::{
+		linear::LimitComp, CardinalityOne, ConditionalDatabase, Encoder, LadderEncoder,
+		Unsatisfiable, Var,
+	};
 
 	macro_rules! assert_enc {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
@@ -962,6 +965,14 @@ pub mod tests {
 				eprintln!("let x{} = slv.add_var() as i32;", res);
 			}
 			Var(NonZeroI32::new(res).unwrap())
+		}
+
+		type CondDB = Self;
+		fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self> {
+			ConditionalDatabase {
+				db: self,
+				conditions,
+			}
 		}
 	}
 }
