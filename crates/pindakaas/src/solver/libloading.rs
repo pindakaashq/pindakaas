@@ -14,7 +14,7 @@ use super::{
 };
 #[cfg(feature = "ipasir-up")]
 use super::{Propagator, SolvingActions};
-use crate::{ClauseDatabase, Lit, Result, Valuation, Var};
+use crate::{ClauseDatabase, ConditionalDatabase, Lit, Result, Valuation, Var};
 
 pub struct IpasirLibrary {
 	lib: Library,
@@ -163,6 +163,14 @@ impl<'lib> ClauseDatabase for IpasirSolver<'lib> {
 			(self.add_fn)(self.slv, 0);
 		}
 		Ok(())
+	}
+
+	type CondDB = Self;
+	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
+		ConditionalDatabase {
+			db: self,
+			conditions,
+		}
 	}
 }
 

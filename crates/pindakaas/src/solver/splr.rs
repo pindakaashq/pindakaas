@@ -4,7 +4,7 @@ pub use splr::Solver as Splr;
 use splr::{Certificate, SatSolverIF, SolveIF, SolverError::*, VERSION};
 
 use super::{SolveResult, Solver};
-use crate::{helpers::const_concat, ClauseDatabase, Cnf, Lit, Valuation, Var};
+use crate::{helpers::const_concat, ClauseDatabase, Cnf, ConditionalDatabase, Lit, Valuation, Var};
 
 impl ClauseDatabase for Splr {
 	fn new_var(&mut self) -> Var {
@@ -24,6 +24,14 @@ impl ClauseDatabase for Splr {
 					panic!("an error occured in splr while adding a clause")
 				}
 			},
+		}
+	}
+
+	type CondDB = Self;
+	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
+		ConditionalDatabase {
+			db: self,
+			conditions,
 		}
 	}
 }

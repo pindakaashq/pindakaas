@@ -365,6 +365,14 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				}
 				Ok(())
 			}
+
+			type CondDB = Self;
+			fn with_conditions(&mut self, conditions: Vec<crate::Lit>) -> crate::ConditionalDatabase<Self::CondDB> {
+				crate::ConditionalDatabase {
+					db: self,
+					conditions,
+				}
+			}
 		}
 
 		impl crate::solver::NextVarRange for #ident {
