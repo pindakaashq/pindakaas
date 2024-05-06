@@ -8,7 +8,7 @@ use super::model::USE_CSE;
 use super::Cse;
 use super::{model::Obj, IntVar, LinExp};
 
-pub(crate) const SHOW_IDS: bool = false;
+pub(crate) const SHOW_IDS: bool = true;
 const SHOW_LITS: bool = false;
 /// Whether to rewrite x1 + .. + xn # 0 as x1 + .. + x_(n-1) # - xn
 const SHOW_K_0: bool = true;
@@ -77,7 +77,11 @@ impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 			.as_ref()
 			.map(|lbl| format!("{}: ", lbl))
 			.unwrap_or_default();
-		if SHOW_K_0 && self.k.is_zero() && self.exp.terms.len() > 1 {
+		if SHOW_K_0
+			&& self.k.is_zero()
+			&& self.exp.terms.len() > 1
+			&& self.exp.terms.last().unwrap().c.is_negative()
+		{
 			// Put in LinExp to avoid printing '+' at start
 			if let Some((rhs, lhs)) = self.exp.terms.split_last() {
 				write!(
@@ -142,7 +146,7 @@ impl<Lit: Literal, C: Coefficient> Display for Cse<Lit, C> {
 			self.0
 				.iter()
 				.sorted_by_key(|(k, _)| *k)
-				.map(|(k, v)| format!("{}*x{} -> {v}", k.1, k.0))
+				.map(|((id, c, cmp), v)| format!("{c}*x#{id} {cmp} {v}"))
 				.join(", ")
 		)
 	}

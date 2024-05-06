@@ -87,22 +87,22 @@ pub fn main() {
 
 	let scm_node_def = r"#[derive(Debug, Clone)]
 pub(crate) struct ScmNode {
-pub(crate) i: u32,
-pub(crate) i1: u32,
-pub(crate) sh1: u32,
+pub(crate) i: usize,
+pub(crate) i1: usize,
+pub(crate) sh1: usize,
 pub(crate) add: bool,
-pub(crate) i2: u32,
-pub(crate) sh2: u32,
+pub(crate) i2: usize,
+pub(crate) sh2: usize,
 }";
 	let o = format!(
 		"{scm_node_def}
-        pub(crate) static SCM: [(usize, u32, &[ScmNode]); {}] = [\n{}\n];",
+        pub(crate) static SCM: [(usize, usize, &[ScmNode]); {}] = [\n{}\n];",
 		scm.len(),
 		scm.iter()
 			.map(|(x, c, scm)| format!("\t({}, {}, &{:?})", x, c, scm))
 			.join(",\n")
 	);
-	fs::write("./src/int/scm_db.rs", o).unwrap();
+	fs::write("./src/int/res/scm_db.rs", o).unwrap();
 
 	let db = Path::new("./res/ecm.tar.gz");
 	assert!(db.exists());

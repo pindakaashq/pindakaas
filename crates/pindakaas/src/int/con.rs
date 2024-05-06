@@ -82,7 +82,8 @@ impl<Lit: Literal, C: Coefficient> TryFrom<&Lin<Lit, C>> for LinCase<Lit, C> {
 			// }
 			// SCM
 			(
-				[(t_x, Some(IntVarEnc::Bin(_))), (Term { c: y_c, x: y }, Some(IntVarEnc::Bin(None)))],
+				[(t_x, Some(IntVarEnc::Bin(_))), (Term { c: y_c, x: y }, Some(IntVarEnc::Bin(_)))]
+				| [(Term { c: y_c, x: y }, Some(IntVarEnc::Bin(_))), (t_x, Some(IntVarEnc::Bin(_)))],
 				Comparator::Equal,
 			) if *y_c == -C::one()
 				&& con.k.is_zero()

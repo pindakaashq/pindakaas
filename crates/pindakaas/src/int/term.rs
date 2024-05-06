@@ -1,13 +1,15 @@
+// use crate::int::res::SCM;
+use crate::int::res::SCM;
 use crate::{
 	helpers::as_binary,
 	int::{
 		model::{USE_CHANNEL, USE_CSE},
-		LitOrConst,
+		Cse, LitOrConst,
 	},
-	Coefficient, Comparator, IntLinExp as LinExp, IntVar, IntVarRef, Lin, Literal, Model,
+	Coefficient, Comparator, IntLinExp as LinExp, IntVar, IntVarRef, Lin, Literal, Model, Scm,
 };
 use itertools::Itertools;
-use std::ops::Mul;
+use std::{collections::HashMap, ops::Mul};
 
 use super::{bin::BinEnc, Dom, IntVarEnc};
 
@@ -217,27 +219,89 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					* C::one().shl(sh as usize));
 			}
 			Some(IntVarEnc::Bin(None)) => {
+				assert!(self.c.trailing_zeros() == 0);
 				let model = model.as_mut().unwrap();
-				let y = model
-					.new_var(
-						&dom,
-						false,
-						Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
-						Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
-					)
-					.unwrap();
+				match model.config.scm {
+					Scm::Rca | Scm::Add => {
+						let lits = BinEnc::<Lit>::required_lits(&self.x.borrow().dom);
+						let c = self.c;
+						let scm = SCM
+							.iter()
+							.find_map(|(bits, mul, scm)| {
+								(*bits == lits && C::from(*mul).unwrap() == c).then_some(scm)
+							})
+							.unwrap()
+							.to_vec();
 
-				model
-					.add_constraint(Lin {
-						exp: LinExp {
-							terms: vec![self.clone(), Term::new(-C::one(), y.clone())],
-						},
-						cmp: Comparator::Equal,
-						k: C::zero(),
-						lbl: con_lbl.clone().map(|lbl| (format!("scm-{}", lbl))),
-					})
-					.unwrap();
-				Ok(Term::from(y))
+						let mut ys = [(0, C::one())].into_iter().collect::<HashMap<_, _>>();
+
+						let get_and_shift =
+							|ys: &HashMap<usize, C>, cse: &Cse<Lit, C>, i: usize, sh: usize| {
+								let c = ys[&i];
+								let x = if c.is_one() {
+									Term::from(self.x.clone())
+								} else {
+									cse.0[&(self.x.borrow().id, c, Comparator::Equal)].clone()
+								};
+								(c.shl(sh), x * C::one().shl(sh))
+							};
+
+						for rca in scm {
+							let (z_i, i1, sh1, i2, sh2) = (rca.i, rca.i1, rca.sh1, rca.i2, rca.sh2);
+							assert!(rca.add);
+
+							let ((c_x, t_x), (c_y, t_y)) = (
+								get_and_shift(&ys, &model.cse, i1, sh1),
+								get_and_shift(&ys, &model.cse, i2, sh2),
+							);
+
+							let c = c_x + c_y;
+							let z = model.new_var_from_dom(
+								Dom::from_bounds(t_x.lb() + t_y.lb(), t_x.ub() + t_y.ub()),
+								false,
+								Some(IntVarEnc::Bin(None)),
+								Some(String::from(format!("{c}*{}", self.x.borrow().lbl()))),
+							)?;
+
+							ys.insert(z_i, c);
+							model.add_constraint(Lin {
+								exp: LinExp {
+									terms: vec![t_x, t_y, Term::new(-C::one(), z.clone())],
+								},
+								cmp: Comparator::Equal,
+								k: C::zero(),
+								lbl: Some(String::from("scm")),
+							})?;
+							let key = (self.x.borrow().id, c, Comparator::Equal);
+							model.cse.0.insert(key, Term::from(z));
+						}
+						assert!(USE_CSE);
+						Ok(model.cse.0[&(self.x.borrow().id, self.c, Comparator::Equal)].clone())
+					}
+					Scm::Pow => todo!(),
+					Scm::Dnf => {
+						let y = model
+							.new_var(
+								&dom,
+								false,
+								Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
+								Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
+							)
+							.unwrap();
+
+						model
+							.add_constraint(Lin {
+								exp: LinExp {
+									terms: vec![self.clone(), Term::new(-C::one(), y.clone())],
+								},
+								cmp: Comparator::Equal,
+								k: C::zero(),
+								lbl: con_lbl.clone().map(|lbl| (format!("scm-{}", lbl))),
+							})
+							.unwrap();
+						Ok(Term::from(y))
+					}
+				}
 			}
 			_ => return Ok(self),
 		}?;

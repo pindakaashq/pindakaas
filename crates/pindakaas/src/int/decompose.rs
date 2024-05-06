@@ -1,10 +1,10 @@
 use crate::int::con::LinCase;
+use crate::ModelConfig;
 use crate::{
 	int::{model::USE_CHANNEL, Dom, IntVarEnc},
 	Assignment, BddEncoder, Coefficient, Comparator, Decomposer, IntLinExp as LinExp, IntVarId,
 	Lin, Literal, Model, SwcEncoder, Term, TotalizerEncoder, Unsatisfiable,
 };
-use crate::{ModelConfig, Scm};
 use itertools::{Itertools, Position};
 use std::collections::HashMap;
 
@@ -446,7 +446,6 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ModelDecomposer<Lit, C>
 		let ModelConfig {
 			equalize_ternaries,
 			cutoff,
-			scm,
 			..
 		} = model.config.clone();
 
@@ -462,7 +461,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ModelDecomposer<Lit, C>
 					.then(EqualizeTernsDecomposer::default)
 					.as_ref(),
 			)?
-			.decompose_with((scm == Scm::Dnf).then(ScmDecomposer::default).as_ref())
+			.decompose_with(Some(&ScmDecomposer::default()))
 	}
 }
 
