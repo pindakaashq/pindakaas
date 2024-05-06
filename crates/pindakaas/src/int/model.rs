@@ -34,10 +34,10 @@ use super::IntVarEnc;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Scm {
-	#[default]
 	Add,
 	Rca,
 	Pow,
+	#[default]
 	Dnf,
 }
 
@@ -428,11 +428,36 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.try_for_each(|con| con.check(assignment, lit_assignments))
 	}
 
-	pub(crate) fn brute_force_solve(&self, max_var: Option<IntVarId>) -> Vec<Assignment<C>> {
+	pub(crate) fn brute_force_solve(
+		&self,
+		max_var: Option<IntVarId>,
+	) -> Result<Vec<Assignment<C>>, ()> {
 		let vars = self.vars();
 		let max_var = max_var.unwrap_or(IntVarId(self.num_var));
-		vars.iter()
-			.map(|var| var.borrow().dom.iter().collect::<Vec<_>>())
+
+		const MAX_SEARCH_SPACE: Option<usize> = Some(250);
+		// const MAX_SEARCH_SPACE: Option<usize> = None;
+		let mut max_search_space = MAX_SEARCH_SPACE;
+		let mut last_s = None;
+
+		Ok(vars
+			.iter()
+			.map(|var| {
+				let ds = var.borrow().dom.iter().collect::<Vec<_>>();
+				if let Some(curr_max_search_space) = max_search_space {
+					if let Some(new_max_search_space) =
+						curr_max_search_space.checked_sub(ds.len() * last_s.unwrap_or(1))
+					{
+						max_search_space = Some(new_max_search_space);
+						last_s = Some(ds.len());
+					} else {
+						return Err(());
+					}
+				}
+				Ok(ds)
+			})
+			.try_collect::<Vec<C>, Vec<Vec<C>>, ()>()?
+			.into_iter()
 			.multi_cartesian_product()
 			.map(|a| {
 				Assignment(
@@ -453,7 +478,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.map(|a| a.partialize(&max_var))
 			.sorted() // need to sort to make unique since HashMap cannot derive Hash
 			.dedup()
-			.collect()
+			.collect())
 	}
 
 	/// Expecting actual_assignments to contain all solutions of the model
@@ -502,7 +527,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		let expected_assignments = expected_assignments
 			.as_ref()
 			.map(|expected_assignments| expected_assignments.to_vec())
-			.unwrap_or_else(|| self.brute_force_solve(None));
+			.unwrap_or_else(|| self.brute_force_solve(None).unwrap());
 
 		let canonicalize = |a: &[Assignment<C>]| a.iter().sorted().cloned().collect::<Vec<_>>();
 
@@ -723,7 +748,7 @@ mod tests {
 			// [Consistency::None],
 			// [false],
 			// [Some(0)] // [None, Some(0), Some(2)]
-			[Scm::Dnf],
+			[Scm::Dnf, Scm::Add],
 			[
 				// Decomposer::Gt,
 				// Decomposer::Swc,
@@ -786,19 +811,25 @@ mod tests {
 	) {
 		if !BRUTE_FORCE_SOLVE {
 			return;
-		} else if let Err(errs) = model.check_assignments(
-			&decomposition.brute_force_solve(Some(IntVarId(model.num_var))),
-			expected_assignments,
-			None,
-			BRUTE_FORCE_SOLVE,
-		) {
-			for err in errs {
-				println!("Decomposition error:\n{err}");
+		} else if let Ok(decomposition_expected_assignments) =
+			&decomposition.brute_force_solve(Some(IntVarId(model.num_var)))
+		{
+			if let Err(errs) = model.check_assignments(
+				&decomposition_expected_assignments,
+				expected_assignments,
+				None,
+				BRUTE_FORCE_SOLVE,
+			) {
+				for err in errs {
+					println!("Decomposition error:\n{err}");
+				}
+				panic!(
+					"Decomposition is incorrect. Test failed for {:?}\n{model}",
+					model.config,
+				);
 			}
-			panic!(
-				"Decomposition is incorrect. Test failed for {:?}\n{model}",
-				model.config,
-			);
+		} else {
+			return;
 		}
 	}
 
@@ -857,7 +888,7 @@ mod tests {
 		println!("model = {}", model);
 
 		let expected_assignments =
-			(SOLVE && BRUTE_FORCE_SOLVE).then(|| model.brute_force_solve(None));
+			(SOLVE && BRUTE_FORCE_SOLVE).then(|| model.brute_force_solve(None).unwrap());
 
 		// TODO merge with CHECK_DECOMPOSITION_I
 		const CHECK_CONFIG_I: Option<usize> = None;
@@ -1184,7 +1215,7 @@ End
 		);
 	}
 
-    // TAKING LONG
+	// TAKING LONG
 	// #[test]
 	fn _test_int_lin_les() {
 		test_lp_for_configs(
@@ -1575,15 +1606,15 @@ End
 		);
 	}
 
-	// #[test]
-	fn _test_lp_scm_2() {
+	#[test]
+	fn test_lp_scm_2() {
 		test_lp_for_configs(
 			r"
 Subject To
-c0: x1 - 11 x2 = 0
+c0: 11 x1 - x2 = 0
 Bounds
-0 <= x1 <= 33
-0 <= x2 <= 4
+0 <= x1 <= 3
+0 <= x2 <= 33
 End
 ",
 			None,

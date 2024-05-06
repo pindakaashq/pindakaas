@@ -15,7 +15,7 @@ use crate::{
 	ClauseDatabase, Cnf, Coefficient, Comparator, Literal, Unsatisfiable,
 };
 
-use super::{Dom, LitOrConst};
+use super::{required_lits, Dom, LitOrConst};
 
 #[derive(Debug, Clone)]
 pub struct BinEnc<Lit: Literal> {
@@ -410,6 +410,10 @@ impl<Lit: Literal> BinEnc<Lit> {
 			.chain(map.into_values().sorted().skip(lits).map(LitOrConst::from))
 			.collect_vec();
 		Ok(BinEnc::from_lits(&lits))
+	}
+
+	pub(crate) fn required_lits<C: Coefficient>(dom: &Dom<C>) -> usize {
+		required_lits(dom.lb(), dom.ub())
 	}
 }
 

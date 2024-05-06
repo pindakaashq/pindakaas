@@ -9,6 +9,7 @@ pub(crate) mod helpers;
 mod int_var;
 mod model;
 mod ord;
+mod res;
 mod term;
 
 pub use con::{Lin, LinExp};
