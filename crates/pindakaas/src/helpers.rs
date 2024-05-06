@@ -487,7 +487,7 @@ pub mod tests {
 				feature = "trace",
 				tracing::instrument(name = "negate_encoder", skip_all)
 			)]
-			fn encode<'a, DB: ClauseDatabase>(&mut self, db: &mut DB, lit: Lit) -> Result {
+			fn encode<DB: ClauseDatabase>(&mut self, db: &mut DB, lit: Lit) -> Result {
 				emit_clause!(db, [!lit])
 			}
 		}
