@@ -326,6 +326,11 @@ pub struct ConditionalDatabase<'a, DB: ClauseDatabase + ?Sized> {
 	db: &'a mut DB,
 	conditions: Vec<Lit>,
 }
+impl<'a, DB: ClauseDatabase + ?Sized> ConditionalDatabase<'a, DB> {
+	pub fn new(db: &'a mut DB, conditions: Vec<Lit>) -> Self {
+		Self { db, conditions }
+	}
+}
 impl<'a, DB: ClauseDatabase + ?Sized> ClauseDatabase for ConditionalDatabase<'a, DB> {
 	fn new_var(&mut self) -> Var {
 		self.db.new_var()
