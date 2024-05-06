@@ -60,7 +60,7 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
       - name: Run clippy
-        run: cargo clippy --all-features -- -D warnings
+        run: cargo clippy --tests --features splr,cadical,kissat,intel-sat,ipasir-up -- -D warnings
   format:
     runs-on: ubuntu-latest
     steps:
