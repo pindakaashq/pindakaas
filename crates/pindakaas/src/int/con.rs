@@ -460,7 +460,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				let z: IntVarRef<_, _> = (z * -C::one()).try_into().unwrap();
 
-				let z_ground = x.lb() + y.lb();
+
 				let (x, y) = &[x, y]
 					.into_iter()
 					.map(|t| {
@@ -468,15 +468,11 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 						t.x.borrow_mut().encode(db, None).unwrap();
 						// encode term and return underlying var
 						let t = t.encode_bin(None, self.cmp, None).unwrap();
-						let x: IntVarRef<_, _> = t
-							.try_into()
-							.expect("Calling Term::encode_bin should return 1*y");
+						let x: IntVarRef<_, _> = t.clone().try_into().unwrap_or_else(|_| {
+							panic!("Calling Term::encode_bin on {t} should return 1*y")
+						});
+						x
 						// x.clone().encode_bin(db).unwrap().xs()
-						if let Some(IntVarEnc::Bin(Some(x_enc))) = x.clone().borrow().e.clone() {
-							x_enc.xs()
-						} else {
-							unreachable!()
-						}
 					})
 					.collect_tuple()
 					.unwrap();
@@ -486,14 +482,20 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					"Last var {} should not have been encoded yet",
 					z.borrow()
 				);
+				let z_ground = x.borrow().lb() + y.borrow().lb();
 				let z_dom = Dom::from_bounds(z_ground, z.borrow().ub());
+				let (x, y) = (
+					x.borrow_mut().encode_bin(db)?.xs(),
+					y.borrow_mut().encode_bin(db)?.xs(),
+				);
 
 				let z_lb = z.borrow().lb();
 				z.borrow_mut().dom = z_dom; // fix lower bound to ground
 				let lits = Some(required_lits(z_ground, z.borrow().dom.ub()));
-				let z_bin = BinEnc::from_lits(
-					&log_enc_add_fn(db, x, y, &self.cmp, LitOrConst::Const(false), lits).unwrap(),
-				);
+				// let carry = LitOrConst::Const(!is_addition); // set initial carry to 1 if subtracting
+				let carry = LitOrConst::Const(false); // initial carry can remain 0?
+				let z_bin =
+					BinEnc::from_lits(&log_enc_add_fn(db, &x, &y, &self.cmp, carry, lits).unwrap());
 
 				lex_geq_const(db, &z_bin.xs(), z_lb - z_ground, z_bin.bits())?;
 

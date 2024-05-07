@@ -342,7 +342,8 @@ pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 		.collect::<Result<Vec<_>>>()?;
 
 	// TODO avoid c being created by constraining (x+y+c >= 2 ) <-> false in last iteration if bits<max_bits
-	// prevent overflow
+	// prevent overflow;
+	// TODO this should just happen for all c_i's for bits < i <= max_bits
 	if bits < max_bits {
 		if let LitOrConst::Lit(c) = c {
 			emit_clause!(db, &[c.negate()])?;
