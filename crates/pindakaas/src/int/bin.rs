@@ -107,6 +107,11 @@ impl<Lit: Literal> BinEnc<Lit> {
 		}
 	}
 
+	/// The encoding range
+	pub(crate) fn range<C: Coefficient>(&self) -> (C, C) {
+		unsigned_binary_range::<C>(self.bits())
+	}
+
 	/// Returns conjunction for x>=k (or x<=k if !up)
 	pub(crate) fn geq<C: Coefficient>(&self, k: C) -> Vec<Lit> {
 		let (range_lb, range_ub) = unsigned_binary_range::<C>(self.bits());

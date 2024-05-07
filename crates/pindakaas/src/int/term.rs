@@ -96,8 +96,32 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 		};
 		let dom = self.dom().iter().sorted().copied().collect_vec();
 		let t = match e {
-			Some(IntVarEnc::Bin(_)) if self.c.abs().is_one() => {
+			Some(IntVarEnc::Bin(_)) if self.c.is_zero() => {
+				return Ok(Term::from(IntVar::from_dom_as_ref(
+					0,
+					Dom::from_slice(&[C::zero()]),
+					false,
+					None,
+					None,
+				)));
+			}
+			Some(IntVarEnc::Bin(_)) if self.c.is_one() => {
 				return Ok(self);
+			}
+			Some(IntVarEnc::Bin(Some(x_bin))) if (-self.c).is_one() => {
+				Ok(Term::from(IntVar::from_dom_as_ref(
+					0,
+					// See unit test for example -1 * (x in 2..6[..9]) == y in [-9..]-6..-2
+					Dom::from_bounds(
+						-(self.x.borrow().lb() + x_bin.range::<C>().1),
+						-self.x.borrow().lb(),
+					),
+					false,
+					Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+						&x_bin.xs().into_iter().map(|l| -l).collect_vec(),
+					)))),
+					Some(format!("-{}", self.x.borrow().lbl())),
+				)))
 			}
 			Some(IntVarEnc::Bin(Some(x_bin))) if x_bin.x.len() == 1 => {
 				if let [LitOrConst::Lit(lit)] = &x_bin.x.clone()[..] {
@@ -223,14 +247,20 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 				let model = model.as_mut().unwrap();
 				match model.config.scm {
 					Scm::Rca | Scm::Add => {
-						let lits = BinEnc::<Lit>::required_lits(&self.x.borrow().dom);
+						let lits = if model.config.scm == Scm::Add {
+							BinEnc::<Lit>::required_lits(&self.x.borrow().dom)
+						} else {
+							0
+						};
 						let c = self.c;
 						let scm = SCM
 							.iter()
 							.find_map(|(bits, mul, scm)| {
 								(*bits == lits && C::from(*mul).unwrap() == c).then_some(scm)
 							})
-							.unwrap()
+							.unwrap_or_else(|| {
+								panic!("Cannot find scm recipe for c={c},lits={lits}")
+							})
 							.to_vec();
 
 						let mut ys = [(0, C::one())].into_iter().collect::<HashMap<_, _>>();
@@ -248,16 +278,24 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 
 						for rca in scm {
 							let (z_i, i1, sh1, i2, sh2) = (rca.i, rca.i1, rca.sh1, rca.i2, rca.sh2);
-							assert!(rca.add);
 
 							let ((c_x, t_x), (c_y, t_y)) = (
 								get_and_shift(&ys, &model.cse, i1, sh1),
 								get_and_shift(&ys, &model.cse, i2, sh2),
 							);
+							let (c_y, t_y) = if rca.add {
+								(c_y, t_y.clone())
+							} else {
+								(-c_y, t_y * -C::one())
+							};
 
 							let c = c_x + c_y;
 							let z = model.new_var_from_dom(
-								Dom::from_bounds(t_x.lb() + t_y.lb(), t_x.ub() + t_y.ub()),
+								if rca.add {
+									Dom::from_bounds(t_x.lb() + t_y.lb(), t_x.ub() + t_y.ub())
+								} else {
+									Dom::from_bounds(C::zero(), t_x.ub() + t_y.lb())
+								},
 								false,
 								Some(IntVarEnc::Bin(None)),
 								Some(String::from(format!("{c}*{}", self.x.borrow().lbl()))),
@@ -354,6 +392,43 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	type Lit = i32;
+	type C = i64;
+
+	use crate::{helpers::tests::TestDB, Unsatisfiable};
+
+	use super::*;
+	#[test]
+	fn term_test() {
+		((|| {
+			let mut db = TestDB::new(0);
+			let mut model = Model::<Lit, C>::default();
+			let x = Term::new(
+				-1,
+				model.new_var_from_dom(
+					Dom::from_bounds(2, 6),
+					true,
+					Some(IntVarEnc::Bin(None)),
+					None,
+				)?,
+			);
+			x.x.borrow_mut().encode_bin(&mut db)?;
+			let y = x.encode_bin(None, Comparator::Equal, None)?;
+
+			// -x in 2..6[..9]
+			//  y in [-9..]-6..-2
+			// ALL FALSE -> x000=2 -> y111=-2 = -9 + 7 :)
+			// ALL FALSE -> x111=7 -> y000=-9
+			// ALL FALSE -> x101=5 -> y010=-5
+
+			assert_eq!(y.x.borrow().dom, Dom::from_bounds(-9, -2));
+			Ok::<(), Unsatisfiable>(())
+		})())
+		.unwrap()
+	}
+}
 /*
    OLD SCM
 	// TODO move enc into Term ?
