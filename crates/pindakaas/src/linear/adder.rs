@@ -356,7 +356,7 @@ pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 
 fn bit<Lit: Literal>(x: &[LitOrConst<Lit>], i: usize) -> LitOrConst<Lit> {
 	x.get(i)
-		.map(LitOrConst::<Lit>::clone)
+		.cloned()
 		.unwrap_or_else(|| LitOrConst::Const(false))
 	// .unwrap_or_else(|| x.last().unwrap().clone()) // TODO use this if using 2 comp
 }

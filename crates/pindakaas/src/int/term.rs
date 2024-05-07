@@ -298,7 +298,7 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 								},
 								false,
 								Some(IntVarEnc::Bin(None)),
-								Some(String::from(format!("{c}*{}", self.x.borrow().lbl()))),
+								Some(format!("{c}*{}", self.x.borrow().lbl())),
 							)?;
 
 							ys.insert(z_i, c);
@@ -313,7 +313,6 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 							let key = (self.x.borrow().id, c, Comparator::Equal);
 							model.cse.0.insert(key, Term::from(z));
 						}
-						assert!(USE_CSE);
 						Ok(model.cse.0[&(self.x.borrow().id, self.c, Comparator::Equal)].clone())
 					}
 					Scm::Pow => todo!(),

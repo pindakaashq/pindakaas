@@ -209,7 +209,7 @@ End
 			//let id = var[1..].parse::<usize>().unwrap();
 			let dom = dom.to_vec();
 			vars.entry(var.to_string())
-				.and_modify(|var| *var = dom.clone())
+				.and_modify(|var| var.clone_from(&dom))
 				.or_insert(dom);
 		};
 
