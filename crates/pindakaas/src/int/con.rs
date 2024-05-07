@@ -460,7 +460,6 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				let z: IntVarRef<_, _> = (z * -C::one()).try_into().unwrap();
 
-
 				let (x, y) = &[x, y]
 					.into_iter()
 					.map(|t| {
