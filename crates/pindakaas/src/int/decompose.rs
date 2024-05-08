@@ -315,7 +315,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, 
 
 		cons.into_iter().try_for_each(|con| {
 			let con =
-				if con.exp.terms.len() == 2
+				if con.exp.terms.len() >= 2
 					&& con.exp.terms.iter().all(|t| {
 						t.c.is_positive() && matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_)))
 					}) && con.cmp.is_ineq()

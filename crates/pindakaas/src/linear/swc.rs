@@ -28,7 +28,8 @@ impl<C: Coefficient> SwcEncoder<C> {
 
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for SwcEncoder<C> {
 	fn decompose(&self, mut model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
-		let lin = model.cons.first().unwrap().clone();
+		assert!(model.cons.len() == 1);
+		let lin = model.cons.pop().unwrap();
 		let xs = lin.exp.terms.clone();
 
 		let n = xs.len();

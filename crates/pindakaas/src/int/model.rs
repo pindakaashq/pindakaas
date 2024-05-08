@@ -757,8 +757,8 @@ mod tests {
 			// [Some(0)] // [None, Some(0), Some(2)]
 			[Scm::Dnf, Scm::Add, Scm::Rca],
 			[
-				// Decomposer::Gt,
-				// Decomposer::Swc,
+				Decomposer::Gt,
+				// Decomposer::Swc, // TODO
 				Decomposer::Bdd,
 				// Decomposer::Rca
 			],

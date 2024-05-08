@@ -41,7 +41,8 @@ impl<C: Coefficient> TotalizerEncoder<C> {
 
 impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for TotalizerEncoder<C> {
 	fn decompose(&self, mut model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
-		let lin = model.cons.first().unwrap().clone();
+		assert!(model.cons.len() == 1);
+		let lin = model.cons.pop().unwrap();
 
 		let mut layer = lin.exp.terms.iter().cloned().collect_vec();
 
