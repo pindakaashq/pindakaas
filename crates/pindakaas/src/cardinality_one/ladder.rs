@@ -5,7 +5,7 @@ use crate::{
 };
 
 /// An encoder for an At Most One constraints that TODO
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct LadderEncoder {}
 
 impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for LadderEncoder {

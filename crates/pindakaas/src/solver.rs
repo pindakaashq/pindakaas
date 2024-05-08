@@ -249,6 +249,7 @@ pub trait SolvingActions {
 	fn is_decision(&mut self, lit: Lit) -> bool;
 }
 
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum SlvTermSignal {
 	Continue,
 	Terminate,

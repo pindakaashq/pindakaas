@@ -2,7 +2,7 @@ use pindakaas_derive::IpasirSolver;
 
 use super::VarFactory;
 
-#[derive(IpasirSolver)]
+#[derive(Debug, IpasirSolver)]
 #[ipasir(krate = pindakaas_kissat)]
 pub struct Kissat {
 	ptr: *mut std::ffi::c_void,

@@ -272,6 +272,7 @@ pub type Coeff = i64;
 
 /// IntEncoding is a enumerated type use to represent Boolean encodings of
 /// integer variables within this library
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IntEncoding<'a> {
 	/// The Direct variant represents a integer variable encoded using domain
 	/// or direct encoding of an integer variable. Each given Boolean literal
@@ -322,6 +323,7 @@ pub trait ClauseDatabase {
 }
 
 // TODO: Add usage and think about interface
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct ConditionalDatabase<'a, DB: ClauseDatabase + ?Sized> {
 	db: &'a mut DB,
 	conditions: Vec<Lit>,
@@ -718,6 +720,8 @@ impl Cnf {
 		}
 	}
 }
+
+#[derive(Debug, Clone)]
 pub struct CnfIterator<'a> {
 	lits: &'a Vec<Lit>,
 	size: std::slice::Iter<'a, usize>,

@@ -2,7 +2,7 @@ use pindakaas_derive::IpasirSolver;
 
 use super::VarFactory;
 
-#[derive(IpasirSolver)]
+#[derive(Debug, IpasirSolver)]
 #[ipasir(krate = pindakaas_intel_sat, assumptions, learn_callback, term_callback)]
 pub struct IntelSat {
 	ptr: *mut std::ffi::c_void,
