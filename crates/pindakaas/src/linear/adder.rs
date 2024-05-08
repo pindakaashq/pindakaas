@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use num::Integer;
 use rustc_hash::FxHashMap;
 
@@ -319,7 +320,7 @@ fn xor<DB: ClauseDatabase>(
 	Ok(if trues.is_even() { is_even } else { -is_even })
 }
 
-#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{xs:?} + {ys:?}"))))]
+#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("[{c}] + [{}] + [{}] {cmp}", xs.iter().rev().map(|x| format!("{x}")).collect_vec().join(","), ys.iter().rev().map(|x| format!("{x}")).collect_vec().join(",")))))]
 pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 	db: &mut DB,
 	xs: &[LitOrConst<DB::Lit>],

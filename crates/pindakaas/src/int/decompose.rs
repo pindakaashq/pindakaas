@@ -539,10 +539,15 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ScmDecomposer {
 				.terms
 				.iter()
 				.cloned()
-				.map(|t| {
+				.with_position()
+				.map(|(p, t)| {
 					if let Some(IntVarEnc::Bin(None)) = t.x.borrow().e.clone() {
-						t.clone()
-							.encode_bin(Some(&mut model), con.cmp, con.lbl.clone())
+						if matches!(p, Position::Last) {
+							Ok(t.clone())
+						} else {
+							t.clone()
+								.encode_bin(Some(&mut model), con.cmp, con.lbl.clone())
+						}
 					} else {
 						Ok(t.clone())
 					}
