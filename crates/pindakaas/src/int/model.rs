@@ -23,7 +23,7 @@ pub(crate) struct Model {
 
 // TODO Domain will be used once (/if) this is added as encoder feature.
 #[allow(dead_code)]
-#[derive(Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Consistency {
 	None,
 	#[default]

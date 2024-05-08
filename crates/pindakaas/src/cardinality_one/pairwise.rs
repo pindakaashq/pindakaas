@@ -7,7 +7,7 @@ use crate::{
 
 /// An encoder for an At Most One constraints that for every pair of literals
 /// states that one of the literals has to be `false`.
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PairwiseEncoder {}
 
 impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for PairwiseEncoder {
