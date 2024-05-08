@@ -33,7 +33,7 @@ pub struct Lin<Lit: Literal, C: Coefficient> {
 pub(crate) enum LinCase<Lit: Literal, C: Coefficient> {
 	Couple(Term<Lit, C>, Term<Lit, C>),
 	Fixed(Lin<Lit, C>),
-	Unary(IntVarRef<Lit, C>, Comparator, C),
+	Unary(Term<Lit, C>, Comparator, C),
 	Scm(Term<Lit, C>, IntVarRef<Lit, C>),
 	Rca(Term<Lit, C>, Term<Lit, C>, Term<Lit, C>),
 	Order,
@@ -58,14 +58,7 @@ impl<Lit: Literal, C: Coefficient> TryFrom<&Lin<Lit, C>> for LinCase<Lit, C> {
 				if (t.c.is_one() || t.c.is_multiple_of(&C::from(2).unwrap()))
 					&& !USE_COUPLING_IO_LEX =>
 			{
-				LinCase::Unary(
-					(*t).clone()
-						.encode_bin(None, cmp, None)?
-						.try_into()
-						.unwrap(),
-					cmp,
-					con.k,
-				)
+				LinCase::Unary((*t).clone().encode_bin(None, cmp, None)?, cmp, con.k)
 			}
 			// VIEW COUPLING
 			// ([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(None)))], _)
@@ -297,7 +290,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 	pub(crate) fn check(
 		&self,
 		a: &Assignment<C>,
-		lit_assignment: Option<&[Lit]>,
+		_lit_assignment: Option<&[Lit]>,
 	) -> Result<(), CheckError<Lit>> {
 		let lhs = self
 			.exp
@@ -322,17 +315,18 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					.iter()
 					.map(|term| {
 						format!(
-							"{} * {}={} (={}) [{:?}]",
+							// "{} * {}={} (={}) [{:?}]",
+							"{} * {}={} (={})",
 							term.c,
 							term.x.borrow().lbl(),
 							a[&term.x.borrow().id].1,
 							term.c * a[&term.x.borrow().id].1,
-							lit_assignment
-								.map(|lit_assignment| lit_assignment
-									.iter()
-									.filter(|lit| term.x.borrow().lits().contains(&lit.var()))
-									.collect_vec())
-								.unwrap_or_default()
+							// lit_assignment
+							// 	.map(|lit_assignment| lit_assignment
+							// 		.iter()
+							// 		.filter(|lit| term.x.borrow().lits().contains(&lit.var()))
+							// 		.collect_vec())
+							// 	.unwrap_or_default()
 						)
 					})
 					.join(" + "),
@@ -391,8 +385,13 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				.check(&Assignment::default(), None)
 				.map_err(|_| Unsatisfiable),
 			LinCase::Unary(x, cmp, k) => {
-				let x_enc = x.borrow_mut().encode_bin(db)?; // avoid BorrowMutError
-				x_enc.encode_unary_constraint(db, &cmp, k, &x.borrow().dom, false)
+				// TODO refactor.....
+				x.x.borrow_mut().encode_bin(db)?;
+				let dom = x.x.borrow().dom.clone();
+				let x = x.encode_bin(None, cmp, None)?;
+				let x: IntVarRef<_, _> = x.try_into().unwrap();
+				let x_enc = x.clone().borrow_mut().encode_bin(db)?;
+				x_enc.encode_unary_constraint(db, &cmp, k, &dom, false)
 			}
 			LinCase::Couple(t_x, t_y) => {
 				t_x.x.borrow_mut().encode_ord(db)?;
@@ -439,7 +438,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					})
 			}
 			LinCase::Scm(t_x, y) => {
-				assert!(t_x.c.is_positive(), "neg scm: {self}");
+				// assert!(t_x.c.is_positive(), "neg scm: {self}");
 
 				t_x.x.borrow_mut().encode_bin(db)?; // encode x (if not encoded already)
 									// encode y
@@ -450,9 +449,12 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				(*y).borrow_mut().e = Some(IntVarEnc::Bin(Some(
 					tmp_y.x.borrow_mut().encode_bin(db)?.scm_dnf(db, tmp_y.c)?,
 				)));
+				// TODO handle if y is already encoded
+				y.borrow_mut().dom = t_x.bounds();
 				Ok(())
 			}
 			LinCase::Rca(x, y, z) => {
+				assert!(z.c.is_negative());
 				assert!(
 					x.lb() + y.lb() <= -z.ub(),
 					"LBs for addition not matching: {self}"
@@ -498,7 +500,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 				lex_geq_const(db, &z_bin.xs(), z_lb - z_ground, z_bin.bits())?;
 
-				// TODO only has to be done for last constraint of lin decomp..
+				// TODO only has to be done for last constraint of lin decomp.. (could add_consistency to differentiate?)
 				lex_leq_const(db, &z_bin.xs(), z.borrow().ub() - z_ground, z_bin.bits())?;
 				z.borrow_mut().e = Some(IntVarEnc::Bin(Some(z_bin)));
 				Ok(())

@@ -75,7 +75,6 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 
 		let e = self.x.borrow().e.clone();
 		let lit_to_bin_enc = |a: C, _cmp: Comparator, lit: Lit, dom: &[C]| {
-			assert!(self.c.is_positive(), "TODO neg scm");
 			let c = a.abs() * self.c.abs();
 			let bin_enc = BinEnc::from_lits(
 				&as_binary(c.into(), None)
@@ -108,29 +107,15 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			Some(IntVarEnc::Bin(_)) if self.c.is_one() => {
 				return Ok(self);
 			}
-			Some(IntVarEnc::Bin(Some(x_bin))) if (-self.c).is_one() => {
-				Ok(Term::from(IntVar::from_dom_as_ref(
-					0,
-					// See unit test for example -1 * (x in 2..6[..9]) == y in [-9..]-6..-2
-					Dom::from_bounds(
-						-(self.x.borrow().lb() + x_bin.range::<C>().1),
-						-self.x.borrow().lb(),
-					),
-					false,
-					Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
-						&x_bin.xs().into_iter().map(|l| -l).collect_vec(),
-					)))),
-					Some(format!("-{}", self.x.borrow().lbl())),
-				)))
-			}
-			Some(IntVarEnc::Bin(Some(x_bin))) if x_bin.x.len() == 1 => {
+			Some(IntVarEnc::Bin(Some(x_bin))) if x_bin.x.len() == 1 && self.c.is_positive() => {
+				// TODO generalize for neg. c
 				if let [LitOrConst::Lit(lit)] = &x_bin.x.clone()[..] {
 					lit_to_bin_enc(C::one(), cmp, lit.clone(), &dom)
 				} else {
 					unreachable!()
 				}
 			}
-			Some(IntVarEnc::Ord(Some(x_ord))) if x_ord.x.len() <= 1 => {
+			Some(IntVarEnc::Ord(Some(x_ord))) if x_ord.x.len() <= 1 && self.c.is_positive() => {
 				if let &[lit] = &x_ord.iter().take(2).collect_vec()[..] {
 					// also pass in normalized value of the one literal
 					lit_to_bin_enc(
@@ -143,13 +128,51 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					unreachable!()
 				}
 			}
+			Some(IntVarEnc::Bin(Some(x_bin))) if self.c.is_negative() => {
+				let (_, range_ub) = x_bin.range::<C>();
+				return Term::new(
+					-self.c,
+					IntVar::from_dom_as_ref(
+						0,
+						// See unit test for example -1 * (x in 2..6[..9]) == y in [-9..]-6..-2
+						Dom::from_bounds(
+							-(self.x.borrow().lb() + range_ub),
+							-self.x.borrow().lb(), // TODO might be ground i/o lb
+						),
+						false,
+						Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+							&x_bin.xs().into_iter().map(|l| -l).collect_vec(),
+						)))),
+						Some(format!("scm-b-{}", self.x.borrow().lbl())),
+					),
+				)
+				.encode_bin(model, cmp, con_lbl);
+			}
+			Some(IntVarEnc::Bin(Some(x_bin))) if self.c.trailing_zeros() > 0 => {
+				let sh = self.c.trailing_zeros() as usize;
+				return Term::new(
+					self.c.shr(sh),
+					IntVar::from_dom_as_ref(
+						0,
+						Dom::from_slice(&dom), // TODO just use bounds
+						false,                 // view never needs consistency
+						Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
+							&(0..sh)
+								.map(|_| LitOrConst::Const(self.c.is_negative()))
+								.chain(x_bin.xs().iter().cloned())
+								.collect_vec(),
+						)))),
+						Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
+					),
+				)
+				.encode_bin(model, cmp, con_lbl);
+			}
 			Some(IntVarEnc::Ord(None)) => {
 				/// Couple terms means coupling a*x:O <= y:B i/o x:O <= y:B (and using SCM later for a*y:B)
 				const COUPLE_TERM: bool = true;
 				let couple_term = USE_CHANNEL || COUPLE_TERM;
 
 				let model = model.as_mut().unwrap();
-				// FCreate
 				// Create y:O <= x:B
 				let up = self.c.is_positive();
 				let dom = if couple_term {
@@ -217,24 +240,27 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 					y,
 				))
 			}
-			Some(IntVarEnc::Bin(Some(x_bin))) => {
-				// assert!(self.c.is_multiple_of(&C::from(2).unwrap()));
-				let sh = self.c.trailing_zeros() as usize;
-				return Ok(Term::new(
-					self.c.shr(sh),
-					IntVar::from_dom_as_ref(
-						0,
-						Dom::from_slice(&dom),
-						false, // view never needs consistency
-						Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
-							&(0..sh)
-								.map(|_| LitOrConst::Const(false))
-								.chain(x_bin.xs().iter().cloned())
-								.collect_vec(),
-						)))),
-						Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
-					),
-				));
+			Some(IntVarEnc::Bin(None)) if self.c.is_negative() => {
+				// // rely on CSE?
+				let model = model.as_mut().unwrap();
+
+				let y = model.new_var_from_dom(
+					Dom::from_bounds(-self.x.borrow().ub(), -self.x.borrow().lb()),
+					false,
+					None,
+					None,
+				)?;
+				let z = Term::new(-self.c, y.clone()).encode_bin(Some(model), cmp, con_lbl)?;
+				model.add_constraint(Lin {
+					exp: LinExp {
+						terms: vec![self.clone(), Term::new(-C::one(), y.clone())],
+					},
+					cmp: Comparator::Equal,
+					k: C::zero(),
+					lbl: Some(format!("scm-neg-{self}")),
+				})?;
+
+				Ok(z)
 			}
 			Some(IntVarEnc::Bin(None)) if self.c.trailing_zeros() > 0 => {
 				let sh = self.c.trailing_zeros();
@@ -291,11 +317,11 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 
 							let c = c_x + c_y;
 							let z = model.new_var_from_dom(
-								if rca.add {
-									Dom::from_bounds(t_x.lb() + t_y.lb(), t_x.ub() + t_y.ub())
-								} else {
-									Dom::from_bounds(C::zero(), t_x.ub() + t_y.lb())
-								},
+								// z's represents c*x, so its domain can be directly calculated from c*dom(x)
+								Dom::from_bounds(
+									c * self.x.borrow().lb(),
+									c * self.x.borrow().ub(),
+								),
 								false,
 								Some(IntVarEnc::Bin(None)),
 								Some(format!("{c}*{}", self.x.borrow().lbl())),
@@ -383,6 +409,16 @@ impl<Lit: Literal, C: Coefficient> Term<Lit, C> {
 			vec![C::zero()]
 		} else {
 			self.x.borrow().dom.iter().map(|d| self.c * d).collect_vec()
+		}
+	}
+
+	pub(crate) fn bounds(&self) -> Dom<C> {
+		if self.c.is_zero() {
+			Dom::constant(C::zero())
+		} else if self.c.is_positive() {
+			Dom::from_bounds(self.c * self.x.borrow().lb(), self.c * self.x.borrow().ub())
+		} else {
+			Dom::from_bounds(self.c * self.x.borrow().ub(), self.c * self.x.borrow().lb())
 		}
 	}
 

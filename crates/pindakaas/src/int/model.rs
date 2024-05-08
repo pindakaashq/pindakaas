@@ -436,7 +436,6 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		let max_var = max_var.unwrap_or(IntVarId(self.num_var));
 
 		const MAX_SEARCH_SPACE: Option<usize> = Some(250);
-		// const MAX_SEARCH_SPACE: Option<usize> = None;
 		let mut max_search_space = MAX_SEARCH_SPACE;
 		let mut last_s = None;
 
@@ -748,7 +747,7 @@ mod tests {
 			// [Consistency::None],
 			// [false],
 			// [Some(0)] // [None, Some(0), Some(2)]
-			[Scm::Dnf, Scm::Add],
+			[Scm::Dnf, Scm::Add, Scm::Rca],
 			[
 				// Decomposer::Gt,
 				// Decomposer::Swc,
@@ -796,6 +795,9 @@ mod tests {
 	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Bin(None)];
 	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None)];
 	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[];
+
+	const CHECK_CONSTRAINTS: bool = false;
+	const SHOW_AUX: bool = true;
 
 	fn test_lp_for_configs(lp: &str, configs: Option<Vec<ModelConfig<C>>>) {
 		test_model(
@@ -887,8 +889,14 @@ mod tests {
 	fn test_model(model: Model<Lit, C>, configs: Option<Vec<ModelConfig<C>>>) {
 		println!("model = {}", model);
 
-		let expected_assignments =
-			(SOLVE && BRUTE_FORCE_SOLVE).then(|| model.brute_force_solve(None).unwrap());
+		let expected_assignments = (SOLVE && BRUTE_FORCE_SOLVE)
+			.then(|| model.brute_force_solve(None).ok())
+			.flatten();
+
+		if Some(vec![]) == expected_assignments {
+			// println!("WARNING: brute force solver found model UNSAT");
+			panic!("WARNING: brute force solver found model UNSAT");
+		}
 
 		// TODO merge with CHECK_DECOMPOSITION_I
 		const CHECK_CONFIG_I: Option<usize> = None;
@@ -950,11 +958,7 @@ mod tests {
 					check_decomposition(&model, &decomposition, expected_assignments.as_ref());
 				}
 
-				// TODO move into var_encs loop
-				const CHECK_CONSTRAINTS: bool = false;
-				const SHOW_AUX: bool = true;
-
-				for (mut decomposition, expected_assignments) in if CHECK_CONSTRAINTS {
+				for (decomposition, expected_assignments) in if CHECK_CONSTRAINTS {
 					decomposition
 						.constraints()
 						.map(|constraint| {
@@ -977,96 +981,107 @@ mod tests {
 				} else {
 					vec![(decomposition.clone(), expected_assignments.as_ref())]
 				} {
-					// let mut con_db = decomp_db.clone();
-					// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
-					// TODO should that be moved after encode step since encoding itself might introduce aux (bool) vars?
-					let mut db = TestDB::new(0);
-
-					let principal_vars = decomposition
-						.vars()
-						.into_iter()
-						.filter(|x| x.borrow().id.0 <= model.num_var)
-						.map(|x| {
-							x.borrow_mut().encode(&mut db, None).unwrap();
-							(x.borrow().id.clone(), x.clone())
-						})
-						.collect::<HashMap<IntVarId, IntVarRef<Lit, C>>>();
-
-					println!("decomposition = {}", decomposition);
-
-					// encode and solve
-					let lit_assignments =
-						decomposition
-							.encode(&mut db, false)
-							.map(|_| {
-								println!(
-								"checking config #{i} = {:?}\ndecomposition #{j} = {} [{}/{}/{}]",
-								config, decomposition,
-                                db.cnf.variables(), db.cnf.clauses(), db.cnf.literals()
-							);
-
-								let output = if CHECK_CONSTRAINTS || SHOW_AUX {
-									decomposition.lits()
-								} else {
-									principal_vars
-										.values()
-										.flat_map(|x| x.borrow().lits())
-										.collect()
-								};
-
-								if SOLVE {
-									db.solve(Some(output)).into_iter().sorted().collect()
-								} else {
-									vec![]
-								}
-							})
-							.unwrap_or_else(|_| {
-								println!("Warning: encoding decomposition lead to UNSAT");
-								// TODO panic based on expected_assignments.is_empty
-								Vec::default()
-							});
-
-					assert_eq!(
-						lit_assignments.iter().unique().count(),
-						lit_assignments.len(),
-						"Expected lit assignments to be unique, but was {lit_assignments:?}"
+					println!(
+						"checking config #{i} = {:?}\ndecomposition #{j} = {}",
+						model.config,
+						decomposition,
+						// db.cnf.variables(),
+						// db.cnf.clauses(),
+						// db.cnf.literals()
 					);
-
-					// TODO find way to encode principal variables first (to remove extra solutions that only differe )
-
-					let checker = if CHECK_CONSTRAINTS || SHOW_AUX {
-						decomposition.clone()
-					} else {
-						// create a checker model with the constraints of the principal model and the encodings of the encoded decomposition
-						let principal = model.deep_clone();
-						principal.vars().into_iter().for_each(|x| {
-							let id = x.borrow().id;
-							x.borrow_mut().e = principal_vars[&id].borrow().e.clone();
-						});
-						principal
-					};
-
-					let actual_assignments = lit_assignments
-						.iter()
-						.flat_map(|lit_assignment| checker.assign(lit_assignment))
-						.collect::<Vec<_>>();
-
-					// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
-
-					let check = checker.check_assignments(
-						&actual_assignments,
-						expected_assignments,
-						Some(&lit_assignments),
-						BRUTE_FORCE_SOLVE,
-					);
-					if let Err(errs) = check {
-						for err in errs {
-							println!("{err}");
-						}
-						panic!("Encoding is incorrect. Test failed for {:?}", model.config);
-					}
+					test_decomp(decomposition, &model, expected_assignments)
 				}
 			}
+		}
+	}
+
+	fn test_decomp(
+		mut decomposition: Model<Lit, C>,
+		model: &Model<Lit, C>,
+		expected_assignments: Option<&Vec<Assignment<C>>>,
+	) {
+		// let mut con_db = decomp_db.clone();
+		// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
+		// TODO should that be moved after encode step since encoding itself might introduce aux (bool) vars?
+		let mut db = TestDB::new(0);
+
+		let principal_vars = decomposition
+			.vars()
+			.into_iter()
+			.filter(|x| x.borrow().id.0 <= model.num_var)
+			.map(|x| {
+				// if x.borrow().e.is_some() {
+				x.borrow_mut().encode(&mut db, None).unwrap();
+				// }
+				(x.borrow().id.clone(), x.clone())
+			})
+			.collect::<HashMap<IntVarId, IntVarRef<Lit, C>>>();
+
+		println!("decomposition = {}", decomposition);
+
+		// encode and solve
+		let lit_assignments = decomposition
+			.encode(&mut db, false)
+			.map(|_| {
+				let output = if CHECK_CONSTRAINTS || SHOW_AUX {
+					decomposition.lits()
+				} else {
+					principal_vars
+						.values()
+						.flat_map(|x| x.borrow().lits())
+						.collect()
+				};
+
+				if SOLVE {
+					db.solve(Some(output)).into_iter().sorted().collect()
+				} else {
+					vec![]
+				}
+			})
+			.unwrap_or_else(|_| {
+				println!("Warning: encoding decomposition lead to UNSAT");
+				// TODO panic based on expected_assignments.is_empty
+				Vec::default()
+			});
+
+		assert_eq!(
+			lit_assignments.iter().unique().count(),
+			lit_assignments.len(),
+			"Expected lit assignments to be unique, but was {lit_assignments:?}"
+		);
+
+		// TODO find way to encode principal variables first (to remove extra solutions that only differe )
+
+		let checker = if CHECK_CONSTRAINTS || SHOW_AUX {
+			decomposition.clone()
+		} else {
+			// create a checker model with the constraints of the principal model and the encodings of the encoded decomposition
+			let principal = model.deep_clone();
+			principal.vars().into_iter().for_each(|x| {
+				let id = x.borrow().id;
+				x.borrow_mut().e = principal_vars[&id].borrow().e.clone();
+			});
+			principal
+		};
+
+		let actual_assignments = lit_assignments
+			.iter()
+			.flat_map(|lit_assignment| checker.assign(lit_assignment))
+			.collect::<Vec<_>>();
+
+		// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
+
+		let check = checker.check_assignments(
+			&actual_assignments,
+			expected_assignments,
+			Some(&lit_assignments),
+			BRUTE_FORCE_SOLVE,
+		);
+		if let Err(errs) = check {
+			for err in errs {
+				println!("{err}");
+			}
+			panic!("Encoding is incorrect. Test failed for {:?}", model.config);
 		}
 	}
 
@@ -1679,17 +1694,27 @@ End
 	}
 
 	#[test]
-	fn test_scm_2_117() {
-		test_lp_for_configs(
-			r"
+	fn test_scm_general() {
+		let (l, u) = (1, 5);
+		// let cs = 1..=117;
+		let cs = [117];
+		// TODO could generate custom expected solutions here, since brute force will be intractable
+		for c in cs {
+			let (x2l, x2u) = (c * l, c * u);
+			test_lp_for_configs(
+				&format!(
+					"
 	Subject To
-	c0: 117 x_1 = 0
+	c0: {c} x_1 - 1 x_2 = 0
 	Bounds
-	0 <= x_1 <= 3
+    {l} <= x_1 <= {u}
+    {x2l} <= x_2 <= {x2u}
 	End
-	",
-			None,
-		);
+	"
+				),
+				None,
+			);
+		}
 	}
 
 	#[test]
@@ -2360,6 +2385,61 @@ End
 		// ",
 		// 	Some(vec![base.clone()]),
 		// );
+	}
+
+	// #[test]
+	fn _test_rca_subtract() {
+		let mut model = Model::<Lit, C>::default();
+
+		let dom = Dom::from_bounds(0, 1);
+		let t1 = Term::new(
+			32,
+			model
+				.new_var_from_dom(
+					dom.clone(),
+					true,
+					Some(IntVarEnc::Bin(None)),
+					Some(String::from("x1")),
+				)
+				.unwrap(),
+		);
+		let t2 = Term::new(
+			-7,
+			model
+				.new_var_from_dom(
+					dom.clone(),
+					true,
+					Some(IntVarEnc::Bin(None)),
+					Some(String::from("x2")),
+				)
+				.unwrap(),
+		);
+		let dom = Dom::from_bounds(t1.lb() + t2.lb(), t1.ub() + t2.ub());
+		let con = Lin {
+			exp: LinExp {
+				terms: vec![
+					t1,
+					t2,
+					Term::new(
+						-1,
+						model
+							.new_var_from_dom(
+								dom,
+								true,
+								Some(IntVarEnc::Bin(None)),
+								// None,
+								Some(String::from("x3")),
+							)
+							.unwrap(),
+					),
+				],
+			},
+			cmp: Comparator::Equal,
+			k: 0,
+			lbl: None,
+		};
+		model.add_constraint(con).unwrap();
+		test_decomp(model.deep_clone(), &model, None);
 	}
 
 	// #[test]

@@ -275,7 +275,11 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 	}
 
 	pub(crate) fn as_lin_exp(&self) -> crate::linear::LinExp<Lit, C> {
-		match self.e.as_ref().unwrap() {
+		match self
+			.e
+			.as_ref()
+			.unwrap_or_else(|| panic!("Expected {self} to be encoded"))
+		{
 			IntVarEnc::Ord(Some(o)) => {
 				crate::linear::LinExp::new()
 					.add_chain(

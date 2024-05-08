@@ -79,8 +79,8 @@ impl<Lit: Literal> TryFrom<LitOrConst<Lit>> for bool {
 impl<Lit: Literal> Display for LitOrConst<Lit> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			LitOrConst::Const(b) => write!(f, "{}", *b as i32),
-			LitOrConst::Lit(l) => write!(f, "b{l:?}"),
+			LitOrConst::Const(b) => write!(f, "{}", if *b { "T" } else { "F" }),
+			LitOrConst::Lit(l) => write!(f, "{l:?}"),
 		}
 	}
 }
