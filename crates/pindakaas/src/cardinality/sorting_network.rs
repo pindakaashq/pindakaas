@@ -5,6 +5,7 @@ use crate::{
 };
 
 /// Encoder for the linear constraints that ∑ litsᵢ ≷ k using a sorting network
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SortingNetworkEncoder {
 	pub sorted_encoder: SortedEncoder,
 }

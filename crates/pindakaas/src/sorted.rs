@@ -7,7 +7,7 @@ use crate::{
 	Linear, Lit, Result, Valuation,
 };
 
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SortedEncoder {
 	pub(crate) add_consistency: bool,
 	pub(crate) strategy: SortedStrategy,
@@ -16,7 +16,7 @@ pub struct SortedEncoder {
 	pub(crate) sort_n: SortN,
 }
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SortN {
 	One,
 	#[allow(dead_code)] // TODO
@@ -53,6 +53,7 @@ impl SortedEncoder {
 	}
 }
 
+#[derive(Debug, Clone)]
 pub struct Sorted<'a> {
 	pub(crate) xs: &'a [Lit],
 	pub(crate) cmp: LimitComp,

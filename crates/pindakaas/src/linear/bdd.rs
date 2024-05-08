@@ -27,7 +27,7 @@ enum BddNode {
 const SORT_TERMS: BddSort = BddSort::Dsc;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
-#[derive(Default, Clone)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct BddEncoder {
 	add_consistency: bool,
 	cutoff: Option<Coeff>,

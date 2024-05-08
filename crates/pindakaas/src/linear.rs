@@ -154,7 +154,7 @@ pub(crate) enum Part {
 	Dom(Vec<(Lit, PosCoeff)>, PosCoeff, PosCoeff),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum LimitComp {
 	Equal,
 	LessEq,
@@ -693,7 +693,7 @@ impl Checker for Linear {
 	}
 }
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = LinearAggregator> {
 	pub enc: Enc,
 	pub agg: Agg,
@@ -728,7 +728,7 @@ impl<DB: ClauseDatabase, Enc: Encoder<DB, LinVariant>> Encoder<DB, LinearConstra
 
 // This is just a linear encoder that currently makes an arbitrary choice.
 // This is probably not how we would like to do it in the future.
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct StaticLinEncoder<
 	LinEnc = AdderEncoder,
 	CardEnc = AdderEncoder, // TODO: Actual Cardinality encoding

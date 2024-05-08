@@ -49,3 +49,6 @@ kissat = ["pindakaas-kissat", "pindakaas-derive"]
 trace = ["tracing"]
 # default = ["cadical"]
 ipasir-up = ["cadical"]
+
+[lints]
+workspace = true
