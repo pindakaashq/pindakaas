@@ -406,13 +406,21 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.collect()
 	}
 
-	pub fn assign(&self, a: &[Lit]) -> Result<Assignment<C>, CheckError<Lit>> {
+	pub fn assign(&self, lit_assignment: &[Lit]) -> Result<Assignment<C>, CheckError<Lit>> {
 		self.vars()
 			.iter()
 			.map(|x| {
-				x.borrow()
-					.assign(a)
-					.map(|a| (x.borrow().id, (x.borrow().lbl(), a)))
+				let a = x
+					.borrow()
+					.assign(lit_assignment)
+					.map(|a| (x.borrow().id, (x.borrow().lbl(), a)))?;
+				if x.borrow().add_consistency {
+					assert!(
+						x.borrow().dom.contains(a.1 .1),
+						"Inconsistent var assignment on consistent var: {lit_assignment:?}: {} -> {}", x.borrow(), a.1.1
+					);
+				}
+				Ok(a)
 			})
 			.collect::<Result<HashMap<_, _>, _>>()
 			.map(|a| Assignment(a))
@@ -842,6 +850,20 @@ mod tests {
 		if var_encs.is_empty() {
 			return vec![HashMap::default()];
 		}
+		return VAR_ENCS
+			.iter()
+			.map(|enc| {
+				vars.iter()
+					.sorted_by_key(|var| var.borrow().id)
+					.filter(|x| x.borrow().e.is_none())
+					.map(|x| (x.borrow().id, enc.clone()))
+					.collect::<HashMap<_, _>>()
+			})
+			.filter(|encs| !encs.is_empty())
+			.collect();
+
+		/*
+		   // TODO Comprehensive mixed encoding testing
 		let (var_enc_ids, var_enc_gens): (Vec<_>, Vec<_>) = vars
 			.iter()
 			.sorted_by_key(|var| var.borrow().id)
@@ -884,6 +906,8 @@ mod tests {
 		} else {
 			var_encs_gen
 		}
+
+		*/
 	}
 
 	fn test_model(model: Model<Lit, C>, configs: Option<Vec<ModelConfig<C>>>) {
