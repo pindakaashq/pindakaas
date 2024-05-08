@@ -16,6 +16,7 @@ use super::{
 use super::{Propagator, SolvingActions};
 use crate::{ClauseDatabase, ConditionalDatabase, Lit, Result, Valuation, Var};
 
+#[derive(Debug)]
 pub struct IpasirLibrary {
 	lib: Library,
 }
@@ -117,6 +118,7 @@ impl TryFrom<Library> for IpasirLibrary {
 	}
 }
 
+#[derive(Debug)]
 pub struct IpasirSolver<'lib> {
 	slv: *mut c_void,
 	next_var: VarFactory,
@@ -241,6 +243,7 @@ impl<'lib> IpasirSolver<'lib> {
 	}
 }
 
+#[derive(Debug)]
 pub struct IpasirSol<'lib> {
 	slv: *mut c_void,
 	value_fn: Symbol<'lib, extern "C" fn(*mut c_void, i32) -> i32>,
@@ -261,6 +264,7 @@ impl Valuation for IpasirSol<'_> {
 	}
 }
 
+#[derive(Debug)]
 pub struct IpasirFailed<'lib> {
 	slv: *mut c_void,
 	failed_fn: Symbol<'lib, extern "C" fn(*mut c_void, i32) -> c_int>,

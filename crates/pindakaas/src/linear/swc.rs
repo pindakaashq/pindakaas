@@ -7,7 +7,7 @@ use crate::{
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct SwcEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,

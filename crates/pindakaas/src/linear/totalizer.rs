@@ -7,7 +7,7 @@ use crate::{
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized Totalizer (GT)
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct TotalizerEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,

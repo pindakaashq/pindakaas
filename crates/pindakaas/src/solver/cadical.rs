@@ -1,3 +1,5 @@
+use std::fmt;
+
 use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
 use pindakaas_derive::IpasirSolver;
 
@@ -33,6 +35,15 @@ impl Clone for Cadical {
 			#[cfg(feature = "ipasir-up")]
 			prop: None,
 		}
+	}
+}
+
+impl fmt::Debug for Cadical {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Cadical")
+			.field("ptr", &self.ptr)
+			.field("vars", &self.vars)
+			.finish()
 	}
 }
 

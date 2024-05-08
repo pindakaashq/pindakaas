@@ -11,7 +11,7 @@ use crate::{
 };
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct AdderEncoder {}
 
 impl<DB: ClauseDatabase> Encoder<DB, Linear> for AdderEncoder {

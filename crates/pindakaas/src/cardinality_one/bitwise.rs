@@ -10,7 +10,7 @@ use crate::{
 /// An encoder for [`CardinalityOne`] constraints that uses a logarithm
 /// encoded selector variable to ensure the selection of at most one of
 /// the given literals
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct BitwiseEncoder {}
 
 impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
