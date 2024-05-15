@@ -1,4 +1,3 @@
-#![feature(int_roundings)]
 //! `pindakaas` is a collection of encoders to transform integer and
 //! pseudo-Boolean (PB) constraints into conjunctive normal form (CNF). It
 //! currently considers mostly linear constraints, which are in the form ∑
@@ -753,6 +752,7 @@ impl<'a> Iterator for CnfIterator<'a> {
 	}
 }
 
+// TODO [!] use std  i/o num and remove num
 #[cfg(test)]
 mod tests {
 	use std::num::NonZeroI32;

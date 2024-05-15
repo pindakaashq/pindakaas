@@ -6,7 +6,7 @@ use super::{
 	IntVarEnc, IntVarId,
 };
 use crate::{
-	helpers::add_clauses_for,
+	helpers::{add_clauses_for, div_ceil, div_floor},
 	int::{bin::BinEnc, helpers::display_cnf, required_lits, Dom, LitOrConst},
 	linear::{lex_geq_const, lex_leq_const, log_enc_add_fn, PosCoeff},
 	trace::emit_clause,
@@ -610,9 +610,9 @@ impl Lin {
 			let up = head.c.is_positive() == (cmp == &Comparator::GreaterEq);
 			if tail.is_empty() {
 				let k_ = if up {
-					k.div_ceil(head.c) // TODO [?] requires int_roundings
+					div_ceil(k, head.c)
 				} else {
-					k.div_floor(head.c) + 1
+					div_floor(k, head.c) + 1
 				};
 
 				if PRINT_COUPLING >= 2 {

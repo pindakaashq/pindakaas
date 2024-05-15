@@ -18,6 +18,7 @@ use crate::{
 	Var,
 };
 
+// TODO decide
 #[cfg(feature = "trace")]
 pub(crate) const PRINT_COUPLING: u32 = 1;
 #[cfg(not(feature = "trace"))]
@@ -665,6 +666,7 @@ mod tests {
 
 			// Add variables using dom/slice and optional label
 			let x1 = model.new_var(&[0, 2], true, None, Some("x1".to_string()))?;
+			// let x1 = model.new_var(&[0, 2], Some("x1".to_string()))?;
 			let x2 = model.new_var(&[0, 3], true, None, Some("x2".to_string()))?;
 			let x3 = model.new_var(&[0, 5], true, None, Some("x3".to_string()))?;
 

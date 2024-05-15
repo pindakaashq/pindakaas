@@ -82,7 +82,7 @@ impl BinEnc {
 	/// The encoding range
 	pub(crate) fn range(&self) -> (Coeff, Coeff) {
 		let (range_lb, range_ub) = unsigned_binary_range(self.bits());
-		let (range_lb, range_ub) = (*range_lb, *range_ub); // TODO [?] replace all Coeff for PosCoeff in bin.rs
+		let (range_lb, range_ub) = (*range_lb, *range_ub); // TODO replace all Coeff for PosCoeff in bin.rs
 		(range_lb, range_ub)
 	}
 

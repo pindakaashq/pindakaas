@@ -468,7 +468,7 @@ mod tests {
 			// ALL FALSE -> x101=5 -> y010=-5
 
 			assert_eq!(y.x.borrow().dom, Dom::from_bounds(-9, -2));
-			Ok::<(), Unsatisfiable>(()) // TODO [?] assert_ok and why need specify this error?
+			Ok::<(), Unsatisfiable>(())
 		});
 	}
 }

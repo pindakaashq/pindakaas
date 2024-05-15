@@ -203,9 +203,7 @@ impl Dom {
 	}
 
 	pub(crate) fn density(&self) -> f64 {
-		todo!();
-		// TODO [?] too much precision or not?
-		// (self.size() as f64) / ((self.ub() - self.lb() + 1) as f64)
+		(self.size() as f64) / ((self.ub() - self.lb() + 1) as f64)
 	}
 }
 #[derive(Clone)]
