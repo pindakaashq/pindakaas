@@ -104,7 +104,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for TotalizerEncoder {
 		let mut model = Model {
 			config: ModelConfig {
 				cutoff: self.cutoff,
-				propagate: self.add_propagation.clone(),
+				propagate: self.add_propagation,
 				add_consistency: self.add_consistency,
 				decomposer: Decomposer::Gt,
 				..ModelConfig::default()

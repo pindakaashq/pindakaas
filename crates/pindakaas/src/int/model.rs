@@ -129,7 +129,7 @@ impl Assignment {
 
 // TODO Domain will be used once (/if) this is added as encoder feature.
 #[allow(dead_code)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, Ord, PartialOrd, PartialEq, Eq, Hash)]
 pub enum Consistency {
 	#[default]
 	None,
