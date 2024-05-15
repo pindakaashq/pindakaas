@@ -90,28 +90,6 @@ impl Not for LitOrConst {
 	}
 }
 
-impl From<&IntVarBin> for LinExp {
-	fn from(value: &IntVarBin) -> Self {
-		let mut k = 1;
-		let terms = value
-			.xs
-			.iter()
-			.map(|x| {
-				let term = (*x, k);
-				k *= 2;
-				term
-			})
-			.collect_vec();
-		let lin_exp =
-			LinExp::default().add_bounded_log_encoding(terms.as_slice(), value.lb, value.ub);
-		if GROUND_BINARY_AT_LB {
-			lin_exp.add_constant(value.lb)
-		} else {
-			lin_exp
-		}
-	}
-}
-
 #[derive(Debug, Clone)]
 pub enum IntVarEnc {
 	Ord(Option<OrdEnc>),
