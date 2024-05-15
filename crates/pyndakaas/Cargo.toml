@@ -16,9 +16,8 @@ crate-type = ["cdylib"]
 doc = false
 
 [dependencies]
-num = "0.4"
 pindakaas = { path = "../pindakaas" }
-pyo3 = { version = "0.17.2", features = ["extension-module"] }
+pyo3 = { version = "0.19", features = ["extension-module"] }
 
 [build-dependencies]
-pyo3-build-config = "0.17.2"
+pyo3-build-config = "0.19"

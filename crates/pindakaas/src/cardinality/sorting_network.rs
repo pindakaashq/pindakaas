@@ -1,7 +1,7 @@
 use crate::{
 	int::IntVarEnc,
 	sorted::{Sorted, SortedEncoder},
-	Cardinality, ClauseDatabase, Coefficient, Encoder, Result,
+	Cardinality, ClauseDatabase, Encoder, Result,
 };
 
 /// Encoder for the linear constraints that ∑ litsᵢ ≷ k using a sorting network
@@ -28,18 +28,17 @@ impl SortingNetworkEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Cardinality<DB::Lit, C>>
-	for SortingNetworkEncoder
-{
-	fn encode(&mut self, db: &mut DB, card: &Cardinality<DB::Lit, C>) -> Result {
-		self.sorted_encoder.encode(
-			db,
-			&Sorted::new(
-				card.lits.as_slice(),
-				card.cmp.clone(),
-				&IntVarEnc::Const(*card.k),
-			),
-		)
+impl<DB: ClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
+	fn encode(&self, db: &mut DB, card: &Cardinality) -> Result {
+		todo!();
+		// self.sorted_encoder.encode(
+		// 	db,
+		// 	&Sorted::new(
+		// 		card.lits.as_slice(),
+		// 		card.cmp.clone(),
+		// 		&IntVar::constant(card.k),
+		// 	),
+		// )
 	}
 }
 
@@ -49,7 +48,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		helpers::tests::assert_sol,
-		linear::LimitComp,
+		linear::{LimitComp, PosCoeff},
 		sorted::{SortedEncoder, SortedStrategy},
 		Cardinality, Encoder,
 	};
@@ -60,9 +59,9 @@ mod tests {
 				$encoder,
 				$n,
 				&Cardinality {
-					lits: (1..=$n).collect(),
+					lits: (1..=$n).map(|l| l.into()).collect(),
 					cmp: $cmp,
-					k: $k.into()
+					k: PosCoeff::new($k)
 				}
 			);
 		};

@@ -1,33 +1,22 @@
-use crate::int::con::LinCase;
-use crate::ModelConfig;
-use crate::{
-	int::{model::USE_CHANNEL, Dom, IntVarEnc},
-	Assignment, BddEncoder, Coefficient, Comparator, Decomposer, IntLinExp as LinExp, IntVarId,
-	Lin, Literal, Model, SwcEncoder, Term, TotalizerEncoder, Unsatisfiable,
-};
-use itertools::{Itertools, Position};
 use std::collections::HashMap;
 
-pub trait Decompose<Lit: Literal, C: Coefficient> {
-	fn decompose(
-		&self,
-		// lin: Lin<Lit, C>,
-		// num_var: usize,
-		model: Model<Lit, C>,
-		// model_config: &ModelConfig<C>,
-		// cse: Option<Cse<Lit, C>>,
-	) -> Result<Model<Lit, C>, Unsatisfiable>;
+use itertools::{Itertools, Position};
 
-	// fn fold(&self, model: Model<Lit, C>) -> Result<Model<Lit, C>> {
-	// 	Ok(model)
-	// }
+use crate::{
+	int::{con::LinCase, enc::IntVarEnc, model::USE_CHANNEL, Dom},
+	Assignment, BddEncoder, Coeff, Comparator, Decomposer, IntLinExp as LinExp, IntVarId, Lin,
+	Model, ModelConfig, SwcEncoder, Term, TotalizerEncoder, Unsatisfiable,
+};
+
+pub trait Decompose {
+	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable>;
 }
 
 #[derive(Debug, Default)]
 pub struct EqualizeTernsDecomposer {}
 
-impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer {
-	fn decompose(&self, model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
+impl Decompose for EqualizeTernsDecomposer {
+	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable> {
 		const REMOVE_GAPS: bool = true;
 
 		let cons = model.cons.iter().cloned().collect_vec();
@@ -43,10 +32,9 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 							.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
 						{
 							if let Some((last, firsts)) = con.exp.terms.split_last() {
-								let (lb, ub) =
-									firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
-										(lb + t.lb(), (ub + t.ub()))
-									});
+								let (lb, ub) = firsts
+									.iter()
+									.fold((0, 0), |(lb, ub), t| (lb + t.lb(), (ub + t.ub())));
 								let (lb, ub) = match con.cmp {
 									Comparator::LessEq => (lb, std::cmp::min(ub, -last.lb())),
 									Comparator::GreaterEq => (std::cmp::max(-last.ub(), lb), ub),
@@ -75,7 +63,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 									.map(|t| t.x.borrow().e.clone())
 									.collect_vec()[..],
 								[Some(IntVarEnc::Ord(None)), Some(IntVarEnc::Bin(None))]
-								if con.exp.terms[0].c.is_one() && con.exp.terms[1].c == -C::one() && USE_CHANNEL
+								if con.exp.terms[0].c == 1 && con.exp.terms[1].c == -1 && USE_CHANNEL
 							) {
 							con.exp.terms[0].x.borrow_mut().dom =
 								con.exp.terms[1].x.borrow().dom.clone();
@@ -106,15 +94,15 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EqualizeTernsDecomposer
 #[derive(Default)]
 pub struct UniformBinEqDecomposer {}
 
-impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for UniformBinEqDecomposer {
+impl Decompose for UniformBinEqDecomposer {
 	fn decompose(
 		&self,
-		model: Model<Lit, C>, // con: Lin<Lit, C>,
+		model: Model, // con: Lin,
 							  // num_var: usize,
-							  // model_config: &ModelConfig<C>,
-							  // cse: Option<Cse<Lit, C>>,
-	) -> Result<Model<Lit, C>, Unsatisfiable> {
-		let mut model = Model::<Lit, C>::new(num_var, model_config);
+							  // model_config: &ModelConfig,
+							  // cse: Option<Cse>,
+	) -> Result<Model, Unsatisfiable> {
+		let mut model = Model::new(num_var, model_config);
 		if con.cmp.is_ineq()
 			&& con.exp.terms.len() >= 3
 			&& con.k.is_zero() // TODO potentially could work for non-zero k
@@ -133,7 +121,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for UniformBinEqDecomposer 
 					.new_var_from_dom(
 						{
 							let (lb, ub) =
-								firsts.iter().fold((C::zero(), C::zero()), |(lb, ub), t| {
+								firsts.iter().fold((0,0), |(lb, ub), t| {
 									(lb + t.lb(), ub + t.ub())
 								});
 							match con.cmp {
@@ -154,11 +142,11 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for UniformBinEqDecomposer 
 						terms: firsts
 							.iter()
 							.cloned()
-							.chain([Term::new(-C::one(), lhs.clone())])
+							.chain([Term::new(-1, lhs.clone())])
 							.collect(),
 					},
 					cmp: Comparator::Equal,
-					k: C::zero(),
+					k: 0,
 					lbl: con.lbl.clone().map(|lbl| (format!("eq-1-{}", lbl))),
 				})?;
 
@@ -166,7 +154,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for UniformBinEqDecomposer 
 				if matches!(con.cmp, Comparator::GreaterEq) {
 					model.add_constraint(Lin {
 						exp: LinExp {
-							terms: [Term::new(C::one(), lhs.clone())].to_vec(),
+							terms: [Term::from(lhs.clone())].to_vec(),
 						},
 						cmp: Comparator::GreaterEq,
 						k: last.x.borrow().lb(),
@@ -189,10 +177,10 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for UniformBinEqDecomposer 
 				// lhs # rhs
 				model.add_constraint(Lin {
 					exp: LinExp {
-						terms: [Term::new(C::one(), lhs), last.clone()].to_vec(),
+						terms: [Term::from(lhs), last.clone()].to_vec(),
 					},
 					cmp: con.cmp,
-					k: C::zero(),
+					k: 0,
 					lbl: con.lbl.clone().map(|lbl| (format!("eq-2-{}", lbl))),
 				})?;
 			} else {
@@ -207,21 +195,21 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for UniformBinEqDecomposer 
 */
 
 #[derive(Debug, Default)]
-pub struct EncSpecDecomposer<Lit: Literal, C: Coefficient> {
-	pub(crate) cutoff: Option<C>,
-	pub(crate) spec: Option<HashMap<IntVarId, IntVarEnc<Lit, C>>>,
+pub struct EncSpecDecomposer {
+	pub(crate) cutoff: Option<Coeff>,
+	pub(crate) spec: Option<HashMap<IntVarId, IntVarEnc>>,
 }
 
 const COUPLE_SINGLE_VARS: bool = true;
-impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, C> {
+impl Decompose for EncSpecDecomposer {
 	fn decompose(
 		&self,
-		model: Model<Lit, C>,
+		model: Model,
 		// con: Lin<Lit, C>,
 		// num_var: usize,
 		// config: &ModelConfig<C>,
 		// cse: Option<Cse<Lit, C>>,
-	) -> Result<Model<Lit, C>, Unsatisfiable> {
+	) -> Result<Model, Unsatisfiable> {
 		model
 			.vars()
 			.into_iter()
@@ -326,7 +314,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, 
 							.iter()
 							.map(|t| t.dom().into_iter())
 							.multi_cartesian_product()
-							.map(|cs| cs.into_iter().reduce(C::add).unwrap())
+							.map(|cs| cs.into_iter().sum())
 							.sorted()
 							.dedup()
 							.collect_vec(),
@@ -348,11 +336,11 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, 
 								.terms
 								.iter()
 								.cloned()
-								.chain(vec![Term::new(-C::one(), y.clone())])
+								.chain(vec![Term::new(-1, y.clone())])
 								.collect(),
 						},
 						cmp: Comparator::Equal,
-						k: C::zero(),
+						k: 0,
 						lbl: con.lbl.as_ref().map(|lbl| format!("last-{lbl}")),
 					})?;
 
@@ -380,7 +368,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, 
 				// 	.iter()
 				// 	.with_position()
 				// 	.map(
-				// 		|(_p, t)| -> Result<(Term<Lit, C>, Model<Lit, C>), Unsatisfiable> {
+				// 		|(_p, t)| -> Result<(Term, Model), Unsatisfiable> {
 				// 			Ok(if let Some(IntVarEnc::Ord(None)) = t.x.borrow().e.clone() {
 				// 				// is_last_term = matches!(p, Position::Last);
 				// 				let (new_t, m) = t.clone().encode_bin(
@@ -437,12 +425,12 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for EncSpecDecomposer<Lit, 
 }
 
 #[derive(Default, Debug)]
-pub struct ModelDecomposer<Lit: Literal, C: Coefficient> {
-	pub(crate) spec: Option<HashMap<IntVarId, IntVarEnc<Lit, C>>>,
+pub struct ModelDecomposer {
+	pub(crate) spec: Option<HashMap<IntVarId, IntVarEnc>>,
 }
 
-impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ModelDecomposer<Lit, C> {
-	fn decompose(&self, model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
+impl Decompose for ModelDecomposer {
+	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable> {
 		let ModelConfig {
 			equalize_ternaries,
 			cutoff,
@@ -468,15 +456,15 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ModelDecomposer<Lit, C>
 #[derive(Default, Debug)]
 pub struct LinDecomposer {}
 
-impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
+impl Decompose for LinDecomposer {
 	fn decompose(
 		&self,
-		model: Model<Lit, C>,
-		// con: Lin<Lit, C>,
+		model: Model,
+		// con: Lin,
 		// num_var: usize,
-		// model_config: &ModelConfig<C>,
-		// cse: Option<Cse<Lit, C>>,
-	) -> Result<Model<Lit, C>, Unsatisfiable> {
+		// model_config: &ModelConfig,
+		// cse: Option<Cse>,
+	) -> Result<Model, Unsatisfiable> {
 		// let cons = model.cons.iter().cloned().collect_vec();
 		let Model {
 			cons,
@@ -499,7 +487,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 					[] => {
 						let con_model = model.branch(con);
 						con_model
-							.check_assignment(&Assignment(HashMap::default()), None)
+							.check_assignment(&Assignment(HashMap::default()))
 							.map(|_| con_model)
 							.map_err(|_| Unsatisfiable)
 					}
@@ -526,8 +514,8 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 #[derive(Default, Debug)]
 pub struct ScmDecomposer {}
 
-impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ScmDecomposer {
-	fn decompose(&self, model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
+impl Decompose for ScmDecomposer {
+	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable> {
 		let cons = model.cons.iter().cloned();
 		let mut model = Model {
 			cons: vec![],
@@ -561,7 +549,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ScmDecomposer {
 		Ok(model)
 
 		// Ok({
-		// 	let (terms, couplings): (Vec<Term<Lit, C>>, Model<Lit, C>) =
+		// 	let (terms, couplings): (Vec<Term>, Model) =
 		// 		con.exp.terms.iter().map(|t| {}).unzip();
 		// 	[
 		// 		couplings,
@@ -600,8 +588,8 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ScmDecomposer {
 }
 
 /*
-impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ScmDecomposer {
-	fn decompose(&self, mut model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
+impl Decompose for ScmDecomposer {
+	fn decompose(&self, mut model: Model) -> Result<Model, Unsatisfiable> {
 		// let (terms, couplings) = con
 		//     .exp
 		//     .terms
@@ -627,7 +615,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ScmDecomposer {
 			let con = model.cons.first().unwrap().clone();
 
 			Ok({
-				let (terms, couplings): (Vec<Term<Lit, C>>, Model<Lit, C>) = con
+				let (terms, couplings): (Vec<Term>, Model) = con
 					.exp
 					.terms
 					.iter()
@@ -683,15 +671,15 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for ScmDecomposer {
 */
 
 /*
-impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
+impl Decompose for LinDecomposer {
 	fn decompose(
 		&self,
-		model: Model<Lit, C>,
-		// con: Lin<Lit, C>,
+		model: Model,
+		// con: Lin,
 		// num_var: usize,
-		// model_config: &ModelConfig<C>,
-		// cse: Option<Cse<Lit, C>>,
-	) -> Result<Model<Lit, C>, Unsatisfiable> {
+		// model_config: &ModelConfig,
+		// cse: Option<Cse>,
+	) -> Result<Model, Unsatisfiable> {
 		// model.decompose_with( Some(self))
 		// let Model { cons, .. } = model;
 		model
@@ -709,7 +697,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for LinDecomposer {
 				_ if con.exp.terms.len() <= 2
 					|| con.is_tern() || model.config.decomposer == Decomposer::Rca =>
 				{
-					// let mut model = Model::<Lit, C>::new(num_var, model_config);
+					// let mut model = Model::::new(num_var, model_config);
 					// model.add_constraint(con)?;
 					// Ok(model)
 					Ok(Model {

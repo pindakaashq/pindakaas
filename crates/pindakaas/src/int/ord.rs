@@ -2,25 +2,20 @@ use std::collections::HashSet;
 
 use itertools::Itertools;
 
+use super::Dom;
 use crate::{
 	helpers::negate_cnf,
 	trace::{emit_clause, new_var},
-	ClauseDatabase, Coefficient, Literal,
+	ClauseDatabase, Lit, Var,
 };
 
-use super::Dom;
-
 #[derive(Debug, Clone)]
-pub struct OrdEnc<Lit: Literal> {
+pub struct OrdEnc {
 	pub(crate) x: Vec<Lit>,
 }
 
-impl<Lit: Literal> OrdEnc<Lit> {
-	pub fn new<DB: ClauseDatabase<Lit = Lit>, C: Coefficient>(
-		db: &mut DB,
-		dom: &Dom<C>,
-		_lbl: Option<&String>,
-	) -> Self {
+impl OrdEnc {
+	pub fn new<DB: ClauseDatabase>(db: &mut DB, dom: &Dom, _lbl: Option<&String>) -> Self {
 		let _lbl = _lbl.cloned().unwrap_or(String::from("b"));
 		Self {
 			x: dom
@@ -45,7 +40,7 @@ impl<Lit: Literal> OrdEnc<Lit> {
 		} else {
 			self.x
 				.iter()
-				.map(|x| (vec![vec![x.negate()]], true))
+				.map(|x| (vec![vec![!x]], true))
 				.chain([(vec![], false)])
 				.collect()
 		}
@@ -86,34 +81,17 @@ impl<Lit: Literal> OrdEnc<Lit> {
 		}
 	}
 
-	pub fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> crate::Result {
+	pub fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> crate::Result {
 		self.x.iter().tuple_windows().try_for_each(|(a, b)| {
 			if a.var() != b.var() {
-				emit_clause!(db, &[b.negate(), a.clone()])
+				emit_clause!(db, [!b, *a])
 			} else {
 				Ok(())
 			}
 		})
 	}
 
-	// pub(crate) fn as_lin_exp<C: Coefficient>(&self) -> LinExp<Lit, C> {
-	// 	let mut acc = self.lb();
-	// 	LinExp::new()
-	// 		.add_chain(
-	// 			&self
-	// 				.xs
-	// 				.iter(..)
-	// 				.map(|(iv, lit)| {
-	// 					let v = iv.end - C::one() - acc;
-	// 					acc += v;
-	// 					(lit.clone(), v)
-	// 				})
-	// 				.collect::<Vec<_>>(),
-	// 		)
-	// 		.add_constant(self.lb())
-	// }
-
-	pub(crate) fn lits(&self) -> HashSet<Lit> {
+	pub(crate) fn lits(&self) -> HashSet<Var> {
 		self.x.clone().into_iter().map(|lit| lit.var()).collect()
 	}
 
@@ -122,7 +100,7 @@ impl<Lit: Literal> OrdEnc<Lit> {
 	}
 }
 
-impl<Lit: Literal> std::fmt::Display for OrdEnc<Lit> {
+impl std::fmt::Display for OrdEnc {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		write!(f, "[{}]", self.x.iter().join(", "))
 	}
@@ -134,7 +112,7 @@ mod tests {
 	// type C = i64;
 
 	use super::*;
-	use crate::helpers::tests::TestDB;
+	use crate::helpers::tests::{lits, TestDB};
 	#[test]
 	fn test_ineq() {
 		// let mut model = Model::<Lit, C>::default();
@@ -148,11 +126,11 @@ mod tests {
 
 		for (_up, dom_pos, expected_cnf) in [
 			(true, Some(0), vec![]),
-			(true, Some(1), vec![vec![1]]),
-			(true, Some(2), vec![vec![2]]),
-			(true, Some(3), vec![vec![3]]),
-			(true, Some(4), vec![vec![4]]),
-			(true, None, vec![vec![]]),
+			(true, Some(1), vec![lits![1]]),
+			(true, Some(2), vec![lits![2]]),
+			(true, Some(3), vec![lits![3]]),
+			(true, Some(4), vec![lits![4]]),
+			(true, None, vec![lits![]]),
 			// (false, Some(0), vec![vec![]]),
 			// (false, Some(1), vec![vec![-1]]),
 			// (false, Some(2), vec![vec![-2]]),

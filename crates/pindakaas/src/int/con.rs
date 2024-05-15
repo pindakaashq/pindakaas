@@ -1,49 +1,48 @@
 #![allow(clippy::absurd_extreme_comparisons)]
-use crate::helpers::{add_clauses_for, unsigned_binary_range};
-use crate::int::bin::BinEnc;
-use crate::int::helpers::display_cnf;
-use crate::int::{required_lits, Dom, LitOrConst};
-use crate::linear::{lex_geq_const, lex_leq_const, log_enc_add_fn};
-use crate::{
-	trace::emit_clause, Assignment, CheckError, ClauseDatabase, Coefficient, Comparator,
-	Consistency, IntVarRef, Literal, Model, ModelConfig, Result, Term, Unsatisfiable,
-};
 use itertools::Itertools;
 
 use super::{
 	model::{PRINT_COUPLING, USE_COUPLING_IO_LEX, VIEW_COUPLING},
 	IntVarEnc, IntVarId,
 };
+use crate::{
+	helpers::add_clauses_for,
+	int::{bin::BinEnc, helpers::display_cnf, required_lits, Dom, LitOrConst},
+	linear::{lex_geq_const, lex_leq_const, log_enc_add_fn, PosCoeff},
+	trace::emit_clause,
+	Assignment, CheckError, ClauseDatabase, Coeff, Comparator, Consistency, IntVarRef, Lit, Model,
+	ModelConfig, Result, Term, Unsatisfiable,
+};
 
 static mut SKIPS: u32 = 0;
 
 #[derive(Debug, Clone, Default)]
-pub struct LinExp<Lit: Literal, C: Coefficient> {
-	pub terms: Vec<Term<Lit, C>>,
+pub struct LinExp {
+	pub terms: Vec<Term>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Lin<Lit: Literal, C: Coefficient> {
-	pub exp: LinExp<Lit, C>,
+pub struct Lin {
+	pub exp: LinExp,
 	pub cmp: Comparator,
-	pub k: C,
+	pub k: Coeff,
 	pub lbl: Option<String>,
 }
 
-pub(crate) enum LinCase<Lit: Literal, C: Coefficient> {
-	Couple(Term<Lit, C>, Term<Lit, C>),
-	Fixed(Lin<Lit, C>),
-	Unary(Term<Lit, C>, Comparator, C),
-	Scm(Term<Lit, C>, IntVarRef<Lit, C>),
-	Rca(Term<Lit, C>, Term<Lit, C>, Term<Lit, C>),
+pub(crate) enum LinCase {
+	Couple(Term, Term),
+	Fixed(Lin),
+	Unary(Term, Comparator, Coeff),
+	Scm(Term, IntVarRef),
+	Rca(Term, Term, Term),
 	Order,
 	Other,
 }
 
-impl<Lit: Literal, C: Coefficient> TryFrom<&Lin<Lit, C>> for LinCase<Lit, C> {
+impl TryFrom<&Lin> for LinCase {
 	type Error = Unsatisfiable;
 
-	fn try_from(con: &Lin<Lit, C>) -> Result<Self, Unsatisfiable> {
+	fn try_from(con: &Lin) -> Result<Self, Unsatisfiable> {
 		let term_encs = con
 			.exp
 			.terms
@@ -52,19 +51,20 @@ impl<Lit: Literal, C: Coefficient> TryFrom<&Lin<Lit, C>> for LinCase<Lit, C> {
 			// TODO hopefully does not clone inner enc?
 			.collect_vec();
 
-		Ok(match (&term_encs[..], con.cmp) {
-			([], _) => LinCase::Fixed(con.clone()),
-			([(t, Some(IntVarEnc::Bin(_)))], cmp)
-				if (t.c.is_one() || t.c.is_multiple_of(&C::from(2).unwrap()))
-					&& !USE_COUPLING_IO_LEX =>
+		Ok(match (&term_encs[..], con.cmp, con.k) {
+			([], _, _) => LinCase::Fixed(con.clone()),
+			([(t, Some(IntVarEnc::Bin(_)))], cmp, _)
+				if (t.c == 1
+					|| t.c % 2 == 0) // multiple of 2
+                    && !USE_COUPLING_IO_LEX =>
 			{
 				LinCase::Unary((*t).clone().encode_bin(None, cmp, None)?, cmp, con.k)
 			}
 			// VIEW COUPLING
 			// ([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(None)))], _)
 			// // | ([(y, Some(IntVarEnc::Bin(None))), (t, Some(IntVarEnc::Ord(_)))], _)
-			// 	if y.c == -C::one()
-			// 		&& t.x.borrow().dom.size() <= C::one() + C::one()
+			// 	if y.c == -1
+			// 		&& t.x.borrow().dom.size() <= 2
 			// 		&& VIEW_COUPLING =>
 			// {
 			// 	// t.x.borrow_mut().encode(db, None)?;
@@ -75,19 +75,14 @@ impl<Lit: Literal, C: Coefficient> TryFrom<&Lin<Lit, C>> for LinCase<Lit, C> {
 			// }
 			// SCM
 			(
-				[(t_x, Some(IntVarEnc::Bin(_))), (Term { c: y_c, x: y }, Some(IntVarEnc::Bin(_)))]
-				| [(Term { c: y_c, x: y }, Some(IntVarEnc::Bin(_))), (t_x, Some(IntVarEnc::Bin(_)))],
+				[(t_x, Some(IntVarEnc::Bin(_))), (Term { c: -1, x: y }, Some(IntVarEnc::Bin(_)))]
+				| [(Term { c: -1, x: y }, Some(IntVarEnc::Bin(_))), (t_x, Some(IntVarEnc::Bin(_)))],
 				Comparator::Equal,
-			) if *y_c == -C::one()
-				&& con.k.is_zero()
-				&& matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) =>
-			{
-				LinCase::Scm((*t_x).clone(), y.clone())
-			}
-			([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(_)))], _)
-				if y.c == -C::one()
-                    && con.k.is_zero()
-					// && t.x.borrow().dom.size() <= C::one() + C::one()
+				0,
+			) if matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) => LinCase::Scm((*t_x).clone(), y.clone()),
+			([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(_)))], _, 0)
+				if y.c == -1
+					// && t.x.borrow().dom.size() <= 2
 					&& VIEW_COUPLING =>
 			{
 				LinCase::Couple((*t).clone(), (*y).clone())
@@ -96,10 +91,9 @@ impl<Lit: Literal, C: Coefficient> TryFrom<&Lin<Lit, C>> for LinCase<Lit, C> {
 			(
 				[(x, Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_))), (z, Some(IntVarEnc::Bin(_)))],
 				Comparator::Equal,
-			) if z.c.is_negative() && con.k.is_zero() => {
-				LinCase::Rca((*x).clone(), (*y).clone(), (*z).clone())
-			}
-			(encs, _)
+				0,
+			) if z.c.is_negative() => LinCase::Rca((*x).clone(), (*y).clone(), (*z).clone()),
+			(encs, _, _)
 				if encs
 					.iter()
 					.all(|e| matches!(e.1, Some(IntVarEnc::Ord(_)) | None)) =>
@@ -111,8 +105,8 @@ impl<Lit: Literal, C: Coefficient> TryFrom<&Lin<Lit, C>> for LinCase<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
-	pub fn new(terms: &[Term<Lit, C>], cmp: Comparator, k: C, lbl: Option<String>) -> Self {
+impl Lin {
+	pub fn new(terms: &[Term], cmp: Comparator, k: Coeff, lbl: Option<String>) -> Self {
 		Lin {
 			exp: LinExp {
 				terms: terms.to_vec(),
@@ -123,29 +117,23 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		}
 	}
 
-	pub fn tern(
-		x: Term<Lit, C>,
-		y: Term<Lit, C>,
-		cmp: Comparator,
-		z: Term<Lit, C>,
-		lbl: Option<String>,
-	) -> Self {
+	pub fn tern(x: Term, y: Term, cmp: Comparator, z: Term, lbl: Option<String>) -> Self {
 		Lin {
 			exp: LinExp {
 				terms: vec![x, y, Term::new(-z.c, z.x)],
 			},
 			cmp,
-			k: C::zero(),
+			k: 0,
 			lbl,
 		}
 	}
 
-	pub fn lb(&self) -> C {
-		self.exp.terms.iter().map(Term::lb).fold(C::zero(), C::add)
+	pub fn lb(&self) -> Coeff {
+		self.exp.terms.iter().map(Term::lb).sum()
 	}
 
-	pub fn ub(&self) -> C {
-		self.exp.terms.iter().map(Term::ub).fold(C::zero(), C::add)
+	pub fn ub(&self) -> Coeff {
+		self.exp.terms.iter().map(Term::ub).sum()
 	}
 
 	pub(crate) fn propagate(
@@ -177,9 +165,9 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								let b = x_lb - (rs_lb / term.c);
 
 								if term.c.is_negative() {
-									x.ge(&b);
+									x.ge(b);
 								} else {
-									x.le(&b);
+									x.le(b);
 								}
 
 								if x.size() < size {
@@ -187,7 +175,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 									changed.push(id);
 									fixpoint = false;
 								}
-								if x.size() == C::zero() {
+								if x.size() == 0 {
 									return Err(Unsatisfiable);
 								}
 							}
@@ -210,16 +198,16 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								let b = x_ub - (xs_ub / term.c);
 
 								if !term.c.is_negative() {
-									x.ge(&b);
+									x.ge(b);
 								} else {
-									x.le(&b);
+									x.le(b);
 								}
 
 								if x.size() < size {
 									changed.push(id);
 									fixpoint = false;
 								}
-								if x.size() == C::zero() {
+								if x.size() == 0 {
 									return Err(Unsatisfiable);
 								}
 							}
@@ -260,8 +248,8 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 								})
 								.multi_cartesian_product()
 								.any(|rs| {
-									term.c * *d_i + rs.into_iter().fold(C::zero(), |a, b| a + b)
-										== C::zero()
+									term.c * *d_i + rs.into_iter().sum()
+										== 0
 								}) {
 								true
 							} else {
@@ -284,20 +272,16 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 
 	pub(crate) fn is_tern(&self) -> bool {
 		let cs = self.exp.terms.iter().map(|term| term.c).collect::<Vec<_>>();
-		cs.len() == 3 && cs[2] == -C::one() && self.k.is_zero()
+		cs.len() == 3 && cs[2] == -1 && self.k == 0
 	}
 
-	pub(crate) fn check(
-		&self,
-		a: &Assignment<C>,
-		_lit_assignment: Option<&[Lit]>,
-	) -> Result<(), CheckError<Lit>> {
+	pub(crate) fn check(&self, a: &Assignment) -> Result<(), CheckError> {
 		let lhs = self
 			.exp
 			.terms
 			.iter()
 			.map(|term| term.c * a[&term.x.borrow().id].1)
-			.fold(C::zero(), C::add);
+			.sum::<Coeff>();
 
 		if match self.cmp {
 			Comparator::LessEq => lhs <= self.k,
@@ -350,7 +334,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		self.exp
 			.terms
 			.iter()
-			.all(|term| !term.c.is_zero() && !term.x.borrow().is_constant())
+			.all(|term| term.c != 0 && !term.x.borrow().is_constant())
 	}
 
 	// fn into_tern(self) -> Self {
@@ -362,7 +346,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 	// 				.into_iter()
 	// 				.with_position()
 	// 				.map(|pos| match pos {
-	// 					(Position::Last, term) => term * -C::one(),
+	// 					(Position::Last, term) => term * -1,
 	// 					(_, term) => term, // also matches Only element; so unary constraints are not minused
 	// 				})
 	// 				.collect(),
@@ -375,21 +359,15 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		feature = "trace",
 		tracing::instrument(name = "lin_encoder", skip_all, fields(constraint = format!("{}", self)))
 	)]
-	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(
-		&self,
-		db: &mut DB,
-		_config: &ModelConfig<C>,
-	) -> Result {
+	pub fn encode<DB: ClauseDatabase>(&self, db: &mut DB, _config: &ModelConfig) -> Result {
 		match LinCase::try_from(self)? {
-			LinCase::Fixed(con) => con
-				.check(&Assignment::default(), None)
-				.map_err(|_| Unsatisfiable),
+			LinCase::Fixed(con) => con.check(&Assignment::default()).map_err(|_| Unsatisfiable),
 			LinCase::Unary(x, cmp, k) => {
 				// TODO refactor.....
 				x.x.borrow_mut().encode_bin(db)?;
 				let dom = x.x.borrow().dom.clone();
 				let x = x.encode_bin(None, cmp, None)?;
-				let x: IntVarRef<_, _> = x.try_into().unwrap();
+				let x: IntVarRef = x.try_into().unwrap();
 				let x_enc = x.clone().borrow_mut().encode_bin(db)?;
 				x_enc.encode_unary_constraint(db, &cmp, k, &dom, false)
 			}
@@ -406,13 +384,13 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					Comparator::GreaterEq => true,
 				};
 
-				let (range_lb, range_ub) = unsigned_binary_range::<C>(y_enc.bits());
+				let (range_lb, range_ub) = y_enc.range();
 				let dom = &t_y.x.borrow().dom;
 
 				let mut xs = t_x
 					.ineqs(up)
 					.into_iter()
-					.map(|(c, x, _)| (y_enc.normalize((t_x.c * c) - self.k, dom), x))
+					.map(|(c, x, _)| (*y_enc.normalize((t_x.c * c) - self.k, dom), x))
 					.collect_vec();
 
 				if up {
@@ -426,7 +404,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					.tuple_windows()
 					.try_for_each(|((c_a, x_a), (c_b, x_b))| {
 						let x = if up { x_a } else { x_b };
-						let (c_a, c_b) = (c_a + C::one(), c_b);
+						let (c_a, c_b) = (c_a + 1, c_b);
 						let y = y_enc.ineqs(c_a, c_b, !up);
 						if PRINT_COUPLING >= 2 {
 							println!("{up} {c_a}..{c_b} -> {x:?}");
@@ -460,16 +438,16 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					"LBs for addition not matching: {self}"
 				);
 
-				let z: IntVarRef<_, _> = (z * -C::one()).try_into().unwrap();
+				let z: IntVarRef = (z * -1).try_into().unwrap();
 
 				let (x, y) = &[x, y]
 					.into_iter()
 					.map(|t| {
 						// encode
-						t.x.borrow_mut().encode(db, None).unwrap();
+						t.x.borrow_mut().encode(db).unwrap();
 						// encode term and return underlying var
 						let t = t.encode_bin(None, self.cmp, None).unwrap();
-						let x: IntVarRef<_, _> = t.clone().try_into().unwrap_or_else(|_| {
+						let x: IntVarRef = t.clone().try_into().unwrap_or_else(|_| {
 							panic!("Calling Term::encode_bin on {t} should return 1*y")
 						});
 						x
@@ -493,15 +471,24 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				let z_lb = z.borrow().lb();
 				z.borrow_mut().dom = z_dom; // fix lower bound to ground
 				let lits = Some(required_lits(z_ground, z.borrow().dom.ub()));
-				// let carry = LitOrConst::Const(!is_addition); // set initial carry to 1 if subtracting
-				let carry = LitOrConst::Const(false); // initial carry can remain 0?
-				let z_bin =
-					BinEnc::from_lits(&log_enc_add_fn(db, &x, &y, &self.cmp, carry, lits).unwrap());
+				let z_bin = BinEnc::from_lits(
+					&log_enc_add_fn(db, &x, &y, &self.cmp, LitOrConst::Const(false), lits).unwrap(),
+				);
 
-				lex_geq_const(db, &z_bin.xs(), z_lb - z_ground, z_bin.bits())?;
+				lex_geq_const(
+					db,
+					&z_bin.xs(),
+					PosCoeff::new(z_lb - z_ground),
+					z_bin.bits(),
+				)?;
 
 				// TODO only has to be done for last constraint of lin decomp.. (could add_consistency to differentiate?)
-				lex_leq_const(db, &z_bin.xs(), z.borrow().ub() - z_ground, z_bin.bits())?;
+				lex_leq_const(
+					db,
+					&z_bin.xs(),
+					PosCoeff::new(z.borrow().ub() - z_ground),
+					z_bin.bits(),
+				)?;
 				z.borrow_mut().e = Some(IntVarEnc::Bin(Some(z_bin)));
 				Ok(())
 			}
@@ -510,12 +497,12 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 				self.exp
 					.terms
 					.iter()
-					.try_for_each(|t| t.x.borrow_mut().encode(db, None).map(|_| ()))?;
+					.try_for_each(|t| t.x.borrow_mut().encode(db).map(|_| ()))?;
 
 				assert!(
 					self.exp.terms.iter().all(|t| match t.x.borrow().e {
 						Some(IntVarEnc::Ord(_)) => true,
-						Some(IntVarEnc::Bin(_)) => t.x.borrow().dom.size() <= C::one() + C::one(),
+						Some(IntVarEnc::Bin(_)) => t.x.borrow().dom.size() <= 2,
 						_ => false,
 					}),
 					"Non-order: {self}"
@@ -547,7 +534,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					}
 
 					for c in cnf {
-						emit_clause!(db, &c)?;
+						emit_clause!(db, c)?;
 					}
 					Ok(())
 				})
@@ -560,16 +547,16 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		(
 			[(t_x, Some(IntVarEnc::Ord(_))), (t_y, Some(IntVarEnc::Bin(_)))],
 			Comparator::Equal,
-		) if t_x.c.is_one() && t_y.c == -C::one() && USE_CHANNEL => {
+		) if t_x.c.is_one() && t_y.c == -1 && USE_CHANNEL => {
 			t_x.x.borrow_mut().encode_ord(db)?;
 			if !t_x.x.borrow().add_consistency {
 				t_x.x.borrow_mut().consistent(db)?;
 			}
 			let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
 
-			let (range_lb, range_ub) = unsigned_binary_range::<C>(y_enc.bits());
+			let (range_lb, range_ub) = unsigned_binary_range(y_enc.bits());
 			y_enc.x.iter().enumerate().try_for_each(|(i, y_i)| {
-				let r = C::one().shl(i);
+				let r = 2.pow(i);
 				let (l, u) = (range_lb.div(r), range_ub.div(r));
 				add_clauses_for(
 					db,
@@ -614,18 +601,18 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 	// 	tracing::instrument(name = "encode_rec", skip_all, fields(constraint = format!("{} {} {}", terms.iter().join(" "), cmp, k)))
 	// )]
 	fn encode_rec(
-		terms: &[Term<Lit, C>],
+		terms: &[Term],
 		cmp: &Comparator,
-		k: C,
+		k: Coeff,
 		depth: usize,
-	) -> (Option<C>, Vec<Vec<Lit>>) {
+	) -> (Option<Coeff>, Vec<Vec<Lit>>) {
 		if let Some((head, tail)) = terms.split_first() {
 			let up = head.c.is_positive() == (cmp == &Comparator::GreaterEq);
 			if tail.is_empty() {
 				let k_ = if up {
-					k.div_ceil(&head.c)
+					k.div_ceil(head.c) // TODO [?] requires int_roundings
 				} else {
-					k.div_floor(&head.c.clone()) + C::one()
+					k.div_floor(head.c) + 1
 				};
 
 				if PRINT_COUPLING >= 2 {
@@ -674,7 +661,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 									},
 									head.c,
 									head.x.borrow(),
-									if up { d + C::one() } else { d },
+									if up { d + 1 } else { d },
 									conditions,
 									head.c,
 								);
@@ -747,7 +734,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		}
 	}
 
-	pub fn vars(&self) -> Vec<IntVarRef<Lit, C>> {
+	pub fn vars(&self) -> Vec<IntVarRef> {
 		self.exp
 			.terms
 			.iter()
@@ -757,7 +744,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			.collect()
 	}
 
-	pub(crate) fn _simplified(self) -> Result<Lin<Lit, C>> {
+	pub(crate) fn _simplified(self) -> Result<Lin> {
 		let mut k = self.k;
 		let con = Lin {
 			exp: LinExp {
@@ -779,7 +766,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			..self
 		};
 		if con.exp.terms.is_empty() {
-			con.check(&Assignment::default(), None)
+			con.check(&Assignment::default())
 				.map(|_| con)
 				.map_err(|_| Unsatisfiable)
 		} else {
@@ -795,7 +782,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 		pub fn _encode<DB: ClauseDatabase<Lit = Lit>>(
 			&self,
 			db: &mut DB,
-			config: &ModelConfig<C>,
+			config: &ModelConfig<Coeff>,
 		) -> Result {
 			// TODO assert simplified/simplify
 			// assert!(self._is_simplified());
@@ -804,7 +791,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 			// TODO use binary heap
 
 			if config.decomposer == Decomposer::Rca || config.scm == Scm::Pow {
-				assert!(config.cutoff == Some(C::zero()));
+				assert!(config.cutoff == Some(0));
 				let mut k = self.k;
 				let mut encs = self
 					.clone()
@@ -865,7 +852,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 						db,
 						&TernLeConstraint::new(
 							&encs.pop().unwrap(),
-							&IntVarEnc::Const(C::zero()),
+							&IntVarEnc::Const(0),
 							&self.cmp,
 							&IntVarEnc::Const(k),
 						),
@@ -906,7 +893,7 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 					db,
 					&TernLeConstraint::new(
 						x,
-						&IntVarEnc::Const(C::zero()),
+						&IntVarEnc::Const(0),
 						&self.cmp,
 						&IntVarEnc::Const(k),
 					),
@@ -961,12 +948,12 @@ impl<Lit: Literal, C: Coefficient> Lin<Lit, C> {
 									.zip(&self.exp.terms)
 									.map(|((d, _), term)| {
 										if is_leq == term.c.is_positive() {
-											term.c * (d.end - C::one())
+											term.c * (d.end - 1)
 										} else {
 											term.c * d.start
 										}
 									})
-									.fold(self.k, C::sub);
+									.fold(self.k, Coeff::sub);
 
 								let conditions = geqs
 									.iter()

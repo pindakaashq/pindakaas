@@ -1,6 +1,10 @@
+use itertools::Itertools;
+
 use super::at_least_one_clause;
 use crate::{
-	linear::LimitComp, trace::emit_clause, CardinalityOne, ClauseDatabase, Encoder, Literal, Result,
+	linear::LimitComp,
+	trace::{emit_clause, new_var},
+	CardinalityOne, ClauseDatabase, Encoder, Result,
 };
 
 /// An encoder for [`CardinalityOne`] constraints that uses a logarithm
@@ -9,12 +13,12 @@ use crate::{
 #[derive(Default)]
 pub struct BitwiseEncoder {}
 
-impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne<DB::Lit>> for BitwiseEncoder {
+impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "bitwise_encoder", skip_all, fields(constraint = card1.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, card1: &CardinalityOne<DB::Lit>) -> Result {
+	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
 		let size = card1.lits.len();
 		let bits = (usize::BITS - (size - 1).leading_zeros()) as usize;
 
@@ -24,15 +28,15 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne<DB::Lit>> for BitwiseEncoder
 		}
 
 		// Create a log encoded selection variable
-		let signals = (0..bits).map(|_| db.new_var()).collect::<Vec<_>>();
+		let signals = (0..bits).map(|_| new_var!(db)).collect_vec();
 
 		// Enforce that literal can only be true when selected
 		for (i, lit) in card1.lits.iter().enumerate() {
 			for (j, sig) in signals.iter().enumerate() {
 				if i & (1 << j) != 0 {
-					emit_clause!(db, &[lit.negate(), sig.clone()])?;
+					emit_clause!(db, [!lit, *sig])?;
 				} else {
-					emit_clause!(db, &[lit.negate(), sig.negate()])?;
+					emit_clause!(db, [!lit, !sig])?;
 				}
 			}
 		}
@@ -49,8 +53,9 @@ mod tests {
 	use super::*;
 	use crate::{
 		cardinality_one::tests::card1_test_suite,
-		helpers::tests::{assert_enc_sol, assert_sol},
+		helpers::tests::{assert_enc_sol, assert_sol, lits},
 		linear::LimitComp,
+		Lit,
 	};
 
 	card1_test_suite!(BitwiseEncoder::default());
@@ -60,15 +65,15 @@ mod tests {
 		assert_enc_sol!(
 			BitwiseEncoder::default(),
 			2,
-			&CardinalityOne { lits: vec![1, 2], cmp: LimitComp::Equal }
+			&CardinalityOne { lits: lits![1, 2], cmp: LimitComp::Equal }
 			=> vec![
-				vec![1, 2],
-				vec![-1, -3],
-				vec![-2, 3],
+				lits![1, 2],
+				lits![-1, -3],
+				lits![-2, 3],
 			],
 			vec![
-				vec![1, -2],
-				vec![-1, 2],
+				lits![1, -2],
+				lits![-1, 2],
 			]
 		);
 	}

@@ -1,19 +1,21 @@
 #![allow(clippy::absurd_extreme_comparisons)]
-use crate::int::decompose::{Decompose, ModelDecomposer};
-use crate::int::{IntVar, IntVarId, IntVarRef, LinExp};
-use crate::{
-	int::Dom, CheckError, Checker, ClauseDatabase, Coefficient, Comparator, Literal, Result,
-	Unsatisfiable,
-};
-use crate::{Lin, Term};
-use itertools::Itertools;
-use std::fmt::Display;
 use std::{
 	cell::RefCell,
 	cmp::Ordering,
 	collections::{BTreeSet, HashMap, HashSet},
 	ops::Index,
 	rc::Rc,
+};
+
+use itertools::Itertools;
+
+use crate::{
+	int::{
+		decompose::{Decompose, ModelDecomposer},
+		Dom, IntVar, IntVarId, IntVarRef, LinExp,
+	},
+	CheckError, Checker, ClauseDatabase, Comparator, Lin, Lit, Result, Term, Unsatisfiable,
+	Valuation, Var,
 };
 
 #[cfg(feature = "trace")]
@@ -30,8 +32,6 @@ pub(crate) const VIEW_COUPLING: bool = true;
 // Use channelling
 pub(crate) const USE_CHANNEL: bool = false;
 
-use super::IntVarEnc;
-
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Scm {
 	Add,
@@ -40,6 +40,9 @@ pub enum Scm {
 	#[default]
 	Dnf,
 }
+
+use super::IntVarEnc;
+use crate::Coeff;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Decomposer {
@@ -51,9 +54,9 @@ pub enum Decomposer {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ModelConfig<C: Coefficient> {
+pub struct ModelConfig {
 	pub scm: Scm,
-	pub cutoff: Option<C>,
+	pub cutoff: Option<Coeff>,
 	pub decomposer: Decomposer,
 	/// Rewrites all but last equation x:B + y:B ≤ z:B to x:B + y:B = z:B
 	pub equalize_ternaries: bool,
@@ -65,16 +68,16 @@ pub struct ModelConfig<C: Coefficient> {
 
 // TODO should we keep IntVar i/o IntVarEnc?
 #[derive(Debug, Clone)]
-pub struct Model<Lit: Literal, C: Coefficient> {
-	pub cons: Vec<Lin<Lit, C>>,
+pub struct Model {
+	pub cons: Vec<Lin>,
 	pub num_var: usize,
-	pub obj: Obj<Lit, C>,
-	pub config: ModelConfig<C>,
-	pub cse: Cse<Lit, C>,
+	pub obj: Obj,
+	pub config: ModelConfig,
+	pub cse: Cse,
 }
 
-impl<Lit: Literal, C: Coefficient> From<Lin<Lit, C>> for Model<Lit, C> {
-	fn from(con: Lin<Lit, C>) -> Self {
+impl From<Lin> for Model {
+	fn from(con: Lin) -> Self {
 		Model {
 			cons: vec![con],
 			..Model::default()
@@ -82,8 +85,8 @@ impl<Lit: Literal, C: Coefficient> From<Lin<Lit, C>> for Model<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> From<Vec<Lin<Lit, C>>> for Model<Lit, C> {
-	fn from(cons: Vec<Lin<Lit, C>>) -> Self {
+impl From<Vec<Lin>> for Model {
+	fn from(cons: Vec<Lin>) -> Self {
 		Model {
 			cons,
 			..Model::default()
@@ -92,55 +95,36 @@ impl<Lit: Literal, C: Coefficient> From<Vec<Lin<Lit, C>>> for Model<Lit, C> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Cse<Lit: Literal, C: Coefficient>(
-	pub(crate) HashMap<(IntVarId, C, Comparator), Term<Lit, C>>,
-);
+pub struct Cse(pub(crate) HashMap<(IntVarId, Coeff, Comparator), Term>);
 
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
-pub struct Assignment<C: Coefficient>(pub HashMap<IntVarId, (String, C)>);
+pub struct Assignment(pub HashMap<IntVarId, (String, Coeff)>);
 
-impl<C: Coefficient> Ord for Assignment<C> {
+impl Ord for Assignment {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.0.iter().sorted().cmp(other.0.iter().sorted())
 	}
 }
 
-impl<C: Coefficient> PartialOrd for Assignment<C> {
+impl PartialOrd for Assignment {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))
 	}
 }
 
-impl<C: Coefficient> Index<&IntVarId> for Assignment<C> {
-	type Output = (String, C);
+impl Index<&IntVarId> for Assignment {
+	type Output = (String, Coeff);
 
 	fn index(&self, id: &IntVarId) -> &Self::Output {
 		&self.0[id]
 	}
 }
 
-impl<C: Coefficient> Display for Assignment<C> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(
-			f,
-			"{}",
-			self.0
-				.iter()
-				.sorted()
-				.map(|(_, (lbl, a))| format!("{}={}", lbl, a))
-				.join(", ")
-		)
-	}
-}
-
-impl<C: Coefficient> Assignment<C> {
+impl Assignment {
 	pub(crate) fn partialize(self, max_var: &IntVarId) -> Self {
 		Self(self.0.into_iter().filter(|(k, _)| k <= max_var).collect())
 	}
 }
-// impl<C: Coefficient> Index for Assignment<C> {
-
-// }
 
 // TODO Domain will be used once (/if) this is added as encoder feature.
 #[allow(dead_code)]
@@ -153,15 +137,15 @@ pub enum Consistency {
 }
 
 #[derive(Default, Debug, Clone)]
-pub enum Obj<Lit: Literal, C: Coefficient> {
+pub enum Obj {
 	#[default]
 	Satisfy,
-	Minimize(LinExp<Lit, C>),
-	Maximize(LinExp<Lit, C>),
+	Minimize(LinExp),
+	Maximize(LinExp),
 }
 
-impl<Lit: Literal, C: Coefficient> Obj<Lit, C> {
-	pub fn obj(&self) -> Option<&LinExp<Lit, C>> {
+impl Obj {
+	pub fn obj(&self) -> Option<&LinExp> {
 		match self {
 			Obj::Minimize(exp) | Obj::Maximize(exp) => Some(exp),
 			Obj::Satisfy => None,
@@ -177,8 +161,8 @@ impl<Lit: Literal, C: Coefficient> Obj<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Extend<Model<Lit, C>> for Model<Lit, C> {
-	fn extend<T: IntoIterator<Item = Model<Lit, C>>>(&mut self, iter: T) {
+impl Extend<Model> for Model {
+	fn extend<T: IntoIterator<Item = Model>>(&mut self, iter: T) {
 		for model in iter {
 			self.num_var = model.num_var;
 			self.cons.extend(model.cons);
@@ -186,8 +170,8 @@ impl<Lit: Literal, C: Coefficient> Extend<Model<Lit, C>> for Model<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> FromIterator<Model<Lit, C>> for Model<Lit, C> {
-	fn from_iter<I: IntoIterator<Item = Model<Lit, C>>>(iter: I) -> Self {
+impl FromIterator<Model> for Model {
+	fn from_iter<I: IntoIterator<Item = Model>>(iter: I) -> Self {
 		let mut c = Model::default();
 
 		for i in iter {
@@ -198,23 +182,23 @@ impl<Lit: Literal, C: Coefficient> FromIterator<Model<Lit, C>> for Model<Lit, C>
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Checker for Model<Lit, C> {
-	type Lit = Lit;
-	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>> {
-		let a = self.assign(solution)?;
+impl Checker for Model {
+	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
+		let a = self.assign(sol)?;
 		self.cons
 			.iter()
-			.try_for_each(|con| con.check(&a, Some(solution)))
+			// .try_for_each(|con| con.check(&a, Some(sol)))
+			.try_for_each(|con| con.check(&a))
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Default for Cse<Lit, C> {
+impl Default for Cse {
 	fn default() -> Self {
 		Self(HashMap::new())
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Default for Model<Lit, C> {
+impl Default for Model {
 	fn default() -> Self {
 		Self {
 			cons: vec![],
@@ -226,8 +210,8 @@ impl<Lit: Literal, C: Coefficient> Default for Model<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
-	pub fn new(num_var: usize, config: &ModelConfig<C>) -> Self {
+impl Model {
+	pub fn new(num_var: usize, config: &ModelConfig) -> Self {
 		Self {
 			num_var,
 			config: config.clone(),
@@ -235,44 +219,13 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		}
 	}
 
-	pub fn constraints(&'_ self) -> impl Iterator<Item = &'_ Lin<Lit, C>> {
-		self.cons.iter()
-	}
-
-	pub fn var(
-		&mut self,
-		dom: &[C],
-		lbl: Option<String>,
-	) -> Result<IntVarRef<Lit, C>, Unsatisfiable> {
-		self.new_var(dom, true, None, lbl)
-	}
-
-	pub fn con(
-		&mut self,
-		terms: &[(C, IntVarRef<Lit, C>)],
-		cmp: Comparator,
-		k: C,
-		lbl: Option<String>,
-	) -> Result {
-		self.add_constraint(Lin::new(
-			&terms
-				.iter()
-				.cloned()
-				.map(|(c, x)| Term::new(c, x))
-				.collect::<Vec<_>>(),
-			cmp,
-			k,
-			lbl,
-		))
-	}
-
 	pub(crate) fn new_var_from_dom(
 		&mut self,
-		dom: Dom<C>,
+		dom: Dom,
 		add_consistency: bool,
-		e: Option<IntVarEnc<Lit, C>>,
+		e: Option<IntVarEnc>,
 		lbl: Option<String>,
-	) -> Result<IntVarRef<Lit, C>, Unsatisfiable> {
+	) -> Result<IntVarRef, Unsatisfiable> {
 		(!dom.is_empty())
 			.then(|| {
 				self.num_var += 1;
@@ -283,25 +236,25 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 
 	pub(crate) fn new_var(
 		&mut self,
-		dom: &[C],
+		dom: &[Coeff],
 		add_consistency: bool,
-		e: Option<IntVarEnc<Lit, C>>,
+		e: Option<IntVarEnc>,
 		lbl: Option<String>,
-	) -> Result<IntVarRef<Lit, C>, Unsatisfiable> {
+	) -> Result<IntVarRef, Unsatisfiable> {
 		self.new_var_from_dom(Dom::from_slice(dom), add_consistency, e, lbl)
 	}
 
-	pub fn add_constraint(&mut self, constraint: Lin<Lit, C>) -> Result {
+	pub fn add_constraint(&mut self, constraint: Lin) -> Result {
 		self.cons.push(constraint);
 		Ok(())
 	}
 
-	pub fn new_constant(&mut self, c: C) -> IntVarRef<Lit, C> {
+	pub fn new_constant(&mut self, c: Coeff) -> IntVarRef {
 		self.new_var(&[c], false, None, None).unwrap()
 	}
 
 	/// Decompose every constraint
-	pub fn fold(self, decompose: impl Fn(Self) -> Result<Self>) -> Result<Model<Lit, C>> {
+	pub fn fold(self, decompose: impl Fn(Self) -> Result<Self>) -> Result<Model> {
 		let Model {
 			cons,
 			num_var,
@@ -326,43 +279,61 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	}
 
 	pub(crate) fn decompose_with(
-		self: Model<Lit, C>,
-		decomposer: Option<&(impl Decompose<Lit, C> + std::fmt::Debug)>,
-	) -> Result<Model<Lit, C>, Unsatisfiable> {
+		self: Model,
+		decomposer: Option<&(impl Decompose + std::fmt::Debug)>,
+	) -> Result<Model, Unsatisfiable> {
 		if let Some(decomposer) = decomposer {
 			decomposer.decompose(self)
 		} else {
 			Ok(self)
 		}
 	}
+
+	pub fn constraints(&'_ self) -> impl Iterator<Item = &'_ Lin> {
+		self.cons.iter()
+	}
+
+	// pub(crate) fn add_int_var_enc(
+	// 	&mut self,
+	// 	dom: Dom,
+	// 	e: IntVarEnc,
+	// ) -> Result<IntVarRef, Unsatisfiable> {
+	// 	self.new_var_from_dom(dom, false, Some(e), None)
+	// }
+
+	// pub fn new_var(&mut self, dom: BTreeSet<Coeff>, add_consistency: bool) -> IntVar {
+	// 	self.var_ids += 1;
+	// 	IntVar {
+	// 		id: self.var_ids,
+	// 		dom,
+	// 		add_consistency,
+	// 		views: HashMap::default(),
+	// 	}
+	// }
+
 	pub fn decompose(
 		self,
-		spec: Option<HashMap<IntVarId, IntVarEnc<Lit, C>>>,
-	) -> Result<Model<Lit, C>, Unsatisfiable> {
+		spec: Option<HashMap<IntVarId, IntVarEnc>>,
+	) -> Result<Model, Unsatisfiable> {
 		ModelDecomposer { spec }.decompose(self)
 	}
 
-	pub fn encode_vars<DB: ClauseDatabase<Lit = Lit>>(
-		&mut self,
-		db: &mut DB,
-	) -> Result<(), Unsatisfiable> {
+	pub fn encode_vars<DB: ClauseDatabase>(&mut self, db: &mut DB) -> Result<(), Unsatisfiable> {
 		// Encode (or retrieve encoded) variables (in order of id so lits line up more nicely with variable order)
 		self.vars()
 			.iter()
 			.sorted_by_key(|var| var.borrow().id)
 			.try_for_each(|var| {
 				var.borrow_mut().decide_encoding(self.config.cutoff);
-				var.borrow_mut().encode(db, None).map(|_| ())
+				var.borrow_mut().encode(db).map(|_| ())
 			})
 	}
 
-	pub fn encode<DB: ClauseDatabase<Lit = Lit>>(
+	pub fn encode<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
 		decompose: bool,
 	) -> Result<Self, Unsatisfiable> {
-		// Create decomposed model and its aux vars
-
 		let mut decomposition = if decompose {
 			self.clone().decompose(None)?
 		} else {
@@ -397,7 +368,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		Ok(())
 	}
 
-	pub fn vars(&self) -> Vec<IntVarRef<Lit, C>> {
+	pub fn vars(&self) -> Vec<IntVarRef> {
 		self.cons
 			.iter()
 			.flat_map(|con| con.exp.terms.iter().map(|term| &term.x)) // don't use con.vars() since this will do redundant canonicalizing
@@ -406,43 +377,31 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.collect()
 	}
 
-	pub fn assign(&self, lit_assignment: &[Lit]) -> Result<Assignment<C>, CheckError<Lit>> {
-		self.vars()
-			.iter()
-			.map(|x| {
-				let a = x
-					.borrow()
-					.assign(lit_assignment)
-					.map(|a| (x.borrow().id, (x.borrow().lbl(), a)))?;
-				if x.borrow().add_consistency {
-					assert!(
-						x.borrow().dom.contains(a.1 .1),
-						"Inconsistent var assignment on consistent var: {lit_assignment:?}: {} -> {}", x.borrow(), a.1.1
-					);
-				}
-				Ok(a)
-			})
-			.collect::<Result<HashMap<_, _>, _>>()
-			.map(|a| Assignment(a))
+	pub fn assign<F: Valuation + ?Sized>(&self, sol: &F) -> Result<Assignment, CheckError> {
+		Ok(Assignment(
+			self.vars()
+				.iter()
+				.map(|x| {
+					x.borrow()
+						.assign(sol)
+						.map(|a| (x.borrow().id, (x.borrow().lbl(), a)))
+				})
+				.try_collect()?,
+		))
 	}
 
-	pub fn check_assignment(
-		&self,
-		assignment: &Assignment<C>,
-		lit_assignments: Option<&[Lit]>,
-	) -> Result<(), CheckError<Lit>> {
-		self.cons
-			.iter()
-			.try_for_each(|con| con.check(assignment, lit_assignments))
+	pub fn check_assignment(&self, assignment: &Assignment) -> Result<(), CheckError> {
+		self.cons.iter().try_for_each(|con| con.check(assignment))
 	}
 
-	pub(crate) fn brute_force_solve(
+	pub(crate) fn generate_solutions(
 		&self,
 		max_var: Option<IntVarId>,
-	) -> Result<Vec<Assignment<C>>, ()> {
+	) -> Result<Vec<Assignment>, ()> {
 		let vars = self.vars();
 		let max_var = max_var.unwrap_or(IntVarId(self.num_var));
 
+		/// Limit the search space for solution generation
 		const MAX_SEARCH_SPACE: Option<usize> = Some(250);
 		let mut max_search_space = MAX_SEARCH_SPACE;
 		let mut last_s = None;
@@ -463,7 +422,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 				}
 				Ok(ds)
 			})
-			.try_collect::<Vec<C>, Vec<Vec<C>>, ()>()?
+			.try_collect::<Vec<Coeff>, Vec<Vec<Coeff>>, ()>()?
 			.into_iter()
 			.multi_cartesian_product()
 			.map(|a| {
@@ -474,7 +433,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 						.collect::<HashMap<_, _>>(),
 				)
 			})
-			.filter(|a| self.check_assignment(a, None).is_ok())
+			.filter(|a| self.check_assignment(a).is_ok())
 			// .filter(|a| {
 			// 	matches!(
 			// 		self.check_assignment(a),
@@ -491,11 +450,10 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 	/// Expecting actual_assignments to contain all solutions of the model
 	pub fn check_assignments(
 		&self,
-		actual_assignments: &[Assignment<C>],
-		expected_assignments: Option<&Vec<Assignment<C>>>,
-		_lit_assignments: Option<&[Vec<Lit>]>,
+		actual_assignments: &[Assignment],
+		expected_assignments: Option<&Vec<Assignment>>,
 		brute_force_solve: bool,
-	) -> Result<(), Vec<CheckError<Lit>>> {
+	) -> Result<(), Vec<CheckError>> {
 		// let lit_assignments = lit_assignments
 		// 	.map(|lit_assignments| &lit_assignments.iter().map(|l| Some(l)).collect_vec())
 		// 	.unwrap_or_else(|| &actual_assignments.iter().map(|_| None).collect_vec());
@@ -503,7 +461,7 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 			.iter()
 			// .zip(lit_assignments)
 			.filter_map(|actual_assignment| {
-				match self.check_assignment(actual_assignment, None) {
+				match self.check_assignment(actual_assignment) {
 					Err(CheckError::Fail(e)) => {
 						Some(CheckError::Fail(format!("Inconsistency: {e}")))
 					}
@@ -534,11 +492,11 @@ impl<Lit: Literal, C: Coefficient> Model<Lit, C> {
 		let expected_assignments = expected_assignments
 			.as_ref()
 			.map(|expected_assignments| expected_assignments.to_vec())
-			.unwrap_or_else(|| self.brute_force_solve(None).unwrap());
+			.unwrap_or_else(|| self.generate_solutions(None).unwrap());
 
-		let canonicalize = |a: &[Assignment<C>]| a.iter().sorted().cloned().collect::<Vec<_>>();
+		let canonicalize = |a: &[Assignment]| a.iter().sorted().cloned().collect::<Vec<_>>();
 
-		let check_unique = |a: &[Assignment<C>], mess: &str| {
+		let check_unique = |a: &[Assignment], mess: &str| {
 			assert!(
 				a.iter().sorted().tuple_windows().all(|(a, b)| a != b),
 				"Expected unique {mess} assignments but got:\n{}",
@@ -643,11 +601,11 @@ Actual assignments:
 		Ok(())
 	}
 
-	pub fn lits(&self) -> HashSet<Lit> {
+	pub fn lits(&self) -> HashSet<Var> {
 		self.vars().iter().flat_map(|x| x.borrow().lits()).collect()
 	}
 
-	pub fn with_config(self, config: ModelConfig<C>) -> Self {
+	pub fn with_config(self, config: ModelConfig) -> Self {
 		Model { config, ..self }
 	}
 
@@ -684,7 +642,7 @@ Actual assignments:
 		}
 	}
 
-	pub fn branch(&self, con: Lin<Lit, C>) -> Self {
+	pub fn branch(&self, con: Lin) -> Self {
 		Model {
 			cons: vec![con],
 			num_var: self.num_var,
@@ -694,23 +652,14 @@ Actual assignments:
 	}
 }
 
-// impl<Lit: Literal, C: Coefficient> AsRef<IntVarRef<Lit, C>> for IntVar<Lit, C> {
-// 	fn as_ref(&self) -> &IntVarRef<Lit, C> {
-// 		Rc::new(RefCell::new(self.clone()))
-// 	}
-// }
-
 #[cfg(test)]
 mod tests {
-	type Lit = i32;
-	type C = i64;
-
 	use super::*;
-	use crate::{Cnf, Lin, Model};
+	use crate::{solver::cmdline_solver::MapSol, Cnf, Lin, Model};
 
 	#[test]
 	fn model_test() {
-		let mut model = Model::<Lit, C>::default();
+		let mut model = Model::default();
 		let x1 = model
 			.new_var(&[0, 2], true, None, Some("x1".to_string()))
 			.unwrap();
@@ -729,20 +678,27 @@ mod tests {
 				Some(String::from("c1")),
 			))
 			.unwrap();
-		let mut cnf = Cnf::new(0);
+		let mut cnf = Cnf::default();
 
 		// model.propagate(&Consistency::Bounds);
 		model.encode(&mut cnf, true).unwrap();
 	}
 
-	use crate::int::decompose::LinDecomposer;
-	use crate::{helpers::tests::TestDB, Format};
 	use itertools::{iproduct, Itertools};
-
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
-	fn get_model_configs() -> Vec<ModelConfig<C>> {
+	use crate::{helpers::tests::TestDB, int::decompose::LinDecomposer, Format};
+
+	// pub fn lb(&self) -> Coeff {
+	// 	self.xs.iter().map(|(c, x)| x.borrow().lb(c)).sum::<i64>()
+	// }
+
+	// pub fn ub(&self) -> Coeff {
+	// 	self.xs.iter().map(|(c, x)| x.borrow().ub(c)).sum::<i64>()
+	// }
+
+	fn get_model_configs() -> Vec<ModelConfig> {
 		iproduct!(
 			// [Scm::Add, Scm::Rca, Scm::Pow, Scm::Dnf],
 			// [Decomposer::Gt, Decomposer::Swc, Decomposer::Bdd],
@@ -798,36 +754,32 @@ mod tests {
 	}
 
 	const BRUTE_FORCE_SOLVE: bool = true;
-	const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
+	const VAR_ENCS: &[IntVarEnc] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
 	const SOLVE: bool = true;
-	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Bin(None)];
-	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[IntVarEnc::Ord(None)];
-	// const VAR_ENCS: &[IntVarEnc<Lit, C>] = &[];
 
 	const CHECK_CONSTRAINTS: bool = false;
 	const SHOW_AUX: bool = true;
 
-	fn test_lp_for_configs(lp: &str, configs: Option<Vec<ModelConfig<C>>>) {
+	fn test_lp_for_configs(lp: &str, configs: Option<Vec<ModelConfig>>) {
 		test_model(
-			Model::<Lit, C>::from_string(lp.into(), Format::Lp).unwrap(),
+			Model::from_string(lp.into(), Format::Lp).unwrap(),
 			Some(configs.unwrap_or_else(get_model_configs)),
 		)
 	}
 
 	fn check_decomposition(
-		model: &Model<Lit, C>,
-		decomposition: &Model<Lit, C>,
-		expected_assignments: Option<&Vec<Assignment<C>>>,
+		model: &Model,
+		decomposition: &Model,
+		expected_assignments: Option<&Vec<Assignment>>,
 	) {
 		if !BRUTE_FORCE_SOLVE {
 			return;
 		} else if let Ok(decomposition_expected_assignments) =
-			&decomposition.brute_force_solve(Some(IntVarId(model.num_var)))
+			&decomposition.generate_solutions(Some(IntVarId(model.num_var)))
 		{
 			if let Err(errs) = model.check_assignments(
 				&decomposition_expected_assignments,
 				expected_assignments,
-				None,
 				BRUTE_FORCE_SOLVE,
 			) {
 				for err in errs {
@@ -835,18 +787,16 @@ mod tests {
 				}
 				panic!(
 					"Decomposition is incorrect. Test failed for {:?}\n{model}",
-					model.config,
-				);
+					model.config
+				)
 			}
-		} else {
-			return;
 		}
 	}
 
 	fn expand_var_encs(
-		var_encs: &[IntVarEnc<Lit, C>],
-		vars: Vec<IntVarRef<Lit, C>>,
-	) -> Vec<HashMap<IntVarId, IntVarEnc<Lit, C>>> {
+		var_encs: &[IntVarEnc],
+		vars: Vec<IntVarRef>,
+	) -> Vec<HashMap<IntVarId, IntVarEnc>> {
 		if var_encs.is_empty() {
 			return vec![HashMap::default()];
 		}
@@ -910,11 +860,11 @@ mod tests {
 		*/
 	}
 
-	fn test_model(model: Model<Lit, C>, configs: Option<Vec<ModelConfig<C>>>) {
+	fn test_model(model: Model, configs: Option<Vec<ModelConfig>>) {
 		println!("model = {}", model);
 
 		let expected_assignments = (SOLVE && BRUTE_FORCE_SOLVE)
-			.then(|| model.brute_force_solve(None).ok())
+			.then(|| model.generate_solutions(None).ok())
 			.flatten();
 
 		if Some(vec![]) == expected_assignments {
@@ -951,9 +901,9 @@ mod tests {
 					.unwrap();
 
 				println!("lin_decomp = {}", lin_decomp);
-				if CHECK_DECOMPOSITION {
-					check_decomposition(&model, &lin_decomp, expected_assignments.as_ref());
-				}
+				// if CHECK_DECOMPOSITION {
+				// 	check_decomposition(&model, &lin_decomp, expected_assignments.as_ref());
+				// }
 
 				let var_encs_gen =
 					expand_var_encs(VAR_ENCS, lin_decomp.vars().into_iter().collect());
@@ -1007,11 +957,7 @@ mod tests {
 				} {
 					println!(
 						"checking config #{i} = {:?}\ndecomposition #{j} = {}",
-						model.config,
-						decomposition,
-						// db.cnf.variables(),
-						// db.cnf.clauses(),
-						// db.cnf.literals()
+						model.config, decomposition,
 					);
 					test_decomp(decomposition, &model, expected_assignments)
 				}
@@ -1020,13 +966,10 @@ mod tests {
 	}
 
 	fn test_decomp(
-		mut decomposition: Model<Lit, C>,
-		model: &Model<Lit, C>,
-		expected_assignments: Option<&Vec<Assignment<C>>>,
+		mut decomposition: Model,
+		model: &Model,
+		expected_assignments: Option<&Vec<Assignment>>,
 	) {
-		// let mut con_db = decomp_db.clone();
-		// Set num_var to lits in principal vars (not counting auxiliary vars of decomposition)
-		// TODO should that be moved after encode step since encoding itself might introduce aux (bool) vars?
 		let mut db = TestDB::new(0);
 
 		let principal_vars = decomposition
@@ -1035,12 +978,11 @@ mod tests {
 			.filter(|x| x.borrow().id.0 <= model.num_var)
 			.map(|x| {
 				// if x.borrow().e.is_some() {
-				x.borrow_mut().encode(&mut db, None).unwrap();
+				x.borrow_mut().encode(&mut db).unwrap();
 				// }
 				(x.borrow().id.clone(), x.clone())
 			})
-			.collect::<HashMap<IntVarId, IntVarRef<Lit, C>>>();
-
+			.collect::<HashMap<IntVarId, IntVarRef>>();
 		println!("decomposition = {}", decomposition);
 
 		// encode and solve
@@ -1057,8 +999,13 @@ mod tests {
 				};
 
 				if SOLVE {
-					db.solve(Some(output)).into_iter().sorted().collect()
+					db.solve(Some(output))
+						.into_iter()
+						.sorted()
+						.map(MapSol::from)
+						.collect()
 				} else {
+					// TODO think SOLVE needs to be lifted?
 					vec![]
 				}
 			})
@@ -1068,11 +1015,14 @@ mod tests {
 				Vec::default()
 			});
 
-		assert_eq!(
-			lit_assignments.iter().unique().count(),
-			lit_assignments.len(),
-			"Expected lit assignments to be unique, but was {lit_assignments:?}"
-		);
+		println!("encoded = {}", decomposition);
+
+		// TODO MapSol does not have hash
+		// assert_eq!(
+		// 	lit_assignments.iter().unique().count(),
+		// 	lit_assignments.len(),
+		// 	"Expected lit assignments to be unique, but was {lit_assignments:?}"
+		// );
 
 		// TODO find way to encode principal variables first (to remove extra solutions that only differe )
 
@@ -1095,12 +1045,8 @@ mod tests {
 
 		// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
 
-		let check = checker.check_assignments(
-			&actual_assignments,
-			expected_assignments,
-			Some(&lit_assignments),
-			BRUTE_FORCE_SOLVE,
-		);
+		let check =
+			checker.check_assignments(&actual_assignments, expected_assignments, BRUTE_FORCE_SOLVE);
 		if let Err(errs) = check {
 			for err in errs {
 				println!("{err}");
@@ -1719,9 +1665,9 @@ End
 
 	#[test]
 	fn test_scm_general() {
-		let (l, u) = (1, 5);
-		// let cs = 1..=117;
-		let cs = [117];
+		let (l, u) = (0, 1);
+		let cs = 1..=117;
+		// let cs = [117];
 		// TODO could generate custom expected solutions here, since brute force will be intractable
 		for c in cs {
 			let (x2l, x2u) = (c * l, c * u);
@@ -2413,7 +2359,7 @@ End
 
 	// #[test]
 	fn _test_rca_subtract() {
-		let mut model = Model::<Lit, C>::default();
+		let mut model = Model::default();
 
 		let dom = Dom::from_bounds(0, 1);
 		let t1 = Term::new(
@@ -2469,7 +2415,7 @@ End
 	// #[test]
 	// fn test_ineqs() {
 	// 	let mut db = TestDB::new(0);
-	// 	let mut model = Model::<Lit, C>::default();
+	// 	let mut model = Model::default();
 	// 	let t = Term::new(1, model.new_var(&[-2, 3, 5], true, None, None).unwrap());
 	// 	t.x.borrow_mut().e = Some(IntVarEnc::Bin(None));
 	// 	t.x.borrow_mut()

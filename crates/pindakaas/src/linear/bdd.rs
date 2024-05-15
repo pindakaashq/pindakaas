@@ -4,14 +4,9 @@ use iset::IntervalMap;
 use itertools::Itertools;
 
 use crate::{
-	int::{Decompose, IntVar},
-	Comparator, Decomposer, Literal, ModelConfig, Unsatisfiable,
-};
-#[allow(unused_imports)]
-use crate::{
-	int::{IntVarEnc, IntVarOrd, Lin, LinExp, Model, Term},
-	linear::LimitComp,
-	ClauseDatabase, Coefficient, Encoder, Linear, PosCoeff, Result,
+	int::{Lin, LinExp, Model},
+	ClauseDatabase, Coeff, Comparator, Decompose, Decomposer, Encoder, IntVar, Linear, ModelConfig,
+	Result, Term, Unsatisfiable,
 };
 
 #[allow(dead_code)]
@@ -21,28 +16,36 @@ enum BddSort {
 	None,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+enum BddNode {
+	Val,
+	Gap,
+	View(Coeff),
+}
+
 const SORT_TERMS: BddSort = BddSort::Dsc;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
 #[derive(Default, Clone)]
-pub struct BddEncoder<C: Coefficient> {
+pub struct BddEncoder {
 	add_consistency: bool,
-	cutoff: Option<C>,
+	cutoff: Option<Coeff>,
 }
 
-impl<C: Coefficient> BddEncoder<C> {
+impl BddEncoder {
 	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Option<C>) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
-	fn decompose(&self, mut model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
+impl Decompose for BddEncoder {
+	fn decompose(&self, mut model: Model) -> Result<Model, Unsatisfiable> {
 		assert!(model.cons.len() == 1);
 		let lin = model.cons.pop().unwrap();
 
@@ -57,7 +60,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 					.sorted_by_key(|term| match SORT_TERMS {
 						BddSort::Dsc => -term.ub(),
 						BddSort::Asc => term.ub(),
-						BddSort::None => C::zero(),
+						BddSort::None => 0,
 					})
 					.collect(),
 			},
@@ -69,13 +72,13 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 
 		// We calculate the bounds of the partial sum
 		// Ex. [(0,0), (0,2), (0,5), (0,10)]
-		let mut ys = std::iter::once((C::zero(), C::zero()))
+		let mut ys = std::iter::once((0, 0))
 			.chain(
 				lin.exp
 					.terms
 					.iter()
 					.map(|term| (term.lb(), term.ub()))
-					.scan((C::zero(), C::zero()), |state, (lb, ub)| {
+					.scan((0, 0), |state, (lb, ub)| {
 						*state = (state.0 + lb, state.1 + ub);
 						Some(*state)
 					}),
@@ -94,18 +97,18 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 				match lin.cmp {
 					Comparator::LessEq => vec![
 						(outer_lb..=inner_lb, BddNode::Val),
-						(inner_ub + C::one()..=outer_ub, BddNode::Gap),
+						((inner_ub + 1)..=outer_ub, BddNode::Gap),
 					],
 					Comparator::Equal => {
 						vec![
-							(outer_lb..=(inner_lb - C::one()), BddNode::Gap),
+							(outer_lb..=(inner_lb - 1), BddNode::Gap),
 							(inner_ub..=inner_lb, BddNode::Val),
-							((inner_ub + C::one())..=outer_ub, BddNode::Gap),
+							((inner_ub + 1)..=outer_ub, BddNode::Gap),
 						]
 					}
 					Comparator::GreaterEq => {
 						vec![
-							(outer_lb..=(inner_lb - C::one()), BddNode::Gap),
+							(outer_lb..=(inner_lb - 1), BddNode::Gap),
 							(inner_ub..=outer_ub, BddNode::Val),
 						]
 					}
@@ -115,7 +118,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 				.map(|(iv, node)| {
 					// Turn inclusive ranges into regular ranges for IntervalMap
 					let (lb, ub) = iv.into_inner();
-					(lb..(ub + C::one()), node)
+					(lb..(ub + 1), node)
 				})
 				.collect::<IntervalMap<_, _>>()
 			})
@@ -132,7 +135,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 		// [0..1 => Val, 2..2 => Val]
 		// [0..1 => Val, 2..5 => Val]
 		// [0..6 => Val, 7..10 => Gap]
-		bdd(0, &lin.exp.terms, &lin.cmp, C::zero(), &mut ys);
+		bdd(0, &lin.exp.terms, &lin.cmp, 0, &mut ys);
 
 		// Turn BDD into integer variables and constraints
 		// Ex.
@@ -169,7 +172,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 			})
 			.collect::<Vec<_>>()
 			.into_iter()
-			.chain([(model.new_constant(C::zero()), HashMap::default())]) // Ensure final element is not cut off by tuple_windows
+			.chain([(model.new_constant(0), HashMap::default())]) // Ensure final element is not cut off by tuple_windows
 			.tuple_windows()
 			.map(|((y, views), (y_next, _))| {
 				// Views are always from one y to the next
@@ -184,7 +187,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 
 		let mut ys = ys.into_iter();
 		if let Some(first) = ys.next() {
-			assert!(first.size() == C::one());
+			assert!(first.size() == 1);
 
 			lin.exp.terms.iter().zip(ys).enumerate().try_fold(
 				first,
@@ -208,23 +211,20 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for BddEncoder<C> {
 	}
 }
 
-fn process_val<C: Coefficient>(iv: Range<C>, cmp: &Comparator) -> C {
+fn process_val(iv: Range<Coeff>, cmp: &Comparator) -> Coeff {
 	match cmp {
-		Comparator::LessEq | Comparator::Equal => iv.end - C::one(),
+		Comparator::LessEq | Comparator::Equal => iv.end - 1,
 		Comparator::GreaterEq => iv.start,
 	}
 }
 
-impl<DB, C> Encoder<DB, Linear<DB::Lit, C>> for BddEncoder<C>
-where
-	DB: ClauseDatabase,
-	C: Coefficient,
-{
+impl<DB: ClauseDatabase> Encoder<DB, Linear> for BddEncoder {
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
+
+	fn encode(&self, db: &mut DB, lin: &Linear) -> Result {
 		let mut model = Model {
 			config: ModelConfig {
 				cutoff: self.cutoff,
@@ -240,7 +240,7 @@ where
 			.iter()
 			.enumerate()
 			.map(|(i, part)| {
-				IntVar::from_part(db, &mut model, part, lin.k.clone(), format!("x_{i}"))
+				IntVar::from_part(db, &mut model, part, lin.k.into(), format!("x_{i}"))
 					.map(Term::from)
 			})
 			.collect::<Result<Vec<_>, _>>()?;
@@ -258,21 +258,13 @@ where
 	}
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq)]
-enum BddNode<C: Coefficient> {
-	Val,
-	Gap,
-	View(C),
-}
-
-fn bdd<Lit: Literal, C: Coefficient>(
+fn bdd(
 	i: usize,
-	xs: &Vec<Term<Lit, C>>,
+	xs: &Vec<Term>,
 	_cmp: &Comparator,
-	sum: C,
-	ws: &mut Vec<IntervalMap<C, BddNode<C>>>,
-) -> (std::ops::Range<C>, BddNode<C>) {
+	sum: Coeff,
+	ws: &mut Vec<IntervalMap<Coeff, BddNode>>,
+) -> (std::ops::Range<Coeff>, BddNode) {
 	// TODO assert at most one (not sure if
 	match &ws[i].overlap(sum).next() {
 		None => {
@@ -308,12 +300,13 @@ mod tests {
 	use super::*;
 	use crate::{
 		// cardinality_one::tests::card1_test_suite, CardinalityOne,
-		helpers::tests::assert_sol,
+		helpers::tests::{assert_sol, lits},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
-			LimitComp,
+			LimitComp, PosCoeff,
 		},
 		Encoder,
+		Lit,
 	};
 	linear_test_suite!(BddEncoder::default());
 	// FIXME: BDD does not support LimitComp::Equal
