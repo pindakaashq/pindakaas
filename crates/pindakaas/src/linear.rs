@@ -21,6 +21,7 @@ pub use adder::AdderEncoder;
 pub(crate) use adder::{lex_geq_const, lex_leq_const, log_enc_add_fn};
 pub use aggregator::LinearAggregator;
 pub use bdd::BddEncoder;
+use itertools::Itertools;
 pub use swc::SwcEncoder;
 pub use totalizer::TotalizerEncoder;
 
