@@ -14,7 +14,6 @@ mod int;
 mod linear;
 mod propositional_logic;
 pub mod solver;
-mod sorted;
 pub mod trace;
 
 use std::{
@@ -30,7 +29,7 @@ use std::{
 	path::Path,
 };
 
-pub use cardinality::{Cardinality, SortingNetworkEncoder};
+pub use cardinality::Cardinality;
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
 use helpers::VarRange;
 pub use int::{
