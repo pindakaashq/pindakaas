@@ -439,10 +439,14 @@ impl Term {
 mod tests {
 
 	use super::*;
-	use crate::{helpers::tests::TestDB, Unsatisfiable};
+	use crate::{
+		helpers::tests::{assert_ok, TestDB},
+		Unsatisfiable,
+	};
+
 	#[test]
 	fn term_test() {
-		((|| {
+		assert_ok!({
 			let mut db = TestDB::new(0);
 			let mut model = Model::default();
 			let x = Term::new(
@@ -464,8 +468,7 @@ mod tests {
 			// ALL FALSE -> x101=5 -> y010=-5
 
 			assert_eq!(y.x.borrow().dom, Dom::from_bounds(-9, -2));
-			Ok::<(), Unsatisfiable>(())
-		})())
-		.unwrap()
+			Ok::<(), Unsatisfiable>(()) // TODO [?] assert_ok and why need specify this error?
+		});
 	}
 }

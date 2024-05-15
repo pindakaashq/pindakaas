@@ -56,14 +56,14 @@ pub enum Decomposer {
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModelConfig {
 	pub scm: Scm,
-	pub cutoff: Option<Coeff>,
-	pub decomposer: Decomposer,
+	pub(crate) cutoff: Option<Coeff>,
+	pub(crate) decomposer: Decomposer,
 	/// Rewrites all but last equation x:B + y:B ≤ z:B to x:B + y:B = z:B
-	pub equalize_ternaries: bool,
-	pub add_consistency: bool,
-	pub propagate: Consistency,
+	pub(crate) equalize_ternaries: bool,
+	pub(crate) add_consistency: bool,
+	pub(crate) propagate: Consistency,
 	/// Rewrites x:B + y:B ≤ z:B to x:B + y:B = z':B ∧ y:B ≤ z:B
-	pub equalize_uniform_bin_ineqs: bool,
+	pub(crate) equalize_uniform_bin_ineqs: bool,
 }
 
 // TODO should we keep IntVar i/o IntVarEnc?
@@ -652,33 +652,37 @@ Actual assignments:
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{solver::cmdline_solver::MapSol, Cnf, Lin, Model};
+	use crate::{helpers::tests::assert_ok, solver::cmdline_solver::MapSol, Cnf, Lin, Model};
 
 	#[test]
 	fn model_test() {
-		let mut model = Model::default();
-		let x1 = model
-			.new_var(&[0, 2], true, None, Some("x1".to_string()))
-			.unwrap();
-		let x2 = model
-			.new_var(&[0, 3], true, None, Some("x2".to_string()))
-			.unwrap();
-		let x3 = model
-			.new_var(&[0, 5], true, None, Some("x3".to_string()))
-			.unwrap();
-		let k = 6;
-		model
-			.add_constraint(Lin::new(
+		assert_ok!({
+			// Instantiate model
+			let mut model = Model::default().with_config(ModelConfig {
+				scm: Scm::Add,
+				..ModelConfig::default()
+			});
+
+			// Add variables using dom/slice and optional label
+			let x1 = model.new_var(&[0, 2], true, None, Some("x1".to_string()))?;
+			let x2 = model.new_var(&[0, 3], true, None, Some("x2".to_string()))?;
+			let x3 = model.new_var(&[0, 5], true, None, Some("x3".to_string()))?;
+
+			// Add (linear) constraint
+			model.add_constraint(Lin::new(
 				&[Term::new(1, x1), Term::new(1, x2), Term::new(1, x3)],
 				Comparator::LessEq,
-				k,
+				6,
 				Some(String::from("c1")),
-			))
-			.unwrap();
-		let mut cnf = Cnf::default();
+			))?;
 
-		// model.propagate(&Consistency::Bounds);
-		model.encode(&mut cnf, true).unwrap();
+			// Encode to ClauseDatabase
+			let mut cnf = Cnf::default();
+			model.encode(&mut cnf, true)?;
+
+			// Solve?
+			Ok::<(), Unsatisfiable>(())
+		});
 	}
 
 	use itertools::{iproduct, Itertools};

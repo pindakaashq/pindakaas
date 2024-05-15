@@ -27,51 +27,6 @@ impl Display for Lit {
 	}
 }
 
-// // <<<<<<< HEAD
-// impl FromStr for base::Lit {
-// 	type Err = ParseIntError;
-// 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-//         // TODO [?]
-// 		// Ok(Lit(base::Lit(NonZeroI32(i32::from_str(s)?))))
-// 		Ok(base::Lit(NonZeroI32(i32::from_str(s)?)))
-// 	}
-// }
-
-// impl Zero for Lit {
-// 	fn zero() -> Self {
-// 		Lit(0)
-// 	}
-// 	fn is_zero(&self) -> bool {
-// 		self.0 == 0
-// 	}
-// }
-// impl One for Lit {
-// 	fn one() -> Self {
-// 		Lit(1)
-// 	}
-// }
-// impl Add for Lit {
-// 	type Output = Lit;
-// 	fn add(self, rhs: Self) -> Self::Output {
-// 		Lit(self.0 + rhs.0)
-// 	}
-// }
-// impl Mul for Lit {
-// 	type Output = Lit;
-// 	fn mul(self, rhs: Self) -> Self::Output {
-// 		Lit(self.0 * rhs.0)
-// 	}
-// }
-// impl TryInto<usize> for Lit {
-// 	type Error = TryFromIntError;
-
-// 	fn try_into(self) -> Result<usize, Self::Error> {
-// 		usize::try_from(self.0)
-// 	}
-// }
-// =======
-// >>>>>>> develop
-
 type Clause = Vec<Lit>;
 
 #[pymodule]

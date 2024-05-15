@@ -273,20 +273,6 @@ fn filter_fixed_sum(xs: &[LitOrConst]) -> (Vec<Lit>, usize) {
 	)
 }
 
-// =======
-// 	x: &[Lit],
-// 	y: &[Lit],
-// 	cmp: &LimitComp,
-// 	z: &[Lit],
-// ) -> Result {
-// 	log_enc_add_(
-// 		db,
-// 		&x.iter().copied().map(LitOrConst::from).collect_vec(),
-// 		&y.iter().copied().map(LitOrConst::from).collect_vec(),
-// 		cmp,
-// 		&z.iter().copied().map(LitOrConst::from).collect_vec(),
-// >>>>>>> develop
-
 #[cfg_attr(feature = "trace", tracing::instrument(name = "xor", skip_all, fields(constraint = format!("(+) {xs:?}"))))]
 fn xor<DB: ClauseDatabase>(db: &mut DB, xs: &[LitOrConst], _lbl: String) -> Result<LitOrConst> {
 	let (xs, trues) = filter_fixed_sum(xs);

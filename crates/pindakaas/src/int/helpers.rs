@@ -417,22 +417,13 @@ End
 											let var = token.to_string();
 											set_doms(&var, &[0, 1], &mut vars);
 											con.0.push(var);
-
-										// if we didn't see a coefficient, it should be +/- 1
-										// if il.1.len() == il.0.len() - 1 {
-										//     // il.1.push(if is_positive { 1 } else { -1 });
-										//     // il.1.push(if is_positive { 1 } else { -1 });
-										//     // is_positive = true;
-										// }
 										} else {
-											// let is_positive = token.starts_with('+');
 											let coef = token.parse::<Coeff>().map_err(|_| {
 												format!("Failed parsing to integer on {token}")
 											})?;
 											if cmp.is_some() {
 												k = Some(coef);
 											} else {
-												// il.1.push(if is_positive { coef } else { -coef });
 												con.1.push(coef);
 											}
 										}
@@ -542,21 +533,6 @@ pub(crate) fn display_cnf(cnf: &[Vec<Lit>]) -> String {
 		.join("\n")
 		.to_string()
 }
-
-// pub(crate) fn filter_cnf(cnf: &[Vec<Lit>], given: &Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
-// 	if given.is_empty() {
-// 		cnf
-// 	} else {
-// 		cnf.into_iter()
-// 			.filter(|clause| {
-// 				// remove clause
-// 				!given // if not redundant; if any given clause
-// 					.iter()
-// 					.any(|given_clause| is_clause_redundant(given_clause, clause))
-// 			})
-// 			.collect()
-// 	}
-// }
 
 /// is clause a subset of b
 pub(crate) fn is_clause_redundant(a: &[Lit], b: &[Lit]) -> bool {
