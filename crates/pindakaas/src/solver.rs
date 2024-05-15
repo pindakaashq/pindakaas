@@ -7,6 +7,7 @@ pub mod kissat;
 #[cfg(feature = "splr")]
 pub mod splr;
 
+// TODO move to feature branch
 pub(crate) mod cmdline_solver;
 
 pub mod libloading;

@@ -13,7 +13,7 @@ use itertools::Itertools;
 use super::LitOrConst;
 use crate::{
 	helpers::pow2,
-	int::{model::Obj, IntVarEnc, LinExp},
+	int::{model::Obj, Dom, IntVarEnc, LinExp},
 	Coeff, Comparator, Lin, Lit, Model, Term,
 };
 
@@ -59,7 +59,6 @@ impl Model {
 	pub fn to_text(&self, format: Format) -> String {
 		match format {
 			Format::Lp => {
-				// let mut output = String::new();
 				format!(
 					"Subject To
 {}
@@ -102,12 +101,6 @@ End
 				)
 			}
 			Format::Opb => {
-				println!("Write OPB");
-
-				// let mut output = File::create(path)?;
-
-				// use std::io::Write;
-				//let pbs = self.pbs.iter().map(|pb| pb.into::<())
 				let vars = self.vars().iter().unique_by(|x| x.borrow().id).count();
 
 				format!(
@@ -183,7 +176,6 @@ End
 			Minimize,
 			Maximize,
 			Encs,
-			// Satisfy,
 		}
 
 		let mut vars: HashMap<String, Vec<Coeff>> = HashMap::new();
@@ -192,7 +184,6 @@ End
 		let mut cons: Vec<(ParseLinExp<Coeff>, Comparator, Coeff, Option<String>)> = vec![];
 
 		let set_doms = |var: &str, dom: &[Coeff], vars: &mut HashMap<String, Vec<Coeff>>| {
-			//let id = var[1..].parse::<usize>().unwrap();
 			let dom = dom.to_vec();
 			vars.entry(var.to_string())
 				.and_modify(|var| var.clone_from(&dom))
@@ -453,7 +444,12 @@ End
 		let add_var = |model: &mut Model, lp_id: &str, dom: &[Coeff]| {
 			let lp_id = lp_id.to_string();
 			model
-				.new_var(dom, true, encs.get(&lp_id).cloned(), Some(lp_id.clone()))
+				.new_aux_var(
+					Dom::from_slice(dom),
+					true,
+					encs.get(&lp_id).cloned(),
+					Some(lp_id.clone()),
+				)
 				.map(|x| (lp_id, x))
 		};
 
@@ -576,8 +572,7 @@ mod tests {
 		)
 		.unwrap();
 		let mut cnf = Cnf::default();
-		model.encode(&mut cnf, true).unwrap();
-		println!("opb = {}", model.to_text(Format::Opb));
+		model.encode_internal(&mut cnf, true).unwrap();
 	}
 
 	#[test]
@@ -598,10 +593,10 @@ End
 ";
 		let mut model = Model::from_string(lp.into(), Format::Lp).unwrap();
 		let mut cnf = Cnf::default();
-		model.encode(&mut cnf, true).unwrap();
-		// assert_eq!(lp, model.to_text(Format::Lp));
+		model.encode_internal(&mut cnf, true).unwrap();
 	}
 
+	// TODO to be used in future with Binary encoding
 	fn nearest_power_of_two(k: Coeff, up: bool) -> Coeff {
 		// find next power of one if up (or previous if going down)
 		if k == 0 {
@@ -643,23 +638,4 @@ End
 		assert_eq!(nearest_power_of_two(8, false), 8);
 		assert_eq!(nearest_power_of_two(9, false), 8);
 	}
-
-	// #[test]
-	// fn test_filter_cnf() {
-	// 	// assert_eq!(
-	// 	// 	filter_cnf(vec![vec![4, 6]], &vec![vec![2, 3, 5]]),
-	// 	// 	vec![vec![4, 6]]
-	// 	// );
-
-	// 	// assert_eq!(
-	// 	// 	filter_cnf(vec![vec![4, 5]], &vec![vec![1, 4, 5]]),
-	// 	// Vec::<Vec<_>>::new()
-	// 	// );
-
-	// 	// a \/ b \/ c <= a \/ b
-	// 	assert_eq!(
-	// 		filter_cnf(vec![vec![1, 2, 3]], &vec![vec![1, 2], vec![4]]),
-	// 		Vec::<Vec<_>>::new()
-	// 	);
-	// }
 }

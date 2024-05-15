@@ -1,8 +1,7 @@
 #![allow(unused_imports, unused_variables, dead_code)]
 use std::{
-	collections::HashSet,
-	fmt,
-	fmt::Display,
+	collections::{BTreeSet, HashSet},
+	fmt::{self, Display},
 	hash::BuildHasherDefault,
 	ops::{Not, Range},
 };
@@ -96,11 +95,6 @@ pub enum IntVarEnc {
 	Bin(Option<BinEnc>),
 }
 
-// pub(crate) enum IntVarEnc {
-// 	Ord(IntVarOrd),
-// 	Bin(IntVarBin),
-// }
-
 const COUPLE_DOM_PART_TO_ORD: bool = false;
 
 impl IntVarEnc {
@@ -111,127 +105,13 @@ impl IntVarEnc {
 			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
 		}
 	}
-	// pub(crate) fn constant(k: Coeff) -> Self {
-	// 	IntVarEnc::Ord(Some(OrdEnc::from_lits(&[])))
-	// }
-
-	/*
-		/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
-		pub fn from_part<DB: ClauseDatabase>(
-			db: &mut DB,
-			xs: &Part,
-			ub: PosCoeff,
-			lbl: String,
-		) -> Vec<Self> {
-			match xs {
-				Part::Amo(terms) => {
-					let terms: Vec<(Coeff, Lit)> = terms
-						.iter()
-						.copied()
-						.map(|(lit, coef)| (*coef, lit))
-						.collect();
-					// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
-					let mut h: FxHashMap<Coeff, Vec<Lit>> =
-						FxHashMap::with_capacity_and_hasher(terms.len(), BuildHasherDefault::default());
-					for (coef, lit) in terms {
-						debug_assert!(coef <= *ub);
-						h.entry(coef).or_default().push(lit);
-					}
-
-					let dom = std::iter::once((0, vec![]))
-						.chain(h)
-						.sorted_by(|(a, _), (b, _)| a.cmp(b))
-						.tuple_windows()
-						.map(|((prev, _), (coef, lits))| {
-							let interval = (prev + 1)..(coef + 1);
-							if lits.len() == 1 {
-								(interval, Some(lits[0]))
-							} else {
-								let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
-								for lit in lits {
-									emit_clause!(db, [!lit, o]).unwrap();
-								}
-								(interval, Some(o))
-							}
-						})
-						.collect::<IntervalMap<_, _>>();
-					vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, lbl))]
-				}
-				// Leaves built from Ic/Dom groups are guaranteed to have unique values
-				Part::Ic(terms) => {
-					let mut acc = 0; // running sum
-					let dom = std::iter::once(&(terms[0].0, PosCoeff::new(0)))
-						.chain(terms.iter())
-						.map(|&(lit, coef)| {
-							acc += *coef;
-							debug_assert!(acc <= *ub);
-							(acc, lit)
-						})
-						.tuple_windows()
-						.map(|((prev, _), (coef, lit))| ((prev + 1)..(coef + 1), Some(lit)))
-						.collect::<IntervalMap<_, _>>();
-					vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, lbl))]
-				}
-				Part::Dom(terms, l, u) => {
-					// TODO account for bounds (or even better, create IntVarBin)
-					// TODO old method (which at least respected bounds)
-					if COUPLE_DOM_PART_TO_ORD {
-						let x_bin = IntVarBin::from_terms(terms.to_vec(), *l, *u, String::from("x"));
-						let x_ord = IntVarEnc::Ord(IntVarOrd::from_bounds(
-							db,
-							x_bin.lb(),
-							x_bin.ub(),
-							String::from("x"),
-						));
-
-						TernLeEncoder::default()
-							.encode(
-								db,
-								&TernLeConstraint::new(
-									&x_ord,
-									&IntVarEnc::Const(0),
-									LimitComp::LessEq,
-									&x_bin.into(),
-								),
-							)
-							.unwrap();
-						vec![x_ord]
-					} else {
-						terms
-							.iter()
-							.enumerate()
-							.map(|(i, (lit, coef))| {
-								IntVarEnc::Ord(IntVarOrd::from_views(
-									db,
-									interval_map! { 1..(**coef+1) => Some(*lit) },
-									format!("{lbl}^{i}"),
-								))
-							})
-							.collect()
-					}
-				} // TODO Not so easy to transfer a binary encoded int var
-				  // Part::Dom(terms, l, u) => {
-				  // let coef = (terms[0].1);
-				  // let false_ if (coef > 1).then(|| let false_ = Some(new_var!(db)); emit_clause!([-false_]); false_ });
-				  // let terms = (1..coef).map(|_| false_.clone()).chain(terms.to_vec());
-
-				  // IntVarEnc::Bin(IntVarBin::from_terms(
-				  // 	terms.to_vec(),
-				  // 	l.clone(),
-				  // 	u.clone(),
-				  // 	String::from("x"),
-				  // ))},
-			}
-		}
-
-	*/
 
 	/// Return set of lits in encoding
-	pub(crate) fn lits(&self) -> HashSet<Var> {
+	pub(crate) fn lits(&self) -> BTreeSet<Var> {
 		match self {
 			IntVarEnc::Ord(Some(o)) => o.lits(),
 			IntVarEnc::Bin(Some(b)) => b.lits(),
-			_ => HashSet::default(),
+			_ => BTreeSet::default(),
 		}
 	}
 }
@@ -248,15 +128,6 @@ impl From<OrdEnc> for IntVarEnc {
 	}
 }
 
-// impl From<&IntVarEnc> for LinExp {
-// 	fn from(value: &IntVarEnc) -> Self {
-// 		match value {
-// 			IntVarEnc::Ord(o) => o.into(),
-// 			IntVarEnc::Bin(b) => b.into(),
-// 		}
-// 	}
-// }
-
 impl fmt::Display for IntVarEnc {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
@@ -265,27 +136,4 @@ impl fmt::Display for IntVarEnc {
 			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
 		}
 	}
-}
-pub(crate) fn ord_plus_ord_le_ord_sparse_dom(
-	a: Vec<Coeff>,
-	b: Vec<Coeff>,
-	l: Coeff,
-	u: Coeff,
-) -> IntervalSet<Coeff> {
-	// TODO optimize by dedup (if already sorted?)
-	HashSet::<Coeff>::from_iter(a.iter().flat_map(|a| {
-		b.iter().filter_map(move |b| {
-			// TODO refactor: use then_some when stabilized
-			if *a + *b >= l && *a + *b <= u {
-				Some(*a + *b)
-			} else {
-				None
-			}
-		})
-	}))
-	.into_iter()
-	.sorted()
-	.tuple_windows()
-	.map(|(a, b)| (a + 1)..(b + 1))
-	.collect::<IntervalSet<_>>()
 }

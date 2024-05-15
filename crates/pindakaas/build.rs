@@ -59,7 +59,6 @@ fn scm() -> Result<Vec<(usize, u32, Vec<ScmNode>)>, std::io::Error> {
 		.collect())
 }
 
-//  TODO ? <C: Coefficient>
 #[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct ScmNode {

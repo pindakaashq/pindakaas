@@ -7,7 +7,7 @@ use crate::{
 	int::LitOrConst,
 	linear::LimitComp,
 	trace::{emit_clause, new_var},
-	ClauseDatabase, Coeff, Comparator, Encoder, Linear, Lit, Result, Unsatisfiable,
+	ClauseDatabase, Coeff, Encoder, Linear, Lit, Result, Unsatisfiable,
 };
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
@@ -207,8 +207,7 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase>(
 		})
 }
 
-// TODO Implement Mul/Add for Lit (once merged with new Lit struct)
-
+// TODO implement for given false carry
 #[cfg_attr(feature = "trace", tracing::instrument(name = "carry", skip_all, fields(constraint = format!("{xs:?} >= 2"))))]
 fn carry<DB: ClauseDatabase>(db: &mut DB, xs: &[LitOrConst], _lbl: String) -> Result<LitOrConst> {
 	// The carry is true iff at least 2 out of 3 `xs` are true
@@ -313,18 +312,17 @@ fn xor<DB: ClauseDatabase>(db: &mut DB, xs: &[LitOrConst], _lbl: String) -> Resu
 	Ok(if trues % 2 == 0 { is_even } else { !is_even })
 }
 
-#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("[{c}] + [{}] + [{}] {cmp}", xs.iter().rev().map(|x| format!("{x}")).collect_vec().join(","), ys.iter().rev().map(|x| format!("{x}")).collect_vec().join(",")))))]
+// TODO [?] functional version has duplication with relational version
+#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("[{}] + [{}] = ", xs.iter().rev().map(|x| format!("{x}")).collect_vec().join(","), ys.iter().rev().map(|x| format!("{x}")).collect_vec().join(",")))))]
 pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 	db: &mut DB,
 	xs: &[LitOrConst],
 	ys: &[LitOrConst],
-	cmp: &Comparator,
-	mut c: LitOrConst,
 	bits: Option<u32>,
 ) -> Result<Vec<LitOrConst>> {
-	assert!(cmp == &Comparator::Equal);
 	let max_bits = itertools::max([xs.len(), ys.len()]).unwrap() + 1;
 	let bits = bits.unwrap_or(max_bits as u32) as usize;
+	let mut c = LitOrConst::Const(false);
 
 	let zs = (0..bits)
 		.map(|i| {
@@ -344,104 +342,12 @@ pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 		}
 	}
 
-	// TODO Check if last bits are equal? But then might return unexpected number of bits
+	// TODO If lasts lits are equal, it could mean they can be truncated (at least true for 2-comp)? But then they might return unexpected number of bits in some cases. Needs thinking.
 	Ok(zs)
 }
 
 fn bit(x: &[LitOrConst], i: usize) -> LitOrConst {
 	*x.get(i).unwrap_or(&LitOrConst::Const(false))
-}
-
-#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} {cmp} {z:?}"))))]
-pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
-	db: &mut DB,
-	x: &[LitOrConst],
-	y: &[LitOrConst],
-	cmp: &Comparator,
-	z: &[LitOrConst],
-) -> Result {
-	let n = itertools::max([x.len(), y.len(), z.len()]).unwrap();
-	let bit = |x: &[LitOrConst], i: usize| -> LitOrConst {
-		*x.get(i).unwrap_or(&LitOrConst::Const(false))
-	};
-
-	match cmp {
-		Comparator::Equal => {
-			let c = &std::iter::once(LitOrConst::Const(false))
-				.chain((1..n).map(|_i| {
-					LitOrConst::Lit(new_var!(db, crate::trace::subscripted_name("c", _i)))
-				}))
-				.collect_vec();
-			for i in 0..n {
-				// sum circuit
-				emit_filtered_clause(db, [bit(x, i), bit(y, i), bit(c, i), !bit(z, i)])?;
-				emit_filtered_clause(db, [bit(x, i), !bit(y, i), !bit(c, i), !bit(z, i)])?;
-				emit_filtered_clause(db, [!bit(x, i), bit(y, i), !bit(c, i), !bit(z, i)])?;
-				emit_filtered_clause(db, [!bit(x, i), !bit(y, i), bit(c, i), !bit(z, i)])?;
-
-				emit_filtered_clause(db, [!bit(x, i), !bit(y, i), !bit(c, i), bit(z, i)])?;
-				emit_filtered_clause(db, [!bit(x, i), bit(y, i), bit(c, i), bit(z, i)])?;
-				emit_filtered_clause(db, [bit(x, i), !bit(y, i), bit(c, i), bit(z, i)])?;
-				emit_filtered_clause(db, [bit(x, i), bit(y, i), !bit(c, i), bit(z, i)])?;
-
-				// carry circuit
-				emit_filtered_clause(db, [bit(x, i), bit(y, i), !bit(c, i + 1)])?;
-				emit_filtered_clause(db, [bit(x, i), bit(c, i), !bit(c, i + 1)])?;
-				emit_filtered_clause(db, [bit(y, i), bit(c, i), !bit(c, i + 1)])?;
-				emit_filtered_clause(db, [!bit(x, i), !bit(y, i), bit(c, i + 1)])?;
-				emit_filtered_clause(db, [!bit(x, i), !bit(c, i), bit(c, i + 1)])?;
-				emit_filtered_clause(db, [!bit(y, i), !bit(c, i), bit(c, i + 1)])?;
-			}
-			Ok(())
-		}
-		_ => {
-			todo!("Removed log_enc_add inequality; based on 2-comp");
-			/*
-			let c = &(0..n)
-				.map(|_i| LitOrConst::Lit(new_var!(db, crate::trace::subscripted_name("c", _i))))
-				.chain(std::iter::once(LitOrConst::Const(true)))
-				.collect_vec();
-
-			// Ensure z/x have same length
-			// let x = &sign_extend(x, LitOrConst::Const(false), n);
-			// let z = &sign_extend(z, LitOrConst::Const(false), n);
-			let x = &sign_extend(x, !(x.last().unwrap().clone()), n);
-			let z = &sign_extend(z, !(z.last().unwrap().clone()), n);
-
-			assert!(
-				y.iter().all(|yi| matches!(yi, LitOrConst::Const(false))),
-				"Expected {y:?} to be zero for x<=z lex comparison"
-			);
-
-			// higher i -> more significant
-			for i in 0..n {
-				// c = all more significant bits are equal AND current one is
-				// if up to i is equal, all preceding must be equal
-				emit_filtered_clause(db, [!bit(c, i), bit(c, i + 1)])?;
-				// if up to i is equal, x<->z
-				emit_filtered_clause(db, [!bit(c, i), !bit(x, i), bit(z, i)])?;
-				emit_filtered_clause(db, [!bit(c, i), !bit(z, i), bit(x, i)])?;
-
-				// if not up to i is equal, either preceding bit was not equal, or x!=z
-				emit_filtered_clause(db, [bit(c, i), !bit(c, i + 1), bit(x, i), bit(z, i)])?;
-				emit_filtered_clause(db, [bit(c, i), !bit(c, i + 1), !bit(x, i), !bit(z, i)])?;
-
-				// if preceding bits are equal, then x<=z (or x>=z)
-				match ineq {
-					Comparator::LessEq => {
-						emit_filtered_clause(db, [!bit(c, i + 1), !bit(x, i), bit(z, i)])
-					}
-					Comparator::GreaterEq => {
-						emit_filtered_clause(db, [!bit(c, i + 1), bit(x, i), !bit(z, i)])
-					}
-					Comparator::Equal => unreachable!(),
-				}?;
-			}
-
-			Ok(())
-			*/
-		}
-	}
 }
 
 fn emit_filtered_clause<DB: ClauseDatabase, I: IntoIterator<Item = LitOrConst>>(
@@ -595,24 +501,6 @@ mod tests {
 		Cardinality, CardinalityOne, Comparator, Encoder, LinExp, LinearConstraint, LinearEncoder,
 		PairwiseEncoder,
 	};
-
-	// TODO deprecated for log_enc_add inequality
-	// #[test]
-	fn _test_lex_geq() {
-		let mut db = TestDB::new(5);
-		let x = &[
-			LitOrConst::from(Lit::from(db.new_var())),
-			LitOrConst::from(Lit::from(db.new_var())),
-			LitOrConst::from(false),
-		];
-		let y = &[LitOrConst::from(false)];
-		let z = &[
-			LitOrConst::from(Lit::from(db.new_var())),
-			LitOrConst::from(Lit::from(db.new_var())),
-			LitOrConst::from(Lit::from(db.new_var())),
-		];
-		log_enc_add_(&mut db, x, y, &Comparator::GreaterEq, z).unwrap();
-	}
 
 	#[test]
 	fn test_pb_encode() {

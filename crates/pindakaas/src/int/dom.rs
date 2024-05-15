@@ -7,7 +7,7 @@ use crate::Coeff;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Dom {
-	pub(crate) ranges: Vec<(Coeff, Coeff)>,
+	pub(crate) ranges: Vec<(Coeff, Coeff)>, // TODO [?] better to use RangeInclusive rather than tuple?
 }
 
 impl Dom {
@@ -44,8 +44,6 @@ impl Dom {
 	}
 
 	pub fn from_bounds(lb: Coeff, ub: Coeff) -> Self {
-		// TODO return Result
-		assert!(lb <= ub, "Tried to instantiate empty domain {lb}..{ub}");
 		if ub < lb {
 			Self { ranges: vec![] }
 		} else {
@@ -82,7 +80,7 @@ impl Dom {
 
 	pub fn iter(&self) -> DomIterator {
 		let mut ranges = self.ranges.iter();
-		let empty = (1, 0); // TODO nicer way to do this (using iter::empty?)
+		let empty = (1, 0); // TODO [?] nicer way to do this (using iter::empty?)
 		let r = ranges.next().unwrap_or(&empty);
 		let r = r.0..=r.1;
 		DomIterator { ranges, range: r }
@@ -99,15 +97,16 @@ impl Dom {
 			.unwrap_or_default() // no range found; does not contain d
 	}
 
-	// 0, 8 : [1..2, 4..7] => None
-	// 6 : [1..2, 4..7] => 1
-	// 3 : [1..2, 4..7] => 1
 	/// Finds first range where d <= range.u
+	/// # Examples (TODO non-code since internal)
+	///
+	/// 0, 8 : [1..2, 4..7] => None
+	/// 6 : [1..2, 4..7] => 1
+	/// 3 : [1..2, 4..7] => 1
 	fn range(&self, d: Coeff) -> Option<usize> {
 		self.ranges.iter().position(|r| d <= r.1)
 	}
 
-	// TODO use RangeInclusive
 	/// Find position and value of first domain value >= k/c
 	/// Returns Some(0) if first (and all) domain values satisfy the predicate, or None if no domain value satisfy the predicate
 	pub(crate) fn geq(&self, k: Coeff) -> Option<(usize, Coeff)> {
@@ -226,7 +225,7 @@ impl<'a> Iterator for DomIterator<'a> {
 		})
 	}
 
-	// TODO
+	// TODO size_hint/count
 	// fn size_hint(&self) -> (usize, Option<usize>) {
 	// 	self.size.size_hint()
 	// }
@@ -243,13 +242,14 @@ pub(crate) fn is_sorted<T: Ord>(xs: &[T]) -> bool {
 mod tests {
 	use super::*;
 
-	// #[test]
-	// fn union_test() {
-	// 	let a: Vec<C> = vec![1, 2, 3, 7, 8, 9, 11];
-	// 	let b: Vec<C> = vec![4, 6, 8];
-	// 	let dom = Dom::from_slice(&[1, 2, 3, 7, 8, 9, 11]).union(Dom::from_slice(&[2, 3, 5, 15]));
-	// 	// assert_eq!(dom, Dom::from_slice([a, b].concat().sorted().dedup()));
-	// }
+	#[test]
+	fn union_test() {
+		let a: Vec<Coeff> = vec![1, 2, 3, 7, 8, 9, 11];
+		let b: Vec<Coeff> = vec![4, 6, 8];
+		let dom = Dom::from_slice(&a).union(Dom::from_slice(&b));
+		let exp = Dom::from_slice(&[a, b].concat().into_iter().sorted().dedup().collect_vec());
+		assert_eq!(dom, exp);
+	}
 
 	#[test]
 	fn dom_test() {
@@ -296,69 +296,6 @@ mod tests {
 		);
 	}
 
-	// TODO stupid issue (could be resolved by moving this to intvar)
-	// 	#[test]
-	// 	fn test_ineq() {
-	// 		let dom = Dom::from_slice(&[2, 5, 6, 7, 9]);
-
-	// 		for (c, k, cmp, expected_dom_pos) in [
-	// 			(1, 0, Comparator::GreaterEq, Some(0)),
-	// 			(1, 2, Comparator::GreaterEq, Some(0)),
-	// 			(1, 3, Comparator::GreaterEq, Some(1)),
-	// 			(1, 4, Comparator::GreaterEq, Some(1)),
-	// 			(1, 5, Comparator::GreaterEq, Some(1)),
-	// 			(1, 6, Comparator::GreaterEq, Some(2)),
-	// 			(1, 7, Comparator::GreaterEq, Some(3)),
-	// 			(1, 8, Comparator::GreaterEq, Some(4)),
-	// 			(1, 9, Comparator::GreaterEq, Some(4)),
-	// 			(1, 10, Comparator::GreaterEq, None),
-	// 			(1, 11, Comparator::GreaterEq, None),
-	// 			(1, 0, Comparator::LessEq, None),
-	// 			(1, 2, Comparator::LessEq, Some(1)),
-	// 			(1, 3, Comparator::LessEq, Some(1)),
-	// 			(1, 4, Comparator::LessEq, Some(1)),
-	// 			(1, 5, Comparator::LessEq, Some(2)),
-	// 			(1, 6, Comparator::LessEq, Some(3)),
-	// 			(1, 7, Comparator::LessEq, Some(4)),
-	// 			(1, 8, Comparator::LessEq, Some(4)),
-	// 			(1, 9, Comparator::LessEq, Some(0)),
-	// 			(1, 10, Comparator::LessEq, Some(0)),
-	// 			(1, 11, Comparator::LessEq, Some(0)),
-	// 			// 2
-	// 			(2, 0, Comparator::GreaterEq, Some(0)),
-	// 			(2, 1, Comparator::GreaterEq, Some(0)),
-	// 			(2, 2, Comparator::GreaterEq, Some(0)),
-	// 			(2, 3, Comparator::GreaterEq, Some(0)),
-	// 			(2, 4, Comparator::GreaterEq, Some(0)),
-	// 			(2, 5, Comparator::GreaterEq, Some(1)),
-	// 			(2, 6, Comparator::GreaterEq, Some(1)),
-	// 			(2, 7, Comparator::GreaterEq, Some(1)),
-	// 			(2, 18, Comparator::GreaterEq, Some(4)),
-	// 			(2, 19, Comparator::GreaterEq, None),
-	// 			(2, 0, Comparator::LessEq, None),
-	// 			(2, 1, Comparator::LessEq, None),
-	// 			(2, 2, Comparator::LessEq, None),
-	// 			(2, 3, Comparator::LessEq, None),
-	// 			(2, 10, Comparator::LessEq, Some(2)),
-	// 			(2, 11, Comparator::LessEq, Some(2)),
-	// 			(2, 18, Comparator::LessEq, Some(0)),
-	// 			(2, 19, Comparator::LessEq, Some(0)),
-	// 			(2, 20, Comparator::LessEq, Some(0)),
-	// 		] {
-	// 			// TODO remove functionality from unit test
-	// 			let c = i32::try_from(c).unwrap();
-	// 			let k = i32::try_from(k).unwrap();
-
-	// 			let up = (cmp == Comparator::GreaterEq) == c.is_positive();
-	// 			let k = if up { ceil(k / c) } else { k.div_floor(c) };
-	// 			assert_eq!(
-	// 					dom.ineq(k, cmp == Comparator::GreaterEq),
-	// 					expected_dom_pos,
-	// 					"Expected {dom} {cmp} {c}/{k} to return position {expected_dom_pos:?}, but returned:"
-	// 				);
-	// 		}
-	// 	}
-
 	#[test]
 	fn test_d_index() {
 		let dom = Dom::from_slice(&[0, 2, 5, 6]);
@@ -377,12 +314,6 @@ mod tests {
 		assert_eq!(dom.geq(1), Some((1, 1)));
 		assert_eq!(dom.geq(2), None);
 		assert_eq!(dom.geq(3), None);
-
-		// assert_eq!(dom.geq(-2, false), None);
-		// assert_eq!(dom.geq(-1, false), None);
-		// assert_eq!(dom.geq(0, false), Some(1));
-		// assert_eq!(dom.geq(1, false), Some(0));
-		// assert_eq!(dom.geq(2, false), Some(0));
 	}
 
 	#[test]

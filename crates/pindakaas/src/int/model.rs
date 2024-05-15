@@ -18,26 +18,34 @@ use crate::{
 	Var,
 };
 
-// TODO decide
+// TODO Refactor: move to tracing
 #[cfg(feature = "trace")]
 pub(crate) const PRINT_COUPLING: u32 = 1;
 #[cfg(not(feature = "trace"))]
 pub(crate) const PRINT_COUPLING: u32 = 0;
+
+// TODO needs experiment to find out which is better
 /// Replace unary constraints by coupling
 pub(crate) const USE_COUPLING_IO_LEX: bool = false;
 
+// TODO [?] this seemed like a feature, but we do not want to make it public
+/// Use CSE for terms or not
 pub(crate) const USE_CSE: bool = true;
 
+// (const option because unstable implementation)
 /// View coupling
 pub(crate) const VIEW_COUPLING: bool = true;
-// Use channelling
+/// Use channelling
 pub(crate) const USE_CHANNEL: bool = false;
 
+/// SCM methods
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Scm {
+	/// Use recipe that minimizes adders. Good for ≥12 bits
 	Add,
+	/// Use recipe that minimizes ripple-carry-adders
 	Rca,
-	Pow,
+	/// Use recipe derived by Boolean minimization (min. variables). Good for <12 bits
 	#[default]
 	Dnf,
 }
@@ -56,6 +64,7 @@ pub enum Decomposer {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModelConfig {
+	/// Which SCM method to use
 	pub scm: Scm,
 	pub(crate) cutoff: Option<Coeff>,
 	pub(crate) decomposer: Decomposer,
@@ -67,14 +76,13 @@ pub struct ModelConfig {
 	pub(crate) equalize_uniform_bin_ineqs: bool,
 }
 
-// TODO should we keep IntVar i/o IntVarEnc?
 #[derive(Debug, Clone)]
 pub struct Model {
 	pub cons: Vec<Lin>,
-	pub num_var: usize,
+	pub(crate) num_var: usize,
 	pub obj: Obj,
 	pub config: ModelConfig,
-	pub cse: Cse,
+	pub(crate) cse: Cse,
 }
 
 impl From<Lin> for Model {
@@ -95,9 +103,11 @@ impl From<Vec<Lin>> for Model {
 	}
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct Cse(pub(crate) HashMap<(IntVarId, Coeff, Comparator), Term>);
+#[derive(Default, Debug, Clone)]
+pub(crate) struct Cse(pub(crate) HashMap<(IntVarId, Coeff, Comparator), Term>);
 
+// TODO [?] equivalent of Valuation, could be merged?
+/// A structure holding an integer assignment to `Model`
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Assignment(pub HashMap<IntVarId, (String, Coeff)>);
 
@@ -127,8 +137,6 @@ impl Assignment {
 	}
 }
 
-// TODO Domain will be used once (/if) this is added as encoder feature.
-#[allow(dead_code)]
 #[derive(Debug, Default, Clone, Copy, Ord, PartialOrd, PartialEq, Eq, Hash)]
 pub enum Consistency {
 	#[default]
@@ -190,12 +198,6 @@ impl Checker for Model {
 	}
 }
 
-// impl Default for Cse {
-// 	fn default() -> Self {
-// 		Self(HashMap::new())
-// 	}
-// }
-
 impl Default for Model {
 	fn default() -> Self {
 		Self {
@@ -209,15 +211,8 @@ impl Default for Model {
 }
 
 impl Model {
-	pub fn new(num_var: usize, config: &ModelConfig) -> Self {
-		Self {
-			num_var,
-			config: config.clone(),
-			..Model::default()
-		}
-	}
-
-	pub(crate) fn new_var_from_dom(
+	/// New auxiliary variable (meaning it could be inconsistent, or already be encoded)
+	pub(crate) fn new_aux_var(
 		&mut self,
 		dom: Dom,
 		add_consistency: bool,
@@ -232,27 +227,31 @@ impl Model {
 			.ok_or(Unsatisfiable)
 	}
 
-	pub(crate) fn new_var(
+	/// Creates new auxiliary var
+	pub fn new_var(
 		&mut self,
 		dom: &[Coeff],
-		add_consistency: bool,
-		e: Option<IntVarEnc>,
 		lbl: Option<String>,
 	) -> Result<IntVarRef, Unsatisfiable> {
-		self.new_var_from_dom(Dom::from_slice(dom), add_consistency, e, lbl)
+		self.new_aux_var(Dom::from_slice(dom), true, None, lbl)
 	}
 
+	/// Add constraint to model
 	pub fn add_constraint(&mut self, constraint: Lin) -> Result {
+		// TODO call constrain.simplified?
 		self.cons.push(constraint);
 		Ok(())
 	}
 
-	pub fn new_constant(&mut self, c: Coeff) -> IntVarRef {
-		self.new_var(&[c], false, None, None).unwrap()
+	pub(crate) fn new_constant(&mut self, c: Coeff) -> IntVarRef {
+		self.new_aux_var(Dom::constant(c), false, None, None)
+			.unwrap()
 	}
 
+	// TODO used for experiments, made private for release
+	#[allow(dead_code)]
 	/// Decompose every constraint
-	pub fn fold(self, decompose: impl Fn(Self) -> Result<Self>) -> Result<Model> {
+	pub(crate) fn fold(self, decompose: impl Fn(Self) -> Result<Self>) -> Result<Model> {
 		let Model {
 			cons,
 			num_var,
@@ -287,36 +286,25 @@ impl Model {
 		}
 	}
 
-	pub fn constraints(&'_ self) -> impl Iterator<Item = &'_ Lin> {
+	// TODO used for experiments, made private for release
+	#[allow(dead_code)]
+	pub(crate) fn constraints(&'_ self) -> impl Iterator<Item = &'_ Lin> {
 		self.cons.iter()
 	}
 
-	// pub(crate) fn add_int_var_enc(
-	// 	&mut self,
-	// 	dom: Dom,
-	// 	e: IntVarEnc,
-	// ) -> Result<IntVarRef, Unsatisfiable> {
-	// 	self.new_var_from_dom(dom, false, Some(e), None)
-	// }
-
-	// pub fn new_var(&mut self, dom: BTreeSet<Coeff>, add_consistency: bool) -> IntVar {
-	// 	self.var_ids += 1;
-	// 	IntVar {
-	// 		id: self.var_ids,
-	// 		dom,
-	// 		add_consistency,
-	// 		views: HashMap::default(),
-	// 	}
-	// }
-
-	pub fn decompose(
+	pub(crate) fn decompose(
 		self,
 		spec: Option<HashMap<IntVarId, IntVarEnc>>,
 	) -> Result<Model, Unsatisfiable> {
 		ModelDecomposer { spec }.decompose(self)
 	}
 
-	pub fn encode_vars<DB: ClauseDatabase>(&mut self, db: &mut DB) -> Result<(), Unsatisfiable> {
+	// TODO used for experiments, made private for release
+	#[allow(dead_code)]
+	pub(crate) fn encode_vars<DB: ClauseDatabase>(
+		&mut self,
+		db: &mut DB,
+	) -> Result<(), Unsatisfiable> {
 		// Encode (or retrieve encoded) variables (in order of id so lits line up more nicely with variable order)
 		self.vars()
 			.iter()
@@ -327,7 +315,12 @@ impl Model {
 			})
 	}
 
-	pub fn encode<DB: ClauseDatabase>(
+	/// Encode model into `db`
+	pub fn encode_pub<DB: ClauseDatabase>(&mut self, db: &mut DB) -> Result<Self, Unsatisfiable> {
+		self.encode_internal(db, true)
+	}
+
+	pub fn encode_internal<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
 		decompose: bool,
@@ -347,7 +340,7 @@ impl Model {
 		Ok(decomposition)
 	}
 
-	pub fn propagate(&mut self, consistency: &Consistency) -> Result<(), Unsatisfiable> {
+	pub(crate) fn propagate(&mut self, consistency: &Consistency) -> Result<(), Unsatisfiable> {
 		// TODO for Gt/Bdd we actually know we can start propagation at the last constraint
 		let mut queue = BTreeSet::from_iter(0..self.cons.len());
 		if consistency == &Consistency::None {
@@ -366,6 +359,7 @@ impl Model {
 		Ok(())
 	}
 
+	/// Collect and return all variables (iterates over all constraints)
 	pub fn vars(&self) -> Vec<IntVarRef> {
 		self.cons
 			.iter()
@@ -375,6 +369,7 @@ impl Model {
 			.collect()
 	}
 
+	/// Assign `sol` to model to yield its integer `Assignment`
 	pub fn assign<F: Valuation + ?Sized>(&self, sol: &F) -> Result<Assignment, CheckError> {
 		Ok(Assignment(
 			self.vars()
@@ -388,10 +383,12 @@ impl Model {
 		))
 	}
 
+	/// Checks correctness of `assignment`
 	pub fn check_assignment(&self, assignment: &Assignment) -> Result<(), CheckError> {
 		self.cons.iter().try_for_each(|con| con.check(assignment))
 	}
 
+	/// Brute-forces all solutions
 	pub(crate) fn generate_solutions(
 		&self,
 		max_var: Option<IntVarId>,
@@ -432,42 +429,30 @@ impl Model {
 				)
 			})
 			.filter(|a| self.check_assignment(a).is_ok())
-			// .filter(|a| {
-			// 	matches!(
-			// 		self.check_assignment(a),
-			// 		// Err(CheckError::VarInconsistency(_)) | Ok(())
-			// 		Ok(())
-			// 	)
-			// })
 			.map(|a| a.partialize(&max_var))
 			.sorted() // need to sort to make unique since HashMap cannot derive Hash
 			.dedup()
 			.collect())
 	}
 
-	/// Expecting actual_assignments to contain all solutions of the model
+	/// Check that `actual_assignments` to contain all solutions this model
 	pub fn check_assignments(
 		&self,
 		actual_assignments: &[Assignment],
 		expected_assignments: Option<&Vec<Assignment>>,
 		brute_force_solve: bool,
 	) -> Result<(), Vec<CheckError>> {
-		// let lit_assignments = lit_assignments
-		// 	.map(|lit_assignments| &lit_assignments.iter().map(|l| Some(l)).collect_vec())
-		// 	.unwrap_or_else(|| &actual_assignments.iter().map(|_| None).collect_vec());
 		let errs = actual_assignments
 			.iter()
-			// .zip(lit_assignments)
-			.filter_map(|actual_assignment| {
-				match self.check_assignment(actual_assignment) {
+			.filter_map(
+				|actual_assignment| match self.check_assignment(actual_assignment) {
 					Err(CheckError::Fail(e)) => {
 						Some(CheckError::Fail(format!("Inconsistency: {e}")))
 					}
-					// Err(CheckError::VarInconsistency(_)) => None,
 					Err(e) => panic!("Unexpected err: {e}"),
 					_ => None,
-				}
-			})
+				},
+			)
 			.collect::<Vec<_>>();
 
 		// Throw early if expected_assignments need to be computed
@@ -505,7 +490,7 @@ impl Model {
 		let expected_assignments = canonicalize(&expected_assignments);
 		check_unique(&expected_assignments, "expected");
 		let actual_assignments = canonicalize(actual_assignments);
-		// check_unique(&actual_assignments, "actual"); // TODO why not true anymore?
+		// check_unique(&actual_assignments, "actual"); // TODO Regression for two tests
 
 		let principals = expected_assignments
 			.first()
@@ -526,6 +511,7 @@ impl Model {
 				.dedup()
 				.collect::<Vec<_>>(),
 		);
+
 		// TODO unnecessary canonicalize?
 		let extra_int_assignments = canonicalize(
 			&actual_assignments
@@ -599,15 +585,20 @@ Actual assignments:
 		Ok(())
 	}
 
-	pub fn lits(&self) -> HashSet<Var> {
+	// TODO used for experiments, made private for release
+	#[allow(dead_code)]
+	pub(crate) fn lits(&self) -> BTreeSet<Var> {
 		self.vars().iter().flat_map(|x| x.borrow().lits()).collect()
 	}
 
+	/// Configure model with `config`
 	pub fn with_config(self, config: ModelConfig) -> Self {
 		Model { config, ..self }
 	}
 
-	pub fn deep_clone(&self) -> Self {
+	// TODO used for experiments, made private for release
+	#[allow(dead_code)]
+	pub(crate) fn deep_clone(&self) -> Self {
 		// pff; cannot call deep_clone recursively on all the constraints, as it will deep_clone recurring variables multiple times
 		let vars = self
 			.vars()
@@ -640,7 +631,7 @@ Actual assignments:
 		}
 	}
 
-	pub fn branch(&self, con: Lin) -> Self {
+	pub(crate) fn branch(&self, con: Lin) -> Self {
 		Model {
 			cons: vec![con],
 			num_var: self.num_var,
@@ -664,11 +655,10 @@ mod tests {
 				..ModelConfig::default()
 			});
 
-			// Add variables using dom/slice and optional label
-			let x1 = model.new_var(&[0, 2], true, None, Some("x1".to_string()))?;
-			// let x1 = model.new_var(&[0, 2], Some("x1".to_string()))?;
-			let x2 = model.new_var(&[0, 3], true, None, Some("x2".to_string()))?;
-			let x3 = model.new_var(&[0, 5], true, None, Some("x3".to_string()))?;
+			// Add variables using dom/slice with optional label
+			let x1 = model.new_var(&[0, 2], Some("x1".to_string()))?;
+			let x2 = model.new_var(&[0, 3], Some("x2".to_string()))?;
+			let x3 = model.new_var(&[0, 5], Some("x3".to_string()))?;
 
 			// Add (linear) constraint
 			model.add_constraint(Lin::new(
@@ -680,9 +670,8 @@ mod tests {
 
 			// Encode to ClauseDatabase
 			let mut cnf = Cnf::default();
-			model.encode(&mut cnf, true)?;
+			model.encode_internal(&mut cnf, true)?;
 
-			// Solve?
 			Ok::<(), Unsatisfiable>(())
 		});
 	}
@@ -693,27 +682,9 @@ mod tests {
 
 	use crate::{helpers::tests::TestDB, int::decompose::LinDecomposer, Format};
 
-	// pub fn lb(&self) -> Coeff {
-	// 	self.xs.iter().map(|(c, x)| x.borrow().lb(c)).sum::<i64>()
-	// }
-
-	// pub fn ub(&self) -> Coeff {
-	// 	self.xs.iter().map(|(c, x)| x.borrow().ub(c)).sum::<i64>()
-	// }
-
+	/// All possible currently stable (!) configurations
 	fn get_model_configs() -> Vec<ModelConfig> {
 		iproduct!(
-			// [Scm::Add, Scm::Rca, Scm::Pow, Scm::Dnf],
-			// [Decomposer::Gt, Decomposer::Swc, Decomposer::Bdd],
-			// [Consistency::None, Consistency::Bounds],
-			// [false, true],
-			// [None] // smaller number of tests
-			// [None, Some(0), Some(2)]
-			// [Scm::Add],
-			// [Decomposer::Swc],
-			// [Consistency::None],
-			// [false],
-			// [Some(0)] // [None, Some(0), Some(2)]
 			[Scm::Dnf, Scm::Add, Scm::Rca],
 			[
 				Decomposer::Gt,
@@ -721,15 +692,11 @@ mod tests {
 				Decomposer::Bdd,
 				// Decomposer::Rca
 			],
-			// [Consistency::None],
-			// [Consistency::None, Consistency::Bounds],
 			[Consistency::None],
-			[false], // consistency
-			// [true],
-			// [Some(0), Some(2)] // [None, Some(0), Some(2)]
-			[true],  // equalize terns
-			[None],  // [None, Some(0), Some(2)]
-			[false]  // equalize_uniform_bin_ineqs
+			[false],         // consistency
+			[true],          // equalize terns
+			[None, Some(0)], // cutoffs: [None, Some(0), Some(2)]
+			[false]          // equalize_uniform_bin_ineqs
 		)
 		.map(
 			|(
@@ -756,11 +723,15 @@ mod tests {
 		.collect()
 	}
 
+	// TODO expect_test! should remove this
+	/// Generate solutions for expected models
 	const BRUTE_FORCE_SOLVE: bool = true;
+	/// Which uniform (for now) integer encoding specifications to test
 	const VAR_ENCS: &[IntVarEnc] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
-	const SOLVE: bool = true;
 
+	/// Check each constraint of the decomposition individually (unstable)
 	const CHECK_CONSTRAINTS: bool = false;
+	/// Show assignments to auxiliary variables as well (shows more detail, but also more (symmetrical) solutions)
 	const SHOW_AUX: bool = true;
 
 	fn test_lp_for_configs(lp: &str, configs: Option<Vec<ModelConfig>>) {
@@ -816,7 +787,7 @@ mod tests {
 			.collect();
 
 		/*
-		   // TODO Comprehensive mixed encoding testing
+		   // TODO Comprehensive mixed encoding testing. Working but disabled for now
 		let (var_enc_ids, var_enc_gens): (Vec<_>, Vec<_>) = vars
 			.iter()
 			.sorted_by_key(|var| var.borrow().id)
@@ -866,16 +837,15 @@ mod tests {
 	fn test_model(model: Model, configs: Option<Vec<ModelConfig>>) {
 		println!("model = {}", model);
 
-		let expected_assignments = (SOLVE && BRUTE_FORCE_SOLVE)
+		let expected_assignments = BRUTE_FORCE_SOLVE
 			.then(|| model.generate_solutions(None).ok())
 			.flatten();
 
 		if Some(vec![]) == expected_assignments {
-			// println!("WARNING: brute force solver found model UNSAT");
 			panic!("WARNING: brute force solver found model UNSAT");
 		}
 
-		// TODO merge with CHECK_DECOMPOSITION_I
+		/// Check a specific config or decomposition
 		const CHECK_CONFIG_I: Option<usize> = None;
 		const CHECK_DECOMPOSITION_I: Option<usize> = None;
 
@@ -904,6 +874,7 @@ mod tests {
 					.unwrap();
 
 				println!("lin_decomp = {}", lin_decomp);
+				// check the linear decomposition as well
 				// if CHECK_DECOMPOSITION {
 				// 	check_decomposition(&model, &lin_decomp, expected_assignments.as_ref());
 				// }
@@ -990,7 +961,7 @@ mod tests {
 
 		// encode and solve
 		let lit_assignments = decomposition
-			.encode(&mut db, false)
+			.encode_internal(&mut db, false)
 			.map(|_| {
 				let output = if CHECK_CONSTRAINTS || SHOW_AUX {
 					decomposition.lits()
@@ -1001,34 +972,27 @@ mod tests {
 						.collect()
 				};
 
-				if SOLVE {
-					db.solve(Some(output))
-						.into_iter()
-						.sorted()
-						.map(MapSol::from)
-						.collect()
-				} else {
-					// TODO think SOLVE needs to be lifted?
-					vec![]
-				}
+				db.solve(Some(output))
+					.into_iter()
+					.sorted()
+					.map(MapSol::from)
+					.collect()
 			})
 			.unwrap_or_else(|_| {
 				println!("Warning: encoding decomposition lead to UNSAT");
-				// TODO panic based on expected_assignments.is_empty
 				Vec::default()
 			});
 
 		println!("encoded = {}", decomposition);
 
-		// TODO MapSol does not have hash
+		// TODO Implement hash for MapSol
 		// assert_eq!(
 		// 	lit_assignments.iter().unique().count(),
 		// 	lit_assignments.len(),
 		// 	"Expected lit assignments to be unique, but was {lit_assignments:?}"
 		// );
 
-		// TODO find way to encode principal variables first (to remove extra solutions that only differe )
-
+		// The checker model depends on whether we are testing each individual constraint of the decomp or showing aux variables
 		let checker = if CHECK_CONSTRAINTS || SHOW_AUX {
 			decomposition.clone()
 		} else {
@@ -1046,6 +1010,7 @@ mod tests {
 			.flat_map(|lit_assignment| checker.assign(lit_assignment))
 			.collect::<Vec<_>>();
 
+		// TODO impl Hash for Assignment
 		// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
 
 		let check =
@@ -1143,6 +1108,8 @@ End
 		);
 	}
 
+	// TODO some tests need to be evaluated, whole testing set-up may need some organization? Just a directory of lp's?
+
 	// #[test]
 	// fn test_int_lin_le_single_neg_coef() {
 	// 	test_lp_for_configs(
@@ -1203,23 +1170,23 @@ End
 		);
 	}
 
-	// TAKING LONG
+	// TODO this test needs to be profiled as it takes very long for unknown reason!
 	// #[test]
-	fn _test_int_lin_les() {
-		test_lp_for_configs(
-			r"
-Subject To
-c0: + 2 x1 + 3 x2 + 5 x3 <= 6
-c1: + 4 x1 + 2 x2 + 6 x3 <= 6
-Binary
-x1
-x2
-x3
-End
-",
-			None,
-		);
-	}
+	// fn test_int_lin_les() {
+	// 	test_lp_for_configs(
+	// 		r"
+	// Subject To
+	// c0: + 2 x1 + 3 x2 + 5 x3 <= 6
+	// c1: + 4 x1 + 2 x2 + 6 x3 <= 6
+	// Binary
+	// x1
+	// x2
+	// x3
+	// End
+	// ",
+	// 		None,
+	// 	);
+	// }
 
 	#[test]
 	fn test_int_lin_le_2() {
@@ -1236,6 +1203,7 @@ End
 		);
 	}
 
+	// TODO fix failing
 	// #[test]
 	fn _test_lp_le_2() {
 		test_lp_for_configs(
@@ -1252,7 +1220,7 @@ End
 		)
 	}
 
-	/// Shows the problem for current binary ineq method
+	// Shows the problem for current binary ineq method
 	#[test]
 	fn test_int_lin_le_3() {
 		test_lp_for_configs(
@@ -2368,7 +2336,7 @@ End
 		let t1 = Term::new(
 			32,
 			model
-				.new_var_from_dom(
+				.new_aux_var(
 					dom.clone(),
 					true,
 					Some(IntVarEnc::Bin(None)),
@@ -2379,7 +2347,7 @@ End
 		let t2 = Term::new(
 			-7,
 			model
-				.new_var_from_dom(
+				.new_aux_var(
 					dom.clone(),
 					true,
 					Some(IntVarEnc::Bin(None)),
@@ -2396,7 +2364,7 @@ End
 					Term::new(
 						-1,
 						model
-							.new_var_from_dom(
+							.new_aux_var(
 								dom,
 								true,
 								Some(IntVarEnc::Bin(None)),
@@ -2414,16 +2382,4 @@ End
 		model.add_constraint(con).unwrap();
 		test_decomp(model.deep_clone(), &model, None);
 	}
-
-	// #[test]
-	// fn test_ineqs() {
-	// 	let mut db = TestDB::new(0);
-	// 	let mut model = Model::default();
-	// 	let t = Term::new(1, model.new_var(&[-2, 3, 5], true, None, None).unwrap());
-	// 	t.x.borrow_mut().e = Some(IntVarEnc::Bin(None));
-	// 	t.x.borrow_mut()
-	// 		.encode(&mut db, &mut HashMap::new())
-	// 		.unwrap();
-	// 	// let x = BinEnc::new(&mut db, 4, Some(String::from("x")));
-	// }
 }

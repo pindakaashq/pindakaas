@@ -7,14 +7,12 @@ use super::{
 };
 use crate::{
 	helpers::{add_clauses_for, div_ceil, div_floor},
-	int::{bin::BinEnc, helpers::display_cnf, required_lits, Dom, LitOrConst},
+	int::{bin::BinEnc, helpers::display_cnf, required_lits, Dom},
 	linear::{lex_geq_const, lex_leq_const, log_enc_add_fn, PosCoeff},
 	trace::emit_clause,
 	Assignment, CheckError, ClauseDatabase, Coeff, Comparator, Consistency, IntVarRef, Lit, Model,
 	ModelConfig, Result, Term, Unsatisfiable,
 };
-
-static mut SKIPS: u32 = 0;
 
 #[derive(Debug, Clone, Default)]
 pub struct LinExp {
@@ -48,7 +46,6 @@ impl TryFrom<&Lin> for LinCase {
 			.terms
 			.iter()
 			.map(|t| (t, t.x.borrow().e.clone()))
-			// TODO hopefully does not clone inner enc?
 			.collect_vec();
 
 		Ok(match (&term_encs[..], con.cmp, con.k) {
@@ -61,6 +58,7 @@ impl TryFrom<&Lin> for LinCase {
 				LinCase::Unary((*t).clone().encode_bin(None, cmp, None)?, cmp, con.k)
 			}
 			// VIEW COUPLING
+			// TODO this makes single literal comparisons views if possible
 			// ([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(None)))], _)
 			// // | ([(y, Some(IntVarEnc::Bin(None))), (t, Some(IntVarEnc::Ord(_)))], _)
 			// 	if y.c == -1
@@ -81,9 +79,7 @@ impl TryFrom<&Lin> for LinCase {
 				0,
 			) if matches!(y.borrow().e, Some(IntVarEnc::Bin(_))) => LinCase::Scm((*t_x).clone(), y.clone()),
 			([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(_)))], _, 0)
-				if y.c == -1
-					// && t.x.borrow().dom.size() <= 2
-					&& VIEW_COUPLING =>
+				if y.c == -1 && VIEW_COUPLING =>
 			{
 				LinCase::Couple((*t).clone(), (*y).clone())
 			}
@@ -222,7 +218,9 @@ impl Lin {
 				}
 			},
 			Consistency::Domain => {
-				todo!()
+				todo!(
+					"TODO: (super naive) Domain consistency propagator is not tested. Maybe remove"
+				)
 				/*
 				assert!(self.cmp == Comparator::Equal);
 				loop {
@@ -299,18 +297,11 @@ impl Lin {
 					.iter()
 					.map(|term| {
 						format!(
-							// "{} * {}={} (={}) [{:?}]",
 							"{} * {}={} (={})",
 							term.c,
 							term.x.borrow().lbl(),
 							a[&term.x.borrow().id].1,
 							term.c * a[&term.x.borrow().id].1,
-							// lit_assignment
-							// 	.map(|lit_assignment| lit_assignment
-							// 		.iter()
-							// 		.filter(|lit| term.x.borrow().lits().contains(&lit.var()))
-							// 		.collect_vec())
-							// 	.unwrap_or_default()
 						)
 					})
 					.join(" + "),
@@ -336,24 +327,6 @@ impl Lin {
 			.iter()
 			.all(|term| term.c != 0 && !term.x.borrow().is_constant())
 	}
-
-	// fn into_tern(self) -> Self {
-	// 	Lin {
-	// 		exp: LinExp {
-	// 			terms: self
-	// 				.exp
-	// 				.terms
-	// 				.into_iter()
-	// 				.with_position()
-	// 				.map(|pos| match pos {
-	// 					(Position::Last, term) => term * -1,
-	// 					(_, term) => term, // also matches Only element; so unary constraints are not minused
-	// 				})
-	// 				.collect(),
-	// 		},
-	// 		..self
-	// 	}
-	// }
 
 	#[cfg_attr(
 		feature = "trace",
@@ -443,15 +416,13 @@ impl Lin {
 				let (x, y) = &[x, y]
 					.into_iter()
 					.map(|t| {
-						// encode
-						t.x.borrow_mut().encode(db).unwrap();
 						// encode term and return underlying var
+						t.x.borrow_mut().encode(db).unwrap();
 						let t = t.encode_bin(None, self.cmp, None).unwrap();
 						let x: IntVarRef = t.clone().try_into().unwrap_or_else(|_| {
 							panic!("Calling Term::encode_bin on {t} should return 1*y")
 						});
 						x
-						// x.clone().encode_bin(db).unwrap().xs()
 					})
 					.collect_tuple()
 					.unwrap();
@@ -471,9 +442,7 @@ impl Lin {
 				let z_lb = z.borrow().lb();
 				z.borrow_mut().dom = z_dom; // fix lower bound to ground
 				let lits = Some(required_lits(z_ground, z.borrow().dom.ub()));
-				let z_bin = BinEnc::from_lits(
-					&log_enc_add_fn(db, &x, &y, &self.cmp, LitOrConst::Const(false), lits).unwrap(),
-				);
+				let z_bin = BinEnc::from_lits(&log_enc_add_fn(db, &x, &y, lits).unwrap());
 
 				lex_geq_const(
 					db,
@@ -482,7 +451,7 @@ impl Lin {
 					z_bin.bits(),
 				)?;
 
-				// TODO only has to be done for last constraint of lin decomp.. (could add_consistency to differentiate?)
+				// TODO [!] only has to be done for last constraint of lin decomp.. (could add_consistency to differentiate?)
 				lex_leq_const(
 					db,
 					&z_bin.xs(),
@@ -509,7 +478,6 @@ impl Lin {
 				);
 
 				const SORT_BY_COEF: bool = true;
-				// const SORT_BY_COEF: bool = false;
 				let terms = if SORT_BY_COEF {
 					self.exp
 						.terms
@@ -523,12 +491,6 @@ impl Lin {
 
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					let (_, cnf) = Self::encode_rec(&terms, &cmp, self.k, 0);
-					if PRINT_COUPLING >= 1 {
-						unsafe {
-							println!("skips = {}", SKIPS);
-							SKIPS = 0;
-						}
-					}
 					if PRINT_COUPLING >= 3 {
 						println!("{}", display_cnf(&cnf));
 					}
@@ -543,6 +505,7 @@ impl Lin {
 		}
 
 		/*
+		   // TODO Support order-binary channelling
 		// CHANNEL
 		(
 			[(t_x, Some(IntVarEnc::Ord(_))), (t_y, Some(IntVarEnc::Bin(_)))],
@@ -596,10 +559,6 @@ impl Lin {
 		*/
 	}
 
-	// #[cfg_attr(
-	// 	feature = "trace",
-	// 	tracing::instrument(name = "encode_rec", skip_all, fields(constraint = format!("{} {} {}", terms.iter().join(" "), cmp, k)))
-	// )]
 	fn encode_rec(
 		terms: &[Term],
 		cmp: &Comparator,
@@ -641,7 +600,6 @@ impl Lin {
 			} else {
 				let mut last_a = None; // last antecedent implies till here
 				let mut last_k = None; // last consequent implies to here
-					   // let mut last_cnf = None;
 				(
 					None,
 					head.ineqs(up)
@@ -706,22 +664,11 @@ impl Lin {
                                 if PRINT_COUPLING >= 2 {
 										println!("SKIP");
                                 }
-                                if PRINT_COUPLING >= 1 {
-                                unsafe {
-                                    SKIPS += 1;
-                                }
-                                }
 									return Some(vec![]); // some consequent -> skip clause
 							}
 
 							last_k = c;
 							last_a = Some(implies);
-
-							// // TODO or if r contains empty clause?
-                            // TODO remove; probably redundant with antecedent stuff above
-							// if cnf == vec![vec![]] {
-							// 	stop = true;
-							// }
 
 							Some(cnf)
 						})
@@ -773,208 +720,4 @@ impl Lin {
 			Ok(con)
 		}
 	}
-
-	/*
-		#[cfg_attr(
-			feature = "trace",
-			tracing::instrument(name = "lin_encoder", skip_all, fields(constraint = format!("{}", self)))
-		)]
-		pub fn _encode<DB: ClauseDatabase<Lit = Lit>>(
-			&self,
-			db: &mut DB,
-			config: &ModelConfig<Coeff>,
-		) -> Result {
-			// TODO assert simplified/simplify
-			// assert!(self._is_simplified());
-
-			let mut encoder = TernLeEncoder::default();
-			// TODO use binary heap
-
-			if config.decomposer == Decomposer::Rca || config.scm == Scm::Pow {
-				assert!(config.cutoff == Some(0));
-				let mut k = self.k;
-				let mut encs = self
-					.clone()
-					.exp
-					.terms
-					.into_iter()
-					.flat_map(|term| {
-						term.encode(db, config).map(|(xs, c)| {
-							k -= c;
-							xs.into_iter()
-								.filter(|x| {
-									if let IntVarEnc::Const(c) = x {
-										k -= *c;
-										false
-									} else {
-										true
-									}
-								})
-								.collect_vec()
-						})
-					})
-					.flatten()
-					.collect::<Vec<_>>();
-				assert!(
-					encs.iter().all(|e| matches!(e, IntVarEnc::Bin(_))),
-					"{encs:?}"
-				);
-
-				if self
-					.exp
-					.terms
-					.iter()
-					.all(|term| matches!(term.x.borrow().e.as_ref().unwrap(), IntVarEnc::Bin(_)))
-				{
-					// TODO hard to do in a reduce ..
-					// TODO Replace 0 for first element
-
-					encs.sort_by_key(IntVarEnc::ub);
-					while encs.len() > 1 {
-						let x = encs.pop().unwrap();
-						let z = if let Some(y) = encs.pop() {
-							x.add(db, &mut encoder, &y, None, None)?
-						} else {
-							x
-						};
-
-						encs.insert(
-							encs.iter()
-								.position(|enc| z.ub() < enc.ub())
-								.unwrap_or(encs.len()),
-							z,
-						);
-						debug_assert!(encs.windows(2).all(|x| x[0].ub() <= x[1].ub()));
-					}
-
-					assert!(encs.len() == 1);
-					encoder.encode(
-						db,
-						&TernLeConstraint::new(
-							&encs.pop().unwrap(),
-							&IntVarEnc::Const(0),
-							&self.cmp,
-							&IntVarEnc::Const(k),
-						),
-					)?;
-				}
-				return Ok(());
-			}
-
-			let mut k = self.k;
-			let encs = self
-				.clone()
-				// Encodes terms into ternary constrain (i.e. last term is multiplied by -1)
-				.into_tern()
-				.exp
-				.terms
-				.into_iter()
-				.with_position()
-				.flat_map(|(pos, term)| {
-					term.encode(db, config).map(|(xs, c)| {
-						match pos {
-							Position::Last => {
-								k += c;
-							}
-							_ => {
-								k -= c;
-							}
-						}
-						xs
-					})
-				})
-				.flatten()
-				.collect::<Vec<_>>();
-
-			// TODO generalize n-ary encoding; currently using fallback of TernLeEncoder
-			return match &encs[..] {
-				[] => return Ok(()),
-				[x] if DECOMPOSE => encoder.encode(
-					db,
-					&TernLeConstraint::new(
-						x,
-						&IntVarEnc::Const(0),
-						&self.cmp,
-						&IntVarEnc::Const(k),
-					),
-				),
-				[x, z] if DECOMPOSE => encoder.encode(
-					db,
-					&TernLeConstraint::new(x, &IntVarEnc::Const(-k), &self.cmp, z),
-				),
-				[x, y, z] if DECOMPOSE => {
-					let z = z.add(db, &mut encoder, &IntVarEnc::Const(k), None, None)?;
-					encoder.encode(db, &TernLeConstraint::new(x, y, &self.cmp, &z))
-				}
-				_ => {
-					assert!(
-						encs.iter()
-							.all(|enc| matches!(enc, IntVarEnc::Ord(_) | IntVarEnc::Const(_))),
-						"TODO: {encs:?}"
-					);
-
-					// just get encoding; does not need to handle terms coefficient here
-					// let encs = self
-					// 	.clone()
-					// 	.exp
-					// 	.terms
-					// 	.into_iter()
-					// 	.map(|term| {
-					// 		term.x.borrow_mut().encode(db, &mut HashMap::new(), true)?;
-					// 		Ok(term.x.borrow().e.as_ref().unwrap().clone())
-					// 	})
-					// 	.collect::<Result<Vec<_>>>()?;
-					// TODO support binary
-					self.cmp.split().into_iter().try_for_each(|cmp| {
-						let is_leq = matches!(cmp, Comparator::LessEq);
-
-						// encs[0..encs.len() - 1]
-						self.exp
-							.terms
-							.iter()
-							// .zip(&self.exp.terms)
-							.map(|term| {
-								term.ineqs(&Comparator::GreaterEq)
-								// if is_leq == term.c.is_positive() {
-								// 	term.geqs()
-								// } else {
-								// 	term.leqs()
-								// }
-							})
-							.multi_cartesian_product()
-							.try_for_each(|geqs| {
-								let rhs = geqs
-									.iter()
-									.zip(&self.exp.terms)
-									.map(|((d, _), term)| {
-										if is_leq == term.c.is_positive() {
-											term.c * (d.end - 1)
-										} else {
-											term.c * d.start
-										}
-									})
-									.fold(self.k, Coeff::sub);
-
-								let conditions = geqs
-									.iter()
-									.map(|(_, cnf)| negate_cnf(cnf.clone()))
-									.collect::<Vec<_>>();
-
-								let (last_enc, last_c) =
-									(&encs[encs.len() - 1], &self.exp.terms[encs.len() - 1].c);
-
-								let last = if is_leq == last_c.is_positive() {
-									last_enc.leq_(rhs.div_ceil(last_c))
-								} else {
-									last_enc.geq_(rhs.div_floor(last_c))
-								};
-
-								let cnf = conditions.iter().cloned().chain([last]).collect();
-								add_clauses_for(db, cnf)
-							})
-					})
-				}
-			};
-		}
-	*/
 }

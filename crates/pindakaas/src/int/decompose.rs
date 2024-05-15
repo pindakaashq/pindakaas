@@ -75,124 +75,11 @@ impl Decompose for EqualizeTernsDecomposer {
 						con
 					}
 				})
-				// .flat_map(|con| {
-				// 	println!("con = {}", con);
-				// 	} else {
-				// 		vec![con]
-				// 	}
-				// })
 				.collect(),
-			// num_var,
-			// config: config.clone(),
-			// ..Model::default()
 			..model
 		})
 	}
 }
-
-/*
-#[derive(Default)]
-pub struct UniformBinEqDecomposer {}
-
-impl Decompose for UniformBinEqDecomposer {
-	fn decompose(
-		&self,
-		model: Model, // con: Lin,
-							  // num_var: usize,
-							  // model_config: &ModelConfig,
-							  // cse: Option<Cse>,
-	) -> Result<Model, Unsatisfiable> {
-		let mut model = Model::new(num_var, model_config);
-		if con.cmp.is_ineq()
-			&& con.exp.terms.len() >= 3
-			&& con.k.is_zero() // TODO potentially could work for non-zero k
-			&& con
-				.exp
-				.terms
-				.iter()
-				.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
-		{
-			if let Some((last, firsts)) = con.exp.terms.split_last() {
-				// sum all but last term into lhs, where lb(lhs)=lb(sum(firsts)) (to match addition)
-				// but ub(lhs) is same if cmp # = <= (because its binding)
-				// if # = >=, the ub(lhs) is not binding so set to inf ~= lb(sum(firsts))
-				// but the lb(lhs) is, which might be set to low, so we constrain lhs>=lb later
-				let lhs = model
-					.new_var_from_dom(
-						{
-							let (lb, ub) =
-								firsts.iter().fold((0,0), |(lb, ub), t| {
-									(lb + t.lb(), ub + t.ub())
-								});
-							match con.cmp {
-								Comparator::LessEq => Dom::from_bounds(lb, last.x.borrow().ub()),
-								Comparator::Equal => todo!(),
-								Comparator::GreaterEq => Dom::from_bounds(lb, ub),
-							}
-						},
-						true,                       // TODO should be able to set to model_confing.add_consistency
-						Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
-						Some(format!("eq-{}", last.x.borrow().lbl())), // None,
-					)
-					.unwrap();
-
-				// sum(firsts) = sum(lhs)
-				model.add_constraint(Lin {
-					exp: LinExp {
-						terms: firsts
-							.iter()
-							.cloned()
-							.chain([Term::new(-1, lhs.clone())])
-							.collect(),
-					},
-					cmp: Comparator::Equal,
-					k: 0,
-					lbl: con.lbl.clone().map(|lbl| (format!("eq-1-{}", lbl))),
-				})?;
-
-				// If # = >=, the original lb is binding!
-				if matches!(con.cmp, Comparator::GreaterEq) {
-					model.add_constraint(Lin {
-						exp: LinExp {
-							terms: [Term::from(lhs.clone())].to_vec(),
-						},
-						cmp: Comparator::GreaterEq,
-						k: last.x.borrow().lb(),
-						lbl: con.lbl.clone().map(|lbl| (format!("eq-1-{}", lbl))),
-					})?;
-				}
-
-				// if possible, we change the domain of last.x so its binary encoding is grounded at the same lower bound as z_prime so we can constrain bitwise using lex constraint
-				// TODO otherwise, coupling will take care of it, but this is non-ideal
-				if matches!(last.x.borrow().e, Some(IntVarEnc::Bin(None))) {
-					let x_dom = last
-						.x
-						.borrow()
-						.dom
-						.clone()
-						.union(Dom::constant(lhs.borrow().lb()));
-					last.x.borrow_mut().dom = x_dom;
-				}
-
-				// lhs # rhs
-				model.add_constraint(Lin {
-					exp: LinExp {
-						terms: [Term::from(lhs), last.clone()].to_vec(),
-					},
-					cmp: con.cmp,
-					k: 0,
-					lbl: con.lbl.clone().map(|lbl| (format!("eq-2-{}", lbl))),
-				})?;
-			} else {
-				unreachable!()
-			}
-		} else {
-			model.add_constraint(con)?;
-		}
-		Ok(model)
-	}
-}
-*/
 
 #[derive(Debug, Default)]
 pub struct EncSpecDecomposer {
@@ -202,14 +89,7 @@ pub struct EncSpecDecomposer {
 
 const COUPLE_SINGLE_VARS: bool = true;
 impl Decompose for EncSpecDecomposer {
-	fn decompose(
-		&self,
-		model: Model,
-		// con: Lin<Lit, C>,
-		// num_var: usize,
-		// config: &ModelConfig<C>,
-		// cse: Option<Cse<Lit, C>>,
-	) -> Result<Model, Unsatisfiable> {
+	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable> {
 		model
 			.vars()
 			.into_iter()
@@ -228,7 +108,7 @@ impl Decompose for EncSpecDecomposer {
 				}
 				let is_order = matches!(x.borrow().e, Some(IntVarEnc::Ord(_)));
 				if !is_order && x.borrow().lbl.as_ref().unwrap().contains("bdd") {
-					// || x.borrow().dom.density() > 0.3
+					// TODO experiment using density heuristic: || x.borrow().dom.density() > 0.3
 					x.borrow_mut().add_consistency = false
 				}
 				(x.clone(), is_order)
@@ -266,8 +146,6 @@ impl Decompose for EncSpecDecomposer {
 							.with_position()
 							.map(|(p, t)| {
 								Ok(if let Some(IntVarEnc::Ord(None)) = t.x.borrow().e.clone() {
-									// if !matches!(p, Position::Last) {
-
 									is_last_term = matches!(p, Position::Last);
 									t.clone().encode_bin(
 										Some(&mut model),
@@ -321,7 +199,7 @@ impl Decompose for EncSpecDecomposer {
 					);
 
 					let y = model
-						.new_var_from_dom(
+						.new_aux_var(
 							dom,
 							model.config.add_consistency,
 							Some(IntVarEnc::Bin(None)),
@@ -358,69 +236,6 @@ impl Decompose for EncSpecDecomposer {
 		})?;
 
 		Ok(model)
-
-		/*
-		if model.cons.len() == 1 {
-
-				// let (terms, couplings) = con
-				// 	.exp
-				// 	.terms
-				// 	.iter()
-				// 	.with_position()
-				// 	.map(
-				// 		|(_p, t)| -> Result<(Term, Model), Unsatisfiable> {
-				// 			Ok(if let Some(IntVarEnc::Ord(None)) = t.x.borrow().e.clone() {
-				// 				// is_last_term = matches!(p, Position::Last);
-				// 				let (new_t, m) = t.clone().encode_bin(
-				// 					Some(&mut model),
-				// 					con.cmp,
-				// 					con.lbl.clone(),
-				// 				)?;
-				// 				// let new_id = IntVarId(model.num_var + new_t.x.borrow().id.0);
-				// 				// new_t.x.borrow_mut().id =
-
-				// 				// model.num_var += 1;
-				// 				(new_t, m)
-				// 			} else {
-				// 				(t.clone(), Model::default())
-				// 			})
-				// 		},
-				// 	)
-				// 	.process_results(|x| x.unzip())?;
-
-				// for t in terms {
-				// 	// let new_id = IntVarId(x.borrow().id.clone().0 + self.num_var);
-				// 	let new_id = IntVarId(model.num_var);
-				// 	t.x.borrow_mut().id = new_id;
-				// }
-
-				// let mut model = Model {
-				// 	cons: vec![Lin {
-				// 		exp: LinExp { terms },
-				// 		..con
-				// 	}],
-				// 	..model
-				// };
-				// model.extend(std::iter::once(couplings));
-				// Ok(model)
-			// } else {
-				// Ok(model)
-			// }
-		// // let mut is_last_term = false;
-		// // if mixed encoding of more than 2 terms, couple each xi:O<=yi:B
-		// } else {
-			// model.fold(self)
-		// }
-
-		// Ok(Model {
-		// 	cons: if is_last_term {
-		// 		[new_con].into_iter().chain(model.cons).collect()
-		// 	} else {
-		// 		model.cons.into_iter().chain([new_con]).collect()
-		// 	},
-		// 	..model
-		// })
-		*/
 	}
 }
 
@@ -437,7 +252,6 @@ impl Decompose for ModelDecomposer {
 			..
 		} = model.config.clone();
 
-		// let mut num_var = None;
 		model
 			.decompose_with(Some(&LinDecomposer {}))?
 			.decompose_with(Some(&EncSpecDecomposer {
@@ -457,15 +271,7 @@ impl Decompose for ModelDecomposer {
 pub struct LinDecomposer {}
 
 impl Decompose for LinDecomposer {
-	fn decompose(
-		&self,
-		model: Model,
-		// con: Lin,
-		// num_var: usize,
-		// model_config: &ModelConfig,
-		// cse: Option<Cse>,
-	) -> Result<Model, Unsatisfiable> {
-		// let cons = model.cons.iter().cloned().collect_vec();
+	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable> {
 		let Model {
 			cons,
 			num_var,
@@ -547,179 +353,5 @@ impl Decompose for ScmDecomposer {
 			})
 		})?;
 		Ok(model)
-
-		// Ok({
-		// 	let (terms, couplings): (Vec<Term>, Model) =
-		// 		con.exp.terms.iter().map(|t| {}).unzip();
-		// 	[
-		// 		couplings,
-		// 		Model {
-		// 			cons: vec![Lin {
-		// 				exp: LinExp { terms },
-		// 				..con
-		// 			}],
-		// 			..model
-		// 		},
-		// 	]
-		// 	.into_iter()
-		// 	.collect()
-		// })
-		// })
-		// .collect()
-		// let (terms, couplings) = con
-		//     .exp
-		//     .terms
-		//     .iter()
-		//     .with_position()
-		//     .map(|(_p, t)| {
-		//         Ok(if let Some(IntVarEnc::Ord(None)) = t.x.borrow().e.clone() {
-		//             // is_last_term = matches!(p, Position::Last);
-		//             let (new_t, m) = t.clone().encode_bin(con.cmp, con.lbl.clone())?;
-		//             new_t.x.borrow_mut().id =
-		//                 IntVarId(model.num_var + new_t.x.borrow().id.0);
-		//             model.num_var += 1;
-		//             (new_t, m)
-		//         } else {
-		//             (t.clone(), Model::default())
-		//         })
-		//     })
-		// .process_results(|x| x.unzip())?;
 	}
 }
-
-/*
-impl Decompose for ScmDecomposer {
-	fn decompose(&self, mut model: Model) -> Result<Model, Unsatisfiable> {
-		// let (terms, couplings) = con
-		//     .exp
-		//     .terms
-		//     .iter()
-		//     .with_position()
-		//     .map(|(_p, t)| {
-		//         Ok(if let Some(IntVarEnc::Ord(None)) = t.x.borrow().e.clone() {
-		//             // is_last_term = matches!(p, Position::Last);
-		//             let (new_t, m) = t.clone().encode_bin(con.cmp, con.lbl.clone())?;
-		//             new_t.x.borrow_mut().id =
-		//                 IntVarId(model.num_var + new_t.x.borrow().id.0);
-		//             model.num_var += 1;
-		//             (new_t, m)
-		//         } else {
-		//             (t.clone(), Model::default())
-		//         })
-		//     })
-		// .process_results(|x| x.unzip())?;
-
-		println!("scm model = {}", model);
-
-		if model.cons.len() == 1 {
-			let con = model.cons.first().unwrap().clone();
-
-			Ok({
-				let (terms, couplings): (Vec<Term>, Model) = con
-					.exp
-					.terms
-					.iter()
-					.map(|t| {
-						if con
-							.exp
-							.terms
-							.iter()
-							.all(|t| matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_))))
-						{
-							let (new_t, mut m) =
-								t.clone().encode_bin(con.cmp, con.lbl.clone()).unwrap();
-							// let new_id = IntVarId(model.num_var + new_t.x.borrow().id.0);
-							let new_id = if m.num_var == 0 {
-								model.num_var += 1;
-								IntVarId(model.num_var)
-							} else {
-								model.num_var += 1;
-								let new_id = IntVarId(model.num_var + new_t.x.borrow().id.0);
-								new_id
-							};
-							// let new_id = IntVarId(m.num_var + new_t.x.borrow().id.0);
-							// let new_id = IntVarId(m.num_var + new_t.x.borrow().id.0);
-							new_t.x.borrow_mut().id = new_id;
-							// model.num_var += m.num_var;
-							// m.num_var = model.num_var;
-							(new_t, m)
-						} else {
-							(t.clone(), Model::default())
-						}
-					})
-					.unzip();
-				[
-					couplings,
-					Model {
-						cons: vec![Lin {
-							exp: LinExp { terms },
-							..con
-						}],
-						..model
-					},
-				]
-				.into_iter()
-				.collect()
-			})
-		// .process_results(|x| x.unzip())
-		// .map(|x| x?)
-		} else {
-			model.fold(self)
-		}
-	}
-}
-*/
-
-/*
-impl Decompose for LinDecomposer {
-	fn decompose(
-		&self,
-		model: Model,
-		// con: Lin,
-		// num_var: usize,
-		// model_config: &ModelConfig,
-		// cse: Option<Cse>,
-	) -> Result<Model, Unsatisfiable> {
-		// model.decompose_with( Some(self))
-		// let Model { cons, .. } = model;
-		model
-			.cons
-			.iter()
-			.cloned()
-			.map(|con| match &con.exp.terms[..] {
-				[] => con
-					.check(&Assignment(HashMap::default()), None)
-					.map(|_| Model {
-						cons: vec![con],
-						..model.clone()
-					})
-					.map_err(|_| Unsatisfiable),
-				_ if con.exp.terms.len() <= 2
-					|| con.is_tern() || model.config.decomposer == Decomposer::Rca =>
-				{
-					// let mut model = Model::::new(num_var, model_config);
-					// model.add_constraint(con)?;
-					// Ok(model)
-					Ok(Model {
-						cons: vec![con],
-						..model.clone()
-					})
-				}
-				_ => {
-					// let con_model = Model::from(con);
-					let con_model = Model {
-						cons: vec![con],
-						..model.clone()
-					};
-					match con_model.config.decomposer {
-						Decomposer::Bdd => BddEncoder::default().decompose(con_model),
-						Decomposer::Gt => TotalizerEncoder::default().decompose(con_model),
-						Decomposer::Swc => SwcEncoder::default().decompose(con_model),
-						Decomposer::Rca => unreachable!(),
-					}
-				}
-			})
-			.collect()
-	}
-}
-*/

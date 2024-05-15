@@ -1,6 +1,6 @@
 #![allow(clippy::absurd_extreme_comparisons)]
 use std::{
-	collections::{HashMap, HashSet},
+	collections::{BTreeSet, HashMap},
 	path::PathBuf,
 };
 
@@ -16,13 +16,13 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct BinEnc {
+pub(crate) struct BinEnc {
 	pub(crate) x: Vec<LitOrConst>,
 }
 
 impl BinEnc {
-	pub fn new<DB: ClauseDatabase>(db: &mut DB, lits: u32, _lbl: Option<String>) -> Self {
-		let _lbl = _lbl.unwrap_or(String::from("b"));
+	pub(crate) fn new<DB: ClauseDatabase>(db: &mut DB, lits: u32, lbl: Option<String>) -> Self {
+		let _lbl = lbl.unwrap_or(String::from("b"));
 		Self {
 			x: (0..lits)
 				.map(|_i| new_var!(db, format!("{_lbl}^{_i}")).into())
@@ -63,11 +63,10 @@ impl BinEnc {
 				as_binary(PosCoeff::new(k), Some(self.bits()))
 					.iter()
 					.zip(self.xs().iter().cloned())
-					// if >=, find 1's, if <=, find 0's
+					// since geq, find 1's
 					.filter_map(|(b, x)| b.then_some(x))
 					.filter_map(|x| match x {
-						// THIS IS A CONJUNCTION
-						// TODO make this a bit more clear (maybe simplify function for Cnf)
+						// TODO Move cnf: Vec<Vec<Lit>> functions into Cnf
 						LitOrConst::Lit(x) => Some(Ok(x)),
 						LitOrConst::Const(true) => None, // literal satisfied
 						LitOrConst::Const(false) => Some(Err(Unsatisfiable)), // clause falsified
@@ -144,6 +143,7 @@ impl BinEnc {
 			})
 			.collect_vec();
 
+		// TODO refactor; just got it working
 		// // Returning CNF; so a single empty clause
 		if ineqs == vec![vec![]] {
 			return vec![];
@@ -166,7 +166,7 @@ impl BinEnc {
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
-	pub fn ineq(&self, k: Coeff, up: bool) -> Vec<Vec<Lit>> {
+	pub(crate) fn ineq(&self, k: Coeff, up: bool) -> Vec<Vec<Lit>> {
 		let clause: Result<Vec<_>, _> = as_binary(PosCoeff::new(k), Some(self.bits()))
 			.into_iter()
 			.zip(self.xs().iter().cloned())
@@ -177,6 +177,7 @@ impl BinEnc {
 			.map(|x| if up { x } else { !x })
 			.filter_map(|x| match x {
 				// This is a DISJUNCTION
+				// TODO Move cnf: Vec<Vec<Lit>> functions into Cnf
 				LitOrConst::Lit(x) => Some(Ok(x)),
 				LitOrConst::Const(false) => None, // literal falsified
 				LitOrConst::Const(true) => Some(Err(Unsatisfiable)), // clause satisfied
@@ -190,12 +191,13 @@ impl BinEnc {
 		}
 	}
 
-	/// Get encoding as unsigned binary representation (if negative dom values, offset by `-2^(k-1)`)
+	/// Get encoding literals
 	pub(crate) fn xs(&self) -> Vec<LitOrConst> {
 		self.x.clone()
 	}
 
-	pub fn consistent<DB: ClauseDatabase>(&self, db: &mut DB, dom: &Dom) -> crate::Result {
+	/// Constraints bounds and gaps
+	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB, dom: &Dom) -> crate::Result {
 		self.encode_unary_constraint(db, &Comparator::GreaterEq, dom.lb(), dom, true)?;
 		self.encode_unary_constraint(db, &Comparator::LessEq, dom.ub(), dom, true)?;
 		for (a, b) in dom.ranges.iter().tuple_windows() {
@@ -305,7 +307,7 @@ impl BinEnc {
 		)
 	}
 
-	pub(crate) fn lits(&self) -> HashSet<Var> {
+	pub(crate) fn lits(&self) -> BTreeSet<Var> {
 		self.x
 			.clone()
 			.into_iter()
@@ -334,6 +336,7 @@ impl BinEnc {
 			return Ok(self.clone());
 		}
 		// assume shifts; all Const(false) at front
+		// TODO add assertion for this
 		let bits = self.bits(); // all
 		let lits = self.lits().len() as u32; // unfixed
 		let xs = self
@@ -346,13 +349,13 @@ impl BinEnc {
 			})
 			.collect_vec();
 
-		// TODO [!] remove reading
+		// TODO [!] remove reading, check in Cnf objects based on dimacs files
 		let cnf = Cnf::from_file(&PathBuf::from(format!(
 			"{}/res/ecm/{lits}_{c}.dimacs",
 			env!("CARGO_MANIFEST_DIR")
 		)))
 		.unwrap_or_else(|_| panic!("Could not find Dnf method cnf for {lits}_{c}"));
-		// TODO could replace with some arithmetic
+		// TODO [?] could replace with some arithmetic. Using VarRange?
 		let map = cnf
 			.vars()
 			.zip_longest(xs.iter())
@@ -411,18 +414,8 @@ impl std::fmt::Display for BinEnc {
 
 #[cfg(test)]
 mod tests {
-	// type Lit = i32;
-
 	use super::*;
 	use crate::helpers::tests::{lits, TestDB};
-
-	// #[test]
-	// fn test_ineqs() {
-	// 	let mut db = TestDB::new(0);
-	// 	let x_ = BinEnc::new(&mut db, 3, Some(String::from("x")));
-	// 	// &x.ineqs(true, Dom::from_slice(&[0, 2, 3, 5]));
-	// 	// panic!();
-	// }
 
 	#[test]
 	fn test_geqs() {
@@ -436,21 +429,11 @@ mod tests {
 		let mut db = TestDB::new(0);
 		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
 
-		// &x.ineq(false, 2);
-		// &negate_cnf(x.ineq(false, 2));
 		for (up, ks, expected_lits) in [
 			(true, 0, lits![]),
 			(true, 1, lits![1]),
 			(true, 2, lits![2]),
 			(true, 3, lits![1, 2]),
-			// (
-			// 	true,
-			// 	(0, 3),
-			// 	vec![vec![1, 2, 3, 4], vec![2, 3, 4], vec![1, 3, 4]],
-			// ),
-			// (true, (14, 17), vec![vec![1], vec![]]),
-			// (true, (0, 0), vec![]),
-			// (false, (15, 16), vec![]),
 		] {
 			assert_eq!(
 				x.geq(ks),
@@ -459,15 +442,4 @@ mod tests {
 			);
 		}
 	}
-
-	// #[test]
-	// fn test_ineqs() {
-	// 	let mut db = TestDB::new(0);
-	// 	let dom = Dom::from_slice(&[0, 1, 2, 3]);
-	// 	let x = BinEnc::new(&mut db, 2, Some(String::from("x")));
-	// 	assert_eq!(
-	// 		x.ineqs(true, dom),
-	// 		(vec![(0, vec![]), (1, vec![1]), (2, vec![2]), (3, vec![1, 2])])
-	// 	);
-	// }
 }

@@ -1,4 +1,5 @@
 fn main() {
+    // TODO [?] something like this needs to be added to all build.rs files? Even better, pinpointing the specific files which could change?
 	println!("cargo:rerun-if-changed=vendor");
 	let src = [
 		"vendor/cadical/src/analyze.cpp",

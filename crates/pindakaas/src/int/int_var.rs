@@ -1,6 +1,6 @@
 use std::{
 	cell::RefCell,
-	collections::{HashMap, HashSet},
+	collections::{BTreeSet, HashMap},
 	fmt::Display,
 	hash::BuildHasherDefault,
 	rc::Rc,
@@ -28,8 +28,6 @@ impl Display for IntVarId {
 		write!(f, "{}", self.0)
 	}
 }
-// TODO perhaps id can be used by replacing vars HashMap to just vec
-// TODO why can't we derive Default without impl. for Lit (since it's in Option?)
 #[derive(Debug, Clone)]
 pub struct IntVar {
 	pub id: IntVarId,
@@ -72,7 +70,6 @@ impl IntVar {
 			add_consistency,
 			views: HashMap::default(),
 			e,
-			// x: OrdEnc::default(),
 			lbl,
 		}
 	}
@@ -155,7 +152,6 @@ impl IntVar {
 				.map(|(c, cnf)| {
 					(c, cnf, {
 						let k = if up { range_ub - c } else { c };
-						// let k = range_ub - c;
 						let k = x_bin.normalize(k, &self.dom);
 						let a = x_bin.geq_implies(*k);
 						let k = if up { c - a } else { c + a };
@@ -170,29 +166,22 @@ impl IntVar {
 
 	/// Return x>=k (given x>=a)
 	pub fn ineq(&self, k: Coeff, up: bool, a: Option<Coeff>) -> (Option<Coeff>, Vec<Vec<Lit>>) {
-		// TODO move into IntVar since self.c is taken care off?
 		match self.e.as_ref().unwrap() {
 			IntVarEnc::Ord(Some(o)) => {
-				// TODO make use of a?
 				let pos = self.dom.geq(k);
 				if PRINT_COUPLING >= 2 {
 					print!(" = d_{pos:?}");
 				}
 				let d = if let Some((pos, v)) = pos {
 					if up {
-						// Some(pos) // if larger than self.dom.size, then self.dom.d will return None
 						Some(v)
 					} else {
 						pos.checked_sub(1).and_then(|next_pos| self.dom.d(next_pos))
 					}
-				// pos.and_then(|next_pos| self.dom.d(next_pos))
+				} else if up {
+					None
 				} else {
-					// TODO not sure if this should be ub/lb or None. This makes most sense looking at the test ineq_ord
-					if up {
-						None
-					} else {
-						Some(self.dom.ub())
-					}
+					Some(self.dom.ub())
 				};
 				let geq = o.geq(pos.map(|(pos, _)| pos));
 				(d, if up { geq } else { negate_cnf(geq) })
@@ -225,6 +214,7 @@ impl IntVar {
 					dnf
 				} else {
 					// negate dnf
+					// TODO Move dnf/cnf: Vec<Vec<Lit>> functions into Cnf
 					if dnf.contains(&vec![]) {
 						vec![vec![]]
 					} else if dnf.is_empty() {
@@ -296,7 +286,7 @@ impl IntVar {
 		self.size() == 1
 	}
 
-	pub(crate) fn lits(&self) -> HashSet<Var> {
+	pub(crate) fn lits(&self) -> BTreeSet<Var> {
 		self.e.as_ref().map(|e| e.lits()).unwrap_or_default()
 	}
 
@@ -321,10 +311,6 @@ impl IntVar {
 			_ => panic!("encode_bin called without binary encoding for {self}"),
 		})
 	}
-
-	// pub(crate) fn constant(k: Coeff) -> Int{
-	// 	OrdEnc::from_lits(&[])
-	// }
 
 	pub(crate) fn encode<DB: ClauseDatabase>(
 		&mut self,
@@ -406,6 +392,7 @@ impl IntVar {
 		}
 	}
 
+	// TODO [!] only updated for Amo
 	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
 	pub(crate) fn from_part<DB: ClauseDatabase>(
 		db: &mut DB,
@@ -428,11 +415,8 @@ impl IntVar {
 				let (dom, lits): (Vec<_>, Vec<_>) = h
 					.into_iter()
 					.sorted_by(|(a, _), (b, _)| a.cmp(b))
-					// .tuple_windows()
-					// .map(|((prev, _), (coef, lits))| {
 					.map(|(coef, lits)| {
-						// let interval = (prev + C::one())..(coef + C::one());
-						let coef = *coef; // dom uses Coeff
+						let coef = *coef;
 						if lits.is_empty() {
 							(coef, None)
 						} else if lits.len() == 1 {
@@ -446,18 +430,14 @@ impl IntVar {
 						}
 					})
 					.unzip();
-				model.new_var(
-					&[0].into_iter().chain(dom).collect_vec(),
+				model.new_aux_var(
+					Dom::from_slice(&[0].into_iter().chain(dom).collect_vec()),
 					false,
 					Some(IntVarEnc::Ord(Some(OrdEnc::from_lits(
 						&lits.iter().flatten().cloned().collect_vec(),
 					)))),
 					Some(lbl),
 				)
-				// Ok(model)
-				// let x = IntVar::<Lit, C>::new(1, &[2, 5, 6, 7, 9], true, None, Some(String::from("x")))
-				// vec![IntVarEnc::Ord(OrdEnc::from_views(db, dom, lbl))]
-				// vec![IntVar::new()]
 			}
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
 			Part::Ic(_terms) => {
