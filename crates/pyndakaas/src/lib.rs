@@ -1,10 +1,4 @@
-use std::{
-	fmt::Display,
-	num::{ParseIntError, TryFromIntError},
-	ops::{Add, DerefMut, Mul},
-	path::PathBuf,
-	str::FromStr,
-};
+use std::{fmt::Display, ops::DerefMut, path::PathBuf};
 
 use base::{ClauseDatabase, Encoder, LinExp, LinearConstraint, LinearEncoder};
 use pindakaas as base;
