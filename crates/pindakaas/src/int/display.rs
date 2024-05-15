@@ -4,14 +4,16 @@ use itertools::Itertools;
 
 use super::{
 	model::{Obj, USE_CSE},
-	Cse, IntVar, LinExp,
+	Cse, Dom, IntVar, LinExp,
 };
-use crate::{int::IntVarEnc, Assignment, Lin, Model, Term};
+use crate::{int::IntVarEnc, Assignment, Coeff, Lin, Model, Term};
 
 pub(crate) const SHOW_IDS: bool = false;
 const SHOW_LITS: bool = true;
 /// Whether to rewrite x1 + .. + xn # 0 as x1 + .. + x_(n-1) # - xn
 const SHOW_K_0: bool = true;
+/// Show domain density
+const SHOW_DOM_DENSITY: bool = false;
 
 impl Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -158,5 +160,38 @@ impl Display for Cse {
 				.map(|((id, c, cmp), v)| format!("{c}*x#{id} {cmp} {v}"))
 				.join(", ")
 		)
+	}
+}
+
+impl Display for Dom {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		// TODO replaced {..} by |..| since logger interprets {/} wrong
+		let dom = self.iter().collect::<Vec<_>>();
+		if dom.is_empty() {
+			return write!(f, "||");
+		}
+		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
+		const ELIPSIZE: Option<usize> = Some(4);
+		let elipsize = ELIPSIZE.map(|e| dom.len() > e).unwrap_or_default();
+
+		let density = if dom.len() <= 1 || !SHOW_DOM_DENSITY {
+			String::from("")
+		} else {
+			format!("{:.0}%", self.density() * 100.0)
+		};
+		if dom.len() > 1 && Coeff::try_from(dom.len()).unwrap() == ub - lb + 1 {
+			write!(f, "|{}..{}| |{}|", lb, ub, dom.len())?;
+		} else if elipsize {
+			write!(
+				f,
+				"|{},..,{ub}| |{}|{}",
+				dom.iter().take(ELIPSIZE.unwrap() - 1).join(","),
+				dom.len(),
+				density
+			)?;
+		} else {
+			write!(f, "|{}| |{}|{}", dom.iter().join(","), dom.len(), density)?;
+		}
+		Ok(())
 	}
 }

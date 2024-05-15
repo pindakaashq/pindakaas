@@ -183,7 +183,7 @@ impl LinearAggregator {
 						vec![Part::Amo(
 							terms
 								.into_iter()
-								.map(|(lit, coef)| (lit, PosCoeff::from(coef)))
+								.map(|(lit, coef)| (lit, PosCoeff::new(coef)))
 								.collect(),
 						)]
 					}
@@ -196,7 +196,7 @@ impl LinearAggregator {
 							Part::Ic(
 								pos_chain
 									.into_iter()
-									.map(|(lit, coef)| (lit, PosCoeff::from(coef)))
+									.map(|(lit, coef)| (lit, PosCoeff::new(coef)))
 									.collect(),
 							),
 							Part::Ic(
@@ -221,7 +221,7 @@ impl LinearAggregator {
 								.into_iter()
 								.map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k))
 								.collect(),
-                                PosCoeff::from(l), PosCoeff::from(u)
+                                PosCoeff::new(l), PosCoeff::new(u)
 						)]
 					}
 				}
@@ -308,7 +308,7 @@ impl LinearAggregator {
 						})
 						.collect_vec();
 					// the one or more of the most significant bits have been removed, the upper bound could have dropped to a power of 2 (but not beyond)
-					let u = PosCoeff::from(std::cmp::min(
+					let u = PosCoeff::new(std::cmp::min(
 						*u,
 						terms.iter().map(|&(_, coef)| *coef).sum(),
 					));

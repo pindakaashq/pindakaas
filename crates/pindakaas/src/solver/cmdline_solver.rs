@@ -70,7 +70,8 @@ impl Solver for CmdlineSolver {
 			dimacs
 		};
 
-		let output = Command::new(format!("../../../cadical/build/cadical"))
+		// TODO [!] remove
+		let output = Command::new("../../../cadical/build/cadical")
 			.arg(&dimacs)
 			.arg("-t")
 			.arg("10")
@@ -107,7 +108,7 @@ impl Solver for CmdlineSolver {
 						status = Some(SolveResult::Unsat);
 					}
 					Some("UNKNOWN") | Some("INDETERMINATE") => {
-						Some(SolveResult::Unknown);
+						status = Some(SolveResult::Unknown);
 					}
 					status => panic!("CADICAL Unknown status: {status:?}"),
 				},

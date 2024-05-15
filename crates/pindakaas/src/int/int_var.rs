@@ -257,7 +257,7 @@ impl IntVar {
 							.zip(o.ineqs(true))
 							.tuple_windows()
 							// Every lit adds the difference
-							.map(|((prev, (_, _)), (v, (cnf, _)))| (cnf[0][0].clone(), v - prev))
+							.map(|((prev, (_, _)), (v, (cnf, _)))| (cnf[0][0], v - prev))
 							.collect::<Vec<_>>(),
 					)
 					.add_constant(self.lb())
@@ -283,10 +283,10 @@ impl IntVar {
 	pub fn assign<F: Valuation + ?Sized>(&self, a: &F) -> Result<Coeff, CheckError> {
 		let assignment = crate::linear::LinExp::from(self).assign(a)?;
 		if self.add_consistency && !self.dom.contains(assignment) {
-			return Err(CheckError::Fail(format!(
+			Err(CheckError::Fail(format!(
 				"Inconsistent var assignment on consistent var: {} -> {:?}",
 				self, assignment
-			)));
+			)))
 		} else {
 			Ok(assignment)
 		}
@@ -416,10 +416,7 @@ impl IntVar {
 	) -> Result<IntVarRef, Unsatisfiable> {
 		match xs {
 			Part::Amo(terms) => {
-				let terms = terms
-					.iter()
-					.map(|(lit, coef)| (coef.clone(), lit.clone()))
-					.collect_vec();
+				let terms = terms.iter().map(|(lit, coef)| (*coef, *lit)).collect_vec();
 				// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
 				let mut h: FxHashMap<PosCoeff, Vec<Lit>> =
 					FxHashMap::with_capacity_and_hasher(terms.len(), BuildHasherDefault::default());
@@ -439,11 +436,11 @@ impl IntVar {
 						if lits.is_empty() {
 							(coef, None)
 						} else if lits.len() == 1 {
-							(coef, Some(lits[0].clone()))
+							(coef, Some(lits[0]))
 						} else {
 							let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
 							for lit in lits {
-								emit_clause!(db, [!lit, o.clone()]).unwrap();
+								emit_clause!(db, [!lit, o]).unwrap();
 							}
 							(coef, Some(o))
 						}

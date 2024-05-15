@@ -240,8 +240,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for BddEncoder {
 			.iter()
 			.enumerate()
 			.map(|(i, part)| {
-				IntVar::from_part(db, &mut model, part, lin.k.into(), format!("x_{i}"))
-					.map(Term::from)
+				IntVar::from_part(db, &mut model, part, lin.k, format!("x_{i}")).map(Term::from)
 			})
 			.collect::<Result<Vec<_>, _>>()?;
 
