@@ -88,7 +88,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for SwcEncoder {
 		let mut model = Model {
 			config: ModelConfig {
 				cutoff: self.cutoff,
-				propagate: self.add_propagation.clone(),
+				propagate: self.add_propagation,
 				add_consistency: self.add_consistency,
 				decomposer: Decomposer::Swc,
 				..ModelConfig::default()

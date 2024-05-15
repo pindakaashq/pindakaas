@@ -17,6 +17,7 @@ use crate::{
 	Coeff, Comparator, Lin, Lit, Model, Term,
 };
 
+#[derive(Debug)]
 pub enum Format {
 	Lp,
 	Opb,
