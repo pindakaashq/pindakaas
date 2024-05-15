@@ -183,53 +183,6 @@ pub struct LinExp {
 	pub mult: Coeff,
 }
 
-/*
-impl LinExp {
-	pub(crate) fn value<F: Valuation + ?Sized>(&self, sol: &F) -> Result<Coeff, CheckError> {
-		let mut total = self.add;
-		for (constraint, terms) in self.iter() {
-			// Calculate sum for constraint
-			let sum = terms
-				.iter()
-				.filter(|(lit, _)| sol.value(*lit).expect("missing assignment to literal"))
-				.map(|(_, i)| i)
-				.sum();
-			match constraint {
-				Some(Constraint::AtMostOne) => {
-					if sum != 0
-						&& terms
-							.iter()
-							.filter(|&(l, _)| sol.value(*l).unwrap_or(true))
-							.count() > 1
-					{
-						return Err(Unsatisfiable.into());
-					}
-				}
-				Some(Constraint::ImplicationChain) => {
-					if terms
-						.iter()
-						.map(|(l, _)| *l)
-						.tuple_windows()
-						.any(|(a, b)| !sol.value(a).unwrap_or(false) & sol.value(b).unwrap_or(true))
-					{
-						return Err(Unsatisfiable.into());
-					}
-				}
-				Some(Constraint::Domain { lb, ub }) => {
-					// divide by first coeff to get int assignment
-					if sum > ub - lb {
-						return Err(Unsatisfiable.into());
-					}
-				}
-				None => {}
-			};
-			total += sum;
-		}
-		Ok(total * self.mult)
-	}
-}
-*/
-
 impl Default for LinExp {
 	fn default() -> Self {
 		Self {
@@ -501,10 +454,10 @@ impl LinExp {
 	}
 
 	pub(crate) fn value<F: Valuation + ?Sized>(&self, sol: &F) -> Option<Coeff> {
-		// TODO [?] look up how to return none if any none
+		// Nicest way I could find to short-circuit on list of Option
 		self.terms()
 			.map(|(l, c)| sol.value(l).map(|l| c * l as Coeff))
-			.sum()
+			.fold_options(0, |acc, val| acc + val)
 	}
 }
 

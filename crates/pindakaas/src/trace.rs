@@ -29,10 +29,9 @@ pub(crate) use new_var;
 #[cfg(feature = "trace")]
 macro_rules! emit_clause {
 	($db:expr, $cl:expr) => {{
-		let slice = $cl;
-		// let res = $db.add_clause(slice.to_vec());
-		let res = $db.add_clause(slice.clone()); // [?] check
-		tracing::info!(clause = ?slice, fail = matches!(res, Err($crate::Unsatisfiable)), "emit clause");
+		let slice = $cl.into_iter().collect::<Vec<_>>();
+		let res = $db.add_clause(slice.iter().copied());
+		tracing::info!(clause = ?&slice, fail = matches!(res, Err($crate::Unsatisfiable)), "emit clause");
 		res
 	}};
 }
@@ -47,8 +46,10 @@ pub(crate) use emit_clause;
 #[cfg(feature = "trace")]
 mod subscriber {
 
-	const SHOW_DIMACS_ID: bool = true;
-	const SHOW_DUR: bool = false;
+	/// Show the dimacs ID after label
+	const SHOW_DIMACS_ID: bool = false;
+	/// Show the time duration
+	const SHOW_DUR: bool = true;
 
 	use std::{
 		fmt,

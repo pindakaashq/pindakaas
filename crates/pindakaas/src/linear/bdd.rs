@@ -4,16 +4,16 @@ use iset::IntervalMap;
 use itertools::Itertools;
 
 use crate::{
-	int::{Lin, LinExp, Model},
+	int::{Dom, Lin, LinExp, Model},
 	ClauseDatabase, Coeff, Comparator, Decompose, Decomposer, Encoder, IntVar, Linear, ModelConfig,
 	Result, Term, Unsatisfiable,
 };
 
 #[allow(dead_code)]
 enum BddSort {
-	Asc,
-	Dsc,
-	None,
+	Asc,  // Bad
+	Dsc,  // Good
+	None, // useful for debugging
 }
 
 #[allow(dead_code)]
@@ -24,6 +24,7 @@ enum BddNode {
 	View(Coeff),
 }
 
+/// Determine sorting order of terms (useful for debugging)
 const SORT_TERMS: BddSort = BddSort::Dsc;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
@@ -49,7 +50,6 @@ impl Decompose for BddEncoder {
 		assert!(model.cons.len() == 1);
 		let lin = model.cons.pop().unwrap();
 
-		// traditionally, sort by *decreasing* ub
 		let lin = Lin {
 			exp: LinExp {
 				terms: lin
@@ -68,7 +68,7 @@ impl Decompose for BddEncoder {
 		};
 
 		// Ex. 2 x1 {0,2} + 3 x2 {0,3} + 5 x3 {0,5} <= 6
-		// NOTE: Example assumes `SORT_TERMS = false`
+		// NOTE: Example assumes `SORT_TERMS = BddSort::None`
 
 		// We calculate the bounds of the partial sum
 		// Ex. [(0,0), (0,2), (0,5), (0,10)]
@@ -162,8 +162,8 @@ impl Decompose for BddEncoder {
 					})
 					.collect::<Vec<_>>();
 				model
-					.new_var(
-						&dom,
+					.new_aux_var(
+						Dom::from_slice(&dom),
 						model.config.add_consistency,
 						None,
 						Some(format!("bdd_{}", i + 1)),
@@ -250,9 +250,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for BddEncoder {
 			..model
 		})?;
 
-		// model.extend(decomposition);
-
-		model.encode(db, false)?;
+		model.encode_internal(db, false)?;
 		Ok(())
 	}
 }
@@ -264,7 +262,7 @@ fn bdd(
 	sum: Coeff,
 	ws: &mut Vec<IntervalMap<Coeff, BddNode>>,
 ) -> (std::ops::Range<Coeff>, BddNode) {
-	// TODO assert at most one (not sure if
+	// TODO assert at most one (this was the last case, but seemed to impact performance in profiling!)
 	match &ws[i].overlap(sum).next() {
 		None => {
 			let (iv, node) = xs[i]
@@ -298,16 +296,12 @@ mod tests {
 
 	use super::*;
 	use crate::{
-		// cardinality_one::tests::card1_test_suite, CardinalityOne,
 		helpers::tests::{assert_sol, lits},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
 			LimitComp, PosCoeff,
 		},
-		Encoder,
-		Lit,
+		Encoder, Lit,
 	};
 	linear_test_suite!(BddEncoder::default());
-	// FIXME: BDD does not support LimitComp::Equal
-	// card1_test_suite!(BddEncoder::default());
 }

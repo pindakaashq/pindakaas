@@ -43,7 +43,7 @@ pub(crate) fn at_least_one_clause<DB: ClauseDatabase>(
 	card1: &CardinalityOne,
 ) -> Result {
 	debug_assert_eq!(card1.cmp, LimitComp::Equal);
-	emit_clause!(db, card1.lits.clone())
+	emit_clause!(db, card1.lits.iter().copied())
 }
 
 #[cfg(test)]

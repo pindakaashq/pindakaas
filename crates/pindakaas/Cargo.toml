@@ -12,7 +12,6 @@ edition = "2021"
 
 [dependencies]
 cached = "0.46"
-num = "0.4"
 bzip2 = "0.4"
 flate2 = "1.0"
 itertools = "0.12.0"

@@ -133,8 +133,7 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 	db: &mut DB,
 	expression: Vec<Vec<Vec<Lit>>>,
 ) -> Result {
-	// TODO doctor out type of expression (clauses containing conjunctions?)
-
+	// TODO Move cnf: Vec<Vec<Lit>> functions into Cnf
 	for cls in expression.into_iter().multi_cartesian_product() {
 		let cls = cls.concat(); // filter out [] (empty conjunctions?) of the clause
 		if FILTER_TRIVIAL_CLAUSES {
@@ -366,7 +365,7 @@ impl From<RangeInclusive<Var>> for VarRange {
 #[cfg(test)]
 pub mod tests {
 	use std::{
-		collections::{HashMap, HashSet},
+		collections::{BTreeSet, HashMap, HashSet},
 		num::NonZeroI32,
 		thread::panicking,
 	};
@@ -386,7 +385,7 @@ pub mod tests {
 	/// TODO a macro to write tests using `?`
 	macro_rules! assert_ok {
 		($test:expr) => {
-			((|| $test)()).unwrap_or_else(|e| panic!("Asserted Result was Ok but was Err({e})"))
+			((|| $test)()).unwrap_or_else(|e| panic!("Asserted Result is Ok but was Err({e})"))
 		};
 	}
 	pub(crate) use assert_ok;
@@ -602,7 +601,7 @@ pub mod tests {
 	/// The maximum number of variable to generate expected solutions for
 	const GENERATE_EXPECTED_SOLUTIONS: i32 = 0;
 
-	#[derive(Clone, Debug)]
+	#[derive(Debug)]
 	pub(crate) struct TestDB {
 		slv: Solver,
 		/// Number of variables available when solver is created
@@ -626,7 +625,6 @@ pub mod tests {
 
 	impl TestDB {
 		pub fn new(num_var: i32) -> TestDB {
-			// let num_var = Var::from(NonZeroI32::new(num_var).unwrap());
 			if OUTPUT_SPLR {
 				eprintln!("let slv = Solver::instantiate( &Config::default(), &CNFDescription {{ num_of_variables: {} as usize, ..CNFDescription::default() }});", num_var);
 			}
@@ -739,22 +737,13 @@ pub mod tests {
 		}
 
 		/// Solve for given output variables (or self.num_var if None)
-		pub fn solve(&mut self, output: Option<HashSet<Var>>) -> Vec<Vec<Lit>> {
+		pub fn solve(&mut self, output: Option<BTreeSet<Var>>) -> Vec<Vec<Lit>> {
 			let mut from_slv: Vec<Vec<Lit>> = Vec::new();
-			// let output = output.unwrap_or_else(|| (1..=self.num_var).collect());
-			// let output = output.unwrap_or_else(|| VarRange::new(1, self.num_var));
-			// let output = VarRange::new(1, self.num_var);
-			let output: HashSet<_> = output
+			let output: BTreeSet<_> = output
 				.map(|output| output.into_iter().map(|v| v.into()).collect())
 				.unwrap_or((1..=self.num_var).collect());
 
-			// // TODO optimize by considering additional output vars as free
-			// // TODO [!]
-			// self.cnf.nvar.next_var = Some(Var(std::cmp::max(
-			// 	self.cnf.vars().max().unwrap_or(Var(1)),
-			// 	output, // output.iter().max().unwrap().clone(),
-			// )));
-
+			// TODO [refactor] instead of using splr, testing should use our own Solver interface
 			let mut k_sol = 0;
 			while let Ok(Certificate::SAT(lit_assignment)) = self.slv.solve() {
 				let solution = if ONLY_OUTPUT {

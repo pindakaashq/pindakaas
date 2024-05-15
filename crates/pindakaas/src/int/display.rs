@@ -1,3 +1,4 @@
+// TODO Refactor: move display to where struct has its other impls
 use std::fmt::{self, Display};
 
 use itertools::Itertools;

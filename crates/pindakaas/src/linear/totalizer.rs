@@ -1,8 +1,9 @@
+// TODO rename to gt.rs
 use itertools::Itertools;
 
 pub(crate) use crate::int::IntVar;
 use crate::{
-	int::{Consistency, Decompose, Lin, Model, Term},
+	int::{Consistency, Decompose, Dom, Lin, Model, Term},
 	ClauseDatabase, Coeff, Decomposer, Encoder, Linear, ModelConfig, Result, Unsatisfiable,
 };
 
@@ -49,24 +50,16 @@ impl Decompose for TotalizerEncoder {
 						let dom = if at_root {
 							vec![lin.k]
 						} else {
-							// let lb = lin.k - (lin_ub - left.ub() - right.ub()) - C::one();
 							left.dom()
 								.into_iter()
 								.cartesian_product(right.dom().into_iter())
 								.map(|(a, b)| a + b)
-								// .filter(|d| {
-								// 	lin.cmp.split().into_iter().all(|cmp| match cmp {
-								// 		Comparator::LessEq => d <= &lin_ub,
-								// 		Comparator::GreaterEq => d >= &lb,
-								// 		_ => unreachable!(),
-								// 	})
-								// })
 								.sorted()
 								.dedup()
 								.collect::<Vec<_>>()
 						};
-						let parent = model.new_var(
-							&dom,
+						let parent = model.new_aux_var(
+							Dom::from_slice(&dom),
 							model.config.add_consistency,
 							None,
 							Some(format!("gt_{}_{}", i, j)),
@@ -124,12 +117,12 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for TotalizerEncoder {
 		let xs = xs.into_iter().sorted_by_key(Term::ub).collect_vec();
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
-
 		let mut model = self.decompose(Model {
 			cons: vec![Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None)],
 			..model
 		})?;
-		model.encode(db, false)?;
+
+		model.encode_internal(db, false)?;
 		Ok(())
 	}
 }

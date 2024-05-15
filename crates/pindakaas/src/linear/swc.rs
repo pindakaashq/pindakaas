@@ -54,7 +54,7 @@ impl Decompose for SwcEncoder {
 			.enumerate()
 			.map(|(i, (lb, ub))| {
 				model
-					.new_var_from_dom(
+					.new_aux_var(
 						Dom::from_bounds(lb, ub),
 						model.config.add_consistency,
 						None,
@@ -109,7 +109,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for SwcEncoder {
 			cons: vec![Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None)],
 			..model
 		})?;
-		model.encode(db, false)?;
+		model.encode_internal(db, false)?;
 		Ok(())
 	}
 }

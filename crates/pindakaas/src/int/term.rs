@@ -18,10 +18,11 @@ use crate::{
 	Coeff, Comparator, IntLinExp as LinExp, IntVar, IntVarRef, Lin, Lit, Model, Scm,
 };
 
+/// A linear term (constant times integer variable)
 #[derive(Debug, Clone)]
 pub struct Term {
-	pub c: Coeff,
-	pub x: IntVarRef,
+	pub(crate) c: Coeff,
+	pub(crate) x: IntVarRef,
 }
 
 impl Mul<Coeff> for Term {
@@ -79,7 +80,7 @@ impl Term {
 			}
 		}
 
-		// TODO [!] refactor
+		// TODO [!] refactor using entry
 		// let cse = match model
 		// 	.cse
 		// 	.entry((self.x.borrow().id, self.c))
@@ -108,6 +109,7 @@ impl Term {
 
 			Ok(Term::from(y))
 		};
+		// TODO [!] remove
 		let dom = self.dom().iter().sorted().copied().collect_vec();
 		let t = match e {
 			Some(IntVarEnc::Bin(_)) if self.c == 0 => {
@@ -195,7 +197,7 @@ impl Term {
 				} else {
 					self.x.borrow().dom.clone()
 				};
-				let y = model.new_var_from_dom(
+				let y = model.new_aux_var(
 					dom,
 					false,
 					Some(IntVarEnc::Bin(None)), // y:B
@@ -210,7 +212,6 @@ impl Term {
 				model.add_constraint(Lin {
 					exp: LinExp {
 						terms: vec![
-							// Term::new(self.c.abs(), self.x.clone()),
 							Term::new(
 								if couple_term {
 									if up {
@@ -251,10 +252,9 @@ impl Term {
 				))
 			}
 			Some(IntVarEnc::Bin(None)) if self.c.is_negative() => {
-				// // rely on CSE?
 				let model = model.as_mut().unwrap();
 
-				let y = model.new_var_from_dom(
+				let y = model.new_aux_var(
 					Dom::from_bounds(-self.x.borrow().ub(), -self.x.borrow().lb()),
 					false,
 					None,
@@ -326,7 +326,7 @@ impl Term {
 							};
 
 							let c = c_x + c_y;
-							let z = model.new_var_from_dom(
+							let z = model.new_aux_var(
 								// z's represents c*x, so its domain can be directly calculated from c*dom(x)
 								Dom::from_bounds(
 									c * self.x.borrow().lb(),
@@ -351,11 +351,10 @@ impl Term {
 						}
 						Ok(model.cse.0[&(self.x.borrow().id, self.c, Comparator::Equal)].clone())
 					}
-					Scm::Pow => todo!(),
 					Scm::Dnf => {
 						let y = model
-							.new_var(
-								&dom,
+							.new_aux_var(
+								Dom::from_slice(&dom),
 								false,
 								Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
 								Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
@@ -391,11 +390,11 @@ impl Term {
 		Ok(t)
 	}
 
-	pub fn ineqs(&self, up: bool) -> Vec<(Coeff, Vec<Lit>, Coeff)> {
+	pub(crate) fn ineqs(&self, up: bool) -> Vec<(Coeff, Vec<Lit>, Coeff)> {
 		self.x.borrow().ineqs(up)
 	}
 
-	pub fn lb(&self) -> Coeff {
+	pub(crate) fn lb(&self) -> Coeff {
 		self.c
 			* (if self.c.is_negative() {
 				self.x.borrow().ub()
@@ -414,6 +413,7 @@ impl Term {
 	}
 
 	// TODO [?] correct way to return an iter with this if-else which returns different iter types?
+	// TODO return Dom?
 	pub(crate) fn dom(&self) -> Vec<Coeff> {
 		if self.c == 0 {
 			vec![0]
@@ -451,7 +451,7 @@ mod tests {
 			let mut model = Model::default();
 			let x = Term::new(
 				-1,
-				model.new_var_from_dom(
+				model.new_aux_var(
 					Dom::from_bounds(2, 6),
 					true,
 					Some(IntVarEnc::Bin(None)),
