@@ -14,8 +14,8 @@ use crate::{
 		decompose::{Decompose, ModelDecomposer},
 		Dom, IntVar, IntVarId, IntVarRef, LinExp,
 	},
-	CheckError, Checker, ClauseDatabase, Comparator, Lin, Lit, Result, Term, Unsatisfiable,
-	Valuation, Var,
+	CheckError, Checker, ClauseDatabase, Comparator, Lin, Result, Term, Unsatisfiable, Valuation,
+	Var,
 };
 
 #[cfg(feature = "trace")]
@@ -94,7 +94,7 @@ impl From<Vec<Lin>> for Model {
 	}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Cse(pub(crate) HashMap<(IntVarId, Coeff, Comparator), Term>);
 
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
@@ -185,18 +185,15 @@ impl FromIterator<Model> for Model {
 impl Checker for Model {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
 		let a = self.assign(sol)?;
-		self.cons
-			.iter()
-			// .try_for_each(|con| con.check(&a, Some(sol)))
-			.try_for_each(|con| con.check(&a))
+		self.cons.iter().try_for_each(|con| con.check(&a))
 	}
 }
 
-impl Default for Cse {
-	fn default() -> Self {
-		Self(HashMap::new())
-	}
-}
+// impl Default for Cse {
+// 	fn default() -> Self {
+// 		Self(HashMap::new())
+// 	}
+// }
 
 impl Default for Model {
 	fn default() -> Self {

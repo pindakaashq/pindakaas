@@ -38,15 +38,15 @@ impl PosCoeff {
 	}
 }
 
-// TODO [?] why removed?
-impl From<Coeff> for PosCoeff {
-	fn from(c: Coeff) -> Self {
-		if c < 0 {
-			panic!("cannot create a PosCoeff with a negative value")
-		}
-		Self(c)
-	}
-}
+// // TODO [?] why removed?
+// impl From<Coeff> for PosCoeff {
+// 	fn from(c: Coeff) -> Self {
+// 		if c < 0 {
+// 			panic!("cannot create a PosCoeff with a negative value")
+// 		}
+// 		Self(c)
+// 	}
+// }
 
 impl From<PosCoeff> for Coeff {
 	fn from(val: PosCoeff) -> Self {
@@ -126,7 +126,7 @@ impl From<Cardinality> for Linear {
 			terms: card
 				.lits
 				.into_iter()
-				.map(|l| Part::Amo(vec![(l, PosCoeff::from(1))]))
+				.map(|l| Part::Amo(vec![(l, PosCoeff::new(1))]))
 				.collect(),
 			cmp: card.cmp,
 			k: card.k,
@@ -333,12 +333,6 @@ impl From<&IntVar> for LinExp {
 		x.as_lin_exp()
 	}
 }
-
-// impl<Lit: Literal, C: Coefficient> From<&IntVarEnc<Lit, C>> for LinExp<Lit, C> {
-// 	fn from(x: &IntVarEnc<Lit, C>) -> Self {
-// 		x.as_lin_exp()
-// 	}
-// }
 
 impl Checker for LinearConstraint {
 	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {

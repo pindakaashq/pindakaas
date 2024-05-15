@@ -1,5 +1,8 @@
 // use crate::int::res::SCM;
-use std::{collections::HashMap, ops::Mul};
+use std::{
+	collections::HashMap,
+	ops::{Mul, Shl},
+};
 
 use itertools::Itertools;
 
@@ -11,6 +14,7 @@ use crate::{
 		res::SCM,
 		Cse, LitOrConst,
 	},
+	linear::PosCoeff,
 	Coeff, Comparator, IntLinExp as LinExp, IntVar, IntVarRef, Lin, Lit, Model, Scm,
 };
 
@@ -26,6 +30,16 @@ impl Mul<Coeff> for Term {
 		Self {
 			x: self.x,
 			c: self.c * rhs,
+		}
+	}
+}
+
+impl Shl<u32> for Term {
+	type Output = Self;
+	fn shl(self, rhs: u32) -> Self {
+		Self {
+			x: self.x,
+			c: self.c << rhs,
 		}
 	}
 }
@@ -65,7 +79,7 @@ impl Term {
 			}
 		}
 
-		// TODO refactor
+		// TODO [!] refactor
 		// let cse = match model
 		// 	.cse
 		// 	.entry((self.x.borrow().id, self.c))
@@ -78,9 +92,9 @@ impl Term {
 		let lit_to_bin_enc = |a: Coeff, _cmp: Comparator, lit: Lit, dom: &[Coeff]| {
 			let c = a.abs() * self.c.abs();
 			let bin_enc = BinEnc::from_lits(
-				&as_binary(c.into(), None)
+				&as_binary(PosCoeff::new(c), None)
 					.into_iter()
-					.map(|bit| LitOrConst::from(bit.then_some(lit.clone()))) // if true, return Lit(lit), if false, return Const(false)
+					.map(|bit| LitOrConst::from(bit.then_some(lit))) // if true, return Lit(lit), if false, return Const(false)
 					.collect_vec(),
 			);
 
@@ -111,7 +125,7 @@ impl Term {
 			Some(IntVarEnc::Bin(Some(x_bin))) if x_bin.x.len() == 1 && self.c.is_positive() => {
 				// TODO generalize for neg. c
 				if let [LitOrConst::Lit(lit)] = &x_bin.x.clone()[..] {
-					lit_to_bin_enc(1, cmp, lit.clone(), &dom)
+					lit_to_bin_enc(1, cmp, *lit, &dom)
 				} else {
 					unreachable!()
 				}
@@ -119,12 +133,7 @@ impl Term {
 			Some(IntVarEnc::Ord(Some(x_ord))) if x_ord.x.len() <= 1 && self.c.is_positive() => {
 				if let &[lit] = &x_ord.iter().take(2).collect_vec()[..] {
 					// also pass in normalized value of the one literal
-					lit_to_bin_enc(
-						self.x.borrow().ub() - self.x.borrow().lb(),
-						cmp,
-						lit.clone(),
-						&dom,
-					)
+					lit_to_bin_enc(self.x.borrow().ub() - self.x.borrow().lb(), cmp, *lit, &dom)
 				} else {
 					unreachable!()
 				}
@@ -265,9 +274,9 @@ impl Term {
 			}
 			Some(IntVarEnc::Bin(None)) if self.c.trailing_zeros() > 0 => {
 				let sh = self.c.trailing_zeros();
-				return Ok(Term::new(self.c >> sh as usize, self.x.clone())
+				return Ok(Term::new(self.c >> sh, self.x.clone())
 					.encode_bin(model, cmp, con_lbl)?
-					* Coeff::from(2).pow(sh));
+					<< sh);
 			}
 			Some(IntVarEnc::Bin(None)) => {
 				assert!(self.c.trailing_zeros() == 0);
@@ -300,7 +309,7 @@ impl Term {
 								} else {
 									cse.0[&(self.x.borrow().id, c, Comparator::Equal)].clone()
 								};
-								(c << sh, x * Coeff::from(2).pow(sh))
+								(c << sh, x << sh)
 							};
 
 						for rca in scm {

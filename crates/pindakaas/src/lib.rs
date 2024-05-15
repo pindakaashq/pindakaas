@@ -1,5 +1,4 @@
 #![feature(int_roundings)]
-#![allow(unreachable_code, unused_imports)]
 //! `pindakaas` is a collection of encoders to transform integer and
 //! pseudo-Boolean (PB) constraints into conjunctive normal form (CNF). It
 //! currently considers mostly linear constraints, which are in the form ∑

@@ -29,11 +29,14 @@ impl PbLinExp {
 		self.iter().try_fold(self.add, |acc, (_, terms)| {
 			Ok(acc
 				+ terms.into_iter().fold(0, |acc, (lit, coef)| {
-					acc + solution
+					acc + if solution
 						.value(*lit)
 						.unwrap_or_else(|| panic!("TODO unassigned"))
-						.then_some(coef)
-						.unwrap_or(&0)
+					{
+						coef
+					} else {
+						&0
+					}
 				}) * self.mult)
 			// let is_consistent = match constraint {
 			// 	Some(Constraint::AtMostOne) => assignments.iter().filter(|(lit,_,a)| lit == a).count() <= 1,

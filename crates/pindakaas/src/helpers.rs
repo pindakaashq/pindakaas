@@ -75,28 +75,23 @@ macro_rules! const_concat {
 #[allow(unused_imports)]
 pub(crate) use const_concat;
 
+pub(crate) fn pow2(k: u32) -> Coeff {
+	Coeff::from(2).pow(k)
+}
+
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
 pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool {
 	let mut it = coefs.into_iter().enumerate();
 	if let Some((_, mult)) = it.next() {
-		const TWO: Coeff = 2;
-		it.all(|(i, c)| c == (TWO.pow(i as u32) * mult))
+		it.all(|(i, c)| c == (mult << i))
 	} else {
 		false
 	}
 }
 
-// pub(crate) fn unsigned_binary_range_ub(bits: u32) -> Coeff {
-// 	const TWO: Coeff = 2;
-// 	(0u32..bits).fold(0, |sum, i| sum + TWO.pow(i))
-// }
-
 /// 2^bits - 1
 pub(crate) fn unsigned_binary_range(bits: u32) -> (PosCoeff, PosCoeff) {
-	(
-		PosCoeff::new(0),
-		PosCoeff::new(Coeff::from(2).checked_pow(bits).unwrap() - 1),
-	)
+	(PosCoeff::new(0), PosCoeff::new(pow2(bits) - 1))
 }
 
 /// Convert `k` to unsigned binary in `bits`

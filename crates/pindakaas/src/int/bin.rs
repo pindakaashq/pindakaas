@@ -8,7 +8,7 @@ use itertools::Itertools;
 
 use super::{required_lits, Dom, LitOrConst};
 use crate::{
-	helpers::{add_clauses_for, as_binary, negate_cnf, unsigned_binary_range},
+	helpers::{add_clauses_for, as_binary, negate_cnf, pow2, unsigned_binary_range},
 	int::{helpers::remove_red, model::PRINT_COUPLING},
 	linear::{lex_geq_const, lex_leq_const, PosCoeff},
 	trace::{emit_clause, new_var},
@@ -38,8 +38,7 @@ impl BinEnc {
 		if k == 0 {
 			0
 		} else {
-			let zeroes = u32::try_from((k).trailing_zeros()).unwrap();
-			Coeff::from(2).pow(zeroes) - 1
+			pow2(k.trailing_zeros()) - 1
 		}
 	}
 
@@ -53,11 +52,7 @@ impl BinEnc {
 			assert!(k <= a);
 			let k = k.clamp(range_lb, range_ub);
 			std::iter::successors(Some(k), |k: &Coeff| {
-				let k = k + if k == &0 {
-					1
-				} else {
-					Coeff::from(2).pow(u32::try_from((k).trailing_zeros()).unwrap())
-				};
+				let k = k + if k == &0 { 1 } else { pow2(k.trailing_zeros()) };
 				if k < a {
 					Some(k)
 				} else {
@@ -65,7 +60,7 @@ impl BinEnc {
 				}
 			})
 			.map(|k| {
-				as_binary(k.into(), Some(self.bits()))
+				as_binary(PosCoeff::new(k), Some(self.bits()))
 					.iter()
 					.zip(self.xs().iter().cloned())
 					// if >=, find 1's, if <=, find 0's
@@ -87,7 +82,7 @@ impl BinEnc {
 	/// The encoding range
 	pub(crate) fn range(&self) -> (Coeff, Coeff) {
 		let (range_lb, range_ub) = unsigned_binary_range(self.bits());
-		let (range_lb, range_ub) = (*range_lb, *range_ub); // TODO replace all Coeff for PosCoeff in bin.rs
+		let (range_lb, range_ub) = (*range_lb, *range_ub); // TODO [?] replace all Coeff for PosCoeff in bin.rs
 		(range_lb, range_ub)
 	}
 
@@ -98,7 +93,7 @@ impl BinEnc {
 			vec![]
 		} else {
 			let k = k.clamp(range_lb, range_ub);
-			as_binary(k.into(), Some(self.bits()))
+			as_binary(PosCoeff::new(k), Some(self.bits()))
 				.into_iter()
 				.zip(self.xs().iter().cloned())
 				// if >=, find 1's, if <=, find 0's
@@ -172,7 +167,7 @@ impl BinEnc {
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
 	pub fn ineq(&self, k: Coeff, up: bool) -> Vec<Vec<Lit>> {
-		let clause: Result<Vec<_>, _> = as_binary(k.into(), Some(self.bits()))
+		let clause: Result<Vec<_>, _> = as_binary(PosCoeff::new(k), Some(self.bits()))
 			.into_iter()
 			.zip(self.xs().iter().cloned())
 			// if >=, find 0's, if <=, find 0's
@@ -249,10 +244,10 @@ impl BinEnc {
 
 	/// Return conjunction of bits equivalent where `x=k`
 	fn eq(&self, k: Coeff, dom: &Dom) -> Vec<Vec<Lit>> {
-		as_binary(self.normalize(k, dom).into(), Some(self.bits()))
+		as_binary(self.normalize(k, dom), Some(self.bits()))
 			.into_iter()
 			.zip(self.xs().iter())
-			.map(|(b, x)| if b { x.clone() } else { !x.clone() })
+			.map(|(b, x)| if b { *x } else { !*x })
 			.flat_map(|x| match x {
 				LitOrConst::Lit(lit) => Some(Ok(vec![lit])),
 				LitOrConst::Const(true) => None,
@@ -294,10 +289,10 @@ impl BinEnc {
 				.iter()
 				.enumerate()
 				.filter_map(|(k, x)| {
-					let a = Coeff::from(2).pow(k as u32);
+					let a = pow2(k as u32);
 
 					match x {
-						LitOrConst::Lit(l) => Some((l.clone(), a)),
+						LitOrConst::Lit(l) => Some((*l, a)),
 						LitOrConst::Const(true) => {
 							add += a;
 							None
@@ -351,6 +346,7 @@ impl BinEnc {
 			})
 			.collect_vec();
 
+		// TODO [!] remove reading
 		let cnf = Cnf::from_file(&PathBuf::from(format!(
 			"{}/res/ecm/{lits}_{c}.dimacs",
 			env!("CARGO_MANIFEST_DIR")
@@ -361,10 +357,10 @@ impl BinEnc {
 			.vars()
 			.zip_longest(xs.iter())
 			.flat_map(|yx| match yx {
-				itertools::EitherOrBoth::Both(x, y) => Some((x, y.clone())),
+				itertools::EitherOrBoth::Both(x, y) => Some((x, *y)),
 				itertools::EitherOrBoth::Left(x) => {
 					// var in CNF but not in x -> new var y
-					Some((x.clone(), new_var!(db, format!("scm_{x}"))))
+					Some((x, new_var!(db, format!("scm_{x}"))))
 				}
 				itertools::EitherOrBoth::Right(_) => unreachable!(), // cnf has at least as many vars as xs
 			})
@@ -377,11 +373,11 @@ impl BinEnc {
 				clause
 					.iter()
 					.map(|x| {
-						let lit = &map[&x.var()];
+						let lit = map[&x.var()];
 						if x.is_negated() {
 							!lit
 						} else {
-							lit.clone()
+							lit
 						}
 					})
 					.collect::<Vec<_>>()

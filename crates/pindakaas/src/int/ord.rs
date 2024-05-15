@@ -35,7 +35,7 @@ impl OrdEnc {
 		if up {
 			[(vec![], false)]
 				.into_iter()
-				.chain(self.x.iter().map(|x| (vec![vec![x.clone()]], true)))
+				.chain(self.x.iter().map(|x| (vec![vec![*x]], true)))
 				.collect()
 		} else {
 			self.x
@@ -53,7 +53,7 @@ impl OrdEnc {
 				vec![]
 			} // true
 			Some(p) => {
-				vec![vec![self.x[p - 1].clone()]]
+				vec![vec![self.x[p - 1]]]
 			} // lit
 			None => {
 				vec![vec![]]
@@ -68,7 +68,7 @@ impl OrdEnc {
 				vec![]
 			} // true
 			Some(p) => {
-				vec![vec![self.x[p - 1].clone()]]
+				vec![vec![self.x[p - 1]]]
 			} // lit
 			None => {
 				vec![vec![]]

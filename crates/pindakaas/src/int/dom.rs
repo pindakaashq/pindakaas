@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use std::{fmt::Display, ops::RangeInclusive};
+use std::ops::RangeInclusive;
 
 use itertools::{FoldWhile, Itertools};
 
@@ -202,49 +202,16 @@ impl Dom {
 		)
 	}
 
-	// TODO [?] too much precision or not?
 	pub(crate) fn density(&self) -> f64 {
 		todo!();
-		(self.size() as f64) / ((self.ub() - self.lb() + 1) as f64)
+		// TODO [?] too much precision or not?
+		// (self.size() as f64) / ((self.ub() - self.lb() + 1) as f64)
 	}
 }
 #[derive(Clone)]
 pub struct DomIterator<'a> {
 	ranges: std::slice::Iter<'a, (Coeff, Coeff)>,
 	range: RangeInclusive<Coeff>,
-}
-
-impl Display for Dom {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		// TODO replaced {..} for |..| since logger interprets {/} wrong
-		let dom = self.iter().collect::<Vec<_>>();
-		if dom.is_empty() {
-			return write!(f, "||");
-		}
-		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
-		const ELIPSIZE: Option<usize> = Some(4);
-		let elipsize = ELIPSIZE.map(|e| dom.len() > e).unwrap_or_default();
-
-		let density = if dom.len() <= 1 || true {
-			String::from("")
-		} else {
-			format!("{:.0}%", self.density() * 100.0)
-		};
-		if dom.len() > 1 && Coeff::try_from(dom.len()).unwrap() == ub - lb + 1 {
-			write!(f, "|{}..{}| |{}|", lb, ub, dom.len())?;
-		} else if elipsize {
-			write!(
-				f,
-				"|{},..,{ub}| |{}|{}",
-				dom.iter().take(ELIPSIZE.unwrap() - 1).join(","),
-				dom.len(),
-				density
-			)?;
-		} else {
-			write!(f, "|{}| |{}|{}", dom.iter().join(","), dom.len(), density)?;
-		}
-		Ok(())
-	}
 }
 
 impl<'a> Iterator for DomIterator<'a> {

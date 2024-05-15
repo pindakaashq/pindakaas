@@ -12,7 +12,7 @@ use itertools::Itertools;
 
 use super::LitOrConst;
 use crate::{
-	helpers::as_binary,
+	helpers::pow2,
 	int::{model::Obj, IntVarEnc, LinExp},
 	Coeff, Comparator, Lin, Lit, Model, Term,
 };
@@ -28,7 +28,7 @@ pub(crate) fn required_lits(lb: Coeff, ub: Coeff) -> u32 {
 	if cardinality == 0 {
 		0
 	} else {
-		u32::try_from(cardinality.ilog2() + 1).unwrap()
+		cardinality.ilog2() + 1
 	}
 }
 
@@ -38,13 +38,16 @@ pub(crate) fn filter_fixed(xs: &[LitOrConst]) -> (Vec<(Lit, Coeff)>, Coeff) {
 	(
 		xs.iter()
 			.enumerate()
-			.filter_map(|(k, x)| match x {
-				LitOrConst::Lit(l) => Some((l.clone(), Coeff::from(2).pow(k as u32))),
-				LitOrConst::Const(true) => {
-					add += Coeff::from(2).pow(k as u32);
-					None
+			.filter_map(|(k, x)| {
+				let a = pow2(k as u32);
+				match x {
+					LitOrConst::Lit(l) => Some((*l, a)),
+					LitOrConst::Const(true) => {
+						add += a;
+						None
+					}
+					LitOrConst::Const(false) => None,
 				}
-				LitOrConst::Const(false) => None,
 			})
 			.collect::<Vec<_>>(),
 		add,
