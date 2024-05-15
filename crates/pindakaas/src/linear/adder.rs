@@ -278,7 +278,7 @@ fn xor<DB: ClauseDatabase>(db: &mut DB, xs: &[LitOrConst], _lbl: String) -> Resu
 	let (xs, trues) = filter_fixed_sum(xs);
 
 	let is_even = match &xs[..] {
-		[] => LitOrConst::Const(false), // TODO ?? why not `true`?
+		[] => LitOrConst::Const(false), // TODO why not `true`?
 		[x] => LitOrConst::Lit(*x),
 		[x, y] => {
 			assert!(trues <= 1);

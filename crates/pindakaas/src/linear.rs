@@ -38,16 +38,6 @@ impl PosCoeff {
 	}
 }
 
-// // TODO [?] why removed?
-// impl From<Coeff> for PosCoeff {
-// 	fn from(c: Coeff) -> Self {
-// 		if c < 0 {
-// 			panic!("cannot create a PosCoeff with a negative value")
-// 		}
-// 		Self(c)
-// 	}
-// }
-
 impl From<PosCoeff> for Coeff {
 	fn from(val: PosCoeff) -> Self {
 		val.0

@@ -9,6 +9,7 @@ use flate2::read::GzDecoder;
 use itertools::Itertools;
 use tar::Archive;
 
+// TODO [!] once recipes added, to be moved from build.rs to a rust script type thing: scm_db_res.rs
 fn scm() -> Result<Vec<(usize, u32, Vec<ScmNode>)>, std::io::Error> {
 	if Path::new("./res/scm").exists() {
 		fs::remove_dir_all("./res/scm")?;
