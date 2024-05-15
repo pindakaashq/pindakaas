@@ -362,6 +362,14 @@ pub mod tests {
 		linear::LimitComp, CardinalityOne, ConditionalDatabase, LadderEncoder, Unsatisfiable, Var,
 	};
 
+	/// TODO a macro to write tests using `?`
+	macro_rules! assert_ok {
+		($test:expr) => {
+			((|| $test)()).unwrap_or_else(|e| panic!("Asserted Result was Ok but was Err({e})"))
+		};
+	}
+	pub(crate) use assert_ok;
+
 	macro_rules! assert_enc {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
@@ -720,7 +728,7 @@ pub mod tests {
 				.unwrap_or((1..=self.num_var).collect());
 
 			// // TODO optimize by considering additional output vars as free
-			// // TODO [?]
+			// // TODO [!]
 			// self.cnf.nvar.next_var = Some(Var(std::cmp::max(
 			// 	self.cnf.vars().max().unwrap_or(Var(1)),
 			// 	output, // output.iter().max().unwrap().clone(),
