@@ -1,4 +1,3 @@
-#![allow(unused_imports, unused_variables, dead_code, unreachable_code)]
 use crate::{
 	linear::{LimitComp, LinMarker, Linear, PosCoeff},
 	CardinalityOne, CheckError, Checker, ClauseDatabase, Encoder, Lit, Valuation,
