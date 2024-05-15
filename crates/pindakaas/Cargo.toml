@@ -47,7 +47,6 @@ cadical = ["pindakaas-cadical", "pindakaas-derive"]
 intel-sat = ["pindakaas-intel-sat", "pindakaas-derive"]
 kissat = ["pindakaas-kissat", "pindakaas-derive"]
 trace = ["tracing"]
-# default = ["cadical"]
 ipasir-up = ["cadical"]
 
 [lints]

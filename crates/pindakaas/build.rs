@@ -1,8 +1,3 @@
-// macro_rules! p {
-//     ($($tokens: tt)*) => {
-//         println!("cargo:warning={}", format!($($tokens)*))
-//     }
-// }
 use std::{fs, path::Path};
 
 use flate2::read::GzDecoder;
