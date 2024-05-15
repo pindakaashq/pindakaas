@@ -6,26 +6,15 @@ use rustc_hash::FxHashMap;
 use crate::{
 	helpers::is_powers_of_two,
 	linear::{Constraint, LimitComp, Part, PosCoeff},
-	sorted::SortedEncoder,
 	trace::{emit_clause, new_var},
 	Cardinality, CardinalityOne, ClauseDatabase, Coeff, Comparator, LinVariant, Linear,
 	LinearConstraint, Lit, Result, Unsatisfiable,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct LinearAggregator {
-	sorted_encoder: SortedEncoder,
-	sort_same_coefficients: usize,
-}
+pub struct LinearAggregator {}
 
 impl LinearAggregator {
-	/// For non-zero `n`, detect groups of minimum size `n` with free literals and same coefficients, sort them (using provided SortedEncoder) and add them as a single implication chain group
-	pub fn sort_same_coefficients(&mut self, sorted_encoder: SortedEncoder, n: usize) -> &mut Self {
-		self.sorted_encoder = sorted_encoder;
-		self.sort_same_coefficients = n;
-		self
-	}
-
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
@@ -444,52 +433,6 @@ impl LinearAggregator {
 				k,
 			}));
 		}
-
-		let partition = if self.sort_same_coefficients >= 2 {
-			todo!();
-		/*
-		let (free_lits, mut partition): (Vec<_>, Vec<_>) = partition.into_iter().partition(
-			|part| matches!(part, Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1),
-		);
-
-		for (coef, lits) in free_lits
-			.into_iter()
-			.map(|part| match part {
-				Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1 => x[0],
-				_ => unreachable!(),
-			})
-			.map(|(lit, coef)| (coef, lit))
-			.into_group_map()
-			.into_iter()
-		{
-			if self.sort_same_coefficients >= 2 && lits.len() >= self.sort_same_coefficients {
-				let c = *k / *coef;
-
-				let y = IntVarOrd::from_bounds(db, 0, c, String::from("s")).into();
-				self.sorted_encoder
-					.encode(db, &Sorted::new(&lits, cmp.clone(), &y))
-					.unwrap();
-
-				let lin_exp = LinExp::from(&y);
-				partition.push(Part::Ic(
-					lin_exp
-						.terms
-						.into_iter()
-						.map(|(lit, _)| (lit, coef))
-						.collect(),
-				));
-			} else {
-				for x in lits {
-					partition.push(Part::Amo(vec![(x, coef)]));
-				}
-			}
-		}
-
-		partition
-		*/
-		} else {
-			partition
-		};
 
 		// Default case: encode pseudo-Boolean linear constraint
 		Ok(LinVariant::Linear(Linear {

@@ -3,9 +3,6 @@ use crate::{
 	CardinalityOne, CheckError, Checker, ClauseDatabase, Encoder, Lit, Valuation,
 };
 
-mod sorting_network;
-pub use sorting_network::SortingNetworkEncoder;
-
 #[derive(Clone, Debug)]
 pub struct Cardinality {
 	pub(crate) lits: Vec<Lit>,
@@ -56,7 +53,6 @@ impl<DB: ClauseDatabase, Enc: Encoder<DB, Cardinality> + CardMarker> Encoder<DB,
 // local marker trait, to ensure the previous definition only applies within this crate
 pub(crate) trait CardMarker {}
 impl<T: LinMarker> CardMarker for T {}
-impl CardMarker for SortingNetworkEncoder {}
 
 #[cfg(test)]
 pub(crate) mod tests {
