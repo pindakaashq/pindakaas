@@ -644,7 +644,29 @@ Actual assignments:
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{helpers::tests::assert_ok, solver::cmdline_solver::MapSol, Cnf, Lin, Model};
+	use crate::{helpers::tests::assert_ok, Cnf, Lin, Lit, Model};
+
+	pub(crate) struct MapSol(HashMap<Var, bool>);
+
+	impl From<Vec<Lit>> for MapSol {
+		fn from(value: Vec<Lit>) -> Self {
+			Self(
+				value
+					.into_iter()
+					.map(|lit| (lit.var(), !lit.is_negated()))
+					.collect::<HashMap<_, _>>(),
+			)
+		}
+	}
+
+	impl Valuation for MapSol {
+		fn value(&self, lit: Lit) -> Option<bool> {
+			self.0
+				.get(&lit.var())
+				.copied()
+				.map(|a| if lit.is_negated() { !a } else { a })
+		}
+	}
 
 	#[test]
 	fn model_test() {
