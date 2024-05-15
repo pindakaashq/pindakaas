@@ -1,3 +1,5 @@
+#![feature(int_roundings)]
+#![allow(unreachable_code, unused_imports)]
 //! `pindakaas` is a collection of encoders to transform integer and
 //! pseudo-Boolean (PB) constraints into conjunctive normal form (CNF). It
 //! currently considers mostly linear constraints, which are in the form ∑
@@ -7,107 +9,169 @@
 //! set of booleans is *At Most One (AMO)* or *At Most K (AMK)*. Specialised
 //! encodings are used when these cases are detected.
 
-use std::{
-	clone::Clone,
-	cmp::Eq,
-	cmp::Ordering,
-	error::Error,
-	fmt::{self, Display},
-	fs::File,
-	hash::Hash,
-	io::{self, BufRead, BufReader, Write},
-	ops::Neg,
-	path::Path,
-	str::FromStr,
-};
-
-use itertools::{Itertools, Position};
-use num::{
-	traits::{NumAssignOps, NumOps},
-	Integer, One, PrimInt, Signed, Zero,
-};
-
-// mod bench;
 mod cardinality;
 mod cardinality_one;
 pub(crate) mod helpers;
 mod int;
 mod linear;
-pub mod solvers;
+mod propositional_logic;
+pub mod solver;
 mod sorted;
 pub mod trace;
 
+use std::{
+	clone::Clone,
+	cmp::{Eq, Ordering},
+	error::Error,
+	fmt::{self, Display},
+	fs::File,
+	hash::Hash,
+	io::{self, BufRead, BufReader, Write},
+	num::NonZeroI32,
+	ops::Not,
+	path::Path,
+};
+
 pub use cardinality::{Cardinality, SortingNetworkEncoder};
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
+use helpers::VarRange;
 pub use int::{
 	Assignment, Consistency, Decompose, Decomposer, Format, IntVar, IntVarId, IntVarRef, Lin,
 	LinExp as IntLinExp, Model, ModelConfig, ModelDecomposer, Obj, Scm, Term,
 };
+use itertools::{Itertools, Position};
 pub use linear::{
 	AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear, LinearAggregator,
-	LinearConstraint, LinearEncoder, PosCoeff, SwcEncoder, TotalizerEncoder,
+	LinearConstraint, LinearEncoder, SwcEncoder, TotalizerEncoder,
 };
-pub use sorted::{SortedEncoder, SortedStrategy};
+use solver::{NextVarRange, VarFactory};
 
-/// Literal is the super-trait for types that can be used to represent boolean
-/// literals in this library.
-///
-/// Literals need to implement the following trait to be used as literals:
-///
-///  - [`std::clone::Clone`] to allow creating a new copy of the literal to
-///    create clauses.
-///
-///  - [`std::cmp::Eq`] and [`std::hash::Hash`] to allow PB constraints to be
-///    simplified
-pub trait Literal:
-	fmt::Debug + Clone + Eq + Ord + PartialOrd + Hash + Zero + One + FromStr + Display + TryInto<usize>
-{
-	/// Returns the negation of the literal in its current form
-	fn negate(&self) -> Self;
-	/// Returns `true` when the literal a negated boolean variable.
-	fn is_negated(&self) -> bool;
-	/// Returns a non-negated version of the literal
-	fn var(&self) -> Self {
-		if self.is_negated() {
-			self.negate()
+pub use crate::propositional_logic::{Formula, TseitinEncoder};
+use crate::trace::subscript_number;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Var(pub(crate) NonZeroI32);
+
+impl Var {
+	fn next_var(&self) -> Option<Var> {
+		const ONE: NonZeroI32 = unsafe { NonZeroI32::new_unchecked(1) };
+		self.checked_add(ONE)
+	}
+
+	fn prev_var(&self) -> Option<Var> {
+		let prev = self.0.get() - 1;
+		if prev > 0 {
+			Some(Var(NonZeroI32::new(prev).unwrap()))
 		} else {
-			self.clone()
+			None
+		}
+	}
+
+	fn checked_add(&self, b: NonZeroI32) -> Option<Var> {
+		self.0
+			.get()
+			.checked_add(b.get())
+			.map(|v| Var(NonZeroI32::new(v).unwrap()))
+	}
+}
+
+impl Not for Var {
+	type Output = Lit;
+	fn not(self) -> Self::Output {
+		!Lit::from(self)
+	}
+}
+impl Not for &Var {
+	type Output = Lit;
+	fn not(self) -> Self::Output {
+		!*self
+	}
+}
+
+impl Display for Var {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "x{}", subscript_number(self.0.get() as usize).format(""))
+	}
+}
+
+impl From<Var> for NonZeroI32 {
+	fn from(val: Var) -> Self {
+		val.0
+	}
+}
+impl From<Var> for i32 {
+	fn from(val: Var) -> Self {
+		val.0.get()
+	}
+}
+
+/// Literal is type that can be use to represent Boolean decision variables and
+/// their negations
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Lit(NonZeroI32);
+
+impl Lit {
+	pub fn var(&self) -> Var {
+		Var(self.0.abs())
+	}
+	pub fn is_negated(&self) -> bool {
+		self.0.is_negative()
+	}
+}
+
+impl Not for Lit {
+	type Output = Lit;
+	fn not(self) -> Self::Output {
+		Lit(-self.0)
+	}
+}
+impl Not for &Lit {
+	type Output = Lit;
+	fn not(self) -> Self::Output {
+		!(*self)
+	}
+}
+
+impl PartialOrd for Lit {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+impl Ord for Lit {
+	fn cmp(&self, other: &Self) -> Ordering {
+		match self.var().cmp(&other.var()) {
+			std::cmp::Ordering::Equal => (self.is_negated()).cmp(&other.is_negated()),
+			r => r,
 		}
 	}
 }
-impl<
-		T: Signed
-			+ fmt::Debug
-			+ Clone
-			+ Eq
-			+ Ord
-			+ PartialOrd
-			+ Hash
-			+ Neg<Output = Self>
-			+ LitMarker
-			+ Zero
-			+ One
-			+ Display
-			+ TryInto<usize>
-			+ FromStr,
-	> Literal for T
-{
-	fn is_negated(&self) -> bool {
-		self.is_negative()
-	}
-	fn negate(&self) -> Self {
-		-(self.clone())
-	}
-	fn var(&self) -> Self {
-		self.abs()
+
+impl From<Var> for Lit {
+	fn from(value: Var) -> Self {
+		Lit(value.0)
 	}
 }
-pub(crate) trait LitMarker {}
-impl LitMarker for i8 {}
-impl LitMarker for i16 {}
-impl LitMarker for i32 {}
-impl LitMarker for i64 {}
-impl LitMarker for i128 {}
+impl From<Lit> for NonZeroI32 {
+	fn from(val: Lit) -> Self {
+		val.0
+	}
+}
+impl From<Lit> for i32 {
+	fn from(val: Lit) -> Self {
+		val.0.get()
+	}
+}
+
+impl Display for Lit {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(
+			f,
+			"{}{}",
+			if self.is_negated() { "¬" } else { "" },
+			self.var()
+		)
+	}
+}
 
 /// Unsatisfiable is an error type returned when the problem being encoded is
 /// found to be inconsistent.
@@ -124,40 +188,47 @@ impl fmt::Display for Unsatisfiable {
 /// an empty value, or the [`Unsatisfiable`] error type.
 pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
+/// A trait implemented by types that can be used to represent a solution/model
+pub trait Valuation {
+	/// Returns the valuation/truth-value for a given literal in the
+	/// current solution/model.
+	///
+	/// Note that the function can return None if the model/solution is independent
+	/// of the given literal.
+	fn value(&self, lit: Lit) -> Option<bool>;
+}
+
+impl<F: Fn(Lit) -> Option<bool>> Valuation for F {
+	fn value(&self, lit: Lit) -> Option<bool> {
+		self(lit)
+	}
+}
+
 /// Encoder is the central trait implemented for all the encoding algorithms
 pub trait Encoder<DB: ClauseDatabase, Constraint> {
-	fn encode(&mut self, db: &mut DB, con: &Constraint) -> Result;
+	fn encode(&self, db: &mut DB, con: &Constraint) -> Result;
 }
 
 /// Checker is a trait implemented by types that represent constraints. The
 /// [`Checker::check`] methods checks whether an assignment (often referred to
 /// as a model) satisfies the constraint.
 pub trait Checker {
-	type Lit: Literal;
-
 	/// Check whether the constraint represented by the object is violated.
 	///
 	/// - The method returns [`Result::Ok`] when the assignment satisfies
 	///   the constraint,
 	/// - it returns [`Unsatisfiable`] when the assignment violates the
-	///   constraint,
-	/// - and it return [`Incomplete`] when not all the literals used in the
-	///   constraint have been assigned.
-	fn check(&self, solution: &[Self::Lit]) -> Result<(), CheckError<Self::Lit>>;
-
-	/// Returns assignment of `lit` in `solution`
-	fn assign<'a>(lit: &'a Self::Lit, solution: &'a [Self::Lit]) -> &'a Self::Lit {
-		solution.iter().find(|x| x.var() == lit.var()).unwrap_or_else(|| panic!("Could not find lit {lit:?} in solution {solution:?}; perhaps this variable did not occur in any clause"))
-	}
+	///   constraint
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError>;
 }
 
 /// Incomplete is a error type returned by a [`Checker`] type when the
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
-pub struct Incomplete<Lit: Literal> {
+pub struct Incomplete {
 	missing: Box<[Lit]>,
 }
-impl<Lit: Literal> Error for Incomplete<Lit> {}
-impl<Lit: Literal> fmt::Display for Incomplete<Lit> {
+impl Error for Incomplete {}
+impl fmt::Display for Incomplete {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self.missing.len() {
 			0 => write!(f, "Unknown literal is unasssigned"),
@@ -180,64 +251,40 @@ impl<Lit: Literal> fmt::Display for Incomplete<Lit> {
 
 /// Enumerated type of
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
-pub enum CheckError<Lit: Literal> {
+pub enum CheckError {
 	Unsatisfiable(Unsatisfiable),
-	Incomplete(Incomplete<Lit>),
 	Fail(String),
 }
-impl<Lit: Literal> Error for CheckError<Lit> {}
-impl<Lit: Literal> fmt::Display for CheckError<Lit> {
+impl Error for CheckError {}
+impl fmt::Display for CheckError {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			CheckError::Fail(err) => err.fmt(f),
 			CheckError::Unsatisfiable(err) => err.fmt(f),
-			CheckError::Incomplete(err) => err.fmt(f),
 		}
 	}
 }
-
-/// Coefficient in PB constraints are represented by types that implement the
-/// `Coefficient` constraint.
-pub trait Coefficient:
-	Signed
-	+ Integer
-	+ PrimInt
-	+ NumAssignOps
-	+ NumOps
-	+ Hash
-	+ Default
-	+ FromStr
-	+ fmt::Debug
-	+ fmt::Display
-{
+impl From<Unsatisfiable> for CheckError {
+	fn from(value: Unsatisfiable) -> Self {
+		Self::Unsatisfiable(value)
+	}
 }
-impl<
-		T: Signed
-			+ PrimInt
-			+ Integer
-			+ NumAssignOps
-			+ NumOps
-			+ Hash
-			+ Default
-			+ FromStr
-			+ fmt::Debug
-			+ fmt::Display,
-	> Coefficient for T
-{
-}
+/// Coeff is a type alias used for the number type used to represent the
+/// coefficients in pseudo-Boolean constraints and expression.
+pub type Coeff = i64;
 
 /// IntEncoding is a enumerated type use to represent Boolean encodings of
 /// integer variables within this library
-pub enum IntEncoding<'a, Lit: Literal, C: Coefficient> {
+pub enum IntEncoding<'a> {
 	/// The Direct variant represents a integer variable encoded using domain
 	/// or direct encoding of an integer variable. Each given Boolean literal
 	/// represents whether the integer takes the associated value (i.e., X =
 	/// (first+i) ↔ vals\[i\]).
-	Direct { first: C, vals: &'a [Lit] },
+	Direct { first: Coeff, vals: &'a [Lit] },
 	/// The Order variant represents a integer variable using an order
 	/// encoding. Each given Boolean literal represents whether the integer
 	/// is bigger than the associated value(i.e., X > (first+i) ↔ vals\[i\]).
-	Order { first: C, vals: &'a [Lit] },
+	Order { first: Coeff, vals: &'a [Lit] },
 	/// The Log variant represents a integer variable using a two's complement
 	/// encoding. The sum of the Boolean literals multiplied by their
 	/// associated power of two represents value of the integer (i.e., X = ∑
@@ -252,39 +299,58 @@ pub enum IntEncoding<'a, Lit: Literal, C: Coefficient> {
 /// To satisfy the trait, the type must implement a [`Self::add_clause`] method
 /// and a [`Self::new_var`] method.
 pub trait ClauseDatabase {
-	/// Type used to represent a Boolean literal in the constraint input and
-	/// generated clauses.
-	type Lit: Literal;
 	/// Method to be used to receive a new Boolean variable that can be used in
-	/// the encoding of a constraint.
-	fn new_var(&mut self) -> Self::Lit;
+	/// the encoding of a problem or constriant.
+	fn new_var(&mut self) -> Var;
 
-	/// Add a clause to the `ClauseDatabase`. The sink is allowed to return
-	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to
-	/// be unsatisfiable. This is used as a signal to the encoder that any
-	/// subsequent encoding effort can be abandoned.
-	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result;
+	/// Add a clause to the `ClauseDatabase`. The databae is allowed to return
+	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
+	/// unsatisfiable. This is used as a signal to the encoder that any subsequent
+	/// encoding effort can be abandoned.
+	///
+	/// Clauses added this way cannot be removed. The addition of removable
+	/// clauses can be simulated using activation literals and solving the problem
+	/// under assumptions.
+	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result;
+
+	fn encode<C, E: Encoder<Self, C>>(&mut self, constraint: &C, encoder: &E) -> Result
+	where
+		Self: Sized,
+	{
+		encoder.encode(self, constraint)
+	}
+
+	type CondDB: ClauseDatabase + ?Sized;
+	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB>;
 }
 
 // TODO: Add usage and think about interface
-pub struct ConditionalDatabase<'a, DB: ClauseDatabase> {
+pub struct ConditionalDatabase<'a, DB: ClauseDatabase + ?Sized> {
 	db: &'a mut DB,
-	conditions: &'a [DB::Lit],
+	conditions: Vec<Lit>,
 }
-impl<'a, DB: ClauseDatabase> ConditionalDatabase<'a, DB> {
-	pub fn new(db: &'a mut DB, conditions: &'a [DB::Lit]) -> Self {
+impl<'a, DB: ClauseDatabase + ?Sized> ConditionalDatabase<'a, DB> {
+	pub fn new(db: &'a mut DB, conditions: Vec<Lit>) -> Self {
 		Self { db, conditions }
 	}
 }
-impl<'a, DB: ClauseDatabase> ClauseDatabase for ConditionalDatabase<'a, DB> {
-	type Lit = DB::Lit;
-	fn new_var(&mut self) -> Self::Lit {
+impl<'a, DB: ClauseDatabase + ?Sized> ClauseDatabase for ConditionalDatabase<'a, DB> {
+	fn new_var(&mut self) -> Var {
 		self.db.new_var()
 	}
-	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
-		self.db.add_clause(&Vec::from_iter(
-			self.conditions.iter().chain(cl.iter()).cloned(),
-		))
+
+	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
+		let chain = self.conditions.iter().copied().chain(cl);
+		self.db.add_clause(chain)
+	}
+
+	type CondDB = DB;
+	fn with_conditions(&mut self, mut conditions: Vec<Lit>) -> ConditionalDatabase<DB> {
+		conditions.extend(self.conditions.iter().copied());
+		ConditionalDatabase {
+			db: self.db,
+			conditions,
+		}
 	}
 }
 
@@ -292,10 +358,10 @@ impl<'a, DB: ClauseDatabase> ClauseDatabase for ConditionalDatabase<'a, DB> {
 ///
 /// It can be used to create formulas manually, to store the results from
 /// encoders, read formulas from a file, and write them to a file
-#[derive(Clone, Debug)]
-pub struct Cnf<Lit: Literal = i32> {
-	/// The last variable created by [`new_var`]
-	last_var: Lit,
+#[derive(Clone, Debug, Default)]
+pub struct Cnf {
+	/// The variable factory used by [`new_var`]
+	nvar: VarFactory,
 	/// The literals from *all* clauses
 	lits: Vec<Lit>,
 	/// The size *for each* clause
@@ -305,17 +371,17 @@ pub struct Cnf<Lit: Literal = i32> {
 /// A representation for a weighted CNF formula
 ///
 /// Same as CNF, but every clause has an optional weight. Otherwise, it is a hard clause.
-#[derive(Clone, Debug)]
-pub struct Wcnf<Lit: Literal + Zero + One = i32, C: Coefficient = i32> {
+#[derive(Clone, Debug, Default)]
+pub struct Wcnf {
 	/// The CNF formula
-	cnf: Cnf<Lit>,
+	cnf: Cnf,
 	/// The weight for every clause
-	weights: Vec<Option<C>>,
+	weights: Vec<Option<Coeff>>,
 	// TODO this can be optimised, for example by having all weighted clauses at the start/end
 }
 
 // TODO not sure how to handle converting num_var for vars()
-impl<Lit: Literal + Zero + One + Display> Cnf<Lit> {
+impl Cnf {
 	/// Store CNF formula at given path in DIMACS format
 	///
 	/// File will optionally be prefaced by a given comment
@@ -329,7 +395,7 @@ impl<Lit: Literal + Zero + One + Display> Cnf<Lit> {
 		write!(file, "{self}")
 	}
 
-	pub fn vars(&self) -> impl Iterator<Item = Lit> {
+	pub fn vars(&self) -> impl Iterator<Item = Var> {
 		self.iter()
 			.flat_map(|cl| cl.iter().map(|lit| lit.var()))
 			.sorted()
@@ -337,10 +403,7 @@ impl<Lit: Literal + Zero + One + Display> Cnf<Lit> {
 	}
 
 	pub fn variables(&self) -> usize {
-		self.last_var
-			.clone()
-			.try_into()
-			.unwrap_or_else(|_| panic!("Cannot convert Lit {} to usize", self.last_var))
+		self.nvar.emited_vars()
 	}
 
 	pub fn clauses(&self) -> usize {
@@ -352,15 +415,21 @@ impl<Lit: Literal + Zero + One + Display> Cnf<Lit> {
 	}
 }
 
-impl<Lit: Literal + Zero + One + Display, C: Coefficient> From<Cnf<Lit>> for Wcnf<Lit, C> {
-	fn from(cnf: Cnf<Lit>) -> Self {
+impl NextVarRange for Cnf {
+	fn next_var_range(&mut self, size: usize) -> Option<VarRange> {
+		self.nvar.next_var_range(size)
+	}
+}
+
+impl From<Cnf> for Wcnf {
+	fn from(cnf: Cnf) -> Self {
 		let weights = std::iter::repeat(None).take(cnf.clauses()).collect();
 		Wcnf { cnf, weights }
 	}
 }
-impl<Lit: Literal + Zero + One + Display, C: Coefficient> From<Wcnf<Lit, C>> for Cnf<Lit> {
+impl From<Wcnf> for Cnf {
 	// TODO implement iter for Cnf
-	fn from(wcnf: Wcnf<Lit, C>) -> Self {
+	fn from(wcnf: Wcnf) -> Self {
 		let mut start = 0;
 		let lits_size = wcnf
 			.cnf
@@ -376,7 +445,7 @@ impl<Lit: Literal + Zero + One + Display, C: Coefficient> From<Wcnf<Lit, C>> for
 							.skip(start)
 							.take(*size)
 							.cloned()
-							.collect::<Vec<_>>(),
+							.collect_vec(),
 						size,
 					);
 					start += size;
@@ -386,28 +455,25 @@ impl<Lit: Literal + Zero + One + Display, C: Coefficient> From<Wcnf<Lit, C>> for
 					None
 				}
 			})
-			.collect::<Vec<_>>();
+			.collect_vec();
 		let lits = lits_size
 			.iter()
 			.flat_map(|lit_size| lit_size.0.clone())
 			.collect();
-		let size = lits_size
-			.iter()
-			.map(|lit_size| *lit_size.1)
-			.collect::<Vec<_>>();
+		let size = lits_size.iter().map(|lit_size| *lit_size.1).collect_vec();
 		Self {
+			nvar: wcnf.cnf.nvar,
 			lits,
-			last_var: wcnf.cnf.last_var,
 			size,
 		}
 	}
 }
 
-impl<Lit: Literal + Zero + One + Display, C: Coefficient> Display for Wcnf<Lit, C> {
+impl Display for Wcnf {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let num_var = &self.cnf.last_var;
+		let num_var = &self.cnf.nvar.emited_vars();
 		let num_clauses = self.cnf.size.len();
-		let top = self.weights.iter().flatten().fold(C::one(), |a, b| a + *b);
+		let top = self.weights.iter().flatten().fold(1, |a, b| a + *b);
 		writeln!(f, "p wcnf {num_var} {num_clauses} {top}")?;
 		let mut start = 0;
 		for (size, weight) in self.cnf.size.iter().zip(self.weights.iter()) {
@@ -424,7 +490,7 @@ impl<Lit: Literal + Zero + One + Display, C: Coefficient> Display for Wcnf<Lit, 
 	}
 }
 
-impl<Lit: Literal + Zero + One + Display, C: Coefficient> Wcnf<Lit, C> {
+impl Wcnf {
 	/// Store WCNF formula at given path in WDIMACS format
 	///
 	/// File will optionally be prefaced by a given comment
@@ -451,9 +517,9 @@ impl<Lit: Literal + Zero + One + Display, C: Coefficient> Wcnf<Lit, C> {
 	}
 }
 
-impl<Lit: Literal + Zero + One + Display> Display for Cnf<Lit> {
+impl Display for Cnf {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let num_var = &self.last_var;
+		let num_var = &self.variables();
 		let num_clauses = self.size.len();
 		writeln!(f, "p cnf {num_var} {num_clauses}")?;
 		let mut start = 0;
@@ -469,23 +535,20 @@ impl<Lit: Literal + Zero + One + Display> Display for Cnf<Lit> {
 	}
 }
 
-enum Dimacs<Lit: Literal + Zero + One + FromStr, C: Coefficient> {
-	Cnf(Cnf<Lit>),
-	Wcnf(Wcnf<Lit, C>),
+enum Dimacs {
+	Cnf(Cnf),
+	Wcnf(Wcnf),
 }
 
-fn parse_dimacs_file<Lit: Literal + Zero + One + FromStr + Display, C: Coefficient + FromStr>(
-	path: &Path,
-	expect_wcnf: bool,
-) -> Result<Dimacs<Lit, C>, io::Error> {
+fn parse_dimacs_file(path: &Path, expect_wcnf: bool) -> Result<Dimacs, io::Error> {
 	let file = File::open(path)?;
 	let mut had_header = false;
 
-	let mut wcnf = Wcnf::<Lit, C>::default();
+	let mut wcnf = Wcnf::default();
 
 	let mut cl: Vec<Lit> = Vec::new();
-	let mut top: Option<C> = None;
-	let weight: Option<C> = None;
+	let mut top: Option<Coeff> = None;
+	let weight: Option<Coeff> = None;
 
 	for line in BufReader::new(file).lines() {
 		match line {
@@ -493,7 +556,7 @@ fn parse_dimacs_file<Lit: Literal + Zero + One + FromStr + Display, C: Coefficie
 			Ok(line) if had_header => {
 				for seg in line.split(' ') {
 					if expect_wcnf {
-						if let Ok(weight) = seg.parse::<C>() {
+						if let Ok(weight) = seg.parse::<Coeff>() {
 							wcnf.weights.push(match weight.cmp(&top.unwrap()) {
 								Ordering::Less => Some(weight),
 								Ordering::Equal => None,
@@ -506,13 +569,12 @@ fn parse_dimacs_file<Lit: Literal + Zero + One + FromStr + Display, C: Coefficie
 						}
 					}
 
-					if let Ok(lit) = seg.parse::<Lit>() {
-						if lit == Lit::zero() {
-							wcnf.add_weighted_clause(&cl, weight)
+					if let Ok(lit) = seg.parse::<i32>() {
+						if lit == 0 {
+							wcnf.add_weighted_clause(cl.drain(..), weight)
 								.expect("CNF::add_clause does not return Unsatisfiable");
-							cl.clear();
 						} else {
-							cl.push(lit);
+							cl.push(Lit(NonZeroI32::new(lit).unwrap()));
 						}
 					}
 				}
@@ -533,12 +595,14 @@ fn parse_dimacs_file<Lit: Literal + Zero + One + FromStr + Display, C: Coefficie
 					));
 				}
 				// parse number of variables
-				wcnf.cnf.last_var = vec[2].parse().map_err(|_| {
-					io::Error::new(
-						io::ErrorKind::InvalidInput,
-						"unable to parse number of variables",
-					)
-				})?;
+				wcnf.cnf.nvar = VarFactory {
+					next_var: Some(Var(vec[2].parse::<NonZeroI32>().map_err(|_| {
+						io::Error::new(
+							io::ErrorKind::InvalidInput,
+							"unable to parse number of variables",
+						)
+					})?)),
+				};
 				// parse number of clauses
 				let num_clauses: usize = vec[3].parse().map_err(|_| {
 					io::Error::new(
@@ -566,95 +630,97 @@ fn parse_dimacs_file<Lit: Literal + Zero + One + FromStr + Display, C: Coefficie
 	if expect_wcnf {
 		Ok(Dimacs::Wcnf(wcnf))
 	} else {
-		Ok(Dimacs::Cnf(Cnf::<Lit>::from(wcnf)))
+		Ok(Dimacs::Cnf(Cnf::from(wcnf)))
 	}
 }
 
-impl<Lit: Literal + Zero + One + FromStr + Display> Cnf<Lit> {
+impl Cnf {
 	/// Read a CNF formula from a file formatted in the DIMACS CNF format
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-		match parse_dimacs_file::<Lit, i8>(path, false)? {
+		match parse_dimacs_file(path, false)? {
 			Dimacs::Cnf(cnf) => Ok(cnf),
 			_ => unreachable!(),
 		}
 	}
 }
 
-impl<Lit: Literal + Zero + One + FromStr + Display, C: Coefficient + FromStr> Wcnf<Lit, C> {
+impl Wcnf {
 	/// Read a WCNF formula from a file formatted in the (W)DIMACS WCNF format
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-		match parse_dimacs_file::<Lit, C>(path, true)? {
+		match parse_dimacs_file(path, true)? {
 			Dimacs::Wcnf(wcnf) => Ok(wcnf),
 			_ => unreachable!(),
 		}
 	}
 }
 
-impl<Lit: Literal + Zero + One, C: Coefficient> Default for Wcnf<Lit, C> {
-	fn default() -> Self {
-		Self {
-			cnf: Cnf::<Lit>::default(),
-			weights: Vec::new(),
-		}
-	}
-}
-
-impl<Lit: Literal + Zero + One> Default for Cnf<Lit> {
-	fn default() -> Self {
-		Self {
-			last_var: Lit::zero(),
-			lits: Vec::new(),
-			size: Vec::new(),
-		}
-	}
-}
-impl<Lit: Literal + Zero + One> ClauseDatabase for Cnf<Lit> {
-	type Lit = Lit;
-	fn new_var(&mut self) -> Self::Lit {
-		self.last_var = self.last_var.clone() + Lit::one();
-		self.last_var.clone()
+impl ClauseDatabase for Cnf {
+	fn new_var(&mut self) -> Var {
+		self.nvar.next().expect("exhausted variable pool")
 	}
 
-	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
-		self.lits.reserve(cl.len());
-		self.lits.extend_from_slice(cl);
-		self.size.push(cl.len());
+	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
+		let size = self.lits.len();
+		self.lits.extend(cl);
+		let len = self.lits.len() - size;
+		if len > 0 {
+			self.size.push(len);
+		}
 		Ok(())
 	}
+
+	type CondDB = Self;
+	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
+		ConditionalDatabase {
+			db: self,
+			conditions,
+		}
+	}
 }
 
-impl<Lit: Literal + Zero + One, C: Coefficient> Wcnf<Lit, C> {
-	pub fn add_weighted_clause(&mut self, cl: &[Lit], weight: Option<C>) -> Result {
+impl Wcnf {
+	pub fn add_weighted_clause<I: IntoIterator<Item = Lit>>(
+		&mut self,
+		cl: I,
+		weight: Option<Coeff>,
+	) -> Result {
+		let clauses = self.cnf.clauses();
 		self.cnf.add_clause(cl)?;
-		self.weights.push(weight);
+		if self.cnf.clauses() > clauses {
+			self.weights.push(weight);
+		}
 		Ok(())
 	}
 
-	pub fn iter(&self) -> impl Iterator<Item = (&[Lit], &Option<C>)> {
+	pub fn iter(&self) -> impl Iterator<Item = (&[Lit], &Option<Coeff>)> {
 		self.cnf.iter().zip(self.weights.iter())
 	}
 }
 
-impl<Lit: Literal + Zero + One, C: Coefficient> ClauseDatabase for Wcnf<Lit, C> {
-	type Lit = Lit;
-	fn new_var(&mut self) -> Self::Lit {
+impl ClauseDatabase for Wcnf {
+	fn new_var(&mut self) -> Var {
 		self.cnf.new_var()
 	}
-
-	fn add_clause(&mut self, cl: &[Self::Lit]) -> Result {
-		self.cnf.add_clause(cl)
+	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
+		self.add_weighted_clause(cl, None)
+	}
+	type CondDB = Self;
+	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
+		ConditionalDatabase {
+			db: self,
+			conditions,
+		}
 	}
 }
 
-impl<Lit: Literal + Zero + One> Cnf<Lit> {
-	/// Construct a new `Cnf` with no clauses. New variables are offset by `last_var`.
-	pub fn new(last_var: Lit) -> Self {
-		Self {
-			last_var,
-			..Self::default()
-		}
+impl NextVarRange for Wcnf {
+	fn next_var_range(&mut self, size: usize) -> Option<VarRange> {
+		self.cnf.next_var_range(size)
 	}
-	pub fn iter(&self) -> CnfIterator<Lit> {
+}
+
+impl Cnf {
+	pub fn iter(&self) -> CnfIterator<'_> {
 		CnfIterator {
 			lits: &self.lits,
 			size: self.size.iter(),
@@ -662,12 +728,12 @@ impl<Lit: Literal + Zero + One> Cnf<Lit> {
 		}
 	}
 }
-pub struct CnfIterator<'a, Lit: Literal + Zero + One> {
+pub struct CnfIterator<'a> {
 	lits: &'a Vec<Lit>,
 	size: std::slice::Iter<'a, usize>,
 	index: usize,
 }
-impl<'a, Lit: Literal + Zero + One> Iterator for CnfIterator<'a, Lit> {
+impl<'a> Iterator for CnfIterator<'a> {
 	type Item = &'a [Lit];
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -690,45 +756,13 @@ impl<'a, Lit: Literal + Zero + One> Iterator for CnfIterator<'a, Lit> {
 
 #[cfg(test)]
 mod tests {
-	#[cfg(feature = "trace")]
-	use traced_test::test;
+	use std::num::NonZeroI32;
 
-	use super::*;
+	use crate::Lit;
 
-	#[test]
-	fn test_int_literals() {
-		assert!(is_lit(1i8));
-		assert!(is_lit(1i16));
-		assert!(is_lit(1i32));
-		assert!(is_lit(1i64));
-		assert!(is_lit(1i128));
-	}
-	fn is_lit<T: Literal>(_: T) -> bool {
-		true
-	}
-
-	#[test]
-	fn test_coefficients() {
-		assert!(is_coeff(1i8));
-		assert!(is_coeff(1i16));
-		assert!(is_coeff(1i32));
-		assert!(is_coeff(1i64));
-		assert!(is_coeff(1i128));
-	}
-	fn is_coeff<T: Coefficient>(_: T) -> bool {
-		true
-	}
-
-	#[test]
-	fn test_positive_coefficients() {
-		assert!(is_poscoeff(1i8));
-		assert!(is_poscoeff(1i16));
-		assert!(is_poscoeff(1i32));
-		assert!(is_poscoeff(1i64));
-		assert!(is_poscoeff(1i128));
-	}
-	fn is_poscoeff<T: Coefficient>(c: T) -> bool {
-		let _ = PosCoeff::from(c);
-		true
+	impl From<i32> for Lit {
+		fn from(value: i32) -> Self {
+			Lit(NonZeroI32::new(value).expect("cannot create literal with value zero"))
+		}
 	}
 }

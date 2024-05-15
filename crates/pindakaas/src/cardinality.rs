@@ -1,30 +1,30 @@
 #![allow(unused_imports, unused_variables, dead_code, unreachable_code)]
 use crate::{
 	linear::{LimitComp, LinMarker, Linear, PosCoeff},
-	CardinalityOne, Checker, ClauseDatabase, Coefficient, Encoder, Literal,
+	CardinalityOne, CheckError, Checker, ClauseDatabase, Encoder, Lit, Valuation,
 };
 
 mod sorting_network;
 pub use sorting_network::SortingNetworkEncoder;
 
 #[derive(Clone, Debug)]
-pub struct Cardinality<Lit: Literal, C: Coefficient> {
-	pub lits: Vec<Lit>,
-	pub cmp: LimitComp,
-	pub k: PosCoeff<C>,
+pub struct Cardinality {
+	pub(crate) lits: Vec<Lit>,
+	pub(crate) cmp: LimitComp,
+	pub(crate) k: PosCoeff,
 }
 
-impl<Lit: Literal, C: Coefficient> From<CardinalityOne<Lit>> for Cardinality<Lit, C> {
-	fn from(card1: CardinalityOne<Lit>) -> Self {
+impl From<CardinalityOne> for Cardinality {
+	fn from(card1: CardinalityOne) -> Self {
 		Self {
 			lits: card1.lits,
 			cmp: card1.cmp,
-			k: C::one().into(),
+			k: PosCoeff::new(1),
 		}
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Cardinality<Lit, C> {
+impl Cardinality {
 	#[cfg(feature = "trace")]
 	#[allow(dead_code)] // FIXME: Remove when used
 	pub(crate) fn trace_print(&self) -> String {
@@ -40,20 +40,18 @@ impl<Lit: Literal, C: Coefficient> Cardinality<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Checker for Cardinality<Lit, C> {
-	type Lit = Lit;
-
-	fn check(&self, solution: &[Self::Lit]) -> Result<(), crate::CheckError<Self::Lit>> {
-		Linear::from(self.clone()).check(solution)
+impl Checker for Cardinality {
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
+		Linear::from(self.clone()).check(value)
 	}
 }
 
 // Automatically implement AtMostOne encoding when you can encode Cardinality constraints
-impl<DB: ClauseDatabase, Enc: Encoder<DB, Cardinality<DB::Lit, i8>> + CardMarker>
-	Encoder<DB, CardinalityOne<DB::Lit>> for Enc
+impl<DB: ClauseDatabase, Enc: Encoder<DB, Cardinality> + CardMarker> Encoder<DB, CardinalityOne>
+	for Enc
 {
-	fn encode(&mut self, db: &mut DB, con: &CardinalityOne<DB::Lit>) -> crate::Result {
-		self.encode(db, &Cardinality::<DB::Lit, i8>::from(con.clone()))
+	fn encode(&self, db: &mut DB, con: &CardinalityOne) -> crate::Result {
+		self.encode(db, &Cardinality::from(con.clone()))
 	}
 }
 // local marker trait, to ensure the previous definition only applies within this crate
@@ -72,18 +70,18 @@ pub(crate) mod tests {
 					$encoder,
 					3,
 					&Cardinality {
-						lits: vec![-1, -2, 3],
+						lits: lits![-1, -2, 3],
 						cmp: LimitComp::LessEq,
-						k: 2.into()
+						k: PosCoeff::new(2)
 					} =>
 						vec![
-							vec![-1, -2, -3],
-							vec![-1, 2, -3],
-							vec![-1, 2, 3],
-							vec![1, -2, -3],
-							vec![1, -2, 3],
-							vec![1, 2, -3],
-							vec![1, 2, 3],
+							lits![-1, -2, -3],
+							lits![-1, 2, -3],
+							lits![-1, 2, 3],
+							lits![1, -2, -3],
+							lits![1, -2, 3],
+							lits![1, 2, -3],
+							lits![1, 2, 3],
 						]
 				);
 			}
@@ -94,15 +92,15 @@ pub(crate) mod tests {
 					$encoder,
 					3,
 					&Cardinality {
-						lits: vec![1, 2, 3],
+						lits: lits![1, 2, 3],
 						cmp: LimitComp::Equal,
-						k: 1.into()
+						k: PosCoeff::new(1)
 					}
 					=>
 					vec![
-					vec![ 1,-2,-3],
-					vec![-1, 2,-3],
-					vec![-1,-2, 3],
+						lits![ 1,-2,-3],
+						lits![-1, 2,-3],
+						lits![-1,-2, 3],
 					]
 				);
 			}
@@ -114,15 +112,15 @@ pub(crate) mod tests {
 					$encoder,
 					3,
 					&Cardinality {
-						lits: vec![1, 2, 3],
+						lits: lits![1, 2, 3],
 						cmp: LimitComp::Equal,
-						k: 2.into()
+						k: PosCoeff::new(2)
 					}
 					=>
 					vec![
-					vec![1, 2, -3],
-					vec![1, -2, 3],
-					vec![-1, 2, 3],
+						lits![1, 2, -3],
+						lits![1, -2, 3],
+						lits![-1, 2, 3],
 					]
 				);
 			}
@@ -133,17 +131,17 @@ pub(crate) mod tests {
 					$encoder,
 					4,
 					&Cardinality {
-						lits: vec![1, 2, 3, 4],
+						lits: lits![1, 2, 3, 4],
 						cmp: LimitComp::Equal,
-						k: 2.into()
+						k: PosCoeff::new(2)
 					} =>
 					vec![
-					  vec![1, 2, -3, -4],
-					  vec![1, -2, 3, -4],
-					  vec![-1, 2, 3, -4],
-					  vec![1, -2, -3, 4],
-					  vec![-1, 2, -3, 4],
-					  vec![-1, -2, 3, 4],
+					  lits![1, 2, -3, -4],
+					  lits![1, -2, 3, -4],
+					  lits![-1, 2, 3, -4],
+					  lits![1, -2, -3, 4],
+					  lits![-1, 2, -3, 4],
+					  lits![-1, -2, 3, 4],
 					]
 				);
 			}
@@ -156,28 +154,25 @@ pub(crate) mod tests {
 					$encoder,
 					5,
 					&Cardinality {
-						lits: vec![ 1,  2, 3, 4 ,5 ],
+						lits: lits![1, 2, 3, 4 ,5],
 						cmp: LimitComp::Equal,
-						k: 3.into()
+						k: PosCoeff::new(3)
 					}
 					=>
 					vec![
-					vec![1, 2, 3, -4, -5],
-					vec![1, 2, -3, 4, -5],
-					vec![1, -2, 3, 4, -5],
-					vec![-1, 2, 3, 4, -5],
-					vec![1, 2, -3, -4, 5],
-					vec![1, -2, 3, -4, 5],
-					vec![-1, 2, 3, -4, 5],
-					vec![1, -2, -3, 4, 5],
-					vec![-1, 2, -3, 4, 5],
-					vec![-1, -2, 3, 4, 5],
+						lits![1, 2, 3, -4, -5],
+						lits![1, 2, -3, 4, -5],
+						lits![1, -2, 3, 4, -5],
+						lits![-1, 2, 3, 4, -5],
+						lits![1, 2, -3, -4, 5],
+						lits![1, -2, 3, -4, 5],
+						lits![-1, 2, 3, -4, 5],
+						lits![1, -2, -3, 4, 5],
+						lits![-1, 2, -3, 4, 5],
+						lits![-1, -2, 3, 4, 5],
 					]
 				);
 			}
-
-
-
 		};
 	}
 

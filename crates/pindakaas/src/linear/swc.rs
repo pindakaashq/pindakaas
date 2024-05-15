@@ -1,17 +1,20 @@
-use crate::int::{Consistency, Decompose, Dom, IntVar, Lin, Model, Term};
-use crate::{ClauseDatabase, Coefficient, Decomposer, Encoder, Linear, Result};
-use crate::{Literal, ModelConfig, Unsatisfiable};
 use itertools::Itertools;
+
+use crate::{
+	int::{Consistency, Dom, Lin, Model},
+	ClauseDatabase, Coeff, Decompose, Decomposer, Encoder, IntVar, Linear, ModelConfig, Result,
+	Term, Unsatisfiable,
+};
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight Counter (SWC)
 #[derive(Clone, Default)]
-pub struct SwcEncoder<C: Coefficient> {
+pub struct SwcEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,
-	cutoff: Option<C>,
+	cutoff: Option<Coeff>,
 }
 
-impl<C: Coefficient> SwcEncoder<C> {
+impl SwcEncoder {
 	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
@@ -20,21 +23,21 @@ impl<C: Coefficient> SwcEncoder<C> {
 		self.add_propagation = c;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Option<C>) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for SwcEncoder<C> {
-	fn decompose(&self, mut model: Model<Lit, C>) -> Result<Model<Lit, C>, Unsatisfiable> {
+impl Decompose for SwcEncoder {
+	fn decompose(&self, mut model: Model) -> Result<Model, Unsatisfiable> {
 		assert!(model.cons.len() == 1);
 		let lin = model.cons.pop().unwrap();
 		let xs = lin.exp.terms.clone();
 
 		let n = xs.len();
 
-		let ys = [(C::zero(), C::zero())]
+		let ys = [(0, 0)]
 			.into_iter()
 			.chain(
 				lin.exp
@@ -42,7 +45,7 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for SwcEncoder<C> {
 					.iter()
 					.map(|term| (term.lb(), term.ub()))
 					.take(n - 1)
-					.scan((C::zero(), C::zero()), |state, (lb, ub)| {
+					.scan((0, 0), |state, (lb, ub)| {
 						*state = (state.0 - ub, state.1 - lb);
 						Some(*state)
 					}),
@@ -76,12 +79,12 @@ impl<Lit: Literal, C: Coefficient> Decompose<Lit, C> for SwcEncoder<C> {
 	}
 }
 
-impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for SwcEncoder<C> {
+impl<DB: ClauseDatabase> Encoder<DB, Linear> for SwcEncoder {
 	#[cfg_attr(
 		feature = "trace",
 		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&mut self, db: &mut DB, lin: &Linear<DB::Lit, C>) -> Result {
+	fn encode(&self, db: &mut DB, lin: &Linear) -> Result {
 		let mut model = Model {
 			config: ModelConfig {
 				cutoff: self.cutoff,
@@ -98,8 +101,7 @@ impl<DB: ClauseDatabase, C: Coefficient> Encoder<DB, Linear<DB::Lit, C>> for Swc
 			.iter()
 			.enumerate()
 			.map(|(i, part)| {
-				IntVar::from_part(db, &mut model, part, lin.k.clone(), format!("x_{i}"))
-					.map(Term::from)
+				IntVar::from_part(db, &mut model, part, lin.k, format!("x_{i}")).map(Term::from)
 			})
 			.collect::<Result<Vec<_>>>()?;
 
@@ -119,12 +121,12 @@ mod tests {
 
 	use super::*;
 	use crate::{
-		helpers::tests::assert_sol,
+		helpers::tests::{assert_sol, lits},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
-			LimitComp,
+			LimitComp, PosCoeff,
 		},
-		Encoder,
+		Encoder, Lit,
 	};
 
 	linear_test_suite!(SwcEncoder::default().add_propagation(Consistency::None));

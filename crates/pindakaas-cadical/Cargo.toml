@@ -1,0 +1,16 @@
+[package]
+name = "pindakaas-cadical"
+version = "1.9.5"
+edition = "2021"
+build = "build.rs"
+links = "cadical"
+exclude = ["vendor/cadical"]
+include = ["vendor/cadical/src/*.cpp"]
+
+publish = false
+
+[build-dependencies]
+cc = { version = "1.0", features = ["parallel"] }
+
+[dependencies]
+pindakaas-build-macros = { path = "../pindakaas-build-macros" }

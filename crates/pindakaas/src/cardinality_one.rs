@@ -1,7 +1,7 @@
 use crate::{
 	linear::{LimitComp, Linear},
 	trace::emit_clause,
-	Checker, ClauseDatabase, Literal, Result,
+	CheckError, Checker, ClauseDatabase, Lit, Result, Valuation,
 };
 
 mod bitwise;
@@ -12,12 +12,12 @@ pub use ladder::LadderEncoder;
 pub use pairwise::PairwiseEncoder;
 
 #[derive(Debug, Clone)]
-pub struct CardinalityOne<Lit: Literal> {
+pub struct CardinalityOne {
 	pub lits: Vec<Lit>,
 	pub cmp: LimitComp,
 }
 
-impl<Lit: Literal> CardinalityOne<Lit> {
+impl CardinalityOne {
 	#[cfg(feature = "trace")]
 	pub(crate) fn trace_print(&self) -> String {
 		use crate::trace::trace_print_lit;
@@ -32,27 +32,25 @@ impl<Lit: Literal> CardinalityOne<Lit> {
 	}
 }
 
-impl<Lit: Literal> Checker for CardinalityOne<Lit> {
-	type Lit = Lit;
-
-	fn check(&self, solution: &[Self::Lit]) -> Result<(), crate::CheckError<Self::Lit>> {
-		Linear::<Self::Lit, i8>::from(self.clone()).check(solution)
+impl Checker for CardinalityOne {
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
+		Linear::from(self.clone()).check(value)
 	}
 }
 
 pub(crate) fn at_least_one_clause<DB: ClauseDatabase>(
 	db: &mut DB,
-	card1: &CardinalityOne<DB::Lit>,
+	card1: &CardinalityOne,
 ) -> Result {
 	debug_assert_eq!(card1.cmp, LimitComp::Equal);
-	emit_clause!(db, &card1.lits)
+	emit_clause!(db, card1.lits.clone())
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
 	macro_rules! card1_test_suite {
 		($encoder:expr) => {
-            const LARGE_N: i32 = 20;
+			const LARGE_N: i32 = 50;
 			// ------ At Most One testing ------
 			#[test]
 			fn test_amo_pair() {
@@ -60,10 +58,10 @@ pub(crate) mod tests {
 					$encoder,
 					2,
 					&CardinalityOne {
-						lits: vec![1, 2],
+						lits: lits![1, 2],
 						cmp: LimitComp::LessEq
 					}
-					=> vec![vec![-1, -2], vec![1, -2], vec![-1, 2]]
+					=> vec![lits![-1, -2], lits![1, -2], lits![-1, 2]]
 				);
 			}
 			#[test]
@@ -72,10 +70,10 @@ pub(crate) mod tests {
 					$encoder,
 					2,
 					&CardinalityOne {
-						lits: vec![1, -2],
+						lits: lits![1, -2],
 						cmp: LimitComp::LessEq
 					}
-					=> vec![vec![-1, -2], vec![-1, 2], vec![1, 2]]
+					=> vec![lits![-1, -2], lits![-1, 2], lits![1, 2]]
 				);
 			}
 			#[test]
@@ -84,10 +82,10 @@ pub(crate) mod tests {
 					$encoder,
 					2,
 					&CardinalityOne {
-						lits: vec![-1, -2],
+						lits: lits![-1, -2],
 						cmp: LimitComp::LessEq
 					}
-					=> vec![vec![-1, 2], vec![1, -2], vec![1, 2]]
+					=> vec![lits![-1, 2], lits![1, -2], lits![1, 2]]
 				);
 			}
 			#[test]
@@ -96,10 +94,10 @@ pub(crate) mod tests {
 					$encoder,
 					3,
 					&CardinalityOne {
-						lits: vec![1, 2, 3],
+						lits: lits![1, 2, 3],
 						cmp: LimitComp::LessEq
 					}
-					=> vec![vec![-1, -2, -3], vec![1, -2, -3], vec![-1, 2, -3], vec![-1, -2, 3]]
+					=> vec![lits![-1, -2, -3], lits![1, -2, -3], lits![-1, 2, -3], lits![-1, -2, 3]]
 				);
 			}
 			#[test]
@@ -108,7 +106,7 @@ pub(crate) mod tests {
 					$encoder,
 					LARGE_N,
 					&CardinalityOne {
-						lits: (1..=LARGE_N).collect::<Vec<i32>>(),
+						lits: (1..=LARGE_N).map(|l| l.into()).collect::<Vec<Lit>>(),
 						cmp: LimitComp::LessEq
 					}
 				);
@@ -119,7 +117,7 @@ pub(crate) mod tests {
 					$encoder,
 					LARGE_N,
 					&CardinalityOne {
-						lits: (-LARGE_N..=-1).collect::<Vec<i32>>(),
+						lits: (-LARGE_N..=-1).map(|l| l.into()).collect::<Vec<Lit>>(),
 						cmp: LimitComp::LessEq
 					}
 				);
@@ -130,7 +128,7 @@ pub(crate) mod tests {
 					$encoder,
 					LARGE_N,
 					&CardinalityOne {
-						lits: (1..=LARGE_N).map(|i| if i % 2 != 0 { -i } else { i }).collect::<Vec<i32>>(),
+						lits: (1..=LARGE_N).map(|i| (if i % 2 != 0 { -i } else { i }).into()).collect::<Vec<Lit>>(),
 						cmp: LimitComp::LessEq
 					}
 				);
@@ -142,10 +140,10 @@ pub(crate) mod tests {
 					$encoder,
 					2,
 					&CardinalityOne {
-						lits: vec![1, 2],
+						lits: lits![1, 2],
 						cmp: LimitComp::Equal
 					}
-					=> vec![vec![1, -2], vec![-1, 2]]
+					=> vec![lits![1, -2], lits![-1, 2]]
 				);
 			}
 			#[test]
@@ -154,10 +152,10 @@ pub(crate) mod tests {
 					$encoder,
 					2,
 					&CardinalityOne {
-						lits: vec![1, -2],
+						lits: lits![1, -2],
 						cmp: LimitComp::Equal
 					}
-					=> vec![vec![-1, -2], vec![1, 2]]
+					=> vec![lits![-1, -2], lits![1, 2]]
 				);
 			}
 			#[test]
@@ -166,10 +164,10 @@ pub(crate) mod tests {
 					$encoder,
 					2,
 					&CardinalityOne {
-						lits: vec![-1, -2],
+						lits: lits![-1, -2],
 						cmp: LimitComp::Equal
 					}
-					=> vec![vec![-1, 2], vec![1, -2]]
+					=> vec![lits![-1, 2], lits![1, -2]]
 				);
 			}
 			#[test]
@@ -178,10 +176,10 @@ pub(crate) mod tests {
 					$encoder,
 					3,
 					&CardinalityOne {
-						lits: vec![1, 2, 3],
+						lits: lits![1, 2, 3],
 						cmp: LimitComp::Equal
 					}
-					=> vec![vec![1, -2, -3], vec![-1, 2, -3], vec![-1, -2, 3]]
+					=> vec![lits![1, -2, -3], lits![-1, 2, -3], lits![-1, -2, 3]]
 				);
 			}
 			#[test]
@@ -190,7 +188,7 @@ pub(crate) mod tests {
 					$encoder,
 					LARGE_N,
 					&CardinalityOne {
-						lits: (1..=LARGE_N).collect::<Vec<i32>>(),
+						lits: (1..=LARGE_N).map(|l| l.into()).collect(),
 						cmp: LimitComp::Equal
 					}
 				);
@@ -201,7 +199,7 @@ pub(crate) mod tests {
 					$encoder,
 					LARGE_N,
 					&CardinalityOne {
-						lits: (-LARGE_N..=-1).collect::<Vec<i32>>(),
+						lits: (-LARGE_N..=-1).map(|l| l.into()).collect::<Vec<Lit>>(),
 						cmp: LimitComp::Equal
 					}
 				);
@@ -212,7 +210,7 @@ pub(crate) mod tests {
 					$encoder,
 					LARGE_N,
 					&CardinalityOne {
-						lits: (1..=LARGE_N).map(|i| if i % 2 != 0 { -i } else { i }).collect::<Vec<i32>>(),
+						lits: (1..=LARGE_N).map(|i| (if i % 2 != 0 { -i } else { i }).into()).collect::<Vec<Lit>>(),
 						cmp: LimitComp::Equal
 					}
 				);

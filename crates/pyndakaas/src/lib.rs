@@ -6,23 +6,19 @@ use std::{
 	str::FromStr,
 };
 
-use base::{Encoder, LinExp, LinearConstraint, LinearEncoder, Literal};
-use num::{One, Zero};
+use base::{ClauseDatabase, Encoder, LinExp, LinearConstraint, LinearEncoder};
 use pindakaas as base;
 use pyo3::{exceptions::PyArithmeticError, prelude::*};
 
 #[pyclass]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Lit(i32);
-impl Literal for Lit {
-	fn negate(&self) -> Self {
-		Lit(-self.0)
-	}
-	fn is_negated(&self) -> bool {
+pub struct Lit(base::Lit);
+impl Lit {
+	pub fn is_negated(&self) -> bool {
 		self.0.is_negated()
 	}
-	fn var(&self) -> Self {
-		Lit(self.0.abs())
+	pub fn var(&self) -> Self {
+		Self(self.0.var().into()) // TODO
 	}
 }
 impl Display for Lit {
@@ -30,44 +26,52 @@ impl Display for Lit {
 		self.0.fmt(f)
 	}
 }
-impl FromStr for Lit {
-	type Err = ParseIntError;
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Ok(Lit(i32::from_str(s)?))
-	}
-}
-impl Zero for Lit {
-	fn zero() -> Self {
-		Lit(0)
-	}
-	fn is_zero(&self) -> bool {
-		self.0 == 0
-	}
-}
-impl One for Lit {
-	fn one() -> Self {
-		Lit(1)
-	}
-}
-impl Add for Lit {
-	type Output = Lit;
-	fn add(self, rhs: Self) -> Self::Output {
-		Lit(self.0 + rhs.0)
-	}
-}
-impl Mul for Lit {
-	type Output = Lit;
-	fn mul(self, rhs: Self) -> Self::Output {
-		Lit(self.0 * rhs.0)
-	}
-}
-impl TryInto<usize> for Lit {
-	type Error = TryFromIntError;
 
-	fn try_into(self) -> Result<usize, Self::Error> {
-		usize::try_from(self.0)
-	}
-}
+// // <<<<<<< HEAD
+// impl FromStr for base::Lit {
+// 	type Err = ParseIntError;
+// 	fn from_str(s: &str) -> Result<Self, Self::Err> {
+//         // TODO [?]
+// 		// Ok(Lit(base::Lit(NonZeroI32(i32::from_str(s)?))))
+// 		Ok(base::Lit(NonZeroI32(i32::from_str(s)?)))
+// 	}
+// }
+
+// impl Zero for Lit {
+// 	fn zero() -> Self {
+// 		Lit(0)
+// 	}
+// 	fn is_zero(&self) -> bool {
+// 		self.0 == 0
+// 	}
+// }
+// impl One for Lit {
+// 	fn one() -> Self {
+// 		Lit(1)
+// 	}
+// }
+// impl Add for Lit {
+// 	type Output = Lit;
+// 	fn add(self, rhs: Self) -> Self::Output {
+// 		Lit(self.0 + rhs.0)
+// 	}
+// }
+// impl Mul for Lit {
+// 	type Output = Lit;
+// 	fn mul(self, rhs: Self) -> Self::Output {
+// 		Lit(self.0 * rhs.0)
+// 	}
+// }
+// impl TryInto<usize> for Lit {
+// 	type Error = TryFromIntError;
+
+// 	fn try_into(self) -> Result<usize, Self::Error> {
+// 		usize::try_from(self.0)
+// 	}
+// }
+// =======
+// >>>>>>> develop
+
 type Clause = Vec<Lit>;
 
 #[pymodule]
@@ -82,15 +86,22 @@ fn module(_py: Python, m: &PyModule) -> PyResult<()> {
 fn adder_encode(mut db: PyRefMut<'_, Cnf>) -> Result<(), PyErr> {
 	let pref = db.deref_mut();
 	let db = &mut pref.0;
-	let x = LinExp::from_slices(&[1, 2, 3], &[Lit(1), Lit(2), Lit(3)]);
+	let x = LinExp::from_slices(
+		&[1, 2, 3],
+		&[
+			db.new_var().into(),
+			db.new_var().into(),
+			db.new_var().into(),
+		],
+	);
 	let con = LinearConstraint::new(x, base::Comparator::Equal, 2);
-	let mut enc: LinearEncoder = LinearEncoder::default();
+	let enc: LinearEncoder = LinearEncoder::default();
 	enc.encode(db, &con)
 		.map_err(|_e| PyArithmeticError::new_err("Unsatisfiable"))
 }
 
 #[pyclass(name = "CNF")]
-struct Cnf(base::Cnf<Lit>);
+struct Cnf(base::Cnf);
 
 #[pymethods]
 impl Cnf {
@@ -109,9 +120,10 @@ impl Cnf {
 
 	fn __iter__(&self) -> ClauseIter {
 		// FIXME: It would be great if this could be made lazily instead of copying everything when creating the iterator
-		ClauseIter {
-			inner: Vec::from_iter(self.0.iter().map(Vec::from)).into_iter(),
-		}
+		// ClauseIter {
+		// 	inner: Vec::from_iter(self.0.iter().map(Vec::from)).into_iter(),
+		// }
+		todo!()
 	}
 }
 

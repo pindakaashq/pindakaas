@@ -1,6 +1,3 @@
-#![allow(clippy::absurd_extreme_comparisons)]
-use itertools::Itertools;
-use rustc_hash::FxHashMap;
 use std::{
 	cell::RefCell,
 	collections::{HashMap, HashSet},
@@ -9,23 +6,22 @@ use std::{
 	rc::Rc,
 };
 
-use crate::{
-	helpers::{negate_cnf, two_comp_bounds, unsigned_binary_range},
-	int::display::SHOW_IDS,
-	linear::Part,
-	trace::{emit_clause, new_var},
-	CheckError, ClauseDatabase, Coefficient, Literal, Model, PosCoeff, Result, Unsatisfiable,
-};
+use itertools::Itertools;
+use rustc_hash::FxHashMap;
 
-use super::{
-	bin::BinEnc, enc::GROUND_BINARY_AT_LB, model::PRINT_COUPLING, ord::OrdEnc, required_lits, Dom,
-	IntVarEnc,
+use super::{bin::BinEnc, model::PRINT_COUPLING, ord::OrdEnc, required_lits, Dom, IntVarEnc};
+use crate::{
+	helpers::negate_cnf,
+	int::display::SHOW_IDS,
+	linear::{Part, PosCoeff},
+	trace::{emit_clause, new_var},
+	CheckError, ClauseDatabase, Coeff, Lit, Model, Result, Unsatisfiable, Valuation, Var,
 };
 
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct IntVarId(pub usize);
 
-pub type IntVarRef<Lit, C> = Rc<RefCell<IntVar<Lit, C>>>;
+pub type IntVarRef = Rc<RefCell<IntVar>>;
 
 impl Display for IntVarId {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -35,53 +31,25 @@ impl Display for IntVarId {
 // TODO perhaps id can be used by replacing vars HashMap to just vec
 // TODO why can't we derive Default without impl. for Lit (since it's in Option?)
 #[derive(Debug, Clone)]
-pub struct IntVar<Lit: Literal, C: Coefficient> {
+pub struct IntVar {
 	pub id: IntVarId,
-	pub dom: Dom<C>,
+	pub dom: Dom,
 	pub(crate) add_consistency: bool,
-	pub(crate) views: HashMap<C, (IntVarId, C)>,
-	pub(crate) e: Option<IntVarEnc<Lit, C>>,
-	// pub(crate) x: OrdEnc<Lit>,
+	pub(crate) views: HashMap<Coeff, (IntVarId, Coeff)>,
+	pub(crate) e: Option<IntVarEnc>,
 	pub(crate) lbl: Option<String>,
 }
 
 // TODO implement Eq so we don't compare .e
 
-impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
-	/*
-	pub(crate) fn new(
-		id: usize,
-		dom: &[C],
-		add_consistency: bool,
-		e: Option<IntVarEnc<Lit, C>>,
-		lbl: Option<String>,
-	) -> Self {
-		Self::from_dom(id, Dom::from_slice(dom), add_consistency, e, lbl)
-	}
-
-	fn into_ref(self) -> IntVarRef<Lit, C> {
-		Rc::new(RefCell::new(self))
-	}
-
-	// TODO should not be C i/o &C?
-	fn fix(&mut self, q: &C) -> Result {
-		if self.dom.contains(*q) {
-			self.dom = Dom::from_slice(&[*q]);
-			Ok(())
-		} else {
-			Err(Unsatisfiable)
-		}
-	}
-
-	*/
-
+impl IntVar {
 	pub(crate) fn from_dom_as_ref(
 		id: usize,
-		dom: Dom<C>,
+		dom: Dom,
 		add_consistency: bool,
-		e: Option<IntVarEnc<Lit, C>>,
+		e: Option<IntVarEnc>,
 		lbl: Option<String>,
-	) -> IntVarRef<Lit, C> {
+	) -> IntVarRef {
 		Rc::new(RefCell::new(Self::from_dom(
 			id,
 			dom,
@@ -93,9 +61,9 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 
 	pub(crate) fn from_dom(
 		id: usize,
-		dom: Dom<C>,
+		dom: Dom,
 		add_consistency: bool,
-		e: Option<IntVarEnc<Lit, C>>,
+		e: Option<IntVarEnc>,
 		lbl: Option<String>,
 	) -> Self {
 		Self {
@@ -113,15 +81,15 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		feature = "trace",
 		tracing::instrument(name = "consistency", skip_all, fields(constraint = format!("{}", self)))
 	)]
-	pub(crate) fn consistent<DB: ClauseDatabase<Lit = Lit>>(&self, db: &mut DB) -> Result {
+	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> Result {
 		self.e
 			.as_ref()
 			.map(|e| e.consistent(db, &self.dom))
 			.unwrap_or(Ok(()))
 	}
 
-	pub fn ineqs(&self, up: bool) -> Vec<(C, Vec<Lit>, C)> {
-		let ineqs = |es: Vec<Vec<Lit>>, dom: Dom<C>, up: bool| {
+	pub fn ineqs(&self, up: bool) -> Vec<(Coeff, Vec<Lit>, Coeff)> {
+		let ineqs = |es: Vec<Vec<Lit>>, dom: Dom, up: bool| {
 			// go through False lit first
 			let es: Vec<_> = if up {
 				std::iter::once(vec![]) // x>=ub(x)+1
@@ -135,7 +103,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					.chain(
 						// x<lb(x)+1, x<lb(x)+2, .., x<ub(x)
 						es.into_iter()
-							.map(|clause| clause.into_iter().map(|l| l.negate()).collect()),
+							.map(|clause| clause.into_iter().map(|l| !l).collect()),
 					)
 					.collect()
 			};
@@ -175,11 +143,11 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			.collect(),
 			IntVarEnc::Bin(Some(x_bin)) => {
 				// TODO not (particularly) optimized for the domain of x, but this is tricky as the domain values go outside the binary encoding ranges
-				let (range_lb, range_ub) = unsigned_binary_range::<C>(x_bin.bits());
+				let (range_lb, range_ub) = x_bin.range();
 
 				ineqs(
-					num::iter::range_inclusive(range_lb, range_ub - C::one())
-						.map(|k| x_bin.geq(if up { range_ub - k } else { k + C::one() }))
+					(range_lb..=(range_ub - 1))
+						.map(|k| x_bin.geq(if up { range_ub - k } else { k + 1 }))
 						.collect(),
 					Dom::from_bounds(range_lb, range_ub).add(self.lb()), // denormalize
 					up,
@@ -189,7 +157,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 						let k = if up { range_ub - c } else { c };
 						// let k = range_ub - c;
 						let k = x_bin.normalize(k, &self.dom);
-						let a = x_bin.geq_implies(k);
+						let a = x_bin.geq_implies(*k);
 						let k = if up { c - a } else { c + a };
 						x_bin.denormalize(k, &self.dom)
 					})
@@ -201,7 +169,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 	}
 
 	/// Return x>=k (given x>=a)
-	pub fn ineq(&self, k: C, up: bool, a: Option<C>) -> (Option<C>, Vec<Vec<Lit>>) {
+	pub fn ineq(&self, k: Coeff, up: bool, a: Option<Coeff>) -> (Option<Coeff>, Vec<Vec<Lit>>) {
 		// TODO move into IntVar since self.c is taken care off?
 		match self.e.as_ref().unwrap() {
 			IntVarEnc::Ord(Some(o)) => {
@@ -235,14 +203,15 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 				// returns Dnf e.q. (x1 \/ x0 /\ x0)
 				// x1 /\ x0 -> x>=3 -> x0 \/ x2
 
-				let (range_lb, range_ub) = unsigned_binary_range::<C>(x_bin.bits());
+				let (range_lb, range_ub) = x_bin.range();
 				let (k, a) = (
-					x_bin.normalize(k, &self.dom),
-					a.map(|a| x_bin.normalize(a, &self.dom)).unwrap_or(range_ub),
+					*x_bin.normalize(k, &self.dom),
+					a.map(|a| *x_bin.normalize(a, &self.dom))
+						.unwrap_or(range_ub),
 				);
 				let (r_a, r_b) = if up {
 					// x>=k \/ x>=k+1 \/ .. \/ x>=r_b
-					(range_ub + C::one() - k, a)
+					(range_ub + 1 - k, a)
 				} else {
 					(range_lb + k, a)
 				};
@@ -268,20 +237,19 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 				};
 				(None, dnf)
 			}
-			IntVarEnc::Const(_) => todo!(),
 
 			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
 		}
 	}
 
-	pub(crate) fn as_lin_exp(&self) -> crate::linear::LinExp<Lit, C> {
+	pub(crate) fn as_lin_exp(&self) -> crate::linear::LinExp {
 		match self
 			.e
 			.as_ref()
 			.unwrap_or_else(|| panic!("Expected {self} to be encoded"))
 		{
 			IntVarEnc::Ord(Some(o)) => {
-				crate::linear::LinExp::new()
+				crate::linear::LinExp::default()
 					.add_chain(
 						&self
 							.dom
@@ -295,81 +263,73 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					.add_constant(self.lb())
 			}
 			IntVarEnc::Bin(Some(b)) => {
-				let (terms, add) = b.as_lin_exp::<C>();
+				let (terms, add) = b.as_lin_exp();
 				// The offset and the fixed value `add` are added to the constant
-				let add = if GROUND_BINARY_AT_LB {
-					add + self.lb()
-				} else if !self.dom.lb().is_negative() {
-					add
-				} else {
-					add.checked_add(&two_comp_bounds::<C>(b.bits()).0).unwrap()
-				};
+				let add = add + self.lb();
+				let (lb, ub) = (add, self.ub() - self.lb() + add);
 
-				let (lb, ub) = if GROUND_BINARY_AT_LB {
-					(C::zero() + add, self.ub() - self.lb() + add)
-				} else {
-					(self.lb() - add, self.ub() - add)
-				};
-
-				let lin_exp = crate::linear::LinExp::<Lit, C>::new().add_bounded_log_encoding(
+				let lin_exp = crate::linear::LinExp::default().add_bounded_log_encoding(
 					terms.as_slice(),
 					// The Domain constraint bounds only account for the unfixed part of the offset binary notation
 					lb,
 					ub,
 				);
-
 				lin_exp.add_constant(add)
 			}
 			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
-			IntVarEnc::Const(c) => crate::linear::LinExp::new().add_constant(*c),
 		}
 	}
 
-	pub fn assign(&self, a: &[Lit]) -> Result<C, CheckError<Lit>> {
-		crate::linear::LinExp::from(self).assign(a)
-		// match  {
-		// 	IntVarEnc::Ord(o) => LinExp::from(o).assign
-		// 	IntVarEnc::Bin(_) => todo!(),
-		// 	IntVarEnc::Const(c) => Ok(*c),
-		// }
-
-		// .assign(a)
+	pub fn assign<F: Valuation + ?Sized>(&self, a: &F) -> Result<Coeff, CheckError> {
+		let assignment = crate::linear::LinExp::from(self).assign(a)?;
+		if self.add_consistency && !self.dom.contains(assignment) {
+			return Err(CheckError::Fail(format!(
+				"Inconsistent var assignment on consistent var: {} -> {:?}",
+				self, assignment
+			)));
+		} else {
+			Ok(assignment)
+		}
 	}
+
 	pub fn is_constant(&self) -> bool {
-		self.size() == C::one()
+		self.size() == 1
 	}
 
-	pub(crate) fn lits(&self) -> HashSet<Lit> {
+	pub(crate) fn lits(&self) -> HashSet<Var> {
 		self.e.as_ref().map(|e| e.lits()).unwrap_or_default()
 	}
 
-	pub(crate) fn encode_ord<DB: ClauseDatabase<Lit = Lit>>(
+	pub(crate) fn encode_ord<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
-	) -> Result<OrdEnc<Lit>, Unsatisfiable> {
-		self.encode(db, None).map(|e| match e {
+	) -> Result<OrdEnc, Unsatisfiable> {
+		self.encode(db).map(|e| match e {
 			IntVarEnc::Ord(Some(o)) => o,
 			_ if self.is_constant() => OrdEnc::from_lits(&[]),
 			_ => panic!("encode_ord called without binary encoding for {self}"),
 		})
 	}
 
-	pub(crate) fn encode_bin<DB: ClauseDatabase<Lit = Lit>>(
+	pub(crate) fn encode_bin<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
-	) -> Result<BinEnc<Lit>, Unsatisfiable> {
-		self.encode(db, None).map(|e| match e {
+	) -> Result<BinEnc, Unsatisfiable> {
+		self.encode(db).map(|e| match e {
 			IntVarEnc::Bin(Some(b)) => b,
 			_ if self.is_constant() => BinEnc::from_lits(&[]),
 			_ => panic!("encode_bin called without binary encoding for {self}"),
 		})
 	}
 
-	pub(crate) fn encode<DB: ClauseDatabase<Lit = Lit>>(
+	// pub(crate) fn constant(k: Coeff) -> Int{
+	// 	OrdEnc::from_lits(&[])
+	// }
+
+	pub(crate) fn encode<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
-		_views: Option<&mut HashMap<(IntVarId, C), Lit>>,
-	) -> Result<IntVarEnc<Lit, C>, Unsatisfiable> {
+	) -> Result<IntVarEnc, Unsatisfiable> {
 		// cache instantiated encoding
 		let e = match self.e {
 			Some(IntVarEnc::Ord(Some(_))) | Some(IntVarEnc::Bin(Some(_))) => {
@@ -380,10 +340,9 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			}
 			Some(IntVarEnc::Bin(_)) => IntVarEnc::Bin(Some(BinEnc::new(
 				db,
-				required_lits::<C>(self.dom.lb(), self.dom.ub()),
+				required_lits(self.dom.lb(), self.dom.ub()),
 				self.lbl.clone(),
 			))),
-			Some(IntVarEnc::Const(_)) => todo!(),
 		};
 
 		self.e = Some(e.clone());
@@ -395,33 +354,33 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 		Ok(e)
 	}
 
-	pub(crate) fn ge(&mut self, bound: &C) {
-		self.dom.ge(*bound);
+	pub(crate) fn ge(&mut self, bound: Coeff) {
+		self.dom.ge(bound);
 	}
 
-	pub(crate) fn le(&mut self, bound: &C) {
-		self.dom.le(*bound);
+	pub(crate) fn le(&mut self, bound: Coeff) {
+		self.dom.le(bound);
 	}
 
-	pub(crate) fn size(&self) -> C {
+	pub(crate) fn size(&self) -> Coeff {
 		self.dom.size()
 	}
 
-	pub fn lb(&self) -> C {
+	pub fn lb(&self) -> Coeff {
 		self.dom.lb()
 	}
 
-	pub fn ub(&self) -> C {
+	pub fn ub(&self) -> Coeff {
 		self.dom.ub()
 	}
 
-	pub(crate) fn decide_encoding(&mut self, cutoff: Option<C>) -> IntVarEnc<Lit, C> {
+	pub(crate) fn decide_encoding(&mut self, cutoff: Option<Coeff>) -> IntVarEnc {
 		if let Some(e) = self.e.as_ref() {
 			return e.clone();
 		}
 		self.e = Some(match cutoff {
 			None => IntVarEnc::Ord(None),
-			Some(cutoff) if cutoff == C::zero() => IntVarEnc::Bin(None),
+			Some(0) => IntVarEnc::Bin(None),
 			Some(cutoff) => {
 				if self.dom.size() <= cutoff {
 					IntVarEnc::Ord(None)
@@ -448,25 +407,25 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 	}
 
 	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
-	pub(crate) fn from_part<DB: ClauseDatabase<Lit = Lit>>(
+	pub(crate) fn from_part<DB: ClauseDatabase>(
 		db: &mut DB,
-		model: &mut Model<DB::Lit, C>,
-		xs: &Part<Lit, PosCoeff<C>>,
-		ub: PosCoeff<C>,
+		model: &mut Model,
+		xs: &Part,
+		ub: PosCoeff,
 		lbl: String,
-	) -> Result<IntVarRef<Lit, C>, Unsatisfiable> {
+	) -> Result<IntVarRef, Unsatisfiable> {
 		match xs {
 			Part::Amo(terms) => {
-				let terms: Vec<(PosCoeff<C>, Lit)> = terms
+				let terms = terms
 					.iter()
 					.map(|(lit, coef)| (coef.clone(), lit.clone()))
-					.collect();
+					.collect_vec();
 				// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
-				let mut h: FxHashMap<C, Vec<Lit>> =
+				let mut h: FxHashMap<PosCoeff, Vec<Lit>> =
 					FxHashMap::with_capacity_and_hasher(terms.len(), BuildHasherDefault::default());
 				for (coef, lit) in terms {
 					debug_assert!(coef <= ub);
-					h.entry(*coef).or_default().push(lit);
+					h.entry(coef).or_default().push(lit);
 				}
 
 				let (dom, lits): (Vec<_>, Vec<_>) = h
@@ -476,6 +435,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 					// .map(|((prev, _), (coef, lits))| {
 					.map(|(coef, lits)| {
 						// let interval = (prev + C::one())..(coef + C::one());
+						let coef = *coef; // dom uses Coeff
 						if lits.is_empty() {
 							(coef, None)
 						} else if lits.len() == 1 {
@@ -483,14 +443,14 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 						} else {
 							let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
 							for lit in lits {
-								emit_clause!(db, &[lit.negate(), o.clone()]).unwrap();
+								emit_clause!(db, [!lit, o.clone()]).unwrap();
 							}
 							(coef, Some(o))
 						}
 					})
 					.unzip();
 				model.new_var(
-					&[C::zero()].into_iter().chain(dom).collect_vec(),
+					&[0].into_iter().chain(dom).collect_vec(),
 					false,
 					Some(IntVarEnc::Ord(Some(OrdEnc::from_lits(
 						&lits.iter().flatten().cloned().collect_vec(),
@@ -506,7 +466,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			Part::Ic(_terms) => {
 				todo!();
 				/*
-				let mut acc = C::zero(); // running sum
+				let mut acc = 0; // running sum
 				let (dom, lits): (Vec<_>, Vec<_>) =
 					std::iter::once(&(terms[0].0.clone(), C::zero().into()))
 						.chain(terms.iter())
@@ -517,7 +477,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 						})
 						.tuple_windows()
 						.map(|((prev, _), (coef, lit))| {
-							// ((prev + C::one())..(coef + C::one()), Some(lit))
+							// ((prev + 1)..(coef + 1), Some(lit))
 							(coef, Some(lit))
 						})
 						.unzip();
@@ -572,7 +532,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 						.map(|(i, (lit, coef))| {
 							IntVarEnc::Ord(IntVarOrd::from_views(
 								db,
-								interval_map! { C::one()..(**coef+C::one()) => Some(lit.clone()) },
+								interval_map! { 1..(**coef+1) => Some(lit.clone()) },
 								format!("{lbl}^{i}"),
 							))
 						})
@@ -582,7 +542,7 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 			} // TODO Not so easy to transfer a binary encoded int var
 			  // Part::Dom(terms, l, u) => {
 			  // let coef = (terms[0].1);
-			  // let false_ if (coef > 1).then(|| let false_ = Some(new_var!(db)); emit_clause!(&[-false_]); false_ });
+			  // let false_ if (coef > 1).then(|| let false_ = Some(new_var!(db)); emit_clause!([-false_]); false_ });
 			  // let terms = (1..coef).map(|_| false_.clone()).chain(terms.to_vec());
 
 			  // IntVarEnc::Bin(IntVarBin::from_terms(
@@ -597,37 +557,34 @@ impl<Lit: Literal, C: Coefficient> IntVar<Lit, C> {
 
 #[cfg(test)]
 mod tests {
-	type Lit = i32;
-	type C = i32;
-
 	use super::*;
-
-	use crate::helpers::tests::TestDB;
+	use crate::helpers::tests::{lits, TestDB};
 
 	#[test]
 	fn test_ineq_ord() {
 		(|| {
 			let mut db = TestDB::new(0);
-			let mut x = IntVar::<Lit, C>::from_dom(
+			let mut x = IntVar::from_dom(
 				0,
 				Dom::from_slice(&[5, 7, 8]),
 				true,
 				Some(IntVarEnc::Ord(None)),
 				Some(String::from("x")),
 			);
-			x.encode(&mut db, None)?;
+			x.encode(&mut db)?;
+
 			assert_eq!(x.ineq(3, true, None), (Some(5), vec![]));
 			assert_eq!(x.ineq(5, true, None), (Some(5), vec![]));
-			assert_eq!(x.ineq(6, true, None), (Some(7), vec![vec![1]]));
-			assert_eq!(x.ineq(8, true, None), (Some(8), vec![vec![2]]));
-			assert_eq!(x.ineq(12, true, None), (None, vec![vec![]]));
+			assert_eq!(x.ineq(6, true, None), (Some(7), vec![lits![1]]));
+			assert_eq!(x.ineq(8, true, None), (Some(8), vec![lits![2]]));
+			assert_eq!(x.ineq(12, true, None), (None, vec![lits![]]));
 
-			// x < k
+			// // x < k
 			assert_eq!(x.ineq(3, false, None), (None, vec![vec![]]));
 			assert_eq!(x.ineq(5, false, None), (None, vec![vec![]]));
-			assert_eq!(x.ineq(6, false, None), (Some(5), vec![vec![-1]]));
-			assert_eq!(x.ineq(7, false, None), (Some(5), vec![vec![-1]]));
-			assert_eq!(x.ineq(8, false, None), (Some(7), vec![vec![-2]]));
+			assert_eq!(x.ineq(6, false, None), (Some(5), vec![lits![-1]]));
+			assert_eq!(x.ineq(7, false, None), (Some(5), vec![lits![-1]]));
+			assert_eq!(x.ineq(8, false, None), (Some(7), vec![lits![-2]]));
 			assert_eq!(x.ineq(12, false, None), (Some(8), vec![]));
 			Ok::<_, Unsatisfiable>(())
 		})()
@@ -638,39 +595,39 @@ mod tests {
 	fn test_ineqs_bin() {
 		(|| {
 			let mut db = TestDB::new(0);
-			let mut x = IntVar::<Lit, C>::from_dom(
+			let mut x = IntVar::from_dom(
 				0,
 				Dom::from_slice(&[0, 1, 2, 3, 4, 5, 6, 7]),
 				true,
 				Some(IntVarEnc::Bin(None)),
 				Some(String::from("x")),
 			);
-			x.encode(&mut db, None)?;
+			x.encode(&mut db)?;
 			assert_eq!(
 				x.ineqs(true),
 				vec![
-					(7, vec![], 7),        // +0
-					(6, vec![1], 6),       // +0
-					(5, vec![2], 4),       // +1
-					(4, vec![1, 2], 4),    // +0
-					(3, vec![3], 0),       // +3
-					(2, vec![1, 3], 2),    // +0
-					(1, vec![2, 3], 0),    // +0
-					(0, vec![1, 2, 3], 0)  // +0
+					(7, lits![], 7),        // +0
+					(6, lits![1], 6),       // +0
+					(5, lits![2], 4),       // +1
+					(4, lits![1, 2], 4),    // +0
+					(3, lits![3], 0),       // +3
+					(2, lits![1, 3], 2),    // +0
+					(1, lits![2, 3], 0),    // +0
+					(0, lits![1, 2, 3], 0)  // +0
 				]
 			);
 
 			assert_eq!(
 				x.ineqs(false),
 				vec![
-					(0, vec![], 0),           // +0
-					(1, vec![-1], 1),         // +0
-					(2, vec![-2], 3),         // +0
-					(3, vec![-1, -2], 3),     // +3
-					(4, vec![-3], 7),         // +0
-					(5, vec![-1, -3], 5),     // +1
-					(6, vec![-2, -3], 7),     // +0
-					(7, vec![-1, -2, -3], 7), // +0
+					(0, lits![], 0),           // +0
+					(1, lits![-1], 1),         // +0
+					(2, lits![-2], 3),         // +0
+					(3, lits![-1, -2], 3),     // +3
+					(4, lits![-3], 7),         // +0
+					(5, lits![-1, -3], 5),     // +1
+					(6, lits![-2, -3], 7),     // +0
+					(7, lits![-1, -2, -3], 7), // +0
 				]
 			);
 			Ok::<_, Unsatisfiable>(())

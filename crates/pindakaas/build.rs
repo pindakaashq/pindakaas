@@ -1,15 +1,12 @@
-use itertools::Itertools;
-
 // macro_rules! p {
 //     ($($tokens: tt)*) => {
 //         println!("cargo:warning={}", format!($($tokens)*))
 //     }
 // }
-
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 
 use flate2::read::GzDecoder;
+use itertools::Itertools;
 use tar::Archive;
 
 fn scm() -> Result<Vec<(usize, u32, Vec<ScmNode>)>, std::io::Error> {
@@ -85,18 +82,20 @@ pub fn main() {
 
 	let scm = scm().unwrap();
 
-	let scm_node_def = r"#[derive(Debug, Clone)]
+	let scm_node_def = r"use crate::Coeff;
+#[derive(Debug, Clone)]
 pub(crate) struct ScmNode {
 pub(crate) i: usize,
 pub(crate) i1: usize,
-pub(crate) sh1: usize,
+pub(crate) sh1: u32,
 pub(crate) add: bool,
 pub(crate) i2: usize,
-pub(crate) sh2: usize,
+pub(crate) sh2: u32,
 }";
+	// TODO make HashMap (but this is not easy using static/const)
 	let o = format!(
 		"{scm_node_def}
-        pub(crate) static SCM: [(usize, usize, &[ScmNode]); {}] = [\n{}\n];",
+        pub(crate) static SCM: [(u32, Coeff, &[ScmNode]); {}] = [\n{}\n];",
 		scm.len(),
 		scm.iter()
 			.map(|(x, c, scm)| format!("\t({}, {}, &{:?})", x, c, scm))

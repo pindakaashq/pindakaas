@@ -1,19 +1,19 @@
 use std::fmt::{self, Display};
 
-use crate::Lin;
-use crate::{int::IntVarEnc, Coefficient, Literal, Model, Term};
 use itertools::Itertools;
 
-use super::model::USE_CSE;
-use super::Cse;
-use super::{model::Obj, IntVar, LinExp};
+use super::{
+	model::{Obj, USE_CSE},
+	Cse, IntVar, LinExp,
+};
+use crate::{int::IntVarEnc, Assignment, Lin, Model, Term};
 
-pub(crate) const SHOW_IDS: bool = true;
-const SHOW_LITS: bool = false;
+pub(crate) const SHOW_IDS: bool = false;
+const SHOW_LITS: bool = true;
 /// Whether to rewrite x1 + .. + xn # 0 as x1 + .. + x_(n-1) # - xn
 const SHOW_K_0: bool = true;
 
-impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
+impl Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		if SHOW_IDS {
 			writeln!(f, "num_var: {}", self.num_var)?;
@@ -33,7 +33,21 @@ impl<Lit: Literal, C: Coefficient> Display for Model<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Display for LinExp<Lit, C> {
+impl Display for Assignment {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"{}",
+			self.0
+				.iter()
+				.sorted()
+				.map(|(_, (lbl, a))| format!("{}={}", lbl, a))
+				.join(", ")
+		)
+	}
+}
+
+impl Display for LinExp {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let s = self.terms.iter().join(" ");
 		if s.len() >= 2 && &s[..2] == "+ " {
@@ -44,23 +58,19 @@ impl<Lit: Literal, C: Coefficient> Display for LinExp<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Display for Term<Lit, C> {
+impl Display for Term {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		if self.c.is_zero() {
-			write!(f, "+ 0")
-		} else if self.c.is_one() {
-			write!(f, "+ ({})", self.x.borrow())
-		} else if self.c == -C::one() {
-			write!(f, "- ({})", self.x.borrow())
-		} else if self.c.is_positive() {
-			write!(f, "+ {}·({})", self.c, self.x.borrow())
-		} else {
-			write!(f, "- ({}·{})", self.c.abs(), self.x.borrow())
+		match self.c {
+			0 => write!(f, "+ 0"),
+			1 => write!(f, "+ ({})", self.x.borrow()),
+			-1 => write!(f, "- ({})", self.x.borrow()),
+			c if c.is_positive() => write!(f, "+ {}·({})", c, self.x.borrow()),
+			c => write!(f, "- ({}·{})", c.abs(), self.x.borrow()),
 		}
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Display for Obj<Lit, C> {
+impl Display for Obj {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Obj::Minimize(exp) => write!(f, "min {exp}"),
@@ -70,7 +80,7 @@ impl<Lit: Literal, C: Coefficient> Display for Obj<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
+impl Display for Lin {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let lbl = self
 			.lbl
@@ -78,7 +88,7 @@ impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 			.map(|lbl| format!("{}: ", lbl))
 			.unwrap_or_default();
 		if SHOW_K_0
-			&& self.k.is_zero()
+			&& self.k == 0
 			&& self.exp.terms.len() > 1
 			&& self.exp.terms.last().unwrap().c.is_negative()
 		{
@@ -93,7 +103,7 @@ impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 					},
 					self.cmp,
 					LinExp {
-						terms: vec![rhs.clone() * -C::one()]
+						terms: vec![rhs.clone() * -1]
 					},
 				)
 			} else {
@@ -105,7 +115,7 @@ impl<Lit: Literal, C: Coefficient> Display for Lin<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
+impl fmt::Display for IntVar {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
@@ -124,7 +134,6 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 					})
 				),
 				Some(IntVarEnc::Ord(_)) => ":O".to_string(),
-				Some(IntVarEnc::Const(_)) => unreachable!(),
 				None => String::new(),
 			},
 			self.add_consistency.then_some("!").unwrap_or_default(),
@@ -138,7 +147,7 @@ impl<Lit: Literal, C: Coefficient> fmt::Display for IntVar<Lit, C> {
 	}
 }
 
-impl<Lit: Literal, C: Coefficient> Display for Cse<Lit, C> {
+impl Display for Cse {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
 			f,

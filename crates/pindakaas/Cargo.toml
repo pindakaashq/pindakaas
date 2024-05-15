@@ -12,20 +12,25 @@ edition = "2021"
 
 [dependencies]
 cached = "0.46"
-ipasir = { version = "0.3", features = ["ffi"] }
-iset = "0.2"
-itertools = "0.11"
-rustc-hash = "1.1.0"
 num = "0.4"
 bzip2 = "0.4"
 flate2 = "1.0"
+itertools = "0.12.0"
+rand = "0.8.5"
+rustc-hash = "1.1"
+# Dynamically load solver libraries (through IPASIR interfaces)
+libloading = "0.8"
 
 # Optional encoding tracing capabilities
 tracing = { version = "0.1", optional = true }
 
 # Optional Solver Interfaces
-minisat = { git = "https://github.com/luteberget/minisat-rs.git", optional = true } # waiting on release for minisat::Lit::var()
+pindakaas-cadical = { path = "../pindakaas-cadical", optional = true }
+pindakaas-derive = { path = "../pindakaas-derive", optional = true }
+pindakaas-intel-sat = { path = "../pindakaas-intel-sat", optional = true }
+pindakaas-kissat = { path = "../pindakaas-kissat", optional = true }
 splr = { version = "0.17", optional = true }
+iset = "0.2.2"
 
 [build-dependencies]
 itertools = "0.11"
@@ -35,8 +40,11 @@ flate2 = "1.0"
 [dev-dependencies]
 splr = { version = "0.17", features = ["incremental_solver"] }
 traced_test = { path = "../traced_test" }
-rand = "0.8.5"
 
 [features]
+cadical = ["pindakaas-cadical", "pindakaas-derive"]
+intel-sat = ["pindakaas-intel-sat", "pindakaas-derive"]
+kissat = ["pindakaas-kissat", "pindakaas-derive"]
 trace = ["tracing"]
-default = []
+# default = ["cadical"]
+ipasir-up = ["cadical"]

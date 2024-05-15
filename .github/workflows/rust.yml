@@ -8,33 +8,79 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_CHANNEL: stable
+  # Lets us format with unstable rustfmt options
+  RUST_FMT_CHANNEL: nightly
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Build
-        run: cargo build --verbose
+  # build:
+  #   runs-on: ubuntu-latest
+  #   strategy:
+  #     matrix:
+  #       crate: []
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #     - name: Install Rust toolchain
+  #       run: |
+  #         rustup toolchain install --profile minimal --no-self-update ${{ env.RUST_CHANNEL }}
+  #         rustup default ${{ env.RUST_CHANNEL }}
+  #     - name: Cache dependencies
+  #       uses: Swatinem/rust-cache@v2
+  #     - name: Build ${{ matrix.crate }}
+  #       run: cargo install --root dist/ --path crates/${{ matrix.crate }}
+  #     - name: Upload build artifact
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ${{ matrix.crate }}-${{ matrix.os }}
+  #         path: dist/
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Run tests
-        run: cargo test --workspace --verbose
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Check Formatting
-        run: cargo fmt --all -- --check
-      - name: Run clippy
-        run: cargo clippy -- -D warnings
-  semver:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Check semver
-        uses: obi1kenobi/cargo-semver-checks-action@v1
+      - uses: actions/checkout@v4
         with:
-          crate-name: pindakaas
+          submodules: true
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update ${{ env.RUST_CHANNEL }}
+          rustup default ${{ env.RUST_CHANNEL }}
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Run cargo test
+        run: cargo test --all-features
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --profile minimal --component clippy --no-self-update ${{ env.RUST_CHANNEL }}
+          rustup default ${{ env.RUST_CHANNEL }}
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Run clippy
+        run: cargo clippy --tests --features splr,cadical,kissat,intel-sat,ipasir-up -- -D warnings
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --profile minimal --component rustfmt --no-self-update ${{ env.RUST_FMT_CHANNEL }}
+          rustup default ${{ env.RUST_CHANNEL }}
+      - name: Run cargo format
+        run: cargo +nightly fmt --all --check
+  # TODO: Re-enable after first release
+  # semver:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         submodules: true
+  #     - name: Check semver
+  #       uses: obi1kenobi/cargo-semver-checks-action@v2
+  #       with:
+  #         crate-name: pindakaas
