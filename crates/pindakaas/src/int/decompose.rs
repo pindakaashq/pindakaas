@@ -16,15 +16,14 @@ pub trait Decompose {
 pub struct EqualizeTernsDecomposer {}
 
 impl Decompose for EqualizeTernsDecomposer {
-	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable> {
-		const REMOVE_GAPS: bool = true;
-
+	fn decompose(&self, mut model: Model) -> Result<Model, Unsatisfiable> {
 		let cons = model.cons.iter().cloned().collect_vec();
 		Ok(Model {
 			cons: cons
 				.into_iter()
-				.map(|con| {
-					if REMOVE_GAPS && con.exp.terms.len() >= 2 && con.cmp.is_ineq() {
+				.with_position()
+				.flat_map(|(pos, con)| {
+					if con.exp.terms.len() >= 2 && con.cmp.is_ineq() {
 						if con
 							.exp
 							.terms
@@ -40,15 +39,51 @@ impl Decompose for EqualizeTernsDecomposer {
 									Comparator::GreaterEq => (std::cmp::max(-last.ub(), lb), ub),
 									Comparator::Equal => unreachable!(),
 								};
+								let dom = Dom::from_bounds(lb, ub);
+								if matches!(pos, Position::First | Position::Middle) {
+									last.x.borrow_mut().dom = dom;
 
-								last.x.borrow_mut().dom = Dom::from_bounds(lb, ub);
+									vec![Lin {
+										exp: LinExp {
+											terms: firsts.iter().chain([last]).cloned().collect(),
+										},
+										cmp: Comparator::Equal,
+										..con
+									}]
+								} else if con.exp.terms.len() >= 3 {
+									// x+y<=z == x+y=z' /\ z' <= z
+									let y = model
+										.new_aux_var(
+											dom,
+											true,
+											Some(IntVarEnc::Bin(None)),
+											Some(String::from("last")),
+										)
+										.unwrap();
 
-								Lin {
-									exp: LinExp {
-										terms: firsts.iter().chain([last]).cloned().collect(),
-									},
-									cmp: Comparator::Equal,
-									..con
+									vec![
+										Lin {
+											exp: LinExp {
+												terms: firsts
+													.iter()
+													.chain([&Term::new(-1, y.clone())])
+													.cloned()
+													.collect(),
+											},
+											cmp: Comparator::Equal,
+											k: 0,
+											lbl: Some(String::from("last")),
+										},
+										Lin {
+											exp: LinExp {
+												terms: vec![Term::from(y), last.clone()],
+											},
+											cmp: con.cmp,
+											..con
+										},
+									]
+								} else {
+									vec![con]
 								}
 							} else {
 								unreachable!()
@@ -67,12 +102,22 @@ impl Decompose for EqualizeTernsDecomposer {
 							) {
 							con.exp.terms[0].x.borrow_mut().dom =
 								con.exp.terms[1].x.borrow().dom.clone();
-							con
+							vec![con]
 						} else {
-							con
+							vec![con]
 						}
+					// } else if con.exp.terms.len() == 2 && con.cmp == Comparator::Equal && false {
+					// 	let z = con.exp.terms[0]
+					// 		.clone()
+					// 		.add(con.exp.terms[1].clone(), &mut model)
+					// 		.unwrap();
+					// 	vec![Lin {
+					// 		exp: LinExp { terms: vec![z] },
+					// 		cmp: con.cmp,
+					// 		..con
+					// 	}]
 					} else {
-						con
+						vec![con]
 					}
 				})
 				.collect(),

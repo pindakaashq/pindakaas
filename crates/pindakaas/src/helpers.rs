@@ -9,8 +9,8 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-	linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase, Coeff, Encoder,
-	LinExp, Lit, Result, Unsatisfiable, Valuation, Var,
+	int::LitOrConst, linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase,
+	Coeff, Encoder, LinExp, Lit, Result, Unsatisfiable, Valuation, Var,
 };
 
 #[allow(unused_macros)]
@@ -152,6 +152,25 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 		emit_clause!(db, cls)?
 	}
 	Ok(())
+}
+
+pub(crate) fn emit_filtered_clause<DB: ClauseDatabase, I: IntoIterator<Item = LitOrConst>>(
+	db: &mut DB,
+	lits: I,
+) -> Result {
+	if let Ok(clause) = lits
+		.into_iter()
+		.filter_map(|lit| match lit {
+			LitOrConst::Lit(lit) => Some(Ok(lit)),
+			LitOrConst::Const(true) => Some(Err(())), // clause satisfied
+			LitOrConst::Const(false) => None,         // literal falsified
+		})
+		.collect::<std::result::Result<Vec<_>, ()>>()
+	{
+		emit_clause!(db, clause)
+	} else {
+		Ok(())
+	}
 }
 
 /// Negates CNF (flipping between empty clause and formula)

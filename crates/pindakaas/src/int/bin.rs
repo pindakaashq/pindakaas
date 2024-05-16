@@ -8,7 +8,9 @@ use itertools::Itertools;
 
 use super::{required_lits, Dom, LitOrConst};
 use crate::{
-	helpers::{add_clauses_for, as_binary, negate_cnf, pow2, unsigned_binary_range},
+	helpers::{
+		add_clauses_for, as_binary, emit_filtered_clause, negate_cnf, pow2, unsigned_binary_range,
+	},
 	int::{helpers::remove_red, model::PRINT_COUPLING},
 	linear::{lex_geq_const, lex_leq_const, PosCoeff},
 	trace::{emit_clause, new_var},
@@ -42,6 +44,54 @@ impl BinEnc {
 		}
 	}
 
+	/// Encode x:B <=/>= y:B
+	pub(crate) fn lex<DB: ClauseDatabase>(
+		&self,
+		db: &mut DB,
+		cmp: Comparator,
+		other: Self,
+	) -> crate::Result {
+		let n = std::cmp::max(self.bits(), other.bits()) as usize;
+
+		fn bit(x: &[LitOrConst], i: usize) -> LitOrConst {
+			*x.get(i).unwrap_or(&LitOrConst::Const(false))
+		}
+
+		let (x, y, c) = (
+			&self.xs(),
+			&other.xs(),
+			&(0..n)
+				.map(|_i| LitOrConst::Lit(new_var!(db, crate::trace::subscripted_name("c", _i))))
+				.chain(std::iter::once(LitOrConst::Const(true)))
+				.collect_vec(),
+		);
+
+		// higher i -> more significant
+		for i in 0..n {
+			// c = all more significant bits are equal AND current one is
+			// if up to i is equal, all preceding must be equal
+			emit_filtered_clause(db, [!bit(c, i), bit(c, i + 1)])?;
+			// if up to i is equal, x<->y
+			emit_filtered_clause(db, [!bit(c, i), !bit(x, i), bit(y, i)])?;
+			emit_filtered_clause(db, [!bit(c, i), !bit(y, i), bit(x, i)])?;
+
+			// if not up to i is equal, either preceding bit was not equal, or x!=y
+			emit_filtered_clause(db, [bit(c, i), !bit(c, i + 1), bit(x, i), bit(y, i)])?;
+			emit_filtered_clause(db, [bit(c, i), !bit(c, i + 1), !bit(x, i), !bit(y, i)])?;
+
+			// if preceding bits are equal, then x<=y (or x>=y)
+			match cmp {
+				Comparator::LessEq => {
+					emit_filtered_clause(db, [!bit(c, i + 1), !bit(x, i), bit(y, i)])
+				}
+				Comparator::GreaterEq => {
+					emit_filtered_clause(db, [!bit(c, i + 1), bit(x, i), !bit(y, i)])
+				}
+				Comparator::Equal => unreachable!(),
+			}?;
+		}
+		Ok(())
+	}
 	/// Returns conjunction for x>=k, given x>=b
 	pub(crate) fn geqs(&self, k: Coeff, a: Coeff) -> Vec<Vec<Lit>> {
 		let (range_lb, range_ub) = self.range();
