@@ -31,6 +31,7 @@ pub(crate) enum LinCase {
 	Couple(Term, Term),
 	Fixed(Lin),
 	Unary(Term, Comparator, Coeff),
+	Binary(Term, Comparator, Term), // just for binary ineqs
 	Scm(Term, IntVarRef),
 	Rca(Term, Term, Term),
 	Order,
@@ -57,6 +58,11 @@ impl TryFrom<&Lin> for LinCase {
 			{
 				LinCase::Unary((*t).clone().encode_bin(None, cmp, None)?, cmp, con.k)
 			}
+			(
+				[(x, Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_)))],
+				Comparator::LessEq | Comparator::GreaterEq,
+				0,
+			) => LinCase::Binary((*x).clone(), con.cmp, (*y).clone()),
 			// VIEW COUPLING
 			// TODO this makes single literal comparisons views if possible
 			// ([(t, Some(IntVarEnc::Ord(_))), (y, Some(IntVarEnc::Bin(None)))], _)
@@ -83,7 +89,14 @@ impl TryFrom<&Lin> for LinCase {
 			{
 				LinCase::Couple((*t).clone(), (*y).clone())
 			}
-
+			// ([(x, Some(IntVarEnc::Bin(_)))], Comparator::Equal, k) => {
+			// 	LinCase::Rca((*x).clone(), Term::from(0), Term::from(k))
+			// }
+			(
+				[(x, Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_)))],
+				Comparator::Equal,
+				k,
+			) => LinCase::Rca((*x).clone(), (*y).clone(), Term::from(-k)),
 			(
 				[(x, Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_))), (z, Some(IntVarEnc::Bin(_)))],
 				Comparator::Equal,
@@ -343,6 +356,16 @@ impl Lin {
 				let x: IntVarRef = x.try_into().unwrap();
 				let x_enc = x.clone().borrow_mut().encode_bin(db)?;
 				x_enc.encode_unary_constraint(db, &cmp, k, &dom, false)
+			}
+			LinCase::Binary(t_x, cmp, t_y) => {
+				println!("self = {}", self);
+
+				t_x.x.borrow_mut().encode_bin(db)?;
+				t_y.x.borrow_mut().encode_bin(db)?;
+
+				let x_enc = t_x.x.borrow_mut().encode_bin(db)?;
+				let y_enc = (t_y * -1).x.borrow_mut().encode_bin(db)?;
+				x_enc.lex(db, cmp, y_enc)
 			}
 			LinCase::Couple(t_x, t_y) => {
 				t_x.x.borrow_mut().encode_ord(db)?;

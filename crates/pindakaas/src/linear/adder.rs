@@ -3,7 +3,7 @@ use rustc_hash::FxHashMap;
 
 use super::PosCoeff;
 use crate::{
-	helpers::{as_binary, XorConstraint, XorEncoder},
+	helpers::{as_binary, emit_filtered_clause, XorConstraint, XorEncoder},
 	int::LitOrConst,
 	linear::LimitComp,
 	trace::{emit_clause, new_var},
@@ -348,25 +348,6 @@ pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 
 fn bit(x: &[LitOrConst], i: usize) -> LitOrConst {
 	*x.get(i).unwrap_or(&LitOrConst::Const(false))
-}
-
-fn emit_filtered_clause<DB: ClauseDatabase, I: IntoIterator<Item = LitOrConst>>(
-	db: &mut DB,
-	lits: I,
-) -> Result {
-	if let Ok(clause) = lits
-		.into_iter()
-		.filter_map(|lit| match lit {
-			LitOrConst::Lit(lit) => Some(Ok(lit)),
-			LitOrConst::Const(true) => Some(Err(())), // clause satisfied
-			LitOrConst::Const(false) => None,         // literal falsified
-		})
-		.collect::<std::result::Result<Vec<_>, ()>>()
-	{
-		emit_clause!(db, clause)
-	} else {
-		Ok(())
-	}
 }
 
 /// Encode the adder sum circuit

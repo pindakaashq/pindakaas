@@ -715,10 +715,10 @@ mod tests {
 				// Decomposer::Rca
 			],
 			[Consistency::None],
-			[false],         // consistency
-			[true],          // equalize terns
-			[None, Some(0)], // cutoffs: [None, Some(0), Some(2)]
-			[false]          // equalize_uniform_bin_ineqs
+			[false], // consistency
+			// [true],          // equalize terns
+			[Some(0)], // cutoffs: [None, Some(0), Some(2)]
+			[false]    // equalize_uniform_bin_ineqs
 		)
 		.map(
 			|(
@@ -726,7 +726,7 @@ mod tests {
 				decomposer,
 				propagate,
 				add_consistency,
-				equalize_ternaries,
+				// equalize_ternaries,
 				cutoff,
 				equalize_uniform_bin_ineqs,
 			)| {
@@ -735,7 +735,7 @@ mod tests {
 					decomposer: decomposer.clone(),
 					propagate: propagate.clone(),
 					add_consistency,
-					equalize_ternaries,
+					equalize_ternaries: cutoff == Some(0),
 					cutoff,
 					equalize_uniform_bin_ineqs,
 					..ModelConfig::default()
@@ -912,7 +912,11 @@ mod tests {
 							.clone(),
 					)]
 				} else {
-					var_encs_gen.into_iter().enumerate().collect_vec()
+					if var_encs_gen.is_empty() {
+						vec![(0, HashMap::default())]
+					} else {
+						var_encs_gen.into_iter().enumerate().collect_vec()
+					}
 				}
 			} {
 				let spec = if VAR_ENCS.is_empty() {
@@ -1147,21 +1151,21 @@ End
 		);
 	}
 
-	// #[test]
-	// fn test_lp_le_double_w_const() {
-	// 	test_lp_for_configs(
-	// 		r"
-	// Subject To
-	// c0: + 2 x1 + 3 x2 - 1 x3 <= 0
-	// bounds
-	// 0 <= x1 <= 1
-	// 0 <= x2 <= 1
-	// 4 <= x3 <= 4
-	// End
-	// ",
-	// 		None,
-	// 	);
-	// }
+	#[test]
+	fn test_lp_le_double_w_const() {
+		test_lp_for_configs(
+			r"
+	Subject To
+	c0: + 2 x1 + 3 x2 - 1 x3 <= 0
+	bounds
+	0 <= x1 <= 1
+	0 <= x2 <= 1
+	4 <= x3 <= 4
+	End
+	",
+			None,
+		);
+	}
 
 	#[test]
 	fn test_int_lin_ge_single() {
@@ -1171,6 +1175,42 @@ Subject To
 c0: + x1 >= 1
 Binary
 x1
+End
+",
+			None,
+		);
+	}
+
+	#[test]
+	fn test_int_lin_binary_constraint_le() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 1 x1 - 1 x2 <= 0
+Bounds
+0 <= x1 <= 3
+0 <= x2 <= 3
+Encs
+    x1 B
+    x2 B
+End
+",
+			None,
+		);
+	}
+
+	#[test]
+	fn test_int_lin_binary_constraint_ge() {
+		test_lp_for_configs(
+			r"
+Subject To
+c0: + 1 x1 - 1 x2 >= 0
+Bounds
+0 <= x1 <= 3
+0 <= x2 <= 3
+Encs
+    x1 B
+    x2 B
 End
 ",
 			None,
@@ -1294,35 +1334,35 @@ End
 		);
 	}
 
-	// #[test]
-	// fn test_int_lin_eq_tmp() {
-	// 	test_lp_for_configs(
-	// 		r"
-	// Subject To
-	// c0: + 1 x1 - 1 x2 <= 0
-	// Bounds
-	// 0 <= x1 <= 3
-	// 0 <= x2 <= 3
-	// End
-	// ",
-	// 		None,
-	// 	);
-	// }
+	#[test]
+	fn test_int_lin_eq_tmp() {
+		test_lp_for_configs(
+			r"
+	Subject To
+	c0: + 1 x1 - 1 x2 <= 0
+	Bounds
+	0 <= x1 <= 3
+	0 <= x2 <= 3
+	End
+	",
+			None,
+		);
+	}
 
-	// #[test]
-	// fn test_int_lin_eq_3() {
-	// 	test_lp_for_configs(
-	// 		r"
-	// Subject To
-	// c0: + 1 x1 + 1 x2 = 2
-	// Bounds
-	// 0 <= x1 <= 1
-	// 0 <= x2 <= 1
-	// End
-	// ",
-	// 		None,
-	// 	);
-	// }
+	#[test]
+	fn test_int_lin_eq_3() {
+		test_lp_for_configs(
+			r"
+	Subject To
+	c0: + 1 x1 + 1 x2 = 2
+	Bounds
+	0 <= x1 <= 1
+	0 <= x2 <= 1
+	End
+	",
+			None,
+		);
+	}
 
 	#[test]
 	fn test_int_lin_ge_1() {
@@ -1386,7 +1426,7 @@ End
 		);
 	}
 
-	// #[test]
+	#[test]
 	fn _test_lp_ge_neg() {
 		test_lp_for_configs(
 			r"

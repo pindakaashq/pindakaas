@@ -15,7 +15,7 @@ use crate::{
 		Cse, LitOrConst,
 	},
 	linear::PosCoeff,
-	Coeff, Comparator, IntLinExp as LinExp, IntVar, IntVarRef, Lin, Lit, Model, Scm,
+	Coeff, Comparator, IntLinExp as LinExp, IntVar, IntVarRef, Lin, Lit, Model, Scm, Unsatisfiable,
 };
 
 /// A linear term (constant times integer variable)
@@ -458,6 +458,26 @@ impl Term {
 
 	pub(crate) fn size(&self) -> Coeff {
 		self.x.borrow().size()
+	}
+
+	pub(crate) fn _add(&self, other: Self, model: &mut Model) -> Result<Self, Unsatisfiable> {
+		let (x, y) = (self, other);
+		let z = Term::from(model.new_aux_var(
+			Dom::from_bounds(x.lb() + y.lb(), x.ub() + y.ub()),
+			false,
+			Some(IntVarEnc::Bin(None)),
+			None,
+		)?);
+
+		model.add_constraint(Lin {
+			exp: LinExp {
+				terms: vec![x.clone(), y.clone(), z.clone() * -1],
+			},
+			cmp: Comparator::Equal,
+			k: 0,
+			lbl: None,
+		})?;
+		Ok(z)
 	}
 }
 
