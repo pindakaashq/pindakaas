@@ -378,10 +378,10 @@ impl Lin {
 					.try_for_each(|((c_a, x_a), (c_b, x_b))| {
 						let x = if up { x_a } else { x_b };
 						let (c_a, c_b) = (c_a + 1, c_b);
-						let y = y_enc.ineqs(c_a, c_b, !up);
 						if PRINT_COUPLING >= 2 {
 							println!("{up} {c_a}..{c_b} -> {x:?}");
 						}
+						let y = y_enc.ineqs(c_a, c_b, !up);
 						if PRINT_COUPLING >= 2 {
 							println!("{y:?}");
 						}
@@ -389,8 +389,6 @@ impl Lin {
 					})
 			}
 			LinCase::Scm(t_x, y) => {
-				// assert!(t_x.c.is_positive(), "neg scm: {self}");
-
 				t_x.x.borrow_mut().encode_bin(db)?; // encode x (if not encoded already)
 									// encode y
 
@@ -501,7 +499,7 @@ impl Lin {
 					Ok(())
 				})
 			}
-			LinCase::Other => todo!("Cannot constrain: {self}"),
+			LinCase::Other => todo!("Cannot constrain: {self}\n{self:?}"),
 		}
 
 		/*

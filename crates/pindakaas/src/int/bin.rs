@@ -196,6 +196,11 @@ impl BinEnc {
 		self.x.clone()
 	}
 
+	/// Get complement
+	pub(crate) fn complement(self) -> Self {
+		Self::from_lits(&self.xs().into_iter().map(|l| !l).collect_vec())
+	}
+
 	/// Constraints bounds and gaps
 	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB, dom: &Dom) -> crate::Result {
 		self.encode_unary_constraint(db, &Comparator::GreaterEq, dom.lb(), dom, true)?;
