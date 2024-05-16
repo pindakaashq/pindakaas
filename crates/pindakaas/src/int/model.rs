@@ -1132,19 +1132,20 @@ End
 
 	// TODO some tests need to be evaluated, whole testing set-up may need some organization? Just a directory of lp's?
 
-	// #[test]
-	// fn test_int_lin_le_single_neg_coef() {
-	// 	test_lp_for_configs(
-	// 		r"
-	// Subject To
-	// c0: -1 x1 <= -1
-	// Binary
-	// x1
-	// End
-	// ",
-	// 		None,
-	// 	);
-	// }
+	#[test]
+	fn test_reconcile_neg_coeff_for_rca() {
+		test_lp_for_configs(
+			r"
+	Subject To
+	c0: -5 x1 <= -1
+	* c0: -1 x1 <= -1
+    Bounds
+	0 <= x1 <= 3
+	End
+	",
+			None,
+		);
+	}
 
 	// #[test]
 	// fn test_lp_le_double_w_const() {

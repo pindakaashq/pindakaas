@@ -1,10 +1,4 @@
-use std::{
-	cell::RefCell,
-	collections::{BTreeSet, HashMap},
-	fmt::Display,
-	hash::BuildHasherDefault,
-	rc::Rc,
-};
+use std::{cell::RefCell, collections::BTreeSet, fmt::Display, hash::BuildHasherDefault, rc::Rc};
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
@@ -28,12 +22,11 @@ impl Display for IntVarId {
 		write!(f, "{}", self.0)
 	}
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct IntVar {
 	pub id: IntVarId,
 	pub dom: Dom,
 	pub(crate) add_consistency: bool,
-	pub(crate) views: HashMap<Coeff, (IntVarId, Coeff)>,
 	pub(crate) e: Option<IntVarEnc>,
 	pub(crate) lbl: Option<String>,
 }
@@ -41,6 +34,10 @@ pub struct IntVar {
 // TODO implement Eq so we don't compare .e
 
 impl IntVar {
+	pub(crate) fn new_constant(c: Coeff) -> IntVarRef {
+		Self::from_dom_as_ref(0, Dom::constant(c), true, Some(IntVarEnc::Bin(None)), None)
+	}
+
 	pub(crate) fn from_dom_as_ref(
 		id: usize,
 		dom: Dom,
@@ -68,7 +65,6 @@ impl IntVar {
 			id: IntVarId(id),
 			dom,
 			add_consistency,
-			views: HashMap::default(),
 			e,
 			lbl,
 		}

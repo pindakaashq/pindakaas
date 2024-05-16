@@ -174,12 +174,13 @@ impl Decompose for BddEncoder {
 			.into_iter()
 			.chain([(model.new_constant(0), HashMap::default())]) // Ensure final element is not cut off by tuple_windows
 			.tuple_windows()
-			.map(|((y, views), (y_next, _))| {
+			.map(|((y, _views), (_y_next, _))| {
 				// Views are always from one y to the next
-				y.borrow_mut().views = views
-					.into_iter()
-					.map(|(val, view)| (val, (y_next.borrow().id, view)))
-					.collect();
+				// TODO reimplement partial views
+				// y.borrow_mut().views = views
+				// 	.into_iter()
+				// 	.map(|(val, view)| (val, (y_next.borrow().id, view)))
+				// 	.collect();
 				y
 			})
 			.map(Term::from)

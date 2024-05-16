@@ -51,6 +51,12 @@ impl From<IntVarRef> for Term {
 	}
 }
 
+impl From<Coeff> for Term {
+	fn from(c: Coeff) -> Self {
+		Term::from(IntVar::new_constant(c))
+	}
+}
+
 impl TryInto<IntVarRef> for Term {
 	type Error = ();
 
@@ -152,9 +158,7 @@ impl Term {
 							-self.x.borrow().lb(), // TODO might be ground i/o lb
 						),
 						false,
-						Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
-							&x_bin.xs().into_iter().map(|l| !l).collect_vec(),
-						)))),
+						Some(IntVarEnc::Bin(Some(x_bin.clone().complement()))),
 						Some(format!("scm-b-{}", self.x.borrow().lbl())),
 					),
 				)
@@ -251,24 +255,46 @@ impl Term {
 					y,
 				))
 			}
-			Some(IntVarEnc::Bin(None)) if self.c.is_negative() => {
+			Some(IntVarEnc::Bin(None))
+				if self.c.is_negative()
+					&& model
+						.as_ref()
+						.map(|model| model.config.scm != Scm::Dnf)
+						.unwrap_or_default() =>
+			{
 				let model = model.as_mut().unwrap();
 
+				// c = -5, x in -3..0
+				// -5*(x in -3..0)
+				// take care of negative sign: -x = y in -3..0
 				let y = model.new_aux_var(
 					Dom::from_bounds(-self.x.borrow().ub(), -self.x.borrow().lb()),
 					false,
-					None,
-					None,
+					Some(IntVarEnc::Bin(None)),
+					self.x
+						.borrow()
+						.lbl
+						.as_ref()
+						.map(|lbl| format!("scm-neg-{lbl}")),
 				)?;
-				let z = Term::new(-self.c, y.clone()).encode_bin(Some(model), cmp, con_lbl)?;
+
+				// -x = y
 				model.add_constraint(Lin {
 					exp: LinExp {
-						terms: vec![self.clone(), Term::new(-1, y.clone())],
+						terms: vec![
+							Term::new(-1, self.x.clone()),
+							Term::from(0), // force to use RCA, reconciling the offset
+							Term::new(-1, y.clone()),
+						],
 					},
 					cmp: Comparator::Equal,
 					k: 0,
-					lbl: Some(format!("scm-neg-{self}")),
+					lbl: Some(String::from("scm-neg")),
 				})?;
+
+				// z is -c times y: z = 5*(y in -3..0)
+				// take care of multiplication
+				let z = Term::new(-self.c, y.clone()).encode_bin(Some(model), cmp, con_lbl)?;
 
 				Ok(z)
 			}
