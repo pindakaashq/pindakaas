@@ -101,16 +101,16 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 								crate::solver::SlvTermSignal::Terminate => std::ffi::c_int::from(1),
 							}
 						};
-						let data = &mut wrapped_cb as *mut _ as *mut std::ffi::c_void;
+						let trampoline = crate::solver::libloading::get_trampoline0(&wrapped_cb);
+						// WARNING: Any data in the callback now exists forever
+						let data = Box::leak(Box::new(wrapped_cb)) as *mut _ as *mut std::ffi::c_void;
 						unsafe {
 							#krate::ipasir_set_terminate(
 								#ptr,
 								data,
-								Some(crate::solver::libloading::get_trampoline0(&wrapped_cb)),
+								Some(trampoline),
 							)
 						}
-						// WARNING: Any data in the callback now exists forever
-						std::mem::forget(wrapped_cb);
 					} else {
 						unsafe { #krate::ipasir_set_terminate(#ptr, std::ptr::null_mut(), None) }
 					}
@@ -135,17 +135,17 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 								.map(|i: i32| crate::Lit(std::num::NonZeroI32::new(i).unwrap()));
 							cb(&mut iter)
 						};
-						let data = &mut wrapped_cb as *mut _ as *mut std::ffi::c_void;
+						let trampoline = crate::solver::libloading::get_trampoline1(&wrapped_cb);
+						// WARNING: Any data in the callback now exists forever
+						let data = Box::leak(Box::new(wrapped_cb)) as *mut _ as *mut std::ffi::c_void;
 						unsafe {
 							#krate::ipasir_set_learn(
 								#ptr,
 								data,
 								MAX_LEN,
-								Some(crate::solver::libloading::get_trampoline1(&wrapped_cb)),
+								Some(trampoline),
 							)
 						}
-						// WARNING: Any data in the callback now exists forever
-						std::mem::forget(wrapped_cb);
 					} else {
 						unsafe { #krate::ipasir_set_learn(#ptr, std::ptr::null_mut(), MAX_LEN, None) }
 					}
