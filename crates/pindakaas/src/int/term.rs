@@ -61,7 +61,13 @@ impl TryInto<IntVarRef> for Term {
 	type Error = ();
 
 	fn try_into(self) -> Result<IntVarRef, Self::Error> {
-		(self.c == 1).then_some(self.x).ok_or(())
+		if self.c == 1 {
+			Ok(self.x)
+		} else if self.x.borrow().is_constant() {
+			Ok(IntVar::new_constant(self.x.borrow().lb() * self.c))
+		} else {
+			Err(())
+		}
 	}
 }
 
