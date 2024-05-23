@@ -57,14 +57,26 @@ impl From<Coeff> for Term {
 	}
 }
 
+impl TryInto<Coeff> for Term {
+	type Error = ();
+
+	fn try_into(self) -> Result<Coeff, Self::Error> {
+		if self.x.borrow().is_constant() {
+			Ok(self.x.borrow().lb() * self.c)
+		} else {
+			Err(())
+		}
+	}
+}
+
 impl TryInto<IntVarRef> for Term {
 	type Error = ();
 
 	fn try_into(self) -> Result<IntVarRef, Self::Error> {
 		if self.c == 1 {
 			Ok(self.x)
-		} else if self.x.borrow().is_constant() {
-			Ok(IntVar::new_constant(self.x.borrow().lb() * self.c))
+		} else if let Ok(c) = self.try_into() {
+			Ok(IntVar::new_constant(c))
 		} else {
 			Err(())
 		}

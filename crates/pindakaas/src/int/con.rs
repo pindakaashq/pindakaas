@@ -27,6 +27,7 @@ pub struct Lin {
 	pub lbl: Option<String>,
 }
 
+#[derive(Debug)]
 pub(crate) enum LinCase {
 	Couple(Term, Term),
 	Fixed(Lin),
@@ -348,11 +349,11 @@ impl Lin {
 	pub fn encode<DB: ClauseDatabase>(&self, db: &mut DB, _config: &ModelConfig) -> Result {
 		match LinCase::try_from(self)? {
 			LinCase::Fixed(con) => con.check(&Assignment::default()).map_err(|_| Unsatisfiable),
-			LinCase::Unary(x, cmp, k) => {
+			LinCase::Unary(t_x, cmp, k) => {
 				// TODO refactor.....
-				x.x.borrow_mut().encode_bin(db)?;
-				let dom = x.x.borrow().dom.clone();
-				let x = x.encode_bin(None, cmp, None)?;
+				t_x.x.borrow_mut().encode_bin(db)?;
+				let dom = t_x.x.borrow().dom.clone();
+				let x = t_x.encode_bin(None, cmp, None)?;
 				let x: IntVarRef = x.try_into().unwrap();
 				let x_enc = x.clone().borrow_mut().encode_bin(db)?;
 				x_enc.encode_unary_constraint(db, &cmp, k, &dom, false)
@@ -364,8 +365,14 @@ impl Lin {
 				t_y.x.borrow_mut().encode_bin(db)?;
 
 				let x_enc = t_x.x.borrow_mut().encode_bin(db)?;
-				let y_enc = (t_y * -1).x.borrow_mut().encode_bin(db)?;
-				x_enc.lex(db, cmp, y_enc)
+				let t_y = t_y * -1;
+				if let Ok(c) = t_y.clone().try_into() {
+					let dom = t_x.x.borrow().dom.clone();
+					x_enc.encode_unary_constraint(db, &cmp, c, &dom, false)
+				} else {
+					let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
+					x_enc.lex(db, cmp, y_enc)
+				}
 			}
 			LinCase::Couple(t_x, t_y) => {
 				t_x.x.borrow_mut().encode_ord(db)?;
