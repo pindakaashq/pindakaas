@@ -65,7 +65,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		linear::LimitComp,
-		solver::{SolveResult, Solver},
+		solver::{LearnCallback, SlvTermSignal, SolveResult, Solver, TermCallback},
 		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder, Valuation,
 	};
 
@@ -100,6 +100,51 @@ mod tests {
 					|| (model.value(a).unwrap() && model.value(!b).unwrap()),
 			)
 		});
+	}
+
+	#[test]
+	fn test_cadical_cb_no_drop() {
+		let mut slv = Cadical::default();
+
+		let a = slv.new_var().into();
+		let b = slv.new_var().into();
+		PairwiseEncoder::default()
+			.encode(
+				&mut slv,
+				&CardinalityOne {
+					lits: vec![a, b],
+					cmp: LimitComp::Equal,
+				},
+			)
+			.unwrap();
+
+		struct NoDrop(i32);
+		impl NoDrop {
+			fn seen(&mut self) {
+				self.0 += 1;
+				eprintln!("seen {}", self.0);
+			}
+		}
+		impl Drop for NoDrop {
+			fn drop(&mut self) {
+				panic!("I have been dropped {}", self.0);
+			}
+		}
+
+		{
+			let mut nodrop = NoDrop(0);
+			slv.set_terminate_callback(Some(move || {
+				nodrop.seen();
+				SlvTermSignal::Continue
+			}));
+		}
+		{
+			let mut nodrop = NoDrop(0);
+			slv.set_learn_callback(Some(move |_: &mut dyn Iterator<Item = Lit>| {
+				nodrop.seen();
+			}));
+		}
+		assert_eq!(slv.solve(|_| {}), SolveResult::Sat);
 	}
 
 	#[cfg(feature = "ipasir-up")]

@@ -95,7 +95,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					cb: Option<F>,
 				) {
 					if let Some(mut cb) = cb {
-						let mut wrapped_cb = || -> std::ffi::c_int {
+						let mut wrapped_cb = move || -> std::ffi::c_int {
 							match cb() {
 								crate::solver::SlvTermSignal::Continue => std::ffi::c_int::from(0),
 								crate::solver::SlvTermSignal::Terminate => std::ffi::c_int::from(1),
@@ -109,6 +109,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 								Some(crate::solver::libloading::get_trampoline0(&wrapped_cb)),
 							)
 						}
+						// WARNING: Any data in the callback now exists forever
+						std::mem::forget(wrapped_cb);
 					} else {
 						unsafe { #krate::ipasir_set_terminate(#ptr, std::ptr::null_mut(), None) }
 					}
@@ -128,7 +130,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				) {
 					const MAX_LEN: std::ffi::c_int = 512;
 					if let Some(mut cb) = cb {
-						let mut wrapped_cb = |clause: *const i32| {
+						let mut wrapped_cb = move |clause: *const i32| {
 							let mut iter = crate::solver::libloading::ExplIter(clause)
 								.map(|i: i32| crate::Lit(std::num::NonZeroI32::new(i).unwrap()));
 							cb(&mut iter)
@@ -142,6 +144,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 								Some(crate::solver::libloading::get_trampoline1(&wrapped_cb)),
 							)
 						}
+						// WARNING: Any data in the callback now exists forever
+						std::mem::forget(wrapped_cb);
 					} else {
 						unsafe { #krate::ipasir_set_learn(#ptr, std::ptr::null_mut(), MAX_LEN, None) }
 					}

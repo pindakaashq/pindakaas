@@ -68,8 +68,14 @@ pub trait LearnCallback: Solver {
 	/// Set a callback function used to extract learned clauses up to a given
 	/// length from the solver.
 	///
-	/// WARNING: Subsequent calls to this method override the previously set
+	/// # Warning
+	///
+	/// Subsequent calls to this method override the previously set
 	/// callback function.
+	///
+	/// For IPASIR connected through C, the callback and any objects contained
+	/// within it might be leaked to satisfy the FFI requirements. Note that
+	/// [`Drop`] implementations might not be called on these objects.
 	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(&mut self, cb: Option<F>);
 }
 
@@ -80,6 +86,15 @@ pub trait TermCallback: Solver {
 	/// The solver will periodically call this function and check its return value
 	/// during the search. Subsequent calls to this method override the previously
 	/// set callback function.
+	///
+	/// # Warning
+	///
+	/// Subsequent calls to this method override the previously set
+	/// callback function.
+	///
+	/// For IPASIR connected through C, the callback and any objects contained
+	/// within it might be leaked to satisfy the FFI requirements. Note that
+	/// [`Drop`] implementations might not be called on these objects.
 	fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>);
 }
 
