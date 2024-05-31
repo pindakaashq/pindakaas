@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{ffi::CString, fmt};
 
 use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
 use pindakaas_derive::IpasirSolver;
@@ -54,6 +54,18 @@ impl Cadical {
 
 	pub fn unphase(&mut self, lit: Lit) {
 		unsafe { ccadical_unphase(self.ptr, lit.0.get()) }
+	}
+
+	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
+	pub fn set_option(&mut self, name: &str, value: i32) {
+		let name = CString::new(name).unwrap();
+		unsafe { pindakaas_cadical::ccadical_set_option(self.ptr, name.as_ptr(), value) }
+	}
+
+	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
+	pub fn get_option(&self, name: &str) -> i32 {
+		let name = CString::new(name).unwrap();
+		unsafe { pindakaas_cadical::ccadical_get_option(self.ptr, name.as_ptr()) }
 	}
 }
 
