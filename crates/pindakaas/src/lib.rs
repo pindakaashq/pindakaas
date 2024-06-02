@@ -14,7 +14,6 @@ mod int;
 mod linear;
 mod propositional_logic;
 pub mod solver;
-mod sorted;
 pub mod trace;
 
 use std::{
@@ -30,21 +29,22 @@ use std::{
 	path::Path,
 };
 
+pub use cardinality::Cardinality;
+pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
 use helpers::VarRange;
+pub use int::{
+	Assignment, Consistency, Decompose, Decomposer, Format, IntVar, IntVarId, IntVarRef, Lin,
+	LinExp as IntLinExp, Model, ModelConfig, ModelDecomposer, Obj, Scm, Term,
+};
 use itertools::{Itertools, Position};
+pub use linear::{
+	AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear, LinearAggregator,
+	LinearConstraint, LinearEncoder, SwcEncoder, TotalizerEncoder,
+};
 use solver::{NextVarRange, VarFactory};
 
+pub use crate::propositional_logic::{Formula, TseitinEncoder};
 use crate::trace::subscript_number;
-pub use crate::{
-	cardinality::{Cardinality, SortingNetworkEncoder},
-	cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
-	linear::{
-		AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, LinVariant, Linear,
-		LinearAggregator, LinearConstraint, LinearEncoder, SwcEncoder, TotalizerEncoder,
-	},
-	propositional_logic::{Formula, TseitinEncoder},
-	sorted::{SortedEncoder, SortedStrategy},
-};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Var(pub(crate) NonZeroI32);
@@ -194,6 +194,7 @@ pub trait Valuation {
 	/// of the given literal.
 	fn value(&self, lit: Lit) -> Option<bool>;
 }
+
 impl<F: Fn(Lit) -> Option<bool>> Valuation for F {
 	fn value(&self, lit: Lit) -> Option<bool> {
 		self(lit)
@@ -265,7 +266,6 @@ impl From<Unsatisfiable> for CheckError {
 		Self::Unsatisfiable(value)
 	}
 }
-
 /// Coeff is a type alias used for the number type used to represent the
 /// coefficients in pseudo-Boolean constraints and expression.
 pub type Coeff = i64;
@@ -392,6 +392,13 @@ impl Cnf {
 			}
 		}
 		write!(file, "{self}")
+	}
+
+	pub fn vars(&self) -> impl Iterator<Item = Var> {
+		self.iter()
+			.flat_map(|cl| cl.iter().map(|lit| lit.var()))
+			.sorted()
+			.dedup()
 	}
 
 	pub fn variables(&self) -> usize {
@@ -748,6 +755,7 @@ impl<'a> Iterator for CnfIterator<'a> {
 	}
 }
 
+// TODO [!] use std  i/o num and remove num
 #[cfg(test)]
 mod tests {
 	use std::num::NonZeroI32;

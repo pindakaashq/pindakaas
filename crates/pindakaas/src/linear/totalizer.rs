@@ -1,15 +1,11 @@
-use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
-
+// TODO rename to gt.rs
 use itertools::Itertools;
 
 pub(crate) use crate::int::IntVar;
 use crate::{
-	int::{Consistency, IntVarEnc, Lin, Model},
-	linear::LimitComp,
-	ClauseDatabase, Coeff, Encoder, Linear, Result,
+	int::{Consistency, Decompose, Dom, Lin, Model, Term},
+	ClauseDatabase, Coeff, Decomposer, Encoder, Linear, ModelConfig, Result, Unsatisfiable,
 };
-
-const EQUALIZE_INTERMEDIATES: bool = false;
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized Totalizer (GT)
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -34,38 +30,17 @@ impl TotalizerEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, Linear> for TotalizerEncoder {
-	#[cfg_attr(
-		feature = "trace",
-		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
-	)]
-	fn encode(&self, db: &mut DB, lin: &Linear) -> Result {
-		let xs = lin
-			.terms
-			.iter()
-			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
-			.sorted_by_key(|x| x.ub())
-			.collect_vec();
+impl Decompose for TotalizerEncoder {
+	fn decompose(&self, mut model: Model) -> Result<Model, Unsatisfiable> {
+		assert!(model.cons.len() == 1);
+		let lin = model.cons.pop().unwrap();
 
-		// The totalizer encoding constructs a binary tree starting from a layer of leaves
-		let mut model = self.build_totalizer(xs, &lin.cmp, *lin.k);
-		model.propagate(&self.add_propagation, vec![model.cons.len() - 1]);
-		model.encode(db, self.cutoff)
-	}
-}
+		let mut layer = lin.exp.terms.clone();
 
-impl TotalizerEncoder {
-	fn build_totalizer(&self, xs: Vec<IntVarEnc>, cmp: &LimitComp, k: Coeff) -> Model {
-		let mut model = Model::default();
-		let mut layer = xs
-			.into_iter()
-			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
-			.collect_vec();
-
+		let mut i = 0;
 		while layer.len() > 1 {
-			let mut next_layer = Vec::<Rc<RefCell<IntVar>>>::new();
-			for children in layer.chunks(2) {
+			let mut next_layer = Vec::new();
+			for (j, children) in layer.chunks(2).enumerate() {
 				match children {
 					[x] => {
 						next_layer.push(x.clone());
@@ -73,45 +48,88 @@ impl TotalizerEncoder {
 					[left, right] => {
 						let at_root = layer.len() == 2;
 						let dom = if at_root {
-							BTreeSet::from([k])
+							vec![lin.k]
 						} else {
-							left.borrow()
-								.dom
-								.iter()
-								.cartesian_product(right.borrow().dom.iter())
-								.map(|(&a, &b)| a + b)
-								.filter(|&d| d <= k)
+							left.dom()
+								.into_iter()
+								.cartesian_product(right.dom().into_iter())
+								.map(|(a, b)| a + b)
 								.sorted()
 								.dedup()
-								.collect()
+								.collect::<Vec<_>>()
 						};
-						let parent =
-							Rc::new(RefCell::new(model.new_var(dom, self.add_consistency)));
+						let parent = model.new_aux_var(
+							Dom::from_slice(&dom),
+							model.config.add_consistency,
+							None,
+							Some(format!("gt_{}_{}", i, j)),
+						)?;
 
-						model.cons.push(Lin::tern(
+						let con = Lin::tern(
 							left.clone(),
 							right.clone(),
-							if !at_root && EQUALIZE_INTERMEDIATES {
-								LimitComp::Equal
-							} else {
-								cmp.clone()
-							},
-							parent.clone(),
-						));
-						next_layer.push(parent);
+							lin.cmp,
+							parent.clone().into(),
+							Some(format!("gt_{}_{}", i, j)),
+						);
+
+						model.add_constraint(con)?;
+						next_layer.push(parent.into());
 					}
 					_ => panic!(),
 				}
 			}
 			layer = next_layer;
+			i += 1;
 		}
 
-		model
+		Ok(model)
+	}
+}
+
+impl<DB: ClauseDatabase> Encoder<DB, Linear> for TotalizerEncoder {
+	#[cfg_attr(
+		feature = "trace",
+		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
+	)]
+	fn encode(&self, db: &mut DB, lin: &Linear) -> Result {
+		// TODO move options from encoder to model config?
+		let mut model = Model {
+			config: ModelConfig {
+				cutoff: self.cutoff,
+				propagate: self.add_propagation,
+				add_consistency: self.add_consistency,
+				decomposer: Decomposer::Gt,
+				..ModelConfig::default()
+			},
+			..Model::default()
+		};
+
+		let xs = lin
+			.terms
+			.iter()
+			.enumerate()
+			.map(|(i, part)| {
+				IntVar::from_part(db, &mut model, part, lin.k, format!("x_{i}")).map(Term::from)
+			})
+			.collect::<Result<Vec<_>>>()?;
+
+		let xs = xs.into_iter().sorted_by_key(Term::ub).collect_vec();
+
+		// The totalizer encoding constructs a binary tree starting from a layer of leaves
+		let mut model = self.decompose(Model {
+			cons: vec![Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None)],
+			..model
+		})?;
+
+		model.encode_internal(db, false)?;
+		Ok(())
 	}
 }
 
 #[cfg(test)]
 mod tests {
+	#![allow(unused_imports)]
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
@@ -129,9 +147,9 @@ mod tests {
 		LinearAggregator,
 		LinearConstraint,
 		Lit,
-		SortedEncoder,
 	};
 
+	/*
 	#[test]
 	fn test_sort_same_coefficients_2() {
 		use crate::{
@@ -160,8 +178,9 @@ mod tests {
 		})
 		.check_complete()
 	}
+	*/
 
-	linear_test_suite!(TotalizerEncoder::default());
+	linear_test_suite!(TotalizerEncoder::default().add_propagation(Consistency::None));
 	// FIXME: Totalizer does not support LimitComp::Equal
 	// card1_test_suite!(TotalizerEncoder::default());
 }

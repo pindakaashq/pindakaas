@@ -1,79 +1,45 @@
-mod constrain;
-mod enc;
+mod bin;
+mod con;
+mod decompose;
+mod display;
+mod dom;
+pub(crate) mod enc;
+pub(crate) mod helpers;
+mod int_var;
 mod model;
+mod ord;
+mod res;
+mod term;
 
-use std::collections::BTreeSet;
+pub use con::{Lin, LinExp};
+pub use decompose::{Decompose, ModelDecomposer};
+pub use dom::Dom;
+pub(crate) use enc::{IntVarEnc, LitOrConst};
+pub(crate) use helpers::required_lits;
+pub use helpers::Format;
+pub use int_var::{IntVar, IntVarId, IntVarRef};
+pub(crate) use model::Cse;
+pub use model::{Assignment, Consistency, Decomposer, Model, ModelConfig, Obj, Scm};
+pub use term::Term;
 
-pub(crate) use constrain::{TernLeConstraint, TernLeEncoder};
-pub(crate) use enc::{IntVarBin, IntVarEnc, IntVarOrd, LitOrConst};
-use itertools::Itertools;
-pub(crate) use model::{Consistency, IntVar, Lin, Model};
+use crate::{CheckError, LinExp as PbLinExp, Valuation};
 
-use self::enc::GROUND_BINARY_AT_LB;
-use crate::{linear::Constraint, CheckError, Coeff, LinExp, Result, Unsatisfiable, Valuation};
-
-impl LinExp {
-	pub(crate) fn value<F: Valuation + ?Sized>(&self, sol: &F) -> Result<Coeff, CheckError> {
-		let mut total = self.add;
-		for (constraint, terms) in self.iter() {
-			// Calculate sum for constraint
-			let sum = terms
-				.iter()
-				.filter(|(lit, _)| sol.value(*lit).expect("missing assignment to literal"))
-				.map(|(_, i)| i)
-				.sum();
-			match constraint {
-				Some(Constraint::AtMostOne) => {
-					if sum != 0
-						&& terms
-							.iter()
-							.filter(|&(l, _)| sol.value(*l).unwrap_or(true))
-							.count() > 1
+impl PbLinExp {
+	pub(crate) fn assign<F: Valuation + ?Sized>(&self, solution: &F) -> Result<Coeff, CheckError> {
+		self.iter().try_fold(self.add, |acc, (_, terms)| {
+			Ok(acc
+				+ terms.into_iter().fold(0, |acc, (lit, coef)| {
+					acc + if solution
+						.value(*lit)
+						.unwrap_or_else(|| panic!("TODO unassigned"))
 					{
-						return Err(Unsatisfiable.into());
+						coef
+					} else {
+						&0
 					}
-				}
-				Some(Constraint::ImplicationChain) => {
-					if terms
-						.iter()
-						.map(|(l, _)| *l)
-						.tuple_windows()
-						.any(|(a, b)| !sol.value(a).unwrap_or(false) & sol.value(b).unwrap_or(true))
-					{
-						return Err(Unsatisfiable.into());
-					}
-				}
-				Some(Constraint::Domain { lb, ub }) => {
-					// divide by first coeff to get int assignment
-					if GROUND_BINARY_AT_LB {
-						if sum > ub - lb {
-							return Err(Unsatisfiable.into());
-						}
-					} else if lb > sum || sum > ub {
-						return Err(Unsatisfiable.into());
-					}
-				}
-				None => {}
-			};
-			total += sum;
-		}
-		Ok(total * self.mult)
+				}) * self.mult)
+		})
 	}
 }
 
-pub(crate) fn display_dom(dom: &BTreeSet<Coeff>) -> String {
-	const ELIPSIZE: usize = 8;
-	let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
-	if dom.len() > ELIPSIZE && dom.len() == (ub - lb + 1) as usize {
-		format!("{}..{}", dom.first().unwrap(), dom.last().unwrap())
-	} else if dom.len() > ELIPSIZE {
-		format!(
-			"{{{},..,{ub}}} ({}|{})",
-			dom.iter().take(ELIPSIZE).join(","),
-			dom.len(),
-			IntVar::required_bits(lb, ub)
-		)
-	} else {
-		format!("{{{}}}", dom.iter().join(","))
-	}
-}
+use crate::{Coeff, Result};

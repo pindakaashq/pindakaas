@@ -12,8 +12,10 @@ edition = "2021"
 
 [dependencies]
 cached = "0.46"
-iset = "0.2"
+bzip2 = "0.4"
+flate2 = "1.0"
 itertools = "0.12.0"
+rand = "0.8.5"
 rustc-hash = "1.1"
 # Dynamically load solver libraries (through IPASIR interfaces)
 libloading = "0.8"
@@ -27,6 +29,13 @@ pindakaas-derive = { path = "../pindakaas-derive", optional = true }
 pindakaas-intel-sat = { path = "../pindakaas-intel-sat", optional = true }
 pindakaas-kissat = { path = "../pindakaas-kissat", optional = true }
 splr = { version = "0.17", optional = true }
+iset = "0.2.2"
+# assert_ok = "1.0.2"
+
+[build-dependencies]
+itertools = "0.11"
+tar = "0.4"
+flate2 = "1.0"
 
 [dev-dependencies]
 splr = { version = "0.17", features = ["incremental_solver"] }
@@ -37,7 +46,6 @@ cadical = ["pindakaas-cadical", "pindakaas-derive"]
 intel-sat = ["pindakaas-intel-sat", "pindakaas-derive"]
 kissat = ["pindakaas-kissat", "pindakaas-derive"]
 trace = ["tracing"]
-default = ["cadical"]
 ipasir-up = ["cadical"]
 
 [lints]

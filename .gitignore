@@ -1,2 +1,7 @@
 /target
 Cargo.lock
+crates/pindakaas/res/scm
+!crates/pindakaas/res/scm.tar.gz
+crates/pindakaas/src/int/scm_db.rs
+crates/pindakaas/tmp
+

@@ -20,6 +20,7 @@ impl Display for Lit {
 		self.0.fmt(f)
 	}
 }
+
 type Clause = Vec<Lit>;
 
 #[pymodule]

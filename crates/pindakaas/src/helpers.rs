@@ -9,8 +9,8 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-	int::IntVar, linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase, Coeff,
-	Encoder, LinExp, Lit, Result, Unsatisfiable, Valuation, Var,
+	int::LitOrConst, linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase,
+	Coeff, Encoder, LinExp, Lit, Result, Unsatisfiable, Valuation, Var,
 };
 
 #[allow(unused_macros)]
@@ -75,26 +75,51 @@ macro_rules! const_concat {
 #[allow(unused_imports)]
 pub(crate) use const_concat;
 
+pub(crate) fn pow2(k: u32) -> Coeff {
+	Coeff::from(2).pow(k)
+}
+
+// Copied from num library
+pub const fn div_ceil(a: Coeff, b: Coeff) -> Coeff {
+	let d = a / b;
+	let r = a % b;
+	if (r > 0 && b > 0) || (r < 0 && b < 0) {
+		d + 1
+	} else {
+		d
+	}
+}
+
+pub const fn div_floor(a: Coeff, b: Coeff) -> Coeff {
+	let d = a / b;
+	let r = a % b;
+	if (r > 0 && b < 0) || (r < 0 && b > 0) {
+		d - 1
+	} else {
+		d
+	}
+}
+
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
 pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool {
 	let mut it = coefs.into_iter().enumerate();
 	if let Some((_, mult)) = it.next() {
-		const TWO: Coeff = 2;
-		it.all(|(i, c)| c == (TWO.pow(i as u32) * mult))
+		it.all(|(i, c)| c == (mult << i))
 	} else {
 		false
 	}
 }
 
-pub(crate) fn unsigned_binary_range_ub(bits: u32) -> Coeff {
-	const TWO: Coeff = 2;
-	(0u32..bits).fold(0, |sum, i| sum + TWO.pow(i))
+/// 2^bits - 1
+pub(crate) fn unsigned_binary_range(bits: u32) -> (PosCoeff, PosCoeff) {
+	(PosCoeff::new(0), PosCoeff::new(pow2(bits) - 1))
 }
+
 /// Convert `k` to unsigned binary in `bits`
 pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| IntVar::required_bits(0, *k));
+	let bits = bits.unwrap_or_else(|| crate::int::required_lits(0, *k));
 	assert!(
-		*k <= unsigned_binary_range_ub(bits),
+		k <= unsigned_binary_range(bits).1,
 		"{k} cannot be represented in {bits} bits"
 	);
 	(0..bits).map(|b| *k & (1 << b) != 0).collect()
@@ -108,13 +133,8 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 	db: &mut DB,
 	expression: Vec<Vec<Vec<Lit>>>,
 ) -> Result {
-	// TODO doctor out type of expression (clauses containing conjunctions?)
-
-	for cls in expression
-		.into_iter()
-		.map(|cls| cls.into_iter())
-		.multi_cartesian_product()
-	{
+	// TODO Move cnf: Vec<Vec<Lit>> functions into Cnf
+	for cls in expression.into_iter().multi_cartesian_product() {
 		let cls = cls.concat(); // filter out [] (empty conjunctions?) of the clause
 		if FILTER_TRIVIAL_CLAUSES {
 			let mut lits = HashSet::<Lit>::with_capacity(cls.len());
@@ -134,18 +154,43 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 	Ok(())
 }
 
+pub(crate) fn emit_filtered_clause<DB: ClauseDatabase, I: IntoIterator<Item = LitOrConst>>(
+	db: &mut DB,
+	lits: I,
+) -> Result {
+	if let Ok(clause) = lits
+		.into_iter()
+		.filter_map(|lit| match lit {
+			LitOrConst::Lit(lit) => Some(Ok(lit)),
+			LitOrConst::Const(true) => Some(Err(())), // clause satisfied
+			LitOrConst::Const(false) => None,         // literal falsified
+		})
+		.collect::<std::result::Result<Vec<_>, ()>>()
+	{
+		emit_clause!(db, clause)
+	} else {
+		Ok(())
+	}
+}
+
 /// Negates CNF (flipping between empty clause and formula)
 pub(crate) fn negate_cnf(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
 	if clauses.is_empty() {
 		vec![vec![]]
 	} else if clauses.contains(&vec![]) {
 		vec![]
-	} else {
-		assert!(clauses.len() == 1);
+	} else if clauses.len() == 1 {
 		clauses
 			.into_iter()
 			.map(|clause| clause.into_iter().map(|lit| !lit).collect())
 			.collect()
+	} else if clauses.iter().all(|c| c.len() == 1) {
+		vec![clauses
+			.into_iter()
+			.flat_map(|clause| clause.into_iter().map(|lit| !lit))
+			.collect()]
+	} else {
+		unimplemented!("Negating CNF {clauses:?} leads to complex expression")
 	}
 }
 
@@ -193,7 +238,8 @@ impl<'a> XorConstraint<'a> {
 impl<'a> Checker for XorConstraint<'a> {
 	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
 		let count = LinExp::from_terms(self.lits.iter().map(|&l| (l, 1)).collect_vec().as_slice())
-			.value(value)?;
+			.value(value)
+			.unwrap();
 		if count % 2 == 1 {
 			Ok(())
 		} else {
@@ -338,7 +384,7 @@ impl From<RangeInclusive<Var>> for VarRange {
 #[cfg(test)]
 pub mod tests {
 	use std::{
-		collections::{HashMap, HashSet},
+		collections::{BTreeSet, HashMap, HashSet},
 		num::NonZeroI32,
 		thread::panicking,
 	};
@@ -352,9 +398,16 @@ pub mod tests {
 
 	use super::*;
 	use crate::{
-		linear::LimitComp, CardinalityOne, ConditionalDatabase, Encoder, LadderEncoder,
-		Unsatisfiable, Var,
+		linear::LimitComp, CardinalityOne, ConditionalDatabase, LadderEncoder, Unsatisfiable, Var,
 	};
+
+	/// TODO a macro to write tests using `?`
+	macro_rules! assert_ok {
+		($test:expr) => {
+			((|| $test)()).unwrap_or_else(|e| panic!("Asserted Result is Ok but was Err({e})"))
+		};
+	}
+	pub(crate) use assert_ok;
 
 	macro_rules! assert_enc {
 		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
@@ -439,6 +492,7 @@ pub mod tests {
 	}
 	pub(crate) use assert_enc_sol;
 
+	#[allow(unused_macros)]
 	macro_rules! assert_unsat {
 		($enc:expr, $max:expr, $($args:expr),+) => {
 			let mut tdb = $crate::helpers::tests::TestDB::new($max);
@@ -451,6 +505,7 @@ pub mod tests {
 			}
 		};
 	}
+	#[allow(unused_imports)]
 	pub(crate) use assert_unsat;
 
 	macro_rules! assert_trivial_unsat {
@@ -468,14 +523,14 @@ pub mod tests {
 	pub(crate) use assert_trivial_unsat;
 
 	macro_rules! lits {
-		() => (
+		() => {
 			std::vec::Vec::new()
-		);
-		($($x:expr),+ $(,)?) => (
+		};
+		($($x:expr),+ $(,)?) => {
 			<[Lit]>::into_vec(
 				std::boxed::Box::new([$($crate::Lit::from($x)),+])
 			)
-		);
+		};
 	}
 	pub(crate) use lits;
 	#[test]
@@ -565,6 +620,7 @@ pub mod tests {
 	/// The maximum number of variable to generate expected solutions for
 	const GENERATE_EXPECTED_SOLUTIONS: i32 = 0;
 
+	#[derive(Debug)]
 	pub(crate) struct TestDB {
 		slv: Solver,
 		/// Number of variables available when solver is created
@@ -580,7 +636,11 @@ pub mod tests {
 		expected_lits: Option<usize>,
 		expecting_no_unit_clauses: bool,
 		expecting_no_equivalences: Option<HashMap<Lit, Lit>>,
+		num_cls: u32,
 	}
+
+	const ONLY_OUTPUT: bool = true;
+	const CHECK_N_SOL: Option<u32> = None;
 
 	impl TestDB {
 		pub fn new(num_var: i32) -> TestDB {
@@ -595,7 +655,7 @@ pub mod tests {
 						..CNFDescription::default()
 					},
 				),
-				num_var,
+				num_var: num_var.into(),
 				clauses: None,
 				solutions: None,
 				check: None,
@@ -605,6 +665,7 @@ pub mod tests {
 				expected_lits: None,
 				expecting_no_unit_clauses: false,
 				expecting_no_equivalences: None,
+				num_cls: 0,
 			}
 		}
 
@@ -694,6 +755,58 @@ pub mod tests {
 			}
 		}
 
+		/// Solve for given output variables (or self.num_var if None)
+		pub fn solve(&mut self, output: Option<BTreeSet<Var>>) -> Vec<Vec<Lit>> {
+			let mut from_slv: Vec<Vec<Lit>> = Vec::new();
+			let output: BTreeSet<_> = output
+				.map(|output| output.into_iter().map(|v| v.into()).collect())
+				.unwrap_or((1..=self.num_var).collect());
+
+			// TODO [refactor] instead of using splr, testing should use our own Solver interface
+			let mut k_sol = 0;
+			while let Ok(Certificate::SAT(lit_assignment)) = self.slv.solve() {
+				let solution = if ONLY_OUTPUT {
+					lit_assignment
+						.clone()
+						.into_iter()
+						.filter(|l| output.contains(&l.abs()))
+						.collect()
+				} else {
+					lit_assignment
+				};
+				let solution = solution.into_iter().map(|lit| Lit::from(lit)).collect_vec();
+
+				from_slv.push(solution.clone());
+				if let Some(n) = CHECK_N_SOL {
+					if k_sol > n {
+						break;
+					} else {
+						k_sol += 1;
+					}
+				}
+
+				let nogood = solution
+					.iter()
+					.map(|l| !l)
+					.map(|l| i32::from(l))
+					.collect_vec();
+
+				match SatSolverIF::add_clause(&mut self.slv, nogood) {
+					Err(SolverError::Inconsistent | SolverError::EmptyClause) => {
+						break;
+					}
+					Err(e) => {
+						panic!("unexpected solver error: {}", e);
+					}
+					Ok(_) => self.slv.reset(),
+				};
+			}
+			for sol in &mut from_slv {
+				sol.sort_by_key(|a| a.var());
+			}
+			from_slv
+		}
+
 		pub fn check_complete(&mut self) {
 			self.unchecked = false;
 			if let Some(clauses) = &self.clauses {
@@ -720,20 +833,20 @@ pub mod tests {
 			}
 			const ONLY_OUTPUT: bool = true;
 			let mut from_slv: Vec<Vec<Lit>> = Vec::new();
-			while let Ok(Certificate::SAT(model)) = self.slv.solve() {
-				let solution: Vec<Lit> = if ONLY_OUTPUT {
-					model
+			while let Ok(Certificate::SAT(lit_assignment)) = self.slv.solve() {
+				let lit_assignment: Vec<Lit> = if ONLY_OUTPUT {
+					lit_assignment
 						.iter()
 						.filter(|l| l.abs() <= self.num_var)
 						.map(|&l| l.into())
 						.collect()
 				} else {
-					model.iter().map(|&l| l.into()).collect()
+					lit_assignment.iter().map(|&l| l.into()).collect()
 				};
 
-				from_slv.push(solution.clone());
+				from_slv.push(lit_assignment.clone());
 
-				let nogood: Vec<i32> = solution.iter().map(|l| (!l).into()).collect();
+				let nogood: Vec<i32> = lit_assignment.iter().map(|l| (!l).into()).collect();
 				match SatSolverIF::add_clause(&mut self.slv, nogood) {
 					Err(SolverError::Inconsistent | SolverError::EmptyClause) => {
 						break;
@@ -757,7 +870,7 @@ pub mod tests {
 				}
 			}
 			if let Some(solutions) = &self.solutions {
-				// we are only interested in literals present in the expected solutions (and not in auxiliary variables)
+				// solutions only contain principal variables; so we might have to filter from_slv if it contains aux vars
 				from_slv.sort();
 
 				let from_slv_output = if ONLY_OUTPUT {
@@ -768,6 +881,7 @@ pub mod tests {
 						.map(|sol| {
 							sol.iter()
 								.filter(|l| Into::<i32>::into(l.var()) <= self.num_var)
+								// .filter(|l| output.contains(&l.abs())) // TODO could consider adding this; but is only used so far for model-based tests
 								.cloned()
 								.collect_vec()
 						})
@@ -838,9 +952,21 @@ pub mod tests {
 		}
 	}
 
+	/// Optionally check max number of clauses
+	const MAX_CLAUSES: Option<u32> = None;
+
 	impl ClauseDatabase for TestDB {
 		fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
 			let cl = cl.into_iter().sorted().collect_vec();
+			self.num_cls += 1;
+
+			assert!(
+				MAX_CLAUSES
+					.map(|max_clauses| self.num_cls <= max_clauses)
+					.unwrap_or(true),
+				"More than {} clauses added for single unit test",
+				MAX_CLAUSES.unwrap()
+			);
 
 			if let Some(clauses) = &mut self.clauses {
 				let mut found = false;
@@ -934,6 +1060,22 @@ pub mod tests {
 				}
 			}
 
+			const FIND_UNSAT_EVERY: Option<u32> = None;
+
+			let find_unsat = FIND_UNSAT_EVERY
+				.map(|every| self.num_cls % &every == 0)
+				.unwrap_or_default();
+
+			fn handle_splr_err(err: SolverError) -> Result {
+				match err {
+					SolverError::EmptyClause => Ok(()),
+					SolverError::RootLevelConflict(_) => Err(Unsatisfiable),
+					err => {
+						panic!("unexpected solver error: {:?}", err);
+					}
+				}
+			}
+
 			match match cl.len() {
 				0 => return Err(Unsatisfiable),
 				1 => self.slv.add_assignment(cl[0].into()),
@@ -942,14 +1084,13 @@ pub mod tests {
 					cl.iter().map(|&l| l.into()).collect_vec(),
 				),
 			} {
-				Ok(_) => Ok(()),
-				Err(err) => match err {
-					SolverError::EmptyClause => Ok(()),
-					SolverError::RootLevelConflict(_) => Err(Unsatisfiable),
-					err => {
-						panic!("unexpected solver error: {:?}", err);
-					}
+				Ok(_) if find_unsat => match self.slv.solve() {
+					Ok(Certificate::UNSAT) => Err(Unsatisfiable),
+					Ok(_) => Ok(()),
+					Err(err) => handle_splr_err(err),
 				},
+				Ok(_) => Ok(()),
+				Err(err) => handle_splr_err(err),
 			}
 		}
 

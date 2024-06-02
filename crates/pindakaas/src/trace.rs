@@ -25,7 +25,7 @@ macro_rules! new_var {
 }
 pub(crate) use new_var;
 
-/// Helper marco to emit a clause from within an encoder
+/// Helper macro to emit a clause from within an encoder
 #[cfg(feature = "trace")]
 macro_rules! emit_clause {
 	($db:expr, $cl:expr) => {{
@@ -45,6 +45,12 @@ pub(crate) use emit_clause;
 
 #[cfg(feature = "trace")]
 mod subscriber {
+
+	/// Show the dimacs ID after label
+	const SHOW_DIMACS_ID: bool = false;
+	/// Show the time duration
+	const SHOW_DUR: bool = true;
+
 	use std::{
 		fmt,
 		io::{stderr, BufWriter, Stderr, Write},
@@ -123,6 +129,7 @@ mod subscriber {
 		}
 	}
 
+	#[derive(Debug)]
 	pub struct FlushGuard {
 		out: Arc<Mutex<BufWriter<Stderr>>>,
 	}
@@ -230,7 +237,11 @@ mod subscriber {
 								if !pos {
 									label.insert(0, '¬')
 								};
-								label
+								if SHOW_DIMACS_ID {
+									format!("{} ({})", label, lit)
+								} else {
+									label
+								}
 							}),
 							" ∨ ",
 						);
@@ -263,12 +274,17 @@ mod subscriber {
 			let visitor = stack.pop().unwrap();
 			assert_eq!(&visitor.ident, span); // FIXME: Deal with out of order execution
 			if let Some(start) = visitor.start {
-				let dur = Instant::now() - start;
 				self.indented_output(
 					stack.len(),
 					&format!(
-						"╰─╴time: {dur:?} vars: {} clauses: {}",
-						visitor.vars, visitor.clauses
+						"╰─╴{}vars: {} clauses: {}",
+						if SHOW_DUR {
+							format!("time: {:?} ", Instant::now() - start)
+						} else {
+							String::from("")
+						},
+						visitor.vars,
+						visitor.clauses
 					),
 				)
 			}

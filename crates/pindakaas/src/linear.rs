@@ -4,9 +4,11 @@ use std::{
 	ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign},
 };
 
+use itertools::Itertools;
+
 use crate::{
 	Cardinality, CardinalityOne, CheckError, Checker, ClauseDatabase, Coeff, Encoder, IntEncoding,
-	Lit, PairwiseEncoder, Result, Unsatisfiable, Valuation,
+	IntVar, Lit, PairwiseEncoder, Result, Unsatisfiable, Valuation,
 };
 
 mod adder;
@@ -16,10 +18,9 @@ mod swc;
 pub(crate) mod totalizer;
 
 pub use adder::AdderEncoder;
-pub(crate) use adder::{lex_geq_const, lex_leq_const, log_enc_add, log_enc_add_};
+pub(crate) use adder::{lex_geq_const, lex_leq_const, log_enc_add_fn};
 pub use aggregator::LinearAggregator;
 pub use bdd::BddEncoder;
-use itertools::Itertools;
 pub use swc::SwcEncoder;
 pub use totalizer::TotalizerEncoder;
 
@@ -42,6 +43,7 @@ impl From<PosCoeff> for Coeff {
 		val.0
 	}
 }
+
 impl Deref for PosCoeff {
 	type Target = Coeff;
 	fn deref(&self) -> &Self::Target {
@@ -83,7 +85,7 @@ impl Linear {
 		let x = itertools::join(
 			self.terms
 				.iter()
-				.flat_map(|part| part.iter().map(|(lit, coef)| (lit, **coef)))
+				.flat_map(|part| part.iter().map(|(lit, coef)| (lit, coef)))
 				.map(|(l, c)| format!("{c:?}·{}", trace_print_lit(l))),
 			" + ",
 		);
@@ -161,8 +163,8 @@ pub enum LimitComp {
 impl fmt::Display for LimitComp {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			LimitComp::Equal => write!(f, "=="),
-			LimitComp::LessEq => write!(f, "<="),
+			LimitComp::Equal => write!(f, "="),
+			LimitComp::LessEq => write!(f, "≤"),
 		}
 	}
 }
@@ -212,6 +214,18 @@ impl From<LimitComp> for Comparator {
 	}
 }
 
+impl TryFrom<Comparator> for LimitComp {
+	fn try_from(value: Comparator) -> Result<Self, ()> {
+		match value {
+			Comparator::Equal => Ok(LimitComp::Equal),
+			Comparator::LessEq => Ok(LimitComp::LessEq),
+			_ => Err(()),
+		}
+	}
+
+	type Error = ();
+}
+
 impl From<Linear> for LinearConstraint {
 	fn from(lin: Linear) -> Self {
 		LinearConstraint {
@@ -257,9 +271,18 @@ impl LinearConstraint {
 	}
 }
 
+impl From<&IntVar> for LinExp {
+	fn from(x: &IntVar) -> Self {
+		x.as_lin_exp()
+	}
+}
+
 impl Checker for LinearConstraint {
 	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
-		let lhs = self.exp.value(value)?;
+		let lhs = self
+			.exp
+			.value(value)
+			.expect("TODO: handle unassigned value");
 		if match self.cmp {
 			Comparator::LessEq => lhs <= self.k,
 			Comparator::Equal => lhs == self.k,
@@ -272,11 +295,45 @@ impl Checker for LinearConstraint {
 	}
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum Comparator {
 	LessEq,
 	Equal,
 	GreaterEq,
+}
+
+impl Comparator {
+	pub(crate) fn split(&self) -> Vec<Comparator> {
+		match self {
+			Comparator::Equal => vec![Comparator::LessEq, Comparator::GreaterEq],
+			_ => vec![*self],
+		}
+	}
+
+	pub(crate) fn reverse(&self) -> Comparator {
+		match *self {
+			Comparator::LessEq => Comparator::GreaterEq,
+			Comparator::Equal => panic!("Cannot reverse {self}"),
+			Comparator::GreaterEq => Comparator::LessEq,
+		}
+	}
+
+	pub(crate) fn is_ineq(&self) -> bool {
+		match *self {
+			Comparator::Equal => false,
+			Comparator::LessEq | Comparator::GreaterEq => true,
+		}
+	}
+}
+
+impl fmt::Display for Comparator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Comparator::Equal => write!(f, "="),
+			Comparator::LessEq => write!(f, "≤"),
+			Comparator::GreaterEq => write!(f, "≥"),
+		}
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -394,6 +451,13 @@ impl LinExp {
 
 	pub fn terms(&self) -> impl Iterator<Item = (Lit, Coeff)> + '_ {
 		self.terms.iter().copied()
+	}
+
+	pub(crate) fn value<F: Valuation + ?Sized>(&self, sol: &F) -> Option<Coeff> {
+		// Nicest way I could find to short-circuit on list of Option
+		self.terms()
+			.map(|(l, c)| sol.value(l).map(|l| c * l as Coeff))
+			.fold_options(0, |acc, val| acc + val)
 	}
 }
 
@@ -831,7 +895,6 @@ mod tests {
 			}
 		};
 
-
-	}
+    }
 	pub(crate) use linear_test_suite;
 }
