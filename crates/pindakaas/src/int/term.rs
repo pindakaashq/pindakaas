@@ -458,6 +458,12 @@ impl Term {
 
 	// TODO [?] correct way to return an iter with this if-else which returns different iter types?
 	// TODO return Dom?
+	pub(crate) fn dom2(&self) -> Dom {
+		self.x.borrow().dom.clone().mul(self.c)
+	}
+
+	// TODO [?] correct way to return an iter with this if-else which returns different iter types?
+	// TODO return Dom?
 	pub(crate) fn dom(&self) -> Vec<Coeff> {
 		if self.c == 0 {
 			vec![0]

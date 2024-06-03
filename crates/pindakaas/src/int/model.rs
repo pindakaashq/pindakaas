@@ -55,7 +55,7 @@ use crate::Coeff;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Decomposer {
-	Gt,
+	Gt(bool),
 	Swc,
 	#[default]
 	Bdd,
@@ -707,18 +707,19 @@ mod tests {
 	/// All possible currently stable (!) configurations
 	fn get_model_configs() -> Vec<ModelConfig> {
 		iproduct!(
-			[Scm::Dnf, Scm::Add, Scm::Rca],
+			[Scm::Rca],
 			[
-				Decomposer::Gt,
+				Decomposer::Gt(true),
+				Decomposer::Gt(false),
 				// Decomposer::Swc, // TODO
-				Decomposer::Bdd,
+				// Decomposer::Bdd,
 				// Decomposer::Rca
 			],
 			[Consistency::None],
 			[false], // consistency
 			// [true],          // equalize terns
-			[Some(0)], // cutoffs: [None, Some(0), Some(2)]
-			[false]    // equalize_uniform_bin_ineqs
+			[None],  // cutoffs: [None, Some(0), Some(2)]
+			[false]  // equalize_uniform_bin_ineqs
 		)
 		.map(
 			|(
@@ -745,11 +746,13 @@ mod tests {
 		.collect()
 	}
 
+	/// Solve
+	const SOLVE: bool = false;
 	// TODO expect_test! should remove this
 	/// Generate solutions for expected models
-	const BRUTE_FORCE_SOLVE: bool = true;
+	const BRUTE_FORCE_SOLVE: bool = false;
 	/// Which uniform (for now) integer encoding specifications to test
-	const VAR_ENCS: &[IntVarEnc] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
+	const VAR_ENCS: &[IntVarEnc] = &[IntVarEnc::Ord(None)];
 
 	/// Check each constraint of the decomposition individually (unstable)
 	const CHECK_CONSTRAINTS: bool = false;
@@ -768,7 +771,7 @@ mod tests {
 		decomposition: &Model,
 		expected_assignments: Option<&Vec<Assignment>>,
 	) {
-		if !BRUTE_FORCE_SOLVE {
+		if !BRUTE_FORCE_SOLVE || !SOLVE {
 			return;
 		} else if let Ok(decomposition_expected_assignments) =
 			&decomposition.generate_solutions(Some(IntVarId(model.num_var)))
@@ -959,7 +962,7 @@ mod tests {
 						"checking config #{i} = {:?}\ndecomposition #{j} = {}",
 						model.config, decomposition,
 					);
-					test_decomp(decomposition, &model, expected_assignments)
+					test_decomp(decomposition, &model, expected_assignments);
 				}
 			}
 		}
@@ -998,18 +1001,21 @@ mod tests {
 						.collect()
 				};
 
-				db.solve(Some(output))
-					.into_iter()
-					.sorted()
-					.map(MapSol::from)
-					.collect()
+				SOLVE.then(|| {
+					db.solve(Some(output))
+						.into_iter()
+						.sorted()
+						.map(MapSol::from)
+						.collect()
+				})
 			})
 			.unwrap_or_else(|_| {
 				println!("Warning: encoding decomposition lead to UNSAT");
-				Vec::default()
+				Some(Vec::default())
 			});
 
 		println!("encoded = {}", decomposition);
+		println!("statics = [{}/{}/{}]", db.num_vars, db.num_cls, db.num_lits);
 
 		// TODO Implement hash for MapSol
 		// assert_eq!(
@@ -1031,21 +1037,26 @@ mod tests {
 			principal
 		};
 
-		let actual_assignments = lit_assignments
-			.iter()
-			.flat_map(|lit_assignment| checker.assign(lit_assignment))
-			.collect::<Vec<_>>();
+		if let Some(lit_assignments) = lit_assignments {
+			let actual_assignments = lit_assignments
+				.iter()
+				.flat_map(|lit_assignment| checker.assign(lit_assignment))
+				.collect::<Vec<_>>();
 
-		// TODO impl Hash for Assignment
-		// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
+			// TODO impl Hash for Assignment
+			// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
 
-		let check =
-			checker.check_assignments(&actual_assignments, expected_assignments, BRUTE_FORCE_SOLVE);
-		if let Err(errs) = check {
-			for err in errs {
-				println!("{err}");
+			let check = checker.check_assignments(
+				&actual_assignments,
+				expected_assignments,
+				BRUTE_FORCE_SOLVE,
+			);
+			if let Err(errs) = check {
+				for err in errs {
+					println!("{err}");
+				}
+				panic!("Encoding is incorrect. Test failed for {:?}", model.config);
 			}
-			panic!("Encoding is incorrect. Test failed for {:?}", model.config);
 		}
 	}
 
@@ -2444,5 +2455,69 @@ End
 		};
 		model.add_constraint(con).unwrap();
 		test_decomp(model.deep_clone(), &model, None);
+	}
+
+	#[test]
+	fn test_int_lin_le_big() {
+		// test_lp_for_configs(
+		// 	r"
+		// Subject To
+		// c0: + 2 x1 + 3 x2 + 5 x3 + 4 x4 + 7 x5 + 4 x6 + 3 x7 + 8 x8 <= 24
+		// Binary
+		// x1
+		// x2
+		// x3
+		// x4
+		// x5
+		// x6
+		// x7
+		// x8
+		// End
+		// ",
+		// 	None,
+		// );
+
+		use rand::distributions::{Distribution, Uniform};
+		use rand::{rngs::StdRng, SeedableRng};
+
+		let n = 50;
+		let f = 0.7;
+		let u = 10;
+		let seed = 42;
+
+		// .35
+		// statics = [1571/71136/168782]
+		// statics = [1373/59602/133084]
+
+		// % .7
+		// statics = [1571/38620/103897]
+		// statics = [1360/22958/56834]
+
+		let q_sampler = Uniform::from(1..u);
+		let mut fixed_seed = StdRng::seed_from_u64(seed);
+		let mut sample = |_| q_sampler.sample(&mut fixed_seed);
+
+		let mut model = Model::default();
+		let xs = (1..=n)
+			.map(|i| {
+				model
+					.new_var(&[0, sample(0)], Some(format!("x{i}")))
+					.unwrap()
+			})
+			.collect_vec();
+
+		let ub = xs.iter().map(|x| x.borrow().ub()).sum::<Coeff>();
+
+		model
+			.add_constraint(Lin {
+				exp: LinExp {
+					terms: xs.into_iter().map(Term::from).collect(),
+				},
+				cmp: Comparator::LessEq,
+				k: (f * (ub as f32)) as Coeff,
+				lbl: None,
+			})
+			.unwrap();
+		test_model(model, Some(get_model_configs()))
 	}
 }

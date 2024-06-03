@@ -16,7 +16,7 @@ const SHOW_LITS: bool = true;
 /// Whether to rewrite x1 + .. + xn # 0 as x1 + .. + x_(n-1) # - xn
 const SHOW_K_0: bool = true;
 /// Show domain density
-const SHOW_DOM_DENSITY: bool = false;
+const SHOW_DOM_DENSITY: bool = true;
 
 impl Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

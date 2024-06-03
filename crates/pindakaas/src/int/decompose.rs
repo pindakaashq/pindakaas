@@ -349,7 +349,9 @@ impl Decompose for LinDecomposer {
 					}
 					_ => match model.config.decomposer {
 						Decomposer::Bdd => BddEncoder::default().decompose(model.branch(con)),
-						Decomposer::Gt => TotalizerEncoder::default().decompose(model.branch(con)),
+						Decomposer::Gt(_) => {
+							TotalizerEncoder::default().decompose(model.branch(con))
+						}
 						Decomposer::Swc => SwcEncoder::default().decompose(model.branch(con)),
 						Decomposer::Rca => unreachable!(),
 					},
@@ -368,6 +370,7 @@ pub struct ScmDecomposer {}
 impl Decompose for ScmDecomposer {
 	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable> {
 		let cons = model.cons.iter().cloned();
+
 		let mut model = Model {
 			cons: vec![],
 			..model

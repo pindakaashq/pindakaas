@@ -168,6 +168,21 @@ impl Dom {
 		}
 	}
 
+	pub(crate) fn sumset_size(self, rhs: Dom) -> Coeff {
+		self.sumset(rhs).size()
+	}
+	pub(crate) fn sumset(self, rhs: Dom) -> Self {
+		Dom::from_slice(
+			&self
+				.iter()
+				.cartesian_product(rhs.iter())
+				.map(|(a, b)| a + b)
+				.sorted()
+				.dedup()
+				.collect_vec(),
+		)
+	}
+
 	pub(crate) fn mul(self, rhs: Coeff) -> Self {
 		assert!(!rhs.is_negative());
 		Dom {
@@ -191,6 +206,7 @@ impl Dom {
 		)
 	}
 
+	// TODO check no overlap
 	fn invariant(&self) -> bool {
 		is_sorted(
 			&self
