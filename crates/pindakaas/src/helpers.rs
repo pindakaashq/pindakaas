@@ -636,7 +636,9 @@ pub mod tests {
 		expected_lits: Option<usize>,
 		expecting_no_unit_clauses: bool,
 		expecting_no_equivalences: Option<HashMap<Lit, Lit>>,
-		num_cls: u32,
+		pub(crate) num_vars: u32,
+		pub(crate) num_cls: u32,
+		pub(crate) num_lits: u32,
 	}
 
 	const ONLY_OUTPUT: bool = true;
@@ -665,7 +667,9 @@ pub mod tests {
 				expected_lits: None,
 				expecting_no_unit_clauses: false,
 				expecting_no_equivalences: None,
+				num_vars: num_var as u32,
 				num_cls: 0,
+				num_lits: 0,
 			}
 		}
 
@@ -959,6 +963,7 @@ pub mod tests {
 		fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
 			let cl = cl.into_iter().sorted().collect_vec();
 			self.num_cls += 1;
+			self.num_lits += cl.len() as u32;
 
 			assert!(
 				MAX_CLAUSES
@@ -1095,6 +1100,7 @@ pub mod tests {
 		}
 
 		fn new_var(&mut self) -> Var {
+			self.num_vars += 1;
 			let res = self.slv.add_var() as i32;
 
 			if let Some(num) = &mut self.expected_vars {
