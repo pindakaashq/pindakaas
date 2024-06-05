@@ -1,5 +1,7 @@
 fn main() {
 	let src = [
+		"src/ccadical_override.cpp",
+		"vendor/cadical/contrib/craigtracer.cpp",
 		"vendor/cadical/src/analyze.cpp",
 		"vendor/cadical/src/arena.cpp",
 		"vendor/cadical/src/assume.cpp",
@@ -30,12 +32,13 @@ fn main() {
 		"vendor/cadical/src/file.cpp",
 		"vendor/cadical/src/flags.cpp",
 		"vendor/cadical/src/flip.cpp",
-		"vendor/cadical/src/frattracer.cpp",
 		"vendor/cadical/src/format.cpp",
+		"vendor/cadical/src/frattracer.cpp",
 		"vendor/cadical/src/gates.cpp",
 		"vendor/cadical/src/idruptracer.cpp",
 		"vendor/cadical/src/instantiate.cpp",
 		"vendor/cadical/src/internal.cpp",
+		"vendor/cadical/src/lidruptracer.cpp",
 		"vendor/cadical/src/limit.cpp",
 		"vendor/cadical/src/logging.cpp",
 		"vendor/cadical/src/lookahead.cpp",
@@ -72,19 +75,19 @@ fn main() {
 		"vendor/cadical/src/terminal.cpp",
 		"vendor/cadical/src/ternary.cpp",
 		"vendor/cadical/src/transred.cpp",
-		"vendor/cadical/src/veripbtracer.cpp",
 		"vendor/cadical/src/util.cpp",
 		"vendor/cadical/src/var.cpp",
+		"vendor/cadical/src/veripbtracer.cpp",
 		"vendor/cadical/src/version.cpp",
 		"vendor/cadical/src/vivify.cpp",
 		"vendor/cadical/src/walk.cpp",
 		"vendor/cadical/src/watch.cpp",
-		"src/ccadical_override.cpp",
 	];
 
 	let mut builder = cc::Build::new();
 	let build = builder
 		.cpp(true)
+		.include("vendor/cadical/src")
 		.flag_if_supported("-std=c++11")
 		.define("NBUILD", None)
 		.define("NUNLOCKED", None)
