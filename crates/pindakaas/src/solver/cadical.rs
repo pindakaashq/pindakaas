@@ -4,14 +4,25 @@ use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
 use pindakaas_derive::IpasirSolver;
 
 use super::VarFactory;
-use crate::Lit;
+use crate::{
+	solver::libloading::{LearnCB, TermCB},
+	Lit,
+};
 
 #[derive(IpasirSolver)]
 #[ipasir(krate = pindakaas_cadical, assumptions, learn_callback, term_callback, ipasir_up)]
 pub struct Cadical {
+	/// The raw pointer to the Cadical solver.
 	ptr: *mut std::ffi::c_void,
+	/// The variable factory for this solver.
 	vars: VarFactory,
+	/// The callback used when a clause is learned.
+	learn_cb: LearnCB,
+	/// The callback used to check whether the solver should terminate.
+	term_cb: TermCB,
+
 	#[cfg(feature = "ipasir-up")]
+	/// The external propagator called by the solver
 	prop: Option<Box<CadicalProp>>,
 }
 
@@ -20,6 +31,8 @@ impl Default for Cadical {
 		Self {
 			ptr: unsafe { pindakaas_cadical::ipasir_init() },
 			vars: VarFactory::default(),
+			learn_cb: LearnCB::default(),
+			term_cb: TermCB::default(),
 			#[cfg(feature = "ipasir-up")]
 			prop: None,
 		}
@@ -32,6 +45,8 @@ impl Clone for Cadical {
 		Self {
 			ptr,
 			vars: self.vars,
+			learn_cb: LearnCB::default(),
+			term_cb: TermCB::default(),
 			#[cfg(feature = "ipasir-up")]
 			prop: None,
 		}
@@ -77,7 +92,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		linear::LimitComp,
-		solver::{LearnCallback, SlvTermSignal, SolveResult, Solver, TermCallback},
+		solver::{SolveResult, Solver},
 		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder, Valuation,
 	};
 
@@ -112,51 +127,6 @@ mod tests {
 					|| (model.value(a).unwrap() && model.value(!b).unwrap()),
 			)
 		});
-	}
-
-	#[test]
-	fn test_cadical_cb_no_drop() {
-		let mut slv = Cadical::default();
-
-		let a = slv.new_var().into();
-		let b = slv.new_var().into();
-		PairwiseEncoder::default()
-			.encode(
-				&mut slv,
-				&CardinalityOne {
-					lits: vec![a, b],
-					cmp: LimitComp::Equal,
-				},
-			)
-			.unwrap();
-
-		struct NoDrop(i32);
-		impl NoDrop {
-			fn seen(&mut self) {
-				self.0 += 1;
-				eprintln!("seen {}", self.0);
-			}
-		}
-		impl Drop for NoDrop {
-			fn drop(&mut self) {
-				panic!("I have been dropped {}", self.0);
-			}
-		}
-
-		{
-			let mut nodrop = NoDrop(0);
-			slv.set_terminate_callback(Some(move || {
-				nodrop.seen();
-				SlvTermSignal::Continue
-			}));
-		}
-		{
-			let mut nodrop = NoDrop(0);
-			slv.set_learn_callback(Some(move |_: &mut dyn Iterator<Item = Lit>| {
-				nodrop.seen();
-			}));
-		}
-		assert_eq!(slv.solve(|_| {}), SolveResult::Sat);
 	}
 
 	#[cfg(feature = "ipasir-up")]

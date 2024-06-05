@@ -72,11 +72,10 @@ pub trait LearnCallback: Solver {
 	///
 	/// Subsequent calls to this method override the previously set
 	/// callback function.
-	///
-	/// For IPASIR connected through C, the callback and any objects contained
-	/// within it might be leaked to satisfy the FFI requirements. Note that
-	/// [`Drop`] implementations might not be called on these objects.
-	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(&mut self, cb: Option<F>);
+	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>) + 'static>(
+		&mut self,
+		cb: Option<F>,
+	);
 }
 
 pub trait TermCallback: Solver {
@@ -91,11 +90,7 @@ pub trait TermCallback: Solver {
 	///
 	/// Subsequent calls to this method override the previously set
 	/// callback function.
-	///
-	/// For IPASIR connected through C, the callback and any objects contained
-	/// within it might be leaked to satisfy the FFI requirements. Note that
-	/// [`Drop`] implementations might not be called on these objects.
-	fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>);
+	fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>);
 }
 
 #[cfg(feature = "ipasir-up")]
