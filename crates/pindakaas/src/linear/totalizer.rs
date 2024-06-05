@@ -176,6 +176,7 @@ impl Decompose for TotalizerEncoder {
 											.into_iter()
 											.cartesian_product(right.dom().into_iter())
 											.map(|(a, b)| a + b)
+											.filter(|d| d <= &lin.k)
 											.sorted()
 											.dedup()
 											.collect::<Vec<_>>()
