@@ -54,8 +54,17 @@ use super::IntVarEnc;
 use crate::Coeff;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum GtSort {
+	#[default]
+	Coeff,
+	SumsetGreedy,
+	SumsetCard,
+	SumsetDens,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Decomposer {
-	Gt(bool),
+	Gt(GtSort),
 	Swc,
 	#[default]
 	Bdd,
@@ -709,8 +718,9 @@ mod tests {
 		iproduct!(
 			[Scm::Rca],
 			[
-				Decomposer::Gt(true),
-				Decomposer::Gt(false),
+				Decomposer::Gt(GtSort::Coeff),
+				Decomposer::Gt(GtSort::SumsetCard),
+				Decomposer::Gt(GtSort::SumsetDens),
 				// Decomposer::Swc, // TODO
 				// Decomposer::Bdd,
 				// Decomposer::Rca
@@ -2480,18 +2490,10 @@ End
 		use rand::distributions::{Distribution, Uniform};
 		use rand::{rngs::StdRng, SeedableRng};
 
-		let n = 50;
-		let f = 0.7;
-		let u = 10;
+		let n = 256;
+		let f = 0.5;
+		let u = 25;
 		let seed = 42;
-
-		// .35
-		// statics = [1571/71136/168782]
-		// statics = [1373/59602/133084]
-
-		// % .7
-		// statics = [1571/38620/103897]
-		// statics = [1360/22958/56834]
 
 		let q_sampler = Uniform::from(1..u);
 		let mut fixed_seed = StdRng::seed_from_u64(seed);

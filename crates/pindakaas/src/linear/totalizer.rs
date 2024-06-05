@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 pub(crate) use crate::int::IntVar;
 use crate::{
-	int::{Consistency, Decompose, Dom, Lin, LinExp, Model, Term},
+	int::{Consistency, Decompose, Dom, GtSort, Lin, LinExp, Model, Term},
 	ClauseDatabase, Coeff, Decomposer, Encoder, Linear, ModelConfig, Result, Unsatisfiable,
 };
 
@@ -43,9 +43,9 @@ impl Decompose for TotalizerEncoder {
 		while layer.len() >= 2 {
 			// TODO tie-breaker on coef size?
 			match model.config.decomposer {
-				Decomposer::Gt(true) => layer.sort_by_key(Term::ub),
-				Decomposer::Gt(false) => {
-					layer.sort_by_key(Term::ub);
+				Decomposer::Gt(GtSort::Coeff) => layer.sort_by_key(Term::ub),
+				Decomposer::Gt(ref sort) => {
+					// layer.sort_by_key(Term::ub);
 					// layer.sort_by_key(|term| layer.iter()
 					let mut sorted_layer = Vec::new();
 					/*
@@ -64,7 +64,7 @@ impl Decompose for TotalizerEncoder {
 						}
 					);
 
-					let mut sumset_sizes = layer
+					let sumset_sizes = layer
 						.iter()
 						.enumerate()
 						.map(|(i, a)| {
@@ -81,11 +81,29 @@ impl Decompose for TotalizerEncoder {
 												j,
 												(
 													b,
-													a.dom2()
-														.sumset(b.dom2())
-														.iter()
-														.filter(|d| d <= &lin.k)
-														.count(),
+													{
+														let c = a
+															.dom2()
+															.iter()
+															.cartesian_product(b.dom2().iter())
+															.map(|(a, b)| a + b)
+															.filter(|d| d <= &lin.k)
+															.unique()
+															.count();
+														if sort == &GtSort::SumsetCard {
+															c as i128
+														} else {
+															let (lb, ub) =
+																(a.lb() + b.lb(), a.ub() + b.ub());
+															let dens =
+																(c as f64) / ((ub - lb + 1) as f64);
+															(dens * 10000.0) as i128
+														}
+													},
+													// .sumset(b.dom2())
+													// .iter()
+													// .filter(|d| d <= &lin.k)
+													// .count(),
 												),
 											)
 										})
@@ -95,42 +113,76 @@ impl Decompose for TotalizerEncoder {
 						})
 						.collect::<HashMap<_, _>>();
 
-					while !sumset_sizes.is_empty() {
-						if sumset_sizes.len() == 1 {
-							sorted_layer.push(
-								(*sumset_sizes.values().map(|(a, _)| a).next().unwrap()).clone(),
-							);
-							break;
-						}
+					if matches!(sort, GtSort::SumsetCard | GtSort::SumsetDens) {
+						use rustworkx_core::max_weight_matching::max_weight_matching;
+						use rustworkx_core::petgraph;
 
-						let (i, (a, s)) = sumset_sizes
-							.iter()
-							.min_by_key(|(_, (_, s))| {
-								s.iter()
-									.min_by_key(move |(_, (_, s_a_b))| *s_a_b)
+						let g = petgraph::graph::UnGraph::<u32, i128>::from_edges(
+							&sumset_sizes
+								.into_iter()
+								.flat_map(|(i, (_, s))| {
+									s.into_iter()
+										.map(move |(j, (_, s_i_j))| (i as u32, j as u32, s_i_j))
+								})
+								.collect_vec(),
+						);
+
+						use hashbrown::HashSet;
+						let maxc_res: HashSet<(usize, usize)> =
+							max_weight_matching(&g, true, |e| Ok::<_, ()>(-(*e.weight())), true)
+								.unwrap();
+
+						let maxc_matching =
+							maxc_res.into_iter().flat_map(|(i, j)| [i, j]).collect_vec();
+
+						sorted_layer = maxc_matching
+							.into_iter()
+							.map(|i| layer[i].clone())
+							.collect();
+
+					// assert!(layer.len() <= 1);
+					// sorted_layer.append(&mut layer)
+					} else {
+						/*
+							while !sumset_sizes.is_empty() {
+								if sumset_sizes.len() == 1 {
+									sorted_layer.push(
+										(*sumset_sizes.values().map(|(a, _)| a).next().unwrap())
+											.clone(),
+									);
+									break;
+								}
+
+								let (i, (a, s)) = sumset_sizes
+									.iter()
+									.min_by_key(|(_, (_, s))| {
+										s.iter()
+											.min_by_key(move |(_, (_, s_a_b))| *s_a_b)
+											.unwrap()
+											.1
+											 .1
+									})
 									.unwrap()
-									.1
-									 .1
-							})
-							.unwrap()
-							.clone();
+									.clone();
 
-						let (j, (b, _)) = s
-							.iter()
-							.min_by_key(|(_, (_, s_a_b))| *s_a_b)
-							.unwrap()
-							.clone();
+								let (j, (b, _)) = s
+									.iter()
+									.min_by_key(|(_, (_, s_a_b))| *s_a_b)
+									.unwrap()
+									.clone();
 
-						let ((i, a), (j, b)) = ((*i, (*a).clone()), (*j, (*b).clone()));
+								let ((i, a), (j, b)) = ((*i, (*a).clone()), (*j, (*b).clone()));
 
-						sumset_sizes.remove(&i);
-						sumset_sizes.remove(&j);
-						sumset_sizes.values_mut().for_each(|(_, s)| {
-							s.remove(&i);
-							s.remove(&j);
-						});
-						sorted_layer.push(a);
-						sorted_layer.push(b);
+								sumset_sizes.remove(&i);
+								sumset_sizes.remove(&j);
+								sumset_sizes.values_mut().for_each(|(_, s)| {
+									s.remove(&i);
+									s.remove(&j);
+								});
+								sorted_layer.push(a);
+								sorted_layer.push(b);
+							}
+						*/
 					}
 					layer = sorted_layer;
 				}
@@ -177,6 +229,24 @@ impl Decompose for TotalizerEncoder {
 				}
 			}
 			layer = next_layer;
+
+			let (layer_sizes, layer_densities): (Vec<_>, Vec<_>) = layer
+				.iter()
+				.map(|x| {
+					let dom = &x.x.borrow().dom;
+					(dom.size(), dom.density())
+				})
+				.unzip();
+			println!(
+				"{i}: layer_size = {}, layer_avg_dens = {:.2}: {:?}",
+				layer_sizes.iter().sum::<i64>(),
+				layer_densities.iter().sum::<f64>() / layer.len() as f64,
+				layer_sizes
+					.iter()
+					.zip(layer_densities.iter().map(|d| format!("{d:.2}")))
+					.collect_vec()
+			);
+
 			i += 1;
 		}
 
@@ -196,7 +266,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for TotalizerEncoder {
 				cutoff: self.cutoff,
 				propagate: self.add_propagation,
 				add_consistency: self.add_consistency,
-				decomposer: Decomposer::Gt(true),
+				decomposer: Decomposer::Gt(GtSort::default()),
 				..ModelConfig::default()
 			},
 			..Model::default()

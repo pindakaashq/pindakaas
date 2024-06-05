@@ -19,7 +19,7 @@ pub(crate) use helpers::required_lits;
 pub use helpers::Format;
 pub use int_var::{IntVar, IntVarId, IntVarRef};
 pub(crate) use model::Cse;
-pub use model::{Assignment, Consistency, Decomposer, Model, ModelConfig, Obj, Scm};
+pub use model::{Assignment, Consistency, Decomposer, GtSort, Model, ModelConfig, Obj, Scm};
 pub use term::Term;
 
 use crate::{CheckError, LinExp as PbLinExp, Valuation};
