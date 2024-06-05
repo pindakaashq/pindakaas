@@ -903,19 +903,16 @@ mod tests {
 
 			const CHECK_DECOMPOSITION: bool = true;
 			for (j, var_encs) in {
-				let lin_decomp = model
-					.clone()
-					.decompose_with(Some(&LinDecomposer::default()))
-					.unwrap();
-
-				println!("lin_decomp = {}", lin_decomp);
-				// check the linear decomposition as well
-				// if CHECK_DECOMPOSITION {
-				// 	check_decomposition(&model, &lin_decomp, expected_assignments.as_ref());
-				// }
-
+				let var_encs_model = if VAR_ENCS.len() <= 1 {
+					model.clone()
+				} else {
+					model
+						.clone()
+						.decompose_with(Some(&LinDecomposer::default()))
+						.unwrap()
+				};
 				let var_encs_gen =
-					expand_var_encs(VAR_ENCS, lin_decomp.vars().into_iter().collect());
+					expand_var_encs(VAR_ENCS, var_encs_model.vars().into_iter().collect());
 				if let Some(j) = CHECK_DECOMPOSITION_I {
 					vec![(
 						j,
@@ -939,7 +936,7 @@ mod tests {
 				};
 				let decomposition = model.clone().decompose(spec).unwrap();
 
-				println!("decomposition = {}", decomposition);
+				// println!("decomposition = {}", decomposition);
 
 				if CHECK_DECOMPOSITION {
 					check_decomposition(&model, &decomposition, expected_assignments.as_ref());
@@ -969,8 +966,9 @@ mod tests {
 					vec![(decomposition.clone(), expected_assignments.as_ref())]
 				} {
 					println!(
-						"checking config #{i} = {:?}\ndecomposition #{j} = {}",
-						model.config, decomposition,
+						"checking config #{i} = {:?}\ndecomposition #{j}",
+						model.config,
+						// decomposition,
 					);
 					test_decomp(decomposition, &model, expected_assignments);
 				}
@@ -1024,8 +1022,11 @@ mod tests {
 				Some(Vec::default())
 			});
 
-		println!("encoded = {}", decomposition);
-		println!("statics = [{}/{}/{}]", db.num_vars, db.num_cls, db.num_lits);
+		// println!("encoded = {}", decomposition);
+		println!(
+			"{:?}: statics = [{}/{}/{}]",
+			model.config.decomposer, db.num_vars, db.num_cls, db.num_lits
+		);
 
 		// TODO Implement hash for MapSol
 		// assert_eq!(

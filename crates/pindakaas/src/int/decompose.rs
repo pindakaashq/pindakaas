@@ -171,7 +171,13 @@ impl Decompose for EncSpecDecomposer {
 				.exp
 				.terms
 				.iter()
-				.map(|t| matches!(t.x.borrow().e.as_ref().unwrap(), IntVarEnc::Ord(_)))
+				.map(|t| {
+					matches!(
+						// if missing from spec, some vars might not be encoded yet
+						t.x.borrow_mut().decide_encoding(self.cutoff),
+						IntVarEnc::Ord(_)
+					)
+				})
 				.collect_vec();
 
 			// Couple single order encoded variable in mixed constraints, unless this constraint itself is a coupling
