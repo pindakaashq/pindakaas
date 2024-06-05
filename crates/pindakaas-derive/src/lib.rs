@@ -18,7 +18,11 @@ struct IpasirOpts {
 	#[darling(default)]
 	learn_callback: bool,
 	#[darling(default)]
+	learn_callback_ident: Option<Ident>,
+	#[darling(default)]
 	term_callback: bool,
+	#[darling(default)]
+	term_callback_ident: Option<Ident>,
 	#[darling(default)]
 	ipasir_up: bool,
 	#[darling(default = "default_true")]
@@ -88,30 +92,33 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 	};
 
 	let term_callback = if opts.term_callback {
+		let term_cb = match opts.term_callback_ident {
+			Some(x) => quote! { self. #x },
+			None => quote! { self.term_cb },
+		};
 		quote! {
 			impl crate::solver::TermCallback for #ident {
-				fn set_terminate_callback<F: FnMut() -> crate::solver::SlvTermSignal>(
+				fn set_terminate_callback<F: FnMut() -> crate::solver::SlvTermSignal + 'static>(
 					&mut self,
 					cb: Option<F>,
 				) {
 					if let Some(mut cb) = cb {
-						let mut wrapped_cb = move || -> std::ffi::c_int {
+						#term_cb = crate::solver::libloading::TermCB::new(move || -> std::ffi::c_int {
 							match cb() {
 								crate::solver::SlvTermSignal::Continue => std::ffi::c_int::from(0),
 								crate::solver::SlvTermSignal::Terminate => std::ffi::c_int::from(1),
 							}
-						};
-						let trampoline = crate::solver::libloading::get_trampoline0(&wrapped_cb);
-						// WARNING: Any data in the callback now exists forever
-						let data = Box::leak(Box::new(wrapped_cb)) as *mut _ as *mut std::ffi::c_void;
+						});
+
 						unsafe {
 							#krate::ipasir_set_terminate(
 								#ptr,
-								data,
-								Some(trampoline),
+								#term_cb .as_ptr(),
+								Some(crate::solver::libloading::TermCB::exec_callback),
 							)
 						}
 					} else {
+						#term_cb = Default::default();
 						unsafe { #krate::ipasir_set_terminate(#ptr, std::ptr::null_mut(), None) }
 					}
 				}
@@ -122,31 +129,34 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 	};
 
 	let learn_callback = if opts.learn_callback {
+		let learn_cb = match opts.learn_callback_ident {
+			Some(x) => quote! { self. #x },
+			None => quote! { self.learn_cb },
+		};
 		quote! {
 			impl crate::solver::LearnCallback for #ident {
-				fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = crate::Lit>)>(
+				fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = crate::Lit>) + 'static>(
 					&mut self,
 					cb: Option<F>,
 				) {
 					const MAX_LEN: std::ffi::c_int = 512;
 					if let Some(mut cb) = cb {
-						let mut wrapped_cb = move |clause: *const i32| {
+						#learn_cb = crate::solver::libloading::LearnCB::new(move |clause: *const i32| {
 							let mut iter = crate::solver::libloading::ExplIter(clause)
 								.map(|i: i32| crate::Lit(std::num::NonZeroI32::new(i).unwrap()));
 							cb(&mut iter)
-						};
-						let trampoline = crate::solver::libloading::get_trampoline1(&wrapped_cb);
-						// WARNING: Any data in the callback now exists forever
-						let data = Box::leak(Box::new(wrapped_cb)) as *mut _ as *mut std::ffi::c_void;
+						});
+
 						unsafe {
 							#krate::ipasir_set_learn(
 								#ptr,
-								data,
+								#learn_cb .as_ptr(),
 								MAX_LEN,
-								Some(trampoline),
+								Some(crate::solver::libloading::LearnCB::exec_callback),
 							)
 						}
 					} else {
+						#learn_cb = Default::default();
 						unsafe { #krate::ipasir_set_learn(#ptr, std::ptr::null_mut(), MAX_LEN, None) }
 					}
 				}

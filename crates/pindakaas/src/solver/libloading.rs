@@ -2,6 +2,7 @@
 use std::{any::Any, collections::VecDeque};
 use std::{
 	ffi::{c_char, c_int, c_void, CStr},
+	fmt,
 	num::NonZeroI32,
 	ptr,
 };
@@ -85,7 +86,9 @@ impl IpasirLibrary {
 	pub fn new_solver(&self) -> IpasirSolver<'_> {
 		IpasirSolver {
 			slv: (self.ipasir_init_sym().unwrap())(),
-			next_var: VarFactory::default(),
+			vars: VarFactory::default(),
+			learn_cb: LearnCB::default(),
+			term_cb: TermCB::default(),
 			signature_fn: self.ipasir_signature_sym().unwrap(),
 			release_fn: self.ipasir_release_sym().unwrap(),
 			add_fn: self.ipasir_add_sym().unwrap(),
@@ -120,8 +123,16 @@ impl TryFrom<Library> for IpasirLibrary {
 
 #[derive(Debug)]
 pub struct IpasirSolver<'lib> {
+	/// The raw pointer to the Intel SAT solver.
 	slv: *mut c_void,
-	next_var: VarFactory,
+	/// The variable factory for this solver.
+	vars: VarFactory,
+
+	/// The callback used when a clause is learned.
+	learn_cb: LearnCB,
+	/// The callback used to check whether the solver should terminate.
+	term_cb: TermCB,
+
 	signature_fn: Symbol<'lib, extern "C" fn() -> *const c_char>,
 	release_fn: Symbol<'lib, extern "C" fn(*mut c_void)>,
 	add_fn: Symbol<'lib, extern "C" fn(*mut c_void, i32)>,
@@ -152,7 +163,7 @@ impl<'lib> Drop for IpasirSolver<'lib> {
 
 impl<'lib> ClauseDatabase for IpasirSolver<'lib> {
 	fn new_var(&mut self) -> Var {
-		self.next_var.next().expect("variable pool exhaused")
+		self.vars.next().expect("variable pool exhaused")
 	}
 
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, clause: I) -> Result {
@@ -279,53 +290,102 @@ impl FailedAssumtions for IpasirFailed<'_> {
 }
 
 impl<'lib> TermCallback for IpasirSolver<'lib> {
-	fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>) {
+	fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>) {
 		if let Some(mut cb) = cb {
-			let mut wrapped_cb = || -> c_int {
+			self.term_cb = TermCB::new(move || -> c_int {
 				match cb() {
 					SlvTermSignal::Continue => c_int::from(0),
 					SlvTermSignal::Terminate => c_int::from(1),
 				}
-			};
-			let data = &mut wrapped_cb as *mut _ as *mut c_void;
-			(self.set_terminate_fn)(self.slv, data, Some(get_trampoline0(&wrapped_cb)));
+			});
+
+			(self.set_terminate_fn)(self.slv, self.term_cb.as_ptr(), Some(TermCB::exec_callback));
 		} else {
+			self.term_cb = TermCB::default();
 			(self.set_terminate_fn)(self.slv, ptr::null_mut(), None);
 		}
 	}
 }
 
 impl<'lib> LearnCallback for IpasirSolver<'lib> {
-	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(&mut self, cb: Option<F>) {
+	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>) + 'static>(
+		&mut self,
+		cb: Option<F>,
+	) {
 		const MAX_LEN: std::ffi::c_int = 512;
 		if let Some(mut cb) = cb {
-			let mut wrapped_cb = |clause: *const i32| {
+			self.learn_cb = LearnCB::new(move |clause: *const i32| {
 				let mut iter = ExplIter(clause).map(|i: i32| Lit(NonZeroI32::new(i).unwrap()));
 				cb(&mut iter)
-			};
-			let data = &mut wrapped_cb as *mut _ as *mut c_void;
-			(self.set_learn_fn)(self.slv, data, MAX_LEN, Some(get_trampoline1(&wrapped_cb)));
+			});
+			(self.set_learn_fn)(
+				self.slv,
+				self.learn_cb.as_ptr(),
+				MAX_LEN,
+				Some(LearnCB::exec_callback),
+			);
 		} else {
+			self.learn_cb = LearnCB::default();
 			(self.set_learn_fn)(self.slv, ptr::null_mut(), MAX_LEN, None);
 		}
 	}
 }
-type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
-unsafe extern "C" fn trampoline0<R, F: FnMut() -> R>(user_data: *mut c_void) -> R {
-	let user_data = &mut *(user_data as *mut F);
-	user_data()
+
+/// Storage for user provided callbacks when a new clause is learned.
+pub(crate) struct LearnCB(pub(crate) Box<Box<dyn FnMut(*const c_int)>>);
+impl LearnCB {
+	pub(crate) unsafe extern "C" fn exec_callback(data: *mut c_void, clause: *const c_int) {
+		let cb: &mut Box<dyn FnMut(*const c_int)> =
+			&mut *(data as *mut Box<dyn FnMut(*const c_int)>);
+		cb(clause)
+	}
+	pub(crate) fn new(f: impl FnMut(*const c_int) + 'static) -> Self {
+		Self(Box::new(Box::new(f)))
+	}
+	pub(crate) fn as_ptr(&self) -> *mut c_void {
+		#[allow(clippy::borrowed_box)]
+		let x: &Box<dyn FnMut(*const c_int)> = &self.0;
+		x as *const _ as *mut c_void
+	}
 }
-pub(crate) fn get_trampoline0<R, F: FnMut() -> R>(_closure: &F) -> CB0<R> {
-	trampoline0::<R, F>
+impl fmt::Debug for LearnCB {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_tuple("LearnCB").field(&self.as_ptr()).finish()
+	}
 }
-type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;
-unsafe extern "C" fn trampoline1<R, A, F: FnMut(A) -> R>(user_data: *mut c_void, arg1: A) -> R {
-	let user_data = &mut *(user_data as *mut F);
-	user_data(arg1)
+impl Default for LearnCB {
+	fn default() -> Self {
+		Self(Box::new(Box::new(|_| {})))
+	}
 }
-pub(crate) fn get_trampoline1<R, A, F: FnMut(A) -> R>(_closure: &F) -> CB1<R, A> {
-	trampoline1::<R, A, F>
+
+/// Storage for user provided callbacks to check whether a solver should terminate.
+pub(crate) struct TermCB(pub(crate) Box<Box<dyn FnMut() -> c_int>>);
+impl TermCB {
+	pub(crate) unsafe extern "C" fn exec_callback(data: *mut c_void) -> c_int {
+		let cb: &mut Box<dyn FnMut() -> c_int> = &mut *(data as *mut Box<dyn FnMut() -> c_int>);
+		cb()
+	}
+	pub(crate) fn new(f: impl FnMut() -> c_int + 'static) -> Self {
+		Self(Box::new(Box::new(f)))
+	}
+	pub(crate) fn as_ptr(&self) -> *mut c_void {
+		#[allow(clippy::borrowed_box)]
+		let x: &Box<dyn FnMut() -> c_int> = &self.0;
+		x as *const _ as *mut c_void
+	}
 }
+impl fmt::Debug for TermCB {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_tuple("TermCB").field(&self.as_ptr()).finish()
+	}
+}
+impl Default for TermCB {
+	fn default() -> Self {
+		Self(Box::new(Box::new(|| 0)))
+	}
+}
+
 /// Iterator over the elements of a null-terminated i32 array
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ExplIter(pub(crate) *const i32);
