@@ -37,200 +37,178 @@ impl Decompose for TotalizerEncoder {
 		assert!(model.cons.len() == 1);
 		let lin = model.cons.pop().unwrap();
 
-		let mut layer = lin.exp.terms.clone();
+		let mut lin = lin.clone();
+		let sort = if let Decomposer::Gt(sort) = model.config.decomposer.clone() {
+			sort
+		} else {
+			unreachable!()
+		};
 
 		let mut i = 0;
-		while layer.len() >= 2 {
+		while lin.exp.size() >= 2 {
 			// TODO tie-breaker on coef size?
-			match model.config.decomposer {
-				Decomposer::Gt(GtSort::Coeff) => layer.sort_by_key(Term::ub),
-				Decomposer::Gt(ref sort) => {
-					// layer.sort_by_key(Term::ub);
-					// layer.sort_by_key(|term| layer.iter()
-					let mut sorted_layer = Vec::new();
-					/*
-					1,2 = 3
-					1,3 = 4
-					1,4 = 7
-					2,3 = 1
-					2,4 = 7
-					3,4 = 4
-					*/
+			// let ub = lin.exp.ub();
+			// println!("lin = {}", lin);
 
-					eprintln!(
-						"{}",
-						LinExp {
-							terms: layer.clone()
-						}
-					);
+			// lin.propagate(&Consistency::Bounds)?;
 
-					let sumset_sizes = layer
-						.iter()
-						.enumerate()
-						.map(|(i, a)| {
-							(
-								i,
-								(
-									a,
-									layer
-										.iter()
-										.enumerate()
-										.filter(|(j, _)| i != *j)
-										.map(move |(j, b)| {
-											(
-												j,
-												(
-													b,
-													{
-														let c = a
-															.dom2()
-															.iter()
-															.cartesian_product(b.dom2().iter())
-															.map(|(a, b)| a + b)
-															.filter(|d| d <= &lin.k)
-															.unique()
-															.count();
-														if sort == &GtSort::SumsetCard {
-															c as i128
-														} else {
-															let (lb, ub) =
-																(a.lb() + b.lb(), a.ub() + b.ub());
-															let dens =
-																(c as f64) / ((ub - lb + 1) as f64);
-															(dens * 10000.0) as i128
-														}
-													},
-													// .sumset(b.dom2())
-													// .iter()
-													// .filter(|d| d <= &lin.k)
-													// .count(),
-												),
-											)
-										})
-										.collect::<HashMap<_, _>>(),
-								),
-							)
-						})
-						.collect::<HashMap<_, _>>();
+			lin = Lin {
+				exp: LinExp {
+					terms: match sort.clone() {
+						GtSort::Coeff => lin
+							.exp
+							.terms
+							.iter()
+							.cloned()
+							.sorted_by_key(Term::ub)
+							.collect(),
+						_ => {
+							eprintln!("{}", lin);
 
-					if matches!(sort, GtSort::SumsetCard | GtSort::SumsetDens) {
-						use rustworkx_core::max_weight_matching::max_weight_matching;
-						use rustworkx_core::petgraph;
-
-						let g = petgraph::graph::UnGraph::<u32, i128>::from_edges(
-							&sumset_sizes
-								.into_iter()
-								.flat_map(|(i, (_, s))| {
-									s.into_iter()
-										.map(move |(j, (_, s_i_j))| (i as u32, j as u32, s_i_j))
+							let sumset_sizes = lin
+								.exp
+								.terms
+								.iter()
+								.enumerate()
+								.map(|(i, a)| {
+									let sort = &sort;
+									(
+										i,
+										(
+											a,
+											lin.exp
+												.terms
+												.iter()
+												.enumerate()
+												.filter(|(j, _)| i != *j)
+												.map(move |(j, b)| {
+													(
+														j,
+														(
+															b,
+															{
+																let c = a
+																	.dom2()
+																	.iter()
+																	.cartesian_product(
+																		b.dom2().iter(),
+																	)
+																	.map(|(a, b)| a + b)
+																	.filter(|d| d <= &lin.k)
+																	.unique()
+																	.count();
+																if sort == &GtSort::SumsetCard {
+																	c as i128
+																} else {
+																	let (lb, ub) = (
+																		a.lb() + b.lb(),
+																		a.ub() + b.ub(),
+																	);
+																	let dens = (c as f64)
+																		/ ((ub - lb + 1) as f64);
+																	(dens * 10000.0) as i128
+																}
+															},
+															// .sumset(b.dom2())
+															// .iter()
+															// .filter(|d| d <= &lin.k)
+															// .count(),
+														),
+													)
+												})
+												.collect::<HashMap<_, _>>(),
+										),
+									)
 								})
-								.collect_vec(),
-						);
+								.collect::<HashMap<_, _>>();
 
-						use hashbrown::HashSet;
-						let maxc_res: HashSet<(usize, usize)> =
-							max_weight_matching(&g, true, |e| Ok::<_, ()>(-(*e.weight())), true)
-								.unwrap();
+							use rustworkx_core::max_weight_matching::max_weight_matching;
+							use rustworkx_core::petgraph;
 
-						let maxc_matching =
-							maxc_res.into_iter().flat_map(|(i, j)| [i, j]).collect_vec();
-
-						sorted_layer = maxc_matching
-							.into_iter()
-							.map(|i| layer[i].clone())
-							.collect();
-
-					// assert!(layer.len() <= 1);
-					// sorted_layer.append(&mut layer)
-					} else {
-						/*
-							while !sumset_sizes.is_empty() {
-								if sumset_sizes.len() == 1 {
-									sorted_layer.push(
-										(*sumset_sizes.values().map(|(a, _)| a).next().unwrap())
-											.clone(),
-									);
-									break;
-								}
-
-								let (i, (a, s)) = sumset_sizes
-									.iter()
-									.min_by_key(|(_, (_, s))| {
-										s.iter()
-											.min_by_key(move |(_, (_, s_a_b))| *s_a_b)
-											.unwrap()
-											.1
-											 .1
+							let g = petgraph::graph::UnGraph::<u32, i128>::from_edges(
+								&sumset_sizes
+									.into_iter()
+									.flat_map(|(i, (_, s))| {
+										s.into_iter()
+											.map(move |(j, (_, s_i_j))| (i as u32, j as u32, s_i_j))
 									})
-									.unwrap()
-									.clone();
+									.collect_vec(),
+							);
 
-								let (j, (b, _)) = s
-									.iter()
-									.min_by_key(|(_, (_, s_a_b))| *s_a_b)
-									.unwrap()
-									.clone();
+							use hashbrown::HashSet;
+							let maxc_res: HashSet<(usize, usize)> = max_weight_matching(
+								&g,
+								true,
+								|e| Ok::<_, ()>(-(*e.weight())),
+								true,
+							)
+							.unwrap();
 
-								let ((i, a), (j, b)) = ((*i, (*a).clone()), (*j, (*b).clone()));
+							let maxc_matching =
+								maxc_res.into_iter().flat_map(|(i, j)| [i, j]).collect_vec();
 
-								sumset_sizes.remove(&i);
-								sumset_sizes.remove(&j);
-								sumset_sizes.values_mut().for_each(|(_, s)| {
-									s.remove(&i);
-									s.remove(&j);
-								});
-								sorted_layer.push(a);
-								sorted_layer.push(b);
-							}
-						*/
-					}
-					layer = sorted_layer;
-				}
-				_ => unreachable!(),
-			};
-			let mut next_layer = Vec::new();
-			for (j, children) in layer.chunks(2).enumerate() {
-				match children {
-					[x] => {
-						next_layer.push(x.clone());
-					}
-					[left, right] => {
-						let at_root = layer.len() == 2;
-						let dom = if at_root {
-							vec![lin.k]
-						} else {
-							left.dom()
+							maxc_matching
 								.into_iter()
-								.cartesian_product(right.dom().into_iter())
-								.map(|(a, b)| a + b)
-								.sorted()
-								.dedup()
-								.collect::<Vec<_>>()
-						};
-						let parent = model.new_aux_var(
-							Dom::from_slice(&dom),
-							model.config.add_consistency,
-							None,
-							Some(format!("gt_{}_{}", i, j)),
-						)?;
+								.map(|i| lin.exp.terms[i].clone())
+								.collect()
+						}
+					},
+				},
+				..lin
+			};
 
-						let con = Lin::tern(
-							left.clone(),
-							right.clone(),
-							lin.cmp,
-							parent.clone().into(),
-							Some(format!("gt_{}_{}", i, j)),
-						);
+			lin = Lin {
+				exp: LinExp {
+					terms: lin
+						.exp
+						.terms
+						.chunks(2)
+						.enumerate()
+						.map(|(j, children)| {
+							match children {
+								[x] => Ok(x.clone()),
+								[left, right] => {
+									let dom = if lin.exp.size() == 2 {
+										// at root
+										vec![lin.k]
+									} else {
+										left.dom()
+											.into_iter()
+											.cartesian_product(right.dom().into_iter())
+											.map(|(a, b)| a + b)
+											.sorted()
+											.dedup()
+											.collect::<Vec<_>>()
+									};
+									let parent = model.new_aux_var(
+										Dom::from_slice(&dom),
+										model.config.add_consistency,
+										None,
+										Some(format!("gt_{}_{}", i, j)),
+									)?;
 
-						model.add_constraint(con)?;
-						next_layer.push(parent.into());
-					}
-					_ => panic!(),
-				}
-			}
-			layer = next_layer;
+									let con = Lin::tern(
+										left.clone(),
+										right.clone(),
+										lin.cmp,
+										parent.clone().into(),
+										Some(format!("gt_{}_{}", i, j)),
+									);
 
-			let (layer_sizes, layer_densities): (Vec<_>, Vec<_>) = layer
+									model.add_constraint(con)?;
+									Ok(Term::from(parent))
+								}
+								_ => panic!(),
+							}
+						})
+						.try_collect()?,
+				},
+				..lin
+			};
+
+			let (layer_sizes, layer_densities): (Vec<_>, Vec<_>) = lin
+				.exp
+				.terms
 				.iter()
 				.map(|x| {
 					let dom = &x.x.borrow().dom;
@@ -240,7 +218,7 @@ impl Decompose for TotalizerEncoder {
 			println!(
 				"{i}: layer_size = {}, layer_avg_dens = {:.2}: {:?}",
 				layer_sizes.iter().sum::<i64>(),
-				layer_densities.iter().sum::<f64>() / layer.len() as f64,
+				layer_densities.iter().sum::<f64>() / lin.exp.size() as f64,
 				layer_sizes
 					.iter()
 					.zip(layer_densities.iter().map(|d| format!("{d:.2}")))

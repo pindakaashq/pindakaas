@@ -19,6 +19,20 @@ pub struct LinExp {
 	pub terms: Vec<Term>,
 }
 
+impl LinExp {
+	pub fn size(&self) -> usize {
+		self.terms.len()
+	}
+
+	pub fn lb(&self) -> Coeff {
+		self.terms.iter().map(Term::lb).sum()
+	}
+
+	pub fn ub(&self) -> Coeff {
+		self.terms.iter().map(Term::ub).sum()
+	}
+}
+
 #[derive(Debug, Clone)]
 pub struct Lin {
 	pub exp: LinExp,
@@ -139,11 +153,11 @@ impl Lin {
 	}
 
 	pub fn lb(&self) -> Coeff {
-		self.exp.terms.iter().map(Term::lb).sum()
+		self.exp.lb()
 	}
 
 	pub fn ub(&self) -> Coeff {
-		self.exp.terms.iter().map(Term::ub).sum()
+		self.exp.ub()
 	}
 
 	pub(crate) fn propagate(
