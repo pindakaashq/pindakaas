@@ -1,25 +1,26 @@
-use std::{ffi::CString, fmt};
+use std::{
+	alloc::Layout,
+	ffi::{c_void, CString},
+	fmt,
+};
 
 use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
 use pindakaas_derive::IpasirSolver;
 
 use super::VarFactory;
-use crate::{
-	solver::libloading::{LearnCB, TermCB},
-	Lit,
-};
+use crate::Lit;
 
 #[derive(IpasirSolver)]
 #[ipasir(krate = pindakaas_cadical, assumptions, learn_callback, term_callback, ipasir_up)]
 pub struct Cadical {
 	/// The raw pointer to the Cadical solver.
-	ptr: *mut std::ffi::c_void,
+	ptr: *mut c_void,
 	/// The variable factory for this solver.
 	vars: VarFactory,
 	/// The callback used when a clause is learned.
-	learn_cb: LearnCB,
+	learn_cb: Option<(*mut c_void, Layout)>,
 	/// The callback used to check whether the solver should terminate.
-	term_cb: TermCB,
+	term_cb: Option<(*mut c_void, Layout)>,
 
 	#[cfg(feature = "ipasir-up")]
 	/// The external propagator called by the solver
@@ -31,8 +32,8 @@ impl Default for Cadical {
 		Self {
 			ptr: unsafe { pindakaas_cadical::ipasir_init() },
 			vars: VarFactory::default(),
-			learn_cb: LearnCB::default(),
-			term_cb: TermCB::default(),
+			learn_cb: None,
+			term_cb: None,
 			#[cfg(feature = "ipasir-up")]
 			prop: None,
 		}
@@ -45,8 +46,8 @@ impl Clone for Cadical {
 		Self {
 			ptr,
 			vars: self.vars,
-			learn_cb: LearnCB::default(),
-			term_cb: TermCB::default(),
+			learn_cb: None,
+			term_cb: None,
 			#[cfg(feature = "ipasir-up")]
 			prop: None,
 		}
