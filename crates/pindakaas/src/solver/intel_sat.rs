@@ -1,19 +1,20 @@
+use std::{alloc::Layout, ffi::c_void};
+
 use pindakaas_derive::IpasirSolver;
 
 use super::VarFactory;
-use crate::solver::libloading::{LearnCB, TermCB};
 
 #[derive(Debug, IpasirSolver)]
 #[ipasir(krate = pindakaas_intel_sat, assumptions, learn_callback, term_callback)]
 pub struct IntelSat {
 	/// The raw pointer to the Intel SAT solver.
-	ptr: *mut std::ffi::c_void,
+	ptr: *mut c_void,
 	/// The variable factory for this solver.
 	vars: VarFactory,
 	/// The callback used when a clause is learned.
-	learn_cb: LearnCB,
+	learn_cb: Option<(*mut c_void, Layout)>,
 	/// The callback used to check whether the solver should terminate.
-	term_cb: TermCB,
+	term_cb: Option<(*mut c_void, Layout)>,
 }
 
 impl Default for IntelSat {
@@ -21,8 +22,8 @@ impl Default for IntelSat {
 		Self {
 			ptr: unsafe { pindakaas_intel_sat::ipasir_init() },
 			vars: VarFactory::default(),
-			term_cb: TermCB::default(),
-			learn_cb: LearnCB::default(),
+			term_cb: None,
+			learn_cb: None,
 		}
 	}
 }

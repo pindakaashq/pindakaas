@@ -91,79 +91,109 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		quote!()
 	};
 
-	let term_callback = if opts.term_callback {
+	let (term_callback, term_drop) = if opts.term_callback {
 		let term_cb = match opts.term_callback_ident {
 			Some(x) => quote! { self. #x },
 			None => quote! { self.term_cb },
 		};
-		quote! {
-			impl crate::solver::TermCallback for #ident {
-				fn set_terminate_callback<F: FnMut() -> crate::solver::SlvTermSignal + 'static>(
-					&mut self,
-					cb: Option<F>,
-				) {
-					if let Some(mut cb) = cb {
-						#term_cb = crate::solver::libloading::TermCB::new(move || -> std::ffi::c_int {
-							match cb() {
-								crate::solver::SlvTermSignal::Continue => std::ffi::c_int::from(0),
-								crate::solver::SlvTermSignal::Terminate => std::ffi::c_int::from(1),
+		(
+			quote! {
+				impl crate::solver::TermCallback for #ident {
+					fn set_terminate_callback<F: FnMut() -> crate::solver::SlvTermSignal + 'static>(
+						&mut self,
+						cb: Option<F>,
+					) {
+						if let Some(mut cb) = cb {
+							let mut wrapped_cb = move || -> std::ffi::c_int {
+								match cb() {
+									crate::solver::SlvTermSignal::Continue => std::ffi::c_int::from(0),
+									crate::solver::SlvTermSignal::Terminate => std::ffi::c_int::from(1),
+								}
+							};
+							let trampoline = crate::solver::libloading::get_trampoline0(&wrapped_cb);
+							let layout = std::alloc::Layout::for_value(&wrapped_cb);
+							let data = Box::leak(Box::new(wrapped_cb)) as *mut _ as *mut std::ffi::c_void;
+							if layout.size() != 0 {
+								// Otherwise nothing was leaked.
+								#term_cb = Some((data, layout));
 							}
-						});
-
-						unsafe {
-							#krate::ipasir_set_terminate(
-								#ptr,
-								#term_cb .as_ptr(),
-								Some(crate::solver::libloading::TermCB::exec_callback),
-							)
+							unsafe {
+								#krate::ipasir_set_terminate(
+									#ptr,
+									data,
+									Some(trampoline),
+								)
+							}
+						} else {
+							if let Some((ptr, layout)) = #term_cb .take() {
+								unsafe { std::alloc::dealloc(ptr as *mut _, layout) };
+							}
+							unsafe { #krate::ipasir_set_terminate(#ptr, std::ptr::null_mut(), None) }
 						}
-					} else {
-						#term_cb = Default::default();
-						unsafe { #krate::ipasir_set_terminate(#ptr, std::ptr::null_mut(), None) }
 					}
 				}
-			}
-		}
+			},
+			quote! {
+				if let Some((ptr, layout)) = #term_cb .take() {
+					unsafe { std::alloc::dealloc(ptr as *mut _, layout) };
+				}
+			},
+		)
 	} else {
-		quote!()
+		(quote!(), quote!())
 	};
 
-	let learn_callback = if opts.learn_callback {
+	let (learn_callback, learn_drop) = if opts.learn_callback {
 		let learn_cb = match opts.learn_callback_ident {
 			Some(x) => quote! { self. #x },
 			None => quote! { self.learn_cb },
 		};
-		quote! {
-			impl crate::solver::LearnCallback for #ident {
-				fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = crate::Lit>) + 'static>(
-					&mut self,
-					cb: Option<F>,
-				) {
-					const MAX_LEN: std::ffi::c_int = 512;
-					if let Some(mut cb) = cb {
-						#learn_cb = crate::solver::libloading::LearnCB::new(move |clause: *const i32| {
-							let mut iter = crate::solver::libloading::ExplIter(clause)
-								.map(|i: i32| crate::Lit(std::num::NonZeroI32::new(i).unwrap()));
-							cb(&mut iter)
-						});
-
-						unsafe {
-							#krate::ipasir_set_learn(
-								#ptr,
-								#learn_cb .as_ptr(),
-								MAX_LEN,
-								Some(crate::solver::libloading::LearnCB::exec_callback),
-							)
+		(
+			quote! {
+				impl crate::solver::LearnCallback for #ident {
+					fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = crate::Lit>) + 'static>(
+						&mut self,
+						cb: Option<F>,
+					) {
+						const MAX_LEN: std::ffi::c_int = 512;
+						if let Some(mut cb) = cb {
+							let mut wrapped_cb = move |clause: *const i32| {
+								let mut iter = crate::solver::libloading::ExplIter(clause)
+									.map(|i: i32| crate::Lit(std::num::NonZeroI32::new(i).unwrap()));
+								cb(&mut iter)
+							};
+							let trampoline = crate::solver::libloading::get_trampoline1(&wrapped_cb);
+							let layout = std::alloc::Layout::for_value(&wrapped_cb);
+							let data = Box::leak(Box::new(wrapped_cb)) as *mut _ as *mut std::ffi::c_void;
+							if layout.size() != 0 {
+								// Otherwise nothing was leaked.
+								#learn_cb = Some((data, layout));
+							}
+							unsafe {
+								#krate::ipasir_set_learn(
+									#ptr,
+									data,
+									MAX_LEN,
+									Some(trampoline),
+								)
+							}
+						} else {
+							if let Some((ptr, layout)) = #learn_cb .take() {
+								unsafe { std::alloc::dealloc(ptr as *mut _, layout) };
+							}
+							unsafe { #krate::ipasir_set_learn(#ptr, std::ptr::null_mut(), MAX_LEN, None) }
 						}
-					} else {
-						#learn_cb = Default::default();
-						unsafe { #krate::ipasir_set_learn(#ptr, std::ptr::null_mut(), MAX_LEN, None) }
 					}
 				}
-			}
-		}
+			},
+			quote! {
+				if let Some((ptr, layout)) = #learn_cb .take() {
+					unsafe { std::alloc::dealloc(ptr as *mut _, layout) };
+				}
+			},
+		)
 	} else {
-		quote!()
+		(quote!(), quote!())
 	};
 
 	let sol_ident = format_ident!("{}Sol", ident);
@@ -356,6 +386,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 	quote! {
 		impl Drop for #ident {
 			fn drop(&mut self) {
+				#learn_drop
+				#term_drop
 				unsafe { #krate::ipasir_release( #ptr ) }
 			}
 		}
