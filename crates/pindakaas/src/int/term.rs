@@ -465,11 +465,7 @@ impl Term {
 	// TODO [?] correct way to return an iter with this if-else which returns different iter types?
 	// TODO return Dom?
 	pub(crate) fn dom(&self) -> Vec<Coeff> {
-		if self.c == 0 {
-			vec![0]
-		} else {
-			self.x.borrow().dom.iter().map(|d| self.c * d).collect_vec()
-		}
+		self.x.borrow().dom.clone().mul(self.c).iter().collect()
 	}
 
 	pub(crate) fn bounds(&self) -> Dom {

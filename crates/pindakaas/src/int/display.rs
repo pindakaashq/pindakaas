@@ -7,7 +7,10 @@ use super::{
 	model::{Obj, USE_CSE},
 	Cse, Dom, IntVar, LinExp,
 };
-use crate::{int::IntVarEnc, Assignment, Coeff, Lin, Model, Term};
+use crate::{
+	int::{helpers::partition_functions_approx, IntVarEnc},
+	Assignment, Coeff, Lin, Model, Term,
+};
 
 /// Show the integer variable's ID
 pub(crate) const SHOW_IDS: bool = false;
@@ -17,6 +20,8 @@ const SHOW_LITS: bool = true;
 const SHOW_K_0: bool = true;
 /// Show domain density
 const SHOW_DOM_DENSITY: bool = true;
+/// Show domain density
+const SHOW_PF: bool = false;
 
 impl Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -188,12 +193,37 @@ impl Display for Dom {
 			write!(
 				f,
 				"|{},..,{ub}| |{}|{}",
-				dom.iter().take(ELIPSIZE.unwrap() - 1).join(","),
+				dom.iter()
+					.take(ELIPSIZE.unwrap() - 1)
+					.map(|x| format!(
+						"{x}{}",
+						if SHOW_PF {
+							format!("({:.1})", partition_functions_approx(*x))
+						} else {
+							String::new()
+						}
+					))
+					.join(","),
 				dom.len(),
 				density
 			)?;
 		} else {
-			write!(f, "|{}| |{}|{}", dom.iter().join(","), dom.len(), density)?;
+			write!(
+				f,
+				"|{}| |{}|{}",
+				dom.iter()
+					.map(|x| format!(
+						"{x}{}",
+						if SHOW_PF {
+							format!("({:.1})", partition_functions_approx(*x))
+						} else {
+							String::new()
+						}
+					))
+					.join(","),
+				dom.len(),
+				density
+			)?;
 		}
 		Ok(())
 	}

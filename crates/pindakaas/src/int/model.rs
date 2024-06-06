@@ -59,6 +59,7 @@ pub enum GtSort {
 	Coeff,
 	SumsetGreedy,
 	SumsetCard,
+	SumsetPart,
 	SumsetDens,
 }
 
@@ -720,7 +721,8 @@ mod tests {
 			[
 				Decomposer::Gt(GtSort::Coeff),
 				Decomposer::Gt(GtSort::SumsetCard),
-				Decomposer::Gt(GtSort::SumsetDens),
+				Decomposer::Gt(GtSort::SumsetPart),
+				// Decomposer::Gt(GtSort::SumsetDens),
 				// Decomposer::Swc, // TODO
 				// Decomposer::Bdd,
 				// Decomposer::Rca
@@ -795,7 +797,7 @@ mod tests {
 					println!("Decomposition error:\n{err}");
 				}
 				panic!(
-					"Decomposition is incorrect. Test failed for {:?}\n{model}",
+					"Decomposition is incorrect. Test failed for {:?}\n{model}\n{decomposition}",
 					model.config
 				)
 			}

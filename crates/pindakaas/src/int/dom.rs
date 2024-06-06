@@ -185,12 +185,12 @@ impl Dom {
 
 	pub(crate) fn mul(self, rhs: Coeff) -> Self {
 		assert!(!rhs.is_negative());
-		Dom {
-			ranges: self
-				.ranges
-				.into_iter()
-				.map(|(lb, ub)| ((lb * rhs), ub * rhs))
-				.collect(),
+		if rhs == 0 {
+			Dom::constant(0)
+		} else if rhs == 1 {
+			self
+		} else {
+			Dom::from_slice(&self.iter().map(|d| d * rhs).collect_vec())
 		}
 	}
 

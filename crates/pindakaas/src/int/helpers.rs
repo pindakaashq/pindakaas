@@ -17,6 +17,18 @@ use crate::{
 	Coeff, Comparator, Lin, Lit, Model, Term,
 };
 
+pub(crate) fn partition_functions_approx(n: Coeff) -> f64 {
+	if n == 0 {
+		1.0
+	} else {
+		let n = n as f64;
+		// eprintln!("n = {}", n);
+
+		(1.0 / (4.0 * n * (3_f64).sqrt()))
+			* f64::exp(std::f64::consts::PI * (((2.0) * n) / 3.0).sqrt())
+	}
+}
+
 #[derive(Debug)]
 pub enum Format {
 	Lp,

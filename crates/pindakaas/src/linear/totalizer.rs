@@ -5,7 +5,10 @@ use itertools::Itertools;
 
 pub(crate) use crate::int::IntVar;
 use crate::{
-	int::{Consistency, Decompose, Dom, GtSort, Lin, LinExp, Model, Term},
+	int::{
+		helpers::partition_functions_approx, Consistency, Decompose, Dom, GtSort, Lin, LinExp,
+		Model, Term,
+	},
 	ClauseDatabase, Coeff, Decomposer, Encoder, Linear, ModelConfig, Result, Unsatisfiable,
 };
 
@@ -45,12 +48,23 @@ impl Decompose for TotalizerEncoder {
 		};
 
 		let mut i = 0;
+		let mut gt_card = lin
+			.exp
+			.terms
+			.iter()
+			.map(|t| t.dom2().size() as u64)
+			.sum::<u64>();
 		while lin.exp.size() >= 2 {
 			// TODO tie-breaker on coef size?
-			// let ub = lin.exp.ub();
 			// println!("lin = {}", lin);
 
-			// lin.propagate(&Consistency::Bounds)?;
+			// if i > 0 {
+			// 	let ub = lin.exp.ub();
+			// 	lin.exp.terms.iter_mut().for_each(|t| {
+			// 		let t_ub = t.ub();
+			// 		t.x.borrow_mut().ge(lin.k - (ub - t_ub));
+			// 	});
+			// }
 
 			lin = Lin {
 				exp: LinExp {
@@ -63,8 +77,9 @@ impl Decompose for TotalizerEncoder {
 							.sorted_by_key(Term::ub)
 							.collect(),
 						_ => {
-							eprintln!("{}", lin);
-
+							type EdgeWeight = i128;
+							let max_ub = 2 * lin.exp.terms.iter().map(|t| t.ub()).max().unwrap()
+								as EdgeWeight;
 							let sumset_sizes = lin
 								.exp
 								.terms
@@ -84,36 +99,46 @@ impl Decompose for TotalizerEncoder {
 												.map(move |(j, b)| {
 													(
 														j,
-														(
-															b,
-															{
-																let c = a
-																	.dom2()
-																	.iter()
-																	.cartesian_product(
-																		b.dom2().iter(),
-																	)
-																	.map(|(a, b)| a + b)
-																	.filter(|d| d <= &lin.k)
-																	.unique()
-																	.count();
-																if sort == &GtSort::SumsetCard {
-																	c as i128
-																} else {
-																	let (lb, ub) = (
-																		a.lb() + b.lb(),
-																		a.ub() + b.ub(),
-																	);
-																	let dens = (c as f64)
-																		/ ((ub - lb + 1) as f64);
-																	(dens * 10000.0) as i128
+														(b, {
+															let c = Dom::from_slice(
+																&get_parent_dom(a, b, 0, lin.k)
+																	.sorted()
+																	.dedup()
+																	.collect_vec(),
+															);
+
+															match *sort {
+																GtSort::SumsetCard => {
+																	let c = c.size();
+
+																	let u = a.ub() + b.ub();
+
+																	if true {
+																		c as EdgeWeight
+																	} else {
+																		(c as EdgeWeight) * max_ub
+																			+ (u as EdgeWeight)
+																	}
 																}
-															},
-															// .sumset(b.dom2())
-															// .iter()
-															// .filter(|d| d <= &lin.k)
-															// .count(),
-														),
+																GtSort::SumsetPart => {
+																	let sumset = c;
+																	let partition_fs =
+																		sumset
+                                                                        .iter()
+																			.map(partition_functions_approx)
+																			.sum::<f64>();
+																	let partition_fs = partition_fs
+																		/ sumset.size() as f64;
+																	-partition_fs.round()
+																		as EdgeWeight
+																}
+																GtSort::SumsetDens => {
+																	let dens = c.density();
+																	(dens * 10000.0) as EdgeWeight
+																}
+																_ => unreachable!(),
+															}
+														}),
 													)
 												})
 												.collect::<HashMap<_, _>>(),
@@ -125,7 +150,7 @@ impl Decompose for TotalizerEncoder {
 							use rustworkx_core::max_weight_matching::max_weight_matching;
 							use rustworkx_core::petgraph;
 
-							let g = petgraph::graph::UnGraph::<u32, i128>::from_edges(
+							let g = petgraph::graph::UnGraph::<u32, EdgeWeight>::from_edges(
 								&sumset_sizes
 									.into_iter()
 									.flat_map(|(i, (_, s))| {
@@ -157,6 +182,7 @@ impl Decompose for TotalizerEncoder {
 				..lin
 			};
 
+			println!("{}", lin.exp.terms.iter().map(Term::dom2).join(" + "));
 			lin = Lin {
 				exp: LinExp {
 					terms: lin
@@ -172,14 +198,10 @@ impl Decompose for TotalizerEncoder {
 										// at root
 										vec![lin.k]
 									} else {
-										left.dom()
-											.into_iter()
-											.cartesian_product(right.dom().into_iter())
-											.map(|(a, b)| a + b)
-											.filter(|d| d <= &lin.k)
+										get_parent_dom(&left, &right, 0, lin.k)
 											.sorted()
 											.dedup()
-											.collect::<Vec<_>>()
+											.collect()
 									};
 									let parent = model.new_aux_var(
 										Dom::from_slice(&dom),
@@ -216,9 +238,11 @@ impl Decompose for TotalizerEncoder {
 					(dom.size(), dom.density())
 				})
 				.unzip();
+
+			let layer_size = layer_sizes.iter().sum::<i64>();
+			gt_card += layer_size as u64;
 			println!(
-				"{i}: layer_size = {}, layer_avg_dens = {:.2}: {:?}",
-				layer_sizes.iter().sum::<i64>(),
+				"{i}: layer_size = {layer_size}, layer_avg_dens = {:.2}: {:?}",
 				layer_densities.iter().sum::<f64>() / lin.exp.size() as f64,
 				layer_sizes
 					.iter()
@@ -228,9 +252,18 @@ impl Decompose for TotalizerEncoder {
 
 			i += 1;
 		}
+		println!("gt_card = {}", gt_card);
 
 		Ok(model)
 	}
+}
+
+fn get_parent_dom(a: &Term, b: &Term, lb: Coeff, ub: Coeff) -> impl Iterator<Item = Coeff> {
+	a.dom()
+		.into_iter()
+		.cartesian_product(b.dom().into_iter())
+		.map(|(a, b)| a + b)
+		.filter(move |d| &lb <= d && d <= &ub)
 }
 
 impl<DB: ClauseDatabase> Encoder<DB, Linear> for TotalizerEncoder {
