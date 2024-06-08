@@ -58,7 +58,7 @@ pub enum GtSort {
 	#[default]
 	Coeff,
 	SumsetGreedy,
-	SumsetCard,
+	SCard,
 	SumsetPart,
 	SumsetDens,
 }
@@ -720,8 +720,7 @@ mod tests {
 			[Scm::Rca],
 			[
 				Decomposer::Gt(GtSort::Coeff),
-				Decomposer::Gt(GtSort::SumsetCard),
-				Decomposer::Gt(GtSort::SumsetPart),
+				Decomposer::Gt(GtSort::SCard),
 				// Decomposer::Gt(GtSort::SumsetDens),
 				// Decomposer::Swc, // TODO
 				// Decomposer::Bdd,
@@ -2493,36 +2492,38 @@ End
 		use rand::distributions::{Distribution, Uniform};
 		use rand::{rngs::StdRng, SeedableRng};
 
-		let n = 256;
+		let n = 32;
 		let f = 0.5;
-		let u = 25;
-		let seed = 42;
+		let u = 10;
+		let seeds = 10;
+		for seed in 1..=seeds {
+			let q_sampler = Uniform::from(1..u);
+			let mut fixed_seed = StdRng::seed_from_u64(seed);
+			let mut sample = |_| q_sampler.sample(&mut fixed_seed);
 
-		let q_sampler = Uniform::from(1..u);
-		let mut fixed_seed = StdRng::seed_from_u64(seed);
-		let mut sample = |_| q_sampler.sample(&mut fixed_seed);
+			let mut model = Model::default();
+			let xs = (1..=n)
+				.map(|i| {
+					model
+						.new_var(&[0, sample(0)], Some(format!("x{i}")))
+						.unwrap()
+				})
+				.collect_vec();
 
-		let mut model = Model::default();
-		let xs = (1..=n)
-			.map(|i| {
-				model
-					.new_var(&[0, sample(0)], Some(format!("x{i}")))
-					.unwrap()
-			})
-			.collect_vec();
+			let ub = xs.iter().map(|x| x.borrow().ub()).sum::<Coeff>();
 
-		let ub = xs.iter().map(|x| x.borrow().ub()).sum::<Coeff>();
-
-		model
-			.add_constraint(Lin {
-				exp: LinExp {
-					terms: xs.into_iter().map(Term::from).collect(),
-				},
-				cmp: Comparator::LessEq,
-				k: (f * (ub as f32)) as Coeff,
-				lbl: None,
-			})
-			.unwrap();
-		test_model(model, Some(get_model_configs()))
+			model
+				.add_constraint(Lin {
+					exp: LinExp {
+						terms: xs.into_iter().map(Term::from).collect(),
+					},
+					cmp: Comparator::LessEq,
+					k: (f * (ub as f32)) as Coeff,
+					lbl: None,
+				})
+				.unwrap();
+			println!("{}", model.to_text(Format::Lp));
+			test_model(model, Some(get_model_configs()))
+		}
 	}
 }

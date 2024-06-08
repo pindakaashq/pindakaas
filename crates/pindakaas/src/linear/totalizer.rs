@@ -78,8 +78,20 @@ impl Decompose for TotalizerEncoder {
 							.collect(),
 						_ => {
 							type EdgeWeight = i128;
-							let max_ub = 2 * lin.exp.terms.iter().map(|t| t.ub()).max().unwrap()
-								as EdgeWeight;
+							let n = lin.exp.terms.len();
+							let big_m = (0..n)
+								.flat_map(|i| {
+									((i + 1)..n).map(move |j| {
+										(i, j)
+										// &lin.exp.terms[i].x.borrow().dom.size()
+										// 	* &lin.exp.terms[j].x.borrow().dom.size()
+									})
+								})
+								.map(|(i, j)| (&lin.exp.terms[i], &lin.exp.terms[j]))
+								// .map(|(a,b)| (a.x.borrow().dom.size() * b.x.borrow().dom.size()))
+								.map(|(a, b)| (a.ub() + b.ub()))
+								.max()
+								.unwrap();
 							let sumset_sizes = lin
 								.exp
 								.terms
@@ -108,20 +120,30 @@ impl Decompose for TotalizerEncoder {
 															);
 
 															match *sort {
-																GtSort::SumsetCard => {
-																	let c = c.size();
+																GtSort::SCard => {
+																	// let c = c.unique().count();
+																	let card = c.size();
 
-																	let u = a.ub() + b.ub();
+																	let u = (a.ub() - b.ub()).abs();
 
-																	if true {
-																		c as EdgeWeight
+																	let m = (if false {
+																		card
 																	} else {
-																		(c as EdgeWeight) * max_ub
-																			+ (u as EdgeWeight)
-																	}
+																		// card * big_m + (big_m - u)
+																		card * big_m + u
+																	}) as EdgeWeight;
+
+																	println!(
+																		"{} + {} = ({}, {u}) = {m}",
+																		a, b, c
+																	);
+																	m
 																}
 																GtSort::SumsetPart => {
+																	// let sumset =
+																	// 	c.unique().collect_vec();
 																	let sumset = c;
+																	// let card = sumset.size();
 																	let partition_fs =
 																		sumset
                                                                         .iter()
@@ -129,10 +151,22 @@ impl Decompose for TotalizerEncoder {
 																			.sum::<f64>();
 																	let partition_fs = partition_fs
 																		/ sumset.size() as f64;
+																	// println!(
+																	// 	" pf = {partition_fs}"
+																	// );
 																	-partition_fs.round()
 																		as EdgeWeight
 																}
 																GtSort::SumsetDens => {
+																	// let c = c.unique().count();
+																	// let card = c.size();
+																	// let (lb, ub) = (
+																	// 	a.lb() + b.lb(),
+																	// 	a.ub() + b.ub(),
+																	// );
+																	// let dens = (card as f64)
+																	// 	/ ((ub - lb + 1) as f64);
+
 																	let dens = c.density();
 																	(dens * 10000.0) as EdgeWeight
 																}
@@ -160,8 +194,7 @@ impl Decompose for TotalizerEncoder {
 									.collect_vec(),
 							);
 
-							use hashbrown::HashSet;
-							let maxc_res: HashSet<(usize, usize)> = max_weight_matching(
+							let maxc_res: hashbrown::HashSet<(usize, usize)> = max_weight_matching(
 								&g,
 								true,
 								|e| Ok::<_, ()>(-(*e.weight())),
@@ -169,12 +202,12 @@ impl Decompose for TotalizerEncoder {
 							)
 							.unwrap();
 
-							let maxc_matching =
-								maxc_res.into_iter().flat_map(|(i, j)| [i, j]).collect_vec();
-
-							maxc_matching
+							maxc_res
 								.into_iter()
-								.map(|i| lin.exp.terms[i].clone())
+								.map(|(i, j)| (lin.exp.terms[i].clone(), lin.exp.terms[j].clone()))
+								.map(|(a, b)| if a.ub() <= b.ub() { (a, b) } else { (b, a) })
+								.sorted_by_key(|(a, _)| a.ub()) // unnecessary, but better output
+								.flat_map(|(a, b)| [a, b])
 								.collect()
 						}
 					},
@@ -252,7 +285,7 @@ impl Decompose for TotalizerEncoder {
 
 			i += 1;
 		}
-		println!("gt_card = {}", gt_card);
+		println!("{:?}: gt_card = {}", sort, gt_card);
 
 		Ok(model)
 	}
