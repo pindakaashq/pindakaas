@@ -171,6 +171,18 @@ impl Display for Cse {
 	}
 }
 
+fn show_f64_compact(n: f64) -> String {
+	if n == 0.0 || n == 1.0 || n >= 10.0 {
+		format!("{:.0}", n) // 1., 12.
+	} else if n < 1.0 {
+		format!("{:.2}", n)[1..].to_string() // .78
+	} else if n < 10.0 {
+		format!("{:.1}", n) // 1.7
+	} else {
+		unreachable!()
+	}
+}
+
 impl Display for Dom {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		// TODO replaced {..} by |..| since logger interprets {/} wrong
@@ -182,10 +194,11 @@ impl Display for Dom {
 		const ELIPSIZE: Option<usize> = Some(4);
 		let elipsize = ELIPSIZE.map(|e| dom.len() > e).unwrap_or_default();
 
-		let density = if dom.len() <= 1 || !SHOW_DOM_DENSITY {
+		let density = self.density();
+		let density = if density == 1.0 || !SHOW_DOM_DENSITY {
 			String::from("")
 		} else {
-			format!("{:.0}%", self.density() * 100.0)
+			show_f64_compact(density)
 		};
 		if dom.len() > 1 && Coeff::try_from(dom.len()).unwrap() == ub - lb + 1 {
 			write!(f, "|{}..{}| |{}|", lb, ub, dom.len())?;
