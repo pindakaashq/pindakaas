@@ -74,7 +74,7 @@ impl Model {
 				format!(
 					"Subject To
 {}
-Bounds
+Doms
 {}
 End
 ",
@@ -107,7 +107,7 @@ End
 						.sorted_by_key(|x| x.borrow().id)
 						.map(|x| {
 							let x = x.borrow();
-							format!("  {} <= {} <= {}", x.lb(), x.lbl(), x.ub())
+							format!("  {} in {}", x.lbl(), x.dom.iter().join(","))
 						})
 						.join("\n")
 				)
