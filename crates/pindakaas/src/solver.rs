@@ -101,18 +101,14 @@ where
 	/// Set Propagator implementation which allows to learn, propagate and
 	/// backtrack based on external constraints.
 	///
-	/// Only one Propagator can be connected. This Propagator is notified of all
-	/// changes to which it has subscribed, using the [`add_observed_var`] method.
-	///
-	/// If a previous propagator was set, then it is returned.
+	/// Only one Propagator can be connected, any previous propagator will be
+	/// overriden. This Propagator is notified of all changes to which it has
+	/// subscribed, using the [`add_observed_var`] method.
 	///
 	/// # Warning
 	///
 	/// Calling this method automatically resets the observed variable set.
-	fn set_external_propagator(
-		&mut self,
-		prop: Option<Box<dyn Propagator>>,
-	) -> Option<Box<dyn Propagator>>;
+	fn set_external_propagator<P: Propagator + 'static>(&mut self, prop: Option<P>);
 
 	fn add_observed_var(&mut self, var: Var);
 	fn remove_observed_var(&mut self, var: Var);

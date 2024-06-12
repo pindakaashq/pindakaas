@@ -52,7 +52,8 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for BddEncoder {
 
 		// TODO cannot avoid?
 		#[allow(clippy::needless_collect)]
-		let ys = ys.into_iter()
+		let ys = ys
+			.into_iter()
 			.map(|nodes| {
 				let mut views = HashMap::new();
 				Rc::new(RefCell::new({

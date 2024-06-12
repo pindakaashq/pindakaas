@@ -1,11 +1,11 @@
+#[cfg(feature = "ipasir-up")]
+use std::collections::VecDeque;
 use std::{
 	alloc::{self, Layout},
 	ffi::{c_char, c_int, c_void, CStr},
 	num::NonZeroI32,
 	ptr,
 };
-#[cfg(feature = "ipasir-up")]
-use std::{any::Any, collections::VecDeque};
 
 use libloading::{Library, Symbol};
 
@@ -387,23 +387,9 @@ impl Iterator for ExplIter {
 }
 
 #[cfg(feature = "ipasir-up")]
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct NoProp;
-
-#[cfg(feature = "ipasir-up")]
-impl Propagator for NoProp {
-	fn as_any(&self) -> &dyn Any {
-		self
-	}
-	fn as_mut_any(&mut self) -> &mut dyn Any {
-		self
-	}
-}
-
-#[cfg(feature = "ipasir-up")]
-pub(crate) struct IpasirPropStore {
+pub(crate) struct IpasirPropStore<P> {
 	/// Rust Propagator
-	pub(crate) prop: Box<dyn Propagator>,
+	pub(crate) prop: P,
 	/// IPASIR solver pointer
 	pub(crate) slv: *mut dyn SolvingActions,
 	/// Propagation queue
@@ -416,8 +402,8 @@ pub(crate) struct IpasirPropStore {
 }
 
 #[cfg(feature = "ipasir-up")]
-impl IpasirPropStore {
-	pub(crate) fn new(prop: Box<dyn Propagator>, slv: *mut dyn SolvingActions) -> Self {
+impl<P> IpasirPropStore<P> {
+	pub(crate) fn new(prop: P, slv: *mut dyn SolvingActions) -> Self {
 		Self {
 			prop,
 			slv,
@@ -432,23 +418,28 @@ impl IpasirPropStore {
 // --- Callback functions for C propagator interface ---
 
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_notify_assignment_cb(
+pub(crate) unsafe extern "C" fn ipasir_notify_assignment_cb<P: Propagator>(
 	state: *mut c_void,
 	lit: i32,
 	is_fixed: bool,
 ) {
-	let prop = &mut *(state as *mut IpasirPropStore);
+	let prop = &mut *(state as *mut IpasirPropStore<P>);
 	let lit = crate::Lit(std::num::NonZeroI32::new(lit).unwrap());
 	prop.prop.notify_assignment(lit, is_fixed)
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_notify_new_decision_level_cb(state: *mut c_void) {
-	let prop = &mut *(state as *mut IpasirPropStore);
+pub(crate) unsafe extern "C" fn ipasir_notify_new_decision_level_cb<P: Propagator>(
+	state: *mut c_void,
+) {
+	let prop = &mut *(state as *mut IpasirPropStore<P>);
 	prop.prop.notify_new_decision_level()
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_notify_backtrack_cb(state: *mut c_void, level: usize) {
-	let prop = &mut *(state as *mut IpasirPropStore);
+pub(crate) unsafe extern "C" fn ipasir_notify_backtrack_cb<P: Propagator>(
+	state: *mut c_void,
+	level: usize,
+) {
+	let prop = &mut *(state as *mut IpasirPropStore<P>);
 	prop.pqueue.clear();
 	prop.explaining = None;
 	prop.rqueue.clear();
@@ -456,12 +447,12 @@ pub(crate) unsafe extern "C" fn ipasir_notify_backtrack_cb(state: *mut c_void, l
 	prop.prop.notify_backtrack(level);
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_check_model_cb(
+pub(crate) unsafe extern "C" fn ipasir_check_model_cb<P: Propagator>(
 	state: *mut c_void,
 	len: usize,
 	model: *const i32,
 ) -> bool {
-	let prop = &mut *(state as *mut IpasirPropStore);
+	let prop = &mut *(state as *mut IpasirPropStore<P>);
 	let sol = if len > 0 {
 		std::slice::from_raw_parts(model, len)
 	} else {
@@ -475,8 +466,8 @@ pub(crate) unsafe extern "C" fn ipasir_check_model_cb(
 	prop.prop.check_model(&mut *prop.slv, &value)
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_decide_cb(state: *mut c_void) -> i32 {
-	let prop = &mut *(state as *mut IpasirPropStore);
+pub(crate) unsafe extern "C" fn ipasir_decide_cb<P: Propagator>(state: *mut c_void) -> i32 {
+	let prop = &mut *(state as *mut IpasirPropStore<P>);
 	if let Some(l) = prop.prop.decide() {
 		l.0.into()
 	} else {
@@ -484,8 +475,8 @@ pub(crate) unsafe extern "C" fn ipasir_decide_cb(state: *mut c_void) -> i32 {
 	}
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_propagate_cb(state: *mut c_void) -> i32 {
-	let prop = &mut *(state as *mut IpasirPropStore);
+pub(crate) unsafe extern "C" fn ipasir_propagate_cb<P: Propagator>(state: *mut c_void) -> i32 {
+	let prop = &mut *(state as *mut IpasirPropStore<P>);
 	if prop.pqueue.is_empty() {
 		let slv = &mut *prop.slv;
 		prop.pqueue = prop.prop.propagate(slv).into()
@@ -497,11 +488,11 @@ pub(crate) unsafe extern "C" fn ipasir_propagate_cb(state: *mut c_void) -> i32 {
 	}
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_add_reason_clause_lit_cb(
+pub(crate) unsafe extern "C" fn ipasir_add_reason_clause_lit_cb<P: Propagator>(
 	state: *mut c_void,
 	propagated_lit: i32,
 ) -> i32 {
-	let prop = &mut *(state as *mut IpasirPropStore);
+	let prop = &mut *(state as *mut IpasirPropStore<P>);
 	let lit = crate::Lit(std::num::NonZeroI32::new(propagated_lit).unwrap());
 	debug_assert!(prop.explaining.is_none() || prop.explaining == Some(lit));
 	// TODO: Can this be prop.explaining.is_none()?
@@ -518,14 +509,18 @@ pub(crate) unsafe extern "C" fn ipasir_add_reason_clause_lit_cb(
 	}
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_has_external_clause_cb(state: *mut c_void) -> bool {
-	let prop = &mut *(state as *mut IpasirPropStore);
+pub(crate) unsafe extern "C" fn ipasir_has_external_clause_cb<P: Propagator>(
+	state: *mut c_void,
+) -> bool {
+	let prop = &mut *(state as *mut IpasirPropStore<P>);
 	prop.cqueue = prop.prop.add_external_clause(&mut *prop.slv).map(Vec::into);
 	prop.cqueue.is_some()
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_add_external_clause_lit_cb(state: *mut c_void) -> i32 {
-	let prop = &mut *(state as *mut IpasirPropStore);
+pub(crate) unsafe extern "C" fn ipasir_add_external_clause_lit_cb<P: Propagator>(
+	state: *mut c_void,
+) -> i32 {
+	let prop = &mut *(state as *mut IpasirPropStore<P>);
 	if prop.cqueue.is_none() {
 		debug_assert!(false);
 		// This function shouldn't be called when "has_clause" returned false.
