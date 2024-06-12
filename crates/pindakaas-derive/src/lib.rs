@@ -207,7 +207,9 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			#[cfg(feature = "ipasir-up")]
 			pub(crate) struct #prop_ident {
 				/// Rust Propagator Storage
-				prop: Box<crate::solver::libloading::IpasirPropStore>,
+				prop: *mut c_void,
+				drop_prop: fn(*mut c_void),
+				access_prop: fn(*mut c_void) -> *mut dyn std::any::Any,
 				/// C Wrapper Object
 				wrapper: *mut std::ffi::c_void,
 			}
@@ -216,38 +218,46 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			impl Drop for #prop_ident {
 				fn drop(&mut self) {
 					unsafe { #krate::ipasir_prop_release(self.wrapper) };
+					(self.drop_prop)(self.prop);
 				}
 			}
 
 			#[cfg(feature = "ipasir-up")]
 			impl #prop_ident {
-				pub(crate) fn new(prop: Box<dyn crate::solver::Propagator>, slv: *mut dyn crate::solver::SolvingActions) -> Self {
+				pub(crate) fn new<P: crate::solver::Propagator + 'static>(prop: P, slv: *mut dyn crate::solver::SolvingActions) -> Self {
 					// Construct wrapping structures
-					let mut prop = Box::new(crate::solver::libloading::IpasirPropStore::new(prop, slv));
-					let data = (&mut (*prop)) as *mut _;
+					let prop = crate::solver::libloading::IpasirPropStore::<P>::new(prop, slv);
+					let drop_prop = |x: *mut std::ffi::c_void| {
+						let prop = unsafe { Box::<P>::from_raw(x as *mut P) };
+						drop(prop);
+					};
+					let access_prop = |x: *mut std::ffi::c_void| {
+						x as *mut P as *mut dyn std::any::Any
+					};
+					let data = Box::leak(Box::new(prop)) as *mut _ as *mut std::ffi::c_void;
 					let wrapper = unsafe { #krate::ipasir_prop_init(data as *mut std::ffi::c_void) };
 
 					// Set function pointers for methods
-					unsafe { #krate::ipasir_prop_set_notify_assignment(wrapper, Some(crate::solver::libloading::ipasir_notify_assignment_cb)) };
-					unsafe { #krate::ipasir_prop_set_notify_new_decision_level(wrapper, Some(crate::solver::libloading::ipasir_notify_new_decision_level_cb)) };
-					unsafe { #krate::ipasir_prop_set_notify_backtrack(wrapper, Some(crate::solver::libloading::ipasir_notify_backtrack_cb)) };
-					unsafe { #krate::ipasir_prop_set_check_model(wrapper, Some(crate::solver::libloading::ipasir_check_model_cb)) };
-					unsafe { #krate::ipasir_prop_set_decide(wrapper, Some(crate::solver::libloading::ipasir_decide_cb)) };
-					unsafe { #krate::ipasir_prop_set_propagate(wrapper, Some(crate::solver::libloading::ipasir_propagate_cb)) };
-					unsafe { #krate::ipasir_prop_set_add_reason_clause_lit(wrapper, Some(crate::solver::libloading::ipasir_add_reason_clause_lit_cb)) };
-					unsafe { #krate::ipasir_prop_set_has_external_clause(wrapper, Some(crate::solver::libloading::ipasir_has_external_clause_cb)) };
-					unsafe { #krate::ipasir_prop_set_add_external_clause_lit(wrapper, Some(crate::solver::libloading::ipasir_add_external_clause_lit_cb)) };
+					unsafe { #krate::ipasir_prop_set_notify_assignment(wrapper, Some(crate::solver::libloading::ipasir_notify_assignment_cb::<P>)) };
+					unsafe { #krate::ipasir_prop_set_notify_new_decision_level(wrapper, Some(crate::solver::libloading::ipasir_notify_new_decision_level_cb::<P>)) };
+					unsafe { #krate::ipasir_prop_set_notify_backtrack(wrapper, Some(crate::solver::libloading::ipasir_notify_backtrack_cb::<P>)) };
+					unsafe { #krate::ipasir_prop_set_check_model(wrapper, Some(crate::solver::libloading::ipasir_check_model_cb::<P>)) };
+					unsafe { #krate::ipasir_prop_set_decide(wrapper, Some(crate::solver::libloading::ipasir_decide_cb::<P>)) };
+					unsafe { #krate::ipasir_prop_set_propagate(wrapper, Some(crate::solver::libloading::ipasir_propagate_cb::<P>)) };
+					unsafe { #krate::ipasir_prop_set_add_reason_clause_lit(wrapper, Some(crate::solver::libloading::ipasir_add_reason_clause_lit_cb::<P>)) };
+					unsafe { #krate::ipasir_prop_set_has_external_clause(wrapper, Some(crate::solver::libloading::ipasir_has_external_clause_cb::<P>)) };
+					unsafe { #krate::ipasir_prop_set_add_external_clause_lit(wrapper, Some(crate::solver::libloading::ipasir_add_external_clause_lit_cb::<P>)) };
 
-					Self { prop, wrapper, }
+					Self { prop: data, drop_prop, access_prop, wrapper, }
 				}
 			}
 
 			#[cfg(feature = "ipasir-up")]
 			impl crate::solver::PropagatingSolver for #ident {
-				fn set_external_propagator(
+				fn set_external_propagator<P: crate::solver::Propagator + 'static>(
 					&mut self,
-					prop: Option<Box<dyn crate::solver::Propagator>>,
-				) -> Option<Box<dyn crate::solver::Propagator>> {
+					prop: Option<P>,
+				) {
 					// Store old propagator (setting member to None)
 					let old = #prop_member.take();
 					// Disconnect old propagator (if one was set)
@@ -256,17 +266,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					}
 					// If new propagator, set it now
 					if let Some(p) = prop {
-						#prop_member = Some(Box::new(#prop_ident ::new(p, (self as *mut _))));
+						#prop_member = Some(#prop_ident ::new(p, (self as *mut _)));
 						unsafe { #krate::ipasir_connect_external_propagator( #ptr, #prop_member .as_ref().unwrap().wrapper ) };
-					}
-					// Return old propagator
-					if let Some(mut old) = old {
-						// Replace rust propagator with dummy to not interfere with Drop
-						let mut prop: Box<dyn crate::solver::Propagator> = Box::new(crate::solver::libloading::NoProp{});
-						std::mem::swap(&mut old.prop.prop, &mut prop);
-						Some(prop)
-					} else {
-						None
 					}
 				}
 
@@ -284,14 +285,14 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			#[cfg(feature = "ipasir-up")]
 			impl crate::solver::PropagatorAccess for #ident {
 				fn propagator<P: crate::solver::Propagator + 'static>(&self) -> Option<&P> {
-					#prop_member.as_ref().map(|p| p.prop.prop.as_any().downcast_ref()).flatten()
+					#prop_member.as_ref().map(|p| unsafe { &*(p.access_prop)(p.prop) } .downcast_ref()).flatten()
 				}
 			}
 
 			#[cfg(feature = "ipasir-up")]
 			impl crate::solver::MutPropagatorAccess for #ident {
 				fn propagator_mut<P: crate::solver::Propagator + 'static>(&mut self) -> Option<&mut P> {
-					#prop_member.as_mut().map(|p| p.prop.prop.as_mut_any().downcast_mut()).flatten()
+					#prop_member.as_ref().map(|p| unsafe { &mut *(p.access_prop)(p.prop) } .downcast_mut()).flatten()
 				}
 			}
 
@@ -312,17 +313,17 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				ptr: *mut std::ffi::c_void,
 				#[cfg(feature = "ipasir-up")]
 				prop: Option<*mut std::ffi::c_void>,
+				#[cfg(feature = "ipasir-up")]
+				access_prop: Option<fn(*mut std::ffi::c_void) -> *mut dyn std::any::Any>,
 			}
 			impl #ident {
 				fn solver_solution_obj(&mut self) -> #sol_ident {
 					#sol_ident {
 						ptr: self.ptr,
 						#[cfg(feature = "ipasir-up")]
-						prop: if let Some(p) = #prop_member .as_mut() {
-							Some((&mut (*p.prop)) as *mut _ as *mut std::ffi::c_void)
-						} else {
-							None
-						},
+						prop: #prop_member .as_mut().map(|p| p.prop),
+						#[cfg(feature = "ipasir-up")]
+						access_prop: #prop_member .as_ref().map(|p| p.access_prop),
 					}
 				}
 			}
@@ -330,8 +331,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			impl crate::solver::PropagatorAccess for #sol_ident {
 				fn propagator<P: crate::solver::Propagator + 'static>(&self) -> Option<&P> {
 					if let Some(prop) = self.prop {
-						let prop = unsafe { &*(prop as *const crate::solver::libloading::IpasirPropStore) };
-						prop.prop.as_any().downcast_ref()
+						unsafe { &*(self.access_prop.unwrap())(prop) }.downcast_ref()
 					} else {
 						None
 					}
@@ -341,8 +341,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			impl crate::solver::MutPropagatorAccess for #sol_ident {
 				fn propagator_mut<P: crate::solver::Propagator + 'static>(&mut self) -> Option<&mut P> {
 					if let Some(prop) = self.prop {
-						let prop = unsafe { &mut *(prop as *mut crate::solver::libloading::IpasirPropStore) };
-						prop.prop.as_mut_any().downcast_mut()
+						unsafe { &mut *(self.access_prop.unwrap())(prop) }.downcast_mut()
 					} else {
 						None
 					}

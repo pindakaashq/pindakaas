@@ -24,7 +24,7 @@ pub struct Cadical {
 
 	#[cfg(feature = "ipasir-up")]
 	/// The external propagator called by the solver
-	prop: Option<Box<CadicalProp>>,
+	prop: Option<CadicalProp>,
 }
 
 impl Default for Cadical {
@@ -187,10 +187,10 @@ mod tests {
 			}
 		}
 
-		let p = Box::new(Dist2 {
+		let p = Dist2 {
 			vars: vars.clone(),
 			tmp: Vec::new(),
-		});
+		};
 		slv.set_external_propagator(Some(p));
 		slv.add_clause(vars.clone().map_into()).unwrap();
 		for v in vars.clone() {
