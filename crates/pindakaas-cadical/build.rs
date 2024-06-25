@@ -1,3 +1,5 @@
+use std::path::Path;
+
 fn main() {
 	let src = [
 		"src/ccadical_override.cpp",
@@ -93,6 +95,10 @@ fn main() {
 		.define("NUNLOCKED", None)
 		.define("NTRACING", None)
 		.define("QUIET", None);
+
+	if build.get_compiler().is_like_msvc() {
+		build.include(Path::new("vendor/cadical/contrib/msvc"));
+	}
 
 	assert_eq!(
 		env!("CARGO_PKG_VERSION"),

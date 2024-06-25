@@ -1,3 +1,5 @@
+#![allow(clippy::manual_unwrap_or_default)] // TODO: Remove this when fixed in darling
+
 use darling::FromDeriveInput;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
