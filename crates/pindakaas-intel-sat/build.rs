@@ -21,5 +21,5 @@ fn main() {
 	let mut builder = cc::Build::new();
 	let build = builder.cpp(true).flag_if_supported("-std=c++20");
 	change_ipasir_prefix(build, "intel_sat");
-	build.files(src).compile("intel_sat");
+	build.files(src).cargo_warnings(false).compile("intel_sat");
 }
