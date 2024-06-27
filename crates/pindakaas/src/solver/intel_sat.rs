@@ -1,8 +1,9 @@
-use std::{alloc::Layout, ffi::c_void};
+use std::ffi::c_void;
 
 use pindakaas_derive::IpasirSolver;
 
 use super::VarFactory;
+use crate::solver::libloading::FFIPointer;
 
 #[derive(Debug, IpasirSolver)]
 #[ipasir(krate = pindakaas_intel_sat, assumptions, learn_callback, term_callback)]
@@ -12,9 +13,9 @@ pub struct IntelSat {
 	/// The variable factory for this solver.
 	vars: VarFactory,
 	/// The callback used when a clause is learned.
-	learn_cb: Option<(*mut c_void, Layout)>,
+	learn_cb: FFIPointer,
 	/// The callback used to check whether the solver should terminate.
-	term_cb: Option<(*mut c_void, Layout)>,
+	term_cb: FFIPointer,
 }
 
 impl Default for IntelSat {
@@ -22,8 +23,8 @@ impl Default for IntelSat {
 		Self {
 			ptr: unsafe { pindakaas_intel_sat::ipasir_init() },
 			vars: VarFactory::default(),
-			term_cb: None,
-			learn_cb: None,
+			term_cb: FFIPointer::default(),
+			learn_cb: FFIPointer::default(),
 		}
 	}
 }

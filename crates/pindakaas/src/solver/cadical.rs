@@ -1,7 +1,6 @@
 #[cfg(feature = "ipasir-up")]
 use std::sync::{Arc, Mutex};
 use std::{
-	alloc::Layout,
 	ffi::{c_void, CString},
 	fmt,
 };
@@ -10,7 +9,7 @@ use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
 use pindakaas_derive::IpasirSolver;
 
 use super::VarFactory;
-use crate::Lit;
+use crate::{solver::libloading::FFIPointer, Lit};
 
 #[derive(IpasirSolver)]
 #[ipasir(krate = pindakaas_cadical, assumptions, learn_callback, term_callback, ipasir_up)]
@@ -24,9 +23,9 @@ pub struct Cadical {
 	#[cfg(feature = "ipasir-up")]
 	vars: Arc<Mutex<VarFactory>>,
 	/// The callback used when a clause is learned.
-	learn_cb: Option<(*mut c_void, Layout)>,
+	learn_cb: FFIPointer,
 	/// The callback used to check whether the solver should terminate.
-	term_cb: Option<(*mut c_void, Layout)>,
+	term_cb: FFIPointer,
 
 	#[cfg(feature = "ipasir-up")]
 	/// The external propagator called by the solver
@@ -41,8 +40,8 @@ impl Default for Cadical {
 			vars: VarFactory::default(),
 			#[cfg(feature = "ipasir-up")]
 			vars: Arc::default(),
-			learn_cb: None,
-			term_cb: None,
+			learn_cb: FFIPointer::default(),
+			term_cb: FFIPointer::default(),
 			#[cfg(feature = "ipasir-up")]
 			prop: None,
 		}
@@ -59,8 +58,8 @@ impl Clone for Cadical {
 		Self {
 			ptr,
 			vars,
-			learn_cb: None,
-			term_cb: None,
+			learn_cb: FFIPointer::default(),
+			term_cb: FFIPointer::default(),
 			#[cfg(feature = "ipasir-up")]
 			prop: None,
 		}
