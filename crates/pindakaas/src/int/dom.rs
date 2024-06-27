@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use std::ops::RangeInclusive;
+use std::{collections::HashSet, ops::RangeInclusive};
 
 use itertools::{FoldWhile, Itertools};
 
@@ -11,6 +11,10 @@ pub struct Dom {
 }
 
 impl Dom {
+	pub fn empty() -> Self {
+		Self::default()
+	}
+
 	pub fn constant(d: Coeff) -> Self {
 		Self::from_slice(&[d])
 	}
@@ -202,6 +206,20 @@ impl Dom {
 				.into_iter()
 				.sorted()
 				.dedup()
+				.collect_vec(),
+		)
+	}
+
+	// TODO optimize
+	pub(crate) fn intersect(self, rhs: Dom) -> Self {
+		Dom::from_slice(
+			&self
+				.iter()
+				.collect::<HashSet<_>>()
+				.intersection(&rhs.iter().collect::<HashSet<_>>())
+				.map(|i| *i)
+				.sorted()
+				.dedup() // redundant
 				.collect_vec(),
 		)
 	}

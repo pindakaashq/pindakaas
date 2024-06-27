@@ -59,8 +59,9 @@ pub enum GtSort {
 	Coeff,
 	SumsetGreedy,
 	SCard,
+	SDens,
+	SDBnd,
 	SumsetPart,
-	SumsetDens,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -653,6 +654,8 @@ Actual assignments:
 
 #[cfg(test)]
 mod tests {
+	use std::path::Path;
+
 	use super::*;
 	use crate::{helpers::tests::assert_ok, Cnf, Lin, Lit, Model};
 
@@ -719,12 +722,9 @@ mod tests {
 		iproduct!(
 			[Scm::Rca],
 			[
-				Decomposer::Gt(GtSort::Coeff),
-				Decomposer::Gt(GtSort::SCard),
-				// Decomposer::Gt(GtSort::SumsetDens),
-				// Decomposer::Swc, // TODO
-				// Decomposer::Bdd,
-				// Decomposer::Rca
+				Decomposer::Gt(GtSort::Coeff), // sort by ub
+				Decomposer::Gt(GtSort::SCard), // get next min cardinality layer
+				Decomposer::Gt(GtSort::SDBnd), // attempt at comprehensively covering whole tree using cardinatity (excat) or estimate based on density (WIP)
 			],
 			[Consistency::None],
 			[false], // consistency
@@ -1245,11 +1245,13 @@ End
 		test_lp_for_configs(
 			r"
 Subject To
-c0: + 2 x1 + 3 x2 + 5 x3 <= 6
+c0: + 2 x1 + 3 x2 + 5 x3 + 4 x4 <= 12
+\ c0: + 2 x1 + 3 x2 + 5 x3 <= 6
 Binary
 x1
 x2
 x3
+x4
 End
 ",
 			None,
@@ -2470,6 +2472,32 @@ End
 	}
 
 	#[test]
+	fn test_int_lin_le_gt_sort() {
+		test_lp_for_configs(
+			// worse SCard
+			&std::fs::read_to_string("./res/lps/gt_sort.lp").unwrap(),
+			// r"
+			// Subject To
+			// c0: + 1 x1 + 1 x2 + 1 x3 + 1 x4 + 1 x5 + 1 x6 + 1 x7 + 1 x8 <= 68
+			// Doms
+			// x1 in 0,5
+			// x2 in 0,18
+			// x3 in 0,10
+			// x4 in 0,21
+			// x5 in 0,12
+			// x6 in 0,20
+			// x7 in 0,18
+			// x8 in 0,32
+			// End
+
+			// ",
+			None,
+		);
+	}
+	// (x \/ y /\ -x \/ -y) [2/2/4]
+	// (x \/ y /\ -x \/ -y /\ -x) [2/3/5]
+
+	#[test]
 	fn test_int_lin_le_big() {
 		// test_lp_for_configs(
 		// 	r"
@@ -2492,22 +2520,43 @@ End
 		use rand::distributions::{Distribution, Uniform};
 		use rand::{rngs::StdRng, SeedableRng};
 
-		let n = 32;
-		let f = 0.5;
-		let u = 10;
-		let seeds = 10;
+		let (k, u, f, seeds): (u32, Coeff, f32, u64) =
+			match &std::fs::read_to_string(Path::new("./res/lps/le_big_pars.txt"))
+				.unwrap()
+				.lines()
+				.into_iter()
+				.collect_vec()
+				.as_slice()
+			{
+				&[k, u, f, seeds] => (
+					k.parse().unwrap(),
+					u.parse().unwrap(),
+					f.parse().unwrap(),
+					seeds.parse().unwrap(),
+				),
+				_ => unreachable!(),
+			};
+
+		let n = 2_usize.pow(k);
+
+		// let k = 2; n = 2^k
+		// let u = 5; coeff in 1..u
+		// let f = 0.5;
+		// 2 x1 + 3 x2 <= f*5 = 0.5 *
+		// let seeds = 15;
+		println!("n = {n}, u = {u}, f = {f}");
+
 		for seed in 1..=seeds {
-			let q_sampler = Uniform::from(1..u);
+			let q_sampler = Uniform::from(1..=u);
 			let mut fixed_seed = StdRng::seed_from_u64(seed);
-			let mut sample = |_| q_sampler.sample(&mut fixed_seed);
+			let mut sample = || q_sampler.sample(&mut fixed_seed);
 
 			let mut model = Model::default();
 			let xs = (1..=n)
-				.map(|i| {
-					model
-						.new_var(&[0, sample(0)], Some(format!("x{i}")))
-						.unwrap()
-				})
+				.map(|_| sample())
+				.sorted() // nicer output
+				.enumerate()
+				.map(|(i, u)| model.new_var(&[0, u], Some(format!("x{}", i + 1))).unwrap())
 				.collect_vec();
 
 			let ub = xs.iter().map(|x| x.borrow().ub()).sum::<Coeff>();
@@ -2522,7 +2571,7 @@ End
 					lbl: None,
 				})
 				.unwrap();
-			println!("{}", model.to_text(Format::Lp));
+			println!("lp = {}", model.to_text(Format::Lp));
 			test_model(model, Some(get_model_configs()))
 		}
 	}

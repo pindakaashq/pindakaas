@@ -1,5 +1,5 @@
 use std::{
-	collections::{hash_map::Entry, HashMap},
+	collections::{hash_map::Entry, HashMap, HashSet},
 	fs::File,
 	io::{BufReader, Read},
 	path::PathBuf,
@@ -16,6 +16,16 @@ use crate::{
 	int::{model::Obj, Dom, IntVarEnc, LinExp},
 	Coeff, Comparator, Lin, Lit, Model, Term,
 };
+
+use std::hash::Hash;
+pub(crate) fn is_unique<T>(iter: T) -> bool
+where
+	T: IntoIterator,
+	T::Item: Eq + Hash,
+{
+	let mut uniq = HashSet::new();
+	iter.into_iter().all(move |x| uniq.insert(x))
+}
 
 pub(crate) fn partition_functions_approx(n: Coeff) -> f64 {
 	if n == 0 {
