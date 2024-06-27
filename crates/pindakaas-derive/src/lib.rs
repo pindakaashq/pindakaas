@@ -106,7 +106,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 						cb: Option<F>,
 					) {
 						if let Some(mut cb) = cb {
-							let mut wrapped_cb = move || -> std::ffi::c_int {
+							let wrapped_cb = move || -> std::ffi::c_int {
 								match cb() {
 									crate::solver::SlvTermSignal::Continue => std::ffi::c_int::from(0),
 									crate::solver::SlvTermSignal::Terminate => std::ffi::c_int::from(1),
@@ -159,7 +159,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					) {
 						const MAX_LEN: std::ffi::c_int = 512;
 						if let Some(mut cb) = cb {
-							let mut wrapped_cb = move |clause: *const i32| {
+							let wrapped_cb = move |clause: *const i32| {
 								let mut iter = crate::solver::libloading::ExplIter(clause)
 									.map(|i: i32| crate::Lit(std::num::NonZeroI32::new(i).unwrap()));
 								cb(&mut iter)
@@ -201,6 +201,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 	let sol_ident = format_ident!("{}Sol", ident);
 	let ipasir_up = if opts.ipasir_up {
 		let prop_ident = format_ident!("{}Prop", ident);
+		let actions_ident = format_ident!("{}SolvingActions", ident);
 		let prop_member = match opts.prop {
 			Some(x) => quote! { self. #x },
 			None => quote! { self.prop },
@@ -226,9 +227,9 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 
 			#[cfg(feature = "ipasir-up")]
 			impl #prop_ident {
-				pub(crate) fn new<P: crate::solver::Propagator + 'static>(prop: P, slv: *mut dyn crate::solver::SolvingActions) -> Self {
+				pub(crate) fn new<P: crate::solver::Propagator + 'static>(prop: P, slv: #actions_ident) -> Self {
 					// Construct wrapping structures
-					let prop = crate::solver::libloading::IpasirPropStore::<P>::new(prop, slv);
+					let prop = crate::solver::libloading::IpasirPropStore::new(prop, slv);
 					let drop_prop = |x: *mut std::ffi::c_void| {
 						let prop = unsafe { Box::<P>::from_raw(x as *mut P) };
 						drop(prop);
@@ -240,15 +241,15 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					let wrapper = unsafe { #krate::ipasir_prop_init(data as *mut std::ffi::c_void) };
 
 					// Set function pointers for methods
-					unsafe { #krate::ipasir_prop_set_notify_assignment(wrapper, Some(crate::solver::libloading::ipasir_notify_assignment_cb::<P>)) };
-					unsafe { #krate::ipasir_prop_set_notify_new_decision_level(wrapper, Some(crate::solver::libloading::ipasir_notify_new_decision_level_cb::<P>)) };
-					unsafe { #krate::ipasir_prop_set_notify_backtrack(wrapper, Some(crate::solver::libloading::ipasir_notify_backtrack_cb::<P>)) };
-					unsafe { #krate::ipasir_prop_set_check_model(wrapper, Some(crate::solver::libloading::ipasir_check_model_cb::<P>)) };
-					unsafe { #krate::ipasir_prop_set_decide(wrapper, Some(crate::solver::libloading::ipasir_decide_cb::<P>)) };
-					unsafe { #krate::ipasir_prop_set_propagate(wrapper, Some(crate::solver::libloading::ipasir_propagate_cb::<P>)) };
-					unsafe { #krate::ipasir_prop_set_add_reason_clause_lit(wrapper, Some(crate::solver::libloading::ipasir_add_reason_clause_lit_cb::<P>)) };
-					unsafe { #krate::ipasir_prop_set_has_external_clause(wrapper, Some(crate::solver::libloading::ipasir_has_external_clause_cb::<P>)) };
-					unsafe { #krate::ipasir_prop_set_add_external_clause_lit(wrapper, Some(crate::solver::libloading::ipasir_add_external_clause_lit_cb::<P>)) };
+					unsafe { #krate::ipasir_prop_set_notify_assignment(wrapper, Some(crate::solver::libloading::ipasir_notify_assignment_cb::<P, #actions_ident>)) };
+					unsafe { #krate::ipasir_prop_set_notify_new_decision_level(wrapper, Some(crate::solver::libloading::ipasir_notify_new_decision_level_cb::<P, #actions_ident>)) };
+					unsafe { #krate::ipasir_prop_set_notify_backtrack(wrapper, Some(crate::solver::libloading::ipasir_notify_backtrack_cb::<P, #actions_ident>)) };
+					unsafe { #krate::ipasir_prop_set_check_model(wrapper, Some(crate::solver::libloading::ipasir_check_model_cb::<P, #actions_ident>)) };
+					unsafe { #krate::ipasir_prop_set_decide(wrapper, Some(crate::solver::libloading::ipasir_decide_cb::<P, #actions_ident>)) };
+					unsafe { #krate::ipasir_prop_set_propagate(wrapper, Some(crate::solver::libloading::ipasir_propagate_cb::<P, #actions_ident>)) };
+					unsafe { #krate::ipasir_prop_set_add_reason_clause_lit(wrapper, Some(crate::solver::libloading::ipasir_add_reason_clause_lit_cb::<P, #actions_ident>)) };
+					unsafe { #krate::ipasir_prop_set_has_external_clause(wrapper, Some(crate::solver::libloading::ipasir_has_external_clause_cb::<P, #actions_ident>)) };
+					unsafe { #krate::ipasir_prop_set_add_external_clause_lit(wrapper, Some(crate::solver::libloading::ipasir_add_external_clause_lit_cb::<P, #actions_ident>)) };
 
 					Self { prop: data, drop_prop, access_prop, wrapper, }
 				}
@@ -268,7 +269,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					}
 					// If new propagator, set it now
 					if let Some(p) = prop {
-						#prop_member = Some(#prop_ident ::new(p, (self as *mut _)));
+						#prop_member = Some(#prop_ident ::new(p, #actions_ident::new(#ptr, Arc::clone(&#vars))));
 						unsafe { #krate::ipasir_connect_external_propagator( #ptr, #prop_member .as_ref().unwrap().wrapper ) };
 					}
 				}
@@ -299,15 +300,28 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			}
 
 			#[cfg(feature = "ipasir-up")]
-			impl crate::solver::SolvingActions for #ident {
+			pub(crate) struct #actions_ident {
+				ptr: *mut std::ffi::c_void,
+				vars: Arc<Mutex<crate::VarFactory>>,
+			}
+
+			#[cfg(feature = "ipasir-up")]
+			impl #actions_ident {
+				pub fn new(ptr: *mut std::ffi::c_void, vars: Arc<Mutex<crate::VarFactory>>) -> Self {
+					Self { ptr, vars }
+				}
+			}
+
+			#[cfg(feature = "ipasir-up")]
+			impl crate::solver::SolvingActions for #actions_ident {
 				fn new_var(&mut self) -> crate::Var {
-					<#ident as crate::ClauseDatabase>::new_var(self)
+					self.vars.as_ref().lock().unwrap().next().expect("variable pool exhaused")
 				}
 				fn add_observed_var(&mut self, var: crate::Var) {
-					<#ident as crate::solver::PropagatingSolver>::add_observed_var(self, var)
+					unsafe { #krate::ipasir_add_observed_var( self.ptr, var.0.get()) };
 				}
 				fn is_decision(&mut self, lit: crate::Lit) -> bool {
-					unsafe { #krate::ipasir_is_decision( #ptr, lit.0.get() ) }
+					unsafe { #krate::ipasir_is_decision( self.ptr, lit.0.get() ) }
 				}
 			}
 
@@ -363,12 +377,68 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		}
 	};
 
+	let new_var = if opts.ipasir_up {
+		quote! {
+			fn new_var(&mut self) -> crate::Var {
+				#[cfg(feature = "ipasir-up")]
+				let var = #vars .as_ref().lock().unwrap().next().expect("variable pool exhaused");
+				#[cfg(not(feature = "ipasir-up"))]
+				let var = #vars .next().expect("variable pool exhaused");
+				var
+			}
+		}
+	} else {
+		quote! {
+			fn new_var(&mut self) -> crate::Var {
+				#vars .next().expect("variable pool exhaused")
+			}
+		}
+	};
+
+	let next_var_range = if opts.ipasir_up {
+		quote! {
+			fn next_var_range(&mut self, size: usize) -> Option<crate::helpers::VarRange> {
+				#[cfg(feature = "ipasir-up")]
+				let r = #vars .as_ref().lock().unwrap().next_var_range(size);
+				#[cfg(not(feature = "ipasir-up"))]
+				let r = #vars .next_var_range(size);
+				r
+			}
+		}
+	} else {
+		quote! {
+			fn next_var_range(&mut self, size: usize) -> Option<crate::helpers::VarRange> {
+				#vars .next_var_range(size)
+			}
+		}
+	};
+
 	let from_cnf = if opts.has_default {
 		let var_member = match opts.vars {
 			Some(x) => quote! { #x },
 			None => quote! { vars },
 		};
+		let up_version = if opts.ipasir_up {
+			quote! {
+				#[cfg(feature = "ipasir-up")]
+				impl From<crate::Cnf> for #ident {
+					fn from(value: crate::Cnf) -> #ident {
+						let mut slv: #ident = Default::default();
+						slv. #var_member = Arc::new(Mutex::new(value.nvar));
+						for cl in value.iter() {
+							let _ = crate::ClauseDatabase::add_clause(&mut slv, cl.iter().copied());
+						}
+						slv
+					}
+				}
+				#[cfg(not(feature = "ipasir-up"))]
+			}
+		} else {
+			quote!()
+		};
+
 		quote! {
+			#up_version
 			impl From<crate::Cnf> for #ident {
 				fn from(value: crate::Cnf) -> #ident {
 					let mut slv: #ident = Default::default();
@@ -394,9 +464,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		}
 
 		impl crate::ClauseDatabase for #ident {
-			fn new_var(&mut self) -> crate::Var {
-				#vars .next().expect("variable pool exhaused")
-			}
+			#new_var
 
 			fn add_clause<I: IntoIterator<Item = crate::Lit>>(
 				&mut self,
@@ -423,9 +491,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		}
 
 		impl crate::solver::NextVarRange for #ident {
-			fn next_var_range(&mut self, size: usize) -> Option<crate::helpers::VarRange> {
-				#vars .next_var_range(size)
-			}
+			#next_var_range
 		}
 
 		impl crate::solver::Solver for #ident {
