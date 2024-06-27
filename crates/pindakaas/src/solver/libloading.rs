@@ -1,7 +1,6 @@
 #[cfg(feature = "ipasir-up")]
 use std::collections::VecDeque;
 use std::{
-	alloc::{self, Layout},
 	ffi::{c_char, c_int, c_void, CStr},
 	num::NonZeroI32,
 	ptr,
@@ -87,8 +86,8 @@ impl IpasirLibrary {
 		IpasirSolver {
 			slv: (self.ipasir_init_sym().unwrap())(),
 			vars: VarFactory::default(),
-			learn_cb: None,
-			term_cb: None,
+			learn_cb: FFIPointer::default(),
+			term_cb: FFIPointer::default(),
 			signature_fn: self.ipasir_signature_sym().unwrap(),
 			release_fn: self.ipasir_release_sym().unwrap(),
 			add_fn: self.ipasir_add_sym().unwrap(),
@@ -129,9 +128,9 @@ pub struct IpasirSolver<'lib> {
 	vars: VarFactory,
 
 	/// The callback used when a clause is learned.
-	learn_cb: Option<(*mut c_void, Layout)>,
+	learn_cb: FFIPointer,
 	/// The callback used to check whether the solver should terminate.
-	term_cb: Option<(*mut c_void, Layout)>,
+	term_cb: FFIPointer,
 
 	signature_fn: Symbol<'lib, extern "C" fn() -> *const c_char>,
 	release_fn: Symbol<'lib, extern "C" fn(*mut c_void)>,
@@ -157,14 +156,6 @@ pub struct IpasirSolver<'lib> {
 
 impl<'lib> Drop for IpasirSolver<'lib> {
 	fn drop(&mut self) {
-		// Drop the termination callback.
-		if let Some((ptr, layout)) = self.term_cb.take() {
-			unsafe { alloc::dealloc(ptr as *mut _, layout) };
-		}
-		// Drop the learning callback.
-		if let Some((ptr, layout)) = self.learn_cb.take() {
-			unsafe { alloc::dealloc(ptr as *mut _, layout) };
-		}
 		// Release the solver.
 		(self.release_fn)(self.slv);
 	}
@@ -299,7 +290,7 @@ impl FailedAssumtions for IpasirFailed<'_> {
 }
 
 impl<'lib> TermCallback for IpasirSolver<'lib> {
-	fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>) {
+	fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>) {
 		if let Some(mut cb) = cb {
 			let wrapped_cb = move || -> c_int {
 				match cb() {
@@ -307,45 +298,33 @@ impl<'lib> TermCallback for IpasirSolver<'lib> {
 					SlvTermSignal::Terminate => c_int::from(1),
 				}
 			};
-
 			let trampoline = get_trampoline0(&wrapped_cb);
-			let layout = Layout::for_value(&wrapped_cb);
-			let data = Box::leak(Box::new(wrapped_cb)) as *mut _ as *mut std::ffi::c_void;
-			if layout.size() != 0 {
-				// Otherwise nothing was leaked.
-				self.term_cb = Some((data, layout));
-			}
-			(self.set_terminate_fn)(self.slv, data, Some(trampoline));
+			self.term_cb = FFIPointer::new(wrapped_cb);
+			(self.set_terminate_fn)(self.slv, self.term_cb.get_ptr(), Some(trampoline));
 		} else {
-			if let Some((ptr, layout)) = self.term_cb.take() {
-				unsafe { alloc::dealloc(ptr as *mut _, layout) };
-			}
+			self.term_cb = FFIPointer::default();
 			(self.set_terminate_fn)(self.slv, ptr::null_mut(), None);
 		}
 	}
 }
 
 impl<'lib> LearnCallback for IpasirSolver<'lib> {
-	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(&mut self, cb: Option<F>) {
+	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>) + 'static>(
+		&mut self,
+		cb: Option<F>,
+	) {
 		const MAX_LEN: std::ffi::c_int = 512;
 		if let Some(mut cb) = cb {
-			let wrapped_cb = |clause: *const i32| {
+			let wrapped_cb = move |clause: *const i32| {
 				let mut iter = ExplIter(clause).map(|i: i32| Lit(NonZeroI32::new(i).unwrap()));
 				cb(&mut iter)
 			};
 
 			let trampoline = get_trampoline1(&wrapped_cb);
-			let layout = Layout::for_value(&wrapped_cb);
-			let data = Box::leak(Box::new(wrapped_cb)) as *mut _ as *mut std::ffi::c_void;
-			if layout.size() != 0 {
-				// Otherwise nothing was leaked.
-				self.learn_cb = Some((data, layout));
-			}
-			(self.set_learn_fn)(self.slv, data, MAX_LEN, Some(trampoline));
+			self.learn_cb = FFIPointer::new(wrapped_cb);
+			(self.set_learn_fn)(self.slv, self.learn_cb.get_ptr(), MAX_LEN, Some(trampoline));
 		} else {
-			if let Some((ptr, layout)) = self.learn_cb.take() {
-				unsafe { alloc::dealloc(ptr as *mut _, layout) };
-			}
+			self.learn_cb = FFIPointer::default();
 			(self.set_learn_fn)(self.slv, ptr::null_mut(), MAX_LEN, None);
 		}
 	}
@@ -411,6 +390,53 @@ impl<P, A> IpasirPropStore<P, A> {
 			rqueue: VecDeque::default(),
 			explaining: None,
 			cqueue: None,
+		}
+	}
+}
+
+// --- Helpers for C interface ---
+pub(crate) fn get_drop_fn<T>(_: &T) -> fn(*mut std::ffi::c_void) {
+	|ptr: *mut std::ffi::c_void| {
+		let b = unsafe { Box::<T>::from_raw(ptr as *mut T) };
+		drop(b);
+	}
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) struct FFIPointer {
+	pub(crate) ptr: *mut std::ffi::c_void,
+	pub(crate) drop_fn: fn(*mut std::ffi::c_void),
+}
+
+impl FFIPointer {
+	pub(crate) fn new<T: 'static>(obj: T) -> Self {
+		let drop_fn = get_drop_fn(&obj);
+		let ptr = Box::leak(Box::new(obj)) as *mut _ as *mut std::ffi::c_void;
+		Self { ptr, drop_fn }
+	}
+
+	/// Get the FFI pointer to the contained object
+	///
+	/// # WARNING
+	/// This pointer is only valid until the FFIPointer object is dropped.
+	pub(crate) fn get_ptr(&self) -> *mut std::ffi::c_void {
+		self.ptr
+	}
+}
+
+impl Default for FFIPointer {
+	fn default() -> Self {
+		Self {
+			ptr: std::ptr::null_mut(),
+			drop_fn: |_: *mut std::ffi::c_void| {},
+		}
+	}
+}
+
+impl Drop for FFIPointer {
+	fn drop(&mut self) {
+		if !self.ptr.is_null() {
+			(self.drop_fn)(self.ptr);
 		}
 	}
 }

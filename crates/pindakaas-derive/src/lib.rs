@@ -93,109 +93,82 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		quote!()
 	};
 
-	let (term_callback, term_drop) = if opts.term_callback {
+	let term_callback = if opts.term_callback {
 		let term_cb = match opts.term_callback_ident {
 			Some(x) => quote! { self. #x },
 			None => quote! { self.term_cb },
 		};
-		(
-			quote! {
-				impl crate::solver::TermCallback for #ident {
-					fn set_terminate_callback<F: FnMut() -> crate::solver::SlvTermSignal + 'static>(
-						&mut self,
-						cb: Option<F>,
-					) {
-						if let Some(mut cb) = cb {
-							let wrapped_cb = move || -> std::ffi::c_int {
-								match cb() {
-									crate::solver::SlvTermSignal::Continue => std::ffi::c_int::from(0),
-									crate::solver::SlvTermSignal::Terminate => std::ffi::c_int::from(1),
-								}
-							};
-							let trampoline = crate::solver::libloading::get_trampoline0(&wrapped_cb);
-							let layout = std::alloc::Layout::for_value(&wrapped_cb);
-							let data = Box::leak(Box::new(wrapped_cb)) as *mut _ as *mut std::ffi::c_void;
-							if layout.size() != 0 {
-								// Otherwise nothing was leaked.
-								#term_cb = Some((data, layout));
+		quote! {
+			impl crate::solver::TermCallback for #ident {
+				fn set_terminate_callback<F: FnMut() -> crate::solver::SlvTermSignal + 'static>(
+					&mut self,
+					cb: Option<F>,
+				) {
+					if let Some(mut cb) = cb {
+						let wrapped_cb = move || -> std::ffi::c_int {
+							match cb() {
+								crate::solver::SlvTermSignal::Continue => std::ffi::c_int::from(0),
+								crate::solver::SlvTermSignal::Terminate => std::ffi::c_int::from(1),
 							}
-							unsafe {
-								#krate::ipasir_set_terminate(
-									#ptr,
-									data,
-									Some(trampoline),
-								)
-							}
-						} else {
-							if let Some((ptr, layout)) = #term_cb .take() {
-								unsafe { std::alloc::dealloc(ptr as *mut _, layout) };
-							}
-							unsafe { #krate::ipasir_set_terminate(#ptr, std::ptr::null_mut(), None) }
+						};
+						let trampoline = crate::solver::libloading::get_trampoline0(&wrapped_cb);
+						#term_cb = crate::solver::libloading::FFIPointer::new(wrapped_cb);
+						unsafe {
+							#krate::ipasir_set_terminate(
+								#ptr,
+								#term_cb .get_ptr(),
+								Some(trampoline),
+							)
 						}
+					} else {
+						#term_cb = crate::solver::libloading::FFIPointer::default();
+						unsafe { #krate::ipasir_set_terminate(#ptr, std::ptr::null_mut(), None) }
 					}
 				}
-			},
-			quote! {
-				if let Some((ptr, layout)) = #term_cb .take() {
-					unsafe { std::alloc::dealloc(ptr as *mut _, layout) };
-				}
-			},
-		)
+			}
+		}
 	} else {
-		(quote!(), quote!())
+		quote!()
 	};
 
-	let (learn_callback, learn_drop) = if opts.learn_callback {
+	let learn_callback = if opts.learn_callback {
 		let learn_cb = match opts.learn_callback_ident {
 			Some(x) => quote! { self. #x },
 			None => quote! { self.learn_cb },
 		};
-		(
-			quote! {
-				impl crate::solver::LearnCallback for #ident {
-					fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = crate::Lit>) + 'static>(
-						&mut self,
-						cb: Option<F>,
-					) {
-						const MAX_LEN: std::ffi::c_int = 512;
-						if let Some(mut cb) = cb {
-							let wrapped_cb = move |clause: *const i32| {
-								let mut iter = crate::solver::libloading::ExplIter(clause)
-									.map(|i: i32| crate::Lit(std::num::NonZeroI32::new(i).unwrap()));
-								cb(&mut iter)
-							};
-							let trampoline = crate::solver::libloading::get_trampoline1(&wrapped_cb);
-							let layout = std::alloc::Layout::for_value(&wrapped_cb);
-							let data = Box::leak(Box::new(wrapped_cb)) as *mut _ as *mut std::ffi::c_void;
-							if layout.size() != 0 {
-								// Otherwise nothing was leaked.
-								#learn_cb = Some((data, layout));
-							}
-							unsafe {
-								#krate::ipasir_set_learn(
-									#ptr,
-									data,
-									MAX_LEN,
-									Some(trampoline),
-								)
-							}
-						} else {
-							if let Some((ptr, layout)) = #learn_cb .take() {
-								unsafe { std::alloc::dealloc(ptr as *mut _, layout) };
-							}
-							unsafe { #krate::ipasir_set_learn(#ptr, std::ptr::null_mut(), MAX_LEN, None) }
+
+		quote! {
+			impl crate::solver::LearnCallback for #ident {
+				fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = crate::Lit>) + 'static>(
+					&mut self,
+					cb: Option<F>,
+				) {
+					const MAX_LEN: std::ffi::c_int = 512;
+					if let Some(mut cb) = cb {
+						let wrapped_cb = move |clause: *const i32| {
+							let mut iter = crate::solver::libloading::ExplIter(clause)
+								.map(|i: i32| crate::Lit(std::num::NonZeroI32::new(i).unwrap()));
+							cb(&mut iter)
+						};
+						let trampoline = crate::solver::libloading::get_trampoline1(&wrapped_cb);
+						#learn_cb = crate::solver::libloading::FFIPointer::new(wrapped_cb);
+						unsafe {
+							#krate::ipasir_set_learn(
+								#ptr,
+								#learn_cb .get_ptr(),
+								MAX_LEN,
+								Some(trampoline),
+							)
 						}
+					} else {
+						#learn_cb = crate::solver::libloading::FFIPointer::default();
+						unsafe { #krate::ipasir_set_learn(#ptr, std::ptr::null_mut(), MAX_LEN, None) }
 					}
 				}
-			},
-			quote! {
-				if let Some((ptr, layout)) = #learn_cb .take() {
-					unsafe { std::alloc::dealloc(ptr as *mut _, layout) };
-				}
-			},
-		)
+			}
+		}
 	} else {
-		(quote!(), quote!())
+		quote!()
 	};
 
 	let sol_ident = format_ident!("{}Sol", ident);
@@ -210,8 +183,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			#[cfg(feature = "ipasir-up")]
 			pub(crate) struct #prop_ident {
 				/// Rust Propagator Storage
-				prop: *mut c_void,
-				drop_prop: fn(*mut c_void),
+				prop: crate::solver::libloading::FFIPointer,
 				access_prop: fn(*mut c_void) -> *mut dyn std::any::Any,
 				/// C Wrapper Object
 				wrapper: *mut std::ffi::c_void,
@@ -221,7 +193,6 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			impl Drop for #prop_ident {
 				fn drop(&mut self) {
 					unsafe { #krate::ipasir_prop_release(self.wrapper) };
-					(self.drop_prop)(self.prop);
 				}
 			}
 
@@ -229,16 +200,13 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			impl #prop_ident {
 				pub(crate) fn new<P: crate::solver::Propagator + 'static>(prop: P, slv: #actions_ident) -> Self {
 					// Construct wrapping structures
-					let prop = crate::solver::libloading::IpasirPropStore::new(prop, slv);
-					let drop_prop = |x: *mut std::ffi::c_void| {
-						let prop = unsafe { Box::<P>::from_raw(x as *mut P) };
-						drop(prop);
+					let store = crate::solver::libloading::IpasirPropStore::new(prop, slv);
+					let prop = crate::solver::libloading::FFIPointer::new(store);
+					let access_prop = |x: *mut std::ffi::c_void| -> *mut dyn std::any::Any {
+						let store = unsafe{ &mut *(x as *mut crate::solver::libloading::IpasirPropStore<P, #actions_ident>) } ;
+					  (&mut store.prop) as *mut dyn std::any::Any
 					};
-					let access_prop = |x: *mut std::ffi::c_void| {
-						x as *mut P as *mut dyn std::any::Any
-					};
-					let data = Box::leak(Box::new(prop)) as *mut _ as *mut std::ffi::c_void;
-					let wrapper = unsafe { #krate::ipasir_prop_init(data as *mut std::ffi::c_void) };
+					let wrapper = unsafe { #krate::ipasir_prop_init(prop.get_ptr()) };
 
 					// Set function pointers for methods
 					unsafe { #krate::ipasir_prop_set_notify_assignment(wrapper, Some(crate::solver::libloading::ipasir_notify_assignment_cb::<P, #actions_ident>)) };
@@ -251,7 +219,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					unsafe { #krate::ipasir_prop_set_has_external_clause(wrapper, Some(crate::solver::libloading::ipasir_has_external_clause_cb::<P, #actions_ident>)) };
 					unsafe { #krate::ipasir_prop_set_add_external_clause_lit(wrapper, Some(crate::solver::libloading::ipasir_add_external_clause_lit_cb::<P, #actions_ident>)) };
 
-					Self { prop: data, drop_prop, access_prop, wrapper, }
+					Self { prop, access_prop, wrapper, }
 				}
 			}
 
@@ -288,14 +256,14 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			#[cfg(feature = "ipasir-up")]
 			impl crate::solver::PropagatorAccess for #ident {
 				fn propagator<P: crate::solver::Propagator + 'static>(&self) -> Option<&P> {
-					#prop_member.as_ref().map(|p| unsafe { &*(p.access_prop)(p.prop) } .downcast_ref()).flatten()
+					#prop_member.as_ref().map(|p| unsafe { &*(p.access_prop)(p.prop.get_ptr()) } .downcast_ref()).flatten()
 				}
 			}
 
 			#[cfg(feature = "ipasir-up")]
 			impl crate::solver::MutPropagatorAccess for #ident {
 				fn propagator_mut<P: crate::solver::Propagator + 'static>(&mut self) -> Option<&mut P> {
-					#prop_member.as_ref().map(|p| unsafe { &mut *(p.access_prop)(p.prop) } .downcast_mut()).flatten()
+					#prop_member.as_ref().map(|p| unsafe { &mut *(p.access_prop)(p.prop.get_ptr()) } .downcast_mut()).flatten()
 				}
 			}
 
@@ -337,7 +305,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					#sol_ident {
 						ptr: self.ptr,
 						#[cfg(feature = "ipasir-up")]
-						prop: #prop_member .as_mut().map(|p| p.prop),
+						prop: #prop_member .as_mut().map(|p| p.prop.get_ptr()),
 						#[cfg(feature = "ipasir-up")]
 						access_prop: #prop_member .as_ref().map(|p| p.access_prop),
 					}
@@ -457,8 +425,6 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 	quote! {
 		impl Drop for #ident {
 			fn drop(&mut self) {
-				#learn_drop
-				#term_drop
 				unsafe { #krate::ipasir_release( #ptr ) }
 			}
 		}
