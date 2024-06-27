@@ -1,3 +1,5 @@
+#[cfg(feature = "ipasir-up")]
+use std::sync::{Arc, Mutex};
 use std::{
 	alloc::Layout,
 	ffi::{c_void, CString},
@@ -16,7 +18,11 @@ pub struct Cadical {
 	/// The raw pointer to the Cadical solver.
 	ptr: *mut c_void,
 	/// The variable factory for this solver.
+	#[cfg(not(feature = "ipasir-up"))]
 	vars: VarFactory,
+	/// The variable factory for this solver.
+	#[cfg(feature = "ipasir-up")]
+	vars: Arc<Mutex<VarFactory>>,
 	/// The callback used when a clause is learned.
 	learn_cb: Option<(*mut c_void, Layout)>,
 	/// The callback used to check whether the solver should terminate.
@@ -31,7 +37,10 @@ impl Default for Cadical {
 	fn default() -> Self {
 		Self {
 			ptr: unsafe { pindakaas_cadical::ipasir_init() },
+			#[cfg(not(feature = "ipasir-up"))]
 			vars: VarFactory::default(),
+			#[cfg(feature = "ipasir-up")]
+			vars: Arc::default(),
 			learn_cb: None,
 			term_cb: None,
 			#[cfg(feature = "ipasir-up")]
@@ -43,9 +52,13 @@ impl Default for Cadical {
 impl Clone for Cadical {
 	fn clone(&self) -> Self {
 		let ptr = unsafe { ccadical_copy(self.ptr) };
+		#[cfg(not(feature = "ipasir-up"))]
+		let vars = self.vars; // Copy
+		#[cfg(feature = "ipasir-up")]
+		let vars = Arc::new(Mutex::new(*self.vars.as_ref().lock().unwrap()));
 		Self {
 			ptr,
-			vars: self.vars,
+			vars,
 			learn_cb: None,
 			term_cb: None,
 			#[cfg(feature = "ipasir-up")]

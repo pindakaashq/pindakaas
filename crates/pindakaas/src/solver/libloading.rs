@@ -387,11 +387,11 @@ impl Iterator for ExplIter {
 }
 
 #[cfg(feature = "ipasir-up")]
-pub(crate) struct IpasirPropStore<P> {
+pub(crate) struct IpasirPropStore<P, A> {
 	/// Rust Propagator
 	pub(crate) prop: P,
 	/// IPASIR solver pointer
-	pub(crate) slv: *mut dyn SolvingActions,
+	pub(crate) slv: A,
 	/// Propagation queue
 	pub(crate) pqueue: VecDeque<crate::Lit>,
 	/// Reason clause queue
@@ -402,8 +402,8 @@ pub(crate) struct IpasirPropStore<P> {
 }
 
 #[cfg(feature = "ipasir-up")]
-impl<P> IpasirPropStore<P> {
-	pub(crate) fn new(prop: P, slv: *mut dyn SolvingActions) -> Self {
+impl<P, A> IpasirPropStore<P, A> {
+	pub(crate) fn new(prop: P, slv: A) -> Self {
 		Self {
 			prop,
 			slv,
@@ -418,28 +418,28 @@ impl<P> IpasirPropStore<P> {
 // --- Callback functions for C propagator interface ---
 
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_notify_assignment_cb<P: Propagator>(
+pub(crate) unsafe extern "C" fn ipasir_notify_assignment_cb<P: Propagator, A>(
 	state: *mut c_void,
 	lit: i32,
 	is_fixed: bool,
 ) {
-	let prop = &mut *(state as *mut IpasirPropStore<P>);
+	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	let lit = crate::Lit(std::num::NonZeroI32::new(lit).unwrap());
 	prop.prop.notify_assignment(lit, is_fixed)
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_notify_new_decision_level_cb<P: Propagator>(
+pub(crate) unsafe extern "C" fn ipasir_notify_new_decision_level_cb<P: Propagator, A>(
 	state: *mut c_void,
 ) {
-	let prop = &mut *(state as *mut IpasirPropStore<P>);
+	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	prop.prop.notify_new_decision_level()
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_notify_backtrack_cb<P: Propagator>(
+pub(crate) unsafe extern "C" fn ipasir_notify_backtrack_cb<P: Propagator, A>(
 	state: *mut c_void,
 	level: usize,
 ) {
-	let prop = &mut *(state as *mut IpasirPropStore<P>);
+	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	prop.pqueue.clear();
 	prop.explaining = None;
 	prop.rqueue.clear();
@@ -447,12 +447,12 @@ pub(crate) unsafe extern "C" fn ipasir_notify_backtrack_cb<P: Propagator>(
 	prop.prop.notify_backtrack(level);
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_check_model_cb<P: Propagator>(
+pub(crate) unsafe extern "C" fn ipasir_check_model_cb<P: Propagator, A: SolvingActions>(
 	state: *mut c_void,
 	len: usize,
 	model: *const i32,
 ) -> bool {
-	let prop = &mut *(state as *mut IpasirPropStore<P>);
+	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	let sol = if len > 0 {
 		std::slice::from_raw_parts(model, len)
 	} else {
@@ -463,11 +463,11 @@ pub(crate) unsafe extern "C" fn ipasir_check_model_cb<P: Propagator>(
 		.map(|&i| (Var(NonZeroI32::new(i.abs()).unwrap()), i >= 0))
 		.collect();
 	let value = |l: Lit| sol.get(&l.var()).copied();
-	prop.prop.check_model(&mut *prop.slv, &value)
+	prop.prop.check_model(&mut prop.slv, &value)
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_decide_cb<P: Propagator>(state: *mut c_void) -> i32 {
-	let prop = &mut *(state as *mut IpasirPropStore<P>);
+pub(crate) unsafe extern "C" fn ipasir_decide_cb<P: Propagator, A>(state: *mut c_void) -> i32 {
+	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	if let Some(l) = prop.prop.decide() {
 		l.0.into()
 	} else {
@@ -475,10 +475,12 @@ pub(crate) unsafe extern "C" fn ipasir_decide_cb<P: Propagator>(state: *mut c_vo
 	}
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_propagate_cb<P: Propagator>(state: *mut c_void) -> i32 {
-	let prop = &mut *(state as *mut IpasirPropStore<P>);
+pub(crate) unsafe extern "C" fn ipasir_propagate_cb<P: Propagator, A: SolvingActions>(
+	state: *mut c_void,
+) -> i32 {
+	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	if prop.pqueue.is_empty() {
-		let slv = &mut *prop.slv;
+		let slv = &mut prop.slv;
 		prop.pqueue = prop.prop.propagate(slv).into()
 	}
 	if let Some(l) = prop.pqueue.pop_front() {
@@ -488,11 +490,14 @@ pub(crate) unsafe extern "C" fn ipasir_propagate_cb<P: Propagator>(state: *mut c
 	}
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_add_reason_clause_lit_cb<P: Propagator>(
+pub(crate) unsafe extern "C" fn ipasir_add_reason_clause_lit_cb<
+	P: Propagator,
+	A: SolvingActions,
+>(
 	state: *mut c_void,
 	propagated_lit: i32,
 ) -> i32 {
-	let prop = &mut *(state as *mut IpasirPropStore<P>);
+	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	let lit = crate::Lit(std::num::NonZeroI32::new(propagated_lit).unwrap());
 	debug_assert!(prop.explaining.is_none() || prop.explaining == Some(lit));
 	// TODO: Can this be prop.explaining.is_none()?
@@ -509,22 +514,25 @@ pub(crate) unsafe extern "C" fn ipasir_add_reason_clause_lit_cb<P: Propagator>(
 	}
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_has_external_clause_cb<P: Propagator>(
+pub(crate) unsafe extern "C" fn ipasir_has_external_clause_cb<P: Propagator, A: SolvingActions>(
 	state: *mut c_void,
 ) -> bool {
-	let prop = &mut *(state as *mut IpasirPropStore<P>);
-	prop.cqueue = prop.prop.add_external_clause(&mut *prop.slv).map(Vec::into);
+	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
+	prop.cqueue = prop.prop.add_external_clause(&mut prop.slv).map(Vec::into);
 	prop.cqueue.is_some()
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_add_external_clause_lit_cb<P: Propagator>(
+pub(crate) unsafe extern "C" fn ipasir_add_external_clause_lit_cb<
+	P: Propagator,
+	A: SolvingActions,
+>(
 	state: *mut c_void,
 ) -> i32 {
-	let prop = &mut *(state as *mut IpasirPropStore<P>);
+	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	if prop.cqueue.is_none() {
 		debug_assert!(false);
 		// This function shouldn't be called when "has_clause" returned false.
-		prop.cqueue = prop.prop.add_external_clause(&mut *prop.slv).map(Vec::into);
+		prop.cqueue = prop.prop.add_external_clause(&mut prop.slv).map(Vec::into);
 	}
 	if let Some(queue) = &mut prop.cqueue {
 		if let Some(l) = queue.pop_front() {
