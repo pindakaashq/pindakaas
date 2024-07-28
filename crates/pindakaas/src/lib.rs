@@ -220,6 +220,7 @@ pub trait Checker {
 
 /// Incomplete is a error type returned by a [`Checker`] type when the
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
+#[allow(dead_code)] // TODO
 pub struct Incomplete {
 	missing: Box<[Lit]>,
 }
