@@ -492,9 +492,12 @@ pub(crate) unsafe extern "C" fn ipasir_check_model_cb<P: Propagator, A: SolvingA
 	prop.prop.check_model(&mut prop.slv, &value)
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_decide_cb<P: Propagator, A>(state: *mut c_void) -> i32 {
+pub(crate) unsafe extern "C" fn ipasir_decide_cb<P: Propagator, A: SolvingActions>(
+	state: *mut c_void,
+) -> i32 {
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
-	if let Some(l) = prop.prop.decide() {
+	let slv = &mut prop.slv;
+	if let Some(l) = prop.prop.decide(slv) {
 		l.0.into()
 	} else {
 		0

@@ -173,7 +173,8 @@ pub trait Propagator {
 
 	/// Method called when the solver asks for the next decision literal. If it
 	/// returns None, the solver makes its own choice.
-	fn decide(&mut self) -> Option<Lit> {
+	fn decide(&mut self, slv: &mut dyn SolvingActions) -> Option<Lit> {
+		let _ = slv;
 		None
 	}
 
