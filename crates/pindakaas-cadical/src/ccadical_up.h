@@ -14,44 +14,26 @@ extern "C" {
 
 // C wrapper for CaDiCaL's C++ API following IPASIR-UP.
 
-typedef struct CCaDiCaLPropagator CCaDiCaLPropagator;
-
-void ccadical_connect_external_propagator(CCaDiCaL *, CCaDiCaLPropagator *);
+void ccadical_connect_external_propagator(
+	CCaDiCaL *slv,
+	void *propagator_data,
+	void (*prop_notify_assignment) (void* prop, int lit, bool is_fixed),
+	void (*prop_notify_new_decision_level) (void* prop),
+	void (*prop_notify_backtrack) (void* prop, size_t new_level),
+	bool (*prop_cb_check_found_model) (void* prop, const int* model, size_t size),
+	bool (*prop_cb_has_external_clause) (void* prop),
+	int (*prop_cb_add_external_clause_lit) (void* prop),
+	bool is_lazy = false,
+	int (*prop_cb_decide) (void* prop) = prop_decide_default,
+	int (*prop_cb_propagate) (void* prop) = prop_propagate_default,
+	int (*prop_cb_add_reason_clause_lit) (void* prop, int propagated_lit) = prop_add_reason_clause_lit_default
+);
 void ccadical_disconnect_external_propagator(CCaDiCaL *);
 
 void ccadical_add_observed_var(CCaDiCaL *, int var);
 void ccadical_remove_observed_var(CCaDiCaL *, int var);
 void ccadical_reset_observed_vars(CCaDiCaL *);
 bool ccadical_is_decision(CCaDiCaL *, int lit);
-
-CCaDiCaLPropagator *ccadical_prop_init(void *state);
-void ccadical_prop_release(CCaDiCaLPropagator *);
-void ccadical_prop_lazy(CCaDiCaLPropagator *, bool is_lazy);
-
-void ccadical_prop_set_notify_assignment(
-    CCaDiCaLPropagator *,
-    void (*notify_assignment)(void *state, int lit, bool is_fixed));
-void ccadical_prop_set_notify_new_decision_level(
-    CCaDiCaLPropagator *, void (*notify_new_decision_level)(void *state));
-void ccadical_prop_set_notify_backtrack(
-    CCaDiCaLPropagator *,
-    void (*notify_backtrack)(void *state, size_t new_level));
-
-void ccadical_prop_set_check_model(CCaDiCaLPropagator *,
-                                   bool (*check_model)(void *state, size_t size,
-                                                       const int *model));
-void ccadical_prop_set_decide(CCaDiCaLPropagator *, int (*decide)(void *state));
-void ccadical_prop_set_propagate(CCaDiCaLPropagator *,
-                                 int (*propagate)(void *state));
-
-void ccadical_prop_set_add_reason_clause_lit(
-    CCaDiCaLPropagator *,
-    int (*add_reason_clause_lit)(void *state, int propagated_lit));
-
-void ccadical_prop_set_has_external_clause(
-    CCaDiCaLPropagator *, bool (*has_external_clause)(void *state));
-void ccadical_prop_set_add_external_clause_lit(
-    CCaDiCaLPropagator *, int (*add_external_clause_lit)(void *state));
 
 // Additional C bindings for C++ Cadical
 
