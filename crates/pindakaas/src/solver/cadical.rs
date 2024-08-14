@@ -9,7 +9,10 @@ use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
 use pindakaas_derive::IpasirSolver;
 
 use super::VarFactory;
-use crate::{solver::libloading::FFIPointer, Lit};
+use crate::{
+	solver::libloading::{FFIPointer, PropagatorPointer},
+	Lit,
+};
 
 #[derive(IpasirSolver)]
 #[ipasir(krate = pindakaas_cadical, assumptions, learn_callback, term_callback, ipasir_up)]
@@ -29,7 +32,7 @@ pub struct Cadical {
 
 	#[cfg(feature = "ipasir-up")]
 	/// The external propagator called by the solver
-	prop: Option<CadicalProp>,
+	prop: Option<PropagatorPointer>,
 }
 
 impl Default for Cadical {

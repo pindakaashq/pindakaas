@@ -441,6 +441,46 @@ impl Drop for FFIPointer {
 	}
 }
 
+#[cfg(feature = "ipasir-up")]
+pub(crate) struct PropagatorPointer {
+	ptr: FFIPointer,
+	pub(crate) access_prop: fn(*mut c_void) -> *mut dyn std::any::Any,
+}
+
+#[cfg(feature = "ipasir-up")]
+impl PropagatorPointer {
+	pub(crate) fn new<P, A>(prop: P, slv: A) -> Self
+	where
+		P: Propagator + 'static,
+		A: SolvingActions + 'static,
+	{
+		// Construct wrapping structures
+		let store = IpasirPropStore::new(prop, slv);
+		let prop = FFIPointer::new(store);
+		let access_prop = |x: *mut std::ffi::c_void| -> *mut dyn std::any::Any {
+			let store =
+				unsafe { &mut *(x as *mut crate::solver::libloading::IpasirPropStore<P, A>) };
+			(&mut store.prop) as *mut dyn std::any::Any
+		};
+		Self {
+			ptr: prop,
+			access_prop,
+		}
+	}
+
+	pub(crate) fn get_raw_ptr(&self) -> *mut std::ffi::c_void {
+		self.ptr.get_ptr()
+	}
+
+	pub(crate) unsafe fn access_propagator<P: 'static>(&self) -> Option<&P> {
+		(*(self.access_prop)(self.get_raw_ptr())).downcast_ref::<P>()
+	}
+
+	pub(crate) unsafe fn access_propagator_mut<P: 'static>(&self) -> Option<&mut P> {
+		(*(self.access_prop)(self.get_raw_ptr())).downcast_mut::<P>()
+	}
+}
+
 // --- Callback functions for C propagator interface ---
 
 #[cfg(feature = "ipasir-up")]
@@ -475,8 +515,8 @@ pub(crate) unsafe extern "C" fn ipasir_notify_backtrack_cb<P: Propagator, A>(
 #[cfg(feature = "ipasir-up")]
 pub(crate) unsafe extern "C" fn ipasir_check_model_cb<P: Propagator, A: SolvingActions>(
 	state: *mut c_void,
-	len: usize,
 	model: *const i32,
+	len: usize,
 ) -> bool {
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	let sol = if len > 0 {
