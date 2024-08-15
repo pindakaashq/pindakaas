@@ -52,7 +52,7 @@ impl Formula {
 					*lit
 				}
 			}
-			Formula::Not(f) => !(f.bind(db, name)?),
+			Formula::Not(f) => !(f.bind(db, name.map(|lit| !lit))?),
 			Formula::And(sub) => {
 				match sub.len() {
 					0 => {
@@ -256,6 +256,10 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 					let mut cdb = db.with_conditions(vec![name]);
 					let neg_els: Formula = !*els.clone();
 					self.encode(&mut cdb, &neg_els)
+				}
+				Formula::Xor(sub) => {
+					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
+					self.encode(db, &Formula::Xor(neg_sub))
 				}
 				_ => {
 					let l = f.bind(db, None)?;
@@ -507,6 +511,23 @@ mod tests {
 			])
 			=> vec![lits![-1, 2, -4], lits![1, 3, -4], lits![-1, -2, 4], lits![1, -3, 4], lits![-2, -3, 4]],
 			vec![lits![-1, -2, -3, -4], lits![-1, -2, 3, 4], lits![1, -2, 3, -4], lits![1, 2, 3, 4], lits![1, 2, -3, 4], lits![1, -2, -3, -4], lits![-1, 2, 3, 4], lits![-1, 2, -3, -4]]
+		);
+	}
+
+	#[test]
+	fn encode_prop_neg_equiv() {
+		// Regression test
+		assert_enc_sol!(
+			TseitinEncoder,
+			2,
+			&Formula::Equiv(vec![
+				Formula::Atom(2.into()),
+				Formula::Not(Box::new(Formula::Xor(vec![Formula::Atom(1.into())]))),
+			])
+			=> vec![
+				lits![1,2], lits![-1,-2]
+			],
+			vec![lits![1,-2], lits![-1,2]]
 		);
 	}
 }
