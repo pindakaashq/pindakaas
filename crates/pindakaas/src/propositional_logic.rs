@@ -79,7 +79,11 @@ impl Formula {
 			}
 			Formula::Or(sub) => {
 				match sub.len() {
-					0 => return Err(Unsatisfiable),
+					0 => {
+						let name = name.unwrap_or_else(|| db.new_var().into());
+						db.add_clause([!name])?;
+						name
+					}
 					1 => return sub[0].bind(db, name),
 					_ => {
 						let name = name.unwrap_or_else(|| db.new_var().into());
@@ -365,6 +369,16 @@ mod tests {
 			=> vec![lits![-1, -2, 3], lits![1, -3], lits![2, -3]],
 			vec![lits![1, 2, 3], lits![-1, 2, -3], lits![-1, -2, -3], lits![1, -2, -3]]
 		);
+		// Regression test: empty and
+		assert_enc_sol!(
+			TseitinEncoder,
+			1,
+			&Formula::Equiv(vec![
+				Formula::Atom(1.into()),
+				Formula::And(vec![])
+			])
+			=> vec![lits![1]], vec![lits![1]]
+		);
 	}
 
 	#[test]
@@ -392,6 +406,16 @@ mod tests {
 			])
 			=> vec![lits![1, 2, -3], lits![-1, 3], lits![-2, 3]],
 			vec![lits![1, 2, 3], lits![-1, 2, 3], lits![-1, -2, -3], lits![1, -2, 3]]
+		);
+		// Regression test: empty or
+		assert_enc_sol!(
+			TseitinEncoder,
+			1,
+			&Formula::Equiv(vec![
+				Formula::Atom(1.into()),
+				Formula::Or(vec![])
+			])
+			=> vec![lits![-1]], vec![lits![-1]]
 		);
 	}
 
