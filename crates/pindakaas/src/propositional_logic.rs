@@ -261,7 +261,13 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 					let neg_els: Formula = !*els.clone();
 					self.encode(&mut cdb, &neg_els)
 				}
-				Formula::Xor(sub) => {
+				Formula::Equiv(sub) if sub.len() == 2 => {
+					self.encode(db, &Formula::Xor(sub.clone()))
+				}
+				Formula::Xor(sub) if sub.len() == 2 => {
+					self.encode(db, &Formula::Equiv(sub.clone()))
+				}
+				Formula::Xor(sub) if sub.len() % 2 != 0 => {
 					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
 					self.encode(db, &Formula::Xor(neg_sub))
 				}
@@ -339,7 +345,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 #[cfg(test)]
 mod tests {
 	use crate::{
-		helpers::tests::{assert_enc_sol, lits},
+		helpers::tests::{assert_enc_sol, assert_sol, lits},
 		Encoder, Formula, Lit, TseitinEncoder,
 	};
 
@@ -506,6 +512,49 @@ mod tests {
 			])
 			=> vec![lits![-1, -3, -5], lits![1, 3, -5], lits![-1, 3, 5], lits![1, -3, 5], lits![-2, -4, -5], lits![2, -4, 5], lits![2, 4, -5], lits![-2, 4, 5]],
 			vec![lits![-1, -2, -3, -4], lits![-1, -2, 3, 4], lits![-1, 2, -3, 4], lits![-1, 2, 3, -4], lits![1, -2, -3, 4], lits![1, -2, 3, -4], lits![1, 2, -3, -4], lits![1, 2, 3, 4]]
+		);
+		// Regression test: negated XOR (into equiv)
+		assert_enc_sol!(
+			TseitinEncoder,
+			2,
+			&Formula::Not(Box::new(Formula::Xor(vec![
+				Formula::Atom(1.into()),
+				Formula::Atom(2.into()),
+			])))
+			=> vec![lits![-1, 2,], lits![1,-2]],
+			vec![lits![-1, -2],lits![1, 2]]
+		);
+		// Regression test: negated XOR (negated args)
+		assert_sol!(
+			TseitinEncoder,
+			3,
+			&Formula::Not(Box::new(Formula::Xor(vec![
+				Formula::Atom(1.into()),
+				Formula::Atom(2.into()),
+				Formula::Atom(3.into()),
+			])))
+			=> vec![lits![-1, -2, -3], lits![1, 2, -3], lits![-1, 2, 3], lits![1, -2, 3]]
+		);
+		// Regression test: negated XOR (negated binding)
+		assert_sol!(
+			TseitinEncoder,
+			4,
+			&Formula::Not(Box::new(Formula::Xor(vec![
+				Formula::Atom(1.into()),
+				Formula::Atom(2.into()),
+				Formula::Atom(3.into()),
+				Formula::Atom(4.into()),
+			])))
+			=> vec![
+				lits![-1, -2, -3, -4],
+				lits![1, 2, -3, -4],
+				lits![1, -2, 3, -4],
+				lits![1, -2, -3, 4],
+				lits![-1, 2, 3, -4],
+				lits![-1, 2, -3, 4],
+				lits![-1, -2, 3, 4],
+				lits![1, 2, 3, 4]
+			]
 		);
 	}
 
