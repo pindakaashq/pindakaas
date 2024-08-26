@@ -152,6 +152,10 @@ fn main() {
 		)
 		.define("QUIET", None);
 
+	#[cfg(not(debug_assertions))]
+	// I'm not sure why this is not automatic, but assertions still seem to trigger otherwise.
+	build.define("NDEBUG", None);
+
 	build.files(src);
 
 	build.compile("kissat");

@@ -96,6 +96,10 @@ fn main() {
 		.define("NTRACING", None)
 		.define("QUIET", None);
 
+	#[cfg(not(debug_assertions))]
+	// I'm not sure why this is not automatic, but assertions still seem to trigger otherwise.
+	build.define("NDEBUG", None);
+
 	if build.get_compiler().is_like_msvc() {
 		build.include(Path::new("vendor/cadical/contrib/msvc"));
 	}
