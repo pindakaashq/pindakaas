@@ -158,8 +158,9 @@ pub trait Propagator {
 		let _ = persistent;
 	}
 	fn notify_new_decision_level(&mut self) {}
-	fn notify_backtrack(&mut self, new_level: usize) {
+	fn notify_backtrack(&mut self, new_level: usize, restart: bool) {
 		let _ = new_level;
+		let _ = restart;
 	}
 
 	/// Method called to check the found complete solution (after solution

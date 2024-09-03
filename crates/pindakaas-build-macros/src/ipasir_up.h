@@ -29,7 +29,7 @@ void ipasir_connect_external_propagator(
   // to an assignment.
   void (*prop_notify_assignment) (void* prop, int lit, bool is_fixed),
   void (*prop_notify_new_decision_level) (void* prop),
-  void (*prop_notify_backtrack) (void* prop, size_t new_level),
+  void (*prop_notify_backtrack) (void* prop, size_t new_level, bool restart),
   // Check by the external propagator the found complete solution (after
   // solution reconstruction). If it returns false, the propagator must
   // provide an external clause during the next callback.

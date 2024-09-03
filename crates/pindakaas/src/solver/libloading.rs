@@ -504,13 +504,14 @@ pub(crate) unsafe extern "C" fn ipasir_notify_new_decision_level_cb<P: Propagato
 pub(crate) unsafe extern "C" fn ipasir_notify_backtrack_cb<P: Propagator, A>(
 	state: *mut c_void,
 	level: usize,
+	restart: bool,
 ) {
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	prop.pqueue.clear();
 	prop.explaining = None;
 	prop.rqueue.clear();
 	prop.cqueue = None;
-	prop.prop.notify_backtrack(level);
+	prop.prop.notify_backtrack(level, restart);
 }
 #[cfg(feature = "ipasir-up")]
 pub(crate) unsafe extern "C" fn ipasir_check_model_cb<P: Propagator, A: SolvingActions>(
