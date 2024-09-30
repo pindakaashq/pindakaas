@@ -123,6 +123,7 @@ mod subscriber {
 		}
 	}
 
+	#[derive(Debug)]
 	pub struct FlushGuard {
 		out: Arc<Mutex<BufWriter<Stderr>>>,
 	}
