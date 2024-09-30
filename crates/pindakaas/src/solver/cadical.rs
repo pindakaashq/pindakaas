@@ -9,10 +9,9 @@ use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
 use pindakaas_derive::IpasirSolver;
 
 use super::VarFactory;
-use crate::{
-	solver::libloading::{FFIPointer, PropagatorPointer},
-	Lit,
-};
+#[cfg(feature = "ipasir-up")]
+use crate::solver::libloading::PropagatorPointer;
+use crate::{solver::libloading::FFIPointer, Lit};
 
 #[derive(IpasirSolver)]
 #[ipasir(krate = pindakaas_cadical, assumptions, learn_callback, term_callback, ipasir_up)]
