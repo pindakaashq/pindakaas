@@ -12,13 +12,11 @@ pub struct SortingNetworkEncoder {
 
 impl Default for SortingNetworkEncoder {
 	fn default() -> Self {
-		Self {
-			sorted_encoder: SortedEncoder {
-				overwrite_direct_cmp: None,
-				overwrite_recursive_cmp: None,
-				..SortedEncoder::default()
-			},
-		}
+		let mut sorted_encoder = SortedEncoder::default();
+		let _ = sorted_encoder
+			.with_overwrite_direct_cmp(None)
+			.with_overwrite_recursive_cmp(None);
+		Self { sorted_encoder }
 	}
 }
 
@@ -150,12 +148,11 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				let f = SortedEncoder {
-					strategy: SortedStrategy::Recursive,
-					overwrite_direct_cmp: None,
-					overwrite_recursive_cmp: None,
-					..SortedEncoder::default()
-				};
+				let mut f = SortedEncoder::default();
+				let _ = f
+					.with_strategy(SortedStrategy::Recursive)
+					.with_overwrite_direct_cmp(None)
+					.with_overwrite_recursive_cmp(None);
 				let _ = e.set_sorted_encoder(f);
 				e
 			},
@@ -167,13 +164,11 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				let mut f = SortedEncoder {
-					strategy: SortedStrategy::Recursive,
-					overwrite_direct_cmp: None,
-					overwrite_recursive_cmp: None,
-					..SortedEncoder::default()
-				};
-				let _ = f.set_strategy(SortedStrategy::Recursive);
+				let mut f = SortedEncoder::default();
+				let _ = f
+					.with_strategy(SortedStrategy::Recursive)
+					.with_overwrite_direct_cmp(None)
+					.with_overwrite_recursive_cmp(None);
 				let _ = e.set_sorted_encoder(f);
 				e
 			},
@@ -185,12 +180,11 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				let f = SortedEncoder {
-					strategy: SortedStrategy::Direct,
-					overwrite_direct_cmp: None,
-					overwrite_recursive_cmp: None,
-					..SortedEncoder::default()
-				};
+				let mut f = SortedEncoder::default();
+				let _ = f
+					.with_strategy(SortedStrategy::Direct)
+					.with_overwrite_direct_cmp(None)
+					.with_overwrite_recursive_cmp(None);
 				let _ = e.set_sorted_encoder(f);
 				e
 			},
@@ -202,12 +196,11 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				let f = SortedEncoder {
-					strategy: SortedStrategy::Direct,
-					overwrite_direct_cmp: None,
-					overwrite_recursive_cmp: None,
-					..SortedEncoder::default()
-				};
+				let mut f = SortedEncoder::default();
+				let _ = f
+					.with_strategy(SortedStrategy::Direct)
+					.with_overwrite_direct_cmp(None)
+					.with_overwrite_recursive_cmp(None);
 				let _ = e.set_sorted_encoder(f);
 				e
 			},
@@ -219,12 +212,11 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				let f = SortedEncoder {
-					strategy: SortedStrategy::Mixed(2),
-					overwrite_direct_cmp: None,
-					overwrite_recursive_cmp: None,
-					..SortedEncoder::default()
-				};
+				let mut f = SortedEncoder::default();
+				let _ = f
+					.with_strategy(SortedStrategy::Mixed(2))
+					.with_overwrite_direct_cmp(None)
+					.with_overwrite_recursive_cmp(None);
 				let _ = e.set_sorted_encoder(f);
 				e
 			},
