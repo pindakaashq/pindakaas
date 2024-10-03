@@ -1,6 +1,8 @@
-use cached::proc_macro::cached;
+use std::{hash, mem, sync::Mutex};
+
 use iset::interval_map;
 use itertools::Itertools;
+use rustc_hash::FxHashMap;
 
 use crate::{
 	helpers::{add_clauses_for, emit_clause, negate_cnf},
@@ -10,13 +12,24 @@ use crate::{
 	Valuation,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+type SortedCache = FxHashMap<(u128, u128, u128), (SortedStrategy, (u128, u128))>;
+
+#[derive(Debug)]
+/// Encoder for [`Sorted`] employing a Merge Sort strategy.
+///
+/// # Warning
+/// The encoder structure contains a cache for computing node costs that is
+/// used when using a mixed strategy. This cache is not considered when
+/// comparing two encoders for equality, when hashing, or when cloning. This
+/// could, for example, mean that a cloned encoder might lead to a degradation
+/// in performance.
 pub struct SortedEncoder {
-	pub(crate) add_consistency: bool,
-	pub(crate) strategy: SortedStrategy,
-	pub(crate) overwrite_direct_cmp: Option<LimitComp>,
-	pub(crate) overwrite_recursive_cmp: Option<LimitComp>,
-	pub(crate) sort_n: SortN,
+	add_consistency: bool,
+	strategy: SortedStrategy,
+	overwrite_direct_cmp: Option<LimitComp>,
+	overwrite_recursive_cmp: Option<LimitComp>,
+	sort_n: SortN,
+	strategy_cost_cache: Mutex<SortedCache>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -31,29 +44,6 @@ pub enum SortedStrategy {
 	Direct,
 	Recursive,
 	Mixed(u32),
-}
-
-impl Default for SortedEncoder {
-	fn default() -> Self {
-		Self {
-			strategy: SortedStrategy::Mixed(10),
-			add_consistency: false,
-			overwrite_direct_cmp: Some(LimitComp::LessEq),
-			overwrite_recursive_cmp: Some(LimitComp::Equal),
-			sort_n: SortN::DivTwo,
-		}
-	}
-}
-
-impl SortedEncoder {
-	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_consistency = b;
-		self
-	}
-	pub fn set_strategy(&mut self, strategy: SortedStrategy) -> &mut Self {
-		self.strategy = strategy;
-		self
-	}
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +114,26 @@ impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for SortedEncoder {
 }
 
 impl SortedEncoder {
+	/// Set whether to add consistency constraints to the intermediate integer
+	/// variables.
+	pub fn enable_intermediate_consistency(&mut self, b: bool) -> &mut Self {
+		self.add_consistency = b;
+		self
+	}
+	/// Set whether the encoder should use the direct or recursive strategy, or a
+	/// mix of both.
+	pub fn with_strategy(&mut self, strategy: SortedStrategy) -> &mut Self {
+		self.strategy = strategy;
+		self
+	}
+	pub(crate) fn with_overwrite_direct_cmp(&mut self, cmp: Option<LimitComp>) -> &mut Self {
+		self.overwrite_direct_cmp = cmp;
+		self
+	}
+	pub(crate) fn with_overwrite_recursive_cmp(&mut self, cmp: Option<LimitComp>) -> &mut Self {
+		self.overwrite_recursive_cmp = cmp;
+		self
+	}
 	fn next_int_var<DB: ClauseDatabase>(&self, db: &mut DB, ub: Coeff, lbl: String) -> IntVarEnc {
 		// TODO We always have the view x>=1 <-> y>=1, which is now realized using equiv
 		if ub == 0 {
@@ -279,18 +289,12 @@ impl SortedEncoder {
 		_lvl: usize,
 	) -> Result {
 		let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
-		let (strat, _cost) = merged_cost(a as u128, b as u128, c as u128, self.strategy.clone());
-
-		// TODO: Add tracing
-		// eprintln!(
-		//	"{:_lvl$}merged({}, {}, {}, {:?})",
-		//	"",
-		//	x1,
-		//	x2,
-		//	y,
-		//	_cost,
-		//	_lvl = _lvl
-		// );
+		let strat = if let SortedStrategy::Mixed(lambda) = &self.strategy {
+			let mut cache = self.strategy_cost_cache.lock().unwrap();
+			SortedStrategy::mixed_cost(&mut cache, a as u128, b as u128, c as u128, *lambda).0
+		} else {
+			self.strategy.clone()
+		};
 
 		match strat {
 			SortedStrategy::Direct => {
@@ -402,85 +406,159 @@ impl SortedEncoder {
 	}
 }
 
-fn merged_dir_cost(a: u128, b: u128, c: u128) -> (u128, u128) {
-	if a <= c && b <= c && a + b > c {
-		(
-			c,
-			(a + b) * c - ((c * (c - 1)) / 2) - ((a * (a - 1)) / 2) - ((b * (b - 1)) / 2),
-		)
-	} else {
-		(a + b, a * b + a + b)
-	}
-}
-
-fn merged_rec_cost(a: u128, b: u128, c: u128, strat: SortedStrategy) -> (u128, u128) {
-	let div_ceil = |a: u128, b: u128| {
-		a.checked_add(b)
-			.unwrap()
-			.checked_sub(1)
-			.unwrap()
-			.checked_div(b)
-			.unwrap()
-	};
-
-	match (a, b, c) {
-		(0, 0, _) => (0, 0),
-		(1, 0, _) => unreachable!(),
-		(0, 1, _) => (0, 0),
-		(1, 1, 1) => (1, 2),
-		(1, 1, 2) => (2, 3),
-		(a, b, c) => {
-			let ((_, (v1, c1)), (_, (v2, c2)), (v3, c3)) = (
-				merged_cost(div_ceil(a, 2), div_ceil(b, 2), c / 2 + 1, strat.clone()),
-				merged_cost(a / 2, b / 2, c / 2, strat),
-				(
-					c - 1,
-					if c % 2 == 1 {
-						(3 * c - 3) / 2
-					} else {
-						((3 * c - 2) / 2) + 2
-					},
-				),
-			);
-			(v1 + v2 + v3, c1 + c2 + c3)
+impl Clone for SortedEncoder {
+	fn clone(&self) -> Self {
+		Self {
+			add_consistency: self.add_consistency,
+			strategy: self.strategy.clone(),
+			overwrite_direct_cmp: self.overwrite_direct_cmp.clone(),
+			overwrite_recursive_cmp: self.overwrite_recursive_cmp.clone(),
+			sort_n: self.sort_n.clone(),
+			strategy_cost_cache: Mutex::default(),
 		}
 	}
 }
 
-fn merged_mix_cost(
-	dir_cost: (u128, u128),
-	rec_cost: (u128, u128),
-	l: u32,
-) -> (SortedStrategy, (u128, u128)) {
-	if lambda(dir_cost, l) < lambda(rec_cost, l) {
-		(SortedStrategy::Direct, dir_cost)
-	} else {
-		(SortedStrategy::Recursive, rec_cost)
+impl Default for SortedEncoder {
+	fn default() -> Self {
+		Self {
+			strategy: SortedStrategy::Mixed(10),
+			add_consistency: false,
+			overwrite_direct_cmp: Some(LimitComp::LessEq),
+			overwrite_recursive_cmp: Some(LimitComp::Equal),
+			sort_n: SortN::DivTwo,
+			strategy_cost_cache: Mutex::default(),
+		}
 	}
 }
 
-#[cached]
-fn merged_cost(a: u128, b: u128, c: u128, strat: SortedStrategy) -> (SortedStrategy, (u128, u128)) {
-	if a > b {
-		merged_cost(b, a, c, strat)
-	} else {
-		match strat {
-			SortedStrategy::Direct => (SortedStrategy::Direct, merged_dir_cost(a, b, c)),
-			SortedStrategy::Recursive => {
-				(SortedStrategy::Recursive, merged_rec_cost(a, b, c, strat))
+impl Eq for SortedEncoder {}
+
+impl hash::Hash for SortedEncoder {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		// Deconstruct the struct to ensure no additional fields are ignored if
+		// they are ever added
+		let &Self {
+			add_consistency,
+			strategy,
+			overwrite_direct_cmp,
+			overwrite_recursive_cmp,
+			sort_n,
+			strategy_cost_cache: _, // Ignore the cache for hashing
+		} = &self;
+		add_consistency.hash(state);
+		strategy.hash(state);
+		overwrite_direct_cmp.hash(state);
+		overwrite_recursive_cmp.hash(state);
+		sort_n.hash(state);
+	}
+}
+
+impl PartialEq for SortedEncoder {
+	fn eq(&self, other: &Self) -> bool {
+		// Deconstruct the two structs to ensure no additional fields are ignored if
+		// they are ever added
+		let &Self {
+			add_consistency: a1,
+			strategy: b1,
+			overwrite_direct_cmp: c1,
+			overwrite_recursive_cmp: d1,
+			sort_n: e1,
+			strategy_cost_cache: _, // Ignore the cache for equality comparison
+		} = &self;
+		let &Self {
+			add_consistency: a2,
+			strategy: b2,
+			overwrite_direct_cmp: c2,
+			overwrite_recursive_cmp: d2,
+			sort_n: e2,
+			strategy_cost_cache: _,
+		} = &other;
+		a1 == a2 && b1 == b2 && c1 == c2 && d1 == d2 && e1 == e2
+	}
+}
+
+impl SortedStrategy {
+	/// Calculate the cost of both the direct and recursive strategies for the
+	/// given upper bounds of the integer variables, and return the best
+	/// strategy and its cost using the given lambda to bias the comparison.
+	fn mixed_cost(
+		cache: &mut SortedCache,
+		mut a: u128,
+		mut b: u128,
+		c: u128,
+		lambda: u32,
+	) -> (SortedStrategy, (u128, u128)) {
+		if a > b {
+			mem::swap(&mut a, &mut b);
+		}
+		let key = (a, b, c);
+		if cache.contains_key(&key) {
+			return cache[&key].clone();
+		}
+
+		// TODO safely use floating point for lambda
+		let lambda_fn = |(v, c): (u128, u128), lambda: u32| -> u128 { (v * lambda as u128) + c };
+
+		let dir_cost = Self::direct_cost(a, b, c);
+		let rec_cost = Self::recursive_cost(cache, a, b, c, lambda);
+		let ret = if lambda_fn(dir_cost, lambda) < lambda_fn(rec_cost, lambda) {
+			(SortedStrategy::Direct, dir_cost)
+		} else {
+			(SortedStrategy::Recursive, rec_cost)
+		};
+
+		let _ = cache.insert(key, ret.clone());
+		ret
+	}
+
+	/// Calculate the cost of the direct strategy for the given upper bounds of
+	/// the integer variables.
+	fn direct_cost(a: u128, b: u128, c: u128) -> (u128, u128) {
+		if a <= c && b <= c && a + b > c {
+			(
+				c,
+				(a + b) * c - ((c * (c - 1)) / 2) - ((a * (a - 1)) / 2) - ((b * (b - 1)) / 2),
+			)
+		} else {
+			(a + b, a * b + a + b)
+		}
+	}
+
+	/// Calculate the cost of the recursive strategy for the given upper bounds
+	/// of the integer variables.
+	fn recursive_cost(
+		cache: &mut SortedCache,
+		a: u128,
+		b: u128,
+		c: u128,
+		lambda: u32,
+	) -> (u128, u128) {
+		let div_ceil = |a: u128, b: u128| (a - 1 + b) / b;
+
+		match (a, b, c) {
+			(0, 0, _) => (0, 0),
+			(1, 0, _) => unreachable!(),
+			(0, 1, _) => (0, 0),
+			(1, 1, 1) => (1, 2),
+			(1, 1, 2) => (2, 3),
+			(a, b, c) => {
+				let ((_, (v1, c1)), (_, (v2, c2)), (v3, c3)) = (
+					Self::mixed_cost(cache, div_ceil(a, 2), div_ceil(b, 2), c / 2 + 1, lambda),
+					Self::mixed_cost(cache, a / 2, b / 2, c / 2, lambda),
+					(
+						c - 1,
+						if c % 2 == 1 {
+							(3 * c - 3) / 2
+						} else {
+							((3 * c - 2) / 2) + 2
+						},
+					),
+				);
+				(v1 + v2 + v3, c1 + c2 + c3)
 			}
-			SortedStrategy::Mixed(lambda) => merged_mix_cost(
-				merged_dir_cost(a, b, c),
-				merged_rec_cost(a, b, c, strat),
-				lambda,
-			),
 		}
 	}
-}
-
-// TODO safely use floating point for lambda
-fn lambda((v, c): (u128, u128), lambda: u32) -> u128 {
-	(v * lambda as u128) + c
 }
 
 #[cfg(test)]

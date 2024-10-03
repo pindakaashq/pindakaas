@@ -10,7 +10,7 @@ use crate::{
 	Linear, LinearConstraint, Lit, Result, Unsatisfiable,
 };
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LinearAggregator {
 	sorted_encoder: SortedEncoder,
 	sort_same_coefficients: usize,
