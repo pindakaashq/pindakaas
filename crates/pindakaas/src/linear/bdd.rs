@@ -209,20 +209,23 @@ fn bdd(
 
 #[cfg(test)]
 mod tests {
+
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;
+	use crate::helpers::tests::expect_file;
 	use crate::{
+		helpers::tests::assert_solutions,
 		// cardinality_one::tests::card1_test_suite, CardinalityOne,
-		helpers::tests::{assert_sol, lits},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
 			LimitComp,
 		},
+		Cnf,
 		Encoder,
-		Lit,
 	};
+
 	linear_test_suite!(BddEncoder::default());
 	// FIXME: BDD does not support LimitComp::Equal
 	// card1_test_suite!(BddEncoder::default());

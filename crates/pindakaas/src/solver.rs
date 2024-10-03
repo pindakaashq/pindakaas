@@ -1,4 +1,4 @@
-#[cfg(feature = "cadical")]
+#[cfg(any(feature = "cadical", test))]
 pub mod cadical;
 #[cfg(feature = "intel-sat")]
 pub mod intel_sat;

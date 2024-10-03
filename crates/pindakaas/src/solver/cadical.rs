@@ -151,12 +151,8 @@ mod tests {
 
 		use itertools::Itertools;
 
-		use crate::{
-			helpers::tests::lits,
-			solver::{
-				NextVarRange, PropagatingSolver, Propagator, PropagatorAccess, SolvingActions,
-				VarRange,
-			},
+		use crate::solver::{
+			NextVarRange, PropagatingSolver, Propagator, PropagatorAccess, SolvingActions, VarRange,
 		};
 
 		let mut slv = Cadical::default();
@@ -230,17 +226,19 @@ mod tests {
 				.unwrap()
 		}
 		solns.sort();
+
+		let (a, b, c, d, e) = vars.clone().iter_lits().collect_tuple().unwrap();
 		assert_eq!(
 			solns,
 			vec![
-				lits![1, -2, -3, 4, -5],
-				lits![1, -2, -3, -4, 5],
-				lits![1, -2, -3, -4, -5],
-				lits![-1, 2, -3, -4, 5],
-				lits![-1, 2, -3, -4, -5],
-				lits![-1, -2, 3, -4, -5],
-				lits![-1, -2, -3, 4, -5],
-				lits![-1, -2, -3, -4, 5],
+				vec![a, !b, !c, d, !e],
+				vec![a, !b, !c, !d, e],
+				vec![a, !b, !c, !d, !e],
+				vec![!a, b, !c, !d, e],
+				vec![!a, b, !c, !d, !e],
+				vec![!a, !b, c, !d, !e],
+				vec![!a, !b, !c, d, !e],
+				vec![!a, !b, !c, !d, e],
 			]
 		);
 		assert!(slv.propagator::<Dist2>().unwrap().tmp.is_empty())

@@ -2,11 +2,11 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	helpers::{as_binary, XorConstraint, XorEncoder},
+	helpers::as_binary,
 	int::LitOrConst,
 	linear::{LimitComp, PosCoeff},
 	trace::{emit_clause, new_var},
-	ClauseDatabase, Coeff, Encoder, Linear, Lit, Result, Unsatisfiable,
+	ClauseDatabase, Coeff, Encoder, Formula, Linear, Lit, Result, TseitinEncoder, Unsatisfiable,
 };
 
 /// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a binary adders circuits
@@ -333,7 +333,10 @@ fn sum_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: LitOrCons
 			}
 			_ => unreachable!(),
 		},
-		LitOrConst::Const(true) => XorEncoder::default().encode(db, &XorConstraint::new(input)),
+		LitOrConst::Const(true) => {
+			let xor = Formula::Xor(input.into_iter().map(|&l| Formula::Atom(l)).collect_vec());
+			TseitinEncoder.encode(db, &xor)
+		}
 		LitOrConst::Const(false) => match *input {
 			[a, b] => {
 				emit_clause!(db, [a, !b])?;
@@ -428,79 +431,82 @@ mod tests {
 	use crate::{
 		cardinality::tests::card_test_suite,
 		cardinality_one::tests::card1_test_suite,
-		helpers::tests::{assert_enc_sol, assert_sol, lits, TestDB},
+		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
 			LimitComp, StaticLinEncoder,
 		},
-		Cardinality, CardinalityOne, Comparator, Encoder, LinExp, LinearConstraint, LinearEncoder,
-		PairwiseEncoder,
+		solver::NextVarRange,
+		Cardinality, CardinalityOne, Cnf, Comparator, Encoder, LinExp, LinearConstraint,
+		LinearEncoder, PairwiseEncoder,
 	};
 
 	#[test]
 	fn test_pb_encode() {
-		assert_enc_sol!(
-			LinearEncoder::<StaticLinEncoder>::default(),
-			4,
-			&LinearConstraint::new(
-				LinExp::from_slices(&[1,1,1,2], &lits![1,2,3,4]),
-				Comparator::LessEq,
-				1
+		let mut cnf = Cnf::default();
+		let vars = cnf.next_var_range(4).unwrap().iter_lits().collect_vec();
+		LinearEncoder::<StaticLinEncoder>::default()
+			.encode(
+				&mut cnf,
+				&LinearConstraint::new(
+					LinExp::from_slices(&[1, 1, 1, 2], &vars),
+					Comparator::LessEq,
+					1,
+				),
 			)
-			=>
-			vec![
-				lits![-4], lits![-3, -1], lits![-2, -1], lits![-3, -2]
-			],
-			vec![
-				lits![-1, -2, -3, -4],
-				lits![-1, -2, 3, -4],
-				lits![-1, 2, -3, -4],
-				lits![1, -2, -3, -4],
-			]
-		);
+			.unwrap();
+
+		assert_encoding(&cnf, &expect_file!["linear/adder/test_pb_encode.cnf"]);
+		assert_solutions(&cnf, vars, &expect_file!["linear/adder/test_pb_encode.sol"]);
 	}
 
 	#[test]
 	fn test_encoders() {
-		// +7*x1 +10*x2 +4*x3 +4*x4 <= 9
-		let mut db = TestDB::new(4).expect_solutions(vec![
-			lits![-1, -2, -3, -4],
-			lits![1, -2, -3, -4],
-			lits![-1, -2, 3, -4],
-			lits![-1, -2, -3, 4],
-		]);
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf
+			.next_var_range(4)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
 		// TODO encode this if encoder does not support constraint
-		assert!(PairwiseEncoder::default()
+		PairwiseEncoder::default()
 			.encode(
-				&mut db,
+				&mut cnf,
 				&CardinalityOne {
-					lits: lits![1, 2],
-					cmp: LimitComp::LessEq
-				}
+					lits: vec![a, b],
+					cmp: LimitComp::LessEq,
+				},
 			)
-			.is_ok());
-		assert!(PairwiseEncoder::default()
+			.unwrap();
+		PairwiseEncoder::default()
 			.encode(
-				&mut db,
+				&mut cnf,
 				&CardinalityOne {
-					lits: lits![3, 4],
-					cmp: LimitComp::LessEq
-				}
+					lits: vec![c, d],
+					cmp: LimitComp::LessEq,
+				},
 			)
-			.is_ok());
-		assert!(LinearEncoder::<StaticLinEncoder<AdderEncoder>>::default()
+			.unwrap();
+		// +7*x1 +10*x2 +4*x3 +4*x4 <= 9
+		LinearEncoder::<StaticLinEncoder<AdderEncoder>>::default()
 			.encode(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
 					LinExp::default()
-						.add_choice(&[(1.into(), 7), (2.into(), 10)])
-						.add_choice(&[(3.into(), 4), (4.into(), 4)]),
+						.add_choice(&[(a, 7), (b, 10)])
+						.add_choice(&[(c, 4), (d, 4)]),
 					Comparator::LessEq,
 					9,
 				),
 			)
-			.is_ok());
-		db.check_complete();
+			.unwrap();
+
+		assert_solutions(
+			&cnf,
+			vec![a, b, c, d],
+			&expect_file!["linear/adder/test_encoders.sol"],
+		);
 	}
 
 	linear_test_suite!(AdderEncoder::default());

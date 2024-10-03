@@ -298,10 +298,6 @@ pub enum IntEncoding<'a> {
 /// To satisfy the trait, the type must implement a [`Self::add_clause`] method
 /// and a [`Self::new_var`] method.
 pub trait ClauseDatabase {
-	/// Method to be used to receive a new Boolean variable that can be used in
-	/// the encoding of a problem or constriant.
-	fn new_var(&mut self) -> Var;
-
 	/// Add a clause to the `ClauseDatabase`. The databae is allowed to return
 	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
 	/// unsatisfiable. This is used as a signal to the encoder that any subsequent
@@ -311,6 +307,16 @@ pub trait ClauseDatabase {
 	/// clauses can be simulated using activation literals and solving the problem
 	/// under assumptions.
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result;
+
+	/// Method used to receive a new Boolean variable in the form of a positive
+	/// literal. This is a convenience method on top of [`Self::new_var`].
+	fn new_lit(&mut self) -> Lit {
+		self.new_var().into()
+	}
+
+	/// Method to be used to receive a new Boolean variable that can be used in
+	/// the encoding of a problem or constraint.
+	fn new_var(&mut self) -> Var;
 
 	fn encode<C, E: Encoder<Self, C>>(&mut self, constraint: &C, encoder: &E) -> Result
 	where
@@ -405,6 +411,15 @@ impl Cnf {
 
 	pub fn literals(&self) -> usize {
 		self.size.iter().sum()
+	}
+
+	#[cfg(test)]
+	/// Small helper method that gets all the created variables, used for testing.
+	pub(crate) fn get_variables(&self) -> VarRange {
+		VarRange::new(
+			Var(NonZeroI32::new(1).unwrap()),
+			self.nvar.next_var.unwrap().prev_var().unwrap(),
+		)
 	}
 }
 
@@ -518,8 +533,8 @@ impl Display for Cnf {
 		let mut start = 0;
 		for size in self.size.iter() {
 			let cl = self.lits.iter().skip(start).take(*size);
-			for lit in cl {
-				write!(f, "{lit} ")?
+			for &lit in cl {
+				write!(f, "{} ", i32::from(lit))?
 			}
 			writeln!(f, "0")?;
 			start += size;

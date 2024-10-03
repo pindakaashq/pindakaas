@@ -78,17 +78,18 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for SwcEncoder {
 
 #[cfg(test)]
 mod tests {
+
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;
 	use crate::{
-		helpers::tests::{assert_sol, lits},
+		helpers::tests::{assert_solutions, expect_file},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
 			LimitComp, PosCoeff,
 		},
-		Encoder, Lit,
+		Cnf, Encoder,
 	};
 
 	linear_test_suite!(SwcEncoder::default());

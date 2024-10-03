@@ -112,53 +112,45 @@ impl TotalizerEncoder {
 
 #[cfg(test)]
 mod tests {
+
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;
+	use crate::helpers::tests::expect_file;
 	use crate::{
 		// cardinality_one::tests::card1_test_suite, CardinalityOne,
-		helpers::tests::{assert_sol, lits, TestDB},
+		helpers::tests::{assert_checker, assert_solutions},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
-			LimitComp, PosCoeff,
+			LimitComp, PosCoeff, StaticLinEncoder,
 		},
+		solver::NextVarRange,
+		Cnf,
 		Comparator,
 		Encoder,
 		LinExp,
 		LinearAggregator,
 		LinearConstraint,
-		Lit,
+		LinearEncoder,
 		SortedEncoder,
 	};
 
 	#[test]
 	fn test_sort_same_coefficients_2() {
-		use crate::{
-			linear::{LinearEncoder, StaticLinEncoder},
-			Checker, Encoder,
-		};
-		let mut db = TestDB::new(5);
+		let mut db = Cnf::default();
+		let vars = db.next_var_range(5).unwrap().iter_lits().collect_vec();
 		let mut agg = LinearAggregator::default();
 		agg.sort_same_coefficients(SortedEncoder::default(), 3);
 		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default();
 		encoder.add_linear_aggregater(agg);
 		let con = LinearConstraint::new(
-			LinExp::from_slices(&[3, 3, 1, 1, 3], &lits![1, 2, 3, 4, 5]),
+			LinExp::from_slices(&[3, 3, 1, 1, 3], &vars),
 			Comparator::GreaterEq,
 			2,
 		);
-		assert!(encoder.encode(&mut db, &con).is_ok());
-		db.with_check(|value| {
-			LinearConstraint::new(
-				LinExp::from_slices(&[3, 3, 1, 1, 3], &lits![1, 2, 3, 4, 5]),
-				Comparator::GreaterEq,
-				2,
-			)
-			.check(value)
-			.is_ok()
-		})
-		.check_complete()
+		encoder.encode(&mut db, &con).unwrap();
+		assert_checker(&db, &con);
 	}
 
 	linear_test_suite!(TotalizerEncoder::default());
