@@ -1,62 +1,68 @@
-name: Rust
+name: Run Tests
 
 on:
   push:
-    branches: ["develop"]
+    branches:
+      - "develop"
   pull_request:
-    branches: ["develop"]
+  workflow_dispatch:
 
 env:
-  CARGO_TERM_COLOR: always
-  RUST_CHANNEL: stable
-  # Lets us format with unstable rustfmt options
-  RUST_FMT_CHANNEL: nightly
+  RUST_CHANNEL: "stable"
+  RUST_COV_CHANNEL: "nightly"
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+  test-coverage:
+    runs-on: "ubuntu-latest"
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
       - name: Install Rust toolchain
-        run: |
-          rustup toolchain install --profile minimal --no-self-update ${{ env.RUST_CHANNEL }}
-          rustup default ${{ env.RUST_CHANNEL }}
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.5
+        uses: moonrepo/setup-rust@v0
+        with:
+          cache: false
+          channel: ${{ env.RUST_COV_CHANNEL }}
+      - name: cargo install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate code coverage
+        run: cargo llvm-cov --all-features --workspace --codecov --output-path codecov.json
+      - uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: codecov.json
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install Rust toolchain
+        uses: moonrepo/setup-rust@v0
+        with:
+          cache: false
+          channel: ${{ env.RUST_COV_CHANNEL }}
       - name: Run cargo test
-        run: cargo test --features splr,cadical,kissat,intel-sat,ipasir-up
-        if: matrix.os == 'ubuntu-latest'
-      - name: Run cargo test
-        run: cargo test -p pindakaas --features splr,cadical,ipasir-up
+        run: cargo test -p pindakaas --features splr,cadical,ipasir-up,tracing
         if: matrix.os == 'windows-latest'
+      - name: Run cargo test
+        run: cargo test --all-features
+        if: matrix.os != 'windows-latest'
   clippy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install --profile minimal --component clippy --no-self-update ${{ env.RUST_CHANNEL }}
-          rustup default ${{ env.RUST_CHANNEL }}
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.5
-      - name: Run clippy
-        run: cargo clippy --tests --features splr,cadical,kissat,intel-sat,ipasir-up -- -D warnings
-  format:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Install Rust toolchain and clippy
+        uses: moonrepo/setup-rust@v0
         with:
-          submodules: true
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install --profile minimal --component rustfmt --no-self-update ${{ env.RUST_FMT_CHANNEL }}
-          rustup default ${{ env.RUST_CHANNEL }}
-      - name: Run cargo format
-        run: cargo +nightly fmt --all --check
+          channel: ${{ env.RUST_CHANNEL }}
+          components: clippy
+      - name: Run clippy
+        run: cargo clippy --tests -- -D warnings
+      - name: Run clippy with all features
+        run: cargo clippy --tests --all-features -- -D warnings
