@@ -2,9 +2,9 @@ use std::fmt;
 
 use itertools::Itertools;
 
-use super::{enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, LitOrConst};
 use crate::{
 	helpers::{add_clauses_for, as_binary, emit_clause, negate_cnf},
+	int::{enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, LitOrConst},
 	linear::{
 		lex_geq_const, lex_leq_const, log_enc_add, log_enc_add_, LimitComp, LinExp, PosCoeff,
 	},
@@ -335,12 +335,12 @@ pub(crate) mod tests {
 	use iset::{interval_set, IntervalSet};
 	use traced_test::test;
 
-	use super::*;
 	use crate::{
 		helpers::tests::{assert_solutions, expect_file, make_valuation},
-		int::IntVarOrd,
+		int::{IntVarBin, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+		linear::LimitComp,
 		solver::VarRange,
-		Cnf, Lit, Var,
+		ClauseDatabase, Cnf, Coeff, Encoder, LinExp, Lit, Var,
 	};
 
 	fn get_ord_x<DB: ClauseDatabase>(

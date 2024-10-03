@@ -113,9 +113,9 @@ impl TotalizerEncoder {
 #[cfg(test)]
 mod tests {
 
+	use itertools::Itertools;
 	use traced_test::test;
 
-	use super::*;
 	use crate::helpers::tests::expect_file;
 	use crate::{
 		// cardinality_one::tests::card1_test_suite, CardinalityOne,
@@ -125,14 +125,17 @@ mod tests {
 			LimitComp, PosCoeff, StaticLinEncoder,
 		},
 		solver::NextVarRange,
+		ClauseDatabase,
 		Cnf,
 		Comparator,
 		Encoder,
 		LinExp,
+		Linear,
 		LinearAggregator,
 		LinearConstraint,
 		LinearEncoder,
 		SortedEncoder,
+		TotalizerEncoder,
 	};
 
 	#[test]

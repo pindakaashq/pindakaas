@@ -487,13 +487,15 @@ fn lambda((v, c): (u128, u128), lambda: u32) -> u128 {
 mod tests {
 	use std::num::NonZeroI32;
 
+	use itertools::Itertools;
 	use traced_test::test;
 
-	use super::*;
 	use crate::{
 		helpers::tests::{assert_solutions, expect_file},
+		int::{IntVarEnc, IntVarOrd, TernLeConstraint},
 		solver::{NextVarRange, VarRange},
-		Cnf, Var,
+		sorted::Sorted,
+		ClauseDatabase, Cnf, Encoder, LimitComp, SortedEncoder, SortedStrategy, Var,
 	};
 
 	fn get_sorted_encoder(strategy: SortedStrategy) -> SortedEncoder {

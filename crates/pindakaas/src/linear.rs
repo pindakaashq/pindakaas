@@ -666,8 +666,10 @@ impl<
 
 #[cfg(test)]
 mod tests {
-	use super::{Part, PosCoeff};
-	use crate::{Coeff, Lit};
+	use crate::{
+		linear::{Part, PosCoeff},
+		Coeff, Lit,
+	};
 
 	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(terms: &[(L, Coeff)]) -> Vec<Part> {
 		terms

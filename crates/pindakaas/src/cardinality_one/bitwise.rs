@@ -1,7 +1,7 @@
 use itertools::Itertools;
 
-use super::at_least_one_clause;
 use crate::{
+	cardinality_one::at_least_one_clause,
 	helpers::{emit_clause, new_var},
 	linear::LimitComp,
 	CardinalityOne, ClauseDatabase, Encoder, Result,
@@ -50,12 +50,11 @@ mod tests {
 	use itertools::Itertools;
 	use traced_test::test;
 
-	use super::*;
 	use crate::{
 		cardinality_one::tests::card1_test_suite,
 		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
 		linear::LimitComp,
-		Cnf, NextVarRange,
+		BitwiseEncoder, CardinalityOne, ClauseDatabase, Cnf, Encoder, NextVarRange,
 	};
 
 	card1_test_suite!(BitwiseEncoder::default());

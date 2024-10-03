@@ -426,20 +426,20 @@ fn trace_print_carry(input: &[Lit], output: &LitOrConst) -> String {
 
 #[cfg(test)]
 mod tests {
+	use itertools::Itertools;
 	use traced_test::test;
 
-	use super::*;
 	use crate::{
 		cardinality::tests::card_test_suite,
 		cardinality_one::tests::card1_test_suite,
 		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
-			LimitComp, StaticLinEncoder,
+			LimitComp, PosCoeff, StaticLinEncoder,
 		},
 		solver::NextVarRange,
-		Cardinality, CardinalityOne, Cnf, Comparator, Encoder, LinExp, LinearConstraint,
-		LinearEncoder, PairwiseEncoder,
+		AdderEncoder, Cardinality, CardinalityOne, ClauseDatabase, Cnf, Comparator, Encoder,
+		LinExp, Linear, LinearConstraint, LinearEncoder, PairwiseEncoder,
 	};
 
 	#[test]
