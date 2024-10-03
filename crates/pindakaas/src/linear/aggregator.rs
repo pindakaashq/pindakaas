@@ -500,14 +500,14 @@ mod tests {
 	use std::num::NonZeroI32;
 
 	use itertools::Itertools;
+	use traced_test::test;
 
-	// use traced_test::test;
-	use super::*;
 	use crate::{
 		helpers::tests::{assert_encoding, expect_file},
-		linear::{tests::construct_terms, PosCoeff},
+		linear::{tests::construct_terms, Part, PosCoeff},
 		solver::NextVarRange,
-		Cnf, LinExp,
+		Cardinality, CardinalityOne, Cnf, Comparator, LimitComp, LinExp, LinVariant, Linear,
+		LinearAggregator, LinearConstraint, Lit, SortedEncoder, Unsatisfiable,
 	};
 
 	#[test]

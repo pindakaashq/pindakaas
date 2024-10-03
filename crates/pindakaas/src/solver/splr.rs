@@ -1,10 +1,13 @@
 use std::num::NonZeroI32;
 
 pub use splr::Solver as Splr;
-use splr::{Certificate, SatSolverIF, SolveIF, SolverError::*, VERSION};
+use splr::{Certificate, SatSolverIF, SolveIF, VERSION};
 
-use super::{SolveResult, Solver};
-use crate::{helpers::const_concat, ClauseDatabase, Cnf, ConditionalDatabase, Lit, Valuation, Var};
+use crate::{
+	helpers::const_concat,
+	solver::{SolveResult, Solver},
+	ClauseDatabase, Cnf, ConditionalDatabase, Lit, Valuation, Var,
+};
 
 impl ClauseDatabase for Splr {
 	fn new_var(&mut self) -> Var {
@@ -13,6 +16,8 @@ impl ClauseDatabase for Splr {
 		Var(NonZeroI32::new(var).expect("variables cannot use the value zero"))
 	}
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> crate::Result {
+		use splr::SolverError::*;
+
 		let cl: Vec<_> = cl.into_iter().map(Into::<i32>::into).collect();
 		match SatSolverIF::add_clause(self, cl) {
 			Ok(_) => Ok(()),
@@ -45,6 +50,8 @@ impl Solver for Splr {
 	}
 
 	fn solve<SolCb: FnOnce(&Self::ValueFn)>(&mut self, on_sol: SolCb) -> SolveResult {
+		use splr::SolverError::*;
+
 		match SolveIF::solve(self) {
 			Ok(Certificate::UNSAT) => SolveResult::Unsat,
 			Ok(cert @ Certificate::SAT(_)) => {

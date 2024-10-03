@@ -339,12 +339,12 @@ pub(crate) mod tests {
 	use std::{fmt::Display, mem};
 
 	use expect_test::ExpectFile;
+	use itertools::Itertools;
 
-	use super::*;
 	use crate::{
 		int::IntVarEnc,
 		solver::{cadical::Cadical, SolveResult, Solver},
-		Checker, Cnf, LinExp, Valuation,
+		Checker, ClauseDatabase, Cnf, LinExp, Lit, Valuation,
 	};
 
 	/// Simple helper function to assert the generated formula against an expect

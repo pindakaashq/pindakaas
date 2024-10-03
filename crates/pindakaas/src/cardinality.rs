@@ -172,6 +172,5 @@ pub(crate) mod tests {
 			}
 		};
 	}
-
 	pub(crate) use card_test_suite;
 }

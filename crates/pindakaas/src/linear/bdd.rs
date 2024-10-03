@@ -3,10 +3,9 @@ use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc};
 use iset::IntervalMap;
 use itertools::Itertools;
 
-use super::PosCoeff;
 use crate::{
 	int::{IntVarEnc, Lin, Model},
-	linear::LimitComp,
+	linear::{LimitComp, PosCoeff},
 	ClauseDatabase, Coeff, Encoder, Linear, Result,
 };
 
@@ -208,20 +207,15 @@ fn bdd(
 
 #[cfg(test)]
 mod tests {
-
 	use traced_test::test;
 
-	use super::*;
-	use crate::helpers::tests::expect_file;
 	use crate::{
-		helpers::tests::assert_solutions,
-		// cardinality_one::tests::card1_test_suite, CardinalityOne,
+		helpers::tests::{assert_solutions, expect_file},
 		linear::{
 			tests::{construct_terms, linear_test_suite},
-			LimitComp,
+			LimitComp, PosCoeff,
 		},
-		Cnf,
-		Encoder,
+		BddEncoder, ClauseDatabase, Cnf, Encoder, Linear,
 	};
 
 	linear_test_suite!(BddEncoder::default());

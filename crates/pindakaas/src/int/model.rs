@@ -8,9 +8,11 @@ use std::{
 use iset::IntervalMap;
 use itertools::Itertools;
 
-use super::{display_dom, enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, IntVarOrd};
 use crate::{
-	int::{TernLeConstraint, TernLeEncoder},
+	int::{
+		display_dom, enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, IntVarOrd, TernLeConstraint,
+		TernLeEncoder,
+	},
 	ClauseDatabase, Coeff, Encoder, LimitComp, Lit,
 };
 

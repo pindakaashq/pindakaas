@@ -2,8 +2,7 @@ use std::ffi::c_void;
 
 use pindakaas_derive::IpasirSolver;
 
-use super::VarFactory;
-use crate::solver::libloading::FFIPointer;
+use crate::{solver::libloading::FFIPointer, VarFactory};
 
 #[derive(Debug, IpasirSolver)]
 #[ipasir(krate = pindakaas_intel_sat, assumptions, learn_callback, term_callback)]
@@ -34,10 +33,9 @@ impl Default for IntelSat {
 mod tests {
 	use traced_test::test;
 
-	use super::*;
 	use crate::{
 		linear::LimitComp,
-		solver::{SolveResult, Solver},
+		solver::{intel_sat::IntelSat, SolveResult, Solver},
 		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder, Valuation,
 	};
 

@@ -1,6 +1,6 @@
 use pindakaas_derive::IpasirSolver;
 
-use super::VarFactory;
+use crate::VarFactory;
 
 #[derive(Debug, IpasirSolver)]
 #[ipasir(krate = pindakaas_kissat)]
@@ -23,10 +23,9 @@ impl Default for Kissat {
 mod tests {
 	use traced_test::test;
 
-	use super::*;
 	use crate::{
 		linear::LimitComp,
-		solver::{SolveResult, Solver},
+		solver::{kissat::Kissat, SolveResult, Solver},
 		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder, Valuation,
 	};
 

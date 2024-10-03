@@ -8,13 +8,15 @@ use std::{
 
 use libloading::{Library, Symbol};
 
-use super::{
-	FailedAssumtions, LearnCallback, SlvTermSignal, SolveAssuming, SolveResult, Solver,
-	TermCallback, VarFactory,
-};
 #[cfg(feature = "ipasir-up")]
-use super::{Propagator, SolvingActions};
-use crate::{ClauseDatabase, ConditionalDatabase, Lit, Result, Valuation, Var};
+use crate::solver::{Propagator, SolvingActions};
+use crate::{
+	solver::{
+		FailedAssumtions, LearnCallback, SlvTermSignal, SolveAssuming, SolveResult, Solver,
+		TermCallback, VarFactory,
+	},
+	ClauseDatabase, ConditionalDatabase, Lit, Result, Valuation, Var,
+};
 
 #[derive(Debug)]
 pub struct IpasirLibrary {

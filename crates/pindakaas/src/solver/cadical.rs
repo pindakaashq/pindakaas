@@ -8,10 +8,9 @@ use std::{
 use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
 use pindakaas_derive::IpasirSolver;
 
-use super::VarFactory;
 #[cfg(feature = "ipasir-up")]
 use crate::solver::libloading::PropagatorPointer;
-use crate::{solver::libloading::FFIPointer, Lit};
+use crate::{solver::libloading::FFIPointer, Lit, VarFactory};
 
 #[derive(IpasirSolver)]
 #[ipasir(krate = pindakaas_cadical, assumptions, learn_callback, term_callback, ipasir_up)]
@@ -111,10 +110,9 @@ impl Cadical {
 mod tests {
 	use traced_test::test;
 
-	use super::*;
 	use crate::{
 		linear::LimitComp,
-		solver::{SolveResult, Solver},
+		solver::{cadical::Cadical, SolveResult, Solver},
 		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder, Valuation,
 	};
 
@@ -161,8 +159,13 @@ mod tests {
 
 		use itertools::Itertools;
 
-		use crate::solver::{
-			NextVarRange, PropagatingSolver, Propagator, PropagatorAccess, SolvingActions, VarRange,
+		use crate::{
+			helpers::tests::assert_solutions,
+			solver::{
+				cadical::CadicalSol, NextVarRange, PropagatingSolver, Propagator, PropagatorAccess,
+				SolvingActions, VarRange,
+			},
+			Lit,
 		};
 
 		let mut slv = Cadical::default();

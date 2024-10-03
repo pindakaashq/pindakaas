@@ -9,10 +9,9 @@ use iset::{interval_map, interval_set, IntervalMap, IntervalSet};
 use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
-use super::display_dom;
 use crate::{
 	helpers::{as_binary, emit_clause, is_powers_of_two, new_var, unsigned_binary_range_ub},
-	int::{IntVar, TernLeConstraint, TernLeEncoder},
+	int::{display_dom, IntVar, TernLeConstraint, TernLeEncoder},
 	linear::{LimitComp, LinExp, Part, PosCoeff},
 	CheckError, Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
 };

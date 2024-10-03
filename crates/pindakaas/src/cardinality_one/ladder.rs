@@ -41,12 +41,11 @@ mod tests {
 	use itertools::Itertools;
 	use traced_test::test;
 
-	use super::*;
 	use crate::{
 		cardinality_one::tests::card1_test_suite,
 		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
 		linear::LimitComp,
-		Cnf, NextVarRange,
+		CardinalityOne, ClauseDatabase, Cnf, Encoder, LadderEncoder, NextVarRange,
 	};
 
 	card1_test_suite!(LadderEncoder::default());
