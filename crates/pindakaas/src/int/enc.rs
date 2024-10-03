@@ -227,6 +227,17 @@ impl IntVarOrd {
 	pub fn lits(&self) -> usize {
 		self.xs.len()
 	}
+
+	pub fn value(&self, value: &impl Valuation) -> i64 {
+		let mut val = self.lb();
+		for (range, x) in self.xs.iter(..) {
+			if !value.value(*x).unwrap() {
+				return val;
+			}
+			val = range.start;
+		}
+		val
+	}
 }
 
 impl From<&IntVarOrd> for LinExp {
@@ -436,6 +447,18 @@ impl IntVarBin {
 			)?;
 			Ok(z_bin)
 		}
+	}
+
+	pub fn value(&self, value: &impl Valuation) -> i64 {
+		let mut k = 1;
+		self.xs.iter().fold(
+			if GROUND_BINARY_AT_LB { self.lb() } else { 0 },
+			|mut acc, x| {
+				acc += if value.value(*x).unwrap() { k } else { 0 };
+				k *= 2;
+				acc
+			},
+		)
 	}
 }
 
@@ -768,6 +791,16 @@ impl IntVarEnc {
 			IntVarEnc::Ord(o) => o.lits(),
 			IntVarEnc::Bin(b) => b.lits(),
 			IntVarEnc::Const(_) => 0,
+		}
+	}
+
+	#[allow(dead_code)]
+	/// Returns the value of the variable in the given valuation
+	pub fn value(&self, value: &impl Valuation) -> i64 {
+		match self {
+			IntVarEnc::Ord(x) => x.value(value),
+			IntVarEnc::Bin(x) => x.value(value),
+			IntVarEnc::Const(i) => *i,
 		}
 	}
 }

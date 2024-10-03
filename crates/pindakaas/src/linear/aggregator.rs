@@ -501,26 +501,35 @@ impl LinearAggregator {
 
 #[cfg(test)]
 mod tests {
+	use std::num::NonZeroI32;
+
 	use itertools::Itertools;
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;
 	use crate::{
-		helpers::tests::{assert_trivial_unsat, lits, TestDB},
+		helpers::tests::{assert_encoding, expect_file},
 		linear::{tests::construct_terms, PosCoeff},
-		LinExp,
+		solver::NextVarRange,
+		Cnf, LinExp,
 	};
 
 	#[test]
 	fn test_combine() {
-		let mut db = TestDB::new(3).expect_clauses(vec![]);
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf
+			.next_var_range(3)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
 		// Simple aggregation of multiple occurrences of the same literal
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 2, 1, 2], &lits![1, 1, 2, 3]),
+					LinExp::from_slices(&[1, 2, 1, 2], &vec![a, a, b, c]),
 					Comparator::LessEq,
 					3
 				)
@@ -540,15 +549,15 @@ mod tests {
 		// +1*~x1 + ... <= 2
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 2, 1, 2], &lits![1, -1, 2, 3]),
+					LinExp::from_slices(&[1, 2, 1, 2], &vec![a, !a, b, c]),
 					Comparator::LessEq,
 					3
 				)
 			),
 			Ok(LinVariant::Linear(Linear {
-				terms: construct_terms(&[(-1, 1), (2, 1), (3, 2)]),
+				terms: construct_terms(&[(!a, 1), (b, 1), (c, 2)]),
 				cmp: LimitComp::LessEq,
 				k: PosCoeff::new(2)
 			}))
@@ -557,52 +566,59 @@ mod tests {
 		// Aggregation of positive and negative coefficients of the same literal
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, -2, 1, 2], &lits![1, 1, 2, 3]),
+					LinExp::from_slices(&[1, -2, 1, 2], &vec![a, a, b, c]),
 					Comparator::LessEq,
 					2,
 				)
 			),
 			Ok(LinVariant::Linear(Linear {
-				terms: construct_terms(&[(-1, 1), (2, 1), (3, 2)]),
+				terms: construct_terms(&[(!a, 1), (b, 1), (c, 2)]),
 				cmp: LimitComp::LessEq,
 				k: PosCoeff::new(3)
 			}))
 		);
-		db.check_complete()
+
+		assert_eq!(cnf.clauses(), 0);
 	}
 
 	#[test]
 	fn test_detection() {
-		let mut db = TestDB::new(3);
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf
+			.next_var_range(4)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
 
 		// Correctly detect at most one
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 1, 1], &lits![1, 2, 3]),
+					LinExp::from_slices(&[1, 1, 1], &vec![a, b, c]),
 					Comparator::LessEq,
 					1
 				)
 			),
 			Ok(LinVariant::CardinalityOne(CardinalityOne {
-				lits: lits![1, 2, 3],
+				lits: vec![a, b, c],
 				cmp: LimitComp::LessEq
 			}))
 		);
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[2, 2, 2], &lits![1, 2, 3]),
+					LinExp::from_slices(&[2, 2, 2], &vec![a, b, c]),
 					Comparator::LessEq,
 					2
 				)
 			),
 			Ok(LinVariant::CardinalityOne(CardinalityOne {
-				lits: lits![1, 2, 3],
+				lits: vec![a, b, c],
 				cmp: LimitComp::LessEq
 			}))
 		);
@@ -610,30 +626,30 @@ mod tests {
 		// Correctly detect at most k
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 1, 1, 1], &lits![1, 2, 3, 4]),
+					LinExp::from_slices(&[1, 1, 1, 1], &vec![a, b, c, d]),
 					Comparator::LessEq,
 					2
 				)
 			),
 			Ok(LinVariant::Cardinality(Cardinality {
-				lits: lits![1, 2, 3, 4],
+				lits: vec![a, b, c, d],
 				cmp: LimitComp::LessEq,
 				k: PosCoeff::new(2),
 			}))
 		);
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[3, 3, 3, 3], &lits![1, 2, 3, 4]),
+					LinExp::from_slices(&[3, 3, 3, 3], &vec![a, b, c, d]),
 					Comparator::LessEq,
 					7
 				)
 			),
 			Ok(LinVariant::Cardinality(Cardinality {
-				lits: lits![1, 2, 3, 4],
+				lits: vec![a, b, c, d],
 				cmp: LimitComp::LessEq,
 				k: PosCoeff::new(2),
 			}))
@@ -642,30 +658,30 @@ mod tests {
 		// Correctly detect equal k
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 1, 1, 1], &lits![1, 2, 3, 4]),
+					LinExp::from_slices(&[1, 1, 1, 1], &vec![a, b, c, d]),
 					Comparator::Equal,
 					2
 				)
 			),
 			Ok(LinVariant::Cardinality(Cardinality {
-				lits: lits![1, 2, 3, 4],
+				lits: vec![a, b, c, d],
 				cmp: LimitComp::Equal,
 				k: PosCoeff::new(2),
 			}))
 		);
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[3, 3, 3, 3], &lits![1, 2, 3, 4]),
+					LinExp::from_slices(&[3, 3, 3, 3], &vec![a, b, c, d]),
 					Comparator::Equal,
 					6
 				)
 			),
 			Ok(LinVariant::Cardinality(Cardinality {
-				lits: lits![1, 2, 3, 4],
+				lits: vec![a, b, c, d],
 				cmp: LimitComp::Equal,
 				k: PosCoeff::new(2),
 			}))
@@ -674,15 +690,15 @@ mod tests {
 		// Is still normal Boolean linear in-equality
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 2, 2], &lits![1, 2, 3]),
+					LinExp::from_slices(&[1, 2, 2], &vec![a, b, c]),
 					Comparator::LessEq,
 					2
 				)
 			),
 			Ok(LinVariant::Linear(Linear {
-				terms: construct_terms(&[(1, 1), (2, 2), (3, 2)]),
+				terms: construct_terms(&[(a, 1), (b, 2), (c, 2)]),
 				cmp: LimitComp::LessEq,
 				k: PosCoeff::new(2),
 			}))
@@ -691,15 +707,15 @@ mod tests {
 		// Is still normal Boolean linear equality
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 2, 2], &lits![1, 2, 3]),
+					LinExp::from_slices(&[1, 2, 2], &vec![a, b, c]),
 					Comparator::Equal,
 					2
 				)
 			),
 			Ok(LinVariant::Linear(Linear {
-				terms: construct_terms(&[(1, 1), (2, 2), (3, 2)]),
+				terms: construct_terms(&[(a, 1), (b, 2), (c, 2)]),
 				cmp: LimitComp::Equal,
 				k: PosCoeff::new(2),
 			}))
@@ -708,10 +724,9 @@ mod tests {
 		// Correctly identify that the AMO is limiting the LHS ub
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_terms(&[(3.into(), -1)])
-						.add_choice(&[(1.into(), -1), (2.into(), -1)]),
+					LinExp::from_terms(&[(c, -1)]).add_choice(&[(a, -1), (b, -1)]),
 					Comparator::LessEq,
 					-2,
 				)
@@ -722,14 +737,21 @@ mod tests {
 
 	#[test]
 	fn test_sort_same_coefficients() {
-		let mut db = TestDB::new(4);
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf
+			.next_var_range(4)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
+
 		assert_eq!(
 			LinearAggregator::default()
 				.sort_same_coefficients(SortedEncoder::default(), 2)
 				.aggregate(
-					&mut db,
+					&mut cnf,
 					&LinearConstraint::new(
-						LinExp::from_slices(&[3, 3, 5, 3], &lits![1, 2, 4, 3]),
+						LinExp::from_slices(&[3, 3, 5, 3], &vec![a, b, d, c]),
 						Comparator::LessEq,
 						10
 					)
@@ -737,85 +759,91 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
 					Part::Ic(vec![
-						(5.into(), PosCoeff::new(3)),
-						(6.into(), PosCoeff::new(3)),
-						(7.into(), PosCoeff::new(3))
+						(Lit(NonZeroI32::new(5).unwrap()), PosCoeff::new(3)),
+						(Lit(NonZeroI32::new(6).unwrap()), PosCoeff::new(3)),
+						(Lit(NonZeroI32::new(7).unwrap()), PosCoeff::new(3))
 					]),
-					Part::Amo(vec![(4.into(), PosCoeff::new(5))]),
+					Part::Amo(vec![(d, PosCoeff::new(5))]),
 				],
 				cmp: LimitComp::LessEq,
 				k: PosCoeff::new(10),
 			}))
 		);
-		db.check_complete()
 	}
 
 	#[test]
 	fn test_sort_same_coefficients_using_minimal_chain() {
-		let mut db = TestDB::new(5);
+		let mut cnf = Cnf::default();
+		let vars = cnf.next_var_range(5).unwrap().iter_lits().collect_vec();
 		assert_eq!(
 			LinearAggregator::default()
 				.sort_same_coefficients(SortedEncoder::default(), 2)
 				.aggregate(
-					&mut db,
+					&mut cnf,
 					&LinearConstraint::new(
-						LinExp::from_slices(&[5, 5, 5, 5, 4], &lits![1, 2, 3, 4, 5]),
+						LinExp::from_slices(&[5, 5, 5, 5, 4], &vars),
 						Comparator::LessEq,
 						12 // only need 2 to sort
 					)
 				),
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
-					Part::Amo(vec![(5.into(), PosCoeff::new(4))]),
+					Part::Amo(vec![(*vars.last().unwrap(), PosCoeff::new(4))]),
 					Part::Ic(vec![
-						(6.into(), PosCoeff::new(5)),
-						(7.into(), PosCoeff::new(5))
+						(Lit(NonZeroI32::new(6).unwrap()), PosCoeff::new(5)),
+						(Lit(NonZeroI32::new(7).unwrap()), PosCoeff::new(5))
 					]),
 				],
 				cmp: LimitComp::LessEq,
 				k: PosCoeff::new(12),
 			}))
 		);
-		db.check_complete()
 	}
 
 	#[test]
 	fn test_equal_one() {
-		let mut db = TestDB::new(3).expect_clauses(vec![]);
-		// An exactly one constraint adds an at most one constraint + a clause for all literals
+		let mut cnf = Cnf::default();
+		let vars = cnf.next_var_range(3).unwrap().iter_lits().collect_vec();
+		// An exactly one constraint adds an exactly one constraint
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 1, 1], &lits![1, 2, 3]),
+					LinExp::from_slices(&[1, 1, 1], &vars),
 					Comparator::Equal,
 					1
 				)
 			),
 			Ok(LinVariant::CardinalityOne(CardinalityOne {
-				lits: lits![1, 2, 3],
+				lits: vars,
 				cmp: LimitComp::Equal
 			}))
 		);
-		db.check_complete()
+		assert_eq!(cnf.clauses(), 0);
 	}
 
 	#[test]
 	fn test_neg_coeff() {
-		let mut db = TestDB::new(3);
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf
+			.next_var_range(3)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
 
 		// Correctly convert a negative coefficient
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[2, 3, -2], &lits![1, 2, 3]),
+					LinExp::from_slices(&[2, 3, -2], &vec![a, b, c]),
 					Comparator::LessEq,
 					2
 				)
 			),
 			Ok(LinVariant::Linear(Linear {
-				terms: construct_terms(&[(1, 2), (2, 3), (-3, 2)]),
+				terms: construct_terms(&[(a, 2), (b, 3), (!c, 2)]),
 				cmp: LimitComp::LessEq,
 				k: PosCoeff::new(4),
 			}))
@@ -824,43 +852,49 @@ mod tests {
 		// Correctly convert multiple negative coefficients
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[-1, -1, -1], &lits![1, 2, 3]),
+					LinExp::from_slices(&[-1, -1, -1], &vec![a, b, c]),
 					Comparator::LessEq,
 					-2,
 				)
 			),
 			Ok(LinVariant::CardinalityOne(CardinalityOne {
-				lits: lits![-1, -2, -3],
+				lits: vec![!a, !b, !c],
 				cmp: LimitComp::LessEq
 			}))
 		);
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[-1, -2, -3], &lits![1, 2, 3]),
+					LinExp::from_slices(&[-1, -2, -3], &vec![a, b, c]),
 					Comparator::LessEq,
 					-2,
 				)
 			),
 			Ok(LinVariant::Linear(Linear {
-				terms: construct_terms(&[(-1, 1), (-2, 2), (-3, 3)]),
+				terms: construct_terms(&[(!a, 1), (!b, 2), (!c, 3)]),
 				cmp: LimitComp::LessEq,
 				k: PosCoeff::new(4),
 			}))
 		);
 
 		// Correctly convert multiple negative coefficients with AMO constraints
-		let mut db = TestDB::new(6);
+		let mut cnf = Cnf::default();
+		let (a, b, c, d, e, f) = cnf
+			.next_var_range(6)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
 					LinExp::default()
-						.add_choice(&[(1.into(), -1), (2.into(), -3), (3.into(), -4)])
-						.add_choice(&[(4.into(), -2), (5.into(), -3), (6.into(), -5)]),
+						.add_choice(&[(a, -1), (b, -3), (c, -4)])
+						.add_choice(&[(d, -2), (e, -3), (f, -5)]),
 					Comparator::LessEq,
 					-4,
 				)
@@ -868,14 +902,14 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
 					Part::Amo(vec![
-						(1.into(), PosCoeff::new(3)),
-						(2.into(), PosCoeff::new(1)),
-						(7.into(), PosCoeff::new(4))
+						(a, PosCoeff::new(3)),
+						(b, PosCoeff::new(1)),
+						(Lit(NonZeroI32::new(7).unwrap()), PosCoeff::new(4))
 					]),
 					Part::Amo(vec![
-						(4.into(), PosCoeff::new(3)),
-						(5.into(), PosCoeff::new(2)),
-						(8.into(), PosCoeff::new(5))
+						(d, PosCoeff::new(3)),
+						(e, PosCoeff::new(2)),
+						(Lit(NonZeroI32::new(8).unwrap()), PosCoeff::new(5))
 					]),
 				],
 				cmp: LimitComp::LessEq,
@@ -884,18 +918,24 @@ mod tests {
 		);
 
 		// Correctly convert multiple negative coefficients with side constraints
-		let mut db = TestDB::new(6);
+		let mut cnf = Cnf::default();
+		let (a, b, c, d, e, f) = cnf
+			.next_var_range(6)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
 					LinExp::default().add_chain(&[
-						(1.into(), 1),
-						(2.into(), -3),
-						(3.into(), -2),
-						(4.into(), 2),
-						(5.into(), 5),
-						(6.into(), -3)
+						(a, 1),
+						(b, -3),
+						(c, -2),
+						(d, 2),
+						(e, 5),
+						(f, -3)
 					]),
 					Comparator::LessEq,
 					3
@@ -904,14 +944,14 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
 					Part::Ic(vec![
-						(1.into(), PosCoeff::new(1)),
-						(4.into(), PosCoeff::new(2)),
-						(5.into(), PosCoeff::new(5))
+						(a, PosCoeff::new(1)),
+						(d, PosCoeff::new(2)),
+						(e, PosCoeff::new(5))
 					]),
 					Part::Ic(vec![
-						((-6).into(), PosCoeff::new(3)),
-						((-3).into(), PosCoeff::new(2)),
-						((-2).into(), PosCoeff::new(3))
+						(!f, PosCoeff::new(3)),
+						(!c, PosCoeff::new(2)),
+						(!b, PosCoeff::new(3))
 					]),
 				],
 				cmp: LimitComp::LessEq,
@@ -920,14 +960,20 @@ mod tests {
 		);
 
 		// Correctly convert GreaterEq into LessEq with side constrains
-		let mut db = TestDB::new(6);
+		let mut cnf = Cnf::default();
+		let (a, b, c, d, e, f) = cnf
+			.next_var_range(6)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
 					LinExp::default()
-						.add_choice(&[(1.into(), 1), (2.into(), 2), (3.into(), 3), (4.into(), 4)])
-						.add_choice(&[(5.into(), 1), (6.into(), 3)]),
+						.add_choice(&[(a, 1), (b, 2), (c, 3), (d, 4)])
+						.add_choice(&[(e, 1), (f, 3)]),
 					Comparator::GreaterEq,
 					3,
 				)
@@ -935,14 +981,14 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
 					Part::Amo(vec![
-						(1.into(), PosCoeff::new(3)),
-						(2.into(), PosCoeff::new(2)),
-						(3.into(), PosCoeff::new(1)),
-						(7.into(), PosCoeff::new(4))
+						(a, PosCoeff::new(3)),
+						(b, PosCoeff::new(2)),
+						(c, PosCoeff::new(1)),
+						(Lit(NonZeroI32::new(7).unwrap()), PosCoeff::new(4))
 					]),
 					Part::Amo(vec![
-						(5.into(), PosCoeff::new(2)),
-						(8.into(), PosCoeff::new(3))
+						(e, PosCoeff::new(2)),
+						(Lit(NonZeroI32::new(8).unwrap()), PosCoeff::new(3))
 					]),
 				],
 				cmp: LimitComp::LessEq,
@@ -951,14 +997,20 @@ mod tests {
 		);
 
 		// Correctly convert GreaterEq into LessEq with side constrains
-		let mut db = TestDB::new(6);
+		let mut cnf = Cnf::default();
+		let (a, b, c, d, e, f) = cnf
+			.next_var_range(6)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
 					LinExp::default()
-						.add_chain(&[(1.into(), 1), (2.into(), 1), (3.into(), 1), (4.into(), 1)])
-						.add_chain(&[(5.into(), 1), (6.into(), 2)]),
+						.add_chain(&[(a, 1), (b, 1), (c, 1), (d, 1)])
+						.add_chain(&[(e, 1), (f, 2)]),
 					Comparator::GreaterEq,
 					3,
 				)
@@ -966,15 +1018,12 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![
 					Part::Ic(vec![
-						((-4).into(), PosCoeff::new(1)),
-						((-3).into(), PosCoeff::new(1)),
-						((-2).into(), PosCoeff::new(1)),
-						((-1).into(), PosCoeff::new(1)),
+						(!d, PosCoeff::new(1)),
+						(!c, PosCoeff::new(1)),
+						(!b, PosCoeff::new(1)),
+						(!a, PosCoeff::new(1)),
 					]),
-					Part::Ic(vec![
-						((-6).into(), PosCoeff::new(2)),
-						((-5).into(), PosCoeff::new(1))
-					]),
+					Part::Ic(vec![(!f, PosCoeff::new(2)), (!e, PosCoeff::new(1))]),
 				],
 				cmp: LimitComp::LessEq,
 				k: PosCoeff::new(4),
@@ -982,16 +1031,18 @@ mod tests {
 		);
 
 		// Correctly account for the coefficient in the Dom bounds
-		let mut db = TestDB::new(5);
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf
+			.next_var_range(3)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::default().add_bounded_log_encoding(
-						&[(1.into(), 1), (2.into(), 2), (3.into(), 4)],
-						0,
-						3
-					),
+					LinExp::default().add_bounded_log_encoding(&[(a, 1), (b, 2), (c, 4)], 0, 3),
 					Comparator::LessEq,
 					5,
 				)
@@ -999,9 +1050,9 @@ mod tests {
 			Ok(LinVariant::Linear(Linear {
 				terms: vec![Part::Dom(
 					vec![
-						(1.into(), PosCoeff::new(1)),
-						(2.into(), PosCoeff::new(2)),
-						(3.into(), PosCoeff::new(4))
+						(a, PosCoeff::new(1)),
+						(b, PosCoeff::new(2)),
+						(c, PosCoeff::new(4))
 					],
 					PosCoeff::new(0),
 					PosCoeff::new(7)
@@ -1012,18 +1063,20 @@ mod tests {
 		);
 
 		// Correctly convert GreaterEq into LessEq with side constrains
-		let mut db = TestDB::new(5);
+		let mut cnf = Cnf::default();
+		let (a, b, c, d, e) = cnf
+			.next_var_range(5)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
 					LinExp::default()
-						.add_bounded_log_encoding(
-							&[(1.into(), 1), (2.into(), 2), (3.into(), 4)],
-							0,
-							5
-						)
-						.add_bounded_log_encoding(&[(4.into(), 3), (5.into(), 6)], 0, 2),
+						.add_bounded_log_encoding(&[(a, 1), (b, 2), (c, 4)], 0, 5)
+						.add_bounded_log_encoding(&[(d, 3), (e, 6)], 0, 2),
 					Comparator::GreaterEq,
 					3,
 				)
@@ -1032,18 +1085,15 @@ mod tests {
 				terms: vec![
 					Part::Dom(
 						vec![
-							((-1).into(), PosCoeff::new(1)),
-							((-2).into(), PosCoeff::new(2)),
-							((-3).into(), PosCoeff::new(4))
+							(!a, PosCoeff::new(1)),
+							(!b, PosCoeff::new(2)),
+							(!c, PosCoeff::new(4))
 						],
 						PosCoeff::new(2),
 						PosCoeff::new(7),
 					),
 					Part::Dom(
-						vec![
-							((-4).into(), PosCoeff::new(3)),
-							((-5).into(), PosCoeff::new(6))
-						],
+						vec![(!d, PosCoeff::new(3)), (!e, PosCoeff::new(6))],
 						PosCoeff::new(7),
 						PosCoeff::new(9),
 					),
@@ -1056,63 +1106,85 @@ mod tests {
 
 	#[test]
 	fn test_false_trivial_unsat() {
-		let mut db = TestDB::new(7);
+		let mut cnf = Cnf::default();
+		let (a, b, c, d, e, f, g) = cnf
+			.next_var_range(7)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 2, 1, 1, 4, 1, 1], &lits![1, -2, 3, 4, -5, 6, -7]),
+					LinExp::from_slices(&[1, 2, 1, 1, 4, 1, 1], &vec![a, !b, c, d, !e, f, !g]),
 					Comparator::GreaterEq,
 					7
 				)
 			),
 			Ok(LinVariant::Linear(Linear {
 				terms: construct_terms(&[
-					(5, 4),
-					(2, 2),
-					(7, 1),
-					(-4, 1),
-					(-1, 1),
-					(-6, 1),
-					(-3, 1)
+					(e, 4),
+					(b, 2),
+					(g, 1),
+					(!d, 1),
+					(!a, 1),
+					(!f, 1),
+					(!c, 1)
 				]),
 				cmp: LimitComp::LessEq,
 				k: PosCoeff::new(4),
 			}))
 		);
-		db.check_complete();
+		assert_eq!(cnf.clauses(), 0);
 	}
 
 	#[test]
 	fn test_at_least_one_negated() {
-		let mut db = TestDB::new(4).expect_clauses(vec![lits![-1, -2, -3, -4]]);
-		// An exactly one constraint adds an at most one constraint + a clause for all literals
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf
+			.next_var_range(4)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
+		// Correctly detect that all but one literal can be set to true
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut db,
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 1, 1, 1], &lits![1, 2, 3, 4]),
+					LinExp::from_slices(&[1, 1, 1, 1], &vec![a, b, c, d]),
 					Comparator::LessEq,
 					3
 				)
 			),
 			Ok(LinVariant::Trivial)
 		);
-		db.check_complete();
+		assert_encoding(
+			&cnf,
+			&expect_file!["linear/aggregator/test_at_least_one_negated.cnf"],
+		);
 
 		// Correctly detect equal k
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf
+			.next_var_range(3)
+			.unwrap()
+			.iter_lits()
+			.collect_tuple()
+			.unwrap();
 		assert_eq!(
 			LinearAggregator::default().aggregate(
-				&mut TestDB::new(3),
+				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 1, 1], &lits![1, 2, 3]),
+					LinExp::from_slices(&[1, 1, 1], &vec![a, b, c]),
 					Comparator::Equal,
 					2
 				)
 			),
 			// actually leaves over a CardinalityOne constraint
 			Ok(LinVariant::CardinalityOne(CardinalityOne {
-				lits: lits![-1, -2, -3],
+				lits: vec![!a, !b, !c],
 				cmp: LimitComp::LessEq,
 			}))
 		);
@@ -1120,43 +1192,56 @@ mod tests {
 
 	#[test]
 	fn test_unsat() {
-		let mut db = TestDB::new(3);
+		let mut db = Cnf::default();
+		let vars = db.next_var_range(3).unwrap().iter_lits().collect_vec();
 
 		// Constant cannot be reached
-		assert_trivial_unsat!(LinearAggregator::default().aggregate(
-			&mut db,
-			&LinearConstraint::new(
-				LinExp::from_slices(&[1, 2, 2], &lits![1, 2, 3]),
-				Comparator::Equal,
-				6
-			)
-		));
-		assert_trivial_unsat!(LinearAggregator::default().aggregate(
-			&mut db,
-			&LinearConstraint::new(
-				LinExp::from_slices(&[1, 2, 2], &lits![1, 2, 3]),
-				Comparator::GreaterEq,
-				6,
-			)
-		));
-		assert_trivial_unsat!(LinearAggregator::default().aggregate(
-			&mut db,
-			&LinearConstraint::new(
-				LinExp::from_slices(&[1, 2, 2], &lits![1, 2, 3]),
-				Comparator::LessEq,
-				-1
-			)
-		));
+		assert_eq!(
+			LinearAggregator::default().aggregate(
+				&mut db,
+				&LinearConstraint::new(
+					LinExp::from_slices(&[1, 2, 2], &vars),
+					Comparator::Equal,
+					6
+				)
+			),
+			Err(Unsatisfiable)
+		);
+		assert_eq!(
+			LinearAggregator::default().aggregate(
+				&mut db,
+				&LinearConstraint::new(
+					LinExp::from_slices(&[1, 2, 2], &vars),
+					Comparator::GreaterEq,
+					6,
+				)
+			),
+			Err(Unsatisfiable)
+		);
+		assert_eq!(
+			LinearAggregator::default().aggregate(
+				&mut db,
+				&LinearConstraint::new(
+					LinExp::from_slices(&[1, 2, 2], &vars),
+					Comparator::LessEq,
+					-1
+				)
+			),
+			Err(Unsatisfiable)
+		);
 
 		// Scaled counting constraint with off-scaled Constant
-		assert_trivial_unsat!(LinearAggregator::default().aggregate(
-			&mut db,
-			&LinearConstraint::new(
-				LinExp::from_slices(&[4, 4, 4], &lits![1, 2, 3]),
-				Comparator::Equal,
-				6
-			)
-		));
+		assert_eq!(
+			LinearAggregator::default().aggregate(
+				&mut db,
+				&LinearConstraint::new(
+					LinExp::from_slices(&[4, 4, 4], &vars),
+					Comparator::Equal,
+					6
+				)
+			),
+			Err(Unsatisfiable)
+		);
 	}
 
 	impl PartialEq for Part {

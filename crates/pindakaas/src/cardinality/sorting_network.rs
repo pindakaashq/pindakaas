@@ -44,25 +44,41 @@ impl<DB: ClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
 
 #[cfg(test)]
 mod tests {
+	use itertools::Itertools;
+
 	use super::*;
 	use crate::{
-		helpers::tests::assert_sol,
+		helpers::tests::assert_solutions,
 		linear::{LimitComp, PosCoeff},
 		sorted::{SortedEncoder, SortedStrategy},
-		Cardinality, Encoder,
+		Cardinality, Cnf, Encoder, NextVarRange,
 	};
 
 	macro_rules! test_card {
 		($encoder:expr,$n:expr,$cmp:expr,$k:expr) => {
-			assert_sol!(
-				$encoder,
+			let mut cnf = Cnf::default();
+			let vars = cnf.next_var_range($n).unwrap().iter_lits().collect_vec();
+			$encoder
+				.encode(
+					&mut cnf,
+					&Cardinality {
+						lits: vars.clone(),
+						cmp: $cmp,
+						k: PosCoeff::new($k),
+					},
+				)
+				.unwrap();
+
+			let expect = crate::helpers::tests::expect_file![format!(
+				"cardinality/sorting_network/test_card_{}_{}_{}.sol",
 				$n,
-				&Cardinality {
-					lits: (1..=$n).map(|l| l.into()).collect(),
-					cmp: $cmp,
-					k: PosCoeff::new($k)
+				$k,
+				match $cmp {
+					LimitComp::LessEq => "le",
+					LimitComp::Equal => "eq",
 				}
-			);
+			)];
+			assert_solutions(&cnf, vars, &expect);
 		};
 	}
 
@@ -124,11 +140,6 @@ mod tests {
 			fn test_card_5_2() {
 				test_card!($encoder, 5, $cmp, 1);
 			}
-
-			// #[test]
-			// fn test_card_12_7() {
-			// 	test_card!($encoder, 12, $cmp, 7);
-			// }
 		};
 	}
 

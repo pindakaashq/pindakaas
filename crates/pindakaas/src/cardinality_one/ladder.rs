@@ -38,41 +38,43 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for LadderEncoder {
 
 #[cfg(test)]
 mod tests {
+	use itertools::Itertools;
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;
 	use crate::{
 		cardinality_one::tests::card1_test_suite,
-		helpers::tests::{assert_enc_sol, assert_sol, lits},
+		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
 		linear::LimitComp,
-		Lit,
+		Cnf, NextVarRange,
 	};
 
 	card1_test_suite!(LadderEncoder::default());
 
 	#[test]
 	fn test_eo_ladder() {
-		assert_enc_sol!(
-			LadderEncoder::default(),
-			2,
-			&CardinalityOne { lits: lits![1, 2], cmp: LimitComp::Equal }
-			=> vec![
-				lits![-1, 3],
-				lits![1, -3, 4],
-				lits![-1, -4],
-				lits![-2, -5],
-				lits![-2, 4],
-				lits![3],
-				lits![-4, 3],
-				lits![-4, 5, 2],
-				lits![-5, 4],
-				lits![-5],
-			],
-			vec![
-				lits![1, -2],
-				lits![-1, 2],
-			]
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let b = cnf.new_lit();
+		LadderEncoder::default()
+			.encode(
+				&mut cnf,
+				&CardinalityOne {
+					lits: vec![a, b],
+					cmp: LimitComp::Equal,
+				},
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["cardinality_one/ladder/test_eo_ladder.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a, b],
+			&expect_file!["cardinality_one/ladder/test_eo_ladder.sol"],
 		);
 	}
 }

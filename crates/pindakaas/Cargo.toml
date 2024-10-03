@@ -29,6 +29,9 @@ pindakaas-kissat = { path = "../pindakaas-kissat", optional = true }
 splr = { version = "0.17", optional = true }
 
 [dev-dependencies]
+expect-test = "1.5.0"
+pindakaas-cadical = { path = "../pindakaas-cadical" }
+pindakaas-derive = { path = "../pindakaas-derive" }
 splr = { version = "0.17", features = ["incremental_solver"] }
 traced_test = { path = "../traced_test" }
 

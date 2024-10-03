@@ -62,114 +62,113 @@ impl CardMarker for SortingNetworkEncoder {}
 pub(crate) mod tests {
 	macro_rules! card_test_suite {
 		($encoder:expr) => {
-
 			#[test]
 			fn test_card_le_2_3() {
-				assert_sol!(
-					$encoder,
-					3,
-					&Cardinality {
-						lits: lits![-1, -2, 3],
-						cmp: LimitComp::LessEq,
-						k: PosCoeff::new(2)
-					} =>
-						vec![
-							lits![-1, -2, -3],
-							lits![-1, 2, -3],
-							lits![-1, 2, 3],
-							lits![1, -2, -3],
-							lits![1, -2, 3],
-							lits![1, 2, -3],
-							lits![1, 2, 3],
-						]
-				);
+				let mut cnf = Cnf::default();
+				let vars = cnf.next_var_range(3).unwrap().iter_lits().collect_vec();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Cardinality {
+							lits: vars.clone(),
+							cmp: LimitComp::LessEq,
+							k: PosCoeff::new(2),
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vars,
+					&expect_file!["cardinality/test_card_le_2_3.sol"],
+				)
 			}
 
 			#[test]
 			fn test_card_eq_1_3() {
-				assert_sol!(
-					$encoder,
-					3,
-					&Cardinality {
-						lits: lits![1, 2, 3],
-						cmp: LimitComp::Equal,
-						k: PosCoeff::new(1)
-					}
-					=>
-					vec![
-						lits![ 1,-2,-3],
-						lits![-1, 2,-3],
-						lits![-1,-2, 3],
-					]
-				);
-			}
+				let mut cnf = Cnf::default();
+				let vars = cnf.next_var_range(3).unwrap().iter_lits().collect_vec();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Cardinality {
+							lits: vars.clone(),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(1),
+						},
+					)
+					.unwrap();
 
+				assert_solutions(
+					&cnf,
+					vars,
+					&expect_file!["cardinality/test_card_eq_1_3.sol"],
+				)
+			}
 
 			#[test]
 			fn test_card_eq_2_3() {
-				assert_sol!(
-					$encoder,
-					3,
-					&Cardinality {
-						lits: lits![1, 2, 3],
-						cmp: LimitComp::Equal,
-						k: PosCoeff::new(2)
-					}
-					=>
-					vec![
-						lits![1, 2, -3],
-						lits![1, -2, 3],
-						lits![-1, 2, 3],
-					]
-				);
+				let mut cnf = Cnf::default();
+				let vars = cnf.next_var_range(3).unwrap().iter_lits().collect_vec();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Cardinality {
+							lits: vars.clone(),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(2),
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vars,
+					&expect_file!["cardinality/test_card_eq_2_3.sol"],
+				)
 			}
 
 			#[test]
 			fn test_card_eq_2_4() {
-				assert_sol!(
-					$encoder,
-					4,
-					&Cardinality {
-						lits: lits![1, 2, 3, 4],
-						cmp: LimitComp::Equal,
-						k: PosCoeff::new(2)
-					} =>
-					vec![
-					  lits![1, 2, -3, -4],
-					  lits![1, -2, 3, -4],
-					  lits![-1, 2, 3, -4],
-					  lits![1, -2, -3, 4],
-					  lits![-1, 2, -3, 4],
-					  lits![-1, -2, 3, 4],
-					]
+				let mut cnf = Cnf::default();
+				let vars = cnf.next_var_range(4).unwrap().iter_lits().collect_vec();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Cardinality {
+							lits: vars.clone(),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(2),
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vars,
+					&expect_file!["cardinality/test_card_eq_2_4.sol"],
 				);
 			}
 
-
-
 			#[test]
 			fn test_card_eq_3_5() {
-				assert_sol!(
-					$encoder,
-					5,
-					&Cardinality {
-						lits: lits![1, 2, 3, 4 ,5],
-						cmp: LimitComp::Equal,
-						k: PosCoeff::new(3)
-					}
-					=>
-					vec![
-						lits![1, 2, 3, -4, -5],
-						lits![1, 2, -3, 4, -5],
-						lits![1, -2, 3, 4, -5],
-						lits![-1, 2, 3, 4, -5],
-						lits![1, 2, -3, -4, 5],
-						lits![1, -2, 3, -4, 5],
-						lits![-1, 2, 3, -4, 5],
-						lits![1, -2, -3, 4, 5],
-						lits![-1, 2, -3, 4, 5],
-						lits![-1, -2, 3, 4, 5],
-					]
+				let mut cnf = Cnf::default();
+				let vars = cnf.next_var_range(5).unwrap().iter_lits().collect_vec();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Cardinality {
+							lits: vars.clone(),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(3),
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vars,
+					&expect_file!["cardinality/test_card_eq_3_5.sol"],
 				);
 			}
 		};

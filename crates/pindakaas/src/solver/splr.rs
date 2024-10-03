@@ -79,8 +79,8 @@ impl Valuation for Certificate {
 	}
 }
 
-impl From<Cnf> for Splr {
-	fn from(cnf: Cnf) -> Self {
+impl From<&Cnf> for Splr {
+	fn from(cnf: &Cnf) -> Self {
 		use splr::{
 			types::{CNFDescription, Instantiate},
 			Config,

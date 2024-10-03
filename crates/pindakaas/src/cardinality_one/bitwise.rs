@@ -47,34 +47,43 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 
 #[cfg(test)]
 mod tests {
+	use itertools::Itertools;
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;
 	use crate::{
 		cardinality_one::tests::card1_test_suite,
-		helpers::tests::{assert_enc_sol, assert_sol, lits},
+		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
 		linear::LimitComp,
-		Lit,
+		Cnf, NextVarRange,
 	};
 
 	card1_test_suite!(BitwiseEncoder::default());
 
 	#[test]
 	fn test_eo_bitwise() {
-		assert_enc_sol!(
-			BitwiseEncoder::default(),
-			2,
-			&CardinalityOne { lits: lits![1, 2], cmp: LimitComp::Equal }
-			=> vec![
-				lits![1, 2],
-				lits![-1, -3],
-				lits![-2, 3],
-			],
-			vec![
-				lits![1, -2],
-				lits![-1, 2],
-			]
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let b = cnf.new_lit();
+		BitwiseEncoder::default()
+			.encode(
+				&mut cnf,
+				&CardinalityOne {
+					lits: vec![a, b],
+					cmp: LimitComp::Equal,
+				},
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["cardinality_one/bitwise/test_eo_bitwise.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a, b],
+			&expect_file!["cardinality_one/bitwise/test_eo_bitwise.sol"],
 		);
 	}
 }

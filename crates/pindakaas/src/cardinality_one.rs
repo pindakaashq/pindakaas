@@ -51,172 +51,286 @@ pub(crate) fn at_least_one_clause<DB: ClauseDatabase>(
 pub(crate) mod tests {
 	macro_rules! card1_test_suite {
 		($encoder:expr) => {
-			const LARGE_N: i32 = 50;
+			const LARGE_N: usize = 50;
 			// ------ At Most One testing ------
 			#[test]
 			fn test_amo_pair() {
-				assert_sol!(
-					$encoder,
-					2,
-					&CardinalityOne {
-						lits: lits![1, 2],
-						cmp: LimitComp::LessEq
-					}
-					=> vec![lits![-1, -2], lits![1, -2], lits![-1, 2]]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&CardinalityOne {
+							lits: vec![a, b],
+							cmp: LimitComp::LessEq,
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b],
+					&expect_file!["cardinality_one/test_amo_pair.sol"],
 				);
 			}
 			#[test]
 			fn test_amo_one_neg() {
-				assert_sol!(
-					$encoder,
-					2,
-					&CardinalityOne {
-						lits: lits![1, -2],
-						cmp: LimitComp::LessEq
-					}
-					=> vec![lits![-1, -2], lits![-1, 2], lits![1, 2]]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&CardinalityOne {
+							lits: vec![a, !b],
+							cmp: LimitComp::LessEq,
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b],
+					&expect_file!["cardinality_one/test_amo_one_neg.sol"],
 				);
 			}
 			#[test]
 			fn test_amo_neg_only() {
-				assert_sol!(
-					$encoder,
-					2,
-					&CardinalityOne {
-						lits: lits![-1, -2],
-						cmp: LimitComp::LessEq
-					}
-					=> vec![lits![-1, 2], lits![1, -2], lits![1, 2]]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&CardinalityOne {
+							lits: vec![!a, !b],
+							cmp: LimitComp::LessEq,
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b],
+					&expect_file!["cardinality_one/test_amo_neg_only.sol"],
 				);
 			}
 			#[test]
 			fn test_amo_triple() {
-				assert_sol!(
-					$encoder,
-					3,
-					&CardinalityOne {
-						lits: lits![1, 2, 3],
-						cmp: LimitComp::LessEq
-					}
-					=> vec![lits![-1, -2, -3], lits![1, -2, -3], lits![-1, 2, -3], lits![-1, -2, 3]]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				let c = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&CardinalityOne {
+							lits: vec![a, b, c],
+							cmp: LimitComp::LessEq,
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b, c],
+					&expect_file!["cardinality_one/test_amo_triple.sol"],
 				);
 			}
 			#[test]
 			fn test_amo_large() {
-				assert_sol!(
-					$encoder,
-					LARGE_N,
-					&CardinalityOne {
-						lits: (1..=LARGE_N).map(|l| l.into()).collect::<Vec<Lit>>(),
-						cmp: LimitComp::LessEq
-					}
-				);
+				let mut cnf = Cnf::default();
+				let vars = cnf
+					.next_var_range(LARGE_N)
+					.unwrap()
+					.iter_lits()
+					.collect_vec();
+				let con = CardinalityOne {
+					lits: vars.clone(),
+					cmp: LimitComp::LessEq,
+				};
+				$encoder.encode(&mut cnf, &con).unwrap();
+
+				assert_checker(&cnf, &con);
 			}
 			#[test]
 			fn test_amo_large_neg() {
-				assert_sol!(
-					$encoder,
-					LARGE_N,
-					&CardinalityOne {
-						lits: (-LARGE_N..=-1).map(|l| l.into()).collect::<Vec<Lit>>(),
-						cmp: LimitComp::LessEq
-					}
-				);
+				let mut cnf = Cnf::default();
+				let vars = cnf
+					.next_var_range(LARGE_N)
+					.unwrap()
+					.iter_lits()
+					.collect_vec();
+				let con = CardinalityOne {
+					lits: vars.clone().into_iter().map(|l| !l).collect_vec(),
+					cmp: LimitComp::LessEq,
+				};
+				$encoder.encode(&mut cnf, &con).unwrap();
+
+				assert_checker(&cnf, &con);
 			}
 			#[test]
 			fn test_amo_large_mix() {
-				assert_sol!(
-					$encoder,
-					LARGE_N,
-					&CardinalityOne {
-						lits: (1..=LARGE_N).map(|i| (if i % 2 != 0 { -i } else { i }).into()).collect::<Vec<Lit>>(),
-						cmp: LimitComp::LessEq
-					}
-				);
+				let mut cnf = Cnf::default();
+				let vars = cnf
+					.next_var_range(LARGE_N)
+					.unwrap()
+					.iter_lits()
+					.collect_vec();
+
+				let con = CardinalityOne {
+					lits: vars
+						.clone()
+						.into_iter()
+						.enumerate()
+						.map(|(i, l)| if i % 2 == 0 { l } else { !l })
+						.collect_vec(),
+					cmp: LimitComp::LessEq,
+				};
+				$encoder.encode(&mut cnf, &con).unwrap();
+
+				assert_checker(&cnf, &con);
 			}
 			// ------ Exactly One testing ------
 			#[test]
 			fn test_eo_pair() {
-				assert_sol!(
-					$encoder,
-					2,
-					&CardinalityOne {
-						lits: lits![1, 2],
-						cmp: LimitComp::Equal
-					}
-					=> vec![lits![1, -2], lits![-1, 2]]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&CardinalityOne {
+							lits: vec![a, b],
+							cmp: LimitComp::Equal,
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b],
+					&expect_file!["cardinality_one/test_eo_pair.sol"],
 				);
 			}
 			#[test]
 			fn test_eo_one_neg() {
-				assert_sol!(
-					$encoder,
-					2,
-					&CardinalityOne {
-						lits: lits![1, -2],
-						cmp: LimitComp::Equal
-					}
-					=> vec![lits![-1, -2], lits![1, 2]]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&CardinalityOne {
+							lits: vec![a, !b],
+							cmp: LimitComp::Equal,
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b],
+					&expect_file!["cardinality_one/test_eo_one_neg.sol"],
 				);
 			}
 			#[test]
 			fn test_eo_neg_only() {
-				assert_sol!(
-					$encoder,
-					2,
-					&CardinalityOne {
-						lits: lits![-1, -2],
-						cmp: LimitComp::Equal
-					}
-					=> vec![lits![-1, 2], lits![1, -2]]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&CardinalityOne {
+							lits: vec![!a, !b],
+							cmp: LimitComp::Equal,
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b],
+					&expect_file!["cardinality_one/test_eo_neg_only.sol"],
 				);
 			}
 			#[test]
 			fn test_eo_triple() {
-				assert_sol!(
-					$encoder,
-					3,
-					&CardinalityOne {
-						lits: lits![1, 2, 3],
-						cmp: LimitComp::Equal
-					}
-					=> vec![lits![1, -2, -3], lits![-1, 2, -3], lits![-1, -2, 3]]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				let c = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&CardinalityOne {
+							lits: vec![a, b, c],
+							cmp: LimitComp::Equal,
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b, c],
+					&expect_file!["cardinality_one/test_eo_triple.sol"],
 				);
 			}
 			#[test]
 			fn test_eo_large() {
-				assert_sol!(
-					$encoder,
-					LARGE_N,
-					&CardinalityOne {
-						lits: (1..=LARGE_N).map(|l| l.into()).collect(),
-						cmp: LimitComp::Equal
-					}
-				);
+				let mut cnf = Cnf::default();
+				let vars = cnf
+					.next_var_range(LARGE_N)
+					.unwrap()
+					.iter_lits()
+					.collect_vec();
+				let con = CardinalityOne {
+					lits: vars.clone(),
+					cmp: LimitComp::Equal,
+				};
+				$encoder.encode(&mut cnf, &con).unwrap();
+
+				assert_checker(&cnf, &con);
 			}
 			#[test]
 			fn test_eo_large_neg() {
-				assert_sol!(
-					$encoder,
-					LARGE_N,
-					&CardinalityOne {
-						lits: (-LARGE_N..=-1).map(|l| l.into()).collect::<Vec<Lit>>(),
-						cmp: LimitComp::Equal
-					}
-				);
+				let mut cnf = Cnf::default();
+				let vars = cnf
+					.next_var_range(LARGE_N)
+					.unwrap()
+					.iter_lits()
+					.collect_vec();
+				let con = CardinalityOne {
+					lits: vars.clone().iter().map(|l| !l).collect_vec(),
+					cmp: LimitComp::Equal,
+				};
+				$encoder.encode(&mut cnf, &con).unwrap();
+
+				assert_checker(&cnf, &con);
 			}
 			#[test]
 			fn test_eo_large_mix() {
-				assert_sol!(
-					$encoder,
-					LARGE_N,
-					&CardinalityOne {
-						lits: (1..=LARGE_N).map(|i| (if i % 2 != 0 { -i } else { i }).into()).collect::<Vec<Lit>>(),
-						cmp: LimitComp::Equal
-					}
-				);
-			}
+				let mut cnf = Cnf::default();
+				let vars = cnf
+					.next_var_range(LARGE_N)
+					.unwrap()
+					.iter_lits()
+					.collect_vec();
+				let con = CardinalityOne {
+					lits: vars
+						.clone()
+						.into_iter()
+						.enumerate()
+						.map(|(i, l)| if i % 2 == 0 { l } else { !l })
+						.collect_vec(),
+					cmp: LimitComp::Equal,
+				};
+				$encoder.encode(&mut cnf, &con).unwrap();
 
+				assert_checker(&cnf, &con);
+			}
 		};
 	}
 	pub(crate) use card1_test_suite;

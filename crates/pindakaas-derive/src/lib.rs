@@ -361,8 +361,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		let up_version = if opts.ipasir_up {
 			quote! {
 				#[cfg(feature = "ipasir-up")]
-				impl From<crate::Cnf> for #ident {
-					fn from(value: crate::Cnf) -> #ident {
+				impl From<&crate::Cnf> for #ident {
+					fn from(value: &crate::Cnf) -> #ident {
 						let mut slv: #ident = Default::default();
 						slv. #var_member = Arc::new(Mutex::new(value.nvar));
 						for cl in value.iter() {
@@ -379,8 +379,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 
 		quote! {
 			#up_version
-			impl From<crate::Cnf> for #ident {
-				fn from(value: crate::Cnf) -> #ident {
+			impl From<&crate::Cnf> for #ident {
+				fn from(value: &crate::Cnf) -> #ident {
 					let mut slv: #ident = Default::default();
 					slv. #var_member = value.nvar;
 					for cl in value.iter() {

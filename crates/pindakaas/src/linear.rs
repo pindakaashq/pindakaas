@@ -666,6 +666,7 @@ impl<
 
 #[cfg(test)]
 mod tests {
+
 	use super::{Part, PosCoeff};
 	use crate::{Coeff, Lit};
 
@@ -680,158 +681,208 @@ mod tests {
 		($encoder:expr) => {
 			#[test]
 			fn test_small_le_1() {
-				assert_sol!(
-					$encoder,
-					3,
-					&Linear {
-						terms: construct_terms(&[(1, 2), (2, 3), (3, 5),]),
-						cmp: LimitComp::LessEq,
-						k: PosCoeff::new(6)
-					}
-					=> vec![
-						lits![-1, -2, -3], // 0
-						lits![ 1, -2, -3], // 2
-						lits![-1,  2, -3], // 3
-						lits![ 1,  2, -3], // 5
-						lits![-1, -2,  3], // 5
-					]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				let c = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Linear {
+							terms: construct_terms(&[(a, 2), (b, 3), (c, 5)]),
+							cmp: LimitComp::LessEq,
+							k: PosCoeff::new(6),
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b, c],
+					&expect_file!["linear/test_small_le_1.sol"],
 				);
 			}
 
 			#[test]
 			fn test_small_le_2() {
-				assert_sol!(
-					$encoder,
-					6,
-					&Linear {
-						terms: construct_terms(&[
-							(-1, 3),
-							(-2, 6),
-							(-3, 1),
-							(-4, 2),
-							(-5, 3),
-							(-6, 6)
-						]),
-						cmp: LimitComp::LessEq,
-						k: PosCoeff::new(19)
-					}
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				let c = cnf.new_lit();
+				let d = cnf.new_lit();
+				let e = cnf.new_lit();
+				let f = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Linear {
+							terms: construct_terms(&[
+								(!a, 3),
+								(!b, 6),
+								(!c, 1),
+								(!d, 2),
+								(!e, 3),
+								(!f, 6),
+							]),
+							cmp: LimitComp::LessEq,
+							k: PosCoeff::new(19),
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b, c, d, e, f],
+					&expect_file!["linear/test_small_le_2.sol"],
 				);
 			}
 
 			#[test]
 			fn test_small_le_3() {
-				assert_sol!(
-					$encoder,
-					3,
-					&Linear {
-						terms: construct_terms(&[(1, 1), (2, 2), (3, 4),]),
-						cmp: LimitComp::LessEq,
-						k: PosCoeff::new(5)
-					}
-					=> vec![
-						lits![-1, -2, -3],
-						lits![ 1, -2, -3],
-						lits![-1,  2, -3],
-						lits![ 1,  2, -3],
-						lits![-1, -2,  3],
-						lits![ 1, -2,  3],
-					]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				let c = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Linear {
+							terms: construct_terms(&[(a, 1), (b, 2), (c, 4)]),
+							cmp: LimitComp::LessEq,
+							k: PosCoeff::new(5),
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b, c],
+					&expect_file!["linear/test_small_le_3.sol"],
 				);
 			}
 
 			#[test]
 			fn test_small_le_4() {
-				assert_sol!(
-					$encoder,
-					3,
-					&Linear {
-						terms: construct_terms(&[(1, 4), (2, 6), (3, 7),]),
-						cmp: LimitComp::LessEq,
-						k: PosCoeff::new(10)
-					}
-					=> vec![
-						lits![-1, -2, -3],
-						lits![1, -2, -3],
-						lits![-1, 2, -3],
-						lits![1, 2, -3],
-						lits![-1, -2, 3],
-					]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				let c = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Linear {
+							terms: construct_terms(&[(a, 4), (b, 6), (c, 7)]),
+							cmp: LimitComp::LessEq,
+							k: PosCoeff::new(10),
+						},
+					)
+					.unwrap();
 
+				assert_solutions(
+					&cnf,
+					vec![a, b, c],
+					&expect_file!["linear/test_small_le_4.sol"],
 				);
 			}
 
-
-
 			#[test]
 			fn test_small_eq_1() {
-				assert_sol!(
-					$encoder,
-					3,
-					&Linear {
-						terms: construct_terms(&[(1, 1), (2, 2), (3, 4)]),
-						cmp: LimitComp::Equal,
-						k: PosCoeff::new(5)
-					}
-					=> vec![
-						lits![ 1, -2,  3],
-					]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				let c = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Linear {
+							terms: construct_terms(&[(a, 1), (b, 2), (c, 4)]),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(5),
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b, c],
+					&expect_file!["linear/test_small_eq_1.sol"],
 				);
 			}
 
 			#[test]
 			fn test_small_eq_2() {
-				assert_sol!(
-					$encoder,
-					3,
-					&Linear {
-						terms: construct_terms(&[(1, 1), (2, 2), (3, 3),]),
-						cmp: LimitComp::Equal,
-						k: PosCoeff::new(3)
-					}
-					=> vec![
-						lits![-1, -2,  3],
-						lits![ 1,  2, -3],
-					]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				let c = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Linear {
+							terms: construct_terms(&[(a, 1), (b, 2), (c, 3)]),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(3),
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b, c],
+					&expect_file!["linear/test_small_eq_2.sol"],
 				);
 			}
 
 			#[test]
 			fn test_small_eq_3() {
-				assert_sol!(
-					$encoder,
-					4,
-					&Linear {
-						terms: construct_terms(&[(1, 2), (2, 3), (3, 5), (4,7)]),
-						cmp: LimitComp::Equal,
-						k: PosCoeff::new(10)
-					}
-					=> vec![
-						lits![-1, 2,-3, 4],
-						lits![ 1, 2, 3,-4],
-					]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				let c = cnf.new_lit();
+				let d = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Linear {
+							terms: construct_terms(&[(a, 2), (b, 3), (c, 5), (d, 7)]),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(10),
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b, c, d],
+					&expect_file!["linear/test_small_eq_3.sol"],
 				);
 			}
 
 			#[test]
 			fn test_small_eq_4() {
-				assert_sol!(
-					$encoder,
-					4,
-					&Linear {
-						terms: construct_terms(&[(1, 2), (2, 1), (3, 2), (4,2)]),
-						cmp: LimitComp::Equal,
-						k: PosCoeff::new(4)
-					}
-					=> vec![
-						lits![ 1,-2,-3, 4],
-						lits![-1,-2, 3, 4],
-						lits![ 1,-2, 3,-4],
-					]
+				let mut cnf = Cnf::default();
+				let a = cnf.new_lit();
+				let b = cnf.new_lit();
+				let c = cnf.new_lit();
+				let d = cnf.new_lit();
+				$encoder
+					.encode(
+						&mut cnf,
+						&Linear {
+							terms: construct_terms(&[(a, 2), (b, 1), (c, 2), (d, 2)]),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(4),
+						},
+					)
+					.unwrap();
+
+				assert_solutions(
+					&cnf,
+					vec![a, b, c, d],
+					&expect_file!["linear/test_small_eq_4.sol"],
 				);
 			}
 		};
-
-
 	}
 	pub(crate) use linear_test_suite;
 }
