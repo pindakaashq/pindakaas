@@ -2,23 +2,25 @@ use std::{
 	collections::HashSet,
 	fmt,
 	fmt::Display,
-	hash::BuildHasherDefault,
 	ops::{Not, Range},
 };
 
 use iset::{interval_map, interval_set, IntervalMap, IntervalSet};
 use itertools::Itertools;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use super::display_dom;
 use crate::{
-	helpers::{as_binary, is_powers_of_two, unsigned_binary_range_ub},
+	helpers::{as_binary, emit_clause, is_powers_of_two, new_var, unsigned_binary_range_ub},
 	int::{IntVar, TernLeConstraint, TernLeEncoder},
 	linear::{LimitComp, LinExp, Part, PosCoeff},
-	trace::{emit_clause, new_var},
 	CheckError, Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
 };
 
+#[allow(
+	variant_size_differences,
+	reason = "bool is 1 byte, but Lit will always require more"
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum LitOrConst {
 	Lit(Lit),
@@ -56,7 +58,7 @@ impl Not for LitOrConst {
 	}
 }
 
-impl fmt::Display for IntVarOrd {
+impl Display for IntVarOrd {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
@@ -69,7 +71,7 @@ impl fmt::Display for IntVarOrd {
 
 pub(crate) const GROUND_BINARY_AT_LB: bool = false;
 
-impl fmt::Display for IntVarBin {
+impl Display for IntVarBin {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
@@ -88,11 +90,16 @@ pub(crate) struct IntVarOrd {
 }
 
 impl IntVarOrd {
-	pub fn from_bounds<DB: ClauseDatabase>(db: &mut DB, lb: Coeff, ub: Coeff, lbl: String) -> Self {
+	pub(crate) fn from_bounds<DB: ClauseDatabase>(
+		db: &mut DB,
+		lb: Coeff,
+		ub: Coeff,
+		lbl: String,
+	) -> Self {
 		Self::from_dom(db, (lb..=ub).collect_vec().as_slice(), lbl)
 	}
 
-	pub fn from_dom<DB: ClauseDatabase>(db: &mut DB, dom: &[Coeff], lbl: String) -> Self {
+	pub(crate) fn from_dom<DB: ClauseDatabase>(db: &mut DB, dom: &[Coeff], lbl: String) -> Self {
 		Self::from_syms(
 			db,
 			dom.iter()
@@ -103,7 +110,7 @@ impl IntVarOrd {
 		)
 	}
 
-	pub fn from_syms<DB: ClauseDatabase>(
+	pub(crate) fn from_syms<DB: ClauseDatabase>(
 		db: &mut DB,
 		syms: IntervalSet<Coeff>,
 		lbl: String,
@@ -111,7 +118,7 @@ impl IntVarOrd {
 		Self::from_views(db, syms.into_iter(..).map(|c| (c, None)).collect(), lbl)
 	}
 
-	pub fn from_views<DB: ClauseDatabase>(
+	pub(crate) fn from_views<DB: ClauseDatabase>(
 		db: &mut DB,
 		views: IntervalMap<Coeff, Option<Lit>>,
 		lbl: String,
@@ -128,7 +135,7 @@ impl IntVarOrd {
 		let xs = views
 			.into_iter(..)
 			.map(|(v, lit)| {
-				#[cfg(feature = "trace")]
+				#[cfg(any(feature = "tracing", test))]
 				let lbl = format!("{lbl}>={}..{}", v.start, v.end - 1);
 				(v, lit.unwrap_or_else(|| new_var!(db, lbl)))
 			})
@@ -136,18 +143,17 @@ impl IntVarOrd {
 		Self { xs, lbl }
 	}
 
-	pub fn consistency(&self) -> ImplicationChainConstraint {
+	pub(crate) fn consistency(&self) -> ImplicationChainConstraint {
 		ImplicationChainConstraint {
 			lits: self.xs.values(..).cloned().collect_vec(),
 		}
 	}
 
-	#[allow(dead_code)]
-	pub fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> Result {
+	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> Result {
 		ImplicationChainEncoder::default()._encode(db, &self.consistency())
 	}
 
-	pub fn div(&self, c: Coeff) -> IntVarEnc {
+	pub(crate) fn div(&self, c: Coeff) -> IntVarEnc {
 		assert!(c == 2, "Can only divide IntVarOrd by 2");
 		let xs: IntervalMap<_, _> = self
 			.xs
@@ -168,13 +174,13 @@ impl IntVarOrd {
 		}
 	}
 
-	pub fn dom(&self) -> IntervalSet<Coeff> {
+	pub(crate) fn dom(&self) -> IntervalSet<Coeff> {
 		std::iter::once(self.lb()..(self.lb() + 1))
 			.chain(self.xs.intervals(..))
 			.collect()
 	}
 
-	pub fn leqs(&self) -> Vec<(Range<Coeff>, Vec<Vec<Lit>>)> {
+	pub(crate) fn leqs(&self) -> Vec<(Range<Coeff>, Vec<Vec<Lit>>)> {
 		self.xs
 			.iter(..)
 			.map(|(v, x)| ((v.start - 1)..(v.end - 1), vec![vec![!x]]))
@@ -182,21 +188,21 @@ impl IntVarOrd {
 			.collect()
 	}
 
-	pub fn geqs(&self) -> Vec<(Range<Coeff>, Vec<Vec<Lit>>)> {
+	pub(crate) fn geqs(&self) -> Vec<(Range<Coeff>, Vec<Vec<Lit>>)> {
 		std::iter::once((self.lb()..(self.lb() + 1), vec![]))
 			.chain(self.xs.iter(..).map(|(v, x)| (v, vec![vec![*x]])))
 			.collect()
 	}
 
-	pub fn lb(&self) -> Coeff {
+	pub(crate) fn lb(&self) -> Coeff {
 		self.xs.range().unwrap().start - 1
 	}
 
-	pub fn ub(&self) -> Coeff {
+	pub(crate) fn ub(&self) -> Coeff {
 		self.xs.range().unwrap().end - 1
 	}
 
-	pub fn leq(&self, v: Range<Coeff>) -> Vec<Vec<Lit>> {
+	pub(crate) fn leq(&self, v: Range<Coeff>) -> Vec<Vec<Lit>> {
 		let v = v.start + 1; // [x<=v] = [x < v+1]
 		if v <= self.lb() {
 			vec![vec![]]
@@ -210,7 +216,7 @@ impl IntVarOrd {
 		}
 	}
 
-	pub fn geq(&self, v: Range<Coeff>) -> Vec<Vec<Lit>> {
+	pub(crate) fn geq(&self, v: Range<Coeff>) -> Vec<Vec<Lit>> {
 		let v = v.end - 1;
 		if v <= self.lb() {
 			vec![]
@@ -224,19 +230,9 @@ impl IntVarOrd {
 		}
 	}
 
-	pub fn lits(&self) -> usize {
+	#[cfg(test)]
+	pub(crate) fn lits(&self) -> usize {
 		self.xs.len()
-	}
-
-	pub fn value(&self, value: &impl Valuation) -> i64 {
-		let mut val = self.lb();
-		for (range, x) in self.xs.iter(..) {
-			if !value.value(*x).unwrap() {
-				return val;
-			}
-			val = range.start;
-		}
-		val
 	}
 }
 
@@ -267,13 +263,13 @@ pub(crate) struct ImplicationChainConstraint {
 pub(crate) struct ImplicationChainEncoder {}
 
 impl ImplicationChainEncoder {
-	pub fn _encode<DB: ClauseDatabase>(
+	pub(crate) fn _encode<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
 		ic: &ImplicationChainConstraint,
 	) -> Result {
 		for (a, b) in ic.lits.iter().copied().tuple_windows() {
-			emit_clause!(db, [!b, a])?
+			emit_clause!(db, [!b, a])?;
 		}
 		Ok(())
 	}
@@ -300,7 +296,12 @@ pub(crate) struct IntVarBin {
 
 impl IntVarBin {
 	// TODO change to with_label or something
-	pub fn from_bounds<DB: ClauseDatabase>(db: &mut DB, lb: Coeff, ub: Coeff, lbl: String) -> Self {
+	pub(crate) fn from_bounds<DB: ClauseDatabase>(
+		db: &mut DB,
+		lb: Coeff,
+		ub: Coeff,
+		lbl: String,
+	) -> Self {
 		Self {
 			xs: (0..IntVar::required_bits(lb, ub))
 				.map(|_i| new_var!(db, format!("{}^{}", lbl, _i)))
@@ -311,7 +312,7 @@ impl IntVarBin {
 		}
 	}
 
-	pub fn from_terms(
+	pub(crate) fn from_terms(
 		terms: Vec<(Lit, PosCoeff)>,
 		lb: PosCoeff,
 		ub: PosCoeff,
@@ -326,7 +327,7 @@ impl IntVarBin {
 		}
 	}
 
-	pub fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> Result {
+	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> Result {
 		let encoder = TernLeEncoder::default();
 		if !GROUND_BINARY_AT_LB {
 			encoder.encode(
@@ -448,18 +449,6 @@ impl IntVarBin {
 			Ok(z_bin)
 		}
 	}
-
-	pub fn value(&self, value: &impl Valuation) -> i64 {
-		let mut k = 1;
-		self.xs.iter().fold(
-			if GROUND_BINARY_AT_LB { self.lb() } else { 0 },
-			|mut acc, x| {
-				acc += if value.value(*x).unwrap() { k } else { 0 };
-				k *= 2;
-				acc
-			},
-		)
-	}
 }
 
 impl From<&IntVarBin> for LinExp {
@@ -495,7 +484,7 @@ const COUPLE_DOM_PART_TO_ORD: bool = false;
 
 impl IntVarEnc {
 	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
-	pub fn from_part<DB: ClauseDatabase>(
+	pub(crate) fn from_part<DB: ClauseDatabase>(
 		db: &mut DB,
 		xs: &Part,
 		ub: PosCoeff,
@@ -510,7 +499,7 @@ impl IntVarEnc {
 					.collect();
 				// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
 				let mut h: FxHashMap<Coeff, Vec<Lit>> =
-					FxHashMap::with_capacity_and_hasher(terms.len(), BuildHasherDefault::default());
+					FxHashMap::with_capacity_and_hasher(terms.len(), FxBuildHasher);
 				for (coef, lit) in terms {
 					debug_assert!(coef <= *ub);
 					h.entry(coef).or_default().push(lit);
@@ -599,19 +588,6 @@ impl IntVarEnc {
 			  // 	u.clone(),
 			  // 	String::from("x"),
 			  // ))},
-		}
-	}
-
-	#[allow(dead_code)]
-	pub(crate) fn from_dom<DB: ClauseDatabase>(
-		db: &mut DB,
-		dom: &[Coeff],
-		lbl: String,
-	) -> Result<IntVarEnc> {
-		match dom {
-			[] => Err(Unsatisfiable),
-			[d] => Ok(IntVarEnc::Const(*d)),
-			dom => Ok(IntVarOrd::from_dom(db, dom, lbl).into()),
 		}
 	}
 
@@ -785,22 +761,12 @@ impl IntVarEnc {
 	}
 
 	/// Return number of lits in encoding
-	#[allow(dead_code)]
+	#[cfg(test)]
 	pub(crate) fn lits(&self) -> usize {
 		match self {
 			IntVarEnc::Ord(o) => o.lits(),
 			IntVarEnc::Bin(b) => b.lits(),
 			IntVarEnc::Const(_) => 0,
-		}
-	}
-
-	#[allow(dead_code)]
-	/// Returns the value of the variable in the given valuation
-	pub fn value(&self, value: &impl Valuation) -> i64 {
-		match self {
-			IntVarEnc::Ord(x) => x.value(value),
-			IntVarEnc::Bin(x) => x.value(value),
-			IntVarEnc::Const(i) => *i,
 		}
 	}
 }
@@ -827,7 +793,7 @@ impl From<IntVarOrd> for IntVarEnc {
 	}
 }
 
-impl fmt::Display for IntVarEnc {
+impl Display for IntVarEnc {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			IntVarEnc::Ord(o) => o.fmt(f),

@@ -21,8 +21,6 @@ pub(crate) struct Model {
 	var_ids: usize,
 }
 
-// TODO Domain will be used once (/if) this is added as encoder feature.
-#[allow(dead_code)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Consistency {
 	None,
@@ -60,20 +58,20 @@ impl Display for Lin {
 	}
 }
 
-impl fmt::Display for IntVar {
+impl Display for IntVar {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "x{} ∈ {}", self.id, display_dom(&self.dom))
 	}
 }
 
 impl Model {
-	pub fn add_int_var_enc(&mut self, x: IntVarEnc) -> IntVar {
+	pub(crate) fn add_int_var_enc(&mut self, x: IntVarEnc) -> IntVar {
 		let var = self.new_var(x.dom().iter(..).map(|d| d.end - 1).collect(), false);
-		self.vars.insert(var.id, x);
+		let _ = self.vars.insert(var.id, x);
 		var
 	}
 
-	pub fn new_var(&mut self, dom: BTreeSet<Coeff>, add_consistency: bool) -> IntVar {
+	pub(crate) fn new_var(&mut self, dom: BTreeSet<Coeff>, add_consistency: bool) -> IntVar {
 		self.var_ids += 1;
 		IntVar {
 			id: self.var_ids,
@@ -83,11 +81,11 @@ impl Model {
 		}
 	}
 
-	pub fn new_constant(&mut self, c: Coeff) -> IntVar {
+	pub(crate) fn new_constant(&mut self, c: Coeff) -> IntVar {
 		self.new_var(BTreeSet::from([c]), false)
 	}
 
-	pub fn encode<DB: ClauseDatabase>(
+	pub(crate) fn encode<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
 		cutoff: Option<Coeff>,
@@ -101,7 +99,8 @@ impl Model {
 
 			for (_, x) in xs {
 				let x = x.borrow();
-				self.vars
+				let _ = self
+					.vars
 					.entry(x.id)
 					.or_insert_with(|| x.encode(db, &mut all_views, x.prefer_order(cutoff)));
 			}
@@ -143,13 +142,13 @@ impl Model {
 }
 
 #[derive(Debug)]
-pub struct Lin {
+pub(crate) struct Lin {
 	pub(crate) xs: Vec<(Coeff, Rc<RefCell<IntVar>>)>,
 	pub(crate) cmp: LimitComp,
 }
 
 impl Lin {
-	pub fn tern(
+	pub(crate) fn tern(
 		x: Rc<RefCell<IntVar>>,
 		y: Rc<RefCell<IntVar>>,
 		cmp: LimitComp,
@@ -161,11 +160,11 @@ impl Lin {
 		}
 	}
 
-	pub fn lb(&self) -> Coeff {
+	pub(crate) fn lb(&self) -> Coeff {
 		self.xs.iter().map(|(c, x)| x.borrow().lb(c)).sum::<i64>()
 	}
 
-	pub fn ub(&self) -> Coeff {
+	pub(crate) fn ub(&self) -> Coeff {
 		self.xs.iter().map(|(c, x)| x.borrow().ub(c)).sum::<i64>()
 	}
 
@@ -282,7 +281,7 @@ impl Lin {
 
 // TODO perhaps id can be used by replacing vars HashMap to just vec
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IntVar {
+pub(crate) struct IntVar {
 	pub(crate) id: usize,
 	pub(crate) dom: BTreeSet<Coeff>,
 	add_consistency: bool,
@@ -309,13 +308,13 @@ impl IntVar {
 					.map(|(a, b)| (a + 1)..(b + 1))
 					.map(|v| (v.clone(), views.get(&(self.id, v.end - 1)).cloned()))
 					.collect::<IntervalMap<_, _>>();
-				IntVarEnc::Ord(IntVarOrd::from_views(db, dom, "x".to_string()))
+				IntVarEnc::Ord(IntVarOrd::from_views(db, dom, "x".to_owned()))
 			} else {
 				let y = IntVarBin::from_bounds(
 					db,
 					*self.dom.first().unwrap(),
 					*self.dom.last().unwrap(),
-					"x".to_string(),
+					"x".to_owned(),
 				);
 				IntVarEnc::Bin(y)
 			};
@@ -331,7 +330,7 @@ impl IntVar {
 			{
 				// TODO refactor
 				if !view.1.is_empty() {
-					views.insert(view.0, view.1[0][0]);
+					let _ = views.insert(view.0, view.1[0][0]);
 				}
 			}
 			x
@@ -343,7 +342,7 @@ impl IntVar {
 	}
 
 	fn le(&mut self, bound: &Coeff) {
-		self.dom.split_off(&(*bound + 1));
+		let _ = self.dom.split_off(&(*bound + 1));
 	}
 
 	pub(crate) fn size(&self) -> usize {
@@ -368,7 +367,7 @@ impl IntVar {
 		.unwrap()
 	}
 
-	pub fn required_bits(lb: Coeff, ub: Coeff) -> u32 {
+	pub(crate) fn required_bits(lb: Coeff, ub: Coeff) -> u32 {
 		const ZERO: Coeff = 0;
 		if GROUND_BINARY_AT_LB {
 			ZERO.leading_zeros() - ((ub - lb).leading_zeros())

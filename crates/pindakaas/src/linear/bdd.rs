@@ -30,7 +30,7 @@ impl BddEncoder {
 
 impl<DB: ClauseDatabase> Encoder<DB, Linear> for BddEncoder {
 	#[cfg_attr(
-		feature = "trace",
+		any(feature = "tracing", test),
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&self, db: &mut DB, lin: &Linear) -> Result {
@@ -50,8 +50,6 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for BddEncoder {
 			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
 			.collect_vec();
 
-		// TODO cannot avoid?
-		#[allow(clippy::needless_collect)]
 		let ys = ys
 			.into_iter()
 			.map(|nodes| {
@@ -65,7 +63,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for BddEncoder {
 								BddNode::Val => Some(iv.end - 1),
 								BddNode::View(view) => {
 									let val = iv.end - 1;
-									views.insert(val, view);
+									let _ = views.insert(val, view);
 									Some(val)
 								}
 							})
@@ -84,10 +82,13 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for BddEncoder {
 		let mut ys = ys.into_iter();
 		let first = ys.next().unwrap();
 		assert!(first.as_ref().borrow().size() == 1);
-		xs.iter().zip(ys).fold(first, |curr, (x_i, next)| {
-			model
-				.cons
-				.push(Lin::tern(curr, x_i.clone(), lin.cmp.clone(), next.clone()));
+		let _ = xs.iter().zip(ys).fold(first, |curr, (x_i, next)| {
+			model.cons.push(Lin::tern(
+				curr,
+				Rc::clone(x_i),
+				lin.cmp.clone(),
+				Rc::clone(&next),
+			));
 			next
 		});
 
@@ -112,8 +113,6 @@ fn construct_bdd(
 		.chain(std::iter::once((0, k)))
 		.collect_vec();
 
-	// TODO ? also hard to avoid?
-	#[allow(clippy::needless_collect)]
 	let margins = xs
 		.iter()
 		.rev()
@@ -148,7 +147,7 @@ fn construct_bdd(
 		})
 		.collect();
 
-	bdd(0, xs, 0, &mut ws);
+	let _ = bdd(0, xs, 0, &mut ws);
 	ws
 }
 
@@ -210,7 +209,6 @@ fn bdd(
 #[cfg(test)]
 mod tests {
 
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;

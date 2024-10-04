@@ -2,7 +2,7 @@ use itertools::Itertools;
 
 use super::at_least_one_clause;
 use crate::{
-	linear::LimitComp, trace::emit_clause, CardinalityOne, ClauseDatabase, Encoder, Result,
+	helpers::emit_clause, linear::LimitComp, CardinalityOne, ClauseDatabase, Encoder, Result,
 };
 
 /// An encoder for an At Most One constraints that for every pair of literals
@@ -12,17 +12,17 @@ pub struct PairwiseEncoder {}
 
 impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for PairwiseEncoder {
 	#[cfg_attr(
-		feature = "trace",
+		any(feature = "tracing", test),
 		tracing::instrument(name = "pairwise_encoder", skip_all, fields(constraint = card1.trace_print()))
 	)]
 	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
 		// Add clause to ensure "at least one" literal holds
 		if card1.cmp == LimitComp::Equal {
-			at_least_one_clause(db, card1)?
+			at_least_one_clause(db, card1)?;
 		}
 		// For every pair of literals (i, j) add "¬i ∨ ¬j"
 		for (a, b) in card1.lits.iter().tuple_combinations() {
-			emit_clause!(db, [!a, !b])?
+			emit_clause!(db, [!a, !b])?;
 		}
 		Ok(())
 	}
@@ -31,7 +31,6 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for PairwiseEncoder {
 #[cfg(test)]
 mod tests {
 	use itertools::Itertools;
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;

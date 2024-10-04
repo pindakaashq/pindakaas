@@ -25,33 +25,49 @@ pub type SymResult<'a, S, E = libloading::Error> = std::result::Result<Symbol<'a
 
 impl IpasirLibrary {
 	fn ipasir_signature_sym(&self) -> SymResult<extern "C" fn() -> *const c_char> {
+		// SAFETY: We assume that if this symbol is present, then it is part of a
+		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_signature") }
 	}
 
 	fn ipasir_init_sym(&self) -> SymResult<extern "C" fn() -> *mut c_void> {
+		// SAFETY: We assume that if this symbol is present, then it is part of a
+		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_init") }
 	}
 
 	fn ipasir_release_sym(&self) -> SymResult<extern "C" fn(*mut c_void)> {
+		// SAFETY: We assume that if this symbol is present, then it is part of a
+		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_release") }
 	}
 
 	fn ipasir_add_sym(&self) -> SymResult<extern "C" fn(*mut c_void, i32)> {
+		// SAFETY: We assume that if this symbol is present, then it is part of a
+		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_add") }
 	}
 
 	fn ipasir_assume_sym(&self) -> SymResult<extern "C" fn(*mut c_void, i32)> {
+		// SAFETY: We assume that if this symbol is present, then it is part of a
+		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_assume") }
 	}
 
 	fn ipasir_solve_sym(&self) -> SymResult<extern "C" fn(*mut c_void) -> c_int> {
+		// SAFETY: We assume that if this symbol is present, then it is part of a
+		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_solve") }
 	}
 	fn ipasir_value_sym(&self) -> SymResult<extern "C" fn(*mut c_void, i32) -> i32> {
+		// SAFETY: We assume that if this symbol is present, then it is part of a
+		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_val") }
 	}
 
 	fn ipasir_failed_sym(&self) -> SymResult<extern "C" fn(*mut c_void, i32) -> c_int> {
+		// SAFETY: We assume that if this symbol is present, then it is part of a
+		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_failed") }
 	}
 
@@ -60,6 +76,8 @@ impl IpasirLibrary {
 	) -> SymResult<
 		extern "C" fn(*mut c_void, *mut c_void, Option<unsafe extern "C" fn(*mut c_void) -> c_int>),
 	> {
+		// SAFETY: We assume that if this symbol is present, then it is part of a
+		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_set_terminate") }
 	}
 
@@ -73,10 +91,14 @@ impl IpasirLibrary {
 			Option<unsafe extern "C" fn(*mut c_void, *const i32)>,
 		),
 	> {
+		// SAFETY: We assume that if this symbol is present, then it is part of a
+		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_set_learn") }
 	}
 
 	pub fn signature(&self) -> &str {
+		// SAFETY: We assume that the signature function as part of the IPASIR
+		// interface returns a valid C string.
 		unsafe { CStr::from_ptr((self.ipasir_signature_sym().unwrap())()) }
 			.to_str()
 			.unwrap()
@@ -106,16 +128,16 @@ impl TryFrom<Library> for IpasirLibrary {
 
 	fn try_from(lib: Library) -> Result<Self, Self::Error> {
 		let lib = IpasirLibrary { lib };
-		lib.ipasir_signature_sym()?;
-		lib.ipasir_init_sym()?;
-		lib.ipasir_release_sym()?;
-		lib.ipasir_add_sym()?;
-		lib.ipasir_assume_sym()?;
-		lib.ipasir_solve_sym()?;
-		lib.ipasir_value_sym()?;
-		lib.ipasir_failed_sym()?;
-		lib.ipasir_set_terminate_sym()?;
-		lib.ipasir_set_learn_sym()?;
+		let _ = lib.ipasir_signature_sym()?;
+		let _ = lib.ipasir_init_sym()?;
+		let _ = lib.ipasir_release_sym()?;
+		let _ = lib.ipasir_add_sym()?;
+		let _ = lib.ipasir_assume_sym()?;
+		let _ = lib.ipasir_solve_sym()?;
+		let _ = lib.ipasir_value_sym()?;
+		let _ = lib.ipasir_failed_sym()?;
+		let _ = lib.ipasir_set_terminate_sym()?;
+		let _ = lib.ipasir_set_learn_sym()?;
 		Ok(lib)
 	}
 }
@@ -191,6 +213,8 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 	type ValueFn = IpasirSol<'lib>;
 
 	fn signature(&self) -> &str {
+		// SAFETY: We assume that the signature function as part of the IPASIR
+		// interface returns a valid C string.
 		unsafe { CStr::from_ptr((self.signature_fn)()) }
 			.to_str()
 			.unwrap()
@@ -313,11 +337,11 @@ impl<'lib> LearnCallback for IpasirSolver<'lib> {
 		&mut self,
 		cb: Option<F>,
 	) {
-		const MAX_LEN: std::ffi::c_int = 512;
+		const MAX_LEN: c_int = 512;
 		if let Some(mut cb) = cb {
 			let wrapped_cb = move |clause: *const i32| {
 				let mut iter = ExplIter(clause).map(|i: i32| Lit(NonZeroI32::new(i).unwrap()));
-				cb(&mut iter)
+				cb(&mut iter);
 			};
 
 			let trampoline = get_trampoline1(&wrapped_cb);
@@ -353,6 +377,8 @@ impl Iterator for ExplIter {
 	type Item = i32;
 	#[inline]
 	fn next(&mut self) -> Option<Self::Item> {
+		// SAFETY: ExplIter is assumed to be constructed using a valid pointer to an
+		// correctly aligned and null-terminated array of i32.
 		unsafe {
 			if *self.0 == 0 {
 				None
@@ -372,12 +398,12 @@ pub(crate) struct IpasirPropStore<P, A> {
 	/// IPASIR solver pointer
 	pub(crate) slv: A,
 	/// Propagation queue
-	pub(crate) pqueue: VecDeque<crate::Lit>,
+	pub(crate) pqueue: VecDeque<Lit>,
 	/// Reason clause queue
-	pub(crate) rqueue: VecDeque<crate::Lit>,
+	pub(crate) rqueue: VecDeque<Lit>,
 	pub(crate) explaining: Option<Lit>,
 	/// External clause queue
-	pub(crate) cqueue: Option<VecDeque<crate::Lit>>,
+	pub(crate) cqueue: Option<VecDeque<Lit>>,
 }
 
 #[cfg(feature = "ipasir-up")]
@@ -395,8 +421,9 @@ impl<P, A> IpasirPropStore<P, A> {
 }
 
 // --- Helpers for C interface ---
-pub(crate) fn get_drop_fn<T>(_: &T) -> fn(*mut std::ffi::c_void) {
-	|ptr: *mut std::ffi::c_void| {
+pub(crate) fn get_drop_fn<T>(_: &T) -> fn(*mut c_void) {
+	|ptr: *mut c_void| {
+		// SAFETY: This drop function assumes that the pointer was created by Box::leak
 		let b = unsafe { Box::<T>::from_raw(ptr as *mut T) };
 		drop(b);
 	}
@@ -404,22 +431,25 @@ pub(crate) fn get_drop_fn<T>(_: &T) -> fn(*mut std::ffi::c_void) {
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct FFIPointer {
-	pub(crate) ptr: *mut std::ffi::c_void,
-	pub(crate) drop_fn: fn(*mut std::ffi::c_void),
+	pub(crate) ptr: *mut c_void,
+	pub(crate) drop_fn: fn(*mut c_void),
 }
 
 impl FFIPointer {
 	pub(crate) fn new<T: 'static>(obj: T) -> Self {
 		let drop_fn = get_drop_fn(&obj);
-		let ptr = Box::leak(Box::new(obj)) as *mut _ as *mut std::ffi::c_void;
-		Self { ptr, drop_fn }
+		let ptr: *mut T = Box::leak(Box::new(obj));
+		Self {
+			ptr: ptr as *mut c_void,
+			drop_fn,
+		}
 	}
 
 	/// Get the FFI pointer to the contained object
 	///
 	/// # WARNING
 	/// This pointer is only valid until the FFIPointer object is dropped.
-	pub(crate) fn get_ptr(&self) -> *mut std::ffi::c_void {
+	pub(crate) fn get_ptr(&self) -> *mut c_void {
 		self.ptr
 	}
 }
@@ -427,8 +457,8 @@ impl FFIPointer {
 impl Default for FFIPointer {
 	fn default() -> Self {
 		Self {
-			ptr: std::ptr::null_mut(),
-			drop_fn: |_: *mut std::ffi::c_void| {},
+			ptr: ptr::null_mut(),
+			drop_fn: |_: *mut c_void| {},
 		}
 	}
 }
@@ -457,10 +487,11 @@ impl PropagatorPointer {
 		// Construct wrapping structures
 		let store = IpasirPropStore::new(prop, slv);
 		let prop = FFIPointer::new(store);
-		let access_prop = |x: *mut std::ffi::c_void| -> *mut dyn std::any::Any {
-			let store =
-				unsafe { &mut *(x as *mut crate::solver::libloading::IpasirPropStore<P, A>) };
-			(&mut store.prop) as *mut dyn std::any::Any
+		let access_prop = |x: *mut c_void| -> *mut dyn std::any::Any {
+			// SAFETY: The pointer is known to be created using
+			// Box::<IpasirPropStore<P, A>>::leak()
+			let store = unsafe { &mut *(x as *mut IpasirPropStore<P, A>) };
+			&mut store.prop
 		};
 		Self {
 			ptr: prop,
@@ -468,7 +499,7 @@ impl PropagatorPointer {
 		}
 	}
 
-	pub(crate) fn get_raw_ptr(&self) -> *mut std::ffi::c_void {
+	pub(crate) fn get_raw_ptr(&self) -> *mut c_void {
 		self.ptr.get_ptr()
 	}
 
@@ -490,15 +521,15 @@ pub(crate) unsafe extern "C" fn ipasir_notify_assignment_cb<P: Propagator, A>(
 	is_fixed: bool,
 ) {
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
-	let lit = crate::Lit(std::num::NonZeroI32::new(lit).unwrap());
-	prop.prop.notify_assignment(lit, is_fixed)
+	let lit = Lit(NonZeroI32::new(lit).unwrap());
+	prop.prop.notify_assignment(lit, is_fixed);
 }
 #[cfg(feature = "ipasir-up")]
 pub(crate) unsafe extern "C" fn ipasir_notify_new_decision_level_cb<P: Propagator, A>(
 	state: *mut c_void,
 ) {
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
-	prop.prop.notify_new_decision_level()
+	prop.prop.notify_new_decision_level();
 }
 #[cfg(feature = "ipasir-up")]
 pub(crate) unsafe extern "C" fn ipasir_notify_backtrack_cb<P: Propagator, A>(
@@ -551,7 +582,7 @@ pub(crate) unsafe extern "C" fn ipasir_propagate_cb<P: Propagator, A: SolvingAct
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	if prop.pqueue.is_empty() {
 		let slv = &mut prop.slv;
-		prop.pqueue = prop.prop.propagate(slv).into()
+		prop.pqueue = prop.prop.propagate(slv).into();
 	}
 	if let Some(l) = prop.pqueue.pop_front() {
 		l.0.into()
@@ -568,7 +599,7 @@ pub(crate) unsafe extern "C" fn ipasir_add_reason_clause_lit_cb<
 	propagated_lit: i32,
 ) -> i32 {
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
-	let lit = crate::Lit(std::num::NonZeroI32::new(propagated_lit).unwrap());
+	let lit = Lit(NonZeroI32::new(propagated_lit).unwrap());
 	debug_assert!(prop.explaining.is_none() || prop.explaining == Some(lit));
 	// TODO: Can this be prop.explaining.is_none()?
 	if prop.explaining != Some(lit) {

@@ -1,8 +1,19 @@
 [package]
 name = "pindakaas-build-macros"
-version = "0.1.0"
-edition = "2021"
+description = "build macros for pindakaas crates to help with the compilation of SAT solvers"
+
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+repository.workspace = true
 
 [dependencies]
-cc = "1.0"
+cc = { workspace = true }
 paste = "1.0"
+
+[lints]
+workspace = true

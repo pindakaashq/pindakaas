@@ -21,6 +21,7 @@ pub struct IntelSat {
 impl Default for IntelSat {
 	fn default() -> Self {
 		Self {
+			// SAFETY: Assume correct creation of the solver using the IPASIR API.
 			ptr: unsafe { pindakaas_intel_sat::ipasir_init() },
 			vars: VarFactory::default(),
 			term_cb: FFIPointer::default(),
@@ -31,7 +32,6 @@ impl Default for IntelSat {
 
 #[cfg(test)]
 mod tests {
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;

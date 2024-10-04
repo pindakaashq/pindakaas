@@ -2,10 +2,9 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	helpers::as_binary,
+	helpers::{as_binary, emit_clause, new_var},
 	int::LitOrConst,
 	linear::{LimitComp, PosCoeff},
-	trace::{emit_clause, new_var},
 	ClauseDatabase, Coeff, Encoder, Formula, Linear, Lit, Result, TseitinEncoder, Unsatisfiable,
 };
 
@@ -15,7 +14,7 @@ pub struct AdderEncoder {}
 
 impl<DB: ClauseDatabase> Encoder<DB, Linear> for AdderEncoder {
 	#[cfg_attr(
-		feature = "trace",
+		any(feature = "tracing", test),
 		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&self, db: &mut DB, lin: &Linear) -> Result {
@@ -59,7 +58,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for AdderEncoder {
 				1 => {
 					let x = bucket[b].pop().unwrap();
 					if lin.cmp == LimitComp::Equal {
-						emit_clause!(db, [if k[b] { x } else { !x }])?
+						emit_clause!(db, [if k[b] { x } else { !x }])?;
 					} else {
 						sum[b] = Some(x);
 					}
@@ -102,7 +101,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for AdderEncoder {
 							if lits.len() == 2 && lin.cmp == LimitComp::Equal {
 								// Already encoded by the XOR to compute the sum
 							} else {
-								carry_circuit(db, &lits[..], LitOrConst::Const(false))?
+								carry_circuit(db, &lits[..], LitOrConst::Const(false))?;
 							}
 						} else if last && lin.cmp == LimitComp::Equal && bucket[b + 1].is_empty() {
 							// No need to create a new literal, force the carry to equal the result
@@ -147,7 +146,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for AdderEncoder {
 
 /// Uses lexicographic constraint to constrain x:B ≦ k
 #[cfg_attr(
-	feature = "trace",
+	any(feature = "tracing", test),
 	tracing::instrument(name = "lex_lesseq_const", skip_all)
 )]
 pub(crate) fn lex_leq_const<DB: ClauseDatabase>(
@@ -174,7 +173,10 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase>(
 }
 
 /// Uses lexicographic constraint to constrain x:B >= k
-#[cfg_attr(feature = "trace", tracing::instrument(name = "lex_geq", skip_all))]
+#[cfg_attr(
+	any(feature = "tracing", test),
+	tracing::instrument(name = "lex_geq", skip_all)
+)]
 pub(crate) fn lex_geq_const<DB: ClauseDatabase>(
 	db: &mut DB,
 	x: &[Option<Lit>],
@@ -212,7 +214,7 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 	)
 }
 
-#[cfg_attr(feature = "trace", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} {cmp} {z:?}"))))]
+#[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} {cmp} {z:?}"))))]
 pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 	db: &mut DB,
 	x: &[LitOrConst],
@@ -310,7 +312,7 @@ fn emit_filtered_clause<DB: ClauseDatabase, I: IntoIterator<Item = LitOrConst>>(
 /// literals (full adder).
 ///
 /// `output` can be either a literal, or a constant Boolean value.
-#[cfg_attr(feature = "trace", tracing::instrument(name = "sum_circuit", skip_all, fields(constraint = trace_print_sum(input, &output))))]
+#[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "sum_circuit", skip_all, fields(constraint = trace_print_sum(input, &output))))]
 fn sum_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: LitOrConst) -> Result {
 	match output {
 		LitOrConst::Lit(sum) => match *input {
@@ -334,7 +336,7 @@ fn sum_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: LitOrCons
 			_ => unreachable!(),
 		},
 		LitOrConst::Const(true) => {
-			let xor = Formula::Xor(input.into_iter().map(|&l| Formula::Atom(l)).collect_vec());
+			let xor = Formula::Xor(input.iter().map(|&l| Formula::Atom(l)).collect_vec());
 			TseitinEncoder.encode(db, &xor)
 		}
 		LitOrConst::Const(false) => match *input {
@@ -353,7 +355,7 @@ fn sum_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: LitOrCons
 	}
 }
 
-#[cfg(feature = "trace")]
+#[cfg(any(feature = "tracing", test))]
 fn trace_print_sum(input: &[Lit], output: &LitOrConst) -> String {
 	use crate::trace::trace_print_lit;
 	let inner = itertools::join(input.iter().map(trace_print_lit), " ⊻ ");
@@ -370,7 +372,7 @@ fn trace_print_sum(input: &[Lit], output: &LitOrConst) -> String {
 /// literals (full adder).
 ///
 /// `output` can be either a literal, or a constant Boolean value.
-#[cfg_attr(feature = "trace", tracing::instrument(name = "carry_circuit", skip_all, fields(constraint = trace_print_carry(input, &output))))]
+#[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "carry_circuit", skip_all, fields(constraint = trace_print_carry(input, &output))))]
 fn carry_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: LitOrConst) -> Result {
 	match output {
 		LitOrConst::Lit(carry) => match *input {
@@ -411,7 +413,7 @@ fn carry_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: LitOrCo
 	}
 }
 
-#[cfg(feature = "trace")]
+#[cfg(any(feature = "tracing", test))]
 fn trace_print_carry(input: &[Lit], output: &LitOrConst) -> String {
 	use crate::trace::trace_print_lit;
 	let inner = itertools::join(input.iter().map(trace_print_lit), " + ");
@@ -424,7 +426,6 @@ fn trace_print_carry(input: &[Lit], output: &LitOrConst) -> String {
 
 #[cfg(test)]
 mod tests {
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;

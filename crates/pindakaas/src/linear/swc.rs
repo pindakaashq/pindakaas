@@ -32,7 +32,7 @@ impl SwcEncoder {
 
 impl<DB: ClauseDatabase> Encoder<DB, Linear> for SwcEncoder {
 	#[cfg_attr(
-		feature = "trace",
+		any(feature = "tracing", test),
 		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&self, db: &mut DB, lin: &Linear) -> Result {
@@ -48,8 +48,6 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for SwcEncoder {
 			.collect_vec();
 		let n = xs.len();
 
-		// TODO not possible to fix since both closures use db?
-		#[allow(clippy::needless_collect)] // TODO no idea how to avoid collect
 		let ys = std::iter::once(model.new_constant(0))
 			.chain(
 				(1..n)
@@ -79,7 +77,6 @@ impl<DB: ClauseDatabase> Encoder<DB, Linear> for SwcEncoder {
 #[cfg(test)]
 mod tests {
 
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;

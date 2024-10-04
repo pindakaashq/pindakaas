@@ -317,7 +317,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 				Ok(())
 			}
 			Formula::Xor(sub) => match sub.len() {
-				0 => Err(crate::Unsatisfiable),
+				0 => Err(Unsatisfiable),
 				1 => self.encode(db, &sub[0]),
 				_ => {
 					let mut sub = sub.clone();

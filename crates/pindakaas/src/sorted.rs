@@ -3,10 +3,9 @@ use iset::interval_map;
 use itertools::Itertools;
 
 use crate::{
-	helpers::{add_clauses_for, negate_cnf},
+	helpers::{add_clauses_for, emit_clause, negate_cnf},
 	int::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 	linear::LimitComp,
-	trace::emit_clause,
 	CheckError, Checker, ClauseDatabase, Coeff, Encoder, LinExp, Lit, Result, Unsatisfiable,
 	Valuation,
 };
@@ -19,11 +18,11 @@ pub struct SortedEncoder {
 	pub(crate) overwrite_recursive_cmp: Option<LimitComp>,
 	pub(crate) sort_n: SortN,
 }
-#[allow(dead_code)]
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum SortN {
+pub(crate) enum SortN {
+	#[allow(dead_code, reason = "TODO: Ask HB to see whether this is still useful")]
 	One,
-	#[allow(dead_code)] // TODO
 	DivTwo,
 }
 
@@ -488,7 +487,6 @@ fn lambda((v, c): (u128, u128), lambda: u32) -> u128 {
 mod tests {
 	use std::num::NonZeroI32;
 
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;

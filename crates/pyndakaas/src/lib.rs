@@ -1,7 +1,11 @@
+#![allow(
+	unused_qualifications,
+	reason = "pyo3 macro will generate unused qualified types"
+)]
 use std::{fmt::Display, ops::DerefMut, path::PathBuf};
 
+use ::pindakaas as base;
 use base::{ClauseDatabase, Encoder, LinExp, LinearConstraint, LinearEncoder};
-use pindakaas as base;
 use pyo3::{exceptions::PyArithmeticError, prelude::*};
 
 #[pyclass]
@@ -23,8 +27,7 @@ impl Display for Lit {
 type Clause = Vec<Lit>;
 
 #[pymodule]
-#[pyo3(name = "pindakaas")]
-fn module(_py: Python, m: &PyModule) -> PyResult<()> {
+fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<Cnf>()?;
 	m.add_function(wrap_pyfunction!(adder_encode, m)?)?;
 	Ok(())

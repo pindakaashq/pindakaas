@@ -1,12 +1,23 @@
 [package]
 name = "pindakaas-derive"
-version = "0.1.0"
-edition = "2021"
+description = "derive macros for the pindakaas crate to connect to SAT solvers"
+
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+repository.workspace = true
 
 [lib]
 proc-macro = true
 
 [dependencies]
-darling = "0.20.3"
-quote = "1.0"
-syn = "2.0.43"
+darling = "0.20"
+quote = { workspace = true }
+syn = { workspace = true }
+
+[lints]
+workspace = true

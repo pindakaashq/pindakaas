@@ -29,7 +29,7 @@ pub use totalizer::TotalizerEncoder;
 pub(crate) struct PosCoeff(Coeff);
 
 impl PosCoeff {
-	pub fn new(c: Coeff) -> Self {
+	pub(crate) fn new(c: Coeff) -> Self {
 		if c < 0 {
 			panic!("cannot create a PosCoeff with a negative value")
 		}
@@ -76,7 +76,7 @@ pub struct Linear {
 }
 
 impl Linear {
-	#[cfg(feature = "trace")]
+	#[cfg(any(feature = "tracing", test))]
 	pub(crate) fn trace_print(&self) -> String {
 		use crate::trace::trace_print_lit;
 
@@ -129,7 +129,7 @@ impl From<CardinalityOne> for Linear {
 
 // Automatically implement Cardinality encoding when you can encode Linear constraints
 impl<DB: ClauseDatabase, Enc: Encoder<DB, Linear> + LinMarker> Encoder<DB, Cardinality> for Enc {
-	fn encode(&self, db: &mut DB, con: &Cardinality) -> crate::Result {
+	fn encode(&self, db: &mut DB, con: &Cardinality) -> Result {
 		self.encode(db, &Linear::from(con.clone()))
 	}
 }
@@ -158,7 +158,7 @@ pub enum LimitComp {
 	LessEq,
 }
 
-impl fmt::Display for LimitComp {
+impl Display for LimitComp {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			LimitComp::Equal => write!(f, "=="),
@@ -233,7 +233,7 @@ impl LinearConstraint {
 		Self { exp, cmp, k }
 	}
 
-	#[cfg(feature = "trace")]
+	#[cfg(any(feature = "tracing", test))]
 	pub(crate) fn trace_print(&self) -> String {
 		use crate::trace::trace_print_lit;
 
@@ -287,7 +287,7 @@ pub(crate) enum Constraint {
 }
 
 impl Part {
-	pub fn iter(&self) -> impl Iterator<Item = &(Lit, PosCoeff)> {
+	pub(crate) fn iter(&self) -> impl Iterator<Item = &(Lit, PosCoeff)> {
 		self.into_iter()
 	}
 }
@@ -333,7 +333,7 @@ impl LinExp {
 			self += *term;
 		} else {
 			self.terms.extend(choice.iter().cloned());
-			self.constraints.push((Constraint::AtMostOne, choice.len()))
+			self.constraints.push((Constraint::AtMostOne, choice.len()));
 		}
 		self
 	}
@@ -346,7 +346,7 @@ impl LinExp {
 		} else {
 			self.terms.extend(chain.iter().cloned());
 			self.constraints
-				.push((Constraint::ImplicationChain, chain.len()))
+				.push((Constraint::ImplicationChain, chain.len()));
 		}
 		self
 	}
@@ -385,7 +385,7 @@ impl LinExp {
 			let mut terms = Vec::with_capacity(constraint.1);
 			for _ in 0..constraint.1 {
 				if let Some(term) = it.next() {
-					terms.push(term)
+					terms.push(term);
 				}
 			}
 			(Some(constraint.0.clone()), terms)
@@ -460,7 +460,7 @@ impl<'a> From<IntEncoding<'a>> for LinExp {
 impl AddAssign<(Lit, Coeff)> for LinExp {
 	fn add_assign(&mut self, rhs: (Lit, Coeff)) {
 		self.terms.push_front(rhs);
-		self.num_free += 1
+		self.num_free += 1;
 	}
 }
 impl Add<(Lit, Coeff)> for LinExp {
@@ -479,15 +479,15 @@ impl<'a> AddAssign<IntEncoding<'a>> for LinExp {
 					self.terms.push_back((*lit, k));
 					k += 1;
 				}
-				self.constraints.push((Constraint::AtMostOne, vals.len()))
+				self.constraints.push((Constraint::AtMostOne, vals.len()));
 			}
 			IntEncoding::Order { first, vals } => {
 				for lit in vals {
-					self.terms.push_back((*lit, 1))
+					self.terms.push_back((*lit, 1));
 				}
 				self.add += first;
 				self.constraints
-					.push((Constraint::ImplicationChain, vals.len()))
+					.push((Constraint::ImplicationChain, vals.len()));
 			}
 			IntEncoding::Log { signed, bits } => {
 				let two = 1 + 1;
@@ -606,7 +606,7 @@ impl<DB: ClauseDatabase, Enc: Encoder<DB, LinVariant>> Encoder<DB, LinearConstra
 	for LinearEncoder<Enc>
 {
 	#[cfg_attr(
-		feature = "trace",
+		any(feature = "tracing", test),
 		tracing::instrument(name = "linear_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&self, db: &mut DB, lin: &LinearConstraint) -> Result {
@@ -666,7 +666,6 @@ impl<
 
 #[cfg(test)]
 mod tests {
-
 	use super::{Part, PosCoeff};
 	use crate::{Coeff, Lit};
 
