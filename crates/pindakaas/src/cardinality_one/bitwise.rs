@@ -2,8 +2,8 @@ use itertools::Itertools;
 
 use super::at_least_one_clause;
 use crate::{
+	helpers::{emit_clause, new_var},
 	linear::LimitComp,
-	trace::{emit_clause, new_var},
 	CardinalityOne, ClauseDatabase, Encoder, Result,
 };
 
@@ -15,7 +15,7 @@ pub struct BitwiseEncoder {}
 
 impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 	#[cfg_attr(
-		feature = "trace",
+		any(feature = "tracing", test),
 		tracing::instrument(name = "bitwise_encoder", skip_all, fields(constraint = card1.trace_print()))
 	)]
 	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
@@ -24,7 +24,7 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 
 		// Add clause to ensure "at least one" literal holds
 		if card1.cmp == LimitComp::Equal {
-			at_least_one_clause(db, card1)?
+			at_least_one_clause(db, card1)?;
 		}
 
 		// Create a log encoded selection variable
@@ -48,7 +48,6 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 #[cfg(test)]
 mod tests {
 	use itertools::Itertools;
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;

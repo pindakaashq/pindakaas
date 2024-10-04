@@ -30,6 +30,10 @@ impl SortingNetworkEncoder {
 }
 
 impl<DB: ClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
+	#[cfg_attr(
+		any(feature = "tracing", test),
+		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))
+	)]
 	fn encode(&self, db: &mut DB, card: &Cardinality) -> Result {
 		self.sorted_encoder.encode(
 			db,
@@ -44,16 +48,6 @@ impl<DB: ClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
 
 #[cfg(test)]
 mod tests {
-	use itertools::Itertools;
-
-	use super::*;
-	use crate::{
-		helpers::tests::assert_solutions,
-		linear::{LimitComp, PosCoeff},
-		sorted::{SortedEncoder, SortedStrategy},
-		Cardinality, Cnf, Encoder, NextVarRange,
-	};
-
 	macro_rules! test_card {
 		($encoder:expr,$n:expr,$cmp:expr,$k:expr) => {
 			let mut cnf = Cnf::default();
@@ -84,7 +78,16 @@ mod tests {
 
 	macro_rules! sorted_card_test_suite {
 		($encoder:expr,$cmp:expr) => {
-			use super::*;
+			use itertools::Itertools;
+			use traced_test::test;
+
+			use crate::{
+				cardinality::sorting_network::SortingNetworkEncoder,
+				helpers::tests::assert_solutions,
+				linear::PosCoeff,
+				sorted::{SortedEncoder, SortedStrategy},
+				Cardinality, Cnf, Encoder, LimitComp, NextVarRange,
+			};
 
 			#[test]
 			fn test_card_2_1() {
@@ -147,14 +150,13 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				#[allow(unused_mut)]
-				let mut f = SortedEncoder {
+				let f = SortedEncoder {
 					strategy: SortedStrategy::Recursive,
 					overwrite_direct_cmp: None,
 					overwrite_recursive_cmp: None,
 					..SortedEncoder::default()
 				};
-				e.set_sorted_encoder(f);
+				let _ = e.set_sorted_encoder(f);
 				e
 			},
 			LimitComp::LessEq
@@ -165,15 +167,14 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				#[allow(unused_mut)]
 				let mut f = SortedEncoder {
 					strategy: SortedStrategy::Recursive,
 					overwrite_direct_cmp: None,
 					overwrite_recursive_cmp: None,
 					..SortedEncoder::default()
 				};
-				f.set_strategy(SortedStrategy::Recursive);
-				e.set_sorted_encoder(f);
+				let _ = f.set_strategy(SortedStrategy::Recursive);
+				let _ = e.set_sorted_encoder(f);
 				e
 			},
 			LimitComp::Equal
@@ -184,14 +185,13 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				#[allow(unused_mut)]
-				let mut f = SortedEncoder {
+				let f = SortedEncoder {
 					strategy: SortedStrategy::Direct,
 					overwrite_direct_cmp: None,
 					overwrite_recursive_cmp: None,
 					..SortedEncoder::default()
 				};
-				e.set_sorted_encoder(f);
+				let _ = e.set_sorted_encoder(f);
 				e
 			},
 			LimitComp::LessEq
@@ -202,14 +202,13 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				#[allow(unused_mut)]
-				let mut f = SortedEncoder {
+				let f = SortedEncoder {
 					strategy: SortedStrategy::Direct,
 					overwrite_direct_cmp: None,
 					overwrite_recursive_cmp: None,
 					..SortedEncoder::default()
 				};
-				e.set_sorted_encoder(f);
+				let _ = e.set_sorted_encoder(f);
 				e
 			},
 			LimitComp::Equal
@@ -220,14 +219,13 @@ mod tests {
 		sorted_card_test_suite!(
 			{
 				let mut e = SortingNetworkEncoder::default();
-				#[allow(unused_mut)]
-				let mut f = SortedEncoder {
+				let f = SortedEncoder {
 					strategy: SortedStrategy::Mixed(2),
 					overwrite_direct_cmp: None,
 					overwrite_recursive_cmp: None,
 					..SortedEncoder::default()
 				};
-				e.set_sorted_encoder(f);
+				let _ = e.set_sorted_encoder(f);
 				e
 			},
 			LimitComp::LessEq

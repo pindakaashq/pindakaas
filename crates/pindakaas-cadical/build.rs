@@ -101,7 +101,7 @@ fn main() {
 	build.define("NDEBUG", None);
 
 	if build.get_compiler().is_like_msvc() {
-		build.include(Path::new("vendor/cadical/contrib/msvc"));
+		let _ = build.include(Path::new("vendor/cadical/contrib/msvc"));
 	}
 
 	assert_eq!(
@@ -109,7 +109,7 @@ fn main() {
 		include_str!("vendor/cadical/VERSION").trim()
 	);
 
-	build.files(src);
+	let _ = build.files(src);
 
 	build.compile("cadical");
 }

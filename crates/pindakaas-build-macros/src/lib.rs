@@ -153,6 +153,6 @@ pub fn change_ipasir_prefix(build: &mut Build, prefix: &str) {
 		"_reset_observed_vars",
 		"_is_decision",
 	] {
-		build.define(&format!("ipasir{f}"), format!("{prefix}{f}").as_ref());
+		let _ = build.define(&format!("ipasir{f}"), format!("{prefix}{f}").as_ref());
 	}
 }

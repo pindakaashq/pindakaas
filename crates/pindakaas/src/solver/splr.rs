@@ -65,7 +65,7 @@ impl Solver for Splr {
 impl Valuation for Certificate {
 	fn value(&self, lit: Lit) -> Option<bool> {
 		if let Certificate::SAT(sol) = self {
-			let var: Var = lit.var();
+			let var = lit.var();
 			let v = Into::<i32>::into(var) as usize;
 			if v <= sol.len() {
 				debug_assert_eq!(sol[v - 1].abs(), lit.var().into());
@@ -102,7 +102,6 @@ impl From<&Cnf> for Splr {
 
 #[cfg(test)]
 mod tests {
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	// use crate::{linear::LimitComp, solver::SolveResult, CardinalityOne, Encoder, PairwiseEncoder};

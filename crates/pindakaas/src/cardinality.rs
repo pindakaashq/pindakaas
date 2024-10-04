@@ -24,8 +24,7 @@ impl From<CardinalityOne> for Cardinality {
 }
 
 impl Cardinality {
-	#[cfg(feature = "trace")]
-	#[allow(dead_code)] // FIXME: Remove when used
+	#[cfg(any(feature = "tracing", test))]
 	pub(crate) fn trace_print(&self) -> String {
 		use crate::trace::trace_print_lit;
 

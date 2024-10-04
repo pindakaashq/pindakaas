@@ -1,14 +1,25 @@
 [package]
 name = "pindakaas-kissat"
+description = "build of the Kissat SAT solver for the pindakaas crate"
 version = "4.0.1"
-edition = "2021"
 build = "build.rs"
 links = "kissat"
 exclude = ["vendor/kissat"]
 include = ["vendor/kissat/src/*.c"]
 
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+repository.workspace = true
+
 [build-dependencies]
-cc = { version = "1.0", features = ["parallel"] }
+cc = { workspace = true }
 
 [dependencies]
 pindakaas-build-macros = { path = "../pindakaas-build-macros" }
+
+[lints]
+workspace = true

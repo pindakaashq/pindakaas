@@ -1,6 +1,6 @@
 use crate::{
+	helpers::{emit_clause, new_var},
 	linear::LimitComp,
-	trace::{emit_clause, new_var},
 	CardinalityOne, ClauseDatabase, Encoder, Result,
 };
 
@@ -10,7 +10,7 @@ pub struct LadderEncoder {}
 
 impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for LadderEncoder {
 	#[cfg_attr(
-	feature = "trace",
+	any(feature = "tracing", test),
 	tracing::instrument(name = "ladder_encoder", skip_all, fields(constraint = card1.trace_print()))
 )]
 	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
@@ -39,7 +39,6 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for LadderEncoder {
 #[cfg(test)]
 mod tests {
 	use itertools::Itertools;
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;

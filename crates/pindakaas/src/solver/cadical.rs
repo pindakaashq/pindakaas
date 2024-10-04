@@ -37,6 +37,7 @@ pub struct Cadical {
 impl Default for Cadical {
 	fn default() -> Self {
 		Self {
+			// SAFETY: Assume ipasir_init() returns a non-null pointer.
 			ptr: unsafe { pindakaas_cadical::ipasir_init() },
 			#[cfg(not(feature = "ipasir-up"))]
 			vars: VarFactory::default(),
@@ -52,6 +53,7 @@ impl Default for Cadical {
 
 impl Clone for Cadical {
 	fn clone(&self) -> Self {
+		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		let ptr = unsafe { ccadical_copy(self.ptr) };
 		#[cfg(not(feature = "ipasir-up"))]
 		let vars = self.vars; // Copy
@@ -79,29 +81,34 @@ impl fmt::Debug for Cadical {
 
 impl Cadical {
 	pub fn phase(&mut self, lit: Lit) {
+		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		unsafe { ccadical_phase(self.ptr, lit.0.get()) }
 	}
 
 	pub fn unphase(&mut self, lit: Lit) {
+		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		unsafe { ccadical_unphase(self.ptr, lit.0.get()) }
 	}
 
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
 	pub fn set_option(&mut self, name: &str, value: i32) {
 		let name = CString::new(name).unwrap();
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
+		// handles non-existing options gracefully.
 		unsafe { pindakaas_cadical::ccadical_set_option(self.ptr, name.as_ptr(), value) }
 	}
 
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
 	pub fn get_option(&self, name: &str) -> i32 {
 		let name = CString::new(name).unwrap();
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
+		// handles non-existing options gracefully.
 		unsafe { pindakaas_cadical::ccadical_get_option(self.ptr, name.as_ptr()) }
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;
@@ -131,17 +138,20 @@ mod tests {
 			assert!(
 				(model.value(!a).unwrap() && model.value(b).unwrap())
 					|| (model.value(a).unwrap() && model.value(!b).unwrap()),
-			)
+			);
 		});
 		assert_eq!(res, SolveResult::Sat);
 		// Test clone implementation
 		let mut cp = slv.clone();
-		cp.solve(|model| {
-			assert!(
-				(model.value(!a).unwrap() && model.value(b).unwrap())
-					|| (model.value(a).unwrap() && model.value(!b).unwrap()),
-			)
-		});
+		assert_eq!(
+			cp.solve(|model| {
+				assert!(
+					(model.value(!a).unwrap() && model.value(b).unwrap())
+						|| (model.value(a).unwrap() && model.value(!b).unwrap()),
+				);
+			}),
+			SolveResult::Sat
+		);
 	}
 
 	#[cfg(feature = "ipasir-up")]

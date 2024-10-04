@@ -4,11 +4,10 @@ use itertools::Itertools;
 
 use super::{enc::GROUND_BINARY_AT_LB, IntVarBin, IntVarEnc, LitOrConst};
 use crate::{
-	helpers::{add_clauses_for, as_binary, negate_cnf},
+	helpers::{add_clauses_for, as_binary, emit_clause, negate_cnf},
 	linear::{
 		lex_geq_const, lex_leq_const, log_enc_add, log_enc_add_, LimitComp, LinExp, PosCoeff,
 	},
-	trace::emit_clause,
 	CheckError, Checker, ClauseDatabase, Coeff, Encoder, Unsatisfiable, Valuation,
 };
 
@@ -21,11 +20,16 @@ pub(crate) struct TernLeConstraint<'a> {
 }
 
 impl<'a> TernLeConstraint<'a> {
-	pub fn new(x: &'a IntVarEnc, y: &'a IntVarEnc, cmp: LimitComp, z: &'a IntVarEnc) -> Self {
+	pub(crate) fn new(
+		x: &'a IntVarEnc,
+		y: &'a IntVarEnc,
+		cmp: LimitComp,
+		z: &'a IntVarEnc,
+	) -> Self {
 		Self { x, y, cmp, z }
 	}
 
-	pub fn is_fixed(&self) -> Result<bool, Unsatisfiable> {
+	pub(crate) fn is_fixed(&self) -> Result<bool, Unsatisfiable> {
 		let TernLeConstraint { x, y, cmp, z } = self;
 		if let IntVarEnc::Const(x) = x {
 			if let IntVarEnc::Const(y) = y {
@@ -77,7 +81,7 @@ const ENCODE_REDUNDANT_X_O_Y_O_Z_B: bool = true;
 
 impl<'a, DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'a>> for TernLeEncoder {
 	#[cfg_attr(
-		feature = "trace",
+		any(feature = "tracing", test),
 		tracing::instrument(name = "tern_le_encoder", skip_all, fields(constraint = format!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z)))
 	)]
 	fn encode(&self, db: &mut DB, tern: &TernLeConstraint) -> crate::Result {
@@ -324,12 +328,11 @@ impl<'a, DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'a>> for TernLeEncoder
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
 
 	use std::num::NonZeroI32;
 
 	use iset::{interval_set, IntervalSet};
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;
@@ -369,7 +372,7 @@ pub mod tests {
 
 	#[test]
 	fn constant_test() {
-		let c: IntVarEnc = IntVarEnc::Const(42);
+		let c = IntVarEnc::Const(42);
 		assert_eq!(c.lb(), 42);
 		assert_eq!(c.ub(), 42);
 		assert_eq!(c.geq(6..7), Vec::<Vec<_>>::new());
@@ -379,7 +382,7 @@ pub mod tests {
 	#[test]
 	fn bin_geq_2_test() {
 		let mut cnf = Cnf::default();
-		let x = IntVarBin::from_bounds(&mut cnf, 0, 12, "x".to_string());
+		let x = IntVarBin::from_bounds(&mut cnf, 0, 12, "x".to_owned());
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -410,7 +413,7 @@ pub mod tests {
 			&mut cnf,
 			interval_set!(3..5, 5..7, 7..11),
 			true,
-			"x".to_string(),
+			"x".to_owned(),
 		);
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
@@ -449,9 +452,9 @@ pub mod tests {
 	fn ord_plus_ord_le_ord_test() {
 		let mut cnf = Cnf::default();
 		let (x, y, z) = (
-			get_ord_x(&mut cnf, interval_set!(1..2, 2..7), true, "x".to_string()),
-			get_ord_x(&mut cnf, interval_set!(2..3, 3..5), true, "y".to_string()),
-			get_ord_x(&mut cnf, interval_set!(0..4, 4..11), true, "z".to_string()),
+			get_ord_x(&mut cnf, interval_set!(1..2, 2..7), true, "x".to_owned()),
+			get_ord_x(&mut cnf, interval_set!(2..3, 3..5), true, "y".to_owned()),
+			get_ord_x(&mut cnf, interval_set!(0..4, 4..11), true, "z".to_owned()),
 		);
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
@@ -481,11 +484,11 @@ pub mod tests {
 	fn ord_le_bin_test() {
 		let mut cnf = Cnf::default();
 		let (x, y, z) = (
-			get_ord_x(&mut cnf, interval_set!(1..2, 2..7), true, "x".to_string()),
+			get_ord_x(&mut cnf, interval_set!(1..2, 2..7), true, "x".to_owned()),
 			// TODO 'gapped' in interval_set:
 			// get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x".to_string()),
 			IntVarEnc::Const(0),
-			get_bin_x(&mut cnf, 0, 7, true, "z".to_string()),
+			get_bin_x(&mut cnf, 0, 7, true, "z".to_owned()),
 		);
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
@@ -514,9 +517,9 @@ pub mod tests {
 	fn ord_plus_ord_le_bin_test() {
 		let mut cnf = Cnf::default();
 		let (x, y, z) = (
-			get_ord_x(&mut cnf, interval_set!(1..3), true, "x".to_string()),
-			get_ord_x(&mut cnf, interval_set!(1..4), true, "y".to_string()),
-			get_bin_x(&mut cnf, 0, 6, true, "z".to_string()),
+			get_ord_x(&mut cnf, interval_set!(1..3), true, "x".to_owned()),
+			get_ord_x(&mut cnf, interval_set!(1..4), true, "y".to_owned()),
+			get_bin_x(&mut cnf, 0, 6, true, "z".to_owned()),
 		);
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
@@ -546,10 +549,10 @@ pub mod tests {
 		let mut cnf = Cnf::default();
 		let n = 4;
 		let lb = 0;
-		let ub = ((2i32.pow(n)) - 1) as Coeff;
+		let ub = ((2_i32.pow(n)) - 1) as Coeff;
 
 		let (x, y, z) = (
-			get_bin_x(&mut cnf, lb, ub, true, "x".to_string()),
+			get_bin_x(&mut cnf, lb, ub, true, "x".to_owned()),
 			IntVarEnc::Const(0),
 			// get_bin_x(&mut db, (2i32.pow(n)) - 1, true, "y".to_string()),
 			IntVarEnc::Const(14),
@@ -579,13 +582,13 @@ pub mod tests {
 		let mut cnf = Cnf::default();
 		let n = 5;
 		let lb = 0;
-		let ub = ((2i32.pow(n)) - 1) as Coeff;
+		let ub = ((2_i32.pow(n)) - 1) as Coeff;
 
 		let (x, y, z) = (
-			get_bin_x(&mut cnf, lb, ub, true, "x".to_string()),
+			get_bin_x(&mut cnf, lb, ub, true, "x".to_owned()),
 			IntVarEnc::Const(0),
 			// get_bin_x(&mut db, (2i32.pow(n)) - 1, true, "y".to_string()),
-			get_bin_x(&mut cnf, lb, ub, true, "z".to_string()),
+			get_bin_x(&mut cnf, lb, ub, true, "z".to_owned()),
 		);
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
@@ -619,23 +622,23 @@ pub mod tests {
 			get_bin_x(
 				&mut cnf,
 				0,
-				((2i32.pow(n)) - 1) as Coeff,
+				((2_i32.pow(n)) - 1) as Coeff,
 				true,
-				"x".to_string(),
+				"x".to_owned(),
 			),
 			get_bin_x(
 				&mut cnf,
 				0,
-				((2i32.pow(n)) - 1) as Coeff,
+				((2_i32.pow(n)) - 1) as Coeff,
 				true,
-				"y".to_string(),
+				"y".to_owned(),
 			),
 			get_bin_x(
 				&mut cnf,
 				0,
-				((2i32.pow(n + 1)) - 2) as Coeff,
+				((2_i32.pow(n + 1)) - 2) as Coeff,
 				true,
-				"z".to_string(),
+				"z".to_owned(),
 			),
 		);
 		let vars = VarRange::new(
@@ -665,9 +668,9 @@ pub mod tests {
 	fn bin_plus_bin_eq_bin_test() {
 		let mut cnf = Cnf::default();
 		let (x, y, z) = (
-			get_bin_x(&mut cnf, 0, 2, true, "x".to_string()),
-			get_bin_x(&mut cnf, 0, 3, true, "y".to_string()),
-			get_bin_x(&mut cnf, 0, 5, true, "z".to_string()),
+			get_bin_x(&mut cnf, 0, 2, true, "x".to_owned()),
+			get_bin_x(&mut cnf, 0, 3, true, "y".to_owned()),
+			get_bin_x(&mut cnf, 0, 5, true, "z".to_owned()),
 		);
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),

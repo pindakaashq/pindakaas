@@ -15,6 +15,7 @@ mod linear;
 mod propositional_logic;
 pub mod solver;
 mod sorted;
+#[cfg(any(feature = "tracing", test))]
 pub mod trace;
 
 use std::{
@@ -34,7 +35,7 @@ use helpers::VarRange;
 use itertools::{Itertools, Position};
 use solver::{NextVarRange, VarFactory};
 
-use crate::trace::subscript_number;
+use crate::helpers::subscript_number;
 pub use crate::{
 	cardinality::{Cardinality, SortingNetworkEncoder},
 	cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
@@ -51,6 +52,7 @@ pub struct Var(pub(crate) NonZeroI32);
 
 impl Var {
 	fn next_var(&self) -> Option<Var> {
+		/// SAFETY: literal 1 is known to be non-zero
 		const ONE: NonZeroI32 = unsafe { NonZeroI32::new_unchecked(1) };
 		self.checked_add(ONE)
 	}
@@ -108,9 +110,22 @@ impl From<Var> for i32 {
 pub struct Lit(NonZeroI32);
 
 impl Lit {
+	/// Coerce a non-zero integer into a literal.
+	///
+	/// ### Warning
+	/// This method is only safe to use if the input integer is known to be a
+	/// integer coerced from a literal part of the same formula. Otherwise, the
+	/// usage of the literal may lead to undefined behavior.
+	pub fn from_raw(value: NonZeroI32) -> Lit {
+		Lit(value)
+	}
+
+	/// Returns the underlying variable of the literal, whether negated or not.
 	pub fn var(&self) -> Var {
 		Var(self.0.abs())
 	}
+
+	/// Returns whether the literal is a negation of the underlying variable.
 	pub fn is_negated(&self) -> bool {
 		self.0.is_negative()
 	}
@@ -122,6 +137,7 @@ impl Not for Lit {
 		Lit(-self.0)
 	}
 }
+
 impl Not for &Lit {
 	type Output = Lit;
 	fn not(self) -> Self::Output {
@@ -130,14 +146,14 @@ impl Not for &Lit {
 }
 
 impl PartialOrd for Lit {
-	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))
 	}
 }
 impl Ord for Lit {
 	fn cmp(&self, other: &Self) -> Ordering {
 		match self.var().cmp(&other.var()) {
-			std::cmp::Ordering::Equal => (self.is_negated()).cmp(&other.is_negated()),
+			Ordering::Equal => (self.is_negated()).cmp(&other.is_negated()),
 			r => r,
 		}
 	}
@@ -175,7 +191,7 @@ impl Display for Lit {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
 pub struct Unsatisfiable;
 impl Error for Unsatisfiable {}
-impl fmt::Display for Unsatisfiable {
+impl Display for Unsatisfiable {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "Problem inconsistency detected")
 	}
@@ -220,12 +236,12 @@ pub trait Checker {
 
 /// Incomplete is a error type returned by a [`Checker`] type when the
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
-#[allow(dead_code)] // TODO
+#[allow(dead_code, reason = "TODO: does checking use this?")]
 pub struct Incomplete {
 	missing: Box<[Lit]>,
 }
 impl Error for Incomplete {}
-impl fmt::Display for Incomplete {
+impl Display for Incomplete {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self.missing.len() {
 			0 => write!(f, "Unknown literal is unasssigned"),
@@ -253,7 +269,7 @@ pub enum CheckError {
 	Fail(String),
 }
 impl Error for CheckError {}
-impl fmt::Display for CheckError {
+impl Display for CheckError {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			CheckError::Fail(err) => err.fmt(f),
@@ -395,7 +411,7 @@ impl Cnf {
 		let mut file = File::create(path)?;
 		if let Some(comment) = comment {
 			for line in comment.lines() {
-				writeln!(file, "c {line}")?
+				writeln!(file, "c {line}")?;
 			}
 		}
 		write!(file, "{self}")
@@ -506,7 +522,7 @@ impl Wcnf {
 		let mut file = File::create(path)?;
 		if let Some(comment) = comment {
 			for line in comment.lines() {
-				writeln!(file, "c {line}")?
+				writeln!(file, "c {line}")?;
 			}
 		}
 		write!(file, "{self}")
@@ -534,7 +550,7 @@ impl Display for Cnf {
 		for size in self.size.iter() {
 			let cl = self.lits.iter().skip(start).take(*size);
 			for &lit in cl {
-				write!(f, "{} ", i32::from(lit))?
+				write!(f, "{} ", i32::from(lit))?;
 			}
 			writeln!(f, "0")?;
 			start += size;

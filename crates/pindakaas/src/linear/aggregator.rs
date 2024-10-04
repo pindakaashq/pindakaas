@@ -1,14 +1,11 @@
-use std::hash::BuildHasherDefault;
-
 use itertools::Itertools;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
-	helpers::is_powers_of_two,
+	helpers::{emit_clause, is_powers_of_two, new_var},
 	int::IntVarOrd,
 	linear::{Constraint, LimitComp, Part, PosCoeff},
 	sorted::{Sorted, SortedEncoder},
-	trace::{emit_clause, new_var},
 	Cardinality, CardinalityOne, ClauseDatabase, Coeff, Comparator, Encoder, LinExp, LinVariant,
 	Linear, LinearConstraint, Lit, Result, Unsatisfiable,
 };
@@ -28,7 +25,7 @@ impl LinearAggregator {
 	}
 
 	#[cfg_attr(
-		feature = "trace",
+		any(feature = "tracing", test),
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	pub fn aggregate<DB: ClauseDatabase>(
@@ -39,8 +36,7 @@ impl LinearAggregator {
 		let mut k = lin.k;
 		// Aggregate multiple occurrences of the same
 		// variable.
-		let mut agg =
-			FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), BuildHasherDefault::default());
+		let mut agg = FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), FxBuildHasher);
 		for term in &lin.exp.terms {
 			let var = term.0.var();
 			let entry = agg.entry(var).or_insert(0);
@@ -67,7 +63,7 @@ impl LinearAggregator {
 			for _ in 0..con.1 {
 				let term = iter.next().unwrap();
 				if let Some((var, i)) = agg.remove_entry(&term.0.var()) {
-					terms.push((var.into(), i))
+					terms.push((var.into(), i));
 				}
 			}
 			if !terms.is_empty() {
@@ -85,7 +81,7 @@ impl LinearAggregator {
 								// in both cases, l and u now represent the true constraint
 								(terms[0].1 * lb, terms[0].1 * ub)
 							};
-							partition.push((Constraint::Domain { lb, ub }, terms))
+							partition.push((Constraint::Domain { lb, ub }, terms));
 						} else {
 							for term in terms {
 								partition.push((Constraint::AtMostOne, vec![term]));
@@ -168,7 +164,7 @@ impl LinearAggregator {
 							}
 
 							// this term will cancel out later when we add q*min_lit to the LHS
-							terms.remove(min_index);
+							let _ =terms.remove(min_index);
 
 							// since y + x1 + x2 + ... = 1 (exactly-one), we have q*y + q*x1 + q*x2 + ... = q
 							// after adding term 0*y, we can add q*y + q*x1 + q*x2 + ... on the LHS, and q on the RHS
@@ -254,7 +250,7 @@ impl LinearAggregator {
 		if k == 0 {
 			for part in partition {
 				for (lit, _) in part.iter() {
-					emit_clause!(db, [!lit])?
+					emit_clause!(db, [!lit])?;
 				}
 			}
 			return Ok(LinVariant::Trivial);
@@ -504,9 +500,8 @@ mod tests {
 	use std::num::NonZeroI32;
 
 	use itertools::Itertools;
-	#[cfg(feature = "trace")]
-	use traced_test::test;
 
+	// use traced_test::test;
 	use super::*;
 	use crate::{
 		helpers::tests::{assert_encoding, expect_file},
@@ -529,7 +524,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 2, 1, 2], &vec![a, a, b, c]),
+					LinExp::from_slices(&[1, 2, 1, 2], &[a, a, b, c]),
 					Comparator::LessEq,
 					3
 				)
@@ -551,7 +546,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 2, 1, 2], &vec![a, !a, b, c]),
+					LinExp::from_slices(&[1, 2, 1, 2], &[a, !a, b, c]),
 					Comparator::LessEq,
 					3
 				)
@@ -568,7 +563,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, -2, 1, 2], &vec![a, a, b, c]),
+					LinExp::from_slices(&[1, -2, 1, 2], &[a, a, b, c]),
 					Comparator::LessEq,
 					2,
 				)
@@ -598,7 +593,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 1, 1], &vec![a, b, c]),
+					LinExp::from_slices(&[1, 1, 1], &[a, b, c]),
 					Comparator::LessEq,
 					1
 				)
@@ -612,7 +607,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[2, 2, 2], &vec![a, b, c]),
+					LinExp::from_slices(&[2, 2, 2], &[a, b, c]),
 					Comparator::LessEq,
 					2
 				)
@@ -628,7 +623,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 1, 1, 1], &vec![a, b, c, d]),
+					LinExp::from_slices(&[1, 1, 1, 1], &[a, b, c, d]),
 					Comparator::LessEq,
 					2
 				)
@@ -643,7 +638,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[3, 3, 3, 3], &vec![a, b, c, d]),
+					LinExp::from_slices(&[3, 3, 3, 3], &[a, b, c, d]),
 					Comparator::LessEq,
 					7
 				)
@@ -660,7 +655,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 1, 1, 1], &vec![a, b, c, d]),
+					LinExp::from_slices(&[1, 1, 1, 1], &[a, b, c, d]),
 					Comparator::Equal,
 					2
 				)
@@ -675,7 +670,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[3, 3, 3, 3], &vec![a, b, c, d]),
+					LinExp::from_slices(&[3, 3, 3, 3], &[a, b, c, d]),
 					Comparator::Equal,
 					6
 				)
@@ -692,7 +687,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 2, 2], &vec![a, b, c]),
+					LinExp::from_slices(&[1, 2, 2], &[a, b, c]),
 					Comparator::LessEq,
 					2
 				)
@@ -709,7 +704,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 2, 2], &vec![a, b, c]),
+					LinExp::from_slices(&[1, 2, 2], &[a, b, c]),
 					Comparator::Equal,
 					2
 				)
@@ -751,7 +746,7 @@ mod tests {
 				.aggregate(
 					&mut cnf,
 					&LinearConstraint::new(
-						LinExp::from_slices(&[3, 3, 5, 3], &vec![a, b, d, c]),
+						LinExp::from_slices(&[3, 3, 5, 3], &[a, b, d, c]),
 						Comparator::LessEq,
 						10
 					)
@@ -837,7 +832,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[2, 3, -2], &vec![a, b, c]),
+					LinExp::from_slices(&[2, 3, -2], &[a, b, c]),
 					Comparator::LessEq,
 					2
 				)
@@ -854,7 +849,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[-1, -1, -1], &vec![a, b, c]),
+					LinExp::from_slices(&[-1, -1, -1], &[a, b, c]),
 					Comparator::LessEq,
 					-2,
 				)
@@ -868,7 +863,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[-1, -2, -3], &vec![a, b, c]),
+					LinExp::from_slices(&[-1, -2, -3], &[a, b, c]),
 					Comparator::LessEq,
 					-2,
 				)
@@ -1117,7 +1112,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 2, 1, 1, 4, 1, 1], &vec![a, !b, c, d, !e, f, !g]),
+					LinExp::from_slices(&[1, 2, 1, 1, 4, 1, 1], &[a, !b, c, d, !e, f, !g]),
 					Comparator::GreaterEq,
 					7
 				)
@@ -1153,7 +1148,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 1, 1, 1], &vec![a, b, c, d]),
+					LinExp::from_slices(&[1, 1, 1, 1], &[a, b, c, d]),
 					Comparator::LessEq,
 					3
 				)
@@ -1177,7 +1172,7 @@ mod tests {
 			LinearAggregator::default().aggregate(
 				&mut cnf,
 				&LinearConstraint::new(
-					LinExp::from_slices(&[1, 1, 1], &vec![a, b, c]),
+					LinExp::from_slices(&[1, 1, 1], &[a, b, c]),
 					Comparator::Equal,
 					2
 				)

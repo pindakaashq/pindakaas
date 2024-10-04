@@ -1,6 +1,6 @@
 use crate::{
+	helpers::emit_clause,
 	linear::{LimitComp, Linear},
-	trace::emit_clause,
 	CheckError, Checker, ClauseDatabase, Lit, Result, Valuation,
 };
 
@@ -19,7 +19,7 @@ pub struct CardinalityOne {
 }
 
 impl CardinalityOne {
-	#[cfg(feature = "trace")]
+	#[cfg(any(feature = "tracing", test))]
 	pub(crate) fn trace_print(&self) -> String {
 		use crate::trace::trace_print_lit;
 

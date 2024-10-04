@@ -341,6 +341,8 @@ impl NextVarRange for VarFactory {
 mod tests {
 	use std::num::NonZeroI32;
 
+	use traced_test::test;
+
 	use crate::{
 		solver::{NextVarRange, VarFactory},
 		Var,

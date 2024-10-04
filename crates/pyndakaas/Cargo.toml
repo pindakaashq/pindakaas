@@ -1,14 +1,15 @@
 [package]
 name = "pyndakaas"
-description = "Python interface for the to pindakaas crate"
-version = "0.1.0"
-authors = [
-	"Jip J. Dekker <jip.dekker@monash.edu>",
-	"Hendrik 'Henk' Bierlee <hendrik.bierlee@monash.edu>",
-]
-license = "MPL-2.0"
+description = "Python interface for to the pindakaas crate"
 
-edition = "2021"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+repository.workspace = true
 
 [lib]
 name = "pindakaas"
@@ -17,7 +18,10 @@ doc = false
 
 [dependencies]
 pindakaas = { path = "../pindakaas" }
-pyo3 = { version = "0.19", features = ["extension-module"] }
+pyo3 = { version = "0.22", features = ["extension-module"] }
 
 [build-dependencies]
-pyo3-build-config = "0.19"
+pyo3-build-config = "0.22"
+
+[lints]
+workspace = true

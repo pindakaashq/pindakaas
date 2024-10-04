@@ -12,6 +12,7 @@ pub struct Kissat {
 impl Default for Kissat {
 	fn default() -> Self {
 		Self {
+			// SAFETY: Assume correct creation of the solver using the IPASIR API.
 			ptr: unsafe { pindakaas_kissat::ipasir_init() },
 			vars: VarFactory::default(),
 		}
@@ -20,7 +21,6 @@ impl Default for Kissat {
 
 #[cfg(test)]
 mod tests {
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;

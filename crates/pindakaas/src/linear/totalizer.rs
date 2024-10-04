@@ -36,7 +36,7 @@ impl TotalizerEncoder {
 
 impl<DB: ClauseDatabase> Encoder<DB, Linear> for TotalizerEncoder {
 	#[cfg_attr(
-		feature = "trace",
+		any(feature = "tracing", test),
 		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&self, db: &mut DB, lin: &Linear) -> Result {
@@ -68,7 +68,7 @@ impl TotalizerEncoder {
 			for children in layer.chunks(2) {
 				match children {
 					[x] => {
-						next_layer.push(x.clone());
+						next_layer.push(Rc::clone(x));
 					}
 					[left, right] => {
 						let at_root = layer.len() == 2;
@@ -89,14 +89,14 @@ impl TotalizerEncoder {
 							Rc::new(RefCell::new(model.new_var(dom, self.add_consistency)));
 
 						model.cons.push(Lin::tern(
-							left.clone(),
-							right.clone(),
+							Rc::clone(left),
+							Rc::clone(right),
 							if !at_root && EQUALIZE_INTERMEDIATES {
 								LimitComp::Equal
 							} else {
 								cmp.clone()
 							},
-							parent.clone(),
+							Rc::clone(&parent),
 						));
 						next_layer.push(parent);
 					}
@@ -113,7 +113,6 @@ impl TotalizerEncoder {
 #[cfg(test)]
 mod tests {
 
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
 	use super::*;
@@ -141,9 +140,9 @@ mod tests {
 		let mut db = Cnf::default();
 		let vars = db.next_var_range(5).unwrap().iter_lits().collect_vec();
 		let mut agg = LinearAggregator::default();
-		agg.sort_same_coefficients(SortedEncoder::default(), 3);
+		let _ = agg.sort_same_coefficients(SortedEncoder::default(), 3);
 		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default();
-		encoder.add_linear_aggregater(agg);
+		let _ = encoder.add_linear_aggregater(agg);
 		let con = LinearConstraint::new(
 			LinExp::from_slices(&[3, 3, 1, 1, 3], &vars),
 			Comparator::GreaterEq,
