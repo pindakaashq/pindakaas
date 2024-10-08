@@ -564,7 +564,7 @@ enum Dimacs {
 	Wcnf(Wcnf),
 }
 
-fn parse_dimacs_file(path: &Path, expect_wcnf: bool) -> Result<Dimacs, io::Error> {
+fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Error> {
 	let file = File::open(path)?;
 	let mut had_header = false;
 
@@ -579,7 +579,7 @@ fn parse_dimacs_file(path: &Path, expect_wcnf: bool) -> Result<Dimacs, io::Error
 			Ok(line) if line.is_empty() || line.starts_with('c') => (),
 			Ok(line) if had_header => {
 				for seg in line.split(' ') {
-					if expect_wcnf {
+					if WEIGHTED {
 						if let Ok(weight) = seg.parse::<Coeff>() {
 							wcnf.weights.push(match weight.cmp(&top.unwrap()) {
 								Ordering::Less => Some(weight),
@@ -607,12 +607,12 @@ fn parse_dimacs_file(path: &Path, expect_wcnf: bool) -> Result<Dimacs, io::Error
 			Ok(line) => {
 				let vec: Vec<&str> = line.split_whitespace().collect();
 				// check "p" and "cnf" keyword
-				if !expect_wcnf && (vec.len() != 4 || vec[0..2] != ["p", "cnf"]) {
+				if !WEIGHTED && (vec.len() != 4 || vec[0..2] != ["p", "cnf"]) {
 					return Err(io::Error::new(
 						io::ErrorKind::InvalidInput,
 						"expected DIMACS CNF header formatted \"p cnf {variables} {clauses}\"",
 					));
-				} else if expect_wcnf && (vec.len() != 4 || vec[0..2] != ["p", "wcnf"]) {
+				} else if WEIGHTED && (vec.len() != 4 || vec[0..2] != ["p", "wcnf"]) {
 					return Err(io::Error::new(
 						io::ErrorKind::InvalidInput,
 						"expected DIMACS WCNF header formatted \"p wcnf {variables} {clauses} {top}\"",
@@ -638,7 +638,7 @@ fn parse_dimacs_file(path: &Path, expect_wcnf: bool) -> Result<Dimacs, io::Error
 				wcnf.cnf.lits.reserve(num_clauses);
 				wcnf.cnf.size.reserve(num_clauses);
 
-				if expect_wcnf {
+				if WEIGHTED {
 					top = Some(vec[4].parse().map_err(|_| {
 						io::Error::new(io::ErrorKind::InvalidInput, "unable to parse top weight")
 					})?);
@@ -651,7 +651,7 @@ fn parse_dimacs_file(path: &Path, expect_wcnf: bool) -> Result<Dimacs, io::Error
 		}
 	}
 
-	if expect_wcnf {
+	if WEIGHTED {
 		Ok(Dimacs::Wcnf(wcnf))
 	} else {
 		Ok(Dimacs::Cnf(Cnf::from(wcnf)))
@@ -661,7 +661,7 @@ fn parse_dimacs_file(path: &Path, expect_wcnf: bool) -> Result<Dimacs, io::Error
 impl Cnf {
 	/// Read a CNF formula from a file formatted in the DIMACS CNF format
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-		match parse_dimacs_file(path, false)? {
+		match parse_dimacs_file::<false>(path)? {
 			Dimacs::Cnf(cnf) => Ok(cnf),
 			_ => unreachable!(),
 		}
@@ -671,7 +671,7 @@ impl Cnf {
 impl Wcnf {
 	/// Read a WCNF formula from a file formatted in the (W)DIMACS WCNF format
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-		match parse_dimacs_file(path, true)? {
+		match parse_dimacs_file::<true>(path)? {
 			Dimacs::Wcnf(wcnf) => Ok(wcnf),
 			_ => unreachable!(),
 		}
