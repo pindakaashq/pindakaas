@@ -113,7 +113,7 @@ mod tests {
 	use crate::{
 		linear::LimitComp,
 		solver::{cadical::Cadical, SolveResult, Solver},
-		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder, Valuation,
+		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder, Unsatisfiable, Valuation,
 	};
 
 	#[test]
@@ -150,6 +150,13 @@ mod tests {
 			}),
 			SolveResult::Sat
 		);
+	}
+
+	#[test]
+	fn test_cadical_empty_clause() {
+		let mut slv = Cadical::default();
+		assert_eq!(slv.add_clause([]), Err(Unsatisfiable));
+		assert_eq!(slv.solve(|_| unreachable!()), SolveResult::Unsat);
 	}
 
 	#[cfg(feature = "ipasir-up")]

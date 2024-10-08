@@ -687,10 +687,12 @@ impl ClauseDatabase for Cnf {
 		let size = self.lits.len();
 		self.lits.extend(cl);
 		let len = self.lits.len() - size;
-		if len > 0 {
-			self.size.push(len);
+		self.size.push(len);
+		if len == 0 {
+			Err(Unsatisfiable)
+		} else {
+			Ok(())
 		}
-		Ok(())
 	}
 
 	type CondDB = Self;
