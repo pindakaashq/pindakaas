@@ -406,15 +406,17 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				&mut self,
 				clause: I,
 			) -> crate::Result {
-				let mut added = false;
+				let mut empty = true;
 				for lit in clause.into_iter() {
 					unsafe { #krate::ipasir_add( #ptr , lit.into()) };
-					added = true;
+					empty = false;
 				}
-				if added {
-					unsafe { #krate::ipasir_add( #ptr , 0) };
+				unsafe { #krate::ipasir_add( #ptr , 0) };
+				if empty {
+					Err(crate::Unsatisfiable)
+				} else {
+					Ok(())
 				}
-				Ok(())
 			}
 
 			type CondDB = Self;
