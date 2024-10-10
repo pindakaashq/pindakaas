@@ -191,22 +191,28 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					}
 					// If new propagator, set it now
 					if let Some(p) = prop {
-						let is_lazy = p.is_lazy();
+						let is_lazy = p.is_check_only();
+						let forgettable_reasons = p.reason_persistence() == crate::solver::ClausePersistence::Forgettable;
+						let notify_fixed = p.enable_persistent_assignments();
+
 						#prop_member = Some(crate::solver::libloading::PropagatorPointer::new(p, #actions_ident::new(#ptr, Arc::clone(&#vars))));
 						unsafe {
 							#krate::ipasir_connect_external_propagator(
 								#ptr,
 								#prop_member .as_ref().unwrap().get_raw_ptr(),
-								crate::solver::libloading::ipasir_notify_assignment_cb::<P, #actions_ident>,
+								crate::solver::libloading::ipasir_notify_assignments_cb::<P, #actions_ident>,
 								crate::solver::libloading::ipasir_notify_new_decision_level_cb::<P, #actions_ident>,
 								crate::solver::libloading::ipasir_notify_backtrack_cb::<P, #actions_ident>,
 								crate::solver::libloading::ipasir_check_model_cb::<P, #actions_ident>,
 								crate::solver::libloading::ipasir_has_external_clause_cb::<P, #actions_ident>,
 								crate::solver::libloading::ipasir_add_external_clause_lit_cb::<P, #actions_ident>,
 								is_lazy,
+								forgettable_reasons,
+								notify_fixed,
 								crate::solver::libloading::ipasir_decide_cb::<P, #actions_ident>,
 								crate::solver::libloading::ipasir_propagate_cb::<P, #actions_ident>,
 								crate::solver::libloading::ipasir_add_reason_clause_lit_cb::<P, #actions_ident>,
+								crate::solver::libloading::ipasir_notify_persistent_assignments_cb::<P, #actions_ident>,
 							)
 						};
 					}
@@ -260,6 +266,13 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				}
 				fn is_decision(&mut self, lit: crate::Lit) -> bool {
 					unsafe { #krate::ipasir_is_decision( self.ptr, lit.0.get() ) }
+				}
+			}
+
+			#[cfg(feature = "ipasir-up")]
+			impl crate::solver::ExtendedSolvingActions for #actions_ident {
+				fn force_backtrack(&mut self, new_level: usize) {
+					unsafe { #krate::ipasir_force_backtrack( self.ptr, new_level ) }
 				}
 			}
 

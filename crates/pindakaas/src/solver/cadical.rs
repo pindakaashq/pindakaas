@@ -169,8 +169,8 @@ mod tests {
 		use crate::{
 			helpers::tests::assert_solutions,
 			solver::{
-				cadical::CadicalSol, NextVarRange, PropagatingSolver, Propagator, PropagatorAccess,
-				SolvingActions, VarRange,
+				cadical::CadicalSol, ClausePersistence, NextVarRange, PropagatingSolver,
+				Propagator, PropagatorAccess, SolvingActions, VarRange,
 			},
 			Lit,
 		};
@@ -184,7 +184,7 @@ mod tests {
 			tmp: Vec<Vec<Lit>>,
 		}
 		impl Propagator for Dist2 {
-			fn is_lazy(&self) -> bool {
+			fn is_check_only(&self) -> bool {
 				true
 			}
 			fn check_model(
@@ -205,8 +205,11 @@ mod tests {
 				}
 				self.tmp.is_empty()
 			}
-			fn add_external_clause(&mut self, _slv: &mut dyn SolvingActions) -> Option<Vec<Lit>> {
-				self.tmp.pop()
+			fn add_external_clause(
+				&mut self,
+				_slv: &mut dyn SolvingActions,
+			) -> Option<(Vec<Lit>, ClausePersistence)> {
+				self.tmp.pop().map(|c| (c, ClausePersistence::Forgettable))
 			}
 
 			fn as_any(&self) -> &dyn Any {
