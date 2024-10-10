@@ -78,39 +78,46 @@ macro_rules! ipasir_up_definitions {
 				pub fn [<$prefix _connect_external_propagator>](
 					slv: *mut std::ffi::c_void,
 					propagator_data: *mut std::ffi::c_void,
-					prop_notify_assignment: unsafe extern "C" fn(*mut std::ffi::c_void, i32, bool),
+					prop_notify_assignments: unsafe extern "C" fn(*mut std::ffi::c_void, *const i32, usize),
 					prop_notify_new_decision_level: unsafe extern "C" fn(*mut std::ffi::c_void),
 					prop_notify_backtrack: unsafe extern "C" fn(*mut std::ffi::c_void, usize, bool),
 					prop_cb_check_found_model: unsafe extern "C" fn(*mut std::ffi::c_void, *const i32, usize) -> bool,
-					prop_cb_has_external_clause: unsafe extern "C" fn(*mut std::ffi::c_void) -> bool,
+					prop_cb_has_external_clause: unsafe extern "C" fn(*mut std::ffi::c_void, *mut bool) -> bool,
 					prop_cb_add_external_clause_lit: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
 					is_lazy: bool,
+					forgettable_reasons: bool,
+					notify_fixed: bool,
 					prop_cb_decide: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
 					prop_cb_propagate: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
 					prop_cb_add_reason_clause_lit: unsafe extern "C" fn(*mut std::ffi::c_void, i32) -> i32,
+					prop_notify_fixed_assignment: unsafe extern "C" fn(*mut std::ffi::c_void, i32),
 				);
 				pub fn [<$prefix _disconnect_external_propagator>](slv: *mut std::ffi::c_void);
 				pub fn [<$prefix _add_observed_var>](slv: *mut std::ffi::c_void, var: i32);
 				pub fn [<$prefix _remove_observed_var>](slv: *mut std::ffi::c_void, var: i32);
 				pub fn [<$prefix _reset_observed_vars>](slv: *mut std::ffi::c_void);
 				pub fn [<$prefix _is_decision>](slv: *mut std::ffi::c_void, lit: i32) -> bool;
+				pub fn [<$prefix _force_backtrack>](slv: *mut std::ffi::c_void, new_level: usize);
 			}
 			#[allow(clippy::too_many_arguments)]
 			pub unsafe fn ipasir_connect_external_propagator(
 				slv: *mut std::ffi::c_void,
 					propagator_data: *mut std::ffi::c_void,
-					prop_notify_assignment: unsafe extern "C" fn(*mut std::ffi::c_void, i32, bool),
+					prop_notify_assignments: unsafe extern "C" fn(*mut std::ffi::c_void, *const i32, usize),
 					prop_notify_new_decision_level: unsafe extern "C" fn(*mut std::ffi::c_void),
 					prop_notify_backtrack: unsafe extern "C" fn(*mut std::ffi::c_void, usize, bool),
 					prop_cb_check_found_model: unsafe extern "C" fn(*mut std::ffi::c_void, *const i32, usize) -> bool,
-					prop_cb_has_external_clause: unsafe extern "C" fn(*mut std::ffi::c_void) -> bool,
+					prop_cb_has_external_clause: unsafe extern "C" fn(*mut std::ffi::c_void, *mut bool) -> bool,
 					prop_cb_add_external_clause_lit: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
 					is_lazy: bool,
+					forgettable_reasons: bool,
+					notify_fixed: bool,
 					prop_cb_decide: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
 					prop_cb_propagate: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
 					prop_cb_add_reason_clause_lit: unsafe extern "C" fn(*mut std::ffi::c_void, i32) -> i32,
+					prop_notify_fixed_assignment: unsafe extern "C" fn(*mut std::ffi::c_void, i32),
 			){
-				[<$prefix _connect_external_propagator>](slv, propagator_data, prop_notify_assignment, prop_notify_new_decision_level, prop_notify_backtrack, prop_cb_check_found_model, prop_cb_has_external_clause, prop_cb_add_external_clause_lit, is_lazy, prop_cb_decide, prop_cb_propagate, prop_cb_add_reason_clause_lit)
+				[<$prefix _connect_external_propagator>](slv, propagator_data, prop_notify_assignments, prop_notify_new_decision_level, prop_notify_backtrack, prop_cb_check_found_model, prop_cb_has_external_clause, prop_cb_add_external_clause_lit, is_lazy, forgettable_reasons, notify_fixed, prop_cb_decide, prop_cb_propagate, prop_cb_add_reason_clause_lit, prop_notify_fixed_assignment)
 			}
 			pub unsafe fn ipasir_disconnect_external_propagator(slv: *mut std::ffi::c_void) {
 				[<$prefix _disconnect_external_propagator>](slv)
@@ -126,6 +133,9 @@ macro_rules! ipasir_up_definitions {
 			}
 			pub unsafe fn ipasir_is_decision(slv: *mut std::ffi::c_void, lit: i32) -> bool {
 				[<$prefix _is_decision>](slv, lit)
+			}
+			pub unsafe fn ipasir_force_backtrack(slv: *mut std::ffi::c_void, new_level: usize) {
+				[<$prefix _force_backtrack>](slv, new_level)
 			}
 		}
 	}
@@ -152,6 +162,7 @@ pub fn change_ipasir_prefix(build: &mut Build, prefix: &str) {
 		"_remove_observed_var",
 		"_reset_observed_vars",
 		"_is_decision",
+		"_force_backtrack",
 	] {
 		let _ = build.define(&format!("ipasir{f}"), format!("{prefix}{f}").as_ref());
 	}

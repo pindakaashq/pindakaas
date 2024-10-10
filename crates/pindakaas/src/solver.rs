@@ -136,11 +136,61 @@ pub trait MutPropagatorAccess {
 }
 
 #[cfg(feature = "ipasir-up")]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// A representation of a search decision made by a propagator.
+pub enum SearchDecision {
+	/// Leave the search decision to the solver.
+	Free,
+	/// Make the decision to assign the given literal.
+	Assign(Lit),
+	/// Force the solver to backtrack to the given decision level.
+	Backtrack(usize),
+}
+
+#[cfg(feature = "ipasir-up")]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// Whether a clause could possibly be removed from the clause database.
+pub enum ClausePersistence {
+	/// The clause is to be considered forgettable. Its removal would not affect
+	/// the solver's correctness (in combination with the propagator), and it can
+	/// be re-derived if needed.
+	Forgettable,
+	/// The clause is to be considered irreduntant. It contains information that
+	/// can not (easily) be re-derived.
+	Irreduntant,
+}
+
+#[cfg(feature = "ipasir-up")]
 pub trait Propagator {
-	/// This method is called checked only when the propagator is connected. When
-	/// a Propagator is marked as lazy, it is only asked to check complete
-	/// assignments.
-	fn is_lazy(&self) -> bool {
+	/// Check whether the propagator only checks complete assignments.
+	///
+	/// This method is called and checked only when the propagator is connected. If
+	/// the propagator returns `true`, it is only asked to validate wheter complete
+	/// assignments produced are correct.
+	fn is_check_only(&self) -> bool {
+		false
+	}
+
+	/// Check whether the propagator's produced reasons are forgettable.
+	///
+	/// This method is called and checked only when the propagator is connected. If
+	/// the propagator returns [`ClausePersistence::Forgettable`], then the solver
+	/// might remove the reason clause to save memory. The propagator must be able
+	/// to re-derive the reason clause at a later point.
+	fn reason_persistence(&self) -> ClausePersistence {
+		ClausePersistence::Irreduntant
+	}
+
+	/// Check whether the propagator wants to be notified about persistent
+	/// assignments of literals.
+	///
+	/// This method is called and checked only when the propagator is connected. If
+	/// the propagator returns `true`, then the
+	/// [`Self::notify_persistent_assignment`] method will be called (in addition
+	/// to [`Self::notify_assignments`]) to notify the propagator about assignemnts
+	/// that will persist for the remainder of the search for literals concerning
+	/// observed variables.
+	fn enable_persistent_assignments(&self) -> bool {
 		false
 	}
 
@@ -150,17 +200,16 @@ pub trait Propagator {
 	/// The notification is not necessarily eager. It usually happens before the
 	/// call of propagator callbacks and when a driving clause is leading to an
 	/// assignment.
-	///
-	/// If [`persistent`] is set to `true`, then the assignment is known to
-	/// persist through backtracking.
-	fn notify_assignment(&mut self, lit: Lit, persistent: bool) {
-		let _ = lit;
-		let _ = persistent;
+	fn notify_assignments(&mut self, lits: &[Lit]) {
+		let _ = lits;
 	}
 	fn notify_new_decision_level(&mut self) {}
 	fn notify_backtrack(&mut self, new_level: usize, restart: bool) {
 		let _ = new_level;
 		let _ = restart;
+	}
+	fn notify_persistent_assignment(&mut self, lit: Lit) {
+		let _ = lit;
 	}
 
 	/// Method called to check the found complete solution (after solution
@@ -172,11 +221,14 @@ pub trait Propagator {
 		true
 	}
 
-	/// Method called when the solver asks for the next decision literal. If it
-	/// returns None, the solver makes its own choice.
-	fn decide(&mut self, slv: &mut dyn SolvingActions) -> Option<Lit> {
+	/// Method called when the solver asks for the next search decision.
+	///
+	/// The propagator can either decide to assign a given literal, force the
+	/// solver to backtrack to a given decision level, or leave the decision to the
+	/// solver.
+	fn decide(&mut self, slv: &mut dyn SolvingActions) -> SearchDecision {
 		let _ = slv;
-		None
+		SearchDecision::Free
 	}
 
 	/// Method to ask the propagator if there is an propagation to make under the
@@ -197,7 +249,10 @@ pub trait Propagator {
 	}
 
 	/// Method to ask whether there is an external clause to add to the solver.
-	fn add_external_clause(&mut self, slv: &mut dyn SolvingActions) -> Option<Vec<Lit>> {
+	fn add_external_clause(
+		&mut self,
+		slv: &mut dyn SolvingActions,
+	) -> Option<(Vec<Lit>, ClausePersistence)> {
 		let _ = slv;
 		None
 	}
@@ -251,10 +306,20 @@ pub trait Propagator {
 }
 
 #[cfg(feature = "ipasir-up")]
+/// A trait containing the solver methods that are exposed to the propagator
+/// during solving.
 pub trait SolvingActions {
 	fn new_var(&mut self) -> Var;
 	fn add_observed_var(&mut self, var: Var);
 	fn is_decision(&mut self, lit: Lit) -> bool;
+}
+
+#[cfg(feature = "ipasir-up")]
+/// A trait containing additional actions that the solver can perform during
+/// solving. In contrast to [`SolvingActions`], these additional actions are not
+/// exposed to the propagator.
+pub(crate) trait ExtendedSolvingActions: SolvingActions {
+	fn force_backtrack(&mut self, level: usize);
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]

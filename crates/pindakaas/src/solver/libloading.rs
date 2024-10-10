@@ -9,7 +9,7 @@ use std::{
 use libloading::{Library, Symbol};
 
 #[cfg(feature = "ipasir-up")]
-use crate::solver::{Propagator, SolvingActions};
+use crate::solver::{ExtendedSolvingActions, Propagator, SolvingActions};
 use crate::{
 	solver::{
 		FailedAssumtions, LearnCallback, SlvTermSignal, SolveAssuming, SolveResult, Solver,
@@ -484,7 +484,7 @@ impl PropagatorPointer {
 	pub(crate) fn new<P, A>(prop: P, slv: A) -> Self
 	where
 		P: Propagator + 'static,
-		A: SolvingActions + 'static,
+		A: ExtendedSolvingActions + 'static,
 	{
 		// Construct wrapping structures
 		let store = IpasirPropStore::new(prop, slv);
@@ -517,14 +517,16 @@ impl PropagatorPointer {
 // --- Callback functions for C propagator interface ---
 
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_notify_assignment_cb<P: Propagator, A>(
+pub(crate) unsafe extern "C" fn ipasir_notify_assignments_cb<P: Propagator, A>(
 	state: *mut c_void,
-	lit: i32,
-	is_fixed: bool,
+	lits: *const i32,
+	len: usize,
 ) {
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
-	let lit = Lit(NonZeroI32::new(lit).unwrap());
-	prop.prop.notify_assignment(lit, is_fixed);
+	if len > 0 {
+		let lits = std::slice::from_raw_parts(lits as *mut Lit, len);
+		prop.prop.notify_assignments(lits);
+	};
 }
 #[cfg(feature = "ipasir-up")]
 pub(crate) unsafe extern "C" fn ipasir_notify_new_decision_level_cb<P: Propagator, A>(
@@ -566,15 +568,29 @@ pub(crate) unsafe extern "C" fn ipasir_check_model_cb<P: Propagator, A: SolvingA
 	prop.prop.check_model(&mut prop.slv, &value)
 }
 #[cfg(feature = "ipasir-up")]
-pub(crate) unsafe extern "C" fn ipasir_decide_cb<P: Propagator, A: SolvingActions>(
+pub(crate) unsafe extern "C" fn ipasir_notify_persistent_assignments_cb<P: Propagator, A>(
+	state: *mut c_void,
+	lit: i32,
+) {
+	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
+	let lit = Lit(NonZeroI32::new(lit).unwrap());
+	prop.prop.notify_persistent_assignment(lit);
+}
+#[cfg(feature = "ipasir-up")]
+pub(crate) unsafe extern "C" fn ipasir_decide_cb<P: Propagator, A: ExtendedSolvingActions>(
 	state: *mut c_void,
 ) -> i32 {
+	use crate::solver::SearchDecision;
+
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	let slv = &mut prop.slv;
-	if let Some(l) = prop.prop.decide(slv) {
-		l.0.into()
-	} else {
-		0
+	match prop.prop.decide(slv) {
+		SearchDecision::Assign(lit) => lit.0.into(),
+		SearchDecision::Backtrack(level) => {
+			slv.force_backtrack(level);
+			0
+		}
+		SearchDecision::Free => 0,
 	}
 }
 #[cfg(feature = "ipasir-up")]
@@ -619,9 +635,15 @@ pub(crate) unsafe extern "C" fn ipasir_add_reason_clause_lit_cb<
 #[cfg(feature = "ipasir-up")]
 pub(crate) unsafe extern "C" fn ipasir_has_external_clause_cb<P: Propagator, A: SolvingActions>(
 	state: *mut c_void,
+	is_forgettable: *mut bool,
 ) -> bool {
+	use crate::solver::ClausePersistence;
+
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
-	prop.cqueue = prop.prop.add_external_clause(&mut prop.slv).map(Vec::into);
+	if let Some((clause, p)) = prop.prop.add_external_clause(&mut prop.slv) {
+		*is_forgettable = p == ClausePersistence::Forgettable;
+		prop.cqueue = Some(clause.into());
+	}
 	prop.cqueue.is_some()
 }
 #[cfg(feature = "ipasir-up")]
@@ -632,21 +654,16 @@ pub(crate) unsafe extern "C" fn ipasir_add_external_clause_lit_cb<
 	state: *mut c_void,
 ) -> i32 {
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
-	if prop.cqueue.is_none() {
+	let Some(queue) = &mut prop.cqueue else {
 		debug_assert!(false);
-		// This function shouldn't be called when "has_clause" returned false.
-		prop.cqueue = prop.prop.add_external_clause(&mut prop.slv).map(Vec::into);
-	}
-	if let Some(queue) = &mut prop.cqueue {
-		if let Some(l) = queue.pop_front() {
-			l.0.get()
-		} else {
-			prop.cqueue = None;
-			0 // End of clause
-		}
+		// "has_clause" should have been called first and should have returned true.
+		// Just return 0 to signal empty clause.
+		return 0;
+	};
+	if let Some(l) = queue.pop_front() {
+		l.0.get()
 	} else {
-		debug_assert!(false);
-		// Even after re-assessing, no additional clause was found. Just return 0
-		0
+		prop.cqueue = None;
+		0 // End of clause
 	}
 }
