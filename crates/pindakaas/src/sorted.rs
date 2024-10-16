@@ -5,7 +5,7 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	bool_linear::{LimitComp, LinExp},
+	bool_linear::{BoolLinExp, LimitComp},
 	helpers::{add_clauses_for, emit_clause, negate_cnf},
 	integer::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
@@ -60,9 +60,9 @@ impl<'a> Sorted<'a> {
 
 impl<'a> Checker for Sorted<'a> {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
-		let lhs = LinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
+		let lhs = BoolLinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
 			.value(sol)?;
-		let rhs = LinExp::from(self.y).value(sol)?;
+		let rhs = BoolLinExp::from(self.y).value(sol)?;
 
 		if match self.cmp {
 			LimitComp::LessEq => lhs <= rhs,

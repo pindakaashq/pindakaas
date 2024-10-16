@@ -11,7 +11,7 @@ use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 
 use crate::{
-	bool_linear::{LimitComp, LinExp, Part, PosCoeff},
+	bool_linear::{BoolLinExp, LimitComp, Part, PosCoeff},
 	helpers::{
 		add_clauses_for, as_binary, emit_clause, is_powers_of_two, negate_cnf, new_var,
 		unsigned_binary_range_ub,
@@ -1217,7 +1217,7 @@ impl Display for Lin {
 	}
 }
 
-impl From<&IntVarBin> for LinExp {
+impl From<&IntVarBin> for BoolLinExp {
 	fn from(value: &IntVarBin) -> Self {
 		let mut k = 1;
 		let terms = value
@@ -1230,7 +1230,7 @@ impl From<&IntVarBin> for LinExp {
 			})
 			.collect_vec();
 		let lin_exp =
-			LinExp::default().add_bounded_log_encoding(terms.as_slice(), value.lb, value.ub);
+			BoolLinExp::default().add_bounded_log_encoding(terms.as_slice(), value.lb, value.ub);
 		if GROUND_BINARY_AT_LB {
 			lin_exp.add_constant(value.lb)
 		} else {
@@ -1239,7 +1239,7 @@ impl From<&IntVarBin> for LinExp {
 	}
 }
 
-impl From<&IntVarEnc> for LinExp {
+impl From<&IntVarEnc> for BoolLinExp {
 	fn from(value: &IntVarEnc) -> Self {
 		match value {
 			IntVarEnc::Ord(o) => o.into(),
@@ -1249,10 +1249,10 @@ impl From<&IntVarEnc> for LinExp {
 	}
 }
 
-impl From<&IntVarOrd> for LinExp {
+impl From<&IntVarOrd> for BoolLinExp {
 	fn from(value: &IntVarOrd) -> Self {
 		let mut acc = value.lb();
-		LinExp::default()
+		BoolLinExp::default()
 			.add_chain(
 				&value
 					.xs
@@ -1421,9 +1421,9 @@ impl<'a> TernLeConstraint<'a> {
 
 impl<'a> Checker for TernLeConstraint<'a> {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result {
-		let x = LinExp::from(self.x).value(sol)?;
-		let y = LinExp::from(self.y).value(sol)?;
-		let z = LinExp::from(self.z).value(sol)?;
+		let x = BoolLinExp::from(self.x).value(sol)?;
+		let y = BoolLinExp::from(self.y).value(sol)?;
+		let z = BoolLinExp::from(self.z).value(sol)?;
 		if Self::check(x, y, &self.cmp, z) {
 			Ok(())
 		} else {
@@ -1697,7 +1697,7 @@ pub(crate) mod tests {
 	use traced_test::test;
 
 	use crate::{
-		bool_linear::{LimitComp, LinExp},
+		bool_linear::{BoolLinExp, LimitComp},
 		helpers::tests::{assert_solutions, expect_file, make_valuation},
 		integer::{IntVarBin, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 		ClauseDatabase, Cnf, Coeff, Encoder, Lit, Var, VarRange,
@@ -1937,7 +1937,7 @@ pub(crate) mod tests {
 		assert_eq!(x.geq(6..7), vec![vec![Lit(NonZeroI32::new(2).unwrap())]]);
 		assert_eq!(x.geq(4..7), vec![vec![Lit(NonZeroI32::new(2).unwrap())]]);
 
-		let x_lin = LinExp::from(&x);
+		let x_lin = BoolLinExp::from(&x);
 		assert!(x_lin.value(&make_valuation(&[1, -2, 3])).is_err());
 		assert!(x_lin.value(&make_valuation(&[-1, 2, -3])).is_err());
 		assert_eq!(x_lin.value(&make_valuation(&[-1, -2, -3])), Ok(2));

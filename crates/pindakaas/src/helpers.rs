@@ -209,7 +209,7 @@ pub(crate) mod tests {
 	use itertools::Itertools;
 
 	use crate::{
-		bool_linear::LinExp,
+		bool_linear::BoolLinExp,
 		integer::IntVarEnc,
 		solver::{cadical::Cadical, SolveResult, Solver},
 		Checker, ClauseDatabase, Cnf, Lit, Valuation,
@@ -253,7 +253,7 @@ pub(crate) mod tests {
 		let mut slv = Cadical::from(formula);
 		let vars = vars
 			.into_iter()
-			.map(|x| LinExp::from(&x.into()))
+			.map(|x| BoolLinExp::from(&x.into()))
 			.collect_vec();
 		let bool_vars = formula.get_variables();
 		let mut solutions = Vec::new();

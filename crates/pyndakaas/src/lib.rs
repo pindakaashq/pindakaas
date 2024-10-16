@@ -7,7 +7,7 @@ use std::{fmt::Display, ops::DerefMut, path::PathBuf};
 
 use ::pindakaas as base;
 use base::{
-	bool_linear::{Comparator, LinExp, LinearConstraint, LinearEncoder},
+	bool_linear::{BoolLinExp, BoolLinear, Comparator, LinearEncoder},
 	ClauseDatabase, Encoder,
 };
 use pyo3::{exceptions::PyArithmeticError, prelude::*};
@@ -30,7 +30,7 @@ pub struct Lit(base::Lit);
 fn adder_encode(mut db: PyRefMut<'_, Cnf>) -> Result<(), PyErr> {
 	let pref = db.deref_mut();
 	let db = &mut pref.0;
-	let x = LinExp::from_slices(
+	let x = BoolLinExp::from_slices(
 		&[1, 2, 3],
 		&[
 			db.new_var().into(),
@@ -38,7 +38,7 @@ fn adder_encode(mut db: PyRefMut<'_, Cnf>) -> Result<(), PyErr> {
 			db.new_var().into(),
 		],
 	);
-	let con = LinearConstraint::new(x, Comparator::Equal, 2);
+	let con = BoolLinear::new(x, Comparator::Equal, 2);
 	let enc: LinearEncoder = LinearEncoder::default();
 	enc.encode(db, &con)
 		.map_err(|_e| PyArithmeticError::new_err("Unsatisfiable"))

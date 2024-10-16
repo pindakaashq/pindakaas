@@ -1,5 +1,5 @@
 use crate::{
-	bool_linear::{LimitComp, LinMarker, Linear, PosCoeff},
+	bool_linear::{LimitComp, LinMarker, NormalizedBoolLinear, PosCoeff},
 	cardinality_one::CardinalityOne,
 	integer::IntVarEnc,
 	sorted::{Sorted, SortedEncoder},
@@ -39,7 +39,7 @@ impl Cardinality {
 
 impl Checker for Cardinality {
 	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result {
-		Linear::from(self.clone()).check(value)
+		NormalizedBoolLinear::from(self.clone()).check(value)
 	}
 }
 

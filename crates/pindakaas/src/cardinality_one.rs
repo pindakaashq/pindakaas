@@ -1,7 +1,7 @@
 use itertools::Itertools;
 
 use crate::{
-	bool_linear::{LimitComp, Linear},
+	bool_linear::{LimitComp, NormalizedBoolLinear},
 	helpers::{emit_clause, new_var},
 	Checker, ClauseDatabase, Encoder, Lit, Result, Valuation,
 };
@@ -14,8 +14,8 @@ pub struct BitwiseEncoder {}
 
 #[derive(Debug, Clone)]
 pub struct CardinalityOne {
-	pub lits: Vec<Lit>,
-	pub cmp: LimitComp,
+	pub(crate) lits: Vec<Lit>,
+	pub(crate) cmp: LimitComp,
 }
 
 /// An encoder for an At Most One constraints that TODO
@@ -84,7 +84,7 @@ impl CardinalityOne {
 
 impl Checker for CardinalityOne {
 	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<()> {
-		Linear::from(self.clone()).check(value)
+		NormalizedBoolLinear::from(self.clone()).check(value)
 	}
 }
 
