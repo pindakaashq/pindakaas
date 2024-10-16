@@ -9,12 +9,26 @@ use crate::{
 	ClauseDatabase, Cnf, ConditionalDatabase, Lit, Valuation, Var,
 };
 
-impl ClauseDatabase for Splr {
-	fn new_var(&mut self) -> Var {
-		let var = self.add_var();
-		let var: i32 = var.try_into().expect("exhausted variable pool");
-		Var(NonZeroI32::new(var).expect("variables cannot use the value zero"))
+impl Valuation for Certificate {
+	fn value(&self, lit: Lit) -> Option<bool> {
+		if let Certificate::SAT(sol) = self {
+			let var = lit.var();
+			let v = Into::<i32>::into(var) as usize;
+			if v <= sol.len() {
+				debug_assert_eq!(sol[v - 1].abs(), lit.var().into());
+				Some(sol[v - 1] == lit.into())
+			} else {
+				None
+			}
+		} else {
+			panic!("value called on an unsatisfiable certificate")
+		}
 	}
+}
+
+impl ClauseDatabase for Splr {
+	type CondDB = Self;
+
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> crate::Result {
 		use splr::SolverError::*;
 
@@ -32,12 +46,38 @@ impl ClauseDatabase for Splr {
 		}
 	}
 
-	type CondDB = Self;
+	fn new_var(&mut self) -> Var {
+		let var = self.add_var();
+		let var: i32 = var.try_into().expect("exhausted variable pool");
+		Var(NonZeroI32::new(var).expect("variables cannot use the value zero"))
+	}
+
 	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
 		ConditionalDatabase {
 			db: self,
 			conditions,
 		}
+	}
+}
+
+impl From<&Cnf> for Splr {
+	fn from(cnf: &Cnf) -> Self {
+		use splr::{
+			types::{CNFDescription, Instantiate},
+			Config,
+		};
+		let mut slv = Splr::instantiate(
+			&Config::default(),
+			&CNFDescription {
+				num_of_variables: cnf.nvar.emited_vars(),
+				..CNFDescription::default()
+			},
+		);
+		for cl in cnf.iter() {
+			// Ignore early detected unsatisfiability
+			let _ = ClauseDatabase::add_clause(&mut slv, cl.iter().copied());
+		}
+		slv
 	}
 }
 
@@ -66,44 +106,6 @@ impl Solver for Splr {
 				_ => panic!("an error occurred within the splr solver"),
 			},
 		}
-	}
-}
-
-impl Valuation for Certificate {
-	fn value(&self, lit: Lit) -> Option<bool> {
-		if let Certificate::SAT(sol) = self {
-			let var = lit.var();
-			let v = Into::<i32>::into(var) as usize;
-			if v <= sol.len() {
-				debug_assert_eq!(sol[v - 1].abs(), lit.var().into());
-				Some(sol[v - 1] == lit.into())
-			} else {
-				None
-			}
-		} else {
-			panic!("value called on an unsatisfiable certificate")
-		}
-	}
-}
-
-impl From<&Cnf> for Splr {
-	fn from(cnf: &Cnf) -> Self {
-		use splr::{
-			types::{CNFDescription, Instantiate},
-			Config,
-		};
-		let mut slv = Splr::instantiate(
-			&Config::default(),
-			&CNFDescription {
-				num_of_variables: cnf.nvar.emited_vars(),
-				..CNFDescription::default()
-			},
-		);
-		for cl in cnf.iter() {
-			// Ignore early detected unsatisfiability
-			let _ = ClauseDatabase::add_clause(&mut slv, cl.iter().copied());
-		}
-		slv
 	}
 }
 

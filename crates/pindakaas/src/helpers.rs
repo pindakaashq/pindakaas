@@ -1,27 +1,3 @@
-use std::{
-	cmp::max,
-	collections::HashSet,
-	iter::FusedIterator,
-	num::NonZeroI32,
-	ops::{Bound, RangeBounds, RangeInclusive},
-};
-
-use itertools::Itertools;
-
-use crate::{int::IntVar, linear::PosCoeff, ClauseDatabase, Coeff, Lit, Result, Var};
-
-#[cfg(feature = "splr")]
-macro_rules! maybe_std_concat {
-	($e:literal) => {
-		concat!($e)
-	};
-	($e:expr) => {
-		$e
-	};
-}
-#[cfg(feature = "splr")]
-pub(crate) use maybe_std_concat;
-
 #[cfg(feature = "splr")]
 macro_rules! concat_slices {
     ([$init:expr; $T:ty]: $($s:expr),+ $(,)?) => {{
@@ -50,8 +26,6 @@ macro_rules! concat_slices {
         $crate::helpers::concat_slices!([0; $T]: $($s),+)
     };
 }
-#[cfg(feature = "splr")]
-pub(crate) use concat_slices;
 
 #[cfg(feature = "splr")]
 macro_rules! const_concat {
@@ -68,8 +42,42 @@ macro_rules! const_concat {
 			unsafe { std::str::from_utf8_unchecked(slice) }
 	}};
 }
+#[cfg(not(any(feature = "tracing", test)))]
+macro_rules! emit_clause {
+	($db:expr, $cl:expr) => {
+		$db.add_clause($cl)
+	};
+}
+
+/// Helper marco to emit a clause from within an encoder
+#[cfg(any(feature = "tracing", test))]
+macro_rules! emit_clause {
+	($db:expr, $cl:expr) => {{
+		let slice = $cl.into_iter().collect::<Vec<_>>();
+		let res = $db.add_clause(slice.iter().copied());
+		tracing::info!(clause = ?&slice, fail = matches!(res, Err($crate::Unsatisfiable)), "emit clause");
+		res
+	}};
+}
+
 #[cfg(feature = "splr")]
-pub(crate) use const_concat;
+macro_rules! maybe_std_concat {
+	($e:literal) => {
+		concat!($e)
+	};
+	($e:expr) => {
+		$e
+	};
+}
+#[cfg(not(any(feature = "tracing", test)))]
+macro_rules! new_var {
+	($db:expr) => {
+		$crate::Lit::from($db.new_var())
+	};
+	($db:expr, $lbl:expr) => {
+		$crate::Lit::from($db.new_var())
+	};
+}
 
 /// Helper marco to create a new variable within an Encoder
 #[cfg(any(feature = "tracing", test))]
@@ -85,70 +93,19 @@ macro_rules! new_var {
 		$crate::Lit::from(var)
 	}};
 }
-#[cfg(not(any(feature = "tracing", test)))]
-macro_rules! new_var {
-	($db:expr) => {
-		$crate::Lit::from($db.new_var())
-	};
-	($db:expr, $lbl:expr) => {
-		$crate::Lit::from($db.new_var())
-	};
-}
-pub(crate) use new_var;
 
-/// Helper marco to emit a clause from within an encoder
-#[cfg(any(feature = "tracing", test))]
-macro_rules! emit_clause {
-	($db:expr, $cl:expr) => {{
-		let slice = $cl.into_iter().collect::<Vec<_>>();
-		let res = $db.add_clause(slice.iter().copied());
-		tracing::info!(clause = ?&slice, fail = matches!(res, Err($crate::Unsatisfiable)), "emit clause");
-		res
-	}};
-}
-#[cfg(not(any(feature = "tracing", test)))]
-macro_rules! emit_clause {
-	($db:expr, $cl:expr) => {
-		$db.add_clause($cl)
-	};
-}
+use std::collections::HashSet;
+
 pub(crate) use emit_clause;
+use itertools::Itertools;
+pub(crate) use new_var;
+#[cfg(feature = "splr")]
+pub(crate) use {concat_slices, const_concat, maybe_std_concat};
 
-/// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
-pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool {
-	let mut it = coefs.into_iter().enumerate();
-	if let Some((_, mult)) = it.next() {
-		const TWO: Coeff = 2;
-		it.all(|(i, c)| c == (TWO.pow(i as u32) * mult))
-	} else {
-		false
-	}
-}
-
-pub(crate) fn unsigned_binary_range_ub(bits: u32) -> Coeff {
-	const TWO: Coeff = 2;
-	(0_u32..bits).fold(0, |sum, i| sum + TWO.pow(i))
-}
-/// Convert `k` to unsigned binary in `bits`
-pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| IntVar::required_bits(0, *k));
-	assert!(
-		*k <= unsigned_binary_range_ub(bits),
-		"{k} cannot be represented in {bits} bits"
-	);
-	(0..bits).map(|b| *k & (1 << b) != 0).collect()
-}
-
-pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
-	num.to_string()
-		.chars()
-		.map(|d| d.to_digit(10).unwrap())
-		.map(|d| char::from_u32(0x2080 + d).unwrap())
-		.collect_vec()
-		.into_iter()
-}
+use crate::{bool_linear::PosCoeff, integer::IntVar, ClauseDatabase, Coeff, Lit, Result};
 
 const FILTER_TRIVIAL_CLAUSES: bool = false;
+
 /// Adds clauses for a DNF formula (disjunction of conjunctions)
 /// Ex. (a /\ -b) \/ c == a \/ c /\ -b \/ c
 /// If any disjunction is empty, this satisfies the whole formula. If any element contains the empty conjunction, that element is falsified in the final clause.
@@ -181,6 +138,26 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 	}
 	Ok(())
 }
+/// Convert `k` to unsigned binary in `bits`
+pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
+	let bits = bits.unwrap_or_else(|| IntVar::required_bits(0, *k));
+	assert!(
+		*k <= unsigned_binary_range_ub(bits),
+		"{k} cannot be represented in {bits} bits"
+	);
+	(0..bits).map(|b| *k & (1 << b) != 0).collect()
+}
+
+/// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
+pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool {
+	let mut it = coefs.into_iter().enumerate();
+	if let Some((_, mult)) = it.next() {
+		const TWO: Coeff = 2;
+		it.all(|(i, c)| c == (TWO.pow(i as u32) * mult))
+	} else {
+		false
+	}
+}
 
 /// Negates CNF (flipping between empty clause and formula)
 pub(crate) fn negate_cnf(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
@@ -197,155 +174,67 @@ pub(crate) fn negate_cnf(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct VarRange {
-	start: Var,
-	end: Var,
+pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
+	num.to_string()
+		.chars()
+		.map(|d| d.to_digit(10).unwrap())
+		.map(|d| char::from_u32(0x2080 + d).unwrap())
+		.collect_vec()
+		.into_iter()
 }
 
-impl VarRange {
-	/// Create a range starting from [`start`] and ending at [`end`] (inclusive)
-	pub fn new(start: Var, end: Var) -> Self {
-		Self { start, end }
-	}
-
-	/// Returns the lower bound of the variable range (inclusive).
-	///
-	/// Note: the value returned by this method is unspecified after the range
-	/// has been iterated to exhaustion.
-	pub fn start(&self) -> Var {
-		self.start
-	}
-
-	/// Returns the upper bound of the variable range (inclusive).
-	///
-	/// Note: the value returned by this method is unspecified after the range
-	/// has been iterated to exhaustion.
-	pub fn end(&self) -> Var {
-		self.end
-	}
-
-	/// Create an empty variable range
-	pub fn empty() -> Self {
-		Self {
-			start: Var(NonZeroI32::new(2).unwrap()),
-			end: Var(NonZeroI32::new(1).unwrap()),
-		}
-	}
-
-	/// Returns `true` if the range contains no items.
-	///
-	/// # Examples
-	///
-	/// ```
-	/// # use pindakaas::solver::VarRange;
-	/// assert!(VarRange::empty().is_empty());
-	/// ```
-	pub fn is_empty(&self) -> bool {
-		self.start > self.end
-	}
-
-	/// Performs the indexing operation into the variable range
-	pub fn index(&self, index: usize) -> Var {
-		if index >= self.len() {
-			panic!("out of bounds access");
-		}
-		if index == 0 {
-			self.start
-		} else {
-			let index = NonZeroI32::new(index as i32).unwrap();
-			self.start.checked_add(index).unwrap()
-		}
-	}
-
-	/// Find the index of a variable within the range
-	pub fn find(&self, var: Var) -> Option<usize> {
-		if !self.contains(&var) {
-			None
-		} else {
-			let offset = (var.0.get() - self.start.0.get()) as usize;
-			debug_assert!(offset <= self.len());
-			Some(offset)
-		}
-	}
-
-	pub fn iter_lits(&mut self) -> impl Iterator<Item = Lit> + '_ {
-		self.map(Lit::from)
-	}
-}
-
-impl Iterator for VarRange {
-	type Item = Var;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		if self.start <= self.end {
-			let item = self.start;
-			self.start = self.start.next_var().unwrap();
-			Some(item)
-		} else {
-			None
-		}
-	}
-	fn size_hint(&self) -> (usize, Option<usize>) {
-		let size = max(self.end.0.get() - self.start.0.get() + 1, 0) as usize;
-		(size, Some(size))
-	}
-	fn count(self) -> usize {
-		let (lower, upper) = self.size_hint();
-		debug_assert_eq!(upper, Some(lower));
-		lower
-	}
-}
-impl FusedIterator for VarRange {}
-impl ExactSizeIterator for VarRange {
-	fn len(&self) -> usize {
-		let (lower, upper) = self.size_hint();
-		debug_assert_eq!(upper, Some(lower));
-		lower
-	}
-}
-impl DoubleEndedIterator for VarRange {
-	fn next_back(&mut self) -> Option<Self::Item> {
-		if self.start <= self.end {
-			let item = self.end;
-			if let Some(prev) = self.end.prev_var() {
-				self.end = prev;
-			} else {
-				*self = VarRange::empty();
-			}
-			Some(item)
-		} else {
-			None
-		}
-	}
-}
-impl RangeBounds<Var> for VarRange {
-	fn start_bound(&self) -> Bound<&Var> {
-		Bound::Included(&self.start)
-	}
-
-	fn end_bound(&self) -> Bound<&Var> {
-		Bound::Included(&self.end)
-	}
-}
-impl From<RangeInclusive<Var>> for VarRange {
-	fn from(value: RangeInclusive<Var>) -> Self {
-		VarRange::new(*value.start(), *value.end())
-	}
+pub(crate) fn unsigned_binary_range_ub(bits: u32) -> Coeff {
+	const TWO: Coeff = 2;
+	(0_u32..bits).fold(0, |sum, i| sum + TWO.pow(i))
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
+	#[cfg(test)]
+	macro_rules! expect_file {
+		($rel_path:expr) => {
+			expect_test::expect_file!(format!(
+				"{}/corpus/{}",
+				env!("CARGO_MANIFEST_DIR"),
+				$rel_path
+			))
+		};
+	}
+
 	use std::{fmt::Display, mem};
 
+	#[cfg(test)]
+	pub(crate) use expect_file;
 	use expect_test::ExpectFile;
 	use itertools::Itertools;
 
 	use crate::{
-		int::IntVarEnc,
+		bool_linear::LinExp,
+		integer::IntVarEnc,
 		solver::{cadical::Cadical, SolveResult, Solver},
-		Checker, ClauseDatabase, Cnf, LinExp, Lit, Valuation,
+		Checker, ClauseDatabase, Cnf, Lit, Valuation,
 	};
+
+	/// Helper functions to ensure that the possible solutions of a formula
+	/// abide by the given checker.
+	pub(crate) fn assert_checker(formula: &Cnf, checker: &impl Checker) {
+		let mut slv = Cadical::from(formula);
+		let vars = formula.get_variables();
+		let mut sol = Vec::new();
+		while slv.solve(|value| {
+			assert_eq!(checker.check(value), Ok(()));
+			sol = vars
+				.clone()
+				.filter_map(|v| {
+					let l = v.into();
+					value.value(l).map(|b| if b { l } else { !l })
+				})
+				.collect();
+		}) != SolveResult::Unsat
+		{
+			slv.add_clause(sol.iter().map(|l| !l)).unwrap();
+		}
+	}
 
 	/// Simple helper function to assert the generated formula against an expect
 	/// block.
@@ -432,40 +321,6 @@ pub(crate) mod tests {
 		);
 		expect.assert_eq(&sol_str);
 	}
-
-	/// Helper functions to ensure that the possible solutions of a formula
-	/// abide by the given checker.
-	pub(crate) fn assert_checker(formula: &Cnf, checker: &impl Checker) {
-		let mut slv = Cadical::from(formula);
-		let vars = formula.get_variables();
-		let mut sol = Vec::new();
-		while slv.solve(|value| {
-			assert_eq!(checker.check(value), Ok(()));
-			sol = vars
-				.clone()
-				.filter_map(|v| {
-					let l = v.into();
-					value.value(l).map(|b| if b { l } else { !l })
-				})
-				.collect();
-		}) != SolveResult::Unsat
-		{
-			slv.add_clause(sol.iter().map(|l| !l)).unwrap();
-		}
-	}
-
-	#[cfg(test)]
-	macro_rules! expect_file {
-		($rel_path:expr) => {
-			expect_test::expect_file!(format!(
-				"{}/corpus/{}",
-				env!("CARGO_MANIFEST_DIR"),
-				$rel_path
-			))
-		};
-	}
-	#[cfg(test)]
-	pub(crate) use expect_file;
 
 	/// Helper function to quickly create a valuation from a slice of literals.
 	///

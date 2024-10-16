@@ -33,20 +33,30 @@ pub struct Cadical {
 	prop: Option<PropagatorPointer>,
 }
 
-impl Default for Cadical {
-	fn default() -> Self {
-		Self {
-			// SAFETY: Assume ipasir_init() returns a non-null pointer.
-			ptr: unsafe { pindakaas_cadical::ipasir_init() },
-			#[cfg(not(feature = "ipasir-up"))]
-			vars: VarFactory::default(),
-			#[cfg(feature = "ipasir-up")]
-			vars: Arc::default(),
-			learn_cb: FFIPointer::default(),
-			term_cb: FFIPointer::default(),
-			#[cfg(feature = "ipasir-up")]
-			prop: None,
-		}
+impl Cadical {
+	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
+	pub fn get_option(&self, name: &str) -> i32 {
+		let name = CString::new(name).unwrap();
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
+		// handles non-existing options gracefully.
+		unsafe { pindakaas_cadical::ccadical_get_option(self.ptr, name.as_ptr()) }
+	}
+	pub fn phase(&mut self, lit: Lit) {
+		// SAFETY: Pointer known to be non-null, no other known safety concerns.
+		unsafe { ccadical_phase(self.ptr, lit.0.get()) }
+	}
+
+	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
+	pub fn set_option(&mut self, name: &str, value: i32) {
+		let name = CString::new(name).unwrap();
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
+		// handles non-existing options gracefully.
+		unsafe { pindakaas_cadical::ccadical_set_option(self.ptr, name.as_ptr(), value) }
+	}
+
+	pub fn unphase(&mut self, lit: Lit) {
+		// SAFETY: Pointer known to be non-null, no other known safety concerns.
+		unsafe { ccadical_unphase(self.ptr, lit.0.get()) }
 	}
 }
 
@@ -69,6 +79,23 @@ impl Clone for Cadical {
 	}
 }
 
+impl Default for Cadical {
+	fn default() -> Self {
+		Self {
+			// SAFETY: Assume ipasir_init() returns a non-null pointer.
+			ptr: unsafe { pindakaas_cadical::ipasir_init() },
+			#[cfg(not(feature = "ipasir-up"))]
+			vars: VarFactory::default(),
+			#[cfg(feature = "ipasir-up")]
+			vars: Arc::default(),
+			learn_cb: FFIPointer::default(),
+			term_cb: FFIPointer::default(),
+			#[cfg(feature = "ipasir-up")]
+			prop: None,
+		}
+	}
+}
+
 impl fmt::Debug for Cadical {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct("Cadical")
@@ -78,42 +105,15 @@ impl fmt::Debug for Cadical {
 	}
 }
 
-impl Cadical {
-	pub fn phase(&mut self, lit: Lit) {
-		// SAFETY: Pointer known to be non-null, no other known safety concerns.
-		unsafe { ccadical_phase(self.ptr, lit.0.get()) }
-	}
-
-	pub fn unphase(&mut self, lit: Lit) {
-		// SAFETY: Pointer known to be non-null, no other known safety concerns.
-		unsafe { ccadical_unphase(self.ptr, lit.0.get()) }
-	}
-
-	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
-	pub fn set_option(&mut self, name: &str, value: i32) {
-		let name = CString::new(name).unwrap();
-		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
-		// handles non-existing options gracefully.
-		unsafe { pindakaas_cadical::ccadical_set_option(self.ptr, name.as_ptr(), value) }
-	}
-
-	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
-	pub fn get_option(&self, name: &str) -> i32 {
-		let name = CString::new(name).unwrap();
-		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
-		// handles non-existing options gracefully.
-		unsafe { pindakaas_cadical::ccadical_get_option(self.ptr, name.as_ptr()) }
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use traced_test::test;
 
 	use crate::{
-		linear::LimitComp,
+		bool_linear::LimitComp,
+		cardinality_one::{CardinalityOne, PairwiseEncoder},
 		solver::{cadical::Cadical, SolveResult, Solver},
-		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder, Unsatisfiable, Valuation,
+		ClauseDatabase, Encoder, Unsatisfiable, Valuation,
 	};
 
 	#[test]

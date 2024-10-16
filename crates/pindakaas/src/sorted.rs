@@ -5,11 +5,10 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
+	bool_linear::{LimitComp, LinExp},
 	helpers::{add_clauses_for, emit_clause, negate_cnf},
-	int::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
-	linear::LimitComp,
-	CheckError, Checker, ClauseDatabase, Coeff, Encoder, LinExp, Lit, Result, Unsatisfiable,
-	Valuation,
+	integer::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
 };
 
 type SortedCache = FxHashMap<(u128, u128, u128), (SortedStrategy, (u128, u128))>;
@@ -60,7 +59,7 @@ impl<'a> Sorted<'a> {
 }
 
 impl<'a> Checker for Sorted<'a> {
-	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
+	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
 		let lhs = LinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
 			.value(sol)?;
 		let rhs = LinExp::from(self.y).value(sol)?;
@@ -71,7 +70,7 @@ impl<'a> Checker for Sorted<'a> {
 		} {
 			Ok(())
 		} else {
-			Err(CheckError::Unsatisfiable(Unsatisfiable))
+			Err(Unsatisfiable)
 		}
 	}
 }
@@ -569,11 +568,12 @@ mod tests {
 	use traced_test::test;
 
 	use crate::{
+		bool_linear::LimitComp,
 		helpers::tests::{assert_solutions, expect_file},
-		int::{IntVarEnc, IntVarOrd, TernLeConstraint},
-		solver::{NextVarRange, VarRange},
-		sorted::Sorted,
-		ClauseDatabase, Cnf, Encoder, LimitComp, SortedEncoder, SortedStrategy, Var,
+		integer::{IntVarEnc, IntVarOrd, TernLeConstraint},
+		solver::NextVarRange,
+		sorted::{Sorted, SortedEncoder, SortedStrategy},
+		ClauseDatabase, Cnf, Encoder, Var, VarRange,
 	};
 
 	fn get_sorted_encoder(strategy: SortedStrategy) -> SortedEncoder {

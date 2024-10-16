@@ -4,54 +4,35 @@ pub mod cadical;
 pub mod intel_sat;
 #[cfg(feature = "kissat")]
 pub mod kissat;
+pub mod libloading;
 #[cfg(feature = "splr")]
 pub mod splr;
-
-pub mod libloading;
 
 #[cfg(feature = "ipasir-up")]
 use std::any::Any;
 use std::num::NonZeroI32;
 
-pub use crate::helpers::VarRange;
-use crate::{ClauseDatabase, Lit, Valuation, Var};
+use crate::{ClauseDatabase, Lit, Valuation, Var, VarRange};
 
-pub trait Solver: ClauseDatabase {
-	type ValueFn: Valuation;
-	/// Return the name and the version of SAT solver.
-	fn signature(&self) -> &str;
-
-	/// Solve the formula with specified clauses.
-	///
-	/// If the search is interrupted (see [`set_terminate_callback`]) the function
-	/// returns unknown
-	fn solve<SolCb: FnOnce(&Self::ValueFn)>(&mut self, on_sol: SolCb) -> SolveResult;
+#[cfg(feature = "ipasir-up")]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// Whether a clause could possibly be removed from the clause database.
+pub enum ClausePersistence {
+	/// The clause is to be considered forgettable. Its removal would not affect
+	/// the solver's correctness (in combination with the propagator), and it can
+	/// be re-derived if needed.
+	Forgettable,
+	/// The clause is to be considered irreduntant. It contains information that
+	/// can not (easily) be re-derived.
+	Irreduntant,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
-pub enum SolveResult {
-	Sat,
-	Unsat,
-	Unknown,
-}
-
-pub trait SolveAssuming: Solver {
-	type FailFn: FailedAssumtions;
-
-	/// Solve the formula with specified clauses under the given assumptions.
-	///
-	/// If the search is interrupted (see [`set_terminate_callback`]) the function
-	/// returns unknown
-	fn solve_assuming<
-		I: IntoIterator<Item = Lit>,
-		SolCb: FnOnce(&Self::ValueFn),
-		FailCb: FnOnce(&Self::FailFn),
-	>(
-		&mut self,
-		assumptions: I,
-		on_sol: SolCb,
-		on_fail: FailCb,
-	) -> SolveResult;
+#[cfg(feature = "ipasir-up")]
+/// A trait containing additional actions that the solver can perform during
+/// solving. In contrast to [`SolvingActions`], these additional actions are not
+/// exposed to the propagator.
+pub(crate) trait ExtendedSolvingActions: SolvingActions {
+	fn force_backtrack(&mut self, level: usize);
 }
 
 /// Trait implemented by the object given to the callback on detecting failure
@@ -78,19 +59,23 @@ pub trait LearnCallback: Solver {
 	);
 }
 
-pub trait TermCallback: Solver {
-	/// Set a callback function used to indicate a termination requirement to the
-	/// solver.
+/// Get mutable access to the external propagator given the to solver
+#[cfg(feature = "ipasir-up")]
+pub trait MutPropagatorAccess {
+	/// Get mutable access to the external propagator given the to solver
 	///
-	/// The solver will periodically call this function and check its return value
-	/// during the search. Subsequent calls to this method override the previously
-	/// set callback function.
+	/// This method will return [`None`] if no propagator is set, or if the
+	/// propagator is not of type [`P`].
+	fn propagator_mut<P: Propagator + 'static>(&mut self) -> Option<&mut P>;
+}
+
+/// Allow request for sequential ranges of variables.
+pub trait NextVarRange {
+	/// Request the next sequential range of variables.
 	///
-	/// # Warning
-	///
-	/// Subsequent calls to this method override the previously set
-	/// callback function.
-	fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>);
+	/// The method is can return [`None`] if the range of the requested [`size`] is not
+	/// available.
+	fn next_var_range(&mut self, size: usize) -> Option<VarRange>;
 }
 
 #[cfg(feature = "ipasir-up")]
@@ -113,51 +98,6 @@ where
 	fn add_observed_var(&mut self, var: Var);
 	fn remove_observed_var(&mut self, var: Var);
 	fn reset_observed_vars(&mut self);
-}
-
-/// Access the external propagator given the to solver
-#[cfg(feature = "ipasir-up")]
-pub trait PropagatorAccess {
-	/// Access the external propagator given the to solver
-	///
-	/// This method will return [`None`] if no propagator is set, or if the
-	/// propagator is not of type [`P`].
-	fn propagator<P: Propagator + 'static>(&self) -> Option<&P>;
-}
-
-/// Get mutable access to the external propagator given the to solver
-#[cfg(feature = "ipasir-up")]
-pub trait MutPropagatorAccess {
-	/// Get mutable access to the external propagator given the to solver
-	///
-	/// This method will return [`None`] if no propagator is set, or if the
-	/// propagator is not of type [`P`].
-	fn propagator_mut<P: Propagator + 'static>(&mut self) -> Option<&mut P>;
-}
-
-#[cfg(feature = "ipasir-up")]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-/// A representation of a search decision made by a propagator.
-pub enum SearchDecision {
-	/// Leave the search decision to the solver.
-	Free,
-	/// Make the decision to assign the given literal.
-	Assign(Lit),
-	/// Force the solver to backtrack to the given decision level.
-	Backtrack(usize),
-}
-
-#[cfg(feature = "ipasir-up")]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-/// Whether a clause could possibly be removed from the clause database.
-pub enum ClausePersistence {
-	/// The clause is to be considered forgettable. Its removal would not affect
-	/// the solver's correctness (in combination with the propagator), and it can
-	/// be re-derived if needed.
-	Forgettable,
-	/// The clause is to be considered irreduntant. It contains information that
-	/// can not (easily) be re-derived.
-	Irreduntant,
 }
 
 #[cfg(feature = "ipasir-up")]
@@ -305,6 +245,72 @@ pub trait Propagator {
 	fn as_mut_any(&mut self) -> &mut dyn Any;
 }
 
+/// Access the external propagator given the to solver
+#[cfg(feature = "ipasir-up")]
+pub trait PropagatorAccess {
+	/// Access the external propagator given the to solver
+	///
+	/// This method will return [`None`] if no propagator is set, or if the
+	/// propagator is not of type [`P`].
+	fn propagator<P: Propagator + 'static>(&self) -> Option<&P>;
+}
+
+#[cfg(feature = "ipasir-up")]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// A representation of a search decision made by a propagator.
+pub enum SearchDecision {
+	/// Leave the search decision to the solver.
+	Free,
+	/// Make the decision to assign the given literal.
+	Assign(Lit),
+	/// Force the solver to backtrack to the given decision level.
+	Backtrack(usize),
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub enum SlvTermSignal {
+	Continue,
+	Terminate,
+}
+
+pub trait SolveAssuming: Solver {
+	type FailFn: FailedAssumtions;
+
+	/// Solve the formula with specified clauses under the given assumptions.
+	///
+	/// If the search is interrupted (see [`set_terminate_callback`]) the function
+	/// returns unknown
+	fn solve_assuming<
+		I: IntoIterator<Item = Lit>,
+		SolCb: FnOnce(&Self::ValueFn),
+		FailCb: FnOnce(&Self::FailFn),
+	>(
+		&mut self,
+		assumptions: I,
+		on_sol: SolCb,
+		on_fail: FailCb,
+	) -> SolveResult;
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+pub enum SolveResult {
+	Sat,
+	Unsat,
+	Unknown,
+}
+
+pub trait Solver: ClauseDatabase {
+	type ValueFn: Valuation;
+	/// Return the name and the version of SAT solver.
+	fn signature(&self) -> &str;
+
+	/// Solve the formula with specified clauses.
+	///
+	/// If the search is interrupted (see [`set_terminate_callback`]) the function
+	/// returns unknown
+	fn solve<SolCb: FnOnce(&Self::ValueFn)>(&mut self, on_sol: SolCb) -> SolveResult;
+}
+
 #[cfg(feature = "ipasir-up")]
 /// A trait containing the solver methods that are exposed to the propagator
 /// during solving.
@@ -314,18 +320,19 @@ pub trait SolvingActions {
 	fn is_decision(&mut self, lit: Lit) -> bool;
 }
 
-#[cfg(feature = "ipasir-up")]
-/// A trait containing additional actions that the solver can perform during
-/// solving. In contrast to [`SolvingActions`], these additional actions are not
-/// exposed to the propagator.
-pub(crate) trait ExtendedSolvingActions: SolvingActions {
-	fn force_backtrack(&mut self, level: usize);
-}
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-pub enum SlvTermSignal {
-	Continue,
-	Terminate,
+pub trait TermCallback: Solver {
+	/// Set a callback function used to indicate a termination requirement to the
+	/// solver.
+	///
+	/// The solver will periodically call this function and check its return value
+	/// during the search. Subsequent calls to this method override the previously
+	/// set callback function.
+	///
+	/// # Warning
+	///
+	/// Subsequent calls to this method override the previously set
+	/// callback function.
+	fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -365,15 +372,6 @@ impl Iterator for VarFactory {
 	}
 }
 
-/// Allow request for sequential ranges of variables.
-pub trait NextVarRange {
-	/// Request the next sequential range of variables.
-	///
-	/// The method is can return [`None`] if the range of the requested [`size`] is not
-	/// available.
-	fn next_var_range(&mut self, size: usize) -> Option<VarRange>;
-}
-
 impl NextVarRange for VarFactory {
 	fn next_var_range(&mut self, size: usize) -> Option<VarRange> {
 		let start = self.next_var?;
@@ -399,38 +397,5 @@ impl NextVarRange for VarFactory {
 				}
 			}
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use std::num::NonZeroI32;
-
-	use traced_test::test;
-
-	use crate::{
-		solver::{NextVarRange, VarFactory},
-		Var,
-	};
-
-	#[test]
-	fn test_var_range() {
-		let mut factory = VarFactory::default();
-
-		let range = factory.next_var_range(0).unwrap();
-		assert_eq!(range.len(), 0);
-		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(1).unwrap())));
-
-		let range = factory.next_var_range(1).unwrap();
-		assert_eq!(range.len(), 1);
-		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(2).unwrap())));
-
-		let range = factory.next_var_range(2).unwrap();
-		assert_eq!(range.len(), 2);
-		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(4).unwrap())));
-
-		let range = factory.next_var_range(100).unwrap();
-		assert_eq!(range.len(), 100);
-		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(104).unwrap())));
 	}
 }

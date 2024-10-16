@@ -348,7 +348,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 
 	let next_var_range = if opts.ipasir_up {
 		quote! {
-			fn next_var_range(&mut self, size: usize) -> Option<crate::helpers::VarRange> {
+			fn next_var_range(&mut self, size: usize) -> Option<crate::VarRange> {
 				#[cfg(feature = "ipasir-up")]
 				let r = #vars .as_ref().lock().unwrap().next_var_range(size);
 				#[cfg(not(feature = "ipasir-up"))]
@@ -358,7 +358,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		}
 	} else {
 		quote! {
-			fn next_var_range(&mut self, size: usize) -> Option<crate::helpers::VarRange> {
+			fn next_var_range(&mut self, size: usize) -> Option<crate::VarRange> {
 				#vars .next_var_range(size)
 			}
 		}
