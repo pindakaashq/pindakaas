@@ -1,4 +1,4 @@
-#[cfg(feature = "ipasir-up")]
+#[cfg(feature = "external-propagation")]
 use std::sync::{Arc, Mutex};
 use std::{
 	ffi::{c_void, CString},
@@ -8,9 +8,9 @@ use std::{
 use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
 use pindakaas_derive::IpasirSolver;
 
-#[cfg(feature = "ipasir-up")]
-use crate::solver::libloading::PropagatorPointer;
-use crate::{solver::libloading::FFIPointer, Lit, VarFactory};
+#[cfg(feature = "external-propagation")]
+use crate::solver::propagation::PropagatorPointer;
+use crate::{solver::FFIPointer, Lit, VarFactory};
 
 #[derive(IpasirSolver)]
 #[ipasir(krate = pindakaas_cadical, assumptions, learn_callback, term_callback, ipasir_up)]
@@ -18,17 +18,17 @@ pub struct Cadical {
 	/// The raw pointer to the Cadical solver.
 	ptr: *mut c_void,
 	/// The variable factory for this solver.
-	#[cfg(not(feature = "ipasir-up"))]
+	#[cfg(not(feature = "external-propagation"))]
 	vars: VarFactory,
 	/// The variable factory for this solver.
-	#[cfg(feature = "ipasir-up")]
+	#[cfg(feature = "external-propagation")]
 	vars: Arc<Mutex<VarFactory>>,
 	/// The callback used when a clause is learned.
 	learn_cb: FFIPointer,
 	/// The callback used to check whether the solver should terminate.
 	term_cb: FFIPointer,
 
-	#[cfg(feature = "ipasir-up")]
+	#[cfg(feature = "external-propagation")]
 	/// The external propagator called by the solver
 	prop: Option<PropagatorPointer>,
 }
@@ -41,6 +41,7 @@ impl Cadical {
 		// handles non-existing options gracefully.
 		unsafe { pindakaas_cadical::ccadical_get_option(self.ptr, name.as_ptr()) }
 	}
+
 	pub fn phase(&mut self, lit: Lit) {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		unsafe { ccadical_phase(self.ptr, lit.0.get()) }
@@ -64,16 +65,16 @@ impl Clone for Cadical {
 	fn clone(&self) -> Self {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		let ptr = unsafe { ccadical_copy(self.ptr) };
-		#[cfg(not(feature = "ipasir-up"))]
+		#[cfg(not(feature = "external-propagation"))]
 		let vars = self.vars; // Copy
-		#[cfg(feature = "ipasir-up")]
+		#[cfg(feature = "external-propagation")]
 		let vars = Arc::new(Mutex::new(*self.vars.as_ref().lock().unwrap()));
 		Self {
 			ptr,
 			vars,
 			learn_cb: FFIPointer::default(),
 			term_cb: FFIPointer::default(),
-			#[cfg(feature = "ipasir-up")]
+			#[cfg(feature = "external-propagation")]
 			prop: None,
 		}
 	}
@@ -84,13 +85,13 @@ impl Default for Cadical {
 		Self {
 			// SAFETY: Assume ipasir_init() returns a non-null pointer.
 			ptr: unsafe { pindakaas_cadical::ipasir_init() },
-			#[cfg(not(feature = "ipasir-up"))]
+			#[cfg(not(feature = "external-propagation"))]
 			vars: VarFactory::default(),
-			#[cfg(feature = "ipasir-up")]
+			#[cfg(feature = "external-propagation")]
 			vars: Arc::default(),
 			learn_cb: FFIPointer::default(),
 			term_cb: FFIPointer::default(),
-			#[cfg(feature = "ipasir-up")]
+			#[cfg(feature = "external-propagation")]
 			prop: None,
 		}
 	}
@@ -159,7 +160,7 @@ mod tests {
 		assert_eq!(slv.solve(|_| unreachable!()), SolveResult::Unsat);
 	}
 
-	#[cfg(feature = "ipasir-up")]
+	#[cfg(feature = "external-propagation")]
 	#[test]
 	fn test_ipasir_up() {
 		use std::any::Any;
@@ -169,8 +170,12 @@ mod tests {
 		use crate::{
 			helpers::tests::assert_solutions,
 			solver::{
-				cadical::CadicalSol, ClausePersistence, NextVarRange, PropagatingSolver,
-				Propagator, PropagatorAccess, SolvingActions, VarRange,
+				cadical::CadicalSol,
+				propagation::{
+					ClausePersistence, PropagatingSolver, Propagator, PropagatorAccess,
+					SolvingActions,
+				},
+				NextVarRange, VarRange,
 			},
 			Lit,
 		};

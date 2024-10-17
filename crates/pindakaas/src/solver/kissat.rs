@@ -24,9 +24,10 @@ mod tests {
 	use traced_test::test;
 
 	use crate::{
-		linear::LimitComp,
+		bool_linear::LimitComp,
+		cardinality_one::{CardinalityOne, PairwiseEncoder},
 		solver::{kissat::Kissat, SolveResult, Solver},
-		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder, Valuation,
+		ClauseDatabase, Encoder, Valuation,
 	};
 
 	#[test]

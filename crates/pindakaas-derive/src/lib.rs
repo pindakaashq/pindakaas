@@ -109,8 +109,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 								crate::solver::SlvTermSignal::Terminate => std::ffi::c_int::from(1),
 							}
 						};
-						let trampoline = crate::solver::libloading::get_trampoline0(&wrapped_cb);
-						#term_cb = crate::solver::libloading::FFIPointer::new(wrapped_cb);
+						let trampoline = crate::solver::get_trampoline0(&wrapped_cb);
+						#term_cb = crate::solver::FFIPointer::new(wrapped_cb);
 						unsafe {
 							#krate::ipasir_set_terminate(
 								#ptr,
@@ -119,7 +119,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 							)
 						}
 					} else {
-						#term_cb = crate::solver::libloading::FFIPointer::default();
+						#term_cb = crate::solver::FFIPointer::default();
 						unsafe { #krate::ipasir_set_terminate(#ptr, std::ptr::null_mut(), None) }
 					}
 				}
@@ -144,12 +144,12 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					const MAX_LEN: std::ffi::c_int = 512;
 					if let Some(mut cb) = cb {
 						let wrapped_cb = move |clause: *const i32| {
-							let mut iter = crate::solver::libloading::ExplIter(clause)
+							let mut iter = crate::solver::ExplIter(clause)
 								.map(|i: i32| crate::Lit(std::num::NonZeroI32::new(i).unwrap()));
 							cb(&mut iter)
 						};
-						let trampoline = crate::solver::libloading::get_trampoline1(&wrapped_cb);
-						#learn_cb = crate::solver::libloading::FFIPointer::new(wrapped_cb);
+						let trampoline = crate::solver::get_trampoline1(&wrapped_cb);
+						#learn_cb = crate::solver::FFIPointer::new(wrapped_cb);
 						unsafe {
 							#krate::ipasir_set_learn(
 								#ptr,
@@ -159,7 +159,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 							)
 						}
 					} else {
-						#learn_cb = crate::solver::libloading::FFIPointer::default();
+						#learn_cb = crate::solver::FFIPointer::default();
 						unsafe { #krate::ipasir_set_learn(#ptr, std::ptr::null_mut(), MAX_LEN, None) }
 					}
 				}
@@ -177,9 +177,9 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			None => quote! { self.prop },
 		};
 		quote! {
-			#[cfg(feature = "ipasir-up")]
-			impl crate::solver::PropagatingSolver for #ident {
-				fn set_external_propagator<P: crate::solver::Propagator + 'static>(
+			#[cfg(feature = "external-propagation")]
+			impl crate::solver::propagation::PropagatingSolver for #ident {
+				fn set_external_propagator<P: crate::solver::propagation::Propagator + 'static>(
 					&mut self,
 					prop: Option<P>,
 				) {
@@ -192,27 +192,27 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					// If new propagator, set it now
 					if let Some(p) = prop {
 						let is_lazy = p.is_check_only();
-						let forgettable_reasons = p.reason_persistence() == crate::solver::ClausePersistence::Forgettable;
+						let forgettable_reasons = p.reason_persistence() == crate::solver::propagation::ClausePersistence::Forgettable;
 						let notify_fixed = p.enable_persistent_assignments();
 
-						#prop_member = Some(crate::solver::libloading::PropagatorPointer::new(p, #actions_ident::new(#ptr, Arc::clone(&#vars))));
+						#prop_member = Some(crate::solver::propagation::PropagatorPointer::new(p, #actions_ident::new(#ptr, Arc::clone(&#vars))));
 						unsafe {
 							#krate::ipasir_connect_external_propagator(
 								#ptr,
 								#prop_member .as_ref().unwrap().get_raw_ptr(),
-								crate::solver::libloading::ipasir_notify_assignments_cb::<P, #actions_ident>,
-								crate::solver::libloading::ipasir_notify_new_decision_level_cb::<P, #actions_ident>,
-								crate::solver::libloading::ipasir_notify_backtrack_cb::<P, #actions_ident>,
-								crate::solver::libloading::ipasir_check_model_cb::<P, #actions_ident>,
-								crate::solver::libloading::ipasir_has_external_clause_cb::<P, #actions_ident>,
-								crate::solver::libloading::ipasir_add_external_clause_lit_cb::<P, #actions_ident>,
+								crate::solver::propagation::ipasir_notify_assignments_cb::<P, #actions_ident>,
+								crate::solver::propagation::ipasir_notify_new_decision_level_cb::<P, #actions_ident>,
+								crate::solver::propagation::ipasir_notify_backtrack_cb::<P, #actions_ident>,
+								crate::solver::propagation::ipasir_check_model_cb::<P, #actions_ident>,
+								crate::solver::propagation::ipasir_has_external_clause_cb::<P, #actions_ident>,
+								crate::solver::propagation::ipasir_add_external_clause_lit_cb::<P, #actions_ident>,
 								is_lazy,
 								forgettable_reasons,
 								notify_fixed,
-								crate::solver::libloading::ipasir_decide_cb::<P, #actions_ident>,
-								crate::solver::libloading::ipasir_propagate_cb::<P, #actions_ident>,
-								crate::solver::libloading::ipasir_add_reason_clause_lit_cb::<P, #actions_ident>,
-								crate::solver::libloading::ipasir_notify_persistent_assignments_cb::<P, #actions_ident>,
+								crate::solver::propagation::ipasir_decide_cb::<P, #actions_ident>,
+								crate::solver::propagation::ipasir_propagate_cb::<P, #actions_ident>,
+								crate::solver::propagation::ipasir_add_reason_clause_lit_cb::<P, #actions_ident>,
+								crate::solver::propagation::ipasir_notify_persistent_assignments_cb::<P, #actions_ident>,
 							)
 						};
 					}
@@ -229,35 +229,35 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				}
 			}
 
-			#[cfg(feature = "ipasir-up")]
-			impl crate::solver::PropagatorAccess for #ident {
-				fn propagator<P: crate::solver::Propagator + 'static>(&self) -> Option<&P> {
+			#[cfg(feature = "external-propagation")]
+			impl crate::solver::propagation::PropagatorAccess for #ident {
+				fn propagator<P: crate::solver::propagation::Propagator + 'static>(&self) -> Option<&P> {
 					#prop_member.as_ref().map(|p| unsafe { p.access_propagator() } ).flatten()
 				}
 			}
 
-			#[cfg(feature = "ipasir-up")]
-			impl crate::solver::MutPropagatorAccess for #ident {
-				fn propagator_mut<P: crate::solver::Propagator + 'static>(&mut self) -> Option<&mut P> {
+			#[cfg(feature = "external-propagation")]
+			impl crate::solver::propagation::MutPropagatorAccess for #ident {
+				fn propagator_mut<P: crate::solver::propagation::Propagator + 'static>(&mut self) -> Option<&mut P> {
 					#prop_member.as_ref().map(|p| unsafe { p.access_propagator_mut() } ).flatten()
 				}
 			}
 
-			#[cfg(feature = "ipasir-up")]
+			#[cfg(feature = "external-propagation")]
 			pub(crate) struct #actions_ident {
 				ptr: *mut std::ffi::c_void,
 				vars: Arc<Mutex<crate::VarFactory>>,
 			}
 
-			#[cfg(feature = "ipasir-up")]
+			#[cfg(feature = "external-propagation")]
 			impl #actions_ident {
 				pub fn new(ptr: *mut std::ffi::c_void, vars: Arc<Mutex<crate::VarFactory>>) -> Self {
 					Self { ptr, vars }
 				}
 			}
 
-			#[cfg(feature = "ipasir-up")]
-			impl crate::solver::SolvingActions for #actions_ident {
+			#[cfg(feature = "external-propagation")]
+			impl crate::solver::propagation::SolvingActions for #actions_ident {
 				fn new_var(&mut self) -> crate::Var {
 					self.vars.as_ref().lock().unwrap().next().expect("variable pool exhaused")
 				}
@@ -269,8 +269,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				}
 			}
 
-			#[cfg(feature = "ipasir-up")]
-			impl crate::solver::ExtendedSolvingActions for #actions_ident {
+			#[cfg(feature = "external-propagation")]
+			impl crate::solver::propagation::ExtendedSolvingActions for #actions_ident {
 				fn force_backtrack(&mut self, new_level: usize) {
 					unsafe { #krate::ipasir_force_backtrack( self.ptr, new_level ) }
 				}
@@ -278,25 +278,25 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 
 			pub struct #sol_ident {
 				ptr: *mut std::ffi::c_void,
-				#[cfg(feature = "ipasir-up")]
+				#[cfg(feature = "external-propagation")]
 				prop: Option<*mut std::ffi::c_void>,
-				#[cfg(feature = "ipasir-up")]
+				#[cfg(feature = "external-propagation")]
 				access_prop: Option<fn(*mut std::ffi::c_void) -> *mut dyn std::any::Any>,
 			}
 			impl #ident {
 				fn solver_solution_obj(&mut self) -> #sol_ident {
 					#sol_ident {
 						ptr: self.ptr,
-						#[cfg(feature = "ipasir-up")]
+						#[cfg(feature = "external-propagation")]
 						prop: #prop_member .as_mut().map(|p| p.get_raw_ptr()),
-						#[cfg(feature = "ipasir-up")]
+						#[cfg(feature = "external-propagation")]
 						access_prop: #prop_member .as_ref().map(|p| p.access_prop),
 					}
 				}
 			}
-			#[cfg(feature = "ipasir-up")]
-			impl crate::solver::PropagatorAccess for #sol_ident {
-				fn propagator<P: crate::solver::Propagator + 'static>(&self) -> Option<&P> {
+			#[cfg(feature = "external-propagation")]
+			impl crate::solver::propagation::PropagatorAccess for #sol_ident {
+				fn propagator<P: crate::solver::propagation::Propagator + 'static>(&self) -> Option<&P> {
 					if let Some(prop) = self.prop {
 						unsafe { &*(self.access_prop.unwrap())(prop) }.downcast_ref()
 					} else {
@@ -304,9 +304,9 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					}
 				}
 			}
-			#[cfg(feature = "ipasir-up")]
-			impl crate::solver::MutPropagatorAccess for #sol_ident {
-				fn propagator_mut<P: crate::solver::Propagator + 'static>(&mut self) -> Option<&mut P> {
+			#[cfg(feature = "external-propagation")]
+			impl crate::solver::propagation::MutPropagatorAccess for #sol_ident {
+				fn propagator_mut<P: crate::solver::propagation::Propagator + 'static>(&mut self) -> Option<&mut P> {
 					if let Some(prop) = self.prop {
 						unsafe { &mut *(self.access_prop.unwrap())(prop) }.downcast_mut()
 					} else {
@@ -331,9 +331,9 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 	let new_var = if opts.ipasir_up {
 		quote! {
 			fn new_var(&mut self) -> crate::Var {
-				#[cfg(feature = "ipasir-up")]
+				#[cfg(feature = "external-propagation")]
 				let var = #vars .as_ref().lock().unwrap().next().expect("variable pool exhaused");
-				#[cfg(not(feature = "ipasir-up"))]
+				#[cfg(not(feature = "external-propagation"))]
 				let var = #vars .next().expect("variable pool exhaused");
 				var
 			}
@@ -349,9 +349,9 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 	let next_var_range = if opts.ipasir_up {
 		quote! {
 			fn next_var_range(&mut self, size: usize) -> Option<crate::VarRange> {
-				#[cfg(feature = "ipasir-up")]
+				#[cfg(feature = "external-propagation")]
 				let r = #vars .as_ref().lock().unwrap().next_var_range(size);
-				#[cfg(not(feature = "ipasir-up"))]
+				#[cfg(not(feature = "external-propagation"))]
 				let r = #vars .next_var_range(size);
 				r
 			}
@@ -371,7 +371,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		};
 		let up_version = if opts.ipasir_up {
 			quote! {
-				#[cfg(feature = "ipasir-up")]
+				#[cfg(feature = "external-propagation")]
 				impl From<&crate::Cnf> for #ident {
 					fn from(value: &crate::Cnf) -> #ident {
 						let mut slv: #ident = Default::default();
@@ -382,7 +382,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 						slv
 					}
 				}
-				#[cfg(not(feature = "ipasir-up"))]
+				#[cfg(not(feature = "external-propagation"))]
 			}
 		} else {
 			quote!()
