@@ -169,14 +169,14 @@ mod tests {
 					ClausePersistence, PropagatingSolver, Propagator, PropagatorAccess,
 					SolvingActions,
 				},
-				NextVarRange, VarRange,
+				VarRange,
 			},
 			Lit,
 		};
 
 		let mut slv = Cadical::default();
 
-		let vars = slv.next_var_range(5).unwrap();
+		let vars = slv.new_var_range(5);
 
 		struct Dist2 {
 			vars: VarRange,

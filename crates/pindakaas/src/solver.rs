@@ -52,15 +52,6 @@ pub trait LearnCallback: Solver {
 	);
 }
 
-/// Allow request for sequential ranges of variables.
-pub trait NextVarRange {
-	/// Request the next sequential range of variables.
-	///
-	/// The method is can return [`None`] if the range of the requested [`size`] is not
-	/// available.
-	fn next_var_range(&mut self, size: usize) -> Option<VarRange>;
-}
-
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum SlvTermSignal {
 	Continue,
@@ -206,13 +197,51 @@ impl Drop for FFIPointer {
 }
 
 impl VarFactory {
-	const MAX_VARS: usize = NonZeroI32::MAX.get() as usize;
-
 	pub fn emited_vars(&self) -> usize {
 		if let Some(x) = self.next_var {
 			x.0.get() as usize - 1
 		} else {
-			Self::MAX_VARS
+			Var::MAX_VARS
+		}
+	}
+
+	pub(crate) fn next_var(&mut self) -> Var {
+		if let Some(x) = self.next_var {
+			self.next_var = x.next_var();
+			x
+		} else {
+			panic!("unable to create more than `Var::MAX_VARS` variables")
+		}
+	}
+
+	pub(crate) fn next_var_range(&mut self, size: usize) -> VarRange {
+		let Some(start) = self.next_var else {
+			panic!("unable to create more than `Var::MAX_VARS` variables")
+		};
+		match size {
+			0 => VarRange::new(
+				Var(NonZeroI32::new(2).unwrap()),
+				Var(NonZeroI32::new(1).unwrap()),
+			),
+			1 => {
+				self.next_var = start.next_var();
+				VarRange::new(start, start)
+			}
+			_ if size > Var::MAX_VARS => {
+				panic!("unable to create more than `Var::MAX_VARS` variables")
+			}
+			_ => {
+				// Size is reduced by 1 since it includes self.next_var
+				let size = NonZeroI32::new((size - 1) as i32).unwrap();
+				if let Some(end) = start.checked_add(size) {
+					// Set self.next_var to one after end
+					self.next_var = end.next_var();
+					VarRange::new(start, end)
+				} else {
+					// If end is None, then the range is too large
+					panic!("unable to create more than `Var::MAX_VARS` variables")
+				}
+			}
 		}
 	}
 }
@@ -221,46 +250,6 @@ impl Default for VarFactory {
 	fn default() -> Self {
 		Self {
 			next_var: Some(Var(NonZeroI32::new(1).unwrap())),
-		}
-	}
-}
-
-impl Iterator for VarFactory {
-	type Item = Var;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		let var = self.next_var;
-		if let Some(var) = var {
-			self.next_var = var.next_var();
-		}
-		var
-	}
-}
-
-impl NextVarRange for VarFactory {
-	fn next_var_range(&mut self, size: usize) -> Option<VarRange> {
-		let start = self.next_var?;
-		match size {
-			0 => Some(VarRange::new(
-				Var(NonZeroI32::new(2).unwrap()),
-				Var(NonZeroI32::new(1).unwrap()),
-			)),
-			1 => {
-				self.next_var = start.next_var();
-				Some(VarRange::new(start, start))
-			}
-			_ if size > NonZeroI32::MAX.get() as usize => None,
-			_ => {
-				// Size is reduced by 1 since it includes self.next_var
-				let size = NonZeroI32::new((size - 1) as i32).unwrap();
-				if let Some(end) = start.checked_add(size) {
-					// Set self.next_var to one after end
-					self.next_var = end.next_var();
-					Some(VarRange::new(start, end))
-				} else {
-					None
-				}
-			}
 		}
 	}
 }

@@ -259,7 +259,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 			#[cfg(feature = "external-propagation")]
 			impl crate::solver::propagation::SolvingActions for #actions_ident {
 				fn new_var(&mut self) -> crate::Var {
-					self.vars.as_ref().lock().unwrap().next().expect("variable pool exhaused")
+					self.vars.as_ref().lock().unwrap().next_var()
 				}
 				fn add_observed_var(&mut self, var: crate::Var) {
 					unsafe { #krate::ipasir_add_observed_var( self.ptr, var.0.get()) };
@@ -332,34 +332,29 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		quote! {
 			fn new_var(&mut self) -> crate::Var {
 				#[cfg(feature = "external-propagation")]
-				let var = #vars .as_ref().lock().unwrap().next().expect("variable pool exhaused");
+				let var = #vars .as_ref().lock().unwrap().next_var();
 				#[cfg(not(feature = "external-propagation"))]
-				let var = #vars .next().expect("variable pool exhaused");
+				let var = #vars .next_var();
+				var
+			}
+
+			fn new_var_range(&mut self, len: usize) -> crate::VarRange {
+				#[cfg(feature = "external-propagation")]
+				let var = #vars .as_ref().lock().unwrap().next_var_range(len);
+				#[cfg(not(feature = "external-propagation"))]
+				let var = #vars .next_var_range(len);
 				var
 			}
 		}
 	} else {
 		quote! {
 			fn new_var(&mut self) -> crate::Var {
-				#vars .next().expect("variable pool exhaused")
+				#vars .next_var()
 			}
-		}
-	};
 
-	let next_var_range = if opts.ipasir_up {
-		quote! {
-			fn next_var_range(&mut self, size: usize) -> Option<crate::VarRange> {
-				#[cfg(feature = "external-propagation")]
-				let r = #vars .as_ref().lock().unwrap().next_var_range(size);
-				#[cfg(not(feature = "external-propagation"))]
-				let r = #vars .next_var_range(size);
-				r
-			}
-		}
-	} else {
-		quote! {
-			fn next_var_range(&mut self, size: usize) -> Option<crate::VarRange> {
-				#vars .next_var_range(size)
+			fn new_var_range(&mut self, len: usize) -> crate::VarRange {
+				let var = #vars .next_var_range(len);
+				var
 			}
 		}
 	};
@@ -439,10 +434,6 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					conditions,
 				}
 			}
-		}
-
-		impl crate::solver::NextVarRange for #ident {
-			#next_var_range
 		}
 
 		impl crate::solver::Solver for #ident {

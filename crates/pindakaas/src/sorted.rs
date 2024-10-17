@@ -571,7 +571,6 @@ mod tests {
 		bool_linear::LimitComp,
 		helpers::tests::{assert_solutions, expect_file},
 		integer::{IntVarEnc, IntVarOrd, TernLeConstraint},
-		solver::NextVarRange,
 		sorted::{Sorted, SortedEncoder, SortedStrategy},
 		ClauseDatabase, Cnf, Encoder, Var, VarRange,
 	};
@@ -672,7 +671,7 @@ mod tests {
 	#[test]
 	fn test_4_sorted_eq() {
 		let mut cnf = Cnf::default();
-		let lits = cnf.next_var_range(4).unwrap().iter_lits().collect_vec();
+		let lits = cnf.new_var_range(4).iter_lits().collect_vec();
 		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 4, String::from("y")).into();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
@@ -691,7 +690,7 @@ mod tests {
 	#[test]
 	fn test_4_2_sorted_eq() {
 		let mut cnf = Cnf::default();
-		let lits = cnf.next_var_range(4).unwrap().iter_lits().collect_vec();
+		let lits = cnf.new_var_range(4).iter_lits().collect_vec();
 		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 2, String::from("y")).into();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
@@ -710,7 +709,7 @@ mod tests {
 	#[test]
 	fn test_4_3_sorted_eq() {
 		let mut cnf = Cnf::default();
-		let lits = cnf.next_var_range(4).unwrap().iter_lits().collect_vec();
+		let lits = cnf.new_var_range(4).iter_lits().collect_vec();
 		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 3, String::from("y")).into();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
@@ -729,7 +728,7 @@ mod tests {
 	#[test]
 	fn test_5_sorted_eq() {
 		let mut cnf = Cnf::default();
-		let lits = cnf.next_var_range(5).unwrap().iter_lits().collect_vec();
+		let lits = cnf.new_var_range(5).iter_lits().collect_vec();
 		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 5, String::from("y")).into();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
@@ -748,7 +747,7 @@ mod tests {
 	#[test]
 	fn test_5_3_sorted_eq() {
 		let mut cnf = Cnf::default();
-		let lits = cnf.next_var_range(5).unwrap().iter_lits().collect_vec();
+		let lits = cnf.new_var_range(5).iter_lits().collect_vec();
 		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 3, String::from("y")).into();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
@@ -767,12 +766,7 @@ mod tests {
 	#[test]
 	fn test_5_1_sorted_eq_negated() {
 		let mut cnf = Cnf::default();
-		let lits = cnf
-			.next_var_range(5)
-			.unwrap()
-			.iter_lits()
-			.map(|l| !l)
-			.collect_vec();
+		let lits = cnf.new_var_range(5).iter_lits().map(|l| !l).collect_vec();
 		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 1, String::from("y")).into();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),

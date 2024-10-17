@@ -6,7 +6,7 @@ use splr::{Certificate, SatSolverIF, SolveIF, VERSION};
 use crate::{
 	helpers::const_concat,
 	solver::{SolveResult, Solver},
-	ClauseDatabase, Cnf, ConditionalDatabase, Lit, Valuation, Var,
+	ClauseDatabase, Cnf, ConditionalDatabase, Lit, Valuation, Var, VarRange,
 };
 
 impl Valuation for Certificate {
@@ -50,6 +50,17 @@ impl ClauseDatabase for Splr {
 		let var = self.add_var();
 		let var: i32 = var.try_into().expect("exhausted variable pool");
 		Var(NonZeroI32::new(var).expect("variables cannot use the value zero"))
+	}
+
+	fn new_var_range(&mut self, len: usize) -> VarRange {
+		let start = self.new_var();
+		let mut last = start;
+		for _ in 1..len {
+			let x = self.new_var();
+			debug_assert_eq!(i32::from(last) + 1, i32::from(x));
+			last = x;
+		}
+		VarRange::new(start, last)
 	}
 
 	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {

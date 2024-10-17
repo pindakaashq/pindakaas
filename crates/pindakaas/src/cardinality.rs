@@ -107,7 +107,7 @@ pub(crate) mod tests {
 			#[test]
 			fn test_card_le_2_3() {
 				let mut cnf = Cnf::default();
-				let vars = cnf.next_var_range(3).unwrap().iter_lits().collect_vec();
+				let vars = cnf.new_var_range(3).iter_lits().collect_vec();
 				$encoder
 					.encode(
 						&mut cnf,
@@ -129,7 +129,7 @@ pub(crate) mod tests {
 			#[test]
 			fn test_card_eq_1_3() {
 				let mut cnf = Cnf::default();
-				let vars = cnf.next_var_range(3).unwrap().iter_lits().collect_vec();
+				let vars = cnf.new_var_range(3).iter_lits().collect_vec();
 				$encoder
 					.encode(
 						&mut cnf,
@@ -151,7 +151,7 @@ pub(crate) mod tests {
 			#[test]
 			fn test_card_eq_2_3() {
 				let mut cnf = Cnf::default();
-				let vars = cnf.next_var_range(3).unwrap().iter_lits().collect_vec();
+				let vars = cnf.new_var_range(3).iter_lits().collect_vec();
 				$encoder
 					.encode(
 						&mut cnf,
@@ -173,7 +173,7 @@ pub(crate) mod tests {
 			#[test]
 			fn test_card_eq_2_4() {
 				let mut cnf = Cnf::default();
-				let vars = cnf.next_var_range(4).unwrap().iter_lits().collect_vec();
+				let vars = cnf.new_var_range(4).iter_lits().collect_vec();
 				$encoder
 					.encode(
 						&mut cnf,
@@ -195,7 +195,7 @@ pub(crate) mod tests {
 			#[test]
 			fn test_card_eq_3_5() {
 				let mut cnf = Cnf::default();
-				let vars = cnf.next_var_range(5).unwrap().iter_lits().collect_vec();
+				let vars = cnf.new_var_range(5).iter_lits().collect_vec();
 				$encoder
 					.encode(
 						&mut cnf,
@@ -226,7 +226,7 @@ pub(crate) mod tests {
 				cardinality::{Cardinality, SortingNetworkEncoder},
 				helpers::tests::assert_solutions,
 				sorted::{SortedEncoder, SortedStrategy},
-				Cnf, Encoder, NextVarRange,
+				ClauseDatabase, Cnf, Encoder,
 			};
 
 			#[test]
@@ -289,7 +289,7 @@ pub(crate) mod tests {
 	macro_rules! test_card {
 		($encoder:expr,$n:expr,$cmp:expr,$k:expr) => {
 			let mut cnf = Cnf::default();
-			let vars = cnf.next_var_range($n).unwrap().iter_lits().collect_vec();
+			let vars = cnf.new_var_range($n).iter_lits().collect_vec();
 			$encoder
 				.encode(
 					&mut cnf,

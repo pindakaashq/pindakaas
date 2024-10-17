@@ -2126,9 +2126,8 @@ mod tests {
 		cardinality::{tests::card_test_suite, Cardinality},
 		cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
 		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
-		solver::NextVarRange,
 		sorted::SortedEncoder,
-		Cnf, Coeff, Encoder, Lit, Unsatisfiable,
+		ClauseDatabase, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 	};
 
 	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(terms: &[(L, Coeff)]) -> Vec<Part> {
@@ -2141,12 +2140,7 @@ mod tests {
 	#[test]
 	fn test_aggregator_at_least_one_negated() {
 		let mut cnf = Cnf::default();
-		let (a, b, c, d) = cnf
-			.next_var_range(4)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c, d) = cnf.new_lits();
 		// Correctly detect that all but one literal can be set to true
 		assert_eq!(
 			BoolLinAggregator::default().aggregate(
@@ -2166,12 +2160,7 @@ mod tests {
 
 		// Correctly detect equal k
 		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf
-			.next_var_range(3)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
 		assert_eq!(
 			BoolLinAggregator::default().aggregate(
 				&mut cnf,
@@ -2192,12 +2181,7 @@ mod tests {
 	#[test]
 	fn test_aggregator_combine() {
 		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf
-			.next_var_range(3)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
 		// Simple aggregation of multiple occurrences of the same literal
 		assert_eq!(
 			BoolLinAggregator::default().aggregate(
@@ -2260,12 +2244,7 @@ mod tests {
 	#[test]
 	fn test_aggregator_detection() {
 		let mut cnf = Cnf::default();
-		let (a, b, c, d) = cnf
-			.next_var_range(4)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c, d) = cnf.new_lits();
 
 		// Correctly detect at most one
 		assert_eq!(
@@ -2412,7 +2391,7 @@ mod tests {
 	#[test]
 	fn test_aggregator_equal_one() {
 		let mut cnf = Cnf::default();
-		let vars = cnf.next_var_range(3).unwrap().iter_lits().collect_vec();
+		let vars = cnf.new_var_range(3).iter_lits().collect_vec();
 		// An exactly one constraint adds an exactly one constraint
 		assert_eq!(
 			BoolLinAggregator::default().aggregate(
@@ -2434,12 +2413,7 @@ mod tests {
 	#[test]
 	fn test_aggregator_false_trivial_unsat() {
 		let mut cnf = Cnf::default();
-		let (a, b, c, d, e, f, g) = cnf
-			.next_var_range(7)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c, d, e, f, g) = cnf.new_lits();
 		assert_eq!(
 			BoolLinAggregator::default().aggregate(
 				&mut cnf,
@@ -2469,12 +2443,7 @@ mod tests {
 	#[test]
 	fn test_aggregator_neg_coeff() {
 		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf
-			.next_var_range(3)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
 
 		// Correctly convert a negative coefficient
 		assert_eq!(
@@ -2526,12 +2495,7 @@ mod tests {
 
 		// Correctly convert multiple negative coefficients with AMO constraints
 		let mut cnf = Cnf::default();
-		let (a, b, c, d, e, f) = cnf
-			.next_var_range(6)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c, d, e, f) = cnf.new_lits();
 		assert_eq!(
 			BoolLinAggregator::default().aggregate(
 				&mut cnf,
@@ -2563,12 +2527,7 @@ mod tests {
 
 		// Correctly convert multiple negative coefficients with side constraints
 		let mut cnf = Cnf::default();
-		let (a, b, c, d, e, f) = cnf
-			.next_var_range(6)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c, d, e, f) = cnf.new_lits();
 		assert_eq!(
 			BoolLinAggregator::default().aggregate(
 				&mut cnf,
@@ -2605,12 +2564,7 @@ mod tests {
 
 		// Correctly convert GreaterEq into LessEq with side constrains
 		let mut cnf = Cnf::default();
-		let (a, b, c, d, e, f) = cnf
-			.next_var_range(6)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c, d, e, f) = cnf.new_lits();
 		assert_eq!(
 			BoolLinAggregator::default().aggregate(
 				&mut cnf,
@@ -2642,12 +2596,7 @@ mod tests {
 
 		// Correctly convert GreaterEq into LessEq with side constrains
 		let mut cnf = Cnf::default();
-		let (a, b, c, d, e, f) = cnf
-			.next_var_range(6)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c, d, e, f) = cnf.new_lits();
 		assert_eq!(
 			BoolLinAggregator::default().aggregate(
 				&mut cnf,
@@ -2676,12 +2625,7 @@ mod tests {
 
 		// Correctly account for the coefficient in the Dom bounds
 		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf
-			.next_var_range(3)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
 		assert_eq!(
 			BoolLinAggregator::default().aggregate(
 				&mut cnf,
@@ -2708,12 +2652,7 @@ mod tests {
 
 		// Correctly convert GreaterEq into LessEq with side constrains
 		let mut cnf = Cnf::default();
-		let (a, b, c, d, e) = cnf
-			.next_var_range(5)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c, d, e) = cnf.new_lits();
 		assert_eq!(
 			BoolLinAggregator::default().aggregate(
 				&mut cnf,
@@ -2751,12 +2690,7 @@ mod tests {
 	#[test]
 	fn test_aggregator_sort_same_coefficients() {
 		let mut cnf = Cnf::default();
-		let (a, b, c, d) = cnf
-			.next_var_range(4)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c, d) = cnf.new_lits();
 
 		assert_eq!(
 			BoolLinAggregator::default()
@@ -2787,7 +2721,7 @@ mod tests {
 	#[test]
 	fn test_aggregator_sort_same_coefficients_using_minimal_chain() {
 		let mut cnf = Cnf::default();
-		let vars = cnf.next_var_range(5).unwrap().iter_lits().collect_vec();
+		let vars = cnf.new_var_range(5).iter_lits().collect_vec();
 		assert_eq!(
 			BoolLinAggregator::default()
 				.sort_same_coefficients(SortedEncoder::default(), 2)
@@ -2816,7 +2750,7 @@ mod tests {
 	#[test]
 	fn test_aggregator_unsat() {
 		let mut db = Cnf::default();
-		let vars = db.next_var_range(3).unwrap().iter_lits().collect_vec();
+		let vars = db.new_var_range(3).iter_lits().collect_vec();
 
 		// Constant cannot be reached
 		assert_eq!(
@@ -2870,12 +2804,7 @@ mod tests {
 	#[test]
 	fn test_encoders() {
 		let mut cnf = Cnf::default();
-		let (a, b, c, d) = cnf
-			.next_var_range(4)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c, d) = cnf.new_lits();
 		// TODO encode this if encoder does not support constraint
 		PairwiseEncoder::default()
 			.encode(
@@ -2919,7 +2848,7 @@ mod tests {
 	#[test]
 	fn test_pb_encode() {
 		let mut cnf = Cnf::default();
-		let vars = cnf.next_var_range(4).unwrap().iter_lits().collect_vec();
+		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
 		LinearEncoder::<StaticLinEncoder>::default()
 			.encode(
 				&mut cnf,
@@ -2938,7 +2867,7 @@ mod tests {
 	#[test]
 	fn test_sort_same_coefficients_2() {
 		let mut db = Cnf::default();
-		let vars = db.next_var_range(5).unwrap().iter_lits().collect_vec();
+		let vars = db.new_var_range(5).iter_lits().collect_vec();
 		let mut agg = BoolLinAggregator::default();
 		let _ = agg.sort_same_coefficients(SortedEncoder::default(), 3);
 		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default();

@@ -145,7 +145,7 @@ pub(crate) mod tests {
 					bool_linear::LimitComp,
 					cardinality_one::CardinalityOne,
 					helpers::tests::{assert_checker, assert_solutions, expect_file},
-					ClauseDatabase, Cnf, Encoder, NextVarRange,
+					ClauseDatabase, Cnf, Encoder,
 				};
 
 				const LARGE_N: usize = 50;
@@ -238,11 +238,7 @@ pub(crate) mod tests {
 				#[test]
 				fn test_amo_large() {
 					let mut cnf = Cnf::default();
-					let vars = cnf
-						.next_var_range(LARGE_N)
-						.unwrap()
-						.iter_lits()
-						.collect_vec();
+					let vars = cnf.new_var_range(LARGE_N).iter_lits().collect_vec();
 					let con = CardinalityOne {
 						lits: vars.clone(),
 						cmp: LimitComp::LessEq,
@@ -254,11 +250,7 @@ pub(crate) mod tests {
 				#[test]
 				fn test_amo_large_neg() {
 					let mut cnf = Cnf::default();
-					let vars = cnf
-						.next_var_range(LARGE_N)
-						.unwrap()
-						.iter_lits()
-						.collect_vec();
+					let vars = cnf.new_var_range(LARGE_N).iter_lits().collect_vec();
 					let con = CardinalityOne {
 						lits: vars.clone().into_iter().map(|l| !l).collect_vec(),
 						cmp: LimitComp::LessEq,
@@ -270,11 +262,7 @@ pub(crate) mod tests {
 				#[test]
 				fn test_amo_large_mix() {
 					let mut cnf = Cnf::default();
-					let vars = cnf
-						.next_var_range(LARGE_N)
-						.unwrap()
-						.iter_lits()
-						.collect_vec();
+					let vars = cnf.new_var_range(LARGE_N).iter_lits().collect_vec();
 
 					let con = CardinalityOne {
 						lits: vars
@@ -378,11 +366,7 @@ pub(crate) mod tests {
 				#[test]
 				fn test_eo_large() {
 					let mut cnf = Cnf::default();
-					let vars = cnf
-						.next_var_range(LARGE_N)
-						.unwrap()
-						.iter_lits()
-						.collect_vec();
+					let vars = cnf.new_var_range(LARGE_N).iter_lits().collect_vec();
 					let con = CardinalityOne {
 						lits: vars.clone(),
 						cmp: LimitComp::Equal,
@@ -394,11 +378,7 @@ pub(crate) mod tests {
 				#[test]
 				fn test_eo_large_neg() {
 					let mut cnf = Cnf::default();
-					let vars = cnf
-						.next_var_range(LARGE_N)
-						.unwrap()
-						.iter_lits()
-						.collect_vec();
+					let vars = cnf.new_var_range(LARGE_N).iter_lits().collect_vec();
 					let con = CardinalityOne {
 						lits: vars.clone().iter().map(|l| !l).collect_vec(),
 						cmp: LimitComp::Equal,
@@ -410,11 +390,7 @@ pub(crate) mod tests {
 				#[test]
 				fn test_eo_large_mix() {
 					let mut cnf = Cnf::default();
-					let vars = cnf
-						.next_var_range(LARGE_N)
-						.unwrap()
-						.iter_lits()
-						.collect_vec();
+					let vars = cnf.new_var_range(LARGE_N).iter_lits().collect_vec();
 					let con = CardinalityOne {
 						lits: vars
 							.clone()

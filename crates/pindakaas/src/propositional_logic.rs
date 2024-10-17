@@ -349,7 +349,6 @@ mod tests {
 	use crate::{
 		helpers::tests::{assert_encoding, assert_solutions, expect_file},
 		propositional_logic::{Formula, TseitinEncoder},
-		solver::NextVarRange,
 		ClauseDatabase, Cnf, Encoder,
 	};
 
@@ -357,12 +356,7 @@ mod tests {
 	fn encode_prop_and() {
 		// Simple conjunction
 		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf
-			.next_var_range(3)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
 			.encode(
 				&mut cnf,
@@ -382,12 +376,7 @@ mod tests {
 
 		// Reified conjunction
 		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf
-			.next_var_range(3)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
 			.encode(
 				&mut cnf,
@@ -433,7 +422,7 @@ mod tests {
 	fn encode_prop_equiv() {
 		// Simple equivalence
 		let mut cnf = Cnf::default();
-		let vars = cnf.next_var_range(4).unwrap().iter_lits().collect_vec();
+		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
 		TseitinEncoder
 			.encode(
 				&mut cnf,
@@ -453,12 +442,7 @@ mod tests {
 
 		// Reified equivalence
 		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf
-			.next_var_range(3)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
 			.encode(
 				&mut cnf,
@@ -505,12 +489,7 @@ mod tests {
 
 		// Reified implication
 		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf
-			.next_var_range(3)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
 			.encode(
 				&mut cnf,
@@ -536,12 +515,7 @@ mod tests {
 	fn encode_prop_ite() {
 		// Simple if-then-else
 		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf
-			.next_var_range(3)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
 			.encode(
 				&mut cnf,
@@ -565,12 +539,7 @@ mod tests {
 
 		// Reified if-then-else
 		let mut cnf = Cnf::default();
-		let (a, b, c, d) = cnf
-			.next_var_range(4)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c, d) = cnf.new_lits();
 		TseitinEncoder
 			.encode(
 				&mut cnf,
@@ -627,12 +596,7 @@ mod tests {
 	fn encode_prop_or() {
 		// Simple disjunction
 		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf
-			.next_var_range(3)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
 			.encode(
 				&mut cnf,
@@ -652,12 +616,7 @@ mod tests {
 
 		// Reified disjunction
 		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf
-			.next_var_range(3)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
 			.encode(
 				&mut cnf,
@@ -703,7 +662,7 @@ mod tests {
 	fn encode_prop_xor() {
 		// Simple XOR
 		let mut cnf = Cnf::default();
-		let vars = cnf.next_var_range(3).unwrap().iter_lits().collect_vec();
+		let vars = cnf.new_var_range(3).iter_lits().collect_vec();
 		TseitinEncoder
 			.encode(
 				&mut cnf,
@@ -723,12 +682,7 @@ mod tests {
 
 		// Reified XOR
 		let mut cnf = Cnf::default();
-		let (a, b, c, d) = cnf
-			.next_var_range(4)
-			.unwrap()
-			.iter_lits()
-			.collect_tuple()
-			.unwrap();
+		let (a, b, c, d) = cnf.new_lits();
 		TseitinEncoder
 			.encode(
 				&mut cnf,
@@ -773,7 +727,7 @@ mod tests {
 		);
 		// Regression test: negated XOR (negated args)
 		let mut cnf = Cnf::default();
-		let vars = cnf.next_var_range(3).unwrap().iter_lits().collect_vec();
+		let vars = cnf.new_var_range(3).iter_lits().collect_vec();
 		TseitinEncoder
 			.encode(
 				&mut cnf,
@@ -790,7 +744,7 @@ mod tests {
 		);
 		// Regression test: negated XOR (negated binding)
 		let mut cnf = Cnf::default();
-		let vars = cnf.next_var_range(4).unwrap().iter_lits().collect_vec();
+		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
 		TseitinEncoder
 			.encode(
 				&mut cnf,

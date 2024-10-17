@@ -32,12 +32,9 @@ use std::{
 	path::Path,
 };
 
-use itertools::Itertools;
+use itertools::{traits::HomogeneousTuple, Itertools};
 
-use crate::{
-	helpers::subscript_number,
-	solver::{NextVarRange, VarFactory},
-};
+use crate::{helpers::subscript_number, solver::VarFactory};
 
 /// Checker is a trait implemented by types that represent constraints. The
 /// [`Checker::check`] methods checks whether an assignment (often referred to
@@ -78,15 +75,54 @@ pub trait ClauseDatabase {
 		encoder.encode(self, constraint)
 	}
 
-	/// Method used to receive a new Boolean variable in the form of a positive
-	/// literal. This is a convenience method on top of [`Self::new_var`].
+	/// Create a new Boolean variable in the form of a positive literal.
 	fn new_lit(&mut self) -> Lit {
 		self.new_var().into()
 	}
 
+	/// Create multiple new Boolean literals and capture them in a tuple.
+	///
+	/// # Example
+	/// ```
+	/// # use crate::Cnf;
+	/// # let mut db = Cnf::default();
+	/// let (a, b, c) = db.new_lits();
+	/// ```
+	fn new_lits<T>(&mut self) -> T
+	where
+		T: HomogeneousTuple<Item = Lit>,
+	{
+		let range = self.new_var_range(T::num_items());
+		range.map(Lit::from).collect_tuple().unwrap()
+	}
+
+	/// Create a new Boolean variable that can be used in the encoding of a problem
+	/// or constraint.
+	fn new_var(&mut self) -> Var {
+		let mut range = self.new_var_range(1);
+		debug_assert_eq!(range.len(), 1);
+		range.next().unwrap()
+	}
+
 	/// Method to be used to receive a new Boolean variable that can be used in
 	/// the encoding of a problem or constraint.
-	fn new_var(&mut self) -> Var;
+	fn new_var_range(&mut self, len: usize) -> VarRange;
+
+	/// Create multiple new Boolean variables and capture them in a tuple.
+	///
+	/// # Example
+	/// ```
+	/// # use crate::Cnf;
+	/// # let mut db = Cnf::default();
+	/// let (a, b, c) = db.new_vars();
+	/// ```
+	fn new_vars<T>(&mut self) -> T
+	where
+		T: HomogeneousTuple<Item = Var>,
+	{
+		let range = self.new_var_range(T::num_items());
+		range.collect_tuple().unwrap()
+	}
 
 	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB>;
 }
@@ -366,9 +402,15 @@ impl ClauseDatabase for Cnf {
 			Ok(())
 		}
 	}
+
 	fn new_var(&mut self) -> Var {
-		self.nvar.next().expect("exhausted variable pool")
+		self.nvar.next_var()
 	}
+
+	fn new_var_range(&mut self, len: usize) -> VarRange {
+		self.nvar.next_var_range(len)
+	}
+
 	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
 		ConditionalDatabase {
 			db: self,
@@ -392,12 +434,6 @@ impl Display for Cnf {
 			start += size;
 		}
 		Ok(())
-	}
-}
-
-impl NextVarRange for Cnf {
-	fn next_var_range(&mut self, size: usize) -> Option<VarRange> {
-		self.nvar.next_var_range(size)
 	}
 }
 
@@ -441,6 +477,10 @@ impl<'a, DB: ClauseDatabase + ?Sized> ClauseDatabase for ConditionalDatabase<'a,
 
 	fn new_var(&mut self) -> Var {
 		self.db.new_var()
+	}
+
+	fn new_var_range(&mut self, len: usize) -> VarRange {
+		self.db.new_var_range(len)
 	}
 
 	fn with_conditions(&mut self, mut conditions: Vec<Lit>) -> ConditionalDatabase<DB> {
@@ -549,6 +589,8 @@ impl Display for Unsatisfiable {
 impl Error for Unsatisfiable {}
 
 impl Var {
+	const MAX_VARS: usize = NonZeroI32::MAX.get() as usize;
+
 	fn checked_add(&self, b: NonZeroI32) -> Option<Var> {
 		self.0
 			.get()
@@ -792,9 +834,15 @@ impl ClauseDatabase for Wcnf {
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
 		self.add_weighted_clause(cl, None)
 	}
+
 	fn new_var(&mut self) -> Var {
 		self.cnf.new_var()
 	}
+
+	fn new_var_range(&mut self, len: usize) -> VarRange {
+		self.cnf.new_var_range(len)
+	}
+
 	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
 		ConditionalDatabase {
 			db: self,
@@ -831,12 +879,6 @@ impl From<Cnf> for Wcnf {
 	}
 }
 
-impl NextVarRange for Wcnf {
-	fn next_var_range(&mut self, size: usize) -> Option<VarRange> {
-		self.cnf.next_var_range(size)
-	}
-}
-
 impl From<Lit> for i32 {
 	fn from(val: Lit) -> Self {
 		val.0.get()
@@ -853,28 +895,25 @@ impl From<Var> for i32 {
 mod tests {
 	use std::num::NonZeroI32;
 
-	use crate::{
-		solver::{NextVarRange, VarFactory},
-		Lit, Var,
-	};
+	use crate::{solver::VarFactory, Lit, Var};
 
 	#[test]
 	fn test_var_range() {
 		let mut factory = VarFactory::default();
 
-		let range = factory.next_var_range(0).unwrap();
+		let range = factory.next_var_range(0);
 		assert_eq!(range.len(), 0);
 		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(1).unwrap())));
 
-		let range = factory.next_var_range(1).unwrap();
+		let range = factory.next_var_range(1);
 		assert_eq!(range.len(), 1);
 		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(2).unwrap())));
 
-		let range = factory.next_var_range(2).unwrap();
+		let range = factory.next_var_range(2);
 		assert_eq!(range.len(), 2);
 		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(4).unwrap())));
 
-		let range = factory.next_var_range(100).unwrap();
+		let range = factory.next_var_range(100);
 		assert_eq!(range.len(), 100);
 		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(104).unwrap())));
 	}

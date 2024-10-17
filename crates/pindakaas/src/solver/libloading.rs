@@ -238,9 +238,15 @@ impl<'lib> ClauseDatabase for IpasirSolver<'lib> {
 		}
 		Ok(())
 	}
+
 	fn new_var(&mut self) -> Var {
-		self.vars.next().expect("variable pool exhaused")
+		self.vars.next_var()
 	}
+
+	fn new_var_range(&mut self, len: usize) -> crate::VarRange {
+		self.vars.next_var_range(len)
+	}
+
 	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
 		ConditionalDatabase {
 			db: self,
