@@ -195,15 +195,15 @@ impl TryFrom<Library> for IpasirLibrary {
 }
 
 impl Valuation for IpasirSol<'_> {
-	fn value(&self, lit: Lit) -> Option<bool> {
+	fn value(&self, lit: Lit) -> bool {
 		let lit: i32 = lit.into();
 		let val = (self.value_fn)(self.slv, lit);
 		match val {
-			_ if val == lit => Some(true),
-			_ if val == -lit => Some(false),
+			_ if val == lit => true,
+			_ if val == -lit => false,
 			_ => {
 				debug_assert_eq!(val, 0); // zero according to spec, both value are valid
-				None
+				false
 			}
 		}
 	}

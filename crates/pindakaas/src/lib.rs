@@ -174,7 +174,7 @@ pub trait Valuation {
 	///
 	/// Note that the function can return None if the model/solution is independent
 	/// of the given literal.
-	fn value(&self, lit: Lit) -> Option<bool>;
+	fn value(&self, lit: Lit) -> bool;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -452,8 +452,8 @@ impl<'a, DB: ClauseDatabase + ?Sized> ClauseDatabase for ConditionalDatabase<'a,
 	}
 }
 
-impl<F: Fn(Lit) -> Option<bool>> Valuation for F {
-	fn value(&self, lit: Lit) -> Option<bool> {
+impl<F: Fn(Lit) -> bool> Valuation for F {
+	fn value(&self, lit: Lit) -> bool {
 		self(lit)
 	}
 }

@@ -476,16 +476,16 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		}
 
 		impl crate::Valuation for #sol_ident {
-			fn value(&self, lit: crate::Lit) -> Option<bool> {
+			fn value(&self, lit: crate::Lit) -> bool {
 				let var: i32 = lit.var().into();
 				// WARN: Always ask about variable (positive) literal, otherwise solvers sometimes seem incorrect
 				let ret = unsafe { #krate::ipasir_val(self.ptr, var) };
 				match ret {
-					_ if ret == var => Some(!lit.is_negated()),
-					_ if ret == -var => Some(lit.is_negated()),
+					_ if ret == var => !lit.is_negated(),
+					_ if ret == -var => lit.is_negated(),
 					_ => {
 						debug_assert_eq!(ret, 0); // zero according to spec, both value are valid
-						None
+						false
 					}
 				}
 			}

@@ -315,7 +315,7 @@ pub(crate) unsafe extern "C" fn ipasir_check_model_cb<P: Propagator, A: SolvingA
 		.iter()
 		.map(|&i| (Var(NonZeroI32::new(i.abs()).unwrap()), i >= 0))
 		.collect();
-	let value = |l: Lit| sol.get(&l.var()).copied();
+	let value = |l: Lit| sol.get(&l.var()).copied().unwrap_or(false);
 	prop.prop.check_model(&mut prop.slv, &value)
 }
 

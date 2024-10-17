@@ -10,15 +10,15 @@ use crate::{
 };
 
 impl Valuation for Certificate {
-	fn value(&self, lit: Lit) -> Option<bool> {
+	fn value(&self, lit: Lit) -> bool {
 		if let Certificate::SAT(sol) = self {
 			let var = lit.var();
 			let v = Into::<i32>::into(var) as usize;
 			if v <= sol.len() {
 				debug_assert_eq!(sol[v - 1].abs(), lit.var().into());
-				Some(sol[v - 1] == lit.into())
+				sol[v - 1] == lit.into()
 			} else {
-				None
+				false
 			}
 		} else {
 			panic!("value called on an unsatisfiable certificate")

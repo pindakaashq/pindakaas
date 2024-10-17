@@ -47,10 +47,7 @@ mod tests {
 			)
 			.unwrap();
 		let res = slv.solve(|model| {
-			assert!(
-				(model.value(!a).unwrap() && model.value(b).unwrap())
-					|| (model.value(a).unwrap() && model.value(!b).unwrap()),
-			)
+			assert!((model.value(!a) && model.value(b)) || (model.value(a) && model.value(!b)),)
 		});
 		assert_eq!(res, SolveResult::Sat);
 	}

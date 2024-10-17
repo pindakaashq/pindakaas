@@ -1225,17 +1225,12 @@ impl BoolLinExp {
 			// Calculate sum for constraint
 			let sum = terms
 				.iter()
-				.filter(|(lit, _)| sol.value(*lit).expect("missing assignment to literal"))
+				.filter(|(lit, _)| sol.value(*lit))
 				.map(|(_, i)| i)
 				.sum();
 			match constraint {
 				Some(Constraint::AtMostOne) => {
-					if sum != 0
-						&& terms
-							.iter()
-							.filter(|&(l, _)| sol.value(*l).unwrap_or(true))
-							.count() > 1
-					{
+					if sum != 0 && terms.iter().filter(|&(l, _)| sol.value(*l)).count() > 1 {
 						return Err(Unsatisfiable);
 					}
 				}
@@ -1244,7 +1239,7 @@ impl BoolLinExp {
 						.iter()
 						.map(|(l, _)| *l)
 						.tuple_windows()
-						.any(|(a, b)| !sol.value(a).unwrap_or(false) & sol.value(b).unwrap_or(true))
+						.any(|(a, b)| !sol.value(a) & sol.value(b))
 					{
 						return Err(Unsatisfiable);
 					}
@@ -1608,15 +1603,18 @@ impl NormalizedBoolLinear {
 
 impl Checker for NormalizedBoolLinear {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
-		let mut sum = 0;
-		for (lit, coef) in self.terms.iter().flat_map(|p| p.iter().copied()) {
-			match sol.value(lit) {
-				Some(true) => sum += *coef,
-				None if self.cmp == LimitComp::LessEq => sum += *coef,
-				Some(false) => {}
-				None => return Err(Unsatisfiable),
-			}
-		}
+		let sum: Coeff = self
+			.terms
+			.iter()
+			.flat_map(|p| p.iter().copied())
+			.filter_map(|(l, c)| {
+				if sol.value(l) {
+					Some(Coeff::from(c))
+				} else {
+					None
+				}
+			})
+			.sum();
 		if match self.cmp {
 			LimitComp::LessEq => sum <= *self.k,
 			LimitComp::Equal => sum == *self.k,

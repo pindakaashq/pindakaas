@@ -134,20 +134,14 @@ mod tests {
 			)
 			.unwrap();
 		let res = slv.solve(|model| {
-			assert!(
-				(model.value(!a).unwrap() && model.value(b).unwrap())
-					|| (model.value(a).unwrap() && model.value(!b).unwrap()),
-			);
+			assert!((model.value(!a) && model.value(b)) || (model.value(a) && model.value(!b)),);
 		});
 		assert_eq!(res, SolveResult::Sat);
 		// Test clone implementation
 		let mut cp = slv.clone();
 		assert_eq!(
 			cp.solve(|model| {
-				assert!(
-					(model.value(!a).unwrap() && model.value(b).unwrap())
-						|| (model.value(a).unwrap() && model.value(!b).unwrap()),
-				);
+				assert!((model.value(!a) && model.value(b)) || (model.value(a) && model.value(!b)),);
 			}),
 			SolveResult::Sat
 		);
@@ -199,10 +193,10 @@ mod tests {
 			) -> bool {
 				let mut vars = self.vars.clone();
 				while let Some(v) = vars.next() {
-					if model.value(v.into()).unwrap_or(true) {
+					if model.value(v.into()) {
 						let next_2 = vars.clone().take(2);
 						for o in next_2 {
-							if model.value(o.into()).unwrap_or(true) {
+							if model.value(o.into()) {
 								self.tmp.push(vec![!v, !o]);
 							}
 						}
@@ -239,13 +233,7 @@ mod tests {
 		let push_sol = |model: &CadicalSol, solns: &mut Vec<Vec<Lit>>| {
 			let sol: Vec<Lit> = vars
 				.clone()
-				.map(|v| {
-					if model.value(v.into()).unwrap() {
-						v.into()
-					} else {
-						!v
-					}
-				})
+				.map(|v| if model.value(v.into()) { v.into() } else { !v })
 				.collect_vec();
 			solns.push(sol);
 		};

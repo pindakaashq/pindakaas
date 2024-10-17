@@ -307,7 +307,7 @@ pub(crate) fn ord_plus_ord_le_ord_sparse_dom(
 impl Checker for ImplicationChainConstraint {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result {
 		for (a, b) in self.lits.iter().copied().tuple_windows() {
-			if sol.value(a).unwrap_or(true) & !sol.value(b).unwrap_or(false) {
+			if sol.value(a) & !sol.value(b) {
 				return Err(Unsatisfiable);
 			}
 		}
@@ -1471,7 +1471,7 @@ impl<'a, DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'a>> for TernLeEncoder
 
 		return match (x, y, z) {
 			(IntVarEnc::Const(_), IntVarEnc::Const(_), IntVarEnc::Const(_)) => {
-				if tern.check(&|_| None).is_ok() {
+				if tern.check(&|_| unreachable!()).is_ok() {
 					Ok(())
 				} else {
 					Err(Unsatisfiable)

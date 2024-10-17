@@ -225,9 +225,13 @@ pub(crate) mod tests {
 			assert_eq!(checker.check(value), Ok(()));
 			sol = vars
 				.clone()
-				.filter_map(|v| {
+				.map(|v| {
 					let l = v.into();
-					value.value(l).map(|b| if b { l } else { !l })
+					if value.value(l) {
+						l
+					} else {
+						!l
+					}
 				})
 				.collect();
 		}) != SolveResult::Unsat
@@ -261,9 +265,13 @@ pub(crate) mod tests {
 		while slv.solve(|value| {
 			nogood = bool_vars
 				.clone()
-				.filter_map(|v| {
+				.map(|v| {
 					let l = v.into();
-					value.value(l).map(|b| if b { !l } else { l })
+					if value.value(l) {
+						l
+					} else {
+						!l
+					}
 				})
 				.collect();
 			let sol: Vec<i64> = vars
@@ -300,9 +308,13 @@ pub(crate) mod tests {
 			let sol: Vec<Lit> = vars
 				.clone()
 				.into_iter()
-				.filter_map(|v| {
+				.map(|v| {
 					let l = v.into();
-					value.value(l).map(|b| if b { l } else { !l })
+					if value.value(l) {
+						l
+					} else {
+						!l
+					}
 				})
 				.collect();
 			solutions.push(sol);
@@ -334,9 +346,9 @@ pub(crate) mod tests {
 			let v = Into::<i32>::into(abs) as usize;
 			if v <= solution.len() {
 				debug_assert_eq!(solution[v - 1].into().var(), l.var());
-				Some(solution[v - 1].into() == l)
+				solution[v - 1].into() == l
 			} else {
-				None
+				false
 			}
 		}
 	}
