@@ -285,34 +285,22 @@ impl<'lib> LearnCallback for IpasirSolver<'lib> {
 }
 
 impl<'lib> SolveAssuming for IpasirSolver<'lib> {
-	type FailFn = IpasirFailed<'lib>;
-
-	fn solve_assuming<
-		I: IntoIterator<Item = Lit>,
-		SolCb: FnOnce(&<Self as Solver>::ValueFn),
-		FailCb: FnOnce(&Self::FailFn),
-	>(
+	#[allow(
+		refining_impl_trait,
+		reason = "user can use more specific type if needed"
+	)]
+	fn solve_assuming<I: IntoIterator<Item = Lit>>(
 		&mut self,
 		assumptions: I,
-		on_sol: SolCb,
-		on_fail: FailCb,
-	) -> SolveResult {
+	) -> SolveResult<IpasirSol<'_>, IpasirFailed<'_>> {
 		for i in assumptions {
 			(self.assume_fn)(self.slv, i.into());
 		}
-		match self.solve(on_sol) {
-			SolveResult::Unsat => {
-				on_fail(&self.failed_obj());
-				SolveResult::Unsat
-			}
-			r => r,
-		}
+		self.solve()
 	}
 }
 
 impl<'lib> Solver for IpasirSolver<'lib> {
-	type ValueFn = IpasirSol<'lib>;
-
 	fn signature(&self) -> &str {
 		// SAFETY: We assume that the signature function as part of the IPASIR
 		// interface returns a valid C string.
@@ -321,15 +309,15 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 			.unwrap()
 	}
 
-	fn solve<SolCb: FnOnce(&Self::ValueFn)>(&mut self, on_sol: SolCb) -> SolveResult {
+	#[allow(
+		refining_impl_trait,
+		reason = "user can use more specific type if needed"
+	)]
+	fn solve(&mut self) -> SolveResult<IpasirSol<'_>, IpasirFailed<'_>> {
 		let res = (self.solve_fn)(self.slv);
 		match res {
-			10 => {
-				// 10 -> Sat
-				on_sol(&self.sol_obj());
-				SolveResult::Sat
-			}
-			20 => SolveResult::Unsat, // 20 -> Unsat
+			10 => SolveResult::Satisfied(self.sol_obj()), // 10 -> Sat
+			20 => SolveResult::Unsatisfiable(self.failed_obj()), // 20 -> Unsat
 			_ => {
 				debug_assert_eq!(res, 0); // According to spec should be 0, unknown
 				SolveResult::Unknown

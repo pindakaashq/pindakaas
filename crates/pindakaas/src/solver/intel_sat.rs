@@ -55,9 +55,11 @@ mod tests {
 				},
 			)
 			.unwrap();
-		let res = slv.solve(|model| {
-			assert!((model.value(!a) && model.value(b)) || (model.value(a) && model.value(!b)),)
-		});
-		assert_eq!(res, SolveResult::Sat);
+		let SolveResult::Satisfied(solution) = slv.solve() else {
+			unreachable!()
+		};
+		assert!(
+			(solution.value(!a) && solution.value(b)) || (solution.value(a) && solution.value(!b))
+		);
 	}
 }

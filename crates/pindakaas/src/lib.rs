@@ -84,7 +84,7 @@ pub trait ClauseDatabase {
 	///
 	/// # Example
 	/// ```
-	/// # use crate::Cnf;
+	/// # use pindakaas::{ClauseDatabase, Cnf};
 	/// # let mut db = Cnf::default();
 	/// let (a, b, c) = db.new_lits();
 	/// ```
@@ -112,7 +112,7 @@ pub trait ClauseDatabase {
 	///
 	/// # Example
 	/// ```
-	/// # use crate::Cnf;
+	/// # use pindakaas::{ClauseDatabase, Cnf};
 	/// # let mut db = Cnf::default();
 	/// let (a, b, c) = db.new_vars();
 	/// ```
@@ -682,7 +682,7 @@ impl VarRange {
 	/// # Examples
 	///
 	/// ```
-	/// # use pindakaas::solver::VarRange;
+	/// # use pindakaas::VarRange;
 	/// assert!(VarRange::empty().is_empty());
 	/// ```
 	pub fn is_empty(&self) -> bool {

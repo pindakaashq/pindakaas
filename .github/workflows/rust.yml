@@ -46,7 +46,7 @@ jobs:
           cache: false
           channel: ${{ env.RUST_COV_CHANNEL }}
       - name: Run cargo test
-        run: cargo test -p pindakaas --features splr,cadical,ipasir-up,tracing
+        run: cargo test -p pindakaas --features splr,cadical,external-propagation,tracing
         if: matrix.os == 'windows-latest'
       - name: Run cargo test
         run: cargo test --all-features

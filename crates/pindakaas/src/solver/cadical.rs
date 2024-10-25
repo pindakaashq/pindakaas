@@ -1,5 +1,3 @@
-#[cfg(feature = "external-propagation")]
-use std::sync::{Arc, Mutex};
 use std::{
 	ffi::{c_void, CString},
 	fmt,
@@ -8,8 +6,6 @@ use std::{
 use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
 use pindakaas_derive::IpasirSolver;
 
-#[cfg(feature = "external-propagation")]
-use crate::solver::propagation::PropagatorPointer;
 use crate::{solver::FFIPointer, Lit, VarFactory};
 
 #[derive(IpasirSolver)]
@@ -18,19 +14,11 @@ pub struct Cadical {
 	/// The raw pointer to the Cadical solver.
 	ptr: *mut c_void,
 	/// The variable factory for this solver.
-	#[cfg(not(feature = "external-propagation"))]
 	vars: VarFactory,
-	/// The variable factory for this solver.
-	#[cfg(feature = "external-propagation")]
-	vars: Arc<Mutex<VarFactory>>,
 	/// The callback used when a clause is learned.
 	learn_cb: FFIPointer,
 	/// The callback used to check whether the solver should terminate.
 	term_cb: FFIPointer,
-
-	#[cfg(feature = "external-propagation")]
-	/// The external propagator called by the solver
-	prop: Option<PropagatorPointer>,
 }
 
 impl Cadical {
@@ -65,17 +53,12 @@ impl Clone for Cadical {
 	fn clone(&self) -> Self {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		let ptr = unsafe { ccadical_copy(self.ptr) };
-		#[cfg(not(feature = "external-propagation"))]
 		let vars = self.vars; // Copy
-		#[cfg(feature = "external-propagation")]
-		let vars = Arc::new(Mutex::new(*self.vars.as_ref().lock().unwrap()));
 		Self {
 			ptr,
 			vars,
 			learn_cb: FFIPointer::default(),
 			term_cb: FFIPointer::default(),
-			#[cfg(feature = "external-propagation")]
-			prop: None,
 		}
 	}
 }
@@ -85,14 +68,9 @@ impl Default for Cadical {
 		Self {
 			// SAFETY: Assume ipasir_init() returns a non-null pointer.
 			ptr: unsafe { pindakaas_cadical::ipasir_init() },
-			#[cfg(not(feature = "external-propagation"))]
 			vars: VarFactory::default(),
-			#[cfg(feature = "external-propagation")]
-			vars: Arc::default(),
 			learn_cb: FFIPointer::default(),
 			term_cb: FFIPointer::default(),
-			#[cfg(feature = "external-propagation")]
-			prop: None,
 		}
 	}
 }
@@ -133,17 +111,19 @@ mod tests {
 				},
 			)
 			.unwrap();
-		let res = slv.solve(|model| {
-			assert!((model.value(!a) && model.value(b)) || (model.value(a) && model.value(!b)),);
-		});
-		assert_eq!(res, SolveResult::Sat);
+		let SolveResult::Satisfied(solution) = slv.solve() else {
+			unreachable!()
+		};
+		assert!(
+			(solution.value(!a) && solution.value(b)) || (solution.value(a) && solution.value(!b))
+		);
 		// Test clone implementation
 		let mut cp = slv.clone();
-		assert_eq!(
-			cp.solve(|model| {
-				assert!((model.value(!a) && model.value(b)) || (model.value(a) && model.value(!b)),);
-			}),
-			SolveResult::Sat
+		let SolveResult::Satisfied(solution) = cp.solve() else {
+			unreachable!()
+		};
+		assert!(
+			(solution.value(!a) && solution.value(b)) || (solution.value(a) && solution.value(!b))
 		);
 	}
 
@@ -151,7 +131,7 @@ mod tests {
 	fn test_cadical_empty_clause() {
 		let mut slv = Cadical::default();
 		assert_eq!(slv.add_clause([]), Err(Unsatisfiable));
-		assert_eq!(slv.solve(|_| unreachable!()), SolveResult::Unsat);
+		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_)));
 	}
 
 	#[cfg(feature = "external-propagation")]
@@ -166,8 +146,8 @@ mod tests {
 			solver::{
 				cadical::CadicalSol,
 				propagation::{
-					ClausePersistence, PropagatingSolver, Propagator, PropagatorAccess,
-					SolvingActions,
+					ClausePersistence, PropagatingSolver, Propagator, SolvingActions,
+					WithPropagator,
 				},
 				VarRange,
 			},
@@ -186,7 +166,7 @@ mod tests {
 			fn is_check_only(&self) -> bool {
 				true
 			}
-			fn check_model(
+			fn check_solution(
 				&mut self,
 				_slv: &mut dyn SolvingActions,
 				model: &dyn crate::Valuation,
@@ -210,34 +190,25 @@ mod tests {
 			) -> Option<(Vec<Lit>, ClausePersistence)> {
 				self.tmp.pop().map(|c| (c, ClausePersistence::Forgettable))
 			}
-
-			fn as_any(&self) -> &dyn Any {
-				self
-			}
-			fn as_mut_any(&mut self) -> &mut dyn Any {
-				self
-			}
 		}
 
 		let p = Dist2 {
 			vars: vars.clone(),
 			tmp: Vec::new(),
 		};
-		slv.set_external_propagator(Some(p));
+		let mut slv = slv.with_propagator(p);
 		slv.add_clause(vars.clone().map_into()).unwrap();
 		for v in vars.clone() {
 			PropagatingSolver::add_observed_var(&mut slv, v)
 		}
 
 		let mut solns: Vec<Vec<Lit>> = Vec::new();
-		let push_sol = |model: &CadicalSol, solns: &mut Vec<Vec<Lit>>| {
+		while let (_, SolveResult::Satisfied(sol)) = slv.solve() {
 			let sol: Vec<Lit> = vars
 				.clone()
-				.map(|v| if model.value(v.into()) { v.into() } else { !v })
+				.map(|v| if sol.value(v.into()) { v.into() } else { !v })
 				.collect_vec();
 			solns.push(sol);
-		};
-		while slv.solve(|model| push_sol(model, &mut solns)) == SolveResult::Sat {
 			slv.add_clause(solns.last().unwrap().iter().map(|l| !l))
 				.unwrap()
 		}
@@ -257,6 +228,6 @@ mod tests {
 				vec![!a, !b, !c, !d, e],
 			]
 		);
-		assert!(slv.propagator::<Dist2>().unwrap().tmp.is_empty())
+		assert!(slv.propagator().tmp.is_empty())
 	}
 }

@@ -1,8 +1,8 @@
-use std::{any::Any, collections::VecDeque, ffi::c_void, num::NonZeroI32};
+use std::{collections::VecDeque, ffi::c_void, num::NonZeroI32};
 
 use crate::{
-	solver::{FFIPointer, Solver},
-	Lit, Valuation, Var,
+	solver::{FailedAssumtions, SolveResult},
+	ClauseDatabase, Lit, Valuation, Var,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -24,58 +24,84 @@ pub(crate) trait ExtendedSolvingActions: SolvingActions {
 	fn force_backtrack(&mut self, level: usize);
 }
 
-/// Trait implemented by the object given to the callback on detecting failure
-pub trait FailedAssumtions {
-	/// Check if the given assumption literal was used to prove the unsatisfiability
-	/// of the formula under the assumptions used for the last SAT search.
-	///
-	/// Note that for literals 'lit' which are not assumption literals, the behavior
-	/// of is not specified.
-	fn fail(&self, lit: Lit) -> bool;
-}
-
-pub(crate) struct IpasirPropStore<P, A> {
+/// Container that is used to store a propagator and all its data required to
+/// implement the methods required by the IPASIR-UP interface.
+pub(crate) struct IpasirPropStore<P, Slv> {
 	/// Rust Propagator
 	pub(crate) prop: P,
-	/// IPASIR solver pointer
-	pub(crate) slv: A,
+	/// IPASIR Solver object
+	pub(crate) slv: Slv,
 	/// Propagation queue
 	pub(crate) pqueue: VecDeque<Lit>,
 	/// Reason clause queue
 	pub(crate) rqueue: VecDeque<Lit>,
+	/// The current literal that is being explained
 	pub(crate) explaining: Option<Lit>,
 	/// External clause queue
 	pub(crate) cqueue: Option<VecDeque<Lit>>,
 }
 
-/// Get mutable access to the external propagator given the to solver
-pub trait MutPropagatorAccess {
-	/// Get mutable access to the external propagator given the to solver
-	///
-	/// This method will return [`None`] if no propagator is set, or if the
-	/// propagator is not of type [`P`].
-	fn propagator_mut<P: Propagator + 'static>(&mut self) -> Option<&mut P>;
-}
+pub trait PropagatingSolver<P: Propagator>: ClauseDatabase {
+	type Slv;
 
-pub trait PropagatingSolver: Solver + PropagatorAccess + MutPropagatorAccess
-where
-	Self::ValueFn: PropagatorAccess,
-{
-	/// Set Propagator implementation which allows to learn, propagate and
-	/// backtrack based on external constraints.
-	///
-	/// Only one Propagator can be connected, any previous propagator will be
-	/// overriden. This Propagator is notified of all changes to which it has
-	/// subscribed, using the [`add_observed_var`] method.
-	///
-	/// # Warning
-	///
-	/// Calling this method automatically resets the observed variable set.
-	fn set_external_propagator<P: Propagator + 'static>(&mut self, prop: Option<P>);
+	/// Access the external propagator together with the solving actions that are
+	/// available during the solving process.
+	fn access_solving(&mut self) -> (&mut dyn SolvingActions, &mut P);
 
+	/// Add a variable to the set of observed variables.
+	///
+	/// The external propagator will be notified when the variable is assigned.
 	fn add_observed_var(&mut self, var: Var);
+
+	/// Destructures the `PropagatingSolver` into a [`Self::Slv`] and the
+	/// [`Propagator`].
+	fn into_parts(self) -> (Self::Slv, P);
+
+	/// Access the external propagator given the to solver
+	fn propagator(&self) -> &P;
+
+	/// Get mutable access to the external propagator given the to solver
+	fn propagator_mut(&mut self) -> &mut P;
+
+	/// Remove a variable from the set of observed variables.
+	///
+	/// The external propagator will no longer be notified of assignments to
+	/// the variable.
 	fn remove_observed_var(&mut self, var: Var);
+
+	/// Reset the set of observed variables.
+	///
+	/// The external propagator will no longer be notified of assignments to
+	/// any variables.
 	fn reset_observed_vars(&mut self);
+
+	/// Solve the formula with specified clauses,subject to the external
+	/// propagator.
+	///
+	/// If the search is interrupted (see [`set_terminate_callback`]) the function
+	/// returns unknown
+	fn solve(&mut self) -> (&P, SolveResult<impl Valuation + '_, impl Sized>) {
+		self.solve_assuming(std::iter::empty())
+	}
+
+	/// Solve the formula with specified clauses under the given assumptions,
+	/// subject to the external propagator.
+	///
+	/// If the search is interrupted (see [`set_terminate_callback`]) the function
+	/// returns unknown
+	fn solve_assuming<I: IntoIterator<Item = Lit>>(
+		&mut self,
+		assumptions: I,
+	) -> (
+		&P,
+		SolveResult<impl Valuation + '_, impl FailedAssumtions + '_>,
+	);
+
+	/// Access the underlying solver.
+	fn solver(&self) -> &Self::Slv;
+
+	/// Get mutable access to the underlying solver.
+	fn solver_mut(&mut self) -> &mut Self::Slv;
 }
 
 pub trait Propagator {
@@ -132,7 +158,7 @@ pub trait Propagator {
 	/// Method called to check the found complete solution (after solution
 	/// reconstruction). If it returns false, the propagator must provide an
 	/// external clause during the next callback.
-	fn check_model(&mut self, slv: &mut dyn SolvingActions, value: &dyn Valuation) -> bool {
+	fn check_solution(&mut self, slv: &mut dyn SolvingActions, value: &dyn Valuation) -> bool {
 		let _ = value;
 		let _ = slv;
 		true
@@ -173,67 +199,6 @@ pub trait Propagator {
 		let _ = slv;
 		None
 	}
-
-	/// Method to help access to the propagator when given to the solver.
-	///
-	/// See [`PropagatingSolver::propagator`].
-	///
-	/// # Note
-	///
-	/// This method can generally be implemented as
-	/// ```rust
-	/// use std::any::Any;
-	/// use pindakaas::solver::Propagator;
-	///
-	/// struct A;
-	///
-	/// impl Propagator for A {
-	///   fn as_any(&self) -> &dyn Any {
-	///     self
-	///   }
-	///
-	/// #  fn as_mut_any(&mut self) -> &mut dyn Any { self }
-	/// }
-	///
-	/// ```
-	fn as_any(&self) -> &dyn Any;
-
-	/// Method to help access to the propagator when given to the solver.
-	///
-	/// See [`PropagatingSolver::propagator`].
-	///
-	/// # Note
-	///
-	/// This method can generally be implemented as
-	/// ```rust
-	/// use std::any::Any;
-	/// use pindakaas::solver::Propagator;
-	///
-	/// struct A;
-	///
-	/// impl Propagator for A {
-	///   fn as_mut_any(&mut self) -> &mut dyn Any {
-	///     self
-	///   }
-	/// #  fn as_any(&self) -> &dyn Any { self }
-	/// }
-	///
-	/// ```
-	fn as_mut_any(&mut self) -> &mut dyn Any;
-}
-
-/// Access the external propagator given the to solver
-pub trait PropagatorAccess {
-	/// Access the external propagator given the to solver
-	///
-	/// This method will return [`None`] if no propagator is set, or if the
-	/// propagator is not of type [`P`].
-	fn propagator<P: Propagator + 'static>(&self) -> Option<&P>;
-}
-
-pub(crate) struct PropagatorPointer {
-	ptr: FFIPointer,
-	pub(crate) access_prop: fn(*mut c_void) -> *mut dyn Any,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -250,9 +215,30 @@ pub enum SearchDecision {
 /// A trait containing the solver methods that are exposed to the propagator
 /// during solving.
 pub trait SolvingActions {
+	/// Add a new observed variable to the solver.
 	fn new_var(&mut self) -> Var;
-	fn add_observed_var(&mut self, var: Var);
+	/// Add a new observed literal to the solver.
+	fn new_lit(&mut self) -> Lit {
+		self.new_var().into()
+	}
+	/// Query whether a literal was assigned as a search decision.
 	fn is_decision(&mut self, lit: Lit) -> bool;
+}
+
+pub trait WithPropagator<P: Propagator> {
+	type PropSlv: PropagatingSolver<P>;
+
+	/// Set Propagator implementation which allows to learn, propagate and
+	/// backtrack based on external constraints.
+	///
+	/// Only one Propagator can be connected, any previous propagator will be
+	/// overriden. This Propagator is notified of all changes to which it has
+	/// subscribed, using the [`add_observed_var`] method.
+	///
+	/// # Warning
+	///
+	/// Calling this method automatically resets the observed variable set.
+	fn with_propagator(self, prop: P) -> Self::PropSlv;
 }
 
 pub(crate) unsafe extern "C" fn ipasir_add_external_clause_lit_cb<
@@ -316,7 +302,7 @@ pub(crate) unsafe extern "C" fn ipasir_check_model_cb<P: Propagator, A: SolvingA
 		.map(|&i| (Var(NonZeroI32::new(i.abs()).unwrap()), i >= 0))
 		.collect();
 	let value = |l: Lit| sol.get(&l.var()).copied().unwrap_or(false);
-	prop.prop.check_model(&mut prop.slv, &value)
+	prop.prop.check_solution(&mut prop.slv, &value)
 }
 
 pub(crate) unsafe extern "C" fn ipasir_decide_cb<P: Propagator, A: ExtendedSolvingActions>(
@@ -411,40 +397,6 @@ impl<P, A> IpasirPropStore<P, A> {
 			rqueue: VecDeque::default(),
 			explaining: None,
 			cqueue: None,
-		}
-	}
-}
-
-impl PropagatorPointer {
-	pub(crate) unsafe fn access_propagator<P: 'static>(&self) -> Option<&P> {
-		(*(self.access_prop)(self.get_raw_ptr())).downcast_ref::<P>()
-	}
-
-	pub(crate) unsafe fn access_propagator_mut<P: 'static>(&self) -> Option<&mut P> {
-		(*(self.access_prop)(self.get_raw_ptr())).downcast_mut::<P>()
-	}
-
-	pub(crate) fn get_raw_ptr(&self) -> *mut c_void {
-		self.ptr.get_ptr()
-	}
-
-	pub(crate) fn new<P, A>(prop: P, slv: A) -> Self
-	where
-		P: Propagator + 'static,
-		A: ExtendedSolvingActions + 'static,
-	{
-		// Construct wrapping structures
-		let store = IpasirPropStore::new(prop, slv);
-		let prop = FFIPointer::new(store);
-		let access_prop = |x: *mut c_void| -> *mut dyn Any {
-			// SAFETY: The pointer is known to be created using
-			// Box::<IpasirPropStore<P, A>>::leak()
-			let store = unsafe { &mut *(x as *mut IpasirPropStore<P, A>) };
-			&mut store.prop
-		};
-		Self {
-			ptr: prop,
-			access_prop,
 		}
 	}
 }

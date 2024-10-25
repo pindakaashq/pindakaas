@@ -93,26 +93,25 @@ impl From<&Cnf> for Splr {
 }
 
 impl Solver for Splr {
-	type ValueFn = Certificate;
-
 	fn signature(&self) -> &str {
 		const SPLR_SIG: &str = const_concat!("SPLR-", VERSION);
 		SPLR_SIG
 	}
 
-	fn solve<SolCb: FnOnce(&Self::ValueFn)>(&mut self, on_sol: SolCb) -> SolveResult {
+	#[allow(
+		refining_impl_trait,
+		reason = "user can use more specific type if needed"
+	)]
+	fn solve(&mut self) -> SolveResult<Certificate, ()> {
 		use splr::SolverError::*;
 
 		match SolveIF::solve(self) {
-			Ok(Certificate::UNSAT) => SolveResult::Unsat,
-			Ok(cert @ Certificate::SAT(_)) => {
-				on_sol(&cert);
-				SolveResult::Sat
-			}
+			Ok(Certificate::UNSAT) => SolveResult::Unsatisfiable(()),
+			Ok(cert @ Certificate::SAT(_)) => SolveResult::Satisfied(cert),
 			Err(e) => match e {
 				InvalidLiteral => panic!("clause referenced a non-existing variable"),
-				Inconsistent => SolveResult::Unsat,
-				RootLevelConflict(_) => SolveResult::Unsat,
+				Inconsistent => SolveResult::Unsatisfiable(()),
+				RootLevelConflict(_) => SolveResult::Unsatisfiable(()),
 				TimeOut | OutOfMemory => SolveResult::Unknown,
 				_ => panic!("an error occurred within the splr solver"),
 			},
@@ -142,12 +141,11 @@ mod tests {
 		// 		},
 		// 	)
 		// 	.unwrap();
-		// let res = Solver::solve(&mut slv, |value| {
-		// 	assert!(
-		// 		(value(!a).unwrap() && value(b).unwrap())
-		// 			|| (value(a).unwrap() && value(!b).unwrap()),
-		// 	)
-		// });
-		// assert_eq!(res, SolveResult::Sat);
+		// let SolveResult::Satisfied(solution) = slv.solve() else {
+		// 	unreachable!()
+		// };
+		// assert!(
+		// 	(solution.value(!a) && solution.value(b)) || (solution.value(a) && solution.value(!b))
+		// );
 	}
 }

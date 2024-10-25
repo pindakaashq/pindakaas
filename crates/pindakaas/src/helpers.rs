@@ -201,7 +201,7 @@ pub(crate) mod tests {
 		};
 	}
 
-	use std::{fmt::Display, mem};
+	use std::fmt::Display;
 
 	#[cfg(test)]
 	pub(crate) use expect_file;
@@ -220,23 +220,20 @@ pub(crate) mod tests {
 	pub(crate) fn assert_checker(formula: &Cnf, checker: &impl Checker) {
 		let mut slv = Cadical::from(formula);
 		let vars = formula.get_variables();
-		let mut sol = Vec::new();
-		while slv.solve(|value| {
-			assert_eq!(checker.check(value), Ok(()));
-			sol = vars
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			assert_eq!(checker.check(&value), Ok(()));
+			let no_good: Vec<Lit> = vars
 				.clone()
 				.map(|v| {
 					let l = v.into();
 					if value.value(l) {
-						l
-					} else {
 						!l
+					} else {
+						l
 					}
 				})
 				.collect();
-		}) != SolveResult::Unsat
-		{
-			slv.add_clause(sol.iter().map(|l| !l)).unwrap();
+			slv.add_clause(no_good).unwrap();
 		}
 	}
 
@@ -260,29 +257,28 @@ pub(crate) mod tests {
 			.map(|x| BoolLinExp::from(&x.into()))
 			.collect_vec();
 		let bool_vars = formula.get_variables();
-		let mut solutions = Vec::new();
-		let mut nogood: Vec<Lit> = Vec::new();
-		while slv.solve(|value| {
-			nogood = bool_vars
+		let mut solutions: Vec<Vec<i64>> = Vec::new();
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			// Collect integer solution
+			solutions.push(
+				vars.clone()
+					.into_iter()
+					.map(|x| x.value(&value).unwrap())
+					.collect(),
+			);
+			// Add nogood clause
+			let nogood: Vec<Lit> = bool_vars
 				.clone()
 				.map(|v| {
 					let l = v.into();
 					if value.value(l) {
-						l
-					} else {
 						!l
+					} else {
+						l
 					}
 				})
 				.collect();
-			let sol: Vec<i64> = vars
-				.clone()
-				.into_iter()
-				.map(|x| x.value(value).unwrap())
-				.collect();
-			solutions.push(sol);
-		}) != SolveResult::Unsat
-		{
-			slv.add_clause(mem::take(&mut nogood)).unwrap();
+			slv.add_clause(nogood).unwrap();
 		}
 		solutions.sort();
 		let sol_str = format!(
@@ -303,23 +299,21 @@ pub(crate) mod tests {
 		I: IntoIterator<Item = V> + Clone,
 	{
 		let mut slv = Cadical::from(formula);
-		let mut solutions = Vec::new();
-		while slv.solve(|value| {
-			let sol: Vec<Lit> = vars
-				.clone()
-				.into_iter()
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						l
-					} else {
-						!l
-					}
-				})
-				.collect();
-			solutions.push(sol);
-		}) != SolveResult::Unsat
-		{
+		let mut solutions: Vec<Vec<Lit>> = Vec::new();
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			solutions.push(
+				vars.clone()
+					.into_iter()
+					.map(|v| {
+						let l = v.into();
+						if value.value(l) {
+							l
+						} else {
+							!l
+						}
+					})
+					.collect(),
+			);
 			slv.add_clause(solutions.last().unwrap().iter().map(|l| !l))
 				.unwrap();
 		}

@@ -59,33 +59,24 @@ pub enum SlvTermSignal {
 }
 
 pub trait SolveAssuming: Solver {
-	type FailFn: FailedAssumtions;
-
 	/// Solve the formula with specified clauses under the given assumptions.
 	///
 	/// If the search is interrupted (see [`set_terminate_callback`]) the function
 	/// returns unknown
-	fn solve_assuming<
-		I: IntoIterator<Item = Lit>,
-		SolCb: FnOnce(&Self::ValueFn),
-		FailCb: FnOnce(&Self::FailFn),
-	>(
+	fn solve_assuming<I: IntoIterator<Item = Lit>>(
 		&mut self,
 		assumptions: I,
-		on_sol: SolCb,
-		on_fail: FailCb,
-	) -> SolveResult;
+	) -> SolveResult<impl Valuation + '_, impl FailedAssumtions + '_>;
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
-pub enum SolveResult {
-	Sat,
-	Unsat,
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SolveResult<Sol: Valuation, Fail = ()> {
+	Satisfied(Sol),
+	Unsatisfiable(Fail),
 	Unknown,
 }
 
 pub trait Solver: ClauseDatabase {
-	type ValueFn: Valuation;
 	/// Return the name and the version of SAT solver.
 	fn signature(&self) -> &str;
 
@@ -93,7 +84,7 @@ pub trait Solver: ClauseDatabase {
 	///
 	/// If the search is interrupted (see [`set_terminate_callback`]) the function
 	/// returns unknown
-	fn solve<SolCb: FnOnce(&Self::ValueFn)>(&mut self, on_sol: SolCb) -> SolveResult;
+	fn solve(&mut self) -> SolveResult<impl Valuation + '_, impl Sized>;
 }
 
 pub trait TermCallback: Solver {
