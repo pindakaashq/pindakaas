@@ -72,8 +72,19 @@ impl Cnf {
 	}
 
 	fn __str__(&self) -> String {
-		self.0.to_string()
+		"test:".to_owned() + &self.0.to_string()
 	}
+
+	fn add_clause(&mut self, cl: Vec<Lit>) -> Result<(), PyErr> {
+		self.0
+			.add_clause(cl.into_iter().map(|l| l.0))
+			.map_err(|_e| PyArithmeticError::new_err("Unsatisfiable"))
+	}
+
+	fn new_var(&mut self) -> Lit {
+		Lit(self.0.new_var().into())
+	}
+
 	#[staticmethod]
 	fn from_file(path: PathBuf) -> Result<Self, std::io::Error> {
 		Ok(Self(base::Cnf::from_file(&path)?))
@@ -83,10 +94,18 @@ impl Cnf {
 		Self(base::Cnf::default())
 	}
 }
+#[pymethods]
 impl Lit {
 	pub fn is_negated(&self) -> bool {
 		self.0.is_negated()
 	}
+
+	// TODO python can't overload `not,` but can overload `~`. Somehow doesn't register on python side?
+	// pub fn __invert__(&self) -> Self {
+	pub fn negate(&self) -> Self {
+		Self(!self.0)
+	}
+
 	pub fn var(&self) -> Self {
 		Self(self.0.var().into()) // TODO
 	}
