@@ -758,7 +758,6 @@ mod tests {
 					equalize_ternaries: cutoff == Some(0),
 					cutoff,
 					equalize_uniform_bin_ineqs,
-					..ModelConfig::default()
 				}
 			},
 		)
@@ -910,7 +909,7 @@ mod tests {
 				// }
 
 				let var_encs_gen =
-					expand_var_encs(&(*VAR_ENCS), lin_decomp.vars().into_iter().collect());
+					expand_var_encs(&VAR_ENCS, lin_decomp.vars().into_iter().collect());
 				if let Some(j) = CHECK_DECOMPOSITION_I {
 					vec![(
 						j,
