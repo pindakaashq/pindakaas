@@ -640,7 +640,39 @@ mod tests {
 	use super::*;
 	use crate::{helpers::tests::assert_ok, Cnf, Lin, Lit, Model};
 
+	#[cfg(feature = "trace")]
+	use traced_test::test;
+
+	use crate::{helpers::tests::TestDB, int::decompose::LinDecomposer, Format};
+
 	pub(crate) struct MapSol(HashMap<Var, bool>);
+	use itertools::{iproduct, Itertools};
+	use std::sync::LazyLock;
+
+	macro_rules! has_bool_flag {
+		($flag:expr) => {{
+			LazyLock::new(|| std::env::args().contains(&String::from($flag)))
+		}};
+	}
+
+	/// Generate solutions for expected models
+	static BRUTE_FORCE_SOLVE: LazyLock<bool> =
+		LazyLock::new(|| std::env::args().contains(&String::from("--brute-force-solve")));
+	/// Which uniform (for now) integer encoding specifications to test
+	static VAR_ENCS: LazyLock<Vec<IntVarEnc>> = LazyLock::new(|| {
+		std::env::args()
+			.filter_map(|arg| match arg.as_str() {
+				"--ord" => Some(IntVarEnc::Ord(None)),
+				"--bin" => Some(IntVarEnc::Bin(None)),
+				_ => None,
+			})
+			.collect()
+	});
+
+	/// Check each constraint of the decomposition individually (unstable)
+	static CHECK_CONSTRAINTS: LazyLock<bool> = has_bool_flag!("--check-constraints");
+	/// Show assignments to auxiliary variables as well (shows more detail, but also more (symmetrical) solutions)
+	static SHOW_AUX: LazyLock<bool> = has_bool_flag!("--show-aux");
 
 	impl From<Vec<Lit>> for MapSol {
 		fn from(value: Vec<Lit>) -> Self {
@@ -692,12 +724,6 @@ mod tests {
 		});
 	}
 
-	use itertools::{iproduct, Itertools};
-	#[cfg(feature = "trace")]
-	use traced_test::test;
-
-	use crate::{helpers::tests::TestDB, int::decompose::LinDecomposer, Format};
-
 	/// All possible currently stable (!) configurations
 	fn get_model_configs() -> Vec<ModelConfig> {
 		iproduct!(
@@ -739,17 +765,6 @@ mod tests {
 		.collect()
 	}
 
-	// TODO expect_test! should remove this
-	/// Generate solutions for expected models
-	const BRUTE_FORCE_SOLVE: bool = true;
-	/// Which uniform (for now) integer encoding specifications to test
-	const VAR_ENCS: &[IntVarEnc] = &[IntVarEnc::Ord(None)];
-
-	/// Check each constraint of the decomposition individually (unstable)
-	const CHECK_CONSTRAINTS: bool = false;
-	/// Show assignments to auxiliary variables as well (shows more detail, but also more (symmetrical) solutions)
-	const SHOW_AUX: bool = true;
-
 	fn test_lp_for_configs(lp: &str, configs: Option<Vec<ModelConfig>>) {
 		test_model(
 			Model::from_string(lp.into(), Format::Lp).unwrap(),
@@ -762,14 +777,14 @@ mod tests {
 		decomposition: &Model,
 		expected_assignments: Option<&Vec<Assignment>>,
 	) {
-		if !BRUTE_FORCE_SOLVE {
+		if !*BRUTE_FORCE_SOLVE {
 		} else if let Ok(decomposition_expected_assignments) =
 			&decomposition.generate_solutions(Some(IntVarId(model.num_var)))
 		{
 			if let Err(errs) = model.check_assignments(
 				decomposition_expected_assignments,
 				expected_assignments,
-				BRUTE_FORCE_SOLVE,
+				*BRUTE_FORCE_SOLVE,
 			) {
 				for err in errs {
 					println!("Decomposition error:\n{err}");
@@ -789,7 +804,7 @@ mod tests {
 		if var_encs.is_empty() {
 			return vec![HashMap::default()];
 		}
-		return VAR_ENCS
+		return (*VAR_ENCS)
 			.iter()
 			.map(|enc| {
 				vars.iter()
@@ -852,7 +867,7 @@ mod tests {
 	fn test_model(model: Model, configs: Option<Vec<ModelConfig>>) {
 		println!("model = {}", model);
 
-		let expected_assignments = BRUTE_FORCE_SOLVE
+		let expected_assignments = (*BRUTE_FORCE_SOLVE)
 			.then(|| model.generate_solutions(None).ok())
 			.flatten();
 
@@ -895,7 +910,7 @@ mod tests {
 				// }
 
 				let var_encs_gen =
-					expand_var_encs(VAR_ENCS, lin_decomp.vars().into_iter().collect());
+					expand_var_encs(&(*VAR_ENCS), lin_decomp.vars().into_iter().collect());
 				if let Some(j) = CHECK_DECOMPOSITION_I {
 					vec![(
 						j,
@@ -910,7 +925,7 @@ mod tests {
 					var_encs_gen.into_iter().enumerate().collect_vec()
 				}
 			} {
-				let spec = if VAR_ENCS.is_empty() {
+				let spec = if (*VAR_ENCS).is_empty() {
 					None
 				} else {
 					Some(var_encs)
@@ -923,7 +938,7 @@ mod tests {
 					check_decomposition(&model, &decomposition, expected_assignments.as_ref());
 				}
 
-				for (decomposition, expected_assignments) in if CHECK_CONSTRAINTS {
+				for (decomposition, expected_assignments) in if *CHECK_CONSTRAINTS {
 					decomposition
 						.constraints()
 						.map(|constraint| {
@@ -980,7 +995,7 @@ mod tests {
 		let lit_assignments = decomposition
 			.encode_internal(&mut db, false)
 			.map(|_| {
-				let output = if CHECK_CONSTRAINTS || SHOW_AUX {
+				let output = if *CHECK_CONSTRAINTS || *SHOW_AUX {
 					decomposition.lits()
 				} else {
 					principal_vars
@@ -1010,7 +1025,7 @@ mod tests {
 		// );
 
 		// The checker model depends on whether we are testing each individual constraint of the decomp or showing aux variables
-		let checker = if CHECK_CONSTRAINTS || SHOW_AUX {
+		let checker = if *CHECK_CONSTRAINTS || *SHOW_AUX {
 			decomposition.clone()
 		} else {
 			// create a checker model with the constraints of the principal model and the encodings of the encoded decomposition
@@ -1030,8 +1045,11 @@ mod tests {
 		// TODO impl Hash for Assignment
 		// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
 
-		let check =
-			checker.check_assignments(&actual_assignments, expected_assignments, BRUTE_FORCE_SOLVE);
+		let check = checker.check_assignments(
+			&actual_assignments,
+			expected_assignments,
+			*BRUTE_FORCE_SOLVE,
+		);
 		if let Err(errs) = check {
 			for err in errs {
 				println!("{err}");
