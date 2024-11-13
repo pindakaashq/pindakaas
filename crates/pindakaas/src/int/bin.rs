@@ -11,9 +11,9 @@ use crate::{
 	helpers::{
 		add_clauses_for, as_binary, emit_filtered_clause, negate_cnf, pow2, unsigned_binary_range,
 	},
-	int::{helpers::remove_red, model::PRINT_COUPLING},
+	int::helpers::remove_red,
 	linear::{lex_geq_const, lex_leq_const, PosCoeff},
-	trace::{emit_clause, new_var},
+	trace::{emit_clause, log, new_var},
 	ClauseDatabase, Cnf, Coeff, Comparator, Lit, Unsatisfiable, Var,
 };
 
@@ -162,9 +162,8 @@ impl BinEnc {
 	/// Returns conjunction for x>=k (or x<=k if !up)
 	pub(crate) fn ineqs(&self, r_a: Coeff, r_b: Coeff, up: bool) -> Vec<Vec<Lit>> {
 		let (range_lb, range_ub) = self.range();
-		if PRINT_COUPLING >= 2 {
-			print!("\t {up} {r_a}..{r_b} [{range_lb}..{range_ub}] -> ");
-		}
+
+		log!("\t {up} {r_a}..{r_b} [{range_lb}..{range_ub}] -> ");
 
 		if r_a <= range_lb {
 			if up {
@@ -186,9 +185,7 @@ impl BinEnc {
 			.flat_map(|k| {
 				let k = if up { k - 1 } else { k };
 				let ineq = self.ineq(k, up); // returns cnf
-				if PRINT_COUPLING >= 2 {
-					println!("{k} -> ineq = {:?}", ineq);
-				}
+				log!("{k} -> ineq = {ineg:?}");
 				ineq
 			})
 			.collect_vec();

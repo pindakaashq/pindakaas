@@ -1,9 +1,10 @@
 use std::{cell::RefCell, collections::BTreeSet, fmt::Display, hash::BuildHasherDefault, rc::Rc};
 
+use crate::trace::log;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
-use super::{bin::BinEnc, model::PRINT_COUPLING, ord::OrdEnc, required_lits, Dom, IntVarEnc};
+use super::{bin::BinEnc, ord::OrdEnc, required_lits, Dom, IntVarEnc};
 use crate::{
 	helpers::negate_cnf,
 	int::display::SHOW_IDS,
@@ -165,9 +166,7 @@ impl IntVar {
 		match self.e.as_ref().unwrap() {
 			IntVarEnc::Ord(Some(o)) => {
 				let pos = self.dom.geq(k);
-				if PRINT_COUPLING >= 2 {
-					print!(" = d_{pos:?}");
-				}
+				log!(" = d_{pos:?}");
 				let d = if let Some((pos, v)) = pos {
 					if up {
 						Some(v)
@@ -201,9 +200,7 @@ impl IntVar {
 					(range_lb + k, a)
 				};
 
-				if PRINT_COUPLING >= 2 {
-					print!("{r_a}..{r_b} ");
-				}
+				log!("{r_a}..{r_b} ");
 				let dnf = x_bin.geqs(r_a, r_b);
 
 				let dnf = if up {

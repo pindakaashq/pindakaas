@@ -2,14 +2,14 @@
 use itertools::Itertools;
 
 use super::{
-	model::{PRINT_COUPLING, USE_COUPLING_IO_LEX, VIEW_COUPLING},
+	model::{USE_COUPLING_IO_LEX, VIEW_COUPLING},
 	IntVarEnc, IntVarId,
 };
 use crate::{
 	helpers::{add_clauses_for, div_ceil, div_floor},
 	int::{bin::BinEnc, helpers::display_cnf, required_lits, Dom},
 	linear::{lex_geq_const, lex_leq_const, log_enc_add_fn, PosCoeff},
-	trace::emit_clause,
+	trace::{emit_clause, log},
 	Assignment, CheckError, ClauseDatabase, Coeff, Comparator, Consistency, IntVarRef, Lit, Model,
 	ModelConfig, Result, Term, Unsatisfiable,
 };
@@ -401,13 +401,9 @@ impl Lin {
 					.try_for_each(|((c_a, x_a), (c_b, x_b))| {
 						let x = if up { x_a } else { x_b };
 						let (c_a, c_b) = (c_a + 1, c_b);
-						if PRINT_COUPLING >= 2 {
-							println!("{up} {c_a}..{c_b} -> {x:?}");
-						}
+						log!("{up} {c_a}..{c_b} -> {x:?}");
 						let y = y_enc.ineqs(c_a, c_b, !up);
-						if PRINT_COUPLING >= 2 {
-							println!("{y:?}");
-						}
+						log!("{y:?}");
 						add_clauses_for(db, vec![vec![x.clone()], y])
 					})
 			}
@@ -512,9 +508,7 @@ impl Lin {
 
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					let (_, cnf) = Self::encode_rec(&terms, &cmp, self.k, 0);
-					if PRINT_COUPLING >= 3 {
-						println!("{}", display_cnf(&cnf));
-					}
+					log!("{}", display_cnf(&cnf));
 
 					for c in cnf {
 						emit_clause!(db, c)?;
@@ -595,27 +589,24 @@ impl Lin {
 					div_floor(k, head.c) + 1
 				};
 
-				if PRINT_COUPLING >= 2 {
-					print!(
-						"{}{} ({}*{} {cmp} {k}) (= {} {} {k_})",
-						"\t".repeat(depth),
-						if up { "up: " } else { "down: " },
-						head.c,
-						head.x.borrow(),
-						head.x.borrow().lbl(),
-						if head.c.is_positive() {
-							*cmp
-						} else {
-							cmp.reverse()
-						}
-					);
-				}
+				log!(
+					"{}{} ({}*{} {cmp} {k}) (= {} {} {k_})",
+					"\t".repeat(depth),
+					if up { "up: " } else { "down: " },
+					head.c,
+					head.x.borrow(),
+					head.x.borrow().lbl(),
+					if head.c.is_positive() {
+						*cmp
+					} else {
+						cmp.reverse()
+					}
+				);
 
 				let (c, cnf) = head.x.borrow().ineq(k_, up, None);
 
-				if PRINT_COUPLING >= 2 {
-					println!("== {cnf:?}",);
-				}
+				let _disp_cnf = display_cnf(&cnf); // TODO inlining this function won't be removed with feature trace
+				log!("== {:?}", _disp_cnf);
 
 				(c.map(|c| head.c * c), cnf)
 			} else {
@@ -629,8 +620,7 @@ impl Lin {
 							// l = x>=d+1, ~l = ~(x>=d+1) = x<d+1 = x<=d
 							let k_ = k - head.c * d;
 
-							if PRINT_COUPLING >= 2 {
-								print!(
+								log!(
 									"{} {} {}*({} {cmp} {}) (->x{cmp}{implies}) = [{:?}] (k={k} - {}*{d} = {k_}) last_a={last_a:?} last_k={last_k:?}",
                                     "\t".repeat(depth),
 									if up {
@@ -642,9 +632,8 @@ impl Lin {
 									head.x.borrow(),
 									if up { d + 1 } else { d },
 									conditions,
-									head.c,
+									head.c
 								);
-							}
 
 
 							let antecedent_implies_next = last_a
@@ -666,13 +655,7 @@ impl Lin {
 								})
 								.unwrap_or_default();
 
-							if PRINT_COUPLING >= 2 {
-								print!(" {}/{}", antecedent_implies_next, consequent_implies_next);
-							}
-
-							if PRINT_COUPLING >= 2 {
-								println!();
-							}
+								log!(" {}/{} \n", antecedent_implies_next, consequent_implies_next);
 
 							let (c, cnf) = Self::encode_rec(tail, cmp, k_, depth + 1);
 							let cnf = cnf
@@ -682,9 +665,6 @@ impl Lin {
 
 
 							if antecedent_implies_next && consequent_implies_next  {
-                                if PRINT_COUPLING >= 2 {
-										println!("SKIP");
-                                }
 									return Some(vec![]); // some consequent -> skip clause
 							}
 

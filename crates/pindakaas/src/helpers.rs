@@ -655,7 +655,7 @@ pub mod tests {
 						..CNFDescription::default()
 					},
 				),
-				num_var: num_var,
+				num_var,
 				clauses: None,
 				solutions: None,
 				check: None,
@@ -785,11 +785,7 @@ pub mod tests {
 					}
 				}
 
-				let nogood = solution
-					.iter()
-					.map(|l| !l)
-					.map(i32::from)
-					.collect_vec();
+				let nogood = solution.iter().map(|l| !l).map(i32::from).collect_vec();
 
 				match SatSolverIF::add_clause(&mut self.slv, nogood) {
 					Err(SolverError::Inconsistent | SolverError::EmptyClause) => {
@@ -1063,7 +1059,7 @@ pub mod tests {
 			const FIND_UNSAT_EVERY: Option<u32> = None;
 
 			let find_unsat = FIND_UNSAT_EVERY
-				.map(|every| self.num_cls % &every == 0)
+				.map(|every| self.num_cls % every == 0)
 				.unwrap_or_default();
 
 			fn handle_splr_err(err: SolverError) -> Result {

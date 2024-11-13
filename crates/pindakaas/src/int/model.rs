@@ -18,12 +18,6 @@ use crate::{
 	Var,
 };
 
-// TODO Refactor: move to tracing
-#[cfg(feature = "trace")]
-pub(crate) const PRINT_COUPLING: u32 = 1;
-#[cfg(not(feature = "trace"))]
-pub(crate) const PRINT_COUPLING: u32 = 0;
-
 // TODO needs experiment to find out which is better
 /// Replace unary constraints by coupling
 pub(crate) const USE_COUPLING_IO_LEX: bool = false;
@@ -733,7 +727,7 @@ mod tests {
 				ModelConfig {
 					scm: scm.clone(),
 					decomposer: decomposer.clone(),
-					propagate: propagate,
+					propagate,
 					add_consistency,
 					equalize_ternaries: cutoff == Some(0),
 					cutoff,
@@ -911,10 +905,10 @@ mod tests {
 							.clone(),
 					)]
 				} else if var_encs_gen.is_empty() {
-    						vec![(0, HashMap::default())]
-    					} else {
-    						var_encs_gen.into_iter().enumerate().collect_vec()
-    					}
+					vec![(0, HashMap::default())]
+				} else {
+					var_encs_gen.into_iter().enumerate().collect_vec()
+				}
 			} {
 				let spec = if VAR_ENCS.is_empty() {
 					None

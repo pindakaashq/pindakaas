@@ -1,10 +1,19 @@
 use itertools::Itertools;
+/// General log function
+macro_rules! log {
+    ($fmt:expr $(, $args:expr)* ) => {
+        #[cfg(feature = "trace")]
+        tracing::info!($fmt $(, $args)*)
+    }
+}
+pub(crate) use log;
 
 /// Helper marco to create a new variable within an Encoder
 #[cfg(feature = "trace")]
 macro_rules! new_var {
 	($db:expr) => {{
 		let var = $db.new_var();
+                #[cfg(feature = "trace")]
 		tracing::info!(var = ?var, "new variable");
 		$crate::Lit::from(var)
 	}};
