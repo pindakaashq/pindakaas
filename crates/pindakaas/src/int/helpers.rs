@@ -459,7 +459,7 @@ End
 			.flat_map(|(lp_id, dom)| add_var(&mut model, &lp_id, &dom))
 			.collect::<HashMap<_, _>>();
 
-		const DEFAULT_01: bool = false;
+		const DEFAULT_01: bool = true;
 		let mut to_ilp_exp = |model: &mut Model, (int_vars, coefs): &ParseLinExp<Coeff>| LinExp {
 			terms: coefs
 				.iter()

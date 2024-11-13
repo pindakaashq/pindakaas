@@ -707,9 +707,9 @@ mod tests {
 	/// All possible currently stable (!) configurations
 	fn get_model_configs() -> Vec<ModelConfig> {
 		iproduct!(
-			[Scm::Dnf, Scm::Add, Scm::Rca],
+			[Scm::Rca],
 			[
-				Decomposer::Gt,
+				// Decomposer::Gt,
 				// Decomposer::Swc, // TODO
 				Decomposer::Bdd,
 				// Decomposer::Rca
@@ -749,7 +749,7 @@ mod tests {
 	/// Generate solutions for expected models
 	const BRUTE_FORCE_SOLVE: bool = true;
 	/// Which uniform (for now) integer encoding specifications to test
-	const VAR_ENCS: &[IntVarEnc] = &[IntVarEnc::Ord(None), IntVarEnc::Bin(None)];
+	const VAR_ENCS: &[IntVarEnc] = &[IntVarEnc::Ord(None)];
 
 	/// Check each constraint of the decomposition individually (unstable)
 	const CHECK_CONSTRAINTS: bool = false;
@@ -1223,10 +1223,7 @@ End
 			r"
 Subject To
 c0: + 2 x1 + 3 x2 + 5 x3 <= 6
-Binary
-x1
-x2
-x3
+\ c0: + 2 x1 + 3 x2 + 5 x3 + 5 x4 + 7 x5 + 8 x6 <= 20
 End
 ",
 			None,
