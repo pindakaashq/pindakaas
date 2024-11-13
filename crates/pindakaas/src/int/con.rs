@@ -578,7 +578,7 @@ impl Lin {
 		terms: &[Term],
 		cmp: &Comparator,
 		k: Coeff,
-		depth: usize,
+		_depth: usize,
 	) -> (Option<Coeff>, Vec<Vec<Lit>>) {
 		if let Some((head, tail)) = terms.split_first() {
 			let up = head.c.is_positive() == (cmp == &Comparator::GreaterEq);
@@ -591,7 +591,7 @@ impl Lin {
 
 				log!(
 					"{}{} ({}*{} {cmp} {k}) (= {} {} {k_})",
-					"\t".repeat(depth),
+					"\t".repeat(_depth),
 					if up { "up: " } else { "down: " },
 					head.c,
 					head.x.borrow(),
@@ -622,7 +622,7 @@ impl Lin {
 
 								log!(
 									"{} {} {}*({} {cmp} {}) (->x{cmp}{implies}) = [{:?}] (k={k} - {}*{d} = {k_}) last_a={last_a:?} last_k={last_k:?}",
-                                    "\t".repeat(depth),
+                                    "\t".repeat(_depth),
 									if up {
 										"up: "
 									} else {
@@ -657,7 +657,7 @@ impl Lin {
 
 								log!(" {}/{} \n", antecedent_implies_next, consequent_implies_next);
 
-							let (c, cnf) = Self::encode_rec(tail, cmp, k_, depth + 1);
+							let (c, cnf) = Self::encode_rec(tail, cmp, k_, _depth + 1);
 							let cnf = cnf
 								.into_iter()
 								.map(|r| conditions.clone().into_iter().chain(r).collect())

@@ -184,6 +184,7 @@ impl BinEnc {
 		let ineqs = (r_a..=r_b)
 			.flat_map(|k| {
 				let k = if up { k - 1 } else { k };
+				#[allow(clippy::let_and_return)]
 				let ineq = self.ineq(k, up); // returns cnf
 				log!("{k} -> ineq = {ineq:?}");
 				ineq
