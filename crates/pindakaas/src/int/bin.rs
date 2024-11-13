@@ -185,7 +185,7 @@ impl BinEnc {
 			.flat_map(|k| {
 				let k = if up { k - 1 } else { k };
 				let ineq = self.ineq(k, up); // returns cnf
-				log!("{k} -> ineq = {ineg:?}");
+				log!("{k} -> ineq = {ineq:?}");
 				ineq
 			})
 			.collect_vec();

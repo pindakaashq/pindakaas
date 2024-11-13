@@ -9,7 +9,6 @@ macro_rules! log {
 pub(crate) use log;
 
 /// Helper marco to create a new variable within an Encoder
-#[cfg(feature = "trace")]
 macro_rules! new_var {
 	($db:expr) => {{
 		let var = $db.new_var();
@@ -19,18 +18,10 @@ macro_rules! new_var {
 	}};
 	($db:expr, $lbl:expr) => {{
 		let var = $db.new_var();
+                #[cfg(feature = "trace")]
 		tracing::info!(var = ?var, label = $lbl, "new variable");
 		$crate::Lit::from(var)
 	}};
-}
-#[cfg(not(feature = "trace"))]
-macro_rules! new_var {
-	($db:expr) => {
-		$crate::Lit::from($db.new_var())
-	};
-	($db:expr, $lbl:expr) => {
-		$crate::Lit::from($db.new_var())
-	};
 }
 pub(crate) use new_var;
 
