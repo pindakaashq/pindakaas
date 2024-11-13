@@ -733,7 +733,7 @@ mod tests {
 				ModelConfig {
 					scm: scm.clone(),
 					decomposer: decomposer.clone(),
-					propagate: propagate.clone(),
+					propagate: propagate,
 					add_consistency,
 					equalize_ternaries: cutoff == Some(0),
 					cutoff,
@@ -769,12 +769,11 @@ mod tests {
 		expected_assignments: Option<&Vec<Assignment>>,
 	) {
 		if !BRUTE_FORCE_SOLVE {
-			return;
 		} else if let Ok(decomposition_expected_assignments) =
 			&decomposition.generate_solutions(Some(IntVarId(model.num_var)))
 		{
 			if let Err(errs) = model.check_assignments(
-				&decomposition_expected_assignments,
+				decomposition_expected_assignments,
 				expected_assignments,
 				BRUTE_FORCE_SOLVE,
 			) {
@@ -911,13 +910,11 @@ mod tests {
 							.expect("CHECK_DECOMPOSITION_I is not set to None")
 							.clone(),
 					)]
-				} else {
-					if var_encs_gen.is_empty() {
-						vec![(0, HashMap::default())]
-					} else {
-						var_encs_gen.into_iter().enumerate().collect_vec()
-					}
-				}
+				} else if var_encs_gen.is_empty() {
+    						vec![(0, HashMap::default())]
+    					} else {
+    						var_encs_gen.into_iter().enumerate().collect_vec()
+    					}
 			} {
 				let spec = if VAR_ENCS.is_empty() {
 					None
@@ -980,7 +977,7 @@ mod tests {
 				// if x.borrow().e.is_some() {
 				x.borrow_mut().encode(&mut db).unwrap();
 				// }
-				(x.borrow().id.clone(), x.clone())
+				(x.borrow().id, x.clone())
 			})
 			.collect::<HashMap<IntVarId, IntVarRef>>();
 		println!("decomposition = {}", decomposition);

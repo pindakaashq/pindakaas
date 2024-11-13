@@ -655,7 +655,7 @@ pub mod tests {
 						..CNFDescription::default()
 					},
 				),
-				num_var: num_var.into(),
+				num_var: num_var,
 				clauses: None,
 				solutions: None,
 				check: None,
@@ -774,7 +774,7 @@ pub mod tests {
 				} else {
 					lit_assignment
 				};
-				let solution = solution.into_iter().map(|lit| Lit::from(lit)).collect_vec();
+				let solution = solution.into_iter().map(Lit::from).collect_vec();
 
 				from_slv.push(solution.clone());
 				if let Some(n) = CHECK_N_SOL {
@@ -788,7 +788,7 @@ pub mod tests {
 				let nogood = solution
 					.iter()
 					.map(|l| !l)
-					.map(|l| i32::from(l))
+					.map(i32::from)
 					.collect_vec();
 
 				match SatSolverIF::add_clause(&mut self.slv, nogood) {
