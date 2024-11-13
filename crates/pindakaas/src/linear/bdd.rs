@@ -144,7 +144,8 @@ impl Decompose for BddEncoder {
 		// x3 ∈ {0,5} + y_2 ∈ {1,5} ≤ y_3 ∈ {6}
 		// TODO since both borrow model, I don't know how to avoid needless_collect
 		#[allow(clippy::needless_collect)]
-		let ys = ys.into_iter()
+		let ys = ys
+			.into_iter()
 			.enumerate()
 			.flat_map(|(i, nodes)| {
 				let mut views = HashMap::new();

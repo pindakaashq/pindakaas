@@ -413,7 +413,7 @@ impl Lin {
 			}
 			LinCase::Scm(t_x, y) => {
 				t_x.x.borrow_mut().encode_bin(db)?; // encode x (if not encoded already)
-									// encode y
+										// encode y
 
 				let tmp_y = t_x.clone().encode_bin(None, self.cmp, None)?;
 
