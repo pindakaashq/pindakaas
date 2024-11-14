@@ -769,3 +769,20 @@ impl From<i32> for Var {
 		Self(NonZeroI32::new(value).expect("cannot create literal with value zero"))
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::helpers::tests::assert_ok;
+	// use std::path::Path;
+
+	#[test]
+	fn cnf_from_file_test() {
+		assert_ok!({
+			let cnf = Cnf::from_file(Path::new("res/ex1.dimacs"))?;
+			println!("{cnf:?}");
+			println!("{cnf}");
+			Ok::<(), std::io::Error>(())
+		})
+	}
+}
