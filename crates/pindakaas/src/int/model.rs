@@ -1,9 +1,6 @@
-#![allow(clippy::absurd_extreme_comparisons)]
 use std::{
 	cell::RefCell,
-	cmp::Ordering,
 	collections::{BTreeSet, HashMap, HashSet},
-	ops::Index,
 	rc::Rc,
 };
 
@@ -12,7 +9,7 @@ use itertools::Itertools;
 use crate::{
 	int::{
 		decompose::{Decompose, ModelDecomposer},
-		Dom, IntVar, IntVarId, IntVarRef, LinExp,
+		Assignment, Dom, IntVar, IntVarId, IntVarRef, LinExp,
 	},
 	CheckError, Checker, ClauseDatabase, Comparator, Lin, Result, Term, Unsatisfiable, Valuation,
 	Var,
@@ -42,6 +39,8 @@ pub enum Scm {
 	/// Use recipe derived by Boolean minimization (min. variables). Good for <12 bits
 	#[default]
 	Dnf,
+	/// Use base-line pow-of-2 approach
+	Pow,
 }
 
 use super::IntVarEnc;
@@ -60,14 +59,14 @@ pub enum Decomposer {
 pub struct ModelConfig {
 	/// Which SCM method to use
 	pub scm: Scm,
-	pub(crate) cutoff: Option<Coeff>,
-	pub(crate) decomposer: Decomposer,
+	pub cutoff: Option<Coeff>,
+	pub decomposer: Decomposer,
 	/// Rewrites all but last equation x:B + y:B ≤ z:B to x:B + y:B = z:B
-	pub(crate) equalize_ternaries: bool,
-	pub(crate) add_consistency: bool,
-	pub(crate) propagate: Consistency,
+	pub equalize_ternaries: bool,
+	pub add_consistency: bool,
+	pub propagate: Consistency,
 	/// Rewrites x:B + y:B ≤ z:B to x:B + y:B = z':B ∧ y:B ≤ z:B
-	pub(crate) equalize_uniform_bin_ineqs: bool,
+	pub equalize_uniform_bin_ineqs: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -99,37 +98,6 @@ impl From<Vec<Lin>> for Model {
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct Cse(pub(crate) HashMap<(IntVarId, Coeff, Comparator), Term>);
-
-// TODO [?] equivalent of Valuation, could be merged?
-/// A structure holding an integer assignment to `Model`
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
-pub struct Assignment(pub HashMap<IntVarId, (String, Coeff)>);
-
-impl Ord for Assignment {
-	fn cmp(&self, other: &Self) -> Ordering {
-		self.0.iter().sorted().cmp(other.0.iter().sorted())
-	}
-}
-
-impl PartialOrd for Assignment {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Index<&IntVarId> for Assignment {
-	type Output = (String, Coeff);
-
-	fn index(&self, id: &IntVarId) -> &Self::Output {
-		&self.0[id]
-	}
-}
-
-impl Assignment {
-	pub(crate) fn partialize(self, max_var: &IntVarId) -> Self {
-		Self(self.0.into_iter().filter(|(k, _)| k <= max_var).collect())
-	}
-}
 
 #[derive(Debug, Default, Clone, Copy, Ord, PartialOrd, PartialEq, Eq, Hash)]
 pub enum Consistency {
@@ -281,8 +249,7 @@ impl Model {
 	}
 
 	// TODO used for experiments, made private for release
-	#[allow(dead_code)]
-	pub(crate) fn constraints(&'_ self) -> impl Iterator<Item = &'_ Lin> {
+	pub fn constraints(&'_ self) -> impl Iterator<Item = &'_ Lin> {
 		self.cons.iter()
 	}
 
@@ -293,12 +260,7 @@ impl Model {
 		ModelDecomposer { spec }.decompose(self)
 	}
 
-	// TODO used for experiments, made private for release
-	#[allow(dead_code)]
-	pub(crate) fn encode_vars<DB: ClauseDatabase>(
-		&mut self,
-		db: &mut DB,
-	) -> Result<(), Unsatisfiable> {
+	pub fn encode_vars<DB: ClauseDatabase>(&mut self, db: &mut DB) -> Result<(), Unsatisfiable> {
 		// Encode (or retrieve encoded) variables (in order of id so lits line up more nicely with variable order)
 		self.vars()
 			.iter()
@@ -334,7 +296,7 @@ impl Model {
 		Ok(decomposition)
 	}
 
-	pub(crate) fn propagate(&mut self, consistency: &Consistency) -> Result<(), Unsatisfiable> {
+	pub fn propagate(&mut self, consistency: &Consistency) -> Result<(), Unsatisfiable> {
 		// TODO for Gt/Bdd we actually know we can start propagation at the last constraint
 		let mut queue = BTreeSet::from_iter(0..self.cons.len());
 		if consistency == &Consistency::None {
@@ -579,9 +541,7 @@ Actual assignments:
 		Ok(())
 	}
 
-	// TODO used for experiments, made private for release
-	#[allow(dead_code)]
-	pub(crate) fn lits(&self) -> BTreeSet<Var> {
+	pub fn lits(&self) -> BTreeSet<Var> {
 		self.vars().iter().flat_map(|x| x.borrow().lits()).collect()
 	}
 
@@ -638,14 +598,17 @@ Actual assignments:
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{helpers::tests::assert_ok, Cnf, Lin, Lit, Model};
+	use crate::{helpers::tests::assert_ok, Cnf, Lin, Model};
 
 	#[cfg(feature = "trace")]
 	use traced_test::test;
 
-	use crate::{helpers::tests::TestDB, int::decompose::LinDecomposer, Format};
+	use crate::{
+		helpers::tests::TestDB,
+		int::{assignment::MapSol, decompose::LinDecomposer},
+		Format,
+	};
 
-	pub(crate) struct MapSol(HashMap<Var, bool>);
 	use itertools::{iproduct, Itertools};
 	use std::sync::LazyLock;
 
@@ -673,26 +636,6 @@ mod tests {
 	static CHECK_CONSTRAINTS: LazyLock<bool> = has_bool_flag!("--check-constraints");
 	/// Show assignments to auxiliary variables as well (shows more detail, but also more (symmetrical) solutions)
 	static SHOW_AUX: LazyLock<bool> = has_bool_flag!("--show-aux");
-
-	impl From<Vec<Lit>> for MapSol {
-		fn from(value: Vec<Lit>) -> Self {
-			Self(
-				value
-					.into_iter()
-					.map(|lit| (lit.var(), !lit.is_negated()))
-					.collect::<HashMap<_, _>>(),
-			)
-		}
-	}
-
-	impl Valuation for MapSol {
-		fn value(&self, lit: Lit) -> Option<bool> {
-			self.0
-				.get(&lit.var())
-				.copied()
-				.map(|a| if lit.is_negated() { !a } else { a })
-		}
-	}
 
 	#[test]
 	fn model_test() {

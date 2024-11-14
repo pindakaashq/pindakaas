@@ -21,8 +21,8 @@ use crate::{
 /// A linear term (constant times integer variable)
 #[derive(Debug, Clone)]
 pub struct Term {
-	pub(crate) c: Coeff,
-	pub(crate) x: IntVarRef,
+	pub c: Coeff,
+	pub x: IntVarRef,
 }
 
 impl Mul<Coeff> for Term {
@@ -399,6 +399,7 @@ impl Term {
 							.unwrap();
 						Ok(Term::from(y))
 					}
+					_ => todo!(),
 				}
 			}
 			_ => return Ok(self),

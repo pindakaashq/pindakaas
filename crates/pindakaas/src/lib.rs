@@ -34,7 +34,7 @@ pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
 use helpers::VarRange;
 pub use int::{
 	Assignment, Consistency, Decompose, Decomposer, Format, IntVar, IntVarId, IntVarRef, Lin,
-	LinExp as IntLinExp, Model, ModelConfig, ModelDecomposer, Obj, Scm, Term,
+	LinExp as IntLinExp, MapSol, Model, ModelConfig, ModelDecomposer, Obj, Scm, Term,
 };
 use itertools::{Itertools, Position};
 pub use linear::{
@@ -47,7 +47,7 @@ pub use crate::propositional_logic::{Formula, TseitinEncoder};
 use crate::trace::subscript_number;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Var(pub(crate) NonZeroI32);
+pub struct Var(NonZeroI32);
 
 impl Var {
 	fn next_var(&self) -> Option<Var> {
@@ -105,7 +105,8 @@ impl From<Var> for i32 {
 /// Literal is type that can be use to represent Boolean decision variables and
 /// their negations
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Lit(NonZeroI32);
+pub struct Lit(pub NonZeroI32);
+// TODO remove pub
 
 impl Lit {
 	pub fn var(&self) -> Var {
@@ -319,7 +320,9 @@ pub trait ClauseDatabase {
 	}
 
 	type CondDB: ClauseDatabase + ?Sized;
-	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB>;
+	fn with_conditions(&mut self, _conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
+		unimplemented!();
+	}
 }
 
 // TODO: Add usage and think about interface
@@ -755,16 +758,14 @@ impl<'a> Iterator for CnfIterator<'a> {
 	}
 }
 
-// TODO [!] use std  i/o num and remove num
-#[cfg(test)]
-mod tests {
-	use std::num::NonZeroI32;
+impl From<i32> for Lit {
+	fn from(value: i32) -> Self {
+		Self(NonZeroI32::new(value).expect("cannot create literal with value zero"))
+	}
+}
 
-	use crate::Lit;
-
-	impl From<i32> for Lit {
-		fn from(value: i32) -> Self {
-			Lit(NonZeroI32::new(value).expect("cannot create literal with value zero"))
-		}
+impl From<i32> for Var {
+	fn from(value: i32) -> Self {
+		Self(NonZeroI32::new(value).expect("cannot create literal with value zero"))
 	}
 }

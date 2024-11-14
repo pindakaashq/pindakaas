@@ -7,11 +7,11 @@ use super::{
 };
 use crate::{
 	helpers::{add_clauses_for, div_ceil, div_floor},
-	int::{bin::BinEnc, helpers::display_cnf, required_lits, Dom},
+	int::{bin::BinEnc, helpers::display_cnf, required_lits, Assignment, Dom},
 	linear::{lex_geq_const, lex_leq_const, log_enc_add_fn, PosCoeff},
 	trace::{emit_clause, log},
-	Assignment, CheckError, ClauseDatabase, Coeff, Comparator, Consistency, IntVarRef, Lit, Model,
-	ModelConfig, Result, Term, Unsatisfiable,
+	CheckError, ClauseDatabase, Coeff, Comparator, Consistency, IntVarRef, Lit, Model, ModelConfig,
+	Result, Term, Unsatisfiable,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -145,10 +145,7 @@ impl Lin {
 		self.exp.terms.iter().map(Term::ub).sum()
 	}
 
-	pub(crate) fn propagate(
-		&mut self,
-		consistency: &Consistency,
-	) -> Result<Vec<IntVarId>, Unsatisfiable> {
+	pub fn propagate(&mut self, consistency: &Consistency) -> Result<Vec<IntVarId>, Unsatisfiable> {
 		let mut changed = vec![];
 		match consistency {
 			Consistency::None => unreachable!(),
