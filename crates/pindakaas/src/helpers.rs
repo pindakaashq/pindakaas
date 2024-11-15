@@ -639,8 +639,8 @@ pub mod tests {
 		num_cls: u32,
 	}
 
-	const ONLY_OUTPUT: bool = true;
-	const CHECK_N_SOL: Option<u32> = None;
+	const _ONLY_OUTPUT: bool = true;
+	const _CHECK_N_SOL: Option<u32> = None;
 
 	impl TestDB {
 		pub fn new(num_var: i32) -> TestDB {
@@ -755,8 +755,9 @@ pub mod tests {
 			}
 		}
 
+		// TODO use solver IF
 		/// Solve for given output variables (or self.num_var if None)
-		pub fn solve(&mut self, output: Option<BTreeSet<Var>>) -> Vec<Vec<Lit>> {
+		pub fn _solve(&mut self, output: Option<BTreeSet<Var>>) -> Vec<Vec<Lit>> {
 			let mut from_slv: Vec<Vec<Lit>> = Vec::new();
 			let output: BTreeSet<_> = output
 				.map(|output| output.into_iter().map(|v| v.into()).collect())
@@ -765,7 +766,7 @@ pub mod tests {
 			// TODO [refactor] instead of using splr, testing should use our own Solver interface
 			let mut k_sol = 0;
 			while let Ok(Certificate::SAT(lit_assignment)) = self.slv.solve() {
-				let solution = if ONLY_OUTPUT {
+				let solution = if _ONLY_OUTPUT {
 					lit_assignment
 						.clone()
 						.into_iter()
@@ -777,7 +778,7 @@ pub mod tests {
 				let solution = solution.into_iter().map(Lit::from).collect_vec();
 
 				from_slv.push(solution.clone());
-				if let Some(n) = CHECK_N_SOL {
+				if let Some(n) = _CHECK_N_SOL {
 					if k_sol > n {
 						break;
 					} else {

@@ -45,7 +45,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Run cargo test
         # run: cargo test --all-features
-        run: cargo test -p pindakaas --features trace -- test -- --brute-force-solve --ord --show-aux
+        run: cargo test -p pindakaas --features trace --features cadical -- test -- --brute-force-solve --ord --show-aux
   clippy:
     runs-on: ubuntu-latest
     steps:
