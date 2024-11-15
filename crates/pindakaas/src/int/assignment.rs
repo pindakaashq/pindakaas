@@ -81,7 +81,7 @@ impl From<Vec<Lit>> for MapSol {
 // }
 
 impl TryFrom<MapSol> for Vec<Lit> {
-    type Error = ();
+	type Error = ();
 	fn try_from(v: MapSol) -> Result<Self, Self::Error> {
 		let vars = v.0.keys().cloned().sorted().collect_vec();
 		if v.0.is_empty() {
@@ -92,7 +92,8 @@ impl TryFrom<MapSol> for Vec<Lit> {
 				.tuple_windows()
 				.all(|(a, b)| &a.next_var().unwrap() == b)
 		{
-			Ok(vars.into_iter()
+			Ok(vars
+				.into_iter()
 				.map(|k| {
 					let lit = Lit::from(k);
 					if v.value(lit).unwrap() {
@@ -103,7 +104,7 @@ impl TryFrom<MapSol> for Vec<Lit> {
 				})
 				.collect())
 		} else {
-                    Err(())
+			Err(())
 		}
 	}
 }
