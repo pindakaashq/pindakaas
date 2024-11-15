@@ -31,7 +31,7 @@ use std::{
 
 pub use cardinality::Cardinality;
 pub use cardinality_one::{CardinalityOne, LadderEncoder, PairwiseEncoder};
-use helpers::VarRange;
+pub use helpers::VarRange;
 pub use int::{
 	Assignment, Consistency, Decompose, Decomposer, Format, IntVar, IntVarId, IntVarRef, Lin,
 	LinExp as IntLinExp, MapSol, Model, ModelConfig, ModelDecomposer, Obj, Scm, Term,

@@ -170,10 +170,11 @@ mod tests {
 		}
 
 		let solns: Vec<Vec<Lit>> = slv
-			.solve_all(vars)
+			.solve_all(&vars.into_iter().collect_vec())
 			.into_iter()
-			.map(|sol| Vec::try_from(sol).unwrap())
-			.sorted();
+			.map(|sol| sol.into())
+			.sorted()
+			.collect_vec();
 		assert_eq!(
 			solns,
 			vec![

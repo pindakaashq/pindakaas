@@ -9,6 +9,7 @@ pub mod splr;
 use crate::MapSol;
 use itertools::Itertools;
 pub mod libloading;
+use crate::Cnf;
 
 #[cfg(feature = "ipasir-up")]
 use std::any::Any;
@@ -52,6 +53,12 @@ pub trait Solver: ClauseDatabase {
 				.unwrap()
 		}
 		solns.into_iter().map(MapSol::from).collect()
+	}
+
+	fn add_cnf(&mut self, cnf: Cnf) {
+		for cl in cnf.iter() {
+			self.add_clause(cl.into_iter().cloned()).unwrap();
+		}
 	}
 }
 

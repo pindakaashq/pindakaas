@@ -48,33 +48,61 @@ impl From<Vec<Lit>> for MapSol {
 	}
 }
 
-impl TryInto<Vec<Lit>> for MapSol {
-	type Error = ();
-	fn try_into(self) -> Result<Vec<Lit>, Self::Error> {
+// TODO can't get this to compile inside
+// impl TryInto<Vec<Lit>> for MapSol {
+// 	type Error = ();
+// 	fn try_into(self) -> Result<Vec<Lit>, Self::Error> {
+// 		if self.0.is_empty() {
+// 			Ok(vec![])
+// 		} else if self.0.keys().min().unwrap() == &Var::from(1)
+// 			&& self
+// 				.0
+// 				.keys()
+// 				.tuple_windows()
+// 				.all(|(a, b)| &a.next_var().unwrap() == b)
+// 		{
+// 			Ok(self
+// 				.0
+// 				.keys()
+// 				.sorted()
+// 				.map(|k| {
+// 					let lit = Lit::from(*k);
+// 					if self.value(lit).unwrap() {
+// 						lit
+// 					} else {
+// 						!lit
+// 					}
+// 				})
+// 				.collect())
+// 		} else {
+// 			Err(())
+// 		}
+// 	}
+// }
+
+impl Into<Vec<Lit>> for MapSol {
+	fn into(self) -> Vec<Lit> {
+		let vars = self.0.keys().cloned().sorted().collect_vec();
 		if self.0.is_empty() {
-			Ok(vec![])
-		} else if self.0.keys().min().unwrap() == &Var::from(1)
-			&& self
-				.0
-				.keys()
+			vec![]
+		} else if vars.first().unwrap() == &Var::from(1)
+			&& vars
+				.iter()
 				.tuple_windows()
 				.all(|(a, b)| &a.next_var().unwrap() == b)
 		{
-			Ok(self
-				.0
-				.keys()
-				.sorted()
+			vars.into_iter()
 				.map(|k| {
-					let lit = Lit::from(*k);
+					let lit = Lit::from(k);
 					if self.value(lit).unwrap() {
 						lit
 					} else {
 						!lit
 					}
 				})
-				.collect())
+				.collect()
 		} else {
-			Err(())
+			panic!("try_from impl not working, for now panic on: {self:?}")
 		}
 	}
 }
