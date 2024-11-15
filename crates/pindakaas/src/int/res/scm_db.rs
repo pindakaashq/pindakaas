@@ -1,4 +1,3 @@
-// @generated
 use crate::Coeff;
 #[derive(Debug, Clone)]
 pub(crate) struct ScmNode {
