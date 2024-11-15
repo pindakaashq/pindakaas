@@ -1,4 +1,4 @@
-#![cfg_attr(any(), rustfmt::skip)]
+// @generated
 use crate::Coeff;
 #[derive(Debug, Clone)]
 pub(crate) struct ScmNode {
