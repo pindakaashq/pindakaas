@@ -57,7 +57,7 @@ pub trait Solver: ClauseDatabase {
 
 	fn add_cnf(&mut self, cnf: Cnf) {
 		for cl in cnf.iter() {
-			self.add_clause(cl.into_iter().cloned()).unwrap();
+			self.add_clause(cl.iter().cloned()).unwrap();
 		}
 	}
 }
