@@ -80,29 +80,30 @@ impl From<Vec<Lit>> for MapSol {
 // 	}
 // }
 
-impl Into<Vec<Lit>> for MapSol {
-	fn into(self) -> Vec<Lit> {
-		let vars = self.0.keys().cloned().sorted().collect_vec();
-		if self.0.is_empty() {
-			vec![]
+impl TryFrom<MapSol> for Vec<Lit> {
+    type Error = ();
+	fn try_from(v: MapSol) -> Result<Self, Self::Error> {
+		let vars = v.0.keys().cloned().sorted().collect_vec();
+		if v.0.is_empty() {
+			Ok(vec![])
 		} else if vars.first().unwrap() == &Var::from(1)
 			&& vars
 				.iter()
 				.tuple_windows()
 				.all(|(a, b)| &a.next_var().unwrap() == b)
 		{
-			vars.into_iter()
+			Ok(vars.into_iter()
 				.map(|k| {
 					let lit = Lit::from(k);
-					if self.value(lit).unwrap() {
+					if v.value(lit).unwrap() {
 						lit
 					} else {
 						!lit
 					}
 				})
-				.collect()
+				.collect())
 		} else {
-			panic!("try_from impl not working, for now panic on: {self:?}")
+                    Err(())
 		}
 	}
 }

@@ -172,7 +172,7 @@ mod tests {
 		let solns: Vec<Vec<Lit>> = slv
 			.solve_all(&vars.into_iter().collect_vec())
 			.into_iter()
-			.map(|sol| sol.into())
+			.map(|sol| sol.try_into().unwrap())
 			.sorted()
 			.collect_vec();
 		assert_eq!(
