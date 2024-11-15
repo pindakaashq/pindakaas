@@ -169,25 +169,11 @@ mod tests {
 			PropagatingSolver::add_observed_var(&mut slv, v)
 		}
 
-		let mut solns: Vec<Vec<Lit>> = Vec::new();
-		let push_sol = |model: &CadicalSol, solns: &mut Vec<Vec<Lit>>| {
-			let sol: Vec<Lit> = vars
-				.clone()
-				.map(|v| {
-					if model.value(v.into()).unwrap() {
-						v.into()
-					} else {
-						!v
-					}
-				})
-				.collect_vec();
-			solns.push(sol);
-		};
-		while slv.solve(|model| push_sol(model, &mut solns)) == SolveResult::Sat {
-			slv.add_clause(solns.last().unwrap().iter().map(|l| !l))
-				.unwrap()
-		}
-		solns.sort();
+		let solns: Vec<Vec<Lit>> = slv
+			.solve_all(vars)
+			.into_iter()
+			.map(|sol| Vec::try_from(sol).unwrap())
+			.sorted();
 		assert_eq!(
 			solns,
 			vec![

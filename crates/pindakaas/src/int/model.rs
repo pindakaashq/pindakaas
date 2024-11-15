@@ -596,18 +596,16 @@ Actual assignments:
 }
 
 #[cfg(test)]
+#[cfg(feature = "cadical")]
 mod tests {
 	use super::*;
 	use crate::{helpers::tests::assert_ok, Cnf, Lin, Model};
 
+	use crate::solver::cadical::Cadical;
+	use crate::solver::Solver;
+	use crate::{int::decompose::LinDecomposer, Format};
 	#[cfg(feature = "trace")]
 	use traced_test::test;
-
-	use crate::{
-		helpers::tests::TestDB,
-		int::{assignment::MapSol, decompose::LinDecomposer},
-		Format,
-	};
 
 	use itertools::{iproduct, Itertools};
 	use std::sync::LazyLock;
@@ -918,7 +916,7 @@ mod tests {
 		model: &Model,
 		expected_assignments: Option<&Vec<Assignment>>,
 	) {
-		let mut db = TestDB::new(0);
+		let mut slv = Cadical::default();
 
 		let principal_vars = decomposition
 			.vars()
@@ -926,7 +924,7 @@ mod tests {
 			.filter(|x| x.borrow().id.0 <= model.num_var)
 			.map(|x| {
 				// if x.borrow().e.is_some() {
-				x.borrow_mut().encode(&mut db).unwrap();
+				x.borrow_mut().encode(&mut slv).unwrap();
 				// }
 				(x.borrow().id, x.clone())
 			})
@@ -935,7 +933,7 @@ mod tests {
 
 		// encode and solve
 		let lit_assignments = decomposition
-			.encode_internal(&mut db, false)
+			.encode_internal(&mut slv, false)
 			.map(|_| {
 				let output = if *CHECK_CONSTRAINTS || *SHOW_AUX {
 					decomposition.lits()
@@ -946,11 +944,7 @@ mod tests {
 						.collect()
 				};
 
-				db.solve(Some(output))
-					.into_iter()
-					.sorted()
-					.map(MapSol::from)
-					.collect()
+				slv.solve_all(&output.into_iter().collect::<Vec<_>>())
 			})
 			.unwrap_or_else(|_| {
 				println!("Warning: encoding decomposition lead to UNSAT");

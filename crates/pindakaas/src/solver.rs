@@ -6,7 +6,8 @@ pub mod intel_sat;
 pub mod kissat;
 #[cfg(feature = "splr")]
 pub mod splr;
-
+use crate::MapSol;
+use itertools::Itertools;
 pub mod libloading;
 
 #[cfg(feature = "ipasir-up")]
@@ -26,6 +27,32 @@ pub trait Solver: ClauseDatabase {
 	/// If the search is interrupted (see [`set_terminate_callback`]) the function
 	/// returns unknown
 	fn solve<SolCb: FnOnce(&Self::ValueFn)>(&mut self, on_sol: SolCb) -> SolveResult;
+
+	/// Solve for all solutions
+	fn solve_all(&mut self, output: &[Var]) -> Vec<MapSol> {
+		// TODO update this interface to give sols one-by-one and return Valuation
+		let mut solns = Vec::new();
+		let push_sol = |model: &Self::ValueFn, solns: &mut Vec<Vec<Lit>>| {
+			solns.push(
+				output
+					.iter()
+					.cloned()
+					.map(|v| {
+						if model.value(v.into()).unwrap() {
+							v.into()
+						} else {
+							!v
+						}
+					})
+					.collect_vec(),
+			);
+		};
+		while self.solve(|model| push_sol(model, &mut solns)) == SolveResult::Sat {
+			self.add_clause(solns.last().unwrap().iter().map(|l| !l))
+				.unwrap()
+		}
+		solns.into_iter().map(MapSol::from).collect()
+	}
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]

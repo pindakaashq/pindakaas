@@ -419,7 +419,6 @@ impl Lin {
 				Ok(())
 			}
 			LinCase::Rca(x, y, z) => {
-				assert!(z.c.is_negative());
 				assert!(
 					x.lb() + y.lb() <= -z.ub(),
 					"LBs for addition not matching: {self}"
