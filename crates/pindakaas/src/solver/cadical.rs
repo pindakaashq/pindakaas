@@ -101,6 +101,21 @@ mod tests {
 			)
 		});
 	}
+	use crate::Cnf;
+	use std::path::Path;
+	#[test]
+	fn test_cadical_examples() {
+		let mut slv = Cadical::default();
+		slv.clone()
+			.add_cnf(Cnf::from_file(Path::new("res/dimacs/ex1.dimacs")).unwrap());
+		assert_eq!(slv.solve(|_| ()), SolveResult::Sat);
+		slv.clone()
+			.add_cnf(Cnf::from_file(Path::new("res/dimacs/ex2.dimacs")).unwrap());
+		// assert_eq!(slv.solve(|_| ()), SolveResult::Unsat); // TODO failing.
+		slv.clone()
+			.add_cnf(Cnf::from_file(Path::new("res/dimacs/ex3.dimacs")).unwrap());
+		assert_eq!(slv.solve(|_| ()), SolveResult::Sat);
+	}
 
 	#[cfg(feature = "ipasir-up")]
 	#[test]

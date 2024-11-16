@@ -397,6 +397,8 @@ impl Cnf {
 		write!(file, "{self}")
 	}
 
+	/// Iterate over variables in the actual formula (might be non-contiguous and exceed vars added)
+	// TODO uphold consistency?
 	pub fn vars(&self) -> impl Iterator<Item = Var> {
 		self.iter()
 			.flat_map(|cl| cl.iter().map(|lit| lit.var()))
