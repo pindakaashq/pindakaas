@@ -299,7 +299,7 @@ impl VarFactory {
 
 	pub fn emited_vars(&self) -> usize {
 		if let Some(x) = self.next_var {
-			x.0.get() as usize
+			x.0.get() as usize - 1
 		} else {
 			Self::MAX_VARS
 		}
