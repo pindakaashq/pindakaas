@@ -579,6 +579,7 @@ impl Lin {
 		k: Coeff,
 		_depth: usize,
 	) -> (Option<Coeff>, Vec<Vec<Lit>>) {
+		const LOOKAHEAD: bool = true;
 		if let Some((head, tail)) = terms.split_first() {
 			let up = head.c.is_positive() == (cmp == &Comparator::GreaterEq);
 			if tail.is_empty() {
@@ -667,8 +668,13 @@ impl Lin {
 									return Some(vec![]); // some consequent -> skip clause
 							}
 
-							last_k = c;
-							last_a = Some(implies);
+                                                        if LOOKAHEAD {
+                                                            last_k = c;
+                                                            last_a = Some(implies);
+                                                        } else { // disable feature
+                                                            last_k = None;
+                                                            last_a = None;
+                                                        }
 
 							Some(cnf)
 						})
@@ -719,5 +725,39 @@ impl Lin {
 		} else {
 			Ok(con)
 		}
+	}
+}
+
+#[cfg(test)]
+#[cfg(feature = "cadical")]
+#[allow(unused_imports)]
+mod tests {
+
+	use crate::helpers::tests::lits;
+	use crate::helpers::tests::TestDB;
+	use crate::Format;
+	use crate::Lit;
+	use crate::{Cnf, Lin, Model};
+
+	#[cfg(feature = "trace")]
+	use traced_test::test;
+	#[test]
+	fn test_enc_rec_lookahead() {
+		let mut m = Model::from_string(
+			r"Subject To
+c0: + 1 x + 1 y - z <= 0
+doms
+  x in 0,2
+  y in 0,3
+  z in 0,5
+End
+",
+			Format::Lp,
+		)
+		.unwrap();
+		// LOOKAHEAD feature removes redundant x>=2/\y>=3->z>=5 (-1 -2 3), since we have x>=2->x>=0 (tautological) and x>=0/\y>=3->z>=5 (-2 3)
+		let mut db = TestDB::new(0).expect_clauses(vec![lits![-2, 3], lits![-1, 3]]);
+		m.encode_pub(&mut db).unwrap();
+		db.check_complete()
 	}
 }

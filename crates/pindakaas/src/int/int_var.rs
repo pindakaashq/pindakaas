@@ -82,6 +82,7 @@ impl IntVar {
 			.unwrap_or(Ok(()))
 	}
 
+	/// Returns (d,cnf,c) where cnf encodes x>=d, which implies up to x>=c,x>=c+1,..,x>=d
 	pub fn ineqs(&self, up: bool) -> Vec<(Coeff, Vec<Lit>, Coeff)> {
 		let ineqs = |es: Vec<Vec<Lit>>, dom: Dom, up: bool| {
 			// go through False lit first

@@ -801,7 +801,7 @@ mod tests {
 		{
 			let cnf = Cnf::from_file(&f).unwrap();
 			assert_eq!(cnf.iter().collect_vec(), exp);
-                        // TODO test out as well
+			// TODO test out as well
 			// println!("{cnf} \n {}", std::fs::read_to_string(&f).unwrap());
 			// assert_eq!(
 			// 	String::from(format!("{cnf}")), // TODO display might not be DIMACS in the future

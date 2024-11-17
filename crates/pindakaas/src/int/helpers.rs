@@ -153,10 +153,10 @@ End
 			Format::Opb
 		};
 
-		Model::from_string(s, format)
+		Model::from_string(&s, format)
 	}
 
-	pub fn from_string(s: String, format: Format) -> Result<Self, String> {
+	pub fn from_string(s: &str, format: Format) -> Result<Self, String> {
 		type ParseLinExp<Coeff> = (Vec<String>, Vec<Coeff>);
 
 		#[derive(PartialEq)]
@@ -562,12 +562,9 @@ mod tests {
 	#[test]
 	fn test_from_opb() {
 		let mut model = Model::from_string(
-			String::from(
-				"
-* comment
+			"* comment
 +2 x1 +3 x2 +5 x3 <= 6 ;
 ",
-			),
 			Format::Opb,
 		)
 		.unwrap();
