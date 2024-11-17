@@ -616,9 +616,6 @@ mod tests {
 		}};
 	}
 
-	/// Generate solutions for expected models
-	static BRUTE_FORCE_SOLVE: LazyLock<bool> =
-		LazyLock::new(|| std::env::args().contains(&String::from("--brute-force-solve")));
 	/// Which uniform (for now) integer encoding specifications to test
 	static VAR_ENCS: LazyLock<Vec<IntVarEnc>> = LazyLock::new(|| {
 		std::env::args()
@@ -630,6 +627,8 @@ mod tests {
 			.collect()
 	});
 
+	/// Generate solutions for expected models
+	static BRUTE_FORCE_SOLVE: LazyLock<bool> = has_bool_flag!("--brute-force-solve");
 	/// Check each constraint of the decomposition individually (unstable)
 	static CHECK_CONSTRAINTS: LazyLock<bool> = has_bool_flag!("--check-constraints");
 	/// Show assignments to auxiliary variables as well (shows more detail, but also more (symmetrical) solutions)
@@ -812,7 +811,7 @@ mod tests {
 			.flatten();
 
 		if Some(vec![]) == expected_assignments {
-			panic!("WARNING: brute force solver found model UNSAT");
+			println!("WARNING: brute force solver found model UNSAT");
 		}
 
 		/// Check a specific config or decomposition
@@ -1173,6 +1172,13 @@ End
 ",
 			None,
 		);
+	}
+
+	#[test]
+	fn test_model_by_lps() {
+		for lp in std::fs::read_dir("./src/int/res/lps").unwrap() {
+			test_lp_for_configs(&std::fs::read_to_string(lp.unwrap().path()).unwrap(), None);
+		}
 	}
 
 	// TODO this test needs to be profiled as it takes very long for unknown reason!

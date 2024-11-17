@@ -490,7 +490,7 @@ impl Lin {
 					"Non-order: {self}"
 				);
 
-				const SORT_BY_COEF: bool = true;
+				const SORT_BY_COEF: bool = false;
 				let terms = if SORT_BY_COEF {
 					self.exp
 						.terms
@@ -507,6 +507,9 @@ impl Lin {
 					log!("{}", display_cnf(&cnf));
 
 					for c in cnf {
+						if c.is_empty() {
+							return Err(Unsatisfiable);
+						}
 						emit_clause!(db, c)?;
 					}
 					Ok(())
