@@ -528,8 +528,7 @@ impl Display for Cnf {
 		writeln!(f, "p cnf {num_var} {num_clauses}")?;
 		let mut start = 0;
 		for size in self.size.iter() {
-			let cl = self.lits.iter().skip(start).take(*size);
-			for lit in cl {
+			for lit in self.lits.iter().skip(start).take(*size).map(|l| l.0.get()) {
 				write!(f, "{lit} ")?
 			}
 			writeln!(f, "0")?;
@@ -791,26 +790,29 @@ mod tests {
 
 	#[test]
 	fn cnf_from_file_test() {
-		assert_eq!(
-			Cnf::from_file(Path::new("res/dimacs/ex1.dimacs"))
-				.unwrap()
-				.iter()
-				.collect_vec(),
-			vec![lits![1, -2]],
-		);
-		assert_eq!(
-			Cnf::from_file(Path::new("res/dimacs/ex2.dimacs"))
-				.unwrap()
-				.iter()
-				.collect_vec(),
-			vec![lits![], lits![]],
-		);
-		assert_eq!(
-			Cnf::from_file(Path::new("res/dimacs/ex3.dimacs"))
-				.unwrap()
-				.iter()
-				.collect_vec(),
-			Vec::<Vec<Lit>>::default(),
-		);
+		for (f, exp) in std::fs::read_dir("res/dimacs")
+			.unwrap()
+			.map(|f| f.unwrap().path())
+			.collect_vec()
+			.into_iter()
+			.sorted()
+			.into_iter()
+			.zip([vec![lits![1, -2]], vec![lits![], lits![]], vec![]])
+		{
+			let cnf = Cnf::from_file(&f).unwrap();
+			assert_eq!(cnf.iter().collect_vec(), exp);
+                        // TODO test out as well
+			// println!("{cnf} \n {}", std::fs::read_to_string(&f).unwrap());
+			// assert_eq!(
+			// 	String::from(format!("{cnf}")), // TODO display might not be DIMACS in the future
+			// 	std::fs::read_to_string(&f)
+			// 		.unwrap()
+			// 		.lines()
+			// 		.filter(|l| !l.starts_with("c"))
+			// 		.filter(|l| !l.is_empty())
+			// 		// .chain(["\n"])
+			// 		.join("\n")
+			// );
+		}
 	}
 }
