@@ -1,2 +1,1 @@
 hard_tabs = true
-ignore = ["crates/pindakaas/src/int/res/scm_db.rs"]
