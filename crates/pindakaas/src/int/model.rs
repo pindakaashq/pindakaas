@@ -174,6 +174,19 @@ impl Default for Model {
 
 impl Model {
 	/// New auxiliary variable (meaning it could be inconsistent, or already be encoded)
+	pub(crate) fn var_by_lbl(&self, lbl: &str) -> Option<IntVarRef> {
+		self.vars()
+			.find(|&x| {
+				x.borrow()
+					.lbl
+					.as_ref()
+					.map(|l| l == lbl)
+					.unwrap_or_default()
+			})
+			.cloned()
+	}
+
+	/// New auxiliary variable (meaning it could be inconsistent, or already be encoded)
 	pub(crate) fn new_aux_var(
 		&mut self,
 		dom: Dom,
@@ -263,7 +276,6 @@ impl Model {
 	pub fn encode_vars<DB: ClauseDatabase>(&mut self, db: &mut DB) -> Result<(), Unsatisfiable> {
 		// Encode (or retrieve encoded) variables (in order of id so lits line up more nicely with variable order)
 		self.vars()
-			.iter()
 			.sorted_by_key(|var| var.borrow().id)
 			.try_for_each(|var| {
 				var.borrow_mut().decide_encoding(self.config.cutoff);
@@ -316,20 +328,17 @@ impl Model {
 	}
 
 	/// Collect and return all variables (iterates over all constraints)
-	pub fn vars(&self) -> Vec<IntVarRef> {
+	pub fn vars(&self) -> impl Iterator<Item = &IntVarRef> {
 		self.cons
 			.iter()
 			.flat_map(|con| con.exp.terms.iter().map(|term| &term.x)) // don't use con.vars() since this will do redundant canonicalizing
 			.unique_by(|x| x.borrow().id)
-			.cloned()
-			.collect()
 	}
 
 	/// Assign `sol` to model to yield its integer `Assignment`
 	pub fn assign<F: Valuation + ?Sized>(&self, sol: &F) -> Result<Assignment, CheckError> {
 		Ok(Assignment(
 			self.vars()
-				.iter()
 				.map(|x| {
 					x.borrow()
 						.assign(sol)
@@ -349,7 +358,7 @@ impl Model {
 		&self,
 		max_var: Option<IntVarId>,
 	) -> Result<Vec<Assignment>, ()> {
-		let vars = self.vars();
+		let vars = self.vars().cloned().collect_vec();
 		let max_var = max_var.unwrap_or(IntVarId(self.num_var));
 
 		/// Limit the search space for solution generation
@@ -542,7 +551,7 @@ Actual assignments:
 	}
 
 	pub fn lits(&self) -> BTreeSet<Var> {
-		self.vars().iter().flat_map(|x| x.borrow().lits()).collect()
+		self.vars().flat_map(|x| x.borrow().lits()).collect()
 	}
 
 	/// Configure model with `config`
@@ -556,7 +565,6 @@ Actual assignments:
 		// pff; cannot call deep_clone recursively on all the constraints, as it will deep_clone recurring variables multiple times
 		let vars = self
 			.vars()
-			.iter()
 			.map(|x| (x.borrow().id, Rc::new(RefCell::new((*x.borrow()).clone()))))
 			.collect::<HashMap<_, _>>();
 		#[allow(clippy::needless_update)]
@@ -848,8 +856,7 @@ mod tests {
 				// 	check_decomposition(&model, &lin_decomp, expected_assignments.as_ref());
 				// }
 
-				let var_encs_gen =
-					expand_var_encs(&VAR_ENCS, lin_decomp.vars().into_iter().collect());
+				let var_encs_gen = expand_var_encs(&VAR_ENCS, lin_decomp.vars().cloned().collect());
 				if let Some(j) = CHECK_DECOMPOSITION_I {
 					vec![(
 						j,
