@@ -744,19 +744,26 @@ mod tests {
 	#[test]
 	fn test_enc_rec_lookahead() {
 		let mut m = Model::from_string(
-			r"Subject To
-c0: + 1 x + 1 y - z <= 0
-doms
-  x in 0,2
-  y in 0,3
-  z in 0,5
-End
-",
+			&std::fs::read_to_string("./src/int/res/lps/enc_rec_lookahead.lp").unwrap(),
 			Format::Lp,
 		)
 		.unwrap();
 		// LOOKAHEAD feature removes redundant x>=2/\y>=3->z>=5 (-1 -2 3), since we have x>=2->x>=0 (tautological) and x>=0/\y>=3->z>=5 (-2 3)
-		let mut db = TestDB::new(0).expect_clauses(vec![lits![-2, 3], lits![-1, 3]]);
+		let mut db = TestDB::new(0);
+		db = db.expect_clauses(vec![lits![-2, 3], lits![-1, 3]]);
+		m.encode_pub(&mut db).unwrap();
+		db.check_complete()
+	}
+
+	#[test]
+	fn test_enc_rec_bdd_style_view() {
+		let mut m = Model::from_string(
+			&std::fs::read_to_string("./src/int/res/lps/bdd_style_view.lp").unwrap(),
+			Format::Lp,
+		)
+		.unwrap();
+		let mut db = TestDB::new(0);
+		// db = db.expect_clauses(vec![lits![-2, 3], lits![-1, 3]]);
 		m.encode_pub(&mut db).unwrap();
 		db.check_complete()
 	}

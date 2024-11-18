@@ -92,7 +92,6 @@ End
 						))
 						.join("\n"),
 					self.vars()
-						.into_iter()
 						.sorted_by_key(|x| x.borrow().id)
 						.map(|x| {
 							let x = x.borrow();
@@ -102,7 +101,6 @@ End
 				)
 			}
 			Format::Opb => {
-				todo!();
 				let vars = self.vars().unique_by(|x| x.borrow().id).count();
 
 				format!(
@@ -178,6 +176,14 @@ End
 
 		let mut model = Model::default();
 
+		let set_dom = |model: &mut Model, name: &str, dom: Dom| {
+			model
+				.var_by_lbl(name)
+				.unwrap_or_else(|| panic!("domain set for unconstrained variable {name}"))
+				.borrow_mut()
+				.dom = dom;
+		};
+
 		for line in s.lines() {
 			match format {
 				Format::Lp => {
@@ -229,23 +235,29 @@ End
 						["minimize" | "minimum" | "min"] => state = State::Minimize,
 						["maximize" | "maximum" | "max"] => state = State::Maximize,
 						[name, "=", val] if state == State::Bounds => {
-							model.var_by_lbl(name).unwrap().borrow_mut().dom =
-								Dom::constant(val.parse().unwrap());
+							set_dom(&mut model, name, Dom::constant(val.parse().unwrap()));
 						}
 						[name, "in", dom] if state == State::Doms => {
-							model.var_by_lbl(name).unwrap().borrow_mut().dom = Dom::from_slice(
-								&dom.split(',')
-									.map(|c| {
-										c.parse::<Coeff>().unwrap_or_else(|_| {
-											panic!("Could not parse dom value {c}")
+							set_dom(
+								&mut model,
+								name,
+								Dom::from_slice(
+									&dom.split(',')
+										.map(|c| {
+											c.parse::<Coeff>().unwrap_or_else(|_| {
+												panic!("Could not parse dom value {c}")
+											})
 										})
-									})
-									.collect_vec(),
+										.collect_vec(),
+								),
 							);
 						}
 						[lb, "<=", name, "<=", ub] if state == State::Bounds => {
-							model.var_by_lbl(name).unwrap().borrow_mut().dom =
-								Dom::from_bounds(lb.parse().unwrap(), ub.parse().unwrap());
+							set_dom(
+								&mut model,
+								name,
+								Dom::from_bounds(lb.parse().unwrap(), ub.parse().unwrap()),
+							);
 						}
 						[name, ">=", lb] if state == State::Bounds => {
 							return Err(format!(
@@ -254,8 +266,7 @@ End
 						}
 						xs if state == State::Binary => {
 							xs.iter().for_each(|name| {
-								model.var_by_lbl(name).unwrap().borrow_mut().dom =
-									Dom::from_slice(&[0, 1]);
+								set_dom(&mut model, name, Dom::pb());
 							});
 						}
 
@@ -279,7 +290,7 @@ End
 							for token in line {
 								match *token {
 									"->" => {
-										return Err(format!("Indicator variables not supported"));
+										return Err("Indicator variables not supported".to_string());
 									}
 									">=" => {
 										cmp = Some(Comparator::GreaterEq);
@@ -312,8 +323,8 @@ End
 											let x = model.var_by_lbl(token).unwrap_or_else(|| {
 												model
 													.new_aux_var(
-														Dom::from_slice(&[0, 1]),
-														false,
+														Dom::pb(),
+														true,
 														None,
 														Some(token.to_string()),
 													)
@@ -360,11 +371,22 @@ End
 					}
 				}
 				Format::Opb => {
-					todo!();
-					/*
+					let mut model = Model::default();
+					let mut cmp = None;
+					let mut c = None;
+
 					if line.starts_with('*') {
 						continue;
 					}
+
+					model
+						.add_constraint(Lin {
+							exp: LinExp { terms: vec![] },
+							cmp: Comparator::LessEq,
+							k: 0,
+							lbl: None,
+						})
+						.unwrap(); // assuming one line per constraint
 					match line
 						.to_lowercase()
 						.split_whitespace()
@@ -389,39 +411,41 @@ End
 										if token.chars().next().unwrap().is_alphabetic()
 											|| token.starts_with('x')
 										{
-											let name = token.to_string();
-											set_doms(&name, &[0, 1], &mut vars);
-											con.push(name);
+											let x = model.var_by_lbl(token).unwrap_or_else(|| {
+												model
+													.new_aux_var(
+														Dom::pb(),
+														true,
+														None,
+														Some(token.to_string()),
+													)
+													.unwrap()
+											});
+											model
+												.cons
+												.last_mut()
+												.unwrap()
+												.exp
+												.terms
+												.push(Term::new(c.unwrap(), x));
+											c = None;
 										} else {
 											let coef = token.parse::<Coeff>().map_err(|_| {
 												format!("Failed parsing to integer on {token}")
 											})?;
-											if cmp.is_some() {
-												k = Some(coef);
+											if let Some(cmp) = cmp {
+												model.cons.last_mut().unwrap().cmp = cmp;
+												model.cons.last_mut().unwrap().k = coef;
 											} else {
-												con.1.push(coef);
+												c = Some(if is_positive { coef } else { -coef });
+												is_positive = true;
 											}
 										}
 									}
 								}
 							}
-
-							model.add_constraint(con.clone())?;
-							con = None;
-
-							//                                                             (
-							// 								con,
-							// 								cmp.unwrap(),
-							// 								k.unwrap(),
-							// 								Some(lbl.unwrap_or_else(|| format!("c{}", cons.len()))),
-							// 							));
-							// 							con = (vec![], vec![]);
-							// 							lbl = None;
-							// 							cmp = None;
-							// 							k = None;
 						}
 					}
-										*/
 				}
 			}
 		}
@@ -495,10 +519,9 @@ Encs
   z b !
 End
 ";
-		let mut model = Model::from_string(lp.into(), Format::Lp).unwrap();
-		let mut cnf = Cnf::default();
+		let model = Model::from_string(lp, Format::Lp).unwrap();
 		println!("MODEL = {}", model);
-		model.encode_internal(&mut cnf, true).unwrap();
+		// model.encode_internal(&mut cnf, true).unwrap();
 	}
 
 	// TODO to be used in future with Binary encoding

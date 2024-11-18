@@ -714,7 +714,7 @@ mod tests {
 
 	fn test_lp_for_configs(lp: &str, configs: Option<Vec<ModelConfig>>) {
 		test_model(
-			Model::from_string(lp.into(), Format::Lp).unwrap(),
+			Model::from_string(lp, Format::Lp).unwrap(),
 			Some(configs.unwrap_or_else(get_model_configs)),
 		)
 	}
@@ -926,7 +926,6 @@ mod tests {
 
 		let principal_vars = decomposition
 			.vars()
-			.into_iter()
 			.filter(|x| x.borrow().id.0 <= model.num_var)
 			.map(|x| {
 				// if x.borrow().e.is_some() {
@@ -972,7 +971,7 @@ mod tests {
 		} else {
 			// create a checker model with the constraints of the principal model and the encodings of the encoded decomposition
 			let principal = model.deep_clone();
-			principal.vars().into_iter().for_each(|x| {
+			principal.vars().for_each(|x| {
 				let id = x.borrow().id;
 				x.borrow_mut().e = principal_vars[&id].borrow().e.clone();
 			});
@@ -1520,7 +1519,6 @@ c0: + 2 x1 + 3 x2 <= 6
 Binary
 x1
 x2
-x3
 End
 ",
 			None,

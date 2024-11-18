@@ -7,16 +7,22 @@ use crate::Coeff;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Dom {
-	pub(crate) ranges: Vec<(Coeff, Coeff)>, // TODO [?] better to use RangeInclusive rather than tuple?
+	pub ranges: Vec<(Coeff, Coeff)>, // TODO [?] better to use RangeInclusive rather than tuple?
 }
 
 impl Dom {
 	pub fn constant(d: Coeff) -> Self {
 		Self::from_slice(&[d])
 	}
+
 	pub fn is_constant(&self) -> bool {
 		self.size() == 1
 	}
+
+	pub fn pb() -> Self {
+		Self::from_slice(&[0, 1])
+	}
+
 	pub fn from_slice(ds: &[Coeff]) -> Self {
 		let mut ds = ds.iter();
 		if let Some(&k) = ds.next() {
@@ -308,7 +314,7 @@ mod tests {
 
 	#[test]
 	fn test_ineq() {
-		let dom = Dom::from_slice(&[0, 1]);
+		let dom = Dom::pb();
 		assert_eq!(dom.geq(-1), Some((0, 0)));
 		assert_eq!(dom.geq(0), Some((0, 0)));
 		assert_eq!(dom.geq(1), Some((1, 1)));

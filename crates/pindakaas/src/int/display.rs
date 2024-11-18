@@ -141,7 +141,7 @@ impl fmt::Display for IntVar {
 				Some(IntVarEnc::Ord(_)) => ":O".to_string(),
 				None => String::new(),
 			},
-			self.add_consistency.then_some("!").unwrap_or_default(),
+			if self.add_consistency { "" } else { "!" },
 			self.dom,
 			if SHOW_LITS {
 				format!("[{}]", self.lits().iter().sorted().join(", "))

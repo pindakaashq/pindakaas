@@ -137,7 +137,6 @@ impl Decompose for EncSpecDecomposer {
 	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable> {
 		model
 			.vars()
-			.into_iter()
 			.map(|x| {
 				if let Some(spec) = self.spec.as_ref() {
 					// only encode var which are specified

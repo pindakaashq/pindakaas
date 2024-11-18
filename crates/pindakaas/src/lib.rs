@@ -796,7 +796,6 @@ mod tests {
 			.collect_vec()
 			.into_iter()
 			.sorted()
-			.into_iter()
 			.zip([vec![lits![1, -2]], vec![lits![], lits![]], vec![]])
 		{
 			let cnf = Cnf::from_file(&f).unwrap();
