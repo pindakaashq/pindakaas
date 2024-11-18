@@ -345,7 +345,7 @@ End
 											})?;
 											if cmp.is_some() {
 												model.cons.last_mut().unwrap().cmp = cmp.unwrap();
-                                                                                                cmp = None;
+												cmp = None;
 												model.cons.last_mut().unwrap().k = coef;
 											} else {
 												c = Some(if is_positive { coef } else { -coef });

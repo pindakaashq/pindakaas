@@ -624,6 +624,16 @@ mod tests {
 		}};
 	}
 
+	macro_rules! get_usize_flag {
+		($flag:expr) => {{
+			LazyLock::new(|| {
+				std::env::args()
+					.find(|x| x == $flag)
+					.map(|x| x.parse().unwrap())
+			})
+		}};
+	}
+
 	/// Which uniform (for now) integer encoding specifications to test
 	static VAR_ENCS: LazyLock<Vec<IntVarEnc>> = LazyLock::new(|| {
 		std::env::args()
@@ -637,10 +647,15 @@ mod tests {
 
 	/// Generate solutions for expected models
 	static BRUTE_FORCE_SOLVE: LazyLock<bool> = has_bool_flag!("--brute-force-solve");
+	/// Check that the decomposition correctly encodes the model
+	static CHECK_DECOMPOSITION: LazyLock<bool> = has_bool_flag!("--check-decomposition");
 	/// Check each constraint of the decomposition individually (unstable)
 	static CHECK_CONSTRAINTS: LazyLock<bool> = has_bool_flag!("--check-constraints");
 	/// Show assignments to auxiliary variables as well (shows more detail, but also more (symmetrical) solutions)
 	static SHOW_AUX: LazyLock<bool> = has_bool_flag!("--show-aux");
+
+	static TEST_CONFIG_I: LazyLock<Option<usize>> = get_usize_flag!("--test-config");
+	static TEST_DECOMP_I: LazyLock<Option<usize>> = get_usize_flag!("--test-decomp");
 
 	#[test]
 	fn model_test() {
@@ -822,19 +837,15 @@ mod tests {
 			println!("WARNING: brute force solver found model UNSAT");
 		}
 
-		/// Check a specific config or decomposition
-		const CHECK_CONFIG_I: Option<usize> = None;
-		const CHECK_DECOMPOSITION_I: Option<usize> = None;
-
 		for (i, config) in {
 			let configs = configs.unwrap_or_else(|| vec![model.config.clone()]);
 
-			if let Some(i) = CHECK_CONFIG_I {
+			if let Some(i) = *TEST_CONFIG_I {
 				vec![(
 					i,
 					configs
 						.get(i)
-						.expect("CHECK_CONFIG_I is not set to None")
+						.expect("TEST_CONFIG_I is not set to None")
 						.clone(),
 				)]
 			} else {
@@ -843,7 +854,6 @@ mod tests {
 		} {
 			let model = model.deep_clone().with_config(config.clone());
 
-			const CHECK_DECOMPOSITION: bool = true;
 			for (j, var_encs) in {
 				let lin_decomp = model
 					.clone()
@@ -857,12 +867,12 @@ mod tests {
 				// }
 
 				let var_encs_gen = expand_var_encs(&VAR_ENCS, lin_decomp.vars().cloned().collect());
-				if let Some(j) = CHECK_DECOMPOSITION_I {
+				if let Some(j) = *TEST_DECOMP_I {
 					vec![(
 						j,
 						var_encs_gen
 							.get(j)
-							.expect("CHECK_DECOMPOSITION_I is not set to None")
+							.expect("TEST_DECOMP_I is not set to None")
 							.clone(),
 					)]
 				} else if var_encs_gen.is_empty() {
@@ -880,7 +890,7 @@ mod tests {
 
 				println!("decomposition = {}", decomposition);
 
-				if CHECK_DECOMPOSITION {
+				if *CHECK_DECOMPOSITION {
 					check_decomposition(&model, &decomposition, expected_assignments.as_ref());
 				}
 
