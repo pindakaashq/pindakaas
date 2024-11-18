@@ -1177,17 +1177,22 @@ End
 		);
 	}
 
+	macro_rules! test_lp {
+		($lp:expr) => {
+			test_lp_for_configs(
+				&std::fs::read_to_string(std::path::Path::new(&format!(
+					"./src/int/res/lps/{}.lp",
+					$lp
+				)))
+				.unwrap(),
+				None,
+			);
+		};
+	}
+
 	#[test]
-	fn test_int_lin_le_1() {
-		test_lp_for_configs(
-			r"
-Subject To
-c0: + 2 x1 + 3 x2 + 5 x3 <= 6
-\ c0: + 2 x1 + 3 x2 + 5 x3 + 5 x4 + 7 x5 + 8 x6 <= 20
-End
-",
-			None,
-		);
+	fn le_1() {
+		test_lp!("le_1");
 	}
 
 	#[test]
