@@ -343,8 +343,9 @@ End
 											let coef = token.parse::<Coeff>().map_err(|_| {
 												format!("Failed parsing to integer on {token}")
 											})?;
-											if let Some(cmp) = cmp {
-												model.cons.last_mut().unwrap().cmp = cmp;
+											if cmp.is_some() {
+												model.cons.last_mut().unwrap().cmp = cmp.unwrap();
+                                                                                                cmp = None;
 												model.cons.last_mut().unwrap().k = coef;
 											} else {
 												c = Some(if is_positive { coef } else { -coef });
@@ -507,6 +508,7 @@ mod tests {
 \ comment
 Subject To
   c1: - x + 3 y + 5 z <= 10
+  c2: 3 x + 5 y >= 5
 Binary
   x
 Doms
