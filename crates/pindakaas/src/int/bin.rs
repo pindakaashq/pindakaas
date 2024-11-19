@@ -371,6 +371,7 @@ impl BinEnc {
 			.collect()
 	}
 
+	// TODO u32 -> usize
 	/// Number of bits in the encoding
 	pub(crate) fn bits(&self) -> u32 {
 		self.x.len() as u32
@@ -461,7 +462,12 @@ impl BinEnc {
 
 impl std::fmt::Display for BinEnc {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		write!(f, "[{}]", self.x.iter().rev().join(", "))
+		write!(
+			f,
+			"({}){}",
+			self.x.iter().rev().join(""),
+			crate::trace::subscript_number(2).format("")
+		)
 	}
 }
 

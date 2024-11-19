@@ -74,7 +74,7 @@ impl Display for LitOrConst {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			LitOrConst::Const(b) => write!(f, "{}", if *b { "T" } else { "F" }),
-			LitOrConst::Lit(l) => write!(f, "{l:?}"),
+			LitOrConst::Lit(l) => write!(f, "{}", l),
 		}
 	}
 }
