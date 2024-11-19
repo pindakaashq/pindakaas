@@ -327,8 +327,8 @@ pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 	let zs = (0..bits)
 		.map(|i| {
 			let (x, y) = (bit(xs, i), bit(ys, i));
-			let z = xor(db, &[x, y, c], format!("z_{}", i));
-			c = carry(db, &[x, y, c], format!("c_{}", i + 1))?;
+			let z = xor(db, &[x, y, c], format!("z_{}", i)); // sum
+			c = carry(db, &[x, y, c], format!("c_{}", i + 1))?; // carry
 			z
 		})
 		.collect::<Result<Vec<_>>>()?;
@@ -504,6 +504,40 @@ mod tests {
 				lits![1, -2, -3, -4],
 			]
 		);
+	}
+
+	#[test]
+	fn test_xor() {
+		let mut db = TestDB::new(1).expect_solutions(vec![lits![1, -2], lits![-1, -2]]);
+		xor(
+			&mut db,
+			&[
+				LitOrConst::from(Lit::from(1)),
+				LitOrConst::from(Lit::from(1)),
+				LitOrConst::Const(false),
+			],
+			String::from("out"),
+		)
+		.unwrap();
+		db.num_var = 2;
+		db.check_complete();
+	}
+
+	#[test]
+	fn test_sum() {
+		let mut db = TestDB::new(1).expect_solutions(vec![lits![1, 2], lits![-1, -2]]);
+		carry(
+			&mut db,
+			&[
+				LitOrConst::from(Lit::from(1)),
+				LitOrConst::from(Lit::from(1)),
+				LitOrConst::Const(false),
+			],
+			String::from("out"),
+		)
+		.unwrap();
+		db.num_var = 2;
+		db.check_complete();
 	}
 
 	#[test]
