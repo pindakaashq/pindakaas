@@ -1366,6 +1366,11 @@ End
 		test_lp!("ge_1");
 	}
 
+	#[test]
+	fn dev() {
+		test_lp!("dev");
+	}
+
 	// #[test]
 	fn _test_lp_ge_pb_neg_1() {
 		test_lp_for_configs(
