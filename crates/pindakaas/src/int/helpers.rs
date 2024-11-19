@@ -314,7 +314,11 @@ End
 													exp: LinExp { terms: vec![] },
 													cmp: Comparator::LessEq,
 													k: 0,
-													lbl: Some(next_lbl.to_string()),
+													lbl: if next_lbl.is_empty() {
+														None
+													} else {
+														Some(next_lbl.to_string())
+													},
 												})
 												.unwrap();
 										} else if token.chars().next().unwrap().is_alphabetic()

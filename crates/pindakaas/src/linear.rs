@@ -32,7 +32,7 @@ pub(crate) struct PosCoeff(Coeff);
 impl PosCoeff {
 	pub fn new(c: Coeff) -> Self {
 		if c < 0 {
-			panic!("cannot create a PosCoeff with a negative value")
+			panic!("cannot create a PosCoeff from negative value {c}")
 		}
 		Self(c)
 	}
