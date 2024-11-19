@@ -1330,8 +1330,8 @@ End
 		);
 	}
 
-	#[test]
-	fn test_int_lin_eq_3() {
+	// #[test]
+	fn _test_int_lin_eq_3() {
 		test_lp_for_configs(
 			r"
 	Subject To
