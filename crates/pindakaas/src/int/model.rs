@@ -928,6 +928,16 @@ mod tests {
 		}
 	}
 
+	impl IntVar {
+		fn clear_encoding(&mut self) {
+			self.e = match self.e.as_ref() {
+				Some(IntVarEnc::Bin(Some(_))) => Some(IntVarEnc::Bin(None)),
+				Some(IntVarEnc::Ord(Some(_))) => Some(IntVarEnc::Ord(None)),
+				_ => return,
+			};
+		}
+	}
+
 	fn test_decomp(
 		mut decomposition: Model,
 		model: &Model,
@@ -935,17 +945,20 @@ mod tests {
 	) {
 		let mut slv = Cadical::default();
 
+		if *CHECK_CONSTRAINTS {
+			decomposition
+				.vars()
+				.for_each(|x| x.borrow_mut().clear_encoding());
+		}
 		let principal_vars = decomposition
 			.vars()
 			.filter(|x| x.borrow().id.0 <= model.num_var)
 			.map(|x| {
-				// if x.borrow().e.is_some() {
 				x.borrow_mut().encode(&mut slv).unwrap();
-				// }
 				(x.borrow().id, x.clone())
 			})
 			.collect::<HashMap<IntVarId, IntVarRef>>();
-		println!("decomposition = {}", decomposition);
+		println!("decomposition (principal vars encoded) = {}", decomposition);
 
 		// encode and solve
 		let lit_assignments = decomposition
