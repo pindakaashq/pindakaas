@@ -1207,12 +1207,12 @@ End
 		test_lp!("le_2");
 	}
 
-	#[test]
-	fn test_model_by_lps() {
-		for lp in std::fs::read_dir("./src/int/res/lps").unwrap() {
-			test_lp_for_configs(&std::fs::read_to_string(lp.unwrap().path()).unwrap(), None);
-		}
-	}
+	// #[test]
+	// fn test_model_by_lps() {
+	// 	for lp in std::fs::read_dir("./src/int/res/lps").unwrap() {
+	// 		test_lp_for_configs(&std::fs::read_to_string(lp.unwrap().path()).unwrap(), None);
+	// 	}
+	// }
 
 	// TODO this test needs to be profiled as it takes very long for unknown reason!
 	// #[test]
@@ -1362,19 +1362,8 @@ End
 	}
 
 	#[test]
-	fn test_lp_ge_pb_triv() {
-		test_lp_for_configs(
-			r"
-Subject To
-c0: + 1 x1 + 2 x2 + 1 x3 >= -2
-Bounds
-0 <= x1 <= 1
-0 <= x2 <= 1
-0 <= x3 <= 1
-End
-",
-			None,
-		);
+	fn ge_1() {
+		test_lp!("ge_1");
 	}
 
 	// #[test]

@@ -358,7 +358,7 @@ impl Lin {
 				println!("self = {}", self);
 				// assert!(t_x.x.borrow().lb() == t_y.x.borrow().lb());
 
-				let k = -(t_y.ub() - t_x.lb()); // used to make lbs match
+				let k = t_y.x.borrow().lb() - t_x.x.borrow().lb(); // used to make lbs match
 				t_x.x.borrow_mut().encode_bin(db)?;
 				t_y.x.borrow_mut().encode_bin(db)?;
 
