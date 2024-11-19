@@ -22,6 +22,12 @@ pub(crate) struct BinEnc {
 	pub(crate) x: Vec<LitOrConst>,
 }
 
+impl From<Vec<LitOrConst>> for BinEnc {
+	fn from(x: Vec<LitOrConst>) -> Self {
+		Self { x: x.to_vec() }
+	}
+}
+
 impl BinEnc {
 	pub(crate) fn new<DB: ClauseDatabase>(db: &mut DB, lits: u32, lbl: Option<String>) -> Self {
 		let _lbl = lbl.unwrap_or(String::from("b"));
@@ -30,6 +36,16 @@ impl BinEnc {
 				.map(|_i| new_var!(db, format!("{_lbl}^{_i}")).into())
 				.collect(),
 		}
+	}
+
+	/// Returns binary encoding of of x{0}+k
+	fn from_k(k: Coeff, bits: u32) -> Self {
+		Self::from(
+			as_binary(PosCoeff::new(k), Some(bits))
+				.into_iter()
+				.map(LitOrConst::from)
+				.collect_vec(),
+		)
 	}
 
 	pub(crate) fn from_lits(x: &[LitOrConst]) -> Self {
@@ -44,17 +60,30 @@ impl BinEnc {
 		}
 	}
 
-	/// Encode x:B <=/>= y:B
+	/// Encode x:B <=/>= y:B + k
+	#[cfg_attr(
+    feature = "trace",
+    tracing::instrument(name = "lex", skip_all, fields(constraint = format!("{self} {cmp} {other}")))
+)]
 	pub(crate) fn lex<DB: ClauseDatabase>(
 		&self,
 		db: &mut DB,
 		cmp: Comparator,
-		other: Self,
+		mut other: Self,
+		k: Coeff,
 	) -> crate::Result {
 		let n = std::cmp::max(self.bits(), other.bits()) as usize;
 
 		fn bit(x: &[LitOrConst], i: usize) -> LitOrConst {
 			*x.get(i).unwrap_or(&LitOrConst::Const(false))
+		}
+
+		if k != 0 {
+			assert!(
+				other.x.is_empty(),
+				"Can't resolve for different lbs (with non-zero k={k}) yet for non-fixed binary encodings"
+			);
+			other = Self::from_k(k, self.bits());
 		}
 
 		let (x, y, c) = (
