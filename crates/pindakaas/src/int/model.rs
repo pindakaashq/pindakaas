@@ -421,7 +421,7 @@ impl Model {
 			.collect::<Vec<_>>();
 
 		// Throw early if expected_assignments need to be computed
-		if !brute_force_solve || expected_assignments.is_none() {
+		if !brute_force_solve && expected_assignments.is_none() {
 			if errs.is_empty() {
 				println!(
 					"All constraints hold for actual assignments:\n{}",
@@ -628,8 +628,8 @@ mod tests {
 		($flag:expr) => {{
 			LazyLock::new(|| {
 				std::env::args()
-					.find(|x| x == $flag)
-					.map(|x| x.parse().unwrap())
+					.position(|x| x == $flag)
+					.map(|p| std::env::args().nth(p + 1).unwrap().parse().unwrap())
 			})
 		}};
 	}
@@ -740,6 +740,7 @@ mod tests {
 		expected_assignments: Option<&Vec<Assignment>>,
 	) {
 		if !*BRUTE_FORCE_SOLVE {
+			return;
 		} else if let Ok(decomposition_expected_assignments) =
 			&decomposition.generate_solutions(Some(IntVarId(model.num_var)))
 		{
@@ -968,13 +969,6 @@ mod tests {
 
 		println!("encoded = {}", decomposition);
 
-		// TODO Implement hash for MapSol
-		// assert_eq!(
-		// 	lit_assignments.iter().unique().count(),
-		// 	lit_assignments.len(),
-		// 	"Expected lit assignments to be unique, but was {lit_assignments:?}"
-		// );
-
 		// The checker model depends on whether we are testing each individual constraint of the decomp or showing aux variables
 		let checker = if *CHECK_CONSTRAINTS || *SHOW_AUX {
 			decomposition.clone()
@@ -1193,6 +1187,11 @@ End
 	#[test]
 	fn le_1() {
 		test_lp!("le_1");
+	}
+
+	#[test]
+	fn le_2() {
+		test_lp!("le_2");
 	}
 
 	#[test]
