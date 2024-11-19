@@ -740,7 +740,6 @@ mod tests {
 		expected_assignments: Option<&Vec<Assignment>>,
 	) {
 		if !*BRUTE_FORCE_SOLVE {
-			return;
 		} else if let Ok(decomposition_expected_assignments) =
 			&decomposition.generate_solutions(Some(IntVarId(model.num_var)))
 		{
