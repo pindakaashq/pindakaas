@@ -958,6 +958,7 @@ mod tests {
 				(x.borrow().id, x.clone())
 			})
 			.collect::<HashMap<IntVarId, IntVarRef>>();
+
 		println!("decomposition (principal vars encoded) = {}", decomposition);
 
 		// encode and solve

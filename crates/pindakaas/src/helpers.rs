@@ -893,7 +893,7 @@ pub mod tests {
 				if !misses.is_empty() {
 					println!("Missing solutions ({})", misses.len());
 					for s in misses {
-						println!("  -{s:?}");
+						println!("  -{}", s.iter().join(","));
 					}
 				}
 
@@ -906,7 +906,7 @@ pub mod tests {
 				if !extras.is_empty() {
 					println!("Extra solutions ({})", extras.len());
 					for s in extras {
-						println!("  +{s:?}");
+						println!("  +{}", s.iter().join(","));
 					}
 				}
 

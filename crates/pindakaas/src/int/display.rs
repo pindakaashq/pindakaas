@@ -127,17 +127,7 @@ impl fmt::Display for IntVar {
 			"{}{}{} ∈ {} {}",
 			self.lbl(),
 			match self.e.as_ref() {
-				Some(IntVarEnc::Bin(x_bin)) => format!(
-					":B{}",
-					(if SHOW_LITS {
-						x_bin
-							.as_ref()
-							.map(|x_bin| format!(" [{x_bin}]"))
-							.unwrap_or_default()
-					} else {
-						String::new()
-					})
-				),
+				Some(IntVarEnc::Bin(_)) => format!(":B",),
 				Some(IntVarEnc::Ord(_)) => ":O".to_string(),
 				None => String::new(),
 			},
