@@ -12,9 +12,7 @@ use crate::{
 		add_clauses_for, as_binary, emit_filtered_clause, negate_cnf, pow2, unsigned_binary_range,
 	},
 	int::helpers::remove_red,
-	linear::{lex_geq_const, lex_leq_const, PosCoeff},
-	trace::{emit_clause, log, new_var},
-	ClauseDatabase, Cnf, Coeff, Comparator, Lit, Unsatisfiable, Var,
+	ClauseDatabase, Cnf, Coeff, Lit, Unsatisfiable, Var,
 };
 
 #[derive(Debug, Clone)]
@@ -503,30 +501,23 @@ impl std::fmt::Display for BinEnc {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::helpers::tests::{lits, TestDB};
 
 	#[test]
 	fn test_geqs() {
-		let mut db = TestDB::new(0);
-		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
-		assert_eq!(x.geqs(1, 6), vec![lits![1], lits![2], lits![3]]);
+		let mut cnf = Cnf::default();
+		let x = BinEnc::new(&mut cnf, 3, Some(String::from("x")));
+		cnf.add_clause(x.geqs(1, 6)).unwrap();
+		assert_encoding(&cnf, &expect_file!["int/bin/geq_1_6.cnf"]);
 	}
 
 	#[test]
 	fn test_ineq() {
-		let mut db = TestDB::new(0);
 		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
 
-		for (up, ks, expected_lits) in [
-			(true, 0, lits![]),
-			(true, 1, lits![1]),
-			(true, 2, lits![2]),
-			(true, 3, lits![1, 2]),
-		] {
-			assert_eq!(
-				x.geq(ks),
-				expected_lits,
-				"ks {ks:?} with up {up} was expected to return {expected_lits:?}"
+		for k in 0..=3 {
+			assert_encoding(
+				&Cnf::try_from(vec![x.geq(k)]).unwarp(),
+				&expect_file!["int/ord/geq_{k}.cnf", k],
 			);
 		}
 	}

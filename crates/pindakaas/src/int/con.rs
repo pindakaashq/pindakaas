@@ -1,15 +1,15 @@
 #![allow(clippy::absurd_extreme_comparisons)]
 use itertools::Itertools;
 
+
 use super::{
 	model::{USE_COUPLING_IO_LEX, VIEW_COUPLING},
-	IntVarEnc, IntVarId,
+	IntVarId,
 };
 use crate::{
 	helpers::{add_clauses_for, div_ceil, div_floor},
 	int::{bin::BinEnc, helpers::display_cnf, required_lits, Assignment, Dom},
-	linear::{lex_geq_const, lex_leq_const, log_enc_add_fn, PosCoeff},
-	trace::{emit_clause, log},
+	bool_linear::PosCoeff,
 	CheckError, ClauseDatabase, Coeff, Comparator, Consistency, IntVarRef, Lit, Model, ModelConfig,
 	Result, Term, Unsatisfiable,
 };
@@ -735,8 +735,6 @@ impl Lin {
 #[allow(unused_imports)]
 mod tests {
 
-	use crate::helpers::tests::lits;
-	use crate::helpers::tests::TestDB;
 	use crate::Format;
 	use crate::Lit;
 	use crate::{Cnf, Lin, Model};
@@ -752,9 +750,8 @@ mod tests {
 		.unwrap();
 		// LOOKAHEAD feature removes redundant x>=2/\y>=3->z>=5 (-1 -2 3), since we have x>=2->x>=0 (tautological) and x>=0/\y>=3->z>=5 (-2 3)
 		let mut db = TestDB::new(0);
-		db = db.expect_clauses(vec![lits![-2, 3], lits![-1, 3]]);
 		m.encode_pub(&mut db).unwrap();
-		db.check_complete()
+		assert_encoding(&cnf, &expect_file!["int/con/enc_rec_lookahead.cnf"]);
 	}
 
 	#[test]
@@ -764,9 +761,8 @@ mod tests {
 			Format::Lp,
 		)
 		.unwrap();
-		let mut db = TestDB::new(0);
 		// db = db.expect_clauses(vec![lits![-2, 3], lits![-1, 3]]);
 		m.encode_pub(&mut db).unwrap();
-		db.check_complete()
+		assert_encoding(&cnf, &expect_file!["int/con/enc_rec_bdd_style_view.cnf"]);
 	}
 }

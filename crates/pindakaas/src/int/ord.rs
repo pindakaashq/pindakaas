@@ -111,10 +111,8 @@ impl std::fmt::Display for OrdEnc {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::helpers::tests::{lits, TestDB};
 	#[test]
 	fn test_ineq() {
-		let mut db = TestDB::new(0);
 		let x = OrdEnc::new(&mut db, &Dom::from_slice(&[2, 5, 6, 7, 9]), None);
 
 		for (dom_pos, expected_cnf) in [
@@ -125,11 +123,20 @@ mod tests {
 			(Some(4), vec![lits![4]]),
 			(None, vec![lits![]]),
 		] {
-			assert_eq!(
-				x.geq(dom_pos),
-				expected_cnf,
-				"Domain pos {dom_pos:?} was expected to return {expected_cnf:?}"
+			assert_encoding(
+				&Cnf::try_from(vec![x.geq(dom_pos)]).unwarp(),
+				&expect_file!["int/bin/geq_{k}.cnf", k],
 			);
+		}
+	}
+
+	#[test]
+	fn test_ineq() {
+		let mut db = TestDB::new(0);
+		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
+
+		for k in 0..=3 {
+			assert_encoding(&cnf, &expect_file!["int/bin/geq_{k}.cnf", k]);
 		}
 	}
 }

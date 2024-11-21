@@ -1,6 +1,6 @@
 use pindakaas_derive::IpasirSolver;
 
-use super::VarFactory;
+use crate::VarFactory;
 
 #[derive(Debug, IpasirSolver)]
 #[ipasir(krate = pindakaas_kissat)]
@@ -12,6 +12,7 @@ pub struct Kissat {
 impl Default for Kissat {
 	fn default() -> Self {
 		Self {
+			// SAFETY: Assume correct creation of the solver using the IPASIR API.
 			ptr: unsafe { pindakaas_kissat::ipasir_init() },
 			vars: VarFactory::default(),
 		}
@@ -20,14 +21,13 @@ impl Default for Kissat {
 
 #[cfg(test)]
 mod tests {
-	#[cfg(feature = "trace")]
 	use traced_test::test;
 
-	use super::*;
 	use crate::{
-		linear::LimitComp,
-		solver::{SolveResult, Solver},
-		CardinalityOne, ClauseDatabase, Encoder, PairwiseEncoder, Valuation,
+		bool_linear::LimitComp,
+		cardinality_one::{CardinalityOne, PairwiseEncoder},
+		solver::{kissat::Kissat, SolveResult, Solver},
+		ClauseDatabase, Encoder, Valuation,
 	};
 
 	#[test]
@@ -46,12 +46,11 @@ mod tests {
 				},
 			)
 			.unwrap();
-		let res = slv.solve(|model| {
-			assert!(
-				(model.value(!a).unwrap() && model.value(b).unwrap())
-					|| (model.value(a).unwrap() && model.value(!b).unwrap()),
-			)
-		});
-		assert_eq!(res, SolveResult::Sat);
+		let SolveResult::Satisfied(solution) = slv.solve() else {
+			unreachable!()
+		};
+		assert!(
+			(solution.value(!a) && solution.value(b)) || (solution.value(a) && solution.value(!b))
+		);
 	}
 }

@@ -4,7 +4,7 @@ use crate::trace::log;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
-use super::{bin::BinEnc, ord::OrdEnc, required_lits, Dom, IntVarEnc};
+use crate::{bin::BinEnc, ord::OrdEnc, required_lits, Dom, IntVarEnc};
 use crate::{
 	helpers::negate_cnf,
 	int::display::SHOW_IDS,
@@ -529,7 +529,6 @@ impl IntVar {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::helpers::tests::{lits, TestDB};
 
 	#[test]
 	fn test_ineq_ord() {

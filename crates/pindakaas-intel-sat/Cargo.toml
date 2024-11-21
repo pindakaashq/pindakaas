@@ -1,15 +1,26 @@
 [package]
 name = "pindakaas-intel-sat"
+description = "build of the Intel SAT solver for the pindakaas crate"
 version = "0.1.0"
-edition = "2021"
 build = "build.rs"
 links = "intel_sat"
 exclude = ["vendor/intel_sat"]
 include = ["vendor/intel_sat/*.cc"]
 
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+repository.workspace = true
+
 [build-dependencies]
 pindakaas-build-macros = { path = "../pindakaas-build-macros" }
-cc = { version = "1.0", features = ["parallel"] }
+cc = { workspace = true }
 
 [dependencies]
 pindakaas-build-macros = { path = "../pindakaas-build-macros" }
+
+[lints]
+workspace = true

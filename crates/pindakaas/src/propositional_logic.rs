@@ -7,39 +7,34 @@ use crate::{ClauseDatabase, Cnf, Encoder, Lit, Result, Unsatisfiable};
 /// A propositional logic formula
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Formula {
-	///A atomic formula (a literal)
-	Atom(Lit),
-	/// The negation of a sub-formula
-	Not(Box<Formula>),
 	/// A conjunction of two or more sub-formulas
 	And(Vec<Formula>),
-	/// A disjunction of two or more sub-formulas
-	Or(Vec<Formula>),
-	/// An implication of two sub-formulas
-	Implies(Box<Formula>, Box<Formula>),
+	///A atomic formula (a literal)
+	Atom(Lit),
 	/// The equivalence of two or more sub-formulas
 	Equiv(Vec<Formula>),
-	/// An exclusive or of two or more sub-formulas
-	Xor(Vec<Formula>),
 	/// A choice between two sub-formulas
 	IfThenElse {
 		cond: Box<Formula>,
 		then: Box<Formula>,
 		els: Box<Formula>,
 	},
+	/// An implication of two sub-formulas
+	Implies(Box<Formula>, Box<Formula>),
+	/// The negation of a sub-formula
+	Not(Box<Formula>),
+	/// A disjunction of two or more sub-formulas
+	Or(Vec<Formula>),
+	/// An exclusive or of two or more sub-formulas
+	Xor(Vec<Formula>),
 }
 
-impl Formula {
-	/// Convert propositional logic formula to CNF
-	pub fn clausify(&self) -> Result<Cnf> {
-		let mut cnf = Cnf::default();
-		cnf.encode(self, &TseitinEncoder)?;
-		Ok(cnf)
-	}
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct TseitinEncoder;
 
+impl Formula {
 	/// Helper function to bind the (sub) formula to a name (literal) for the tseitin encoding.
 	fn bind(&self, db: &mut impl ClauseDatabase, name: Option<Lit>) -> Result<Lit> {
-		// let name = name.unwrap_or_else(|| db.new_var().into());
 		Ok(match self {
 			Formula::Atom(lit) => {
 				if let Some(name) = name {
@@ -52,7 +47,7 @@ impl Formula {
 					*lit
 				}
 			}
-			Formula::Not(f) => !(f.bind(db, name)?),
+			Formula::Not(f) => !(f.bind(db, name.map(|lit| !lit))?),
 			Formula::And(sub) => {
 				match sub.len() {
 					0 => {
@@ -79,7 +74,11 @@ impl Formula {
 			}
 			Formula::Or(sub) => {
 				match sub.len() {
-					0 => return Err(Unsatisfiable),
+					0 => {
+						let name = name.unwrap_or_else(|| db.new_var().into());
+						db.add_clause([!name])?;
+						name
+					}
 					1 => return sub[0].bind(db, name),
 					_ => {
 						let name = name.unwrap_or_else(|| db.new_var().into());
@@ -176,16 +175,12 @@ impl Formula {
 			}
 		})
 	}
-}
 
-impl Not for Formula {
-	type Output = Formula;
-	fn not(self) -> Self {
-		match self {
-			Formula::Atom(l) => Formula::Atom(!l),
-			Formula::Not(f) => *f,
-			_ => Formula::Not(Box::new(self)),
-		}
+	/// Convert propositional logic formula to CNF
+	pub fn clausify(&self) -> Result<Cnf> {
+		let mut cnf = Cnf::default();
+		cnf.encode(self, &TseitinEncoder)?;
+		Ok(cnf)
 	}
 }
 
@@ -226,8 +221,17 @@ impl Display for Formula {
 	}
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct TseitinEncoder;
+impl Not for Formula {
+	type Output = Formula;
+
+	fn not(self) -> Self {
+		match self {
+			Formula::Atom(l) => Formula::Atom(!l),
+			Formula::Not(f) => *f,
+			_ => Formula::Not(Box::new(self)),
+		}
+	}
+}
 
 impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 	fn encode(&self, db: &mut DB, f: &Formula) -> Result {
@@ -256,6 +260,16 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 					let mut cdb = db.with_conditions(vec![name]);
 					let neg_els: Formula = !*els.clone();
 					self.encode(&mut cdb, &neg_els)
+				}
+				Formula::Equiv(sub) if sub.len() == 2 => {
+					self.encode(db, &Formula::Xor(sub.clone()))
+				}
+				Formula::Xor(sub) if sub.len() == 2 => {
+					self.encode(db, &Formula::Equiv(sub.clone()))
+				}
+				Formula::Xor(sub) if sub.len() % 2 != 0 => {
+					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
+					self.encode(db, &Formula::Xor(neg_sub))
 				}
 				_ => {
 					let l = f.bind(db, None)?;
@@ -303,7 +317,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 				Ok(())
 			}
 			Formula::Xor(sub) => match sub.len() {
-				0 => Err(crate::Unsatisfiable),
+				0 => Err(Unsatisfiable),
 				1 => self.encode(db, &sub[0]),
 				_ => {
 					let mut sub = sub.clone();
@@ -330,183 +344,422 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 
 #[cfg(test)]
 mod tests {
+	use itertools::Itertools;
+
 	use crate::{
-		helpers::tests::{assert_enc_sol, lits},
-		Encoder, Formula, Lit, TseitinEncoder,
+		// helpers::{assert_encoding, assert_solutions, expect_file},
+		propositional_logic::{Formula, TseitinEncoder},
+		ClauseDatabase,
+		Cnf,
+		Encoder,
 	};
 
 	#[test]
 	fn encode_prop_and() {
-		assert_enc_sol!(
-			TseitinEncoder,
-			3,
-			&Formula::And(vec![
-				Formula::Atom(1.into()),
-				Formula::Atom(2.into()),
-				Formula::Atom(3.into()),
-			])
-			=> vec![lits![1], lits![2], lits![3]],
-			vec![lits![1, 2, 3],]
-		);
-		assert_enc_sol!(
-			TseitinEncoder,
-			3,
-			&Formula::Equiv(vec![
-				Formula::Atom(3.into()),
-					Formula::And(vec![
-					Formula::Atom(1.into()),
-					Formula::Atom(2.into()),
-				])
-			])
-			=> vec![lits![-1, -2, 3], lits![1, -3], lits![2, -3]],
-			vec![lits![1, 2, 3], lits![-1, 2, -3], lits![-1, -2, -3], lits![1, -2, -3]]
-		);
-	}
-
-	#[test]
-	fn encode_prop_or() {
-		assert_enc_sol!(
-			TseitinEncoder,
-			3,
-			&Formula::Or(vec![
-				Formula::Atom(1.into()),
-				Formula::Atom(2.into()),
-				Formula::Atom(3.into()),
-			])
-			=> vec![lits![1, 2, 3]],
-			vec![lits![1,2,3], lits![-1,2,3], lits![1,-2,3], lits![1,2,-3], lits![-1,-2,3], lits![1,-2,-3],lits![-1,2,-3],]
-		);
-		assert_enc_sol!(
-			TseitinEncoder,
-			3,
-			&Formula::Equiv(vec![
-				Formula::Atom(3.into()),
-				Formula::Or(vec![
-					Formula::Atom(1.into()),
-					Formula::Atom(2.into()),
-				])
-			])
-			=> vec![lits![1, 2, -3], lits![-1, 3], lits![-2, 3]],
-			vec![lits![1, 2, 3], lits![-1, 2, 3], lits![-1, -2, -3], lits![1, -2, 3]]
-		);
-	}
-
-	#[test]
-	fn encode_prop_implies() {
-		assert_enc_sol!(
-			TseitinEncoder,
-			2,
-			&Formula::Implies(
-				Box::new(Formula::Atom(1.into())),
-				Box::new(Formula::Atom(2.into()))
+		// Simple conjunction
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::And(vec![Formula::Atom(a), Formula::Atom(b), Formula::Atom(c)]),
 			)
-			=> vec![lits![-1, 2]],
-			vec![lits![-1, -2], lits![1, 2], lits![-1, 2]]
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_and.cnf"],
 		);
-		assert_enc_sol!(
-			TseitinEncoder,
-			3,
-			&Formula::Equiv(
-				vec![
-				Formula::Atom(3.into()),
-				Formula::Implies(
-					Box::new(Formula::Atom(1.into())),
-					Box::new(Formula::Atom(2.into())),
-				)]
+		assert_solutions(
+			&cnf,
+			vec![a, b, c],
+			&expect_file!["propositional_logic/encode_prop_and.sol"],
+		);
+
+		// Reified conjunction
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Equiv(vec![
+					Formula::Atom(c),
+					Formula::And(vec![Formula::Atom(a), Formula::Atom(b)]),
+				]),
 			)
-			=> vec![lits![-1, 2, -3], lits![1, 3], lits![-2, 3]],
-			vec![lits![1, 2, 3], lits![1, -2, -3], lits![-1, -2, 3], lits![-1, 2, 3]]
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_and_reif.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a, b, c],
+			&expect_file!["propositional_logic/encode_prop_and_reif.sol"],
+		);
+
+		// Regression test: empty and
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Equiv(vec![Formula::Atom(a), Formula::And(vec![])]),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_and_empty.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a],
+			&expect_file!["propositional_logic/encode_prop_and_empty.sol"],
 		);
 	}
 
 	#[test]
 	fn encode_prop_equiv() {
-		assert_enc_sol!(
-			TseitinEncoder,
-			4,
-			&Formula::Equiv(vec![
-				Formula::Atom(1.into()),
-				Formula::Atom(2.into()),
-				Formula::Atom(3.into()),
-				Formula::Atom(4.into())
-			])
-			=> vec![lits![-1, 2], lits![1, -2], lits![1, -3], lits![-1, 3], lits![1, -4], lits![-1, 4]],
-			vec![lits![1, 2, 3, 4], lits![-1, -2, -3, -4]]
+		// Simple equivalence
+		let mut cnf = Cnf::default();
+		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Equiv(vars.iter().cloned().map(Formula::Atom).collect()),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_equiv.cnf"],
 		);
-		assert_enc_sol!(
-			TseitinEncoder,
-			3,
-			&Formula::Equiv(vec![
-				Formula::Atom(3.into()),
-				Formula::Equiv(vec![
-					Formula::Atom(1.into()),
-					Formula::Atom(2.into()),
-				])
-			])
-			=> vec![lits![-1, 2, -3], lits![1, -2, -3], lits![-1, -2, 3], lits![1, 2, 3]],
-			vec![lits![1, 2, 3], lits![-1, 2, -3], lits![-1, -2, 3], lits![1, -2, -3]]
+		assert_solutions(
+			&cnf,
+			vars,
+			&expect_file!["propositional_logic/encode_prop_equiv.sol"],
+		);
+
+		// Reified equivalence
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Equiv(vec![
+					Formula::Atom(c),
+					Formula::Equiv(vec![Formula::Atom(a), Formula::Atom(b)]),
+				]),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_equiv_reif.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a, b, c],
+			&expect_file!["propositional_logic/encode_prop_equiv_reif.sol"],
 		);
 	}
 
 	#[test]
-	fn encode_prop_xor() {
-		assert_enc_sol!(
-			TseitinEncoder,
-			4,
-			&Formula::Xor(vec![
-				Formula::Atom(1.into()),
-				Formula::Atom(2.into()),
-				Formula::Atom(3.into()),
-				Formula::Atom(4.into()),
-			])
-			=> vec![
-				lits![-1, -3, -6], lits![1, 3, -6], lits![1, -3, 6], lits![-1, 3, 6],
-				lits![-2, -5, -6], lits![2, -5, 6], lits![2, 5, -6], lits![-2, 5, 6],
-				lits![4, 5], lits![-4, -5]],
-			vec![lits![-1, 2, 3, 4], lits![1, -2, 3, 4], lits![1, 2, -3, 4], lits![1, 2, 3, -4], lits![-1, -2, -3, 4], lits![-1, -2, 3, -4], lits![-1, 2, -3, -4], lits![1, -2, -3, -4]]
+	fn encode_prop_implies() {
+		// Simple implication
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let b = cnf.new_lit();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Implies(Box::new(Formula::Atom(a)), Box::new(Formula::Atom(b))),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_implies.cnf"],
 		);
-		assert_enc_sol!(
-			TseitinEncoder,
-			4,
-			&Formula::Equiv(vec![
-				Formula::Atom(4.into()),
-				Formula::Xor(vec![
-					Formula::Atom(1.into()),
-					Formula::Atom(2.into()),
-					Formula::Atom(3.into()),
-				])
-			])
-			=> vec![lits![-1, -3, -5], lits![1, 3, -5], lits![-1, 3, 5], lits![1, -3, 5], lits![-2, -4, -5], lits![2, -4, 5], lits![2, 4, -5], lits![-2, 4, 5]],
-			vec![lits![-1, -2, -3, -4], lits![-1, -2, 3, 4], lits![-1, 2, -3, 4], lits![-1, 2, 3, -4], lits![1, -2, -3, 4], lits![1, -2, 3, -4], lits![1, 2, -3, -4], lits![1, 2, 3, 4]]
+		assert_solutions(
+			&cnf,
+			vec![a, b],
+			&expect_file!["propositional_logic/encode_prop_implies.sol"],
+		);
+
+		// Reified implication
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Equiv(vec![
+					Formula::Atom(c),
+					Formula::Implies(Box::new(Formula::Atom(a)), Box::new(Formula::Atom(b))),
+				]),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_implies_reif.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a, b, c],
+			&expect_file!["propositional_logic/encode_prop_implies_reif.sol"],
 		);
 	}
 
 	#[test]
 	fn encode_prop_ite() {
-		assert_enc_sol!(
-			TseitinEncoder,
-			3,
-			&Formula::IfThenElse{
-				cond: Box::new(Formula::Atom(1.into())),
-				then: Box::new(Formula::Atom(2.into())),
-				els: Box::new(Formula::Atom(3.into())),
-			}
-			=> vec![lits![-1, 2], lits![1, 3]],
-			vec![lits![-1, -2, 3], lits![-1, 2, 3], lits![1, 2, -3], lits![1, 2, 3]]
+		// Simple if-then-else
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::IfThenElse {
+					cond: Box::new(Formula::Atom(a)),
+					then: Box::new(Formula::Atom(b)),
+					els: Box::new(Formula::Atom(c)),
+				},
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_ite.cnf"],
 		);
-		assert_enc_sol!(
-			TseitinEncoder,
-			4,
-			&Formula::Equiv(vec![
-				Formula::Atom(4.into()),
-				Formula::IfThenElse{
-					cond: Box::new(Formula::Atom(1.into())),
-					then: Box::new(Formula::Atom(2.into())),
-					els: Box::new(Formula::Atom(3.into())),
-				}
-			])
-			=> vec![lits![-1, 2, -4], lits![1, 3, -4], lits![-1, -2, 4], lits![1, -3, 4], lits![-2, -3, 4]],
-			vec![lits![-1, -2, -3, -4], lits![-1, -2, 3, 4], lits![1, -2, 3, -4], lits![1, 2, 3, 4], lits![1, 2, -3, 4], lits![1, -2, -3, -4], lits![-1, 2, 3, 4], lits![-1, 2, -3, -4]]
+		assert_solutions(
+			&cnf,
+			vec![a, b, c],
+			&expect_file!["propositional_logic/encode_prop_ite.sol"],
+		);
+
+		// Reified if-then-else
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Equiv(vec![
+					Formula::Atom(d),
+					Formula::IfThenElse {
+						cond: Box::new(Formula::Atom(a)),
+						then: Box::new(Formula::Atom(b)),
+						els: Box::new(Formula::Atom(c)),
+					},
+				]),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_ite_reif.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a, b, c, d],
+			&expect_file!["propositional_logic/encode_prop_ite_reif.sol"],
+		);
+	}
+
+	#[test]
+	fn encode_prop_neg_equiv() {
+		// Regression test
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let b = cnf.new_lit();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Equiv(vec![
+					Formula::Atom(b),
+					Formula::Not(Box::new(Formula::Xor(vec![Formula::Atom(a)]))),
+				]),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_neg_equiv.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a, b],
+			&expect_file!["propositional_logic/encode_prop_neg_equiv.sol"],
+		);
+	}
+
+	#[test]
+	fn encode_prop_or() {
+		// Simple disjunction
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Or(vec![Formula::Atom(a), Formula::Atom(b), Formula::Atom(c)]),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_or.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a, b, c],
+			&expect_file!["propositional_logic/encode_prop_or.sol"],
+		);
+
+		// Reified disjunction
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Equiv(vec![
+					Formula::Atom(c),
+					Formula::Or(vec![Formula::Atom(a), Formula::Atom(b)]),
+				]),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_or_reif.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a, b, c],
+			&expect_file!["propositional_logic/encode_prop_or_reif.sol"],
+		);
+
+		// Regression test: empty or
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Equiv(vec![Formula::Atom(a), Formula::Or(vec![])]),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_or_empty.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a],
+			&expect_file!["propositional_logic/encode_prop_or_empty.sol"],
+		);
+	}
+
+	#[test]
+	fn encode_prop_xor() {
+		// Simple XOR
+		let mut cnf = Cnf::default();
+		let vars = cnf.new_var_range(3).iter_lits().collect_vec();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Xor(vars.iter().cloned().map(Formula::Atom).collect()),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_xor.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vars,
+			&expect_file!["propositional_logic/encode_prop_xor.sol"],
+		);
+
+		// Reified XOR
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Equiv(vec![
+					Formula::Atom(d),
+					Formula::Xor(vec![Formula::Atom(a), Formula::Atom(c), Formula::Atom(d)]),
+				]),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_xor_reif.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a, b, c, d],
+			&expect_file!["propositional_logic/encode_prop_xor_reif.sol"],
+		);
+		// Regression test: negated XOR (into equiv)
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let b = cnf.new_lit();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Not(Box::new(Formula::Xor(vec![
+					Formula::Atom(a),
+					Formula::Atom(b),
+				]))),
+			)
+			.unwrap();
+
+		assert_encoding(
+			&cnf,
+			&expect_file!["propositional_logic/encode_prop_xor_neg1.cnf"],
+		);
+		assert_solutions(
+			&cnf,
+			vec![a, b],
+			&expect_file!["propositional_logic/encode_prop_xor_neg1.sol"],
+		);
+		// Regression test: negated XOR (negated args)
+		let mut cnf = Cnf::default();
+		let vars = cnf.new_var_range(3).iter_lits().collect_vec();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Not(Box::new(Formula::Xor(
+					vars.iter().cloned().map(Formula::Atom).collect(),
+				))),
+			)
+			.unwrap();
+
+		assert_solutions(
+			&cnf,
+			vars,
+			&expect_file!["propositional_logic/encode_prop_xor_neg2.sol"],
+		);
+		// Regression test: negated XOR (negated binding)
+		let mut cnf = Cnf::default();
+		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
+		TseitinEncoder
+			.encode(
+				&mut cnf,
+				&Formula::Not(Box::new(Formula::Xor(
+					vars.iter().cloned().map(Formula::Atom).collect(),
+				))),
+			)
+			.unwrap();
+
+		assert_solutions(
+			&cnf,
+			vars,
+			&expect_file!["propositional_logic/encode_prop_xor_neg3.sol"],
 		);
 	}
 }

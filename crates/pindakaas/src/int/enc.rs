@@ -89,12 +89,6 @@ impl Not for LitOrConst {
 	}
 }
 
-#[derive(Debug, Clone)]
-pub enum IntVarEnc {
-	Ord(Option<OrdEnc>),
-	Bin(Option<BinEnc>),
-}
-
 const COUPLE_DOM_PART_TO_ORD: bool = false;
 
 impl IntVarEnc {

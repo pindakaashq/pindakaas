@@ -1,31 +1,5 @@
-use std::{
-	cmp::max,
-	collections::HashSet,
-	iter::FusedIterator,
-	num::NonZeroI32,
-	ops::{Bound, RangeBounds, RangeInclusive},
-};
-
-use itertools::Itertools;
-
-use crate::{
-	int::LitOrConst, linear::PosCoeff, trace::emit_clause, CheckError, Checker, ClauseDatabase,
-	Coeff, Encoder, LinExp, Lit, Result, Unsatisfiable, Valuation, Var,
-};
-
 #[allow(unused_macros)]
-macro_rules! maybe_std_concat {
-	($e:literal) => {
-		concat!($e)
-	};
-	($e:expr) => {
-		$e
-	};
-}
-#[allow(unused_imports)]
-pub(crate) use maybe_std_concat;
-
-#[allow(unused_macros)]
+#[cfg(feature = "splr")]
 macro_rules! concat_slices {
     ([$init:expr; $T:ty]: $($s:expr),+ $(,)?) => {{
         $(
@@ -53,13 +27,9 @@ macro_rules! concat_slices {
         $crate::helpers::concat_slices!([0; $T]: $($s),+)
     };
 }
-#[allow(unused_imports)]
-pub(crate) use concat_slices;
 
-#[allow(unused_macros)]
+#[cfg(feature = "splr")]
 macro_rules! const_concat {
-	() => { "" };
-
 	($($e:expr),+) => {{
 			$crate::helpers::const_concat!(@impl $($crate::helpers::maybe_std_concat!($e)),+)
 	}};
@@ -69,11 +39,10 @@ macro_rules! const_concat {
 					const _: &str = $e;
 			)*
 			let slice: &[u8] = $crate::helpers::concat_slices!([u8]: $($e.as_bytes()),+);
+			// SAFETY: the slice is constructed from string literals, so it is valid UTF-8
 			unsafe { std::str::from_utf8_unchecked(slice) }
 	}};
 }
-#[allow(unused_imports)]
-pub(crate) use const_concat;
 
 pub(crate) fn pow2(k: u32) -> Coeff {
 	Coeff::from(2).pow(k)
@@ -110,21 +79,6 @@ pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool 
 	}
 }
 
-/// 2^bits - 1
-pub(crate) fn unsigned_binary_range(bits: u32) -> (PosCoeff, PosCoeff) {
-	(PosCoeff::new(0), PosCoeff::new(pow2(bits) - 1))
-}
-
-/// Convert `k` to unsigned binary in `bits`
-pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| crate::int::required_lits(0, *k));
-	assert!(
-		k <= unsigned_binary_range(bits).1,
-		"{k} cannot be represented in {bits} bits"
-	);
-	(0..bits).map(|b| *k & (1 << b) != 0).collect()
-}
-
 const FILTER_TRIVIAL_CLAUSES: bool = false;
 /// Adds clauses for a DNF formula (disjunction of conjunctions)
 /// Ex. (a /\ -b) \/ c == a \/ c /\ -b \/ c
@@ -153,6 +107,82 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 	}
 	Ok(())
 }
+
+/// 2^bits - 1
+pub(crate) fn unsigned_binary_range(bits: u32) -> (PosCoeff, PosCoeff) {
+	(PosCoeff::new(0), PosCoeff::new(pow2(bits) - 1))
+}
+
+/// Convert `k` to unsigned binary in `bits`
+pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
+	let bits = bits.unwrap_or_else(|| crate::int::required_lits(0, *k));
+	assert!(
+		k <= unsigned_binary_range(bits).1,
+		"{k} cannot be represented in {bits} bits"
+	);
+	(0..bits).map(|b| *k & (1 << b) != 0).collect()
+}
+#[cfg(not(any(feature = "tracing", test)))]
+macro_rules! emit_clause {
+	($db:expr, $cl:expr) => {
+		$db.add_clause($cl)
+	};
+}
+
+/// Helper marco to emit a clause from within an encoder
+#[cfg(any(feature = "tracing", test))]
+macro_rules! emit_clause {
+	($db:expr, $cl:expr) => {{
+		let slice = $cl.into_iter().collect::<Vec<_>>();
+		let res = $db.add_clause(slice.iter().copied());
+		tracing::info!(clause = ?&slice, fail = matches!(res, Err($crate::Unsatisfiable)), "emit clause");
+		res
+	}};
+}
+
+#[cfg(feature = "splr")]
+macro_rules! maybe_std_concat {
+	($e:literal) => {
+		concat!($e)
+	};
+	($e:expr) => {
+		$e
+	};
+}
+#[cfg(not(any(feature = "tracing", test)))]
+macro_rules! new_var {
+	($db:expr) => {
+		$crate::Lit::from($db.new_var())
+	};
+	($db:expr, $lbl:expr) => {
+		$crate::Lit::from($db.new_var())
+	};
+}
+
+/// Helper marco to create a new variable within an Encoder
+#[cfg(any(feature = "tracing", test))]
+macro_rules! new_var {
+	($db:expr) => {{
+		let var = $db.new_var();
+		tracing::info!(var = ?var, "new variable");
+		$crate::Lit::from(var)
+	}};
+	($db:expr, $lbl:expr) => {{
+		let var = $db.new_var();
+		tracing::info!(var = ?var, label = $lbl, "new variable");
+		$crate::Lit::from(var)
+	}};
+}
+
+use std::collections::HashSet;
+
+pub(crate) use emit_clause;
+use itertools::Itertools;
+pub(crate) use new_var;
+#[cfg(feature = "splr")]
+pub(crate) use {concat_slices, const_concat, maybe_std_concat};
+
+use crate::{bool_linear::PosCoeff, integer::IntVar, ClauseDatabase, Coeff, Lit, Result};
 
 pub(crate) fn emit_filtered_clause<DB: ClauseDatabase, I: IntoIterator<Item = LitOrConst>>(
 	db: &mut DB,
@@ -194,333 +224,171 @@ pub(crate) fn negate_cnf(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
 	}
 }
 
-/// Encode the constraint lits[0] ⊕ ... ⊕ lits[n].
-/// # Warning
-/// Currently only defined for n ≤ 3.
-#[derive(Default)]
-pub struct XorEncoder {}
-
-impl<'a, DB: ClauseDatabase> Encoder<DB, XorConstraint<'a>> for XorEncoder {
-	#[cfg_attr(
-		feature = "trace",
-		tracing::instrument(name = "xor_encoder", skip_all, fields(
-			constraint = itertools::join(xor.lits.iter().map(crate::trace::trace_print_lit), " ⊻ ")
-		))
-	)]
-	fn encode(&self, db: &mut DB, xor: &XorConstraint) -> Result {
-		match *xor.lits {
-			[a] => emit_clause!(db, [a]),
-			[a, b] => {
-				emit_clause!(db, [a, b])?;
-				emit_clause!(db, [!a, !b])
-			}
-			[a, b, c] => {
-				emit_clause!(db, [a, b, c])?;
-				emit_clause!(db, [a, !b, !c])?;
-				emit_clause!(db, [!a, b, !c])?;
-				emit_clause!(db, [!a, !b, c])
-			}
-			_ => panic!("Unexpected usage of XOR with zero or more than three arguments"),
-		}
-	}
+pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
+	num.to_string()
+		.chars()
+		.map(|d| d.to_digit(10).unwrap())
+		.map(|d| char::from_u32(0x2080 + d).unwrap())
+		.collect_vec()
+		.into_iter()
 }
 
-pub struct XorConstraint<'a> {
-	pub(crate) lits: &'a [Lit],
-}
-
-impl<'a> XorConstraint<'a> {
-	pub fn new(lits: &'a [Lit]) -> Self {
-		Self { lits }
-	}
-}
-
-impl<'a> Checker for XorConstraint<'a> {
-	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
-		let count = LinExp::from_terms(self.lits.iter().map(|&l| (l, 1)).collect_vec().as_slice())
-			.value(value)
-			.unwrap();
-		if count % 2 == 1 {
-			Ok(())
-		} else {
-			Err(Unsatisfiable.into())
-		}
-	}
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct VarRange {
-	start: Var,
-	end: Var,
-}
-
-impl VarRange {
-	/// Create a range starting from [`start`] and ending at [`end`] (inclusive)
-	pub fn new(start: Var, end: Var) -> Self {
-		Self { start, end }
-	}
-
-	/// Returns the lower bound of the variable range (inclusive).
-	///
-	/// Note: the value returned by this method is unspecified after the range
-	/// has been iterated to exhaustion.
-	pub fn start(&self) -> Var {
-		self.start
-	}
-
-	/// Returns the upper bound of the variable range (inclusive).
-	///
-	/// Note: the value returned by this method is unspecified after the range
-	/// has been iterated to exhaustion.
-	pub fn end(&self) -> Var {
-		self.end
-	}
-
-	/// Create an empty variable range
-	pub fn empty() -> Self {
-		Self {
-			start: Var(NonZeroI32::new(2).unwrap()),
-			end: Var(NonZeroI32::new(1).unwrap()),
-		}
-	}
-
-	/// Returns `true` if the range contains no items.
-	///
-	/// # Examples
-	///
-	/// ```
-	/// # use pindakaas::solver::VarRange;
-	/// assert!(VarRange::empty().is_empty());
-	/// ```
-	pub fn is_empty(&self) -> bool {
-		self.start > self.end
-	}
-
-	/// Performs the indexing operation into the variable range
-	pub fn index(&self, index: usize) -> Var {
-		if index >= self.len() {
-			panic!("out of bounds access");
-		}
-		if index == 0 {
-			self.start
-		} else {
-			let index = NonZeroI32::new(index as i32).unwrap();
-			self.start.checked_add(index).unwrap()
-		}
-	}
-
-	/// Find the index of a variable within the range
-	pub fn find(&self, var: Var) -> Option<usize> {
-		if !self.contains(&var) {
-			None
-		} else {
-			let offset = (var.0.get() - self.start.0.get()) as usize;
-			debug_assert!(offset <= self.len());
-			Some(offset)
-		}
-	}
-}
-
-impl Iterator for VarRange {
-	type Item = Var;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		if self.start <= self.end {
-			let item = self.start;
-			self.start = self.start.next_var().unwrap();
-			Some(item)
-		} else {
-			None
-		}
-	}
-	fn size_hint(&self) -> (usize, Option<usize>) {
-		let size = max(self.end.0.get() - self.start.0.get() + 1, 0) as usize;
-		(size, Some(size))
-	}
-	fn count(self) -> usize {
-		let (lower, upper) = self.size_hint();
-		debug_assert_eq!(upper, Some(lower));
-		lower
-	}
-}
-impl FusedIterator for VarRange {}
-impl ExactSizeIterator for VarRange {
-	fn len(&self) -> usize {
-		let (lower, upper) = self.size_hint();
-		debug_assert_eq!(upper, Some(lower));
-		lower
-	}
-}
-impl DoubleEndedIterator for VarRange {
-	fn next_back(&mut self) -> Option<Self::Item> {
-		if self.start <= self.end {
-			let item = self.end;
-			if let Some(prev) = self.end.prev_var() {
-				self.end = prev;
-			} else {
-				*self = VarRange::empty();
-			}
-			Some(item)
-		} else {
-			None
-		}
-	}
-}
-impl RangeBounds<Var> for VarRange {
-	fn start_bound(&self) -> Bound<&Var> {
-		Bound::Included(&self.start)
-	}
-
-	fn end_bound(&self) -> Bound<&Var> {
-		Bound::Included(&self.end)
-	}
-}
-impl From<RangeInclusive<Var>> for VarRange {
-	fn from(value: RangeInclusive<Var>) -> Self {
-		VarRange::new(*value.start(), *value.end())
-	}
+pub(crate) fn unsigned_binary_range_ub(bits: u32) -> Coeff {
+	const TWO: Coeff = 2;
+	(0_u32..bits).fold(0, |sum, i| sum + TWO.pow(i))
 }
 
 #[cfg(test)]
-pub mod tests {
-	use std::{
-		collections::{BTreeSet, HashMap, HashSet},
-		num::NonZeroI32,
-		thread::panicking,
-	};
+pub(crate) mod tests {
+	#[cfg(test)]
+	macro_rules! expect_file {
+		($rel_path:expr) => {
+			expect_test::expect_file!(format!(
+				"{}/corpus/{}",
+				env!("CARGO_MANIFEST_DIR"),
+				$rel_path
+			))
+		};
+	}
 
-	use splr::{
-		types::{CNFDescription, Instantiate},
-		Certificate, Config, SatSolverIF, SolveIF, Solver, SolverError,
-	};
-	#[cfg(feature = "trace")]
-	use traced_test::test;
+	use std::fmt::Display;
 
-	use super::*;
+	#[cfg(test)]
+	pub(crate) use expect_file;
+	use expect_test::ExpectFile;
+	use itertools::Itertools;
+
 	use crate::{
-		linear::LimitComp, CardinalityOne, ConditionalDatabase, LadderEncoder, Unsatisfiable, Var,
+		bool_linear::BoolLinExp,
+		integer::IntVarEnc,
+		solver::{cadical::Cadical, SolveResult, Solver},
+		Checker, ClauseDatabase, Cnf, Lit, Valuation,
 	};
 
-	/// TODO a macro to write tests using `?`
-	macro_rules! assert_ok {
-		($test:expr) => {
-			((|| $test)()).unwrap_or_else(|e| panic!("Asserted Result is Ok but was Err({e})"))
-		};
-	}
-	pub(crate) use assert_ok;
-
-	macro_rules! assert_enc {
-		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
-			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-			assert_enc!(tdb => $enc, $arg => $clauses)
-		};
-		($tdb:ident => $enc:expr, $arg:expr => $clauses:expr) => {
-			$tdb = $tdb.expect_clauses($clauses);
-			$enc.encode(&mut $tdb, $arg)
-				.expect("Encoding proved to be trivially unsatisfiable");
-			$tdb.check_complete()
-		};
-		($enc:expr, $max:expr, $($args:expr),+ => $clauses:expr) => {
-			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-			assert_enc!(tdb => $enc, $($args),+ => $clauses)
-		};
-		($tdb:ident => $enc:expr, $($args:expr),+ => $clauses:expr) => {
-			$tdb = $tdb.expect_clauses($clauses);
-			$enc.encode(&mut $tdb, ($($args),+))
-				.expect("Encoding proved to be trivially unsatisfiable");
-			$tdb.check_complete()
-		};
-	}
-	pub(crate) use assert_enc;
-
-	macro_rules! assert_sol {
-		($enc:expr, $max:expr, $arg:expr) => {
-			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-			assert_sol!(tdb => $enc, $arg)
-		};
-		($tdb:ident => $enc:expr, $arg:expr) => {
-			use $crate::Checker;
-			$tdb = $tdb.with_check(|sol| $arg.check(sol).is_ok());
-			$enc.encode(&mut $tdb, $arg)
-				.expect("Encoding proved to be trivially unsatisfiable");
-			$tdb.check_complete()
-		};
-		($tdb:ident, $enc:expr, $max:expr, $arg:expr) => {
-			use $crate::Checker;
-			$tdb = $tdb.with_check(|sol| $arg.check(sol).is_ok());
-			$enc.encode(&mut $tdb, $arg)
-				.expect("Encoding proved to be trivially unsatisfiable");
-			$tdb.check_complete()
-		};
-		($enc:expr, $max:expr, $($args:expr),+ => $solns:expr) => {
-			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-			assert_sol!(tdb => $enc, $($args),+ => $solns)
-		};
-		($tdb:ident => $enc:expr, $($args:expr),+ => $solns:expr) => {
-			assert!(!$solns.is_empty(), "cannot using `assert_enc_sol!` with an empty solution set, use `assert_unsat!` or `assert_trivial_unsat!` instead.");
-			$tdb = $tdb.expect_solutions($solns);
-			$enc.encode(&mut $tdb, $($args),+)
-				.expect("Encoding proved to be trivially unsatisfiable");
-			$tdb.check_complete()
+	/// Helper functions to ensure that the possible solutions of a formula
+	/// abide by the given checker.
+	pub(crate) fn assert_checker(formula: &Cnf, checker: &impl Checker) {
+		let mut slv = Cadical::from(formula);
+		let vars = formula.get_variables();
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			assert_eq!(checker.check(&value), Ok(()));
+			let no_good: Vec<Lit> = vars
+				.clone()
+				.map(|v| {
+					let l = v.into();
+					if value.value(l) {
+						!l
+					} else {
+						l
+					}
+				})
+				.collect();
+			slv.add_clause(no_good).unwrap();
 		}
 	}
-	pub(crate) use assert_sol;
 
-	macro_rules! assert_enc_sol {
-		($enc:expr, $max:expr, $arg:expr => $clauses:expr) => {
-			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-			assert_enc_sol!(tdb => $enc, $arg => $clauses)
-		};
-		($tdb:ident => $enc:expr, $arg:expr => $clauses:expr) => {
-			$tdb = $tdb.expect_clauses($clauses);
-			$enc.encode(&mut $tdb, $arg)
-				.expect("Encoding proved to be trivially unsatisfiable");
-			$tdb.check_complete()
-		};
-		($enc:expr, $max:expr, $($args:expr),+ => $clauses:expr, $solns:expr) => {
-			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-			assert_enc_sol!(tdb => $enc, $($args),+ => $clauses, $solns)
-		};
-		($tdb:ident => $enc:expr, $($args:expr),+ => $clauses:expr, $solns:expr) => {
-			assert!(!$solns.is_empty(), "cannot using `assert_enc_sol!` with an empty solution set, use `assert_unsat!` or `assert_trivial_unsat!` instead.");
-			$tdb = $tdb.expect_clauses($clauses);
-			$tdb = $tdb.expect_solutions($solns);
-			$enc.encode(&mut $tdb, ($($args),+))
-				.expect("Encoding proved to be trivially unsatisfiable");
-			$tdb.check_complete()
-		};
+	/// Simple helper function to assert the generated formula against an expect
+	/// block.
+	pub(crate) fn assert_encoding(formula: &impl Display, expect: &ExpectFile) {
+		expect.assert_eq(&formula.to_string());
 	}
-	pub(crate) use assert_enc_sol;
 
-	#[allow(unused_macros)]
-	macro_rules! assert_unsat {
-		($enc:expr, $max:expr, $($args:expr),+) => {
-			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-			assert_unsat!(tdb => $enc, $($args),+)
-		};
-		($tdb:ident => $enc:expr, $($args:expr),+) => {
-			if ! $enc.encode(&mut $tdb, ($($args),+)).is_err() {
-				$tdb = $tdb.expect_solutions(vec![]);
-				$tdb.check_complete();
+	#[allow(dead_code, reason = "TODO: prepare for checking integer encodings")]
+	/// Helper function that asserts that the integer solutions of a formula are
+	/// as contained in the expect block.
+	pub(crate) fn assert_integer_solutions<V, I>(formula: &Cnf, vars: I, expect: &ExpectFile)
+	where
+		V: Into<IntVarEnc>,
+		I: IntoIterator<Item = V> + Clone,
+	{
+		let mut slv = Cadical::from(formula);
+		let vars = vars
+			.into_iter()
+			.map(|x| BoolLinExp::from(&x.into()))
+			.collect_vec();
+		let bool_vars = formula.get_variables();
+		let mut solutions: Vec<Vec<i64>> = Vec::new();
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			// Collect integer solution
+			solutions.push(
+				vars.clone()
+					.into_iter()
+					.map(|x| x.value(&value).unwrap())
+					.collect(),
+			);
+			// Add nogood clause
+			let nogood: Vec<Lit> = bool_vars
+				.clone()
+				.map(|v| {
+					let l = v.into();
+					if value.value(l) {
+						!l
+					} else {
+						l
+					}
+				})
+				.collect();
+			slv.add_clause(nogood).unwrap();
+
+			/// Helper functions to ensure that the possible solutions of a formula, with
+			/// relation to a set of variables, match the expected solutions string.
+			pub(crate) fn assert_solutions<V, I>(formula: &Cnf, vars: I, expect: &ExpectFile)
+			where
+				V: Into<Lit>,
+				I: IntoIterator<Item = V> + Clone,
+			{
+				let mut slv = Cadical::from(formula);
+				let mut solutions: Vec<Vec<Lit>> = Vec::new();
+				while let SolveResult::Satisfied(value) = slv.solve() {
+					solutions.push(
+						vars.clone()
+							.into_iter()
+							.map(|v| {
+								let l = v.into();
+								if value.value(l) {
+									l
+								} else {
+									!l
+								}
+							})
+							.collect(),
+					);
+					slv.add_clause(solutions.last().unwrap().iter().map(|l| !l))
+						.unwrap();
+				}
+				solutions.sort();
+				let sol_str = format!(
+					"{}",
+					solutions
+						.into_iter()
+						.map(|sol| sol.into_iter().map(i32::from).format(" "))
+						.format("\n")
+				);
+				expect.assert_eq(&sol_str);
 			}
-		};
-	}
-	#[allow(unused_imports)]
-	pub(crate) use assert_unsat;
 
-	macro_rules! assert_trivial_unsat {
-		($enc:expr, $max:expr, $($args:expr),+) => {
-			let mut tdb = $crate::helpers::tests::TestDB::new($max);
-			assert_trivial_unsat!(tdb => $enc, $($args),+)
-		};
-		($tdb:ident => $enc:expr, $($args:expr),+) => {
-			assert_eq!($enc.encode(&mut $tdb, ($($args),+)), Err($crate::Unsatisfiable))
-		};
-		($res:expr) => {
-			assert_eq!($res, Err($crate::Unsatisfiable))
+			/// Helper function to quickly create a valuation from a slice of literals.
+			///
+			/// ### Warning
+			/// This function assumes that the literal slice contains all literals
+			/// starting from the first variable, and that the literals are in order of
+			/// the variables.
+			pub(crate) fn make_valuation<L: Into<Lit> + Copy>(
+				solution: &[L],
+			) -> impl Valuation + '_ {
+				|l: Lit| {
+					let abs: Lit = l.var().into();
+					let v = Into::<i32>::into(abs) as usize;
+					if v <= solution.len() {
+						debug_assert_eq!(solution[v - 1].into().var(), l.var());
+						solution[v - 1].into() == l
+					} else {
+						false
+					}
+				}
+			}
 		}
 	}
-	pub(crate) use assert_trivial_unsat;
 
 	macro_rules! lits {
 		() => {
@@ -533,584 +401,4 @@ pub mod tests {
 		};
 	}
 	pub(crate) use lits;
-	#[test]
-	fn test_assert_macros() {
-		#[derive(Default)]
-		struct Negate {}
-		impl Negate {
-			#[cfg_attr(
-				feature = "trace",
-				tracing::instrument(name = "negate_encoder", skip_all)
-			)]
-			fn encode<DB: ClauseDatabase>(&mut self, db: &mut DB, lit: Lit) -> Result {
-				emit_clause!(db, [!lit])
-			}
-		}
-
-		// Test resulting encoding
-		assert_enc!(Negate::default(), 1, 1.into() => vec![lits![-1]]);
-		// Test possible solutions (using specification)
-		assert_sol!(Negate::default(), 1, 1.into() => vec![lits![-1]]);
-		// Test encoding and possible solutions
-		assert_enc_sol!(Negate::default(), 1, 1.into() => vec![lits![-1]], vec![lits![-1]]);
-
-		// Test resulting encoding for given TestDB instance
-		let mut tdb = TestDB::new(2);
-		tdb.add_clause(lits![2]).unwrap();
-		assert_enc!(tdb => Negate::default(), 1.into() => vec![lits![-1]]); // only clauses of encoder are checked against
-
-		let mut tdb = TestDB::new(2);
-		tdb.add_clause(lits![2]).unwrap();
-		assert_sol!(tdb => Negate::default(), 1.into() => vec![lits![-1,2]]);
-
-		let mut tdb = TestDB::new(2);
-		tdb.add_clause(lits![2]).unwrap();
-		assert_enc_sol!(tdb => Negate::default(), 1.into() => vec![lits![-1]], vec![lits![-1,2]]);
-	}
-
-	#[test]
-	fn test_assert_macros_with_check() {
-		let mut tdb = TestDB::new(3);
-		tdb.add_clause(lits![1]).unwrap();
-		assert_sol!(tdb => LadderEncoder::default(), &CardinalityOne {
-			lits: lits![2, 3],
-			cmp: LimitComp::LessEq,
-		});
-	}
-
-	#[test]
-	fn test_xor() {
-		assert_enc_sol!(
-			XorEncoder::default(),
-			2,
-			&XorConstraint::new(&lits![1,2]) =>
-			vec![lits![1, 2], lits![-1, -2]],
-			vec![lits![-1, 2], lits![1, -2]]
-		);
-	}
-
-	#[test]
-	fn test_expect_statistics() {
-		let mut tdb = TestDB::new(3);
-		tdb = tdb.expect_vars(2);
-		tdb = tdb.expect_cls(3);
-		tdb = tdb.expect_lits(5);
-		tdb.add_clause(lits![1, 2]).unwrap();
-		tdb.new_var();
-		tdb.add_clause(lits![-3, -4]).unwrap();
-		tdb.new_var();
-		tdb.add_clause(lits![5]).unwrap();
-		tdb.check_complete();
-	}
-
-	pub(crate) fn make_valuation<L: Into<Lit> + Copy>(g: &[L]) -> impl Valuation + '_ {
-		|l: Lit| {
-			let abs: Lit = l.var().into();
-			let v = Into::<i32>::into(abs) as usize;
-			if v <= g.len() {
-				debug_assert_eq!(g[v - 1].into().var(), l.var());
-				Some(g[v - 1].into() == l)
-			} else {
-				None
-			}
-		}
-	}
-
-	const OUTPUT_SPLR: bool = false;
-	/// The maximum number of variable to generate expected solutions for
-	const GENERATE_EXPECTED_SOLUTIONS: i32 = 0;
-
-	#[derive(Debug)]
-	pub(crate) struct TestDB {
-		slv: Solver,
-		/// Number of variables available when solver is created
-		pub(crate) num_var: i32,
-		/// Clauses expected by the test case
-		clauses: Option<Vec<(bool, Vec<Lit>)>>,
-		/// Solutions expected by the test case
-		solutions: Option<Vec<Vec<Lit>>>,
-		check: Option<fn(&dyn Valuation) -> bool>,
-		unchecked: bool,
-		expected_vars: Option<usize>,
-		expected_cls: Option<usize>,
-		expected_lits: Option<usize>,
-		expecting_no_unit_clauses: bool,
-		expecting_no_equivalences: Option<HashMap<Lit, Lit>>,
-		num_cls: u32,
-	}
-
-	const _ONLY_OUTPUT: bool = true;
-	const _CHECK_N_SOL: Option<u32> = None;
-
-	impl TestDB {
-		pub fn new(num_var: i32) -> TestDB {
-			if OUTPUT_SPLR {
-				eprintln!("let slv = Solver::instantiate( &Config::default(), &CNFDescription {{ num_of_variables: {} as usize, ..CNFDescription::default() }});", num_var);
-			}
-			TestDB {
-				slv: Solver::instantiate(
-					&Config::default(),
-					&CNFDescription {
-						num_of_variables: num_var as usize,
-						..CNFDescription::default()
-					},
-				),
-				num_var,
-				clauses: None,
-				solutions: None,
-				check: None,
-				unchecked: false,
-				expected_vars: None,
-				expected_cls: None,
-				expected_lits: None,
-				expecting_no_unit_clauses: false,
-				expecting_no_equivalences: None,
-				num_cls: 0,
-			}
-		}
-
-		pub fn expect_clauses(mut self, mut clauses: Vec<Vec<Lit>>) -> TestDB {
-			for cl in &mut clauses {
-				cl.sort();
-			}
-			clauses.sort();
-			self.clauses = Some(clauses.into_iter().map(|cl| (false, cl)).collect());
-			self.unchecked = true;
-			self
-		}
-
-		pub fn expect_vars(mut self, vars: usize) -> TestDB {
-			self.expected_vars = Some(vars);
-			self
-		}
-
-		pub fn expect_cls(mut self, cls: usize) -> TestDB {
-			self.expected_cls = Some(cls);
-			self
-		}
-
-		pub fn expect_lits(mut self, lits: usize) -> TestDB {
-			self.expected_lits = Some(lits);
-			self
-		}
-
-		pub fn expect_solutions(mut self, mut solutions: Vec<Vec<Lit>>) -> TestDB {
-			for sol in &mut solutions {
-				sol.sort();
-			}
-			solutions.sort();
-			if let Some(self_solutions) = &self.solutions {
-				assert_eq!(self_solutions, &solutions, "Previous (probably generated) solutions (left) differ from given solutions (right)" );
-			}
-			self.solutions = Some(solutions);
-			self.unchecked = true;
-			self
-		}
-
-		#[allow(dead_code)]
-		pub fn generate_solutions(
-			&self,
-			check: impl Fn(&dyn Valuation) -> bool,
-			n: i32,
-		) -> Vec<Vec<Lit>> {
-			if n > 32 {
-				unimplemented!(
-					"Cannot generate solutions using binary shifts with more than 32 variables."
-				);
-			}
-
-			(0..((2_i32).pow(n as u32)))
-				.map(|i| {
-					(0..n)
-						.map(|j| if ((i >> j) & 1) == 1 { j + 1 } else { -(j + 1) }.into())
-						.collect_vec()
-				})
-				.filter(|g| check(&make_valuation(g)))
-				.collect()
-		}
-
-		pub fn _print_solutions(sols: &[Vec<Lit>]) -> String {
-			format!(
-				"vec![\n{}\n]",
-				sols.iter()
-					.map(|sol| format!(
-						"\tvec![{}]",
-						(*sol)
-							.iter()
-							.map(|&lit| Into::<i32>::into(lit).to_string())
-							.join(", ")
-					))
-					.join(",\n")
-			)
-		}
-
-		pub fn with_check(mut self, checker: fn(&dyn Valuation) -> bool) -> TestDB {
-			if self.solutions.is_none() && self.num_var <= GENERATE_EXPECTED_SOLUTIONS {
-				let solutions = self.generate_solutions(checker, self.num_var);
-				self.expect_solutions(solutions)
-			} else {
-				self.check = Some(checker);
-				self.unchecked = true;
-				self
-			}
-		}
-
-		// TODO use solver IF
-		/// Solve for given output variables (or self.num_var if None)
-		pub fn _solve(&mut self, output: Option<BTreeSet<Var>>) -> Vec<Vec<Lit>> {
-			let mut from_slv: Vec<Vec<Lit>> = Vec::new();
-			let output: BTreeSet<_> = output
-				.map(|output| output.into_iter().map(|v| v.into()).collect())
-				.unwrap_or((1..=self.num_var).collect());
-
-			// TODO [refactor] instead of using splr, testing should use our own Solver interface
-			let mut k_sol = 0;
-			while let Ok(Certificate::SAT(lit_assignment)) = self.slv.solve() {
-				let solution = if _ONLY_OUTPUT {
-					lit_assignment
-						.clone()
-						.into_iter()
-						.filter(|l| output.contains(&l.abs()))
-						.collect()
-				} else {
-					lit_assignment
-				};
-				let solution = solution.into_iter().map(Lit::from).collect_vec();
-
-				from_slv.push(solution.clone());
-				if let Some(n) = _CHECK_N_SOL {
-					if k_sol > n {
-						break;
-					} else {
-						k_sol += 1;
-					}
-				}
-
-				let nogood = solution.iter().map(|l| !l).map(i32::from).collect_vec();
-
-				match SatSolverIF::add_clause(&mut self.slv, nogood) {
-					Err(SolverError::Inconsistent | SolverError::EmptyClause) => {
-						break;
-					}
-					Err(e) => {
-						panic!("unexpected solver error: {}", e);
-					}
-					Ok(_) => self.slv.reset(),
-				};
-			}
-			for sol in &mut from_slv {
-				sol.sort_by_key(|a| a.var());
-			}
-			from_slv
-		}
-
-		pub fn check_complete(&mut self) {
-			self.unchecked = false;
-			if let Some(clauses) = &self.clauses {
-				let missing: Vec<Vec<Lit>> = clauses
-					.iter()
-					.filter_map(|(found, cl)| if *found { None } else { Some(cl.clone()) })
-					.collect();
-				assert!(
-					missing.is_empty(),
-					"clauses are missing from the encoding: {:?}",
-					missing
-				);
-			}
-			if self.solutions.is_none()
-				&& self.check.is_none()
-				&& self.expected_vars.is_none()
-				&& self.expected_cls.is_none()
-				&& self.expected_lits.is_none()
-			{
-				return;
-			}
-			if OUTPUT_SPLR {
-				eprintln!("let result: Vec<Vec<i32>> = slv.iter().collect();");
-			}
-			const ONLY_OUTPUT: bool = true;
-			let mut from_slv: Vec<Vec<Lit>> = Vec::new();
-			while let Ok(Certificate::SAT(lit_assignment)) = self.slv.solve() {
-				let lit_assignment: Vec<Lit> = if ONLY_OUTPUT {
-					lit_assignment
-						.iter()
-						.filter(|l| l.abs() <= self.num_var)
-						.map(|&l| l.into())
-						.collect()
-				} else {
-					lit_assignment.iter().map(|&l| l.into()).collect()
-				};
-
-				from_slv.push(lit_assignment.clone());
-
-				let nogood: Vec<i32> = lit_assignment.iter().map(|l| (!l).into()).collect();
-				match SatSolverIF::add_clause(&mut self.slv, nogood) {
-					Err(SolverError::Inconsistent | SolverError::EmptyClause) => {
-						break;
-					}
-					Err(e) => {
-						panic!("unexpected solver error: {}", e);
-					}
-					Ok(_) => self.slv.reset(),
-				}
-			}
-			for sol in &mut from_slv {
-				sol.sort();
-			}
-			if let Some(check) = &self.check {
-				for sol in &mut from_slv {
-					assert!(
-						check(&make_valuation(sol)),
-						"solution {:?} failed check",
-						sol
-					)
-				}
-			}
-			if let Some(solutions) = &self.solutions {
-				// solutions only contain principal variables; so we might have to filter from_slv if it contains aux vars
-				from_slv.sort();
-
-				let from_slv_output = if ONLY_OUTPUT {
-					from_slv.clone()
-				} else {
-					from_slv
-						.iter()
-						.map(|sol| {
-							sol.iter()
-								.filter(|l| Into::<i32>::into(l.var()) <= self.num_var)
-								// .filter(|l| output.contains(&l.abs())) // TODO could consider adding this; but is only used so far for model-based tests
-								.cloned()
-								.collect_vec()
-						})
-						.collect()
-				};
-
-				let misses = solutions
-					.iter()
-					.filter(|s| !from_slv_output.contains(s))
-					.collect_vec();
-
-				if !misses.is_empty() {
-					println!("Missing solutions ({})", misses.len());
-					for s in misses {
-						println!("  -{}", s.iter().join(","));
-					}
-				}
-
-				let extras = from_slv
-					.iter()
-					.zip(from_slv_output)
-					.filter_map(|(sol, out)| (!solutions.contains(&out)).then_some(sol))
-					.collect_vec();
-
-				if !extras.is_empty() {
-					println!("Extra solutions ({})", extras.len());
-					for s in extras {
-						println!("  +{}", s.iter().join(","));
-					}
-				}
-
-				let vars: HashSet<Var> = solutions
-					.iter()
-					.flat_map(|sol| sol.iter().map(|lit| lit.var()))
-					.collect();
-
-				let mut from_slv: Vec<Vec<Lit>> = HashSet::<Vec<Lit>>::from_iter(
-					from_slv
-						.into_iter()
-						.map(|xs| xs.into_iter().filter(|x| vars.contains(&x.var())).collect()),
-				)
-				.into_iter()
-				.collect();
-				from_slv.sort();
-
-				assert_eq!(
-					&from_slv, solutions,
-					"solutions found by the solver do not match expected set of solutions"
-				);
-			}
-			assert!(
-				(self.expected_vars.is_none() || self.expected_vars.unwrap() == 0)
-					&& (self.expected_cls.is_none() || self.expected_cls.unwrap() == 0)
-					&& (self.expected_lits.is_none() || self.expected_lits.unwrap() == 0),
-				"Missing {} var(s), {} clause(s) and {} literal(s)",
-				self.expected_vars.unwrap_or(0),
-				self.expected_cls.unwrap_or(0),
-				self.expected_lits.unwrap_or(0)
-			);
-		}
-	}
-
-	impl Drop for TestDB {
-		fn drop(&mut self) {
-			if self.unchecked && !panicking() {
-				panic!("TestDB object was dropped without being checked!")
-			}
-		}
-	}
-
-	/// Optionally check max number of clauses
-	const MAX_CLAUSES: Option<u32> = None;
-
-	impl ClauseDatabase for TestDB {
-		fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
-			let cl = cl.into_iter().sorted().collect_vec();
-			self.num_cls += 1;
-
-			assert!(
-				MAX_CLAUSES
-					.map(|max_clauses| self.num_cls <= max_clauses)
-					.unwrap_or(true),
-				"More than {} clauses added for single unit test",
-				MAX_CLAUSES.unwrap()
-			);
-
-			if let Some(clauses) = &mut self.clauses {
-				let mut found = false;
-				for (f, x) in clauses {
-					if &cl == x {
-						*f = true;
-						found = true;
-						break;
-					}
-				}
-				assert!(found, "unexpected clause: {:?}", cl);
-			}
-
-			if self.expecting_no_unit_clauses {
-				assert!(
-					cl.len() > 1 || Into::<i32>::into(cl[0]) <= self.num_var,
-					"Unexpected unit clause on aux var {:?}",
-					cl
-				);
-			}
-
-			if let Some(equivalences) = &mut self.expecting_no_equivalences {
-				let mut cl = cl.clone();
-				cl.sort();
-				if match cl[..] {
-					[a, b] => {
-						let (a, b): (Lit, Lit) = (a.var().into(), b.var().into());
-						if !a.is_negated() && !b.is_negated() {
-							// a \/ b = ~a -> b
-							equivalences.insert(!a, b);
-							// do we have b -> ~a = ~b \/ ~a = a -> ~b?
-							equivalences.get(&a) == Some(&!b)
-						} else if a.is_negated() && !b.is_negated() {
-							// ~a \/ b = a -> b
-							equivalences.insert(a, b);
-							// do we have b -> a = ~b \/ a = ~a -> ~b?
-							equivalences.get(&!a) == Some(&!b)
-						} else if !a.is_negated() && b.is_negated() {
-							// a \/ ~b = ~a -> ~b
-							equivalences.insert(!a, !b);
-							// do we have ~b -> ~a = b \/ ~a = a -> b?
-							equivalences.get(&a) == Some(&b)
-						} else if a.is_negated() && b.is_negated() {
-							// ~a \/ ~b = a -> ~b
-							equivalences.insert(!a, !b);
-							// do we have ~b -> a = b \/ a = ~a -> b?
-							equivalences.get(&!a) == Some(&b)
-						} else {
-							unreachable!("{:?}", cl);
-						}
-					}
-					_ => false,
-				} {
-					println!("Unexpected equivalence by adding {cl:?}");
-				}
-			}
-
-			if let Some(num) = &mut self.expected_cls {
-				assert!(*num > 0, "unexpected number of new clauses");
-				*num -= 1;
-			}
-			if let Some(num) = &mut self.expected_lits {
-				assert!(*num >= cl.len(), "unexpected number of new literals");
-				*num -= cl.len();
-			}
-
-			if OUTPUT_SPLR {
-				let list: Vec<String> = cl
-					.iter()
-					.map(|l| {
-						let v: i32 = l.var().into();
-						if v <= self.num_var {
-							l.to_string()
-						} else {
-							format!("{}x{}", if l.is_negated() { "-" } else { "" }, v)
-						}
-					})
-					.collect();
-				match cl.len() {
-					0 => {}
-					1 => {
-						eprintln!(
-						"slv.add_assignment({}).expect(\"unexpected error from add_assignment\");",
-							list[0],
-						)
-					}
-					_ => eprintln!(
-						"slv.add_clause([{}]).expect(\"unexpected error from add_clause\");",
-						list.join(", ")
-					),
-				}
-			}
-
-			const FIND_UNSAT_EVERY: Option<u32> = None;
-
-			let find_unsat = FIND_UNSAT_EVERY
-				.map(|every| self.num_cls % every == 0)
-				.unwrap_or_default();
-
-			fn handle_splr_err(err: SolverError) -> Result {
-				match err {
-					SolverError::EmptyClause => Ok(()),
-					SolverError::RootLevelConflict(_) => Err(Unsatisfiable),
-					err => {
-						panic!("unexpected solver error: {:?}", err);
-					}
-				}
-			}
-
-			match match cl.len() {
-				0 => return Err(Unsatisfiable),
-				1 => self.slv.add_assignment(cl[0].into()),
-				_ => SatSolverIF::add_clause(
-					&mut self.slv,
-					cl.iter().map(|&l| l.into()).collect_vec(),
-				),
-			} {
-				Ok(_) if find_unsat => match self.slv.solve() {
-					Ok(Certificate::UNSAT) => Err(Unsatisfiable),
-					Ok(_) => Ok(()),
-					Err(err) => handle_splr_err(err),
-				},
-				Ok(_) => Ok(()),
-				Err(err) => handle_splr_err(err),
-			}
-		}
-
-		fn new_var(&mut self) -> Var {
-			let res = self.slv.add_var() as i32;
-
-			if let Some(num) = &mut self.expected_vars {
-				assert!(*num > 0, "unexpected number of new variables");
-				*num -= 1;
-			}
-
-			if OUTPUT_SPLR {
-				eprintln!("let x{} = slv.add_var() as i32;", res);
-			}
-			Var(NonZeroI32::new(res).unwrap())
-		}
-
-		type CondDB = Self;
-		fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self> {
-			ConditionalDatabase {
-				db: self,
-				conditions,
-			}
-		}
-	}
 }

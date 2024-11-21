@@ -1,7 +1,11 @@
+use std::path::Path;
+
 fn main() {
 	// TODO [?] something like this needs to be added to all build.rs files? Even better, pinpointing the specific files which could change?
 	println!("cargo:rerun-if-changed=build.rs");
 	let src = [
+		"src/ccadical_override.cpp",
+		"vendor/cadical/contrib/craigtracer.cpp",
 		"vendor/cadical/src/analyze.cpp",
 		"vendor/cadical/src/arena.cpp",
 		"vendor/cadical/src/assume.cpp",
@@ -32,12 +36,13 @@ fn main() {
 		"vendor/cadical/src/file.cpp",
 		"vendor/cadical/src/flags.cpp",
 		"vendor/cadical/src/flip.cpp",
-		"vendor/cadical/src/frattracer.cpp",
 		"vendor/cadical/src/format.cpp",
+		"vendor/cadical/src/frattracer.cpp",
 		"vendor/cadical/src/gates.cpp",
 		"vendor/cadical/src/idruptracer.cpp",
 		"vendor/cadical/src/instantiate.cpp",
 		"vendor/cadical/src/internal.cpp",
+		"vendor/cadical/src/lidruptracer.cpp",
 		"vendor/cadical/src/limit.cpp",
 		"vendor/cadical/src/logging.cpp",
 		"vendor/cadical/src/lookahead.cpp",
@@ -74,31 +79,39 @@ fn main() {
 		"vendor/cadical/src/terminal.cpp",
 		"vendor/cadical/src/ternary.cpp",
 		"vendor/cadical/src/transred.cpp",
-		"vendor/cadical/src/veripbtracer.cpp",
 		"vendor/cadical/src/util.cpp",
 		"vendor/cadical/src/var.cpp",
+		"vendor/cadical/src/veripbtracer.cpp",
 		"vendor/cadical/src/version.cpp",
 		"vendor/cadical/src/vivify.cpp",
 		"vendor/cadical/src/walk.cpp",
 		"vendor/cadical/src/watch.cpp",
-		"src/ccadical_override.cpp",
 	];
 
 	let mut builder = cc::Build::new();
 	let build = builder
 		.cpp(true)
+		.include("vendor/cadical/src")
 		.flag_if_supported("-std=c++11")
 		.define("NBUILD", None)
 		.define("NUNLOCKED", None)
 		.define("NTRACING", None)
 		.define("QUIET", None);
 
+	#[cfg(not(debug_assertions))]
+	// I'm not sure why this is not automatic, but assertions still seem to trigger otherwise.
+	build.define("NDEBUG", None);
+
+	if build.get_compiler().is_like_msvc() {
+		let _ = build.include(Path::new("vendor/cadical/contrib/msvc"));
+	}
+
 	assert_eq!(
 		env!("CARGO_PKG_VERSION"),
 		include_str!("vendor/cadical/VERSION").trim()
 	);
 
-	build.files(src);
+	let _ = build.files(src);
 
 	build.compile("cadical");
 }

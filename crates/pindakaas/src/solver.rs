@@ -1,25 +1,85 @@
-#[cfg(feature = "cadical")]
+#[cfg(any(feature = "cadical", test))]
 pub mod cadical;
 #[cfg(feature = "intel-sat")]
 pub mod intel_sat;
 #[cfg(feature = "kissat")]
 pub mod kissat;
+#[cfg(feature = "libloading")]
+pub mod libloading;
+#[cfg(feature = "external-propagation")]
+pub mod propagation;
 #[cfg(feature = "splr")]
 pub mod splr;
+use crate::Cnf;
 use crate::MapSol;
 use itertools::Itertools;
-pub mod libloading;
-use crate::Cnf;
 
-#[cfg(feature = "ipasir-up")]
-use std::any::Any;
-use std::num::NonZeroI32;
+use std::{ffi::c_void, num::NonZeroI32, ptr};
 
-pub use crate::helpers::VarRange;
-use crate::{ClauseDatabase, Lit, Valuation, Var};
+use crate::{ClauseDatabase, Lit, Valuation, Var, VarRange};
+
+type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
+type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;
+
+#[derive(Debug, Clone, Copy)]
+/// Iterator over the elements of a null-terminated i32 array
+struct ExplIter(*const i32);
+
+#[derive(Debug, PartialEq)]
+struct FFIPointer {
+	ptr: *mut c_void,
+	drop_fn: fn(*mut c_void),
+}
+
+/// Trait implemented by the object given to the callback on detecting failure
+pub trait FailedAssumtions {
+	/// Check if the given assumption literal was used to prove the unsatisfiability
+	/// of the formula under the assumptions used for the last SAT search.
+	///
+	/// Note that for literals 'lit' which are not assumption literals, the behavior
+	/// of is not specified.
+	fn fail(&self, lit: Lit) -> bool;
+}
+
+pub trait LearnCallback: Solver {
+	/// Set a callback function used to extract learned clauses up to a given
+	/// length from the solver.
+	///
+	/// # Warning
+	///
+	/// Subsequent calls to this method override the previously set
+	/// callback function.
+	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>) + 'static>(
+		&mut self,
+		cb: Option<F>,
+	);
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub enum SlvTermSignal {
+	Continue,
+	Terminate,
+}
+
+pub trait SolveAssuming: Solver {
+	/// Solve the formula with specified clauses under the given assumptions.
+	///
+	/// If the search is interrupted (see [`set_terminate_callback`]) the function
+	/// returns unknown
+	fn solve_assuming<I: IntoIterator<Item = Lit>>(
+		&mut self,
+		assumptions: I,
+	) -> SolveResult<impl Valuation + '_, impl FailedAssumtions + '_>;
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SolveResult<Sol: Valuation, Fail = ()> {
+	Satisfied(Sol),
+	Unsatisfiable(Fail),
+	Unknown,
+}
 
 pub trait Solver: ClauseDatabase {
-	type ValueFn: Valuation;
 	/// Return the name and the version of SAT solver.
 	fn signature(&self) -> &str;
 
@@ -27,7 +87,7 @@ pub trait Solver: ClauseDatabase {
 	///
 	/// If the search is interrupted (see [`set_terminate_callback`]) the function
 	/// returns unknown
-	fn solve<SolCb: FnOnce(&Self::ValueFn)>(&mut self, on_sol: SolCb) -> SolveResult;
+	fn solve(&mut self) -> SolveResult<impl Valuation + '_, impl Sized>;
 
 	/// Solve for all solutions
 	fn solve_all(&mut self, output: &[Var]) -> Vec<MapSol> {
@@ -62,51 +122,6 @@ pub trait Solver: ClauseDatabase {
 	}
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
-pub enum SolveResult {
-	Sat,
-	Unsat,
-	Unknown,
-}
-
-pub trait SolveAssuming: Solver {
-	type FailFn: FailedAssumtions;
-
-	/// Solve the formula with specified clauses under the given assumptions.
-	///
-	/// If the search is interrupted (see [`set_terminate_callback`]) the function
-	/// returns unknown
-	fn solve_assuming<
-		I: IntoIterator<Item = Lit>,
-		SolCb: FnOnce(&Self::ValueFn),
-		FailCb: FnOnce(&Self::FailFn),
-	>(
-		&mut self,
-		assumptions: I,
-		on_sol: SolCb,
-		on_fail: FailCb,
-	) -> SolveResult;
-}
-
-/// Trait implemented by the object given to the callback on detecting failure
-pub trait FailedAssumtions {
-	/// Check if the given assumption literal was used to prove the unsatisfiability
-	/// of the formula under the assumptions used for the last SAT search.
-	///
-	/// Note that for literals 'lit' which are not assumption literals, the behavior
-	/// of is not specified.
-	fn fail(&self, lit: Lit) -> bool;
-}
-
-pub trait LearnCallback: Solver {
-	/// Set a callback function used to extract learned clauses up to a given
-	/// length from the solver.
-	///
-	/// WARNING: Subsequent calls to this method override the previously set
-	/// callback function.
-	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>)>(&mut self, cb: Option<F>);
-}
-
 pub trait TermCallback: Solver {
 	/// Set a callback function used to indicate a termination requirement to the
 	/// solver.
@@ -114,179 +129,12 @@ pub trait TermCallback: Solver {
 	/// The solver will periodically call this function and check its return value
 	/// during the search. Subsequent calls to this method override the previously
 	/// set callback function.
-	fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>);
-}
-
-#[cfg(feature = "ipasir-up")]
-pub trait PropagatingSolver: Solver + PropagatorAccess + MutPropagatorAccess
-where
-	Self::ValueFn: PropagatorAccess,
-{
-	/// Set Propagator implementation which allows to learn, propagate and
-	/// backtrack based on external constraints.
-	///
-	/// Only one Propagator can be connected. This Propagator is notified of all
-	/// changes to which it has subscribed, using the [`add_observed_var`] method.
-	///
-	/// If a previous propagator was set, then it is returned.
 	///
 	/// # Warning
 	///
-	/// Calling this method automatically resets the observed variable set.
-	fn set_external_propagator(
-		&mut self,
-		prop: Option<Box<dyn Propagator>>,
-	) -> Option<Box<dyn Propagator>>;
-
-	fn add_observed_var(&mut self, var: Var);
-	fn remove_observed_var(&mut self, var: Var);
-	fn reset_observed_vars(&mut self);
-}
-
-/// Access the external propagator given the to solver
-#[cfg(feature = "ipasir-up")]
-pub trait PropagatorAccess {
-	/// Access the external propagator given the to solver
-	///
-	/// This method will return [`None`] if no propagator is set, or if the
-	/// propagator is not of type [`P`].
-	fn propagator<P: Propagator + 'static>(&self) -> Option<&P>;
-}
-
-/// Get mutable access to the external propagator given the to solver
-#[cfg(feature = "ipasir-up")]
-pub trait MutPropagatorAccess {
-	/// Get mutable access to the external propagator given the to solver
-	///
-	/// This method will return [`None`] if no propagator is set, or if the
-	/// propagator is not of type [`P`].
-	fn propagator_mut<P: Propagator + 'static>(&mut self) -> Option<&mut P>;
-}
-
-#[cfg(feature = "ipasir-up")]
-pub trait Propagator {
-	/// This method is called checked only when the propagator is connected. When
-	/// a Propagator is marked as lazy, it is only asked to check complete
-	/// assignments.
-	fn is_lazy(&self) -> bool {
-		false
-	}
-
-	/// Method called to notify the propagator about assignments of literals
-	/// concerning observed variables.
-	///
-	/// The notification is not necessarily eager. It usually happens before the
-	/// call of propagator callbacks and when a driving clause is leading to an
-	/// assignment.
-	///
-	/// If [`persistent`] is set to `true`, then the assignment is known to
-	/// persist through backtracking.
-	fn notify_assignment(&mut self, lit: Lit, persistent: bool) {
-		let _ = lit;
-		let _ = persistent;
-	}
-	fn notify_new_decision_level(&mut self) {}
-	fn notify_backtrack(&mut self, new_level: usize) {
-		let _ = new_level;
-	}
-
-	/// Method called to check the found complete solution (after solution
-	/// reconstruction). If it returns false, the propagator must provide an
-	/// external clause during the next callback.
-	fn check_model(&mut self, slv: &mut dyn SolvingActions, value: &dyn Valuation) -> bool {
-		let _ = value;
-		let _ = slv;
-		true
-	}
-
-	/// Method called when the solver asks for the next decision literal. If it
-	/// returns None, the solver makes its own choice.
-	fn decide(&mut self) -> Option<Lit> {
-		None
-	}
-
-	/// Method to ask the propagator if there is an propagation to make under the
-	/// current assignment. It returns queue of literals to be propagated in order,
-	/// if an empty queue is returned it indicates that there is no propagation
-	/// under the current assignment.
-	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Vec<Lit> {
-		let _ = slv;
-		Vec::new()
-	}
-
-	/// Ask the external propagator for the reason clause of a previous external
-	/// propagation step (done by [`Propagator::propagate`]). The clause must
-	/// contain the propagated literal.
-	fn add_reason_clause(&mut self, propagated_lit: Lit) -> Vec<Lit> {
-		let _ = propagated_lit;
-		Vec::new()
-	}
-
-	/// Method to ask whether there is an external clause to add to the solver.
-	fn add_external_clause(&mut self, slv: &mut dyn SolvingActions) -> Option<Vec<Lit>> {
-		let _ = slv;
-		None
-	}
-
-	/// Method to help access to the propagator when given to the solver.
-	///
-	/// See [`PropagatingSolver::propagator`].
-	///
-	/// # Note
-	///
-	/// This method can generally be implemented as
-	/// ```rust
-	/// use std::any::Any;
-	/// use pindakaas::solver::Propagator;
-	///
-	/// struct A;
-	///
-	/// impl Propagator for A {
-	///   fn as_any(&self) -> &dyn Any {
-	///     self
-	///   }
-	///
-	/// #  fn as_mut_any(&mut self) -> &mut dyn Any { self }
-	/// }
-	///
-	/// ```
-	fn as_any(&self) -> &dyn Any;
-
-	/// Method to help access to the propagator when given to the solver.
-	///
-	/// See [`PropagatingSolver::propagator`].
-	///
-	/// # Note
-	///
-	/// This method can generally be implemented as
-	/// ```rust
-	/// use std::any::Any;
-	/// use pindakaas::solver::Propagator;
-	///
-	/// struct A;
-	///
-	/// impl Propagator for A {
-	///   fn as_mut_any(&mut self) -> &mut dyn Any {
-	///     self
-	///   }
-	/// #  fn as_any(&self) -> &dyn Any { self }
-	/// }
-	///
-	/// ```
-	fn as_mut_any(&mut self) -> &mut dyn Any;
-}
-
-#[cfg(feature = "ipasir-up")]
-pub trait SolvingActions {
-	fn new_var(&mut self) -> Var;
-	fn add_observed_var(&mut self, var: Var);
-	fn is_decision(&mut self, lit: Lit) -> bool;
-}
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-pub enum SlvTermSignal {
-	Continue,
-	Terminate,
+	/// Subsequent calls to this method override the previously set
+	/// callback function.
+	fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -294,14 +142,132 @@ pub struct VarFactory {
 	pub(crate) next_var: Option<Var>,
 }
 
-impl VarFactory {
-	const MAX_VARS: usize = NonZeroI32::MAX.get() as usize;
+fn get_drop_fn<T>(_: &T) -> fn(*mut c_void) {
+	|ptr: *mut c_void| {
+		// SAFETY: This drop function assumes that the pointer was created by Box::leak
+		let b = unsafe { Box::<T>::from_raw(ptr as *mut T) };
+		drop(b);
+	}
+}
 
+fn get_trampoline0<R, F: FnMut() -> R>(_closure: &F) -> CB0<R> {
+	trampoline0::<R, F>
+}
+
+fn get_trampoline1<R, A, F: FnMut(A) -> R>(_closure: &F) -> CB1<R, A> {
+	trampoline1::<R, A, F>
+}
+
+unsafe extern "C" fn trampoline0<R, F: FnMut() -> R>(user_data: *mut c_void) -> R {
+	let user_data = &mut *(user_data as *mut F);
+	user_data()
+}
+
+unsafe extern "C" fn trampoline1<R, A, F: FnMut(A) -> R>(user_data: *mut c_void, arg1: A) -> R {
+	let user_data = &mut *(user_data as *mut F);
+	user_data(arg1)
+}
+
+impl Iterator for ExplIter {
+	type Item = i32;
+
+	#[inline]
+	fn next(&mut self) -> Option<Self::Item> {
+		// SAFETY: ExplIter is assumed to be constructed using a valid pointer to an
+		// correctly aligned and null-terminated array of i32.
+		unsafe {
+			if *self.0 == 0 {
+				None
+			} else {
+				let ptr = self.0;
+				self.0 = ptr.offset(1);
+				Some(*ptr)
+			}
+		}
+	}
+}
+
+impl FFIPointer {
+	/// Get the FFI pointer to the contained object
+	///
+	/// # WARNING
+	/// This pointer is only valid until the FFIPointer object is dropped.
+	fn get_ptr(&self) -> *mut c_void {
+		self.ptr
+	}
+	fn new<T: 'static>(obj: T) -> Self {
+		let drop_fn = get_drop_fn(&obj);
+		let ptr: *mut T = Box::leak(Box::new(obj));
+		Self {
+			ptr: ptr as *mut c_void,
+			drop_fn,
+		}
+	}
+}
+
+impl Default for FFIPointer {
+	fn default() -> Self {
+		Self {
+			ptr: ptr::null_mut(),
+			drop_fn: |_: *mut c_void| {},
+		}
+	}
+}
+
+impl Drop for FFIPointer {
+	fn drop(&mut self) {
+		if !self.ptr.is_null() {
+			(self.drop_fn)(self.ptr);
+		}
+	}
+}
+
+impl VarFactory {
 	pub fn emited_vars(&self) -> usize {
 		if let Some(x) = self.next_var {
 			x.0.get() as usize - 1
 		} else {
-			Self::MAX_VARS
+			Var::MAX_VARS
+		}
+	}
+
+	pub(crate) fn next_var(&mut self) -> Var {
+		if let Some(x) = self.next_var {
+			self.next_var = x.next_var();
+			x
+		} else {
+			panic!("unable to create more than `Var::MAX_VARS` variables")
+		}
+	}
+
+	pub(crate) fn next_var_range(&mut self, size: usize) -> VarRange {
+		let Some(start) = self.next_var else {
+			panic!("unable to create more than `Var::MAX_VARS` variables")
+		};
+		match size {
+			0 => VarRange::new(
+				Var(NonZeroI32::new(2).unwrap()),
+				Var(NonZeroI32::new(1).unwrap()),
+			),
+			1 => {
+				self.next_var = start.next_var();
+				VarRange::new(start, start)
+			}
+			_ if size > Var::MAX_VARS => {
+				panic!("unable to create more than `Var::MAX_VARS` variables")
+			}
+			_ => {
+				// Size is reduced by 1 since it includes self.next_var
+				let size = NonZeroI32::new((size - 1) as i32).unwrap();
+				if let Some(end) = start.checked_add(size) {
+					// Set self.next_var to one after end
+					self.next_var = end.next_var();
+					VarRange::new(start, end)
+				} else {
+					// If end is None, then the range is too large
+					panic!("unable to create more than `Var::MAX_VARS` variables")
+				}
+			}
 		}
 	}
 }
@@ -311,85 +277,5 @@ impl Default for VarFactory {
 		Self {
 			next_var: Some(Var(NonZeroI32::new(1).unwrap())),
 		}
-	}
-}
-
-impl Iterator for VarFactory {
-	type Item = Var;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		let var = self.next_var;
-		if let Some(var) = var {
-			self.next_var = var.next_var();
-		}
-		var
-	}
-}
-
-/// Allow request for sequential ranges of variables.
-pub trait NextVarRange {
-	/// Request the next sequential range of variables.
-	///
-	/// The method is can return [`None`] if the range of the requested [`size`] is not
-	/// available.
-	fn next_var_range(&mut self, size: usize) -> Option<VarRange>;
-}
-
-impl NextVarRange for VarFactory {
-	fn next_var_range(&mut self, size: usize) -> Option<VarRange> {
-		let start = self.next_var?;
-		match size {
-			0 => Some(VarRange::new(
-				Var(NonZeroI32::new(2).unwrap()),
-				Var(NonZeroI32::new(1).unwrap()),
-			)),
-			1 => {
-				self.next_var = start.next_var();
-				Some(VarRange::new(start, start))
-			}
-			_ if size > NonZeroI32::MAX.get() as usize => None,
-			_ => {
-				// Size is reduced by 1 since it includes self.next_var
-				let size = NonZeroI32::new((size - 1) as i32).unwrap();
-				if let Some(end) = start.checked_add(size) {
-					// Set self.next_var to one after end
-					self.next_var = end.next_var();
-					Some(VarRange::new(start, end))
-				} else {
-					None
-				}
-			}
-		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use std::num::NonZeroI32;
-
-	use crate::{
-		solver::{NextVarRange, VarFactory},
-		Var,
-	};
-
-	#[test]
-	fn test_var_range() {
-		let mut factory = VarFactory::default();
-
-		let range = factory.next_var_range(0).unwrap();
-		assert_eq!(range.len(), 0);
-		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(1).unwrap())));
-
-		let range = factory.next_var_range(1).unwrap();
-		assert_eq!(range.len(), 1);
-		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(2).unwrap())));
-
-		let range = factory.next_var_range(2).unwrap();
-		assert_eq!(range.len(), 2);
-		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(4).unwrap())));
-
-		let range = factory.next_var_range(100).unwrap();
-		assert_eq!(range.len(), 100);
-		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(104).unwrap())));
 	}
 }
