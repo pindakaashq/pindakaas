@@ -12,17 +12,14 @@ mod ord;
 mod res;
 mod term;
 
-pub use assignment::{Assignment, MapSol};
+pub use assignment::Assignment;
 pub use con::{Lin, LinExp};
-pub use decompose::{Decompose, ModelDecomposer};
 pub use dom::Dom;
 pub(crate) use enc::{IntVarEnc, LitOrConst};
 pub(crate) use helpers::required_lits;
-pub use helpers::Format;
 pub use int_var::{IntVar, IntVarId, IntVarRef};
 pub(crate) use model::Cse;
-pub use model::{Consistency, Decomposer, Model, ModelConfig, Obj, Scm};
-pub use term::Term;
+pub use model::{Consistency, Model};
 
 use crate::{CheckError, LinExp as PbLinExp, Valuation};
 

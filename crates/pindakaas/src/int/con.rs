@@ -10,8 +10,8 @@ use crate::{
 	helpers::{add_clauses_for, div_ceil, div_floor},
 	int::{bin::BinEnc, helpers::display_cnf, required_lits, Assignment, Dom},
 	bool_linear::PosCoeff,
-	CheckError, ClauseDatabase, Coeff, Comparator, Consistency, IntVarRef, Lit, Model, ModelConfig,
-	Result, Term, Unsatisfiable,
+	ClauseDatabase, Coeff, Lit,
+	Result, Unsatisfiable,
 };
 
 #[derive(Debug, Clone, Default)]

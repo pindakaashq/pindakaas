@@ -39,7 +39,7 @@ impl Display for Model {
 }
 
 impl Display for Assignment {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
 			f,
 			"{}",
@@ -120,7 +120,7 @@ impl Display for Lin {
 	}
 }
 
-impl fmt::Display for IntVar {
+impl Display for IntVar {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
@@ -157,7 +157,7 @@ impl Display for Cse {
 }
 
 impl Display for Dom {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		// TODO replaced {..} by |..| since logger interprets {/} wrong
 		let dom = self.iter().collect::<Vec<_>>();
 		if dom.is_empty() {

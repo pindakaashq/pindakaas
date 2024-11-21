@@ -607,7 +607,7 @@ Actual assignments:
 #[cfg(feature = "cadical")]
 mod tests {
 	use super::*;
-	use crate::{Cnf, Lin, Model};
+	use crate::{Lin, Model};
 
 	use crate::solver::cadical::Cadical;
 	use crate::solver::Solver;

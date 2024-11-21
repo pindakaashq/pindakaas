@@ -493,7 +493,7 @@ impl std::fmt::Display for BinEnc {
 			f,
 			"({}){}",
 			self.x.iter().rev().join(""),
-			crate::trace::subscript_number(2).format("")
+			helpers::subscript_number(2).format("")
 		)
 	}
 }

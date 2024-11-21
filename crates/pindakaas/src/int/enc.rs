@@ -122,7 +122,7 @@ impl From<OrdEnc> for IntVarEnc {
 	}
 }
 
-impl fmt::Display for IntVarEnc {
+impl Display for IntVarEnc {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			IntVarEnc::Ord(Some(o)) => o.fmt(f),

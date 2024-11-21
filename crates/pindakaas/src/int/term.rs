@@ -485,11 +485,8 @@ impl Term {
 #[cfg(test)]
 mod tests {
 
-	use super::*;
-	use crate::{
-		helpers::tests::{assert_ok, TestDB},
-		Unsatisfiable,
-	};
+	
+	use crate::helpers::tests::{assert_ok, TestDB};
 
 	#[test]
 	fn term_test() {

@@ -2082,11 +2082,7 @@ mod tests {
 	use crate::{
 		cardinality::Cardinality,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
-		helpers::{as_binary, emit_clause, is_powers_of_two, new_var},
-		propositional_logic::{Formula, TseitinEncoder},
-		sorted::{Sorted, SortedEncoder},
-		Checker, ClauseDatabase, Coeff, Encoder, IntEncoding, Lit, Result, Unsatisfiable,
-		Valuation,
+		sorted::SortedEncoder, ClauseDatabase, Coeff, Encoder, Lit, Unsatisfiable,
 	};
 
 	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(terms: &[(L, Coeff)]) -> Vec<Part> {

@@ -182,7 +182,7 @@ pub(crate) use new_var;
 #[cfg(feature = "splr")]
 pub(crate) use {concat_slices, const_concat, maybe_std_concat};
 
-use crate::{bool_linear::PosCoeff, integer::IntVar, ClauseDatabase, Coeff, Lit, Result};
+use crate::{bool_linear::PosCoeff, ClauseDatabase, Coeff, Lit, Result};
 
 pub(crate) fn emit_filtered_clause<DB: ClauseDatabase, I: IntoIterator<Item = LitOrConst>>(
 	db: &mut DB,
@@ -400,5 +400,5 @@ pub(crate) mod tests {
 			)
 		};
 	}
-	pub(crate) use lits;
+	
 }

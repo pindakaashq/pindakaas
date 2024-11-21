@@ -110,7 +110,7 @@ impl TryFrom<MapSol> for Vec<Lit> {
 }
 
 impl Valuation for MapSol {
-	fn value(&self, lit: Lit) -> Option<bool> {
+	fn value(&self, lit: Lit) -> bool {
 		self.0
 			.get(&lit.var())
 			.copied()

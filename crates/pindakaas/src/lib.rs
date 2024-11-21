@@ -36,7 +36,7 @@ use itertools::{traits::HomogeneousTuple, Itertools};
 
 use crate::solver::VarFactory;
 
-use crate::trace::subscript_number;
+use helpers::subscript_number;
 
 /// Checker is a trait implemented by types that represent constraints. The
 /// [`Checker::check`] methods checks whether an assignment (often referred to
