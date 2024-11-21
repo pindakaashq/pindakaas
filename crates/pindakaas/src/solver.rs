@@ -11,7 +11,6 @@ pub mod propagation;
 #[cfg(feature = "splr")]
 pub mod splr;
 use crate::Cnf;
-use crate::MapSol;
 use itertools::Itertools;
 
 use std::{ffi::c_void, num::NonZeroI32, ptr};

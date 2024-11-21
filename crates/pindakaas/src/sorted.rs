@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 use crate::{
 	bool_linear::{BoolLinExp, LimitComp},
 	helpers::{add_clauses_for, emit_clause, negate_cnf},
-	integer::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+	integer::IntVarEnc,
 	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
 };
 

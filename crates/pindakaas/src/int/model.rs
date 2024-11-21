@@ -11,7 +11,7 @@ use crate::{
 		decompose::{Decompose, ModelDecomposer},
 		Assignment, Dom, IntVar, IntVarId, IntVarRef, LinExp,
 	},
-	CheckError, Checker, ClauseDatabase, Comparator, Lin, Result, Term, Unsatisfiable, Valuation,
+	Checker, ClauseDatabase, Result, Unsatisfiable, Valuation,
 	Var,
 };
 
@@ -43,7 +43,6 @@ pub enum Scm {
 	Pow,
 }
 
-use super::IntVarEnc;
 use crate::Coeff;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

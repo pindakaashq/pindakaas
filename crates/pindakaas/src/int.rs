@@ -15,13 +15,12 @@ mod term;
 pub use assignment::Assignment;
 pub use con::{Lin, LinExp};
 pub use dom::Dom;
-pub(crate) use enc::{IntVarEnc, LitOrConst};
+pub(crate) use enc::LitOrConst;
 pub(crate) use helpers::required_lits;
 pub use int_var::{IntVar, IntVarId, IntVarRef};
 pub(crate) use model::Cse;
 pub use model::{Consistency, Model};
 
-use crate::{CheckError, LinExp as PbLinExp, Valuation};
 
 impl PbLinExp {
 	pub(crate) fn assign<F: Valuation + ?Sized>(&self, solution: &F) -> Result<Coeff, CheckError> {

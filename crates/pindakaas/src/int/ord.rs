@@ -5,7 +5,6 @@ use itertools::Itertools;
 use super::Dom;
 use crate::{
 	helpers::negate_cnf,
-	trace::{emit_clause, new_var},
 	ClauseDatabase, Lit, Var,
 };
 
@@ -125,18 +124,8 @@ mod tests {
 		] {
 			assert_encoding(
 				&Cnf::try_from(vec![x.geq(dom_pos)]).unwarp(),
-				&expect_file!["int/bin/geq_{k}.cnf", k],
+				&expect_file!["int/ord/geq_{k}.cnf", k],
 			);
-		}
-	}
-
-	#[test]
-	fn test_ineq() {
-		let mut db = TestDB::new(0);
-		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
-
-		for k in 0..=3 {
-			assert_encoding(&cnf, &expect_file!["int/bin/geq_{k}.cnf", k]);
 		}
 	}
 }

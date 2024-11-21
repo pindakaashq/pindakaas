@@ -7,7 +7,7 @@ use super::{
 	model::{Obj, USE_CSE},
 	Cse, Dom, IntVar, LinExp,
 };
-use crate::{int::IntVarEnc, Assignment, Coeff, Lin, Model, Term};
+use crate::Coeff;
 
 /// Show the integer variable's ID
 pub(crate) const SHOW_IDS: bool = false;

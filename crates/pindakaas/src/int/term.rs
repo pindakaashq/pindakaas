@@ -6,7 +6,7 @@ use std::{
 
 use itertools::Itertools;
 
-use super::{bin::BinEnc, Dom, IntVarEnc};
+use super::{bin::BinEnc, Dom};
 use crate::{
 	helpers::as_binary,
 	int::{
@@ -14,8 +14,7 @@ use crate::{
 		res::SCM,
 		Cse, LitOrConst,
 	},
-	linear::PosCoeff,
-	Coeff, Comparator, IntLinExp as LinExp, IntVar, IntVarRef, Lin, Lit, Model, Scm, Unsatisfiable,
+        Lit, Coeff
 };
 
 /// A linear term (constant times integer variable)

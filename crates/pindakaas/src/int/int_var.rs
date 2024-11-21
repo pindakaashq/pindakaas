@@ -1,16 +1,12 @@
 use std::{cell::RefCell, collections::BTreeSet, fmt::Display, hash::BuildHasherDefault, rc::Rc};
 
-use crate::trace::log;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
-use crate::{bin::BinEnc, ord::OrdEnc, required_lits, Dom, IntVarEnc};
 use crate::{
 	helpers::negate_cnf,
 	int::display::SHOW_IDS,
-	linear::{Part, PosCoeff},
-	trace::{emit_clause, new_var},
-	CheckError, ClauseDatabase, Coeff, Lit, Model, Result, Unsatisfiable, Valuation, Var,
+	ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation, Var,
 };
 
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]

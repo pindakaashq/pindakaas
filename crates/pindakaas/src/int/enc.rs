@@ -17,9 +17,7 @@ use crate::{
 		helpers::{filter_fixed, required_lits},
 		Dom, IntVar,
 	},
-	linear::{lex_geq_const, lex_leq_const, LinExp, Part, PosCoeff},
-	trace::{emit_clause, new_var},
-	CheckError, Checker, ClauseDatabase, Cnf, Coeff, Encoder, Lit, Result, Unsatisfiable,
+	Checker, ClauseDatabase, Cnf, Coeff, Encoder, Lit, Result, Unsatisfiable,
 	Valuation, Var,
 };
 

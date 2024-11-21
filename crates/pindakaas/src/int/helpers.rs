@@ -10,12 +10,10 @@ use flate2::bufread::GzDecoder;
 use itertools::Itertools;
 
 use super::LitOrConst;
-use crate::IntLinExp as LinExp;
-use crate::Lin;
 use crate::{
 	helpers::pow2,
-	int::{Dom, IntVarEnc},
-	Coeff, Comparator, Lit, Model, Term,
+	int::Dom,
+	Coeff, Lit
 };
 
 #[derive(Debug)]

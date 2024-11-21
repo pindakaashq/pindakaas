@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use itertools::{Itertools, Position};
 
 use crate::{
-	int::{con::LinCase, enc::IntVarEnc, model::USE_CHANNEL, Dom},
-	Assignment, BddEncoder, Coeff, Comparator, Decomposer, IntLinExp as LinExp, IntVarId, Lin,
-	Model, ModelConfig, SwcEncoder, Term, TotalizerEncoder, Unsatisfiable,
+	int::{con::LinCase, model::USE_CHANNEL, Dom},
+	Coeff,
+	Unsatisfiable,
 };
 
 pub trait Decompose {
