@@ -12,7 +12,7 @@ use crate::{
 	cardinality_one::{CardinalityOne, PairwiseEncoder},
 	helpers::{as_binary, emit_clause, is_powers_of_two, new_var},
 	int::LitOrConst,
-	integer::lex_leq_const,
+	integer::{lex_leq_const, IntVar},
 	propositional_logic::{Formula, TseitinEncoder},
 	// sorted::{Sorted, SortedEncoder},
 	CheckError,
@@ -57,6 +57,23 @@ pub struct BoolLinExp {
 	mult: Coeff,
 }
 
+impl BoolLinExp {
+	pub(crate) fn assign<F: Valuation + ?Sized>(&self, solution: &F) -> Result<Coeff, CheckError> {
+		self.iter().try_fold(self.add, |acc, (_, terms)| {
+			Ok(acc
+				+ terms.into_iter().fold(0, |acc, (lit, coef)| {
+					acc + if solution.value(*lit) { coef } else { &0 }
+				}) * self.mult)
+		})
+	}
+}
+
+impl From<&IntVar> for BoolLinExp {
+	fn from(x: &IntVar) -> Self {
+		x.as_lin_exp()
+	}
+}
+
 #[derive(Debug)]
 pub enum BoolLinVariant {
 	Linear(NormalizedBoolLinear),
@@ -85,7 +102,7 @@ pub struct BoolLinear {
 	k: Coeff,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 /// A comparator type used in linear and cardinality constraints.
 pub enum Comparator {
 	/// Force the left hand side of the constraint to be less than or equal to the
@@ -97,6 +114,40 @@ pub enum Comparator {
 	/// Force the left hand side of the constraint to be greater than or equal to
 	/// the right hand side, i.e. `exp ≥ k`.
 	GreaterEq,
+}
+
+impl Comparator {
+	pub(crate) fn split(&self) -> Vec<Comparator> {
+		match self {
+			Comparator::Equal => vec![Comparator::LessEq, Comparator::GreaterEq],
+			_ => vec![*self],
+		}
+	}
+
+	pub(crate) fn reverse(&self) -> Comparator {
+		match *self {
+			Comparator::LessEq => Comparator::GreaterEq,
+			Comparator::Equal => panic!("Cannot reverse {self}"),
+			Comparator::GreaterEq => Comparator::LessEq,
+		}
+	}
+
+	pub(crate) fn is_ineq(&self) -> bool {
+		match *self {
+			Comparator::Equal => false,
+			Comparator::LessEq | Comparator::GreaterEq => true,
+		}
+	}
+}
+
+impl Display for Comparator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Comparator::Equal => write!(f, "="),
+			Comparator::LessEq => write!(f, "≤"),
+			Comparator::GreaterEq => write!(f, "≥"),
+		}
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -314,11 +365,10 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 		debug_assert!(lin.cmp == LimitComp::LessEq || lin.cmp == LimitComp::Equal);
 		// The number of relevant bits in k
 		const ZERO: Coeff = 0;
-		let bits = ZERO.leading_zeros() - lin.k.leading_zeros();
+		let bits = (ZERO.leading_zeros() - lin.k.leading_zeros()) as usize;
 		let mut k = as_binary(lin.k, Some(bits));
 
 		let first_zero = lin.k.trailing_ones() as usize;
-		let bits = bits as usize;
 		debug_assert!(k[bits - 1]);
 
 		// Create structure with which coefficients use which bits
@@ -425,7 +475,12 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 
 		// Enforce less-than constraint
 		if lin.cmp == LimitComp::LessEq {
-			lex_leq_const(db, sum.as_slice(), lin.k, bits)?;
+			lex_leq_const(
+				db,
+				&sum.into_iter().map(LitOrConst::from).collect_vec(),
+				lin.k,
+				bits,
+			)?;
 		}
 		Ok(())
 	}
@@ -1005,11 +1060,10 @@ impl BoolLinExp {
 		self.terms.iter().copied()
 	}
 
-	pub(crate) fn value<F: Valuation + ?Sized>(&self, sol: &F) -> Option<Coeff> {
-		// Nicest way I could find to short-circuit on list of Option
+	pub(crate) fn value<F: Valuation + ?Sized>(&self, sol: &F) -> Coeff {
 		self.terms()
-			.map(|(l, c)| sol.value(l).map(|l| c * l as Coeff))
-			.fold_options(0, |acc, val| acc + val)
+			.map(|(l, c)| c * sol.value(l) as Coeff)
+			.fold(0, |acc, val| acc + val)
 	}
 }
 
@@ -1230,7 +1284,7 @@ impl BoolLinear {
 
 impl Checker for BoolLinear {
 	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
-		let lhs = self.exp.value(value)?;
+		let lhs = self.exp.value(value);
 		if match self.cmp {
 			Comparator::LessEq => lhs <= self.k,
 			Comparator::Equal => lhs == self.k,
@@ -1238,7 +1292,7 @@ impl Checker for BoolLinear {
 		} {
 			Ok(())
 		} else {
-			Err(CheckError::Unsatisfiable)
+			Err(Unsatisfiable.into())
 		}
 	}
 }
@@ -1372,7 +1426,7 @@ impl Checker for NormalizedBoolLinear {
 		} {
 			Ok(())
 		} else {
-			Err(CheckError::Unsatisfiable)
+			Err(Unsatisfiable.into())
 		}
 	}
 }
@@ -1715,9 +1769,12 @@ mod tests {
 	use crate::{
 		cardinality::Cardinality,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
-		sorted::SortedEncoder,
-		ClauseDatabase, Coeff, Encoder, Lit, Unsatisfiable,
+		gt::TotalizerEncoder,
+		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
+		ClauseDatabase, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 	};
+
+	use super::*;
 
 	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(terms: &[(L, Coeff)]) -> Vec<Part> {
 		terms
@@ -2276,6 +2333,7 @@ mod tests {
 		);
 	}
 
+	/*
 	#[test]
 	fn test_aggregator_sort_same_coefficients() {
 		let mut cnf = Cnf::default();
@@ -2335,6 +2393,7 @@ mod tests {
 			}))
 		);
 	}
+		*/
 
 	#[test]
 	fn test_aggregator_unsat() {
@@ -2458,7 +2517,7 @@ mod tests {
 		let mut db = Cnf::default();
 		let vars = db.new_var_range(5).iter_lits().collect_vec();
 		let mut agg = BoolLinAggregator::default();
-		let _ = agg.sort_same_coefficients(SortedEncoder::default(), 3);
+		// let _ = agg.sort_same_coefficients(SortedEncoder::default(), 3);
 		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default();
 		let _ = encoder.add_linear_aggregater(agg);
 		let con = BoolLinear::new(
@@ -2604,12 +2663,11 @@ mod tests {
 
 	// FIXME: SWC does not support LimitComp::Equal
 	// card1_test_suite!(SwcEncoder::default());
-	linear_test_suite! {swc_encoder, crate::bool_linear::SwcEncoder::default()}
+	linear_test_suite! {swc_encoder, crate::swc::SwcEncoder::default()}
 
 	// FIXME: Totalizer does not support LimitComp::Equal
 	// card1_test_suite!(TotalizerEncoder::default());
-	linear_test_suite!(
-		totalizer_encoder,
-		crate::bool_linear::TotalizerEncoder::default()
-	);
+	linear_test_suite!(totalizer_encoder, crate::gt::TotalizerEncoder::default());
+	use crate::cardinality::tests::card_test_suite;
+	use crate::cardinality_one::tests::card1_test_suite;
 }

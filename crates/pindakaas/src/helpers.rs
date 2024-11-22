@@ -109,12 +109,12 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 }
 
 /// 2^bits - 1
-pub(crate) fn unsigned_binary_range(bits: u32) -> (PosCoeff, PosCoeff) {
-	(PosCoeff::new(0), PosCoeff::new(pow2(bits) - 1))
+pub(crate) fn unsigned_binary_range(bits: usize) -> (PosCoeff, PosCoeff) {
+	(PosCoeff::new(0), PosCoeff::new(pow2(bits as u32) - 1))
 }
 
 /// Convert `k` to unsigned binary in `bits`
-pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
+pub(crate) fn as_binary(k: PosCoeff, bits: Option<usize>) -> Vec<bool> {
 	let bits = bits.unwrap_or_else(|| crate::int::required_lits(0, *k));
 	assert!(
 		k <= unsigned_binary_range(bits).1,
@@ -233,9 +233,9 @@ pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 		.into_iter()
 }
 
-pub(crate) fn unsigned_binary_range_ub(bits: u32) -> Coeff {
+pub(crate) fn unsigned_binary_range_ub(bits: usize) -> Coeff {
 	const TWO: Coeff = 2;
-	(0_u32..bits).fold(0, |sum, i| sum + TWO.pow(i))
+	(0..bits).fold(0, |sum, i| sum + TWO.pow(i as u32))
 }
 
 #[cfg(test)]

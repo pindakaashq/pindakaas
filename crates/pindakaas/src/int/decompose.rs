@@ -12,7 +12,7 @@ use crate::{
 	Coeff, Unsatisfiable,
 };
 
-use super::{enc::IntVarEnc, Assignment, Decomposer, Model, ModelConfig};
+use crate::int::{enc::IntVarEnc, Assignment, Decomposer, Model, ModelConfig};
 
 pub trait Decompose {
 	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable>;

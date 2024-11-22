@@ -8,7 +8,7 @@ pub(crate) struct ScmNode {
 	pub(crate) i2: usize,
 	pub(crate) sh2: u32,
 }
-pub(crate) static SCM: [(u32, Coeff, &[ScmNode]); 17391] = [
+pub(crate) static SCM: [(usize, Coeff, &[ScmNode]); 17391] = [
 	(
 		0,
 		3,

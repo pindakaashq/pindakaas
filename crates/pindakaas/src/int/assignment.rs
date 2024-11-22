@@ -2,6 +2,7 @@ use crate::{integer::IntVarId, Coeff, Lit, Valuation, Var};
 use std::{cmp::Ordering, collections::HashMap, ops::Index};
 
 use itertools::Itertools;
+use rustc_hash::FxHashMap;
 
 // TODO [?] equivalent of Valuation, could be merged?
 /// A structure holding an integer assignment to `Model`
@@ -35,18 +36,28 @@ impl Assignment {
 }
 
 #[derive(Debug)]
-pub struct MapSol(HashMap<Var, bool>);
+pub struct MapSol(pub(crate) FxHashMap<Var, bool>);
 
-impl From<Vec<Lit>> for MapSol {
-	fn from(value: Vec<Lit>) -> Self {
-		Self(
-			value
-				.into_iter()
-				.map(|lit| (lit.var(), !lit.is_negated()))
-				.collect::<HashMap<_, _>>(),
-		)
+impl MapSol {
+	pub fn new(vars: &[Var], sol: impl Valuation) -> Self {
+		Self(vars.iter().map(|&v| (v, sol.value(v.into()))).collect())
+	}
+	pub fn iter(&self) -> impl Iterator<Item = Lit> + use<'_> {
+		self.0
+			.iter()
+			.map(|(&v, &b)| if b { Lit::from(v) } else { !Lit::from(v) })
 	}
 }
+// impl From<Vec<Lit>> for MapSol {
+// 	fn from(value: &[Lit]) -> Self {
+// 		Self(
+// 			value
+// 				.into_iter()
+// 				.map(|lit| (lit.var(), !lit.is_negated()))
+// 				.collect::<HashMap<_, _>>(),
+// 		)
+// 	}
+// }
 
 // TODO can't get this to compile inside
 // impl TryInto<Vec<Lit>> for MapSol {
@@ -96,7 +107,7 @@ impl TryFrom<MapSol> for Vec<Lit> {
 				.into_iter()
 				.map(|k| {
 					let lit = Lit::from(k);
-					if v.value(lit).unwrap() {
+					if v.value(lit) {
 						lit
 					} else {
 						!lit
@@ -111,9 +122,14 @@ impl TryFrom<MapSol> for Vec<Lit> {
 
 impl Valuation for MapSol {
 	fn value(&self, lit: Lit) -> bool {
-		self.0
-			.get(&lit.var())
-			.copied()
-			.map(|a| if lit.is_negated() { !a } else { a })
+		if let Some(&a) = self.0.get(&lit.var()) {
+			if lit.is_negated() {
+				!a
+			} else {
+				a
+			}
+		} else {
+			panic!("Literal {lit} was not assigned")
+		}
 	}
 }

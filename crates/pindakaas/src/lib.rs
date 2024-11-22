@@ -133,6 +133,11 @@ pub trait ClauseDatabase {
 	}
 
 	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB>;
+
+	/// Add multiple clauses
+	fn add_clauses<I: IntoIterator<Item = Vec<Lit>>>(&mut self, clauses: I) -> Result {
+		clauses.into_iter().try_for_each(|cl| self.add_clause(cl))
+	}
 }
 
 /// A representation for Boolean formulas in conjunctive normal form.
@@ -268,7 +273,10 @@ impl TryFrom<Vec<Vec<Lit>>> for Cnf {
 	type Error = Unsatisfiable;
 	fn try_from(clauses: Vec<Vec<Lit>>) -> Result<Self, Self::Error> {
 		let mut cnf = Cnf::default();
-		clauses.into_iter().try_for_each(|cls| cnf.add_clause(cls))
+		clauses
+			.into_iter()
+			.try_for_each(|cls| cnf.add_clause(cls))?;
+		Ok(cnf)
 	}
 }
 
@@ -330,8 +338,8 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 
 	let mut wcnf = Wcnf::default();
 
-	let mut vars: Option<VarRange> = None;
-	let mut num_cls: Option<usize> = None;
+	let vars: Option<VarRange> = None;
+	let num_cls: Option<usize> = None;
 	let mut cl: Vec<Lit> = Vec::new();
 	let mut top: Option<Coeff> = None;
 	let weight: Option<Coeff> = None;
@@ -341,89 +349,6 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 			Ok(line) if line.is_empty() || line.starts_with('c') => (),
 			// parse header, expected format: "p cnf {num_var} {num_clauses}" or "p wcnf {num_var} {num_clauses} {top}"
 			Ok(line) if !had_header => {
-				let pars: Vec<&str> = line.split_whitespace().collect();
-				// check "p" and "cnf" keyword
-				if !WEIGHTED && (pars.len() != 4 || pars[0..2] != ["p", "cnf"]) {
-					return Err(io::Error::new(
-						io::ErrorKind::InvalidInput,
-						"expected DIMACS CNF header formatted \"p cnf {variables} {clauses}\"",
-					));
-				} else if WEIGHTED && (pars.len() != 4 || pars[0..2] != ["p", "wcnf"]) {
-					return Err(io::Error::new(
-						io::ErrorKind::InvalidInput,
-						"expected DIMACS WCNF header formatted \"p wcnf {variables} {clauses} {top}\"",
-					));
-				}
-
-				vars = wcnf.cnf.next_var_range(pars[2].parse().map_err(|_| {
-					io::Error::new(
-						io::ErrorKind::InvalidInput,
-						format!("unable to parse number of variables in p-line: {line}"),
-					)
-				})?);
-
-				// parse number of clauses
-				num_cls = Some(pars[3].parse().map_err(|_| {
-					io::Error::new(
-						io::ErrorKind::InvalidInput,
-						format!("unable to parse number of clauses in p-line: {line}"),
-					)
-				})?);
-				wcnf.cnf.size.reserve(num_cls.unwrap());
-
-				if WEIGHTED {
-					top = Some(pars[4].parse().map_err(|_| {
-						io::Error::new(io::ErrorKind::InvalidInput, "unable to parse top weight")
-					})?);
-				}
-
-				// parsing header complete
-				had_header = true;
-			}
-			// HEAD?
-			// Ok(line) => {
-			// 	for seg in line.split(' ') {
-			// 		if WEIGHTED {
-			// 			if let Ok(weight) = seg.parse::<Coeff>() {
-			// 				wcnf.weights.push(match weight.cmp(&top.unwrap()) {
-			// 					Ordering::Less => Some(weight),
-			// 					Ordering::Equal => None,
-			// 					Ordering::Greater => panic!(
-			// 					"Found weight weight {weight} greater than top {top:?} from header"
-			// 				),
-			// 				});
-			// 			} else {
-			// 				panic!("Cannot parse line {line}");
-			// 			}
-			// 		}
-
-			// 		if let Ok(lit) = seg.parse::<i32>() {
-			// 			if lit == 0 {
-			// 				wcnf.add_weighted_clause(cl.drain(..), weight)
-			// 					.expect("CNF::add_clause does not return Unsatisfiable");
-			// 			} else {
-			// 				let l = Lit::from(
-			// 					vars.as_ref()
-			// 						.unwrap()
-			// 						.index((lit.abs() - 1).try_into().unwrap()),
-			// 				);
-			// 				cl.push(if lit.is_negative() { !l } else { l });
-			// 				if wcnf.cnf.clauses() > num_cls.unwrap() {
-			// 					return Err(io::Error::new(
-			// 						io::ErrorKind::InvalidInput,
-			// 						format!(
-			// 							"Number of clauses exceeded p-line parameter of {} in {}",
-			// 							num_cls.unwrap(),
-			// 							path.display(),
-			// 						),
-			// 					));
-			// 				}
-			// 			}
-			// 		}
-			// 	}
-			// }
-			// parse header, expected format: "p cnf {num_var} {num_clauses}" or "p wcnf {num_var} {num_clauses} {top}"
-			Ok(line) => {
 				let vec: Vec<&str> = line.split_whitespace().collect();
 				// check "p" and "cnf" keyword
 				if !WEIGHTED && (vec.len() != 4 || vec[0..2] != ["p", "cnf"]) {
@@ -465,6 +390,47 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 
 				// parsing header complete
 				had_header = true;
+			}
+			Ok(line) => {
+				for seg in line.split(' ') {
+					if WEIGHTED {
+						if let Ok(weight) = seg.parse::<Coeff>() {
+							wcnf.weights.push(match weight.cmp(&top.unwrap()) {
+								Ordering::Less => Some(weight),
+								Ordering::Equal => None,
+								Ordering::Greater => panic!(
+								"Found weight weight {weight} greater than top {top:?} from header"
+							),
+							});
+						} else {
+							panic!("Cannot parse line {line}");
+						}
+					}
+
+					if let Ok(lit) = seg.parse::<i32>() {
+						if lit == 0 {
+							wcnf.add_weighted_clause(cl.drain(..), weight)
+								.expect("CNF::add_clause does not return Unsatisfiable");
+						} else {
+							let l = Lit::from(
+								vars.as_ref()
+									.unwrap()
+									.index((lit.abs() - 1).try_into().unwrap()),
+							);
+							cl.push(if lit.is_negative() { !l } else { l });
+							if wcnf.cnf.clauses() > num_cls.unwrap() {
+								return Err(io::Error::new(
+									io::ErrorKind::InvalidInput,
+									format!(
+										"Number of clauses exceeded p-line parameter of {} in {}",
+										num_cls.unwrap(),
+										path.display(),
+									),
+								));
+							}
+						}
+					}
+				}
 			}
 			Err(e) => return Err(e),
 		}

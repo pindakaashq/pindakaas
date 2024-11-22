@@ -1,4 +1,3 @@
-// use crate::int::res::SCM;
 use std::{
 	collections::HashMap,
 	ops::{Mul, Shl},
@@ -6,7 +5,7 @@ use std::{
 
 use itertools::Itertools;
 
-use super::{bin::BinEnc, enc::IntVarEnc, Dom, Model, Scm};
+use super::{bin::BinEnc, enc::IntVarEnc, model::Scm, Dom, Model};
 use crate::{
 	bool_linear::{Comparator, PosCoeff},
 	helpers::as_binary,
@@ -15,7 +14,7 @@ use crate::{
 		res::SCM,
 		Cse, Lin, LinExp, LitOrConst,
 	},
-	integer::IntVarRef,
+	integer::{IntVar, IntVarRef},
 	Coeff, Lit, Unsatisfiable,
 };
 

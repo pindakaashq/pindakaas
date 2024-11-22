@@ -1,6 +1,7 @@
 #![allow(clippy::absurd_extreme_comparisons)]
 use crate::helpers::emit_clause;
 use crate::int::term::Term;
+use crate::int::Format;
 use crate::integer::{lex_geq_const, log_enc_add_fn, IntVarRef};
 use crate::CheckError;
 use crate::{bool_linear::Comparator, integer::lex_leq_const};
@@ -738,8 +739,8 @@ impl Lin {
 mod tests {
 
 	use crate::helpers::tests::expect_file;
-	use crate::int::{Lin};
-        use crate::int::Model;
+	use crate::int::Lin;
+	use crate::int::Model;
 	use crate::Cnf;
 	use crate::Lit;
 

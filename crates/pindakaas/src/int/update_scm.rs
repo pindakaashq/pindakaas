@@ -5,7 +5,7 @@ use itertools::Itertools;
 use tar::Archive;
 
 // TODO [!] once recipes added, to be moved from build.rs to a rust script type thing: scm_db_res.rs
-fn scm() -> Result<Vec<(usize, u32, Vec<ScmNode>)>, std::io::Error> {
+fn scm() -> Result<Vec<(usize, usize, Vec<ScmNode>)>, std::io::Error> {
 	if Path::new("./res/scm").exists() {
 		fs::remove_dir_all("./res/scm")?;
 		fs::create_dir("./res/scm")?;
@@ -62,11 +62,11 @@ fn scm() -> Result<Vec<(usize, u32, Vec<ScmNode>)>, std::io::Error> {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct ScmNode {
-	i: u32,
-	i1: u32,
+	i: usize,
+	i1: usize,
 	sh1: u32,
 	add: bool,
-	i2: u32,
+	i2: usize,
 	sh2: u32,
 }
 

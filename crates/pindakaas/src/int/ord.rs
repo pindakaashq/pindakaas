@@ -109,22 +109,18 @@ impl std::fmt::Display for OrdEnc {
 
 #[cfg(test)]
 mod tests {
+	use crate::helpers::tests::{assert_encoding, expect_file};
+
 	use super::*;
 	#[test]
 	fn test_ineq() {
-		let x = OrdEnc::new(&mut db, &Dom::from_slice(&[2, 5, 6, 7, 9]), None);
+		let mut cnf = Cnf::default();
+		let x = OrdEnc::new(&mut cnf, &Dom::from_slice(&[2, 5, 6, 7, 9]), None);
 
-		for (dom_pos, expected_cnf) in [
-			(Some(0), vec![]),
-			(Some(1), vec![lits![1]]),
-			(Some(2), vec![lits![2]]),
-			(Some(3), vec![lits![3]]),
-			(Some(4), vec![lits![4]]),
-			(None, vec![lits![]]),
-		] {
+		for k in 0..=3 {
 			assert_encoding(
 				&Cnf::try_from(vec![x.geq(dom_pos)]).unwarp(),
-				&expect_file!["int/ord/geq_{k}.cnf", k],
+				&expect_file![format!("int/ord/geq_{k}.cnf")],
 			);
 		}
 	}

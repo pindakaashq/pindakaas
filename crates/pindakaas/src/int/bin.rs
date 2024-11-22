@@ -33,7 +33,7 @@ impl From<Vec<LitOrConst>> for BinEnc {
 }
 
 impl BinEnc {
-	pub(crate) fn new<DB: ClauseDatabase>(db: &mut DB, lits: u32, lbl: Option<String>) -> Self {
+	pub(crate) fn new<DB: ClauseDatabase>(db: &mut DB, lits: usize, lbl: Option<String>) -> Self {
 		let _lbl = lbl.unwrap_or(String::from("b"));
 		Self {
 			x: (0..lits)
@@ -43,7 +43,7 @@ impl BinEnc {
 	}
 
 	/// Returns binary encoding of of x{0}+k
-	fn from_k(k: Coeff, bits: u32) -> Self {
+	fn from_k(k: Coeff, bits: usize) -> Self {
 		Self::from(
 			as_binary(PosCoeff::new(k), Some(bits))
 				.into_iter()
@@ -76,7 +76,7 @@ impl BinEnc {
 		mut other: Self,
 		k: Coeff,
 	) -> crate::Result {
-		let n = std::cmp::max(self.bits(), other.bits()) as usize;
+		let n = std::cmp::max(self.bits(), other.bits());
 
 		fn bit(x: &[LitOrConst], i: usize) -> LitOrConst {
 			*x.get(i).unwrap_or(&LitOrConst::Const(false))
@@ -406,8 +406,8 @@ impl BinEnc {
 
 	// TODO u32 -> usize
 	/// Number of bits in the encoding
-	pub(crate) fn bits(&self) -> u32 {
-		self.x.len() as u32
+	pub(crate) fn bits(&self) -> usize {
+		self.x.len()
 	}
 
 	#[cfg_attr(
@@ -425,7 +425,7 @@ impl BinEnc {
 		// assume shifts; all Const(false) at front
 		// TODO add assertion for this
 		let bits = self.bits(); // all
-		let lits = self.lits().len() as u32; // unfixed
+		let lits = self.lits().len(); // unfixed
 		let xs = self
 			.xs()
 			.into_iter()
@@ -475,20 +475,15 @@ impl BinEnc {
 		})?;
 
 		let lits = [false]
-			.repeat((bits - lits) as usize)
+			.repeat(bits - lits)
 			.into_iter()
 			.map(LitOrConst::from)
-			.chain(
-				map.into_values()
-					.sorted()
-					.skip(lits as usize)
-					.map(LitOrConst::from),
-			)
+			.chain(map.into_values().sorted().skip(lits).map(LitOrConst::from))
 			.collect_vec();
 		Ok(BinEnc::from_lits(&lits))
 	}
 
-	pub(crate) fn required_lits(dom: &Dom) -> u32 {
+	pub(crate) fn required_lits(dom: &Dom) -> usize {
 		required_lits(dom.lb(), dom.ub())
 	}
 }
@@ -506,7 +501,7 @@ impl std::fmt::Display for BinEnc {
 
 #[cfg(test)]
 mod tests {
-	use helpers::tests::expect_file;
+	use helpers::tests::{assert_encoding, expect_file};
 
 	use super::*;
 
@@ -514,18 +509,18 @@ mod tests {
 	fn test_geqs() {
 		let mut cnf = Cnf::default();
 		let x = BinEnc::new(&mut cnf, 3, Some(String::from("x")));
-		cnf.add_clause(x.geqs(1, 6)).unwrap();
+		cnf.add_clauses(x.geqs(1, 6)).unwrap();
 		assert_encoding(&cnf, &expect_file!("int/bin/geq_1_6.cnf"));
 	}
 
 	#[test]
 	fn test_ineq() {
-		let x = BinEnc::new(&mut db, 3, Some(String::from("x")));
-
+		let mut cnf = Cnf::default();
+		let x = BinEnc::new(&mut cnf, 3, Some(String::from("x")));
 		for k in 0..=3 {
 			assert_encoding(
 				&Cnf::try_from(vec![x.geq(k)]).unwarp(),
-				&expect_file!(format!("int/ord/geq_{k}.cnf")),
+				&expect_file![format!("int/bin/geq_{k}.cnf")],
 			);
 		}
 	}

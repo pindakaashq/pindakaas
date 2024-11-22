@@ -4,12 +4,11 @@ use std::fmt::{self, Display};
 
 use itertools::Itertools;
 
-use super::{
-	model::{Obj, USE_CSE},
-	Assignment, Cse, Dom, LinExp,
-};
+use crate::int::{model::Cse, Assignment, Dom, LinExp};
 use crate::integer::IntVar;
 use crate::Coeff;
+
+use super::model::{Obj, USE_CSE};
 
 /// Show the integer variable's ID
 pub(crate) const SHOW_IDS: bool = false;

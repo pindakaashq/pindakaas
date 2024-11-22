@@ -11,7 +11,6 @@ pub mod propagation;
 #[cfg(feature = "splr")]
 pub mod splr;
 use crate::{int::MapSol, Cnf};
-use itertools::Itertools;
 
 use std::{ffi::c_void, num::NonZeroI32, ptr};
 
@@ -90,28 +89,29 @@ pub trait Solver: ClauseDatabase {
 
 	/// Solve for all solutions
 	fn solve_all(&mut self, output: &[Var]) -> Vec<MapSol> {
-		// TODO update this interface to give sols one-by-one and return Valuation
-		let mut solns = Vec::new();
-		let push_sol = |model: &Self::ValueFn, solns: &mut Vec<Vec<Lit>>| {
-			solns.push(
-				output
-					.iter()
-					.cloned()
-					.map(|v| {
-						if model.value(v.into()).unwrap() {
-							v.into()
-						} else {
-							!v
-						}
-					})
-					.collect_vec(),
-			);
-		};
-		while self.solve(|model| push_sol(model, &mut solns)) == SolveResult::Sat {
-			self.add_clause(solns.last().unwrap().iter().map(|l| !l))
-				.unwrap()
+		// TODO update this interface to give sols one-by-one and return Valuations i/o MapSols
+		let mut solns = Vec::<MapSol>::new();
+		loop {
+			match self.solve() {
+				SolveResult::Satisfied(sol) => {
+					solns.push(MapSol::new(output, sol));
+				}
+				SolveResult::Unsatisfiable(_) => {
+                                    return solns;
+				}
+				SolveResult::Unknown => panic!("Ran out of time before finding all solutions"),
+			}
+
+                        self.add_clause(solns.last().unwrap().iter().map(|l| !l))
+                            .unwrap();
 		}
-		solns.into_iter().map(MapSol::from).collect()
+		// TODO doesn't compile :)
+		// while let SolveResult::Satisfied(sol) = self.solve() {
+		// 	solns.push(MapSol::new(output, sol));
+		// 	self.add_clause(solns.last().unwrap().iter().map(|l| !l))
+		// 		.unwrap();
+		// };
+		// solns
 	}
 
 	fn add_cnf(&mut self, cnf: Cnf) {

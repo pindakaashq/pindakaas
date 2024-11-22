@@ -24,12 +24,12 @@ pub enum Format {
 }
 
 /// Number of required bits for unsigned Binary encoding with range 0..(ub-lb)
-pub(crate) fn required_lits(lb: Coeff, ub: Coeff) -> u32 {
+pub(crate) fn required_lits(lb: Coeff, ub: Coeff) -> usize {
 	let cardinality = ub - lb;
 	if cardinality == 0 {
 		0
 	} else {
-		cardinality.ilog2() + 1
+		(cardinality.ilog2() + 1) as usize
 	}
 }
 

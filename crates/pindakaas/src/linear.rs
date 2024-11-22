@@ -302,30 +302,6 @@ pub enum Comparator {
 	GreaterEq,
 }
 
-impl Comparator {
-	pub(crate) fn split(&self) -> Vec<Comparator> {
-		match self {
-			Comparator::Equal => vec![Comparator::LessEq, Comparator::GreaterEq],
-			_ => vec![*self],
-		}
-	}
-
-	pub(crate) fn reverse(&self) -> Comparator {
-		match *self {
-			Comparator::LessEq => Comparator::GreaterEq,
-			Comparator::Equal => panic!("Cannot reverse {self}"),
-			Comparator::GreaterEq => Comparator::LessEq,
-		}
-	}
-
-	pub(crate) fn is_ineq(&self) -> bool {
-		match *self {
-			Comparator::Equal => false,
-			Comparator::LessEq | Comparator::GreaterEq => true,
-		}
-	}
-}
-
 impl fmt::Display for Comparator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
