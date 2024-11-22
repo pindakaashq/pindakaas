@@ -1,3 +1,10 @@
+use crate::bool_linear::Comparator;
+use crate::int::enc::IntVarEnc;
+use crate::int::term::Term;
+use crate::int::Lin;
+use crate::integer::IntVarId;
+use crate::integer::IntVarRef;
+use crate::CheckError;
 use std::{
 	cell::RefCell,
 	collections::{BTreeSet, HashMap, HashSet},
@@ -9,10 +16,10 @@ use itertools::Itertools;
 use crate::{
 	int::{
 		decompose::{Decompose, ModelDecomposer},
-		Assignment, Dom, IntVar, IntVarId, IntVarRef, LinExp,
+		Assignment, Dom, LinExp,
 	},
-	Checker, ClauseDatabase, Result, Unsatisfiable, Valuation,
-	Var,
+	integer::IntVar,
+	Checker, ClauseDatabase, Result, Unsatisfiable, Valuation, Var,
 };
 
 // TODO needs experiment to find out which is better
@@ -606,12 +613,12 @@ Actual assignments:
 #[cfg(feature = "cadical")]
 mod tests {
 	use super::*;
-	use crate::{Lin, Model};
 
+	use crate::int::decompose::LinDecomposer;
+	use crate::int::Format;
 	use crate::solver::cadical::Cadical;
 	use crate::solver::Solver;
-	use crate::{int::decompose::LinDecomposer, Format};
-	#[cfg(feature = "trace")]
+	#[cfg(feature = "tracing")]
 	use traced_test::test;
 
 	use itertools::{iproduct, Itertools};
@@ -658,32 +665,30 @@ mod tests {
 
 	#[test]
 	fn model_test() {
-		assert_ok!({
-			// Instantiate model
-			let mut model = Model::default().with_config(ModelConfig {
-				scm: Scm::Add,
-				..ModelConfig::default()
-			});
-
-			// Add variables using dom/slice with optional label
-			let x1 = model.new_var(&[0, 2], Some("x1".to_string()))?;
-			let x2 = model.new_var(&[0, 3], Some("x2".to_string()))?;
-			let x3 = model.new_var(&[0, 5], Some("x3".to_string()))?;
-
-			// Add (linear) constraint
-			model.add_constraint(Lin::new(
-				&[Term::new(1, x1), Term::new(1, x2), Term::new(1, x3)],
-				Comparator::LessEq,
-				6,
-				Some(String::from("c1")),
-			))?;
-
-			// Encode to ClauseDatabase
-			let mut cnf = Cnf::default();
-			model.encode_internal(&mut cnf, true)?;
-
-			Ok::<(), Unsatisfiable>(())
+		// Instantiate model
+		let mut model = Model::default().with_config(ModelConfig {
+			scm: Scm::Add,
+			..ModelConfig::default()
 		});
+
+		// Add variables using dom/slice with optional label
+		let x1 = model.new_var(&[0, 2], Some("x1".to_string())).unwrap();
+		let x2 = model.new_var(&[0, 3], Some("x2".to_string())).unwrap();
+		let x3 = model.new_var(&[0, 5], Some("x3".to_string())).unwrap();
+
+		// Add (linear) constraint
+		model.add_constraint(Lin::new(
+			&[Term::new(1, x1), Term::new(1, x2), Term::new(1, x3)],
+			Comparator::LessEq,
+			6,
+			Some(String::from("c1")),
+		))?;
+
+		// Encode to ClauseDatabase
+		let mut cnf = Cnf::default();
+		model.encode_internal(&mut cnf, true).unwrap();
+
+		Ok::<(), Unsatisfiable>(())
 	}
 
 	/// All possible currently stable (!) configurations
@@ -865,7 +870,10 @@ mod tests {
 				// 	check_decomposition(&model, &lin_decomp, expected_assignments.as_ref());
 				// }
 
-				let var_encs_gen = expand_var_encs(&VAR_ENCS, lin_decomp.vars().cloned().collect());
+				let var_encs_gen = expand_var_encs(
+					&VAR_ENCS.into_iter().collect_vec(),
+					lin_decomp.vars().cloned().collect(),
+				);
 				if let Some(j) = *TEST_DECOMP_I {
 					vec![(
 						j,

@@ -3,8 +3,9 @@ use std::{cell::RefCell, collections::BTreeSet, fmt::Display, hash::BuildHasherD
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
+
 use crate::{
-	helpers::negate_cnf,
+    helpers::{negate_cnf,emit_clause, new_var},
 	int::display::SHOW_IDS,
 	ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation, Var,
 };

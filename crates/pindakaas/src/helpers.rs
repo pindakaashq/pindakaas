@@ -182,7 +182,7 @@ pub(crate) use new_var;
 #[cfg(feature = "splr")]
 pub(crate) use {concat_slices, const_concat, maybe_std_concat};
 
-use crate::{bool_linear::PosCoeff, ClauseDatabase, Coeff, Lit, Result};
+use crate::{bool_linear::PosCoeff, int::enc::LitOrConst, ClauseDatabase, Coeff, Lit, Result};
 
 pub(crate) fn emit_filtered_clause<DB: ClauseDatabase, I: IntoIterator<Item = LitOrConst>>(
 	db: &mut DB,
@@ -255,12 +255,13 @@ pub(crate) mod tests {
 
 	#[cfg(test)]
 	pub(crate) use expect_file;
+
 	use expect_test::ExpectFile;
 	use itertools::Itertools;
 
 	use crate::{
 		bool_linear::BoolLinExp,
-		integer::IntVarEnc,
+		int::enc::IntVarEnc,
 		solver::{cadical::Cadical, SolveResult, Solver},
 		Checker, ClauseDatabase, Cnf, Lit, Valuation,
 	};
@@ -308,97 +309,82 @@ pub(crate) mod tests {
 			.collect_vec();
 		let bool_vars = formula.get_variables();
 		let mut solutions: Vec<Vec<i64>> = Vec::new();
+		// while let SolveResult::Satisfied(value) = slv.solve() {
+		// 	// Collect integer solution
+		// 	solutions.push(
+		// 		vars.clone()
+		// 			.into_iter()
+		// 			.map(|x| x.value(&value).unwrap())
+		// 			.collect(),
+		// 	);
+		// 	// Add nogood clause
+		// 	let nogood: Vec<Lit> = bool_vars
+		// 		.clone()
+		// 		.map(|v| {
+		// 			let l = v.into();
+		// 			if value.value(l) {
+		// 				!l
+		// 			} else {
+		// 				l
+		// 			}
+		// 		})
+		// 		.collect();
+		// 	slv.add_clause(nogood).unwrap();
+	}
+
+	/// Helper functions to ensure that the possible solutions of a formula, with
+	/// relation to a set of variables, match the expected solutions string.
+	pub(crate) fn assert_solutions<V, I>(formula: &Cnf, vars: I, expect: &ExpectFile)
+	where
+		V: Into<Lit>,
+		I: IntoIterator<Item = V> + Clone,
+	{
+		let mut slv = Cadical::from(formula);
+		let mut solutions: Vec<Vec<Lit>> = Vec::new();
 		while let SolveResult::Satisfied(value) = slv.solve() {
-			// Collect integer solution
 			solutions.push(
 				vars.clone()
 					.into_iter()
-					.map(|x| x.value(&value).unwrap())
+					.map(|v| {
+						let l = v.into();
+						if value.value(l) {
+							l
+						} else {
+							!l
+						}
+					})
 					.collect(),
 			);
-			// Add nogood clause
-			let nogood: Vec<Lit> = bool_vars
-				.clone()
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect();
-			slv.add_clause(nogood).unwrap();
+			slv.add_clause(solutions.last().unwrap().iter().map(|l| !l))
+				.unwrap();
+		}
+		solutions.sort();
+		let sol_str = format!(
+			"{}",
+			solutions
+				.into_iter()
+				.map(|sol| sol.into_iter().map(i32::from).format(" "))
+				.format("\n")
+		);
+		expect.assert_eq(&sol_str);
+	}
 
-			/// Helper functions to ensure that the possible solutions of a formula, with
-			/// relation to a set of variables, match the expected solutions string.
-			pub(crate) fn assert_solutions<V, I>(formula: &Cnf, vars: I, expect: &ExpectFile)
-			where
-				V: Into<Lit>,
-				I: IntoIterator<Item = V> + Clone,
-			{
-				let mut slv = Cadical::from(formula);
-				let mut solutions: Vec<Vec<Lit>> = Vec::new();
-				while let SolveResult::Satisfied(value) = slv.solve() {
-					solutions.push(
-						vars.clone()
-							.into_iter()
-							.map(|v| {
-								let l = v.into();
-								if value.value(l) {
-									l
-								} else {
-									!l
-								}
-							})
-							.collect(),
-					);
-					slv.add_clause(solutions.last().unwrap().iter().map(|l| !l))
-						.unwrap();
-				}
-				solutions.sort();
-				let sol_str = format!(
-					"{}",
-					solutions
-						.into_iter()
-						.map(|sol| sol.into_iter().map(i32::from).format(" "))
-						.format("\n")
-				);
-				expect.assert_eq(&sol_str);
-			}
-
-			/// Helper function to quickly create a valuation from a slice of literals.
-			///
-			/// ### Warning
-			/// This function assumes that the literal slice contains all literals
-			/// starting from the first variable, and that the literals are in order of
-			/// the variables.
-			pub(crate) fn make_valuation<L: Into<Lit> + Copy>(
-				solution: &[L],
-			) -> impl Valuation + '_ {
-				|l: Lit| {
-					let abs: Lit = l.var().into();
-					let v = Into::<i32>::into(abs) as usize;
-					if v <= solution.len() {
-						debug_assert_eq!(solution[v - 1].into().var(), l.var());
-						solution[v - 1].into() == l
-					} else {
-						false
-					}
-				}
+	/// Helper function to quickly create a valuation from a slice of literals.
+	///
+	/// ### Warning
+	/// This function assumes that the literal slice contains all literals
+	/// starting from the first variable, and that the literals are in order of
+	/// the variables.
+	pub(crate) fn make_valuation<L: Into<Lit> + Copy>(solution: &[L]) -> impl Valuation + '_ {
+		|l: Lit| {
+			let abs: Lit = l.var().into();
+			let v = Into::<i32>::into(abs) as usize;
+			if v <= solution.len() {
+				debug_assert_eq!(solution[v - 1].into().var(), l.var());
+				solution[v - 1].into() == l
+			} else {
+				false
 			}
 		}
 	}
-
-	macro_rules! lits {
-		() => {
-			std::vec::Vec::new()
-		};
-		($($x:expr),+ $(,)?) => {
-			<[Lit]>::into_vec(
-				std::boxed::Box::new([$($crate::Lit::from($x)),+])
-			)
-		};
-	}
-	
 }

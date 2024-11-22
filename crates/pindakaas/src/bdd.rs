@@ -1,13 +1,32 @@
+use crate::{
+	bool_linear::{Comparator, LinMarker, NormalizedBoolLinear},
+	int::{Decompose, Decomposer, Dom, Lin, LinExp, Model, ModelConfig, Term},
+	integer::IntVar,
+	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
+};
+
 use std::{collections::HashMap, ops::Range};
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary
+/// Decision Diagram (BDD)
+pub struct BddEncoder {
+	add_consistency: bool,
+	cutoff: Option<Coeff>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+/// The representation of a Binary Decision Diagram (BDD) node for the
+/// [`BddEncoder`].
+enum BddNode {
+	Val,
+	Gap,
+	View(Coeff),
+}
+
+impl LinMarker for BddEncoder {}
 use iset::IntervalMap;
 use itertools::Itertools;
-
-use crate::{
-	int::{Dom, Lin, LinExp, Model},
-	ClauseDatabase, Coeff, Comparator, Decompose, Decomposer, Encoder, IntVar, Linear, ModelConfig,
-	Result, Term, Unsatisfiable,
-};
 
 #[allow(dead_code)]
 enum BddSort {
@@ -16,23 +35,8 @@ enum BddSort {
 	None, // useful for debugging
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq)]
-enum BddNode {
-	Val,
-	Gap,
-	View(Coeff),
-}
-
 /// Determine sorting order of terms (useful for debugging)
 const SORT_TERMS: BddSort = BddSort::Dsc;
-
-/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary Decision Diagram (BDD)
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct BddEncoder {
-	add_consistency: bool,
-	cutoff: Option<Coeff>,
-}
 
 impl BddEncoder {
 	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
@@ -220,13 +224,13 @@ fn process_val(iv: Range<Coeff>, cmp: &Comparator) -> Coeff {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, Linear> for BddEncoder {
+impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
 	#[cfg_attr(
-		feature = "trace",
+		any(feature = "tracing", test),
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 
-	fn encode(&self, db: &mut DB, lin: &Linear) -> Result {
+	fn encode(&self, db: &mut DB, lin: &NormalizedBoolLinear) -> Result {
 		let mut model = Model {
 			config: ModelConfig {
 				cutoff: self.cutoff,
@@ -263,7 +267,7 @@ fn bdd(
 	_cmp: &Comparator,
 	sum: Coeff,
 	ws: &mut Vec<IntervalMap<Coeff, BddNode>>,
-) -> (std::ops::Range<Coeff>, BddNode) {
+) -> (Range<Coeff>, BddNode) {
 	// TODO assert at most one (this was the last case, but seemed to impact performance in profiling!)
 	match &ws[i].overlap(sum).next() {
 		None => {
@@ -289,21 +293,4 @@ fn bdd(
 		Some((a, node)) => (a.clone(), (*node).clone()),
 		// _ => panic!("ROBDD intervals should be disjoint, but were {:?}", ws[i]),
 	}
-}
-
-#[cfg(test)]
-mod tests {
-	#[cfg(feature = "trace")]
-	use traced_test::test;
-
-	use super::*;
-	use crate::{
-		helpers::tests::{assert_sol, lits},
-		linear::{
-			tests::{construct_terms, linear_test_suite},
-			LimitComp, PosCoeff,
-		},
-		Encoder, Lit,
-	};
-	linear_test_suite!(BddEncoder::default());
 }

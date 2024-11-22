@@ -1,17 +1,28 @@
-use std::{cell::RefCell, collections::BTreeSet, fmt::Display, hash::BuildHasherDefault, rc::Rc};
+use crate::bool_linear::BoolLinExp;
+use crate::bool_linear::Part;
+use crate::bool_linear::PosCoeff;
+use crate::helpers::as_binary;
+use crate::helpers::emit_clause;
+use crate::helpers::emit_filtered_clause;
+use crate::helpers::new_var;
+use crate::int::enc::IntVarEnc;
+use crate::int::required_lits;
+use crate::int::Dom;
+use crate::int::LinExp;
+use crate::int::LitOrConst;
+use crate::int::Model;
+use crate::int::{BinEnc, OrdEnc};
+use crate::CheckError;
 
-use crate::trace::log;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	helpers::negate_cnf,
-	int::display::SHOW_IDS,
-	ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation, Var,
+	helpers::negate_cnf, int::display::SHOW_IDS, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable,
+	Valuation, Var,
 };
 
-#[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
-pub struct IntVarId(pub usize);
+use std::{cell::RefCell, collections::BTreeSet, fmt::Display, hash::BuildHasherDefault, rc::Rc};
 
 pub type IntVarRef = Rc<RefCell<IntVar>>;
 
@@ -20,6 +31,10 @@ impl Display for IntVarId {
 		write!(f, "{}", self.0)
 	}
 }
+
+#[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
+pub struct IntVarId(pub usize);
+
 #[derive(Debug, Clone, Default)]
 pub struct IntVar {
 	pub id: IntVarId,
@@ -30,12 +45,6 @@ pub struct IntVar {
 }
 
 // TODO implement Eq so we don't compare .e
-
-#[derive(Debug, Clone)]
-pub enum IntVarEnc {
-	Ord(Option<OrdEnc>),
-	Bin(Option<BinEnc>),
-}
 
 impl IntVar {
 	pub(crate) fn new_constant(c: Coeff) -> IntVarRef {
@@ -75,7 +84,7 @@ impl IntVar {
 	}
 
 	#[cfg_attr(
-		feature = "trace",
+		feature = "tracing",
 		tracing::instrument(name = "consistency", skip_all, fields(constraint = format!("{}", self)))
 	)]
 	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> Result {
@@ -170,7 +179,7 @@ impl IntVar {
 		match self.e.as_ref().unwrap() {
 			IntVarEnc::Ord(Some(o)) => {
 				let pos = self.dom.geq(k);
-				log!(" = d_{pos:?}");
+				println!(" = d_{pos:?}");
 				let d = if let Some((pos, v)) = pos {
 					if up {
 						Some(v)
@@ -204,7 +213,7 @@ impl IntVar {
 					(range_lb + k, a)
 				};
 
-				log!("{r_a}..{r_b} ");
+				println!("{r_a}..{r_b} ");
 				let dnf = x_bin.geqs(r_a, r_b);
 
 				let dnf = if up {
@@ -229,14 +238,14 @@ impl IntVar {
 		}
 	}
 
-	pub(crate) fn as_lin_exp(&self) -> crate::linear::LinExp {
+	pub(crate) fn as_lin_exp(&self) -> BoolLinExp {
 		match self
 			.e
 			.as_ref()
 			.unwrap_or_else(|| panic!("Expected {self} to be encoded"))
 		{
 			IntVarEnc::Ord(Some(o)) => {
-				crate::linear::LinExp::default()
+				BoolLinExp::default()
 					.add_chain(
 						&self
 							.dom
@@ -255,7 +264,7 @@ impl IntVar {
 				let add = add + self.lb();
 				let (lb, ub) = (add, self.ub() - self.lb() + add);
 
-				let lin_exp = crate::linear::LinExp::default().add_bounded_log_encoding(
+				let lin_exp = BoolLinExp::default().add_bounded_log_encoding(
 					terms.as_slice(),
 					// The Domain constraint bounds only account for the unfixed part of the offset binary notation
 					lb,
@@ -268,7 +277,7 @@ impl IntVar {
 	}
 
 	pub fn assign<F: Valuation + ?Sized>(&self, a: &F) -> Result<Coeff, CheckError> {
-		let assignment = crate::linear::LinExp::from(self).assign(a)?;
+		let assignment = LinExp::from(self).assign(a)?;
 		if self.add_consistency && !self.dom.contains(assignment) {
 			Err(CheckError::Fail(format!(
 				"Inconsistent var assignment on consistent var: {} -> {:?}",
@@ -529,82 +538,569 @@ impl IntVar {
 	}
 }
 
+/// Uses lexicographic constraint to constrain x:B ≦ k
+#[cfg_attr(
+	feature = "tracing",
+	tracing::instrument(name = "lex_leq_const", skip_all, fields(constraint = format!("{x:?} <= {k}")))
+)]
+pub(crate) fn lex_leq_const<DB: ClauseDatabase>(
+	db: &mut DB,
+	x: &[LitOrConst],
+	k: PosCoeff,
+	bits: u32,
+) -> Result {
+	// For every zero bit in k:
+	// - either the `x` bit is also zero, or
+	// - a higher `x` bit is zero that was one in k.
+	let k = as_binary(k, Some(bits));
+	let bits = bits as usize;
+
+	(0..bits)
+		.filter(|i| !k.get(*i).unwrap_or(&false))
+		.try_for_each(|i| {
+			emit_filtered_clause(
+				db,
+				(i..bits)
+					.filter(|j| (*j == i || *k.get(*j).unwrap_or(&false)))
+					.map(|j| !x[j])
+					.collect_vec(),
+			)
+		})
+}
+
+/// Uses lexicographic constraint to constrain x:B >= k
+#[cfg_attr(
+	feature = "tracing",
+	tracing::instrument(name = "lex_geq_const", skip_all, fields(constraint = format!("{x:?} >= {k} over {bits} bits")))
+)]
+pub(crate) fn lex_geq_const<DB: ClauseDatabase>(
+	db: &mut DB,
+	x: &[LitOrConst],
+	k: PosCoeff,
+	bits: u32,
+) -> Result {
+	let k = as_binary(k, Some(bits));
+	let bits = bits as usize;
+
+	(0..bits)
+		.filter(|i| *k.get(*i).unwrap_or(&false))
+		.try_for_each(|i| {
+			emit_filtered_clause(
+				db,
+				(i..bits)
+					.filter(|j| (*j == i || !k.get(*j).unwrap_or(&false)))
+					.map(|j| x[j])
+					.collect_vec(),
+			)
+		})
+}
+
+// TODO implement for given false carry
+#[cfg_attr(feature = "tracing", tracing::instrument(name = "carry", skip_all, fields(constraint = format!("{xs:?} >= 2"))))]
+fn carry<DB: ClauseDatabase>(db: &mut DB, xs: &[LitOrConst], _lbl: String) -> Result<LitOrConst> {
+	// The carry is true iff at least 2 out of 3 `xs` are true
+	let (xs, trues) = filter_fixed_sum(xs);
+	let carry = match &xs[..] {
+		[] => (trues >= 2).into(), // trues is {0,1,2,3}
+		[x] => match trues {
+			0 => false.into(),
+			1 => (*x).into(),
+			2 => true.into(),
+			_ => unreachable!(),
+		},
+		[x, y] => match trues {
+			0 => {
+				let and = new_var!(db, _lbl);
+				emit_clause!(db, [!x, !y, and])?;
+				emit_clause!(db, [*x, !and])?;
+				emit_clause!(db, [*y, !and])?;
+				and.into()
+			}
+			1 => {
+				let or = new_var!(db, _lbl);
+				emit_clause!(db, [*x, *y, !or])?;
+				emit_clause!(db, [!x, or])?;
+				emit_clause!(db, [!y, or])?;
+				or.into()
+			}
+			_ => unreachable!(),
+		},
+		[x, y, z] => {
+			assert!(trues == 0);
+			let carry = new_var!(db, _lbl);
+
+			emit_clause!(db, [*x, *y, !carry])?; // 2 false -> ~carry
+			emit_clause!(db, [*x, *z, !carry])?; // " ..
+			emit_clause!(db, [*y, *z, !carry])?;
+
+			emit_clause!(db, [!x, !y, carry])?; // 2 true -> carry
+			emit_clause!(db, [!x, !z, carry])?; // " ..
+			emit_clause!(db, [!y, !z, carry])?;
+			carry.into()
+		}
+		_ => unreachable!(),
+	};
+	Ok(carry)
+}
+
+fn filter_fixed_sum(xs: &[LitOrConst]) -> (Vec<Lit>, usize) {
+	let mut trues = 0;
+	(
+		xs.iter()
+			.filter_map(|x| match x {
+				LitOrConst::Lit(l) => Some(*l),
+				LitOrConst::Const(true) => {
+					trues += 1;
+					None
+				}
+				LitOrConst::Const(false) => None,
+			})
+			.collect(),
+		trues,
+	)
+}
+
+#[cfg_attr(feature = "tracing", tracing::instrument(name = "xor", skip_all, fields(constraint = format!("(+) {xs:?}"))))]
+fn xor<DB: ClauseDatabase>(db: &mut DB, xs: &[LitOrConst], _lbl: String) -> Result<LitOrConst> {
+	let (xs, trues) = filter_fixed_sum(xs);
+
+	let is_even = match &xs[..] {
+		[] => LitOrConst::Const(false), // TODO why not `true`?
+		[x] => LitOrConst::Lit(*x),
+		[x, y] => {
+			assert!(trues <= 1);
+			let is_even = new_var!(db, _lbl);
+
+			emit_clause!(db, [*x, *y, !is_even])?; // 0
+			emit_clause!(db, [!x, !y, !is_even])?; // 2
+
+			emit_clause!(db, [!x, *y, is_even])?; // 1
+			emit_clause!(db, [*x, !y, is_even])?; // 1
+			LitOrConst::Lit(is_even)
+		}
+		[x, y, z] => {
+			assert!(trues == 0);
+			let is_even = new_var!(db, _lbl);
+
+			emit_clause!(db, [*x, *y, *z, !is_even])?; // 0
+			emit_clause!(db, [*x, !y, !z, !is_even])?; // 2
+			emit_clause!(db, [!x, *y, !z, !is_even])?; // 2
+			emit_clause!(db, [!x, !y, *z, !is_even])?; // 2
+
+			emit_clause!(db, [!x, !y, !z, is_even])?; // 3
+			emit_clause!(db, [!x, *y, *z, is_even])?; // 1
+			emit_clause!(db, [*x, !y, *z, is_even])?; // 1
+			emit_clause!(db, [*x, *y, !z, is_even])?; // 1
+			LitOrConst::Lit(is_even)
+		}
+		_ => unimplemented!(),
+	};
+
+	// If trues is odd, negate sum
+	Ok(if trues % 2 == 0 { is_even } else { !is_even })
+}
+
+// TODO [?] functional version has duplication with relational version
+#[cfg_attr(feature = "tracing", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("[{}] + [{}] = ", xs.iter().rev().map(|x| format!("{x}")).collect_vec().join(","), ys.iter().rev().map(|x| format!("{x}")).collect_vec().join(",")))))]
+pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
+	db: &mut DB,
+	xs: &[LitOrConst],
+	ys: &[LitOrConst],
+	bits: Option<u32>,
+) -> Result<Vec<LitOrConst>> {
+	let max_bits = itertools::max([xs.len(), ys.len()]).unwrap() + 1;
+	let bits = bits.unwrap_or(max_bits as u32) as usize;
+	let mut c = LitOrConst::Const(false);
+
+	let zs = (0..bits)
+		.map(|i| {
+			let (x, y) = (bit(xs, i), bit(ys, i));
+			let z = xor(db, &[x, y, c], format!("z_{}", i)); // sum
+			c = carry(db, &[x, y, c], format!("c_{}", i + 1))?; // carry
+			z
+		})
+		.collect::<Result<Vec<_>>>()?;
+
+	// TODO avoid c being created by constraining (x+y+c >= 2 ) <-> false in last iteration if bits<max_bits
+	// prevent overflow;
+	// TODO this should just happen for all c_i's for bits < i <= max_bits
+	if bits < max_bits {
+		if let LitOrConst::Lit(c) = c {
+			emit_clause!(db, [!c])?;
+		}
+	}
+
+	// TODO If lasts lits are equal, it could mean they can be truncated (at least true for 2-comp)? But then they might return unexpected number of bits in some cases. Needs thinking.
+	Ok(zs)
+}
+
+fn bit(x: &[LitOrConst], i: usize) -> LitOrConst {
+	*x.get(i).unwrap_or(&LitOrConst::Const(false))
+}
+
 #[cfg(test)]
-mod tests {
-	use super::*;
+pub(crate) mod tests {
+	use std::num::NonZeroI32;
+
+	use iset::{interval_set, IntervalSet};
+	use traced_test::test;
+
+	use crate::{
+		bool_linear::{BoolLinExp, LimitComp},
+		helpers::tests::{assert_solutions, expect_file, make_valuation},
+		integer::{IntVarBin, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+		ClauseDatabase, Cnf, Coeff, Var, VarRange,
+	};
 
 	#[test]
-	fn test_ineq_ord() {
-		(|| {
-			let mut db = TestDB::new(0);
-			let mut x = IntVar::from_dom(
-				0,
-				Dom::from_slice(&[5, 7, 8]),
-				true,
-				Some(IntVarEnc::Ord(None)),
-				Some(String::from("x")),
-			);
-			x.encode(&mut db)?;
+	fn bin_geq_2_test() {
+		let mut cnf = Cnf::default();
+		let x = IntVarBin::from_bounds(&mut cnf, 0, 12, "x".to_owned());
+		let vars = VarRange::new(
+			Var(NonZeroI32::new(1).unwrap()),
+			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
+		);
+		TernLeEncoder::default()
+			.encode(
+				&mut cnf,
+				&TernLeConstraint {
+					x: &IntVarEnc::Bin(x),
+					y: &IntVarEnc::Const(0),
+					cmp: LimitComp::LessEq,
+					z: &IntVarEnc::Const(6),
+				},
+			)
+			.unwrap();
 
-			assert_eq!(x.ineq(3, true, None), (Some(5), vec![]));
-			assert_eq!(x.ineq(5, true, None), (Some(5), vec![]));
-			assert_eq!(x.ineq(6, true, None), (Some(7), vec![lits![1]]));
-			assert_eq!(x.ineq(8, true, None), (Some(8), vec![lits![2]]));
-			assert_eq!(x.ineq(12, true, None), (None, vec![lits![]]));
-
-			// // x < k
-			assert_eq!(x.ineq(3, false, None), (None, vec![vec![]]));
-			assert_eq!(x.ineq(5, false, None), (None, vec![vec![]]));
-			assert_eq!(x.ineq(6, false, None), (Some(5), vec![lits![-1]]));
-			assert_eq!(x.ineq(7, false, None), (Some(5), vec![lits![-1]]));
-			assert_eq!(x.ineq(8, false, None), (Some(7), vec![lits![-2]]));
-			assert_eq!(x.ineq(12, false, None), (Some(8), vec![]));
-			Ok::<_, Unsatisfiable>(())
-		})()
-		.unwrap();
+		assert_solutions(
+			&cnf,
+			vars,
+			&expect_file!["int/constrain/bin_geq_2_test.sol"],
+		);
 	}
 
 	#[test]
-	fn test_ineqs_bin() {
-		(|| {
-			let mut db = TestDB::new(0);
-			let mut x = IntVar::from_dom(
-				0,
-				Dom::from_slice(&[0, 1, 2, 3, 4, 5, 6, 7]),
-				true,
-				Some(IntVarEnc::Bin(None)),
-				Some(String::from("x")),
-			);
-			x.encode(&mut db)?;
-			assert_eq!(
-				x.ineqs(true),
-				vec![
-					(7, lits![], 7),        // +0
-					(6, lits![1], 6),       // +0
-					(5, lits![2], 4),       // +1
-					(4, lits![1, 2], 4),    // +0
-					(3, lits![3], 0),       // +3
-					(2, lits![1, 3], 2),    // +0
-					(1, lits![2, 3], 0),    // +0
-					(0, lits![1, 2, 3], 0)  // +0
-				]
-			);
+	fn bin_le_bin_test() {
+		let mut cnf = Cnf::default();
+		let n = 5;
+		let lb = 0;
+		let ub = ((2_i32.pow(n)) - 1) as Coeff;
 
-			assert_eq!(
-				x.ineqs(false),
-				vec![
-					(0, lits![], 0),           // +0
-					(1, lits![-1], 1),         // +0
-					(2, lits![-2], 3),         // +0
-					(3, lits![-1, -2], 3),     // +3
-					(4, lits![-3], 7),         // +0
-					(5, lits![-1, -3], 5),     // +1
-					(6, lits![-2, -3], 7),     // +0
-					(7, lits![-1, -2, -3], 7), // +0
-				]
-			);
-			Ok::<_, Unsatisfiable>(())
-		})()
-		.unwrap();
+		let (x, y, z) = (
+			get_bin_x(&mut cnf, lb, ub, true, "x".to_owned()),
+			IntVarEnc::Const(0),
+			// get_bin_x(&mut db, (2i32.pow(n)) - 1, true, "y".to_string()),
+			get_bin_x(&mut cnf, lb, ub, true, "z".to_owned()),
+		);
+		let vars = VarRange::new(
+			Var(NonZeroI32::new(1).unwrap()),
+			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
+		);
+		TernLeEncoder::default()
+			.encode(
+				&mut cnf,
+				&TernLeConstraint {
+					x: &x,
+					y: &y,
+					// cmp: LimitComp::Equal,
+					cmp: LimitComp::LessEq,
+					z: &z,
+				},
+			)
+			.unwrap();
+
+		assert_solutions(
+			&cnf,
+			vars,
+			&expect_file!["int/constrain/bin_le_bin_test.sol"],
+		);
+	}
+
+	#[test]
+	fn bin_le_test() {
+		let mut cnf = Cnf::default();
+		let n = 4;
+		let lb = 0;
+		let ub = ((2_i32.pow(n)) - 1) as Coeff;
+
+		let (x, y, z) = (
+			get_bin_x(&mut cnf, lb, ub, true, "x".to_owned()),
+			IntVarEnc::Const(0),
+			// get_bin_x(&mut db, (2i32.pow(n)) - 1, true, "y".to_string()),
+			IntVarEnc::Const(14),
+		);
+		let vars = VarRange::new(
+			Var(NonZeroI32::new(1).unwrap()),
+			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
+		);
+		TernLeEncoder::default()
+			.encode(
+				&mut cnf,
+				&TernLeConstraint {
+					x: &x,
+					y: &y,
+					// cmp: LimitComp::Equal,
+					cmp: LimitComp::LessEq,
+					z: &z,
+				},
+			)
+			.unwrap();
+
+		assert_solutions(&cnf, vars, &expect_file!["int/constrain/bin_le_test.sol"]);
+	}
+
+	#[test]
+	fn bin_plus_bin_eq_bin_test() {
+		let mut cnf = Cnf::default();
+		let (x, y, z) = (
+			get_bin_x(&mut cnf, 0, 2, true, "x".to_owned()),
+			get_bin_x(&mut cnf, 0, 3, true, "y".to_owned()),
+			get_bin_x(&mut cnf, 0, 5, true, "z".to_owned()),
+		);
+		let vars = VarRange::new(
+			Var(NonZeroI32::new(1).unwrap()),
+			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
+		);
+		TernLeEncoder::default()
+			.encode(
+				&mut cnf,
+				&TernLeConstraint {
+					x: &x,
+					y: &y,
+					cmp: LimitComp::Equal,
+					z: &z,
+				},
+			)
+			.unwrap();
+
+		assert_solutions(
+			&cnf,
+			vars,
+			&expect_file!["int/constrain/bin_plus_bin_eq_bin_test.sol"],
+		);
+	}
+
+	#[test]
+	fn bin_plus_bin_le_bin_test() {
+		let mut cnf = Cnf::default();
+		let n = 2;
+		let (x, y, z) = (
+			get_bin_x(
+				&mut cnf,
+				0,
+				((2_i32.pow(n)) - 1) as Coeff,
+				true,
+				"x".to_owned(),
+			),
+			get_bin_x(
+				&mut cnf,
+				0,
+				((2_i32.pow(n)) - 1) as Coeff,
+				true,
+				"y".to_owned(),
+			),
+			get_bin_x(
+				&mut cnf,
+				0,
+				((2_i32.pow(n + 1)) - 2) as Coeff,
+				true,
+				"z".to_owned(),
+			),
+		);
+		let vars = VarRange::new(
+			Var(NonZeroI32::new(1).unwrap()),
+			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
+		);
+		TernLeEncoder::default()
+			.encode(
+				&mut cnf,
+				&TernLeConstraint {
+					x: &x,
+					y: &y,
+					cmp: LimitComp::LessEq,
+					z: &z,
+				},
+			)
+			.unwrap();
+
+		assert_solutions(
+			&cnf,
+			vars,
+			&expect_file!["int/constrain/bin_plus_bin_le_bin_test.sol"],
+		);
+	}
+
+	#[test]
+	fn constant_test() {
+		let c = IntVarEnc::Const(42);
+		assert_eq!(c.lb(), 42);
+		assert_eq!(c.ub(), 42);
+		assert_eq!(c.geq(6..7), Vec::<Vec<_>>::new());
+		assert_eq!(c.geq(45..46), vec![vec![]]);
+	}
+
+	fn get_bin_x<DB: ClauseDatabase>(
+		db: &mut DB,
+		lb: Coeff,
+		ub: Coeff,
+		consistent: bool,
+		lbl: String,
+	) -> IntVarEnc {
+		let x = IntVarBin::from_bounds(db, lb, ub, lbl);
+		if consistent {
+			x.consistent(db).unwrap();
+		}
+		IntVarEnc::Bin(x)
+	}
+
+	fn get_ord_x<DB: ClauseDatabase>(
+		db: &mut DB,
+		dom: IntervalSet<Coeff>,
+		consistent: bool,
+		lbl: String,
+	) -> IntVarEnc {
+		let x = IntVarOrd::from_syms(db, dom, lbl);
+		if consistent {
+			x.consistent(db).unwrap();
+		}
+		IntVarEnc::Ord(x)
+	}
+
+	#[test]
+	fn ord_geq_test() {
+		let mut cnf = Cnf::default();
+		let x = get_ord_x(
+			&mut cnf,
+			interval_set!(3..5, 5..7, 7..11),
+			true,
+			"x".to_owned(),
+		);
+		let vars = VarRange::new(
+			Var(NonZeroI32::new(1).unwrap()),
+			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
+		);
+
+		assert_eq!(x.lits(), 3);
+		assert_eq!(x.lb(), 2);
+		assert_eq!(x.ub(), 10);
+		assert_eq!(x.geq(6..7), vec![vec![Lit(NonZeroI32::new(2).unwrap())]]);
+		assert_eq!(x.geq(4..7), vec![vec![Lit(NonZeroI32::new(2).unwrap())]]);
+
+		let x_lin = BoolLinExp::from(&x);
+		assert!(x_lin.value(&make_valuation(&[1, -2, 3])).is_err());
+		assert!(x_lin.value(&make_valuation(&[-1, 2, -3])).is_err());
+		assert_eq!(x_lin.value(&make_valuation(&[-1, -2, -3])), Ok(2));
+		assert_eq!(x_lin.value(&make_valuation(&[1, -2, -3])), Ok(4));
+		assert_eq!(x_lin.value(&make_valuation(&[1, 2, -3])), Ok(6));
+		assert_eq!(x_lin.value(&make_valuation(&[1, 2, 3])), Ok(10));
+
+		TernLeEncoder::default()
+			.encode(
+				&mut cnf,
+				&TernLeConstraint {
+					x: &x,
+					y: &IntVarEnc::Const(0),
+					cmp: LimitComp::LessEq,
+					z: &IntVarEnc::Const(6),
+				},
+			)
+			.unwrap();
+		assert_solutions(&cnf, vars, &expect_file!["int/constrain/ord_geq_test.sol"])
+	}
+
+	#[test]
+	fn ord_le_bin_test() {
+		let mut cnf = Cnf::default();
+		let (x, y, z) = (
+			get_ord_x(&mut cnf, interval_set!(1..2, 2..7), true, "x".to_owned()),
+			// TODO 'gapped' in interval_set:
+			// get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x".to_string()),
+			IntVarEnc::Const(0),
+			get_bin_x(&mut cnf, 0, 7, true, "z".to_owned()),
+		);
+		let vars = VarRange::new(
+			Var(NonZeroI32::new(1).unwrap()),
+			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
+		);
+		TernLeEncoder::default()
+			.encode(
+				&mut cnf,
+				&TernLeConstraint {
+					x: &x,
+					y: &y,
+					cmp: LimitComp::LessEq,
+					z: &z,
+				},
+			)
+			.unwrap();
+
+		assert_solutions(
+			&cnf,
+			vars,
+			&expect_file!["int/constrain/ord_le_bin_test.sol"],
+		);
+	}
+
+	#[test]
+	fn ord_plus_ord_le_bin_test() {
+		let mut cnf = Cnf::default();
+		let (x, y, z) = (
+			get_ord_x(&mut cnf, interval_set!(1..3), true, "x".to_owned()),
+			get_ord_x(&mut cnf, interval_set!(1..4), true, "y".to_owned()),
+			get_bin_x(&mut cnf, 0, 6, true, "z".to_owned()),
+		);
+		let vars = VarRange::new(
+			Var(NonZeroI32::new(1).unwrap()),
+			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
+		);
+		TernLeEncoder::default()
+			.encode(
+				&mut cnf,
+				&TernLeConstraint {
+					x: &x,
+					y: &y,
+					cmp: LimitComp::LessEq,
+					z: &z,
+				},
+			)
+			.unwrap();
+
+		assert_solutions(
+			&cnf,
+			vars,
+			&expect_file!["int/constrain/ord_plus_ord_le_bin_test.sol"],
+		);
+	}
+
+	#[test]
+	fn ord_plus_ord_le_ord_test() {
+		let mut cnf = Cnf::default();
+		let (x, y, z) = (
+			get_ord_x(&mut cnf, interval_set!(1..2, 2..7), true, "x".to_owned()),
+			get_ord_x(&mut cnf, interval_set!(2..3, 3..5), true, "y".to_owned()),
+			get_ord_x(&mut cnf, interval_set!(0..4, 4..11), true, "z".to_owned()),
+		);
+		let vars = VarRange::new(
+			Var(NonZeroI32::new(1).unwrap()),
+			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
+		);
+
+		TernLeEncoder::default()
+			.encode(
+				&mut cnf,
+				&TernLeConstraint {
+					x: &x,
+					y: &y,
+					cmp: LimitComp::LessEq,
+					z: &z,
+				},
+			)
+			.unwrap();
+
+		assert_solutions(
+			&cnf,
+			vars,
+			&expect_file!["int/constrain/ord_plus_ord_le_ord_test.sol"],
+		);
 	}
 }

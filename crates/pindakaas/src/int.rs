@@ -2,27 +2,28 @@ mod assignment;
 mod bin;
 mod con;
 mod decompose;
-mod display;
+pub(crate) mod display;
 mod dom;
 pub(crate) mod enc;
 pub(crate) mod helpers;
-mod int_var;
+// mod int_var;
 mod model;
 mod ord;
 mod res;
 mod term;
 
-pub use assignment::Assignment;
+pub use assignment::{Assignment, MapSol};
+
+pub(crate) use bin::BinEnc;
 pub use con::{Lin, LinExp};
 pub use dom::Dom;
 pub(crate) use enc::LitOrConst;
-pub(crate) use helpers::required_lits;
-pub use int_var::{IntVar, IntVarId, IntVarRef};
+pub(crate) use helpers::{required_lits, Format};
 pub(crate) use model::Cse;
-pub use model::{Consistency, Model};
+pub(crate) use ord::OrdEnc;
+pub use term::Term;
 
-
-impl PbLinExp {
+impl LinExp {
 	pub(crate) fn assign<F: Valuation + ?Sized>(&self, solution: &F) -> Result<Coeff, CheckError> {
 		self.iter().try_fold(self.add, |acc, (_, terms)| {
 			Ok(acc
@@ -40,4 +41,4 @@ impl PbLinExp {
 	}
 }
 
-use crate::{Coeff, Result};
+use crate::{CheckError, Coeff, Result, Valuation};

@@ -3,10 +3,16 @@ use std::collections::HashMap;
 use itertools::{Itertools, Position};
 
 use crate::{
-	int::{con::LinCase, model::USE_CHANNEL, Dom},
-	Coeff,
-	Unsatisfiable,
+	bdd::BddEncoder,
+	bool_linear::Comparator,
+	gt::TotalizerEncoder,
+	int::{con::LinCase, model::USE_CHANNEL, Dom, Lin, LinExp, Term},
+	integer::IntVarId,
+	swc::SwcEncoder,
+	Coeff, Unsatisfiable,
 };
+
+use super::{enc::IntVarEnc, Assignment, Decomposer, Model, ModelConfig};
 
 pub trait Decompose {
 	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable>;

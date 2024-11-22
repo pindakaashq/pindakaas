@@ -9,6 +9,12 @@ use std::{
 };
 
 use itertools::join;
+use tracing::{
+	field::{Field, Visit},
+	metadata::LevelFilter,
+	span::{Attributes, Record},
+	Event, Id, Level, Metadata, Subscriber,
+};
 
 use crate::{helpers::subscript_number, Lit};
 
@@ -357,13 +363,3 @@ impl Subscriber for Tracer {
 }
 
 use itertools::Itertools;
-/// General log function
-macro_rules! log {
-    ($fmt:expr $(, $args:expr)* ) => {
-        #[cfg(feature = "trace")]
-        println!($fmt $(, $args)*)
-    }
-}
-pub(crate) use log;
-
-

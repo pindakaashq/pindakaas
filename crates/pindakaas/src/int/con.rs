@@ -1,17 +1,19 @@
 #![allow(clippy::absurd_extreme_comparisons)]
+use crate::helpers::emit_clause;
+use crate::int::term::Term;
+use crate::integer::{lex_geq_const, log_enc_add_fn, IntVarRef};
+use crate::CheckError;
+use crate::{bool_linear::Comparator, integer::lex_leq_const};
 use itertools::Itertools;
 
-
-use super::{
-	model::{USE_COUPLING_IO_LEX, VIEW_COUPLING},
-	IntVarId,
-};
+use super::enc::IntVarEnc;
+use super::model::{Consistency, Model, ModelConfig, USE_COUPLING_IO_LEX, VIEW_COUPLING};
+use crate::integer::IntVarId;
 use crate::{
+	bool_linear::PosCoeff,
 	helpers::{add_clauses_for, div_ceil, div_floor},
 	int::{bin::BinEnc, helpers::display_cnf, required_lits, Assignment, Dom},
-	bool_linear::PosCoeff,
-	ClauseDatabase, Coeff, Lit,
-	Result, Unsatisfiable,
+	ClauseDatabase, Coeff, Lit, Result, Unsatisfiable,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -324,7 +326,7 @@ impl Lin {
 							cons: vec![self.clone()],
 							..Model::default()
 						}
-						.to_text(crate::Format::Lp)
+						.to_text(Format::Lp)
 					})
 					.unwrap_or_default()
 			)))
@@ -339,7 +341,7 @@ impl Lin {
 	}
 
 	#[cfg_attr(
-		feature = "trace",
+		feature = "tracing",
 		tracing::instrument(name = "lin_encoder", skip_all, fields(constraint = format!("{}", self)))
 	)]
 	pub fn encode<DB: ClauseDatabase>(&self, db: &mut DB, _config: &ModelConfig) -> Result {
@@ -400,9 +402,9 @@ impl Lin {
 					.try_for_each(|((c_a, x_a), (c_b, x_b))| {
 						let x = if up { x_a } else { x_b };
 						let (c_a, c_b) = (c_a + 1, c_b);
-						log!("{up} {c_a}..{c_b} -> {x:?}");
+						println!("{up} {c_a}..{c_b} -> {x:?}");
 						let y = y_enc.ineqs(c_a, c_b, !up);
-						log!("{y:?}");
+						println!("{y:?}");
 						add_clauses_for(db, vec![vec![x.clone()], y])
 					})
 			}
@@ -506,7 +508,7 @@ impl Lin {
 
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					let (_, cnf) = Self::encode_rec(&terms, &cmp, self.k, 0);
-					log!("{}", display_cnf(&cnf));
+					println!("{}", display_cnf(&cnf));
 
 					for c in cnf {
 						if c.is_empty() {
@@ -591,7 +593,7 @@ impl Lin {
 					div_floor(k, head.c) + 1
 				};
 
-				log!(
+				println!(
 					"{}{} ({}*{} {cmp} {k}) (= {} {} {k_})",
 					"\t".repeat(_depth),
 					if up { "up: " } else { "down: " },
@@ -608,7 +610,7 @@ impl Lin {
 				let (c, cnf) = head.x.borrow().ineq(k_, up, None);
 
 				let _disp_cnf = display_cnf(&cnf); // TODO inlining this function won't be removed with feature trace
-				log!("== {:?}", _disp_cnf);
+				println!("== {:?}", _disp_cnf);
 
 				(c.map(|c| head.c * c), cnf)
 			} else {
@@ -622,7 +624,7 @@ impl Lin {
 							// l = x>=d+1, ~l = ~(x>=d+1) = x<d+1 = x<=d
 							let k_ = k - head.c * d;
 
-								log!(
+								println!(
 									"{} {} {}*({} {cmp} {}) (->x{cmp}{implies}) = [{:?}] (k={k} - {}*{d} = {k_}) last_a={last_a:?} last_k={last_k:?}",
                                     "\t".repeat(_depth),
 									if up {
@@ -657,7 +659,7 @@ impl Lin {
 								})
 								.unwrap_or_default();
 
-								log!(" {}/{} \n", antecedent_implies_next, consequent_implies_next);
+								println!(" {}/{} \n", antecedent_implies_next, consequent_implies_next);
 
 							let (c, cnf) = Self::encode_rec(tail, cmp, k_, _depth + 1);
 							let cnf = cnf
@@ -735,12 +737,17 @@ impl Lin {
 #[allow(unused_imports)]
 mod tests {
 
-	use crate::Format;
+	use crate::helpers::tests::expect_file;
+	use crate::int::{Lin};
+        use crate::int::Model;
+	use crate::Cnf;
 	use crate::Lit;
-	use crate::{Cnf, Lin, Model};
 
 	#[cfg(feature = "trace")]
 	use traced_test::test;
+
+	use super::Format;
+
 	#[test]
 	fn test_enc_rec_lookahead() {
 		let mut m = Model::from_string(

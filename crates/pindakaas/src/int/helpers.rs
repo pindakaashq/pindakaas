@@ -1,4 +1,9 @@
 #![allow(unreachable_code)]
+use crate::int::enc::IntVarEnc;
+use crate::int::Lin;
+use crate::int::LinExp;
+use crate::int::Model;
+use crate::int::Term;
 use std::{
 	fs::File,
 	io::{BufReader, Read},
@@ -10,11 +15,7 @@ use flate2::bufread::GzDecoder;
 use itertools::Itertools;
 
 use super::LitOrConst;
-use crate::{
-	helpers::pow2,
-	int::Dom,
-	Coeff, Lit
-};
+use crate::{bool_linear::Comparator, helpers::pow2, int::Dom, Coeff, Lit};
 
 #[derive(Debug)]
 pub enum Format {

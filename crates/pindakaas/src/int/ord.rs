@@ -4,7 +4,7 @@ use itertools::Itertools;
 
 use super::Dom;
 use crate::{
-	helpers::negate_cnf,
+	helpers::{emit_clause, negate_cnf, new_var},
 	ClauseDatabase, Lit, Var,
 };
 

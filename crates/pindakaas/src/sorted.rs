@@ -5,10 +5,7 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	bool_linear::{BoolLinExp, LimitComp},
-	helpers::{add_clauses_for, emit_clause, negate_cnf},
-	integer::IntVarEnc,
-	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
+	bool_linear::{BoolLinExp, LimitComp}, helpers::{add_clauses_for, emit_clause, negate_cnf}, integer::IntVarEnc, CheckError, Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation
 };
 
 type SortedCache = FxHashMap<(u128, u128, u128), (SortedStrategy, (u128, u128))>;
@@ -59,7 +56,7 @@ impl<'a> Sorted<'a> {
 }
 
 impl<'a> Checker for Sorted<'a> {
-	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
+	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(),CheckError> {
 		let lhs = BoolLinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
 			.value(sol)?;
 		let rhs = BoolLinExp::from(self.y).value(sol)?;

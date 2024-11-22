@@ -1,9 +1,15 @@
 use crate::{
 	bool_linear::{LimitComp, LinMarker, NormalizedBoolLinear, PosCoeff},
 	cardinality_one::CardinalityOne,
-	integer::IntVarEnc,
-	sorted::{Sorted, SortedEncoder},
-	Checker, ClauseDatabase, Encoder, Lit, Result, Valuation,
+	int::enc::IntVarEnc,
+	// sorted::{Sorted, SortedEncoder},
+	CheckError,
+	Checker,
+	ClauseDatabase,
+	Encoder,
+	Lit,
+	Result,
+	Valuation,
 };
 
 // local marker trait, to ensure the previous definition only applies within this crate
@@ -19,7 +25,7 @@ pub struct Cardinality {
 /// Encoder for the linear constraints that ∑ litsᵢ ≷ k using a sorting network
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SortingNetworkEncoder {
-	pub sorted_encoder: SortedEncoder,
+	// pub sorted_encoder: SortedEncoder,
 }
 
 impl Cardinality {
@@ -38,7 +44,7 @@ impl Cardinality {
 }
 
 impl Checker for Cardinality {
-	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result {
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
 		NormalizedBoolLinear::from(self.clone()).check(value)
 	}
 }
@@ -215,7 +221,7 @@ pub(crate) mod tests {
 			use crate::{
 				bool_linear::{LimitComp, PosCoeff},
 				cardinality::{Cardinality, SortingNetworkEncoder},
-				helpers::tests::assert_solutions,
+				helpers::tests::{assert_solutions, expect_file, make_valuation},
 				sorted::{SortedEncoder, SortedStrategy},
 				ClauseDatabase, Cnf, Encoder,
 			};
@@ -304,8 +310,6 @@ pub(crate) mod tests {
 			assert_solutions(&cnf, vars, &expect);
 		};
 	}
-
-	
 
 	mod eq_direct {
 		sorted_card_test_suite!(

@@ -1,9 +1,15 @@
 #![allow(clippy::absurd_extreme_comparisons)]
+use crate::bool_linear::Comparator;
+use crate::bool_linear::PosCoeff;
+use crate::helpers;
+use crate::helpers::new_var;
+use crate::integer::{lex_geq_const, lex_leq_const};
 use std::{
 	collections::{BTreeSet, HashMap},
 	path::PathBuf,
 };
 
+use crate::helpers::emit_clause;
 use itertools::Itertools;
 
 use super::{required_lits, Dom, LitOrConst};
@@ -60,7 +66,7 @@ impl BinEnc {
 
 	/// Encode x:B <=/>= y:B + k
 	#[cfg_attr(
-    feature = "trace",
+    feature = "tracing",
     tracing::instrument(name = "lex", skip_all, fields(constraint = format!("{self} {cmp} {other}")))
 )]
 	pub(crate) fn lex<DB: ClauseDatabase>(
@@ -190,7 +196,7 @@ impl BinEnc {
 	pub(crate) fn ineqs(&self, r_a: Coeff, r_b: Coeff, up: bool) -> Vec<Vec<Lit>> {
 		let (range_lb, range_ub) = self.range();
 
-		log!("\t {up} {r_a}..{r_b} [{range_lb}..{range_ub}] -> ");
+		println!("\t {up} {r_a}..{r_b} [{range_lb}..{range_ub}] -> ");
 
 		if r_a <= range_lb {
 			if up {
@@ -213,7 +219,7 @@ impl BinEnc {
 				let k = if up { k - 1 } else { k };
 				#[allow(clippy::let_and_return)]
 				let ineq = self.ineq(k, up); // returns cnf
-				log!("{k} -> ineq = {ineq:?}");
+				println!("{k} -> ineq = {ineq:?}");
 				ineq
 			})
 			.collect_vec();
@@ -290,7 +296,7 @@ impl BinEnc {
 
 	/// Encode `x # k` where `# ∈ {≤,=,≥}`
 	#[cfg_attr(
-		feature = "trace",
+		feature = "tracing",
 		tracing::instrument(name = "unary", skip_all, fields(constraint = format!("{} {cmp} {k}", self)))
 	)]
 	pub(crate) fn encode_unary_constraint<DB: ClauseDatabase>(
@@ -351,7 +357,7 @@ impl BinEnc {
 	}
 
 	#[cfg_attr(
-		feature = "trace",
+		feature = "tracing",
 		tracing::instrument(name = "unary", skip_all, fields(constraint = format!("{} != {k}", self)))
 	)]
 	pub(crate) fn encode_neq<DB: ClauseDatabase>(
@@ -405,7 +411,7 @@ impl BinEnc {
 	}
 
 	#[cfg_attr(
-	feature = "trace",
+	feature = "tracing",
 	tracing::instrument(name = "scm_dnf", skip_all, fields(constraint = format!("DNF:{c}*{self}")))
 )]
 	pub(crate) fn scm_dnf<DB: ClauseDatabase>(
@@ -500,6 +506,8 @@ impl std::fmt::Display for BinEnc {
 
 #[cfg(test)]
 mod tests {
+	use helpers::tests::expect_file;
+
 	use super::*;
 
 	#[test]
@@ -507,7 +515,7 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let x = BinEnc::new(&mut cnf, 3, Some(String::from("x")));
 		cnf.add_clause(x.geqs(1, 6)).unwrap();
-		assert_encoding(&cnf, &expect_file!["int/bin/geq_1_6.cnf"]);
+		assert_encoding(&cnf, &expect_file!("int/bin/geq_1_6.cnf"));
 	}
 
 	#[test]
@@ -517,7 +525,7 @@ mod tests {
 		for k in 0..=3 {
 			assert_encoding(
 				&Cnf::try_from(vec![x.geq(k)]).unwarp(),
-				&expect_file!["int/ord/geq_{k}.cnf", k],
+				&expect_file!(format!("int/ord/geq_{k}.cnf")),
 			);
 		}
 	}

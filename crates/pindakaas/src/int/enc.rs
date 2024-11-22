@@ -15,10 +15,10 @@ use crate::{
 	helpers::{as_binary, is_powers_of_two, negate_cnf},
 	int::{
 		helpers::{filter_fixed, required_lits},
-		Dom, IntVar,
+		Dom,
 	},
-	Checker, ClauseDatabase, Cnf, Coeff, Encoder, Lit, Result, Unsatisfiable,
-	Valuation, Var,
+	integer::IntVar,
+	Checker, ClauseDatabase, Cnf, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation, Var,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -85,6 +85,12 @@ impl Not for LitOrConst {
 			LitOrConst::Const(b) => (!b).into(),
 		}
 	}
+}
+
+#[derive(Debug, Clone)]
+pub enum IntVarEnc {
+	Ord(Option<OrdEnc>),
+	Bin(Option<BinEnc>),
 }
 
 const COUPLE_DOM_PART_TO_ORD: bool = false;

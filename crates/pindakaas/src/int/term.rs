@@ -6,15 +6,17 @@ use std::{
 
 use itertools::Itertools;
 
-use super::{bin::BinEnc, Dom};
+use super::{bin::BinEnc, enc::IntVarEnc, Dom, Model, Scm};
 use crate::{
+	bool_linear::{Comparator, PosCoeff},
 	helpers::as_binary,
 	int::{
 		model::{USE_CHANNEL, USE_CSE},
 		res::SCM,
-		Cse, LitOrConst,
+		Cse, Lin, LinExp, LitOrConst,
 	},
-        Lit, Coeff
+	integer::IntVarRef,
+	Coeff, Lit, Unsatisfiable,
 };
 
 /// A linear term (constant times integer variable)
@@ -484,7 +486,6 @@ impl Term {
 #[cfg(test)]
 mod tests {
 
-	
 	use crate::helpers::tests::{assert_ok, TestDB};
 
 	#[test]

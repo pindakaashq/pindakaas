@@ -15,8 +15,14 @@ pub(crate) mod int;
 mod integer;
 pub mod propositional_logic;
 pub mod solver;
-mod sorted;
+// mod sorted;
+
+#[cfg(any(feature = "tracing", test))]
 pub mod trace;
+
+pub mod bdd;
+pub mod gt;
+pub mod swc;
 
 use std::{
 	clone::Clone,
@@ -48,7 +54,7 @@ pub trait Checker {
 	///   the constraint,
 	/// - it returns [`Unsatisfiable`] when the assignment violates the
 	///   constraint
-	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), Unsatisfiable>;
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError>;
 }
 
 /// The `ClauseDatabase` trait is the common trait implemented by types that are
@@ -204,6 +210,27 @@ type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 /// found to be inconsistent.
 pub struct Unsatisfiable;
 
+/// Errors relating to failing assignments
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
+pub enum CheckError {
+	Unsatisfiable(Unsatisfiable),
+	Fail(String),
+}
+impl Error for CheckError {}
+impl Display for CheckError {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			CheckError::Fail(err) => err.fmt(f),
+			CheckError::Unsatisfiable(err) => err.fmt(f),
+		}
+	}
+}
+impl From<Unsatisfiable> for CheckError {
+	fn from(value: Unsatisfiable) -> Self {
+		Self::Unsatisfiable(value)
+	}
+}
+
 /// A trait implemented by types that can be used to represent a solution/model
 pub trait Valuation {
 	/// Returns the valuation/truth-value for a given literal in the
@@ -241,7 +268,7 @@ impl TryFrom<Vec<Vec<Lit>>> for Cnf {
 	type Error = Unsatisfiable;
 	fn try_from(clauses: Vec<Vec<Lit>>) -> Result<Self, Self::Error> {
 		let mut cnf = Cnf::default();
-		clauses.drain().try_for_each(|cls| cnf.add_clause(cls))
+		clauses.into_iter().try_for_each(|cls| cnf.add_clause(cls))
 	}
 }
 
@@ -251,6 +278,7 @@ impl From<Cnf> for Wcnf {
 		Wcnf { cnf, weights }
 	}
 }
+
 impl From<Wcnf> for Cnf {
 	// TODO implement iter for Cnf
 	fn from(wcnf: Wcnf) -> Self {
@@ -315,12 +343,12 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 			Ok(line) if !had_header => {
 				let pars: Vec<&str> = line.split_whitespace().collect();
 				// check "p" and "cnf" keyword
-				if !expect_wcnf && (pars.len() != 4 || pars[0..2] != ["p", "cnf"]) {
+				if !WEIGHTED && (pars.len() != 4 || pars[0..2] != ["p", "cnf"]) {
 					return Err(io::Error::new(
 						io::ErrorKind::InvalidInput,
 						"expected DIMACS CNF header formatted \"p cnf {variables} {clauses}\"",
 					));
-				} else if expect_wcnf && (pars.len() != 4 || pars[0..2] != ["p", "wcnf"]) {
+				} else if WEIGHTED && (pars.len() != 4 || pars[0..2] != ["p", "wcnf"]) {
 					return Err(io::Error::new(
 						io::ErrorKind::InvalidInput,
 						"expected DIMACS WCNF header formatted \"p wcnf {variables} {clauses} {top}\"",
@@ -343,7 +371,7 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 				})?);
 				wcnf.cnf.size.reserve(num_cls.unwrap());
 
-				if expect_wcnf {
+				if WEIGHTED {
 					top = Some(pars[4].parse().map_err(|_| {
 						io::Error::new(io::ErrorKind::InvalidInput, "unable to parse top weight")
 					})?);
@@ -997,13 +1025,6 @@ impl Display for Wcnf {
 	}
 }
 
-impl From<Cnf> for Wcnf {
-	fn from(cnf: Cnf) -> Self {
-		let weights = std::iter::repeat(None).take(cnf.clauses()).collect();
-		Wcnf { cnf, weights }
-	}
-}
-
 impl From<Lit> for i32 {
 	fn from(val: Lit) -> Self {
 		val.0.get()
@@ -1030,21 +1051,20 @@ impl From<i32> for Var {
 
 #[cfg(test)]
 mod tests {
+	use helpers::tests::{assert_encoding, expect_file};
+
 	use super::*;
 
 	#[test]
 	fn cnf_from_file_test() {
-		for (f, exp) in std::fs::read_dir("res/dimacs")
+		for f in std::fs::read_dir("res/dimacs")
 			.unwrap()
 			.map(|f| f.unwrap().path())
 			.collect_vec()
 			.into_iter()
 			.sorted()
-			.zip([vec![lits![1, -2]], vec![lits![], lits![]], vec![]])
 		{
-			let cnf = Cnf::from_file(&f).unwrap();
-			assert_eq!(cnf.iter().collect_vec(), exp);
-			// TODO test out as well
+			assert_encoding(&Cnf::from_file(&f).unwrap(), &expect_file![f.display()]);
 			// println!("{cnf} \n {}", std::fs::read_to_string(&f).unwrap());
 			// assert_eq!(
 			// 	String::from(format!("{cnf}")), // TODO display might not be DIMACS in the future
@@ -1058,7 +1078,7 @@ mod tests {
 			// );
 		}
 	}
-	use crate::{solver::VarFactory, Lit, Var};
+	use crate::{solver::VarFactory, Var};
 
 	#[test]
 	fn test_var_range() {
@@ -1079,11 +1099,5 @@ mod tests {
 		let range = factory.next_var_range(100);
 		assert_eq!(range.len(), 100);
 		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(104).unwrap())));
-	}
-
-	impl From<i32> for Lit {
-		fn from(value: i32) -> Self {
-			Lit(NonZeroI32::new(value).expect("cannot create literal with value zero"))
-		}
 	}
 }
