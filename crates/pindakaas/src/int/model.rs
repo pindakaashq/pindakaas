@@ -7,11 +7,12 @@ use crate::integer::IntVarRef;
 use crate::CheckError;
 use std::{
 	cell::RefCell,
-	collections::{BTreeSet, HashMap, HashSet},
+	collections::{BTreeSet, HashSet},
 	rc::Rc,
 };
 
 use itertools::Itertools;
+use rustc_hash::FxHashMap;
 
 use crate::{
 	int::{
@@ -103,7 +104,7 @@ impl From<Vec<Lin>> for Model {
 }
 
 #[derive(Default, Debug, Clone)]
-pub(crate) struct Cse(pub(crate) HashMap<(IntVarId, Coeff, Comparator), Term>);
+pub(crate) struct Cse(pub(crate) FxHashMap<(IntVarId, Coeff, Comparator), Term>);
 
 #[derive(Debug, Default, Clone, Copy, Ord, PartialOrd, PartialEq, Eq, Hash)]
 pub enum Consistency {
@@ -274,7 +275,7 @@ impl Model {
 
 	pub(crate) fn decompose(
 		self,
-		spec: Option<HashMap<IntVarId, IntVarEnc>>,
+		spec: Option<FxHashMap<IntVarId, IntVarEnc>>,
 	) -> Result<Model, Unsatisfiable> {
 		ModelDecomposer { spec }.decompose(self)
 	}
@@ -396,7 +397,7 @@ impl Model {
 					vars.iter()
 						.zip(a)
 						.map(|(var, a)| (var.borrow().id, (var.borrow().lbl(), a)))
-						.collect::<HashMap<_, _>>(),
+						.collect::<FxHashMap<_, _>>(),
 				)
 			})
 			.filter(|a| self.check_assignment(a).is_ok())
@@ -572,7 +573,7 @@ Actual assignments:
 		let vars = self
 			.vars()
 			.map(|x| (x.borrow().id, Rc::new(RefCell::new((*x.borrow()).clone()))))
-			.collect::<HashMap<_, _>>();
+			.collect::<FxHashMap<_, _>>();
 		#[allow(clippy::needless_update)]
 		Self {
 			cons: self
@@ -766,9 +767,9 @@ mod tests {
 	fn expand_var_encs(
 		var_encs: &[IntVarEnc],
 		vars: Vec<IntVarRef>,
-	) -> Vec<HashMap<IntVarId, IntVarEnc>> {
+	) -> Vec<FxHashMap<IntVarId, IntVarEnc>> {
 		if var_encs.is_empty() {
-			return vec![HashMap::default()];
+			return vec![FxHashMap::default()];
 		}
 		return (*VAR_ENCS)
 			.iter()
@@ -777,7 +778,7 @@ mod tests {
 					.sorted_by_key(|var| var.borrow().id)
 					.filter(|x| x.borrow().e.is_none())
 					.map(|x| (x.borrow().id, enc.clone()))
-					.collect::<HashMap<_, _>>()
+					.collect::<FxHashMap<_, _>>()
 			})
 			.filter(|encs| !encs.is_empty())
 			.collect();
@@ -817,12 +818,12 @@ mod tests {
 					.iter()
 					.cloned()
 					.zip(var_encs.into_iter())
-					.collect::<HashMap<_, _>>()
+					.collect::<FxHashMap<_, _>>()
 			})
 			.collect_vec();
 
 		if var_encs_gen.is_empty() {
-			vec![HashMap::default()]
+			vec![FxHashMap::default()]
 		} else {
 			var_encs_gen
 		}
@@ -883,7 +884,7 @@ mod tests {
 							.clone(),
 					)]
 				} else if var_encs_gen.is_empty() {
-					vec![(0, HashMap::default())]
+					vec![(0, FxHashMap::default())]
 				} else {
 					var_encs_gen.into_iter().enumerate().collect_vec()
 				}
@@ -963,7 +964,7 @@ mod tests {
 				x.borrow_mut().encode(&mut slv).unwrap();
 				(x.borrow().id, x.clone())
 			})
-			.collect::<HashMap<IntVarId, IntVarRef>>();
+			.collect::<FxHashMap<IntVarId, IntVarRef>>();
 
 		println!("decomposition (principal vars encoded) = {}", decomposition);
 

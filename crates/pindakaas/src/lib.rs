@@ -269,14 +269,23 @@ pub struct Wcnf {
 	// TODO this can be optimised, for example by having all weighted clauses at the start/end
 }
 
+/// Convert into clauses
 impl TryFrom<Vec<Vec<Lit>>> for Cnf {
 	type Error = Unsatisfiable;
 	fn try_from(clauses: Vec<Vec<Lit>>) -> Result<Self, Self::Error> {
 		let mut cnf = Cnf::default();
-		clauses
-			.into_iter()
-			.try_for_each(|cls| cnf.add_clause(cls))?;
+		cnf.add_clauses(clauses)?;
 		Ok(cnf)
+	}
+}
+
+/// Create trivial Unsatisfiable formula with single empty clause
+impl From<Unsatisfiable> for Cnf {
+	fn from(_: Unsatisfiable) -> Self {
+		Self {
+			size: vec![1],
+			..Default::default()
+		}
 	}
 }
 
@@ -329,6 +338,17 @@ impl From<Wcnf> for Cnf {
 	}
 }
 
+// enum ParseDimacsError {
+//     IO(io::Error),
+//     Unsatisfiable(Unsatisfiable),
+// }
+
+// impl From<io:Error> for ParseDimacsError {
+//     fn from(value: io::Error) -> Self {
+//         Self::IO(value)
+//     }
+// }
+
 /// Internal function used to parse a file in the (weighted) DIMACS format.
 ///
 /// This function is used by `Cnf::from_str` and `Wcnf::from_str`.
@@ -338,8 +358,8 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 
 	let mut wcnf = Wcnf::default();
 
-	let vars: Option<VarRange> = None;
-	let num_cls: Option<usize> = None;
+	let mut vars: Option<VarRange> = None;
+	let mut num_cls: Option<usize> = None;
 	let mut cl: Vec<Lit> = Vec::new();
 	let mut top: Option<Coeff> = None;
 	let weight: Option<Coeff> = None;
@@ -363,24 +383,23 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 					));
 				}
 				// parse number of variables
-				wcnf.cnf.nvar = VarFactory {
-					next_var: Some(Var(vec[2].parse::<NonZeroI32>().map_err(|_| {
-						io::Error::new(
-							io::ErrorKind::InvalidInput,
-							"unable to parse number of variables",
-						)
-					})?)),
-				};
+				vars = Some(wcnf.new_var_range(vec[2].parse().map_err(|_| {
+					io::Error::new(
+						io::ErrorKind::InvalidInput,
+						format!("unable to parse number of variables in p-line: {line}"),
+					)
+				})?));
+
 				// parse number of clauses
-				let num_clauses: usize = vec[3].parse().map_err(|_| {
+				num_cls = Some(vec[3].parse().map_err(|_| {
 					io::Error::new(
 						io::ErrorKind::InvalidInput,
 						"unable to parse number of clauses",
 					)
-				})?;
+				})?);
 
-				wcnf.cnf.lits.reserve(num_clauses);
-				wcnf.cnf.size.reserve(num_clauses);
+				wcnf.cnf.lits.reserve(num_cls.unwrap());
+				wcnf.cnf.size.reserve(num_cls.unwrap());
 
 				if WEIGHTED {
 					top = Some(vec[4].parse().map_err(|_| {
@@ -409,8 +428,14 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 
 					if let Ok(lit) = seg.parse::<i32>() {
 						if lit == 0 {
-							wcnf.add_weighted_clause(cl.drain(..), weight)
-								.expect("CNF::add_clause does not return Unsatisfiable");
+							// TODO before this would panic with expect; now this is slightly improved with returning an Unsat formula, but we should (maybe) split up the errors to handle Unsat differently from io:Error
+							if let Err(unsat) = wcnf.add_weighted_clause(cl.drain(..), weight) {
+								return if WEIGHTED {
+									Ok(Dimacs::Wcnf(Wcnf::from(Cnf::from(unsat))))
+								} else {
+									Ok(Dimacs::Cnf(Cnf::from(unsat)))
+								};
+							}
 						} else {
 							let l = Lit::from(
 								vars.as_ref()
@@ -1030,7 +1055,11 @@ mod tests {
 			.into_iter()
 			.sorted()
 		{
-			assert_encoding(&Cnf::from_file(&f).unwrap(), &expect_file![f.display()]);
+			assert_encoding(
+				// &Cnf::from_file(&f).unwrap_or_else(Cnf::from),
+				&Cnf::from_file(&f).unwrap(),
+				&expect_file![f.display()],
+			);
 			// println!("{cnf} \n {}", std::fs::read_to_string(&f).unwrap());
 			// assert_eq!(
 			// 	String::from(format!("{cnf}")), // TODO display might not be DIMACS in the future

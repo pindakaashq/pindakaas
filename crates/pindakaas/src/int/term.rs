@@ -1,9 +1,7 @@
-use std::{
-	collections::HashMap,
-	ops::{Mul, Shl},
-};
+use std::ops::{Mul, Shl};
 
 use itertools::Itertools;
+use rustc_hash::FxHashMap;
 
 use super::{bin::BinEnc, enc::IntVarEnc, model::Scm, Dom, Model};
 use crate::{
@@ -326,10 +324,10 @@ impl Term {
 							})
 							.to_vec();
 
-						let mut ys = [(0, 1)].into_iter().collect::<HashMap<_, _>>();
+						let mut ys = [(0, 1)].into_iter().collect::<FxHashMap<_, _>>();
 
 						let get_and_shift =
-							|ys: &HashMap<usize, Coeff>, cse: &Cse, i: usize, sh: u32| {
+							|ys: &FxHashMap<usize, Coeff>, cse: &Cse, i: usize, sh: u32| {
 								let c = ys[&i];
 								let x = if c == 1 {
 									Term::from(self.x.clone())

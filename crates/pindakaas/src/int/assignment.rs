@@ -1,5 +1,5 @@
 use crate::{integer::IntVarId, Coeff, Lit, Valuation, Var};
-use std::{cmp::Ordering, collections::HashMap, ops::Index};
+use std::{cmp::Ordering, ops::Index};
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 // TODO [?] equivalent of Valuation, could be merged?
 /// A structure holding an integer assignment to `Model`
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
-pub struct Assignment(pub HashMap<IntVarId, (String, Coeff)>);
+pub struct Assignment(pub FxHashMap<IntVarId, (String, Coeff)>);
 
 impl Assignment {
 	pub fn partialize(self, max_var: &IntVarId) -> Self {
@@ -81,7 +81,7 @@ impl MapSol {
 // 			value
 // 				.into_iter()
 // 				.map(|lit| (lit.var(), !lit.is_negated()))
-// 				.collect::<HashMap<_, _>>(),
+// 				.collect::<FxHashMap<_, _>>(),
 // 		)
 // 	}
 // }

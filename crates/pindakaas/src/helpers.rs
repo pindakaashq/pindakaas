@@ -332,7 +332,7 @@ pub(crate) mod tests {
 			&Cadical::from(formula)
 				.solve_all(vars)
 				.into_iter()
-				.map(|sol| sol.iter().collect_vec())
+				.map(|sol| sol.iter().sorted_by_key(|l| l.var()).collect_vec())
 				.sorted()
 				.map(|sol| sol.into_iter().map(i32::from).format(" "))
 				.join("\n"),

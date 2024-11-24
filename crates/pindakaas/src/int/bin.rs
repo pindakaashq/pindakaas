@@ -4,13 +4,11 @@ use crate::bool_linear::PosCoeff;
 use crate::helpers;
 use crate::helpers::new_var;
 use crate::integer::{lex_geq_const, lex_leq_const};
-use std::{
-	collections::{BTreeSet, HashMap},
-	path::PathBuf,
-};
+use std::{collections::BTreeSet, path::PathBuf};
 
 use crate::helpers::emit_clause;
 use itertools::Itertools;
+use rustc_hash::FxHashMap;
 
 use super::{required_lits, Dom, LitOrConst};
 use crate::{
@@ -454,7 +452,7 @@ impl BinEnc {
 				}
 				itertools::EitherOrBoth::Right(_) => unreachable!(), // cnf has at least as many vars as xs
 			})
-			.collect::<HashMap<_, _>>();
+			.collect::<FxHashMap<_, _>>();
 
 		// add clauses according to Dnf
 		cnf.iter().try_for_each(|clause| {
@@ -516,10 +514,10 @@ mod tests {
 	#[test]
 	fn test_ineq() {
 		let mut cnf = Cnf::default();
-		let x = BinEnc::new(&mut cnf, 3, Some(String::from("x")));
+		let x = BinEnc::new(&mut cnf, 2, Some(String::from("x")));
 		for k in 0..=3 {
 			assert_encoding(
-				&Cnf::try_from(vec![x.geq(k)]).unwrap(),
+				&Cnf::try_from(vec![dbg!(x.geq(k))]).unwrap_or(Cnf::from(Unsatisfiable)),
 				&expect_file![format!("int/bin/geq_{k}.cnf")],
 			);
 		}

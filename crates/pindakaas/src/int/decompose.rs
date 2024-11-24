@@ -1,6 +1,5 @@
-use std::collections::HashMap;
-
 use itertools::{Itertools, Position};
+use rustc_hash::FxHashMap;
 
 use crate::{
 	bdd::BddEncoder,
@@ -135,7 +134,7 @@ impl Decompose for EqualizeTernsDecomposer {
 #[derive(Debug, Default)]
 pub struct EncSpecDecomposer {
 	pub(crate) cutoff: Option<Coeff>,
-	pub(crate) spec: Option<HashMap<IntVarId, IntVarEnc>>,
+	pub(crate) spec: Option<FxHashMap<IntVarId, IntVarEnc>>,
 }
 
 const COUPLE_SINGLE_VARS: bool = true;
@@ -291,7 +290,7 @@ impl Decompose for EncSpecDecomposer {
 
 #[derive(Default, Debug)]
 pub struct ModelDecomposer {
-	pub(crate) spec: Option<HashMap<IntVarId, IntVarEnc>>,
+	pub(crate) spec: Option<FxHashMap<IntVarId, IntVarEnc>>,
 }
 
 impl Decompose for ModelDecomposer {
@@ -343,7 +342,7 @@ impl Decompose for LinDecomposer {
 					[] => {
 						let con_model = model.branch(con);
 						con_model
-							.check_assignment(&Assignment(HashMap::default()))
+							.check_assignment(&Assignment(FxHashMap::default()))
 							.map(|_| con_model)
 							.map_err(|_| Unsatisfiable)
 					}
