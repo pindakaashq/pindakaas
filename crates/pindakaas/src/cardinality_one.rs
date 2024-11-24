@@ -413,10 +413,8 @@ pub(crate) mod tests {
 	use crate::{
 		bool_linear::LimitComp,
 		cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
-		// helpers::{assert_checker, assert_solutions, expect_file},
-		ClauseDatabase,
-		Cnf,
-		Encoder,
+		helpers::tests::{assert_encoding, assert_solutions, expect_file},
+		ClauseDatabase, Cnf, Encoder,
 	};
 
 	#[test]

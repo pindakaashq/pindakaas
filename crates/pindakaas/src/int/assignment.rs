@@ -9,6 +9,12 @@ use rustc_hash::FxHashMap;
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Assignment(pub HashMap<IntVarId, (String, Coeff)>);
 
+impl Assignment {
+	pub fn partialize(self, max_var: &IntVarId) -> Self {
+		Self(self.0.into_iter().filter(|(k, _)| k <= max_var).collect())
+	}
+}
+
 impl Ord for Assignment {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.0.iter().sorted().cmp(other.0.iter().sorted())
@@ -29,18 +35,21 @@ impl Index<&IntVarId> for Assignment {
 	}
 }
 
-impl Assignment {
-	pub(crate) fn partialize(self, max_var: &IntVarId) -> Self {
-		Self(self.0.into_iter().filter(|(k, _)| k <= max_var).collect())
-	}
-}
-
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MapSol(pub(crate) FxHashMap<Var, bool>);
 
 impl MapSol {
-	pub fn new(vars: &[Var], sol: impl Valuation) -> Self {
-		Self(vars.iter().map(|&v| (v, sol.value(v.into()))).collect())
+	pub fn new<V, I>(vars: I, sol: impl Valuation) -> Self
+	where
+		V: Into<Lit>,
+		I: IntoIterator<Item = V> + Clone,
+	{
+		Self(
+			vars.into_iter()
+				.map(|v| v.into())
+				.map(|v| (v.clone().var(), sol.value(v)))
+				.collect(),
+		)
 	}
 	pub fn iter(&self) -> impl Iterator<Item = Lit> + use<'_> {
 		self.0
@@ -48,6 +57,24 @@ impl MapSol {
 			.map(|(&v, &b)| if b { Lit::from(v) } else { !Lit::from(v) })
 	}
 }
+
+// /// Show MapSol as sol file
+// // using Display for this since (W)Cnf does it similarly
+// impl From<MapSol> for Vec<Vec<Lit>> {
+// 	fn from(value: MapSol) -> Self {
+// 		value
+// 			.0
+// 			.iter()
+// 			.map(|(&k, &v)| if v { Lit::from(k) } else { !Lit::from(k) })
+// 			.collect()
+// 	}
+// }
+
+// impl Display for MapSol {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+//         write!(f, self.keys().sorted().map(|k| if self[k] { "{k}" } else {"-{k}")
+//     }
+// }
 // impl From<Vec<Lit>> for MapSol {
 // 	fn from(value: &[Lit]) -> Self {
 // 		Self(

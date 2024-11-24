@@ -233,11 +233,6 @@ pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 		.into_iter()
 }
 
-pub(crate) fn unsigned_binary_range_ub(bits: usize) -> Coeff {
-	const TWO: Coeff = 2;
-	(0..bits).fold(0, |sum, i| sum + TWO.pow(i as u32))
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
 	#[cfg(test)]
@@ -260,32 +255,20 @@ pub(crate) mod tests {
 	use itertools::Itertools;
 
 	use crate::{
-		bool_linear::BoolLinExp,
-		int::enc::IntVarEnc,
-		solver::{cadical::Cadical, SolveResult, Solver},
-		Checker, ClauseDatabase, Cnf, Lit, Valuation,
+		integer::IntVar,
+		solver::{cadical::Cadical, Solver},
+		Checker, Cnf, Lit, Valuation,
 	};
 
 	/// Helper functions to ensure that the possible solutions of a formula
 	/// abide by the given checker.
 	pub(crate) fn assert_checker(formula: &Cnf, checker: &impl Checker) {
-		let mut slv = Cadical::from(formula);
-		let vars = formula.get_variables();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			assert_eq!(checker.check(&value), Ok(()));
-			let no_good: Vec<Lit> = vars
-				.clone()
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect();
-			slv.add_clause(no_good).unwrap();
-		}
+		Cadical::from(formula)
+			.solve_all(formula.get_variables())
+			.into_iter()
+			.for_each(|value| {
+				assert_eq!(checker.check(&value), Ok(()));
+			});
 	}
 
 	/// Simple helper function to assert the generated formula against an expect
@@ -294,21 +277,27 @@ pub(crate) mod tests {
 		expect.assert_eq(&formula.to_string());
 	}
 
-	#[allow(dead_code, reason = "TODO: prepare for checking integer encodings")]
+	#[allow(
+		unused_variables,
+		dead_code,
+		reason = "TODO: prepare for checking integer encodings"
+	)]
 	/// Helper function that asserts that the integer solutions of a formula are
 	/// as contained in the expect block.
 	pub(crate) fn assert_integer_solutions<V, I>(formula: &Cnf, vars: I, expect: &ExpectFile)
 	where
-		V: Into<IntVarEnc>,
+		V: Into<IntVar>,
 		I: IntoIterator<Item = V> + Clone,
 	{
-		let mut slv = Cadical::from(formula);
-		let vars = vars
-			.into_iter()
-			.map(|x| BoolLinExp::from(&x.into()))
-			.collect_vec();
-		let bool_vars = formula.get_variables();
-		let mut solutions: Vec<Vec<i64>> = Vec::new();
+		todo!();
+		// let mut slv = Cadical::from(formula);
+		// let vars = vars
+		// 	.into_iter()
+		// 	.map(|x| BoolLinExp::from(&x.into()))
+		// 	.collect_vec();
+		// slv.solve_all(vars).into_iter().for_each(|value| {
+
+		// });
 		// while let SolveResult::Satisfied(value) = slv.solve() {
 		// 	// Collect integer solution
 		// 	solutions.push(
@@ -339,34 +328,15 @@ pub(crate) mod tests {
 		V: Into<Lit>,
 		I: IntoIterator<Item = V> + Clone,
 	{
-		let mut slv = Cadical::from(formula);
-		let mut solutions: Vec<Vec<Lit>> = Vec::new();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			solutions.push(
-				vars.clone()
-					.into_iter()
-					.map(|v| {
-						let l = v.into();
-						if value.value(l) {
-							l
-						} else {
-							!l
-						}
-					})
-					.collect(),
-			);
-			slv.add_clause(solutions.last().unwrap().iter().map(|l| !l))
-				.unwrap();
-		}
-		solutions.sort();
-		let sol_str = format!(
-			"{}",
-			solutions
+		expect.assert_eq(
+			&Cadical::from(formula)
+				.solve_all(vars)
 				.into_iter()
+				.map(|sol| sol.iter().collect_vec())
+				.sorted()
 				.map(|sol| sol.into_iter().map(i32::from).format(" "))
-				.format("\n")
+				.join("\n"),
 		);
-		expect.assert_eq(&sol_str);
 	}
 
 	/// Helper function to quickly create a valuation from a slice of literals.

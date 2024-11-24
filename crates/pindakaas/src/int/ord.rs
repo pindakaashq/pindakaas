@@ -109,7 +109,10 @@ impl std::fmt::Display for OrdEnc {
 
 #[cfg(test)]
 mod tests {
-	use crate::helpers::tests::{assert_encoding, expect_file};
+	use crate::{
+		helpers::tests::{assert_encoding, expect_file},
+		Cnf,
+	};
 
 	use super::*;
 	#[test]
@@ -119,7 +122,7 @@ mod tests {
 
 		for k in 0..=3 {
 			assert_encoding(
-				&Cnf::try_from(vec![x.geq(dom_pos)]).unwarp(),
+				&Cnf::try_from(x.geq(Some(k))).unwrap(),
 				&expect_file![format!("int/ord/geq_{k}.cnf")],
 			);
 		}

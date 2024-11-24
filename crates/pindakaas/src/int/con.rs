@@ -738,13 +738,14 @@ impl Lin {
 #[allow(unused_imports)]
 mod tests {
 
+	use crate::helpers::tests::assert_encoding;
 	use crate::helpers::tests::expect_file;
 	use crate::int::Lin;
 	use crate::int::Model;
 	use crate::Cnf;
 	use crate::Lit;
 
-	#[cfg(feature = "trace")]
+	#[cfg(feature = "tracing")]
 	use traced_test::test;
 
 	use super::Format;
@@ -757,8 +758,8 @@ mod tests {
 		)
 		.unwrap();
 		// LOOKAHEAD feature removes redundant x>=2/\y>=3->z>=5 (-1 -2 3), since we have x>=2->x>=0 (tautological) and x>=0/\y>=3->z>=5 (-2 3)
-		let mut db = TestDB::new(0);
-		m.encode_pub(&mut db).unwrap();
+		let mut cnf = Cnf::default();
+		m.encode_pub(&mut cnf).unwrap();
 		assert_encoding(&cnf, &expect_file!["int/con/enc_rec_lookahead.cnf"]);
 	}
 
@@ -769,8 +770,8 @@ mod tests {
 			Format::Lp,
 		)
 		.unwrap();
-		// db = db.expect_clauses(vec![lits![-2, 3], lits![-1, 3]]);
-		m.encode_pub(&mut db).unwrap();
+		let mut cnf = Cnf::default();
+		m.encode_pub(&mut cnf).unwrap();
 		assert_encoding(&cnf, &expect_file!["int/con/enc_rec_bdd_style_view.cnf"]);
 	}
 }

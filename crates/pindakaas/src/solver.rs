@@ -88,22 +88,26 @@ pub trait Solver: ClauseDatabase {
 	fn solve(&mut self) -> SolveResult<impl Valuation + '_, impl Sized>;
 
 	/// Solve for all solutions
-	fn solve_all(&mut self, output: &[Var]) -> Vec<MapSol> {
+	fn solve_all<V, I>(&mut self, vars: I) -> Vec<MapSol>
+	where
+		V: Into<Lit>,
+		I: IntoIterator<Item = V> + Clone,
+	{
 		// TODO update this interface to give sols one-by-one and return Valuations i/o MapSols
 		let mut solns = Vec::<MapSol>::new();
 		loop {
 			match self.solve() {
 				SolveResult::Satisfied(sol) => {
-					solns.push(MapSol::new(output, sol));
+					solns.push(MapSol::new(vars.clone(), sol));
 				}
 				SolveResult::Unsatisfiable(_) => {
-                                    return solns;
+					return solns;
 				}
 				SolveResult::Unknown => panic!("Ran out of time before finding all solutions"),
 			}
 
-                        self.add_clause(solns.last().unwrap().iter().map(|l| !l))
-                            .unwrap();
+			self.add_clause(solns.last().unwrap().iter().map(|l| !l))
+				.unwrap();
 		}
 		// TODO doesn't compile :)
 		// while let SolveResult::Satisfied(sol) = self.solve() {

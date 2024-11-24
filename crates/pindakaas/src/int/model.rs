@@ -614,10 +614,10 @@ Actual assignments:
 mod tests {
 	use super::*;
 
-	use crate::int::decompose::LinDecomposer;
 	use crate::int::Format;
 	use crate::solver::cadical::Cadical;
 	use crate::solver::Solver;
+	use crate::{int::decompose::LinDecomposer, Cnf};
 	#[cfg(feature = "tracing")]
 	use traced_test::test;
 
@@ -677,18 +677,18 @@ mod tests {
 		let x3 = model.new_var(&[0, 5], Some("x3".to_string())).unwrap();
 
 		// Add (linear) constraint
-		model.add_constraint(Lin::new(
-			&[Term::new(1, x1), Term::new(1, x2), Term::new(1, x3)],
-			Comparator::LessEq,
-			6,
-			Some(String::from("c1")),
-		))?;
+		model
+			.add_constraint(Lin::new(
+				&[Term::new(1, x1), Term::new(1, x2), Term::new(1, x3)],
+				Comparator::LessEq,
+				6,
+				Some(String::from("c1")),
+			))
+			.unwrap();
 
 		// Encode to ClauseDatabase
 		let mut cnf = Cnf::default();
 		model.encode_internal(&mut cnf, true).unwrap();
-
-		Ok::<(), Unsatisfiable>(())
 	}
 
 	/// All possible currently stable (!) configurations
@@ -871,7 +871,7 @@ mod tests {
 				// }
 
 				let var_encs_gen = expand_var_encs(
-					&VAR_ENCS.into_iter().collect_vec(),
+					&(*VAR_ENCS).iter().cloned().collect_vec(),
 					lin_decomp.vars().cloned().collect(),
 				);
 				if let Some(j) = *TEST_DECOMP_I {
@@ -980,7 +980,7 @@ mod tests {
 						.collect()
 				};
 
-				slv.solve_all(&output.into_iter().collect::<Vec<_>>())
+				slv.solve_all(output)
 			})
 			.unwrap_or_else(|_| {
 				println!("Warning: encoding decomposition lead to UNSAT");

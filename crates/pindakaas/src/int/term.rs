@@ -10,9 +10,10 @@ use crate::{
 	bool_linear::{Comparator, PosCoeff},
 	helpers::as_binary,
 	int::{
+		model::Cse,
 		model::{USE_CHANNEL, USE_CSE},
 		res::SCM,
-		Cse, Lin, LinExp, LitOrConst,
+		Lin, LinExp, LitOrConst,
 	},
 	integer::{IntVar, IntVarRef},
 	Coeff, Lit, Unsatisfiable,
@@ -484,34 +485,34 @@ impl Term {
 
 #[cfg(test)]
 mod tests {
+	use crate::Cnf;
 
-	use crate::helpers::tests::{assert_ok, TestDB};
+	use super::*;
 
 	#[test]
 	fn term_test() {
-		assert_ok!({
-			let mut db = TestDB::new(0);
-			let mut model = Model::default();
-			let x = Term::new(
-				-1,
-				model.new_aux_var(
+		let mut db = Cnf::default();
+		let mut model = Model::default();
+		let x = Term::new(
+			-1,
+			model
+				.new_aux_var(
 					Dom::from_bounds(2, 6),
 					true,
 					Some(IntVarEnc::Bin(None)),
 					None,
-				)?,
-			);
-			x.x.borrow_mut().encode_bin(&mut db)?;
-			let y = x.encode_bin(None, Comparator::Equal, None)?;
+				)
+				.unwrap(),
+		);
+		x.x.borrow_mut().encode_bin(&mut db).unwrap();
+		let y = x.encode_bin(None, Comparator::Equal, None).unwrap();
 
-			// -x in 2..6[..9]
-			//  y in [-9..]-6..-2
-			// ALL FALSE -> x000=2 -> y111=-2 = -9 + 7 :)
-			// ALL FALSE -> x111=7 -> y000=-9
-			// ALL FALSE -> x101=5 -> y010=-5
+		// -x in 2..6[..9]
+		//  y in [-9..]-6..-2
+		// ALL FALSE -> x000=2 -> y111=-2 = -9 + 7 :)
+		// ALL FALSE -> x111=7 -> y000=-9
+		// ALL FALSE -> x101=5 -> y010=-5
 
-			assert_eq!(y.x.borrow().dom, Dom::from_bounds(-9, -2));
-			Ok::<(), Unsatisfiable>(())
-		});
+		assert_eq!(y.x.borrow().dom, Dom::from_bounds(-9, -2));
 	}
 }

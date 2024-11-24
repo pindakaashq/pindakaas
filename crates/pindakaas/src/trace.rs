@@ -361,5 +361,3 @@ impl Subscriber for Tracer {
 
 	fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
 }
-
-use itertools::Itertools;

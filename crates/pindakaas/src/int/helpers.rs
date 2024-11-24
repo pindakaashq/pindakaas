@@ -490,7 +490,7 @@ pub(crate) fn remove_red(cnf: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{Cnf, Model};
+	use crate::Cnf;
 
 	#[test]
 	fn test_from_opb() {

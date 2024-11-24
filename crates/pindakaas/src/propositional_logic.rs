@@ -347,11 +347,9 @@ mod tests {
 	use itertools::Itertools;
 
 	use crate::{
-		// helpers::{assert_encoding, assert_solutions, expect_file},
+		helpers::tests::{assert_encoding, assert_solutions, expect_file},
 		propositional_logic::{Formula, TseitinEncoder},
-		ClauseDatabase,
-		Cnf,
-		Encoder,
+		ClauseDatabase, Cnf, Encoder,
 	};
 
 	#[test]

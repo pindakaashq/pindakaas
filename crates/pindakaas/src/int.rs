@@ -20,6 +20,6 @@ pub(crate) use decompose::Decompose;
 pub use dom::Dom;
 pub(crate) use enc::LitOrConst;
 pub(crate) use helpers::{required_lits, Format};
-pub(crate) use model::{Consistency, Cse, Decomposer, Model, ModelConfig};
+pub use model::{Consistency, Decomposer, Model, ModelConfig};
 pub(crate) use ord::OrdEnc;
 pub use term::Term;

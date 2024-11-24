@@ -519,7 +519,7 @@ mod tests {
 		let x = BinEnc::new(&mut cnf, 3, Some(String::from("x")));
 		for k in 0..=3 {
 			assert_encoding(
-				&Cnf::try_from(vec![x.geq(k)]).unwarp(),
+				&Cnf::try_from(vec![x.geq(k)]).unwrap(),
 				&expect_file![format!("int/bin/geq_{k}.cnf")],
 			);
 		}
