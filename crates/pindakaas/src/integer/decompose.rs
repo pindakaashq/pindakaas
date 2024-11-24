@@ -5,13 +5,13 @@ use crate::{
 	bdd::BddEncoder,
 	bool_linear::Comparator,
 	gt::TotalizerEncoder,
-	int::{con::LinCase, model::USE_CHANNEL, Dom, Lin, LinExp, Term},
-	integer::IntVarId,
+	integer::var::IntVarId,
+	integer::{con::LinCase, model::USE_CHANNEL, Dom, Lin, LinExp, Term},
 	swc::SwcEncoder,
 	Coeff, Unsatisfiable,
 };
 
-use crate::int::{enc::IntVarEnc, Assignment, Decomposer, Model, ModelConfig};
+use crate::integer::{enc::IntVarEnc, Assignment, Decomposer, Model, ModelConfig};
 
 pub trait Decompose {
 	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable>;

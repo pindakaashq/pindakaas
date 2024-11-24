@@ -10,7 +10,7 @@ pub mod libloading;
 pub mod propagation;
 #[cfg(feature = "splr")]
 pub mod splr;
-use crate::{int::MapSol, Cnf};
+use crate::{integer::MapSol, Cnf};
 
 use std::{ffi::c_void, num::NonZeroI32, ptr};
 

@@ -11,7 +11,7 @@ use crate::{
 	cardinality::Cardinality,
 	cardinality_one::{CardinalityOne, PairwiseEncoder},
 	helpers::{as_binary, emit_clause, is_powers_of_two, new_var},
-	int::LitOrConst,
+	integer::enc::LitOrConst,
 	integer::{lex_leq_const, IntVar},
 	propositional_logic::{Formula, TseitinEncoder},
 	// sorted::{Sorted, SortedEncoder},

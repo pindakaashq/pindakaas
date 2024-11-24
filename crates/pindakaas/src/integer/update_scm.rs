@@ -96,7 +96,7 @@ pub(crate) sh2: u32,
 			.map(|(x, c, scm)| format!("\t({}, {}, &{:?})", x, c, scm))
 			.join(",\n")
 	);
-	fs::write("./src/int/res/scm_db.rs", o).unwrap();
+	fs::write("./src/integer/res/scm_db.rs", o).unwrap();
 
 	let db = Path::new("./res/ecm.tar.gz");
 	assert!(db.exists());

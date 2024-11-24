@@ -1,19 +1,23 @@
 #![allow(clippy::absurd_extreme_comparisons)]
 use crate::helpers::emit_clause;
-use crate::int::term::Term;
-use crate::int::Format;
-use crate::integer::{lex_geq_const, log_enc_add_fn, IntVarRef};
+use crate::integer::term::Term;
+use crate::integer::var::IntVarId;
+use crate::integer::Format;
+use crate::integer::{lex_geq_const, log_enc_add_fn, var::IntVarRef};
 use crate::CheckError;
 use crate::{bool_linear::Comparator, integer::lex_leq_const};
 use itertools::Itertools;
 
 use super::enc::IntVarEnc;
 use super::model::{Consistency, Model, ModelConfig, USE_COUPLING_IO_LEX, VIEW_COUPLING};
-use crate::integer::IntVarId;
 use crate::{
 	bool_linear::PosCoeff,
 	helpers::{add_clauses_for, div_ceil, div_floor},
-	int::{bin::BinEnc, helpers::display_cnf, required_lits, Assignment, Dom},
+	integer::{
+		bin::BinEnc,
+		helpers::{display_cnf, required_lits},
+		Assignment, Dom,
+	},
 	ClauseDatabase, Coeff, Lit, Result, Unsatisfiable,
 };
 
@@ -740,8 +744,8 @@ mod tests {
 
 	use crate::helpers::tests::assert_encoding;
 	use crate::helpers::tests::expect_file;
-	use crate::int::Lin;
-	use crate::int::Model;
+	use crate::integer::Lin;
+	use crate::integer::Model;
 	use crate::Cnf;
 	use crate::Lit;
 
@@ -753,25 +757,28 @@ mod tests {
 	#[test]
 	fn test_enc_rec_lookahead() {
 		let mut m = Model::from_string(
-			&std::fs::read_to_string("./src/int/res/lps/enc_rec_lookahead.lp").unwrap(),
+			&std::fs::read_to_string("./src/integer/res/lps/enc_rec_lookahead.lp").unwrap(),
 			Format::Lp,
 		)
 		.unwrap();
 		// LOOKAHEAD feature removes redundant x>=2/\y>=3->z>=5 (-1 -2 3), since we have x>=2->x>=0 (tautological) and x>=0/\y>=3->z>=5 (-2 3)
 		let mut cnf = Cnf::default();
 		m.encode_pub(&mut cnf).unwrap();
-		assert_encoding(&cnf, &expect_file!["int/con/enc_rec_lookahead.cnf"]);
+		assert_encoding(&cnf, &expect_file!["integer/con/enc_rec_lookahead.cnf"]);
 	}
 
 	#[test]
 	fn test_enc_rec_bdd_style_view() {
 		let mut m = Model::from_string(
-			&std::fs::read_to_string("./src/int/res/lps/bdd_style_view.lp").unwrap(),
+			&std::fs::read_to_string("./src/integer/res/lps/bdd_style_view.lp").unwrap(),
 			Format::Lp,
 		)
 		.unwrap();
 		let mut cnf = Cnf::default();
 		m.encode_pub(&mut cnf).unwrap();
-		assert_encoding(&cnf, &expect_file!["int/con/enc_rec_bdd_style_view.cnf"]);
+		assert_encoding(
+			&cnf,
+			&expect_file!["integer/con/enc_rec_bdd_style_view.cnf"],
+		);
 	}
 }

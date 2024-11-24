@@ -115,7 +115,7 @@ pub(crate) fn unsigned_binary_range(bits: usize) -> (PosCoeff, PosCoeff) {
 
 /// Convert `k` to unsigned binary in `bits`
 pub(crate) fn as_binary(k: PosCoeff, bits: Option<usize>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| crate::int::required_lits(0, *k));
+	let bits = bits.unwrap_or_else(|| required_lits(0, *k));
 	assert!(
 		k <= unsigned_binary_range(bits).1,
 		"{k} cannot be represented in {bits} bits"
@@ -182,7 +182,11 @@ pub(crate) use new_var;
 #[cfg(feature = "splr")]
 pub(crate) use {concat_slices, const_concat, maybe_std_concat};
 
-use crate::{bool_linear::PosCoeff, int::enc::LitOrConst, ClauseDatabase, Coeff, Lit, Result};
+use crate::{
+	bool_linear::PosCoeff,
+	integer::{enc::LitOrConst, helpers::required_lits},
+	ClauseDatabase, Coeff, Lit, Result,
+};
 
 pub(crate) fn emit_filtered_clause<DB: ClauseDatabase, I: IntoIterator<Item = LitOrConst>>(
 	db: &mut DB,

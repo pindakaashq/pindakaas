@@ -1,4 +1,4 @@
-use crate::{integer::IntVarId, Coeff, Lit, Valuation, Var};
+use crate::{integer::var::IntVarId, Coeff, Lit, Valuation, Var};
 use std::{cmp::Ordering, ops::Index};
 
 use itertools::Itertools;

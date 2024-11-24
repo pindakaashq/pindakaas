@@ -1,7 +1,7 @@
 use crate::{
 	bool_linear::{LinMarker, NormalizedBoolLinear},
-	int::{Consistency, Decompose, Decomposer, Dom, Lin, Model, ModelConfig, Term},
 	integer::IntVar,
+	integer::{Consistency, Decompose, Decomposer, Dom, Lin, Model, ModelConfig, Term},
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 

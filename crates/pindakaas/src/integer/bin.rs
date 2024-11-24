@@ -3,19 +3,19 @@ use crate::bool_linear::Comparator;
 use crate::bool_linear::PosCoeff;
 use crate::helpers;
 use crate::helpers::new_var;
-use crate::integer::{lex_geq_const, lex_leq_const};
+use crate::integer::{enc::LitOrConst, helpers::required_lits, lex_geq_const, lex_leq_const};
 use std::{collections::BTreeSet, path::PathBuf};
 
 use crate::helpers::emit_clause;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
-use super::{required_lits, Dom, LitOrConst};
+use super::Dom;
 use crate::{
 	helpers::{
 		add_clauses_for, as_binary, emit_filtered_clause, negate_cnf, pow2, unsigned_binary_range,
 	},
-	int::helpers::remove_red,
+	integer::helpers::remove_red,
 	ClauseDatabase, Cnf, Coeff, Lit, Unsatisfiable, Var,
 };
 
@@ -508,7 +508,7 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let x = BinEnc::new(&mut cnf, 3, Some(String::from("x")));
 		cnf.add_clauses(x.geqs(1, 6)).unwrap();
-		assert_encoding(&cnf, &expect_file!("int/bin/geq_1_6.cnf"));
+		assert_encoding(&cnf, &expect_file!("integer/bin/geq_1_6.cnf"));
 	}
 
 	#[test]
@@ -517,8 +517,8 @@ mod tests {
 		let x = BinEnc::new(&mut cnf, 2, Some(String::from("x")));
 		for k in 0..=3 {
 			assert_encoding(
-				&Cnf::try_from(vec![dbg!(x.geq(k))]).unwrap_or(Cnf::from(Unsatisfiable)),
-				&expect_file![format!("int/bin/geq_{k}.cnf")],
+				&Cnf::try_from(vec![dbg!(x.geq(k))]).unwrap_or_else(|e| e.into()),
+				&expect_file![format!("integer/bin/geq_{k}.cnf")],
 			);
 		}
 	}

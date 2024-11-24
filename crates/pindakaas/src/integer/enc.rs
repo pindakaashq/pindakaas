@@ -13,11 +13,11 @@ use rustc_hash::FxHashMap;
 use super::{bin::BinEnc, ord::OrdEnc};
 use crate::{
 	helpers::{as_binary, is_powers_of_two, negate_cnf},
-	int::{
+	integer::IntVar,
+	integer::{
 		helpers::{filter_fixed, required_lits},
 		Dom,
 	},
-	integer::IntVar,
 	Checker, ClauseDatabase, Cnf, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation, Var,
 };
 

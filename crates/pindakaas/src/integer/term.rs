@@ -7,11 +7,12 @@ use super::{bin::BinEnc, enc::IntVarEnc, model::Scm, Dom, Model};
 use crate::{
 	bool_linear::{Comparator, PosCoeff},
 	helpers::as_binary,
-	int::{
+	integer::{
+		enc::LitOrConst,
 		model::Cse,
 		model::{USE_CHANNEL, USE_CSE},
 		res::SCM,
-		Lin, LinExp, LitOrConst,
+		Lin, LinExp,
 	},
 	integer::{IntVar, IntVarRef},
 	Coeff, Lit, Unsatisfiable,

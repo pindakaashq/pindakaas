@@ -1,11 +1,11 @@
 // TODO Refactor: move display to where struct has its other impls
-use crate::int::{enc::IntVarEnc, Lin, Model, Term};
+use crate::integer::{enc::IntVarEnc, Lin, Model, Term};
 use std::fmt::{self, Display};
 
 use itertools::Itertools;
 
-use crate::int::{model::Cse, Assignment, Dom, LinExp};
 use crate::integer::IntVar;
+use crate::integer::{model::Cse, Assignment, Dom, LinExp};
 use crate::Coeff;
 
 use super::model::{Obj, USE_CSE};

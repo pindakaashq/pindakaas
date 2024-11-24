@@ -1,9 +1,9 @@
 use crate::bool_linear::Comparator;
-use crate::int::enc::IntVarEnc;
-use crate::int::term::Term;
-use crate::int::Lin;
-use crate::integer::IntVarId;
-use crate::integer::IntVarRef;
+use crate::integer::enc::IntVarEnc;
+use crate::integer::term::Term;
+use crate::integer::var::IntVarId;
+use crate::integer::var::IntVarRef;
+use crate::integer::Lin;
 use crate::CheckError;
 use std::{
 	cell::RefCell,
@@ -15,11 +15,11 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	int::{
+	integer::IntVar,
+	integer::{
 		decompose::{Decompose, ModelDecomposer},
 		Assignment, Dom, LinExp,
 	},
-	integer::IntVar,
 	Checker, ClauseDatabase, Result, Unsatisfiable, Valuation, Var,
 };
 
@@ -182,15 +182,13 @@ impl Default for Model {
 impl Model {
 	/// New auxiliary variable (meaning it could be inconsistent, or already be encoded)
 	pub(crate) fn var_by_lbl(&self, lbl: &str) -> Option<IntVarRef> {
-		self.vars()
-			.find(|&x| {
-				x.borrow()
-					.lbl
-					.as_ref()
-					.map(|l| l == lbl)
-					.unwrap_or_default()
-			})
-			.cloned()
+		self.vars().find(|x| {
+			x.borrow()
+				.lbl
+				.as_ref()
+				.map(|l| l == lbl)
+				.unwrap_or_default()
+		})
 	}
 
 	/// New auxiliary variable (meaning it could be inconsistent, or already be encoded)
@@ -335,11 +333,13 @@ impl Model {
 	}
 
 	/// Collect and return all variables (iterates over all constraints)
-	pub fn vars(&self) -> impl Iterator<Item = &IntVarRef> {
+	pub fn vars(&self) -> impl Iterator<Item = IntVarRef> {
 		self.cons
 			.iter()
-			.flat_map(|con| con.exp.terms.iter().map(|term| &term.x)) // don't use con.vars() since this will do redundant canonicalizing
+			.flat_map(|con| con.exp.terms.iter().map(|term| term.x.clone())) // don't use con.vars() since this will do redundant canonicalizing
 			.unique_by(|x| x.borrow().id)
+			.collect_vec()
+			.into_iter()
 	}
 
 	/// Assign `sol` to model to yield its integer `Assignment`
@@ -365,7 +365,7 @@ impl Model {
 		&self,
 		max_var: Option<IntVarId>,
 	) -> Result<Vec<Assignment>, ()> {
-		let vars = self.vars().cloned().collect_vec();
+		let vars = self.vars().collect_vec();
 		let max_var = max_var.unwrap_or(IntVarId(self.num_var));
 
 		/// Limit the search space for solution generation
@@ -615,10 +615,10 @@ Actual assignments:
 mod tests {
 	use super::*;
 
-	use crate::int::Format;
+	use crate::integer::Format;
 	use crate::solver::cadical::Cadical;
 	use crate::solver::Solver;
-	use crate::{int::decompose::LinDecomposer, Cnf};
+	use crate::{integer::decompose::LinDecomposer, Cnf};
 	#[cfg(feature = "tracing")]
 	use traced_test::test;
 
@@ -873,7 +873,7 @@ mod tests {
 
 				let var_encs_gen = expand_var_encs(
 					&(*VAR_ENCS).iter().cloned().collect_vec(),
-					lin_decomp.vars().cloned().collect(),
+					lin_decomp.vars().collect(),
 				);
 				if let Some(j) = *TEST_DECOMP_I {
 					vec![(
@@ -1196,7 +1196,7 @@ End
 		($lp:expr) => {
 			test_lp_for_configs(
 				&std::fs::read_to_string(std::path::Path::new(&format!(
-					"./src/int/res/lps/{}.lp",
+					"./src/integer/res/lps/{}.lp",
 					$lp
 				)))
 				.unwrap(),
@@ -1217,7 +1217,7 @@ End
 
 	// #[test]
 	// fn test_model_by_lps() {
-	// 	for lp in std::fs::read_dir("./src/int/res/lps").unwrap() {
+	// 	for lp in std::fs::read_dir("./src/integer/res/lps").unwrap() {
 	// 		test_lp_for_configs(&std::fs::read_to_string(lp.unwrap().path()).unwrap(), None);
 	// 	}
 	// }

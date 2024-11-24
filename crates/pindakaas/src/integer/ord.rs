@@ -123,7 +123,7 @@ mod tests {
 		for k in 0..=3 {
 			assert_encoding(
 				&Cnf::try_from(x.geq(Some(k))).unwrap(),
-				&expect_file![format!("int/ord/geq_{k}.cnf")],
+				&expect_file![format!("integer/ord/geq_{k}.cnf")],
 			);
 		}
 	}
