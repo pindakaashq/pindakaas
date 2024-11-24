@@ -295,7 +295,7 @@ impl Lin {
 			.exp
 			.terms
 			.iter()
-			.map(|term| term.c * a[&term.x.borrow().id].1)
+			.map(|term| term.c * a.value(term.x.clone()).unwrap())
 			.sum::<Coeff>();
 
 		if match self.cmp {
@@ -313,12 +313,13 @@ impl Lin {
 					.terms
 					.iter()
 					.map(|term| {
+						let a = a.value(term.x.clone()).unwrap();
 						format!(
 							"{} * {}={} (={})",
 							term.c,
 							term.x.borrow().lbl(),
-							a[&term.x.borrow().id].1,
-							term.c * a[&term.x.borrow().id].1,
+							a,
+							term.c * a,
 						)
 					})
 					.join(" + "),

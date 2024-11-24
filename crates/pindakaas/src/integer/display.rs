@@ -39,20 +39,6 @@ impl Display for Model {
 	}
 }
 
-impl Display for Assignment {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(
-			f,
-			"{}",
-			self.0
-				.iter()
-				.sorted()
-				.map(|(_, (lbl, a))| format!("{}={}", lbl, a))
-				.join(", ")
-		)
-	}
-}
-
 impl Display for LinExp {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let s = self.terms.iter().join(" ");

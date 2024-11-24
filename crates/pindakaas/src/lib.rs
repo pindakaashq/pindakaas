@@ -1,3 +1,4 @@
+#![allow(warnings)]
 //! `pindakaas` is a collection of encoders to transform integer and
 //! pseudo-Boolean (PB) constraints into conjunctive normal form (CNF). It
 //! currently considers mostly linear constraints, which are in the form ∑
@@ -207,7 +208,7 @@ pub struct Lit(NonZeroI32);
 
 /// Result is a type alias for [`std::result::Result`] that by default returns
 /// an empty value, or the [`Unsatisfiable`] error type.
-type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
+pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
 /// Unsatisfiable is an error type returned when the problem being encoded is

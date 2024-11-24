@@ -344,14 +344,15 @@ impl Model {
 
 	/// Assign `sol` to model to yield its integer `Assignment`
 	pub fn assign<F: Valuation + ?Sized>(&self, sol: &F) -> Result<Assignment, CheckError> {
-		Ok(Assignment(
-			self.vars()
-				.map(|x| {
-					x.borrow()
-						.assign(sol)
-						.map(|a| (x.borrow().id, (x.borrow().lbl(), a)))
-				})
-				.try_collect()?,
+		Ok(Assignment::new(
+			self.vars(),
+			sol,
+			// 				.map(|x| {
+			// 					x.borrow()
+			// 						.assign(sol)
+			// 						.map(|a| (x.borrow().id, (x.borrow().lbl(), a)))
+			// 				})
+			// 				.try_collect()?,
 		))
 	}
 
@@ -393,15 +394,14 @@ impl Model {
 			.into_iter()
 			.multi_cartesian_product()
 			.map(|a| {
-				Assignment(
-					vars.iter()
-						.zip(a)
-						.map(|(var, a)| (var.borrow().id, (var.borrow().lbl(), a)))
-						.collect::<FxHashMap<_, _>>(),
-				)
+				Assignment::from(vars.iter().cloned().zip(a).collect_vec())
+				// vars.iter()
+				// 	.zip(a)
+				// 	.map(|(var, a)| (var.borrow().id, (var.borrow().lbl(), a)))
+				// .collect::<FxHashMap<_, _>>(),
 			})
 			.filter(|a| self.check_assignment(a).is_ok())
-			.map(|a| a.partialize(&max_var))
+			// .map(|a| a.partialize(&max_var))
 			.sorted() // need to sort to make unique since HashMap cannot derive Hash
 			.dedup()
 			.collect())
@@ -464,38 +464,22 @@ impl Model {
 		let actual_assignments = canonicalize(actual_assignments);
 		// check_unique(&actual_assignments, "actual"); // TODO Regression for two tests
 
-		let principals = expected_assignments
-			.first()
-			.map(|assignment| assignment.0.keys().collect::<HashSet<_>>())
-			.unwrap_or_default();
+		let principals = self.vars().into_iter().collect_vec();
 
 		let principal_actual_assignments = canonicalize(
 			&actual_assignments
 				.iter()
-				.map(|a| {
-					Assignment(
-						a.0.clone()
-							.into_iter()
-							.filter(|(id, _)| principals.contains(id))
-							.collect(),
-					)
-				})
+				.map(|a| a.partialize(&principals))
 				.dedup()
 				.collect::<Vec<_>>(),
 		);
 
 		// TODO unnecessary canonicalize?
+		// The extra int assignments are the actual assignments of which the principal variables' values are not contained by the expected assignments
 		let extra_int_assignments = canonicalize(
 			&actual_assignments
 				.iter()
-				.filter(|a| {
-					!expected_assignments.contains(&Assignment(
-						a.0.clone()
-							.into_iter()
-							.filter(|(id, _)| principals.contains(id))
-							.collect(),
-					))
-				})
+				.filter(|a| !expected_assignments.contains(&a.partialize(&principals)))
 				.cloned()
 				.collect::<Vec<_>>(),
 		);

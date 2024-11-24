@@ -342,7 +342,7 @@ impl Decompose for LinDecomposer {
 					[] => {
 						let con_model = model.branch(con);
 						con_model
-							.check_assignment(&Assignment(FxHashMap::default()))
+							.check_assignment(&Assignment::default())
 							.map(|_| con_model)
 							.map_err(|_| Unsatisfiable)
 					}

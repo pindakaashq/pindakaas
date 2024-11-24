@@ -130,8 +130,10 @@ mod tests {
 			(solution.value(!a) && solution.value(b)) || (solution.value(a) && solution.value(!b))
 		);
 	}
-	// use crate::Cnf;
-	// use std::path::Path;
+
+	use crate::Cnf;
+	use std::path::Path;
+
 	// #[test]
 	// fn test_cadical_examples() {
 	// 	let mut slv = Cadical::default();

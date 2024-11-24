@@ -1,17 +1,70 @@
 use crate::{integer::var::IntVarId, Coeff, Lit, Valuation, Var};
-use std::{cmp::Ordering, ops::Index};
+use std::{
+	cmp::Ordering,
+	collections::{HashMap, HashSet},
+	fmt::Display,
+	ops::Index,
+};
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
+use super::IntVarRef;
+
 // TODO [?] equivalent of Valuation, could be merged?
 /// A structure holding an integer assignment to `Model`
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
-pub struct Assignment(pub FxHashMap<IntVarId, (String, Coeff)>);
+pub struct Assignment(FxHashMap<String, Coeff>);
 
 impl Assignment {
-	pub fn partialize(self, max_var: &IntVarId) -> Self {
-		Self(self.0.into_iter().filter(|(k, _)| k <= max_var).collect())
+	pub fn new<F: Valuation + ?Sized>(xs: impl Iterator<Item = IntVarRef>, sol: &F) -> Self {
+		Self(
+			xs.map(|x| {
+				(
+					x.borrow().lbl.clone().unwrap(),
+					x.borrow().assign(sol).unwrap(),
+				)
+			})
+			.collect(),
+		)
+	}
+
+	pub fn value(&self, x: IntVarRef) -> Option<Coeff> {
+		self.0.get(x.borrow().lbl.as_ref().unwrap()).cloned()
+	}
+
+	/// Return assignment of a subset of variables
+	pub fn partialize(&self, xs: &[IntVarRef]) -> Self {
+		Self::from(
+			xs.into_iter()
+				.map(|x| (x.clone(), self.value(x.clone()).unwrap()))
+				.collect_vec(),
+		)
+	}
+}
+
+impl From<Vec<(IntVarRef, Coeff)>> for Assignment {
+	fn from(value: Vec<(IntVarRef, Coeff)>) -> Self {
+		Self(
+			value
+				.iter()
+				.map(|(var, a)| (var.borrow().lbl.clone().unwrap(), *a))
+				.collect(),
+		)
+	}
+}
+
+impl Display for Assignment {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"{}",
+			self.0
+				.iter()
+				.sorted()
+				.map(|(lbl, a)| format!("{}={}", lbl, a))
+				.join(", ")
+		)
 	}
 }
 
@@ -27,15 +80,14 @@ impl PartialOrd for Assignment {
 	}
 }
 
-impl Index<&IntVarId> for Assignment {
-	type Output = (String, Coeff);
+// impl Index<&IntVarId> for Assignment {
+// 	type Output = (String, Coeff);
+// 	fn index(&self, id: &IntVarId) -> &Self::Output {
+// 		&self.0[id]
+// 	}
+// }
 
-	fn index(&self, id: &IntVarId) -> &Self::Output {
-		&self.0[id]
-	}
-}
-
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct MapSol(pub(crate) FxHashMap<Var, bool>);
 
 impl MapSol {
@@ -58,6 +110,7 @@ impl MapSol {
 	}
 }
 
+// impl From<CadicalSol>
 // /// Show MapSol as sol file
 // // using Display for this since (W)Cnf does it similarly
 // impl From<MapSol> for Vec<Vec<Lit>> {

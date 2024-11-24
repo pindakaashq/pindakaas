@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::BTreeSet, fmt::Display, rc::Rc};
+use std::{cell::RefCell, collections::BTreeSet, fmt::Display, hash::Hash, rc::Rc};
 
 use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
@@ -32,6 +32,13 @@ pub struct IntVar {
 	pub(crate) e: Option<IntVarEnc>,
 	pub(crate) lbl: Option<String>,
 }
+
+// impl Hash for RefCell<IntVar> {
+//     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+//         // self.lbl.unwrap().hash(state)
+//         self.id.hash(state);
+//     }
+// }
 
 // TODO implement Eq so we don't compare .e
 
