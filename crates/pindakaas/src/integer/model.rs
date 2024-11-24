@@ -39,6 +39,7 @@ pub(crate) const USE_CHANNEL: bool = false;
 
 /// SCM methods
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
 pub enum Scm {
 	/// Use recipe that minimizes adders. Good for ≥12 bits
 	Add,
@@ -54,6 +55,7 @@ pub enum Scm {
 use crate::Coeff;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
 pub enum Decomposer {
 	Gt,
 	Swc,
@@ -63,6 +65,7 @@ pub enum Decomposer {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
 pub struct ModelConfig {
 	/// Which SCM method to use
 	pub scm: Scm,
@@ -107,6 +110,7 @@ impl From<Vec<Lin>> for Model {
 pub(crate) struct Cse(pub(crate) FxHashMap<(IntVarId, Coeff, Comparator), Term>);
 
 #[derive(Debug, Default, Clone, Copy, Ord, PartialOrd, PartialEq, Eq, Hash)]
+#[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
 pub enum Consistency {
 	#[default]
 	None,

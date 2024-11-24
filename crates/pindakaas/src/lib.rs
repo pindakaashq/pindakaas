@@ -20,6 +20,10 @@ pub mod solver;
 #[cfg(any(feature = "tracing", test))]
 pub mod trace;
 
+#[cfg(feature="serde")]
+#[macro_use]
+extern crate serde;
+
 pub mod bdd;
 pub mod gt;
 pub mod swc;
