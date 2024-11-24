@@ -14,7 +14,7 @@ use super::IntVarRef;
 // TODO [?] equivalent of Valuation, could be merged?
 /// A structure holding an integer assignment to `Model`
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
-#[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Assignment(FxHashMap<String, Coeff>);
 
 impl Assignment {
