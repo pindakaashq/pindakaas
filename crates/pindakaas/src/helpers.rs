@@ -237,6 +237,11 @@ pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 		.into_iter()
 }
 
+pub(crate) fn is_unique<I: Iterator<Item = V>, V: Eq + std::hash::Hash>(mut i: I) -> bool {
+	let mut seen = HashSet::new();
+	i.all(|x| seen.insert(x))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
 	#[cfg(test)]

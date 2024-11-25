@@ -358,7 +358,7 @@ impl Term {
 								),
 								false,
 								Some(IntVarEnc::Bin(None)),
-								Some(format!("{c}*{}", self.x.borrow().lbl())),
+								Some(format!("{}-{c}*{}", cmp, self.x.borrow().lbl())),
 							)?;
 
 							ys.insert(z_i, c);

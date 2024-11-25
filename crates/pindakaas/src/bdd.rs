@@ -171,7 +171,7 @@ impl Decompose for BddEncoder {
 						Dom::from_slice(&dom),
 						model.config.add_consistency,
 						None,
-						Some(format!("bdd_{}", i + 1)),
+						lin.lbl.as_ref().map(|lbl| format!("{}_bdd_{}", lbl, i + 1)),
 					)
 					.map(|var| (var, views))
 			})

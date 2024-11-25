@@ -9,7 +9,7 @@ use std::{
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
-use super::IntVarRef;
+use super::{IntVar, IntVarRef};
 
 // TODO [?] equivalent of Valuation, could be merged?
 /// A structure holding an integer assignment to `Model`
@@ -25,15 +25,16 @@ impl Assignment {
 		)
 	}
 
-	pub fn value(&self, x: IntVarRef) -> Option<Coeff> {
-		self.0.get(&x.borrow().lbl()).cloned()
+
+	pub fn value(&self, x: &IntVar) -> Option<Coeff> {
+		self.0.get(&x.lbl()).cloned()
 	}
 
 	/// Return assignment of a subset of variables
 	pub fn partialize(&self, xs: &[IntVarRef]) -> Self {
 		Self::from(
 			xs.into_iter()
-				.map(|x| (x.clone(), self.value(x.clone()).unwrap()))
+				.map(|x| (x.clone(), self.value(&x.borrow()).unwrap()))
 				.collect_vec(),
 		)
 	}

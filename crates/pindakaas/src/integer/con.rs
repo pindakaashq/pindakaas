@@ -295,7 +295,11 @@ impl Lin {
 			.exp
 			.terms
 			.iter()
-			.map(|term| term.c * a.value(term.x.clone()).unwrap())
+			.map(|term| {
+				term.c
+					* a.value(&term.x.borrow())
+						.unwrap_or_else(|| panic!("Expected {} to be assigned in {}", term, a))
+			})
 			.sum::<Coeff>();
 
 		if match self.cmp {
@@ -313,7 +317,7 @@ impl Lin {
 					.terms
 					.iter()
 					.map(|term| {
-						let a = a.value(term.x.clone()).unwrap();
+						let a = a.value(&term.x.borrow()).unwrap();
 						format!(
 							"{} * {}={} (={})",
 							term.c,

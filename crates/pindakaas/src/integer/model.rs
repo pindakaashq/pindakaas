@@ -1,4 +1,5 @@
 use crate::bool_linear::Comparator;
+use crate::helpers::is_unique;
 use crate::integer::enc::IntVarEnc;
 use crate::integer::term::Term;
 use crate::integer::var::IntVarId;
@@ -365,14 +366,17 @@ impl Model {
 		self.cons.iter().try_for_each(|con| con.check(assignment))
 	}
 
-	/// Brute-forces all solutions
+	/// Brute-forces all solutions for given output variables (or all if None)
 	pub(crate) fn generate_solutions(
 		&self,
-		max_var: Option<IntVarId>,
+		vars: Option<Vec<IntVarRef>>,
 	) -> Result<Vec<Assignment>, ()> {
-		let vars = self.vars().collect_vec();
-		let max_var = max_var.unwrap_or(IntVarId(self.num_var));
-
+		let vars = vars.unwrap_or_else(|| self.vars().collect_vec());
+		assert!(
+			is_unique(vars.iter().map(|x| x.borrow().lbl())),
+			"Output variables do not have unique labels: {}",
+			vars.iter().map(|x| x.borrow().lbl()).sorted().join(", ")
+		);
 		/// Limit the search space for solution generation
 		const MAX_SEARCH_SPACE: Option<usize> = Some(250);
 		let mut max_search_space = MAX_SEARCH_SPACE;
@@ -397,15 +401,8 @@ impl Model {
 			.try_collect::<Vec<Coeff>, Vec<Vec<Coeff>>, ()>()?
 			.into_iter()
 			.multi_cartesian_product()
-			.map(|a| {
-				Assignment::from(vars.iter().cloned().zip(a).collect_vec())
-				// vars.iter()
-				// 	.zip(a)
-				// 	.map(|(var, a)| (var.borrow().id, (var.borrow().lbl(), a)))
-				// .collect::<FxHashMap<_, _>>(),
-			})
+			.map(|a| Assignment::from(vars.iter().cloned().zip(a).collect_vec()))
 			.filter(|a| self.check_assignment(a).is_ok())
-			// .map(|a| a.partialize(&max_var))
 			.sorted() // need to sort to make unique since HashMap cannot derive Hash
 			.dedup()
 			.collect())
@@ -420,11 +417,7 @@ impl Model {
 		principals: &[IntVarRef],
 	) -> Result<(), Vec<CheckError>> {
 		assert!(
-			principals
-				.iter()
-				.map(|x| x.borrow().lbl.clone().unwrap())
-				.unique()
-				.count() == principals.len(),
+			is_unique(principals.iter().map(|x| x.borrow().lbl())),
 			"Cannot check assignments if principal variables have different labels: {}",
 			principals
 				.iter()
@@ -471,6 +464,7 @@ impl Model {
 		let check_unique = |a: &[Assignment], mess: &str| {
 			assert!(
 				a.iter().sorted().tuple_windows().all(|(a, b)| a != b),
+				// is_unique(a.clone().iter().map(|a| a.clone().iter().sorted().collect_vec())),
 				"Expected unique {mess} assignments but got:\n{}",
 				a.iter().map(|a| format!("{}", a)).join("\n")
 			)
@@ -489,7 +483,7 @@ impl Model {
 					!expected_assignments.iter().any(|e| {
 						principals
 							.iter()
-							.all(|x| a.value(x.clone()) == e.value(x.clone()))
+							.all(|x| a.value(&x.borrow()) == e.value(&x.borrow()))
 					})
 				})
 				.cloned()
@@ -504,7 +498,7 @@ impl Model {
 					!actual_assignments.iter().any(|a| {
 						principals
 							.iter()
-							.all(|x| a.value(x.clone()) == e.value(x.clone()))
+							.all(|x| a.value(&x.borrow()) == e.value(&x.borrow()))
 					})
 				})
 				.cloned()
@@ -751,8 +745,8 @@ mod tests {
 		expected_assignments: Option<&Vec<Assignment>>,
 	) {
 		if !*BRUTE_FORCE_SOLVE {
-		} else if let Ok(decomposition_expected_assignments) =
-			&decomposition.generate_solutions(Some(IntVarId(model.num_var)))
+		} else if let Ok(decomposition_expected_assignments) = &decomposition
+			.generate_solutions((!*CHECK_CONSTRAINTS).then(|| model.vars().collect_vec()))
 		{
 			if let Err(errs) = model.check_assignments(
 				decomposition_expected_assignments,
@@ -1002,8 +996,16 @@ mod tests {
 			.flat_map(|lit_assignment| checker.assign(lit_assignment))
 			.collect::<Vec<_>>();
 
-		// TODO impl Hash for Assignment
-		// assert_eq!(actual_assignments.iter().unique(), actual_assignments);
+		// assert!(
+		// 	checker.vars()
+		// 		.map(|x| x.borrow().lbl.clone().unwrap())
+		// 		.unique()
+		// 		.count() == checker.vars().count(),
+		// 	"Cannot check assignments if principal variables have different labels: {}",
+		// 	checker.vars()
+		// 		.map(|x| format!("{}", x.borrow()))
+		// 		.join(", ")
+		// );
 
 		let check = checker.check_assignments(
 			&actual_assignments,

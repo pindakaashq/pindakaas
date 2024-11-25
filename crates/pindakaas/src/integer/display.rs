@@ -102,7 +102,7 @@ impl Display for Lin {
 				panic!();
 			}
 		} else {
-			write!(f, "{}{} {} {}", lbl, self.exp, self.cmp, self.k,)
+			write!(f, "{}{} {} {}", lbl, self.exp, self.cmp, self.k)
 		}
 	}
 }
@@ -111,7 +111,7 @@ impl Display for IntVar {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			"{}{}{} ∈ {} {}",
+			"{}{}{} ∈ {}{}",
 			self.lbl(),
 			match self.e.as_ref() {
 				Some(IntVarEnc::Bin(_)) => ":B".to_string(),
@@ -124,7 +124,7 @@ impl Display for IntVar {
 				format!("[{}]", self.lits().iter().sorted().join(", "))
 			} else {
 				if self.lits().len() > 0 {
-					format!("{}L", self.lits().len())
+					format!(" {}L", self.lits().len())
 				} else {
 					"".to_string()
 				}
