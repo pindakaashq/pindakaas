@@ -634,7 +634,7 @@ mod tests {
 		}};
 	}
 
-	macro_rules! get_usize_flag {
+	macro_rules! get_int_flag {
 		($flag:expr) => {{
 			LazyLock::new(|| {
 				std::env::args()
@@ -655,6 +655,8 @@ mod tests {
 			.collect()
 	});
 
+	static TEST_CUTOFF: LazyLock<Option<i64>> = get_int_flag!("--mix");
+
 	/// Generate solutions for expected models
 	static BRUTE_FORCE_SOLVE: LazyLock<bool> = has_bool_flag!("--brute-force-solve");
 	/// Check that the decomposition correctly encodes the model
@@ -664,8 +666,8 @@ mod tests {
 	/// Show assignments to auxiliary variables as well (shows more detail, but also more (symmetrical) solutions)
 	static SHOW_AUX: LazyLock<bool> = has_bool_flag!("--show-aux");
 
-	static TEST_CONFIG_I: LazyLock<Option<usize>> = get_usize_flag!("--test-config");
-	static TEST_DECOMP_I: LazyLock<Option<usize>> = get_usize_flag!("--test-decomp");
+	static TEST_CONFIG_I: LazyLock<Option<usize>> = get_int_flag!("--test-config");
+	static TEST_DECOMP_I: LazyLock<Option<usize>> = get_int_flag!("--test-decomp");
 
 	#[test]
 	fn model_test() {
