@@ -123,7 +123,11 @@ impl Display for IntVar {
 			if SHOW_LITS {
 				format!("[{}]", self.lits().iter().sorted().join(", "))
 			} else {
-				format!("{}L", self.lits().len())
+				if self.lits().len() > 0 {
+					format!("{}L", self.lits().len())
+				} else {
+					"".to_string()
+				}
 			},
 		)
 	}
