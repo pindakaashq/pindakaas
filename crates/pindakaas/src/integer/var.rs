@@ -4,7 +4,10 @@ use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
-	bool_linear::{BoolLinExp, Part}, helpers::{emit_clause, negate_cnf, new_var}, integer::display::SHOW_IDS, log, CheckError, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation, Var
+	bool_linear::{BoolLinExp, Part},
+	helpers::{emit_clause, negate_cnf, new_var},
+	integer::display::SHOW_IDS,
+	log, CheckError, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation, Var,
 };
 
 use super::{

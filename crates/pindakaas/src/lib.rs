@@ -29,7 +29,6 @@ macro_rules! log {
 }
 pub(crate) use log;
 
-
 #[cfg(feature = "serde")]
 #[macro_use]
 extern crate serde;

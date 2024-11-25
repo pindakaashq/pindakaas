@@ -5,9 +5,15 @@ use rustc_hash::FxHashMap;
 
 use super::{bin::BinEnc, enc::IntVarEnc, model::Scm, Dom, Model};
 use crate::{
-	bool_linear::{Comparator, PosCoeff}, helpers::as_binary, integer::{
-		enc::LitOrConst, model::{Cse, USE_CHANNEL, USE_CSE}, res::SCM, IntVar, IntVarRef, Lin, LinExp
-	}, log, Coeff, Lit, Unsatisfiable
+	bool_linear::{Comparator, PosCoeff},
+	helpers::as_binary,
+	integer::{
+		enc::LitOrConst,
+		model::{Cse, USE_CHANNEL, USE_CSE},
+		res::SCM,
+		IntVar, IntVarRef, Lin, LinExp,
+	},
+	log, Coeff, Lit, Unsatisfiable,
 };
 
 /// A linear term (constant times integer variable)

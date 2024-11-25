@@ -4,8 +4,8 @@ use crate::integer::term::Term;
 use crate::integer::var::IntVarId;
 use crate::integer::Format;
 use crate::integer::{lex_geq_const, log_enc_add_fn, var::IntVarRef};
-use crate::{log, CheckError};
 use crate::{bool_linear::Comparator, integer::lex_leq_const};
+use crate::{log, CheckError};
 use itertools::Itertools;
 
 use super::enc::IntVarEnc;

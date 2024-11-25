@@ -417,7 +417,17 @@ impl Model {
 		actual_assignments: &[Assignment],
 		expected_assignments: Option<&Vec<Assignment>>,
 		brute_force_solve: bool,
+		principals: &[IntVarRef],
 	) -> Result<(), Vec<CheckError>> {
+		assert!(
+			principals
+				.iter()
+				.map(|x| x.borrow().lbl.clone().unwrap())
+				.unique()
+				.count() == principals.len(),
+			"Cannot check assignments if principal variables have different labels: {}",
+			principals.iter().map(|x| format!("{}", x.borrow())).join(", ")
+		);
 		let errs = actual_assignments
 			.iter()
 			.filter_map(
@@ -466,32 +476,34 @@ impl Model {
 		let expected_assignments = canonicalize(&expected_assignments);
 		check_unique(&expected_assignments, "expected");
 		let actual_assignments = canonicalize(actual_assignments);
-		// check_unique(&actual_assignments, "actual"); // TODO Regression for two tests
-
-		let principals = self.vars().into_iter().collect_vec();
-
-		let principal_actual_assignments = canonicalize(
-			&actual_assignments
-				.iter()
-				.map(|a| a.partialize(&principals))
-				.dedup()
-				.collect::<Vec<_>>(),
-		);
 
 		// TODO unnecessary canonicalize?
-		// The extra int assignments are the actual assignments of which the principal variables' values are not contained by the expected assignments
+		// The extra int assignments are the actual assignments of which are not contained by the expected assignments
 		let extra_int_assignments = canonicalize(
 			&actual_assignments
 				.iter()
-				.filter(|a| !expected_assignments.contains(&a.partialize(&principals)))
+				.filter(|a| {
+					!expected_assignments.iter().any(|e| {
+						principals
+							.iter()
+							.all(|x| a.value(x.clone()) == e.value(x.clone()))
+					})
+				})
 				.cloned()
 				.collect::<Vec<_>>(),
 		);
 
+		// A missing int assignment si one which is not in the asc
 		let missing_int_assignments = canonicalize(
 			&expected_assignments
 				.iter()
-				.filter(|a| !principal_actual_assignments.contains(a))
+				.filter(|e| {
+					!actual_assignments.iter().any(|a| {
+						principals
+							.iter()
+							.all(|x| a.value(x.clone()) == e.value(x.clone()))
+					})
+				})
 				.cloned()
 				.collect::<Vec<_>>(),
 		);
@@ -530,12 +542,12 @@ Actual assignments:
 				.collect());
 		}
 
-		assert_eq!(principal_actual_assignments,
-                   expected_assignments,
-                   "It seems the actual and expected assignments are not identical sets:\nactual:\n{}\n expected:\n{}",
-                   principal_actual_assignments.iter().join("\n"),
-                   expected_assignments.iter().join("\n")
-                  );
+		// assert_eq!(actual_assignments.iter,
+		// expected_assignments,
+		// "It seems the actual and expected assignments are not identical sets:\nactual:\n{}\n expected:\n{}",
+		// principal_actual_assignments.iter().join("\n"),
+		// expected_assignments.iter().join("\n")
+		// );
 
 		println!(
 			"Actual assignments are complete and correct:\n{}",
@@ -727,6 +739,7 @@ mod tests {
 		)
 	}
 
+	/// Checks decomposition (without encoding)
 	fn check_decomposition(
 		model: &Model,
 		decomposition: &Model,
@@ -740,6 +753,7 @@ mod tests {
 				decomposition_expected_assignments,
 				expected_assignments,
 				*BRUTE_FORCE_SOLVE,
+				&model.vars().map(|x| x.clone()).collect_vec(),
 			) {
 				for err in errs {
 					println!("Decomposition error:\n{err}");
@@ -1003,6 +1017,7 @@ mod tests {
 			&actual_assignments,
 			expected_assignments,
 			*BRUTE_FORCE_SOLVE,
+			&model.vars().map(|x| x.clone()).collect_vec(),
 		);
 		if let Err(errs) = check {
 			for err in errs {
