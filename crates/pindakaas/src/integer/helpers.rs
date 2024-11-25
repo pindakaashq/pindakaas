@@ -281,11 +281,8 @@ End
 									false;
 							}
 						}
-						line if matches!(
-							state,
-							State::SubjectTo | State::Minimize | State::Maximize
-						) =>
-						{
+						line if matches!(state, State::Minimize | State::Maximize) => todo!(),
+						line if matches!(state, State::SubjectTo) => {
 							for token in line {
 								match *token {
 									"->" => {
