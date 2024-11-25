@@ -19,9 +19,9 @@ pub struct Assignment(FxHashMap<String, Coeff>);
 
 impl Assignment {
 	pub fn new<F: Valuation + ?Sized>(xs: impl Iterator<Item = IntVarRef>, sol: &F) -> Self {
-		Self(
-			xs.map(|x| (x.borrow().lbl(), x.borrow().assign(sol).unwrap()))
-				.collect(),
+		Self::from(
+			xs.map(|x| (x.clone(), x.borrow().assign(sol).unwrap()))
+				.collect_vec(),
 		)
 	}
 
@@ -45,6 +45,7 @@ impl From<Vec<(IntVarRef, Coeff)>> for Assignment {
 			value
 				.iter()
 				.map(|(var, a)| (var.borrow().lbl(), *a))
+				// .sorted_by_key(|(x, _)| x.clone()) // sorting makes serialization output a little nicer
 				.collect(),
 		)
 	}
