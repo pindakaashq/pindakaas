@@ -4,10 +4,7 @@ use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
-	bool_linear::{BoolLinExp, Part},
-	helpers::{emit_clause, negate_cnf, new_var},
-	integer::display::SHOW_IDS,
-	CheckError, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation, Var,
+	bool_linear::{BoolLinExp, Part}, helpers::{emit_clause, negate_cnf, new_var}, integer::display::SHOW_IDS, log, CheckError, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation, Var
 };
 
 use super::{
@@ -175,7 +172,7 @@ impl IntVar {
 		match self.e.as_ref().unwrap() {
 			IntVarEnc::Ord(Some(o)) => {
 				let pos = self.dom.geq(k);
-				println!(" = d_{pos:?}");
+				log!(" = d_{pos:?}");
 				let d = if let Some((pos, v)) = pos {
 					if up {
 						Some(v)
@@ -209,7 +206,7 @@ impl IntVar {
 					(range_lb + k, a)
 				};
 
-				println!("{r_a}..{r_b} ");
+				log!("{r_a}..{r_b} ");
 				let dnf = x_bin.geqs(r_a, r_b);
 
 				let dnf = if up {

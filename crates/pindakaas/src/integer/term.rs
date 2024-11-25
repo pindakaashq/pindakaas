@@ -5,17 +5,9 @@ use rustc_hash::FxHashMap;
 
 use super::{bin::BinEnc, enc::IntVarEnc, model::Scm, Dom, Model};
 use crate::{
-	bool_linear::{Comparator, PosCoeff},
-	helpers::as_binary,
-	integer::{
-		enc::LitOrConst,
-		model::Cse,
-		model::{USE_CHANNEL, USE_CSE},
-		res::SCM,
-		Lin, LinExp,
-	},
-	integer::{IntVar, IntVarRef},
-	Coeff, Lit, Unsatisfiable,
+	bool_linear::{Comparator, PosCoeff}, helpers::as_binary, integer::{
+		enc::LitOrConst, model::{Cse, USE_CHANNEL, USE_CSE}, res::SCM, IntVar, IntVarRef, Lin, LinExp
+	}, log, Coeff, Lit, Unsatisfiable
 };
 
 /// A linear term (constant times integer variable)
@@ -78,9 +70,9 @@ impl Term {
 	) -> crate::Result<Self> {
 		if USE_CSE {
 			if let Some(model) = &model {
-				// println!("CSE: {}", model.cse);
+				log!("CSE: {}", model.cse);
 				if let Some(t) = model.cse.0.get(&(self.x.borrow().id, self.c, cmp)) {
-					println!("HIT: ({self}) -> {t}");
+					log!("HIT: ({self}) -> {t}");
 					return Ok(t.clone());
 				}
 			}

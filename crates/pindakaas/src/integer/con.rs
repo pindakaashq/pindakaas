@@ -4,7 +4,7 @@ use crate::integer::term::Term;
 use crate::integer::var::IntVarId;
 use crate::integer::Format;
 use crate::integer::{lex_geq_const, log_enc_add_fn, var::IntVarRef};
-use crate::CheckError;
+use crate::{log, CheckError};
 use crate::{bool_linear::Comparator, integer::lex_leq_const};
 use itertools::Itertools;
 
@@ -184,7 +184,7 @@ impl Lin {
 								}
 
 								if x.size() < size {
-									//println!("Pruned {}", size - x.size());
+									log!("Pruned {}", size - x.size());
 									changed.push(id);
 									fixpoint = false;
 								}
@@ -363,7 +363,6 @@ impl Lin {
 				x_enc.encode_unary_constraint(db, &cmp, k, &dom, false)
 			}
 			LinCase::Binary(t_x, cmp, t_y) => {
-				println!("self = {}", self);
 				// assert!(t_x.x.borrow().lb() == t_y.x.borrow().lb());
 
 				let k = t_y.x.borrow().lb() - t_x.x.borrow().lb(); // used to make lbs match
@@ -408,9 +407,9 @@ impl Lin {
 					.try_for_each(|((c_a, x_a), (c_b, x_b))| {
 						let x = if up { x_a } else { x_b };
 						let (c_a, c_b) = (c_a + 1, c_b);
-						println!("{up} {c_a}..{c_b} -> {x:?}");
+						log!("{up} {c_a}..{c_b} -> {x:?}");
 						let y = y_enc.ineqs(c_a, c_b, !up);
-						println!("{y:?}");
+						log!("{y:?}");
 						add_clauses_for(db, vec![vec![x.clone()], y])
 					})
 			}
@@ -514,7 +513,7 @@ impl Lin {
 
 				self.cmp.split().into_iter().try_for_each(|cmp| {
 					let (_, cnf) = Self::encode_rec(&terms, &cmp, self.k, 0);
-					println!("{}", display_cnf(&cnf));
+					log!("{}", display_cnf(&cnf));
 
 					for c in cnf {
 						if c.is_empty() {
@@ -599,7 +598,7 @@ impl Lin {
 					div_floor(k, head.c) + 1
 				};
 
-				println!(
+				log!(
 					"{}{} ({}*{} {cmp} {k}) (= {} {} {k_})",
 					"\t".repeat(_depth),
 					if up { "up: " } else { "down: " },
@@ -616,7 +615,7 @@ impl Lin {
 				let (c, cnf) = head.x.borrow().ineq(k_, up, None);
 
 				let _disp_cnf = display_cnf(&cnf); // TODO inlining this function won't be removed with feature trace
-				println!("== {:?}", _disp_cnf);
+				log!("== {:?}", _disp_cnf);
 
 				(c.map(|c| head.c * c), cnf)
 			} else {
@@ -630,7 +629,7 @@ impl Lin {
 							// l = x>=d+1, ~l = ~(x>=d+1) = x<d+1 = x<=d
 							let k_ = k - head.c * d;
 
-								println!(
+								log!(
 									"{} {} {}*({} {cmp} {}) (->x{cmp}{implies}) = [{:?}] (k={k} - {}*{d} = {k_}) last_a={last_a:?} last_k={last_k:?}",
                                     "\t".repeat(_depth),
 									if up {
@@ -665,7 +664,7 @@ impl Lin {
 								})
 								.unwrap_or_default();
 
-								println!(" {}/{} \n", antecedent_implies_next, consequent_implies_next);
+								log!(" {}/{} \n", antecedent_implies_next, consequent_implies_next);
 
 							let (c, cnf) = Self::encode_rec(tail, cmp, k_, _depth + 1);
 							let cnf = cnf

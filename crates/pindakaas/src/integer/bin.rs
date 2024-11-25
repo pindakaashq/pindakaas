@@ -4,6 +4,7 @@ use crate::bool_linear::PosCoeff;
 use crate::helpers;
 use crate::helpers::new_var;
 use crate::integer::{enc::LitOrConst, helpers::required_lits, lex_geq_const, lex_leq_const};
+use crate::log;
 use std::{collections::BTreeSet, path::PathBuf};
 
 use crate::helpers::emit_clause;
@@ -194,7 +195,7 @@ impl BinEnc {
 	pub(crate) fn ineqs(&self, r_a: Coeff, r_b: Coeff, up: bool) -> Vec<Vec<Lit>> {
 		let (range_lb, range_ub) = self.range();
 
-		println!("\t {up} {r_a}..{r_b} [{range_lb}..{range_ub}] -> ");
+		log!("\t {up} {r_a}..{r_b} [{range_lb}..{range_ub}] -> ");
 
 		if r_a <= range_lb {
 			if up {
@@ -217,7 +218,7 @@ impl BinEnc {
 				let k = if up { k - 1 } else { k };
 				#[allow(clippy::let_and_return)]
 				let ineq = self.ineq(k, up); // returns cnf
-				println!("{k} -> ineq = {ineq:?}");
+				log!("{k} -> ineq = {ineq:?}");
 				ineq
 			})
 			.collect_vec();

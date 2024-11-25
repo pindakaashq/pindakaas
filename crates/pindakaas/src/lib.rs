@@ -20,6 +20,16 @@ pub mod solver;
 #[cfg(any(feature = "tracing", test))]
 pub mod trace;
 
+/// General log function
+macro_rules! log {
+    ($fmt:expr $(, $args:expr)* ) => {
+        #[cfg(feature = "trace")]
+        tracing::info!($fmt $(, $args)*)
+    }
+}
+pub(crate) use log;
+
+
 #[cfg(feature = "serde")]
 #[macro_use]
 extern crate serde;
