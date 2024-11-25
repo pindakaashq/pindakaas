@@ -20,18 +20,13 @@ pub struct Assignment(FxHashMap<String, Coeff>);
 impl Assignment {
 	pub fn new<F: Valuation + ?Sized>(xs: impl Iterator<Item = IntVarRef>, sol: &F) -> Self {
 		Self(
-			xs.map(|x| {
-				(
-					x.borrow().lbl.clone().unwrap(),
-					x.borrow().assign(sol).unwrap(),
-				)
-			})
-			.collect(),
+			xs.map(|x| (x.borrow().lbl(), x.borrow().assign(sol).unwrap()))
+				.collect(),
 		)
 	}
 
 	pub fn value(&self, x: IntVarRef) -> Option<Coeff> {
-		self.0.get(x.borrow().lbl.as_ref().unwrap()).cloned()
+		self.0.get(&x.borrow().lbl()).cloned()
 	}
 
 	/// Return assignment of a subset of variables
@@ -49,7 +44,7 @@ impl From<Vec<(IntVarRef, Coeff)>> for Assignment {
 		Self(
 			value
 				.iter()
-				.map(|(var, a)| (var.borrow().lbl.clone().unwrap(), *a))
+				.map(|(var, a)| (var.borrow().lbl(), *a))
 				.collect(),
 		)
 	}
