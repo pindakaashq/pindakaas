@@ -426,7 +426,10 @@ impl Model {
 				.unique()
 				.count() == principals.len(),
 			"Cannot check assignments if principal variables have different labels: {}",
-			principals.iter().map(|x| format!("{}", x.borrow())).join(", ")
+			principals
+				.iter()
+				.map(|x| format!("{}", x.borrow()))
+				.join(", ")
 		);
 		let errs = actual_assignments
 			.iter()
@@ -773,6 +776,7 @@ mod tests {
 		if var_encs.is_empty() {
 			return vec![FxHashMap::default()];
 		}
+
 		return (*VAR_ENCS)
 			.iter()
 			.map(|enc| {
@@ -959,14 +963,10 @@ mod tests {
 				.vars()
 				.for_each(|x| x.borrow_mut().clear_encoding());
 		}
-		let principal_vars = decomposition
-			.vars()
-			.filter(|x| x.borrow().id.0 <= model.num_var)
-			.map(|x| {
-				x.borrow_mut().encode(&mut slv).unwrap();
-				(x.borrow().id, x.clone())
-			})
-			.collect::<FxHashMap<IntVarId, IntVarRef>>();
+
+		for x in model.vars().collect_vec() {
+			x.borrow_mut().encode(&mut slv).unwrap();
+		}
 
 		println!("decomposition (principal vars encoded) = {}", decomposition);
 
@@ -974,16 +974,11 @@ mod tests {
 		let lit_assignments = decomposition
 			.encode_internal(&mut slv, false)
 			.map(|_| {
-				let output = if *CHECK_CONSTRAINTS || *SHOW_AUX {
+				slv.solve_all(if *CHECK_CONSTRAINTS || *SHOW_AUX {
 					decomposition.lits()
 				} else {
-					principal_vars
-						.values()
-						.flat_map(|x| x.borrow().lits())
-						.collect()
-				};
-
-				slv.solve_all(output)
+					model.lits()
+				})
 			})
 			.unwrap_or_else(|_| {
 				println!("Warning: encoding decomposition lead to UNSAT");
@@ -997,12 +992,7 @@ mod tests {
 			decomposition.clone()
 		} else {
 			// create a checker model with the constraints of the principal model and the encodings of the encoded decomposition
-			let principal = model.deep_clone();
-			principal.vars().for_each(|x| {
-				let id = x.borrow().id;
-				x.borrow_mut().e = principal_vars[&id].borrow().e.clone();
-			});
-			principal
+			model.deep_clone()
 		};
 
 		let actual_assignments = lit_assignments
