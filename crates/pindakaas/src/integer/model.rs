@@ -694,7 +694,7 @@ mod tests {
 	/// All possible currently stable (!) configurations
 	fn get_model_configs() -> Vec<ModelConfig> {
 		iproduct!(
-			[Scm::Rca],
+			[Scm::Dnf],
 			[
 				// Decomposer::Gt,
 				// Decomposer::Swc, // TODO
@@ -771,10 +771,13 @@ mod tests {
 	) -> Vec<FxHashMap<IntVarId, IntVarEnc>> {
 		if var_encs.is_empty() {
 			return vec![FxHashMap::default()];
+		} else if TEST_CUTOFF.is_some() {
+			return vec![FxHashMap::default()];
 		}
 
-		return (*VAR_ENCS)
+		return var_encs
 			.iter()
+			// .chain((*TEST_CUTOFF).map(|e| IntVarEnc:)
 			.map(|enc| {
 				vars.iter()
 					.sorted_by_key(|var| var.borrow().id)
@@ -1205,6 +1208,11 @@ End
 	#[test]
 	fn le_1() {
 		test_lp!("le_1");
+	}
+
+	#[test]
+	fn le_mix() {
+		test_lp!("le_mix");
 	}
 
 	#[test]

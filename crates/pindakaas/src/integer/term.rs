@@ -358,7 +358,7 @@ impl Term {
 								),
 								false,
 								Some(IntVarEnc::Bin(None)),
-								Some(format!("{}-{c}*{}", cmp, self.x.borrow().lbl())),
+								Some(format!("{}-{c}·{}", cmp, self.x.borrow().lbl())),
 							)?;
 
 							ys.insert(z_i, c);
@@ -381,7 +381,7 @@ impl Term {
 								Dom::from_slice(&dom),
 								false,
 								Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
-								Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
+								Some(format!("{}scm-{}·{}", cmp, self.c, self.x.borrow().lbl())),
 							)
 							.unwrap();
 
