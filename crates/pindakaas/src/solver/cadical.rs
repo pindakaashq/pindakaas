@@ -91,13 +91,24 @@ mod tests {
 	use crate::{
 		bool_linear::LimitComp,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
-		solver::{cadical::Cadical, SolveResult},
+		solver::{cadical::Cadical, SlvTermSignal, SolveResult},
 	};
 
 	use crate::solver::Solver;
 	use crate::ClauseDatabase;
 	use crate::Encoder;
 	use crate::Valuation;
+
+
+        use crate::solver::TermCallback;
+
+	#[test]
+	fn test_cadical_term() {
+		let mut slv = Cadical::default();
+
+                slv.set_terminate_callback(Some(move || SlvTermSignal::Terminate));
+                assert!(matches!(slv.solve(), SolveResult::Unknown));
+	}
 
 	#[test]
 	fn test_cadical() {
