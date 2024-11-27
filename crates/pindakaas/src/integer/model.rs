@@ -704,7 +704,9 @@ mod tests {
 			[Consistency::None],
 			[false], // consistency
 			// [true],          // equalize terns
-			[Some(0)], // cutoffs: [None, Some(0), Some(2)]
+			// [Some(0)], // cutoffs: [None, Some(0), Some(2)]
+			// [*TEST_CUTOFF], // cutoffs: [None, Some(0), Some(2)]
+			[None], // cutoffs: [None, Some(0), Some(2)]
 			[false]    // equalize_uniform_bin_ineqs
 		)
 		.map(

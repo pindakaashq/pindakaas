@@ -131,7 +131,9 @@ End
 	}
 	pub fn from_file(path: PathBuf) -> Result<Self, String> {
 		let ext = path.extension().unwrap().to_str().unwrap();
-		let file = File::open(path.clone()).unwrap();
+		let file = File::open(path.clone())
+			.map_err(|e| format!("File::open({}) failed: {e}", path.display()))
+			.unwrap();
 		let mut s = String::new();
 
 		if ext == "gz" {

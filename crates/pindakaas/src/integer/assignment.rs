@@ -25,7 +25,6 @@ impl Assignment {
 		)
 	}
 
-
 	pub fn value(&self, x: &IntVar) -> Option<Coeff> {
 		self.0.get(&x.lbl()).cloned()
 	}
