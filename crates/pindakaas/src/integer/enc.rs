@@ -88,7 +88,7 @@ impl Not for LitOrConst {
 }
 
 #[derive(Debug, Clone)]
-pub enum IntVarEnc {
+pub(crate) enum IntVarEnc {
 	Ord(Option<OrdEnc>),
 	Bin(Option<BinEnc>),
 }

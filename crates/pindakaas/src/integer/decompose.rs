@@ -18,7 +18,7 @@ pub trait Decompose {
 }
 
 #[derive(Debug, Default)]
-pub struct EqualizeTernsDecomposer {}
+pub(crate) struct EqualizeTernsDecomposer {}
 
 impl Decompose for EqualizeTernsDecomposer {
 	fn decompose(&self, mut model: Model) -> Result<Model, Unsatisfiable> {
@@ -132,7 +132,7 @@ impl Decompose for EqualizeTernsDecomposer {
 }
 
 #[derive(Debug, Default)]
-pub struct EncSpecDecomposer {
+pub(crate) struct EncSpecDecomposer {
 	pub(crate) cutoff: Option<Coeff>,
 	pub(crate) spec: Option<FxHashMap<IntVarId, IntVarEnc>>,
 }
@@ -289,7 +289,7 @@ impl Decompose for EncSpecDecomposer {
 }
 
 #[derive(Default, Debug)]
-pub struct ModelDecomposer {
+pub(crate) struct ModelDecomposer {
 	pub(crate) spec: Option<FxHashMap<IntVarId, IntVarEnc>>,
 }
 
@@ -317,7 +317,7 @@ impl Decompose for ModelDecomposer {
 }
 
 #[derive(Default, Debug)]
-pub struct LinDecomposer {}
+pub(crate) struct LinDecomposer {}
 
 impl Decompose for LinDecomposer {
 	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable> {
@@ -367,7 +367,7 @@ impl Decompose for LinDecomposer {
 }
 
 #[derive(Default, Debug)]
-pub struct ScmDecomposer {}
+pub(crate) struct ScmDecomposer {}
 
 impl Decompose for ScmDecomposer {
 	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable> {

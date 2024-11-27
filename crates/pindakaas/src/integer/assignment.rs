@@ -1,9 +1,7 @@
-use crate::{integer::var::IntVarId, Coeff, Lit, Valuation, Var};
+use crate::{Coeff, Lit, Valuation, Var};
 use std::{
 	cmp::Ordering,
-	collections::{HashMap, HashSet},
 	fmt::Display,
-	ops::Index,
 };
 
 use itertools::Itertools;

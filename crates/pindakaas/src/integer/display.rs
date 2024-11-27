@@ -5,7 +5,7 @@ use std::fmt::{self, Display};
 use itertools::Itertools;
 
 use crate::integer::IntVar;
-use crate::integer::{model::Cse, Assignment, Dom, LinExp};
+use crate::integer::{model::Cse, Dom, LinExp};
 use crate::Coeff;
 
 use super::model::{Obj, USE_CSE};

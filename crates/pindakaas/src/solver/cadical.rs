@@ -142,8 +142,8 @@ mod tests {
 		);
 	}
 
-	use crate::Cnf;
-	use std::path::Path;
+	
+	
 
 	// #[test]
 	// fn test_cadical_examples() {

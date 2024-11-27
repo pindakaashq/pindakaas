@@ -8,7 +8,7 @@ use crate::integer::Lin;
 use crate::CheckError;
 use std::{
 	cell::RefCell,
-	collections::{BTreeSet, HashSet},
+	collections::BTreeSet,
 	rc::Rc,
 };
 

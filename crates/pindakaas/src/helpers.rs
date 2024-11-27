@@ -49,7 +49,7 @@ pub(crate) fn pow2(k: u32) -> Coeff {
 }
 
 // Copied from num library
-pub const fn div_ceil(a: Coeff, b: Coeff) -> Coeff {
+pub(crate) const fn div_ceil(a: Coeff, b: Coeff) -> Coeff {
 	let d = a / b;
 	let r = a % b;
 	if (r > 0 && b > 0) || (r < 0 && b < 0) {
@@ -59,7 +59,7 @@ pub const fn div_ceil(a: Coeff, b: Coeff) -> Coeff {
 	}
 }
 
-pub const fn div_floor(a: Coeff, b: Coeff) -> Coeff {
+pub(crate) const fn div_floor(a: Coeff, b: Coeff) -> Coeff {
 	let d = a / b;
 	let r = a % b;
 	if (r > 0 && b < 0) || (r < 0 && b > 0) {
