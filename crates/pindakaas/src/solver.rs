@@ -4,8 +4,6 @@ pub mod cadical;
 pub mod intel_sat;
 #[cfg(feature = "kissat")]
 pub mod kissat;
-#[cfg(feature = "libloading")]
-pub mod libloading;
 #[cfg(feature = "external-propagation")]
 pub mod propagation;
 #[cfg(feature = "splr")]

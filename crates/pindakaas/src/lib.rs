@@ -22,7 +22,7 @@ pub mod trace;
 /// General log function
 macro_rules! log {
     ($fmt:expr $(, $args:expr)* ) => {
-        #[cfg(feature = "trace")]
+        #[cfg(feature = "tracing")]
         tracing::info!($fmt $(, $args)*)
     }
 }
@@ -1066,17 +1066,18 @@ mod tests {
 			.collect_vec()
 			.into_iter()
 			.sorted()
-                        .zip([(2,1,2), (0,1,0), (0,0,0)]) // statics; notice ex2 is short-circuited
+			.zip([(2, 1, 2), (0, 1, 0), (0, 0, 0)])
+		// statics; notice ex2 is short-circuited
 		{
-                    let cnf = Cnf::from_file(&f).unwrap();
+			let cnf = Cnf::from_file(&f).unwrap();
 			assert_encoding(
 				// &Cnf::from_file(&f).unwrap_or_else(Cnf::from),
 				&cnf,
 				&expect_file![f.display()],
 			);
-                        assert_eq!(cnf.variables(), vars, "{cnf} did not have {vars} vars");
-                        assert_eq!(cnf.clauses(), cls, "{cnf} did not have {cls} clauses");
-                        assert_eq!(cnf.literals(), lits, "{cnf} did not have {lits} literal");
+			assert_eq!(cnf.variables(), vars, "{cnf} did not have {vars} vars");
+			assert_eq!(cnf.clauses(), cls, "{cnf} did not have {cls} clauses");
+			assert_eq!(cnf.literals(), lits, "{cnf} did not have {lits} literal");
 			// println!("{cnf} \n {}", std::fs::read_to_string(&f).unwrap());
 			// assert_eq!(
 			// 	String::from(format!("{cnf}")), // TODO display might not be DIMACS in the future

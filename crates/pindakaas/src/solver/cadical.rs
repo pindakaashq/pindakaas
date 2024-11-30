@@ -99,15 +99,14 @@ mod tests {
 	use crate::Encoder;
 	use crate::Valuation;
 
-
-        use crate::solver::TermCallback;
+	use crate::solver::TermCallback;
 
 	#[test]
 	fn test_cadical_term() {
 		let mut slv = Cadical::default();
 
-                slv.set_terminate_callback(Some(move || SlvTermSignal::Terminate));
-                assert!(matches!(slv.solve(), SolveResult::Unknown));
+		slv.set_terminate_callback(Some(move || SlvTermSignal::Terminate));
+		assert!(matches!(slv.solve(), SolveResult::Unknown));
 	}
 
 	#[test]
@@ -141,9 +140,6 @@ mod tests {
 			(solution.value(!a) && solution.value(b)) || (solution.value(a) && solution.value(!b))
 		);
 	}
-
-	
-	
 
 	// #[test]
 	// fn test_cadical_examples() {

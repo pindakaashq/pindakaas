@@ -6,11 +6,7 @@ use crate::integer::var::IntVarId;
 use crate::integer::var::IntVarRef;
 use crate::integer::Lin;
 use crate::CheckError;
-use std::{
-	cell::RefCell,
-	collections::BTreeSet,
-	rc::Rc,
-};
+use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
@@ -511,9 +507,9 @@ impl Model {
 				.chain([CheckError::Fail(format!(
 					"
 {:?}
-Extra solutions:
+Extra solutions ({}):
 {}
-Missing solutions:
+Missing solutions ({}):
 {}
 Expected assignments:
 {}
@@ -521,6 +517,7 @@ Actual assignments:
 {}
 ",
 					self.config,
+					extra_int_assignments.len(),
 					if actual_assignments.is_empty() {
 						String::from("  Unsatisfiable")
 					} else {
@@ -529,6 +526,7 @@ Actual assignments:
 							.map(|a| format!("+ {}", a))
 							.join("\n")
 					},
+					missing_int_assignments.len(),
 					missing_int_assignments
 						.iter()
 						.map(|a| format!("- {}", a))

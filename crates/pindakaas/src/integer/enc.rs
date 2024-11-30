@@ -27,6 +27,12 @@ pub(crate) enum LitOrConst {
 	Const(bool),
 }
 
+impl Default for LitOrConst {
+	fn default() -> Self {
+		Self::Const(false)
+	}
+}
+
 impl From<LitOrConst> for Vec<Vec<Lit>> {
 	fn from(a: LitOrConst) -> Vec<Vec<Lit>> {
 		match a {
