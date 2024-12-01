@@ -1,8 +1,5 @@
 use crate::{Coeff, Lit, Valuation, Var};
-use std::{
-	cmp::Ordering,
-	fmt::Display,
-};
+use std::{cmp::Ordering, fmt::Display};
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap;

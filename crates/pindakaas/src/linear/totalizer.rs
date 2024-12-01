@@ -12,7 +12,7 @@ use crate::{
 pub struct TotalizerEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,
-	cutoff: Option<Coeff>,
+	cutoff: Mix,
 }
 
 impl TotalizerEncoder {
@@ -24,7 +24,7 @@ impl TotalizerEncoder {
 		self.add_propagation = c;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: Mix) -> &mut Self {
 		self.cutoff = c;
 		self
 	}

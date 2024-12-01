@@ -13,6 +13,8 @@ use crate::{
 
 use crate::integer::{enc::IntVarEnc, Assignment, Decomposer, Model, ModelConfig};
 
+use super::Mix;
+
 pub trait Decompose {
 	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable>;
 }
@@ -133,7 +135,7 @@ impl Decompose for EqualizeTernsDecomposer {
 
 #[derive(Debug, Default)]
 pub(crate) struct EncSpecDecomposer {
-	pub(crate) cutoff: Option<Coeff>,
+	pub(crate) cutoff: Mix,
 	pub(crate) spec: Option<FxHashMap<IntVarId, IntVarEnc>>,
 }
 
@@ -143,6 +145,7 @@ impl Decompose for EncSpecDecomposer {
 		model
 			.vars()
 			.map(|x| {
+				let mix = &self.cutoff;
 				if let Some(spec) = self.spec.as_ref() {
 					// only encode var which are specified
 					if let Some(var_enc) = {
@@ -153,7 +156,7 @@ impl Decompose for EncSpecDecomposer {
 						x.borrow_mut().e = Some(var_enc.clone());
 					}
 				} else {
-					x.borrow_mut().decide_encoding(self.cutoff);
+					x.borrow_mut().decide_encoding(mix);
 				}
 				let is_order = matches!(x.borrow().e, Some(IntVarEnc::Ord(_)));
 				if !is_order && x.borrow().lbl.as_ref().unwrap().contains("bdd") {

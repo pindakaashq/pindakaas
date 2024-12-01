@@ -18,7 +18,7 @@ pub use con::{Lin, LinExp};
 pub use decompose::Decompose;
 pub use dom::Dom;
 pub use helpers::Format;
-pub use model::{Consistency, Decomposer, Model, ModelConfig, Obj, Scm};
+pub use model::{Consistency, Decomposer, Mix, Model, ModelConfig, Obj, Scm};
 pub use term::Term;
 pub use var::{IntVar, IntVarRef};
 

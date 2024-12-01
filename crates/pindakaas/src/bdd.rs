@@ -1,7 +1,6 @@
 use crate::{
 	bool_linear::{Comparator, LinMarker, NormalizedBoolLinear},
-	integer::IntVar,
-	integer::{Decompose, Decomposer, Dom, Lin, LinExp, Model, ModelConfig, Term},
+	integer::{Decompose, Decomposer, Dom, IntVar, Lin, LinExp, Mix, Model, ModelConfig, Term},
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 
@@ -12,7 +11,7 @@ use std::{collections::HashMap, ops::Range};
 /// Decision Diagram (BDD)
 pub struct BddEncoder {
 	add_consistency: bool,
-	cutoff: Option<Coeff>,
+	cutoff: Mix,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,7 +42,7 @@ impl BddEncoder {
 		self.add_consistency = b;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: Mix) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
@@ -233,7 +232,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
 	fn encode(&self, db: &mut DB, lin: &NormalizedBoolLinear) -> Result {
 		let mut model = Model {
 			config: ModelConfig {
-				cutoff: self.cutoff,
+				cutoff: self.cutoff.clone(),
 				add_consistency: self.add_consistency,
 				decomposer: Decomposer::Bdd,
 				..ModelConfig::default()

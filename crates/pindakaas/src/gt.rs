@@ -1,7 +1,8 @@
 use crate::{
 	bool_linear::{LinMarker, NormalizedBoolLinear},
-	integer::IntVar,
-	integer::{Consistency, Decompose, Decomposer, Dom, Lin, Model, ModelConfig, Term},
+	integer::{
+		Consistency, Decompose, Decomposer, Dom, IntVar, Lin, Mix, Model, ModelConfig, Term,
+	},
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 
@@ -11,7 +12,7 @@ use crate::{
 pub struct TotalizerEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,
-	cutoff: Option<Coeff>,
+	cutoff: Mix,
 }
 
 use itertools::Itertools;
@@ -25,7 +26,7 @@ impl TotalizerEncoder {
 		self.add_propagation = c;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: Mix) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
@@ -98,7 +99,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for TotalizerEncoder 
 		// TODO move options from encoder to model config?
 		let mut model = Model {
 			config: ModelConfig {
-				cutoff: self.cutoff,
+				cutoff: self.cutoff.clone(),
 				propagate: self.add_propagation,
 				add_consistency: self.add_consistency,
 				decomposer: Decomposer::Gt,

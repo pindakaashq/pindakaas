@@ -61,12 +61,22 @@ pub enum Decomposer {
 	Rca,
 }
 
+/// Mixed encoding cutoff
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Mix {
+	#[default]
+	Order,
+	Mix(Coeff),
+	Binary,
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ModelConfig {
 	/// Which SCM method to use
 	pub scm: Scm,
-	pub cutoff: Option<Coeff>,
+	pub cutoff: Mix,
 	pub decomposer: Decomposer,
 	/// Rewrites all but last equation x:B + y:B ≤ z:B to x:B + y:B = z:B
 	pub equalize_ternaries: bool,
@@ -284,7 +294,7 @@ impl Model {
 		self.vars()
 			.sorted_by_key(|var| var.borrow().id)
 			.try_for_each(|var| {
-				var.borrow_mut().decide_encoding(self.config.cutoff);
+				var.borrow_mut().decide_encoding(&self.config.cutoff);
 				var.borrow_mut().encode(db).map(|_| ())
 			})
 	}
@@ -704,8 +714,8 @@ mod tests {
 			// [true],          // equalize terns
 			// [Some(0)], // cutoffs: [None, Some(0), Some(2)]
 			// [*TEST_CUTOFF], // cutoffs: [None, Some(0), Some(2)]
-			[None], // cutoffs: [None, Some(0), Some(2)]
-			[false]    // equalize_uniform_bin_ineqs
+			[Mix::Order], // cutoffs: [None, Some(0), Some(2)]
+			[false]       // equalize_uniform_bin_ineqs
 		)
 		.map(
 			|(
@@ -722,7 +732,7 @@ mod tests {
 					decomposer: decomposer.clone(),
 					propagate,
 					add_consistency,
-					equalize_ternaries: cutoff == Some(0),
+					equalize_ternaries: cutoff == Mix::Binary,
 					cutoff,
 					equalize_uniform_bin_ineqs,
 				}
@@ -1804,7 +1814,7 @@ End
 	fn test_couple_inconsistent() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -1834,7 +1844,7 @@ End
 	fn test_couple_view() {
 		let base = ModelConfig {
 			scm: Scm::Dnf,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -1862,7 +1872,7 @@ End
 	fn test_couple_mid() {
 		let base = ModelConfig {
 			scm: Scm::Dnf,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -1971,7 +1981,7 @@ End
 	fn test_tmp_red() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Some(2),
+			cutoff: Mix::Mix(2),
 			// cutoff: None,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2029,7 +2039,7 @@ End
 	fn _test_tmp_whiteboard() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2058,7 +2068,7 @@ End
 	fn _test_sugar() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2086,7 +2096,7 @@ End
 	fn test_sugar_2() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2110,7 +2120,7 @@ End
 	fn test_sugar_4() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2134,7 +2144,7 @@ End
 	fn test_sugar_le() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2159,7 +2169,7 @@ End
 	fn _test_bddpbc() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2183,7 +2193,7 @@ End
 	fn test_sugar_5() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2207,7 +2217,7 @@ End
 	fn test_sugar_6() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2232,7 +2242,7 @@ End
 	fn _test_sugar_pbc() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2259,7 +2269,7 @@ End
 	fn test_sugar_singles() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2315,7 +2325,7 @@ End
 	fn test_sugar_singles_2() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: None,
+			cutoff: Mix::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,

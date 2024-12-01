@@ -11,7 +11,8 @@ use crate::{
 };
 
 use super::{
-	bin::BinEnc, enc::IntVarEnc, helpers::required_lits, ord::OrdEnc, Dom, Model, PosCoeff,
+	bin::BinEnc, enc::IntVarEnc, helpers::required_lits, model::Mix, ord::OrdEnc, Dom, Model,
+	PosCoeff,
 };
 
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
@@ -362,15 +363,15 @@ impl IntVar {
 		self.dom.ub()
 	}
 
-	pub(crate) fn decide_encoding(&mut self, cutoff: Option<Coeff>) -> IntVarEnc {
+	pub(crate) fn decide_encoding(&mut self, mix: &Mix) -> IntVarEnc {
 		if let Some(e) = self.e.as_ref() {
 			return e.clone();
 		}
-		self.e = Some(match cutoff {
-			None => IntVarEnc::Ord(None),
-			Some(0) => IntVarEnc::Bin(None),
-			Some(cutoff) => {
-				if self.dom.size() <= cutoff {
+		self.e = Some(match mix {
+			Mix::Order => IntVarEnc::Ord(None),
+			Mix::Binary => IntVarEnc::Bin(None),
+			Mix::Mix(cutoff) => {
+				if self.dom.size() <= *cutoff {
 					IntVarEnc::Ord(None)
 				} else {
 					IntVarEnc::Bin(None)
