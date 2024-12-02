@@ -1,25 +1,11 @@
-#![allow(unused_imports, unused_variables, dead_code)]
 use std::{
-	collections::{BTreeSet, HashSet},
+	collections::BTreeSet,
 	fmt::{self, Display},
-	hash::BuildHasherDefault,
-	ops::{Not, Range},
+	ops::Not,
 };
-
-use iset::{interval_map, interval_set, IntervalMap, IntervalSet};
-use itertools::Itertools;
-use rustc_hash::FxHashMap;
 
 use super::{bin::BinEnc, ord::OrdEnc};
-use crate::{
-	helpers::{as_binary, is_powers_of_two, negate_cnf},
-	integer::IntVar,
-	integer::{
-		helpers::{filter_fixed, required_lits},
-		Dom,
-	},
-	Checker, ClauseDatabase, Cnf, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation, Var,
-};
+use crate::{integer::Dom, ClauseDatabase, Lit, Result, Var};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[allow(
@@ -102,8 +88,6 @@ pub(crate) enum IntVarEnc {
 	Ord(Option<OrdEnc>),
 	Bin(Option<BinEnc>),
 }
-
-const COUPLE_DOM_PART_TO_ORD: bool = false;
 
 impl IntVarEnc {
 	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB, dom: &Dom) -> Result {

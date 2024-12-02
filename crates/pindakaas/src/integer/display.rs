@@ -114,20 +114,18 @@ impl Display for IntVar {
 			"{}{}{} ∈ {}{}",
 			self.lbl(),
 			match self.e.as_ref() {
-				Some(IntVarEnc::Bin(_)) => ":B".to_string(),
-				Some(IntVarEnc::Ord(_)) => ":O".to_string(),
+				Some(IntVarEnc::Bin(_)) => String::from(":B"),
+				Some(IntVarEnc::Ord(_)) => String::from(":O"),
 				None => String::new(),
 			},
 			if self.add_consistency { "" } else { "!" },
 			self.dom,
 			if SHOW_LITS {
 				format!("[{}]", self.lits().iter().sorted().join(", "))
+			} else if !self.lits().is_empty() {
+				format!(" {}L", self.lits().len())
 			} else {
-				if self.lits().len() > 0 {
-					format!(" {}L", self.lits().len())
-				} else {
-					"".to_string()
-				}
+				String::new()
 			},
 		)
 	}

@@ -161,7 +161,7 @@ impl Decompose for EncSpecDecomposer {
 				let is_order = matches!(x.borrow().e, Some(IntVarEnc::Ord(_)));
 				if !is_order && x.borrow().lbl.as_ref().unwrap().contains("bdd") {
 					// TODO experiment using density heuristic: || x.borrow().dom.density() > 0.3
-					x.borrow_mut().add_consistency = false
+					x.borrow_mut().add_consistency = false;
 				}
 				(x.clone(), is_order)
 			})

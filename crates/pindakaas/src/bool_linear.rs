@@ -1061,9 +1061,7 @@ impl BoolLinExp {
 	}
 
 	pub(crate) fn value<F: Valuation + ?Sized>(&self, sol: &F) -> Coeff {
-		self.terms()
-			.map(|(l, c)| c * sol.value(l) as Coeff)
-			.fold(0, |acc, val| acc + val)
+		self.terms().map(|(l, c)| c * sol.value(l) as Coeff).sum()
 	}
 }
 

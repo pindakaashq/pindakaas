@@ -1,6 +1,4 @@
-#![allow(unreachable_code)]
 use crate::integer::enc::IntVarEnc;
-use crate::integer::enc::LitOrConst;
 use crate::integer::Lin;
 use crate::integer::LinExp;
 use crate::integer::Model;
@@ -15,7 +13,7 @@ use bzip2::read::BzDecoder;
 use flate2::bufread::GzDecoder;
 use itertools::Itertools;
 
-use crate::{bool_linear::Comparator, helpers::pow2, integer::Dom, Coeff, Lit};
+use crate::{bool_linear::Comparator, integer::Dom, Coeff, Lit};
 
 #[derive(Debug)]
 pub enum Format {
@@ -31,28 +29,6 @@ pub(crate) fn required_lits(lb: Coeff, ub: Coeff) -> usize {
 	} else {
 		(cardinality.ilog2() + 1) as usize
 	}
-}
-
-/// Return a linear expression of non-fixed literals and their coefficient, and a constant `add` resulting from the fixed literals
-pub(crate) fn filter_fixed(xs: &[LitOrConst]) -> (Vec<(Lit, Coeff)>, Coeff) {
-	let mut add = 0; // resulting from fixed terms
-	(
-		xs.iter()
-			.enumerate()
-			.filter_map(|(k, x)| {
-				let a = pow2(k as u32);
-				match x {
-					LitOrConst::Lit(l) => Some((*l, a)),
-					LitOrConst::Const(true) => {
-						add += a;
-						None
-					}
-					LitOrConst::Const(false) => None,
-				}
-			})
-			.collect::<Vec<_>>(),
-		add,
-	)
 }
 
 impl Model {
@@ -173,7 +149,7 @@ End
 		let mut state = State::None;
 		let mut cmp: Option<Comparator> = None;
 		let mut c: Option<Coeff> = None;
-		let mut is_positive: bool = true;
+		let mut is_positive = true;
 
 		let mut model = Model::default();
 
@@ -288,7 +264,7 @@ End
 							for token in line {
 								match *token {
 									"->" => {
-										return Err("Indicator variables not supported".to_string());
+										return Err("Indicator variables not supported".to_owned());
 									}
 									">=" => {
 										cmp = Some(Comparator::GreaterEq);
@@ -315,7 +291,7 @@ End
 													lbl: if next_lbl.is_empty() {
 														None
 													} else {
-														Some(next_lbl.to_string())
+														Some(next_lbl.to_owned())
 													},
 												})
 												.unwrap();
@@ -328,7 +304,7 @@ End
 														Dom::pb(),
 														true,
 														None,
-														Some(token.to_string()),
+														Some(token.to_owned()),
 													)
 													.unwrap()
 											});
@@ -360,7 +336,7 @@ End
 
 							// // push last constraint/obj if exists
 							// if let (Some(curr_cmp), Some(curr_k)) = (cmp, k) {
-							// 	cons.push((con, curr_cmp, curr_k, Some(lbl.unwrap().to_string())));
+							// 	cons.push((con, curr_cmp, curr_k, Some(lbl.unwrap().to_owned())));
 							// 	lbl = None;
 							// 	cmp = None;
 							// 	k = None;
@@ -420,7 +396,7 @@ End
 														Dom::pb(),
 														true,
 														None,
-														Some(token.to_string()),
+														Some(token.to_owned()),
 													)
 													.unwrap()
 											});
@@ -460,7 +436,7 @@ pub(crate) fn display_cnf(cnf: &[Vec<Lit>]) -> String {
 	cnf.iter()
 		.map(|c| c.iter().join(", "))
 		.join("\n")
-		.to_string()
+		.to_owned()
 }
 
 /// is clause a subset of b

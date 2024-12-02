@@ -1,4 +1,3 @@
-#![allow(clippy::absurd_extreme_comparisons)]
 use crate::helpers::emit_clause;
 use crate::integer::term::Term;
 use crate::integer::var::IntVarId;
@@ -743,15 +742,12 @@ impl Lin {
 
 #[cfg(test)]
 #[cfg(feature = "cadical")]
-#[allow(unused_imports)]
 mod tests {
 
 	use crate::helpers::tests::assert_encoding;
 	use crate::helpers::tests::expect_file;
-	use crate::integer::Lin;
 	use crate::integer::Model;
 	use crate::Cnf;
-	use crate::Lit;
 
 	#[cfg(feature = "tracing")]
 	use traced_test::test;

@@ -6,7 +6,7 @@ use crate::integer::var::IntVarId;
 use crate::integer::var::IntVarRef;
 use crate::integer::Lin;
 use crate::CheckError;
-use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
+use std::collections::BTreeSet;
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
@@ -164,7 +164,7 @@ impl FromIterator<Model> for Model {
 		let mut c = Model::default();
 
 		for i in iter {
-			c.extend(std::iter::once(i))
+			c.extend(std::iter::once(i));
 		}
 
 		c
@@ -239,10 +239,8 @@ impl Model {
 			.unwrap()
 	}
 
-	// TODO used for experiments, made private for release
-	#[allow(dead_code)]
 	/// Decompose every constraint
-	pub(crate) fn fold(self, decompose: impl Fn(Self) -> Result<Self>) -> Result<Model> {
+	pub fn fold(self, decompose: impl Fn(Self) -> Result<Self>) -> Result<Model> {
 		let Model {
 			cons,
 			num_var,
@@ -473,7 +471,7 @@ impl Model {
 				// is_unique(a.clone().iter().map(|a| a.clone().iter().sorted().collect_vec())),
 				"Expected unique {mess} assignments but got:\n{}",
 				a.iter().map(|a| format!("{}", a)).join("\n")
-			)
+			);
 		};
 
 		let expected_assignments = canonicalize(&expected_assignments);
@@ -571,15 +569,16 @@ Actual assignments:
 		Model { config, ..self }
 	}
 
-	// TODO used for experiments, made private for release
-	#[allow(dead_code)]
+	#[cfg(test)]
 	pub(crate) fn deep_clone(&self) -> Self {
 		// pff; cannot call deep_clone recursively on all the constraints, as it will deep_clone recurring variables multiple times
+
+		use std::{cell::RefCell, rc::Rc};
 		let vars = self
 			.vars()
 			.map(|x| (x.borrow().id, Rc::new(RefCell::new((*x.borrow()).clone()))))
 			.collect::<FxHashMap<_, _>>();
-		#[allow(clippy::needless_update)]
+		#[allow(clippy::needless_update, reason = "TODO unsure how to avoid")]
 		Self {
 			cons: self
 				.cons
@@ -680,9 +679,9 @@ mod tests {
 		});
 
 		// Add variables using dom/slice with optional label
-		let x1 = model.new_var(&[0, 2], Some("x1".to_string())).unwrap();
-		let x2 = model.new_var(&[0, 3], Some("x2".to_string())).unwrap();
-		let x3 = model.new_var(&[0, 5], Some("x3".to_string())).unwrap();
+		let x1 = model.new_var(&[0, 2], Some("x1".to_owned())).unwrap();
+		let x2 = model.new_var(&[0, 3], Some("x2".to_owned())).unwrap();
+		let x3 = model.new_var(&[0, 5], Some("x3".to_owned())).unwrap();
 
 		// Add (linear) constraint
 		model
@@ -745,7 +744,7 @@ mod tests {
 		test_model(
 			Model::from_string(lp, Format::Lp).unwrap(),
 			Some(configs.unwrap_or_else(get_model_configs)),
-		)
+		);
 	}
 
 	/// Checks decomposition (without encoding)
@@ -762,7 +761,7 @@ mod tests {
 				decomposition_expected_assignments,
 				expected_assignments,
 				*BRUTE_FORCE_SOLVE,
-				&model.vars().map(|x| x.clone()).collect_vec(),
+				&model.vars().collect_vec(),
 			) {
 				for err in errs {
 					println!("Decomposition error:\n{err}");
@@ -779,9 +778,7 @@ mod tests {
 		var_encs: &[IntVarEnc],
 		vars: Vec<IntVarRef>,
 	) -> Vec<FxHashMap<IntVarId, IntVarEnc>> {
-		if var_encs.is_empty() {
-			return vec![FxHashMap::default()];
-		} else if TEST_CUTOFF.is_some() {
+		if var_encs.is_empty() || TEST_CUTOFF.is_some() {
 			return vec![FxHashMap::default()];
 		}
 
@@ -944,7 +941,7 @@ mod tests {
 						"checking config #{i} = {:?}\ndecomposition #{j} = {}",
 						model.config, decomposition,
 					);
-					test_decomp(decomposition, &model, expected_assignments)
+					test_decomp(decomposition, &model, expected_assignments);
 				}
 			}
 		}
@@ -1024,7 +1021,7 @@ mod tests {
 			&actual_assignments,
 			expected_assignments,
 			*BRUTE_FORCE_SOLVE,
-			&model.vars().map(|x| x.clone()).collect_vec(),
+			&model.vars().collect_vec(),
 		);
 		if let Err(errs) = check {
 			for err in errs {
@@ -1319,7 +1316,7 @@ Bounds
 End
 ",
 			None,
-		)
+		);
 	}
 
 	// Shows the problem for current binary ineq method

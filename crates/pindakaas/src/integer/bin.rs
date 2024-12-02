@@ -1,4 +1,3 @@
-#![allow(clippy::absurd_extreme_comparisons)]
 use crate::bool_linear::Comparator;
 use crate::bool_linear::PosCoeff;
 use crate::helpers;
@@ -216,7 +215,10 @@ impl BinEnc {
 		let ineqs = (r_a..=r_b)
 			.flat_map(|k| {
 				let k = if up { k - 1 } else { k };
-				#[allow(clippy::let_and_return)]
+				#[allow(
+					clippy::let_and_return,
+					reason = "we need ineq in case of trace enabled"
+				)]
 				let ineq = self.ineq(k, up); // returns cnf
 				log!("{k} -> ineq = {ineq:?}");
 				ineq
@@ -428,7 +430,7 @@ impl BinEnc {
 		let xs = self
 			.xs()
 			.into_iter()
-			.skip(usize::try_from(bits - lits).unwrap())
+			.skip(bits - lits)
 			.map(|x| match x {
 				LitOrConst::Lit(x) => x,
 				LitOrConst::Const(_) => panic!("Fixed bits not at front in {self}"),

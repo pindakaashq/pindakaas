@@ -27,11 +27,14 @@ impl LinMarker for BddEncoder {}
 use iset::IntervalMap;
 use itertools::Itertools;
 
-#[allow(dead_code)]
+#[allow(
+	dead_code,
+	reason = "None sorting is useful for debugging (TODO perhaps good indication that I should add test using it?)"
+)]
 enum BddSort {
-	Asc,  // Bad
-	Dsc,  // Good
-	None, // useful for debugging
+	Asc, // Bad
+	Dsc, // Good
+	None,
 }
 
 /// Determine sorting order of terms (useful for debugging)
@@ -146,7 +149,7 @@ impl Decompose for BddEncoder {
 		// x2 ∈ {0,3} + y_1 ∈ {1,2} ≤ y_2 ∈ {1,5}
 		// x3 ∈ {0,5} + y_2 ∈ {1,5} ≤ y_3 ∈ {6}
 		// TODO since both borrow model, I don't know how to avoid needless_collect
-		#[allow(clippy::needless_collect)]
+		#[allow(clippy::needless_update, reason = "TODO unsure how to avoid")]
 		let ys = ys
 			.into_iter()
 			.enumerate()

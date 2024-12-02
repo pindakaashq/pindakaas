@@ -107,7 +107,7 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 				continue;
 			}
 		}
-		emit_clause!(db, cls)?
+		emit_clause!(db, cls)?;
 	}
 	Ok(())
 }

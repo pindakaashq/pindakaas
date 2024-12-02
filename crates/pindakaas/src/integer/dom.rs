@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use std::ops::RangeInclusive;
 
 use itertools::{FoldWhile, Itertools};
@@ -174,6 +173,7 @@ impl Dom {
 		}
 	}
 
+	#[allow(dead_code, reason = "will be useful in the future")]
 	pub(crate) fn mul(self, rhs: Coeff) -> Self {
 		assert!(!rhs.is_negative());
 		Dom {
@@ -185,7 +185,10 @@ impl Dom {
 		}
 	}
 
-	// TODO optimize
+	#[allow(
+		dead_code,
+		reason = "will be useful in the future (also needs to be optimized for serious use)"
+	)]
 	pub(crate) fn union(self, rhs: Dom) -> Self {
 		Dom::from_slice(
 			&[self.iter().collect_vec(), rhs.iter().collect_vec()]

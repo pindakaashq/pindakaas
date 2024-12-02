@@ -27,7 +27,7 @@ impl Assignment {
 	/// Return assignment of a subset of variables
 	pub fn partialize(&self, xs: &[IntVarRef]) -> Self {
 		Self::from(
-			xs.into_iter()
+			xs.iter()
 				.map(|x| (x.clone(), self.value(&x.borrow()).unwrap()))
 				.collect_vec(),
 		)
