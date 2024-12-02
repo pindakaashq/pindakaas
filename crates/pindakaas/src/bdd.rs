@@ -32,13 +32,16 @@ use itertools::Itertools;
 	reason = "None sorting is useful for debugging (TODO perhaps good indication that I should add test using it?)"
 )]
 enum BddSort {
-	Asc, // Bad
-	Dsc, // Good
-	None,
+	Asc,  // Bad
+	Dsc,  // Good
+	None, // Good for debugging
 }
 
 /// Determine sorting order of terms (useful for debugging)
+#[cfg(debug_assertions)]
 const SORT_TERMS: BddSort = BddSort::Dsc;
+#[cfg(not(debug_assertions))]
+const SORT_TERMS: BddSort = BddSort::None;
 
 impl BddEncoder {
 	pub fn add_consistency(&mut self, b: bool) -> &mut Self {

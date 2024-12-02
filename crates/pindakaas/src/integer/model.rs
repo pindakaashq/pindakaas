@@ -383,21 +383,21 @@ impl Model {
 		);
 		/// Limit the search space for solution generation
 		const MAX_SEARCH_SPACE: Option<usize> = Some(250);
-		let mut max_search_space = MAX_SEARCH_SPACE;
+		let mut budget = MAX_SEARCH_SPACE;
 		let mut last_s = None;
 
 		Ok(vars
 			.iter()
 			.map(|var| {
 				let ds = var.borrow().dom.iter().collect::<Vec<_>>();
-				if let Some(curr_max_search_space) = max_search_space {
+				if let Some(_budget) = budget {
 					if let Some(new_max_search_space) =
-						curr_max_search_space.checked_sub(ds.len() * last_s.unwrap_or(1))
+						_budget.checked_sub(ds.len() * last_s.unwrap_or(1))
 					{
-						max_search_space = Some(new_max_search_space);
+						budget = Some(new_max_search_space);
 						last_s = Some(ds.len());
 					} else {
-						return Err(());
+						panic!("search space exceeded brute-force limit of {MAX_SEARCH_SPACE:?} for model:\n{self}");
 					}
 				}
 				Ok(ds)
@@ -645,18 +645,20 @@ mod tests {
 		}};
 	}
 
+	static TEST_CUTOFF: LazyLock<Option<i64>> = get_int_flag!("--mix");
+
 	/// Which uniform (for now) integer encoding specifications to test
-	static VAR_ENCS: LazyLock<Vec<IntVarEnc>> = LazyLock::new(|| {
+	static VAR_ENCS: LazyLock<Vec<Mix>> = LazyLock::new(|| {
 		std::env::args()
-			.filter_map(|arg| match arg.as_str() {
-				"--ord" => Some(IntVarEnc::Ord(None)),
-				"--bin" => Some(IntVarEnc::Bin(None)),
+			.map(|arg| match arg.as_str() {
+				"--ord" => Some(Mix::Order),
+				"--bin" => Some(Mix::Binary),
 				_ => None,
 			})
+			.chain([TEST_CUTOFF.map(Mix::Mix)])
+			.flatten()
 			.collect()
 	});
-
-	static TEST_CUTOFF: LazyLock<Option<i64>> = get_int_flag!("--mix");
 
 	/// Generate solutions for expected models
 	static BRUTE_FORCE_SOLVE: LazyLock<bool> = has_bool_flag!("--brute-force-solve");
@@ -668,7 +670,7 @@ mod tests {
 	static SHOW_AUX: LazyLock<bool> = has_bool_flag!("--show-aux");
 
 	static TEST_CONFIG_I: LazyLock<Option<usize>> = get_int_flag!("--test-config");
-	static TEST_DECOMP_I: LazyLock<Option<usize>> = get_int_flag!("--test-decomp");
+	// static TEST_DECOMP_I: LazyLock<Option<usize>> = get_int_flag!("--test-decomp");
 
 	#[test]
 	fn model_test() {
@@ -712,9 +714,8 @@ mod tests {
 			[false], // consistency
 			// [true],          // equalize terns
 			// [Some(0)], // cutoffs: [None, Some(0), Some(2)]
-			// [*TEST_CUTOFF], // cutoffs: [None, Some(0), Some(2)]
-			[Mix::Order], // cutoffs: [None, Some(0), Some(2)]
-			[false]       // equalize_uniform_bin_ineqs
+			(*VAR_ENCS).iter().cloned(),
+			[false] // equalize_uniform_bin_ineqs
 		)
 		.map(
 			|(
@@ -731,7 +732,8 @@ mod tests {
 					decomposer: decomposer.clone(),
 					propagate,
 					add_consistency,
-					equalize_ternaries: cutoff == Mix::Binary,
+					// equalize_ternaries: cutoff == Mix::Binary,
+					equalize_ternaries: true,
 					cutoff,
 					equalize_uniform_bin_ineqs,
 				}
@@ -753,28 +755,33 @@ mod tests {
 		decomposition: &Model,
 		expected_assignments: Option<&Vec<Assignment>>,
 	) {
-		if !*BRUTE_FORCE_SOLVE {
-		} else if let Ok(decomposition_expected_assignments) = &decomposition
-			.generate_solutions((!*CHECK_CONSTRAINTS).then(|| model.vars().collect_vec()))
-		{
-			if let Err(errs) = model.check_assignments(
-				decomposition_expected_assignments,
-				expected_assignments,
-				*BRUTE_FORCE_SOLVE,
-				&model.vars().collect_vec(),
-			) {
-				for err in errs {
-					println!("Decomposition error:\n{err}");
+		if *BRUTE_FORCE_SOLVE {
+			if let Ok(decomposition_expected_assignments) =
+				&decomposition.generate_solutions(if *CHECK_CONSTRAINTS {
+					None
+					// Some(model.vars().collect_vec()) // model already encoded?
+				} else {
+					None
+				}) {
+				if let Err(errs) = model.check_assignments(
+					decomposition_expected_assignments,
+					expected_assignments,
+					*BRUTE_FORCE_SOLVE,
+					&model.vars().collect_vec(),
+				) {
+					for err in errs {
+						println!("Decomposition error:\n{err}");
+					}
+					panic!(
+						"Decomposition is incorrect. Test failed for {:?}\n{model}",
+						model.config
+					)
 				}
-				panic!(
-					"Decomposition is incorrect. Test failed for {:?}\n{model}",
-					model.config
-				)
 			}
 		}
 	}
 
-	fn expand_var_encs(
+	fn _expand_var_encs(
 		var_encs: &[IntVarEnc],
 		vars: Vec<IntVarRef>,
 	) -> Vec<FxHashMap<IntVarId, IntVarEnc>> {
@@ -871,7 +878,7 @@ mod tests {
 		} {
 			let model = model.deep_clone().with_config(config.clone());
 
-			for (j, var_encs) in {
+			for (j, _var_encs) in {
 				let lin_decomp = model
 					.clone()
 					.decompose_with(Some(&LinDecomposer::default()))
@@ -883,29 +890,31 @@ mod tests {
 				// 	check_decomposition(&model, &lin_decomp, expected_assignments.as_ref());
 				// }
 
-				let var_encs_gen = expand_var_encs(
-					&(*VAR_ENCS).iter().cloned().collect_vec(),
-					lin_decomp.vars().collect(),
-				);
-				if let Some(j) = *TEST_DECOMP_I {
-					vec![(
-						j,
-						var_encs_gen
-							.get(j)
-							.expect("TEST_DECOMP_I is not set to None")
-							.clone(),
-					)]
-				} else if var_encs_gen.is_empty() {
-					vec![(0, FxHashMap::default())]
-				} else {
-					var_encs_gen.into_iter().enumerate().collect_vec()
-				}
+				// let var_encs_gen = expand_var_encs(
+				// 	&(*VAR_ENCS).iter().cloned().collect_vec(),
+				// 	lin_decomp.vars().collect(),
+				// );
+				// if let Some(j) = *TEST_DECOMP_I {
+				// 	vec![(
+				// 		j,
+				// 		var_encs_gen
+				// 			.get(j)
+				// 			.expect("TEST_DECOMP_I is not set to None")
+				// 			.clone(),
+				// 	)]
+				// } else if var_encs_gen.is_empty() {
+				// 	vec![(0, FxHashMap::default())]
+				// } else {
+				// 	var_encs_gen.into_iter().enumerate().collect_vec()
+				// }
+				vec![(0, 0)]
 			} {
-				let spec = if (*VAR_ENCS).is_empty() {
-					None
-				} else {
-					Some(var_encs)
-				};
+				// let spec = if (*VAR_ENCS).is_empty() {
+				// 	None
+				// } else {
+				// 	Some(var_encs)
+				// };
+				let spec = None;
 				let decomposition = model.clone().decompose(spec).unwrap();
 
 				println!("decomposition = {}", decomposition);
@@ -1202,11 +1211,8 @@ End
 	macro_rules! test_lp {
 		($lp:expr) => {
 			test_lp_for_configs(
-				&std::fs::read_to_string(std::path::Path::new(&format!(
-					"./src/integer/res/lps/{}.lp",
-					$lp
-				)))
-				.unwrap(),
+				&std::fs::read_to_string(std::path::Path::new(&format!("./res/lps/{}.lp", $lp)))
+					.unwrap(),
 				None,
 			);
 		};
@@ -1225,6 +1231,26 @@ End
 	#[test]
 	fn le_2() {
 		test_lp!("le_2");
+	}
+
+	#[test]
+	fn eq_1() {
+		test_lp!("eq_1");
+	}
+
+	#[test]
+	fn eq_2() {
+		test_lp!("eq_2");
+	}
+
+	#[test]
+	fn eq_channel() {
+		test_lp!("eq_channel");
+	}
+
+	#[test]
+	fn eq_channel_term() {
+		test_lp!("eq_channel_term");
 	}
 
 	// #[test]

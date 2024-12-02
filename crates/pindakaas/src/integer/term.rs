@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 use super::{bin::BinEnc, enc::IntVarEnc, model::Scm, Dom, Model};
 use crate::{
 	bool_linear::{Comparator, PosCoeff},
-	helpers::as_binary,
+	helpers::{as_binary, div_ceil, div_floor},
 	integer::{
 		enc::LitOrConst,
 		model::{Cse, USE_CHANNEL, USE_CSE},
@@ -417,6 +417,18 @@ impl Term {
 
 	pub(crate) fn ineqs(&self, up: bool) -> Vec<(Coeff, Vec<Lit>, Coeff)> {
 		self.x.borrow().ineqs(up)
+	}
+
+	/// c*x >=k
+	pub(crate) fn ineq(&self, k: Coeff, up: bool, _: Option<Coeff>) -> Vec<Vec<Lit>> {
+		let k_ = if up {
+			div_ceil(k, self.c)
+		} else {
+			div_floor(k, self.c) + 1
+		};
+
+		let (_, cnf) = self.x.borrow().ineq(k_, up, None);
+		cnf
 	}
 
 	pub(crate) fn lb(&self) -> Coeff {

@@ -127,7 +127,7 @@ impl Comparator {
 	pub(crate) fn reverse(&self) -> Comparator {
 		match *self {
 			Comparator::LessEq => Comparator::GreaterEq,
-			Comparator::Equal => panic!("Cannot reverse {self}"),
+			Comparator::Equal => Comparator::Equal,
 			Comparator::GreaterEq => Comparator::LessEq,
 		}
 	}

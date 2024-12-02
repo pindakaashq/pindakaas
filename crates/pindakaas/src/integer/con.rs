@@ -1,4 +1,4 @@
-use crate::helpers::emit_clause;
+use crate::helpers::{emit_clause, negate_cnf, unsigned_binary_range};
 use crate::integer::term::Term;
 use crate::integer::var::IntVarId;
 use crate::integer::Format;
@@ -8,6 +8,7 @@ use crate::{log, CheckError};
 use itertools::Itertools;
 
 use super::enc::IntVarEnc;
+use super::helpers::remove_red;
 use super::model::{Consistency, Model, ModelConfig, USE_COUPLING_IO_LEX, VIEW_COUPLING};
 use crate::{
 	bool_linear::PosCoeff,
@@ -383,38 +384,92 @@ impl Lin {
 				}
 				let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
 
-				let up = match self.cmp {
-					Comparator::LessEq => false,
-					Comparator::Equal => unreachable!(),
-					Comparator::GreaterEq => true,
-				};
+				match self.cmp {
+					Comparator::LessEq | Comparator::GreaterEq => {
+						let up = self.cmp == Comparator::GreaterEq;
 
-				let (range_lb, range_ub) = y_enc.range();
-				let dom = &t_y.x.borrow().dom;
+						let (range_lb, range_ub) = y_enc.range();
+						let dom = &t_y.x.borrow().dom;
 
-				let mut xs = t_x
-					.ineqs(up)
-					.into_iter()
-					.map(|(c, x, _)| (*y_enc.normalize((t_x.c * c) - self.k, dom), x))
-					.collect_vec();
+						let mut xs = t_x
+							.ineqs(up)
+							.into_iter()
+							.map(|(c, x, _)| (*y_enc.normalize((t_x.c * c) - self.k, dom), x))
+							.collect_vec();
 
-				if up {
-					xs.reverse();
-					xs.push((range_ub, vec![]));
-				} else {
-					xs.insert(0, (range_lb, vec![]));
-				};
+						if up {
+							xs.reverse();
+							xs.push((range_ub, vec![]));
+						} else {
+							xs.insert(0, (range_lb, vec![]));
+						};
 
-				xs.into_iter()
-					.tuple_windows()
-					.try_for_each(|((c_a, x_a), (c_b, x_b))| {
-						let x = if up { x_a } else { x_b };
-						let (c_a, c_b) = (c_a + 1, c_b);
-						log!("{up} {c_a}..{c_b} -> {x:?}");
-						let y = y_enc.ineqs(c_a, c_b, !up);
-						log!("{y:?}");
-						add_clauses_for(db, vec![vec![x.clone()], y])
-					})
+						xs.into_iter()
+							.tuple_windows()
+							.try_for_each(|((c_a, x_a), (c_b, x_b))| {
+								let x = if up { x_a } else { x_b };
+								let (c_a, c_b) = (c_a + 1, c_b);
+								log!("{up} {c_a}..{c_b} -> {x:?}");
+								let y = y_enc.ineqs(c_a, c_b, !up);
+								log!("{y:?}");
+								add_clauses_for(db, vec![vec![x.clone()], y])
+							})
+					}
+					Comparator::Equal => {
+						log!("CHANNEL: {t_x} = {t_y}");
+						assert!(matches!(t_x.x.borrow().e, Some(IntVarEnc::Ord(_))));
+						assert!(matches!(t_y.x.borrow().e, Some(IntVarEnc::Bin(_))));
+						t_x.x.borrow_mut().encode_ord(db)?;
+						if !t_x.x.borrow().add_consistency {
+							t_x.x.borrow_mut().consistent(db)?;
+						}
+						let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
+
+						let (range_lb, range_ub) = unsigned_binary_range(y_enc.bits());
+						y_enc.x.iter().enumerate().try_for_each(|(i, y_i)| {
+							let r = Coeff::from(2).pow(i as u32);
+							let (l, u) = ((*range_lb).div_euclid(r), (*range_ub).div_euclid(r));
+							(l..=u).sorted_by_key(|k| *k).try_for_each(|k| {
+								let y_i = if k % 2 == 0 {
+									!y_i.clone()
+								} else {
+									y_i.clone()
+								};
+								let a = y_enc.denormalize(r * k, &t_y.x.borrow().dom); // x<a
+								let b = a + r; // x>=b (next segment)
+								let (a, b) = (a - 1, b); // not x>=a == x<a == x<=a-1, x>=b
+								 // (x>=a /\ x<b) -> b = k%2
+								 //   x<a \/ x>=b \/ b = k%2
+								 //   x<=a-1 \/ x>=b \/ b = k%2 (note
+								 // println!(
+								 // 	"({t_x}<={a}) or ({t_x}>={b}) OR {y_i}"
+								 // );
+								let x_a = t_x.ineq(a, false, None);
+								let x_b = t_x.ineq(b, true, None);
+								log!("({t_x}<={a} = {x_a:?}) OR {y_i} OR ({t_x}>={b} = {x_b:?})");
+								add_clauses_for(db, vec![x_a, y_i.into(), x_b])
+
+								// if x_a == negate_cnf(x_b.clone()) && false {
+								// 	None
+								// } else {
+								// 	Some(
+								// 		dbg!([x_a, y_i.into(), x_b]
+								// 			.into_iter()
+								// 			.flatten()
+								// 			.flatten()
+								// 			.collect()), // .into_iter()
+								// 		              // .multi_cartesian_product()
+								// 		              // .concat()
+								// 		              // .into_iter()
+								// 		              // // .into_iter()
+								// 		              // .flatten()
+								// 		              // .collect())
+								// 	)
+								// }
+							})
+						})
+					}
+				}
 			}
 			LinCase::Scm(t_x, y) => {
 				t_x.x.borrow_mut().encode_bin(db)?; // encode x (if not encoded already)
@@ -537,50 +592,7 @@ impl Lin {
 			[(t_x, Some(IntVarEnc::Ord(_))), (t_y, Some(IntVarEnc::Bin(_)))],
 			Comparator::Equal,
 		) if t_x.c.is_one() && t_y.c == -1 && USE_CHANNEL => {
-			t_x.x.borrow_mut().encode_ord(db)?;
-			if !t_x.x.borrow().add_consistency {
-				t_x.x.borrow_mut().consistent(db)?;
-			}
-			let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
 
-			let (range_lb, range_ub) = unsigned_binary_range(y_enc.bits());
-			y_enc.x.iter().enumerate().try_for_each(|(i, y_i)| {
-				let r = 2.pow(i);
-				let (l, u) = (range_lb.div(r), range_ub.div(r));
-				add_clauses_for(
-					db,
-					vec![remove_red(
-						num::iter::range_inclusive(l, u)
-							.sorted_by_key(|k| (k.is_even(), *k))
-							.filter_map(|k| {
-								let y_i = if k.is_even() {
-									-y_i.clone()
-								} else {
-									y_i.clone()
-								};
-								let a = y_enc.denormalize(r * k, &t_y.x.borrow().dom); // ??
-								let b = a + r;
-								let x_a = t_x.x.borrow().ineq(a, false, None).1;
-								let x_b = t_x.x.borrow().ineq(b, true, None).1;
-								if x_a == negate_cnf(x_b.clone()) {
-									None
-								} else {
-									Some(
-										[x_a, y_i.into(), x_b]
-											.into_iter()
-											.multi_cartesian_product()
-											.concat()
-											.into_iter()
-											// .into_iter()
-											.flatten()
-											.collect(),
-									)
-								}
-							})
-							.collect(),
-					)],
-				)
-			})
 		}
 		*/
 	}

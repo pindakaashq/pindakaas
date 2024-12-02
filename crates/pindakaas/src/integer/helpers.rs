@@ -133,10 +133,12 @@ End
 		Model::from_string(&s, format)
 	}
 
+	/// Superset of LP format:
+	/// allow anonymous constraints (w/o label) by `: ...`
+	/// allow Doms section for domain
 	pub fn from_string(s: &str, format: Format) -> Result<Self, String> {
 		#[derive(PartialEq)]
 		enum State {
-			None,
 			SubjectTo,
 			Binary,
 			Bounds,
@@ -146,7 +148,7 @@ End
 			Encs,
 		}
 
-		let mut state = State::None;
+		let mut state = State::SubjectTo;
 		let mut cmp: Option<Comparator> = None;
 		let mut c: Option<Coeff> = None;
 		let mut is_positive = true;
