@@ -22,6 +22,10 @@ use crate::{
 };
 
 #[derive(Copy, Clone, Debug, PartialEq)]
+#[allow(
+	variant_size_differences,
+	reason = "TODO this might be interesting to fix in the future if we can pack true/false into Lit"
+)]
 pub(crate) enum LitOrConst {
 	Lit(Lit),
 	Const(bool),

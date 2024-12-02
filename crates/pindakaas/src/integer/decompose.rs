@@ -8,7 +8,7 @@ use crate::{
 	integer::var::IntVarId,
 	integer::{con::LinCase, model::USE_CHANNEL, Dom, Lin, LinExp, Term},
 	swc::SwcEncoder,
-	Coeff, Unsatisfiable,
+	Unsatisfiable,
 };
 
 use crate::integer::{enc::IntVarEnc, Assignment, Decomposer, Model, ModelConfig};

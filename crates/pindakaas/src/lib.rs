@@ -11,6 +11,11 @@ pub mod bool_linear;
 pub mod cardinality;
 pub mod cardinality_one;
 pub(crate) mod helpers;
+
+#[allow(
+	unused_results,
+	reason = "TODO in some cases, we encode the inner var and get the encoding later through the term. This needs to be refactor"
+)]
 pub mod integer;
 pub mod propositional_logic;
 pub mod solver;
@@ -32,8 +37,11 @@ pub(crate) use log;
 #[macro_use]
 extern crate serde;
 
+#[allow(unused_results, reason = "TODO")]
 pub mod bdd;
+#[allow(unused_results, reason = "TODO")]
 pub mod gt;
+#[allow(unused_results, reason = "TODO")]
 pub mod swc;
 
 use std::{

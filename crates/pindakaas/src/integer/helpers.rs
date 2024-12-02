@@ -283,7 +283,7 @@ End
 									false;
 							}
 						}
-						line if matches!(state, State::Minimize | State::Maximize) => todo!(),
+						_ if matches!(state, State::Minimize | State::Maximize) => todo!(),
 						line if matches!(state, State::SubjectTo) => {
 							for token in line {
 								match *token {

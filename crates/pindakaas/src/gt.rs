@@ -3,7 +3,7 @@ use crate::{
 	integer::{
 		Consistency, Decompose, Decomposer, Dom, IntVar, Lin, Mix, Model, ModelConfig, Term,
 	},
-	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
+	ClauseDatabase, Encoder, Result, Unsatisfiable,
 };
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized

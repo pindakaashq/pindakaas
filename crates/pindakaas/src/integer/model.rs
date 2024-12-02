@@ -1231,6 +1231,41 @@ End
 	}
 
 	// #[test]
+	// fn mbkp_inc_bin() {
+	// 	test_lp!("mbkp_inc_bin");
+	// }
+
+	// #[test]
+	// fn le_unit_tern() {
+	// 	test_lp!("le_unit_tern_1");
+	// 	test_lp!("le_unit_tern_2");
+	// 	test_lp!("le_unit_tern_3");
+	// 	test_lp!("le_unit_tern_4");
+	// }
+
+	#[test]
+	fn le_unit_tern_1() {
+		test_lp!("le_unit_tern_1");
+	}
+
+	#[test]
+	fn le_unit_tern_2() {
+		test_lp!("le_unit_tern_2");
+	}
+
+	#[ignore]
+	#[test]
+	fn le_unit_tern_3() {
+		test_lp!("le_unit_tern_3");
+	}
+
+	#[ignore]
+	#[test]
+	fn le_unit_tern_4() {
+		test_lp!("le_unit_tern_4");
+	}
+
+	// #[test]
 	// fn test_model_by_lps() {
 	// 	for lp in std::fs::read_dir("./src/integer/res/lps").unwrap() {
 	// 		test_lp_for_configs(&std::fs::read_to_string(lp.unwrap().path()).unwrap(), None);

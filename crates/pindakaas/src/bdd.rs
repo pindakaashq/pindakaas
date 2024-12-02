@@ -4,7 +4,7 @@ use crate::{
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 
-use std::{collections::HashMap, ops::Range};
+use std::ops::Range;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary
@@ -20,7 +20,7 @@ pub struct BddEncoder {
 enum BddNode {
 	Val,
 	Gap,
-	View(Coeff),
+	// View(Coeff), // TODO
 }
 
 impl LinMarker for BddEncoder {}
@@ -138,7 +138,7 @@ impl Decompose for BddEncoder {
 		// [0..1 => Val, 2..2 => Val]
 		// [0..1 => Val, 2..5 => Val]
 		// [0..6 => Val, 7..10 => Gap]
-		bdd(0, &lin.exp.terms, &lin.cmp, 0, &mut ys);
+		bdd(&lin.exp.terms, &lin.cmp, &mut ys);
 
 		// Turn BDD into integer variables and constraints
 		// Ex.
@@ -151,42 +151,41 @@ impl Decompose for BddEncoder {
 			.into_iter()
 			.enumerate()
 			.flat_map(|(i, nodes)| {
-				let mut views = HashMap::new();
+				// let mut views = HashMap::new();
 
 				let dom = nodes
 					.into_iter(..)
 					.filter_map(|(iv, node)| match node {
 						BddNode::Val => Some(process_val(iv, &lin.cmp)),
 						BddNode::Gap => None,
-						BddNode::View(view) => {
-							let val = process_val(iv, &lin.cmp);
-							views.insert(val, view);
-							Some(val)
-						}
+						// BddNode::View(view) => {
+						// 	let val = process_val(iv, &lin.cmp);
+						// 	views.insert(val, view);
+						// 	Some(val)
+						// }
 					})
 					.collect::<Vec<_>>();
-				model
-					.new_aux_var(
-						Dom::from_slice(&dom),
-						model.config.add_consistency,
-						None,
-						lin.lbl.as_ref().map(|lbl| format!("{}_bdd_{}", lbl, i + 1)),
-					)
-					.map(|var| (var, views))
+				model.new_aux_var(
+					Dom::from_slice(&dom),
+					model.config.add_consistency,
+					None,
+					lin.lbl.as_ref().map(|lbl| format!("{}_bdd_{}", lbl, i + 1)),
+				)
+				// .map(|var| (var, views))
 			})
 			.collect::<Vec<_>>()
 			.into_iter()
-			.chain([(model.new_constant(0), HashMap::default())]) // Ensure final element is not cut off by tuple_windows
-			.tuple_windows()
-			.map(|((y, _views), (_y_next, _))| {
-				// Views are always from one y to the next
-				// TODO reimplement partial views
-				// y.borrow_mut().views = views
-				// 	.into_iter()
-				// 	.map(|(val, view)| (val, (y_next.borrow().id, view)))
-				// 	.collect();
-				y
-			})
+			.chain([model.new_constant(0)]) // Ensure final element is not cut off by tuple_windows
+			// .tuple_windows()
+			// .map(|((y, _views), (_y_next, _))| {
+			// 	// Views are always from one y to the next
+			// 	// TODO reimplement partial views
+			// 	// y.borrow_mut().views = views
+			// 	// 	.into_iter()
+			// 	// 	.map(|(val, view)| (val, (y_next.borrow().id, view)))
+			// 	// 	.collect();
+			// 	y
+			// })
 			.map(Term::from)
 			.collect::<Vec<_>>();
 
@@ -260,7 +259,12 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
 	}
 }
 
-fn bdd(
+#[allow(unused_results, reason = "recursive function call")]
+fn bdd(xs: &Vec<Term>, cmp: &Comparator, ws: &mut Vec<IntervalMap<Coeff, BddNode>>) {
+	bdd_recursive(0, xs, cmp, 0, ws);
+}
+
+fn bdd_recursive(
 	i: usize,
 	xs: &Vec<Term>,
 	_cmp: &Comparator,
@@ -273,7 +277,7 @@ fn bdd(
 			let (iv, node) = xs[i]
 				.dom()
 				.iter()
-				.map(|v| (v, bdd(i + 1, xs, _cmp, sum + *v, ws)))
+				.map(|v| (v, bdd_recursive(i + 1, xs, _cmp, sum + *v, ws)))
 				.map(|(v, (iv, n))| ((iv.start - *v)..(iv.end - *v), n))
 				.reduce(|(iv_a, n_a), (iv_b, n_b)| {
 					(

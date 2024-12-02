@@ -101,8 +101,9 @@ mod tests {
 
 	use crate::solver::TermCallback;
 
-	// TODO
+	// TODO this test
 	// #[test]
+	#[allow(dead_code, reason = "Fails! Should fix fixed on develop")]
 	fn test_cadical_term() {
 		let mut slv = Cadical::default();
 

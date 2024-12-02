@@ -93,6 +93,10 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 		if FILTER_TRIVIAL_CLAUSES {
 			let mut lits = HashSet::<Lit>::with_capacity(cls.len());
 			if cls.iter().any(|lit| {
+				#[allow(
+					unused_results,
+					reason = "since we already use contain, we do not need the insertion result"
+				)]
 				if lits.contains(&(!lit)) {
 					true
 				} else {
@@ -354,6 +358,7 @@ pub(crate) mod tests {
 	/// This function assumes that the literal slice contains all literals
 	/// starting from the first variable, and that the literals are in order of
 	/// the variables.
+	#[allow(dead_code, reason = "Could be useful in the future.")]
 	pub(crate) fn make_valuation<L: Into<Lit> + Copy>(solution: &[L]) -> impl Valuation + '_ {
 		|l: Lit| {
 			let abs: Lit = l.var().into();

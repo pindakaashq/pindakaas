@@ -15,6 +15,10 @@ pub struct Cardinality {
 }
 
 impl Cardinality {
+	#[allow(
+		dead_code,
+		reason = "TODO: no idea why it has this warning but not on develop?"
+	)]
 	#[cfg(any(feature = "tracing", test))]
 	pub(crate) fn trace_print(&self) -> String {
 		use crate::trace::trace_print_lit;

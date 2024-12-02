@@ -555,7 +555,7 @@ mod tests {
 		);
 		x.encode(&mut cnf).unwrap();
 
-		for (k, exp_geq_d, exp_leq_d) in [
+		for (k, exp_geq_d, _exp_leq_d) in [
 			(3, Some(5), None),
 			(5, Some(5), Some(5)),
 			(6, Some(7), Some(5)),
