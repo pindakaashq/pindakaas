@@ -19,13 +19,11 @@ impl Assignment {
 	pub fn new<F: Valuation + ?Sized>(xs: impl Iterator<Item = IntVarRef>, sol: &F) -> Self {
 		Self::from(
 			xs.map(|x| {
-				(
-					x.clone(),
-					(
-						x.borrow().assign(sol).unwrap(),
-						Some(MapSol::new(x.borrow().lits(), sol)),
-					),
-				)
+				#[cfg(debug_assertions)]
+				let lit_assignment = Some(MapSol::new(x.borrow().lits(), sol));
+				#[cfg(not(debug_assertions))]
+				let lit_assignment = None;
+				(x.clone(), (x.borrow().assign(sol).unwrap(), lit_assignment))
 			})
 			.collect_vec(),
 		)

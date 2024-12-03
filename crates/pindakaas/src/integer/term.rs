@@ -321,7 +321,7 @@ impl Term {
 				match model.config.scm {
 					Scm::Rca | Scm::Add => {
 						let lits = if model.config.scm == Scm::Add {
-							dbg!(required_lits(&self.x.borrow().dom))
+							required_lits(&self.x.borrow().dom)
 						} else {
 							0
 						};

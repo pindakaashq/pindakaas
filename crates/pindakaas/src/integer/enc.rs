@@ -141,7 +141,7 @@ impl Display for IntVarEnc {
 		match self {
 			IntVarEnc::Ord(Some(o)) => o.fmt(f),
 			IntVarEnc::Bin(Some(b)) => b.fmt(f),
-			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding of {self}"),
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
 		}
 	}
 }

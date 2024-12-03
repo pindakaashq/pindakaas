@@ -744,13 +744,8 @@ mod tests {
 		expected_assignments: Option<&Vec<Assignment>>,
 	) {
 		if *BRUTE_FORCE_SOLVE {
-			if let Ok(decomposition_expected_assignments) =
-				&decomposition.generate_solutions(if *CHECK_CONSTRAINTS {
-					None
-					// Some(model.vars().collect_vec()) // model already encoded?
-				} else {
-					None
-				}) {
+			if let Ok(decomposition_expected_assignments) = &decomposition.generate_solutions(None)
+			{
 				if let Err(errs) = model.check_assignments(
 					decomposition_expected_assignments,
 					expected_assignments,

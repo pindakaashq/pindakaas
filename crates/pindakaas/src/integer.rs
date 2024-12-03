@@ -202,7 +202,7 @@ fn xor_fn<DB: ClauseDatabase>(
 	let z = z.unwrap_or_else(|| LitOrConst::from(new_var!(db, _lbl)));
 	xor(
 		db,
-		&xs.into_iter()
+		&xs.iter()
 			// .map(LitOrConst::from)
 			.cloned()
 			.chain([z])

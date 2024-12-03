@@ -427,22 +427,18 @@ impl Lin {
 						let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
 
 						let (range_lb, range_ub) = unsigned_binary_range(y_enc.bits());
-						y_enc.x.iter().enumerate().try_for_each(|(i, y_i)| {
+						y_enc.x.iter().enumerate().try_for_each(|(i, &y_i)| {
 							let r = Coeff::from(2).pow(i as u32);
 							let (l, u) = ((*range_lb).div_euclid(r), (*range_ub).div_euclid(r));
 							(l..=u).sorted_by_key(|k| *k).try_for_each(|k| {
-								let y_i = if k % 2 == 0 {
-									!y_i.clone()
-								} else {
-									y_i.clone()
-								};
+								let y_i = if k % 2 == 0 { !y_i } else { y_i };
 								let a = y_enc.denormalize(r * k, &t_y.x.borrow().dom); // x<a
 								let b = a + r; // x>=b (next segment)
 								let (a, b) = (a - 1, b); // not x>=a == x<a == x<=a-1, x>=b
 								 // (x>=a /\ x<b) -> b = k%2
 								 //   x<a \/ x>=b \/ b = k%2
 								 //   x<=a-1 \/ x>=b \/ b = k%2 (note
-								 // println!(
+								 // log!(
 								 // 	"({t_x}<={a}) or ({t_x}>={b}) OR {y_i}"
 								 // );
 								let x_a = t_x.ineq(a, false, None);
@@ -492,9 +488,9 @@ impl Lin {
 					"LBs for addition not matching: {self}"
 				);
 
-				println!("RCA: {x} + {y} + {z} = 0");
+				log!("RCA: {x} + {y} + {z} = 0");
 				let z: IntVarRef = (z * -1).try_into().expect("Expected unit term after -1*z");
-				println!("RCA: {x} + {y} = {}", z.borrow());
+				log!("RCA: {x} + {y} = {}", z.borrow());
 
 				let (x, y) = &[x, y]
 					.into_iter()
@@ -546,7 +542,6 @@ impl Lin {
 
 				// z=w if z unencoded, changing its domain and encoding to w
 				z.borrow_mut().dom = w_dom; // fix lower bound to ground
-				dbg!(&lits);
 				let z_bin = BinEnc::from_lits(&log_enc_add_fn(db, &x, &y, lits, None).unwrap());
 
 				lex_geq_const(

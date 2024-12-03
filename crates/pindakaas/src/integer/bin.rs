@@ -527,7 +527,7 @@ mod tests {
 		let x = BinEnc::new(&mut cnf, 2, Some(String::from("x")));
 		for k in 0..=3 {
 			assert_encoding(
-				&Cnf::try_from(vec![dbg!(x.geq(k))]).unwrap_or_else(|e| e.into()),
+				&Cnf::try_from(vec![x.geq(k)]).unwrap_or_else(|e| e.into()),
 				&expect_file![format!("integer/bin/geq_{k}.cnf")],
 			);
 		}

@@ -292,9 +292,8 @@ impl IntVar {
 		self.dom.is_constant()
 	}
 
-	pub fn as_constant(&self) -> Result<Coeff, ()> {
+	pub(crate) fn as_constant(&self) -> Result<Coeff, ()> {
 		self.dom.clone().try_into()
-		// self.is_constant().then(|| )
 	}
 
 	pub(crate) fn lits(&self) -> BTreeSet<Var> {
