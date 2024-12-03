@@ -1,5 +1,8 @@
 use crate::{Coeff, Lit, Valuation, Var};
-use std::{cmp::Ordering, fmt::Display};
+use std::{
+	cmp::Ordering,
+	fmt::{Display, Formatter},
+};
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
@@ -10,36 +13,59 @@ use super::{IntVar, IntVarRef};
 /// A structure holding an integer assignment to `Model`
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Assignment(FxHashMap<String, Coeff>);
+pub struct Assignment(FxHashMap<String, (Coeff, Option<MapSol>)>);
 
 impl Assignment {
 	pub fn new<F: Valuation + ?Sized>(xs: impl Iterator<Item = IntVarRef>, sol: &F) -> Self {
 		Self::from(
-			xs.map(|x| (x.clone(), x.borrow().assign(sol).unwrap()))
-				.collect_vec(),
+			xs.map(|x| {
+				(
+					x.clone(),
+					(
+						x.borrow().assign(sol).unwrap(),
+						Some(MapSol::new(x.borrow().lits(), sol)),
+					),
+				)
+			})
+			.collect_vec(),
 		)
 	}
 
 	pub fn value(&self, x: &IntVar) -> Option<Coeff> {
-		self.0.get(&x.lbl()).cloned()
+		self.0.get(&x.lbl()).map(|(a, _)| *a)
 	}
 
-	/// Return assignment of a subset of variables
-	pub fn partialize(&self, xs: &[IntVarRef]) -> Self {
-		Self::from(
-			xs.iter()
-				.map(|x| (x.clone(), self.value(&x.borrow()).unwrap()))
-				.collect_vec(),
-		)
+	// TODO make sensible
+	pub fn sol(&self, x: &IntVar) -> Option<Option<MapSol>> {
+		self.0.get(&x.lbl()).map(|(_, sol)| sol.clone())
 	}
+
+	// /// Return assignment of a subset of variables
+	// pub fn partialize(&self, xs: &[IntVarRef]) -> Self {
+	// 	Self::from(
+	// 		xs.iter()
+	// 			.map(|x| (x.clone(), (self.value(&x.borrow()).unwrap(), None)))
+	// 			.collect_vec(),
+	// 	)
+	// }
 }
 
 impl From<Vec<(IntVarRef, Coeff)>> for Assignment {
 	fn from(value: Vec<(IntVarRef, Coeff)>) -> Self {
+		Self::from(
+			value
+				.into_iter()
+				.map(|(var, a)| (var, (a, None)))
+				.collect_vec(),
+		)
+	}
+}
+impl From<Vec<(IntVarRef, (Coeff, Option<MapSol>))>> for Assignment {
+	fn from(value: Vec<(IntVarRef, (Coeff, Option<MapSol>))>) -> Self {
 		Self(
 			value
-				.iter()
-				.map(|(var, a)| (var.borrow().lbl(), *a))
+				.into_iter()
+				.map(|(var, a)| (var.borrow().lbl(), a))
 				// .sorted_by_key(|(x, _)| x.clone()) // sorting makes serialization output a little nicer
 				.collect(),
 		)
@@ -47,22 +73,31 @@ impl From<Vec<(IntVarRef, Coeff)>> for Assignment {
 }
 
 impl Display for Assignment {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
 			"{}",
 			self.0
 				.iter()
-				.sorted()
-				.map(|(lbl, a)| format!("{}={}", lbl, a))
-				.join(", ")
+				.sorted_by_key(|(lbl, _)| *lbl)
+				.map(|(lbl, (a, s))| format!(
+					"{}={} [{}]",
+					lbl,
+					a,
+					s.as_ref().map(|s| format!("{s}")).unwrap_or_default()
+				))
+				.join(", "),
 		)
 	}
 }
 
 impl Ord for Assignment {
 	fn cmp(&self, other: &Self) -> Ordering {
-		self.0.iter().sorted().cmp(other.0.iter().sorted())
+		self.0
+			.iter()
+			.map(|(x, (a, _))| (x, a))
+			.sorted()
+			.cmp(other.0.iter().map(|(x, (a, _))| (x, a)).sorted())
 	}
 }
 
@@ -79,14 +114,15 @@ impl PartialOrd for Assignment {
 // 	}
 // }
 
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct MapSol(pub(crate) FxHashMap<Var, bool>);
 
 impl MapSol {
-	pub fn new<V, I>(vars: I, sol: impl Valuation) -> Self
+	pub fn new<V, I, F>(vars: I, sol: &F) -> Self
 	where
 		V: Into<Lit>,
 		I: IntoIterator<Item = V> + Clone,
+		F: Valuation + ?Sized,
 	{
 		Self(
 			vars.into_iter()
@@ -102,6 +138,9 @@ impl MapSol {
 	}
 }
 
+// #[derive(Debug, Default, Clone, PartialEq)]
+// pub struct MapSol(pub(crate) FxHashMap<Var, bool>);
+
 // impl From<CadicalSol>
 // /// Show MapSol as sol file
 // // using Display for this since (W)Cnf does it similarly
@@ -115,11 +154,19 @@ impl MapSol {
 // 	}
 // }
 
-// impl Display for MapSol {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-//         write!(f, self.keys().sorted().map(|k| if self[k] { "{k}" } else {"-{k}")
-//     }
-// }
+impl Display for MapSol {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"{}",
+			self.iter()
+				.sorted_by_key(|lit| lit.var())
+				.map(|lit| format!("{:?}", lit))
+				.join(", ")
+		)
+	}
+}
+
 // impl From<Vec<Lit>> for MapSol {
 // 	fn from(value: &[Lit]) -> Self {
 // 		Self(

@@ -96,7 +96,7 @@ pub trait Solver: ClauseDatabase {
 		loop {
 			match self.solve() {
 				SolveResult::Satisfied(sol) => {
-					solns.push(MapSol::new(vars.clone(), sol));
+					solns.push(MapSol::new(vars.clone(), &sol));
 				}
 				SolveResult::Unsatisfiable(_) => {
 					return solns;

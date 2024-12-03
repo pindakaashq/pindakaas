@@ -42,6 +42,22 @@ impl From<Option<Lit>> for LitOrConst {
 	}
 }
 
+// /// An Unsatisfiable result is a return of the fixed Boolean value, `false`
+// impl From<Unsatisfiable> for LitOrConst {
+// 	fn from(_: Unsatisfiable) -> Self {
+// 		LitOrConst::Const(false)
+// 	}
+// }
+// /// Inverse, a false is Unsatisfiable
+// impl From<LitOrConst> for Result<(), Unsatisfiable> {
+// 	fn from(l: LitOrConst) -> Self {
+// 		match l {
+// 			LitOrConst::Const(false) => Err(Unsatisfiable),
+// 			x => Ok(x),
+// 		}
+// 	}
+// }
+
 impl From<Lit> for LitOrConst {
 	fn from(item: Lit) -> Self {
 		LitOrConst::Lit(item)
@@ -94,7 +110,7 @@ impl IntVarEnc {
 		match self {
 			IntVarEnc::Ord(Some(o)) => o.consistent(db),
 			IntVarEnc::Bin(Some(b)) => b.consistent(db, dom),
-			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding of {self}"),
 		}
 	}
 
@@ -125,7 +141,7 @@ impl Display for IntVarEnc {
 		match self {
 			IntVarEnc::Ord(Some(o)) => o.fmt(f),
 			IntVarEnc::Bin(Some(b)) => b.fmt(f),
-			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding of {self}"),
 		}
 	}
 }

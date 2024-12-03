@@ -9,6 +9,16 @@ pub struct Dom {
 	pub ranges: Vec<(Coeff, Coeff)>, // TODO [?] better to use RangeInclusive rather than tuple?
 }
 
+impl TryFrom<Dom> for Coeff {
+	type Error = ();
+	fn try_from(value: Dom) -> Result<Self, Self::Error> {
+		value
+			.is_constant()
+			.then(|| value.iter().next().unwrap())
+			.ok_or(())
+	}
+}
+
 impl Dom {
 	pub fn constant(d: Coeff) -> Self {
 		Self::from_slice(&[d])

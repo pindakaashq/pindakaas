@@ -13,7 +13,7 @@ use super::model::{Obj, USE_CSE};
 /// Show the integer variable's ID
 pub(crate) const SHOW_IDS: bool = false;
 /// Show the encoding literals of the integer variable
-const SHOW_LITS: bool = false;
+const SHOW_LITS: bool = true;
 /// Whether to rewrite x1 + .. + xn # 0 as x1 + .. + x_(n-1) # - xn
 const SHOW_K_0: bool = true;
 /// Show domain density

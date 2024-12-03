@@ -22,8 +22,8 @@ pub enum Format {
 }
 
 /// Number of required bits for unsigned Binary encoding with range 0..(ub-lb)
-pub(crate) fn required_lits(lb: Coeff, ub: Coeff) -> usize {
-	let cardinality = ub - lb;
+pub(crate) fn required_lits(dom: &Dom) -> usize {
+	let cardinality = dom.ub() - dom.lb();
 	if cardinality == 0 {
 		0
 	} else {
@@ -135,7 +135,8 @@ End
 
 	/// Superset of LP format:
 	/// allow anonymous constraints (w/o label) by `: ...`
-	/// allow Doms section for domain
+	/// allow Doms section for domain with gaps
+	/// variables without domains default to 01
 	pub fn from_string(s: &str, format: Format) -> Result<Self, String> {
 		#[derive(PartialEq)]
 		enum State {
@@ -522,10 +523,10 @@ End
 
 	#[test]
 	fn test_required_lits() {
-		assert_eq!(required_lits(0, 6), 3);
-		assert_eq!(required_lits(2, 8), 3);
-		assert_eq!(required_lits(0, 0), 0);
-		assert_eq!(required_lits(0, 0), 0);
+		assert_eq!(required_lits(&Dom::from_bounds(0, 6)), 3);
+		assert_eq!(required_lits(&Dom::from_bounds(2, 8)), 3);
+		assert_eq!(required_lits(&Dom::from_bounds(0, 0)), 0);
+		assert_eq!(required_lits(&Dom::from_bounds(0, 0)), 0);
 	}
 
 	#[test]

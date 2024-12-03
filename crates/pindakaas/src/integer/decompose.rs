@@ -142,30 +142,27 @@ pub(crate) struct EncSpecDecomposer {
 const COUPLE_SINGLE_VARS: bool = true;
 impl Decompose for EncSpecDecomposer {
 	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable> {
-		model
-			.vars()
-			.map(|x| {
-				let mix = &self.cutoff;
-				if let Some(spec) = self.spec.as_ref() {
-					// only encode var which are specified
-					if let Some(var_enc) = {
-						let id = x.borrow().id;
-						spec.get(&id)
-					} {
-						// overwriting encodings
-						x.borrow_mut().e = Some(var_enc.clone());
-					}
-				} else {
-					x.borrow_mut().decide_encoding(mix);
+		model.vars().for_each(|x| {
+			let mix = &self.cutoff;
+			if let Some(spec) = self.spec.as_ref() {
+				// only encode var which are specified
+				if let Some(var_enc) = {
+					let id = x.borrow().id;
+					spec.get(&id)
+				} {
+					// overwriting encodings
+					x.borrow_mut().e = Some(var_enc.clone());
 				}
-				let is_order = matches!(x.borrow().e, Some(IntVarEnc::Ord(_)));
-				if !is_order && x.borrow().lbl.as_ref().unwrap().contains("bdd") {
-					// TODO experiment using density heuristic: || x.borrow().dom.density() > 0.3
-					x.borrow_mut().add_consistency = false;
-				}
-				(x.clone(), is_order)
-			})
-			.collect_vec();
+			} else {
+				x.borrow_mut().decide_encoding(mix);
+			}
+			// let is_order = matches!(x.borrow().e, Some(IntVarEnc::Ord(_)));
+			// if !is_order && x.borrow().lbl.as_ref().unwrap().contains("bdd") {
+			// 	// TODO experiment using density heuristic: || x.borrow().dom.density() > 0.3
+			// 	x.borrow_mut().add_consistency = false;
+			// }
+			// x.
+		});
 
 		let cons = model.cons.iter().cloned();
 		let mut model = Model {

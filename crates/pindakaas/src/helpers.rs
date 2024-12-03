@@ -119,7 +119,7 @@ pub(crate) fn unsigned_binary_range(bits: usize) -> (PosCoeff, PosCoeff) {
 
 /// Convert `k` to unsigned binary in `bits`
 pub(crate) fn as_binary(k: PosCoeff, bits: Option<usize>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| required_lits(0, *k));
+	let bits = bits.unwrap_or_else(|| required_lits(&Dom::from_bounds(0, *k)));
 	assert!(
 		k <= unsigned_binary_range(bits).1,
 		"{k} cannot be represented in {bits} bits"
@@ -188,7 +188,7 @@ pub(crate) use {concat_slices, const_concat, maybe_std_concat};
 
 use crate::{
 	bool_linear::PosCoeff,
-	integer::{enc::LitOrConst, helpers::required_lits},
+	integer::{enc::LitOrConst, helpers::required_lits, Dom},
 	ClauseDatabase, Coeff, Lit, Result,
 };
 

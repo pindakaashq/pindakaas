@@ -8,7 +8,7 @@ use crate::{
 	ClauseDatabase, Lit, Var,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct OrdEnc {
 	pub(crate) x: Vec<Lit>,
 }

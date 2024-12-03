@@ -9,6 +9,7 @@ use crate::{
 	helpers::{as_binary, div_ceil, div_floor},
 	integer::{
 		enc::LitOrConst,
+		helpers::required_lits,
 		model::{Cse, USE_CHANNEL, USE_CSE},
 		res::SCM,
 		IntVar, IntVarRef, Lin, LinExp,
@@ -55,11 +56,23 @@ impl From<Coeff> for Term {
 	}
 }
 
-impl TryInto<IntVarRef> for Term {
+impl TryFrom<IntVar> for Coeff {
+	type Error = ();
+	fn try_from(val: IntVar) -> Result<Self, Self::Error> {
+		val.dom.clone().try_into()
+	}
+}
+
+impl TryFrom<Term> for IntVarRef {
 	type Error = ();
 
-	fn try_into(self) -> Result<IntVarRef, Self::Error> {
-		(self.c == 1).then_some(self.x).ok_or(())
+	fn try_from(value: Term) -> Result<Self, Self::Error> {
+		// TODO bad so long as dom() is bad
+		if let Ok(c) = Coeff::try_from(Dom::from_slice(&value.dom())) {
+			Ok(IntVar::new_constant(c))
+		} else {
+			(value.c == 1).then_some(value.x).ok_or(())
+		}
 	}
 }
 
@@ -308,7 +321,7 @@ impl Term {
 				match model.config.scm {
 					Scm::Rca | Scm::Add => {
 						let lits = if model.config.scm == Scm::Add {
-							BinEnc::required_lits(&self.x.borrow().dom)
+							dbg!(required_lits(&self.x.borrow().dom))
 						} else {
 							0
 						};

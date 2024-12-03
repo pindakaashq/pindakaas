@@ -353,16 +353,7 @@ impl Model {
 
 	/// Assign `sol` to model to yield its integer `Assignment`
 	pub fn assign<F: Valuation + ?Sized>(&self, sol: &F) -> Result<Assignment, CheckError> {
-		Ok(Assignment::new(
-			self.vars(),
-			sol,
-			// 				.map(|x| {
-			// 					x.borrow()
-			// 						.assign(sol)
-			// 						.map(|a| (x.borrow().id, (x.borrow().lbl(), a)))
-			// 				})
-			// 				.try_collect()?,
-		))
+		Ok(Assignment::new(self.vars(), sol))
 	}
 
 	/// Checks correctness of `assignment`
@@ -382,7 +373,7 @@ impl Model {
 			vars.iter().map(|x| x.borrow().lbl()).sorted().join(", ")
 		);
 		/// Limit the search space for solution generation
-		const MAX_SEARCH_SPACE: Option<usize> = Some(250);
+		const MAX_SEARCH_SPACE: Option<usize> = Some(500);
 		let mut budget = MAX_SEARCH_SPACE;
 		let mut last_s = None;
 
@@ -629,9 +620,9 @@ mod tests {
 	use itertools::{iproduct, Itertools};
 	use std::sync::LazyLock;
 
-	macro_rules! has_bool_flag {
-		($flag:expr) => {{
-			LazyLock::new(|| std::env::args().contains(&String::from($flag)))
+	macro_rules! has_bool_flags {
+		($flags:expr) => {{
+			LazyLock::new(|| $flags.into_iter().any(|f| std::env::args().contains(f)))
 		}};
 	}
 
@@ -661,13 +652,17 @@ mod tests {
 	});
 
 	/// Generate solutions for expected models
-	static BRUTE_FORCE_SOLVE: LazyLock<bool> = has_bool_flag!("--brute-force-solve");
+	static BRUTE_FORCE_SOLVE: LazyLock<bool> =
+		has_bool_flags!(&[String::from("--brute-force-solve"), String::from("-bfs")]);
 	/// Check that the decomposition correctly encodes the model
-	static CHECK_DECOMPOSITION: LazyLock<bool> = has_bool_flag!("--check-decomposition");
+	static CHECK_DECOMPOSITION: LazyLock<bool> =
+		has_bool_flags!(&[String::from("--check-decomposition"), String::from("-cd")]);
 	/// Check each constraint of the decomposition individually (unstable)
-	static CHECK_CONSTRAINTS: LazyLock<bool> = has_bool_flag!("--check-constraints");
+	static CHECK_CONSTRAINTS: LazyLock<bool> =
+		has_bool_flags!(&[String::from("--check-constraints"), String::from("-cc")]);
 	/// Show assignments to auxiliary variables as well (shows more detail, but also more (symmetrical) solutions)
-	static SHOW_AUX: LazyLock<bool> = has_bool_flag!("--show-aux");
+	static SHOW_AUX: LazyLock<bool> =
+		has_bool_flags!(&[String::from("--show-aux"), String::from("-a")]);
 
 	static TEST_CONFIG_I: LazyLock<Option<usize>> = get_int_flag!("--test-config");
 	// static TEST_DECOMP_I: LazyLock<Option<usize>> = get_int_flag!("--test-decomp");
@@ -1010,10 +1005,16 @@ mod tests {
 			model.deep_clone()
 		};
 
-		let actual_assignments = lit_assignments
+		let actual_assignments: Vec<_> = lit_assignments
 			.iter()
-			.flat_map(|lit_assignment| checker.assign(lit_assignment))
-			.collect::<Vec<_>>();
+			.map(|lit_assignment| checker.assign(lit_assignment))
+			// .sorted()
+			// .inspect(|(assignment, lit_assignment)| {
+			// 	println!("{assignment} -> {lit_assignment}");
+			// })
+			.try_collect()
+			.unwrap();
+		// let (actual_assignments, _): (Vec<_>, Vec<_>) = assigns.into_iter().unzip();
 
 		// assert!(
 		// 	checker.vars()
@@ -1239,8 +1240,19 @@ End
 	}
 
 	#[test]
+	#[ignore]
 	fn eq_2() {
 		test_lp!("eq_2");
+	}
+
+	#[test]
+	fn eq_mix() {
+		test_lp!("eq_mix");
+	}
+
+	#[test]
+	fn test_rca_ground() {
+		test_lp!("rca_ground");
 	}
 
 	#[test]

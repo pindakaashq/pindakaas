@@ -1,4 +1,4 @@
-use crate::helpers::{emit_clause, negate_cnf, unsigned_binary_range};
+use crate::helpers::{emit_clause, unsigned_binary_range};
 use crate::integer::term::Term;
 use crate::integer::var::IntVarId;
 use crate::integer::Format;
@@ -8,7 +8,6 @@ use crate::{log, CheckError};
 use itertools::Itertools;
 
 use super::enc::IntVarEnc;
-use super::helpers::remove_red;
 use super::model::{Consistency, Model, ModelConfig, USE_COUPLING_IO_LEX, VIEW_COUPLING};
 use crate::{
 	bool_linear::PosCoeff,
@@ -317,12 +316,14 @@ impl Lin {
 					.terms
 					.iter()
 					.map(|term| {
-						let a = a.value(&term.x.borrow()).unwrap();
+						let (a, lits) =
+							(a.value(&term.x.borrow()).unwrap(), a.sol(&term.x.borrow()));
 						format!(
-							"{} * {}={} (={})",
+							"{} * {}={} [{}] (={})",
 							term.c,
 							term.x.borrow().lbl(),
 							a,
+							lits.unwrap_or_default().unwrap_or_default(),
 							term.c * a,
 						)
 					})
@@ -491,7 +492,9 @@ impl Lin {
 					"LBs for addition not matching: {self}"
 				);
 
-				let z: IntVarRef = (z * -1).try_into().unwrap();
+				println!("RCA: {x} + {y} + {z} = 0");
+				let z: IntVarRef = (z * -1).try_into().expect("Expected unit term after -1*z");
+				println!("RCA: {x} + {y} = {}", z.borrow());
 
 				let (x, y) = &[x, y]
 					.into_iter()
@@ -507,27 +510,49 @@ impl Lin {
 					.collect_tuple()
 					.unwrap();
 
-				assert!(
-					matches!(z.borrow().e, Some(IntVarEnc::Bin(None))),
-					"Last var {} should not have been encoded yet",
-					z.borrow()
-				);
-				let z_ground = x.borrow().lb() + y.borrow().lb();
-				let z_dom = Dom::from_bounds(z_ground, z.borrow().ub());
+				let w_ground = x.borrow().lb() + y.borrow().lb();
+				let w_dom = Dom::from_bounds(w_ground, z.borrow().ub());
 				let (x, y) = (
 					x.borrow_mut().encode_bin(db)?.xs(),
 					y.borrow_mut().encode_bin(db)?.xs(),
 				);
 
-				let z_lb = z.borrow().lb();
-				z.borrow_mut().dom = z_dom; // fix lower bound to ground
-				let lits = Some(required_lits(z_ground, z.borrow().dom.ub()));
-				let z_bin = BinEnc::from_lits(&log_enc_add_fn(db, &x, &y, lits).unwrap());
+				// if z is constant
+				// x{0..2} + y{2..4} = 000 + 4 == x+y = 010 + 2
+				if let Ok(c) = z.borrow().as_constant() {
+					return log_enc_add_fn(
+						db,
+						&x,
+						&y,
+						None,
+						Some(&BinEnc::from(PosCoeff::new(c - w_ground)).xs()),
+					)
+					.map(|_| ());
+				}
+				// x{0..2} + y{2..4} = z{4..5}
+				// x{0..2} + y{2..4} = z{2..3} + 2
+				// x+y=w{2..ub(z)=5}, w=z
+				let w_lb = z.borrow().lb();
+				let lits = Some(required_lits(&w_dom));
+				// x+y=w, w+lb(z)=z (knowing lb(w)<=lb(z))
+
+				// TODO check whether z's domain is smaller, and/or already encoded.
+
+				assert!(
+					matches!(z.borrow().e, Some(IntVarEnc::Bin(None))),
+					"Last var {} should not have been encoded yet",
+					z.borrow()
+				);
+
+				// z=w if z unencoded, changing its domain and encoding to w
+				z.borrow_mut().dom = w_dom; // fix lower bound to ground
+				dbg!(&lits);
+				let z_bin = BinEnc::from_lits(&log_enc_add_fn(db, &x, &y, lits, None).unwrap());
 
 				lex_geq_const(
 					db,
 					&z_bin.xs(),
-					PosCoeff::new(z_lb - z_ground),
+					PosCoeff::new(w_lb - w_ground),
 					z_bin.bits(),
 				)?;
 
@@ -535,7 +560,7 @@ impl Lin {
 				lex_leq_const(
 					db,
 					&z_bin.xs(),
-					PosCoeff::new(z.borrow().ub() - z_ground),
+					PosCoeff::new(z.borrow().ub() - w_ground),
 					z_bin.bits(),
 				)?;
 				z.borrow_mut().e = Some(IntVarEnc::Bin(Some(z_bin)));
@@ -769,7 +794,7 @@ mod tests {
 	#[test]
 	fn test_enc_rec_lookahead() {
 		let mut m = Model::from_string(
-			&std::fs::read_to_string("./src/integer/res/lps/enc_rec_lookahead.lp").unwrap(),
+			&std::fs::read_to_string("./res/lps/enc_rec_lookahead.lp").unwrap(),
 			Format::Lp,
 		)
 		.unwrap();
@@ -782,7 +807,7 @@ mod tests {
 	#[test]
 	fn test_enc_rec_bdd_style_view() {
 		let mut m = Model::from_string(
-			&std::fs::read_to_string("./src/integer/res/lps/bdd_style_view.lp").unwrap(),
+			&std::fs::read_to_string("./res/lps/bdd_style_view.lp").unwrap(),
 			Format::Lp,
 		)
 		.unwrap();

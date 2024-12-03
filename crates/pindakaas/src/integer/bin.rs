@@ -2,7 +2,7 @@ use crate::bool_linear::Comparator;
 use crate::bool_linear::PosCoeff;
 use crate::helpers;
 use crate::helpers::new_var;
-use crate::integer::{enc::LitOrConst, helpers::required_lits, lex_geq_const, lex_leq_const};
+use crate::integer::{enc::LitOrConst, lex_geq_const, lex_leq_const};
 use crate::log;
 use std::{collections::BTreeSet, path::PathBuf};
 
@@ -19,7 +19,7 @@ use crate::{
 	ClauseDatabase, Cnf, Coeff, Lit, Unsatisfiable, Var,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct BinEnc {
 	pub(crate) x: Vec<LitOrConst>,
 }
@@ -27,6 +27,17 @@ pub(crate) struct BinEnc {
 impl From<Vec<LitOrConst>> for BinEnc {
 	fn from(x: Vec<LitOrConst>) -> Self {
 		Self { x: x.to_vec() }
+	}
+}
+
+impl From<PosCoeff> for BinEnc {
+	fn from(c: PosCoeff) -> Self {
+		Self {
+			x: as_binary(c, None)
+				.into_iter()
+				.map(LitOrConst::from)
+				.collect(),
+		}
 	}
 }
 
@@ -482,10 +493,6 @@ impl BinEnc {
 			.chain(map.into_values().sorted().skip(lits).map(LitOrConst::from))
 			.collect_vec();
 		Ok(BinEnc::from_lits(&lits))
-	}
-
-	pub(crate) fn required_lits(dom: &Dom) -> usize {
-		required_lits(dom.lb(), dom.ub())
 	}
 }
 

@@ -12,6 +12,8 @@ mod res;
 mod term;
 pub(crate) mod var;
 
+use std::cmp::max;
+
 pub use assignment::{Assignment, MapSol};
 
 pub use con::{Lin, LinExp};
@@ -27,6 +29,7 @@ use crate::helpers::as_binary;
 use crate::helpers::emit_clause;
 use crate::helpers::emit_filtered_clause;
 use crate::helpers::new_var;
+use crate::Unsatisfiable;
 use enc::LitOrConst;
 
 use itertools::Itertools;
@@ -153,62 +156,81 @@ fn filter_fixed_sum(xs: &[LitOrConst]) -> (Vec<Lit>, usize) {
 	)
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(name = "xor", skip_all, fields(constraint = format!("(+) {xs:?}"))))]
-fn xor<DB: ClauseDatabase>(db: &mut DB, xs: &[LitOrConst], _lbl: String) -> Result<LitOrConst> {
-	let (xs, trues) = filter_fixed_sum(xs);
-
-	let is_even = match &xs[..] {
-		[] => LitOrConst::Const(false), // TODO why not `true`?
-		[x] => LitOrConst::Lit(*x),
+fn xor<DB: ClauseDatabase>(db: &mut DB, xs: &[LitOrConst]) -> Result {
+	match xs[..] {
+		[] => {
+			return Err(Unsatisfiable);
+		}
+		[x] => {
+			emit_filtered_clause(db, [x])?;
+		}
 		[x, y] => {
-			assert!(trues <= 1);
-			let is_even = new_var!(db, _lbl);
-
-			emit_clause!(db, [*x, *y, !is_even])?; // 0
-			emit_clause!(db, [!x, !y, !is_even])?; // 2
-
-			emit_clause!(db, [!x, *y, is_even])?; // 1
-			emit_clause!(db, [*x, !y, is_even])?; // 1
-			LitOrConst::Lit(is_even)
+			emit_filtered_clause(db, [x, !y])?;
+			emit_filtered_clause(db, [!x, y])?;
 		}
 		[x, y, z] => {
-			assert!(trues == 0);
-			let is_even = new_var!(db, _lbl);
-
-			emit_clause!(db, [*x, *y, *z, !is_even])?; // 0
-			emit_clause!(db, [*x, !y, !z, !is_even])?; // 2
-			emit_clause!(db, [!x, *y, !z, !is_even])?; // 2
-			emit_clause!(db, [!x, !y, *z, !is_even])?; // 2
-
-			emit_clause!(db, [!x, !y, !z, is_even])?; // 3
-			emit_clause!(db, [!x, *y, *z, is_even])?; // 1
-			emit_clause!(db, [*x, !y, *z, is_even])?; // 1
-			emit_clause!(db, [*x, *y, !z, is_even])?; // 1
-			LitOrConst::Lit(is_even)
+			emit_filtered_clause(db, [x, y, !z])?; // 0
+			emit_filtered_clause(db, [!x, !y, !z])?; // 2
+			emit_filtered_clause(db, [!x, y, z])?; // 1
+			emit_filtered_clause(db, [x, !y, z])?; // 1
 		}
+		[x, y, z, w] => {
+			emit_filtered_clause(db, [x, y, z, !w])?; // 0
+			emit_filtered_clause(db, [x, !y, !z, !w])?; // 2
+			emit_filtered_clause(db, [!x, y, !z, !w])?; // 2
+			emit_filtered_clause(db, [!x, !y, z, !w])?; // 2
+
+			emit_filtered_clause(db, [!x, !y, !z, w])?; // 3
+			emit_filtered_clause(db, [!x, y, z, w])?; // 1
+			emit_filtered_clause(db, [x, !y, z, w])?; // 1
+			emit_filtered_clause(db, [x, y, !z, w])?; // 1
+		}
+
 		_ => unimplemented!(),
-	};
+	}
+	Ok(())
+}
+
+#[cfg_attr(feature = "tracing", tracing::instrument(name = "xor", skip_all, fields(constraint = format!("(+) {xs:?}"))))]
+fn xor_fn<DB: ClauseDatabase>(
+	db: &mut DB,
+	xs: &[LitOrConst],
+	z: Option<LitOrConst>,
+	_lbl: String,
+) -> Result<LitOrConst> {
+	// let (xs, trues) = filter_fixed_sum(xs);
+	let z = z.unwrap_or_else(|| LitOrConst::from(new_var!(db, _lbl)));
+	xor(
+		db,
+		&xs.into_iter()
+			// .map(LitOrConst::from)
+			.cloned()
+			.chain([z])
+			.collect_vec(),
+	)?;
 
 	// If trues is odd, negate sum
-	Ok(if trues % 2 == 0 { is_even } else { !is_even })
+	// Ok(if trues % 2 == 0 { z } else { !z })
+	Ok(z)
 }
 
 // TODO [?] functional version has duplication with relational version
-#[cfg_attr(feature = "tracing", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("[{}] + [{}] = ", xs.iter().rev().map(|x| format!("{x}")).collect_vec().join(","), ys.iter().rev().map(|x| format!("{x}")).collect_vec().join(",")))))]
+#[cfg_attr(feature = "tracing", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("[{}] + [{}] = {zs:?} | {bits:?}", xs.iter().rev().map(|x| format!("{x}")).collect_vec().join(","), ys.iter().rev().map(|x| format!("{x}")).collect_vec().join(",")))))]
 pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
 	db: &mut DB,
 	xs: &[LitOrConst],
 	ys: &[LitOrConst],
 	bits: Option<usize>,
+	zs: Option<&[LitOrConst]>,
 ) -> Result<Vec<LitOrConst>> {
-	let max_bits = itertools::max([xs.len(), ys.len()]).unwrap() + 1;
+	let max_bits = max(xs.len(), ys.len()) + 1;
 	let bits = bits.unwrap_or(max_bits);
 	let mut c = LitOrConst::Const(false);
 
-	let zs = (0..bits)
+	let zs = (0..max_bits)
 		.map(|i| {
 			let (x, y) = (bit(xs, i), bit(ys, i));
-			let z = xor(db, &[x, y, c], format!("z_{}", i)); // sum
+			let z = xor_fn(db, &[x, y, c], zs.map(|zs| bit(zs, i)), format!("z_{}", i));
 			c = carry(db, &[x, y, c], format!("c_{}", i + 1))?; // carry
 			z
 		})

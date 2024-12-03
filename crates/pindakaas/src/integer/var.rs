@@ -45,7 +45,7 @@ pub struct IntVar {
 
 impl IntVar {
 	pub(crate) fn new_constant(c: Coeff) -> IntVarRef {
-		Self::from_dom_as_ref(0, Dom::constant(c), true, Some(IntVarEnc::Bin(None)), None)
+		Self::from_dom_as_ref(0, Dom::constant(c), true, None, None)
 	}
 
 	pub(crate) fn from_dom_as_ref(
@@ -231,7 +231,7 @@ impl IntVar {
 				(None, dnf)
 			}
 
-			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding of {self}"),
 		}
 	}
 
@@ -269,7 +269,10 @@ impl IntVar {
 				);
 				lin_exp.add_constant(add)
 			}
-			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding"),
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) if self.is_constant() => {
+				BoolLinExp::from(self.as_constant().unwrap())
+			}
+			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding of {self}"),
 		}
 	}
 
@@ -286,7 +289,12 @@ impl IntVar {
 	}
 
 	pub fn is_constant(&self) -> bool {
-		self.size() == 1
+		self.dom.is_constant()
+	}
+
+	pub fn as_constant(&self) -> Result<Coeff, ()> {
+		self.dom.clone().try_into()
+		// self.is_constant().then(|| )
 	}
 
 	pub(crate) fn lits(&self) -> BTreeSet<Var> {
@@ -310,7 +318,7 @@ impl IntVar {
 	) -> Result<BinEnc, Unsatisfiable> {
 		self.encode(db).map(|e| match e {
 			IntVarEnc::Bin(Some(b)) => b,
-			_ if self.is_constant() => BinEnc::from_lits(&[]),
+			_ if self.is_constant() => BinEnc::default(),
 			_ => panic!("encode_bin called without binary encoding for {self}"),
 		})
 	}
@@ -329,7 +337,7 @@ impl IntVar {
 			}
 			Some(IntVarEnc::Bin(_)) => IntVarEnc::Bin(Some(BinEnc::new(
 				db,
-				required_lits(self.dom.lb(), self.dom.ub()),
+				required_lits(&self.dom),
 				self.lbl.clone(),
 			))),
 		};
