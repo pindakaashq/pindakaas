@@ -156,13 +156,14 @@ fn filter_fixed_sum(xs: &[LitOrConst]) -> (Vec<Lit>, usize) {
 	)
 }
 
+#[cfg_attr(feature = "tracing", tracing::instrument(name = "xor", skip_all, fields(constraint = format!("(+) {xs:?}"))))]
 fn xor<DB: ClauseDatabase>(db: &mut DB, xs: &[LitOrConst]) -> Result {
 	match xs[..] {
 		[] => {
 			return Err(Unsatisfiable);
 		}
 		[x] => {
-			emit_filtered_clause(db, [x])?;
+			emit_filtered_clause(db, [!x])?;
 		}
 		[x, y] => {
 			emit_filtered_clause(db, [x, !y])?;
@@ -191,32 +192,41 @@ fn xor<DB: ClauseDatabase>(db: &mut DB, xs: &[LitOrConst]) -> Result {
 	Ok(())
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(name = "xor", skip_all, fields(constraint = format!("(+) {xs:?}"))))]
 fn xor_fn<DB: ClauseDatabase>(
 	db: &mut DB,
 	xs: &[LitOrConst],
 	z: Option<LitOrConst>,
 	_lbl: String,
 ) -> Result<LitOrConst> {
-	// let (xs, trues) = filter_fixed_sum(xs);
+	let (xs, trues) = filter_fixed_sum(xs);
+	assert!(
+		trues == 0,
+		" TODO probably flip z, but needs to be tested if it comes up"
+	);
 	let z = z.unwrap_or_else(|| LitOrConst::from(new_var!(db, _lbl)));
-	xor(
+	// if trues % 2 == 0 {
+	// 	z
+	// } else {
+	// 	!z
+	// }
+	match xor(
 		db,
 		&xs.iter()
-			// .map(LitOrConst::from)
-			.cloned()
+			.map(|x| LitOrConst::Lit(*x))
 			.chain([z])
 			.collect_vec(),
-	)?;
-
-	// If trues is odd, negate sum
-	// Ok(if trues % 2 == 0 { z } else { !z })
-	Ok(z)
+	) {
+		Ok(()) => Ok(z),
+		// Err(Unsatisfiable) if z == LitOrConst::Const(false) => Err(Unsatisfiable),
+		// Err(Unsatisfiable) => Ok(!z),
+		// Err(Unsatisfiable) => Err(Unsatisfiable),
+		Err(Unsatisfiable) => todo!("also has to be handled based on given z"),
+	}
 }
 
 // TODO [?] functional version has duplication with relational version
 #[cfg_attr(feature = "tracing", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("[{}] + [{}] = {zs:?} | {bits:?}", xs.iter().rev().map(|x| format!("{x}")).collect_vec().join(","), ys.iter().rev().map(|x| format!("{x}")).collect_vec().join(",")))))]
-pub(crate) fn log_enc_add_fn<DB: ClauseDatabase>(
+pub(crate) fn rca<DB: ClauseDatabase>(
 	db: &mut DB,
 	xs: &[LitOrConst],
 	ys: &[LitOrConst],

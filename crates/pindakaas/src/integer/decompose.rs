@@ -156,8 +156,7 @@ impl Decompose for EncSpecDecomposer {
 			} else {
 				x.borrow_mut().decide_encoding(mix);
 			}
-			// let is_order = matches!(x.borrow().e, Some(IntVarEnc::Ord(_)));
-			// if !is_order && x.borrow().lbl.as_ref().unwrap().contains("bdd") {
+			// if matches!(x.borrow().e, Some(IntVarEnc::Bin(_))) && x.borrow().lbl().contains("bdd") {
 			// 	// TODO experiment using density heuristic: || x.borrow().dom.density() > 0.3
 			// 	x.borrow_mut().add_consistency = false;
 			// }

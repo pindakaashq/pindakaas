@@ -2,7 +2,7 @@ use crate::helpers::{emit_clause, unsigned_binary_range};
 use crate::integer::term::Term;
 use crate::integer::var::IntVarId;
 use crate::integer::Format;
-use crate::integer::{lex_geq_const, log_enc_add_fn, var::IntVarRef};
+use crate::integer::{lex_geq_const, rca, var::IntVarRef};
 use crate::{bool_linear::Comparator, integer::lex_leq_const};
 use crate::{log, CheckError};
 use itertools::Itertools;
@@ -516,7 +516,7 @@ impl Lin {
 				// if z is constant
 				// x{0..2} + y{2..4} = 000 + 4 == x+y = 010 + 2
 				if let Ok(c) = z.borrow().as_constant() {
-					return log_enc_add_fn(
+					return rca(
 						db,
 						&x,
 						&y,
@@ -542,7 +542,7 @@ impl Lin {
 
 				// z=w if z unencoded, changing its domain and encoding to w
 				z.borrow_mut().dom = w_dom; // fix lower bound to ground
-				let z_bin = BinEnc::from_lits(&log_enc_add_fn(db, &x, &y, lits, None).unwrap());
+				let z_bin = BinEnc::from_lits(&rca(db, &x, &y, lits, None).unwrap());
 
 				lex_geq_const(
 					db,

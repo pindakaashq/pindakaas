@@ -375,7 +375,7 @@ impl Model {
 			vars.iter().map(|x| x.borrow().lbl()).sorted().join(", ")
 		);
 		/// Limit brute force solve by seconds
-		const BUDGET: Option<u64> = Some(10);
+		const BUDGET: Option<u64> = Some(20);
 		let timer = Instant::now();
 
 		Ok(vars
@@ -386,7 +386,7 @@ impl Model {
 			.filter(|a| {
 				if let Some(budget) = BUDGET {
 					if timer.elapsed() > Duration::from_secs(budget) {
-						panic!("Exceeded brute force solve budget of {budget}");
+						panic!("Exceeded brute force solve budget of {budget} for model:\n{self}");
 					}
 				}
 				self.check_assignment(a).is_ok()
