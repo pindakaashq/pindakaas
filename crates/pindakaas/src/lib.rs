@@ -272,7 +272,8 @@ pub trait Valuation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// A cononical implementation of a Boolean decision variable, independent of
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+/// A canonical implementation of a Boolean decision variable, independent of
 /// negation.
 pub struct Var(pub(crate) NonZeroI32);
 

@@ -115,6 +115,7 @@ impl PartialOrd for Assignment {
 // }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MapSol(pub(crate) FxHashMap<Var, bool>);
 
 impl MapSol {
