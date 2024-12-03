@@ -7,6 +7,8 @@ use crate::integer::var::IntVarRef;
 use crate::integer::Lin;
 use crate::CheckError;
 use std::collections::BTreeSet;
+use std::time::Duration;
+use std::time::Instant;
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
@@ -372,32 +374,23 @@ impl Model {
 			"Output variables do not have unique labels: {}",
 			vars.iter().map(|x| x.borrow().lbl()).sorted().join(", ")
 		);
-		/// Limit the search space for solution generation
-		const MAX_SEARCH_SPACE: Option<usize> = Some(500);
-		let mut budget = MAX_SEARCH_SPACE;
-		let mut last_s = None;
+		/// Limit brute force solve by seconds
+		const BUDGET: Option<u64> = Some(10);
+		let timer = Instant::now();
 
 		Ok(vars
 			.iter()
-			.map(|var| {
-				let ds = var.borrow().dom.iter().collect::<Vec<_>>();
-				if let Some(_budget) = budget {
-					if let Some(new_max_search_space) =
-						_budget.checked_sub(ds.len() * last_s.unwrap_or(1))
-					{
-						budget = Some(new_max_search_space);
-						last_s = Some(ds.len());
-					} else {
-						panic!("search space exceeded brute-force limit of {MAX_SEARCH_SPACE:?} for model:\n{self}");
-					}
-				}
-				Ok(ds)
-			})
-			.try_collect::<Vec<Coeff>, Vec<Vec<Coeff>>, ()>()?
-			.into_iter()
+			.map(|var| var.borrow().dom.clone().iter().collect_vec())
 			.multi_cartesian_product()
 			.map(|a| Assignment::from(vars.iter().cloned().zip(a).collect_vec()))
-			.filter(|a| self.check_assignment(a).is_ok())
+			.filter(|a| {
+				if let Some(budget) = BUDGET {
+					if timer.elapsed() > Duration::from_secs(budget) {
+						panic!("Exceeded brute force solve budget of {budget}");
+					}
+				}
+				self.check_assignment(a).is_ok()
+			})
 			.sorted() // need to sort to make unique since HashMap cannot derive Hash
 			.dedup()
 			.collect())
