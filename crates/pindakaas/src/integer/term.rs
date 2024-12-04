@@ -214,7 +214,7 @@ impl Term {
 					dom,
 					false,
 					Some(IntVarEnc::Bin(None)), // y:B
-					format!("{con_lbl}-couple-{}", self.x.borrow().lbl),
+					format!("{con_lbl}-cpl_{}", self.x.borrow().lbl),
 				)?;
 
 				// coupling constraint
@@ -244,7 +244,7 @@ impl Term {
 						cmp.reverse()
 					},
 					k: 0,
-					lbl: format!("{con_lbl}-couple"),
+					lbl: format!("{con_lbl}-cpl"),
 				})?;
 
 				Ok(Term::new(
