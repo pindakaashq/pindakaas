@@ -116,9 +116,13 @@ impl Display for IntVar {
 			if self.add_consistency { "" } else { "!" },
 			self.dom,
 			if SHOW_LITS {
-				format!("[{}]", self.lits().iter().sorted().join(", "))
+				format!(
+					"[{}|{}]",
+					self.lits().len(),
+					self.lits().iter().sorted().join(", ")
+				)
 			} else if !self.lits().is_empty() {
-				format!(" {}L", self.lits().len())
+				format!(" [{}|]", self.lits().len())
 			} else {
 				String::new()
 			},

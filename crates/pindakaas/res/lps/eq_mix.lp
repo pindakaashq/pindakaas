@@ -6,6 +6,7 @@ Bounds
   0 <= x_2 <= 4
   0 <= x_3 <= 4
   0 <= x_4 <= 4
+  0 <= x_5 <= 4
 End
 
 Subject To
