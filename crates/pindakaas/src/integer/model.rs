@@ -372,7 +372,7 @@ impl Model {
 	pub(crate) fn generate_solutions(
 		&self,
 		vars: Option<Vec<IntVarRef>>,
-	) -> Result<Vec<Assignment>, ()> {
+	) -> (Vec<Assignment>, bool) {
 		let vars = vars.unwrap_or_else(|| self.vars().collect_vec());
 		assert!(
 			is_unique(vars.iter().map(|x| x.borrow().lbl())),
@@ -382,30 +382,34 @@ impl Model {
 		/// Limit brute force solve by seconds
 		const BUDGET: Option<u64> = Some(20);
 		let timer = Instant::now();
+		let mut complete = true;
 
-		Ok(vars
-			.iter()
-			.map(|var| var.borrow().dom.clone().iter().collect_vec())
-			.multi_cartesian_product()
-			.map(|a| Assignment::from(vars.iter().cloned().zip(a).collect_vec()))
-			.filter(|a| {
-				if let Some(budget) = BUDGET {
-					if timer.elapsed() > Duration::from_secs(budget) {
-						panic!("Exceeded brute force solve budget of {budget} for model:\n{self}");
-					}
-				}
-				self.check_assignment(a).is_ok()
-			})
-			.sorted() // need to sort to make unique since HashMap cannot derive Hash
-			.dedup()
-			.collect())
+		(vars
+                 .iter()
+                 .map(|var| var.borrow().dom.clone().iter().collect_vec())
+                 .multi_cartesian_product()
+                 .map(|a| Assignment::from(vars.iter().cloned().zip(a).collect_vec()))
+                 .filter(|a| self.check_assignment(a).is_ok())
+                 .enumerate()
+                 .map(|(i, a)| {
+                     if let Some(budget) = BUDGET {
+                         if timer.elapsed() > Duration::from_secs(budget) {
+                             println!("Exceeded brute force solve budget of {budget} after finding #{i} solutions for model:\n{self}");
+                             complete = false;
+                         }
+                     }
+                     a
+                 })
+                 .sorted() // need to sort to make unique since HashMap cannot derive Hash
+                 .dedup()
+                 .collect(), complete)
 	}
 
 	/// Check that `actual_assignments` to contain all solutions this model
 	pub fn check_assignments(
 		&self,
 		actual_assignments: &[Assignment],
-		expected_assignments: Option<&Vec<Assignment>>,
+		expected_assignments: Option<&(Vec<Assignment>, bool)>,
 		brute_force_solve: bool,
 		principals: &[IntVarRef],
 	) -> Result<(), Vec<CheckError>> {
@@ -441,10 +445,10 @@ impl Model {
 			}
 		}
 
-		let expected_assignments = expected_assignments
-			.as_ref()
-			.map(|expected_assignments| expected_assignments.to_vec())
-			.unwrap_or_else(|| self.generate_solutions(None).unwrap());
+		let (expected_assignments, complete) = expected_assignments
+			.map(|expected_assignments| expected_assignments.clone())
+			.unwrap_or_else(|| self.generate_solutions(None));
+		assert!(complete);
 
 		let canonicalize = |a: &[Assignment]| a.iter().sorted().cloned().collect::<Vec<_>>();
 
@@ -467,6 +471,9 @@ impl Model {
 			&actual_assignments
 				.iter()
 				.filter(|a| {
+					//TODO
+					// complete
+					// 	&&
 					!expected_assignments.iter().any(|e| {
 						principals
 							.iter()
@@ -502,9 +509,9 @@ Extra solutions ({}):
 {}
 Missing solutions ({}):
 {}
-Expected assignments:
+Expected assignments ({}):
 {}
-Actual assignments:
+Actual assignments ({}):
 {}
 ",
 					self.config,
@@ -522,7 +529,9 @@ Actual assignments:
 						.iter()
 						.map(|a| format!("- {}", a))
 						.join("\n"),
+					expected_assignments.len(),
 					expected_assignments.iter().join("\n"),
+					actual_assignments.len(),
 					actual_assignments.iter().join("\n"),
 				))])
 				.collect());
@@ -536,8 +545,15 @@ Actual assignments:
 		// );
 
 		println!(
-			"Actual assignments are complete and correct:\n{}",
-			actual_assignments.iter().join("\n")
+			"Actual assignments are complete and matched against {} expected assignments:
+Expected assignments:
+{}
+Actual assignments:
+{}
+",
+			if complete { "complete" } else { "IMCOMPLETE" },
+			expected_assignments.iter().join("\n"),
+			actual_assignments.iter().join("\n"),
 		);
 
 		Ok(())
@@ -632,7 +648,7 @@ mod tests {
 
 	/// Which uniform (for now) integer encoding specifications to test
 	static VAR_ENCS: LazyLock<Vec<Mix>> = LazyLock::new(|| {
-		std::env::args()
+		let encs = std::env::args()
 			.map(|arg| match arg.as_str() {
 				"--ord" => Some(Mix::Order),
 				"--bin" => Some(Mix::Binary),
@@ -640,7 +656,10 @@ mod tests {
 			})
 			.chain([TEST_CUTOFF.map(Mix::Mix)])
 			.flatten()
-			.collect()
+			.collect_vec();
+		encs.is_empty()
+			.then_some(vec![Mix::Order, Mix::Binary, Mix::Mix(5)])
+			.unwrap_or(encs)
 	});
 
 	/// Generate solutions for expected models
@@ -740,25 +759,28 @@ mod tests {
 	fn check_decomposition(
 		model: &Model,
 		decomposition: &Model,
-		expected_assignments: Option<&Vec<Assignment>>,
+		expected_assignments: Option<&(Vec<Assignment>, bool)>,
 	) {
 		if *BRUTE_FORCE_SOLVE {
-			if let Ok(decomposition_expected_assignments) = &decomposition.generate_solutions(None)
-			{
-				if let Err(errs) = model.check_assignments(
-					decomposition_expected_assignments,
-					expected_assignments,
-					*BRUTE_FORCE_SOLVE,
-					&model.vars().collect_vec(),
-				) {
-					for err in errs {
-						println!("Decomposition error:\n{err}");
-					}
-					panic!(
-						"Decomposition is incorrect. Test failed for {:?}\n{model}",
-						model.config
-					)
+			let (decomposition_actual_assignments, complete) =
+				decomposition.generate_solutions(None);
+			assert!(
+				complete,
+				"Cannot check decomposition if BFS sols are not complete"
+			);
+			if let Err(errs) = model.check_assignments(
+				&decomposition_actual_assignments,
+				expected_assignments,
+				*BRUTE_FORCE_SOLVE,
+				&model.vars().collect_vec(),
+			) {
+				for err in errs {
+					println!("Decomposition error:\n{err}");
 				}
+				panic!(
+					"Decomposition is incorrect. Test failed for {:?}\n{model}",
+					model.config
+				)
 			}
 		}
 	}
@@ -835,12 +857,10 @@ mod tests {
 	fn test_model(model: Model, configs: Option<Vec<ModelConfig>>) {
 		println!("model = {}", model);
 
-		let expected_assignments = (*BRUTE_FORCE_SOLVE)
-			.then(|| model.generate_solutions(None).ok())
-			.flatten();
+		let expected_assignments = (*BRUTE_FORCE_SOLVE).then(|| model.generate_solutions(None));
 
-		if Some(vec![]) == expected_assignments {
-			println!("WARNING: brute force solver found model UNSAT");
+		if Some((vec![], true)) == expected_assignments {
+			println!("WARNING: brute force solver determined model UNSAT");
 		}
 
 		for (i, config) in {
@@ -951,7 +971,7 @@ mod tests {
 	fn test_decomp(
 		mut decomposition: Model,
 		model: &Model,
-		expected_assignments: Option<&Vec<Assignment>>,
+		expected_assignments: Option<&(Vec<Assignment>, bool)>,
 	) {
 		let mut slv = Cadical::default();
 
