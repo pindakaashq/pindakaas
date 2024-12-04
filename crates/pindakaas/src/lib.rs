@@ -241,7 +241,7 @@ pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 pub struct Unsatisfiable;
 
 /// Errors relating to failing assignments
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CheckError {
 	Unsatisfiable(Unsatisfiable),
 	Fail(String),

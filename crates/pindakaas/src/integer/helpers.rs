@@ -134,7 +134,7 @@ End
 	}
 
 	/// Superset of LP format:
-	/// allow anonymous constraints (w/o label) by `: ...`
+	/// allow anonymous constraints (w/o label) by `: ...` (they will be internally labelled still)
 	/// allow Doms section for domain with gaps
 	/// variables without domains default to 01
 	pub fn from_string(s: &str, format: Format) -> Result<Self, String> {
@@ -292,7 +292,7 @@ End
 													cmp: Comparator::LessEq,
 													k: 0,
 													lbl: if next_lbl.is_empty() {
-														None
+														Some(format!("c_{}", model.cons.len() + 1))
 													} else {
 														Some(next_lbl.to_owned())
 													},

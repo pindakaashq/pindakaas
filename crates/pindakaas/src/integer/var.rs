@@ -11,8 +11,8 @@ use crate::{
 };
 
 use super::{
-	bin::BinEnc, enc::IntVarEnc, helpers::required_lits, model::Mix, ord::OrdEnc, Dom, Model,
-	PosCoeff,
+	bin::BinEnc, enc::IntVarEnc, helpers::required_lits, model::Mix, ord::OrdEnc, Assignment, Dom,
+	Model, PosCoeff,
 };
 
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
@@ -84,9 +84,9 @@ impl IntVar {
 		feature = "tracing",
 		tracing::instrument(name = "consistency", skip_all, fields(constraint = format!("{}", self)))
 	)]
-	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> Result {
+	pub(crate) fn consistent<DB: ClauseDatabase>(&mut self, db: &mut DB) -> Result {
 		self.e
-			.as_ref()
+			.as_mut()
 			.map(|e| e.consistent(db, &self.dom))
 			.unwrap_or(Ok(()))
 	}
@@ -276,16 +276,17 @@ impl IntVar {
 		}
 	}
 
-	pub fn assign<F: Valuation + ?Sized>(&self, a: &F) -> Result<Coeff, CheckError> {
-		let assignment = BoolLinExp::from(self).assign(a)?;
-		if self.add_consistency && !self.dom.contains(assignment) {
-			Err(CheckError::Fail(format!(
-				"Inconsistent var assignment on consistent var: {} -> {:?}",
+	pub fn assign<F: Valuation + ?Sized>(&self, sol: &F) -> Coeff {
+		BoolLinExp::from(self).assign(sol)
+	}
+
+	pub fn check(&self, assignment: &Assignment) -> Result<(), CheckError> {
+		(!self.add_consistency || self.dom.contains(assignment.value(&self).unwrap()))
+			.then_some(())
+			.ok_or(CheckError::Fail(format!(
+				"Inconsistent var assignment on {} in assignment {}",
 				self, assignment
 			)))
-		} else {
-			Ok(assignment)
-		}
 	}
 
 	pub fn is_constant(&self) -> bool {
@@ -306,7 +307,7 @@ impl IntVar {
 	) -> Result<OrdEnc, Unsatisfiable> {
 		self.encode(db).map(|e| match e {
 			IntVarEnc::Ord(Some(o)) => o,
-			_ if self.is_constant() => OrdEnc::from_lits(&[]),
+			_ if self.is_constant() => OrdEnc::default(),
 			_ => panic!("encode_ord called without binary encoding for {self}"),
 		})
 	}
@@ -443,8 +444,8 @@ impl IntVar {
 				model.new_aux_var(
 					Dom::from_slice(&[0].into_iter().chain(dom).collect_vec()),
 					false,
-					Some(IntVarEnc::Ord(Some(OrdEnc::from_lits(
-						&lits.iter().flatten().cloned().collect_vec(),
+					Some(IntVarEnc::Ord(Some(OrdEnc::from(
+						lits.into_iter().flatten().collect_vec(),
 					)))),
 					Some(lbl),
 				)

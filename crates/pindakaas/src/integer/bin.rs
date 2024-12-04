@@ -291,7 +291,10 @@ impl BinEnc {
 
 	/// Get complement
 	pub(crate) fn complement(self) -> Self {
-		Self::from_lits(&self.xs().into_iter().map(|l| !l).collect_vec())
+		Self {
+			x: self.xs().into_iter().map(|l| !l).collect(),
+			..self
+		}
 	}
 
 	/// Constraints bounds and gaps

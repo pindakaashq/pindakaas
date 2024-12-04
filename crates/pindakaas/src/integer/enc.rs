@@ -106,9 +106,13 @@ pub(crate) enum IntVarEnc {
 }
 
 impl IntVarEnc {
-	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB, dom: &Dom) -> Result {
+	pub(crate) fn consistent<DB: ClauseDatabase>(&mut self, db: &mut DB, dom: &Dom) -> Result {
+		// if self.add_consistency {
+		// 	return Ok(());
+		// }
+		// self.consistent = true;
 		match self {
-			IntVarEnc::Ord(Some(o)) => o.consistent(db),
+			IntVarEnc::Ord(Some(o)) => o.encode_consistency(db),
 			IntVarEnc::Bin(Some(b)) => b.consistent(db, dom),
 			IntVarEnc::Ord(None) | IntVarEnc::Bin(None) => panic!("Expected encoding of {self}"),
 		}

@@ -58,12 +58,11 @@ pub struct BoolLinExp {
 }
 
 impl BoolLinExp {
-	pub(crate) fn assign<F: Valuation + ?Sized>(&self, solution: &F) -> Result<Coeff, CheckError> {
-		self.iter().try_fold(self.add, |acc, (_, terms)| {
-			Ok(acc
-				+ terms.into_iter().fold(0, |acc, (lit, coef)| {
-					acc + if solution.value(*lit) { coef } else { &0 }
-				}) * self.mult)
+	pub(crate) fn assign<F: Valuation + ?Sized>(&self, solution: &F) -> Coeff {
+		self.iter().fold(self.add, |acc, (_, terms)| {
+			acc + terms.into_iter().fold(0, |acc, (lit, coef)| {
+				acc + if solution.value(*lit) { coef } else { &0 }
+			}) * self.mult
 		})
 	}
 }

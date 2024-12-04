@@ -160,7 +160,6 @@ impl Decompose for EncSpecDecomposer {
 			// 	// TODO experiment using density heuristic: || x.borrow().dom.density() > 0.3
 			// 	x.borrow_mut().add_consistency = false;
 			// }
-			// x.
 		});
 
 		let cons = model.cons.iter().cloned();

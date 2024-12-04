@@ -23,7 +23,7 @@ impl Assignment {
 				let lit_assignment = Some(MapSol::new(x.borrow().lits(), sol));
 				#[cfg(not(debug_assertions))]
 				let lit_assignment = None;
-				(x.clone(), (x.borrow().assign(sol).unwrap(), lit_assignment))
+				(x.clone(), (x.borrow().assign(sol), lit_assignment))
 			})
 			.collect_vec(),
 		)

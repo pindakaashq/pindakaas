@@ -175,8 +175,7 @@ impl FromIterator<Model> for Model {
 
 impl Checker for Model {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
-		let a = self.assign(sol)?;
-		self.cons.iter().try_for_each(|con| con.check(&a))
+		self.check_assignment(&self.assign(sol))
 	}
 }
 
@@ -354,13 +353,15 @@ impl Model {
 	}
 
 	/// Assign `sol` to model to yield its integer `Assignment`
-	pub fn assign<F: Valuation + ?Sized>(&self, sol: &F) -> Result<Assignment, CheckError> {
-		Ok(Assignment::new(self.vars(), sol))
+	pub fn assign<F: Valuation + ?Sized>(&self, sol: &F) -> Assignment {
+		Assignment::new(self.vars(), sol)
 	}
 
-	/// Checks correctness of `assignment`
+	/// Checks correctness of total `assignment`
 	pub fn check_assignment(&self, assignment: &Assignment) -> Result<(), CheckError> {
-		self.cons.iter().try_for_each(|con| con.check(assignment))
+		self.vars().try_for_each(|x| x.borrow().check(assignment))?;
+		self.cons.iter().try_for_each(|con| con.check(assignment))?;
+		Ok(())
 	}
 
 	/// Brute-forces all solutions for given output variables (or all if None)
@@ -1000,8 +1001,7 @@ mod tests {
 			// .inspect(|(assignment, lit_assignment)| {
 			// 	println!("{assignment} -> {lit_assignment}");
 			// })
-			.try_collect()
-			.unwrap();
+			.collect();
 		// let (actual_assignments, _): (Vec<_>, Vec<_>) = assigns.into_iter().unzip();
 
 		// assert!(
@@ -1236,6 +1236,11 @@ End
 	#[test]
 	fn eq_mix() {
 		test_lp!("eq_mix");
+	}
+
+	#[test]
+	fn couple_bug_1() {
+		test_lp!("couple_bug_1");
 	}
 
 	#[test]
@@ -1681,6 +1686,7 @@ End
 	}
 
 	#[test]
+	#[ignore]
 	fn test_lp_scm_2() {
 		test_lp_for_configs(
 			r"

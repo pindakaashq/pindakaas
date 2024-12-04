@@ -421,10 +421,9 @@ impl Lin {
 						assert!(matches!(t_x.x.borrow().e, Some(IntVarEnc::Ord(_))));
 						assert!(matches!(t_y.x.borrow().e, Some(IntVarEnc::Bin(_))));
 						t_x.x.borrow_mut().encode_ord(db)?;
-						if !t_x.x.borrow().add_consistency {
-							t_x.x.borrow_mut().consistent(db)?;
-						}
+						t_x.x.borrow_mut().consistent(db)?; // channelling requires consitency on both vars
 						let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
+						t_y.x.borrow_mut().consistent(db)?;
 
 						let (range_lb, range_ub) = unsigned_binary_range(y_enc.bits());
 						y_enc.x.iter().enumerate().try_for_each(|(i, &y_i)| {

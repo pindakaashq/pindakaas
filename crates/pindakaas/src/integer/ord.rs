@@ -13,6 +13,12 @@ pub(crate) struct OrdEnc {
 	pub(crate) x: Vec<Lit>,
 }
 
+impl From<Vec<Lit>> for OrdEnc {
+	fn from(x: Vec<Lit>) -> Self {
+		Self { x }
+	}
+}
+
 impl OrdEnc {
 	pub(crate) fn new<DB: ClauseDatabase>(db: &mut DB, dom: &Dom, _lbl: Option<&String>) -> Self {
 		let _lbl = _lbl.cloned().unwrap_or(String::from("b"));
@@ -23,10 +29,6 @@ impl OrdEnc {
 				.map(|_v| new_var!(db, format!("{_lbl}≥{_v}")))
 				.collect(),
 		}
-	}
-
-	pub(crate) fn from_lits(x: &[Lit]) -> Self {
-		Self { x: x.to_vec() }
 	}
 
 	// TODO difficulty turning this into iterator?
@@ -82,7 +84,7 @@ impl OrdEnc {
 		}
 	}
 
-	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> crate::Result {
+	pub(crate) fn encode_consistency<DB: ClauseDatabase>(&mut self, db: &mut DB) -> crate::Result {
 		self.x.iter().tuple_windows().try_for_each(|(a, b)| {
 			if a.var() != b.var() {
 				emit_clause!(db, [!b, *a])
