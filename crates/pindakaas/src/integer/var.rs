@@ -281,7 +281,7 @@ impl IntVar {
 	}
 
 	pub fn check(&self, assignment: &Assignment) -> Result<(), CheckError> {
-		(!self.add_consistency || self.dom.contains(assignment.value(&self).unwrap()))
+		(!self.add_consistency || self.dom.contains(assignment.value(self).unwrap()))
 			.then_some(())
 			.ok_or(CheckError::Fail(format!(
 				"VarInconsistency: assignment on {} in assignment {}",

@@ -292,7 +292,6 @@ impl BinEnc {
 	pub(crate) fn complement(self) -> Self {
 		Self {
 			x: self.xs().into_iter().map(|l| !l).collect(),
-			..self
 		}
 	}
 

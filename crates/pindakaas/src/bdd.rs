@@ -260,7 +260,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
 				&xs,
 				lin.cmp.clone().into(),
 				*lin.k,
-				"TODO".to_string(),
+				"TODO".to_owned(),
 			)],
 			..model
 		})?;

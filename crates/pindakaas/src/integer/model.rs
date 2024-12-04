@@ -446,7 +446,7 @@ impl Model {
 		}
 
 		let (expected_assignments, complete) = expected_assignments
-			.map(|expected_assignments| expected_assignments.clone())
+			.cloned()
 			.unwrap_or_else(|| self.generate_solutions(None));
 		assert!(complete);
 

@@ -489,7 +489,7 @@ impl Term {
 			},
 			cmp: Comparator::Equal,
 			k: 0,
-			lbl: format!("{}", z.lbl()),
+			lbl: format!("add-{}", z.lbl()),
 		})?;
 		Ok(z)
 	}
