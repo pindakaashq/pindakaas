@@ -714,12 +714,12 @@ mod tests {
 		iproduct!(
 			[Scm::Dnf],
 			[
-				// Decomposer::Gt,
+				Decomposer::Gt,
 				// Decomposer::Swc, // TODO
 				Decomposer::Bdd,
 				// Decomposer::Rca
 			],
-			[Consistency::None, Consistency::Bounds],
+			[Consistency::None],
 			[false], // consistency
 			// [true],          // equalize terns
 			// [Some(0)], // cutoffs: [None, Some(0), Some(2)]

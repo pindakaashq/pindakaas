@@ -13,7 +13,7 @@ use super::model::{Obj, USE_CSE};
 /// Show the integer variable's ID
 pub(crate) const SHOW_IDS: bool = false;
 /// Show the encoding literals of the integer variable
-const SHOW_LITS: bool = true;
+const SHOW_LITS: Option<usize> = Some(5);
 /// Whether to rewrite x1 + .. + xn # 0 as x1 + .. + x_(n-1) # - xn
 const SHOW_K_0: bool = true;
 /// Show domain density
@@ -115,12 +115,8 @@ impl Display for IntVar {
 			},
 			if self.add_consistency { "" } else { "!" },
 			self.dom,
-			if SHOW_LITS {
-				format!(
-					"[{}|{}]",
-					self.lits().len(),
-					self.lits().iter().sorted().join(", ")
-				)
+			if let Some(l) = SHOW_LITS {
+				format!("[{}]", elipsize(&self.lits().iter().collect_vec(), Some(l)))
 			} else if !self.lits().is_empty() {
 				format!(" [{}|]", self.lits().len())
 			} else {
@@ -144,6 +140,20 @@ impl Display for Cse {
 	}
 }
 
+fn elipsize<T: Display>(x: &[T], e: Option<usize>) -> String {
+	let e = e.map(|e| e).unwrap_or(x.len());
+	if x.len() < e {
+		x.iter().take(e).join(",")
+	} else {
+		format!(
+			"{},..,{}|{}",
+			x.len(),
+			x.iter().take(e).join(","),
+			x.last().unwrap()
+		)
+	}
+}
+
 impl Display for Dom {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		// TODO replaced {..} by |..| since logger interprets {/} wrong
@@ -153,25 +163,20 @@ impl Display for Dom {
 		}
 		let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
 		const ELIPSIZE: Option<usize> = Some(4);
-		let elipsize = ELIPSIZE.map(|e| dom.len() > e).unwrap_or_default();
 
-		let density = if dom.len() <= 1 || !SHOW_DOM_DENSITY {
-			String::from("")
-		} else {
-			format!("{:.0}%", self.density() * 100.0)
-		};
 		if dom.len() > 1 && Coeff::try_from(dom.len()).unwrap() == ub - lb + 1 {
-			write!(f, "|{}..{}| |{}|", lb, ub, dom.len())?;
-		} else if elipsize {
+			write!(f, "|{}..{}|{}", dom.len(), lb, ub)?;
+		} else {
 			write!(
 				f,
-				"|{},..,{ub}| |{}|{}",
-				dom.iter().take(ELIPSIZE.unwrap() - 1).join(","),
-				dom.len(),
-				density
-			)?;
-		} else {
-			write!(f, "|{}| |{}|{}", dom.iter().join(","), dom.len(), density)?;
+				"|{}|{}",
+				elipsize(&dom.iter().collect_vec(), ELIPSIZE),
+				if dom.len() <= 1 || !SHOW_DOM_DENSITY {
+					String::from("")
+				} else {
+					format!("{:.0}%", self.density() * 100.0)
+				}
+			)?
 		}
 		Ok(())
 	}
