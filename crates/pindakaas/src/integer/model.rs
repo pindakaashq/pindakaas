@@ -176,6 +176,8 @@ impl FromIterator<Model> for Model {
 impl Checker for Model {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
 		self.check_assignment(&self.assign(sol))
+			.map_err(|errs| errs.into_iter().next().unwrap())
+		// into_first() ?
 	}
 }
 
@@ -358,10 +360,14 @@ impl Model {
 	}
 
 	/// Checks correctness of total `assignment`
-	pub fn check_assignment(&self, assignment: &Assignment) -> Result<(), CheckError> {
-		self.vars().try_for_each(|x| x.borrow().check(assignment))?;
-		self.cons.iter().try_for_each(|con| con.check(assignment))?;
-		Ok(())
+	pub fn check_assignment(&self, assignment: &Assignment) -> Result<(), Vec<CheckError>> {
+		let errs = self
+			.vars()
+			.map(|x| x.borrow().check(assignment))
+			.chain(self.cons.iter().map(|con| con.check(assignment)))
+			.filter_map(|result| result.is_err().then(|| result.unwrap_err()))
+			.collect_vec();
+		errs.is_empty().then_some(()).ok_or(errs)
 	}
 
 	/// Brute-forces all solutions for given output variables (or all if None)
@@ -415,22 +421,16 @@ impl Model {
 		);
 		let errs = actual_assignments
 			.iter()
-			.filter_map(
-				|actual_assignment| match self.check_assignment(actual_assignment) {
-					Err(CheckError::Fail(e)) => {
-						Some(CheckError::Fail(format!("Inconsistency: {e}")))
-					}
-					Err(e) => panic!("Unexpected err: {e}"),
-					_ => None,
-				},
-			)
-			.collect::<Vec<_>>();
+			.map(|actual_assignment| self.check_assignment(actual_assignment))
+			.filter_map(|result| result.is_err().then(|| result.unwrap_err()))
+			.flatten() // collect
+			.collect_vec();
 
 		// Throw early if expected_assignments need to be computed
 		if !brute_force_solve && expected_assignments.is_none() {
 			if errs.is_empty() {
 				println!(
-					"All constraints hold for actual assignments:\n{}",
+					"Variables and constraints hold for actual assignments:\n{}",
 					if actual_assignments.is_empty() {
 						String::from("Unsat")
 					} else {

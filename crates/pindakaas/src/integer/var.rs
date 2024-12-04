@@ -284,7 +284,7 @@ impl IntVar {
 		(!self.add_consistency || self.dom.contains(assignment.value(&self).unwrap()))
 			.then_some(())
 			.ok_or(CheckError::Fail(format!(
-				"Inconsistent var assignment on {} in assignment {}",
+				"VarInconsistency: assignment on {} in assignment {}",
 				self, assignment
 			)))
 	}

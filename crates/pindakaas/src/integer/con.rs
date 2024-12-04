@@ -289,15 +289,16 @@ impl Lin {
 		cs.len() == 3 && cs[2] == -1 && self.k == 0
 	}
 
-	pub(crate) fn check(&self, a: &Assignment) -> Result<(), CheckError> {
+	pub(crate) fn check(&self, assignment: &Assignment) -> Result<(), CheckError> {
 		let lhs = self
 			.exp
 			.terms
 			.iter()
 			.map(|term| {
 				term.c
-					* a.value(&term.x.borrow())
-						.unwrap_or_else(|| panic!("Expected {} to be assigned in {}", term, a))
+					* assignment.value(&term.x.borrow()).unwrap_or_else(|| {
+						panic!("Expected {} to be assigned in {}", term, assignment)
+					})
 			})
 			.sum::<Coeff>();
 
@@ -310,14 +311,16 @@ impl Lin {
 		} else {
 			const SHOW_LP: bool = false;
 			Err(CheckError::Fail(format!(
-				"Inconsistency in {}: {} == {} !{} {}\n{}",
+				"Inconsistency in {}: {} == {} !{} {}\n{} (A = {assignment})",
 				self.lbl.clone().unwrap_or_default(),
 				self.exp
 					.terms
 					.iter()
 					.map(|term| {
-						let (a, lits) =
-							(a.value(&term.x.borrow()).unwrap(), a.sol(&term.x.borrow()));
+						let (a, lits) = (
+							assignment.value(&term.x.borrow()).unwrap(),
+							assignment.sol(&term.x.borrow()),
+						);
 						format!(
 							"{} * {}={} [{}] (={})",
 							term.c,
