@@ -64,7 +64,7 @@ impl Decompose for TotalizerEncoder {
 							Dom::from_slice(&dom),
 							model.config.add_consistency,
 							None,
-							Some(format!("gt_{}_{}", i, j)),
+							format!("{}-gt_{}_{}", lin.lbl, i, j),
 						)?;
 
 						let con = Lin::tern(
@@ -72,7 +72,7 @@ impl Decompose for TotalizerEncoder {
 							right.clone(),
 							lin.cmp,
 							parent.clone().into(),
-							Some(format!("gt_{}_{}", i, j)),
+							format!("{}-gt_{}_{}", lin.lbl, i, j),
 						);
 
 						model.add_constraint(con)?;
@@ -121,7 +121,12 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for TotalizerEncoder 
 
 		// The totalizer encoding constructs a binary tree starting from a layer of leaves
 		let mut model = self.decompose(Model {
-			cons: vec![Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None)],
+			cons: vec![Lin::new(
+				&xs,
+				lin.cmp.clone().into(),
+				*lin.k,
+				"TODO".to_owned(),
+			)],
 			..model
 		})?;
 

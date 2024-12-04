@@ -81,11 +81,15 @@ impl Term {
 		Self { c, x }
 	}
 
+	pub fn lbl(&self) -> String {
+		format!("{}*{}", self.c, self.x.borrow().lbl)
+	}
+
 	pub(crate) fn encode_bin(
 		self,
 		mut model: Option<&mut Model>,
 		cmp: Comparator,
-		con_lbl: Option<String>,
+		con_lbl: &str,
 	) -> crate::Result<Self> {
 		if USE_CSE {
 			if let Some(model) = &model {
@@ -121,7 +125,7 @@ impl Term {
 				Dom::from_slice(dom),
 				false,
 				Some(IntVarEnc::Bin(Some(bin_enc))),
-				Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
+				format!("{con_lbl}-scm-{}·{}", self.c, self.x.borrow().lbl()),
 			);
 
 			Ok(Term::from(y))
@@ -130,13 +134,7 @@ impl Term {
 		let dom = self.dom().iter().sorted().copied().collect_vec();
 		let t = match e {
 			Some(IntVarEnc::Bin(_)) if self.c == 0 => {
-				return Ok(Term::from(IntVar::from_dom_as_ref(
-					0,
-					Dom::from_slice(&[0]),
-					false,
-					None,
-					None,
-				)));
+				return Ok(Term::from(IntVar::new_constant(0)));
 			}
 			Some(IntVarEnc::Bin(_)) if self.c == 1 => {
 				return Ok(self);
@@ -170,7 +168,7 @@ impl Term {
 						),
 						false,
 						Some(IntVarEnc::Bin(Some(x_bin.clone().complement()))),
-						Some(format!("scm-b-{}", self.x.borrow().lbl())),
+						format!("{con_lbl}-scm-b-{}", self.x.borrow().lbl()),
 					),
 				)
 				.encode_bin(model, cmp, con_lbl);
@@ -189,7 +187,7 @@ impl Term {
 								.chain(x_bin.xs().iter().cloned())
 								.collect_vec(),
 						)))),
-						Some(format!("scm-{}·{}", self.c, self.x.borrow().lbl())),
+						format!("{con_lbl}-scm-{}·{}", self.c, self.x.borrow().lbl()),
 					),
 				)
 				.encode_bin(model, cmp, con_lbl);
@@ -216,11 +214,7 @@ impl Term {
 					dom,
 					false,
 					Some(IntVarEnc::Bin(None)), // y:B
-					self.x
-						.borrow()
-						.lbl
-						.clone()
-						.map(|lbl| format!("couple-{lbl}")),
+					format!("{con_lbl}-couple-{}", self.x.borrow().lbl),
 				)?;
 
 				// coupling constraint
@@ -250,7 +244,7 @@ impl Term {
 						cmp.reverse()
 					},
 					k: 0,
-					lbl: con_lbl.clone().map(|lbl| format!("couple-{lbl}")),
+					lbl: format!("{con_lbl}-couple"),
 				})?;
 
 				Ok(Term::new(
@@ -282,11 +276,7 @@ impl Term {
 					Dom::from_bounds(-self.x.borrow().ub(), -self.x.borrow().lb()),
 					false,
 					Some(IntVarEnc::Bin(None)),
-					self.x
-						.borrow()
-						.lbl
-						.as_ref()
-						.map(|lbl| format!("scm-neg-{lbl}")),
+					format!("{con_lbl}-scm_neg_{}", self.x.borrow().lbl),
 				)?;
 
 				// -x = y
@@ -300,7 +290,7 @@ impl Term {
 					},
 					cmp: Comparator::Equal,
 					k: 0,
-					lbl: Some(String::from("scm-neg")),
+					lbl: format!("{con_lbl}-scm_neg"),
 				})?;
 
 				// z is -c times y: z = 5*(y in -3..0)
@@ -371,7 +361,7 @@ impl Term {
 								),
 								false,
 								Some(IntVarEnc::Bin(None)),
-								Some(format!("{}-{c}·{}", cmp, self.x.borrow().lbl())),
+								format!("{}-{c}·{}", cmp, self.x.borrow().lbl()),
 							)?;
 
 							ys.insert(z_i, c);
@@ -381,7 +371,7 @@ impl Term {
 								},
 								cmp: Comparator::Equal,
 								k: 0,
-								lbl: Some(String::from("scm")),
+								lbl: format!("{con_lbl}-scm-{z_i}"),
 							})?;
 							let key = (self.x.borrow().id, c, Comparator::Equal);
 							model.cse.0.insert(key, Term::from(z));
@@ -394,7 +384,7 @@ impl Term {
 								Dom::from_slice(&dom),
 								false,
 								Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
-								Some(format!("{}scm-{}·{}", cmp, self.c, self.x.borrow().lbl())),
+								format!("{con_lbl}_{}_scm_dnf", self.lbl()),
 							)
 							.unwrap();
 
@@ -405,7 +395,7 @@ impl Term {
 								},
 								cmp: Comparator::Equal,
 								k: 0,
-								lbl: con_lbl.clone().map(|lbl| (format!("scm-{}", lbl))),
+								lbl: format!("{con_lbl}-{}_scm_dnf", self.lbl()),
 							})
 							.unwrap();
 						Ok(Term::from(y))
@@ -490,7 +480,7 @@ impl Term {
 			Dom::from_bounds(x.lb() + y.lb(), x.ub() + y.ub()),
 			false,
 			Some(IntVarEnc::Bin(None)),
-			None,
+			format!("{}+{}", x.lbl(), y.lbl()),
 		)?);
 
 		model.add_constraint(Lin {
@@ -499,7 +489,7 @@ impl Term {
 			},
 			cmp: Comparator::Equal,
 			k: 0,
-			lbl: None,
+			lbl: format!("{}", z.lbl()),
 		})?;
 		Ok(z)
 	}
@@ -522,12 +512,12 @@ mod tests {
 					Dom::from_bounds(2, 6),
 					true,
 					Some(IntVarEnc::Bin(None)),
-					None,
+					"x1".to_owned(),
 				)
 				.unwrap(),
 		);
 		x.x.borrow_mut().encode_bin(&mut db).unwrap();
-		let y = x.encode_bin(None, Comparator::Equal, None).unwrap();
+		let y = x.encode_bin(None, Comparator::Equal, "c1").unwrap();
 
 		// -x in 2..6[..9]
 		//  y in [-9..]-6..-2

@@ -175,7 +175,7 @@ impl Decompose for BddEncoder {
 					Dom::from_slice(&dom),
 					model.config.add_consistency,
 					None,
-					lin.lbl.as_ref().map(|lbl| format!("{}_bdd_{}", lbl, i + 1)),
+					format!("{}_bdd_{}", lin.lbl, i + 1),
 				)
 				// .map(|var| (var, views))
 			})
@@ -209,7 +209,7 @@ impl Decompose for BddEncoder {
 								curr,
 								lin.cmp,
 								next.clone(),
-								lin.lbl.as_ref().map(|lbl| format!("bdd_{}_{}", i + 1, lbl)),
+								format!("{}_bdd-{}", lin.lbl, i + 1),
 							), // TODO .simplified()?,
 						)
 						.map(|_| next)
@@ -256,7 +256,12 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
 
 		// TODO pass BDD::decompose to Model::encode instead, since otherwise we risk decomposing twice
 		let mut model = self.decompose(Model {
-			cons: vec![Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None)],
+			cons: vec![Lin::new(
+				&xs,
+				lin.cmp.clone().into(),
+				*lin.k,
+				"TODO".to_string(),
+			)],
 			..model
 		})?;
 

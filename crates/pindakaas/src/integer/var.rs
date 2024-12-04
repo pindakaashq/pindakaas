@@ -6,7 +6,6 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 use crate::{
 	bool_linear::{BoolLinExp, Part},
 	helpers::{emit_clause, negate_cnf, new_var},
-	integer::display::SHOW_IDS,
 	log, CheckError, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation, Var,
 };
 
@@ -31,7 +30,7 @@ pub struct IntVar {
 	pub dom: Dom,
 	pub(crate) add_consistency: bool,
 	pub(crate) e: Option<IntVarEnc>,
-	pub(crate) lbl: Option<String>,
+	pub(crate) lbl: String,
 }
 
 // impl Hash for RefCell<IntVar> {
@@ -45,7 +44,7 @@ pub struct IntVar {
 
 impl IntVar {
 	pub(crate) fn new_constant(c: Coeff) -> IntVarRef {
-		Self::from_dom_as_ref(0, Dom::constant(c), true, None, None)
+		Self::from_dom_as_ref(0, Dom::constant(c), true, None, format!("C({c})"))
 	}
 
 	pub(crate) fn from_dom_as_ref(
@@ -53,7 +52,7 @@ impl IntVar {
 		dom: Dom,
 		add_consistency: bool,
 		e: Option<IntVarEnc>,
-		lbl: Option<String>,
+		lbl: String,
 	) -> IntVarRef {
 		Rc::new(RefCell::new(Self::from_dom(
 			id,
@@ -69,7 +68,7 @@ impl IntVar {
 		dom: Dom,
 		add_consistency: bool,
 		e: Option<IntVarEnc>,
-		lbl: Option<String>,
+		lbl: String,
 	) -> Self {
 		Self {
 			id: IntVarId(id),
@@ -85,6 +84,7 @@ impl IntVar {
 		tracing::instrument(name = "consistency", skip_all, fields(constraint = format!("{}", self)))
 	)]
 	pub(crate) fn consistent<DB: ClauseDatabase>(&mut self, db: &mut DB) -> Result {
+		self.add_consistency = true;
 		self.e
 			.as_mut()
 			.map(|e| e.consistent(db, &self.dom))
@@ -333,13 +333,11 @@ impl IntVar {
 				return Ok(self.e.as_ref().unwrap().clone());
 			}
 			Some(IntVarEnc::Ord(_)) | None => {
-				IntVarEnc::Ord(Some(OrdEnc::new(db, &self.dom, self.lbl.as_ref())))
+				IntVarEnc::Ord(Some(OrdEnc::new(db, &self.dom, &self.lbl)))
 			}
-			Some(IntVarEnc::Bin(_)) => IntVarEnc::Bin(Some(BinEnc::new(
-				db,
-				required_lits(&self.dom),
-				self.lbl.clone(),
-			))),
+			Some(IntVarEnc::Bin(_)) => {
+				IntVarEnc::Bin(Some(BinEnc::new(db, required_lits(&self.dom), &self.lbl)))
+			}
 		};
 
 		self.e = Some(e.clone());
@@ -390,17 +388,14 @@ impl IntVar {
 	}
 
 	pub fn lbl(&self) -> String {
-		if let Some(lbl) = self.lbl.as_ref() {
-			format!(
-				"{}{}",
-				lbl,
-				SHOW_IDS
-					.then(|| format!("#{}", self.id))
-					.unwrap_or_default()
-			)
-		} else {
-			format!("x#{}", self.id)
-		}
+		self.lbl.clone() //TODO &str
+		           // format!(
+		           // 	"{}{}",
+		           // 	self.lbl,
+		           // 	SHOW_IDS
+		           // 		.then(|| format!("#{}", self.id))
+		           // 		.unwrap_or_default()
+		           // )
 	}
 
 	// TODO [!] only updated for Amo
@@ -447,7 +442,7 @@ impl IntVar {
 					Some(IntVarEnc::Ord(Some(OrdEnc::from(
 						lits.into_iter().flatten().collect_vec(),
 					)))),
-					Some(lbl),
+					lbl,
 				)
 			}
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
@@ -559,7 +554,7 @@ mod tests {
 			dom.clone(),
 			true,
 			Some(IntVarEnc::Ord(None)),
-			Some(String::from("x")),
+			String::from("x"),
 		);
 		x.encode(&mut cnf).unwrap();
 

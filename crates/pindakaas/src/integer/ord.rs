@@ -20,8 +20,7 @@ impl From<Vec<Lit>> for OrdEnc {
 }
 
 impl OrdEnc {
-	pub(crate) fn new<DB: ClauseDatabase>(db: &mut DB, dom: &Dom, _lbl: Option<&String>) -> Self {
-		let _lbl = _lbl.cloned().unwrap_or(String::from("b"));
+	pub(crate) fn new<DB: ClauseDatabase>(db: &mut DB, dom: &Dom, _lbl: &str) -> Self {
 		Self {
 			x: dom
 				.iter()
@@ -84,7 +83,7 @@ impl OrdEnc {
 		}
 	}
 
-	pub(crate) fn encode_consistency<DB: ClauseDatabase>(&mut self, db: &mut DB) -> crate::Result {
+	pub(crate) fn consistent<DB: ClauseDatabase>(&mut self, db: &mut DB) -> crate::Result {
 		self.x.iter().tuple_windows().try_for_each(|(a, b)| {
 			if a.var() != b.var() {
 				emit_clause!(db, [!b, *a])
@@ -120,7 +119,7 @@ mod tests {
 	#[test]
 	fn test_ineq() {
 		let mut cnf = Cnf::default();
-		let x = OrdEnc::new(&mut cnf, &Dom::from_slice(&[2, 5, 6, 7, 9]), None);
+		let x = OrdEnc::new(&mut cnf, &Dom::from_slice(&[2, 5, 6, 7, 9]), "ord");
 
 		for k in 0..=3 {
 			assert_encoding(

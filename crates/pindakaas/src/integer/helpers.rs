@@ -44,10 +44,9 @@ End
 ",
 					self.cons
 						.iter()
-						.enumerate()
-						.map(|(i, con)| format!(
-							"  {}: {} {} {}",
-							con.lbl.clone().unwrap_or_else(|| format!("c{}", i)),
+						.map(|con| format!(
+							"\t{}: {} {} {}",
+							con.lbl,
 							con.exp
 								.terms
 								.iter()
@@ -55,7 +54,7 @@ End
 									"{} {} {}",
 									if term.c.is_positive() { "+" } else { "-" },
 									term.c.abs(),
-									term.x.borrow().lbl()
+									term.x.borrow().lbl
 								))
 								.join(" "),
 							match con.cmp {
@@ -292,9 +291,9 @@ End
 													cmp: Comparator::LessEq,
 													k: 0,
 													lbl: if next_lbl.is_empty() {
-														Some(format!("c_{}", model.cons.len() + 1))
+														format!("c_{}", model.cons.len() + 1)
 													} else {
-														Some(next_lbl.to_owned())
+														next_lbl.to_owned()
 													},
 												})
 												.unwrap();
@@ -307,7 +306,7 @@ End
 														Dom::pb(),
 														true,
 														None,
-														Some(token.to_owned()),
+														token.to_owned(),
 													)
 													.unwrap()
 											});
@@ -353,7 +352,6 @@ End
 					}
 				}
 				Format::Opb => {
-					let mut model = Model::default();
 					let mut cmp = None;
 					let mut c = None;
 
@@ -366,7 +364,7 @@ End
 							exp: LinExp { terms: vec![] },
 							cmp: Comparator::LessEq,
 							k: 0,
-							lbl: None,
+							lbl: format!("c_{}", model.cons.len()),
 						})
 						.unwrap(); // assuming one line per constraint
 					match line
@@ -399,7 +397,7 @@ End
 														Dom::pb(),
 														true,
 														None,
-														Some(token.to_owned()),
+														token.to_owned(),
 													)
 													.unwrap()
 											});

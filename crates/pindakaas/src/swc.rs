@@ -62,19 +62,24 @@ impl Decompose for SwcEncoder {
 						Dom::from_bounds(lb, ub),
 						model.config.add_consistency,
 						None,
-						Some(format!("swc_{}", i)),
+						format!("swc_{}", i),
 					)
 					.unwrap()
 			})
 			.map(Term::from)
 			.collect::<Vec<_>>();
 
-		ys.into_iter()
-			.tuple_windows()
-			.zip(xs)
-			.for_each(|((y_curr, y_next), x)| {
-				model.cons.push(Lin::tern(x, y_next, lin.cmp, y_curr, None));
-			});
+		ys.into_iter().tuple_windows().zip(xs).enumerate().for_each(
+			|(i, ((y_curr, y_next), x))| {
+				model.cons.push(Lin::tern(
+					x,
+					y_next,
+					lin.cmp,
+					y_curr,
+					format!("{}_swc-{}", lin.lbl, i + 1),
+				));
+			},
+		);
 
 		// TODO !!
 		// model.propagate(&Consistency::Bounds)?;
@@ -110,7 +115,12 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for SwcEncoder {
 			.collect::<Result<Vec<_>>>()?;
 
 		let mut model = self.decompose(Model {
-			cons: vec![Lin::new(&xs, lin.cmp.clone().into(), *lin.k, None)],
+			cons: vec![Lin::new(
+				&xs,
+				lin.cmp.clone().into(),
+				*lin.k,
+				"TODO".to_owned(),
+			)],
 			..model
 		})?;
 		model.encode_internal(db, false)?;

@@ -74,11 +74,6 @@ impl Display for Obj {
 
 impl Display for Lin {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let lbl = self
-			.lbl
-			.as_ref()
-			.map(|lbl| format!("{}: ", lbl))
-			.unwrap_or_default();
 		if SHOW_K_0
 			&& self.k == 0
 			&& self.exp.terms.len() > 1
@@ -88,8 +83,8 @@ impl Display for Lin {
 			if let Some((rhs, lhs)) = self.exp.terms.split_last() {
 				write!(
 					f,
-					"{}\t{} {} {}",
-					lbl,
+					"{}:\t{} {} {}",
+					self.lbl,
 					LinExp {
 						terms: lhs.to_vec()
 					},
@@ -102,7 +97,7 @@ impl Display for Lin {
 				panic!();
 			}
 		} else {
-			write!(f, "{}{} {} {}", lbl, self.exp, self.cmp, self.k)
+			write!(f, "{}:\t{} {} {}", self.lbl, self.exp, self.cmp, self.k)
 		}
 	}
 }

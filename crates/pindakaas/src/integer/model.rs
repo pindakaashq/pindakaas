@@ -196,13 +196,7 @@ impl Default for Model {
 impl Model {
 	/// New auxiliary variable (meaning it could be inconsistent, or already be encoded)
 	pub(crate) fn var_by_lbl(&self, lbl: &str) -> Option<IntVarRef> {
-		self.vars().find(|x| {
-			x.borrow()
-				.lbl
-				.as_ref()
-				.map(|l| l == lbl)
-				.unwrap_or_default()
-		})
+		self.vars().find(|x| x.borrow().lbl == lbl)
 	}
 
 	/// New auxiliary variable (meaning it could be inconsistent, or already be encoded)
@@ -211,7 +205,7 @@ impl Model {
 		dom: Dom,
 		add_consistency: bool,
 		e: Option<IntVarEnc>,
-		lbl: Option<String>,
+		lbl: String,
 	) -> Result<IntVarRef, Unsatisfiable> {
 		(!dom.is_empty())
 			.then(|| {
@@ -221,12 +215,16 @@ impl Model {
 			.ok_or(Unsatisfiable)
 	}
 
-	/// Creates new auxiliary var
+	/// Creates new var
 	pub fn new_var(
 		&mut self,
 		dom: &[Coeff],
-		lbl: Option<String>,
+		lbl: String, // TODO ensure unique and not optional!
 	) -> Result<IntVarRef, Unsatisfiable> {
+		debug_assert!(
+			self.var_by_lbl(&lbl).is_none(),
+			"Model already contains variable label {lbl}\n{self}"
+		); // TODO using contains requires clone?
 		self.new_aux_var(Dom::from_slice(dom), true, None, lbl)
 	}
 
@@ -238,7 +236,7 @@ impl Model {
 	}
 
 	pub(crate) fn new_constant(&mut self, c: Coeff) -> IntVarRef {
-		self.new_aux_var(Dom::constant(c), false, None, None)
+		self.new_aux_var(Dom::constant(c), false, None, format!("Const({c}"))
 			.unwrap()
 	}
 
@@ -670,9 +668,9 @@ mod tests {
 		});
 
 		// Add variables using dom/slice with optional label
-		let x1 = model.new_var(&[0, 2], Some("x1".to_owned())).unwrap();
-		let x2 = model.new_var(&[0, 3], Some("x2".to_owned())).unwrap();
-		let x3 = model.new_var(&[0, 5], Some("x3".to_owned())).unwrap();
+		let x1 = model.new_var(&[0, 2], "x1".to_owned()).unwrap();
+		let x2 = model.new_var(&[0, 3], "x2".to_owned()).unwrap();
+		let x3 = model.new_var(&[0, 5], "x3".to_owned()).unwrap();
 
 		// Add (linear) constraint
 		model
@@ -680,7 +678,7 @@ mod tests {
 				&[Term::new(1, x1), Term::new(1, x2), Term::new(1, x3)],
 				Comparator::LessEq,
 				6,
-				Some(String::from("c1")),
+				String::from("c1"),
 			))
 			.unwrap();
 
@@ -2464,7 +2462,7 @@ End
 					dom.clone(),
 					true,
 					Some(IntVarEnc::Bin(None)),
-					Some(String::from("x1")),
+					String::from("x1"),
 				)
 				.unwrap(),
 		);
@@ -2475,7 +2473,7 @@ End
 					dom.clone(),
 					true,
 					Some(IntVarEnc::Bin(None)),
-					Some(String::from("x2")),
+					String::from("x2"),
 				)
 				.unwrap(),
 		);
@@ -2493,7 +2491,7 @@ End
 								true,
 								Some(IntVarEnc::Bin(None)),
 								// None,
-								Some(String::from("x3")),
+								String::from("x3"),
 							)
 							.unwrap(),
 					),
@@ -2501,7 +2499,7 @@ End
 			},
 			cmp: Comparator::Equal,
 			k: 0,
-			lbl: None,
+			lbl: "c1".to_owned(),
 		};
 		model.add_constraint(con).unwrap();
 		test_decomp(model.deep_clone(), &model, None);

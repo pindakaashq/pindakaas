@@ -30,7 +30,7 @@ pub struct Lin {
 	pub exp: LinExp,
 	pub cmp: Comparator,
 	pub k: Coeff,
-	pub lbl: Option<String>,
+	pub lbl: String,
 }
 
 pub(crate) enum LinCase {
@@ -62,7 +62,7 @@ impl TryFrom<&Lin> for LinCase {
 					|| t.c % 2 == 0) // multiple of 2
                     && !USE_COUPLING_IO_LEX =>
 			{
-				LinCase::Unary((*t).clone().encode_bin(None, cmp, None)?, cmp, con.k)
+				LinCase::Unary((*t).clone().encode_bin(None, cmp, &con.lbl)?, cmp, con.k)
 			}
 			(
 				[(x, Some(IntVarEnc::Bin(_))), (y, Some(IntVarEnc::Bin(_)))],
@@ -121,7 +121,7 @@ impl TryFrom<&Lin> for LinCase {
 }
 
 impl Lin {
-	pub fn new(terms: &[Term], cmp: Comparator, k: Coeff, lbl: Option<String>) -> Self {
+	pub fn new(terms: &[Term], cmp: Comparator, k: Coeff, lbl: String) -> Self {
 		Lin {
 			exp: LinExp {
 				terms: terms.to_vec(),
@@ -132,7 +132,7 @@ impl Lin {
 		}
 	}
 
-	pub fn tern(x: Term, y: Term, cmp: Comparator, z: Term, lbl: Option<String>) -> Self {
+	pub fn tern(x: Term, y: Term, cmp: Comparator, z: Term, lbl: String) -> Self {
 		Lin {
 			exp: LinExp {
 				terms: vec![x, y, Term::new(-z.c, z.x)],
@@ -312,7 +312,7 @@ impl Lin {
 			const SHOW_LP: bool = false;
 			Err(CheckError::Fail(format!(
 				"Inconsistency in {}: {} == {} !{} {}\n{} (A = {assignment})",
-				self.lbl.clone().unwrap_or_default(),
+				self.lbl,
 				self.exp
 					.terms
 					.iter()
@@ -365,7 +365,7 @@ impl Lin {
 				// TODO refactor.....
 				x.x.borrow_mut().encode_bin(db)?;
 				let dom = x.x.borrow().dom.clone();
-				let x = x.encode_bin(None, cmp, None)?;
+				let x = x.encode_bin(None, cmp, &self.lbl)?;
 				let x: IntVarRef = x.try_into().unwrap();
 				let x_enc = x.clone().borrow_mut().encode_bin(db)?;
 				x_enc.encode_unary_constraint(db, &cmp, k, &dom, false)
@@ -424,9 +424,9 @@ impl Lin {
 						assert!(matches!(t_x.x.borrow().e, Some(IntVarEnc::Ord(_))));
 						assert!(matches!(t_y.x.borrow().e, Some(IntVarEnc::Bin(_))));
 						t_x.x.borrow_mut().encode_ord(db)?;
-						t_x.x.borrow_mut().consistent(db)?; // channelling requires consitency on both vars
+						t_x.x.borrow_mut().consistent(db)?; // channelling requires consistency only on x:O, not y:B
 						let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
-						t_y.x.borrow_mut().consistent(db)?;
+						// t_y.x.borrow_mut().consistent(db)?; // apparently not needed.
 
 						let (range_lb, range_ub) = unsigned_binary_range(y_enc.bits());
 						y_enc.x.iter().enumerate().try_for_each(|(i, &y_i)| {
@@ -474,7 +474,7 @@ impl Lin {
 				t_x.x.borrow_mut().encode_bin(db)?; // encode x (if not encoded already)
 										// encode y
 
-				let tmp_y = t_x.clone().encode_bin(None, self.cmp, None)?;
+				let tmp_y = t_x.clone().encode_bin(None, self.cmp, &self.lbl)?;
 
 				// TODO make Term decompose and use encode_bin for actual encoding incl scm, but for now (since it's not given Db, call scm_dnf) here
 				(*y).borrow_mut().e = Some(IntVarEnc::Bin(Some(
@@ -499,7 +499,7 @@ impl Lin {
 					.map(|t| {
 						// encode term and return underlying var
 						t.x.borrow_mut().encode(db).unwrap();
-						let t = t.encode_bin(None, self.cmp, None).unwrap();
+						let t = t.encode_bin(None, self.cmp, &self.lbl).unwrap();
 						let x: IntVarRef = t.clone().try_into().unwrap_or_else(|_| {
 							panic!("Calling Term::encode_bin on {t} should return 1*y")
 						});

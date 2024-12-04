@@ -64,7 +64,7 @@ impl Decompose for EqualizeTernsDecomposer {
 											dom,
 											true,
 											Some(IntVarEnc::Bin(None)),
-											Some(String::from("last")),
+											format!("{}_last", con.lbl),
 										)
 										.unwrap();
 
@@ -79,13 +79,14 @@ impl Decompose for EqualizeTernsDecomposer {
 											},
 											cmp: Comparator::Equal,
 											k: 0,
-											lbl: Some(String::from("last")),
+											lbl: format!("{}_last-1", con.lbl),
 										},
 										Lin {
 											exp: LinExp {
 												terms: vec![Term::from(y), last.clone()],
 											},
 											cmp: con.cmp,
+											lbl: format!("{}_last-2", con.lbl),
 											..con
 										},
 									]
@@ -194,11 +195,7 @@ impl Decompose for EncSpecDecomposer {
 							.map(|(p, t)| {
 								Ok(if let Some(IntVarEnc::Ord(None)) = t.x.borrow().e.clone() {
 									is_last_term = matches!(p, Position::Last);
-									t.clone().encode_bin(
-										Some(&mut model),
-										con.cmp,
-										con.lbl.clone(),
-									)?
+									t.clone().encode_bin(Some(&mut model), con.cmp, &con.lbl)?
 								} else {
 									t.clone()
 								})
@@ -226,7 +223,7 @@ impl Decompose for EncSpecDecomposer {
 			..model
 		};
 
-		cons.into_iter().try_for_each(|con| {
+		cons.into_iter().enumerate().try_for_each(|(i, con)| {
 			let con =
 				if con.exp.terms.len() >= 2
 					&& con.exp.terms.iter().all(|t| {
@@ -250,7 +247,7 @@ impl Decompose for EncSpecDecomposer {
 							dom,
 							model.config.add_consistency,
 							Some(IntVarEnc::Bin(None)),
-							con.lbl.as_ref().map(|lbl| format!("last-lhs-{lbl}")),
+							format!("{}-last_{i}_lhs", con.lbl),
 						)
 						.unwrap();
 
@@ -266,7 +263,7 @@ impl Decompose for EncSpecDecomposer {
 						},
 						cmp: Comparator::Equal,
 						k: 0,
-						lbl: con.lbl.as_ref().map(|lbl| format!("last-{lbl}")),
+						lbl: format!("{}-last_{i}", con.lbl),
 					})?;
 
 					Lin {
@@ -386,8 +383,7 @@ impl Decompose for ScmDecomposer {
 						if matches!(p, Position::Last) {
 							Ok(t.clone())
 						} else {
-							t.clone()
-								.encode_bin(Some(&mut model), con.cmp, con.lbl.clone())
+							t.clone().encode_bin(Some(&mut model), con.cmp, &con.lbl)
 						}
 					} else {
 						Ok(t.clone())

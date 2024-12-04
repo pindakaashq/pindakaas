@@ -42,8 +42,7 @@ impl From<PosCoeff> for BinEnc {
 }
 
 impl BinEnc {
-	pub(crate) fn new<DB: ClauseDatabase>(db: &mut DB, lits: usize, lbl: Option<String>) -> Self {
-		let _lbl = lbl.unwrap_or(String::from("b"));
+	pub(crate) fn new<DB: ClauseDatabase>(db: &mut DB, lits: usize, _lbl: &str) -> Self {
 		Self {
 			x: (0..lits)
 				.map(|_i| new_var!(db, format!("{_lbl}^{_i}")).into())
@@ -519,7 +518,7 @@ mod tests {
 	#[test]
 	fn test_geqs() {
 		let mut cnf = Cnf::default();
-		let x = BinEnc::new(&mut cnf, 3, Some(String::from("x")));
+		let x = BinEnc::new(&mut cnf, 3, "x");
 		cnf.add_clauses(x.geqs(1, 6)).unwrap();
 		assert_encoding(&cnf, &expect_file!("integer/bin/geq_1_6.cnf"));
 	}
@@ -527,7 +526,7 @@ mod tests {
 	#[test]
 	fn test_ineq() {
 		let mut cnf = Cnf::default();
-		let x = BinEnc::new(&mut cnf, 2, Some(String::from("x")));
+		let x = BinEnc::new(&mut cnf, 2, "x");
 		for k in 0..=3 {
 			assert_encoding(
 				&Cnf::try_from(vec![x.geq(k)]).unwrap_or_else(|e| e.into()),
