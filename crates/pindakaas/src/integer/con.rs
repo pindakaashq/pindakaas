@@ -48,6 +48,10 @@ impl TryFrom<&Lin> for LinCase {
 	type Error = Unsatisfiable;
 
 	fn try_from(con: &Lin) -> Result<Self, Unsatisfiable> {
+		if con.exp.terms.iter().all(|t| t.x.borrow().is_constant()) {
+			return Ok(LinCase::Fixed(con.clone()));
+		}
+
 		let term_encs = con
 			.exp
 			.terms
@@ -56,7 +60,7 @@ impl TryFrom<&Lin> for LinCase {
 			.collect_vec();
 
 		Ok(match (&term_encs[..], con.cmp, con.k) {
-			([], _, _) => LinCase::Fixed(con.clone()),
+			([], _, _) => unreachable!(),
 			([(t, Some(IntVarEnc::Bin(_)))], cmp, _)
 				if (t.c == 1
 					|| t.c % 2 == 0) // multiple of 2

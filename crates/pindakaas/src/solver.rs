@@ -8,7 +8,7 @@ pub mod kissat;
 pub mod propagation;
 #[cfg(feature = "splr")]
 pub mod splr;
-use crate::{integer::MapSol, Cnf};
+use crate::{integer::MapSol, Cnf, Unsatisfiable};
 
 use std::{ffi::c_void, num::NonZeroI32, ptr};
 
@@ -104,8 +104,9 @@ pub trait Solver: ClauseDatabase {
 				SolveResult::Unknown => panic!("Ran out of time before finding all solutions"),
 			}
 
-			self.add_clause(solns.last().unwrap().iter().map(|l| !l))
-				.unwrap();
+			if self.add_clause(solns.last().unwrap().iter().map(|l| !l)) == Err(Unsatisfiable) {
+				return solns;
+			}
 		}
 		// TODO doesn't compile :)
 		// while let SolveResult::Satisfied(sol) = self.solve() {

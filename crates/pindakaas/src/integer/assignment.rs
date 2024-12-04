@@ -30,7 +30,11 @@ impl Assignment {
 	}
 
 	pub fn value(&self, x: &IntVar) -> Option<Coeff> {
-		self.0.get(&x.lbl()).map(|(a, _)| *a)
+		if let Ok(c) = x.as_constant() {
+			Some(c)
+		} else {
+			self.0.get(&x.lbl()).map(|(a, _)| *a)
+		}
 	}
 
 	// TODO make sensible

@@ -281,11 +281,11 @@ impl IntVar {
 	}
 
 	pub fn check(&self, assignment: &Assignment) -> Result<(), CheckError> {
-		(!self.add_consistency || self.dom.contains(assignment.value(self).unwrap()))
+		let a = assignment.value(self).unwrap();
+		(!self.add_consistency || self.dom.contains(a))
 			.then_some(())
 			.ok_or(CheckError::Fail(format!(
-				"VarInconsistency: assignment on {} in assignment {}",
-				self, assignment
+				"VarInconsistency: assignment on {self}={a} in assignment {assignment}",
 			)))
 	}
 

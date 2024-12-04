@@ -661,6 +661,9 @@ mod tests {
 			.then_some(vec![Mix::Order, Mix::Binary, Mix::Mix(5)])
 			.unwrap_or(encs)
 	});
+	// /// Test propagation extension
+	// static TEST_CONSISTENCIES: LazyLock<Consistency> =
+	// 	has_bool_flags!(&[String::from("--prop"), String::from("-tp")]);
 
 	/// Generate solutions for expected models
 	static BRUTE_FORCE_SOLVE: LazyLock<bool> =
@@ -716,7 +719,7 @@ mod tests {
 				Decomposer::Bdd,
 				// Decomposer::Rca
 			],
-			[Consistency::None],
+			[Consistency::None, Consistency::Bounds],
 			[false], // consistency
 			// [true],          // equalize terns
 			// [Some(0)], // cutoffs: [None, Some(0), Some(2)]
@@ -981,11 +984,10 @@ mod tests {
 				.for_each(|x| x.borrow_mut().clear_encoding());
 		}
 
-		for x in model.vars().collect_vec() {
-			x.borrow_mut().encode(&mut slv).unwrap();
-		}
-
-		println!("decomposition (principal vars encoded) = {}", decomposition);
+		// for x in model.vars().collect_vec() {
+		// 	x.borrow_mut().encode(&mut slv).unwrap();
+		// }
+		// println!("decomposition (principal vars encoded) = {}", decomposition);
 
 		// encode and solve
 		let lit_assignments = decomposition
