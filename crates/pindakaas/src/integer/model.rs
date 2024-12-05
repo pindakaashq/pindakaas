@@ -67,10 +67,10 @@ pub enum Decomposer {
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Mix {
+	Binary,
+	Mix(Coeff),
 	#[default]
 	Order,
-	Mix(Coeff),
-	Binary,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
