@@ -147,9 +147,9 @@ fn elipsize<T: Display>(x: &[T], e: Option<usize>) -> String {
 	} else {
 		format!(
 			"{},..,{}|{}",
-			x.len(),
 			x.iter().take(e).join(","),
-			x.last().unwrap()
+			x.last().unwrap(),
+			x.len()
 		)
 	}
 }
@@ -165,7 +165,7 @@ impl Display for Dom {
 		const ELIPSIZE: Option<usize> = Some(4);
 
 		if dom.len() > 1 && Coeff::try_from(dom.len()).unwrap() == ub - lb + 1 {
-			write!(f, "|{}..{}|{}", dom.len(), lb, ub)?;
+			write!(f, "|{}..{}|{}", lb, ub, dom.len())?;
 		} else {
 			write!(
 				f,

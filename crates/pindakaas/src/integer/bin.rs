@@ -15,7 +15,6 @@ use crate::{
 	helpers::{
 		add_clauses_for, as_binary, emit_filtered_clause, negate_cnf, pow2, unsigned_binary_range,
 	},
-	integer::helpers::remove_red,
 	ClauseDatabase, Cnf, Coeff, Lit, Unsatisfiable, Var,
 };
 
@@ -222,65 +221,69 @@ impl BinEnc {
 			}
 		}
 
-		let ineqs = (r_a..=r_b)
-			.flat_map(|k| {
-				let k = if up { k - 1 } else { k };
-				#[allow(
-					clippy::let_and_return,
-					reason = "we need ineq in case of trace enabled"
-				)]
-				let ineq = self.ineq(k, up); // returns cnf
-				log!("{k} -> ineq = {ineq:?}");
-				ineq
-			})
-			.collect_vec();
+		let mut cnf = Cnf::default();
+		let rs = r_a..=r_b;
 
-		// TODO refactor; just got it working
-		// // Returning CNF; so a single empty clause
-		if ineqs == vec![vec![]] {
-			return vec![];
-		}
-
-		let ineqs = if up {
-			ineqs
-		} else {
-			ineqs.into_iter().rev().collect()
-		};
+		// let ineq_k = |k: i64, up: bool| {
+		// }
 
 		if up {
-			remove_red(ineqs.into_iter().rev().collect())
-				.into_iter()
-				.rev()
-				.collect_vec()
+			for k in rs.rev() {
+				let k = k - 1;
+				// log!("{k} -> ineq = {ineq:?}");
+				let ineq = self.ineq(k, up);
+				// let ineq = ineq.into_iter().collect_vec();
+				// println!("up {:?}", ineq);
+				// let ineq = ineq.into_iter();
+				if let Err(Unsatisfiable) = cnf.add_clause_expensive(ineq) {
+					return vec![];
+				}
+			}
 		} else {
-			remove_red(ineqs.into_iter().rev().collect())
+			for k in rs {
+				// log!("{k} -> ineq = {ineq:?}");
+				let ineq = self.ineq(k, up);
+				// let ineq = ineq.into_iter().collect_vec();
+				// println!("down {:?}", ineq);
+				// let ineq = ineq.into_iter();
+				if let Err(Unsatisfiable) = cnf.add_clause_expensive(ineq) {
+					return vec![];
+				}
+			}
 		}
+
+		cnf.iter().map(|cls| cls.to_vec()).collect()
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
-	pub(crate) fn ineq(&self, k: Coeff, up: bool) -> Vec<Vec<Lit>> {
-		let clause: Result<Vec<_>, _> = as_binary(PosCoeff::new(k), Some(self.bits()))
+	pub(crate) fn ineq<'a>(
+		&'a self,
+		k: Coeff,
+		up: bool,
+		// ) -> impl Iterator<Item = Result<Lit, Unsatisfiable>> + use<'a> {
+	) -> impl Iterator<Item = Lit> + use<'a> {
+		as_binary(PosCoeff::new(k), Some(self.bits()))
 			.into_iter()
-			.zip(self.xs().iter().cloned())
-			// if >=, find 0's, if <=, find 0's
+			.zip(self.x.iter())
+			// if >=, find 0's, if <=, find 1's
 			// .filter_map(|(b, x)| (b != up).then_some(x))
-			.filter_map(|(b, x)| (b != up).then_some(x))
-			// if <=, negate lits at 0's
-			.map(|x| if up { x } else { !x })
+			.filter_map(move |(b, x)| (b != up).then(|| x.clone()))
+			// if <=, negate lits at 1's
+			.map(move |x| if up { x } else { !x })
 			.filter_map(|x| match x {
 				// This is a DISJUNCTION
 				// TODO Move cnf: Vec<Vec<Lit>> functions into Cnf
-				LitOrConst::Lit(x) => Some(Ok(x)),
+				LitOrConst::Lit(x) => Some(x),
 				LitOrConst::Const(false) => None, // literal falsified
-				LitOrConst::Const(true) => Some(Err(Unsatisfiable)), // clause satisfied
+				// LitOrConst::Const(true) => Some(Err(Unsatisfiable)), // clause satisfied
+				LitOrConst::Const(true) => todo!(),
 			})
-			.try_collect();
 
-		match clause {
-			Err(Unsatisfiable) => vec![],
-			Ok(clause) if clause.is_empty() => vec![],
-			Ok(clause) => vec![clause],
-		}
+		// .map(|clause| match clause {
+		// 	Err(Unsatisfiable) => vec![],
+		// 	Ok(clause) if clause.is_empty() => vec![],
+		// 	Ok(clause) => vec![clause],
+		// })
 	}
 
 	/// Get encoding literals

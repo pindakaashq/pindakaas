@@ -67,7 +67,7 @@ use itertools::{traits::HomogeneousTuple, Itertools};
 
 use crate::solver::VarFactory;
 
-use helpers::subscript_number;
+use helpers::{is_unique, subscript_number};
 
 /// Checker is a trait implemented by types that represent constraints. The
 /// [`Checker::check`] methods checks whether an assignment (often referred to
@@ -555,6 +555,52 @@ impl Cnf {
 	/// Returns the number of variables in the formula.
 	pub fn variables(&self) -> usize {
 		self.nvar.emited_vars()
+	}
+
+	/// A potentially expensive way (in terms of runtime, not in terms of memory) to add clauses: skips adding the new clause if it is a subset of the last added clause. Use this instead of `add_clause_expensive` if you have some reason to think this is often the case, because it could both reduce the encoding size and speed up the encoding process as well (the function will exit early once we know the new clause is a subset).
+	/// Warning: you will not see this speedup if the previous clause is already collected (but the clause will still be skipped for the encoding)
+	/// Warning: the last added clause should have unique literals (otherwise clauses will not be skipped as often as they could, which is still correct, but sub-optimal)
+	fn add_clause_expensive<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
+		// size of last added clause
+		let mut last_size = if let Some(last_size) = self.size.last() {
+			*last_size
+		} else {
+			return self.add_clause(cl);
+		};
+
+		// current end
+		let end = self.lits.len();
+		// start of last added clause
+		let prev = end - last_size;
+		debug_assert!(
+			is_unique(self.lits[prev..end].iter()),
+			"Add expensive clause for {} called suboptimally while last clause {} was not unique in CNF:\n{}\n{:?}",
+                        cl.into_iter().join(","),
+                        self.lits[prev..end].iter().join(","),
+                        self,
+                        self
+                        );
+
+		for l in cl {
+			if self.lits[prev..end].contains(&l) {
+				last_size -= 1;
+				if last_size == 0 {
+					// reset
+					self.lits.truncate(end);
+					return Ok(());
+				}
+			}
+
+			self.lits.push(l);
+		}
+
+		let len = self.lits.len() - end;
+		self.size.push(len);
+		if len == 0 {
+			Err(Unsatisfiable)
+		} else {
+			Ok(())
+		}
 	}
 }
 

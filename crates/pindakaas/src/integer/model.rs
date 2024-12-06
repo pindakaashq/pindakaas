@@ -1987,7 +1987,7 @@ End
 				format!(
 					"
 Subject To
-    c0: x - y {} 0
+    c1: x - y {} 0
 Doms
     x in 0,1,2,3
     y in 0,1,2,3
@@ -2001,7 +2001,7 @@ End
 				format!(
 					"
 Subject To
-    c0: x - y {} 0
+    c2: x - y {} 0
 Doms
     x in 0,2,5,7
     y in 0,2,5,7
@@ -2015,7 +2015,7 @@ End
 				format!(
 					"
 Subject To
-    c0: x - y {} 0
+    c3: x - y {} 0
 Doms
     x in 4,6
     y in 0,1,2,3,4,5,6
@@ -2029,7 +2029,7 @@ End
 				format!(
 					"
 				Subject To
-				c0: x - y {} 0
+				c4: x - y {} 0
 				Doms
 				x in 4,6
 				y in 1,2,3,4,5,6,7
@@ -2043,7 +2043,7 @@ End
 				format!(
 					"
 				Subject To
-				c0: x - y {} 0
+				c5: x - y {} 0
 				Doms
 				x in 4,6
 				y in 3,4,5,6,7
