@@ -144,7 +144,7 @@ impl Display for Cse {
 }
 
 fn elipsize<T: Display>(x: &[T], e: Option<usize>) -> String {
-	let e = e.map(|e| e).unwrap_or(x.len());
+	let e = e.unwrap_or(x.len());
 	if x.is_empty() {
 		Default::default()
 	} else if x.len() < e {
@@ -170,7 +170,7 @@ impl Display for Dom {
 		const ELIPSIZE: Option<usize> = Some(4);
 
 		if dom.len() > 1 && Coeff::try_from(dom.len()).unwrap() == ub - lb + 1 {
-			write!(f, "|{}..{}|{}", lb, ub, dom.len())?;
+			write!(f, "|{}..{}|{}", lb, ub, dom.len())
 		} else {
 			write!(
 				f,
@@ -181,8 +181,7 @@ impl Display for Dom {
 				} else {
 					format!("{:.0}%", self.density() * 100.0)
 				}
-			)?
+			)
 		}
-		Ok(())
 	}
 }

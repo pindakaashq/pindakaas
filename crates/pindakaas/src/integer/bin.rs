@@ -256,18 +256,15 @@ impl BinEnc {
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
-	pub(crate) fn ineq<'a>(
-		&'a self,
-		k: Coeff,
-		up: bool,
-		// ) -> impl Iterator<Item = Result<Lit, Unsatisfiable>> + use<'a> {
-	) -> impl Iterator<Item = Lit> + use<'a> {
+	pub(crate) fn ineq(&self, k: Coeff, up: bool) -> impl Iterator<Item = Lit> + use<'_> {
 		as_binary(PosCoeff::new(k), Some(self.bits()))
 			.into_iter()
 			.zip(self.x.iter())
 			// if >=, find 0's, if <=, find 1's
 			// .filter_map(|(b, x)| (b != up).then_some(x))
-			.filter_map(move |(b, x)| (b != up).then(|| x.clone()))
+			.filter(move |(b, _)| b != &up)
+			// we have to clone because we negate in the next step
+			.map(|(_, x)| *x)
 			// if <=, negate lits at 1's
 			.map(move |x| if up { x } else { !x })
 			.filter_map(|x| match x {
