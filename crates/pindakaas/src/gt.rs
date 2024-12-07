@@ -1,5 +1,5 @@
 use crate::{
-	bool_linear::{LinMarker, NormalizedBoolLinear},
+	bool_linear::{Comparator, LinMarker, NormalizedBoolLinear},
 	integer::{
 		Consistency, Decompose, Decomposer, Dom, IntVar, Lin, Mix, Model, ModelConfig, Term,
 	},
@@ -55,10 +55,16 @@ impl Decompose for TotalizerEncoder {
 							left.dom()
 								.into_iter()
 								.cartesian_product(right.dom().into_iter())
-								.map(|(a, b)| a + b)
+								.map_while(|(a, b)| {
+									(match lin.cmp {
+										Comparator::LessEq | Comparator::Equal => a + b <= lin.k,
+										Comparator::GreaterEq => true,
+									})
+									.then_some(a + b)
+								})
 								.sorted()
 								.dedup()
-								.collect::<Vec<_>>()
+								.collect()
 						};
 						let parent = model.new_aux_var(
 							Dom::from_slice(&dom),
