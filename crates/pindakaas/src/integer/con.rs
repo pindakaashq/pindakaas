@@ -124,6 +124,16 @@ impl TryFrom<&Lin> for LinCase {
 	}
 }
 
+impl LinExp {
+	pub fn lb(&self) -> Coeff {
+		self.terms.iter().map(|t| t.lb()).sum()
+	}
+
+	pub fn ub(&self) -> Coeff {
+		self.terms.iter().map(|t| t.ub()).sum()
+	}
+}
+
 impl Lin {
 	pub fn new(terms: &[Term], cmp: Comparator, k: Coeff, lbl: String) -> Self {
 		Lin {

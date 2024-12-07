@@ -56,15 +56,23 @@ impl Decompose for TotalizerEncoder {
 								left.dom()
 									.into_iter()
 									.cartesian_product(right.dom().into_iter())
-									.map_while(|(a, b)| {
-										(match lin.cmp {
-											Comparator::LessEq | Comparator::Equal => {
-												a + b <= lin.k
-											}
-											Comparator::GreaterEq => true,
-										})
-										.then_some(a + b)
+									.map(|(a, b)| a + b)
+									.filter(|&c| {
+										if matches!(lin.cmp, Comparator::LessEq | Comparator::Equal)
+											&& c > lin.k - lin.exp.lb()
+										{
+											false
+										} else if matches!(
+											lin.cmp,
+											Comparator::GreaterEq | Comparator::Equal
+										) && c < lin.k - lin.exp.ub()
+										{
+											false
+										} else {
+											true
+										}
 									}),
+								// TODO more efficient version using map_while, but needs reverse on geq case
 							)
 						};
 						let parent = model.new_aux_var(
