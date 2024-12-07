@@ -28,6 +28,11 @@ impl Dom {
 		self.size() == 1
 	}
 
+	/// The domain does not have gaps
+	pub fn is_contiguous(&self) -> bool {
+		self.ranges.len() <= 1
+	}
+
 	pub fn pb() -> Self {
 		Self::from_slice(&[0, 1])
 	}

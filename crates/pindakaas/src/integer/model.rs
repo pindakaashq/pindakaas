@@ -1259,6 +1259,11 @@ End
 	}
 
 	#[test]
+	fn eq_mix_bug_1() {
+		test_lp!("eq_mix_bug_1");
+	}
+
+	#[test]
 	fn couple_bug_1() {
 		test_lp!("couple_bug_1");
 	}
@@ -1277,11 +1282,6 @@ End
 	fn eq_channel_term() {
 		test_lp!("eq_channel_term");
 	}
-
-	// #[test]
-	// fn mbkp_inc_bin() {
-	// 	test_lp!("mbkp_inc_bin");
-	// }
 
 	// #[test]
 	// fn le_unit_tern() {

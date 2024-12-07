@@ -156,11 +156,11 @@ End
 		let mut model = Model::default();
 
 		let set_dom = |model: &mut Model, name: &str, dom: Dom| {
-			model
-				.var_by_lbl(name)
-				.unwrap_or_else(|| panic!("domain set for unconstrained variable {name}"))
-				.borrow_mut()
-				.dom = dom;
+			if let Some(x) = model.var_by_lbl(name) {
+				x.borrow_mut().dom = dom;
+			} else {
+				println!("Trying to set domain for unconstrained variable {}", name);
+			}
 		};
 
 		for line in s.lines() {
@@ -439,7 +439,6 @@ pub(crate) fn display_cnf(cnf: &[Vec<Lit>]) -> String {
 		.join("\n")
 		.to_owned()
 }
-
 
 #[cfg(test)]
 mod tests {

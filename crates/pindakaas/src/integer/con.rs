@@ -526,7 +526,7 @@ impl Lin {
 						db,
 						&x,
 						&y,
-						None,
+						None, // TODO optimize?
 						Some(&BinEnc::from(PosCoeff::new(c - w_ground)).xs()),
 					)
 					.map(|_| ());
@@ -550,6 +550,7 @@ impl Lin {
 				z.borrow_mut().dom = w_dom; // fix lower bound to ground
 				let z_bin = BinEnc::from_lits(&rca(db, &x, &y, lits, None).unwrap());
 
+				// Constrain encoding lower bound directly i/o of using z.consistent(), because (w_lb - w_ground) <= z.lb()
 				lex_geq_const(
 					db,
 					&z_bin.xs(),

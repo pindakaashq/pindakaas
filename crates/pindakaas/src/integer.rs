@@ -225,7 +225,14 @@ fn xor_fn<DB: ClauseDatabase>(
 }
 
 // TODO [?] functional version has duplication with relational version
-#[cfg_attr(feature = "tracing", tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("[{}] + [{}] = {zs:?} | {bits:?}", xs.iter().rev().map(|x| format!("{x}")).collect_vec().join(","), ys.iter().rev().map(|x| format!("{x}")).collect_vec().join(",")))))]
+#[cfg_attr(feature = "tracing", tracing::instrument(
+        name = "rca", skip_all,
+        fields(constraint = format!(
+                "[{}] + [{}] = {} | {bits:?}",
+                xs.iter().rev().map(|x| format!("{x}")).join(","),
+                ys.iter().rev().map(|x| format!("{x}")).join(","),
+                zs.map(|zs| zs.iter().rev().map(|x| format!("{x}")).join(",")).unwrap_or("...".to_owned()),
+                ))))]
 pub(crate) fn rca<DB: ClauseDatabase>(
 	db: &mut DB,
 	xs: &[LitOrConst],
@@ -240,20 +247,20 @@ pub(crate) fn rca<DB: ClauseDatabase>(
 	let zs = (0..max_bits)
 		.map(|i| {
 			let (x, y) = (bit(xs, i), bit(ys, i));
-			let z = xor_fn(db, &[x, y, c], zs.map(|zs| bit(zs, i)), format!("z_{}", i));
+			let z = if let Some(zs) = zs {
+				// if `zs` is given (relational), just return the LitOrConst to constrain
+				Some(bit(zs, i))
+			} else if i < bits {
+				None // functional, potentially create new bit
+			} else {
+				Some(LitOrConst::Const(false)) // functional, but already fixed to false
+			};
+
+			let z = xor_fn(db, &[x, y, c], z, format!("z_{}", i));
 			c = carry(db, &[x, y, c], format!("c_{}", i + 1))?; // carry
 			z
 		})
 		.collect::<Result<Vec<_>>>()?;
-
-	// TODO avoid c being created by constraining (x+y+c >= 2 ) <-> false in last iteration if bits<max_bits
-	// prevent overflow;
-	// TODO this should just happen for all c_i's for bits < i <= max_bits
-	if bits < max_bits {
-		if let LitOrConst::Lit(c) = c {
-			emit_clause!(db, [!c])?;
-		}
-	}
 
 	// TODO If lasts lits are equal, it could mean they can be truncated (at least true for 2-comp)? But then they might return unexpected number of bits in some cases. Needs thinking.
 	Ok(zs)

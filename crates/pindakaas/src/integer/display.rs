@@ -116,7 +116,10 @@ impl Display for IntVar {
 			if self.add_consistency { "" } else { "!" },
 			self.dom,
 			if let Some(l) = SHOW_LITS {
-				format!("[{}]", elipsize(&self.lits().iter().collect_vec(), Some(l)))
+				format!(
+					" [{}]",
+					elipsize(&self.lits().iter().collect_vec(), Some(l))
+				)
 			} else if !self.lits().is_empty() {
 				format!(" [{}|]", self.lits().len())
 			} else {
@@ -142,7 +145,9 @@ impl Display for Cse {
 
 fn elipsize<T: Display>(x: &[T], e: Option<usize>) -> String {
 	let e = e.map(|e| e).unwrap_or(x.len());
-	if x.len() < e {
+	if x.is_empty() {
+		Default::default()
+	} else if x.len() < e {
 		x.iter().take(e).join(",")
 	} else {
 		format!(
