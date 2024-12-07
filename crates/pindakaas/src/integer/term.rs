@@ -68,7 +68,7 @@ impl TryFrom<Term> for IntVarRef {
 
 	fn try_from(value: Term) -> Result<Self, Self::Error> {
 		// TODO bad so long as dom() is bad
-		if let Ok(c) = Coeff::try_from(Dom::from_slice(&value.dom())) {
+		if let Ok(c) = Coeff::try_from(Dom::new(value.dom())) {
 			Ok(IntVar::new_constant(c))
 		} else {
 			(value.c == 1).then_some(value.x).ok_or(())
@@ -122,7 +122,7 @@ impl Term {
 
 			let y = IntVar::from_dom_as_ref(
 				0,
-				Dom::from_slice(dom),
+				Dom::new(dom.into_iter().cloned()),
 				false,
 				Some(IntVarEnc::Bin(Some(bin_enc))),
 				format!("{con_lbl}-scm-{}·{}", self.c, self.x.borrow().lbl()),
@@ -179,8 +179,8 @@ impl Term {
 					self.c >> sh,
 					IntVar::from_dom_as_ref(
 						0,
-						Dom::from_slice(&dom), // TODO just use bounds
-						false,                 // view never needs consistency
+						Dom::new(dom.into_iter()), // TODO just use bounds
+						false,                     // view never needs consistency
 						Some(IntVarEnc::Bin(Some(BinEnc::from_lits(
 							&(0..sh)
 								.map(|_| LitOrConst::Const(self.c.is_negative()))
@@ -201,12 +201,7 @@ impl Term {
 				// Create y:O <= x:B
 				let up = self.c.is_positive();
 				let dom = if couple_term {
-					Dom::from_slice(
-						&dom.into_iter()
-							.map(|d| if up { d } else { -d })
-							.sorted()
-							.collect_vec(),
-					)
+					Dom::new(dom.into_iter().map(|d| if up { d } else { -d }))
 				} else {
 					self.x.borrow().dom.clone()
 				};
@@ -381,7 +376,7 @@ impl Term {
 					Scm::Dnf => {
 						let y = model
 							.new_aux_var(
-								Dom::from_slice(&dom),
+								Dom::new(dom.into_iter()),
 								false,
 								Some(IntVarEnc::Bin(None)), // annotate to use BinEnc
 								format!("{con_lbl}_{}_scm_dnf", self.lbl()),

@@ -20,29 +20,12 @@ impl TryFrom<Dom> for Coeff {
 }
 
 impl Dom {
-	pub fn constant(d: Coeff) -> Self {
-		Self::from_slice(&[d])
-	}
-
-	pub fn is_constant(&self) -> bool {
-		self.size() == 1
-	}
-
-	/// The domain does not have gaps
-	pub fn is_contiguous(&self) -> bool {
-		self.ranges.len() <= 1
-	}
-
-	pub fn pb() -> Self {
-		Self::from_slice(&[0, 1])
-	}
-
-	pub fn from_slice(ds: &[Coeff]) -> Self {
-		let mut ds = ds.iter();
-		if let Some(&k) = ds.next() {
+	pub fn new<I: IntoIterator<Item = Coeff>>(ds: I) -> Self {
+		let mut ds = ds.into_iter().sorted().dedup();
+		if let Some(k) = ds.next() {
 			let mut k = (k, k);
 			let mut ranges = ds
-				.flat_map(|&d| {
+				.flat_map(|d| {
 					if d - k.1 == 1 {
 						k.1 = d;
 						None
@@ -61,6 +44,22 @@ impl Dom {
 		} else {
 			Self::default()
 		}
+	}
+	pub fn constant(d: Coeff) -> Self {
+		Self::new([d])
+	}
+
+	pub fn is_constant(&self) -> bool {
+		self.size() == 1
+	}
+
+	/// The domain does not have gaps
+	pub fn is_contiguous(&self) -> bool {
+		self.ranges.len() <= 1
+	}
+
+	pub fn pb() -> Self {
+		Self::new([0, 1])
 	}
 
 	pub fn from_bounds(lb: Coeff, ub: Coeff) -> Self {
@@ -205,14 +204,7 @@ impl Dom {
 		reason = "will be useful in the future (also needs to be optimized for serious use)"
 	)]
 	pub(crate) fn union(self, rhs: Dom) -> Self {
-		Dom::from_slice(
-			&[self.iter().collect_vec(), rhs.iter().collect_vec()]
-				.concat()
-				.into_iter()
-				.sorted()
-				.dedup()
-				.collect_vec(),
-		)
+		Dom::new(self.iter().merge(rhs.iter()))
 	}
 
 	fn invariant(&self) -> bool {
@@ -268,17 +260,17 @@ mod tests {
 
 	#[test]
 	fn union_test() {
-		let a: Vec<Coeff> = vec![1, 2, 3, 7, 8, 9, 11];
-		let b: Vec<Coeff> = vec![4, 6, 8];
-		let dom = Dom::from_slice(&a).union(Dom::from_slice(&b));
-		let exp = Dom::from_slice(&[a, b].concat().into_iter().sorted().dedup().collect_vec());
+		let a = vec![1, 2, 3, 7, 8, 9, 11];
+		let b = vec![4, 6, 8];
+		let dom = Dom::new(a.clone()).union(Dom::new(b.clone()));
+		let exp = Dom::new([a, b].concat());
 		assert_eq!(dom, exp);
 	}
 
 	#[test]
 	fn dom_test() {
 		let ds = vec![1, 2, 3, 7, 8, 9, 11];
-		let dom = Dom::from_slice(&ds);
+		let dom = Dom::new(ds.clone());
 		assert_eq!(dom.size() as usize, ds.len());
 		assert_eq!(
 			dom,
@@ -322,7 +314,7 @@ mod tests {
 
 	#[test]
 	fn test_d_index() {
-		let dom = Dom::from_slice(&[0, 2, 5, 6]);
+		let dom = Dom::new([0, 2, 5, 6]);
 		assert_eq!(dom.d(0), Some(0));
 		assert_eq!(dom.d(1), Some(2));
 		assert_eq!(dom.d(2), Some(5));
@@ -342,7 +334,7 @@ mod tests {
 
 	#[test]
 	fn test_ineq_holey() {
-		let dom = Dom::from_slice(&[0, 2, 5, 6]);
+		let dom = Dom::new([0, 2, 5, 6]);
 		assert_eq!(dom.geq(0), Some((0, 0)));
 		assert_eq!(dom.geq(1), Some((1, 2)));
 		assert_eq!(dom.geq(2), Some((1, 2)));

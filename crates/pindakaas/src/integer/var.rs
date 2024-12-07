@@ -437,7 +437,7 @@ impl IntVar {
 					})
 					.unzip();
 				model.new_aux_var(
-					Dom::from_slice(&[0].into_iter().chain(dom).collect_vec()),
+					Dom::new([0].into_iter().chain(dom)),
 					false,
 					Some(IntVarEnc::Ord(Some(OrdEnc::from(
 						lits.into_iter().flatten().collect_vec(),
@@ -548,7 +548,7 @@ mod tests {
 	#[test]
 	fn test_ineq_ord() {
 		let mut cnf = Cnf::default();
-		let dom = Dom::from_slice(&[5, 7, 8]);
+		let dom = Dom::new([5, 7, 8]);
 		let mut x = IntVar::from_dom(
 			0,
 			dom.clone(),

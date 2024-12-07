@@ -230,16 +230,13 @@ impl Decompose for EncSpecDecomposer {
 						t.c.is_positive() && matches!(t.x.borrow().e, Some(IntVarEnc::Bin(_)))
 					}) && con.cmp.is_ineq()
 				{
-					let dom = Dom::from_slice(
-						&con.exp
+					let dom = Dom::new(
+						con.exp
 							.terms
 							.iter()
 							.map(|t| t.dom().into_iter())
 							.multi_cartesian_product()
-							.map(|cs| cs.into_iter().sum())
-							.sorted()
-							.dedup()
-							.collect_vec(),
+							.map(|cs| cs.into_iter().sum()),
 					);
 
 					let y = model

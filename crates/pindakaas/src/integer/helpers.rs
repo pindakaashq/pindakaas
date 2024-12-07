@@ -220,15 +220,10 @@ End
 							set_dom(
 								&mut model,
 								name,
-								Dom::from_slice(
-									&dom.split(',')
-										.map(|c| {
-											c.parse::<Coeff>().unwrap_or_else(|_| {
-												panic!("Could not parse dom value {c}")
-											})
-										})
-										.collect_vec(),
-								),
+								Dom::new(dom.split(',').map(|c| {
+									c.parse::<Coeff>()
+										.unwrap_or_else(|_| panic!("Could not parse dom value {c}"))
+								})),
 							);
 						}
 						[lb, "<=", name, "<=", ub] if state == State::Bounds => {

@@ -157,11 +157,8 @@ impl Decompose for BddEncoder {
 			.into_iter()
 			.enumerate()
 			.flat_map(|(i, nodes)| {
-				// let mut views = HashMap::new();
-
-				let dom = nodes
-					.into_iter(..)
-					.filter_map(|(iv, node)| match node {
+				model.new_aux_var(
+					Dom::new(nodes.into_iter(..).filter_map(|(iv, node)| match node {
 						BddNode::Val => Some(process_val(iv, &lin.cmp)),
 						BddNode::Gap => None,
 						// BddNode::View(view) => {
@@ -169,10 +166,7 @@ impl Decompose for BddEncoder {
 						// 	views.insert(val, view);
 						// 	Some(val)
 						// }
-					})
-					.collect::<Vec<_>>();
-				model.new_aux_var(
-					Dom::from_slice(&dom),
+					})),
 					model.config.add_consistency,
 					None,
 					format!("{}_bdd_{}", lin.lbl, i + 1),

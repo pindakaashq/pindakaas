@@ -50,24 +50,25 @@ impl Decompose for TotalizerEncoder {
 					[left, right] => {
 						let at_root = layer.len() == 2;
 						let dom = if at_root {
-							vec![lin.k]
+							Dom::constant(lin.k)
 						} else {
-							left.dom()
-								.into_iter()
-								.cartesian_product(right.dom().into_iter())
-								.map_while(|(a, b)| {
-									(match lin.cmp {
-										Comparator::LessEq | Comparator::Equal => a + b <= lin.k,
-										Comparator::GreaterEq => true,
-									})
-									.then_some(a + b)
-								})
-								.sorted()
-								.dedup()
-								.collect()
+							Dom::new(
+								left.dom()
+									.into_iter()
+									.cartesian_product(right.dom().into_iter())
+									.map_while(|(a, b)| {
+										(match lin.cmp {
+											Comparator::LessEq | Comparator::Equal => {
+												a + b <= lin.k
+											}
+											Comparator::GreaterEq => true,
+										})
+										.then_some(a + b)
+									}),
+							)
 						};
 						let parent = model.new_aux_var(
-							Dom::from_slice(&dom),
+							dom,
 							model.config.add_consistency,
 							None,
 							format!("{}-gt_{}_{}", lin.lbl, i, j),

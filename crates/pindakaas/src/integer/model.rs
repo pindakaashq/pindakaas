@@ -225,7 +225,7 @@ impl Model {
 			self.var_by_lbl(&lbl).is_none(),
 			"Model already contains variable label {lbl}\n{self}"
 		); // TODO using contains requires clone?
-		self.new_aux_var(Dom::from_slice(dom), true, None, lbl)
+		self.new_aux_var(Dom::new(dom.into_iter().cloned()), true, None, lbl)
 	}
 
 	/// Add constraint to model

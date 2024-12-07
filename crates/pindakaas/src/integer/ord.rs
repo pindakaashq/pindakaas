@@ -119,7 +119,7 @@ mod tests {
 	#[test]
 	fn test_ineq() {
 		let mut cnf = Cnf::default();
-		let x = OrdEnc::new(&mut cnf, &Dom::from_slice(&[2, 5, 6, 7, 9]), "ord");
+		let x = OrdEnc::new(&mut cnf, &Dom::new([2, 5, 6, 7, 9]), "ord");
 
 		for k in 0..=3 {
 			assert_encoding(
