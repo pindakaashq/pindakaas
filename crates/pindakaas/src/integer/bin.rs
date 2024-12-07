@@ -224,29 +224,23 @@ impl BinEnc {
 		let mut cnf = Cnf::default();
 		let rs = r_a..=r_b;
 
-		// let ineq_k = |k: i64, up: bool| {
-		// }
+		let ineq_k = |cnf: &mut Cnf, k: i64| {
+			// let ineq = ineq.into_iter().collect_vec();
+			// println!("up {:?}", ineq);
+			// let ineq = ineq.into_iter();
+			let k = if up { k - 1 } else { k };
+			cnf.add_clause_expensive(self.ineq(k, up).try_collect::<_, Vec<_>, _>()?.into_iter())
+		};
 
 		if up {
 			for k in rs.rev() {
-				let k = k - 1;
-				// log!("{k} -> ineq = {ineq:?}");
-				let ineq = self.ineq(k, up);
-				// let ineq = ineq.into_iter().collect_vec();
-				// println!("up {:?}", ineq);
-				// let ineq = ineq.into_iter();
-				if let Err(Unsatisfiable) = cnf.add_clause_expensive(ineq) {
+				if let Err(Unsatisfiable) = ineq_k(&mut cnf, k) {
 					return vec![];
 				}
 			}
 		} else {
 			for k in rs {
-				// log!("{k} -> ineq = {ineq:?}");
-				let ineq = self.ineq(k, up);
-				// let ineq = ineq.into_iter().collect_vec();
-				// println!("down {:?}", ineq);
-				// let ineq = ineq.into_iter();
-				if let Err(Unsatisfiable) = cnf.add_clause_expensive(ineq) {
+				if let Err(Unsatisfiable) = ineq_k(&mut cnf, k) {
 					return vec![];
 				}
 			}
@@ -256,7 +250,11 @@ impl BinEnc {
 	}
 
 	/// Returns conjunction for x>=k (or x<=k if !up)
-	pub(crate) fn ineq(&self, k: Coeff, up: bool) -> impl Iterator<Item = Lit> + use<'_> {
+	pub(crate) fn ineq(
+		&self,
+		k: Coeff,
+		up: bool,
+	) -> impl Iterator<Item = Result<Lit, Unsatisfiable>> + use<'_> {
 		as_binary(PosCoeff::new(k), Some(self.bits()))
 			.into_iter()
 			.zip(self.x.iter())
@@ -270,10 +268,10 @@ impl BinEnc {
 			.filter_map(|x| match x {
 				// This is a DISJUNCTION
 				// TODO Move cnf: Vec<Vec<Lit>> functions into Cnf
-				LitOrConst::Lit(x) => Some(x),
+				LitOrConst::Lit(x) => Some(Ok(x)),
 				LitOrConst::Const(false) => None, // literal falsified
 				// LitOrConst::Const(true) => Some(Err(Unsatisfiable)), // clause satisfied
-				LitOrConst::Const(true) => todo!(),
+				LitOrConst::Const(true) => Some(Err(Unsatisfiable)),
 			})
 
 		// .map(|clause| match clause {
