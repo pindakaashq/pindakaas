@@ -236,12 +236,14 @@ pub struct Lit(NonZeroI32);
 pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 /// Unsatisfiable is an error type returned when the problem being encoded is
 /// found to be inconsistent.
 pub struct Unsatisfiable;
 
-/// Errors relating to failing assignments
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+/// Errors relating to failing assignments
 pub enum CheckError {
 	Unsatisfiable(Unsatisfiable),
 	Fail(String),
