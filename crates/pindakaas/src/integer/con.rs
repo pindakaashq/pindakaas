@@ -536,7 +536,7 @@ impl Lin {
 						db,
 						&x,
 						&y,
-						None, // TODO optimize?
+						None,
 						Some(&BinEnc::from(PosCoeff::new(c - w_ground)).xs()),
 					)
 					.map(|_| ());

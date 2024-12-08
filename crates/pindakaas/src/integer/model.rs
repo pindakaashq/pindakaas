@@ -626,6 +626,7 @@ mod tests {
 	use traced_test::test;
 
 	use itertools::{iproduct, Itertools};
+	use std::path::PathBuf;
 	use std::sync::LazyLock;
 
 	macro_rules! has_bool_flags {
@@ -1217,100 +1218,97 @@ End
 		);
 	}
 
-	macro_rules! test_lp {
-		($lp:expr) => {
-			test_lp_for_configs(
-				&std::fs::read_to_string(std::path::Path::new(&format!("./res/lps/{}.lp", $lp)))
-					.unwrap(),
-				None,
-			);
-		};
+	fn test_lp(s: &str) {
+		let p = PathBuf::from(if s.ends_with(".lp") {
+			s.to_owned()
+		} else {
+			format!("./res/lps/{}.lp", s)
+		});
+		test_lp_for_configs(
+			&std::fs::read_to_string(&p)
+				.unwrap_or_else(|e| panic!("Error reading LP {}:\n{e}", p.display())),
+			None,
+		);
 	}
+
 
 	#[test]
 	fn le_1() {
-		test_lp!("le_1");
+		test_lp("le_1");
 	}
 
 	#[test]
 	fn le_mix() {
-		test_lp!("le_mix");
+		test_lp("le_mix");
 	}
 
 	#[test]
 	fn le_2() {
-		test_lp!("le_2");
+		test_lp("le_2");
 	}
 
 	#[test]
 	fn eq_1() {
-		test_lp!("eq_1");
+		test_lp("eq_1");
 	}
 
 	#[test]
 	#[ignore]
 	fn eq_2() {
-		test_lp!("eq_2");
+		test_lp("eq_2");
 	}
 
 	#[test]
 	fn eq_mix() {
-		test_lp!("eq_mix");
+		test_lp("eq_mix");
 	}
 
 	#[test]
 	fn eq_mix_bug_1() {
-		test_lp!("eq_mix_bug_1");
+		test_lp("eq_mix_bug_1");
 	}
+
 
 	#[test]
 	fn couple_bug_1() {
-		test_lp!("couple_bug_1");
+		test_lp("couple_bug_1");
 	}
 
 	#[test]
 	fn test_rca_ground() {
-		test_lp!("rca_ground");
+		test_lp("rca_ground");
 	}
 
 	#[test]
 	fn eq_channel() {
-		test_lp!("eq_channel");
+		test_lp("eq_channel");
 	}
 
 	#[test]
 	fn eq_channel_term() {
-		test_lp!("eq_channel_term");
+		test_lp("eq_channel_term");
 	}
-
-	// #[test]
-	// fn le_unit_tern() {
-	// 	test_lp!("le_unit_tern_1");
-	// 	test_lp!("le_unit_tern_2");
-	// 	test_lp!("le_unit_tern_3");
-	// 	test_lp!("le_unit_tern_4");
-	// }
 
 	#[test]
 	fn le_unit_tern_1() {
-		test_lp!("le_unit_tern_1");
+		test_lp("le_unit_tern_1");
 	}
 
 	#[test]
 	fn le_unit_tern_2() {
-		test_lp!("le_unit_tern_2");
+		test_lp("le_unit_tern_2");
 	}
 
 	#[ignore]
 	#[test]
 	fn le_unit_tern_3() {
-		test_lp!("le_unit_tern_3");
+		test_lp("le_unit_tern_3");
 	}
 
 	#[ignore]
 	#[test]
 	fn le_unit_tern_4() {
-		test_lp!("le_unit_tern_4");
+		test_lp("le_unit_tern_4");
 	}
 
 	// #[test]
@@ -1469,12 +1467,12 @@ End
 
 	#[test]
 	fn ge_1() {
-		test_lp!("ge_1");
+		test_lp("ge_1");
 	}
 
 	#[test]
 	fn dev() {
-		test_lp!("dev");
+		test_lp("dev");
 	}
 
 	// #[test]

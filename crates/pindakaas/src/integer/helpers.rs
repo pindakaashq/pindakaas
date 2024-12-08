@@ -52,7 +52,7 @@ End
 								.iter()
 								.map(|term| format!(
 									"{} {} {}",
-									if term.c.is_positive() { "+" } else { "-" },
+									if term.c.is_negative() { "-" } else { "+" },
 									term.c.abs(),
 									term.x.borrow().lbl
 								))
