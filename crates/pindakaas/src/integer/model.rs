@@ -195,7 +195,7 @@ impl Default for Model {
 
 impl Model {
 	/// New auxiliary variable (meaning it could be inconsistent, or already be encoded)
-	pub(crate) fn var_by_lbl(&self, lbl: &str) -> Option<IntVarRef> {
+	pub fn var_by_lbl(&self, lbl: &str) -> Option<IntVarRef> {
 		self.vars().find(|x| x.borrow().lbl == lbl)
 	}
 
