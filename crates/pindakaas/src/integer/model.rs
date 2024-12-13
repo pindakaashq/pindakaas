@@ -627,17 +627,16 @@ Actual assignments:
 					x.borrow().lb() == 0 && x.borrow().dom.is_contiguous(),
 					"todo"
 				);
-				let xs = x
-					.borrow_mut()
-					.encode_ord(db)
-					.unwrap()
+				let xs = x.borrow_mut().encode_ord(db)?;
+				let xs = xs
 					.iter()
-					.map(|lit| {
+					.zip(x.borrow().dom.iter().skip(1))
+					.map(|(lit, d)| {
 						pb_model.new_aux_var(
 							Dom::new([0, 1]),
 							true,
 							Some(IntVarEnc::Ord(Some(OrdEnc::from(vec![lit.clone()])))),
-							format!("{}>=i", lbl),
+							format!("{}>={}", lbl, d),
 						)
 					})
 					.try_collect::<_, Vec<_>, _>()?;
