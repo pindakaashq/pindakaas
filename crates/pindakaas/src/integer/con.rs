@@ -125,6 +125,11 @@ impl TryFrom<&Lin> for LinCase {
 }
 
 impl LinExp {
+	pub fn new(terms: &[Term]) -> Self {
+		Self {
+			terms: terms.to_vec(),
+		}
+	}
 	pub fn lb(&self) -> Coeff {
 		self.terms.iter().map(|t| t.lb()).sum()
 	}
@@ -137,9 +142,7 @@ impl LinExp {
 impl Lin {
 	pub fn new(terms: &[Term], cmp: Comparator, k: Coeff, lbl: String) -> Self {
 		Lin {
-			exp: LinExp {
-				terms: terms.to_vec(),
-			},
+			exp: LinExp::new(terms),
 			cmp,
 			k,
 			lbl,
@@ -148,9 +151,7 @@ impl Lin {
 
 	pub fn tern(x: Term, y: Term, cmp: Comparator, z: Term, lbl: String) -> Self {
 		Lin {
-			exp: LinExp {
-				terms: vec![x, y, Term::new(-z.c, z.x)],
-			},
+			exp: LinExp::new(&[x, y, Term::new(-z.c, z.x)]),
 			cmp,
 			k: 0,
 			lbl,
@@ -761,8 +762,8 @@ impl Lin {
 	pub(crate) fn _simplified(self) -> Result<Lin> {
 		let mut k = self.k;
 		let con = Lin {
-			exp: LinExp {
-				terms: self
+			exp: LinExp::new(
+				&self
 					.exp
 					.terms
 					.into_iter()
@@ -774,8 +775,8 @@ impl Lin {
 							Some(t)
 						}
 					})
-					.collect(),
-			},
+					.collect_vec(),
+			),
 			k,
 			..self
 		};

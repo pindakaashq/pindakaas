@@ -53,6 +53,8 @@ pub enum Scm {
 
 use crate::Coeff;
 
+use super::ord::OrdEnc;
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Decomposer {
@@ -610,6 +612,56 @@ Actual assignments:
 			config: self.config.clone(),
 			..Model::default()
 		}
+	}
+
+	pub fn pbify<DB: ClauseDatabase>(&self, db: &mut DB) -> Result<Self, Unsatisfiable> {
+		let mut pb_model = self.clone();
+
+		// encode integers to 01-integers
+		let encs: FxHashMap<_, _> = self
+			.vars()
+			.into_iter()
+			.map(|x| {
+				let lbl = x.borrow().lbl();
+				assert!(
+					x.borrow().lb() == 0 && x.borrow().dom.is_contiguous(),
+					"todo"
+				);
+				let xs = x
+					.borrow_mut()
+					.encode_ord(db)
+					.unwrap()
+					.iter()
+					.map(|lit| {
+						pb_model.new_aux_var(
+							Dom::new([0, 1]),
+							true,
+							Some(IntVarEnc::Ord(Some(OrdEnc::from(vec![lit.clone()])))),
+							format!("{}>=i", lbl),
+						)
+					})
+					.try_collect::<_, Vec<_>, _>()?;
+				Ok((lbl, xs))
+			})
+			.try_collect()?;
+
+		// encode
+		for con in &self.cons {
+			pb_model.add_constraint(Lin::new(
+				&con.exp
+					.terms
+					.iter()
+					.flat_map(|t| {
+						let lbl = &t.x.borrow().lbl;
+						encs[lbl].iter().map(|x| Term::new(t.c, x.clone()))
+					})
+					.collect_vec(),
+				con.cmp,
+				con.k,
+				format!("pb-{}", con.lbl),
+			))?;
+		}
+		Ok(pb_model)
 	}
 }
 
@@ -1231,7 +1283,6 @@ End
 		);
 	}
 
-
 	#[test]
 	fn le_1() {
 		test_lp("le_1");
@@ -1267,7 +1318,6 @@ End
 	fn eq_mix_bug_1() {
 		test_lp("eq_mix_bug_1");
 	}
-
 
 	#[test]
 	fn couple_bug_1() {
@@ -2523,5 +2573,25 @@ End
 		};
 		model.add_constraint(con).unwrap();
 		test_decomp(model.deep_clone(), &model, None);
+	}
+
+	#[test]
+	fn test_pbify() {
+		let model = Model::from_file(PathBuf::from("./res/lps/le_int.lp")).unwrap();
+		let mut slv = Cadical::default();
+		let mut pbs = model.pbify(&mut slv).unwrap();
+		pbs.encode_pub(&mut slv).unwrap();
+		// assigning model the solutions to the literals of the pb encoding should give the correct assignments
+		assert!(model
+			.check_assignments(
+				&slv.solve_all(model.lits())
+					.into_iter()
+					.map(|sol| model.assign(&sol))
+					.collect_vec(),
+				None,
+				true,
+				&model.vars().collect_vec(),
+			)
+			.is_ok());
 	}
 }
