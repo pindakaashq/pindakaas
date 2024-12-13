@@ -91,10 +91,10 @@ pub struct ModelConfig {
 #[derive(Debug, Clone)]
 pub struct Model {
 	pub cons: Vec<Lin>,
-	pub(crate) num_var: usize,
+	pub num_var: usize,
 	pub obj: Obj,
 	pub config: ModelConfig,
-	pub(crate) cse: Cse,
+	pub cse: Cse,
 }
 
 impl From<Lin> for Model {
@@ -116,7 +116,7 @@ impl From<Vec<Lin>> for Model {
 }
 
 #[derive(Default, Debug, Clone)]
-pub(crate) struct Cse(pub(crate) FxHashMap<(IntVarId, Coeff, Comparator), Term>);
+pub struct Cse(pub FxHashMap<(IntVarId, Coeff, Comparator), Term>);
 
 #[derive(Debug, Default, Clone, Copy, Ord, PartialOrd, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
