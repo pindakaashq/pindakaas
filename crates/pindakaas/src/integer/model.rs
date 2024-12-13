@@ -615,7 +615,7 @@ Actual assignments:
 	}
 
 	pub fn pbify<DB: ClauseDatabase>(&self, db: &mut DB) -> Result<Self, Unsatisfiable> {
-		let mut pb_model = self.clone();
+		let mut pb_model = Model::default().with_config(self.config.clone());
 
 		// encode integers to 01-integers
 		let encs: FxHashMap<_, _> = self
@@ -2576,13 +2576,25 @@ End
 
 	#[test]
 	fn test_pbify() {
-		let model = Model::from_file(PathBuf::from("./res/lps/le_int.lp")).unwrap();
+		let lp = "./res/lps/le_int.lp";
+		// let lp = "./res/lps/le_1.lp"; // TODO add test that the pb encoding encoding of this 01-problem is equivalent
+		let model = Model::from_file(PathBuf::from(lp))
+			.unwrap()
+			.with_config(ModelConfig {
+				decomposer: Decomposer::Gt,
+				..ModelConfig::default()
+			});
+		// let mut cnf = Cnf::default();
+		// model.deep_clone().encode_pub(&mut cnf).unwrap();
+		// println!("model: {model}");
 		let mut slv = Cadical::default();
 		let mut pbs = model.pbify(&mut slv).unwrap();
 		pbs.encode_pub(&mut slv).unwrap();
+		// println!("pbs: {pbs}");
 		// assigning model the solutions to the literals of the pb encoding should give the correct assignments
-		assert!(model
-			.check_assignments(
+		assert_eq!(
+			Ok(()),
+			model.check_assignments(
 				&slv.solve_all(model.lits())
 					.into_iter()
 					.map(|sol| model.assign(&sol))
@@ -2591,6 +2603,6 @@ End
 				true,
 				&model.vars().collect_vec(),
 			)
-			.is_ok());
+		);
 	}
 }
