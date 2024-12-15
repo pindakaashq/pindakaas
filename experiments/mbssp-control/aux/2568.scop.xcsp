@@ -1,0 +1,58 @@
+<instance>
+<variables>
+<var id="x1"> 0..10 </var>
+<var id="x2"> 0..10 </var>
+<var id="x3"> 0..10 </var>
+<var id="x4"> 0..10 </var>
+<var id="x5"> 0..10 </var>
+<var id="x6"> 0..10 </var>
+<var id="x7"> 0..10 </var>
+<var id="x8"> 0..10 </var>
+<var id="x9"> 0..10 </var>
+<var id="x10"> 0..10 </var>
+<var id="x11"> 0..10 </var>
+<var id="x12"> 0..10 </var>
+</variables>
+<constraints>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 </list>
+<coeffs> 73 163 112 238 10 129 102 30 234 178 40 180 </coeffs>
+<condition>(eq,10157)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 </list>
+<coeffs> 212 222 26 229 209 61 99 184 56 181 66 177 </coeffs>
+<condition>(eq,8601)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 </list>
+<coeffs> 247 129 179 43 178 96 116 40 148 128 207 160 </coeffs>
+<condition>(eq,7477)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 </list>
+<coeffs> 151 103 141 80 155 55 15 182 171 67 54 31 </coeffs>
+<condition>(eq,5505)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 </list>
+<coeffs> 21 172 69 105 226 224 84 205 188 181 77 112 </coeffs>
+<condition>(eq,8262)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 </list>
+<coeffs> 221 206 82 23 214 34 80 129 183 47 175 110 </coeffs>
+<condition>(eq,6386)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 </list>
+<coeffs> 109 72 161 110 227 207 98 228 195 245 106 207 </coeffs>
+<condition>(eq,9450)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 </list>
+<coeffs> 170 155 113 151 156 145 161 206 191 208 165 35 </coeffs>
+<condition>(eq,8908)</condition>
+</sum>
+</constraints>
+</instance>

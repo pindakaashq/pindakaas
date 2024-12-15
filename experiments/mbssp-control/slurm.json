@@ -1,0 +1,45 @@
+{
+  "Slurm": {
+    "name": "mbssp-control",
+    "seeds": 1,
+    "build": false,
+    "enc_timeout": 180.0,
+    "solver_timeout": 60.0,
+    "grace_timeout": 60.0,
+    "mem": 3.0,
+    "nodelist": "Extras",
+    "experiments": [
+      "./solvers/control.json"
+    ],
+    "check": true,
+    "problems": [
+      {
+        "Mbssp": {
+          "b": 1,
+          "n": 15,
+          "m": 40,
+          "q": 50,
+          "instances": 100
+        }
+      },
+      {
+        "Mbssp": {
+          "b": 10,
+          "n": 8,
+          "m": 12,
+          "q": 50,
+          "instances": 100
+        }
+      },
+      {
+        "Mbssp": {
+          "b": 10,
+          "n": 8,
+          "m": 12,
+          "q": 250,
+          "instances": 100
+        }
+      }
+    ]
+  }
+}

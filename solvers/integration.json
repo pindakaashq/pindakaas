@@ -1,0 +1,137 @@
+[
+      {
+        "int_encodings": [
+          "Ord"
+        ],
+        "pb_encodings": [
+          "Bdd"
+        ],
+        "con_encodings": [
+          "Include"
+        ],
+        "add_consistencies": [
+          false
+        ],
+        "cutoffs": [
+          "Order",
+          {
+            "Mix": 25
+          }
+        ],
+        "systems": [
+          "Pbc"
+        ],
+        "split_eqs": [
+          false
+        ],
+        "propagates": [
+          "None"
+        ],
+        "scms": [
+          "Add"
+        ],
+        "equalize_ternariess": [
+          true
+        ],
+        "skip": false
+      },
+      {
+        "int_encodings": [
+          "Dir"
+        ],
+        "pb_encodings": [
+          "Bdd"
+        ],
+        "con_encodings": [
+          "Include"
+        ],
+        "add_consistencies": [
+          false
+        ],
+        "cutoffs": [
+          "Order"
+        ],
+        "systems": [
+          "SavileRow"
+        ],
+        "split_eqs": [
+          false
+        ],
+        "propagates": [
+          "None"
+        ],
+        "scms": [
+          "Add"
+        ],
+        "equalize_ternariess": [
+          true
+        ],
+        "skip": false
+      },
+      {
+        "int_encodings": [
+          "Dir"
+        ],
+        "pb_encodings": [
+          "Bdd"
+        ],
+        "con_encodings": [
+          "Include"
+        ],
+        "add_consistencies": [
+          false
+        ],
+        "cutoffs": [
+          "Order"
+        ],
+        "systems": [
+          "Scop"
+        ],
+        "split_eqs": [
+          false
+        ],
+        "propagates": [
+          "None"
+        ],
+        "scms": [
+          "Add"
+        ],
+        "equalize_ternariess": [
+          true
+        ],
+        "skip": false
+      },
+      {
+        "int_encodings": [
+          "Dir"
+        ],
+        "pb_encodings": [
+          "Gt"
+        ],
+        "con_encodings": [
+          "Include"
+        ],
+        "add_consistencies": [
+          false
+        ],
+        "cutoffs": [
+          "Order"
+        ],
+        "systems": [
+          "MiniZinc"
+        ],
+        "split_eqs": [
+          false
+        ],
+        "propagates": [
+          "None"
+        ],
+        "scms": [
+          "Add"
+        ],
+        "equalize_ternariess": [
+          true
+        ],
+        "skip": false
+      }
+    ]

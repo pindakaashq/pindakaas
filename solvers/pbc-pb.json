@@ -1,0 +1,36 @@
+[
+  {
+    "int_encodings": [
+      "Ord"
+    ],
+    "pb_encodings": [
+      "Gt",
+      "Bdd"
+    ],
+    "con_encodings": [
+      "Ignore"
+    ],
+    "add_consistencies": [
+      false
+    ],
+    "cutoffs": [
+      "Order"
+    ],
+    "systems": [
+      "Pbc"
+    ],
+    "split_eqs": [
+      true
+    ],
+    "propagates": [
+      "None"
+    ],
+    "scms": [
+      "Dnf"
+    ],
+    "equalize_ternariess": [
+      true
+    ],
+    "skip": false
+  }
+]

@@ -1,0 +1,34 @@
+<instance format="XCSP3" type="CSP">
+  <variables>
+    <array id="x" note="x[i][j] is the value of the matrix at row i and column j" size="[3][3]"> 2..7 </array>
+    <array id="y" note="y[i][j] is the square of the value of the matrix x at row i and column j" size="[3][3]"> 4..49 </array>
+  </variables>
+  <constraints>
+    <group note="computing y">
+      <intension> eq(%0,mul(%1,%1)) </intension>
+      <args> y[0][0] x[0][0] </args>
+      <args> y[0][1] x[0][1] </args>
+      <args> y[0][2] x[0][2] </args>
+      <args> y[1][0] x[1][0] </args>
+      <args> y[1][1] x[1][1] </args>
+      <args> y[1][2] x[1][2] </args>
+      <args> y[2][0] x[2][0] </args>
+      <args> y[2][1] x[2][1] </args>
+      <args> y[2][2] x[2][2] </args>
+    </group>
+    <sum>
+      <list> mul(x[0][0],x[1][1],x[2][2]) mul(x[0][0],x[1][2],x[2][1]) mul(x[0][1],x[1][0],x[2][2]) mul(x[0][1],x[1][2],x[2][0]) mul(x[0][2],x[1][0],x[2][1]) mul(x[0][2],x[1][1],x[2][0]) </list>
+      <coeffs> 1 -1 -1 1 1 -1 </coeffs>
+      <condition> (eq,1) </condition>
+    </sum>
+    <sum>
+      <list> mul(y[0][0],y[1][1],y[2][2]) mul(y[0][0],y[1][2],y[2][1]) mul(y[0][1],y[1][0],y[2][2]) mul(y[0][1],y[1][2],y[2][0]) mul(y[0][2],y[1][0],y[2][1]) mul(y[0][2],y[1][1],y[2][0]) </list>
+      <coeffs> 1 -1 -1 1 1 -1 </coeffs>
+      <condition> (eq,1) </condition>
+    </sum>
+    <lex class="symmetryBreaking">
+      <matrix> x[][] </matrix>
+      <operator> le </operator>
+    </lex>
+  </constraints>
+</instance>

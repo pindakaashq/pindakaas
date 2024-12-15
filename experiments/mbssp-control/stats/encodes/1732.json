@@ -1,0 +1,39 @@
+{
+  "instance": {
+    "problem": {
+      "Mbssp": {
+        "b": 10,
+        "n": 8,
+        "m": 12,
+        "q": 50,
+        "instances": 100
+      }
+    },
+    "i": 74,
+    "lp": "./experiments/mbssp-control/lps/2/074.lp"
+  },
+  "experiment": {
+    "system": "SavileRow",
+    "pb_encoding": "Swc",
+    "int_encoding": "Dir",
+    "con_encoding": "Include",
+    "split_eq": false,
+    "model_config": {
+      "scm": "Add",
+      "cutoff": "Order",
+      "decomposer": "Swc",
+      "equalize_ternaries": true,
+      "add_consistency": false,
+      "propagate": "None",
+      "equalize_uniform_bin_ineqs": false
+    }
+  },
+  "statics": {
+    "vars": 262126,
+    "cls": 2662604,
+    "lits": 7489286
+  },
+  "pb_statics": null,
+  "time": 2.7431397,
+  "dimacs": null
+}

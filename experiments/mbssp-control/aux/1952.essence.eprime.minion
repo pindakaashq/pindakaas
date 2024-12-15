@@ -1,0 +1,52 @@
+MINION 3
+# CSETopLevel_number = 0
+# CSETopLevel_eliminated_expressions = 0
+# CSETopLevel_total_size = 0
+# CSE_active_number = 0
+# CSE_active_eliminated_expressions = 0
+# CSE_active_total_size = 0
+**VARIABLES**
+DISCRETE x_1 #
+{0..10}
+DISCRETE x_2 #
+{0..10}
+DISCRETE x_3 #
+{0..10}
+DISCRETE x_4 #
+{0..10}
+DISCRETE x_5 #
+{0..10}
+DISCRETE x_6 #
+{0..10}
+DISCRETE x_7 #
+{0..10}
+DISCRETE x_8 #
+{0..10}
+DISCRETE x_9 #
+{0..10}
+DISCRETE x_10 #
+{0..10}
+DISCRETE x_11 #
+{0..10}
+DISCRETE x_12 #
+{0..10}
+**SEARCH**
+PRINT[[x_1],[x_2],[x_3],[x_4],[x_5],[x_6],[x_7],[x_8],[x_9],[x_10],[x_11],[x_12]]
+**CONSTRAINTS**
+weightedsumleq([30,10,30,3,32,48,11,18,30,39,38,23],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],2029)
+weightedsumgeq([30,10,30,3,32,48,11,18,30,39,38,23],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],2029)
+weightedsumleq([45,50,38,45,21,33,12,2,49,7,4,1],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],1421)
+weightedsumgeq([45,50,38,45,21,33,12,2,49,7,4,1],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],1421)
+weightedsumleq([18,48,18,50,21,45,20,15,46,10,47,3],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],1672)
+weightedsumgeq([18,48,18,50,21,45,20,15,46,10,47,3],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],1672)
+weightedsumleq([2,38,8,19,36,47,24,41,12,7,26,4],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],1311)
+weightedsumgeq([2,38,8,19,36,47,24,41,12,7,26,4],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],1311)
+weightedsumleq([35,9,42,13,43,28,24,26,30,13,22,20],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],1695)
+weightedsumgeq([35,9,42,13,43,28,24,26,30,13,22,20],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],1695)
+weightedsumleq([12,41,18,19,8,8,21,6,24,27,28,40],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],1193)
+weightedsumgeq([12,41,18,19,8,8,21,6,24,27,28,40],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],1193)
+weightedsumleq([24,19,21,35,9,39,5,37,47,50,41,46],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],2094)
+weightedsumgeq([24,19,21,35,9,39,5,37,47,50,41,46],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],2094)
+weightedsumleq([14,46,20,28,4,15,33,7,42,50,33,9],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],1472)
+weightedsumgeq([14,46,20,28,4,15,33,7,42,50,33,9],[x_1,x_2,x_3,x_4,x_5,x_6,x_7,x_8,x_9,x_10,x_11,x_12],1472)
+**EOF**

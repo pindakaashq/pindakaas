@@ -1,0 +1,46 @@
+{
+  "instance": {
+    "problem": {
+      "Mbkp": {
+        "bound": 10,
+        "n_": 10,
+        "m_": 200,
+        "q_": 50,
+        "family": 1,
+        "s_": 25,
+        "seed": 4,
+        "fl": "0.4",
+        "fu": null,
+        "skip_obj": true
+      }
+    },
+    "i": 57,
+    "lp": "./experiments/mbkp/lps/2/1_14.lp"
+  },
+  "experiment": {
+    "system": "Pbc",
+    "pb_encoding": "Bdd",
+    "int_encoding": "Ord",
+    "con_encoding": "Include",
+    "split_eq": false,
+    "model_config": {
+      "scm": "Dnf",
+      "cutoff": {
+        "Mix": 75
+      },
+      "decomposer": "Bdd",
+      "equalize_ternaries": true,
+      "add_consistency": false,
+      "propagate": "None",
+      "equalize_uniform_bin_ineqs": false
+    }
+  },
+  "statics": {
+    "vars": 43600,
+    "cls": 252428,
+    "lits": 867729
+  },
+  "pb_statics": null,
+  "time": 2.5493932,
+  "dimacs": null
+}

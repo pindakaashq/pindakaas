@@ -1,0 +1,109 @@
+[
+      {
+        "int_encodings": [
+          "Dir"
+        ],
+        "pb_encodings": [
+                "Gt",
+                "Swc",
+                "Bdd",
+                "Gpw",
+                "Tree",
+                "Gmto"
+        ],
+        "con_encodings": [
+          "Include"
+        ],
+        "add_consistencies": [
+          false
+        ],
+        "cutoffs": [
+          "Order"
+        ],
+        "systems": [
+          "SavileRow"
+        ],
+        "split_eqs": [
+          false
+        ],
+        "propagates": [
+          "None"
+        ],
+        "scms": [
+          "Add"
+        ],
+        "equalize_ternariess": [
+          true
+        ],
+        "skip": false
+      },
+      {
+        "int_encodings": [
+          "Dir"
+        ],
+        "pb_encodings": [
+          "Bdd"
+        ],
+        "con_encodings": [
+          "Include"
+        ],
+        "add_consistencies": [
+          false
+        ],
+        "cutoffs": [
+          {
+            "Mix": 1
+          }, "Order", "Binary"
+        ],
+        "systems": [
+          "Scop"
+        ],
+        "split_eqs": [
+          false
+        ],
+        "propagates": [
+          "None"
+        ],
+        "scms": [
+          "Add"
+        ],
+        "equalize_ternariess": [
+          true
+        ],
+        "skip": false
+      },
+      {
+        "int_encodings": [
+          "Dir"
+        ],
+        "pb_encodings": [
+          "Gt"
+        ],
+        "con_encodings": [
+          "Include"
+        ],
+        "add_consistencies": [
+          false
+        ],
+        "cutoffs": [
+          "Order"
+        ],
+        "systems": [
+          "MiniZinc"
+        ],
+        "split_eqs": [
+          false
+        ],
+        "propagates": [
+          "None"
+        ],
+        "scms": [
+          "Add"
+        ],
+        "equalize_ternariess": [
+          true
+        ],
+        "skip": false
+      }
+    ]
+

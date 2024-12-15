@@ -1,0 +1,9 @@
+language ESSENCE' 1.0
+
+$ This is the spiral of discrete_tomography1.param duplicated four times. 
+
+letting r be 22
+letting c be 24
+letting row_sums be [0,0,16,4,12,8,10,6,14,0,0,0,0,16,4,12,8,10,6,14,0,0]
+letting col_sums be [0,0,14,2,12,6,8,10,4,14,0,0,0,0,14,2,12,6,8,10,4,14,0,0]
+

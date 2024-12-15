@@ -1,0 +1,60 @@
+{
+  "Slurm": {
+    "name": "mbkp-control",
+    "seeds": 1,
+    "build": false,
+    "enc_timeout": 180.0,
+    "solver_timeout": 60.0,
+    "grace_timeout": 60.0,
+    "mem": 3.0,
+    "nodelist": "Extras",
+    "experiments": [
+      "./solvers/control.json"
+    ],
+    "check": true,
+    "problems": [
+      {
+        "Mbkp": {
+          "bound": 1,
+          "n_": 50,
+          "m_": 25,
+          "q_": 50,
+          "family": 1,
+          "s_": 25,
+          "seed": 4,
+          "fl": "0.4",
+          "fu": null,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "bound": 10,
+          "n_": 10,
+          "m_": 200,
+          "q_": 50,
+          "family": 1,
+          "s_": 25,
+          "seed": 4,
+          "fl": "0.4",
+          "fu": null,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbkp": {
+          "bound": 10,
+          "n_": 10,
+          "m_": 200,
+          "q_": 250,
+          "family": 1,
+          "s_": 25,
+          "seed": 4,
+          "fl": "0.4",
+          "fu": null,
+          "skip_obj": true
+        }
+      }
+    ]
+  }
+}

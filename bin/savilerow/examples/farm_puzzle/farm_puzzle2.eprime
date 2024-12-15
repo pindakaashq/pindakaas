@@ -1,0 +1,15 @@
+$ The Farm Puzzle 
+$
+$ A farmer has 7 animals on his farm: pigs and hens.
+$ They all together have 22 legs. How many pigs (4 legs)
+$ and how many hens(2 legs) does the farmer have?
+$
+$ modelled by Karen Petrie
+
+language ESSENCE' 1.0
+
+find pigs, hens: int(0..7)
+
+such that
+     pigs*4 + 2*hens = 22,
+     pigs + hens = 7

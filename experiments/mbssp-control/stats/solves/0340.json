@@ -1,0 +1,12 @@
+[
+  "./experiments/mbssp-control/stats/encodes/0340.json",
+  [
+    {
+      "status": "Sat",
+      "assignment": null,
+      "time": 6.2005076,
+      "cost": null,
+      "check": null
+    }
+  ]
+]

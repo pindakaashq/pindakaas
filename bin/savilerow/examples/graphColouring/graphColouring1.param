@@ -1,0 +1,15 @@
+language ESSENCE' 1.0
+
+letting vertices=5
+letting colours=3
+letting edge_count=6
+
+letting edges be [
+[1,2],
+[1,4],
+[2,3],
+[2,5],
+[3,4],
+[3,5],
+]
+

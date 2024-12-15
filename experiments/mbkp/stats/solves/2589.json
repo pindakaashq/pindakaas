@@ -1,0 +1,12 @@
+[
+  "./experiments/mbkp/stats/encodes/2589.json",
+  [
+    {
+      "status": "Unsat",
+      "assignment": null,
+      "time": 17.829819,
+      "cost": null,
+      "check": null
+    }
+  ]
+]

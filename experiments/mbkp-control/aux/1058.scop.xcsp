@@ -1,0 +1,1021 @@
+<instance>
+<variables>
+<var id="x1"> 0..10 </var>
+<var id="x2"> 0..10 </var>
+<var id="x3"> 0..10 </var>
+<var id="x4"> 0..10 </var>
+<var id="x5"> 0..10 </var>
+<var id="x6"> 0..10 </var>
+<var id="x7"> 0..10 </var>
+<var id="x8"> 0..10 </var>
+<var id="x9"> 0..10 </var>
+<var id="x10"> 0..10 </var>
+</variables>
+<constraints>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 160 56 145 218 108 195 116 183 241 39 </coeffs>
+<condition>(le,5960)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 50 126 236 112 249 154 2 84 161 14 </coeffs>
+<condition>(le,4840)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 202 106 137 177 207 182 115 231 168 87 </coeffs>
+<condition>(le,6570)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 77 8 74 213 214 105 33 238 29 158 </coeffs>
+<condition>(le,4680)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 215 33 177 240 168 231 18 217 34 113 </coeffs>
+<condition>(le,5890)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 179 65 245 156 86 208 109 187 230 101 </coeffs>
+<condition>(le,6380)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 191 175 90 31 145 207 232 176 142 210 </coeffs>
+<condition>(le,6520)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 5 160 12 165 135 247 185 205 71 103 </coeffs>
+<condition>(le,5250)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 148 103 21 147 43 237 86 207 217 177 </coeffs>
+<condition>(le,5650)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 237 88 35 107 38 164 213 201 48 235 </coeffs>
+<condition>(le,5570)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 123 86 228 231 223 162 236 152 102 49 </coeffs>
+<condition>(le,6490)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 7 75 123 42 188 220 240 96 44 217 </coeffs>
+<condition>(le,5100)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 225 41 207 130 167 245 191 169 196 229 </coeffs>
+<condition>(le,7340)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 23 41 216 158 234 177 51 246 50 67 </coeffs>
+<condition>(le,5150)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 186 98 145 149 220 157 30 27 133 103 </coeffs>
+<condition>(le,5090)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 223 67 201 240 56 19 142 26 246 86 </coeffs>
+<condition>(le,5320)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 170 187 6 193 131 92 1 33 238 37 </coeffs>
+<condition>(le,4430)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 186 107 70 53 40 34 222 12 25 183 </coeffs>
+<condition>(le,3800)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 67 4 148 48 187 44 68 108 215 237 </coeffs>
+<condition>(le,4590)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 94 26 189 234 98 54 71 48 150 73 </coeffs>
+<condition>(le,4230)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 4 5 24 89 55 178 226 33 148 19 </coeffs>
+<condition>(le,3180)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 32 28 218 26 191 139 17 184 40 176 </coeffs>
+<condition>(le,4280)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 39 135 126 182 225 239 212 85 206 68 </coeffs>
+<condition>(le,6180)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 153 60 165 220 208 130 135 220 211 37 </coeffs>
+<condition>(le,6270)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 43 69 37 11 233 22 171 76 58 156 </coeffs>
+<condition>(le,3570)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 245 29 196 221 244 10 13 78 15 164 </coeffs>
+<condition>(le,4950)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 229 213 192 214 49 214 40 134 152 228 </coeffs>
+<condition>(le,6790)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 158 31 232 224 131 168 62 202 238 125 </coeffs>
+<condition>(le,6400)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 206 114 180 86 170 193 107 6 247 96 </coeffs>
+<condition>(le,5730)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 141 201 134 28 70 187 8 51 8 220 </coeffs>
+<condition>(le,4270)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 195 71 188 84 106 126 112 136 195 8 </coeffs>
+<condition>(le,4980)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 66 6 149 17 44 34 181 160 195 9 </coeffs>
+<condition>(le,3510)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 206 123 197 16 18 89 129 119 56 60 </coeffs>
+<condition>(le,4130)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 216 51 205 169 91 118 153 82 57 109 </coeffs>
+<condition>(le,5100)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 113 129 136 55 2 79 92 246 231 233 </coeffs>
+<condition>(le,5360)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 28 96 193 134 42 100 118 41 93 88 </coeffs>
+<condition>(le,3800)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 70 162 194 71 149 10 120 110 189 175 </coeffs>
+<condition>(le,5100)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 64 14 66 185 91 212 215 33 194 73 </coeffs>
+<condition>(le,4670)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 79 192 3 146 4 98 81 47 4 84 </coeffs>
+<condition>(le,3010)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 102 132 56 91 246 14 20 217 220 115 </coeffs>
+<condition>(le,4940)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 82 102 83 48 181 236 80 153 113 232 </coeffs>
+<condition>(le,5340)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 135 85 134 191 55 159 139 239 141 182 </coeffs>
+<condition>(le,5950)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 94 137 168 89 53 224 134 79 146 137 </coeffs>
+<condition>(le,5140)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 217 14 34 231 126 62 223 85 103 182 </coeffs>
+<condition>(le,5210)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 37 187 132 164 39 144 113 98 219 50 </coeffs>
+<condition>(le,4820)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 147 123 51 7 249 70 18 66 102 8 </coeffs>
+<condition>(le,3430)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 106 147 228 50 18 76 74 185 243 191 </coeffs>
+<condition>(le,5370)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 241 129 3 118 137 116 43 165 148 169 </coeffs>
+<condition>(le,5170)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 205 210 68 145 75 46 88 91 35 168 </coeffs>
+<condition>(le,4610)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 199 199 193 219 207 60 3 206 159 221 </coeffs>
+<condition>(le,6790)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 122 76 21 149 80 21 206 144 169 41 </coeffs>
+<condition>(le,4190)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 195 168 238 190 197 137 123 232 187 53 </coeffs>
+<condition>(le,7010)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 58 236 133 135 198 115 237 90 130 160 </coeffs>
+<condition>(le,6080)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 124 188 83 189 43 225 133 32 31 112 </coeffs>
+<condition>(le,4730)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 20 109 172 205 230 79 242 155 249 138 </coeffs>
+<condition>(le,6520)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 24 123 55 141 222 63 26 24 42 131 </coeffs>
+<condition>(le,3470)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 80 43 125 20 55 205 154 63 213 167 </coeffs>
+<condition>(le,4590)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 9 97 102 168 147 142 47 154 163 210 </coeffs>
+<condition>(le,5050)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 62 151 9 213 137 39 228 34 82 127 </coeffs>
+<condition>(le,4410)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 101 57 82 208 208 64 71 167 74 196 </coeffs>
+<condition>(le,5010)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 98 162 20 39 117 159 118 173 168 203 </coeffs>
+<condition>(le,5120)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 159 164 11 10 17 78 238 88 57 7 </coeffs>
+<condition>(le,3380)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 78 12 123 198 19 136 137 5 174 226 </coeffs>
+<condition>(le,4520)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 216 249 121 55 21 243 68 222 1 115 </coeffs>
+<condition>(le,5340)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 39 147 61 31 134 3 206 13 24 208 </coeffs>
+<condition>(le,3530)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 129 236 148 83 166 36 243 10 154 227 </coeffs>
+<condition>(le,5840)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 121 30 118 81 11 97 204 1 167 145 </coeffs>
+<condition>(le,3970)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 129 67 145 93 245 116 63 80 48 38 </coeffs>
+<condition>(le,4170)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 92 162 178 21 173 83 204 233 122 3 </coeffs>
+<condition>(le,5180)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 83 143 211 111 212 91 58 223 128 199 </coeffs>
+<condition>(le,5950)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 55 68 140 15 145 154 91 244 230 194 </coeffs>
+<condition>(le,5450)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 20 108 147 38 76 73 218 125 165 86 </coeffs>
+<condition>(le,4300)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 127 156 24 204 101 111 246 193 198 203 </coeffs>
+<condition>(le,6370)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 192 217 134 57 114 66 152 31 242 145 </coeffs>
+<condition>(le,5500)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 5 151 32 215 172 129 142 233 126 27 </coeffs>
+<condition>(le,5020)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 134 35 123 14 175 45 60 48 174 54 </coeffs>
+<condition>(le,3510)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 246 164 175 33 245 135 99 82 133 151 </coeffs>
+<condition>(le,5960)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 104 52 88 32 162 95 93 49 89 37 </coeffs>
+<condition>(le,3260)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 90 222 68 176 83 3 148 157 207 88 </coeffs>
+<condition>(le,5060)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 98 132 139 99 200 97 99 43 135 154 </coeffs>
+<condition>(le,4870)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 176 179 95 118 197 236 147 104 29 187 </coeffs>
+<condition>(le,5980)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 70 23 54 150 185 113 139 196 52 16 </coeffs>
+<condition>(le,4070)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 227 10 15 203 24 211 12 101 115 39 </coeffs>
+<condition>(le,3900)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 165 98 208 227 93 15 91 152 5 42 </coeffs>
+<condition>(le,4470)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 120 53 129 207 81 163 73 175 86 42 </coeffs>
+<condition>(le,4600)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 126 244 210 194 62 52 42 191 204 93 </coeffs>
+<condition>(le,5780)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 234 106 137 155 209 37 140 240 249 145 </coeffs>
+<condition>(le,6740)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 211 48 45 119 194 81 208 162 84 229 </coeffs>
+<condition>(le,5630)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 62 200 166 68 11 9 9 241 199 35 </coeffs>
+<condition>(le,4080)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 163 42 239 143 204 62 1 88 17 180 </coeffs>
+<condition>(le,4640)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 158 145 191 147 107 112 94 27 34 47 </coeffs>
+<condition>(le,4330)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 28 75 194 249 248 138 212 80 3 176 </coeffs>
+<condition>(le,5720)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 156 244 173 143 203 132 78 193 207 221 </coeffs>
+<condition>(le,7140)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 235 109 91 187 171 2 141 84 66 72 </coeffs>
+<condition>(le,4720)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 240 53 50 47 190 165 6 133 204 111 </coeffs>
+<condition>(le,4890)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 136 2 174 112 29 109 80 223 105 78 </coeffs>
+<condition>(le,4270)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 61 191 138 102 173 1 190 146 63 67 </coeffs>
+<condition>(le,4610)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 168 219 190 239 16 66 166 220 104 207 </coeffs>
+<condition>(le,6500)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 167 132 6 178 160 235 33 142 248 119 </coeffs>
+<condition>(le,5790)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 128 248 224 158 219 18 102 34 231 160 </coeffs>
+<condition>(le,6200)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 157 130 39 2 246 159 4 218 191 201 </coeffs>
+<condition>(le,5490)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 86 115 227 66 213 1 67 99 174 199 </coeffs>
+<condition>(le,5080)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 241 179 16 177 171 137 178 227 102 181 </coeffs>
+<condition>(le,6560)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 74 224 39 149 65 100 68 40 208 75 </coeffs>
+<condition>(le,4250)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 116 216 53 248 240 143 137 144 78 162 </coeffs>
+<condition>(le,6270)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 186 43 243 74 201 205 206 208 173 241 </coeffs>
+<condition>(le,7260)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 158 227 190 109 190 218 166 195 107 135 </coeffs>
+<condition>(le,6910)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 226 107 31 171 41 171 148 223 12 45 </coeffs>
+<condition>(le,4790)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 132 225 2 187 74 110 207 237 149 246 </coeffs>
+<condition>(le,6400)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 137 162 226 79 154 186 14 51 1 127 </coeffs>
+<condition>(le,4630)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 13 229 105 140 68 16 177 92 14 52 </coeffs>
+<condition>(le,3690)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 219 122 231 22 156 27 7 66 222 19 </coeffs>
+<condition>(le,4450)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 187 150 151 65 146 160 198 198 225 191 </coeffs>
+<condition>(le,6810)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 56 78 31 9 238 114 109 31 34 183 </coeffs>
+<condition>(le,3600)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 188 174 209 226 113 220 105 177 146 100 </coeffs>
+<condition>(le,6760)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 59 149 147 205 120 9 225 101 17 118 </coeffs>
+<condition>(le,4690)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 62 114 11 80 5 82 52 57 28 78 </coeffs>
+<condition>(le,2320)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 211 164 223 177 192 125 237 75 225 54 </coeffs>
+<condition>(le,6860)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 217 129 151 31 239 143 44 31 21 24 </coeffs>
+<condition>(le,4200)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 63 78 79 129 213 176 135 19 52 181 </coeffs>
+<condition>(le,4590)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 187 112 232 65 109 112 145 227 219 195 </coeffs>
+<condition>(le,6540)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 15 56 34 182 35 126 111 229 54 228 </coeffs>
+<condition>(le,4360)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 163 219 30 119 151 125 148 186 30 110 </coeffs>
+<condition>(le,5220)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 52 38 91 196 177 97 12 19 15 108 </coeffs>
+<condition>(le,3280)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 195 76 230 200 47 77 128 101 175 38 </coeffs>
+<condition>(le,5160)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 197 98 104 198 87 6 206 202 72 213 </coeffs>
+<condition>(le,5640)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 43 106 1 165 175 33 12 39 154 101 </coeffs>
+<condition>(le,3380)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 67 235 160 136 1 197 200 244 81 67 </coeffs>
+<condition>(le,5660)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 60 249 14 92 29 223 100 40 25 207 </coeffs>
+<condition>(le,4230)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 50 138 16 172 174 203 120 31 238 107 </coeffs>
+<condition>(le,5090)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 46 10 185 145 4 166 192 154 1 174 </coeffs>
+<condition>(le,4390)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 245 82 134 218 124 127 108 209 13 187 </coeffs>
+<condition>(le,5900)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 123 63 33 104 80 68 70 5 192 27 </coeffs>
+<condition>(le,3120)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 174 195 169 174 192 142 4 135 6 49 </coeffs>
+<condition>(le,5050)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 129 165 200 57 85 9 224 26 77 227 </coeffs>
+<condition>(le,4890)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 12 160 105 183 146 240 70 233 210 124 </coeffs>
+<condition>(le,6050)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 156 120 47 57 141 162 121 213 19 104 </coeffs>
+<condition>(le,4650)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 222 68 110 156 221 146 31 28 58 27 </coeffs>
+<condition>(le,4350)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 227 11 180 122 225 147 99 211 154 22 </coeffs>
+<condition>(le,5700)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 114 117 201 232 207 28 86 9 120 31 </coeffs>
+<condition>(le,4670)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 222 15 83 178 170 65 201 87 143 78 </coeffs>
+<condition>(le,5060)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 38 212 36 36 135 178 31 106 14 55 </coeffs>
+<condition>(le,3430)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 206 127 110 19 6 60 75 77 40 70 </coeffs>
+<condition>(le,3220)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 30 201 133 103 197 59 200 16 174 146 </coeffs>
+<condition>(le,5130)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 228 136 99 111 204 193 147 123 99 185 </coeffs>
+<condition>(le,6220)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 161 226 60 151 152 2 197 92 233 149 </coeffs>
+<condition>(le,5800)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 64 202 117 126 3 240 95 105 51 229 </coeffs>
+<condition>(le,5020)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 117 145 117 66 172 135 56 149 180 199 </coeffs>
+<condition>(le,5450)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 73 88 244 248 48 153 57 184 16 187 </coeffs>
+<condition>(le,5290)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 225 196 154 66 240 216 31 33 77 85 </coeffs>
+<condition>(le,5390)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 92 48 31 10 222 133 97 150 236 183 </coeffs>
+<condition>(le,4900)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 164 86 114 235 212 39 139 7 10 190 </coeffs>
+<condition>(le,4870)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 140 194 233 233 12 3 239 71 36 204 </coeffs>
+<condition>(le,5560)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 159 108 115 152 96 63 213 213 14 145 </coeffs>
+<condition>(le,5210)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 116 173 34 31 1 174 35 31 237 88 </coeffs>
+<condition>(le,3750)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 69 42 199 245 151 64 106 215 16 200 </coeffs>
+<condition>(le,5330)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 85 221 62 206 23 96 220 183 86 9 </coeffs>
+<condition>(le,4850)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 234 179 199 123 192 147 5 121 87 25 </coeffs>
+<condition>(le,5350)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 228 212 128 34 112 10 148 234 114 136 </coeffs>
+<condition>(le,5530)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 27 100 91 220 17 50 125 55 208 236 </coeffs>
+<condition>(le,4600)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 51 41 200 202 182 203 246 145 61 216 </coeffs>
+<condition>(le,6310)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 198 226 167 180 44 11 150 39 163 227 </coeffs>
+<condition>(le,5730)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 132 169 134 56 53 78 185 53 17 117 </coeffs>
+<condition>(le,4050)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 128 118 236 133 220 59 220 79 72 40 </coeffs>
+<condition>(le,5320)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 224 112 214 156 184 148 211 124 52 201 </coeffs>
+<condition>(le,6630)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 227 199 110 159 180 226 95 145 22 240 </coeffs>
+<condition>(le,6540)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 94 178 73 191 239 80 106 84 118 36 </coeffs>
+<condition>(le,4890)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 111 129 141 225 143 48 161 37 75 125 </coeffs>
+<condition>(le,4870)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 92 154 195 47 234 233 249 217 88 230 </coeffs>
+<condition>(le,7090)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 10 37 248 189 23 11 66 187 244 60 </coeffs>
+<condition>(le,4380)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 35 57 29 21 87 134 118 139 70 175 </coeffs>
+<condition>(le,3520)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 12 147 191 193 18 73 31 113 123 108 </coeffs>
+<condition>(le,4110)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 30 59 137 125 212 45 173 213 210 24 </coeffs>
+<condition>(le,5010)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 17 216 14 202 174 38 30 19 146 249 </coeffs>
+<condition>(le,4500)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 138 75 237 54 86 205 9 102 91 51 </coeffs>
+<condition>(le,4270)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 173 51 43 148 223 234 113 39 14 57 </coeffs>
+<condition>(le,4460)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 143 11 168 90 88 132 183 205 59 14 </coeffs>
+<condition>(le,4450)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 133 220 116 11 70 178 113 109 239 245 </coeffs>
+<condition>(le,5850)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 99 172 153 102 14 32 175 59 43 195 </coeffs>
+<condition>(le,4250)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 47 85 191 80 27 192 195 77 231 58 </coeffs>
+<condition>(le,4820)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 168 238 16 125 206 156 208 96 14 92 </coeffs>
+<condition>(le,5380)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 27 25 70 42 162 114 166 104 67 13 </coeffs>
+<condition>(le,3220)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 249 15 175 61 73 231 148 61 34 171 </coeffs>
+<condition>(le,4960)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 227 185 133 240 9 177 181 103 16 225 </coeffs>
+<condition>(le,6100)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 19 84 93 48 69 201 231 227 180 222 </coeffs>
+<condition>(le,5600)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 46 30 233 115 4 218 151 121 222 157 </coeffs>
+<condition>(le,5290)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 84 214 228 173 146 233 113 76 64 86 </coeffs>
+<condition>(le,5780)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 147 198 180 17 108 135 165 221 7 58 </coeffs>
+<condition>(le,5040)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 91 129 206 52 138 230 63 162 186 244 </coeffs>
+<condition>(le,6120)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 196 72 243 133 2 14 136 16 176 80 </coeffs>
+<condition>(le,4350)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 217 23 55 235 160 38 24 4 194 210 </coeffs>
+<condition>(le,4730)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 110 176 184 143 145 131 76 145 154 183 </coeffs>
+<condition>(le,5900)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 32 28 61 175 145 216 131 217 25 124 </coeffs>
+<condition>(le,4700)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 205 198 229 12 215 229 215 228 159 92 </coeffs>
+<condition>(le,7270)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 180 197 237 219 16 242 239 15 42 63 </coeffs>
+<condition>(le,5910)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 40 234 28 185 62 232 204 179 211 123 </coeffs>
+<condition>(le,6110)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 59 209 104 231 26 145 228 59 36 1 </coeffs>
+<condition>(le,4470)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 224 215 81 71 154 13 239 189 219 198 </coeffs>
+<condition>(le,6540)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 35 184 101 6 59 11 162 8 55 140 </coeffs>
+<condition>(le,3100)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 108 116 43 107 36 141 2 143 246 60 </coeffs>
+<condition>(le,4080)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 </list>
+<coeffs> 75 5 115 124 48 68 246 198 60 71 </coeffs>
+<condition>(ge,5970)</condition>
+</sum>
+</constraints>
+</instance>

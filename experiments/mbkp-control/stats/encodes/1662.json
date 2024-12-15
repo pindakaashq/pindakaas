@@ -1,0 +1,44 @@
+{
+  "instance": {
+    "problem": {
+      "Mbkp": {
+        "bound": 10,
+        "n_": 10,
+        "m_": 200,
+        "q_": 250,
+        "family": 1,
+        "s_": 25,
+        "seed": 4,
+        "fl": "0.4",
+        "fu": null,
+        "skip_obj": true
+      }
+    },
+    "i": 67,
+    "lp": "./experiments/mbkp-control/lps/2/3_16.lp"
+  },
+  "experiment": {
+    "system": "SavileRow",
+    "pb_encoding": "Swc",
+    "int_encoding": "Dir",
+    "con_encoding": "Include",
+    "split_eq": false,
+    "model_config": {
+      "scm": "Add",
+      "cutoff": "Order",
+      "decomposer": "Swc",
+      "equalize_ternaries": true,
+      "add_consistency": false,
+      "propagate": "None",
+      "equalize_uniform_bin_ineqs": false
+    }
+  },
+  "statics": {
+    "vars": 12010860,
+    "cls": 119983035,
+    "lits": 335591195
+  },
+  "pb_statics": null,
+  "time": 74.95755,
+  "dimacs": null
+}

@@ -1,0 +1,8 @@
+[submodule "bin/pindakaas"]
+	path = bin/pindakaas
+	url = https://github.com/hbierlee/pindakaas.git
+	branch = feature/int-merge
+[submodule "bin/Picat/fzn_picat"]
+	path = bin/fzn_picat
+	url = https://github.com/hbierlee/fzn_picat.git
+	branch = main

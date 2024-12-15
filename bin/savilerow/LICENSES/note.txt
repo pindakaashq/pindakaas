@@ -1,0 +1,9 @@
+
+Savile Row itself is licenced with the GNU GPL version 3, and a copy of that
+licence is included in the COPYING file in the directory above. 
+
+Four binaries are included with Savile Row, and in each case they were built
+from the most recent publicly-available source.  
+
+Licenses for the source distributions are included in this directory.
+

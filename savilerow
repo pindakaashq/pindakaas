@@ -1,0 +1,64 @@
+#!/bin/sh
+
+# get savilerow installation directory
+DIR="$( cd "$( dirname "$0" )" && pwd )"
+
+# For solvers distributed with SR, find them in the bin directory. 
+
+if [ -f "$DIR/bin/minion" ]; then
+    MINION_ARG1="-minion-bin"
+    MINION_ARG2="$DIR/bin/minion"
+else
+    MINION_ARG1=""
+    MINION_ARG2=""
+fi
+
+if [ -f "$DIR/bin/fzn-chuffed" ]; then
+    CHUFFED_ARG1="-chuffed-bin"
+    CHUFFED_ARG2="$DIR/bin/fzn-chuffed"
+else
+    CHUFFED_ARG1=""
+    CHUFFED_ARG2=""
+fi
+
+if [ -f "$DIR/bin/kissat" ]; then
+    KISSAT_ARG1="-kissat-bin"
+    KISSAT_ARG2="$DIR/bin/kissat"
+else
+    KISSAT_ARG1=""
+    KISSAT_ARG2=""
+fi
+
+if [ -f "$DIR/bin/symmetry_detect" ]; then
+    SYMDETECT_ARG1="-symdetect-bin"
+    SYMDETECT_ARG2="$DIR/bin/symmetry_detect"
+else
+    SYMDETECT_ARG1=""
+    SYMDETECT_ARG2=""
+fi
+
+mem="${PBC_JAVA_MEM}"
+echo $mem
+case "$@" in
+    *"-cgroups"*)
+        if [ "$(uname)" = "Darwin" ]; then
+            echo "Ignoring -cgroups on macOS"
+            java -ea -XX:ParallelGCThreads=1 -Djava.library.path="$DIR"/lib/ $mem -jar "$DIR/savilerow.jar" "${MINION_ARG1}" "${MINION_ARG2}" "${CHUFFED_ARG1}" "${CHUFFED_ARG2}" "${SYMDETECT_ARG1}" "${SYMDETECT_ARG2}" "${KISSAT_ARG1}" "${KISSAT_ARG2}" "$@"
+        else
+            TIMESTAMP=$(date +%s)
+            GROUP_NAME="savilerow_${TIMESTAMP}_$$"
+
+            echo "Using cgroups, group name: $GROUP_NAME"
+
+            cgcreate -g cpu:/"$GROUP_NAME"
+            cgset -r cpu.cfs_quota_us=1000000 "$GROUP_NAME"
+            cgset -r cpu.cfs_period_us=1000000 "$GROUP_NAME"
+            cgexec -g cpu:"$GROUP_NAME" java -ea -XX:ParallelGCThreads=1 -Djava.library.path="$DIR"/lib/ -Xmx8G -jar "$DIR/savilerow.jar" "${MINION_ARG1}" "${MINION_ARG2}" "${CHUFFED_ARG1}" "${CHUFFED_ARG2}" "${SYMDETECT_ARG1}" "${SYMDETECT_ARG2}" "${KISSAT_ARG1}" "${KISSAT_ARG2}" "$@"
+            cgdelete -g cpu:/"$GROUP_NAME"
+        fi
+    ;;
+    *)
+        java -ea -XX:ParallelGCThreads=1 -Djava.library.path="$DIR"/lib/ $mem -jar "$DIR/savilerow.jar" "${MINION_ARG1}" "${MINION_ARG2}" "${CHUFFED_ARG1}" "${CHUFFED_ARG2}" "${SYMDETECT_ARG1}" "${SYMDETECT_ARG2}" "${KISSAT_ARG1}" "${KISSAT_ARG2}" "$@"
+    ;;
+esac
+

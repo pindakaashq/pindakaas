@@ -1,0 +1,51 @@
+import sat.
+	
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% the directed graph (Vs,Es) represents a path from Src to Dest
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+path_d(Vs,Es,Src,Dest), list(Dest) =>
+    check_graph_vs(Vs, path),
+    check_graph_es(Es, path),
+    hcp_scc_check_vertex(Src,path),
+    foreach (V in Dest)
+        hcp_scc_check_vertex(V,path)
+    end,
+    once member({Src, 1}, Vs),                              % Src is in
+    VMap = new_map(),
+    foreach ({V,B} in Vs)
+        VMap.put(V,B)
+    end,
+    AMap = new_map(),
+    EMap = new_map(),
+    foreach ({V1,V2,B} in Es)
+        register_edge(V1,V2,B,VMap,EMap,AMap),
+        register_edge(V2,V1,B,VMap,EMap,AMap)
+    end,
+    sum([B : V in Dest, B = VMap.get(V,0)]) #= 1,           % exactly one dest vertex is in
+    if member(Src, Dest) then                               % Src is in Dest
+        foreach ({V,B} in Vs, V != Src)                     % only Src is in the graph
+            B = 0
+        end,
+        foreach ({_,_,B} in Es)
+            B = 0
+        end
+    else                                                    
+        Neibs = AMap.get(Src,[]),
+        sum([B1 : (_,B1) in Neibs]) #= 1,                   % exactly one outgoing
+        foreach (V in Dest)
+            Bv = VMap.get(V),
+			BInNeibs = [B : {U,_} in Vs, Key = (U,V), EMap.has_key(Key), B = EMap.get(Key)],
+            Bv #=> sum(BInNeibs) #= 1                       % exactly one incomming
+        end,
+        foreach ({V,B} in Vs, V != Src, not member(V,Dest))
+            Bv = VMap.get(V),
+			BInNeibs = [B : {U,_} in Vs, Key = (U,V), EMap.has_key(Key), B = EMap.get(Key)],
+			BOutNeibs = [B : {U,_} in Vs, Key = (V,U), EMap.has_key(Key), B = EMap.get(Key)],	
+            Bv #=> sum(BInNeibs) #= 1,
+            Bv #=> sum(BOutNeibs) #= 1
+        end
+    end.
+path_d(Vs,Es,Src,Dest) =>                                   % unique dest
+    hcp_scc_check_vertex(Dest,path_d),
+    path_d(Vs,Es,Src,[Dest]).
+

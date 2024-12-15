@@ -1,0 +1,46 @@
+{
+  "instance": {
+    "problem": {
+      "Mbkp": {
+        "bound": 10,
+        "n_": 10,
+        "m_": 200,
+        "q_": 250,
+        "family": 1,
+        "s_": 25,
+        "seed": 4,
+        "fl": "0.4",
+        "fu": null,
+        "skip_obj": true
+      }
+    },
+    "i": 68,
+    "lp": "./experiments/mbkp-control/lps/2/4_16.lp"
+  },
+  "experiment": {
+    "system": "Scop",
+    "pb_encoding": "Bdd",
+    "int_encoding": "Dir",
+    "con_encoding": "Include",
+    "split_eq": false,
+    "model_config": {
+      "scm": "Add",
+      "cutoff": {
+        "Mix": 1
+      },
+      "decomposer": "Bdd",
+      "equalize_ternaries": true,
+      "add_consistency": false,
+      "propagate": "None",
+      "equalize_uniform_bin_ineqs": false
+    }
+  },
+  "statics": {
+    "vars": 5553577,
+    "cls": 15503152,
+    "lits": 45070768
+  },
+  "pb_statics": null,
+  "time": 60.37066,
+  "dimacs": null
+}

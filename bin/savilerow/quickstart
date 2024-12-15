@@ -1,0 +1,2 @@
+Try the command:
+./savilerow examples/sudoku/sudoku.eprime examples/sudoku/sudoku.param -run-solver

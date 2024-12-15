@@ -1,0 +1,41 @@
+{
+  "instance": {
+    "problem": {
+      "Mbssp": {
+        "b": 1,
+        "n": 15,
+        "m": 40,
+        "q": 50,
+        "instances": 100
+      }
+    },
+    "i": 9,
+    "lp": "./experiments/mbssp/lps/1/009.lp"
+  },
+  "experiment": {
+    "system": "Pbc",
+    "pb_encoding": "Gt",
+    "int_encoding": "Ord",
+    "con_encoding": "Include",
+    "split_eq": false,
+    "model_config": {
+      "scm": "Dnf",
+      "cutoff": {
+        "Mix": 25
+      },
+      "decomposer": "Gt",
+      "equalize_ternaries": true,
+      "add_consistency": false,
+      "propagate": "None",
+      "equalize_uniform_bin_ineqs": false
+    }
+  },
+  "statics": {
+    "vars": 6279,
+    "cls": 56462,
+    "lits": 165944
+  },
+  "pb_statics": null,
+  "time": 0.7588985,
+  "dimacs": null
+}

@@ -1,0 +1,55 @@
+[
+  "./experiments/mbkp/stats/encodes/1898.json",
+  [
+    {
+      "status": "Sat",
+      "assignment": {
+        "x_5": [
+          2,
+          null
+        ],
+        "x_2": [
+          6,
+          null
+        ],
+        "x_3": [
+          3,
+          null
+        ],
+        "x_8": [
+          10,
+          null
+        ],
+        "x_7": [
+          0,
+          null
+        ],
+        "x_10": [
+          6,
+          null
+        ],
+        "x_9": [
+          5,
+          null
+        ],
+        "x_4": [
+          4,
+          null
+        ],
+        "x_1": [
+          0,
+          null
+        ],
+        "x_6": [
+          2,
+          null
+        ]
+      },
+      "time": 16.03478,
+      "cost": null,
+      "check": {
+        "Ok": null
+      }
+    }
+  ]
+]

@@ -1,0 +1,12 @@
+[
+  "./experiments/mbssp/stats/encodes/2770.json",
+  [
+    {
+      "status": "Unknown",
+      "assignment": null,
+      "time": 60.04236,
+      "cost": null,
+      "check": null
+    }
+  ]
+]

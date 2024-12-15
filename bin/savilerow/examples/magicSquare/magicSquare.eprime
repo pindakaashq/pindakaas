@@ -1,0 +1,47 @@
+$ Magic Square problem 
+$ (CSPlib Problem 19)
+$  http://www.cs.st-andrews.ac.uk/~ianm/CSPLib/prob/prob019/
+$
+$  An order n magic square is a n by n matrix containing the numbers 1 to 
+$  n**2, with each row, column and main diagonal equal the same sum.
+$
+$ modelled by Andrea Rendl
+$ modified by Peter Nightingale
+
+language ESSENCE' 1.0
+
+given n : int
+letting N be domain int(1..n)
+letting theSum be (n*(n*n+1))/2
+
+find magicSquare : matrix indexed by [N,N] of int(1..n*n)
+
+such that 
+
+allDiff(flatten(magicSquare)),
+
+$ the sum over all columns
+forAll row : N .
+   ( sum col : N .
+       magicSquare[row,col] ) = theSum,
+
+$ the sum over all rows
+forAll col : N .
+   ( sum row : N .
+       magicSquare[row,col] ) = theSum,
+
+$ diagonals
+
+(sum i : N . magicSquare[i,i]) = theSum,
+
+(sum i : N . magicSquare[i,n-i+1]) = theSum,
+
+$ Flip and rotation symmetries generate 7 symmetric images
+$ Combined with allDiff constraint the lex constraints reduce to less-than's 
+$ on the corners. 
+
+magicSquare[1,1]<magicSquare[1,n],
+magicSquare[1,1]<magicSquare[n,1],
+magicSquare[1,1]<magicSquare[n,n],
+
+true

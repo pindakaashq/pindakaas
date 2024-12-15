@@ -1,0 +1,51 @@
+{
+  "Slurm": {
+    "name": "integration",
+    "seeds": 1,
+    "build": false,
+    "enc_timeout": 3.0,
+    "solver_timeout": 3.0,
+    "grace_timeout": 1.0,
+    "mem": 2.0,
+    "nodelist": "Local",
+    "experiments": [
+      "./solvers/pbc.json",
+      "./solvers/pbc-split.json",
+      "./solvers/pbc-pb.json",
+      "./solvers/control.json"
+    ],
+    "check": true,
+    "problems": [
+      {
+        "Pbp": {
+          "path": "./instances/integration",
+          "limit": null,
+          "grep": null
+        }
+      },
+      {
+        "Mbkp": {
+          "bound": 2,
+          "n_": 4,
+          "m_": 2,
+          "q_": 12,
+          "family": 1,
+          "s_": 3,
+          "seed": 2,
+          "fl": "0.4",
+          "fu": null,
+          "skip_obj": true
+        }
+      },
+      {
+        "Mbssp": {
+          "b": 2,
+          "n": 3,
+          "m": 4,
+          "q": 12,
+          "instances": 2
+        }
+      }
+    ]
+  }
+}

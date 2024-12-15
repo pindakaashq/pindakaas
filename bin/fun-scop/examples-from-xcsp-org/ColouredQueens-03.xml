@@ -1,0 +1,33 @@
+<instance format="XCSP3" type="CSP">
+  <variables>
+    <array id="x" size="[3][3]"> 0..2 </array>
+  </variables>
+  <constraints>
+    <group class="rows">
+      <allDifferent> %... </allDifferent>
+      <args> x[0][] </args>
+      <args> x[1][] </args>
+      <args> x[2][] </args>
+    </group>
+    <group class="columns">
+      <allDifferent> %... </allDifferent>
+      <args> x[][0] </args>
+      <args> x[][1] </args>
+      <args> x[][2] </args>
+    </group>
+    <block class="diagonals">
+      <group>
+        <allDifferent> %... </allDifferent>
+        <args> x[0][0] x[1][1] x[2][2] </args>
+        <args> x[0][1] x[1][2] </args>
+        <args> x[1][0] x[2][1] </args>
+      </group>
+      <group>
+        <allDifferent> %... </allDifferent>
+        <args> x[1][0] x[0][1] </args>
+        <args> x[2][0] x[1][1] x[0][2] </args>
+        <args> x[2][1] x[1][2] </args>
+      </group>
+    </block>
+  </constraints>
+</instance>

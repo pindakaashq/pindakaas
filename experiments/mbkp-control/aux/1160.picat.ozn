@@ -1,0 +1,11 @@
+output ["x1 = ",showDzn(x1),";\n","x2 = ",showDzn(x2),";\n","x3 = ",showDzn(x3),";\n","x4 = ",showDzn(x4),";\n","x5 = ",showDzn(x5),";\n","x6 = ",showDzn(x6),";\n","x7 = ",showDzn(x7),";\n","x8 = ",showDzn(x8),";\n","x9 = ",showDzn(x9),";\n","x10 = ",showDzn(x10),";\n"];
+int: x10;
+int: x9;
+int: x8;
+int: x7;
+int: x6;
+int: x5;
+int: x4;
+int: x3;
+int: x2;
+int: x1;

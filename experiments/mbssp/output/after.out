@@ -1,0 +1,14 @@
+warning: unused result of type `&mut Build`
+   --> bin/pindakaas/crates/pindakaas-cadical/build.rs:103:2
+    |
+103 |     build.define("NDEBUG", None);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: requested on the command line with `-W unused-results`
+
+warning: `pindakaas-cadical` (build script) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 6.28s
+     Running `target/release/pbc analyze ./experiments/mbssp/stats --check`
+thread 'main' panicked at src/analyze.rs:126:26:
+called `Result::unwrap()` on an `Err` value: Os { code: 2, kind: NotFound, message: "No such file or directory" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

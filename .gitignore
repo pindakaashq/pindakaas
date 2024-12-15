@@ -1,0 +1,5 @@
+target
+experiments/integration/*
+!experiments/integration/slurm.json
+tables.tex
+tables.pdf

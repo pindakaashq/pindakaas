@@ -1,0 +1,277 @@
+ -help                         Print this message.
+
+Specifying Essence Prime input files:
+ -in-eprime <filename>         Optional if filename ends with ".eprime".
+ -in-param <filename>          Parameter file; optional if ends with ".param".
+ -params <string>              Format is same as for parameter file; language
+                               line is optional: "letting identifier=value" or
+                               "letting identifier be value". For example:
+                                 -params "letting n_nurses=4 letting \
+                                 Demand=[[1,0,1,0],[0,2,1,0]]"
+
+Specifying output format:
+ -minion  (default)            Minion 3 format, flat for numerical expressions
+                               but non-flat for And/Or, which are implemented
+                               with watched-and/watched-or metaconstraints.
+ -gecode                       FlatZinc format for fzn-gecode. Uses mostly
+                               same translation pipeline as for Minion output.
+                               Main differences: model is entirely flat, some
+                               constraints may be rewritten for reification.
+ -chuffed                      Format for fzn-chuffed. Similar to -gecode.
+ -or-tools                     Format for fzn-ortools. Similar to -gecode.
+ -flatzinc                     Standard FlatZinc output for any FlatZinc 
+                               solver.
+ -minizinc                     Partly flat, instance-level subset of MiniZinc,
+                               allowing access to several solvers via the
+                               MiniZinc toolchain. Similar to FlatZinc outputs
+ -sat                          DIMACS format for SAT solver.
+ -smt                          SMT-LIB 2 format for SMT solvers. 
+ -maxsat                       DIMACS-like format for MaxSAT solver. 
+
+Output filename options (each has default value so all are optional):
+ -out-minion <filename>        Minion output.
+ -out-gecode <filename>        Gecode (FlatZinc) output.
+ -out-chuffed <filename>       Chuffed (FlatZinc) output.
+ -out-flatzinc <filename>      FlatZinc output. 
+ -out-minizinc <filename>      Minizinc output.
+ -out-sat <filename>           SAT (DIMACS) output, MaxSAT output.
+ -out-smt <filename>           SMT output.
+ -out-dominion <filename>      Dominion output.
+ -out-solution <filename>      Solution if Savile Row runs a solver and parses
+                               the solver's output.
+ -out-info <filename>          Statistics from Savile Row and Minion.
+ -out-aux <filename>           Symbol table; required for ReadSolution mode.
+ -save-symbols                 Switch on output of symbol table.
+
+Optimisation levels:
+ -O0                           Switch off all optional optimisations.
+                               Expressions are still simplified. For example,
+                               boolean expression 3+4=10 simplifies to false.
+ -O1                           Space and time efficient optimisations:
+                               -active-cse and -deletevars.
+ -O2  (default)                Generally recommended optimisations: -O1,
+                               -reduce-domains-extend, and -aggregate. 
+ -O3                           Most available optimisations: -O2, -ac-cse
+                               and -tabulate.
+
+Symmetry breaking levels:
+ -S0                           Switch off all optimisations that change the
+                               number of solutions.
+ -S1  (default)                Allow Savile Row to delete unused variables,
+                               and to create auxiliary variables that are not
+                               necessarily functionally defined by the 
+                               primary ('find') variables. May change the 
+                               number of solutions. Equivalent to 
+                               -remove-redundant-vars and -aux-non-functional.
+ -S2                           In addition to -S1, detect and break symmetry
+                               among decision variables (-var-sym-breaking)
+                               by applying a graph automorphism solver.
+
+Translation Options (CSE is common subexpression elimination):
+ -no-cse                       Switch off CSE.
+ -identical-cse                Perform CSE for identical subexpressions only.
+ -active-cse                   Perform Active CSE. May be used with -ac-cse;
+                               attempts to match expressions modulo a simple
+                               transformation such as negation. Active CSE 
+                               includes Identical CSE. 
+ -ac-cse                       Perform Associative-Commutative CSE for
+                               operators And (/\), Or (\/), Product and Sum;
+                               exploits associativity and commutativity.
+ -active-ac-cse                Perform Active AC-CSE; extends AC-CSE on sums
+                               by matching a subexpression with its negation.
+                               For example it can extract x+y from the two
+                               expressions x+y+z and w-x-y. 
+                               Identical to AC-CSE on And, Or and Product.
+ -deletevars                   Switch on variable deletion for variables that
+                               equal a constant or another decision variable.
+ -reduce-domains               Filter domains of 'find' decision variables if
+                               Minion is available. Calls Minion using 
+                               SACBounds_limit preprocessing, a restricted 
+                               form of SAC where the SAC test is applied to 
+                               the upper and lower bound of each variable and
+                               the number of iterations is bounded. 
+ -reduce-domains-extend        Extension of -reduce-domains that filters
+                               domains of auxiliary and 'find' variables.
+ -aggregate                    Collect constraints into global constraints.
+                               Currently performs two types of aggregation:
+                               constructing GCC constraints from atleast and 
+                               atmost, and AllDifferent from not-equal, 
+                               less-than and shorter AllDifferent constraints.
+ -tabulate                     Convert some constraint expressions into table
+                               constraints to improve propagation. Candidate
+                               expressions are identified by a set of 
+                               heuristics. See documentation for more detail.
+ -factor-encoding              Apply the factor encoding to strengthen 
+                               propagation of overlapping table constraints.
+ -no-bound-vars                When translating to Minion, never use BOUND
+                               type variables; use DISCRETE even for large
+                               domains. Default is DISCRETE for domain size up
+                               to 10,000, BOUND for larger domains. Using
+                               BOUND type variables can reduce the level of
+                               consistency enforced for some constraints.
+ -remove-redundant-vars        Remove redundant variables by adding constraint
+                               assigning variables that are not mentioned in
+                               some constraint or the objective function.
+                               Enabling this may change the number of 
+                               solutions.
+ -aux-non-functional           Allow Savile Row to create auxiliary variables
+                               that are not functionally defined on the 
+                               primary variables. May change the number of
+                               solutions. 
+ -var-sym-breaking             Automatically identify and break symmetry 
+                               among decision variables using a graph 
+                               automorphism solver. 
+
+SAT Encoding Options:
+ -sat-polarity                 Use half-reification when flattening for SAT.
+ -amo-detect                   Detect AMO and EO relations as in CP 2019 paper
+                               (see documentation for details). Detected
+                               AMOs and EOs are used with MDD, GPW, LPW, SWC, 
+                               GGT, RGGT, GGTh, and GMTO encodings of both PB 
+                               and other sum constraints. 
+
+  Encoding of at-most-one (AMO) and exactly-one constraints:
+ -sat-amo-product (default)    Use Chen's 2-product encoding.
+ -sat-amo-commander            Use the commander-variable encoding with group 
+                               size 3. 
+ -sat-amo-ladder               The ladder encoding.
+ -sat-amo-bimander             The bimander (binary and commander) encoding.
+ -sat-amo-tree                 A totalizer-like encoding.
+
+  Encoding of pseudo-Boolean (PB) sum constraints:
+ -sat-pb-mdd                   Multi-value decision diagram (MDD) encoding.
+ -sat-pb-gpw                   Global polynomial watchdog. 
+ -sat-pb-lpw                   Local polynomial watchdog. 
+ -sat-pb-swc                   Sequential weighted counter.
+ -sat-pb-ggt                   Generalized generalized totalizer. 
+ -sat-pb-rggt                  Reduced generalized generalized totalizer.
+ -sat-pb-ggth                  GGT built with the minRatio heuristic.
+ -sat-pb-gmto                  Generalized n-Level Modulo Totalizer.
+ -sat-pb-tree  (default)       A totalizer-like encoding.
+
+  Encoding of other linear constraints:
+ -sat-sum-mdd                  Multi-value decision diagram (MDD) encoding.
+ -sat-sum-gpw                  Global polynomial watchdog. 
+ -sat-sum-lpw                  Local polynomial watchdog.
+ -sat-sum-swc                  Sequential weighted counter.
+ -sat-sum-ggt                  Generalized generalized totalizer. 
+ -sat-sum-rggt                 Reduced generalized generalized totalizer.
+ -sat-sum-ggth                 GGT built with the minRatio heuristic.
+ -sat-sum-gmto                 Generalized n-Level Modulo Totalizer.
+ -sat-sum-tree  (default)      A totalizer-like encoding.
+ 
+  Encoding of table constraints:
+ -sat-table-mdd                Multi-value decision diagram (MDD) encoding for
+                               table constraints. Default is support (Bacchus)
+                               encoding. 
+
+SMT Encoding and Backend Options:
+ -smt-bv  (default)            Use QF_BV (theory of bit vectors).
+ -smt-idl                      Use QF_IDL (integer difference logic).
+ -smt-lia                      Use QF_LIA (linear integer arithmetic).
+ -smt-nia                      Use QF_NIA (nonlinear integer arithmetic).
+ -smt-flat                     Use the flat encoding (see CP 2020 paper).
+ -smt-nested  (default)        Use the nested encoding (see CP 2020 paper).
+ -smt-no-decomp-alldiff        Do not decompose allDiff, use distinct instead.
+ -smt-pairwise-alldiff         Use a pairwise not-equal decomposition instead
+                               of the default linear decomposition of allDiff.
+ -boolector  (default)         With -run-solver runs the Boolector solver.
+ -z3                           With -run-solver runs the solver Z3.
+ -yices2                       With -run-solver runs the solver Yices2.
+                               If no solver is chosen, a default solver for
+                               the chosen logic will be used as described
+                               in the manual. 
+
+Warnings:
+ -Wundef                       Identify potentially undefined expressions.
+
+Controlling Savile Row:
+ -timelimit <time>             Wall clock time limit in seconds. Savile
+                               Row stops when time limit is reached, unless
+                               translation is complete and a solver is already
+                               running. To apply a time limit to a solver, use
+                               -solver-options.
+ -cnflimit <max>               Limit SAT output to at most <max> clauses.
+ -seed <integer>               Some transformations use a pseudorandom number
+                               generator; this sets the seed value.
+Solver control:
+ -run-solver                   Run the backend solver. Also parse solver output.
+ -all-solutions                Output all solutions, to a sequence of numbered
+                               files, one per solution. For example,
+                               "nurses.param.solution.000001" to "....000871"
+                               Cannot be used on optimisation problems.
+ -num-solutions <n>            Output <n> solutions, to a sequence of numbered
+                               files as for -all-solutions.
+                               Cannot be used on optimisation problems.
+ -solutions-to-null            Do not output solutions in any way.
+ -solver-options <string>      Pass through additional options to solver.
+ -solutions-to-stdout          Instead of writing solutions to files, send
+                               them to stdout separated by ----------.
+Solver control -- Minion:
+ -minion-bin <filename>        Specify where the Minion binary is. Default: use
+                               the one included in the Savile Row distribution.
+ -preprocess                   Strength of preprocessing. Passed to Minion both 
+                               for solving (when using -run-solver) and for 
+                               domain filtering (when using -reduce-domains or 
+                               -O2 or higher). Possible values: None, GAC, 
+                               SACBounds, SACBounds_limit, SAC, SAC_limit, SSAC, 
+                               SSAC_limit, SSACBounds, SSACBounds_limit. 
+                               Default is SACBounds_limit.
+Solver control -- Gecode:
+ -gecode-bin <filename>        Specify the Gecode FlatZinc binary.
+                               Default is "fzn-gecode".
+Solver control -- Chuffed:
+ -chuffed-bin <filename>       Specify the Chuffed FlatZinc binary.
+                               Default is "fzn-chuffed".
+
+Solver control -- standard FlatZinc:
+ -fzn-bin                      Specify FlatZinc solver binary. 
+
+Solver control -- SAT solver:
+ -sat-family <name>            Family of solver: "cadical", "kissat", 
+                               "minisat", "glucose", "lingeling", 
+                               "nbc_minisat_all", "bc_minisat_all". Allows 
+                               parsing output when using the -run-solver flag. 
+                               Default is "kissat". The _all values imply the 
+                               -all-solutions flag. 
+ -satsolver-bin <filename>     Name of SAT solver binary. Default is
+                               to use bundled Kissat solver, otherwise set
+                               to "minisat", "glucose", "lingeling", 
+                               "nbc_minisat_all_release", or 
+                               "bc_minisat_all_release" based on -sat-family.
+ -interactive-solver           Enables interactive usage of the supported 
+                               solvers when Savile Row built with this 
+                               feature. Supported SAT solvers are used 
+                               incrementally via JNI calls. Currently 
+                               supported: "glucose", "cadical" and 
+                               "nbc_minisat_all".
+ -opt-strategy <name>          Controls optimisation for SAT and SMT solvers.
+                               May be linear, unsat, or bisect (default) as
+                               described in the manual.
+                               
+Solver control -- SMT solver:
+ -boolector-bin <filename>     Name of Boolector solver binary. 
+ -z3-bin <filename>            Name of Z3 solver binary.
+ -yices2-bin <filename>        Name of Yices 2 solver binary.
+
+Mode of operation:
+ -mode ReadSolution            Takes a solution table file created by Minion
+                               and produces an Essence Prime solution file.
+                               If the solution table file contains multiple
+                               solutions, -all-solutions can be used to parse
+                               them all, or -num-solutions <n> for first n.
+ -minion-sol-file <filename>   Solution table file, produced by Minion's
+                               -solsout flag. In ReadSolution mode, flags
+                               -out-aux and -out-solution are required, so
+                               that Savile Row can load the symbol table
+                               saved when translating the problem instance,
+                               and to specify where to write solutions, but
+                               -all-solutions and -num-solutions are optional.
+Examples:
+     ./savilerow examples/sudoku/sudoku.eprime \
+       examples/sudoku/sudoku.param -run-solver
+  Use default optimisation (-O2) and solver (Minion). Minion is called twice,
+  first to filter variable domains and then to solve the instance.
+     ./savilerow examples/carSequencing/carSequencing.eprime \
+       examples/carSequencing/carSequencing10.param -O3 -sat -run-solver
+  Targets SAT; with no solver specified, the default (kissat) will be used.

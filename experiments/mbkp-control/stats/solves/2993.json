@@ -1,0 +1,12 @@
+[
+  "./experiments/mbkp-control/stats/encodes/2993.json",
+  [
+    {
+      "status": "Sat",
+      "assignment": null,
+      "time": 0.100275904,
+      "cost": null,
+      "check": null
+    }
+  ]
+]

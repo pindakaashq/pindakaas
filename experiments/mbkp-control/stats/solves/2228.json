@@ -1,0 +1,12 @@
+[
+  "./experiments/mbkp-control/stats/encodes/2228.json",
+  [
+    {
+      "status": "Unknown",
+      "assignment": null,
+      "time": 60.046658,
+      "cost": null,
+      "check": null
+    }
+  ]
+]

@@ -1,0 +1,9 @@
+language ESSENCE' 1.0
+$ loaded file: carseqdata/reginpuget2.car
+letting numcars=100
+letting numclasses=22
+letting numoptions=5
+letting optMax=[1, 2, 1, 2, 1]
+letting windowSize=[2, 3, 3, 5, 5]
+letting numberPerClass=[13, 8, 7, 1, 12, 5, 5, 6, 3, 12, 8, 2, 2, 1, 4, 4, 1, 2, 1, 1, 1, 1]
+letting optionsRequired=[[1, 0, 0, 0, 0], [0, 0, 0, 1, 0], [0, 1, 0, 0, 0], [1, 0, 0, 1, 0], [0, 0, 1, 0, 0], [0, 1, 0, 1, 0], [0, 0, 1, 1, 0], [0, 1, 1, 0, 0], [1, 0, 0, 0, 1], [1, 1, 0, 0, 0], [1, 1, 0, 1, 0], [1, 0, 0, 1, 1], [1, 1, 1, 0, 0], [0, 1, 0, 1, 1], [1, 0, 1, 0, 0], [0, 1, 0, 0, 1], [1, 1, 0, 1, 1], [1, 0, 1, 1, 0], [0, 0, 0, 0, 1], [1, 1, 1, 1, 0], [1, 1, 0, 0, 1], [0, 1, 1, 1, 0]]

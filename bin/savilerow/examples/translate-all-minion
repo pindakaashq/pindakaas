@@ -1,0 +1,16 @@
+#!/bin/bash
+
+for dir in `ls` ; do 
+  if [ -d $dir ]; then
+    for eprimefile in $dir/*.eprime ; do  
+      for paramfile in $dir/*.param ; do 
+        if [ -e $paramfile ]; then
+          ../savilerow $eprimefile $paramfile || { echo $dir; echo $eprimefile; echo $paramfile; exit; }
+        else
+          ../savilerow $eprimefile || { echo $dir; echo $eprimefile; echo $paramfile; exit; }
+        fi
+      done 
+    done
+  fi
+done
+

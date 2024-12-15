@@ -1,0 +1,121 @@
+<instance>
+<variables>
+<var id="x1"> 0..1 </var>
+<var id="x2"> 0..1 </var>
+<var id="x3"> 0..1 </var>
+<var id="x4"> 0..1 </var>
+<var id="x5"> 0..1 </var>
+<var id="x6"> 0..1 </var>
+<var id="x7"> 0..1 </var>
+<var id="x8"> 0..1 </var>
+<var id="x9"> 0..1 </var>
+<var id="x10"> 0..1 </var>
+<var id="x11"> 0..1 </var>
+<var id="x12"> 0..1 </var>
+<var id="x13"> 0..1 </var>
+<var id="x14"> 0..1 </var>
+<var id="x15"> 0..1 </var>
+<var id="x16"> 0..1 </var>
+<var id="x17"> 0..1 </var>
+<var id="x18"> 0..1 </var>
+<var id="x19"> 0..1 </var>
+<var id="x20"> 0..1 </var>
+<var id="x21"> 0..1 </var>
+<var id="x22"> 0..1 </var>
+<var id="x23"> 0..1 </var>
+<var id="x24"> 0..1 </var>
+<var id="x25"> 0..1 </var>
+<var id="x26"> 0..1 </var>
+<var id="x27"> 0..1 </var>
+<var id="x28"> 0..1 </var>
+<var id="x29"> 0..1 </var>
+<var id="x30"> 0..1 </var>
+<var id="x31"> 0..1 </var>
+<var id="x32"> 0..1 </var>
+<var id="x33"> 0..1 </var>
+<var id="x34"> 0..1 </var>
+<var id="x35"> 0..1 </var>
+<var id="x36"> 0..1 </var>
+<var id="x37"> 0..1 </var>
+<var id="x38"> 0..1 </var>
+<var id="x39"> 0..1 </var>
+<var id="x40"> 0..1 </var>
+</variables>
+<constraints>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 27 33 29 30 32 49 34 16 20 19 22 45 4 30 45 17 50 1 8 39 31 32 33 37 32 48 16 2 20 11 44 18 44 17 17 13 11 48 26 5 </coeffs>
+<condition>(eq,818)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 5 39 3 21 29 50 47 23 11 42 48 49 48 5 50 6 40 6 29 37 44 41 11 49 22 13 44 6 19 48 11 34 5 33 46 46 42 14 31 28 </coeffs>
+<condition>(eq,616)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 8 45 16 9 44 33 31 10 1 25 49 28 27 24 10 13 24 48 4 6 47 43 2 35 17 38 11 9 36 1 11 50 21 21 12 29 23 45 22 14 </coeffs>
+<condition>(eq,559)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 8 47 28 5 5 30 5 45 8 1 1 18 47 37 21 13 44 2 41 48 26 29 20 1 21 28 7 23 26 31 35 1 17 14 2 4 9 31 17 16 </coeffs>
+<condition>(eq,521)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 21 26 18 32 27 21 44 27 9 32 1 23 44 27 50 17 25 11 17 7 1 38 50 40 47 31 47 16 18 15 21 19 1 27 35 35 43 44 27 22 </coeffs>
+<condition>(eq,621)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 26 17 17 9 11 20 16 1 50 28 24 24 9 17 44 7 28 27 26 43 25 4 25 39 43 12 23 49 11 27 29 24 21 11 13 47 4 14 47 32 </coeffs>
+<condition>(eq,531)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 6 7 26 6 15 35 20 9 49 38 3 34 13 2 24 16 28 48 22 16 49 39 35 16 35 44 48 42 27 39 49 36 13 30 5 24 16 30 32 9 </coeffs>
+<condition>(eq,561)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 39 18 15 32 1 42 10 5 41 19 47 12 24 3 40 9 40 14 38 16 6 34 28 47 6 1 21 31 44 34 9 7 16 13 42 15 32 21 41 41 </coeffs>
+<condition>(eq,477)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 41 36 14 24 26 26 24 24 37 9 2 7 41 23 19 32 17 4 29 19 13 36 37 37 15 27 25 33 31 10 26 32 9 5 37 22 39 37 2 44 </coeffs>
+<condition>(eq,515)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 44 41 39 6 22 10 20 49 24 36 17 25 4 45 16 12 41 33 47 12 39 28 37 16 46 42 42 33 35 1 11 32 1 37 40 26 22 29 47 30 </coeffs>
+<condition>(eq,617)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 35 27 9 20 37 14 32 9 18 14 9 23 32 8 9 28 50 45 31 11 19 28 13 23 33 44 40 13 35 49 12 19 36 8 17 32 31 6 43 1 </coeffs>
+<condition>(eq,532)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 12 19 2 31 6 41 26 35 32 3 4 23 40 26 48 14 3 40 30 30 46 6 8 38 23 44 49 34 48 45 26 47 26 5 19 21 8 12 43 16 </coeffs>
+<condition>(eq,539)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 16 39 18 27 29 38 4 28 40 20 42 36 43 48 32 15 12 19 25 32 41 47 39 46 39 7 24 43 19 32 8 49 6 36 8 19 36 32 25 12 </coeffs>
+<condition>(eq,621)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 25 43 47 47 26 47 30 7 26 13 12 21 11 7 24 18 22 45 6 1 5 15 3 4 38 30 11 25 29 19 27 13 17 28 1 33 17 20 8 9 </coeffs>
+<condition>(eq,507)</condition>
+</sum>
+<sum>
+<list> x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 x32 x33 x34 x35 x36 x37 x38 x39 x40 </list>
+<coeffs> 25 8 30 30 15 42 13 20 30 27 11 41 42 45 41 12 28 10 6 20 38 41 23 49 46 3 49 34 19 26 13 12 39 50 50 26 7 4 33 29 </coeffs>
+<condition>(eq,627)</condition>
+</sum>
+</constraints>
+</instance>

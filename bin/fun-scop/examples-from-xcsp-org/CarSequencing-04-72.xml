@@ -1,0 +1,1038 @@
+<instance format="XCSP3" type="CSP">
+  <variables>
+    <array id="cls" note="cls[i] is the class of the ith assembled car" size="[100]"> 0..21 </array>
+    <array id="opt" note="opt[i][j] is 1 if the ith assembled car has option j" size="[100][5]"> 0 1 </array>
+  </variables>
+  <constraints>
+    <cardinality note="Building the right numbers of cars per class">
+      <list> cls[] </list>
+      <values> 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 </values>
+      <occurs> 6 10 2 2 8 15 1 5 2 3 2 1 8 3 10 4 4 2 4 6 1 1 </occurs>
+    </cardinality>
+    <group note="Constraints about options">
+      <extension>
+        <list> %... </list>
+        <supports> (0,1,0,0,1,0)(1,1,1,1,0,0)(2,1,1,0,0,1)(3,0,1,1,0,0)(4,0,0,0,1,0)(5,0,1,0,0,0)(6,0,1,1,1,0)(7,0,0,1,1,0)(8,1,0,1,1,0)(9,0,0,1,0,0)(10,1,0,1,0,0)(11,1,1,1,0,1)(12,0,1,0,1,0)(13,1,0,0,1,1)(14,1,0,0,0,0)(15,0,1,0,0,1)(16,0,0,0,0,1)(17,1,0,0,0,1)(18,1,1,0,0,0)(19,1,1,0,1,0)(20,1,0,1,0,1)(21,1,1,1,1,1) </supports>
+      </extension>
+      <args> cls[0] opt[0][] </args>
+      <args> cls[1] opt[1][] </args>
+      <args> cls[2] opt[2][] </args>
+      <args> cls[3] opt[3][] </args>
+      <args> cls[4] opt[4][] </args>
+      <args> cls[5] opt[5][] </args>
+      <args> cls[6] opt[6][] </args>
+      <args> cls[7] opt[7][] </args>
+      <args> cls[8] opt[8][] </args>
+      <args> cls[9] opt[9][] </args>
+      <args> cls[10] opt[10][] </args>
+      <args> cls[11] opt[11][] </args>
+      <args> cls[12] opt[12][] </args>
+      <args> cls[13] opt[13][] </args>
+      <args> cls[14] opt[14][] </args>
+      <args> cls[15] opt[15][] </args>
+      <args> cls[16] opt[16][] </args>
+      <args> cls[17] opt[17][] </args>
+      <args> cls[18] opt[18][] </args>
+      <args> cls[19] opt[19][] </args>
+      <args> cls[20] opt[20][] </args>
+      <args> cls[21] opt[21][] </args>
+      <args> cls[22] opt[22][] </args>
+      <args> cls[23] opt[23][] </args>
+      <args> cls[24] opt[24][] </args>
+      <args> cls[25] opt[25][] </args>
+      <args> cls[26] opt[26][] </args>
+      <args> cls[27] opt[27][] </args>
+      <args> cls[28] opt[28][] </args>
+      <args> cls[29] opt[29][] </args>
+      <args> cls[30] opt[30][] </args>
+      <args> cls[31] opt[31][] </args>
+      <args> cls[32] opt[32][] </args>
+      <args> cls[33] opt[33][] </args>
+      <args> cls[34] opt[34][] </args>
+      <args> cls[35] opt[35][] </args>
+      <args> cls[36] opt[36][] </args>
+      <args> cls[37] opt[37][] </args>
+      <args> cls[38] opt[38][] </args>
+      <args> cls[39] opt[39][] </args>
+      <args> cls[40] opt[40][] </args>
+      <args> cls[41] opt[41][] </args>
+      <args> cls[42] opt[42][] </args>
+      <args> cls[43] opt[43][] </args>
+      <args> cls[44] opt[44][] </args>
+      <args> cls[45] opt[45][] </args>
+      <args> cls[46] opt[46][] </args>
+      <args> cls[47] opt[47][] </args>
+      <args> cls[48] opt[48][] </args>
+      <args> cls[49] opt[49][] </args>
+      <args> cls[50] opt[50][] </args>
+      <args> cls[51] opt[51][] </args>
+      <args> cls[52] opt[52][] </args>
+      <args> cls[53] opt[53][] </args>
+      <args> cls[54] opt[54][] </args>
+      <args> cls[55] opt[55][] </args>
+      <args> cls[56] opt[56][] </args>
+      <args> cls[57] opt[57][] </args>
+      <args> cls[58] opt[58][] </args>
+      <args> cls[59] opt[59][] </args>
+      <args> cls[60] opt[60][] </args>
+      <args> cls[61] opt[61][] </args>
+      <args> cls[62] opt[62][] </args>
+      <args> cls[63] opt[63][] </args>
+      <args> cls[64] opt[64][] </args>
+      <args> cls[65] opt[65][] </args>
+      <args> cls[66] opt[66][] </args>
+      <args> cls[67] opt[67][] </args>
+      <args> cls[68] opt[68][] </args>
+      <args> cls[69] opt[69][] </args>
+      <args> cls[70] opt[70][] </args>
+      <args> cls[71] opt[71][] </args>
+      <args> cls[72] opt[72][] </args>
+      <args> cls[73] opt[73][] </args>
+      <args> cls[74] opt[74][] </args>
+      <args> cls[75] opt[75][] </args>
+      <args> cls[76] opt[76][] </args>
+      <args> cls[77] opt[77][] </args>
+      <args> cls[78] opt[78][] </args>
+      <args> cls[79] opt[79][] </args>
+      <args> cls[80] opt[80][] </args>
+      <args> cls[81] opt[81][] </args>
+      <args> cls[82] opt[82][] </args>
+      <args> cls[83] opt[83][] </args>
+      <args> cls[84] opt[84][] </args>
+      <args> cls[85] opt[85][] </args>
+      <args> cls[86] opt[86][] </args>
+      <args> cls[87] opt[87][] </args>
+      <args> cls[88] opt[88][] </args>
+      <args> cls[89] opt[89][] </args>
+      <args> cls[90] opt[90][] </args>
+      <args> cls[91] opt[91][] </args>
+      <args> cls[92] opt[92][] </args>
+      <args> cls[93] opt[93][] </args>
+      <args> cls[94] opt[94][] </args>
+      <args> cls[95] opt[95][] </args>
+      <args> cls[96] opt[96][] </args>
+      <args> cls[97] opt[97][] </args>
+      <args> cls[98] opt[98][] </args>
+      <args> cls[99] opt[99][] </args>
+    </group>
+    <block note="Constraints about option frequencies">
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (le,1) </condition>
+        </sum>
+        <args> opt[0..1][0] </args>
+        <args> opt[1..2][0] </args>
+        <args> opt[2..3][0] </args>
+        <args> opt[3..4][0] </args>
+        <args> opt[4..5][0] </args>
+        <args> opt[5..6][0] </args>
+        <args> opt[6..7][0] </args>
+        <args> opt[7..8][0] </args>
+        <args> opt[8..9][0] </args>
+        <args> opt[9..10][0] </args>
+        <args> opt[10..11][0] </args>
+        <args> opt[11..12][0] </args>
+        <args> opt[12..13][0] </args>
+        <args> opt[13..14][0] </args>
+        <args> opt[14..15][0] </args>
+        <args> opt[15..16][0] </args>
+        <args> opt[16..17][0] </args>
+        <args> opt[17..18][0] </args>
+        <args> opt[18..19][0] </args>
+        <args> opt[19..20][0] </args>
+        <args> opt[20..21][0] </args>
+        <args> opt[21..22][0] </args>
+        <args> opt[22..23][0] </args>
+        <args> opt[23..24][0] </args>
+        <args> opt[24..25][0] </args>
+        <args> opt[25..26][0] </args>
+        <args> opt[26..27][0] </args>
+        <args> opt[27..28][0] </args>
+        <args> opt[28..29][0] </args>
+        <args> opt[29..30][0] </args>
+        <args> opt[30..31][0] </args>
+        <args> opt[31..32][0] </args>
+        <args> opt[32..33][0] </args>
+        <args> opt[33..34][0] </args>
+        <args> opt[34..35][0] </args>
+        <args> opt[35..36][0] </args>
+        <args> opt[36..37][0] </args>
+        <args> opt[37..38][0] </args>
+        <args> opt[38..39][0] </args>
+        <args> opt[39..40][0] </args>
+        <args> opt[40..41][0] </args>
+        <args> opt[41..42][0] </args>
+        <args> opt[42..43][0] </args>
+        <args> opt[43..44][0] </args>
+        <args> opt[44..45][0] </args>
+        <args> opt[45..46][0] </args>
+        <args> opt[46..47][0] </args>
+        <args> opt[47..48][0] </args>
+        <args> opt[48..49][0] </args>
+        <args> opt[49..50][0] </args>
+        <args> opt[50..51][0] </args>
+        <args> opt[51..52][0] </args>
+        <args> opt[52..53][0] </args>
+        <args> opt[53..54][0] </args>
+        <args> opt[54..55][0] </args>
+        <args> opt[55..56][0] </args>
+        <args> opt[56..57][0] </args>
+        <args> opt[57..58][0] </args>
+        <args> opt[58..59][0] </args>
+        <args> opt[59..60][0] </args>
+        <args> opt[60..61][0] </args>
+        <args> opt[61..62][0] </args>
+        <args> opt[62..63][0] </args>
+        <args> opt[63..64][0] </args>
+        <args> opt[64..65][0] </args>
+        <args> opt[65..66][0] </args>
+        <args> opt[66..67][0] </args>
+        <args> opt[67..68][0] </args>
+        <args> opt[68..69][0] </args>
+        <args> opt[69..70][0] </args>
+        <args> opt[70..71][0] </args>
+        <args> opt[71..72][0] </args>
+        <args> opt[72..73][0] </args>
+        <args> opt[73..74][0] </args>
+        <args> opt[74..75][0] </args>
+        <args> opt[75..76][0] </args>
+        <args> opt[76..77][0] </args>
+        <args> opt[77..78][0] </args>
+        <args> opt[78..79][0] </args>
+        <args> opt[79..80][0] </args>
+        <args> opt[80..81][0] </args>
+        <args> opt[81..82][0] </args>
+        <args> opt[82..83][0] </args>
+        <args> opt[83..84][0] </args>
+        <args> opt[84..85][0] </args>
+        <args> opt[85..86][0] </args>
+        <args> opt[86..87][0] </args>
+        <args> opt[87..88][0] </args>
+        <args> opt[88..89][0] </args>
+        <args> opt[89..90][0] </args>
+        <args> opt[90..91][0] </args>
+        <args> opt[91..92][0] </args>
+        <args> opt[92..93][0] </args>
+        <args> opt[93..94][0] </args>
+        <args> opt[94..95][0] </args>
+        <args> opt[95..96][0] </args>
+        <args> opt[96..97][0] </args>
+        <args> opt[97..98][0] </args>
+        <args> opt[98..99][0] </args>
+        <args> opt[0..2][2] </args>
+        <args> opt[1..3][2] </args>
+        <args> opt[2..4][2] </args>
+        <args> opt[3..5][2] </args>
+        <args> opt[4..6][2] </args>
+        <args> opt[5..7][2] </args>
+        <args> opt[6..8][2] </args>
+        <args> opt[7..9][2] </args>
+        <args> opt[8..10][2] </args>
+        <args> opt[9..11][2] </args>
+        <args> opt[10..12][2] </args>
+        <args> opt[11..13][2] </args>
+        <args> opt[12..14][2] </args>
+        <args> opt[13..15][2] </args>
+        <args> opt[14..16][2] </args>
+        <args> opt[15..17][2] </args>
+        <args> opt[16..18][2] </args>
+        <args> opt[17..19][2] </args>
+        <args> opt[18..20][2] </args>
+        <args> opt[19..21][2] </args>
+        <args> opt[20..22][2] </args>
+        <args> opt[21..23][2] </args>
+        <args> opt[22..24][2] </args>
+        <args> opt[23..25][2] </args>
+        <args> opt[24..26][2] </args>
+        <args> opt[25..27][2] </args>
+        <args> opt[26..28][2] </args>
+        <args> opt[27..29][2] </args>
+        <args> opt[28..30][2] </args>
+        <args> opt[29..31][2] </args>
+        <args> opt[30..32][2] </args>
+        <args> opt[31..33][2] </args>
+        <args> opt[32..34][2] </args>
+        <args> opt[33..35][2] </args>
+        <args> opt[34..36][2] </args>
+        <args> opt[35..37][2] </args>
+        <args> opt[36..38][2] </args>
+        <args> opt[37..39][2] </args>
+        <args> opt[38..40][2] </args>
+        <args> opt[39..41][2] </args>
+        <args> opt[40..42][2] </args>
+        <args> opt[41..43][2] </args>
+        <args> opt[42..44][2] </args>
+        <args> opt[43..45][2] </args>
+        <args> opt[44..46][2] </args>
+        <args> opt[45..47][2] </args>
+        <args> opt[46..48][2] </args>
+        <args> opt[47..49][2] </args>
+        <args> opt[48..50][2] </args>
+        <args> opt[49..51][2] </args>
+        <args> opt[50..52][2] </args>
+        <args> opt[51..53][2] </args>
+        <args> opt[52..54][2] </args>
+        <args> opt[53..55][2] </args>
+        <args> opt[54..56][2] </args>
+        <args> opt[55..57][2] </args>
+        <args> opt[56..58][2] </args>
+        <args> opt[57..59][2] </args>
+        <args> opt[58..60][2] </args>
+        <args> opt[59..61][2] </args>
+        <args> opt[60..62][2] </args>
+        <args> opt[61..63][2] </args>
+        <args> opt[62..64][2] </args>
+        <args> opt[63..65][2] </args>
+        <args> opt[64..66][2] </args>
+        <args> opt[65..67][2] </args>
+        <args> opt[66..68][2] </args>
+        <args> opt[67..69][2] </args>
+        <args> opt[68..70][2] </args>
+        <args> opt[69..71][2] </args>
+        <args> opt[70..72][2] </args>
+        <args> opt[71..73][2] </args>
+        <args> opt[72..74][2] </args>
+        <args> opt[73..75][2] </args>
+        <args> opt[74..76][2] </args>
+        <args> opt[75..77][2] </args>
+        <args> opt[76..78][2] </args>
+        <args> opt[77..79][2] </args>
+        <args> opt[78..80][2] </args>
+        <args> opt[79..81][2] </args>
+        <args> opt[80..82][2] </args>
+        <args> opt[81..83][2] </args>
+        <args> opt[82..84][2] </args>
+        <args> opt[83..85][2] </args>
+        <args> opt[84..86][2] </args>
+        <args> opt[85..87][2] </args>
+        <args> opt[86..88][2] </args>
+        <args> opt[87..89][2] </args>
+        <args> opt[88..90][2] </args>
+        <args> opt[89..91][2] </args>
+        <args> opt[90..92][2] </args>
+        <args> opt[91..93][2] </args>
+        <args> opt[92..94][2] </args>
+        <args> opt[93..95][2] </args>
+        <args> opt[94..96][2] </args>
+        <args> opt[95..97][2] </args>
+        <args> opt[96..98][2] </args>
+        <args> opt[97..99][2] </args>
+        <args> opt[0..4][4] </args>
+        <args> opt[1..5][4] </args>
+        <args> opt[2..6][4] </args>
+        <args> opt[3..7][4] </args>
+        <args> opt[4..8][4] </args>
+        <args> opt[5..9][4] </args>
+        <args> opt[6..10][4] </args>
+        <args> opt[7..11][4] </args>
+        <args> opt[8..12][4] </args>
+        <args> opt[9..13][4] </args>
+        <args> opt[10..14][4] </args>
+        <args> opt[11..15][4] </args>
+        <args> opt[12..16][4] </args>
+        <args> opt[13..17][4] </args>
+        <args> opt[14..18][4] </args>
+        <args> opt[15..19][4] </args>
+        <args> opt[16..20][4] </args>
+        <args> opt[17..21][4] </args>
+        <args> opt[18..22][4] </args>
+        <args> opt[19..23][4] </args>
+        <args> opt[20..24][4] </args>
+        <args> opt[21..25][4] </args>
+        <args> opt[22..26][4] </args>
+        <args> opt[23..27][4] </args>
+        <args> opt[24..28][4] </args>
+        <args> opt[25..29][4] </args>
+        <args> opt[26..30][4] </args>
+        <args> opt[27..31][4] </args>
+        <args> opt[28..32][4] </args>
+        <args> opt[29..33][4] </args>
+        <args> opt[30..34][4] </args>
+        <args> opt[31..35][4] </args>
+        <args> opt[32..36][4] </args>
+        <args> opt[33..37][4] </args>
+        <args> opt[34..38][4] </args>
+        <args> opt[35..39][4] </args>
+        <args> opt[36..40][4] </args>
+        <args> opt[37..41][4] </args>
+        <args> opt[38..42][4] </args>
+        <args> opt[39..43][4] </args>
+        <args> opt[40..44][4] </args>
+        <args> opt[41..45][4] </args>
+        <args> opt[42..46][4] </args>
+        <args> opt[43..47][4] </args>
+        <args> opt[44..48][4] </args>
+        <args> opt[45..49][4] </args>
+        <args> opt[46..50][4] </args>
+        <args> opt[47..51][4] </args>
+        <args> opt[48..52][4] </args>
+        <args> opt[49..53][4] </args>
+        <args> opt[50..54][4] </args>
+        <args> opt[51..55][4] </args>
+        <args> opt[52..56][4] </args>
+        <args> opt[53..57][4] </args>
+        <args> opt[54..58][4] </args>
+        <args> opt[55..59][4] </args>
+        <args> opt[56..60][4] </args>
+        <args> opt[57..61][4] </args>
+        <args> opt[58..62][4] </args>
+        <args> opt[59..63][4] </args>
+        <args> opt[60..64][4] </args>
+        <args> opt[61..65][4] </args>
+        <args> opt[62..66][4] </args>
+        <args> opt[63..67][4] </args>
+        <args> opt[64..68][4] </args>
+        <args> opt[65..69][4] </args>
+        <args> opt[66..70][4] </args>
+        <args> opt[67..71][4] </args>
+        <args> opt[68..72][4] </args>
+        <args> opt[69..73][4] </args>
+        <args> opt[70..74][4] </args>
+        <args> opt[71..75][4] </args>
+        <args> opt[72..76][4] </args>
+        <args> opt[73..77][4] </args>
+        <args> opt[74..78][4] </args>
+        <args> opt[75..79][4] </args>
+        <args> opt[76..80][4] </args>
+        <args> opt[77..81][4] </args>
+        <args> opt[78..82][4] </args>
+        <args> opt[79..83][4] </args>
+        <args> opt[80..84][4] </args>
+        <args> opt[81..85][4] </args>
+        <args> opt[82..86][4] </args>
+        <args> opt[83..87][4] </args>
+        <args> opt[84..88][4] </args>
+        <args> opt[85..89][4] </args>
+        <args> opt[86..90][4] </args>
+        <args> opt[87..91][4] </args>
+        <args> opt[88..92][4] </args>
+        <args> opt[89..93][4] </args>
+        <args> opt[90..94][4] </args>
+        <args> opt[91..95][4] </args>
+        <args> opt[92..96][4] </args>
+        <args> opt[93..97][4] </args>
+        <args> opt[94..98][4] </args>
+        <args> opt[95..99][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (le,2) </condition>
+        </sum>
+        <args> opt[0..2][1] </args>
+        <args> opt[1..3][1] </args>
+        <args> opt[2..4][1] </args>
+        <args> opt[3..5][1] </args>
+        <args> opt[4..6][1] </args>
+        <args> opt[5..7][1] </args>
+        <args> opt[6..8][1] </args>
+        <args> opt[7..9][1] </args>
+        <args> opt[8..10][1] </args>
+        <args> opt[9..11][1] </args>
+        <args> opt[10..12][1] </args>
+        <args> opt[11..13][1] </args>
+        <args> opt[12..14][1] </args>
+        <args> opt[13..15][1] </args>
+        <args> opt[14..16][1] </args>
+        <args> opt[15..17][1] </args>
+        <args> opt[16..18][1] </args>
+        <args> opt[17..19][1] </args>
+        <args> opt[18..20][1] </args>
+        <args> opt[19..21][1] </args>
+        <args> opt[20..22][1] </args>
+        <args> opt[21..23][1] </args>
+        <args> opt[22..24][1] </args>
+        <args> opt[23..25][1] </args>
+        <args> opt[24..26][1] </args>
+        <args> opt[25..27][1] </args>
+        <args> opt[26..28][1] </args>
+        <args> opt[27..29][1] </args>
+        <args> opt[28..30][1] </args>
+        <args> opt[29..31][1] </args>
+        <args> opt[30..32][1] </args>
+        <args> opt[31..33][1] </args>
+        <args> opt[32..34][1] </args>
+        <args> opt[33..35][1] </args>
+        <args> opt[34..36][1] </args>
+        <args> opt[35..37][1] </args>
+        <args> opt[36..38][1] </args>
+        <args> opt[37..39][1] </args>
+        <args> opt[38..40][1] </args>
+        <args> opt[39..41][1] </args>
+        <args> opt[40..42][1] </args>
+        <args> opt[41..43][1] </args>
+        <args> opt[42..44][1] </args>
+        <args> opt[43..45][1] </args>
+        <args> opt[44..46][1] </args>
+        <args> opt[45..47][1] </args>
+        <args> opt[46..48][1] </args>
+        <args> opt[47..49][1] </args>
+        <args> opt[48..50][1] </args>
+        <args> opt[49..51][1] </args>
+        <args> opt[50..52][1] </args>
+        <args> opt[51..53][1] </args>
+        <args> opt[52..54][1] </args>
+        <args> opt[53..55][1] </args>
+        <args> opt[54..56][1] </args>
+        <args> opt[55..57][1] </args>
+        <args> opt[56..58][1] </args>
+        <args> opt[57..59][1] </args>
+        <args> opt[58..60][1] </args>
+        <args> opt[59..61][1] </args>
+        <args> opt[60..62][1] </args>
+        <args> opt[61..63][1] </args>
+        <args> opt[62..64][1] </args>
+        <args> opt[63..65][1] </args>
+        <args> opt[64..66][1] </args>
+        <args> opt[65..67][1] </args>
+        <args> opt[66..68][1] </args>
+        <args> opt[67..69][1] </args>
+        <args> opt[68..70][1] </args>
+        <args> opt[69..71][1] </args>
+        <args> opt[70..72][1] </args>
+        <args> opt[71..73][1] </args>
+        <args> opt[72..74][1] </args>
+        <args> opt[73..75][1] </args>
+        <args> opt[74..76][1] </args>
+        <args> opt[75..77][1] </args>
+        <args> opt[76..78][1] </args>
+        <args> opt[77..79][1] </args>
+        <args> opt[78..80][1] </args>
+        <args> opt[79..81][1] </args>
+        <args> opt[80..82][1] </args>
+        <args> opt[81..83][1] </args>
+        <args> opt[82..84][1] </args>
+        <args> opt[83..85][1] </args>
+        <args> opt[84..86][1] </args>
+        <args> opt[85..87][1] </args>
+        <args> opt[86..88][1] </args>
+        <args> opt[87..89][1] </args>
+        <args> opt[88..90][1] </args>
+        <args> opt[89..91][1] </args>
+        <args> opt[90..92][1] </args>
+        <args> opt[91..93][1] </args>
+        <args> opt[92..94][1] </args>
+        <args> opt[93..95][1] </args>
+        <args> opt[94..96][1] </args>
+        <args> opt[95..97][1] </args>
+        <args> opt[96..98][1] </args>
+        <args> opt[97..99][1] </args>
+        <args> opt[0..4][3] </args>
+        <args> opt[1..5][3] </args>
+        <args> opt[2..6][3] </args>
+        <args> opt[3..7][3] </args>
+        <args> opt[4..8][3] </args>
+        <args> opt[5..9][3] </args>
+        <args> opt[6..10][3] </args>
+        <args> opt[7..11][3] </args>
+        <args> opt[8..12][3] </args>
+        <args> opt[9..13][3] </args>
+        <args> opt[10..14][3] </args>
+        <args> opt[11..15][3] </args>
+        <args> opt[12..16][3] </args>
+        <args> opt[13..17][3] </args>
+        <args> opt[14..18][3] </args>
+        <args> opt[15..19][3] </args>
+        <args> opt[16..20][3] </args>
+        <args> opt[17..21][3] </args>
+        <args> opt[18..22][3] </args>
+        <args> opt[19..23][3] </args>
+        <args> opt[20..24][3] </args>
+        <args> opt[21..25][3] </args>
+        <args> opt[22..26][3] </args>
+        <args> opt[23..27][3] </args>
+        <args> opt[24..28][3] </args>
+        <args> opt[25..29][3] </args>
+        <args> opt[26..30][3] </args>
+        <args> opt[27..31][3] </args>
+        <args> opt[28..32][3] </args>
+        <args> opt[29..33][3] </args>
+        <args> opt[30..34][3] </args>
+        <args> opt[31..35][3] </args>
+        <args> opt[32..36][3] </args>
+        <args> opt[33..37][3] </args>
+        <args> opt[34..38][3] </args>
+        <args> opt[35..39][3] </args>
+        <args> opt[36..40][3] </args>
+        <args> opt[37..41][3] </args>
+        <args> opt[38..42][3] </args>
+        <args> opt[39..43][3] </args>
+        <args> opt[40..44][3] </args>
+        <args> opt[41..45][3] </args>
+        <args> opt[42..46][3] </args>
+        <args> opt[43..47][3] </args>
+        <args> opt[44..48][3] </args>
+        <args> opt[45..49][3] </args>
+        <args> opt[46..50][3] </args>
+        <args> opt[47..51][3] </args>
+        <args> opt[48..52][3] </args>
+        <args> opt[49..53][3] </args>
+        <args> opt[50..54][3] </args>
+        <args> opt[51..55][3] </args>
+        <args> opt[52..56][3] </args>
+        <args> opt[53..57][3] </args>
+        <args> opt[54..58][3] </args>
+        <args> opt[55..59][3] </args>
+        <args> opt[56..60][3] </args>
+        <args> opt[57..61][3] </args>
+        <args> opt[58..62][3] </args>
+        <args> opt[59..63][3] </args>
+        <args> opt[60..64][3] </args>
+        <args> opt[61..65][3] </args>
+        <args> opt[62..66][3] </args>
+        <args> opt[63..67][3] </args>
+        <args> opt[64..68][3] </args>
+        <args> opt[65..69][3] </args>
+        <args> opt[66..70][3] </args>
+        <args> opt[67..71][3] </args>
+        <args> opt[68..72][3] </args>
+        <args> opt[69..73][3] </args>
+        <args> opt[70..74][3] </args>
+        <args> opt[71..75][3] </args>
+        <args> opt[72..76][3] </args>
+        <args> opt[73..77][3] </args>
+        <args> opt[74..78][3] </args>
+        <args> opt[75..79][3] </args>
+        <args> opt[76..80][3] </args>
+        <args> opt[77..81][3] </args>
+        <args> opt[78..82][3] </args>
+        <args> opt[79..83][3] </args>
+        <args> opt[80..84][3] </args>
+        <args> opt[81..85][3] </args>
+        <args> opt[82..86][3] </args>
+        <args> opt[83..87][3] </args>
+        <args> opt[84..88][3] </args>
+        <args> opt[85..89][3] </args>
+        <args> opt[86..90][3] </args>
+        <args> opt[87..91][3] </args>
+        <args> opt[88..92][3] </args>
+        <args> opt[89..93][3] </args>
+        <args> opt[90..94][3] </args>
+        <args> opt[91..95][3] </args>
+        <args> opt[92..96][3] </args>
+        <args> opt[93..97][3] </args>
+        <args> opt[94..98][3] </args>
+        <args> opt[95..99][3] </args>
+      </group>
+    </block>
+    <block class="redundantConstraints">
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,50) </condition>
+        </sum>
+        <args> opt[][0] </args>
+        <args> opt[0..93][1] </args>
+      </group>
+      <sum>
+        <list> opt[0..97][0] </list>
+        <condition> (ge,49) </condition>
+      </sum>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,48) </condition>
+        </sum>
+        <args> opt[0..95][0] </args>
+        <args> opt[0..90][1] </args>
+      </group>
+      <sum>
+        <list> opt[0..93][0] </list>
+        <condition> (ge,47) </condition>
+      </sum>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,46) </condition>
+        </sum>
+        <args> opt[0..91][0] </args>
+        <args> opt[0..87][1] </args>
+      </group>
+      <sum>
+        <list> opt[0..89][0] </list>
+        <condition> (ge,45) </condition>
+      </sum>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,44) </condition>
+        </sum>
+        <args> opt[0..87][0] </args>
+        <args> opt[0..84][1] </args>
+      </group>
+      <sum>
+        <list> opt[0..85][0] </list>
+        <condition> (ge,43) </condition>
+      </sum>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,42) </condition>
+        </sum>
+        <args> opt[0..83][0] </args>
+        <args> opt[0..81][1] </args>
+      </group>
+      <sum>
+        <list> opt[0..81][0] </list>
+        <condition> (ge,41) </condition>
+      </sum>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,40) </condition>
+        </sum>
+        <args> opt[0..79][0] </args>
+        <args> opt[0..78][1] </args>
+        <args> opt[][3] </args>
+      </group>
+      <sum>
+        <list> opt[0..77][0] </list>
+        <condition> (ge,39) </condition>
+      </sum>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,38) </condition>
+        </sum>
+        <args> opt[0..75][0] </args>
+        <args> opt[0..75][1] </args>
+        <args> opt[0..94][3] </args>
+      </group>
+      <sum>
+        <list> opt[0..73][0] </list>
+        <condition> (ge,37) </condition>
+      </sum>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,36) </condition>
+        </sum>
+        <args> opt[0..71][0] </args>
+        <args> opt[0..72][1] </args>
+        <args> opt[0..89][3] </args>
+      </group>
+      <sum>
+        <list> opt[0..69][0] </list>
+        <condition> (ge,35) </condition>
+      </sum>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,34) </condition>
+        </sum>
+        <args> opt[0..67][0] </args>
+        <args> opt[0..69][1] </args>
+        <args> opt[0..84][3] </args>
+      </group>
+      <sum>
+        <list> opt[0..65][0] </list>
+        <condition> (ge,33) </condition>
+      </sum>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,32) </condition>
+        </sum>
+        <args> opt[0..63][0] </args>
+        <args> opt[0..66][1] </args>
+        <args> opt[0..79][3] </args>
+      </group>
+      <sum>
+        <list> opt[0..61][0] </list>
+        <condition> (ge,31) </condition>
+      </sum>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,30) </condition>
+        </sum>
+        <args> opt[0..59][0] </args>
+        <args> opt[0..63][1] </args>
+        <args> opt[0..74][3] </args>
+      </group>
+      <sum>
+        <list> opt[0..57][0] </list>
+        <condition> (ge,29) </condition>
+      </sum>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,28) </condition>
+        </sum>
+        <args> opt[0..55][0] </args>
+        <args> opt[0..60][1] </args>
+        <args> opt[][2] </args>
+        <args> opt[0..69][3] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,27) </condition>
+        </sum>
+        <args> opt[0..53][0] </args>
+        <args> opt[0..96][2] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,26) </condition>
+        </sum>
+        <args> opt[0..51][0] </args>
+        <args> opt[0..57][1] </args>
+        <args> opt[0..93][2] </args>
+        <args> opt[0..64][3] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,25) </condition>
+        </sum>
+        <args> opt[0..49][0] </args>
+        <args> opt[0..90][2] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,24) </condition>
+        </sum>
+        <args> opt[0..47][0] </args>
+        <args> opt[0..54][1] </args>
+        <args> opt[0..87][2] </args>
+        <args> opt[0..59][3] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,23) </condition>
+        </sum>
+        <args> opt[0..45][0] </args>
+        <args> opt[0..84][2] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,22) </condition>
+        </sum>
+        <args> opt[0..43][0] </args>
+        <args> opt[0..51][1] </args>
+        <args> opt[0..81][2] </args>
+        <args> opt[0..54][3] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,21) </condition>
+        </sum>
+        <args> opt[0..41][0] </args>
+        <args> opt[0..78][2] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,20) </condition>
+        </sum>
+        <args> opt[0..39][0] </args>
+        <args> opt[0..48][1] </args>
+        <args> opt[0..75][2] </args>
+        <args> opt[0..49][3] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,19) </condition>
+        </sum>
+        <args> opt[0..37][0] </args>
+        <args> opt[0..72][2] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,18) </condition>
+        </sum>
+        <args> opt[0..35][0] </args>
+        <args> opt[0..45][1] </args>
+        <args> opt[0..69][2] </args>
+        <args> opt[0..44][3] </args>
+        <args> opt[][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,17) </condition>
+        </sum>
+        <args> opt[0..33][0] </args>
+        <args> opt[0..66][2] </args>
+        <args> opt[0..94][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,16) </condition>
+        </sum>
+        <args> opt[0..31][0] </args>
+        <args> opt[0..42][1] </args>
+        <args> opt[0..63][2] </args>
+        <args> opt[0..39][3] </args>
+        <args> opt[0..89][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,15) </condition>
+        </sum>
+        <args> opt[0..29][0] </args>
+        <args> opt[0..60][2] </args>
+        <args> opt[0..84][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,14) </condition>
+        </sum>
+        <args> opt[0..27][0] </args>
+        <args> opt[0..39][1] </args>
+        <args> opt[0..57][2] </args>
+        <args> opt[0..34][3] </args>
+        <args> opt[0..79][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,13) </condition>
+        </sum>
+        <args> opt[0..25][0] </args>
+        <args> opt[0..54][2] </args>
+        <args> opt[0..74][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,12) </condition>
+        </sum>
+        <args> opt[0..23][0] </args>
+        <args> opt[0..36][1] </args>
+        <args> opt[0..51][2] </args>
+        <args> opt[0..29][3] </args>
+        <args> opt[0..69][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,11) </condition>
+        </sum>
+        <args> opt[0..21][0] </args>
+        <args> opt[0..48][2] </args>
+        <args> opt[0..64][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,10) </condition>
+        </sum>
+        <args> opt[0..19][0] </args>
+        <args> opt[0..33][1] </args>
+        <args> opt[0..45][2] </args>
+        <args> opt[0..24][3] </args>
+        <args> opt[0..59][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,9) </condition>
+        </sum>
+        <args> opt[0..17][0] </args>
+        <args> opt[0..42][2] </args>
+        <args> opt[0..54][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,8) </condition>
+        </sum>
+        <args> opt[0..15][0] </args>
+        <args> opt[0..30][1] </args>
+        <args> opt[0..39][2] </args>
+        <args> opt[0..19][3] </args>
+        <args> opt[0..49][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,7) </condition>
+        </sum>
+        <args> opt[0..13][0] </args>
+        <args> opt[0..36][2] </args>
+        <args> opt[0..44][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,6) </condition>
+        </sum>
+        <args> opt[0..11][0] </args>
+        <args> opt[0..27][1] </args>
+        <args> opt[0..33][2] </args>
+        <args> opt[0..14][3] </args>
+        <args> opt[0..39][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,5) </condition>
+        </sum>
+        <args> opt[0..9][0] </args>
+        <args> opt[0..30][2] </args>
+        <args> opt[0..34][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,4) </condition>
+        </sum>
+        <args> opt[0..7][0] </args>
+        <args> opt[0..24][1] </args>
+        <args> opt[0..27][2] </args>
+        <args> opt[0..9][3] </args>
+        <args> opt[0..29][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,3) </condition>
+        </sum>
+        <args> opt[0..5][0] </args>
+        <args> opt[0..24][2] </args>
+        <args> opt[0..24][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,2) </condition>
+        </sum>
+        <args> opt[0..3][0] </args>
+        <args> opt[0..21][1] </args>
+        <args> opt[0..21][2] </args>
+        <args> opt[0..4][3] </args>
+        <args> opt[0..19][4] </args>
+      </group>
+      <group>
+        <sum>
+          <list> %... </list>
+          <condition> (ge,1) </condition>
+        </sum>
+        <args> opt[0..1][0] </args>
+        <args> opt[0..18][2] </args>
+        <args> opt[0..14][4] </args>
+      </group>
+      <sum>
+        <list> opt[][1] </list>
+        <condition> (ge,54) </condition>
+      </sum>
+      <sum>
+        <list> opt[0..96][1] </list>
+        <condition> (ge,52) </condition>
+      </sum>
+    </block>
+  </constraints>
+</instance>

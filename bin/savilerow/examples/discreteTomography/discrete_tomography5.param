@@ -1,0 +1,5 @@
+letting r = 16
+letting c = 4
+letting row_sums = [1,1,1,2,1,1,1,2,1,1,1,1,1,1,1,2]
+letting col_sums = [4,4,4,4]
+

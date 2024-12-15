@@ -1,0 +1,63 @@
+[
+  "./experiments/mbssp/stats/encodes/3237.json",
+  [
+    {
+      "status": "Sat",
+      "assignment": {
+        "x_5": [
+          0,
+          null
+        ],
+        "x_2": [
+          0,
+          null
+        ],
+        "x_3": [
+          1,
+          null
+        ],
+        "x_8": [
+          4,
+          null
+        ],
+        "x_11": [
+          2,
+          null
+        ],
+        "x_7": [
+          1,
+          null
+        ],
+        "x_10": [
+          7,
+          null
+        ],
+        "x_12": [
+          2,
+          null
+        ],
+        "x_9": [
+          3,
+          null
+        ],
+        "x_4": [
+          6,
+          null
+        ],
+        "x_1": [
+          3,
+          null
+        ],
+        "x_6": [
+          3,
+          null
+        ]
+      },
+      "time": 15.453457,
+      "cost": null,
+      "check": {
+        "Ok": null
+      }
+    }
+  ]
+]

@@ -1,0 +1,24 @@
+language ESSENCE' 1.0
+
+$ ----- PARAMETERS -------------------------
+given vertices : int(1..)
+given colours : int(1..)
+given edge_count : int(1..)
+letting VERTICES be domain int(1..vertices)
+letting COLOURS be domain int(1..colours)
+
+given edges : matrix indexed by [int(1..edge_count),int(1..2)] of int(1..vertices)
+
+
+$ ----- VARIABLES --------------------------
+find colouring : matrix indexed by [VERTICES] of COLOURS
+
+$ ----- OBJECTIVE --------------------------
+minimising max(colouring)
+
+$ ----- CONSTRAINTS ------------------------
+such that
+    
+    forAll i : int(1..edge_count) .
+        colouring[edges[i, 1]] != colouring[edges[i, 2]]
+    

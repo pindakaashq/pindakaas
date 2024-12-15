@@ -1,0 +1,9 @@
+language ESSENCE' 1.0
+$ loaded file: carseqdata/csplib-instance-17
+letting numcars=200
+letting numclasses=21
+letting numoptions=5
+letting optMax=[1, 2, 1, 2, 1]
+letting windowSize=[2, 3, 3, 5, 5]
+letting numberPerClass=[1, 1, 46, 4, 9, 63, 4, 13, 2, 2, 11, 4, 1, 1, 17, 9, 1, 1, 1, 4, 5]
+letting optionsRequired=[[1, 1, 0, 1, 0], [0, 0, 0, 1, 1], [0, 0, 0, 1, 0], [1, 0, 0, 1, 0], [1, 1, 0, 0, 0], [0, 1, 0, 0, 0], [0, 0, 1, 1, 0], [0, 0, 0, 0, 1], [1, 1, 1, 0, 0], [1, 0, 1, 0, 0], [0, 1, 0, 1, 0], [1, 0, 0, 0, 1], [1, 0, 1, 1, 0], [0, 1, 1, 0, 1], [1, 0, 0, 0, 0], [0, 0, 1, 0, 0], [1, 1, 1, 1, 0], [1, 1, 1, 0, 1], [0, 1, 1, 1, 0], [0, 1, 1, 0, 0], [0, 1, 0, 0, 1]]

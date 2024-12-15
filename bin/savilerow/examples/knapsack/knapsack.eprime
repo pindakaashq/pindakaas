@@ -1,0 +1,16 @@
+$ Knapsack model in Essence'.
+$
+$ Simple knapsack problem in Essence'.
+$ 
+$ Model created by Hakan Kjellerstrand, hakank@bonetmail.com
+$ See also my Tailor/Essence' page: http://www.hakank.org/minion_tailor
+$ Edited by Peter Nightingale
+language ESSENCE' 1.0
+given maxWeight : int
+given values : matrix indexed by [int(1..numEntries)] of int(1..)
+given weights : matrix indexed by [int(1..numEntries)] of int(1..)
+find x : matrix indexed by [int(1..numEntries)] of bool
+maximising sum i : int(1..numEntries) . x[i]*values[i]
+such that
+   ( sum i : int(1..numEntries) . x[i]*weights[i] ) <= maxWeight
+

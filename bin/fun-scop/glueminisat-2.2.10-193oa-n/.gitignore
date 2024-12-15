@@ -1,0 +1,7 @@
+*.o
+*.exe
+depend.mk
+/.project
+/.cproject
+*~
+.settings/

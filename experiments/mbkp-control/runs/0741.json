@@ -1,0 +1,45 @@
+{
+  "Encode": {
+    "instance": {
+      "problem": {
+        "Mbkp": {
+          "bound": 10,
+          "n_": 10,
+          "m_": 200,
+          "q_": 50,
+          "family": 1,
+          "s_": 25,
+          "seed": 4,
+          "fl": "0.4",
+          "fu": null,
+          "skip_obj": true
+        }
+      },
+      "i": 75,
+      "lp": "./experiments/mbkp-control/lps/1/3_18.lp"
+    },
+    "experiment": {
+      "system": "SavileRow",
+      "pb_encoding": "Gt",
+      "int_encoding": "Dir",
+      "con_encoding": "Include",
+      "split_eq": false,
+      "model_config": {
+        "scm": "Add",
+        "cutoff": "Order",
+        "decomposer": "Gt",
+        "equalize_ternaries": true,
+        "add_consistency": false,
+        "propagate": "None",
+        "equalize_uniform_bin_ineqs": false
+      }
+    },
+    "aux_out": "./experiments/mbkp-control/aux/0741",
+    "solve_seed": 1,
+    "enc_timeout": 180.0,
+    "solver_timeout": 60.0,
+    "mem": 3.0,
+    "stats": "./experiments/mbkp-control/stats/0741.json",
+    "check": true
+  }
+}

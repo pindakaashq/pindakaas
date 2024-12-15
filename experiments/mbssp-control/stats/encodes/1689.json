@@ -1,0 +1,39 @@
+{
+  "instance": {
+    "problem": {
+      "Mbssp": {
+        "b": 10,
+        "n": 8,
+        "m": 12,
+        "q": 50,
+        "instances": 100
+      }
+    },
+    "i": 69,
+    "lp": "./experiments/mbssp-control/lps/2/069.lp"
+  },
+  "experiment": {
+    "system": "Scop",
+    "pb_encoding": "Bdd",
+    "int_encoding": "Dir",
+    "con_encoding": "Include",
+    "split_eq": false,
+    "model_config": {
+      "scm": "Add",
+      "cutoff": "Binary",
+      "decomposer": "Bdd",
+      "equalize_ternaries": true,
+      "add_consistency": false,
+      "propagate": "None",
+      "equalize_uniform_bin_ineqs": false
+    }
+  },
+  "statics": {
+    "vars": 146448,
+    "cls": 410548,
+    "lits": 1203088
+  },
+  "pb_statics": null,
+  "time": 3.8428617,
+  "dimacs": null
+}

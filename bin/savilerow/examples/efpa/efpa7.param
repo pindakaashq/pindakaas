@@ -1,0 +1,9 @@
+language ESSENCE' 1.0
+$ Equidistant Frequency Permutation Arrays.
+$ Details available from CP paper. 
+
+letting d=4      $ the hamming distance between all pairs of words.
+letting lam=3    $ Occurrences of each symbol
+letting q=4      $ Number of symbols
+letting numCodeWords=6      $ aka v, number of words
+

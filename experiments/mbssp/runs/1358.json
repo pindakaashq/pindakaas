@@ -1,0 +1,40 @@
+{
+  "Encode": {
+    "instance": {
+      "problem": {
+        "Mbssp": {
+          "b": 1,
+          "n": 15,
+          "m": 40,
+          "q": 50,
+          "instances": 100
+        }
+      },
+      "i": 97,
+      "lp": "./experiments/mbssp/lps/1/097.lp"
+    },
+    "experiment": {
+      "system": "Pbc",
+      "pb_encoding": "Bdd",
+      "int_encoding": "Ord",
+      "con_encoding": "Ignore",
+      "split_eq": true,
+      "model_config": {
+        "scm": "Dnf",
+        "cutoff": "Order",
+        "decomposer": "Bdd",
+        "equalize_ternaries": true,
+        "add_consistency": false,
+        "propagate": "None",
+        "equalize_uniform_bin_ineqs": false
+      }
+    },
+    "aux_out": "./experiments/mbssp/aux/1358",
+    "solve_seed": 1,
+    "enc_timeout": 180.0,
+    "solver_timeout": 60.0,
+    "mem": 3.0,
+    "stats": "./experiments/mbssp/stats/1358.json",
+    "check": true
+  }
+}

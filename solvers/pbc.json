@@ -1,0 +1,40 @@
+[
+  {
+    "int_encodings": [
+      "Ord"
+    ],
+    "pb_encodings": [
+      "Gt",
+      "Bdd"
+    ],
+    "con_encodings": [
+      "Include"
+    ],
+    "add_consistencies": [
+      false
+    ],
+    "cutoffs": [
+      "Binary",
+      { "Mix": 25 },
+      { "Mix": 75 },
+      { "Mix": 150 },
+      "Order"
+    ],
+    "systems": [
+      "Pbc"
+    ],
+    "split_eqs": [
+      false
+    ],
+    "propagates": [
+      "None"
+    ],
+    "scms": [
+      "Dnf"
+    ],
+    "equalize_ternariess": [
+      true
+    ],
+    "skip": false
+  }
+]

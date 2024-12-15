@@ -1,0 +1,27 @@
+$ Antichain problem
+$
+$ Find m sets, drawn from {1..n}
+$ where for each pair of sets x and y
+$ neither of x <= y or y <= x are true.
+
+language ESSENCE' 1.0
+
+given n : int
+given m : int
+
+find S : matrix indexed by [int(1..m), int(1..n)] of bool
+
+such that 
+
+forall i : int(1..m-1).
+  forall j : int(i+1..m). (
+    (exists k : int(1..n).
+    S[i,k] < S[j,k]) /\ 
+    (exists k : int(1..n).
+    S[i,k] > S[j,k])
+    ),
+
+$ symmetry breaking
+
+forall i : int(1..m-1).
+  S[i,..] <=lex S[i+1,..]
