@@ -1,7 +1,7 @@
 use crate::{
 	bool_linear::{LinMarker, NormalizedBoolLinear},
 	integer::{
-		Consistency, Decompose, Decomposer, Dom, IntVar, Lin, Mix, Model, ModelConfig, Term,
+		Consistency, Decompose, Decomposer, Dom, IntVar, Lin, IntVarEncHeuristic, Model, ModelConfig, Term,
 	},
 	ClauseDatabase, Encoder, Result, Unsatisfiable,
 };
@@ -15,7 +15,7 @@ impl LinMarker for SwcEncoder {}
 pub struct SwcEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,
-	cutoff: Mix,
+	cutoff: IntVarEncHeuristic,
 }
 
 impl SwcEncoder {
@@ -27,7 +27,7 @@ impl SwcEncoder {
 		self.add_propagation = c;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Mix) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: IntVarEncHeuristic) -> &mut Self {
 		self.cutoff = c;
 		self
 	}

@@ -1,7 +1,7 @@
 use crate::{
 	bool_linear::{Comparator, LinMarker, NormalizedBoolLinear},
 	integer::{
-		Consistency, Decompose, Decomposer, Dom, IntVar, Lin, Mix, Model, ModelConfig, Term,
+		Consistency, Decompose, Decomposer, Dom, IntVar, Lin, IntVarEncHeuristic, Model, ModelConfig, Term,
 	},
 	ClauseDatabase, Encoder, Result, Unsatisfiable,
 };
@@ -12,7 +12,7 @@ use crate::{
 pub struct TotalizerEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,
-	cutoff: Mix,
+	cutoff: IntVarEncHeuristic,
 }
 
 use itertools::Itertools;
@@ -26,7 +26,7 @@ impl TotalizerEncoder {
 		self.add_propagation = c;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Mix) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: IntVarEncHeuristic) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
@@ -62,15 +62,10 @@ impl Decompose for TotalizerEncoder {
 											&& c > lin.k - lin.exp.lb()
 										{
 											false
-										} else if matches!(
+										} else { !(matches!(
 											lin.cmp,
 											Comparator::GreaterEq | Comparator::Equal
-										) && c < lin.k - lin.exp.ub()
-										{
-											false
-										} else {
-											true
-										}
+										) && c < lin.k - lin.exp.ub()) }
 									}),
 								// TODO more efficient version using map_while, but needs reverse on geq case
 							)

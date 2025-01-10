@@ -41,7 +41,6 @@ variant_size_differences = "warn"
 [workspace.lints.clippy]
 allow_attributes_without_reason = "deny"
 # cargo_common_metadata = "warn"
-clone_on_ref_ptr = "warn"
 default_union_representation = "deny"
 # missing_docs_in_private_items = "warn"
 mixed_read_write_in_expression = "deny"

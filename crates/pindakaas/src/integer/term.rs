@@ -122,7 +122,7 @@ impl Term {
 
 			let y = IntVar::from_dom_as_ref(
 				0,
-				Dom::new(dom.into_iter().cloned()),
+				Dom::new(dom.iter().cloned()),
 				false,
 				Some(IntVarEnc::Bin(Some(bin_enc))),
 				format!("{con_lbl}-scm-{}·{}", self.c, self.x.borrow().lbl()),

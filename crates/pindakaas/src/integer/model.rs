@@ -67,7 +67,7 @@ pub(crate) enum Decomposer {
 /// Mixed encoding cutoff
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum Mix {
+pub enum IntVarEncHeuristic {
 	Binary,
 	Mix(Coeff),
 	#[default]
@@ -79,7 +79,7 @@ pub enum Mix {
 pub(crate) struct ModelConfig {
 	/// Which SCM method to use
 	pub scm: Scm,
-	pub cutoff: Mix,
+	pub cutoff: IntVarEncHeuristic,
 	pub decomposer: Decomposer,
 	/// Rewrites all but last equation x:B + y:B ≤ z:B to x:B + y:B = z:B
 	pub equalize_ternaries: bool,
@@ -469,7 +469,7 @@ mod tests {
 				self.var_by_lbl(&lbl).is_none(),
 				"Model already contains variable label {lbl}\n{self}"
 			); // TODO using contains requires clone?
-			self.new_aux_var(Dom::new(dom.into_iter().cloned()), true, None, lbl)
+			self.new_aux_var(Dom::new(dom.iter().cloned()), true, None, lbl)
 		}
 
 		pub(crate) fn constraints(&'_ self) -> impl Iterator<Item = &'_ Lin> {
@@ -678,7 +678,6 @@ Actual assignments:
 			// encode integers to 01-integers
 			let encs: FxHashMap<_, _> = self
 				.vars()
-				.into_iter()
 				.map(|x| {
 					let lbl = x.borrow().lbl();
 					assert!(
@@ -693,7 +692,7 @@ Actual assignments:
 							pb_model.new_aux_var(
 								Dom::new([0, 1]),
 								true,
-								Some(IntVarEnc::Ord(Some(OrdEnc::from(vec![lit.clone()])))),
+								Some(IntVarEnc::Ord(Some(OrdEnc::from(vec![*lit])))),
 								format!("{}>={}", lbl, d),
 							)
 						})
@@ -1148,18 +1147,18 @@ Actual assignments:
 	static TEST_CUTOFF: LazyLock<Option<i64>> = get_int_flag!("--mix");
 
 	/// Which uniform (for now) integer encoding specifications to test
-	static VAR_ENCS: LazyLock<Vec<Mix>> = LazyLock::new(|| {
+	static VAR_ENCS: LazyLock<Vec<IntVarEncHeuristic>> = LazyLock::new(|| {
 		let encs = std::env::args()
 			.map(|arg| match arg.as_str() {
-				"--ord" => Some(Mix::Order),
-				"--bin" => Some(Mix::Binary),
+				"--ord" => Some(IntVarEncHeuristic::Order),
+				"--bin" => Some(IntVarEncHeuristic::Binary),
 				_ => None,
 			})
-			.chain([TEST_CUTOFF.map(Mix::Mix)])
+			.chain([TEST_CUTOFF.map(IntVarEncHeuristic::Mix)])
 			.flatten()
 			.collect_vec();
 		encs.is_empty()
-			.then_some(vec![Mix::Order, Mix::Binary, Mix::Mix(5)])
+			.then_some(vec![IntVarEncHeuristic::Order, IntVarEncHeuristic::Binary, IntVarEncHeuristic::Mix(5)])
 			.unwrap_or(encs)
 	});
 	// /// Test propagation extension
@@ -2395,7 +2394,7 @@ End
 	fn test_couple_inconsistent() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2425,7 +2424,7 @@ End
 	fn test_couple_view() {
 		let base = ModelConfig {
 			scm: Scm::Dnf,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2453,7 +2452,7 @@ End
 	fn test_couple_mid() {
 		let base = ModelConfig {
 			scm: Scm::Dnf,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2562,7 +2561,7 @@ End
 	fn test_tmp_red() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Mix(2),
+			cutoff: IntVarEncHeuristic::Mix(2),
 			// cutoff: None,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2620,7 +2619,7 @@ End
 	fn _test_tmp_whiteboard() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2649,7 +2648,7 @@ End
 	fn _test_sugar() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2677,7 +2676,7 @@ End
 	fn test_sugar_2() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2701,7 +2700,7 @@ End
 	fn test_sugar_4() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2725,7 +2724,7 @@ End
 	fn test_sugar_le() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2750,7 +2749,7 @@ End
 	fn _test_bddpbc() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2774,7 +2773,7 @@ End
 	fn test_sugar_5() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2798,7 +2797,7 @@ End
 	fn test_sugar_6() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2823,7 +2822,7 @@ End
 	fn _test_sugar_pbc() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2850,7 +2849,7 @@ End
 	fn test_sugar_singles() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,
@@ -2906,7 +2905,7 @@ End
 	fn test_sugar_singles_2() {
 		let base = ModelConfig {
 			scm: Scm::Rca,
-			cutoff: Mix::Order,
+			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
 			propagate: Consistency::None,

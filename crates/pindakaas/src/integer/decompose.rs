@@ -13,7 +13,7 @@ use crate::{
 
 use crate::integer::{enc::IntVarEnc, Assignment, Decomposer, Model, ModelConfig};
 
-use super::Mix;
+use super::IntVarEncHeuristic;
 
 pub(crate) trait Decompose {
 	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable>;
@@ -136,7 +136,7 @@ impl Decompose for EqualizeTernsDecomposer {
 
 #[derive(Debug, Default)]
 pub(crate) struct EncSpecDecomposer {
-	pub(crate) cutoff: Mix,
+	pub(crate) cutoff: IntVarEncHeuristic,
 	pub(crate) spec: Option<FxHashMap<IntVarId, IntVarEnc>>,
 }
 

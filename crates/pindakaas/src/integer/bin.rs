@@ -229,7 +229,7 @@ impl BinEnc {
 			// println!("up {:?}", ineq);
 			// let ineq = ineq.into_iter();
 			let k = if up { k - 1 } else { k };
-			cnf.add_clause_expensive(self.ineq(k, up).try_collect::<_, Vec<_>, _>()?.into_iter())
+			cnf.add_clause_expensive(self.ineq(k, up).try_collect::<_, Vec<_>, _>()?)
 		};
 
 		if up {

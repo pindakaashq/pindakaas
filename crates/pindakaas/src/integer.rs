@@ -19,7 +19,7 @@ pub(crate) use assignment::{Assignment, MapSol};
 pub(crate) use con::{Lin, LinExp};
 pub(crate) use decompose::Decompose;
 pub(crate) use dom::Dom;
-pub(crate) use model::{Consistency, Decomposer, Mix, Model, ModelConfig};
+pub(crate) use model::{Consistency, Decomposer, IntVarEncHeuristic, Model, ModelConfig};
 pub(crate) use term::Term;
 pub(crate) use var::{IntVar, IntVarRef};
 

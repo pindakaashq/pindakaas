@@ -1,6 +1,6 @@
 use crate::{
 	bool_linear::{Comparator, LinMarker, NormalizedBoolLinear},
-	integer::{Decompose, Decomposer, Dom, IntVar, Lin, LinExp, Mix, Model, ModelConfig, Term},
+	integer::{Decompose, Decomposer, Dom, IntVar, Lin, LinExp, IntVarEncHeuristic, Model, ModelConfig, Term},
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 
@@ -11,7 +11,7 @@ use std::ops::Range;
 /// Decision Diagram (BDD)
 pub struct BddEncoder {
 	add_consistency: bool,
-	cutoff: Mix,
+	cutoff: IntVarEncHeuristic,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,7 +48,7 @@ impl BddEncoder {
 		self.add_consistency = b;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Mix) -> &mut Self {
+	pub fn add_cutoff(&mut self, c: IntVarEncHeuristic) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
