@@ -67,7 +67,7 @@ pub trait Checker {
 	///   the constraint,
 	/// - it returns [`Unsatisfiable`] when the assignment violates the
 	///   constraint
-	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError>;
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), Unsatisfiable>;
 }
 
 /// The `ClauseDatabase` trait is the common trait implemented by types that are
@@ -151,6 +151,57 @@ pub trait ClauseDatabase {
 	fn add_clauses<I: IntoIterator<Item = Vec<Lit>>>(&mut self, clauses: I) -> Result {
 		clauses.into_iter().try_for_each(|cl| self.add_clause(cl))
 	}
+
+	/// Create a new Boolean variable in the form of a positive literal.
+	fn new_lit(&mut self) -> Lit {
+		self.new_var().into()
+	}
+
+	/// Create multiple new Boolean literals and capture them in a tuple.
+	///
+	/// # Example
+	/// ```
+	/// # use pindakaas::{ClauseDatabase, Cnf};
+	/// # let mut db = Cnf::default();
+	/// let (a, b, c) = db.new_lits();
+	/// ```
+	fn new_lits<T>(&mut self) -> T
+	where
+		T: HomogeneousTuple<Item = Lit>,
+	{
+		let range = self.new_var_range(T::num_items());
+		range.map(Lit::from).collect_tuple().unwrap()
+	}
+
+	/// Create a new Boolean variable that can be used in the encoding of a problem
+	/// or constraint.
+	fn new_var(&mut self) -> Var {
+		let mut range = self.new_var_range(1);
+		debug_assert_eq!(range.len(), 1);
+		range.next().unwrap()
+	}
+
+	/// Method to be used to receive a new Boolean variable that can be used in
+	/// the encoding of a problem or constraint.
+	fn new_var_range(&mut self, len: usize) -> VarRange;
+
+	/// Create multiple new Boolean variables and capture them in a tuple.
+	///
+	/// # Example
+	/// ```
+	/// # use pindakaas::{ClauseDatabase, Cnf};
+	/// # let mut db = Cnf::default();
+	/// let (a, b, c) = db.new_vars();
+	/// ```
+	fn new_vars<T>(&mut self) -> T
+	where
+		T: HomogeneousTuple<Item = Var>,
+	{
+		let range = self.new_var_range(T::num_items());
+		range.collect_tuple().unwrap()
+	}
+
+	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB>;
 }
 
 /// A representation for Boolean formulas in conjunctive normal form.
