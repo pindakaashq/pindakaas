@@ -1,7 +1,7 @@
 use crate::helpers::{emit_clause, unsigned_binary_range};
+use crate::integer::model::Format;
 use crate::integer::term::Term;
 use crate::integer::var::IntVarId;
-use crate::integer::Format;
 use crate::integer::{lex_geq_const, rca, var::IntVarRef};
 use crate::{bool_linear::Comparator, integer::lex_leq_const};
 use crate::{log, CheckError};
@@ -21,12 +21,12 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Default)]
-pub struct LinExp {
+pub(crate) struct LinExp {
 	pub terms: Vec<Term>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Lin {
+pub(crate) struct Lin {
 	pub exp: LinExp,
 	pub cmp: Comparator,
 	pub k: Coeff,
@@ -125,22 +125,22 @@ impl TryFrom<&Lin> for LinCase {
 }
 
 impl LinExp {
-	pub fn new(terms: &[Term]) -> Self {
+	pub(crate) fn new(terms: &[Term]) -> Self {
 		Self {
 			terms: terms.to_vec(),
 		}
 	}
-	pub fn lb(&self) -> Coeff {
+	pub(crate) fn lb(&self) -> Coeff {
 		self.terms.iter().map(|t| t.lb()).sum()
 	}
 
-	pub fn ub(&self) -> Coeff {
+	pub(crate) fn ub(&self) -> Coeff {
 		self.terms.iter().map(|t| t.ub()).sum()
 	}
 }
 
 impl Lin {
-	pub fn new(terms: &[Term], cmp: Comparator, k: Coeff, lbl: String) -> Self {
+	pub(crate) fn new(terms: &[Term], cmp: Comparator, k: Coeff, lbl: String) -> Self {
 		Lin {
 			exp: LinExp::new(terms),
 			cmp,
@@ -149,7 +149,7 @@ impl Lin {
 		}
 	}
 
-	pub fn tern(x: Term, y: Term, cmp: Comparator, z: Term, lbl: String) -> Self {
+	pub(crate) fn tern(x: Term, y: Term, cmp: Comparator, z: Term, lbl: String) -> Self {
 		Lin {
 			exp: LinExp::new(&[x, y, Term::new(-z.c, z.x)]),
 			cmp,
@@ -158,15 +158,18 @@ impl Lin {
 		}
 	}
 
-	pub fn lb(&self) -> Coeff {
+	pub(crate) fn lb(&self) -> Coeff {
 		self.exp.terms.iter().map(Term::lb).sum()
 	}
 
-	pub fn ub(&self) -> Coeff {
+	pub(crate) fn ub(&self) -> Coeff {
 		self.exp.terms.iter().map(Term::ub).sum()
 	}
 
-	pub fn propagate(&mut self, consistency: &Consistency) -> Result<Vec<IntVarId>, Unsatisfiable> {
+	pub(crate) fn propagate(
+		&mut self,
+		consistency: &Consistency,
+	) -> Result<Vec<IntVarId>, Unsatisfiable> {
 		let mut changed = vec![];
 		match consistency {
 			Consistency::None => unreachable!(),
@@ -373,12 +376,12 @@ impl Lin {
 		feature = "tracing",
 		tracing::instrument(name = "lin_encoder", skip_all, fields(constraint = format!("{}", self)))
 	)]
-	pub fn encode<DB: ClauseDatabase>(&self, db: &mut DB, _config: &ModelConfig) -> Result {
+	pub(crate) fn encode<DB: ClauseDatabase>(&self, db: &mut DB, _config: &ModelConfig) -> Result {
 		match LinCase::try_from(self)? {
 			LinCase::Fixed(con) => con.check(&Assignment::default()).map_err(|_| Unsatisfiable),
 			LinCase::Unary(x, cmp, k) => {
 				// TODO refactor.....
-				x.x.borrow_mut().encode_bin(db)?;
+				let _ = x.x.borrow_mut().encode_bin(db)?;
 				let dom = x.x.borrow().dom.clone();
 				let x = x.encode_bin(None, cmp, &self.lbl)?;
 				let x: IntVarRef = x.try_into().unwrap();
@@ -389,15 +392,15 @@ impl Lin {
 				// assert!(t_x.x.borrow().lb() == t_y.x.borrow().lb());
 
 				let k = t_y.x.borrow().lb() - t_x.x.borrow().lb(); // used to make lbs match
-				t_x.x.borrow_mut().encode_bin(db)?;
-				t_y.x.borrow_mut().encode_bin(db)?;
+				let _ = t_x.x.borrow_mut().encode_bin(db)?;
+				let _ = t_y.x.borrow_mut().encode_bin(db)?;
 
 				let x_enc = t_x.x.borrow_mut().encode_bin(db)?;
 				let y_enc = (t_y * -1).x.borrow_mut().encode_bin(db)?;
 				x_enc.lex(db, cmp, y_enc, k)
 			}
 			LinCase::Couple(t_x, t_y) => {
-				t_x.x.borrow_mut().encode_ord(db)?;
+				let _ = t_x.x.borrow_mut().encode_ord(db)?;
 				if !t_x.x.borrow().add_consistency {
 					t_x.x.borrow_mut().consistent(db)?;
 				}
@@ -438,7 +441,7 @@ impl Lin {
 						log!("CHANNEL: {t_x} = {t_y}");
 						assert!(matches!(t_x.x.borrow().e, Some(IntVarEnc::Ord(_))));
 						assert!(matches!(t_y.x.borrow().e, Some(IntVarEnc::Bin(_))));
-						t_x.x.borrow_mut().encode_ord(db)?;
+						let _ = t_x.x.borrow_mut().encode_ord(db)?;
 						t_x.x.borrow_mut().consistent(db)?; // channelling requires consistency only on x:O, not y:B
 						let y_enc = t_y.x.borrow_mut().encode_bin(db)?;
 						// t_y.x.borrow_mut().consistent(db)?; // apparently not needed.
@@ -486,8 +489,8 @@ impl Lin {
 				}
 			}
 			LinCase::Scm(t_x, y) => {
-				t_x.x.borrow_mut().encode_bin(db)?; // encode x (if not encoded already)
-										// encode y
+				let _ = t_x.x.borrow_mut().encode_bin(db)?; // encode x (if not encoded already)
+												// encode y
 
 				let tmp_y = t_x.clone().encode_bin(None, self.cmp, &self.lbl)?;
 
@@ -513,7 +516,7 @@ impl Lin {
 					.into_iter()
 					.map(|t| {
 						// encode term and return underlying var
-						t.x.borrow_mut().encode(db).unwrap();
+						let _ = t.x.borrow_mut().encode(db).unwrap();
 						let t = t.encode_bin(None, self.cmp, &self.lbl).unwrap();
 						let x: IntVarRef = t.clone().try_into().unwrap_or_else(|_| {
 							panic!("Calling Term::encode_bin on {t} should return 1*y")
@@ -749,16 +752,6 @@ impl Lin {
 		}
 	}
 
-	pub fn vars(&self) -> Vec<IntVarRef> {
-		self.exp
-			.terms
-			.iter()
-			.map(|term| &term.x)
-			.unique_by(|x| x.borrow().id)
-			.cloned()
-			.collect()
-	}
-
 	pub(crate) fn _simplified(self) -> Result<Lin> {
 		let mut k = self.k;
 		let con = Lin {
@@ -788,6 +781,17 @@ impl Lin {
 			Ok(con)
 		}
 	}
+
+	#[allow(dead_code, reason = "could be useful in the future")]
+	pub(crate) fn vars(&self) -> Vec<IntVarRef> {
+		self.exp
+			.terms
+			.iter()
+			.map(|term| &term.x)
+			.unique_by(|x| x.borrow().id)
+			.cloned()
+			.collect()
+	}
 }
 
 #[cfg(test)]
@@ -802,7 +806,7 @@ mod tests {
 	#[cfg(feature = "tracing")]
 	use traced_test::test;
 
-	use super::Format;
+	use super::*;
 
 	#[test]
 	fn test_enc_rec_lookahead() {
@@ -813,7 +817,7 @@ mod tests {
 		.unwrap();
 		// LOOKAHEAD feature removes redundant x>=2/\y>=3->z>=5 (-1 -2 3), since we have x>=2->x>=0 (tautological) and x>=0/\y>=3->z>=5 (-2 3)
 		let mut cnf = Cnf::default();
-		m.encode_pub(&mut cnf).unwrap();
+		let _ = m.encode_pub(&mut cnf).unwrap();
 		assert_encoding(&cnf, &expect_file!["integer/con/enc_rec_lookahead.cnf"]);
 	}
 
@@ -825,7 +829,7 @@ mod tests {
 		)
 		.unwrap();
 		let mut cnf = Cnf::default();
-		m.encode_pub(&mut cnf).unwrap();
+		let _ = m.encode_pub(&mut cnf).unwrap();
 		assert_encoding(
 			&cnf,
 			&expect_file!["integer/con/enc_rec_bdd_style_view.cnf"],

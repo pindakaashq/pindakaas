@@ -1,5 +1,4 @@
 use crate::bool_linear::Comparator;
-use crate::helpers::is_unique;
 use crate::integer::enc::IntVarEnc;
 use crate::integer::term::Term;
 use crate::integer::var::IntVarId;
@@ -7,19 +6,14 @@ use crate::integer::var::IntVarRef;
 use crate::integer::Lin;
 use crate::CheckError;
 use std::collections::BTreeSet;
-use std::time::Duration;
-use std::time::Instant;
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
 	integer::IntVar,
-	integer::{
-		decompose::{Decompose, ModelDecomposer},
-		Assignment, Dom, LinExp,
-	},
-	Checker, ClauseDatabase, Result, Unsatisfiable, Valuation, Var,
+	integer::{Dom, LinExp},
+	ClauseDatabase, Result, Unsatisfiable,
 };
 
 // TODO needs experiment to find out which is better
@@ -38,8 +32,12 @@ pub(crate) const USE_CHANNEL: bool = false;
 
 /// SCM methods
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(
+	dead_code,
+	reason = "Rca/Pow variants unused, but implemented; will become public with binary aux vars"
+)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum Scm {
+pub(crate) enum Scm {
 	/// Use recipe that minimizes adders. Good for ≥12 bits
 	Add,
 	/// Use recipe that minimizes ripple-carry-adders
@@ -53,11 +51,12 @@ pub enum Scm {
 
 use crate::Coeff;
 
-use super::ord::OrdEnc;
+use super::Assignment;
+use super::Decompose;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum Decomposer {
+pub(crate) enum Decomposer {
 	Gt,
 	Swc,
 	#[default]
@@ -77,7 +76,7 @@ pub enum Mix {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ModelConfig {
+pub(crate) struct ModelConfig {
 	/// Which SCM method to use
 	pub scm: Scm,
 	pub cutoff: Mix,
@@ -90,8 +89,18 @@ pub struct ModelConfig {
 	pub equalize_uniform_bin_ineqs: bool,
 }
 
+#[derive(Debug)]
+pub(crate) enum Format {
+	Lp,
+	#[allow(
+		dead_code,
+		reason = "Once integer interface becomes public, reading OPB files becomes a public feature"
+	)]
+	Opb,
+}
+
 #[derive(Debug, Clone)]
-pub struct Model {
+pub(crate) struct Model {
 	pub cons: Vec<Lin>,
 	pub num_var: usize,
 	pub obj: Obj,
@@ -118,7 +127,7 @@ impl From<Vec<Lin>> for Model {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct Cse(pub FxHashMap<(IntVarId, Coeff, Comparator), Term>);
+pub(crate) struct Cse(pub FxHashMap<(IntVarId, Coeff, Comparator), Term>);
 
 #[derive(Debug, Default, Clone, Copy, Ord, PartialOrd, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -130,26 +139,36 @@ pub enum Consistency {
 }
 
 #[derive(Default, Debug, Clone)]
-pub enum Obj {
+pub(crate) enum Obj {
 	#[default]
 	Satisfy,
+	#[allow(
+		dead_code,
+		reason = "Parsing implemented, but no optimization implemented; this is a todo"
+	)]
 	Minimize(LinExp),
+	#[allow(
+		dead_code,
+		reason = "Parsing implemented, but no optimization implemented; this is a todo"
+	)]
 	Maximize(LinExp),
 }
 
 impl Obj {
-	pub fn obj(&self) -> Option<&LinExp> {
+	#[cfg(feature = "optimization")]
+	pub(crate) fn obj(&self) -> Option<&LinExp> {
 		match self {
 			Obj::Minimize(exp) | Obj::Maximize(exp) => Some(exp),
 			Obj::Satisfy => None,
 		}
 	}
 
-	pub fn is_satisfy(&self) -> bool {
+	pub(crate) fn is_satisfy(&self) -> bool {
 		matches!(self, Obj::Satisfy)
 	}
 
-	pub fn is_maximize(&self) -> bool {
+	#[cfg(feature = "optimization")]
+	pub(crate) fn is_maximize(&self) -> bool {
 		matches!(self, Obj::Maximize(_))
 	}
 }
@@ -175,14 +194,6 @@ impl FromIterator<Model> for Model {
 	}
 }
 
-impl Checker for Model {
-	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
-		self.check_assignment(&self.assign(sol))
-			.map_err(|errs| errs.into_iter().next().unwrap())
-		// into_first() ?
-	}
-}
-
 impl Default for Model {
 	fn default() -> Self {
 		Self {
@@ -194,13 +205,8 @@ impl Default for Model {
 		}
 	}
 }
-
+use crate::integer::decompose::ModelDecomposer;
 impl Model {
-	/// New auxiliary variable (meaning it could be inconsistent, or already be encoded)
-	pub fn var_by_lbl(&self, lbl: &str) -> Option<IntVarRef> {
-		self.vars().find(|x| x.borrow().lbl == lbl)
-	}
-
 	/// New auxiliary variable (meaning it could be inconsistent, or already be encoded)
 	pub(crate) fn new_aux_var(
 		&mut self,
@@ -217,21 +223,8 @@ impl Model {
 			.ok_or(Unsatisfiable)
 	}
 
-	/// Creates new var
-	pub fn new_var(
-		&mut self,
-		dom: &[Coeff],
-		lbl: String, // TODO ensure unique and not optional!
-	) -> Result<IntVarRef, Unsatisfiable> {
-		debug_assert!(
-			self.var_by_lbl(&lbl).is_none(),
-			"Model already contains variable label {lbl}\n{self}"
-		); // TODO using contains requires clone?
-		self.new_aux_var(Dom::new(dom.into_iter().cloned()), true, None, lbl)
-	}
-
 	/// Add constraint to model
-	pub fn add_constraint(&mut self, constraint: Lin) -> Result {
+	pub(crate) fn add_constraint(&mut self, constraint: Lin) -> Result {
 		// TODO call constrain.simplified?
 		self.cons.push(constraint);
 		Ok(())
@@ -242,8 +235,12 @@ impl Model {
 			.unwrap()
 	}
 
+	#[allow(
+		dead_code,
+		reason = "This is an idea for how to transform models, but the current version is not ergonomic and also inefficient"
+	)]
 	/// Decompose every constraint
-	pub fn fold(self, decompose: impl Fn(Self) -> Result<Self>) -> Result<Model> {
+	pub(crate) fn fold(self, decompose: impl Fn(Self) -> Result<Self>) -> Result<Model> {
 		let Model {
 			cons,
 			num_var,
@@ -278,9 +275,21 @@ impl Model {
 		}
 	}
 
-	// TODO used for experiments, made private for release
-	pub fn constraints(&'_ self) -> impl Iterator<Item = &'_ Lin> {
-		self.cons.iter()
+	#[allow(
+		dead_code,
+		reason = "Encoding just the variables could be useful, but probably this should be removed."
+	)]
+	pub(crate) fn encode_vars<DB: ClauseDatabase>(
+		&mut self,
+		db: &mut DB,
+	) -> Result<(), Unsatisfiable> {
+		// Encode (or retrieve encoded) variables (in order of id so lits line up more nicely with variable order)
+		self.vars()
+			.sorted_by_key(|var| var.borrow().id)
+			.try_for_each(|var| {
+				_ = var.borrow_mut().decide_encoding(&self.config.cutoff);
+				var.borrow_mut().encode(db).map(|_| ())
+			})
 	}
 
 	pub(crate) fn decompose(
@@ -290,22 +299,7 @@ impl Model {
 		ModelDecomposer { spec }.decompose(self)
 	}
 
-	pub fn encode_vars<DB: ClauseDatabase>(&mut self, db: &mut DB) -> Result<(), Unsatisfiable> {
-		// Encode (or retrieve encoded) variables (in order of id so lits line up more nicely with variable order)
-		self.vars()
-			.sorted_by_key(|var| var.borrow().id)
-			.try_for_each(|var| {
-				var.borrow_mut().decide_encoding(&self.config.cutoff);
-				var.borrow_mut().encode(db).map(|_| ())
-			})
-	}
-
-	/// Encode model into `db`
-	pub fn encode_pub<DB: ClauseDatabase>(&mut self, db: &mut DB) -> Result<Self, Unsatisfiable> {
-		self.encode_internal(db, true)
-	}
-
-	pub fn encode_internal<DB: ClauseDatabase>(
+	pub(crate) fn encode<DB: ClauseDatabase>(
 		&mut self,
 		db: &mut DB,
 		decompose: bool,
@@ -325,7 +319,7 @@ impl Model {
 		Ok(decomposition)
 	}
 
-	pub fn propagate(&mut self, consistency: &Consistency) -> Result<(), Unsatisfiable> {
+	pub(crate) fn propagate(&mut self, consistency: &Consistency) -> Result<(), Unsatisfiable> {
 		// TODO for Gt/Bdd we actually know we can start propagation at the last constraint
 		let mut queue = BTreeSet::from_iter(0..self.cons.len());
 		if consistency == &Consistency::None {
@@ -345,7 +339,7 @@ impl Model {
 	}
 
 	/// Collect and return all variables (iterates over all constraints)
-	pub fn vars(&self) -> impl Iterator<Item = IntVarRef> {
+	pub(crate) fn vars(&self) -> impl Iterator<Item = IntVarRef> {
 		self.cons
 			.iter()
 			.flat_map(|con| con.exp.terms.iter().map(|term| term.x.clone())) // don't use con.vars() since this will do redundant canonicalizing
@@ -354,13 +348,90 @@ impl Model {
 			.into_iter()
 	}
 
-	/// Assign `sol` to model to yield its integer `Assignment`
-	pub fn assign<F: Valuation + ?Sized>(&self, sol: &F) -> Assignment {
-		Assignment::new(self.vars(), sol)
+	pub(crate) fn branch(&self, con: Lin) -> Self {
+		Model {
+			cons: vec![con],
+			num_var: self.num_var,
+			config: self.config.clone(),
+			..Model::default()
+		}
+	}
+
+	pub(crate) fn to_text(&self, format: Format) -> String {
+		match format {
+			Format::Lp => {
+				format!(
+					"Subject To
+{}
+Bounds
+{}
+End
+",
+					self.cons
+						.iter()
+						.map(|con| format!(
+							"\t{}: {} {} {}",
+							con.lbl,
+							con.exp
+								.terms
+								.iter()
+								.map(|term| format!(
+									"{} {} {}",
+									if term.c.is_negative() { "-" } else { "+" },
+									term.c.abs(),
+									term.x.borrow().lbl
+								))
+								.join(" "),
+							match con.cmp {
+								Comparator::LessEq => "<=",
+								Comparator::Equal => "=",
+								Comparator::GreaterEq => ">=",
+							},
+							con.k
+						))
+						.join("\n"),
+					self.vars()
+						.sorted_by_key(|x| x.borrow().id)
+						.map(|x| {
+							let x = x.borrow();
+							format!("  {} <= {} <= {}", x.lb(), x.lbl(), x.ub())
+						})
+						.join("\n")
+				)
+			}
+			Format::Opb => {
+				let vars = self.vars().unique_by(|x| x.borrow().id).count();
+
+				format!(
+					"* #variable= {} #constraint= {}
+{} 
+                   ",
+					vars,
+					self.cons.len(),
+					self.cons
+						.iter()
+						.map(|con| format!(
+							"{} {} {}",
+							con.exp
+								.terms
+								.iter()
+								.map(|term| format!("{:+} {}", term.c, term.x.borrow().lbl(),))
+								.join(" "),
+							match con.cmp {
+								Comparator::LessEq => "<=",
+								Comparator::Equal => "=",
+								Comparator::GreaterEq => ">=",
+							},
+							con.k
+						))
+						.join(";\n")
+				)
+			}
+		}
 	}
 
 	/// Checks correctness of total `assignment`
-	pub fn check_assignment(&self, assignment: &Assignment) -> Result<(), Vec<CheckError>> {
+	pub(crate) fn check_assignment(&self, assignment: &Assignment) -> Result<(), Vec<CheckError>> {
 		let errs = self
 			.vars()
 			.map(|x| x.borrow().check(assignment))
@@ -369,24 +440,59 @@ impl Model {
 			.collect_vec();
 		errs.is_empty().then_some(()).ok_or(errs)
 	}
+}
 
-	/// Brute-forces all solutions for given output variables (or all if None)
-	pub(crate) fn generate_solutions(
-		&self,
-		vars: Option<Vec<IntVarRef>>,
-	) -> (Vec<Assignment>, bool) {
-		let vars = vars.unwrap_or_else(|| self.vars().collect_vec());
-		assert!(
-			is_unique(vars.iter().map(|x| x.borrow().lbl())),
-			"Output variables do not have unique labels: {}",
-			vars.iter().map(|x| x.borrow().lbl()).sorted().join(", ")
-		);
-		/// Limit brute force solve by seconds
-		const BUDGET: Option<u64> = Some(20);
-		let timer = Instant::now();
-		let mut complete = true;
+#[cfg(test)]
+#[cfg(feature = "cadical")]
+mod tests {
 
-		(vars
+	use bzip2::read::BzDecoder;
+	use flate2::bufread::GzDecoder;
+	use std::io::Read;
+
+	impl Checker for Model {
+		fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
+			self.check_assignment(&self.assign(sol))
+				.map_err(|errs| errs.into_iter().next().unwrap())
+			// into_first() ?
+		}
+	}
+
+	impl Model {
+		/// Creates new var
+		pub(crate) fn new_var(
+			&mut self,
+			dom: &[Coeff],
+			lbl: String, // TODO ensure unique and not optional!
+		) -> Result<IntVarRef, Unsatisfiable> {
+			debug_assert!(
+				self.var_by_lbl(&lbl).is_none(),
+				"Model already contains variable label {lbl}\n{self}"
+			); // TODO using contains requires clone?
+			self.new_aux_var(Dom::new(dom.into_iter().cloned()), true, None, lbl)
+		}
+
+		pub(crate) fn constraints(&'_ self) -> impl Iterator<Item = &'_ Lin> {
+			self.cons.iter()
+		}
+
+		/// Brute-forces all solutions for given output variables (or all if None)
+		pub(crate) fn generate_solutions(
+			&self,
+			vars: Option<Vec<IntVarRef>>,
+		) -> (Vec<Assignment>, bool) {
+			let vars = vars.unwrap_or_else(|| self.vars().collect_vec());
+			assert!(
+				is_unique(vars.iter().map(|x| x.borrow().lbl())),
+				"Output variables do not have unique labels: {}",
+				vars.iter().map(|x| x.borrow().lbl()).sorted().join(", ")
+			);
+			/// Limit brute force solve by seconds
+			const BUDGET: Option<u64> = Some(20);
+			let timer = Instant::now();
+			let mut complete = true;
+
+			(vars
                  .iter()
                  .map(|var| var.borrow().dom.clone().iter().collect_vec())
                  .multi_cartesian_product()
@@ -405,107 +511,107 @@ impl Model {
                  .sorted() // need to sort to make unique since HashMap cannot derive Hash
                  .dedup()
                  .collect(), complete)
-	}
-
-	/// Check that `actual_assignments` to contain all solutions this model
-	pub fn check_assignments(
-		&self,
-		actual_assignments: &[Assignment],
-		expected_assignments: Option<&(Vec<Assignment>, bool)>,
-		brute_force_solve: bool,
-		principals: &[IntVarRef],
-	) -> Result<(), Vec<CheckError>> {
-		assert!(
-			is_unique(principals.iter().map(|x| x.borrow().lbl())),
-			"Cannot check assignments if principal variables have different labels: {}",
-			principals
-				.iter()
-				.map(|x| format!("{}", x.borrow()))
-				.join(", ")
-		);
-		let errs = actual_assignments
-			.iter()
-			.map(|actual_assignment| self.check_assignment(actual_assignment))
-			.filter_map(|result| result.is_err().then(|| result.unwrap_err()))
-			.flatten() // collect
-			.collect_vec();
-
-		// Throw early if expected_assignments need to be computed
-		if !brute_force_solve && expected_assignments.is_none() {
-			if errs.is_empty() {
-				println!(
-					"Variables and constraints hold for actual assignments:\n{}",
-					if actual_assignments.is_empty() {
-						String::from("Unsat")
-					} else {
-						actual_assignments.iter().join("\n")
-					}
-				);
-				return Ok(());
-			} else {
-				return Err(errs);
-			}
 		}
 
-		let (expected_assignments, complete) = expected_assignments
-			.cloned()
-			.unwrap_or_else(|| self.generate_solutions(None));
-		assert!(complete);
-
-		let canonicalize = |a: &[Assignment]| a.iter().sorted().cloned().collect::<Vec<_>>();
-
-		let check_unique = |a: &[Assignment], mess: &str| {
+		/// Check that `actual_assignments` to contain all solutions this model
+		pub(crate) fn check_assignments(
+			&self,
+			actual_assignments: &[Assignment],
+			expected_assignments: Option<&(Vec<Assignment>, bool)>,
+			brute_force_solve: bool,
+			principals: &[IntVarRef],
+		) -> Result<(), Vec<CheckError>> {
 			assert!(
-				a.iter().sorted().tuple_windows().all(|(a, b)| a != b),
-				// is_unique(a.clone().iter().map(|a| a.clone().iter().sorted().collect_vec())),
-				"Expected unique {mess} assignments but got:\n{}",
-				a.iter().map(|a| format!("{}", a)).join("\n")
+				is_unique(principals.iter().map(|x| x.borrow().lbl())),
+				"Cannot check assignments if principal variables have different labels: {}",
+				principals
+					.iter()
+					.map(|x| format!("{}", x.borrow()))
+					.join(", ")
 			);
-		};
-
-		let expected_assignments = canonicalize(&expected_assignments);
-		check_unique(&expected_assignments, "expected");
-		let actual_assignments = canonicalize(actual_assignments);
-
-		// TODO unnecessary canonicalize?
-		// The extra int assignments are the actual assignments of which are not contained by the expected assignments
-		let extra_int_assignments = canonicalize(
-			&actual_assignments
+			let errs = actual_assignments
 				.iter()
-				.filter(|a| {
-					//TODO
-					// complete
-					// 	&&
-					!expected_assignments.iter().any(|e| {
-						principals
-							.iter()
-							.all(|x| a.value(&x.borrow()) == e.value(&x.borrow()))
-					})
-				})
-				.cloned()
-				.collect::<Vec<_>>(),
-		);
+				.map(|actual_assignment| self.check_assignment(actual_assignment))
+				.filter_map(|result| result.is_err().then(|| result.unwrap_err()))
+				.flatten() // collect
+				.collect_vec();
 
-		// A missing int assignment si one which is not in the asc
-		let missing_int_assignments = canonicalize(
-			&expected_assignments
-				.iter()
-				.filter(|e| {
-					!actual_assignments.iter().any(|a| {
-						principals
-							.iter()
-							.all(|x| a.value(&x.borrow()) == e.value(&x.borrow()))
-					})
-				})
-				.cloned()
-				.collect::<Vec<_>>(),
-		);
+			// Throw early if expected_assignments need to be computed
+			if !brute_force_solve && expected_assignments.is_none() {
+				if errs.is_empty() {
+					println!(
+						"Variables and constraints hold for actual assignments:\n{}",
+						if actual_assignments.is_empty() {
+							String::from("Unsat")
+						} else {
+							actual_assignments.iter().join("\n")
+						}
+					);
+					return Ok(());
+				} else {
+					return Err(errs);
+				}
+			}
 
-		if !extra_int_assignments.is_empty() || !missing_int_assignments.is_empty() {
-			return Err(errs
-				.into_iter()
-				.chain([CheckError::Fail(format!(
-					"
+			let (expected_assignments, complete) = expected_assignments
+				.cloned()
+				.unwrap_or_else(|| self.generate_solutions(None));
+			assert!(complete);
+
+			let canonicalize = |a: &[Assignment]| a.iter().sorted().cloned().collect::<Vec<_>>();
+
+			let check_unique = |a: &[Assignment], mess: &str| {
+				assert!(
+					a.iter().sorted().tuple_windows().all(|(a, b)| a != b),
+					// is_unique(a.clone().iter().map(|a| a.clone().iter().sorted().collect_vec())),
+					"Expected unique {mess} assignments but got:\n{}",
+					a.iter().map(|a| format!("{}", a)).join("\n")
+				);
+			};
+
+			let expected_assignments = canonicalize(&expected_assignments);
+			check_unique(&expected_assignments, "expected");
+			let actual_assignments = canonicalize(actual_assignments);
+
+			// TODO unnecessary canonicalize?
+			// The extra int assignments are the actual assignments of which are not contained by the expected assignments
+			let extra_int_assignments = canonicalize(
+				&actual_assignments
+					.iter()
+					.filter(|a| {
+						//TODO
+						// complete
+						// 	&&
+						!expected_assignments.iter().any(|e| {
+							principals
+								.iter()
+								.all(|x| a.value(&x.borrow()) == e.value(&x.borrow()))
+						})
+					})
+					.cloned()
+					.collect::<Vec<_>>(),
+			);
+
+			// A missing int assignment si one which is not in the asc
+			let missing_int_assignments = canonicalize(
+				&expected_assignments
+					.iter()
+					.filter(|e| {
+						!actual_assignments.iter().any(|a| {
+							principals
+								.iter()
+								.all(|x| a.value(&x.borrow()) == e.value(&x.borrow()))
+						})
+					})
+					.cloned()
+					.collect::<Vec<_>>(),
+			);
+
+			if !extra_int_assignments.is_empty() || !missing_int_assignments.is_empty() {
+				return Err(errs
+					.into_iter()
+					.chain([CheckError::Fail(format!(
+						"
 {:?}
 Extra solutions ({}):
 {}
@@ -516,169 +622,512 @@ Expected assignments ({}):
 Actual assignments ({}):
 {}
 ",
-					self.config,
-					extra_int_assignments.len(),
-					if actual_assignments.is_empty() {
-						String::from("  Unsatisfiable")
-					} else {
-						extra_int_assignments
+						self.config,
+						extra_int_assignments.len(),
+						if actual_assignments.is_empty() {
+							String::from("  Unsatisfiable")
+						} else {
+							extra_int_assignments
+								.iter()
+								.map(|a| format!("+ {}", a))
+								.join("\n")
+						},
+						missing_int_assignments.len(),
+						missing_int_assignments
 							.iter()
-							.map(|a| format!("+ {}", a))
-							.join("\n")
-					},
-					missing_int_assignments.len(),
-					missing_int_assignments
-						.iter()
-						.map(|a| format!("- {}", a))
-						.join("\n"),
-					expected_assignments.len(),
-					expected_assignments.iter().join("\n"),
-					actual_assignments.len(),
-					actual_assignments.iter().join("\n"),
-				))])
-				.collect());
-		}
+							.map(|a| format!("- {}", a))
+							.join("\n"),
+						expected_assignments.len(),
+						expected_assignments.iter().join("\n"),
+						actual_assignments.len(),
+						actual_assignments.iter().join("\n"),
+					))])
+					.collect());
+			}
 
-		// assert_eq!(actual_assignments.iter,
-		// expected_assignments,
-		// "It seems the actual and expected assignments are not identical sets:\nactual:\n{}\n expected:\n{}",
-		// principal_actual_assignments.iter().join("\n"),
-		// expected_assignments.iter().join("\n")
-		// );
+			// assert_eq!(actual_assignments.iter,
+			// expected_assignments,
+			// "It seems the actual and expected assignments are not identical sets:\nactual:\n{}\n expected:\n{}",
+			// principal_actual_assignments.iter().join("\n"),
+			// expected_assignments.iter().join("\n")
+			// );
 
-		println!(
-			"Actual assignments are complete and matched against {} expected assignments:
+			println!(
+				"Actual assignments are complete and matched against {} expected assignments:
 Expected assignments:
 {}
 Actual assignments:
 {}
 ",
-			if complete { "complete" } else { "IMCOMPLETE" },
-			expected_assignments.iter().join("\n"),
-			actual_assignments.iter().join("\n"),
-		);
+				if complete { "complete" } else { "IMCOMPLETE" },
+				expected_assignments.iter().join("\n"),
+				actual_assignments.iter().join("\n"),
+			);
 
-		Ok(())
-	}
+			Ok(())
+		}
 
-	pub fn lits(&self) -> BTreeSet<Var> {
-		self.vars().flat_map(|x| x.borrow().lits()).collect()
-	}
+		/// New auxiliary variable (meaning it could be inconsistent, or already be encoded)
+		fn var_by_lbl(&self, lbl: &str) -> Option<IntVarRef> {
+			self.vars().find(|x| x.borrow().lbl == lbl)
+		}
 
-	/// Configure model with `config`
-	pub fn with_config(self, config: ModelConfig) -> Self {
-		Model { config, ..self }
-	}
+		pub(crate) fn pbify<DB: ClauseDatabase>(&self, db: &mut DB) -> Result<Self, Unsatisfiable> {
+			let mut pb_model = Model::default().with_config(self.config.clone());
 
-	#[cfg(test)]
-	pub(crate) fn deep_clone(&self) -> Self {
-		// pff; cannot call deep_clone recursively on all the constraints, as it will deep_clone recurring variables multiple times
-
-		use std::{cell::RefCell, rc::Rc};
-		let vars = self
-			.vars()
-			.map(|x| (x.borrow().id, Rc::new(RefCell::new((*x.borrow()).clone()))))
-			.collect::<FxHashMap<_, _>>();
-		#[allow(clippy::needless_update, reason = "TODO unsure how to avoid")]
-		Self {
-			cons: self
-				.cons
-				.iter()
-				.cloned()
-				.map(|con| Lin {
-					exp: LinExp {
-						terms: con
-							.exp
-							.terms
-							.into_iter()
-							.map(|term| Term {
-								x: vars[&term.x.borrow().id].clone(),
-								..term
-							})
-							.collect(),
-						..con.exp
-					},
-					..con
+			// encode integers to 01-integers
+			let encs: FxHashMap<_, _> = self
+				.vars()
+				.into_iter()
+				.map(|x| {
+					let lbl = x.borrow().lbl();
+					assert!(
+						x.borrow().lb() == 0 && x.borrow().dom.is_contiguous(),
+						"todo"
+					);
+					let xs = x.borrow_mut().encode_ord(db)?;
+					let xs = xs
+						.iter()
+						.zip(x.borrow().dom.iter().skip(1))
+						.map(|(lit, d)| {
+							pb_model.new_aux_var(
+								Dom::new([0, 1]),
+								true,
+								Some(IntVarEnc::Ord(Some(OrdEnc::from(vec![lit.clone()])))),
+								format!("{}>={}", lbl, d),
+							)
+						})
+						.try_collect::<_, Vec<_>, _>()?;
+					Ok((lbl, xs))
 				})
-				.collect(),
-			..self.clone()
+				.try_collect()?;
+
+			// encode
+			for con in &self.cons {
+				pb_model.add_constraint(Lin::new(
+					&con.exp
+						.terms
+						.iter()
+						.flat_map(|t| {
+							let lbl = &t.x.borrow().lbl;
+							encs[lbl].iter().map(|x| Term::new(t.c, x.clone()))
+						})
+						.collect_vec(),
+					con.cmp,
+					con.k,
+					format!("pb-{}", con.lbl),
+				))?;
+			}
+			Ok(pb_model)
 		}
-	}
 
-	pub(crate) fn branch(&self, con: Lin) -> Self {
-		Model {
-			cons: vec![con],
-			num_var: self.num_var,
-			config: self.config.clone(),
-			..Model::default()
+		/// Superset of LP format:
+		/// allow anonymous constraints (w/o label) by `: ...` (they will be internally labelled still)
+		/// allow Doms section for domain with gaps
+		/// variables without domains default to 01
+		pub(crate) fn from_string(s: &str, format: Format) -> Result<Self, String> {
+			#[derive(PartialEq)]
+			enum State {
+				SubjectTo,
+				Binary,
+				Bounds,
+				Doms,
+				Minimize,
+				Maximize,
+				Encs,
+			}
+
+			let mut state = State::SubjectTo;
+			let mut cmp: Option<Comparator> = None;
+			let mut c: Option<Coeff> = None;
+			let mut is_positive = true;
+
+			let mut model = Model::default();
+
+			let set_dom = |model: &mut Model, name: &str, dom: Dom| {
+				if let Some(x) = model.var_by_lbl(name) {
+					x.borrow_mut().dom = dom;
+				} else {
+					println!("Trying to set domain for unconstrained variable {}", name);
+				}
+			};
+
+			for line in s.lines() {
+				match format {
+					Format::Lp => {
+						match line
+							.to_lowercase()
+							.split_whitespace()
+							.collect::<Vec<_>>()
+							.as_slice()
+						{
+							[] | ["*", "\\", ..] => continue,
+							line if matches!(line[0].chars().next(), Some('*' | '\\')) => continue,
+							["end"] => break,
+							["subject", "to"] | ["st" | "s.t."] => {
+								cmp = None;
+								state = State::SubjectTo;
+							}
+							["binary" | "binaries" | "bin"] => {
+								state = State::Binary;
+							}
+							["bounds"] => {
+								state = State::Bounds;
+							}
+							["doms"] => {
+								state = State::Doms;
+							}
+							["encs"] => {
+								state = State::Encs;
+							}
+							["generals" | "general" | "gen" | "semi-continuous" | "semis"
+							| "semi"] => {
+								return Err(String::from(
+									"Generals/semi-continuous sections not supported",
+								));
+							}
+							["minimize" | "minimum" | "min"] => state = State::Minimize,
+							["maximize" | "maximum" | "max"] => state = State::Maximize,
+							[name, "=", val] if state == State::Bounds => {
+								set_dom(&mut model, name, Dom::constant(val.parse().unwrap()));
+							}
+							[name, "in", dom] if state == State::Doms => {
+								set_dom(
+									&mut model,
+									name,
+									Dom::new(dom.split(',').map(|c| {
+										c.parse::<Coeff>().unwrap_or_else(|_| {
+											panic!("Could not parse dom value {c}")
+										})
+									})),
+								);
+							}
+							[lb, "<=", name, "<=", ub] if state == State::Bounds => {
+								set_dom(
+									&mut model,
+									name,
+									Dom::from_bounds(lb.parse().unwrap(), ub.parse().unwrap()),
+								);
+							}
+							[name, ">=", lb] if state == State::Bounds => {
+								return Err(format!(
+									"Unsupported single bound setting for {name}>={lb}"
+								));
+							}
+							xs if state == State::Binary => {
+								xs.iter().for_each(|name| {
+									set_dom(&mut model, name, Dom::pb());
+								});
+							}
+
+							[name, enc, ..] if state == State::Encs => {
+								let enc = match *enc {
+									"b" => IntVarEnc::Bin(None),
+									"o" => IntVarEnc::Ord(None),
+									e => panic!("Unknown encoding spec {e}"),
+								};
+								model.var_by_lbl(name).unwrap().borrow_mut().e = Some(enc);
+								if line.chars().nth(2) == Some('!') {
+									model.var_by_lbl(name).unwrap().borrow_mut().add_consistency =
+										false;
+								}
+							}
+							_ if matches!(state, State::Minimize | State::Maximize) => todo!(),
+							line if matches!(state, State::SubjectTo) => {
+								for token in line {
+									match *token {
+										"->" => {
+											return Err(
+												"Indicator variables not supported".to_owned()
+											);
+										}
+										">=" => {
+											cmp = Some(Comparator::GreaterEq);
+										}
+										"<=" => {
+											cmp = Some(Comparator::LessEq);
+										}
+										"=" => {
+											cmp = Some(Comparator::Equal);
+										}
+										"+" => {
+											is_positive = true;
+										}
+										"-" => {
+											is_positive = false;
+										}
+										token => {
+											if let Some(next_lbl) = token.strip_suffix(':') {
+												model
+													.add_constraint(Lin {
+														exp: LinExp { terms: vec![] },
+														cmp: Comparator::LessEq,
+														k: 0,
+														lbl: if next_lbl.is_empty() {
+															format!("c_{}", model.cons.len() + 1)
+														} else {
+															next_lbl.to_owned()
+														},
+													})
+													.unwrap();
+											} else if token.chars().next().unwrap().is_alphabetic()
+												|| token.starts_with('_')
+											{
+												let x =
+													model.var_by_lbl(token).unwrap_or_else(|| {
+														model
+															.new_aux_var(
+																Dom::pb(),
+																true,
+																None,
+																token.to_owned(),
+															)
+															.unwrap()
+													});
+
+												// con.1.push(if is_positive { 1 } else { -1 });
+												model.cons.last_mut().unwrap().exp.terms.push(
+													Term::new(
+														c.unwrap_or(if is_positive {
+															1
+														} else {
+															-1
+														}),
+														x,
+													),
+												);
+												c = None;
+											} else {
+												let coef =
+													token.parse::<Coeff>().map_err(|_| {
+														format!(
+															"Failed parsing to integer on {token}"
+														)
+													})?;
+												if cmp.is_some() {
+													model.cons.last_mut().unwrap().cmp =
+														cmp.unwrap();
+													cmp = None;
+													model.cons.last_mut().unwrap().k = coef;
+												} else {
+													c = Some(if is_positive {
+														coef
+													} else {
+														-coef
+													});
+													is_positive = true;
+												}
+											}
+										}
+									}
+								}
+
+								// // push last constraint/obj if exists
+								// if let (Some(curr_cmp), Some(curr_k)) = (cmp, k) {
+								// 	cons.push((con, curr_cmp, curr_k, Some(lbl.unwrap().to_owned())));
+								// 	lbl = None;
+								// 	cmp = None;
+								// 	k = None;
+								// 	con = (vec![], vec![]);
+								// 	is_positive = true;
+								// }
+							}
+							err => {
+								return Err(err.join(" "));
+							}
+						}
+					}
+					Format::Opb => {
+						let mut cmp = None;
+						let mut c = None;
+
+						if line.starts_with('*') {
+							continue;
+						}
+
+						model
+							.add_constraint(Lin {
+								exp: LinExp { terms: vec![] },
+								cmp: Comparator::LessEq,
+								k: 0,
+								lbl: format!("c_{}", model.cons.len()),
+							})
+							.unwrap(); // assuming one line per constraint
+						match line
+							.to_lowercase()
+							.split_whitespace()
+							.collect::<Vec<_>>()
+							.as_slice()
+						{
+							[] => continue,
+							line => {
+								for token in line {
+									match *token {
+										">=" => {
+											cmp = Some(Comparator::GreaterEq);
+										}
+										"<=" => {
+											cmp = Some(Comparator::LessEq);
+										}
+										"=" => {
+											cmp = Some(Comparator::Equal);
+										}
+										";" => {}
+										token => {
+											if token.chars().next().unwrap().is_alphabetic()
+												|| token.starts_with('x')
+											{
+												let x =
+													model.var_by_lbl(token).unwrap_or_else(|| {
+														model
+															.new_aux_var(
+																Dom::pb(),
+																true,
+																None,
+																token.to_owned(),
+															)
+															.unwrap()
+													});
+												model
+													.cons
+													.last_mut()
+													.unwrap()
+													.exp
+													.terms
+													.push(Term::new(c.unwrap(), x));
+												c = None;
+											} else {
+												let coef =
+													token.parse::<Coeff>().map_err(|_| {
+														format!(
+															"Failed parsing to integer on {token}"
+														)
+													})?;
+												if let Some(cmp) = cmp {
+													model.cons.last_mut().unwrap().cmp = cmp;
+													model.cons.last_mut().unwrap().k = coef;
+												} else {
+													c = Some(if is_positive {
+														coef
+													} else {
+														-coef
+													});
+													is_positive = true;
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			Ok(model)
 		}
-	}
+		pub(crate) fn from_file(path: PathBuf) -> Result<Self, String> {
+			let ext = path.extension().unwrap().to_str().unwrap();
+			let file = File::open(path.clone())
+				.map_err(|e| format!("File::open({}) failed: {e}", path.display()))
+				.unwrap();
+			let mut s = String::new();
 
-	pub fn pbify<DB: ClauseDatabase>(&self, db: &mut DB) -> Result<Self, Unsatisfiable> {
-		let mut pb_model = Model::default().with_config(self.config.clone());
+			if ext == "gz" {
+				_ = GzDecoder::new(BufReader::new(file))
+					.read_to_string(&mut s)
+					.unwrap();
+			} else if ext == "bz2" {
+				_ = BzDecoder::new(file).read_to_string(&mut s).unwrap();
+			} else if ext == "lp" || ext == "opb" {
+				_ = BufReader::new(file).read_to_string(&mut s).unwrap();
+			} else {
+				panic!("Unknown ext {ext}");
+			}
 
-		// encode integers to 01-integers
-		let encs: FxHashMap<_, _> = self
-			.vars()
-			.into_iter()
-			.map(|x| {
-				let lbl = x.borrow().lbl();
-				assert!(
-					x.borrow().lb() == 0 && x.borrow().dom.is_contiguous(),
-					"todo"
-				);
-				let xs = x.borrow_mut().encode_ord(db)?;
-				let xs = xs
+			let format = if ext != "opb" && ext != "bz2" {
+				Format::Lp
+			} else {
+				Format::Opb
+			};
+
+			Model::from_string(&s, format)
+		}
+
+		pub(crate) fn deep_clone(&self) -> Self {
+			// pff; cannot call deep_clone recursively on all the constraints, as it will deep_clone recurring variables multiple times
+
+			use std::{cell::RefCell, rc::Rc};
+			let vars = self
+				.vars()
+				.map(|x| (x.borrow().id, Rc::new(RefCell::new((*x.borrow()).clone()))))
+				.collect::<FxHashMap<_, _>>();
+			#[allow(clippy::needless_update, reason = "TODO unsure how to avoid")]
+			Self {
+				cons: self
+					.cons
 					.iter()
-					.zip(x.borrow().dom.iter().skip(1))
-					.map(|(lit, d)| {
-						pb_model.new_aux_var(
-							Dom::new([0, 1]),
-							true,
-							Some(IntVarEnc::Ord(Some(OrdEnc::from(vec![lit.clone()])))),
-							format!("{}>={}", lbl, d),
-						)
+					.cloned()
+					.map(|con| Lin {
+						exp: LinExp {
+							terms: con
+								.exp
+								.terms
+								.into_iter()
+								.map(|term| Term {
+									x: vars[&term.x.borrow().id].clone(),
+									..term
+								})
+								.collect(),
+							..con.exp
+						},
+						..con
 					})
-					.try_collect::<_, Vec<_>, _>()?;
-				Ok((lbl, xs))
-			})
-			.try_collect()?;
-
-		// encode
-		for con in &self.cons {
-			pb_model.add_constraint(Lin::new(
-				&con.exp
-					.terms
-					.iter()
-					.flat_map(|t| {
-						let lbl = &t.x.borrow().lbl;
-						encs[lbl].iter().map(|x| Term::new(t.c, x.clone()))
-					})
-					.collect_vec(),
-				con.cmp,
-				con.k,
-				format!("pb-{}", con.lbl),
-			))?;
+					.collect(),
+				..self.clone()
+			}
 		}
-		Ok(pb_model)
-	}
-}
 
-#[cfg(test)]
-#[cfg(feature = "cadical")]
-mod tests {
+		/// Encode model into `db`
+		pub(crate) fn encode_pub<DB: ClauseDatabase>(
+			&mut self,
+			db: &mut DB,
+		) -> Result<Self, Unsatisfiable> {
+			self.encode(db, true)
+		}
+
+		pub(crate) fn lits(&self) -> BTreeSet<Var> {
+			self.vars().flat_map(|x| x.borrow().lits()).collect()
+		}
+
+		/// Configure model with `config`
+		pub(crate) fn with_config(self, config: ModelConfig) -> Self {
+			Model { config, ..self }
+		}
+
+		/// Assign `sol` to model to yield its integer `Assignment`
+		pub(crate) fn assign<F: Valuation + ?Sized>(&self, sol: &F) -> Assignment {
+			Assignment::new(self.vars(), sol)
+		}
+	}
+
 	use super::*;
 
-	use crate::integer::Format;
+	use crate::helpers::is_unique;
+	use crate::integer::ord::OrdEnc;
+	use crate::integer::Assignment;
 	use crate::solver::cadical::Cadical;
 	use crate::solver::Solver;
 	use crate::{integer::decompose::LinDecomposer, Cnf};
+	use crate::{CheckError, Checker, Valuation, Var};
 	#[cfg(feature = "tracing")]
 	use traced_test::test;
 
 	use itertools::{iproduct, Itertools};
+	use std::fs::File;
+	use std::io::BufReader;
 	use std::path::PathBuf;
 	use std::sync::LazyLock;
+	use std::time::{Duration, Instant};
 
 	macro_rules! has_bool_flags {
 		($flags:expr) => {{
@@ -758,7 +1207,7 @@ mod tests {
 
 		// Encode to ClauseDatabase
 		let mut cnf = Cnf::default();
-		model.encode_internal(&mut cnf, true).unwrap();
+		_ = model.encode(&mut cnf, true).unwrap();
 	}
 
 	/// All possible currently stable (!) configurations
@@ -803,6 +1252,7 @@ mod tests {
 		.collect()
 	}
 
+	use crate::integer::model::Format;
 	fn test_lp_for_configs(lp: &str, configs: Option<Vec<ModelConfig>>) {
 		test_model(
 			Model::from_string(lp, Format::Lp).unwrap(),
@@ -1043,7 +1493,7 @@ mod tests {
 
 		// encode and solve
 		let lit_assignments = decomposition
-			.encode_internal(&mut slv, false)
+			.encode(&mut slv, false)
 			.map(|_| {
 				slv.solve_all(if *CHECK_CONSTRAINTS || *SHOW_AUX {
 					decomposition.lits()
@@ -2575,6 +3025,43 @@ End
 	}
 
 	#[test]
+	fn test_from_opb() {
+		let mut model = Model::from_string(
+			"* comment
++2 x1 +3 x2 +5 x3 <= 6 ;
+",
+			Format::Opb,
+		)
+		.unwrap();
+		let mut cnf = Cnf::default();
+		_ = model.encode(&mut cnf, true).unwrap();
+	}
+
+	#[test]
+	fn test_from_lp() {
+		let lp = r"
+\ comment
+Subject To
+  c1: - x + 3 y + 5 z <= 10
+  c2: 3 x + 5 y >= 5
+Binary
+  x
+Doms
+  y in 0,2
+Bounds
+  0 <= z <= 3
+Encs
+  x O
+  y b
+  z b !
+End
+";
+		let model = Model::from_string(lp, Format::Lp).unwrap();
+		println!("MODEL = {}", model);
+		// model.encode(&mut cnf, true).unwrap();
+	}
+
+	#[test]
 	fn test_pbify() {
 		let lp = "./res/lps/le_int.lp";
 		// let lp = "./res/lps/le_1.lp"; // TODO add test that the pb encoding encoding of this 01-problem is equivalent
@@ -2589,7 +3076,7 @@ End
 		// println!("model: {model}");
 		let mut slv = Cadical::default();
 		let mut pbs = model.pbify(&mut slv).unwrap();
-		pbs.encode_pub(&mut slv).unwrap();
+		_ = pbs.encode_pub(&mut slv).unwrap();
 		// println!("pbs: {pbs}");
 		// assigning model the solutions to the literals of the pb encoding should give the correct assignments
 		assert_eq!(

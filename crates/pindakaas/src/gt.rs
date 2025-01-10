@@ -145,7 +145,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for TotalizerEncoder 
 			..model
 		})?;
 
-		model.encode_internal(db, false)?;
+		_ = model.encode(db, false)?;
 		Ok(())
 	}
 }

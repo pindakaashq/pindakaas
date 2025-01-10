@@ -359,7 +359,7 @@ impl Term {
 								format!("{}-{c}·{}", cmp, self.x.borrow().lbl()),
 							)?;
 
-							ys.insert(z_i, c);
+							_ = ys.insert(z_i, c);
 							model.add_constraint(Lin {
 								exp: LinExp {
 									terms: vec![t_x, t_y, Term::new(-1, z.clone())],
@@ -369,7 +369,7 @@ impl Term {
 								lbl: format!("{con_lbl}-scm-{z_i}"),
 							})?;
 							let key = (self.x.borrow().id, c, Comparator::Equal);
-							model.cse.0.insert(key, Term::from(z));
+							_ = model.cse.0.insert(key, Term::from(z));
 						}
 						Ok(model.cse.0[&(self.x.borrow().id, self.c, Comparator::Equal)].clone())
 					}
@@ -403,7 +403,7 @@ impl Term {
 
 		if USE_CSE {
 			if let Some(model) = model.as_mut() {
-				model
+				_ = model
 					.cse
 					.0
 					.insert((self.x.borrow().id, self.c, cmp), t.clone());
@@ -511,7 +511,7 @@ mod tests {
 				)
 				.unwrap(),
 		);
-		x.x.borrow_mut().encode_bin(&mut db).unwrap();
+		_ = x.x.borrow_mut().encode_bin(&mut db).unwrap();
 		let y = x.encode_bin(None, Comparator::Equal, "c1").unwrap();
 
 		// -x in 2..6[..9]

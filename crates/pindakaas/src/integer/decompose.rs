@@ -15,7 +15,7 @@ use crate::integer::{enc::IntVarEnc, Assignment, Decomposer, Model, ModelConfig}
 
 use super::Mix;
 
-pub trait Decompose {
+pub(crate) trait Decompose {
 	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable>;
 }
 
@@ -155,7 +155,7 @@ impl Decompose for EncSpecDecomposer {
 					x.borrow_mut().e = Some(var_enc.clone());
 				}
 			} else {
-				x.borrow_mut().decide_encoding(mix);
+				let _ = x.borrow_mut().decide_encoding(mix);
 			}
 			// if matches!(x.borrow().e, Some(IntVarEnc::Bin(_))) && x.borrow().lbl().contains("bdd") {
 			// 	// TODO experiment using density heuristic: || x.borrow().dom.density() > 0.3

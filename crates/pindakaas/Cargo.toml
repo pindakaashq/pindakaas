@@ -12,8 +12,6 @@ keywords.workspace = true
 repository.workspace = true
 
 [dependencies]
-bzip2 = "0.4"
-flate2 = "1.0"
 iset = "0.3"
 itertools = "0.13"
 rustc-hash = "2.0"
@@ -30,6 +28,8 @@ splr = { version = "0.17", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 [dev-dependencies]
+bzip2 = "0.4"
+flate2 = "1.0"
 expect-test = "1.5.0"
 pindakaas-cadical = { path = "../pindakaas-cadical" }
 pindakaas-derive = { path = "../pindakaas-derive" }
@@ -43,6 +43,8 @@ external-propagation = ["cadical"]
 intel-sat = ["pindakaas-intel-sat", "pindakaas-derive"]
 kissat = ["pindakaas-kissat", "pindakaas-derive"]
 serde = ["dep:serde"]
+# future features
+"optimization" = []
 
 [lints]
 workspace = true

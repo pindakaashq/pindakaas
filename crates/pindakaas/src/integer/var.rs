@@ -17,7 +17,7 @@ use super::{
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct IntVarId(pub usize);
 
-pub type IntVarRef = Rc<RefCell<IntVar>>;
+pub(crate) type IntVarRef = Rc<RefCell<IntVar>>;
 
 impl Display for IntVarId {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -556,7 +556,7 @@ mod tests {
 			Some(IntVarEnc::Ord(None)),
 			String::from("x"),
 		);
-		x.encode(&mut cnf).unwrap();
+		_ = x.encode(&mut cnf).unwrap();
 
 		for (k, exp_geq_d, _exp_leq_d) in [
 			(3, Some(5), None),

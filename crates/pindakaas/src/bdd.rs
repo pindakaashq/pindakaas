@@ -193,7 +193,7 @@ impl Decompose for BddEncoder {
 		if let Some(first) = ys.next() {
 			assert!(first.size() == 1);
 
-			lin.exp.terms.iter().zip(ys).enumerate().try_fold(
+			_ = lin.exp.terms.iter().zip(ys).enumerate().try_fold(
 				first,
 				|curr, (i, (term, next))| {
 					model
@@ -259,7 +259,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
 			..model
 		})?;
 
-		model.encode_internal(db, false)?;
+		_ = model.encode(db, false)?;
 		Ok(())
 	}
 }

@@ -14,15 +14,14 @@ pub(crate) mod var;
 
 use std::cmp::max;
 
-pub use assignment::{Assignment, MapSol};
+pub(crate) use assignment::{Assignment, MapSol};
 
-pub use con::{Lin, LinExp};
-pub use decompose::Decompose;
-pub use dom::Dom;
-pub use helpers::Format;
-pub use model::{Consistency, Decomposer, Mix, Model, ModelConfig, Obj, Scm};
-pub use term::Term;
-pub use var::{IntVar, IntVarRef};
+pub(crate) use con::{Lin, LinExp};
+pub(crate) use decompose::Decompose;
+pub(crate) use dom::Dom;
+pub(crate) use model::{Consistency, Decomposer, Mix, Model, ModelConfig};
+pub(crate) use term::Term;
+pub(crate) use var::{IntVar, IntVarRef};
 
 use crate::bool_linear::PosCoeff;
 use crate::helpers::as_binary;

@@ -104,7 +104,7 @@ pub struct SortingNetworkEncoder {
 impl Default for SortingNetworkEncoder {
 	fn default() -> Self {
 		let mut sorted_encoder = SortedEncoder::default();
-		let _ = sorted_encoder
+		_ = sorted_encoder
 			.with_overwrite_direct_cmp(None)
 			.with_overwrite_recursive_cmp(None);
 		Self { sorted_encoder }
@@ -538,7 +538,7 @@ impl SortedStrategy {
 			(SortedStrategy::Recursive, rec_cost)
 		};
 
-		let _ = cache.insert(key, ret.clone());
+		_ = cache.insert(key, ret.clone());
 		ret
 	}
 
@@ -920,11 +920,11 @@ mod tests {
 			{
 				let mut e = SortingNetworkEncoder::default();
 				let mut f = SortedEncoder::default();
-				let _ = f
+				_ = f
 					.with_strategy(SortedStrategy::Direct)
 					.with_overwrite_direct_cmp(None)
 					.with_overwrite_recursive_cmp(None);
-				let _ = e.set_sorted_encoder(f);
+				_ = e.set_sorted_encoder(f);
 				e
 			},
 			LimitComp::Equal
@@ -936,11 +936,11 @@ mod tests {
 			{
 				let mut e = SortingNetworkEncoder::default();
 				let mut f = SortedEncoder::default();
-				let _ = f
+				_ = f
 					.with_strategy(SortedStrategy::Recursive)
 					.with_overwrite_direct_cmp(None)
 					.with_overwrite_recursive_cmp(None);
-				let _ = e.set_sorted_encoder(f);
+				_ = e.set_sorted_encoder(f);
 				e
 			},
 			LimitComp::Equal
@@ -952,11 +952,11 @@ mod tests {
 			{
 				let mut e = SortingNetworkEncoder::default();
 				let mut f = SortedEncoder::default();
-				let _ = f
+				_ = f
 					.with_strategy(SortedStrategy::Direct)
 					.with_overwrite_direct_cmp(None)
 					.with_overwrite_recursive_cmp(None);
-				let _ = e.set_sorted_encoder(f);
+				_ = e.set_sorted_encoder(f);
 				e
 			},
 			LimitComp::LessEq
@@ -968,11 +968,11 @@ mod tests {
 			{
 				let mut e = SortingNetworkEncoder::default();
 				let mut f = SortedEncoder::default();
-				let _ = f
+				_ = f
 					.with_strategy(SortedStrategy::Mixed(2))
 					.with_overwrite_direct_cmp(None)
 					.with_overwrite_recursive_cmp(None);
-				let _ = e.set_sorted_encoder(f);
+				_ = e.set_sorted_encoder(f);
 				e
 			},
 			LimitComp::LessEq
@@ -984,11 +984,11 @@ mod tests {
 			{
 				let mut e = SortingNetworkEncoder::default();
 				let mut f = SortedEncoder::default();
-				let _ = f
+				_ = f
 					.with_strategy(SortedStrategy::Recursive)
 					.with_overwrite_direct_cmp(None)
 					.with_overwrite_recursive_cmp(None);
-				let _ = e.set_sorted_encoder(f);
+				_ = e.set_sorted_encoder(f);
 				e
 			},
 			LimitComp::LessEq

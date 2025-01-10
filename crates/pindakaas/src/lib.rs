@@ -12,26 +12,14 @@ pub mod cardinality;
 pub mod cardinality_one;
 pub(crate) mod helpers;
 
-#[allow(
-	unused_results,
-	reason = "TODO in some cases, we encode the inner var and get the encoding later through the term. This needs to be refactor"
-)]
-#[allow(
-	clippy::clone_on_ref_ptr,
-	reason = "TODO We use clone to clone int var references all over the place. We should see if the suggested method is truly better."
-)]
-pub mod integer;
+mod integer;
 
-#[allow(unused_results, clippy::clone_on_ref_ptr, reason = "same as integer")]
 pub mod bdd;
-#[allow(unused_results, clippy::clone_on_ref_ptr, reason = "same as integer")]
 pub mod gt;
-#[allow(unused_results, clippy::clone_on_ref_ptr, reason = "same as integer")]
 pub mod swc;
 
 pub mod propositional_logic;
 pub mod solver;
-// mod sorted;
 
 #[cfg(any(feature = "tracing", test))]
 pub mod trace;
