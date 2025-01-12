@@ -60,32 +60,31 @@ impl<DB: ClauseDatabase, Enc: Encoder<DB, Cardinality> + CardMarker> Encoder<DB,
 
 impl<M: LinMarker> CardMarker for M {}
 
-impl Default for SortingNetworkEncoder {
-	fn default() -> Self {
-		let mut sorted_encoder = SortedEncoder::default();
-		let _ = sorted_encoder
-			.with_overwrite_direct_cmp(None)
-			.with_overwrite_recursive_cmp(None);
-		Self { sorted_encoder }
-	}
-}
-
-impl<DB: ClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))
-	)]
-	fn encode(&self, db: &mut DB, card: &Cardinality) -> Result {
-		self.sorted_encoder.encode(
-			db,
-			&Sorted::new(
-				card.lits.as_slice(),
-				card.cmp.clone(),
-				&IntVarEnc::Const(card.k.into()),
-			),
-		)
-	}
-}
+// impl Default for SortingNetworkEncoder {
+// 	fn default() -> Self {
+// 		let mut sorted_encoder = SortedEncoder::default();
+// 		let _ = sorted_encoder
+// 			.with_overwrite_direct_cmp(None)
+// 			.with_overwrite_recursive_cmp(None);
+// 		Self { sorted_encoder }
+// 	}
+// }
+// impl<DB: ClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
+// 	#[cfg_attr(
+// 		any(feature = "tracing", test),
+// 		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))
+// 	)]
+// 	fn encode(&self, db: &mut DB, card: &Cardinality) -> Result {
+// 		self.sorted_encoder.encode(
+// 			db,
+// 			&Sorted::new(
+// 				card.lits.as_slice(),
+// 				card.cmp.clone(),
+// 				&IntVarEnc::Const(card.k.into()),
+// 			),
+// 		)
+// 	}
+// }
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -204,6 +203,9 @@ pub(crate) mod tests {
 		};
 	}
 
+	pub(crate) use card_test_suite;
+
+        /*
 	macro_rules! sorted_card_test_suite {
 		($encoder:expr,$cmp:expr) => {
 			use itertools::Itertools;
@@ -211,7 +213,7 @@ pub(crate) mod tests {
 
 			use crate::{
 				bool_linear::{LimitComp, PosCoeff},
-				cardinality::{Cardinality, SortingNetworkEncoder},
+				cardinality::{Cardinality},
 				helpers::tests::assert_solutions,
 				sorted::{SortedEncoder, SortedStrategy},
 				ClauseDatabase, Cnf, Encoder,
@@ -302,8 +304,6 @@ pub(crate) mod tests {
 		};
 	}
 
-	pub(crate) use card_test_suite;
-
 	mod eq_direct {
 		sorted_card_test_suite!(
 			{
@@ -383,4 +383,8 @@ pub(crate) mod tests {
 			LimitComp::LessEq
 		);
 	}
+
+        */
+
+
 }

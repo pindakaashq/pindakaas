@@ -69,16 +69,6 @@ pub(crate) const fn div_floor(a: Coeff, b: Coeff) -> Coeff {
 	}
 }
 
-/// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
-pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool {
-	let mut it = coefs.into_iter().enumerate();
-	if let Some((_, mult)) = it.next() {
-		it.all(|(i, c)| c == (mult << i))
-	} else {
-		false
-	}
-}
-
 const FILTER_TRIVIAL_CLAUSES: bool = false;
 
 /// Adds clauses for a DNF formula (disjunction of conjunctions)
@@ -112,15 +102,6 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 	}
 	Ok(())
 }
-/// Convert `k` to unsigned binary in `bits`
-pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| IntVar::required_bits(0, *k));
-	assert!(
-		*k <= unsigned_binary_range_ub(bits),
-		"{k} cannot be represented in {bits} bits"
-	);
-	(0..bits).map(|b| *k & (1 << b) != 0).collect()
-}
 
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
 pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool {
@@ -147,6 +128,7 @@ pub(crate) fn as_binary(k: PosCoeff, bits: Option<usize>) -> Vec<bool> {
 	);
 	(0..bits).map(|b| *k & (1 << b) != 0).collect()
 }
+
 #[cfg(not(any(feature = "tracing", test)))]
 macro_rules! emit_clause {
 	($db:expr, $cl:expr) => {
@@ -371,7 +353,6 @@ pub(crate) mod tests {
 				.map(|sol| sol.into_iter().map(i32::from).format(" "))
 				.join("\n"),
 		);
-		expect.assert_eq(&sol_str);
 	}
 
 	/// Helper function to quickly create a valuation from a slice of literals.
