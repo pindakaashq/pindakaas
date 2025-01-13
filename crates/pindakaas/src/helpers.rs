@@ -253,10 +253,8 @@ pub(crate) mod tests {
 	#[cfg(test)]
 	macro_rules! expect_file {
 		($rel_path:expr) => {
-			expect_test::expect_file!(format!(
-				"{}/corpus/{}",
-				env!("CARGO_MANIFEST_DIR"),
-				$rel_path
+			expect_test::expect_file!(std::path::PathBuf::from(
+				format!("{}/corpus/{}", env!("CARGO_MANIFEST_DIR"), $rel_path).to_string()
 			))
 		};
 	}
