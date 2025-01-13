@@ -1,4 +1,3 @@
-use crate::{Coeff, Lit, Valuation, Var};
 use std::{
 	cmp::Ordering,
 	fmt::{Display, Formatter},
@@ -8,6 +7,7 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use super::{IntVar, IntVarRef};
+use crate::{Coeff, Lit, Valuation, Var};
 
 // TODO [?] equivalent of Valuation, could be merged?
 /// A structure holding an integer assignment to `Model`

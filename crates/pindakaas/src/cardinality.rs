@@ -205,7 +205,7 @@ pub(crate) mod tests {
 
 	pub(crate) use card_test_suite;
 
-        /*
+	/*
 	macro_rules! sorted_card_test_suite {
 		($encoder:expr,$cmp:expr) => {
 			use itertools::Itertools;
@@ -384,7 +384,5 @@ pub(crate) mod tests {
 		);
 	}
 
-        */
-
-
+		*/
 }

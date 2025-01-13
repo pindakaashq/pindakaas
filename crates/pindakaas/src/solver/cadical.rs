@@ -86,30 +86,17 @@ impl fmt::Debug for Cadical {
 
 #[cfg(test)]
 mod tests {
+	use std::path::Path;
+
 	use traced_test::test;
 
 	use crate::{
 		bool_linear::LimitComp,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
-		solver::{cadical::Cadical, SlvTermSignal, SolveResult},
+		helpers::tests::{assert_solutions, expect_file},
+		solver::{cadical::Cadical, SlvTermSignal, SolveResult, Solver, TermCallback},
+		ClauseDatabase, Cnf, Encoder, Lit, Valuation,
 	};
-
-	use crate::solver::Solver;
-	use crate::ClauseDatabase;
-	use crate::Encoder;
-	use crate::Valuation;
-
-	use crate::solver::TermCallback;
-
-	// TODO this test
-	// #[test]
-	#[allow(dead_code, reason = "Fails! Should fix fixed on develop")]
-	fn test_cadical_term() {
-		let mut slv = Cadical::default();
-
-		slv.set_terminate_callback(Some(move || SlvTermSignal::Terminate));
-		assert!(matches!(slv.solve(), SolveResult::Unknown));
-	}
 
 	#[test]
 	fn test_cadical() {
@@ -143,24 +130,50 @@ mod tests {
 		);
 	}
 
-	// #[test]
-	// fn test_cadical_examples() {
-	// 	let mut slv = Cadical::default();
-	// 	slv.clone()
-	// 		.add_cnf(Cnf::from_file(Path::new("res/dimacs/ex1.dimacs")).unwrap());
-	// assert_solutions(
-	// &cnf,
-	// vec![a, b, c],
-	// &expect_file!["res/dimacs/ex1.cnf.sol"],
-	// );
-	// 	assert_eq!(slv.solve(), SolveResult::Satisfied(MapSol::default()));
-	// 	slv.clone()
-	// 		.add_cnf(Cnf::from_file(Path::new("res/dimacs/ex2.dimacs")).unwrap());
-	// 	// assert_eq!(slv.solve(|_| ()), SolveResult::Unsat); // TODO failing.
-	// 	slv.clone()
-	// 		.add_cnf(Cnf::from_file(Path::new("res/dimacs/ex3.dimacs")).unwrap());
-	// 	assert_eq!(slv.solve(|_| ()), SolveResult::Satisfied(_));
-	// }
+	#[ignore = "TODO"]
+	#[test]
+	fn test_cadical_term() {
+		let mut slv = Cadical::default();
+		slv.set_terminate_callback(Some(move || SlvTermSignal::Terminate));
+		assert!(matches!(slv.solve(), SolveResult::Unknown));
+	}
+
+	#[ignore = "TODO"]
+	#[test]
+	fn test_cadical_examples() {
+		let ex1 = Cnf::from_file(Path::new("res/dimacs/ex1.dimacs")).unwrap();
+		let cnf = assert_solutions(
+			&ex1,
+			ex1.get_variables(),
+			&expect_file!["cadical/ex1.cnf.sol"],
+		);
+		// containing two empty clauses
+		let ex2 = Cnf::from_file(Path::new("res/dimacs/ex2.dimacs")).unwrap();
+		assert_solutions(
+			&ex2,
+			Vec::<Lit>::new(),
+			&expect_file!["cadical/ex2.cnf.sol"],
+		);
+		// containing no clauses -> empty formula -> SAT
+		let ex3 = Cnf::from_file(Path::new("res/dimacs/ex3.dimacs")).unwrap();
+		assert_solutions(
+			&ex3,
+			Vec::<Lit>::new(),
+			&expect_file!["cadical/ex3.cnf.sol"],
+		);
+
+		let mut slv = Cadical::default();
+		slv.add_cnf(ex1);
+		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
+
+		let mut slv = Cadical::default();
+		slv.add_cnf(ex2);
+		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_))); // TODO failing.
+
+		let mut slv = Cadical::default();
+		slv.add_cnf(ex3);
+		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
+	}
 
 	use crate::Unsatisfiable;
 	#[test]
@@ -178,7 +191,6 @@ mod tests {
 		use itertools::Itertools;
 
 		use crate::{
-			helpers::tests::assert_solutions,
 			solver::{
 				cadical::CadicalSol,
 				propagation::{
@@ -238,12 +250,17 @@ mod tests {
 			PropagatingSolver::add_observed_var(&mut slv, v)
 		}
 
-		let solns: Vec<Vec<Lit>> = slv
-			.solve_all(&vars.into_iter().collect_vec())
-			.into_iter()
-			.map(|sol| sol.try_into().unwrap())
-			.sorted()
-			.collect_vec();
+		let mut solns: Vec<Vec<Lit>> = Vec::new();
+		while let (_, SolveResult::Satisfied(sol)) = slv.solve() {
+			let sol: Vec<Lit> = vars
+				.clone()
+				.map(|v| if sol.value(v.into()) { v.into() } else { !v })
+				.collect_vec();
+			solns.push(sol);
+			slv.add_clause(solns.last().unwrap().iter().map(|l| !l))
+				.unwrap()
+		}
+		solns.sort();
 
 		let (a, b, c, d, e) = vars.clone().iter_lits().collect_tuple().unwrap();
 		assert_eq!(

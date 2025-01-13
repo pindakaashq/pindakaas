@@ -1,7 +1,8 @@
 use crate::{
 	bool_linear::{Comparator, LinMarker, NormalizedBoolLinear},
 	integer::{
-		Consistency, Decompose, Decomposer, Dom, IntVar, Lin, IntVarEncHeuristic, Model, ModelConfig, Term,
+		Consistency, Decompose, Decomposer, Dom, IntVar, IntVarEncHeuristic, Lin, Model,
+		ModelConfig, Term,
 	},
 	ClauseDatabase, Encoder, Result, Unsatisfiable,
 };
@@ -62,10 +63,12 @@ impl Decompose for TotalizerEncoder {
 											&& c > lin.k - lin.exp.lb()
 										{
 											false
-										} else { !(matches!(
-											lin.cmp,
-											Comparator::GreaterEq | Comparator::Equal
-										) && c < lin.k - lin.exp.ub()) }
+										} else {
+											!(matches!(
+												lin.cmp,
+												Comparator::GreaterEq | Comparator::Equal
+											) && c < lin.k - lin.exp.ub())
+										}
 									}),
 								// TODO more efficient version using map_while, but needs reverse on geq case
 							)

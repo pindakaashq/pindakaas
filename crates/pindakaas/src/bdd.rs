@@ -1,10 +1,13 @@
+use std::ops::Range;
+
 use crate::{
 	bool_linear::{Comparator, LinMarker, NormalizedBoolLinear},
-	integer::{Decompose, Decomposer, Dom, IntVar, Lin, LinExp, IntVarEncHeuristic, Model, ModelConfig, Term},
+	integer::{
+		Decompose, Decomposer, Dom, IntVar, IntVarEncHeuristic, Lin, LinExp, Model, ModelConfig,
+		Term,
+	},
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
-
-use std::ops::Range;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary

@@ -51,11 +51,10 @@ use std::{
 	path::Path,
 };
 
+use helpers::{is_unique, subscript_number};
 use itertools::{traits::HomogeneousTuple, Itertools};
 
 use crate::solver::VarFactory;
-
-use helpers::{is_unique, subscript_number};
 
 /// Checker is a trait implemented by types that represent constraints. The
 /// [`Checker::check`] methods checks whether an assignment (often referred to
@@ -151,7 +150,6 @@ pub trait ClauseDatabase {
 	fn add_clauses<I: IntoIterator<Item = Vec<Lit>>>(&mut self, clauses: I) -> Result {
 		clauses.into_iter().try_for_each(|cl| self.add_clause(cl))
 	}
-
 }
 
 /// A representation for Boolean formulas in conjunctive normal form.

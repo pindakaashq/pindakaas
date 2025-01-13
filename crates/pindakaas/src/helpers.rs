@@ -1,4 +1,3 @@
-#[allow(unused_macros)]
 #[cfg(feature = "splr")]
 macro_rules! concat_slices {
     ([$init:expr; $T:ty]: $($s:expr),+ $(,)?) => {{
@@ -266,7 +265,6 @@ pub(crate) mod tests {
 
 	#[cfg(test)]
 	pub(crate) use expect_file;
-
 	use expect_test::ExpectFile;
 	use itertools::Itertools;
 

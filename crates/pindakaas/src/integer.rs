@@ -15,25 +15,20 @@ pub(crate) mod var;
 use std::cmp::max;
 
 pub(crate) use assignment::{Assignment, MapSol};
-
 pub(crate) use con::{Lin, LinExp};
 pub(crate) use decompose::Decompose;
 pub(crate) use dom::Dom;
+use enc::LitOrConst;
+use itertools::Itertools;
 pub(crate) use model::{Consistency, Decomposer, IntVarEncHeuristic, Model, ModelConfig};
 pub(crate) use term::Term;
 pub(crate) use var::{IntVar, IntVarRef};
 
-use crate::bool_linear::PosCoeff;
-use crate::helpers::as_binary;
-use crate::helpers::emit_clause;
-use crate::helpers::emit_filtered_clause;
-use crate::helpers::new_var;
-use crate::Unsatisfiable;
-use enc::LitOrConst;
-
-use itertools::Itertools;
-
-use crate::{ClauseDatabase, Lit, Result};
+use crate::{
+	bool_linear::PosCoeff,
+	helpers::{as_binary, emit_clause, emit_filtered_clause, new_var},
+	ClauseDatabase, Lit, Result, Unsatisfiable,
+};
 
 /// Uses lexicographic constraint to constrain x:B ≦ k
 #[cfg_attr(

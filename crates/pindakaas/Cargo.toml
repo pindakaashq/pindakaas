@@ -45,8 +45,6 @@ external-propagation = ["cadical"]
 intel-sat = ["pindakaas-intel-sat", "pindakaas-derive"]
 kissat = ["pindakaas-kissat", "pindakaas-derive"]
 serde = ["dep:serde"]
-# future features
-"optimization" = []
 
 [lints]
 workspace = true

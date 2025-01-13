@@ -1,23 +1,23 @@
-use crate::helpers::{emit_clause, unsigned_binary_range};
-use crate::integer::model::Format;
-use crate::integer::term::Term;
-use crate::integer::var::IntVarId;
-use crate::integer::{lex_geq_const, rca, var::IntVarRef};
-use crate::{bool_linear::Comparator, integer::lex_leq_const};
-use crate::{log, CheckError};
 use itertools::Itertools;
 
-use super::enc::IntVarEnc;
-use super::model::{Consistency, Model, ModelConfig, USE_COUPLING_IO_LEX, VIEW_COUPLING};
+use super::{
+	enc::IntVarEnc,
+	model::{Consistency, Model, ModelConfig, USE_COUPLING_IO_LEX, VIEW_COUPLING},
+};
 use crate::{
-	bool_linear::PosCoeff,
-	helpers::{add_clauses_for, div_ceil, div_floor},
+	bool_linear::{Comparator, PosCoeff},
+	helpers::{add_clauses_for, div_ceil, div_floor, emit_clause, unsigned_binary_range},
 	integer::{
 		bin::BinEnc,
 		helpers::{display_cnf, required_lits},
+		lex_geq_const, lex_leq_const,
+		model::Format,
+		rca,
+		term::Term,
+		var::{IntVarId, IntVarRef},
 		Assignment, Dom,
 	},
-	ClauseDatabase, Coeff, Lit, Result, Unsatisfiable,
+	log, CheckError, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -798,15 +798,15 @@ impl Lin {
 #[cfg(feature = "cadical")]
 mod tests {
 
-	use crate::helpers::tests::assert_encoding;
-	use crate::helpers::tests::expect_file;
-	use crate::integer::Model;
-	use crate::Cnf;
-
 	#[cfg(feature = "tracing")]
 	use traced_test::test;
 
 	use super::*;
+	use crate::{
+		helpers::tests::{assert_encoding, expect_file},
+		integer::Model,
+		Cnf,
+	};
 
 	#[test]
 	fn test_enc_rec_lookahead() {

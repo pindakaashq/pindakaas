@@ -3,15 +3,14 @@ use std::{cell::RefCell, collections::BTreeSet, fmt::Display, hash::Hash, rc::Rc
 use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
+use super::{
+	bin::BinEnc, enc::IntVarEnc, helpers::required_lits, model::IntVarEncHeuristic, ord::OrdEnc,
+	Assignment, Dom, Model, PosCoeff,
+};
 use crate::{
 	bool_linear::{BoolLinExp, Part},
 	helpers::{emit_clause, negate_cnf, new_var},
 	log, CheckError, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation, Var,
-};
-
-use super::{
-	bin::BinEnc, enc::IntVarEnc, helpers::required_lits, model::IntVarEncHeuristic, ord::OrdEnc, Assignment, Dom,
-	Model, PosCoeff,
 };
 
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
@@ -541,9 +540,10 @@ impl IntVar {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::Cnf;
-
-	use crate::helpers::tests::{assert_encoding, expect_file};
+	use crate::{
+		helpers::tests::{assert_encoding, expect_file},
+		Cnf,
+	};
 
 	#[test]
 	fn test_ineq_ord() {

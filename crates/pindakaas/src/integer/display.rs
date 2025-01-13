@@ -1,14 +1,13 @@
 // TODO Refactor: move display to where struct has its other impls
-use crate::integer::{enc::IntVarEnc, Lin, Model, Term};
 use std::fmt::{self, Display};
 
 use itertools::Itertools;
 
-use crate::integer::IntVar;
-use crate::integer::{model::Cse, Dom, LinExp};
-use crate::Coeff;
-
 use super::model::{Obj, USE_CSE};
+use crate::{
+	integer::{enc::IntVarEnc, model::Cse, Dom, IntVar, Lin, LinExp, Model, Term},
+	Coeff,
+};
 
 /// Show the integer variable's ID
 pub(crate) const SHOW_IDS: bool = false;

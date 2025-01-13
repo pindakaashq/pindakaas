@@ -492,9 +492,8 @@ impl Term {
 
 #[cfg(test)]
 mod tests {
-	use crate::Cnf;
-
 	use super::*;
+	use crate::Cnf;
 
 	#[test]
 	fn term_test() {

@@ -110,12 +110,11 @@ impl std::fmt::Display for OrdEnc {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::{
 		helpers::tests::{assert_encoding, expect_file},
 		Cnf,
 	};
-
-	use super::*;
 	#[test]
 	fn test_ineq() {
 		let mut cnf = Cnf::default();

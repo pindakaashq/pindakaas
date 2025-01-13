@@ -1,19 +1,17 @@
-use crate::bool_linear::Comparator;
-use crate::integer::enc::IntVarEnc;
-use crate::integer::term::Term;
-use crate::integer::var::IntVarId;
-use crate::integer::var::IntVarRef;
-use crate::integer::Lin;
-use crate::CheckError;
 use std::collections::BTreeSet;
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	integer::IntVar,
-	integer::{Dom, LinExp},
-	ClauseDatabase, Result, Unsatisfiable,
+	bool_linear::Comparator,
+	integer::{
+		enc::IntVarEnc,
+		term::Term,
+		var::{IntVarId, IntVarRef},
+		Dom, IntVar, Lin, LinExp,
+	},
+	CheckError, ClauseDatabase, Result, Unsatisfiable,
 };
 
 // TODO needs experiment to find out which is better
@@ -49,10 +47,8 @@ pub(crate) enum Scm {
 	Pow,
 }
 
+use super::{Assignment, Decompose};
 use crate::Coeff;
-
-use super::Assignment;
-use super::Decompose;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -155,7 +151,7 @@ pub(crate) enum Obj {
 }
 
 impl Obj {
-	#[cfg(feature = "optimization")]
+	#[allow(dead_code, reason = "TODO: optimization")]
 	pub(crate) fn obj(&self) -> Option<&LinExp> {
 		match self {
 			Obj::Minimize(exp) | Obj::Maximize(exp) => Some(exp),
@@ -167,7 +163,7 @@ impl Obj {
 		matches!(self, Obj::Satisfy)
 	}
 
-	#[cfg(feature = "optimization")]
+	#[allow(dead_code, reason = "TODO: optimization")]
 	pub(crate) fn is_maximize(&self) -> bool {
 		matches!(self, Obj::Maximize(_))
 	}
@@ -446,9 +442,10 @@ End
 #[cfg(feature = "cadical")]
 mod tests {
 
+	use std::io::Read;
+
 	use bzip2::read::BzDecoder;
 	use flate2::bufread::GzDecoder;
-	use std::io::Read;
 
 	impl Checker for Model {
 		fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
@@ -1109,24 +1106,25 @@ Actual assignments:
 		}
 	}
 
-	use super::*;
+	use std::{
+		fs::File,
+		io::BufReader,
+		path::PathBuf,
+		sync::LazyLock,
+		time::{Duration, Instant},
+	};
 
-	use crate::helpers::is_unique;
-	use crate::integer::ord::OrdEnc;
-	use crate::integer::Assignment;
-	use crate::solver::cadical::Cadical;
-	use crate::solver::Solver;
-	use crate::{integer::decompose::LinDecomposer, Cnf};
-	use crate::{CheckError, Checker, Valuation, Var};
+	use itertools::{iproduct, Itertools};
 	#[cfg(feature = "tracing")]
 	use traced_test::test;
 
-	use itertools::{iproduct, Itertools};
-	use std::fs::File;
-	use std::io::BufReader;
-	use std::path::PathBuf;
-	use std::sync::LazyLock;
-	use std::time::{Duration, Instant};
+	use super::*;
+	use crate::{
+		helpers::is_unique,
+		integer::{decompose::LinDecomposer, ord::OrdEnc, Assignment},
+		solver::{cadical::Cadical, Solver},
+		CheckError, Checker, Cnf, Valuation, Var,
+	};
 
 	macro_rules! has_bool_flags {
 		($flags:expr) => {{
@@ -1158,7 +1156,11 @@ Actual assignments:
 			.flatten()
 			.collect_vec();
 		encs.is_empty()
-			.then_some(vec![IntVarEncHeuristic::Order, IntVarEncHeuristic::Binary, IntVarEncHeuristic::Mix(5)])
+			.then_some(vec![
+				IntVarEncHeuristic::Order,
+				IntVarEncHeuristic::Binary,
+				IntVarEncHeuristic::Mix(5),
+			])
 			.unwrap_or(encs)
 	});
 	// /// Test propagation extension

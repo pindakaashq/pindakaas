@@ -4,15 +4,15 @@ pub mod cadical;
 pub mod intel_sat;
 #[cfg(feature = "kissat")]
 pub mod kissat;
+#[cfg(feature = "libloading")]
+pub mod libloading;
 #[cfg(feature = "external-propagation")]
 pub mod propagation;
 #[cfg(feature = "splr")]
 pub mod splr;
-use crate::{integer::MapSol, Cnf, Unsatisfiable};
-
 use std::{ffi::c_void, num::NonZeroI32, ptr};
 
-use crate::{ClauseDatabase, Lit, Valuation, Var, VarRange};
+use crate::{integer::MapSol, ClauseDatabase, Cnf, Lit, Unsatisfiable, Valuation, Var, VarRange};
 
 type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
 type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;
@@ -85,7 +85,7 @@ pub trait Solver: ClauseDatabase {
 	/// returns unknown
 	fn solve(&mut self) -> SolveResult<impl Valuation + '_, impl Sized>;
 
-	/// Solve for all solutions
+	/// Solve for all solutions for a set of variables
 	fn solve_all<V, I>(&mut self, vars: I) -> Vec<MapSol>
 	where
 		V: Into<Lit>,

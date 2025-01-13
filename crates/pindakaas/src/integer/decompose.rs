@@ -1,19 +1,18 @@
 use itertools::{Itertools, Position};
 use rustc_hash::FxHashMap;
 
+use super::IntVarEncHeuristic;
 use crate::{
 	bdd::BddEncoder,
 	bool_linear::Comparator,
 	gt::TotalizerEncoder,
-	integer::var::IntVarId,
-	integer::{con::LinCase, model::USE_CHANNEL, Dom, Lin, LinExp, Term},
+	integer::{
+		con::LinCase, enc::IntVarEnc, model::USE_CHANNEL, var::IntVarId, Assignment, Decomposer,
+		Dom, Lin, LinExp, Model, ModelConfig, Term,
+	},
 	swc::SwcEncoder,
 	Unsatisfiable,
 };
-
-use crate::integer::{enc::IntVarEnc, Assignment, Decomposer, Model, ModelConfig};
-
-use super::IntVarEncHeuristic;
 
 pub(crate) trait Decompose {
 	fn decompose(&self, model: Model) -> Result<Model, Unsatisfiable>;

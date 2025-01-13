@@ -1,21 +1,18 @@
-use crate::bool_linear::Comparator;
-use crate::bool_linear::PosCoeff;
-use crate::helpers;
-use crate::helpers::new_var;
-use crate::integer::{enc::LitOrConst, lex_geq_const, lex_leq_const};
-use crate::log;
 use std::{collections::BTreeSet, path::PathBuf};
 
-use crate::helpers::emit_clause;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use super::Dom;
 use crate::{
+	bool_linear::{Comparator, PosCoeff},
+	helpers,
 	helpers::{
-		add_clauses_for, as_binary, emit_filtered_clause, negate_cnf, pow2, unsigned_binary_range,
+		add_clauses_for, as_binary, emit_clause, emit_filtered_clause, negate_cnf, new_var, pow2,
+		unsigned_binary_range,
 	},
-	ClauseDatabase, Cnf, Coeff, Lit, Unsatisfiable, Var,
+	integer::{enc::LitOrConst, lex_geq_const, lex_leq_const},
+	log, ClauseDatabase, Cnf, Coeff, Lit, Unsatisfiable, Var,
 };
 
 #[derive(Debug, Clone, Default)]

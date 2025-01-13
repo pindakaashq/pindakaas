@@ -1,12 +1,13 @@
+use itertools::Itertools;
+
 use crate::{
 	bool_linear::{LinMarker, NormalizedBoolLinear},
 	integer::{
-		Consistency, Decompose, Decomposer, Dom, IntVar, Lin, IntVarEncHeuristic, Model, ModelConfig, Term,
+		Consistency, Decompose, Decomposer, Dom, IntVar, IntVarEncHeuristic, Lin, Model,
+		ModelConfig, Term,
 	},
 	ClauseDatabase, Encoder, Result, Unsatisfiable,
 };
-
-use itertools::Itertools;
 
 impl LinMarker for SwcEncoder {}
 

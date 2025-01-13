@@ -21,9 +21,8 @@ pub(crate) fn display_cnf(cnf: &[Vec<Lit>]) -> String {
 
 #[cfg(test)]
 mod tests {
-	use crate::Coeff;
-
 	use super::*;
+	use crate::Coeff;
 
 	// TODO to be used in future with Binary encoding
 	fn nearest_power_of_two(k: Coeff, up: bool) -> Coeff {

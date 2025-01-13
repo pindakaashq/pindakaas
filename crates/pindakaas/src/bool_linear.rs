@@ -1763,6 +1763,7 @@ mod tests {
 	pub(crate) use linear_test_suite;
 	use traced_test::test;
 
+	use super::*;
 	use crate::{
 		cardinality::Cardinality,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
@@ -1770,8 +1771,6 @@ mod tests {
 		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
 		ClauseDatabase, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 	};
-
-	use super::*;
 
 	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(terms: &[(L, Coeff)]) -> Vec<Part> {
 		terms
@@ -2665,6 +2664,5 @@ mod tests {
 	// FIXME: Totalizer does not support LimitComp::Equal
 	// card1_test_suite!(TotalizerEncoder::default());
 	linear_test_suite!(totalizer_encoder, crate::gt::TotalizerEncoder::default());
-	use crate::cardinality::tests::card_test_suite;
-	use crate::cardinality_one::tests::card1_test_suite;
+	use crate::{cardinality::tests::card_test_suite, cardinality_one::tests::card1_test_suite};
 }
