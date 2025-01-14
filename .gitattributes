@@ -1,2 +1,2 @@
-./crates/pindakaas/res/ecm/* binary
-./crates/pindakaas/res/scm/* binary
+crates/pindakaas/res/{ecm,scm} linguist-generated=true
+crates/pindakaas/corpus linguist-generated=true
