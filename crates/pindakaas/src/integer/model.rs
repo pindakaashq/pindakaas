@@ -1299,7 +1299,7 @@ Actual assignments:
 			return vec![FxHashMap::default()];
 		}
 
-		return var_encs
+		var_encs
 			.iter()
 			// .chain((*TEST_CUTOFF).map(|e| IntVarEnc:)
 			.map(|enc| {
@@ -1310,7 +1310,7 @@ Actual assignments:
 					.collect::<FxHashMap<_, _>>()
 			})
 			.filter(|encs| !encs.is_empty())
-			.collect();
+			.collect()
 
 		/*
 		   // TODO Comprehensive mixed encoding testing. Working but disabled for now

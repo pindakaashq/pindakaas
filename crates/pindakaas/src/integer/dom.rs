@@ -227,7 +227,7 @@ pub struct DomIterator<'a> {
 	range: RangeInclusive<Coeff>,
 }
 
-impl<'a> Iterator for DomIterator<'a> {
+impl Iterator for DomIterator<'_> {
 	type Item = Coeff;
 
 	fn next(&mut self) -> Option<Self::Item> {

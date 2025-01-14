@@ -642,7 +642,7 @@ impl Display for Cnf {
 	}
 }
 
-impl<'a> ExactSizeIterator for CnfIterator<'a> {}
+impl ExactSizeIterator for CnfIterator<'_> {}
 
 impl<'a> Iterator for CnfIterator<'a> {
 	type Item = &'a [Lit];
@@ -672,7 +672,7 @@ impl<'a, DB: ClauseDatabase + ?Sized> ConditionalDatabase<'a, DB> {
 	}
 }
 
-impl<'a, DB: ClauseDatabase + ?Sized> ClauseDatabase for ConditionalDatabase<'a, DB> {
+impl<DB: ClauseDatabase + ?Sized> ClauseDatabase for ConditionalDatabase<'_, DB> {
 	type CondDB = DB;
 
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
