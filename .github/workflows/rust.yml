@@ -37,10 +37,10 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest]
     steps:
-      - run: git config core.protectNTFS false
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - run: git config core.protectNTFS false
       - name: Install Rust toolchain
         uses: moonrepo/setup-rust@v0
         with:
