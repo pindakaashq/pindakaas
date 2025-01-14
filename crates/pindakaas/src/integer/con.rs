@@ -832,7 +832,7 @@ mod tests {
 		let _ = m.encode_pub(&mut cnf).unwrap();
 		assert_encoding(
 			&cnf,
-			&expect_file!["integer/con/enc_rec_bdd_style_view.cnf"],
+			&expect_file!["integer/con/bdd.cnf"],
 		);
 	}
 }
