@@ -818,7 +818,7 @@ mod tests {
 		// LOOKAHEAD feature removes redundant x>=2/\y>=3->z>=5 (-1 -2 3), since we have x>=2->x>=0 (tautological) and x>=0/\y>=3->z>=5 (-2 3)
 		let mut cnf = Cnf::default();
 		let _ = m.encode_pub(&mut cnf).unwrap();
-		assert_encoding(&cnf, &expect_file!["integer/con/enc_rec_lookahead.cnf"]);
+		assert_encoding(&cnf, &expect_file!["enc_rec_lookahead.cnf"]);
 	}
 
 	#[test]
