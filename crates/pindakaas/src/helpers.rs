@@ -252,11 +252,13 @@ pub(crate) fn is_unique<I: Iterator<Item = V>, V: Eq + std::hash::Hash>(mut i: I
 pub(crate) mod tests {
 	#[cfg(test)]
 	macro_rules! expect_file {
-		($rel_path:expr) => {
-			expect_test::expect_file!(std::path::PathBuf::from(
-				format!("{}/corpus/{}", env!("CARGO_MANIFEST_DIR"), $rel_path).to_string()
-			))
-		};
+		($rel_path:expr) => {{
+			let p = std::path::PathBuf::from(
+				format!("{}/corpus/{}", env!("CARGO_MANIFEST_DIR"), $rel_path).to_string(),
+			);
+			std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+			expect_test::expect_file!(p)
+		}};
 	}
 
 	use std::fmt::Display;
