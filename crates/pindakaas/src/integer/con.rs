@@ -830,9 +830,6 @@ mod tests {
 		.unwrap();
 		let mut cnf = Cnf::default();
 		let _ = m.encode_pub(&mut cnf).unwrap();
-		assert_encoding(
-			&cnf,
-			&expect_file!["integer/con/bdd.cnf"],
-		);
+		assert_encoding(&cnf, &expect_file!["bdd.cnf"]);
 	}
 }
