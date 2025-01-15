@@ -8,12 +8,13 @@ pub(crate) mod enc;
 pub(crate) mod helpers;
 mod model;
 mod ord;
-mod res;
+mod scm_db;
 mod term;
 pub(crate) mod var;
 
 use std::cmp::max;
 
+pub(crate) use scm_db::SCM;
 pub(crate) use assignment::{Assignment, MapSol};
 pub(crate) use con::{Lin, LinExp};
 pub(crate) use decompose::Decompose;

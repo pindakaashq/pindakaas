@@ -11,7 +11,7 @@ use crate::{
 		enc::LitOrConst,
 		helpers::required_lits,
 		model::{Cse, USE_CHANNEL, USE_CSE},
-		res::SCM,
+		SCM,
 		IntVar, IntVarRef, Lin, LinExp,
 	},
 	log, Coeff, Lit, Unsatisfiable,
