@@ -1,3 +1,5 @@
+use std::ffi::c_void;
+
 use pindakaas_derive::IpasirSolver;
 
 use crate::VarFactory;
@@ -5,7 +7,7 @@ use crate::VarFactory;
 #[derive(Debug, IpasirSolver)]
 #[ipasir(krate = pindakaas_kissat)]
 pub struct Kissat {
-	ptr: *mut std::ffi::c_void,
+	ptr: *mut c_void,
 	vars: VarFactory,
 }
 

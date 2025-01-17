@@ -1,4 +1,4 @@
-use std::{hash, mem, sync::Mutex};
+use std::{cmp::min, hash, mem, sync::Mutex};
 
 use iset::interval_map;
 use itertools::Itertools;
@@ -232,7 +232,7 @@ impl SortedEncoder {
 					db,
 					&xs[..n],
 					cmp,
-					std::cmp::min((0..n).fold(0, |a, _| a + 1), y.ub()),
+					min((0..n).fold(0, |a, _| a + 1), y.ub()),
 					String::from("y1"),
 					_lvl,
 				);
@@ -240,7 +240,7 @@ impl SortedEncoder {
 					db,
 					&xs[n..],
 					cmp,
-					std::cmp::min((n..xs.len()).fold(0, |a, _| a + 1), y.ub()),
+					min((n..xs.len()).fold(0, |a, _| a + 1), y.ub()),
 					String::from("y2"),
 					_lvl,
 				);

@@ -1,7 +1,9 @@
 use std::{
 	cell::RefCell,
+	cmp::{max, min},
 	collections::{BTreeSet, VecDeque},
 	fmt::{self, Display},
+	iter::once,
 	ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign, Range},
 	rc::Rc,
 };
@@ -500,7 +502,7 @@ impl BddEncoder {
 				let interval = views
 					.into_iter()
 					.map(|(v, (interval, _))| (interval.start - v)..(interval.end - v))
-					.reduce(|a, b| std::cmp::max(a.start, b.start)..std::cmp::min(a.end, b.end))
+					.reduce(|a, b| max(a.start, b.start)..min(a.end, b.end))
 					.unwrap();
 
 				let node = if is_gap {
@@ -536,7 +538,7 @@ impl BddEncoder {
 				*state = (state.0 + x.lb(), state.1 + x.ub());
 				Some(*state)
 			})
-			.chain(std::iter::once((0, k)))
+			.chain(once((0, k)))
 			.collect_vec();
 
 		let margins = xs
@@ -553,7 +555,7 @@ impl BddEncoder {
 		let mut ws = margins
 			.into_iter()
 			.rev()
-			.chain(std::iter::once((k, k)))
+			.chain(once((k, k)))
 			.zip(bounds)
 			.map(|((lb_margin, ub_margin), (lb, ub))| {
 				match cmp {
@@ -779,7 +781,7 @@ impl BoolLinAggregator {
 								terms
 									.iter()
 									.map(|(lit, _)| *lit)
-									.chain(std::iter::once(y))
+									.chain(once(y))
 							)
 							.unwrap();
 
@@ -931,10 +933,7 @@ impl BoolLinAggregator {
 						})
 						.collect_vec();
 					// the one or more of the most significant bits have been removed, the upper bound could have dropped to a power of 2 (but not beyond)
-					let u = PosCoeff::new(std::cmp::min(
-						*u,
-						terms.iter().map(|&(_, coef)| *coef).sum(),
-					));
+					let u = PosCoeff::new(min(*u, terms.iter().map(|&(_, coef)| *coef).sum()));
 					Part::Dom(terms, l, u)
 				}
 			})
@@ -1199,7 +1198,7 @@ impl BoolLinExp {
 
 	pub(crate) fn iter(&self) -> impl Iterator<Item = (Option<Constraint>, Vec<&(Lit, Coeff)>)> {
 		let mut it = self.terms.iter();
-		std::iter::once((
+		once((
 			None,
 			Vec::from_iter((0..self.num_free).map(|_| it.next().unwrap())),
 		))
@@ -1765,7 +1764,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for SwcEncoder {
 			.collect_vec();
 		let n = xs.len();
 
-		let ys = std::iter::once(model.new_constant(0))
+		let ys = once(model.new_constant(0))
 			.chain(
 				(1..n)
 					.map(|_| model.new_var((-(*lin.k)..=0).collect(), self.add_consistency))
@@ -1773,7 +1772,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for SwcEncoder {
 			)
 			.collect_vec()
 			.into_iter()
-			.chain(std::iter::once(model.new_constant(-*lin.k)))
+			.chain(once(model.new_constant(-*lin.k)))
 			.map(|y| Rc::new(RefCell::new(y)))
 			.collect_vec();
 
@@ -2110,7 +2109,7 @@ mod tests {
 		};
 	}
 
-	use std::num::NonZeroI32;
+	use std::{cmp::Ordering, num::NonZeroI32};
 
 	use itertools::Itertools;
 	pub(crate) use linear_test_suite;
@@ -2961,23 +2960,23 @@ mod tests {
 	}
 
 	impl PartialOrd for Part {
-		fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 			let termcmp = |a: &Vec<(Lit, PosCoeff)>, b: &Vec<(Lit, PosCoeff)>| {
 				let cmp = a.len().cmp(&b.len());
-				if cmp != std::cmp::Ordering::Equal {
+				if cmp != Ordering::Equal {
 					cmp
 				} else {
 					for (a, b) in a.iter().sorted().zip_eq(other.iter().sorted()) {
 						let cmp = a.0.cmp(&b.0);
-						if cmp != std::cmp::Ordering::Equal {
+						if cmp != Ordering::Equal {
 							return cmp;
 						}
 						let cmp = a.1.cmp(&b.1);
-						if cmp != std::cmp::Ordering::Equal {
+						if cmp != Ordering::Equal {
 							return cmp;
 						}
 					}
-					std::cmp::Ordering::Equal
+					Ordering::Equal
 				}
 			};
 			Some(match self {
@@ -2985,21 +2984,21 @@ mod tests {
 					if let Part::Amo(oterms) = other {
 						termcmp(terms, oterms)
 					} else {
-						std::cmp::Ordering::Less
+						Ordering::Less
 					}
 				}
 				Part::Ic(terms) => {
 					if let Part::Ic(oterms) = other {
 						termcmp(terms, oterms)
 					} else {
-						std::cmp::Ordering::Greater
+						Ordering::Greater
 					}
 				}
 				Part::Dom(terms, _, _) => {
 					if let Part::Dom(oterms, _, _) = other {
 						termcmp(terms, oterms)
 					} else {
-						std::cmp::Ordering::Less
+						Ordering::Less
 					}
 				}
 			})

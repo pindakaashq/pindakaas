@@ -26,10 +26,11 @@ use std::{
 	fs::File,
 	hash::Hash,
 	io::{self, BufRead, BufReader, Write},
-	iter::FusedIterator,
+	iter::{repeat, FusedIterator},
 	num::NonZeroI32,
 	ops::{Bound, Not, RangeBounds, RangeInclusive},
 	path::Path,
+	slice,
 };
 
 use itertools::{traits::HomogeneousTuple, Itertools};
@@ -229,7 +230,7 @@ pub struct Cnf {
 #[derive(Debug, Clone)]
 pub struct CnfIterator<'a> {
 	lits: &'a Vec<Lit>,
-	size: std::slice::Iter<'a, usize>,
+	size: slice::Iter<'a, usize>,
 	index: usize,
 }
 
@@ -935,7 +936,7 @@ impl Display for Wcnf {
 
 impl From<Cnf> for Wcnf {
 	fn from(cnf: Cnf) -> Self {
-		let weights = std::iter::repeat(None).take(cnf.clauses()).collect();
+		let weights = repeat(None).take(cnf.clauses()).collect();
 		Wcnf { cnf, weights }
 	}
 }

@@ -1,4 +1,8 @@
-use std::{fmt::Display, iter::once, ops::Not};
+use std::{
+	fmt::{self, Display, Formatter},
+	iter::once,
+	ops::Not,
+};
 
 use itertools::{Itertools, Position};
 
@@ -182,7 +186,7 @@ impl Formula {
 }
 
 impl Display for Formula {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
 			Formula::Atom(l) => write!(f, "{l}"),
 			Formula::Not(sub) => write!(f, "¬({})", sub),

@@ -1,5 +1,6 @@
 use std::{
 	cell::RefCell,
+	cmp::{max, min},
 	collections::BTreeSet,
 	fmt::{self, Display},
 	iter::once,
@@ -222,7 +223,7 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 		LimitComp::LessEq => {
 			let c = &(0..n)
 				.map(|_i| BoolVal::Lit(new_named_lit!(db, crate::trace::subscripted_name("c", _i))))
-				.chain(std::iter::once(BoolVal::Const(true)))
+				.chain(once(BoolVal::Const(true)))
 				.collect_vec();
 
 			// higher i -> more significant
@@ -515,7 +516,7 @@ impl IntVarBin {
 		let range_lb = 0;
 		let range_ub = unsigned_binary_range_ub(self.lits() as u32);
 
-		let range = std::cmp::max(range_lb - 1, v.start)..std::cmp::min(v.end, range_ub + 1 + 1);
+		let range = max(range_lb - 1, v.start)..min(v.end, range_ub + 1 + 1);
 		range
 			.filter_map(|v| {
 				let v = if geq { v - 1 } else { v + 1 };
@@ -579,10 +580,10 @@ impl IntVarEnc {
 		// enc: &'a mut dyn Encoder<DB, TernLeConstraint<'a, DB, C>>,
 	) -> Result<IntVarEnc> {
 		let comp_lb = self.lb() + y.lb();
-		let lb = std::cmp::max(lb.unwrap_or(comp_lb), comp_lb);
+		let lb = max(lb.unwrap_or(comp_lb), comp_lb);
 
 		let comp_ub = self.ub() + y.ub();
-		let ub = std::cmp::min(ub.unwrap_or(comp_ub), comp_ub);
+		let ub = min(ub.unwrap_or(comp_ub), comp_ub);
 
 		match (self, y) {
 			(IntVarEnc::Const(a), IntVarEnc::Const(b)) => Ok(IntVarEnc::Const(*a + *b)),
@@ -686,7 +687,7 @@ impl IntVarEnc {
 					h.entry(coef).or_default().push(lit);
 				}
 
-				let dom = std::iter::once((0, vec![]))
+				let dom = once((0, vec![]))
 					.chain(h)
 					.sorted_by(|(a, _), (b, _)| a.cmp(b))
 					.tuple_windows()
@@ -708,7 +709,7 @@ impl IntVarEnc {
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
 			Part::Ic(terms) => {
 				let mut acc = 0; // running sum
-				let dom = std::iter::once(&(terms[0].0, PosCoeff::new(0)))
+				let dom = once(&(terms[0].0, PosCoeff::new(0)))
 					.chain(terms.iter())
 					.map(|&(lit, coef)| {
 						acc += *coef;
@@ -910,7 +911,7 @@ impl IntVarOrd {
 	}
 
 	pub(crate) fn dom(&self) -> IntervalSet<Coeff> {
-		std::iter::once(self.lb()..(self.lb() + 1))
+		once(self.lb()..(self.lb() + 1))
 			.chain(self.xs.intervals(..))
 			.collect()
 	}
@@ -982,7 +983,7 @@ impl IntVarOrd {
 	}
 
 	pub(crate) fn geqs(&self) -> Vec<(Range<Coeff>, Vec<Vec<Lit>>)> {
-		std::iter::once((self.lb()..(self.lb() + 1), vec![]))
+		once((self.lb()..(self.lb() + 1), vec![]))
 			.chain(self.xs.iter(..).map(|(v, x)| (v, vec![vec![*x]])))
 			.collect()
 	}
@@ -1009,7 +1010,7 @@ impl IntVarOrd {
 		self.xs
 			.iter(..)
 			.map(|(v, x)| ((v.start - 1)..(v.end - 1), vec![vec![!x]]))
-			.chain(std::iter::once((self.ub()..self.ub() + 1, vec![])))
+			.chain(once((self.ub()..self.ub() + 1, vec![])))
 			.collect()
 	}
 
@@ -1584,8 +1585,8 @@ impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for TernLeEncoder {
 				for (c_a, x_geq_c_a) in x.geqs() {
 					for (c_b, y_geq_c_b) in y.geqs() {
 						// TODO is the max actually correct/good?
-						let c_c = (std::cmp::max(c_a.start, c_b.start))
-							..(((c_a.end - 1) + (c_b.end - 1)) + 1);
+						let c_c =
+							(max(c_a.start, c_b.start))..(((c_a.end - 1) + (c_b.end - 1)) + 1);
 
 						let z_geq_c_c = z.geq(c_c.clone());
 
