@@ -13,7 +13,7 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 use crate::{
 	cardinality::Cardinality,
 	cardinality_one::{CardinalityOne, PairwiseEncoder},
-	helpers::{as_binary, is_powers_of_two, new_var},
+	helpers::{as_binary, is_powers_of_two, new_named_lit},
 	integer::{
 		lex_leq_const, Consistency, IntVar, IntVarEnc, IntVarOrd, Lin, Model, GROUND_BINARY_AT_LB,
 	},
@@ -398,7 +398,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 							Self::sum_circuit(db, lits.as_slice(), BoolVal::Const(k[b]))?;
 						} else if lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
 							// Literal is not used for the less-than constraint unless a zero has been seen first
-							let sum = new_var!(
+							let sum = new_named_lit!(
 								db,
 								if last {
 									crate::trace::subscripted_name("∑", b)
@@ -427,7 +427,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 							// Mark k[b + 1] as false (otherwise next step will fail)
 							k[b + 1] = false;
 						} else {
-							let carry = new_var!(
+							let carry = new_named_lit!(
 								db,
 								if last {
 									crate::trace::subscripted_name("c", b)
@@ -772,7 +772,7 @@ impl BoolLinAggregator {
 							let q = -*min_coef;
 
 							// add aux var y and constrain y <-> ( ~x1 /\ ~x2 /\ .. )
-							let y = new_var!(db);
+							let y = db.new_lit();
 
 							// ~x1 /\ ~x2 /\ .. -> y == x1 \/ x2 \/ .. \/ y
 							db.add_clause(

@@ -52,35 +52,29 @@ macro_rules! maybe_std_concat {
 		$e
 	};
 }
+
 #[cfg(not(any(feature = "tracing", test)))]
-macro_rules! new_var {
-	($db:expr) => {
-		$crate::Lit::from($crate::ClauseDatabaseTools::new_var($db))
-	};
+/// Helper marco to create a new named literal within the library independent of
+/// whether `tracing` is enabled.
+macro_rules! new_named_lit {
 	($db:expr, $lbl:expr) => {
-		$crate::Lit::from($crate::ClauseDatabaseTools::new_var($db))
+		$crate::ClauseDatabaseTools::new_lit($db)
 	};
 }
 
-/// Helper marco to create a new variable within an Encoder
 #[cfg(any(feature = "tracing", test))]
-macro_rules! new_var {
-	($db:expr) => {{
-		let var = $crate::ClauseDatabaseTools::new_var($db);
-		tracing::info!(var = ?var, "new variable");
-		$crate::Lit::from(var)
-	}};
+/// Helper marco to create a new named literal within the library independent of
+/// whether `tracing` is enabled.
+macro_rules! new_named_lit {
 	($db:expr, $lbl:expr) => {{
-		let var = $crate::ClauseDatabaseTools::new_var($db);
-		tracing::info!(var = ?var, label = $lbl, "new variable");
-		$crate::Lit::from(var)
+		$crate::ClauseDatabaseTools::new_named_lit($db, &$lbl)
 	}};
 }
 
 use std::collections::HashSet;
 
 use itertools::Itertools;
-pub(crate) use new_var;
+pub(crate) use new_named_lit;
 #[cfg(feature = "splr")]
 pub(crate) use {concat_slices, const_concat, maybe_std_concat};
 

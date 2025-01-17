@@ -2,6 +2,7 @@ use std::{
 	cell::RefCell,
 	collections::BTreeSet,
 	fmt::{self, Display},
+	iter::once,
 	ops::Range,
 	rc::Rc,
 };
@@ -13,7 +14,8 @@ use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use crate::{
 	bool_linear::{BoolLinExp, LimitComp, Part, PosCoeff},
 	helpers::{
-		add_clauses_for, as_binary, is_powers_of_two, negate_cnf, new_var, unsigned_binary_range_ub,
+		add_clauses_for, as_binary, is_powers_of_two, negate_cnf, new_named_lit,
+		unsigned_binary_range_ub,
 	},
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
 	Unsatisfiable, Valuation,
@@ -190,12 +192,11 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 
 	match cmp {
 		LimitComp::Equal => {
-			let c =
-				&std::iter::once(BoolVal::Const(false))
-					.chain((1..n).map(|_i| {
-						BoolVal::Lit(new_var!(db, crate::trace::subscripted_name("c", _i)))
-					}))
-					.collect_vec();
+			let c = &once(BoolVal::Const(false))
+				.chain((1..n).map(|_i| {
+					BoolVal::Lit(new_named_lit!(db, crate::trace::subscripted_name("c", _i)))
+				}))
+				.collect_vec();
 			for i in 0..n {
 				// sum circuit
 				db.add_clause([bit(x, i), bit(y, i), bit(c, i), !bit(z, i)])?;
@@ -220,7 +221,7 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 		}
 		LimitComp::LessEq => {
 			let c = &(0..n)
-				.map(|_i| BoolVal::Lit(new_var!(db, crate::trace::subscripted_name("c", _i))))
+				.map(|_i| BoolVal::Lit(new_named_lit!(db, crate::trace::subscripted_name("c", _i))))
 				.chain(std::iter::once(BoolVal::Const(true)))
 				.collect_vec();
 
@@ -475,7 +476,7 @@ impl IntVarBin {
 	) -> Self {
 		Self {
 			xs: (0..IntVar::required_bits(lb, ub))
-				.map(|_i| new_var!(db, format!("{}^{}", lbl, _i)))
+				.map(|_i| new_named_lit!(db, format!("{}^{}", lbl, _i)))
 				.collect(),
 			lb,
 			ub,
@@ -694,7 +695,7 @@ impl IntVarEnc {
 						if lits.len() == 1 {
 							(interval, Some(lits[0]))
 						} else {
-							let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
+							let o = new_named_lit!(db, format!("y_{:?}>={:?}", lits, coef));
 							for lit in lits {
 								db.add_clause([!lit, o]).unwrap();
 							}
@@ -960,7 +961,7 @@ impl IntVarOrd {
 			.map(|(v, lit)| {
 				#[cfg(any(feature = "tracing", test))]
 				let lbl = format!("{lbl}>={}..{}", v.start, v.end - 1);
-				(v, lit.unwrap_or_else(|| new_var!(db, lbl)))
+				(v, lit.unwrap_or_else(|| new_named_lit!(db, lbl)))
 			})
 			.collect::<IntervalMap<_, _>>();
 		Self { xs, lbl }

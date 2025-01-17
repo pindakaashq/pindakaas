@@ -2,7 +2,6 @@ use itertools::Itertools;
 
 use crate::{
 	bool_linear::{LimitComp, NormalizedBoolLinear},
-	helpers::new_var,
 	Checker, ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result, Valuation,
 };
 
@@ -50,7 +49,7 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 		}
 
 		// Create a log encoded selection variable
-		let signals = (0..bits).map(|_| new_var!(db)).collect_vec();
+		let signals = (0..bits).map(|_| db.new_lit()).collect_vec();
 
 		// Enforce that literal can only be true when selected
 		for (i, lit) in card1.lits.iter().enumerate() {
@@ -95,12 +94,12 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for LadderEncoder {
 )]
 	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
 		// TODO could be slightly optimised to not introduce fixed lits
-		let mut a = new_var!(db); // y_v-1
+		let mut a = db.new_lit(); // y_v-1
 		if card1.cmp == LimitComp::Equal {
 			db.add_clause([a])?;
 		}
 		for x in card1.lits.iter() {
-			let b = new_var!(db); // y_v
+			let b = db.new_lit(); // y_v
 			db.add_clause([!b, a])?; // y_v -> y_v-1
 
 			// "Channelling" clauses for x_v <-> (y_v-1 /\ ¬y_v)

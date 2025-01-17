@@ -126,7 +126,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 	///
 	/// # Example
 	/// ```
-	/// # use pindakaas::{ClauseDatabase, Cnf};
+	/// # use pindakaas::{ClauseDatabaseTools, Cnf};
 	/// # let mut db = Cnf::default();
 	/// let (a, b, c) = db.new_lits();
 	/// ```
@@ -136,6 +136,24 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 	{
 		let range = self.new_var_range(T::num_items());
 		range.map(Lit::from).collect_tuple().unwrap()
+	}
+
+	#[cfg(any(feature = "tracing", test))]
+	#[inline]
+	/// Create a new Boolean variable in the form of a positive literal. The given
+	/// name is used when the variable is output by the tracer.
+	fn new_named_lit(&mut self, name: &str) -> Lit {
+		self.new_named_var(name).into()
+	}
+
+	#[cfg(any(feature = "tracing", test))]
+	#[inline]
+	/// Create a new Boolean variable that can be used in the encoding of a
+	/// problem. The given name is used when the variable is output by the tracer.
+	fn new_named_var(&mut self, name: &str) -> Var {
+		let var = self.new_var();
+		tracing::info!(var = ?i32::from(var), label = name, "new variable");
+		var
 	}
 
 	/// Create a new Boolean variable that can be used in the encoding of a problem
@@ -150,7 +168,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 	///
 	/// # Example
 	/// ```
-	/// # use pindakaas::{ClauseDatabase, Cnf};
+	/// # use pindakaas::{ClauseDatabaseTools, Cnf};
 	/// # let mut db = Cnf::default();
 	/// let (a, b, c) = db.new_vars();
 	/// ```
