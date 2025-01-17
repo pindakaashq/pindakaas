@@ -631,7 +631,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
 
 		let mut ys = ys.into_iter();
 		let first = ys.next().unwrap();
-		assert!(first.as_ref().borrow().size() == 1);
+		assert_eq!(first.as_ref().borrow().size(), 1);
 		let _ = xs.iter().zip(ys).fold(first, |curr, (x_i, next)| {
 			model.cons.push(Lin::tern(
 				curr,
