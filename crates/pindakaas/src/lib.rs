@@ -97,7 +97,14 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 			})
 			.collect();
 		match result {
-			Ok(clause) => self.add_clause_from_slice(&clause),
+			Ok(clause) => {
+				let result = self.add_clause_from_slice(&clause);
+				#[cfg(any(feature = "tracing", test))]
+				{
+					tracing::info!(clause = ?&clause, fail = result.is_err(), "emit clause");
+				}
+				result
+			}
 			// Collecting revealed the clause was already satisfied
 			Err(()) => Ok(()),
 		}

@@ -2,8 +2,8 @@ use itertools::Itertools;
 
 use crate::{
 	bool_linear::{LimitComp, NormalizedBoolLinear},
-	helpers::{emit_clause, new_var},
-	Checker, ClauseDatabase, Encoder, Lit, Result, Valuation,
+	helpers::new_var,
+	Checker, ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result, Valuation,
 };
 
 /// An encoder for [`CardinalityOne`] constraints that uses a logarithm
@@ -32,7 +32,7 @@ pub(crate) fn at_least_one_clause<DB: ClauseDatabase>(
 	card1: &CardinalityOne,
 ) -> Result {
 	debug_assert_eq!(card1.cmp, LimitComp::Equal);
-	emit_clause!(db, card1.lits.iter().copied())
+	db.add_clause(card1.lits.iter().copied())
 }
 
 impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
@@ -56,9 +56,9 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 		for (i, lit) in card1.lits.iter().enumerate() {
 			for (j, sig) in signals.iter().enumerate() {
 				if i & (1 << j) != 0 {
-					emit_clause!(db, [!lit, *sig])?;
+					db.add_clause([!lit, *sig])?;
 				} else {
-					emit_clause!(db, [!lit, !sig])?;
+					db.add_clause([!lit, !sig])?;
 				}
 			}
 		}
@@ -97,20 +97,20 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for LadderEncoder {
 		// TODO could be slightly optimised to not introduce fixed lits
 		let mut a = new_var!(db); // y_v-1
 		if card1.cmp == LimitComp::Equal {
-			emit_clause!(db, [a])?;
+			db.add_clause([a])?;
 		}
 		for x in card1.lits.iter() {
 			let b = new_var!(db); // y_v
-			emit_clause!(db, [!b, a])?; // y_v -> y_v-1
+			db.add_clause([!b, a])?; // y_v -> y_v-1
 
 			// "Channelling" clauses for x_v <-> (y_v-1 /\ ¬y_v)
-			emit_clause!(db, [!x, a])?; // x_v -> y_v-1
-			emit_clause!(db, [!x, !b])?; // x_v -> ¬y_v
-			emit_clause!(db, [!a, b, *x])?; // (y_v-1 /\ ¬y_v) -> x=v
+			db.add_clause([!x, a])?; // x_v -> y_v-1
+			db.add_clause([!x, !b])?; // x_v -> ¬y_v
+			db.add_clause([!a, b, *x])?; // (y_v-1 /\ ¬y_v) -> x=v
 			a = b;
 		}
 		if card1.cmp == LimitComp::Equal {
-			emit_clause!(db, [!a])?;
+			db.add_clause([!a])?;
 		}
 		Ok(())
 	}
@@ -128,7 +128,7 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for PairwiseEncoder {
 		}
 		// For every pair of literals (i, j) add "¬i ∨ ¬j"
 		for (a, b) in card1.lits.iter().tuple_combinations() {
-			emit_clause!(db, [!a, !b])?;
+			db.add_clause([!a, !b])?;
 		}
 		Ok(())
 	}

@@ -42,37 +42,6 @@ macro_rules! const_concat {
 			unsafe { std::str::from_utf8_unchecked(slice) }
 	}};
 }
-#[cfg(not(any(feature = "tracing", test)))]
-macro_rules! emit_clause {
-	($db:expr, $clause:expr) => {
-		$crate::ClauseDatabaseTools::add_clause($db, $clause)
-	};
-}
-
-/// Helper marco to emit a clause from within an encoder
-#[cfg(any(feature = "tracing", test))]
-macro_rules! emit_clause {
-	($db:expr, $clause:expr) => {{
-		let result: std::result::Result<std::vec::Vec<_>, ()> = $clause
-			.into_iter()
-			.filter_map(|v| match v.into() {
-				$crate::BoolVal::Const(false) => None,         // Irrelevant literal
-				$crate::BoolVal::Const(true) => Some(Err(())), // Clause is already satisfied
-				$crate::BoolVal::Lit(lit) => Some(Ok(lit)),    // Add literal to clause
-			})
-			.collect();
-		match result {
-			Ok(clause) => {
-				let clause: std::vec::Vec<_> = clause; // TODO: Somehow the type is otherwise not inferred correctly
-				let result = $crate::ClauseDatabase::add_clause_from_slice($db, &clause);
-				tracing::info!(clause = ?&clause, fail = matches!(result, Err($crate::Unsatisfiable)), "emit clause");
-				result
-			}
-			// Collecting revealed the clause was already satisfied
-			Err(()) => Ok(()),
-		}
-	}};
-}
 
 #[cfg(feature = "splr")]
 macro_rules! maybe_std_concat {
@@ -110,13 +79,14 @@ macro_rules! new_var {
 
 use std::collections::HashSet;
 
-pub(crate) use emit_clause;
 use itertools::Itertools;
 pub(crate) use new_var;
 #[cfg(feature = "splr")]
 pub(crate) use {concat_slices, const_concat, maybe_std_concat};
 
-use crate::{bool_linear::PosCoeff, integer::IntVar, ClauseDatabase, Coeff, Lit, Result};
+use crate::{
+	bool_linear::PosCoeff, integer::IntVar, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result,
+};
 
 const FILTER_TRIVIAL_CLAUSES: bool = false;
 
@@ -148,7 +118,7 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 				continue;
 			}
 		}
-		emit_clause!(db, cls)?;
+		db.add_clause(cls)?;
 	}
 	Ok(())
 }

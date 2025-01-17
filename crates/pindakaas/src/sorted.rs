@@ -6,9 +6,10 @@ use rustc_hash::FxHashMap;
 
 use crate::{
 	bool_linear::{BoolLinExp, LimitComp},
-	helpers::{add_clauses_for, emit_clause, negate_cnf},
+	helpers::{add_clauses_for, negate_cnf},
 	integer::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
-	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
+	Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
+	Valuation,
 };
 
 type SortedCache = FxHashMap<(u128, u128, u128), (SortedStrategy, (u128, u128))>;
@@ -202,11 +203,10 @@ impl SortedEncoder {
 					.map(|x| x.geq(1..2)[0][0])
 					.combinations(k as usize)
 					.try_for_each(|lits| {
-						emit_clause!(
-							db,
+						db.add_clause(
 							lits.into_iter()
 								.map(|lit| !lit)
-								.chain(y.geq(k..(k + 1))[0].iter().cloned())
+								.chain(y.geq(k..(k + 1))[0].iter().cloned()),
 						)
 					})
 			});

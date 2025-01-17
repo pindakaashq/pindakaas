@@ -13,10 +13,10 @@ use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use crate::{
 	bool_linear::{BoolLinExp, LimitComp, Part, PosCoeff},
 	helpers::{
-		add_clauses_for, as_binary, emit_clause, is_powers_of_two, negate_cnf, new_var,
-		unsigned_binary_range_ub,
+		add_clauses_for, as_binary, is_powers_of_two, negate_cnf, new_var, unsigned_binary_range_ub,
 	},
-	BoolVal, Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
+	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
+	Unsatisfiable, Valuation,
 };
 
 const COUPLE_DOM_PART_TO_ORD: bool = false;
@@ -123,10 +123,7 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase>(
 	let k = as_binary(k, Some(bits as u32));
 	for i in 0..bits {
 		if k[i] && x[i].is_some() {
-			emit_clause!(
-				db,
-				(i..bits).filter_map(|j| if j == i || !k[j] { x[j] } else { None })
-			)?;
+			db.add_clause((i..bits).filter_map(|j| if j == i || !k[j] { x[j] } else { None }))?;
 		}
 	}
 	Ok(())
@@ -149,11 +146,10 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase>(
 	// - a higher `x` bit is zero that was one in k.
 	for i in 0..bits {
 		if !k[i] && x[i].is_some() {
-			emit_clause!(
-				db,
+			db.add_clause(
 				(i..bits)
 					.filter_map(|j| if j == i || k[j] { x[j] } else { None })
-					.map(|lit| !lit)
+					.map(|lit| !lit),
 			)?;
 		}
 	}
@@ -190,7 +186,7 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 	let n = itertools::max([x.len(), y.len(), z.len()]).unwrap();
 
 	let bit =
-		|x: &[BoolVal], i: usize| -> BoolVal { x.get(i).unwrap_or(&BoolVal::Const(false)).clone() };
+		|x: &[BoolVal], i: usize| -> BoolVal { x.get(i).copied().unwrap_or(BoolVal::Const(false)) };
 
 	match cmp {
 		LimitComp::Equal => {
@@ -202,23 +198,23 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 					.collect_vec();
 			for i in 0..n {
 				// sum circuit
-				emit_clause!(db, [bit(x, i), bit(y, i), bit(c, i), !bit(z, i)])?;
-				emit_clause!(db, [bit(x, i), !bit(y, i), !bit(c, i), !bit(z, i)])?;
-				emit_clause!(db, [!bit(x, i), bit(y, i), !bit(c, i), !bit(z, i)])?;
-				emit_clause!(db, [!bit(x, i), !bit(y, i), bit(c, i), !bit(z, i)])?;
+				db.add_clause([bit(x, i), bit(y, i), bit(c, i), !bit(z, i)])?;
+				db.add_clause([bit(x, i), !bit(y, i), !bit(c, i), !bit(z, i)])?;
+				db.add_clause([!bit(x, i), bit(y, i), !bit(c, i), !bit(z, i)])?;
+				db.add_clause([!bit(x, i), !bit(y, i), bit(c, i), !bit(z, i)])?;
 
-				emit_clause!(db, [!bit(x, i), !bit(y, i), !bit(c, i), bit(z, i)])?;
-				emit_clause!(db, [!bit(x, i), bit(y, i), bit(c, i), bit(z, i)])?;
-				emit_clause!(db, [bit(x, i), !bit(y, i), bit(c, i), bit(z, i)])?;
-				emit_clause!(db, [bit(x, i), bit(y, i), !bit(c, i), bit(z, i)])?;
+				db.add_clause([!bit(x, i), !bit(y, i), !bit(c, i), bit(z, i)])?;
+				db.add_clause([!bit(x, i), bit(y, i), bit(c, i), bit(z, i)])?;
+				db.add_clause([bit(x, i), !bit(y, i), bit(c, i), bit(z, i)])?;
+				db.add_clause([bit(x, i), bit(y, i), !bit(c, i), bit(z, i)])?;
 
 				// carry circuit
-				emit_clause!(db, [bit(x, i), bit(y, i), !bit(c, i + 1)])?;
-				emit_clause!(db, [bit(x, i), bit(c, i), !bit(c, i + 1)])?;
-				emit_clause!(db, [bit(y, i), bit(c, i), !bit(c, i + 1)])?;
-				emit_clause!(db, [!bit(x, i), !bit(y, i), bit(c, i + 1)])?;
-				emit_clause!(db, [!bit(x, i), !bit(c, i), bit(c, i + 1)])?;
-				emit_clause!(db, [!bit(y, i), !bit(c, i), bit(c, i + 1)])?;
+				db.add_clause([bit(x, i), bit(y, i), !bit(c, i + 1)])?;
+				db.add_clause([bit(x, i), bit(c, i), !bit(c, i + 1)])?;
+				db.add_clause([bit(y, i), bit(c, i), !bit(c, i + 1)])?;
+				db.add_clause([!bit(x, i), !bit(y, i), bit(c, i + 1)])?;
+				db.add_clause([!bit(x, i), !bit(c, i), bit(c, i + 1)])?;
+				db.add_clause([!bit(y, i), !bit(c, i), bit(c, i + 1)])?;
 			}
 			Ok(())
 		}
@@ -232,20 +228,20 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 			for i in 0..n {
 				// c = all more significant bits are equal AND current one is
 				// if up to i is equal, all preceding must be equal
-				emit_clause!(db, [!bit(c, i), bit(c, i + 1)])?;
+				db.add_clause([!bit(c, i), bit(c, i + 1)])?;
 				// if up to i is equal, x<->z
-				emit_clause!(db, [!bit(c, i), !bit(x, i), bit(z, i)])?;
-				emit_clause!(db, [!bit(c, i), !bit(z, i), bit(x, i)])?;
+				db.add_clause([!bit(c, i), !bit(x, i), bit(z, i)])?;
+				db.add_clause([!bit(c, i), !bit(z, i), bit(x, i)])?;
 
 				// if not up to i is equal, either preceding bit was not equal, or x!=z
-				emit_clause!(db, [bit(c, i), !bit(c, i + 1), bit(x, i), bit(z, i)])?;
-				emit_clause!(db, [bit(c, i), !bit(c, i + 1), !bit(x, i), !bit(z, i)])?;
+				db.add_clause([bit(c, i), !bit(c, i + 1), bit(x, i), bit(z, i)])?;
+				db.add_clause([bit(c, i), !bit(c, i + 1), !bit(x, i), !bit(z, i)])?;
 
 				// if preceding bits are equal, then x<=z
-				emit_clause!(db, [!bit(c, i + 1), !bit(x, i), bit(z, i)])?;
+				db.add_clause([!bit(c, i + 1), !bit(x, i), bit(z, i)])?;
 			}
 
-			emit_clause!(db, [!bit(x, n - 1), bit(z, n - 1)])?;
+			db.add_clause([!bit(x, n - 1), bit(z, n - 1)])?;
 
 			Ok(())
 		}
@@ -293,7 +289,7 @@ impl ImplicationChainEncoder {
 		ic: &ImplicationChainConstraint,
 	) -> Result {
 		for (a, b) in ic.lits.iter().copied().tuple_windows() {
-			emit_clause!(db, [!b, a])?;
+			db.add_clause([!b, a])?;
 		}
 		Ok(())
 	}
@@ -700,7 +696,7 @@ impl IntVarEnc {
 						} else {
 							let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
 							for lit in lits {
-								emit_clause!(db, [!lit, o]).unwrap();
+								db.add_clause([!lit, o]).unwrap();
 							}
 							(interval, Some(o))
 						}
@@ -1464,7 +1460,7 @@ impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for TernLeEncoder {
 					LimitComp::Equal => as_binary(rhs, Some(x_bin.lits() as u32))
 						.into_iter()
 						.zip(x_bin.xs.iter().copied())
-						.try_for_each(|(b, x)| emit_clause!(db, [if b { x } else { !x }])),
+						.try_for_each(|(b, x)| db.add_clause([if b { x } else { !x }])),
 				}
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y_const), IntVarEnc::Bin(z_bin))

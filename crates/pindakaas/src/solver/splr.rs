@@ -7,7 +7,7 @@ use splr::{Certificate, SatSolverIF, SolveIF, VERSION};
 use crate::{
 	helpers::const_concat,
 	solver::{SolveResult, Solver},
-	ClauseDatabase, Cnf, Lit, Result, Valuation, Var, VarRange,
+	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit, Result, Valuation, Var, VarRange,
 };
 
 impl Valuation for Certificate {
@@ -78,7 +78,7 @@ impl From<&Cnf> for Splr {
 		);
 		for cl in cnf.iter() {
 			// Ignore early detected unsatisfiability
-			let _ = ClauseDatabase::add_clause_from_slice(&mut slv, cl);
+			let _ = ClauseDatabaseTools::add_clause(&mut slv, cl.iter().copied());
 		}
 		slv
 	}

@@ -13,14 +13,14 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 use crate::{
 	cardinality::Cardinality,
 	cardinality_one::{CardinalityOne, PairwiseEncoder},
-	helpers::{as_binary, emit_clause, is_powers_of_two, new_var},
+	helpers::{as_binary, is_powers_of_two, new_var},
 	integer::{
 		lex_leq_const, Consistency, IntVar, IntVarEnc, IntVarOrd, Lin, Model, GROUND_BINARY_AT_LB,
 	},
 	propositional_logic::{Formula, TseitinEncoder},
 	sorted::{Sorted, SortedEncoder},
-	BoolVal, Checker, ClauseDatabase, Coeff, Encoder, IntEncoding, Lit, Result, Unsatisfiable,
-	Valuation,
+	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, IntEncoding, Lit,
+	Result, Unsatisfiable, Valuation,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -222,18 +222,18 @@ impl AdderEncoder {
 		match output {
 			BoolVal::Lit(carry) => match *input {
 				[a, b] => {
-					emit_clause!(db, [!a, !b, carry])?;
-					emit_clause!(db, [a, !carry])?;
-					emit_clause!(db, [b, !carry])
+					db.add_clause([!a, !b, carry])?;
+					db.add_clause([a, !carry])?;
+					db.add_clause([b, !carry])
 				}
 				[a, b, c] => {
-					emit_clause!(db, [a, b, !carry])?;
-					emit_clause!(db, [a, c, !carry])?;
-					emit_clause!(db, [b, c, !carry])?;
+					db.add_clause([a, b, !carry])?;
+					db.add_clause([a, c, !carry])?;
+					db.add_clause([b, c, !carry])?;
 
-					emit_clause!(db, [!a, !b, carry])?;
-					emit_clause!(db, [!a, !c, carry])?;
-					emit_clause!(db, [!b, !c, carry])
+					db.add_clause([!a, !b, carry])?;
+					db.add_clause([!a, !c, carry])?;
+					db.add_clause([!b, !c, carry])
 				}
 				_ => unreachable!(),
 			},
@@ -241,17 +241,17 @@ impl AdderEncoder {
 				[a, b] => {
 					if k {
 						// TODO: Can we avoid this?
-						emit_clause!(db, [a])?;
-						emit_clause!(db, [b])
+						db.add_clause([a])?;
+						db.add_clause([b])
 					} else {
-						emit_clause!(db, [!a, !b])
+						db.add_clause([!a, !b])
 					}
 				}
 				[a, b, c] => {
 					let neg = |x: Lit| if k { x } else { !x };
-					emit_clause!(db, [neg(a), neg(b)])?;
-					emit_clause!(db, [neg(a), neg(c)])?;
-					emit_clause!(db, [neg(b), neg(c)])
+					db.add_clause([neg(a), neg(b)])?;
+					db.add_clause([neg(a), neg(c)])?;
+					db.add_clause([neg(b), neg(c)])
 				}
 				_ => unreachable!(),
 			},
@@ -269,21 +269,21 @@ impl AdderEncoder {
 		match output {
 			BoolVal::Lit(sum) => match *input {
 				[a, b] => {
-					emit_clause!(db, [!a, !b, !sum])?;
-					emit_clause!(db, [!a, b, sum])?;
-					emit_clause!(db, [a, !b, sum])?;
-					emit_clause!(db, [a, b, !sum])
+					db.add_clause([!a, !b, !sum])?;
+					db.add_clause([!a, b, sum])?;
+					db.add_clause([a, !b, sum])?;
+					db.add_clause([a, b, !sum])
 				}
 				[a, b, c] => {
-					emit_clause!(db, [a, b, c, !sum])?;
-					emit_clause!(db, [a, !b, !c, !sum])?;
-					emit_clause!(db, [!a, b, !c, !sum])?;
-					emit_clause!(db, [!a, !b, c, !sum])?;
+					db.add_clause([a, b, c, !sum])?;
+					db.add_clause([a, !b, !c, !sum])?;
+					db.add_clause([!a, b, !c, !sum])?;
+					db.add_clause([!a, !b, c, !sum])?;
 
-					emit_clause!(db, [!a, !b, !c, sum])?;
-					emit_clause!(db, [!a, b, c, sum])?;
-					emit_clause!(db, [a, !b, c, sum])?;
-					emit_clause!(db, [a, b, !c, sum])
+					db.add_clause([!a, !b, !c, sum])?;
+					db.add_clause([!a, b, c, sum])?;
+					db.add_clause([a, !b, c, sum])?;
+					db.add_clause([a, b, !c, sum])
 				}
 				_ => unreachable!(),
 			},
@@ -293,14 +293,14 @@ impl AdderEncoder {
 			}
 			BoolVal::Const(false) => match *input {
 				[a, b] => {
-					emit_clause!(db, [a, !b])?;
-					emit_clause!(db, [!a, b])
+					db.add_clause([a, !b])?;
+					db.add_clause([!a, b])
 				}
 				[a, b, c] => {
-					emit_clause!(db, [!a, !b, !c])?;
-					emit_clause!(db, [!a, b, c])?;
-					emit_clause!(db, [a, !b, c])?;
-					emit_clause!(db, [a, b, !c])
+					db.add_clause([!a, !b, !c])?;
+					db.add_clause([!a, b, c])?;
+					db.add_clause([a, !b, c])?;
+					db.add_clause([a, b, !c])
 				}
 				_ => unreachable!(),
 			},
@@ -376,7 +376,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 				1 => {
 					let x = bucket[b].pop().unwrap();
 					if lin.cmp == LimitComp::Equal {
-						emit_clause!(db, [if k[b] { x } else { !x }])?;
+						db.add_clause([if k[b] { x } else { !x }])?;
 					} else {
 						sum[b] = Some(x);
 					}
@@ -775,8 +775,7 @@ impl BoolLinAggregator {
 							let y = new_var!(db);
 
 							// ~x1 /\ ~x2 /\ .. -> y == x1 \/ x2 \/ .. \/ y
-							emit_clause!(
-								db,
+							db.add_clause(
 								terms
 									.iter()
 									.map(|(lit, _)| *lit)
@@ -786,7 +785,7 @@ impl BoolLinAggregator {
 
 														// y -> ( ~x1 /\ ~x2 /\ .. ) == ~y \/ ~x1, ~y \/ ~x2, ..
 							for lit in terms.iter().map(|tup| tup.0) {
-								emit_clause!(db, [!y, !lit]).unwrap();
+								db.add_clause( [!y, !lit]).unwrap();
 							}
 
 							// this term will cancel out later when we add q*min_lit to the LHS
@@ -876,7 +875,7 @@ impl BoolLinAggregator {
 		if k == 0 {
 			for part in partition {
 				for (lit, _) in part.iter() {
-					emit_clause!(db, [!lit])?;
+					db.add_clause([!lit])?;
 				}
 			}
 			return Ok(BoolLinVariant::Trivial);
@@ -892,7 +891,7 @@ impl BoolLinAggregator {
 						.into_iter()
 						.filter(|(lit, coef)| {
 							if coef > &k {
-								emit_clause!(db, [!lit]).unwrap();
+								db.add_clause([!lit]).unwrap();
 								false
 							} else {
 								true
@@ -909,7 +908,7 @@ impl BoolLinAggregator {
 							.filter(|&(lit, coef)| {
 								acc += *coef;
 								if acc > *k {
-									emit_clause!(db, [!lit]).unwrap();
+									db.add_clause([!lit]).unwrap();
 									false
 								} else {
 									true
@@ -924,7 +923,7 @@ impl BoolLinAggregator {
 						.into_iter()
 						.filter(|(lit, coef)| {
 							if coef > &k {
-								emit_clause!(db, [!lit]).unwrap();
+								db.add_clause([!lit]).unwrap();
 								false
 							} else {
 								true
@@ -964,13 +963,12 @@ impl BoolLinAggregator {
 
 				// If we have only 2 (unassigned) lits, which together (but not individually) exceed k, then -x1\/-x2
 				if partition.iter().flat_map(|part| part.iter()).count() == 2 {
-					emit_clause!(
-						db,
+					db.add_clause(
 						partition
 							.iter()
 							.flat_map(|part| part.iter())
 							.map(|(lit, _)| !lit)
-							.collect_vec()
+							.collect_vec(),
 					)?;
 					return Ok(BoolLinVariant::Trivial);
 				}
@@ -983,14 +981,15 @@ impl BoolLinAggregator {
 					for part in partition {
 						match part {
 							Part::Amo(terms) => {
-								emit_clause!(
-									db,
-									[terms.iter().max_by(|(_, a), (_, b)| a.cmp(b)).unwrap().0]
-								)?;
+								db.add_clause([terms
+									.iter()
+									.max_by(|(_, a), (_, b)| a.cmp(b))
+									.unwrap()
+									.0])?;
 							}
 							Part::Ic(terms) | Part::Dom(terms, _, _) => {
 								for (lit, _) in terms {
-									emit_clause!(db, [lit])?;
+									db.add_clause([lit])?;
 								}
 							}
 						};
@@ -1045,7 +1044,7 @@ impl BoolLinAggregator {
 			// Ex. at most 2 out of 3 true = at least 1 out of 3 false
 			if partition.len() == (*k + 1) as usize {
 				let neg = partition.iter().map(|l| !l);
-				emit_clause!(db, neg.clone())?;
+				db.add_clause(neg.clone())?;
 
 				if cmp == LimitComp::LessEq {
 					return Ok(BoolLinVariant::Trivial);

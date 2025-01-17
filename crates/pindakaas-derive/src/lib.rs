@@ -322,7 +322,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					let mut slv: #ident = Default::default();
 					slv. #var_member = value.nvar;
 					for cl in value.iter() {
-						let _ = crate::ClauseDatabase::add_clause_from_slice(&mut slv, cl);
+						// Ignore early detected unsatisfiability
+						let _ = crate::ClauseDatabaseTools::add_clause(&mut slv, cl.iter().copied());
 					}
 					slv
 				}
