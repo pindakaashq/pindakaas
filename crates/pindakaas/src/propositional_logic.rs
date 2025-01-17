@@ -2,7 +2,7 @@ use std::{fmt::Display, iter::once, ops::Not};
 
 use itertools::{Itertools, Position};
 
-use crate::{ClauseDatabase, Cnf, Encoder, Lit, Result, Unsatisfiable};
+use crate::{ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Result, Unsatisfiable};
 
 /// A propositional logic formula
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,7 +34,7 @@ pub struct TseitinEncoder;
 
 impl Formula {
 	/// Helper function to bind the (sub) formula to a name (literal) for the tseitin encoding.
-	fn bind(&self, db: &mut impl ClauseDatabase, name: Option<Lit>) -> Result<Lit> {
+	fn bind<DB: ClauseDatabase>(&self, db: &mut DB, name: Option<Lit>) -> Result<Lit> {
 		Ok(match self {
 			Formula::Atom(lit) => {
 				if let Some(name) = name {
@@ -58,10 +58,7 @@ impl Formula {
 					1 => return sub[0].bind(db, name),
 					_ => {
 						let name = name.unwrap_or_else(|| db.new_var().into());
-						let lits = sub
-							.iter()
-							.map(|f| f.bind(db, None))
-							.collect::<Result<Vec<_>>>()?;
+						let lits: Vec<_> = sub.iter().map(|f| f.bind(db, None)).try_collect()?;
 						// not name -> (not lits[0] or not lits[1] or ...)
 						db.add_clause(once(name).chain(lits.iter().map(|l| !l)))?;
 						for lit in lits {
@@ -254,9 +251,11 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 				}
 				Formula::IfThenElse { cond, then, els } => {
 					let name = cond.bind(db, None)?;
-					let mut cdb = db.with_conditions(vec![!name]);
-					let neg_then: Formula = !*then.clone();
-					self.encode(&mut cdb, &neg_then)?;
+					{
+						let mut cdb = db.with_conditions(vec![!name]);
+						let neg_then: Formula = !*then.clone();
+						self.encode(&mut cdb, &neg_then)?;
+					}
 					let mut cdb = db.with_conditions(vec![name]);
 					let neg_els: Formula = !*els.clone();
 					self.encode(&mut cdb, &neg_els)
@@ -333,8 +332,10 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 			},
 			Formula::IfThenElse { cond, then, els } => {
 				let name = cond.bind(db, None)?;
-				let mut cdb = db.with_conditions(vec![!name]);
-				self.encode(&mut cdb, then)?;
+				{
+					let mut cdb = db.with_conditions(vec![!name]);
+					self.encode(&mut cdb, then)?;
+				}
 				let mut cdb = db.with_conditions(vec![name]);
 				self.encode(&mut cdb, els)
 			}
@@ -349,7 +350,7 @@ mod tests {
 	use crate::{
 		helpers::tests::{assert_encoding, assert_solutions, expect_file},
 		propositional_logic::{Formula, TseitinEncoder},
-		ClauseDatabase, Cnf, Encoder,
+		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder,
 	};
 
 	#[test]

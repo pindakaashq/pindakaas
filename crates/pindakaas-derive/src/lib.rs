@@ -56,7 +56,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				}
 
 				impl crate::solver::SolveAssuming for #ident {
-					#[allow(refining_impl_trait)]
+					#[expect(refining_impl_trait)]
 					fn solve_assuming<I: IntoIterator<Item = crate::Lit>>(
 						&mut self,
 						assumptions: I,
@@ -251,7 +251,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					(&self.container.prop, res)
 				}
 
-				#[allow(
+				#[expect(
 					refining_impl_trait,
 					reason = "user can use more specific type if needed"
 				)]
@@ -278,34 +278,19 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 
 			#[cfg(feature = "external-propagation")]
 			impl<P> crate::ClauseDatabase for #prop_slv <P> {
-				fn new_var(&mut self) -> crate::Var {
-					self.container.slv.new_var()
+				fn add_clause_from_slice(&mut self, clause: &[crate::Lit]) -> crate::Result {
+					self.container.slv.add_clause_from_slice(clause)
 				}
 
 				fn new_var_range(&mut self, len: usize) -> crate::VarRange {
 					self.container.slv.new_var_range(len)
-				}
-
-				fn add_clause<I: IntoIterator<Item = crate::Lit>>(
-					&mut self,
-					clause: I,
-				) -> crate::Result {
-					self.container.slv.add_clause(clause)
-				}
-
-				type CondDB = Self;
-				fn with_conditions(&mut self, conditions: Vec<crate::Lit>) -> crate::ConditionalDatabase<Self::CondDB> {
-					crate::ConditionalDatabase {
-						db: self,
-						conditions,
-					}
 				}
 			}
 
 			#[cfg(feature = "external-propagation")]
 			impl crate::solver::propagation::SolvingActions for #ident {
 				fn new_var(&mut self) -> crate::Var {
-					let var = <Self as crate::ClauseDatabase>::new_var(self);
+					let var = <Self as crate::ClauseDatabaseTools>::new_var(self);
 					unsafe { #krate::ipasir_add_observed_var( #ptr , var.0.get()) };
 					var
 				}
@@ -337,7 +322,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					let mut slv: #ident = Default::default();
 					slv. #var_member = value.nvar;
 					for cl in value.iter() {
-						let _ = crate::ClauseDatabase::add_clause(&mut slv, cl.iter().copied());
+						let _ = crate::ClauseDatabase::add_clause_from_slice(&mut slv, cl);
 					}
 					slv
 				}
@@ -355,21 +340,9 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		}
 
 		impl crate::ClauseDatabase for #ident {
-			fn new_var(&mut self) -> crate::Var {
-				#vars .next_var()
-			}
-
-			fn new_var_range(&mut self, len: usize) -> crate::VarRange {
-				let var = #vars .next_var_range(len);
-				var
-			}
-
-			fn add_clause<I: IntoIterator<Item = crate::Lit>>(
-				&mut self,
-				clause: I,
-			) -> crate::Result {
+			fn add_clause_from_slice(&mut self, clause: &[crate::Lit]) -> crate::Result{
 				let mut empty = true;
-				for lit in clause.into_iter() {
+				for &lit in clause {
 					unsafe { #krate::ipasir_add( #ptr , lit.into()) };
 					empty = false;
 				}
@@ -381,12 +354,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 				}
 			}
 
-			type CondDB = Self;
-			fn with_conditions(&mut self, conditions: Vec<crate::Lit>) -> crate::ConditionalDatabase<Self::CondDB> {
-				crate::ConditionalDatabase {
-					db: self,
-					conditions,
-				}
+			fn new_var_range(&mut self, len: usize) -> crate::VarRange {
+				#vars .next_var_range(len)
 			}
 		}
 
@@ -397,7 +366,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 					.unwrap()
 			}
 
-			#[allow(
+			#[expect(
 				refining_impl_trait,
 				reason = "user can use more specific type if needed"
 			)]

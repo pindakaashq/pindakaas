@@ -58,7 +58,7 @@ impl<'a> Sorted<'a> {
 	}
 }
 
-impl<'a> Checker for Sorted<'a> {
+impl Checker for Sorted<'_> {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
 		let lhs = BoolLinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
 			.value(sol)?;
@@ -572,7 +572,7 @@ mod tests {
 		helpers::tests::{assert_solutions, expect_file},
 		integer::{IntVarEnc, IntVarOrd, TernLeConstraint},
 		sorted::{Sorted, SortedEncoder, SortedStrategy},
-		ClauseDatabase, Cnf, Encoder, Var, VarRange,
+		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Var, VarRange,
 	};
 
 	fn get_sorted_encoder(strategy: SortedStrategy) -> SortedEncoder {

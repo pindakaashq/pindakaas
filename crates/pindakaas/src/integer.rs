@@ -2,7 +2,7 @@ use std::{
 	cell::RefCell,
 	collections::BTreeSet,
 	fmt::{self, Display},
-	ops::{Not, Range},
+	ops::Range,
 	rc::Rc,
 };
 
@@ -16,7 +16,7 @@ use crate::{
 		add_clauses_for, as_binary, emit_clause, is_powers_of_two, negate_cnf, new_var,
 		unsigned_binary_range_ub,
 	},
-	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
+	BoolVal, Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
 };
 
 const COUPLE_DOM_PART_TO_ORD: bool = false;
@@ -74,16 +74,6 @@ pub(crate) struct Lin {
 	pub(crate) cmp: LimitComp,
 }
 
-#[allow(
-	variant_size_differences,
-	reason = "bool is 1 byte, but Lit will always require more"
-)]
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum LitOrConst {
-	Lit(Lit),
-	Const(bool),
-}
-
 #[derive(Debug, Default)]
 pub(crate) struct Model {
 	vars: FxHashMap<usize, IntVarEnc>,
@@ -116,25 +106,6 @@ pub(crate) fn display_dom(dom: &BTreeSet<Coeff>) -> String {
 		)
 	} else {
 		format!("{{{}}}", dom.iter().join(","))
-	}
-}
-
-pub(crate) fn emit_filtered_clause<DB: ClauseDatabase, I: IntoIterator<Item = LitOrConst>>(
-	db: &mut DB,
-	lits: I,
-) -> Result {
-	if let Ok(clause) = lits
-		.into_iter()
-		.filter_map(|lit| match lit {
-			LitOrConst::Lit(lit) => Some(Ok(lit)),
-			LitOrConst::Const(true) => Some(Err(())), // clause satisfied
-			LitOrConst::Const(false) => None,         // literal falsified
-		})
-		.collect::<std::result::Result<Vec<_>, ()>>()
-	{
-		emit_clause!(db, clause)
-	} else {
-		Ok(())
 	}
 }
 
@@ -201,80 +172,80 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 ) -> Result {
 	log_enc_add_(
 		db,
-		&x.iter().copied().map(LitOrConst::from).collect_vec(),
-		&y.iter().copied().map(LitOrConst::from).collect_vec(),
+		&x.iter().copied().map(BoolVal::from).collect_vec(),
+		&y.iter().copied().map(BoolVal::from).collect_vec(),
 		cmp,
-		&z.iter().copied().map(LitOrConst::from).collect_vec(),
+		&z.iter().copied().map(BoolVal::from).collect_vec(),
 	)
 }
 
 #[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} {cmp} {z:?}"))))]
 pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
 	db: &mut DB,
-	x: &[LitOrConst],
-	y: &[LitOrConst],
+	x: &[BoolVal],
+	y: &[BoolVal],
 	cmp: &LimitComp,
-	z: &[LitOrConst],
+	z: &[BoolVal],
 ) -> Result {
 	let n = itertools::max([x.len(), y.len(), z.len()]).unwrap();
 
-	let bit = |x: &[LitOrConst], i: usize| -> LitOrConst {
-		x.get(i).unwrap_or(&LitOrConst::Const(false)).clone()
-	};
+	let bit =
+		|x: &[BoolVal], i: usize| -> BoolVal { x.get(i).unwrap_or(&BoolVal::Const(false)).clone() };
 
 	match cmp {
 		LimitComp::Equal => {
-			let c = &std::iter::once(LitOrConst::Const(false))
-				.chain((1..n).map(|_i| {
-					LitOrConst::Lit(new_var!(db, crate::trace::subscripted_name("c", _i)))
-				}))
-				.collect_vec();
+			let c =
+				&std::iter::once(BoolVal::Const(false))
+					.chain((1..n).map(|_i| {
+						BoolVal::Lit(new_var!(db, crate::trace::subscripted_name("c", _i)))
+					}))
+					.collect_vec();
 			for i in 0..n {
 				// sum circuit
-				emit_filtered_clause(db, [bit(x, i), bit(y, i), bit(c, i), !bit(z, i)])?;
-				emit_filtered_clause(db, [bit(x, i), !bit(y, i), !bit(c, i), !bit(z, i)])?;
-				emit_filtered_clause(db, [!bit(x, i), bit(y, i), !bit(c, i), !bit(z, i)])?;
-				emit_filtered_clause(db, [!bit(x, i), !bit(y, i), bit(c, i), !bit(z, i)])?;
+				emit_clause!(db, [bit(x, i), bit(y, i), bit(c, i), !bit(z, i)])?;
+				emit_clause!(db, [bit(x, i), !bit(y, i), !bit(c, i), !bit(z, i)])?;
+				emit_clause!(db, [!bit(x, i), bit(y, i), !bit(c, i), !bit(z, i)])?;
+				emit_clause!(db, [!bit(x, i), !bit(y, i), bit(c, i), !bit(z, i)])?;
 
-				emit_filtered_clause(db, [!bit(x, i), !bit(y, i), !bit(c, i), bit(z, i)])?;
-				emit_filtered_clause(db, [!bit(x, i), bit(y, i), bit(c, i), bit(z, i)])?;
-				emit_filtered_clause(db, [bit(x, i), !bit(y, i), bit(c, i), bit(z, i)])?;
-				emit_filtered_clause(db, [bit(x, i), bit(y, i), !bit(c, i), bit(z, i)])?;
+				emit_clause!(db, [!bit(x, i), !bit(y, i), !bit(c, i), bit(z, i)])?;
+				emit_clause!(db, [!bit(x, i), bit(y, i), bit(c, i), bit(z, i)])?;
+				emit_clause!(db, [bit(x, i), !bit(y, i), bit(c, i), bit(z, i)])?;
+				emit_clause!(db, [bit(x, i), bit(y, i), !bit(c, i), bit(z, i)])?;
 
 				// carry circuit
-				emit_filtered_clause(db, [bit(x, i), bit(y, i), !bit(c, i + 1)])?;
-				emit_filtered_clause(db, [bit(x, i), bit(c, i), !bit(c, i + 1)])?;
-				emit_filtered_clause(db, [bit(y, i), bit(c, i), !bit(c, i + 1)])?;
-				emit_filtered_clause(db, [!bit(x, i), !bit(y, i), bit(c, i + 1)])?;
-				emit_filtered_clause(db, [!bit(x, i), !bit(c, i), bit(c, i + 1)])?;
-				emit_filtered_clause(db, [!bit(y, i), !bit(c, i), bit(c, i + 1)])?;
+				emit_clause!(db, [bit(x, i), bit(y, i), !bit(c, i + 1)])?;
+				emit_clause!(db, [bit(x, i), bit(c, i), !bit(c, i + 1)])?;
+				emit_clause!(db, [bit(y, i), bit(c, i), !bit(c, i + 1)])?;
+				emit_clause!(db, [!bit(x, i), !bit(y, i), bit(c, i + 1)])?;
+				emit_clause!(db, [!bit(x, i), !bit(c, i), bit(c, i + 1)])?;
+				emit_clause!(db, [!bit(y, i), !bit(c, i), bit(c, i + 1)])?;
 			}
 			Ok(())
 		}
 		LimitComp::LessEq => {
 			let c = &(0..n)
-				.map(|_i| LitOrConst::Lit(new_var!(db, crate::trace::subscripted_name("c", _i))))
-				.chain(std::iter::once(LitOrConst::Const(true)))
+				.map(|_i| BoolVal::Lit(new_var!(db, crate::trace::subscripted_name("c", _i))))
+				.chain(std::iter::once(BoolVal::Const(true)))
 				.collect_vec();
 
 			// higher i -> more significant
 			for i in 0..n {
 				// c = all more significant bits are equal AND current one is
 				// if up to i is equal, all preceding must be equal
-				emit_filtered_clause(db, [!bit(c, i), bit(c, i + 1)])?;
+				emit_clause!(db, [!bit(c, i), bit(c, i + 1)])?;
 				// if up to i is equal, x<->z
-				emit_filtered_clause(db, [!bit(c, i), !bit(x, i), bit(z, i)])?;
-				emit_filtered_clause(db, [!bit(c, i), !bit(z, i), bit(x, i)])?;
+				emit_clause!(db, [!bit(c, i), !bit(x, i), bit(z, i)])?;
+				emit_clause!(db, [!bit(c, i), !bit(z, i), bit(x, i)])?;
 
 				// if not up to i is equal, either preceding bit was not equal, or x!=z
-				emit_filtered_clause(db, [bit(c, i), !bit(c, i + 1), bit(x, i), bit(z, i)])?;
-				emit_filtered_clause(db, [bit(c, i), !bit(c, i + 1), !bit(x, i), !bit(z, i)])?;
+				emit_clause!(db, [bit(c, i), !bit(c, i + 1), bit(x, i), bit(z, i)])?;
+				emit_clause!(db, [bit(c, i), !bit(c, i + 1), !bit(x, i), !bit(z, i)])?;
 
 				// if preceding bits are equal, then x<=z
-				emit_filtered_clause(db, [!bit(c, i + 1), !bit(x, i), bit(z, i)])?;
+				emit_clause!(db, [!bit(c, i + 1), !bit(x, i), bit(z, i)])?;
 			}
 
-			emit_filtered_clause(db, [!bit(x, n - 1), bit(z, n - 1)])?;
+			emit_clause!(db, [!bit(x, n - 1), bit(z, n - 1)])?;
 
 			Ok(())
 		}
@@ -1268,38 +1239,6 @@ impl From<&IntVarOrd> for BoolLinExp {
 	}
 }
 
-impl Display for LitOrConst {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			LitOrConst::Const(b) => write!(f, "{b}"),
-			LitOrConst::Lit(l) => write!(f, "{l}"),
-		}
-	}
-}
-
-impl From<Lit> for LitOrConst {
-	fn from(item: Lit) -> Self {
-		LitOrConst::Lit(item)
-	}
-}
-
-impl From<bool> for LitOrConst {
-	fn from(item: bool) -> Self {
-		LitOrConst::Const(item)
-	}
-}
-
-impl Not for LitOrConst {
-	type Output = LitOrConst;
-
-	fn not(self) -> Self::Output {
-		match self {
-			LitOrConst::Lit(l) => (!l).into(),
-			LitOrConst::Const(b) => (!b).into(),
-		}
-	}
-}
-
 impl Model {
 	pub(crate) fn add_int_var_enc(&mut self, x: IntVarEnc) -> IntVar {
 		let var = self.new_var(x.dom().iter(..).map(|d| d.end - 1).collect(), false);
@@ -1419,7 +1358,7 @@ impl<'a> TernLeConstraint<'a> {
 	}
 }
 
-impl<'a> Checker for TernLeConstraint<'a> {
+impl Checker for TernLeConstraint<'_> {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result {
 		let x = BoolLinExp::from(self.x).value(sol)?;
 		let y = BoolLinExp::from(self.y).value(sol)?;
@@ -1441,7 +1380,7 @@ impl Display for TernLeConstraint<'_> {
 	}
 }
 
-impl<'a, DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'a>> for TernLeEncoder {
+impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for TernLeEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "tern_le_encoder", skip_all, fields(constraint = format!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z)))
@@ -1539,13 +1478,13 @@ impl<'a, DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'a>> for TernLeEncoder
 				};
 				log_enc_add_(
 					db,
-					&x_bin.xs.iter().cloned().map(LitOrConst::from).collect_vec(),
+					&x_bin.xs.iter().cloned().map(BoolVal::from).collect_vec(),
 					&as_binary(PosCoeff::new(*y_const), Some(x_bin.lits() as u32))
 						.into_iter()
-						.map(LitOrConst::Const)
+						.map(BoolVal::Const)
 						.collect_vec(),
 					cmp,
-					&z_bin.xs.iter().cloned().map(LitOrConst::from).collect_vec(),
+					&z_bin.xs.iter().cloned().map(BoolVal::from).collect_vec(),
 				)
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Bin(y_bin), IntVarEnc::Bin(z_bin)) => {

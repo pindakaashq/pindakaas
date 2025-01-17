@@ -145,7 +145,7 @@ pub(crate) mod tests {
 					bool_linear::LimitComp,
 					cardinality_one::CardinalityOne,
 					helpers::tests::{assert_checker, assert_solutions, expect_file},
-					ClauseDatabase, Cnf, Encoder,
+					ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder,
 				};
 
 				const LARGE_N: usize = 50;
@@ -414,7 +414,7 @@ pub(crate) mod tests {
 		bool_linear::LimitComp,
 		cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
 		helpers::tests::{assert_encoding, assert_solutions, expect_file},
-		ClauseDatabase, Cnf, Encoder,
+		ClauseDatabaseTools, Cnf, Encoder,
 	};
 
 	#[test]

@@ -1,12 +1,13 @@
 use std::num::NonZeroI32;
 
+use itertools::Itertools;
 pub use splr::Solver as Splr;
 use splr::{Certificate, SatSolverIF, SolveIF, VERSION};
 
 use crate::{
 	helpers::const_concat,
 	solver::{SolveResult, Solver},
-	ClauseDatabase, Cnf, ConditionalDatabase, Lit, Valuation, Var, VarRange,
+	ClauseDatabase, Cnf, Lit, Result, Valuation, Var, VarRange,
 };
 
 impl Valuation for Certificate {
@@ -27,12 +28,10 @@ impl Valuation for Certificate {
 }
 
 impl ClauseDatabase for Splr {
-	type CondDB = Self;
-
-	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> crate::Result {
+	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
 		use splr::SolverError::*;
 
-		let cl: Vec<_> = cl.into_iter().map(Into::<i32>::into).collect();
+		let cl: Vec<i32> = clause.iter().copied().map_into().collect();
 		match SatSolverIF::add_clause(self, cl) {
 			Ok(_) => Ok(()),
 			Err(e) => match e {
@@ -46,28 +45,21 @@ impl ClauseDatabase for Splr {
 		}
 	}
 
-	fn new_var(&mut self) -> Var {
-		let var = self.add_var();
-		let var: i32 = var.try_into().expect("exhausted variable pool");
-		Var(NonZeroI32::new(var).expect("variables cannot use the value zero"))
-	}
-
 	fn new_var_range(&mut self, len: usize) -> VarRange {
-		let start = self.new_var();
+		let mut new_var = || {
+			let var = self.add_var();
+			let var: i32 = var.try_into().expect("exhausted variable pool");
+			Var(NonZeroI32::new(var).expect("variables cannot use the value zero"))
+		};
+
+		let start = new_var();
 		let mut last = start;
 		for _ in 1..len {
-			let x = self.new_var();
+			let x = new_var();
 			debug_assert_eq!(i32::from(last) + 1, i32::from(x));
 			last = x;
 		}
 		VarRange::new(start, last)
-	}
-
-	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
-		ConditionalDatabase {
-			db: self,
-			conditions,
-		}
 	}
 }
 
@@ -86,7 +78,7 @@ impl From<&Cnf> for Splr {
 		);
 		for cl in cnf.iter() {
 			// Ignore early detected unsatisfiability
-			let _ = ClauseDatabase::add_clause(&mut slv, cl.iter().copied());
+			let _ = ClauseDatabase::add_clause_from_slice(&mut slv, cl);
 		}
 		slv
 	}
@@ -98,7 +90,7 @@ impl Solver for Splr {
 		SPLR_SIG
 	}
 
-	#[allow(
+	#[expect(
 		refining_impl_trait,
 		reason = "user can use more specific type if needed"
 	)]

@@ -92,7 +92,7 @@ mod tests {
 		bool_linear::LimitComp,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
 		solver::{cadical::Cadical, SolveResult, Solver},
-		ClauseDatabase, Encoder, Unsatisfiable, Valuation,
+		ClauseDatabaseTools, Encoder, Unsatisfiable, Valuation,
 	};
 
 	#[test]
@@ -130,7 +130,7 @@ mod tests {
 	#[test]
 	fn test_cadical_empty_clause() {
 		let mut slv = Cadical::default();
-		assert_eq!(slv.add_clause([]), Err(Unsatisfiable));
+		assert_eq!(slv.add_clause([false]), Err(Unsatisfiable));
 		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_)));
 	}
 
@@ -151,7 +151,7 @@ mod tests {
 				},
 				VarRange,
 			},
-			Lit,
+			ClauseDatabase, Lit,
 		};
 
 		let mut slv = Cadical::default();
@@ -193,12 +193,12 @@ mod tests {
 		}
 
 		let p = Dist2 {
-			vars: vars.clone(),
+			vars,
 			tmp: Vec::new(),
 		};
 		let mut slv = slv.with_propagator(p);
-		slv.add_clause(vars.clone().map_into()).unwrap();
-		for v in vars.clone() {
+		slv.add_clause(vars).unwrap();
+		for v in vars {
 			PropagatingSolver::add_observed_var(&mut slv, v)
 		}
 

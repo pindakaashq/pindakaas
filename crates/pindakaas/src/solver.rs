@@ -196,15 +196,6 @@ impl VarFactory {
 		}
 	}
 
-	pub(crate) fn next_var(&mut self) -> Var {
-		if let Some(x) = self.next_var {
-			self.next_var = x.next_var();
-			x
-		} else {
-			panic!("unable to create more than `Var::MAX_VARS` variables")
-		}
-	}
-
 	pub(crate) fn next_var_range(&mut self, size: usize) -> VarRange {
 		let Some(start) = self.next_var else {
 			panic!("unable to create more than `Var::MAX_VARS` variables")

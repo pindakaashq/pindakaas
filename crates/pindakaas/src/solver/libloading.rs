@@ -11,7 +11,7 @@ use crate::{
 		get_trampoline0, get_trampoline1, ExplIter, FFIPointer, FailedAssumtions, LearnCallback,
 		SlvTermSignal, SolveAssuming, SolveResult, Solver, TermCallback, VarFactory,
 	},
-	ClauseDatabase, ConditionalDatabase, Lit, Result, Valuation, Var,
+	ClauseDatabase, Lit, Result, Valuation,
 };
 
 #[derive(Debug)]
@@ -209,14 +209,14 @@ impl Valuation for IpasirSol<'_> {
 	}
 }
 
-impl<'lib> IpasirSolver<'lib> {
-	fn failed_obj(&self) -> IpasirFailed<'lib> {
+impl IpasirSolver<'_> {
+	fn failed_obj(&self) -> IpasirFailed<'_> {
 		IpasirFailed {
 			slv: self.slv,
 			failed_fn: self.failed_fn.clone(),
 		}
 	}
-	fn sol_obj(&self) -> IpasirSol<'lib> {
+	fn sol_obj(&self) -> IpasirSol<'_> {
 		IpasirSol {
 			slv: self.slv,
 			value_fn: self.value_fn.clone(),
@@ -224,12 +224,10 @@ impl<'lib> IpasirSolver<'lib> {
 	}
 }
 
-impl<'lib> ClauseDatabase for IpasirSolver<'lib> {
-	type CondDB = Self;
-
-	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, clause: I) -> Result {
+impl ClauseDatabase for IpasirSolver<'_> {
+	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
 		let mut added = false;
-		for lit in clause.into_iter() {
+		for &lit in clause {
 			(self.add_fn)(self.slv, lit.into());
 			added = true;
 		}
@@ -239,30 +237,19 @@ impl<'lib> ClauseDatabase for IpasirSolver<'lib> {
 		Ok(())
 	}
 
-	fn new_var(&mut self) -> Var {
-		self.vars.next_var()
-	}
-
 	fn new_var_range(&mut self, len: usize) -> crate::VarRange {
 		self.vars.next_var_range(len)
 	}
-
-	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
-		ConditionalDatabase {
-			db: self,
-			conditions,
-		}
-	}
 }
 
-impl<'lib> Drop for IpasirSolver<'lib> {
+impl Drop for IpasirSolver<'_> {
 	fn drop(&mut self) {
 		// Release the solver.
 		(self.release_fn)(self.slv);
 	}
 }
 
-impl<'lib> LearnCallback for IpasirSolver<'lib> {
+impl LearnCallback for IpasirSolver<'_> {
 	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>) + 'static>(
 		&mut self,
 		cb: Option<F>,
@@ -284,8 +271,8 @@ impl<'lib> LearnCallback for IpasirSolver<'lib> {
 	}
 }
 
-impl<'lib> SolveAssuming for IpasirSolver<'lib> {
-	#[allow(
+impl SolveAssuming for IpasirSolver<'_> {
+	#[expect(
 		refining_impl_trait,
 		reason = "user can use more specific type if needed"
 	)]
@@ -300,7 +287,7 @@ impl<'lib> SolveAssuming for IpasirSolver<'lib> {
 	}
 }
 
-impl<'lib> Solver for IpasirSolver<'lib> {
+impl Solver for IpasirSolver<'_> {
 	fn signature(&self) -> &str {
 		// SAFETY: We assume that the signature function as part of the IPASIR
 		// interface returns a valid C string.
@@ -309,7 +296,7 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 			.unwrap()
 	}
 
-	#[allow(
+	#[expect(
 		refining_impl_trait,
 		reason = "user can use more specific type if needed"
 	)]
@@ -326,7 +313,7 @@ impl<'lib> Solver for IpasirSolver<'lib> {
 	}
 }
 
-impl<'lib> TermCallback for IpasirSolver<'lib> {
+impl TermCallback for IpasirSolver<'_> {
 	fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>) {
 		if let Some(mut cb) = cb {
 			let wrapped_cb = move || -> c_int {

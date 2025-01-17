@@ -44,19 +44,33 @@ macro_rules! const_concat {
 }
 #[cfg(not(any(feature = "tracing", test)))]
 macro_rules! emit_clause {
-	($db:expr, $cl:expr) => {
-		$db.add_clause($cl)
+	($db:expr, $clause:expr) => {
+		$crate::ClauseDatabaseTools::add_clause($db, $clause)
 	};
 }
 
 /// Helper marco to emit a clause from within an encoder
 #[cfg(any(feature = "tracing", test))]
 macro_rules! emit_clause {
-	($db:expr, $cl:expr) => {{
-		let slice = $cl.into_iter().collect::<Vec<_>>();
-		let res = $db.add_clause(slice.iter().copied());
-		tracing::info!(clause = ?&slice, fail = matches!(res, Err($crate::Unsatisfiable)), "emit clause");
-		res
+	($db:expr, $clause:expr) => {{
+		let result: std::result::Result<std::vec::Vec<_>, ()> = $clause
+			.into_iter()
+			.filter_map(|v| match v.into() {
+				$crate::BoolVal::Const(false) => None,         // Irrelevant literal
+				$crate::BoolVal::Const(true) => Some(Err(())), // Clause is already satisfied
+				$crate::BoolVal::Lit(lit) => Some(Ok(lit)),    // Add literal to clause
+			})
+			.collect();
+		match result {
+			Ok(clause) => {
+				let clause: std::vec::Vec<_> = clause; // TODO: Somehow the type is otherwise not inferred correctly
+				let result = $crate::ClauseDatabase::add_clause_from_slice($db, &clause);
+				tracing::info!(clause = ?&clause, fail = matches!(result, Err($crate::Unsatisfiable)), "emit clause");
+				result
+			}
+			// Collecting revealed the clause was already satisfied
+			Err(()) => Ok(()),
+		}
 	}};
 }
 
@@ -72,10 +86,10 @@ macro_rules! maybe_std_concat {
 #[cfg(not(any(feature = "tracing", test)))]
 macro_rules! new_var {
 	($db:expr) => {
-		$crate::Lit::from($db.new_var())
+		$crate::Lit::from($crate::ClauseDatabaseTools::new_var($db))
 	};
 	($db:expr, $lbl:expr) => {
-		$crate::Lit::from($db.new_var())
+		$crate::Lit::from($crate::ClauseDatabaseTools::new_var($db))
 	};
 }
 
@@ -83,12 +97,12 @@ macro_rules! new_var {
 #[cfg(any(feature = "tracing", test))]
 macro_rules! new_var {
 	($db:expr) => {{
-		let var = $db.new_var();
+		let var = $crate::ClauseDatabaseTools::new_var($db);
 		tracing::info!(var = ?var, "new variable");
 		$crate::Lit::from(var)
 	}};
 	($db:expr, $lbl:expr) => {{
-		let var = $db.new_var();
+		let var = $crate::ClauseDatabaseTools::new_var($db);
 		tracing::info!(var = ?var, label = $lbl, "new variable");
 		$crate::Lit::from(var)
 	}};
@@ -212,7 +226,7 @@ pub(crate) mod tests {
 		bool_linear::BoolLinExp,
 		integer::IntVarEnc,
 		solver::{cadical::Cadical, SolveResult, Solver},
-		Checker, ClauseDatabase, Cnf, Lit, Valuation,
+		Checker, ClauseDatabaseTools, Cnf, Lit, Valuation,
 	};
 
 	/// Helper functions to ensure that the possible solutions of a formula
@@ -223,7 +237,6 @@ pub(crate) mod tests {
 		while let SolveResult::Satisfied(value) = slv.solve() {
 			assert_eq!(checker.check(&value), Ok(()));
 			let no_good: Vec<Lit> = vars
-				.clone()
 				.map(|v| {
 					let l = v.into();
 					if value.value(l) {
@@ -268,7 +281,6 @@ pub(crate) mod tests {
 			);
 			// Add nogood clause
 			let nogood: Vec<Lit> = bool_vars
-				.clone()
 				.map(|v| {
 					let l = v.into();
 					if value.value(l) {

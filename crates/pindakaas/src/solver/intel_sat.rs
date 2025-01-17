@@ -37,7 +37,7 @@ mod tests {
 		bool_linear::LimitComp,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
 		solver::{intel_sat::IntelSat, SolveResult, Solver},
-		ClauseDatabase, Encoder, Valuation,
+		ClauseDatabaseTools, Encoder, Valuation,
 	};
 
 	#[test]

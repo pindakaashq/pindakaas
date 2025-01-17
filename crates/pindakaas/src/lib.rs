@@ -36,6 +36,18 @@ use itertools::{traits::HomogeneousTuple, Itertools};
 
 use crate::{helpers::subscript_number, solver::VarFactory};
 
+/// A helper type used to represent a Boolean value that can be either a literal
+/// for a Boolean decision variable, or a constant Boolean value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[expect(
+	variant_size_differences,
+	reason = "bool is 1 byte, but Lit will always require more"
+)]
+pub enum BoolVal {
+	Const(bool),
+	Lit(Lit),
+}
+
 /// Checker is a trait implemented by types that represent constraints. The
 /// [`Checker::check`] methods checks whether an assignment (often referred to
 /// as a model) satisfies the constraint.
@@ -56,17 +68,40 @@ pub trait Checker {
 /// To satisfy the trait, the type must implement a [`Self::add_clause`] method
 /// and a [`Self::new_var`] method.
 pub trait ClauseDatabase {
-	type CondDB: ClauseDatabase + ?Sized;
-
 	/// Add a clause to the `ClauseDatabase`. The databae is allowed to return
 	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
 	/// unsatisfiable. This is used as a signal to the encoder that any subsequent
 	/// encoding effort can be abandoned.
-	///
-	/// Clauses added this way cannot be removed. The addition of removable
-	/// clauses can be simulated using activation literals and solving the problem
-	/// under assumptions.
-	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result;
+	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result;
+	/// Method to be used to receive a new Boolean variable that can be used in
+	/// the encoding of a problem or constraint.
+	fn new_var_range(&mut self, len: usize) -> VarRange;
+}
+
+pub trait ClauseDatabaseTools: ClauseDatabase {
+	/// Add a clause, given as any  to the `ClauseDatabase`. The databae is allowed to return
+	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
+	/// unsatisfiable. This is used as a signal to the encoder that any subsequent
+	/// encoding effort can be abandoned.
+	fn add_clause<Iter>(&mut self, clause: Iter) -> Result
+	where
+		Iter: IntoIterator,
+		Iter::Item: Into<BoolVal>,
+	{
+		let result: Result<Vec<_>, ()> = clause
+			.into_iter()
+			.filter_map(|v| match v.into() {
+				BoolVal::Const(false) => None,         // Irrelevant literal
+				BoolVal::Const(true) => Some(Err(())), // Clause is already satisfied
+				BoolVal::Lit(lit) => Some(Ok(lit)),    // Add literal to clause
+			})
+			.collect();
+		match result {
+			Ok(clause) => self.add_clause_from_slice(&clause),
+			// Collecting revealed the clause was already satisfied
+			Err(()) => Ok(()),
+		}
+	}
 
 	fn encode<C, E: Encoder<Self, C>>(&mut self, constraint: &C, encoder: &E) -> Result
 	where
@@ -104,10 +139,6 @@ pub trait ClauseDatabase {
 		range.next().unwrap()
 	}
 
-	/// Method to be used to receive a new Boolean variable that can be used in
-	/// the encoding of a problem or constraint.
-	fn new_var_range(&mut self, len: usize) -> VarRange;
-
 	/// Create multiple new Boolean variables and capture them in a tuple.
 	///
 	/// # Example
@@ -124,7 +155,36 @@ pub trait ClauseDatabase {
 		range.collect_tuple().unwrap()
 	}
 
-	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB>;
+	fn with_conditions(&mut self, conditions: Vec<Lit>) -> impl ClauseDatabase + '_
+	where
+		Self: Sized,
+	{
+		struct ConditionalDatabase<'a> {
+			db: &'a mut dyn ClauseDatabase,
+			conditions: Vec<Lit>,
+		}
+
+		impl ClauseDatabase for ConditionalDatabase<'_> {
+			fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
+				let chain = self
+					.conditions
+					.iter()
+					.copied()
+					.chain(clause.iter().copied())
+					.collect_vec();
+				self.db.add_clause_from_slice(&chain)
+			}
+
+			fn new_var_range(&mut self, len: usize) -> VarRange {
+				self.db.new_var_range(len)
+			}
+		}
+
+		ConditionalDatabase {
+			db: self,
+			conditions,
+		}
+	}
 }
 
 /// A representation for Boolean formulas in conjunctive normal form.
@@ -151,13 +211,6 @@ pub struct CnfIterator<'a> {
 /// Coeff is a type alias used for the number type used to represent the
 /// coefficients in constraints and expression.
 pub(crate) type Coeff = i64;
-
-// TODO: Add usage and think about interface
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub struct ConditionalDatabase<'a, DB: ClauseDatabase + ?Sized> {
-	db: &'a mut DB,
-	conditions: Vec<Lit>,
-}
 
 enum Dimacs {
 	Cnf(Cnf),
@@ -218,7 +271,7 @@ pub trait Valuation {
 /// negation.
 pub struct Var(pub(crate) NonZeroI32);
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct VarRange {
 	start: Var,
 	end: Var,
@@ -333,6 +386,44 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 	}
 }
 
+impl Display for BoolVal {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			BoolVal::Const(b) => write!(f, "{b}"),
+			BoolVal::Lit(l) => write!(f, "{l}"),
+		}
+	}
+}
+
+impl From<bool> for BoolVal {
+	fn from(value: bool) -> Self {
+		BoolVal::Const(value)
+	}
+}
+
+impl From<Lit> for BoolVal {
+	fn from(value: Lit) -> Self {
+		BoolVal::Lit(value)
+	}
+}
+
+impl From<Var> for BoolVal {
+	fn from(value: Var) -> Self {
+		BoolVal::Lit(value.into())
+	}
+}
+
+impl Not for BoolVal {
+	type Output = BoolVal;
+
+	fn not(self) -> Self::Output {
+		match self {
+			BoolVal::Lit(l) => (!l).into(),
+			BoolVal::Const(b) => (!b).into(),
+		}
+	}
+}
+
 impl Cnf {
 	/// Returns the number of clauses in the formula.
 	pub fn clauses(&self) -> usize {
@@ -389,11 +480,9 @@ impl Cnf {
 }
 
 impl ClauseDatabase for Cnf {
-	type CondDB = Self;
-
-	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
+	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
 		let size = self.lits.len();
-		self.lits.extend(cl);
+		self.lits.extend(clause);
 		let len = self.lits.len() - size;
 		self.size.push(len);
 		if len == 0 {
@@ -403,19 +492,8 @@ impl ClauseDatabase for Cnf {
 		}
 	}
 
-	fn new_var(&mut self) -> Var {
-		self.nvar.next_var()
-	}
-
 	fn new_var_range(&mut self, len: usize) -> VarRange {
 		self.nvar.next_var_range(len)
-	}
-
-	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
-		ConditionalDatabase {
-			db: self,
-			conditions,
-		}
 	}
 }
 
@@ -437,7 +515,7 @@ impl Display for Cnf {
 	}
 }
 
-impl<'a> ExactSizeIterator for CnfIterator<'a> {}
+impl ExactSizeIterator for CnfIterator<'_> {}
 
 impl<'a> Iterator for CnfIterator<'a> {
 	type Item = &'a [Lit];
@@ -461,36 +539,7 @@ impl<'a> Iterator for CnfIterator<'a> {
 	}
 }
 
-impl<'a, DB: ClauseDatabase + ?Sized> ConditionalDatabase<'a, DB> {
-	pub fn new(db: &'a mut DB, conditions: Vec<Lit>) -> Self {
-		Self { db, conditions }
-	}
-}
-
-impl<'a, DB: ClauseDatabase + ?Sized> ClauseDatabase for ConditionalDatabase<'a, DB> {
-	type CondDB = DB;
-
-	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
-		let chain = self.conditions.iter().copied().chain(cl);
-		self.db.add_clause(chain)
-	}
-
-	fn new_var(&mut self) -> Var {
-		self.db.new_var()
-	}
-
-	fn new_var_range(&mut self, len: usize) -> VarRange {
-		self.db.new_var_range(len)
-	}
-
-	fn with_conditions(&mut self, mut conditions: Vec<Lit>) -> ConditionalDatabase<DB> {
-		conditions.extend(self.conditions.iter().copied());
-		ConditionalDatabase {
-			db: self.db,
-			conditions,
-		}
-	}
-}
+impl<DB> ClauseDatabaseTools for DB where DB: ClauseDatabase + ?Sized {}
 
 impl<F: Fn(Lit) -> bool> Valuation for F {
 	fn value(&self, lit: Lit) -> bool {
@@ -773,13 +822,13 @@ impl RangeBounds<Var> for VarRange {
 
 impl Wcnf {
 	/// Add a weighted clause to the formula.
-	pub fn add_weighted_clause<I: IntoIterator<Item = Lit>>(
-		&mut self,
-		cl: I,
-		weight: Option<Coeff>,
-	) -> Result {
+	pub fn add_weighted_clause<I>(&mut self, clause: I, weight: Option<Coeff>) -> Result
+	where
+		I: IntoIterator,
+		I::Item: Into<BoolVal>,
+	{
 		let clauses = self.cnf.clauses();
-		self.cnf.add_clause(cl)?;
+		self.cnf.add_clause(clause)?;
 		if self.cnf.clauses() > clauses {
 			self.weights.push(weight);
 		}
@@ -829,25 +878,12 @@ impl Wcnf {
 }
 
 impl ClauseDatabase for Wcnf {
-	type CondDB = Self;
-
-	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
-		self.add_weighted_clause(cl, None)
-	}
-
-	fn new_var(&mut self) -> Var {
-		self.cnf.new_var()
+	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
+		self.add_weighted_clause(clause.iter().copied(), None)
 	}
 
 	fn new_var_range(&mut self, len: usize) -> VarRange {
 		self.cnf.new_var_range(len)
-	}
-
-	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
-		ConditionalDatabase {
-			db: self,
-			conditions,
-		}
 	}
 }
 

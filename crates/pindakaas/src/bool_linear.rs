@@ -15,12 +15,12 @@ use crate::{
 	cardinality_one::{CardinalityOne, PairwiseEncoder},
 	helpers::{as_binary, emit_clause, is_powers_of_two, new_var},
 	integer::{
-		lex_leq_const, Consistency, IntVar, IntVarEnc, IntVarOrd, Lin, LitOrConst, Model,
-		GROUND_BINARY_AT_LB,
+		lex_leq_const, Consistency, IntVar, IntVarEnc, IntVarOrd, Lin, Model, GROUND_BINARY_AT_LB,
 	},
 	propositional_logic::{Formula, TseitinEncoder},
 	sorted::{Sorted, SortedEncoder},
-	Checker, ClauseDatabase, Coeff, Encoder, IntEncoding, Lit, Result, Unsatisfiable, Valuation,
+	BoolVal, Checker, ClauseDatabase, Coeff, Encoder, IntEncoding, Lit, Result, Unsatisfiable,
+	Valuation,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -218,9 +218,9 @@ impl AdderEncoder {
 	/// literals (full adder).
 	///
 	/// `output` can be either a literal, or a constant Boolean value.
-	fn carry_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: LitOrConst) -> Result {
+	fn carry_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: BoolVal) -> Result {
 		match output {
-			LitOrConst::Lit(carry) => match *input {
+			BoolVal::Lit(carry) => match *input {
 				[a, b] => {
 					emit_clause!(db, [!a, !b, carry])?;
 					emit_clause!(db, [a, !carry])?;
@@ -237,7 +237,7 @@ impl AdderEncoder {
 				}
 				_ => unreachable!(),
 			},
-			LitOrConst::Const(k) => match *input {
+			BoolVal::Const(k) => match *input {
 				[a, b] => {
 					if k {
 						// TODO: Can we avoid this?
@@ -265,9 +265,9 @@ impl AdderEncoder {
 	/// literals (full adder).
 	///
 	/// `output` can be either a literal, or a constant Boolean value.
-	fn sum_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: LitOrConst) -> Result {
+	fn sum_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: BoolVal) -> Result {
 		match output {
-			LitOrConst::Lit(sum) => match *input {
+			BoolVal::Lit(sum) => match *input {
 				[a, b] => {
 					emit_clause!(db, [!a, !b, !sum])?;
 					emit_clause!(db, [!a, b, sum])?;
@@ -287,11 +287,11 @@ impl AdderEncoder {
 				}
 				_ => unreachable!(),
 			},
-			LitOrConst::Const(true) => {
+			BoolVal::Const(true) => {
 				let xor = Formula::Xor(input.iter().map(|&l| Formula::Atom(l)).collect_vec());
 				TseitinEncoder.encode(db, &xor)
 			}
-			LitOrConst::Const(false) => match *input {
+			BoolVal::Const(false) => match *input {
 				[a, b] => {
 					emit_clause!(db, [a, !b])?;
 					emit_clause!(db, [!a, b])
@@ -308,24 +308,24 @@ impl AdderEncoder {
 	}
 
 	#[cfg(any(feature = "tracing", test))]
-	fn trace_print_carry(input: &[Lit], output: &LitOrConst) -> String {
+	fn trace_print_carry(input: &[Lit], output: &BoolVal) -> String {
 		use crate::trace::trace_print_lit;
 		let inner = itertools::join(input.iter().map(trace_print_lit), " + ");
 		match output {
-			LitOrConst::Lit(r) => format!("{} ≡ ({} > 1)", trace_print_lit(r), inner),
-			LitOrConst::Const(true) => format!("{inner} > 1"),
-			LitOrConst::Const(false) => format!("{inner} ≤ 1"),
+			BoolVal::Lit(r) => format!("{} ≡ ({} > 1)", trace_print_lit(r), inner),
+			BoolVal::Const(true) => format!("{inner} > 1"),
+			BoolVal::Const(false) => format!("{inner} ≤ 1"),
 		}
 	}
 
 	#[cfg(any(feature = "tracing", test))]
-	fn trace_print_sum(input: &[Lit], output: &LitOrConst) -> String {
+	fn trace_print_sum(input: &[Lit], output: &BoolVal) -> String {
 		use crate::trace::trace_print_lit;
 		let inner = itertools::join(input.iter().map(trace_print_lit), " ⊻ ");
 		match output {
-			LitOrConst::Lit(r) => format!("{} ≡ {}", trace_print_lit(r), inner),
-			LitOrConst::Const(true) => inner,
-			LitOrConst::Const(false) => format!("¬({inner})"),
+			BoolVal::Lit(r) => format!("{} ≡ {}", trace_print_lit(r), inner),
+			BoolVal::Const(true) => inner,
+			BoolVal::Const(false) => format!("¬({inner})"),
 		}
 	}
 }
@@ -395,7 +395,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 						// Compute sum
 						if last && lin.cmp == LimitComp::Equal {
 							// No need to create a new literal, force the sum to equal the result
-							Self::sum_circuit(db, lits.as_slice(), LitOrConst::Const(k[b]))?;
+							Self::sum_circuit(db, lits.as_slice(), BoolVal::Const(k[b]))?;
 						} else if lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
 							// Literal is not used for the less-than constraint unless a zero has been seen first
 							let sum = new_var!(
@@ -409,7 +409,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 									)
 								}
 							);
-							Self::sum_circuit(db, lits.as_slice(), LitOrConst::Lit(sum))?;
+							Self::sum_circuit(db, lits.as_slice(), BoolVal::Lit(sum))?;
 							bucket[b].push(sum);
 						}
 
@@ -419,11 +419,11 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 							if lits.len() == 2 && lin.cmp == LimitComp::Equal {
 								// Already encoded by the XOR to compute the sum
 							} else {
-								Self::carry_circuit(db, &lits[..], LitOrConst::Const(false))?;
+								Self::carry_circuit(db, &lits[..], BoolVal::Const(false))?;
 							}
 						} else if last && lin.cmp == LimitComp::Equal && bucket[b + 1].is_empty() {
 							// No need to create a new literal, force the carry to equal the result
-							Self::carry_circuit(db, &lits[..], LitOrConst::Const(k[b + 1]))?;
+							Self::carry_circuit(db, &lits[..], BoolVal::Const(k[b + 1]))?;
 							// Mark k[b + 1] as false (otherwise next step will fail)
 							k[b + 1] = false;
 						} else {
@@ -438,7 +438,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 									)
 								}
 							);
-							Self::carry_circuit(db, lits.as_slice(), LitOrConst::Lit(carry))?;
+							Self::carry_circuit(db, lits.as_slice(), BoolVal::Lit(carry))?;
 							bucket[b + 1].push(carry);
 						}
 					}
@@ -1901,7 +1901,7 @@ mod tests {
 						tests::construct_terms, LimitComp, NormalizedBoolLinear, PosCoeff,
 					},
 					helpers::tests::{assert_solutions, expect_file},
-					ClauseDatabase, Cnf, Encoder,
+					ClauseDatabaseTools, Cnf, Encoder,
 				};
 
 				#[test]
@@ -2127,7 +2127,7 @@ mod tests {
 		cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
 		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
 		sorted::SortedEncoder,
-		ClauseDatabase, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
+		ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 	};
 
 	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(terms: &[(L, Coeff)]) -> Vec<Part> {

@@ -27,7 +27,7 @@ mod tests {
 		bool_linear::LimitComp,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
 		solver::{kissat::Kissat, SolveResult, Solver},
-		ClauseDatabase, Encoder, Valuation,
+		ClauseDatabaseTools, Encoder, Valuation,
 	};
 
 	#[test]
