@@ -209,7 +209,7 @@ mod tests {
 				.map(|v| if sol.value(v.into()) { v.into() } else { !v })
 				.collect_vec();
 			solns.push(sol);
-			slv.add_clause(solns.last().unwrap().iter().map(|l| !l))
+			slv.add_clause(solns.last().unwrap().iter().map(|&l| !l))
 				.unwrap()
 		}
 		solns.sort();

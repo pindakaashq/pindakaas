@@ -101,11 +101,11 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 		let cls = cls.concat(); // filter out [] (empty conjunctions?) of the clause
 		if FILTER_TRIVIAL_CLAUSES {
 			let mut lits = HashSet::<Lit>::with_capacity(cls.len());
-			if cls.iter().any(|lit| {
+			if cls.iter().any(|&lit| {
 				if lits.contains(&(!lit)) {
 					true
 				} else {
-					let _ = lits.insert(*lit);
+					let _ = lits.insert(lit);
 					false
 				}
 			}) {
@@ -290,7 +290,7 @@ pub(crate) mod tests {
 					})
 					.collect(),
 			);
-			slv.add_clause(solutions.last().unwrap().iter().map(|l| !l))
+			slv.add_clause(solutions.last().unwrap().iter().map(|&l| !l))
 				.unwrap();
 		}
 		solutions.sort();

@@ -531,7 +531,7 @@ impl IntVarBin {
 							.zip(self.xs.iter())
 							// if >=, find 0s, if <=, find 1s
 							.filter_map(|(b, x)| (b != geq).then_some(x))
-							.map(|x| if geq { *x } else { !x })
+							.map(|&x| if geq { x } else { !x })
 							.collect(),
 					)
 				}
@@ -1000,7 +1000,7 @@ impl IntVarOrd {
 			vec![]
 		} else {
 			match self.xs.overlap(v).collect_vec()[..] {
-				[(_, x)] => vec![vec![!x]],
+				[(_, &x)] => vec![vec![!x]],
 				_ => panic!("No or multiples literals at {v:?} for var {self:?}"),
 			}
 		}
@@ -1009,7 +1009,7 @@ impl IntVarOrd {
 	pub(crate) fn leqs(&self) -> Vec<(Range<Coeff>, Vec<Vec<Lit>>)> {
 		self.xs
 			.iter(..)
-			.map(|(v, x)| ((v.start - 1)..(v.end - 1), vec![vec![!x]]))
+			.map(|(v, &x)| ((v.start - 1)..(v.end - 1), vec![vec![!x]]))
 			.chain(once((self.ub()..self.ub() + 1, vec![])))
 			.collect()
 	}
@@ -1406,7 +1406,7 @@ impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for TernLeEncoder {
 
 		let TernLeConstraint { x, y, cmp, z } = tern;
 
-		return match (x, y, z) {
+		match (x, y, z) {
 			(IntVarEnc::Const(_), IntVarEnc::Const(_), IntVarEnc::Const(_)) => {
 				if tern.check(&|_| unreachable!()).is_ok() {
 					Ok(())
@@ -1620,9 +1620,9 @@ impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for TernLeEncoder {
 						}
 					}
 				}
-				return Ok(());
+				Ok(())
 			}
-		};
+		}
 	}
 }
 

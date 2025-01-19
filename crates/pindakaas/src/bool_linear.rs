@@ -877,7 +877,7 @@ impl BoolLinAggregator {
 		if k == 0 {
 			for part in partition {
 				for (lit, _) in part.iter() {
-					db.add_clause([!lit])?;
+					db.add_clause([!*lit])?;
 				}
 			}
 			return Ok(BoolLinVariant::Trivial);
@@ -893,7 +893,7 @@ impl BoolLinAggregator {
 						.into_iter()
 						.filter(|(lit, coef)| {
 							if coef > &k {
-								db.add_clause([!lit]).unwrap();
+								db.add_clause([!*lit]).unwrap();
 								false
 							} else {
 								true
@@ -925,7 +925,7 @@ impl BoolLinAggregator {
 						.into_iter()
 						.filter(|(lit, coef)| {
 							if coef > &k {
-								db.add_clause([!lit]).unwrap();
+								db.add_clause([!*lit]).unwrap();
 								false
 							} else {
 								true
@@ -966,7 +966,7 @@ impl BoolLinAggregator {
 						partition
 							.iter()
 							.flat_map(|part| part.iter())
-							.map(|(lit, _)| !lit)
+							.map(|(lit, _)| !*lit)
 							.collect_vec(),
 					)?;
 					return Ok(BoolLinVariant::Trivial);
@@ -1042,7 +1042,7 @@ impl BoolLinAggregator {
 			// At most n-1 out of n is equivalent to at least *not* one
 			// Ex. at most 2 out of 3 true = at least 1 out of 3 false
 			if partition.len() == (*k + 1) as usize {
-				let neg = partition.iter().map(|l| !l);
+				let neg = partition.iter().map(|&l| !l);
 				db.add_clause(neg.clone())?;
 
 				if cmp == LimitComp::LessEq {

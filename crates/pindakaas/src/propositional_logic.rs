@@ -1,50 +1,409 @@
 use std::{
+	collections::HashSet,
 	fmt::{self, Display, Formatter},
 	iter::once,
-	ops::Not,
+	ops::{BitAnd, BitOr, BitXor, Not},
 };
 
 use itertools::{Itertools, Position};
 
-use crate::{ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Result, Unsatisfiable};
+use crate::{
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Result, Unsatisfiable,
+};
 
 /// A propositional logic formula
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Formula {
+pub enum Formula<Base> {
 	/// A conjunction of two or more sub-formulas
-	And(Vec<Formula>),
+	And(Vec<Formula<Base>>),
 	///A atomic formula (a literal)
-	Atom(Lit),
+	Atom(Base),
 	/// The equivalence of two or more sub-formulas
-	Equiv(Vec<Formula>),
+	Equiv(Vec<Formula<Base>>),
 	/// A choice between two sub-formulas
 	IfThenElse {
-		cond: Box<Formula>,
-		then: Box<Formula>,
-		els: Box<Formula>,
+		cond: Box<Formula<Base>>,
+		then: Box<Formula<Base>>,
+		els: Box<Formula<Base>>,
 	},
 	/// An implication of two sub-formulas
-	Implies(Box<Formula>, Box<Formula>),
+	Implies(Box<Formula<Base>>, Box<Formula<Base>>),
 	/// The negation of a sub-formula
-	Not(Box<Formula>),
+	Not(Box<Formula<Base>>),
 	/// A disjunction of two or more sub-formulas
-	Or(Vec<Formula>),
+	Or(Vec<Formula<Base>>),
 	/// An exclusive or of two or more sub-formulas
-	Xor(Vec<Formula>),
+	Xor(Vec<Formula<Base>>),
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct TseitinEncoder;
 
-impl Formula {
-	/// Helper function to bind the (sub) formula to a name (literal) for the tseitin encoding.
+impl<Base> Formula<Base> {
+	fn simplify_with(
+		self,
+		resolver: &impl Fn(Base) -> Result<Lit, bool>,
+	) -> Result<Formula<Lit>, bool>
+	where
+		Self: Clone,
+	{
+		match self {
+			Formula::And(sub) => {
+				let sub: Vec<_> = sub
+					.into_iter()
+					.filter_map(|f| match f.simplify_with(resolver) {
+						Err(true) => None,
+						Err(false) => Some(Err(false)),
+						Ok(f) => Some(Ok(f)),
+					})
+					.try_collect()?;
+				match sub.len() {
+					0 => Err(true),
+					1 => Ok(sub.into_iter().next().unwrap()),
+					_ => Ok(Formula::And(sub)),
+				}
+			}
+			Formula::Atom(l) => match resolver(l) {
+				Err(b) => Err(b),
+				Ok(l) => Ok(Formula::Atom(l)),
+			},
+			Formula::Equiv(sub) => {
+				let mut val = None;
+				let mut nsub = Vec::with_capacity(sub.len());
+				for f in sub {
+					match f.simplify_with(resolver) {
+						Err(b) => {
+							if val.is_some() && val != Some(b) {
+								return Err(false);
+							}
+							val = Some(b);
+						}
+						Ok(f) => nsub.push(f),
+					}
+				}
+				Ok(match val {
+					Some(true) => Formula::And(nsub),
+					Some(false) => Formula::Not(Box::new(Formula::Or(nsub))),
+					None => Formula::Equiv(nsub),
+				})
+			}
+			Formula::IfThenElse { cond, then, els } => match cond.clone().simplify_with(resolver) {
+				Err(true) => then.simplify_with(resolver),
+				Err(false) => els.simplify_with(resolver),
+				Ok(cond_lit) => match then.simplify_with(resolver) {
+					Err(true) => {
+						Self::Implies(Box::new(!*cond), Box::new(!*els)).simplify_with(resolver)
+					}
+					Err(false) => Self::And(vec![!*cond, !*els]).simplify_with(resolver),
+					Ok(then_lit) => match els.simplify_with(resolver) {
+						Err(true) => Ok(Formula::Implies(Box::new(cond_lit), Box::new(then_lit))),
+						Err(false) => Ok(Formula::And(vec![cond_lit, !then_lit])),
+						Ok(els_lit) => Ok(Formula::IfThenElse {
+							cond: Box::new(cond_lit),
+							then: Box::new(then_lit),
+							els: Box::new(els_lit),
+						}),
+					},
+				},
+			},
+			Formula::Implies(f, g) => match f.simplify_with(resolver) {
+				Err(false) => Err(true),
+				Err(true) => g.simplify_with(resolver),
+				Ok(f) => match g.simplify_with(resolver) {
+					Err(true) => Err(true),
+					Err(false) => Ok(!f),
+					Ok(g) => Ok(Formula::Implies(Box::new(f), Box::new(g))),
+				},
+			},
+			Formula::Not(sub) => match sub.simplify_with(resolver) {
+				Err(b) => Err(!b),
+				Ok(f) => Ok(!f),
+			},
+			Formula::Or(sub) => {
+				let sub: Vec<_> = sub
+					.into_iter()
+					.filter_map(|f| match f.simplify_with(resolver) {
+						Err(true) => Some(Err(true)),
+						Err(false) => None,
+						Ok(f) => Some(Ok(f)),
+					})
+					.try_collect()?;
+				match sub.len() {
+					0 => Err(false),
+					1 => Ok(sub.into_iter().next().unwrap()),
+					_ => Ok(Formula::Or(sub)),
+				}
+			}
+			Formula::Xor(sub) => {
+				let mut count = 0;
+				let sub = sub
+					.into_iter()
+					.filter_map(|f| match f.simplify_with(resolver) {
+						Err(true) => {
+							count += 1;
+							None
+						}
+						Err(false) => None,
+						Ok(f) => Some(f),
+					})
+					.collect_vec();
+				match sub.len() {
+					0 => Err(count % 2 == 1),
+					1 => {
+						let f = sub.into_iter().next().unwrap();
+						Ok(if count % 2 == 1 { !f } else { f })
+					}
+					_ => {
+						let f = Formula::Xor(sub);
+						Ok(if count % 2 == 1 { !f } else { f })
+					}
+				}
+			}
+		}
+	}
+}
+
+impl<Base> BitAnd<Self> for Formula<Base> {
+	type Output = Self;
+
+	fn bitand(self, rhs: Self) -> Self {
+		match (self, rhs) {
+			(Formula::And(mut sub), Formula::And(rhs)) => {
+				sub.extend(rhs);
+				Formula::And(sub)
+			}
+			(Formula::And(mut sub), x) | (x, Formula::And(mut sub)) => {
+				sub.push(x);
+				Formula::And(sub)
+			}
+			(lhs, rhs) => Formula::And(vec![lhs, rhs]),
+		}
+	}
+}
+
+impl<Base> BitOr<Self> for Formula<Base> {
+	type Output = Self;
+
+	fn bitor(self, rhs: Self) -> Self {
+		match (self, rhs) {
+			(Formula::Or(mut sub), Formula::Or(rhs)) => {
+				sub.extend(rhs);
+				Formula::Or(sub)
+			}
+			(Formula::Or(mut sub), x) | (x, Formula::Or(mut sub)) => {
+				sub.push(x);
+				Formula::Or(sub)
+			}
+			(lhs, rhs) => Formula::Or(vec![lhs, rhs]),
+		}
+	}
+}
+
+impl<Base> BitXor<Self> for Formula<Base> {
+	type Output = Self;
+
+	fn bitxor(self, rhs: Self) -> Self {
+		match (self, rhs) {
+			(Formula::Xor(mut sub), Formula::Xor(rhs)) => {
+				sub.extend(rhs);
+				Formula::Xor(sub)
+			}
+			(Formula::Xor(mut sub), x) | (x, Formula::Xor(mut sub)) => {
+				sub.push(x);
+				Formula::Xor(sub)
+			}
+			(lhs, rhs) => Formula::Xor(vec![lhs, rhs]),
+		}
+	}
+}
+
+impl<Base: Display> Display for Formula<Base> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self {
+			Formula::Atom(l) => write!(f, "{l}"),
+			Formula::Not(sub) => write!(f, "¬({})", sub),
+			Formula::And(sub) => write!(
+				f,
+				"{}",
+				sub.iter()
+					.format_with(" ∧ ", |elt, f| f(&format_args!("({elt})")))
+			),
+			Formula::Or(sub) => write!(
+				f,
+				"{}",
+				sub.iter()
+					.format_with(" ∨ ", |elt, f| f(&format_args!("({elt})")))
+			),
+			Formula::Implies(x, y) => write!(f, "({x}) → ({y})"),
+			Formula::Equiv(sub) => write!(
+				f,
+				"{}",
+				sub.iter()
+					.format_with(" ≡ ", |elt, f| f(&format_args!("({elt})")))
+			),
+			Formula::Xor(sub) => write!(
+				f,
+				"{}",
+				sub.iter()
+					.format_with(" ⊻ ", |elt, f| f(&format_args!("({elt})")))
+			),
+			Formula::IfThenElse { cond, then, els } => {
+				write!(f, "if ({cond}) then ({then}) else ({els}) endif")
+			}
+		}
+	}
+}
+
+impl<Base> Not for Formula<Base> {
+	type Output = Formula<Base>;
+
+	fn not(self) -> Self {
+		match self {
+			Formula::Not(f) => *f,
+			_ => Formula::Not(Box::new(self)),
+		}
+	}
+}
+
+impl Formula<BoolVal> {
+	pub fn simplify<Iter>(self, knowledge: Iter) -> Result<Formula<Lit>, bool>
+	where
+		Iter: IntoIterator,
+		Iter::Item: Into<Lit>,
+	{
+		let knowledge: HashSet<_> = knowledge.into_iter().map_into().collect();
+		self.simplify_with(&|l| match l {
+			BoolVal::Const(b) => Err(b),
+			BoolVal::Lit(l) if knowledge.contains(&l) => Err(true),
+			BoolVal::Lit(l) if knowledge.contains(&!l) => Err(false),
+			BoolVal::Lit(l) => Ok(l),
+		})
+	}
+
+	pub fn resolve(self) -> Result<Formula<Lit>, bool> {
+		self.simplify_with(&|l| match l {
+			BoolVal::Const(b) => Err(b),
+			BoolVal::Lit(l) => Ok(l),
+		})
+	}
+}
+
+impl BitAnd<bool> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitand(self, rhs: bool) -> Self {
+		self & BoolVal::Const(rhs)
+	}
+}
+
+impl BitAnd<BoolVal> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitand(self, rhs: BoolVal) -> Self {
+		match rhs {
+			BoolVal::Const(false) => Self::Atom(false.into()),
+			BoolVal::Const(true) => self,
+			BoolVal::Lit(lit) => self & Formula::Atom(BoolVal::Lit(lit)),
+		}
+	}
+}
+
+impl BitAnd<Lit> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitand(self, rhs: Lit) -> Self {
+		self & BoolVal::Lit(rhs)
+	}
+}
+
+impl BitOr<bool> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitor(self, rhs: bool) -> Self {
+		self | BoolVal::Const(rhs)
+	}
+}
+
+impl BitOr<BoolVal> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitor(self, rhs: BoolVal) -> Self {
+		match rhs {
+			BoolVal::Const(true) => Self::Atom(true.into()),
+			BoolVal::Const(false) => self,
+			BoolVal::Lit(lit) => self | Formula::Atom(BoolVal::Lit(lit)),
+		}
+	}
+}
+
+impl BitOr<Lit> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitor(self, rhs: Lit) -> Self {
+		self | BoolVal::Lit(rhs)
+	}
+}
+
+impl BitXor<bool> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitxor(self, rhs: bool) -> Self {
+		self ^ BoolVal::Const(rhs)
+	}
+}
+
+impl BitXor<BoolVal> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitxor(self, rhs: BoolVal) -> Self {
+		match rhs {
+			BoolVal::Const(false) => self,
+			BoolVal::Const(true) => !self,
+			BoolVal::Lit(lit) => self ^ Formula::Atom(BoolVal::Lit(lit)),
+		}
+	}
+}
+
+impl BitXor<Lit> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitxor(self, rhs: Lit) -> Self {
+		self ^ BoolVal::Lit(rhs)
+	}
+}
+
+impl From<Formula<Lit>> for Formula<BoolVal> {
+	fn from(value: Formula<Lit>) -> Self {
+		match value {
+			Formula::And(sub) => Self::And(sub.into_iter().map_into().collect()),
+			Formula::Atom(lit) => Self::Atom(lit.into()),
+			Formula::Equiv(sub) => Self::Equiv(sub.into_iter().map_into().collect()),
+			Formula::IfThenElse { cond, then, els } => Self::IfThenElse {
+				cond: Box::new((*cond).into()),
+				then: Box::new((*then).into()),
+				els: Box::new((*els).into()),
+			},
+			Formula::Implies(f, g) => Self::Implies(Box::new((*f).into()), Box::new((*g).into())),
+			Formula::Not(f) => {
+				let f: Self = (*f).into();
+				!f
+			}
+			Formula::Or(sub) => Self::Or(sub.into_iter().map_into().collect()),
+			Formula::Xor(sub) => Self::Xor(sub.into_iter().map_into().collect()),
+		}
+	}
+}
+
+impl Formula<Lit> {
+	/// Helper function to bind the (sub) formula to a name (literal) for the
+	/// tseitin encoding.
 	fn bind<DB: ClauseDatabase>(&self, db: &mut DB, name: Option<Lit>) -> Result<Lit> {
 		Ok(match self {
 			Formula::Atom(lit) => {
 				if let Some(name) = name {
 					if *lit != name {
 						db.add_clause([!name, *lit])?;
-						db.add_clause([name, !lit])?;
+						db.add_clause([name, !*lit])?;
 					}
 					name
 				} else {
@@ -64,7 +423,7 @@ impl Formula {
 						let name = name.unwrap_or_else(|| db.new_var().into());
 						let lits: Vec<_> = sub.iter().map(|f| f.bind(db, None)).try_collect()?;
 						// not name -> (not lits[0] or not lits[1] or ...)
-						db.add_clause(once(name).chain(lits.iter().map(|l| !l)))?;
+						db.add_clause(once(name).chain(lits.iter().map(|&l| !l)))?;
 						for lit in lits {
 							// name -> lit
 							db.add_clause([!name, lit])?;
@@ -83,11 +442,8 @@ impl Formula {
 					1 => return sub[0].bind(db, name),
 					_ => {
 						let name = name.unwrap_or_else(|| db.new_var().into());
-						let lits = sub
-							.iter()
-							.map(|f| f.bind(db, None))
-							.collect::<Result<Vec<_>>>()?;
-						for lit in &lits {
+						let lits: Vec<_> = sub.iter().map(|f| f.bind(db, None)).try_collect()?;
+						for &lit in &lits {
 							// not name -> not lit
 							db.add_clause([name, !lit])?;
 						}
@@ -119,12 +475,12 @@ impl Formula {
 					.iter()
 					.map(|f| f.bind(db, None))
 					.collect::<Result<Vec<_>>>()?;
-				for (x, y) in lits.iter().tuple_windows() {
+				for (x, y) in lits.iter().copied().tuple_windows() {
 					// name -> (x <-> y)
-					db.add_clause([!name, !x, *y])?;
-					db.add_clause([!name, *x, !y])?;
+					db.add_clause([!name, !x, y])?;
+					db.add_clause([!name, x, !y])?;
 				}
-				db.add_clause(once(name).chain(lits.iter().map(|l| !l)))?;
+				db.add_clause(once(name).chain(lits.iter().map(|&l| !l)))?;
 				db.add_clause(once(name).chain(lits.into_iter()))?;
 				name
 			}
@@ -183,64 +539,102 @@ impl Formula {
 		cnf.encode(self, &TseitinEncoder)?;
 		Ok(cnf)
 	}
-}
 
-impl Display for Formula {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		match self {
-			Formula::Atom(l) => write!(f, "{l}"),
-			Formula::Not(sub) => write!(f, "¬({})", sub),
-			Formula::And(sub) => write!(
-				f,
-				"{}",
-				sub.iter()
-					.format_with(" ∧ ", |elt, f| f(&format_args!("({elt})")))
-			),
-			Formula::Or(sub) => write!(
-				f,
-				"{}",
-				sub.iter()
-					.format_with(" ∨ ", |elt, f| f(&format_args!("({elt})")))
-			),
-			Formula::Implies(x, y) => write!(f, "({x}) → ({y})"),
-			Formula::Equiv(sub) => write!(
-				f,
-				"{}",
-				sub.iter()
-					.format_with(" ≡ ", |elt, f| f(&format_args!("({elt})")))
-			),
-			Formula::Xor(sub) => write!(
-				f,
-				"{}",
-				sub.iter()
-					.format_with(" ⊻ ", |elt, f| f(&format_args!("({elt})")))
-			),
-			Formula::IfThenElse { cond, then, els } => {
-				write!(f, "if ({cond}) then ({then}) else ({els}) endif")
+	pub fn simplify<Iter>(self, knowledge: Iter) -> Result<Formula<Lit>, bool>
+	where
+		Iter: IntoIterator,
+		Iter::Item: Into<Lit>,
+	{
+		let knowledge: HashSet<_> = knowledge.into_iter().map_into().collect();
+		self.simplify_with(&|l| {
+			if knowledge.contains(&l) {
+				Err(true)
+			} else if knowledge.contains(&!l) {
+				Err(false)
+			} else {
+				Ok(l)
 			}
+		})
+	}
+}
+
+impl BitAnd<bool> for Formula<Lit> {
+	type Output = Self;
+
+	fn bitand(self, rhs: bool) -> Self {
+		if rhs {
+			self
+		} else {
+			Self::Or(vec![])
 		}
 	}
 }
 
-impl Not for Formula {
-	type Output = Formula;
+impl BitAnd<Lit> for Formula<Lit> {
+	type Output = Self;
 
-	fn not(self) -> Self {
-		match self {
-			Formula::Atom(l) => Formula::Atom(!l),
-			Formula::Not(f) => *f,
-			_ => Formula::Not(Box::new(self)),
+	fn bitand(self, rhs: Lit) -> Self {
+		self & Formula::Atom(rhs)
+	}
+}
+
+impl BitOr<bool> for Formula<Lit> {
+	type Output = Self;
+
+	fn bitor(self, rhs: bool) -> Self {
+		if rhs {
+			Self::And(vec![])
+		} else {
+			self
 		}
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
-	fn encode(&self, db: &mut DB, f: &Formula) -> Result {
+impl BitOr<Lit> for Formula<Lit> {
+	type Output = Self;
+
+	fn bitor(self, rhs: Lit) -> Self {
+		self | Formula::Atom(rhs)
+	}
+}
+
+impl BitXor<bool> for Formula<Lit> {
+	type Output = Self;
+
+	fn bitxor(self, rhs: bool) -> Self {
+		if rhs {
+			!self
+		} else {
+			self
+		}
+	}
+}
+
+impl BitXor<Lit> for Formula<Lit> {
+	type Output = Self;
+
+	fn bitxor(self, rhs: Lit) -> Self {
+		self ^ Formula::Atom(rhs)
+	}
+}
+
+impl<DB: ClauseDatabase> Encoder<DB, Formula<BoolVal>> for TseitinEncoder {
+	fn encode(&self, db: &mut DB, con: &Formula<BoolVal>) -> Result {
+		match con.clone().resolve() {
+			Err(false) => Err(Unsatisfiable),
+			Err(true) => Ok(()),
+			Ok(con) => self.encode(db, &con),
+		}
+	}
+}
+
+impl<DB: ClauseDatabase> Encoder<DB, Formula<Lit>> for TseitinEncoder {
+	fn encode(&self, db: &mut DB, f: &Formula<Lit>) -> Result {
 		match f {
 			Formula::Atom(l) => db.add_clause([*l]),
 			Formula::Not(f) => match f.as_ref() {
-				Formula::Atom(l) => db.add_clause([!l]),
-				Formula::Not(f) => self.encode(db, f),
+				&Formula::Atom(l) => db.add_clause([!l]),
+				Formula::Not(f) => self.encode(db, f.as_ref()),
 				Formula::And(sub) => {
 					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
 					self.encode(db, &Formula::Or(neg_sub))
@@ -250,18 +644,18 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 					self.encode(db, &Formula::And(neg_sub))
 				}
 				Formula::Implies(x, y) => {
-					self.encode(db, x)?;
-					self.encode(db, &!(**y).clone())
+					self.encode(db, x.as_ref())?;
+					self.encode(db, &!y.as_ref().clone())
 				}
 				Formula::IfThenElse { cond, then, els } => {
 					let name = cond.bind(db, None)?;
 					{
 						let mut cdb = db.with_conditions(vec![!name]);
-						let neg_then: Formula = !*then.clone();
+						let neg_then: Formula<Lit> = !*then.clone();
 						self.encode(&mut cdb, &neg_then)?;
 					}
 					let mut cdb = db.with_conditions(vec![name]);
-					let neg_els: Formula = !*els.clone();
+					let neg_els: Formula<Lit> = !*els.clone();
 					self.encode(&mut cdb, &neg_els)
 				}
 				Formula::Equiv(sub) if sub.len() == 2 => {
@@ -298,7 +692,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 			Formula::Implies(left, right) => {
 				let x = left.bind(db, None)?;
 				let mut cdb = db.with_conditions(vec![!x]);
-				self.encode(&mut cdb, right)
+				self.encode(&mut cdb, right.as_ref())
 			}
 			Formula::Equiv(sub) => {
 				match sub.len() {
@@ -338,10 +732,10 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula> for TseitinEncoder {
 				let name = cond.bind(db, None)?;
 				{
 					let mut cdb = db.with_conditions(vec![!name]);
-					self.encode(&mut cdb, then)?;
+					self.encode(&mut cdb, then.as_ref())?;
 				}
 				let mut cdb = db.with_conditions(vec![name]);
-				self.encode(&mut cdb, els)
+				self.encode(&mut cdb, els.as_ref())
 			}
 		}
 	}
@@ -362,12 +756,7 @@ mod tests {
 		// Simple conjunction
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
-		TseitinEncoder
-			.encode(
-				&mut cnf,
-				&Formula::And(vec![Formula::Atom(a), Formula::Atom(b), Formula::Atom(c)]),
-			)
-			.unwrap();
+		TseitinEncoder.encode(&mut cnf, &(a & b & c)).unwrap();
 
 		assert_encoding(
 			&cnf,
@@ -383,13 +772,7 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
-			.encode(
-				&mut cnf,
-				&Formula::Equiv(vec![
-					Formula::Atom(c),
-					Formula::And(vec![Formula::Atom(a), Formula::Atom(b)]),
-				]),
-			)
+			.encode(&mut cnf, &Formula::Equiv(vec![Formula::Atom(c), a & b]))
 			.unwrap();
 
 		assert_encoding(
@@ -602,12 +985,7 @@ mod tests {
 		// Simple disjunction
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
-		TseitinEncoder
-			.encode(
-				&mut cnf,
-				&Formula::Or(vec![Formula::Atom(a), Formula::Atom(b), Formula::Atom(c)]),
-			)
-			.unwrap();
+		TseitinEncoder.encode(&mut cnf, &(a | b | c)).unwrap();
 
 		assert_encoding(
 			&cnf,
@@ -623,13 +1001,7 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
-			.encode(
-				&mut cnf,
-				&Formula::Equiv(vec![
-					Formula::Atom(c),
-					Formula::Or(vec![Formula::Atom(a), Formula::Atom(b)]),
-				]),
-			)
+			.encode(&mut cnf, &Formula::Equiv(vec![Formula::Atom(c), a | b]))
 			.unwrap();
 
 		assert_encoding(
@@ -667,13 +1039,8 @@ mod tests {
 	fn encode_prop_xor() {
 		// Simple XOR
 		let mut cnf = Cnf::default();
-		let vars = cnf.new_var_range(3).iter_lits().collect_vec();
-		TseitinEncoder
-			.encode(
-				&mut cnf,
-				&Formula::Xor(vars.iter().cloned().map(Formula::Atom).collect()),
-			)
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
+		TseitinEncoder.encode(&mut cnf, &(a ^ b ^ c)).unwrap();
 
 		assert_encoding(
 			&cnf,
@@ -681,7 +1048,7 @@ mod tests {
 		);
 		assert_solutions(
 			&cnf,
-			vars,
+			[a, b, c],
 			&expect_file!["propositional_logic/encode_prop_xor.sol"],
 		);
 
@@ -689,13 +1056,7 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		TseitinEncoder
-			.encode(
-				&mut cnf,
-				&Formula::Equiv(vec![
-					Formula::Atom(d),
-					Formula::Xor(vec![Formula::Atom(a), Formula::Atom(c), Formula::Atom(d)]),
-				]),
-			)
+			.encode(&mut cnf, &Formula::Equiv(vec![Formula::Atom(d), a ^ b ^ c]))
 			.unwrap();
 
 		assert_encoding(
@@ -709,17 +1070,8 @@ mod tests {
 		);
 		// Regression test: negated XOR (into equiv)
 		let mut cnf = Cnf::default();
-		let a = cnf.new_lit();
-		let b = cnf.new_lit();
-		TseitinEncoder
-			.encode(
-				&mut cnf,
-				&Formula::Not(Box::new(Formula::Xor(vec![
-					Formula::Atom(a),
-					Formula::Atom(b),
-				]))),
-			)
-			.unwrap();
+		let (a, b) = cnf.new_lits();
+		TseitinEncoder.encode(&mut cnf, &(!(a ^ b))).unwrap();
 
 		assert_encoding(
 			&cnf,
@@ -732,36 +1084,24 @@ mod tests {
 		);
 		// Regression test: negated XOR (negated args)
 		let mut cnf = Cnf::default();
-		let vars = cnf.new_var_range(3).iter_lits().collect_vec();
-		TseitinEncoder
-			.encode(
-				&mut cnf,
-				&Formula::Not(Box::new(Formula::Xor(
-					vars.iter().cloned().map(Formula::Atom).collect(),
-				))),
-			)
-			.unwrap();
+		let (a, b, c) = cnf.new_lits();
+		TseitinEncoder.encode(&mut cnf, &(!(a ^ b ^ c))).unwrap();
 
 		assert_solutions(
 			&cnf,
-			vars,
+			[a, b, c],
 			&expect_file!["propositional_logic/encode_prop_xor_neg2.sol"],
 		);
 		// Regression test: negated XOR (negated binding)
 		let mut cnf = Cnf::default();
-		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
+		let (a, b, c, d) = cnf.new_lits();
 		TseitinEncoder
-			.encode(
-				&mut cnf,
-				&Formula::Not(Box::new(Formula::Xor(
-					vars.iter().cloned().map(Formula::Atom).collect(),
-				))),
-			)
+			.encode(&mut cnf, &(!(a ^ b ^ c ^ d)))
 			.unwrap();
 
 		assert_solutions(
 			&cnf,
-			vars,
+			[a, b, c, d],
 			&expect_file!["propositional_logic/encode_prop_xor_neg3.sol"],
 		);
 	}

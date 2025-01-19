@@ -52,10 +52,10 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 		let signals = (0..bits).map(|_| db.new_lit()).collect_vec();
 
 		// Enforce that literal can only be true when selected
-		for (i, lit) in card1.lits.iter().enumerate() {
-			for (j, sig) in signals.iter().enumerate() {
+		for (i, &lit) in card1.lits.iter().enumerate() {
+			for (j, &sig) in signals.iter().enumerate() {
 				if i & (1 << j) != 0 {
-					db.add_clause([!lit, *sig])?;
+					db.add_clause([!lit, sig])?;
 				} else {
 					db.add_clause([!lit, !sig])?;
 				}
@@ -98,14 +98,14 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for LadderEncoder {
 		if card1.cmp == LimitComp::Equal {
 			db.add_clause([a])?;
 		}
-		for x in card1.lits.iter() {
+		for &x in card1.lits.iter() {
 			let b = db.new_lit(); // y_v
 			db.add_clause([!b, a])?; // y_v -> y_v-1
 
 			// "Channelling" clauses for x_v <-> (y_v-1 /\ ¬y_v)
 			db.add_clause([!x, a])?; // x_v -> y_v-1
 			db.add_clause([!x, !b])?; // x_v -> ¬y_v
-			db.add_clause([!a, b, *x])?; // (y_v-1 /\ ¬y_v) -> x=v
+			db.add_clause([!a, b, x])?; // (y_v-1 /\ ¬y_v) -> x=v
 			a = b;
 		}
 		if card1.cmp == LimitComp::Equal {
@@ -126,7 +126,7 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for PairwiseEncoder {
 			at_least_one_clause(db, card1)?;
 		}
 		// For every pair of literals (i, j) add "¬i ∨ ¬j"
-		for (a, b) in card1.lits.iter().tuple_combinations() {
+		for (a, b) in card1.lits.iter().copied().tuple_combinations() {
 			db.add_clause([!a, !b])?;
 		}
 		Ok(())
@@ -379,7 +379,7 @@ pub(crate) mod tests {
 					let mut cnf = Cnf::default();
 					let vars = cnf.new_var_range(LARGE_N).iter_lits().collect_vec();
 					let con = CardinalityOne {
-						lits: vars.clone().iter().map(|l| !l).collect_vec(),
+						lits: vars.clone().iter().map(|&l| !l).collect_vec(),
 						cmp: LimitComp::Equal,
 					};
 					$encoder.encode(&mut cnf, &con).unwrap();

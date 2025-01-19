@@ -28,14 +28,14 @@ use std::{
 	io::{self, BufRead, BufReader, Write},
 	iter::{repeat, FusedIterator},
 	num::NonZeroI32,
-	ops::{Bound, Not, RangeBounds, RangeInclusive},
+	ops::{BitAnd, BitOr, BitXor, Bound, Not, RangeBounds, RangeInclusive},
 	path::Path,
 	slice,
 };
 
 use itertools::{traits::HomogeneousTuple, Itertools};
 
-use crate::{helpers::subscript_number, solver::VarFactory};
+use crate::{helpers::subscript_number, propositional_logic::Formula, solver::VarFactory};
 
 /// A helper type used to represent a Boolean value that can be either a literal
 /// for a Boolean decision variable, or a constant Boolean value.
@@ -412,6 +412,110 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 	}
 }
 
+impl BitAnd<bool> for BoolVal {
+	type Output = BoolVal;
+
+	fn bitand(self, rhs: bool) -> Self::Output {
+		match self {
+			BoolVal::Const(b) => (b & rhs).into(),
+			BoolVal::Lit(l) if rhs => (l).into(),
+			BoolVal::Lit(_) => false.into(),
+		}
+	}
+}
+
+impl BitAnd<BoolVal> for BoolVal {
+	type Output = Formula<BoolVal>;
+
+	fn bitand(self, rhs: BoolVal) -> Self::Output {
+		match (self, rhs) {
+			(BoolVal::Const(a), BoolVal::Const(b)) => Formula::Atom((a & b).into()),
+			(BoolVal::Lit(a), BoolVal::Lit(b)) => (a & b).into(),
+			(BoolVal::Lit(a), BoolVal::Const(b)) | (BoolVal::Const(b), BoolVal::Lit(a)) => {
+				Formula::Atom(a & b)
+			}
+		}
+	}
+}
+
+impl BitAnd<Lit> for BoolVal {
+	type Output = Formula<BoolVal>;
+
+	fn bitand(self, rhs: Lit) -> Self::Output {
+		self & BoolVal::Lit(rhs)
+	}
+}
+
+impl BitOr<bool> for BoolVal {
+	type Output = BoolVal;
+
+	fn bitor(self, rhs: bool) -> Self::Output {
+		match self {
+			BoolVal::Const(b) => (b | rhs).into(),
+			BoolVal::Lit(_) if rhs => true.into(),
+			BoolVal::Lit(_) => self,
+		}
+	}
+}
+
+impl BitOr<BoolVal> for BoolVal {
+	type Output = Formula<BoolVal>;
+
+	fn bitor(self, rhs: BoolVal) -> Self::Output {
+		match (self, rhs) {
+			(BoolVal::Const(a), BoolVal::Const(b)) => Formula::Atom((a | b).into()),
+			(BoolVal::Lit(a), BoolVal::Lit(b)) => (a | b).into(),
+			(BoolVal::Lit(a), BoolVal::Const(b)) | (BoolVal::Const(b), BoolVal::Lit(a)) => {
+				Formula::Atom(a | b)
+			}
+		}
+	}
+}
+
+impl BitOr<Lit> for BoolVal {
+	type Output = Formula<BoolVal>;
+
+	fn bitor(self, rhs: Lit) -> Self::Output {
+		self | BoolVal::Lit(rhs)
+	}
+}
+
+impl BitXor<bool> for BoolVal {
+	type Output = BoolVal;
+
+	fn bitxor(self, rhs: bool) -> Self::Output {
+		if rhs {
+			!self
+		} else {
+			self
+		}
+	}
+}
+
+impl BitXor<BoolVal> for BoolVal {
+	type Output = Formula<BoolVal>;
+
+	fn bitxor(self, rhs: BoolVal) -> Self::Output {
+		match (self, rhs) {
+			(BoolVal::Const(a), BoolVal::Const(b)) => Formula::Atom((a ^ b).into()),
+			(BoolVal::Lit(a), BoolVal::Lit(b)) => {
+				Formula::Xor(vec![Formula::Atom(a.into()), Formula::Atom(b.into())])
+			}
+			(BoolVal::Lit(a), BoolVal::Const(b)) | (BoolVal::Const(b), BoolVal::Lit(a)) => {
+				Formula::Atom((a ^ b).into())
+			}
+		}
+	}
+}
+
+impl BitXor<Lit> for BoolVal {
+	type Output = Formula<BoolVal>;
+
+	fn bitxor(self, rhs: Lit) -> Self::Output {
+		self ^ BoolVal::Lit(rhs)
+	}
+}
+
 impl Display for BoolVal {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -606,6 +710,90 @@ impl Display for Lit {
 	}
 }
 
+impl BitAnd<bool> for Lit {
+	type Output = BoolVal;
+
+	fn bitand(self, rhs: bool) -> Self::Output {
+		if rhs {
+			self.into()
+		} else {
+			false.into()
+		}
+	}
+}
+
+impl BitAnd<BoolVal> for Lit {
+	type Output = Formula<BoolVal>;
+
+	fn bitand(self, rhs: BoolVal) -> Self::Output {
+		rhs & self
+	}
+}
+
+impl BitAnd<Lit> for Lit {
+	type Output = Formula<Lit>;
+
+	fn bitand(self, rhs: Lit) -> Self::Output {
+		Formula::And(vec![Formula::Atom(self), Formula::Atom(rhs)])
+	}
+}
+
+impl BitOr<bool> for Lit {
+	type Output = BoolVal;
+
+	fn bitor(self, rhs: bool) -> Self::Output {
+		if rhs {
+			true.into()
+		} else {
+			self.into()
+		}
+	}
+}
+
+impl BitOr<BoolVal> for Lit {
+	type Output = Formula<BoolVal>;
+
+	fn bitor(self, rhs: BoolVal) -> Self::Output {
+		rhs | self
+	}
+}
+
+impl BitOr<Lit> for Lit {
+	type Output = Formula<Lit>;
+
+	fn bitor(self, rhs: Lit) -> Self::Output {
+		Formula::Or(vec![Formula::Atom(self), Formula::Atom(rhs)])
+	}
+}
+
+impl BitXor<bool> for Lit {
+	type Output = Lit;
+
+	fn bitxor(self, rhs: bool) -> Self::Output {
+		if rhs {
+			!self
+		} else {
+			self
+		}
+	}
+}
+
+impl BitXor<BoolVal> for Lit {
+	type Output = Formula<BoolVal>;
+
+	fn bitxor(self, rhs: BoolVal) -> Self::Output {
+		rhs ^ self
+	}
+}
+
+impl BitXor<Lit> for Lit {
+	type Output = Formula<Lit>;
+
+	fn bitxor(self, rhs: Lit) -> Self::Output {
+		Formula::Xor(vec![Formula::Atom(self), Formula::Atom(rhs)])
+	}
+}
+
 impl From<Var> for Lit {
 	fn from(value: Var) -> Self {
 		Lit(value.0)
@@ -617,14 +805,6 @@ impl Not for Lit {
 
 	fn not(self) -> Self::Output {
 		Lit(-self.0)
-	}
-}
-
-impl Not for &Lit {
-	type Output = Lit;
-
-	fn not(self) -> Self::Output {
-		!(*self)
 	}
 }
 
@@ -700,14 +880,6 @@ impl Not for Var {
 
 	fn not(self) -> Self::Output {
 		!Lit::from(self)
-	}
-}
-
-impl Not for &Var {
-	type Output = Lit;
-
-	fn not(self) -> Self::Output {
-		!*self
 	}
 }
 
