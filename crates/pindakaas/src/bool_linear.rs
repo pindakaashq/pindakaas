@@ -2657,12 +2657,8 @@ mod tests {
 	}
 	linear_test_suite! {adder_encoder, crate::bool_linear::AdderEncoder::default()}
 
-	// FIXME: SWC does not support LimitComp::Equal
-	// card1_test_suite!(SwcEncoder::default());
+	linear_test_suite! {totalizer_encoder, crate::gt::TotalizerEncoder::default()}
 	linear_test_suite! {swc_encoder, crate::swc::SwcEncoder::default()}
-
-	// FIXME: Totalizer does not support LimitComp::Equal
-	// card1_test_suite!(TotalizerEncoder::default());
-	linear_test_suite!(totalizer_encoder, crate::gt::TotalizerEncoder::default());
+	linear_test_suite! {bdd_encoder, crate::bdd::BddEncoder::default()}
 	use crate::{cardinality::tests::card_test_suite, cardinality_one::tests::card1_test_suite};
 }

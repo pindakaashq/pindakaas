@@ -11,11 +11,32 @@ use crate::{
 		enc::LitOrConst,
 		helpers::required_lits,
 		model::{Cse, USE_CHANNEL, USE_CSE},
-		SCM,
-		IntVar, IntVarRef, Lin, LinExp,
+		IntVar, IntVarRef, Lin, LinExp, SCM,
 	},
 	log, Coeff, Lit, Unsatisfiable,
 };
+
+// TODO [?] public access because required by pindakaas-scm .. no sure what the right approach is
+#[derive(Debug)]
+pub struct ScmDB(pub(crate) phf::Map<&'static str, &'static [ScmNode]>);
+// TODO pub(crate) ecm: phf::Map<&'static str, &'static Cnf>
+
+impl ScmDB {
+	fn get(&self, lits: usize, c: i64) -> Option<&[ScmNode]> {
+		self.0.get(&format!("{lits}_{c}")).cloned()
+	}
+}
+
+pub type ScmNodeKey = (usize, Coeff); // bits, multiplier
+#[derive(Debug, Clone)]
+pub struct ScmNode {
+	pub i: usize,
+	pub i1: usize,
+	pub sh1: u32,
+	pub add: bool,
+	pub i2: usize,
+	pub sh2: u32,
+}
 
 /// A linear term (constant times integer variable)
 #[derive(Debug, Clone)]
@@ -312,10 +333,7 @@ impl Term {
 						};
 						let c = self.c;
 						let scm = SCM
-							.iter()
-							.find_map(|(bits, mul, scm)| {
-								(*bits == lits && mul == &c).then_some(scm)
-							})
+							.get(lits, c)
 							.unwrap_or_else(|| {
 								panic!("Cannot find scm recipe for c={c},lits={lits}")
 							})

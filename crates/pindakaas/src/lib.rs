@@ -13,6 +13,7 @@ pub mod cardinality_one;
 pub(crate) mod helpers;
 
 mod integer;
+pub use integer::term::{ScmDB, ScmNode, ScmNodeKey};
 
 pub mod bdd;
 pub mod gt;

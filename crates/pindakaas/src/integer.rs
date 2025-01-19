@@ -9,12 +9,12 @@ pub(crate) mod helpers;
 mod model;
 mod ord;
 mod scm_db;
-mod term;
+
+pub(crate) mod term;
 pub(crate) mod var;
 
 use std::cmp::max;
 
-pub(crate) use scm_db::SCM;
 pub(crate) use assignment::{Assignment, MapSol};
 pub(crate) use con::{Lin, LinExp};
 pub(crate) use decompose::Decompose;
@@ -22,6 +22,7 @@ pub(crate) use dom::Dom;
 use enc::LitOrConst;
 use itertools::Itertools;
 pub(crate) use model::{Consistency, Decomposer, IntVarEncHeuristic, Model, ModelConfig};
+pub(crate) use scm_db::SCM;
 pub(crate) use term::Term;
 pub(crate) use var::{IntVar, IntVarRef};
 
