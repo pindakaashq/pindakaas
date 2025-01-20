@@ -28,6 +28,8 @@ pindakaas-derive = { path = "../pindakaas-derive", optional = true }
 pindakaas-intel-sat = { path = "../pindakaas-intel-sat", optional = true }
 pindakaas-kissat = { path = "../pindakaas-kissat", optional = true }
 splr = { version = "0.17", optional = true }
+
+# Other optional dependencies for features
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 [dev-dependencies]
@@ -46,6 +48,7 @@ external-propagation = ["cadical"]
 intel-sat = ["pindakaas-intel-sat", "pindakaas-derive"]
 kissat = ["pindakaas-kissat", "pindakaas-derive"]
 serde = ["dep:serde"]
+scm = []
 
 [lints]
 workspace = true

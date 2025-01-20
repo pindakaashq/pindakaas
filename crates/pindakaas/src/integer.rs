@@ -8,7 +8,6 @@ pub(crate) mod enc;
 pub(crate) mod helpers;
 mod model;
 mod ord;
-mod scm_db;
 
 pub(crate) mod term;
 pub(crate) mod var;
@@ -22,7 +21,6 @@ pub(crate) use dom::Dom;
 use enc::LitOrConst;
 use itertools::Itertools;
 pub(crate) use model::{Consistency, Decomposer, IntVarEncHeuristic, Model, ModelConfig};
-pub(crate) use scm_db::SCM;
 pub(crate) use term::Term;
 pub(crate) use var::{IntVar, IntVarRef};
 

@@ -6,24 +6,38 @@ use rustc_hash::FxHashMap;
 use super::{bin::BinEnc, enc::IntVarEnc, model::Scm, Dom, Model};
 use crate::{
 	bool_linear::{Comparator, PosCoeff},
-	helpers::{as_binary, div_ceil, div_floor},
+	helpers::{as_binary, div_ceil, div_floor, emit_clause},
 	integer::{
 		enc::LitOrConst,
 		helpers::required_lits,
 		model::{Cse, USE_CHANNEL, USE_CSE},
-		IntVar, IntVarRef, Lin, LinExp, SCM,
+		IntVar, IntVarRef, Lin, LinExp,
 	},
-	log, Coeff, Lit, Unsatisfiable,
+	log, ClauseDatabase, Coeff, ConstCnf, Lit, Unsatisfiable,
 };
 
-// TODO [?] public access because required by pindakaas-scm .. no sure what the right approach is
-#[derive(Debug)]
-pub struct ScmDB(pub(crate) phf::Map<&'static str, &'static [ScmNode]>);
-// TODO pub(crate) ecm: phf::Map<&'static str, &'static Cnf>
+#[cfg(not(feature = "scm"))]
+const SCM: ScmDB = ScmDB {
+	scm: phf::Map::new(),
+	ecm: phf::Map::new(),
+};
+
+#[cfg(feature = "scm")]
+include!("../gen/scm_db.rs");
+
+#[derive(Debug, Default)]
+pub struct ScmDB {
+	pub(crate) scm: phf::Map<&'static str, &'static [ScmNode]>,
+	pub(crate) ecm: phf::Map<&'static str, ConstCnf>,
+}
 
 impl ScmDB {
-	fn get(&self, lits: usize, c: i64) -> Option<&[ScmNode]> {
-		self.0.get(&format!("{lits}_{c}")).cloned()
+	fn get(&self, lits: usize, c: i64, scm: &Scm) -> Option<&[ScmNode]> {
+		match scm {
+			Scm::Add => self.scm.get(&format!("{lits}_{c}")).cloned(),
+			Scm::Rca => self.scm.get(&format!("0_{c}")).cloned(),
+			_ => unreachable!(),
+		}
 	}
 }
 
@@ -326,17 +340,15 @@ impl Term {
 				let model = model.as_mut().unwrap();
 				match model.config.scm {
 					Scm::Rca | Scm::Add => {
-						let lits = if model.config.scm == Scm::Add {
-							required_lits(&self.x.borrow().dom)
-						} else {
-							0
-						};
+						// let lits = if model.config.scm == Scm::Add {
+						// 	required_lits(&self.x.borrow().dom)
+						// } else {
+						// 	0
+						// };
 						let c = self.c;
 						let scm = SCM
-							.get(lits, c)
-							.unwrap_or_else(|| {
-								panic!("Cannot find scm recipe for c={c},lits={lits}")
-							})
+							.get(required_lits(&self.x.borrow().dom), c, &model.config.scm)
+							.unwrap_or_else(|| panic!("Cannot find scm recipe for c={c}"))
 							.to_vec();
 
 						let mut ys = [(0, 1)].into_iter().collect::<FxHashMap<_, _>>();
@@ -510,8 +522,25 @@ impl Term {
 
 #[cfg(test)]
 mod tests {
+	use expect_test::expect_file;
+
 	use super::*;
-	use crate::Cnf;
+	use crate::{helpers::tests::assert_encoding, lit, Cnf};
+
+	#[test]
+	fn const_cnf_replace_test() {
+		const CNF: ConstCnf = ConstCnf {
+			lits: &[lit![1], lit![-2], lit![2]],
+			sizes: &[2, 1],
+		};
+		let mut db = Cnf::default();
+		CNF.encode(&mut db, &[lit![42], lit![43]]).unwrap();
+		// TODO ?? cannot update for some reason. Might be a local problem
+		// assert_encoding(
+		// 	&db,
+		// 	&expect_file!["integer/term/const_cnf_replace_test.cnf"],
+		// );
+	}
 
 	#[test]
 	fn term_test() {

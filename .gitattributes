@@ -1,3 +1,2 @@
-crates/pindakaas/res/ecm/* linguist-generated=true
-crates/pindakaas/src/integer/scm_db.rs linguist-generated=true
+crates/pindakaas/src/gen/* linguist-generated=true
 crates/pindakaas/corpus/**/* linguist-generated=true

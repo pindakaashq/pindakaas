@@ -444,12 +444,15 @@ impl BinEnc {
 			})
 			.collect_vec();
 
-		// TODO [!] remove reading, check in Cnf objects based on dimacs files
 		let cnf = Cnf::from_file(&PathBuf::from(format!(
 			"{}/res/ecm/{lits}_{c}.dimacs",
 			env!("CARGO_MANIFEST_DIR")
 		)))
 		.unwrap_or_else(|_| panic!("Could not find Dnf method cnf for {lits}_{c}"));
+
+		// TODO use...
+		// let cnf = SCM.get(lits,c,Scm::Dnf);
+
 		// TODO [?] could replace with some arithmetic. Using VarRange?
 		let map = cnf
 			.vars()

@@ -45,14 +45,14 @@ use std::{
 	fmt::{self, Display},
 	fs::File,
 	hash::Hash,
-	io::{self, BufRead, BufReader, Write},
+	io::{self, BufRead, BufReader, Cursor, Write},
 	iter::FusedIterator,
 	num::NonZeroI32,
 	ops::{Bound, Not, RangeBounds, RangeInclusive},
 	path::Path,
 };
 
-use helpers::{is_unique, subscript_number};
+use helpers::{emit_clause, is_unique, subscript_number};
 use itertools::{traits::HomogeneousTuple, Itertools};
 
 use crate::solver::VarFactory;
@@ -184,7 +184,8 @@ pub struct ConditionalDatabase<'a, DB: ClauseDatabase + ?Sized> {
 	conditions: Vec<Lit>,
 }
 
-enum Dimacs {
+#[derive(Debug)]
+pub enum Dimacs {
 	Cnf(Cnf),
 	Wcnf(Wcnf),
 }
@@ -643,6 +644,12 @@ impl Display for Cnf {
 	}
 }
 
+#[macro_export]
+macro_rules! lit {
+	($lit:expr) => {
+		$crate::Lit(std::num::NonZeroI32::new($lit).unwrap())
+	};
+}
 impl ExactSizeIterator for CnfIterator<'_> {}
 
 impl<'a> Iterator for CnfIterator<'a> {
@@ -1073,6 +1080,49 @@ impl Display for Wcnf {
 			}
 			writeln!(f, "0")?;
 			start += size;
+		}
+		Ok(())
+	}
+}
+
+/// A const Cnf (constructed at compile-time)
+/// TODO lits are assumed to be in a contiguous var range starting from 1..
+#[derive(Debug)]
+pub struct ConstCnf {
+	lits: &'static [Lit],
+	sizes: &'static [usize],
+}
+
+impl ConstCnf {
+	/// Return CNF, replacing literals according to map.
+	fn encode<DB: ClauseDatabase>(self, db: &mut DB, map: &[Lit]) -> Result {
+		if self.lits.is_empty() {
+			return Ok(());
+		}
+		debug_assert!(
+			map.len()
+				== self
+					.lits
+					.iter()
+					.map(|x| usize::try_from(i32::from(x.var())).unwrap())
+					.max()
+					.unwrap(),
+			"All literals should be mapped but was given map: {map:?}"
+		);
+		let mut i = 0;
+		for size in self.sizes {
+			emit_clause!(
+				db,
+				self.lits[i..i + *size].iter().map(|x| {
+					let lit: Lit = map[usize::try_from(i32::from(x.var())).unwrap() - 1];
+					if x.is_negated() {
+						!lit
+					} else {
+						lit
+					}
+				})
+			)?;
+			i += size;
 		}
 		Ok(())
 	}
