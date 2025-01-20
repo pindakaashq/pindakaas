@@ -11,47 +11,10 @@ use crate::{
 		enc::LitOrConst,
 		helpers::required_lits,
 		model::{Cse, USE_CHANNEL, USE_CSE},
-		IntVar, IntVarRef, Lin, LinExp,
+		IntVar, IntVarRef, Lin, LinExp, SCM,
 	},
 	log, ClauseDatabase, Coeff, ConstCnf, Lit, Unsatisfiable,
 };
-
-#[cfg(not(feature = "scm"))]
-const SCM: ScmDB = ScmDB {
-	scm: phf::Map::new(),
-	ecm: phf::Map::new(),
-};
-
-#[cfg(feature = "scm")]
-include!("../gen/scm_db.rs");
-
-#[derive(Debug, Default)]
-pub struct ScmDB {
-	pub(crate) scm: phf::Map<&'static str, &'static [ScmNode]>,
-	pub(crate) ecm: phf::Map<&'static str, ConstCnf>,
-}
-
-impl ScmDB {
-	fn get(&self, lits: usize, c: i64, scm: &Scm) -> Option<&[ScmNode]> {
-		match scm {
-			Scm::Add => self.scm.get(&format!("{lits}_{c}")).cloned(),
-			Scm::Rca => self.scm.get(&format!("0_{c}")).cloned(),
-			_ => unreachable!(),
-		}
-	}
-}
-
-pub type ScmNodeKey = (usize, Coeff); // bits, multiplier
-#[derive(Debug, Clone)]
-pub struct ScmNode {
-	pub i: usize,
-	pub i1: usize,
-	pub sh1: u32,
-	pub add: bool,
-	pub i2: usize,
-	pub sh2: u32,
-}
-
 /// A linear term (constant times integer variable)
 #[derive(Debug, Clone)]
 pub struct Term {

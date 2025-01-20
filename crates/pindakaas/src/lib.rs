@@ -13,7 +13,6 @@ pub mod cardinality_one;
 pub(crate) mod helpers;
 
 mod integer;
-pub use integer::term::{ScmDB, ScmNode, ScmNodeKey};
 
 pub mod bdd;
 pub mod gt;
@@ -33,6 +32,9 @@ macro_rules! log {
     }
 }
 pub(crate) use log;
+
+// TODO on the way out ..
+pub use integer::ScmNode;
 
 #[cfg(feature = "serde")]
 #[macro_use]
@@ -1094,8 +1096,17 @@ pub struct ConstCnf {
 }
 
 impl ConstCnf {
+	// TODO probably save this as a field
+	fn vars(&self) -> Option<VarRange> {
+		self.lits
+			.iter()
+			.map(|x| x.var())
+			.max()
+			.map(|x| VarRange::new(Var(NonZeroI32::new(1).unwrap()), x))
+	}
+
 	/// Return CNF, replacing literals according to map.
-	fn encode<DB: ClauseDatabase>(self, db: &mut DB, map: &[Lit]) -> Result {
+	fn encode<DB: ClauseDatabase>(&self, db: &mut DB, map: &[Lit]) -> Result {
 		if self.lits.is_empty() {
 			return Ok(());
 		}

@@ -20,6 +20,7 @@ pub(crate) use decompose::Decompose;
 pub(crate) use dom::Dom;
 use enc::LitOrConst;
 use itertools::Itertools;
+use model::Scm;
 pub(crate) use model::{Consistency, Decomposer, IntVarEncHeuristic, Model, ModelConfig};
 pub(crate) use term::Term;
 pub(crate) use var::{IntVar, IntVarRef};
@@ -27,8 +28,48 @@ pub(crate) use var::{IntVar, IntVarRef};
 use crate::{
 	bool_linear::PosCoeff,
 	helpers::{as_binary, emit_clause, emit_filtered_clause, new_var},
-	ClauseDatabase, Lit, Result, Unsatisfiable,
+	ClauseDatabase, ConstCnf, Lit, Result, Unsatisfiable,
 };
+
+// TODO move to new scm.rs module
+impl ScmDB {
+	fn get(&self, lits: usize, c: i64, scm: &Scm) -> Option<&[ScmNode]> {
+		match scm {
+			Scm::Add => self.scm.get(&format!("{lits}_{c}")).cloned(),
+			Scm::Rca => self.scm.get(&format!("0_{c}")).cloned(),
+			_ => unreachable!(),
+		}
+	}
+	// TODO merge with above
+	fn ecm(&self, lits: usize, c: i64) -> Option<&ConstCnf> {
+		self.ecm.get(&format!("{lits}_{c}"))
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct ScmNode {
+	pub i: usize,
+	pub i1: usize,
+	pub sh1: u32,
+	pub add: bool,
+	pub i2: usize,
+	pub sh2: u32,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ScmDB {
+	pub(crate) scm: phf::Map<&'static str, &'static [ScmNode]>,
+	pub(crate) ecm: phf::Map<&'static str, ConstCnf>,
+}
+
+#[cfg(not(feature = "scm"))]
+const SCM: ScmDB = ScmDB {
+	scm: phf::Map::new(),
+	ecm: phf::Map::new(),
+};
+
+#[cfg(feature = "scm")]
+include!("gen/scm_db.rs");
 
 /// Uses lexicographic constraint to constrain x:B ≦ k
 #[cfg_attr(

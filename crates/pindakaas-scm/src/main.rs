@@ -10,18 +10,7 @@ use quote::quote;
 use tar::Archive;
 use tqdm::Iter;
 
-const LIMIT: usize = 3;
-
-// pub type ScmNodeKey = (usize, Coeff); // bits, multiplier
-// #[derive(Debug, Clone)]
-// pub struct ScmNode {
-// 	pub i: usize,
-// 	pub i1: usize,
-// 	pub sh1: u32,
-// 	pub add: bool,
-// 	pub i2: usize,
-// 	pub sh2: u32,
-// }
+const LIMIT: usize = 16;
 
 fn scm() -> Result<String, std::io::Error> {
 	// if Path::new("res/scm").exists() {
@@ -38,6 +27,7 @@ fn scm() -> Result<String, std::io::Error> {
 		path.file_stem().unwrap().to_str().unwrap().to_string()
 	}
 
+	// TODO stream i/o unpack
 	Archive::new(GzDecoder::new(fs::File::open(db)?))
 		.unpack("res/")
 		.unwrap();
@@ -53,6 +43,7 @@ fn scm() -> Result<String, std::io::Error> {
 				.lines()
 				.filter(|line| !(line.is_empty() || line.starts_with('#')))
 				.map(|line| match line.split(',').collect::<Vec<_>>()[..] {
+					// TODO rewrite without using scmnode
 					[i, i1, sh1, add, i2, sh2] => ScmNode {
 						i: i.parse().unwrap(),
 						i1: i1.parse().unwrap(),
@@ -102,9 +93,20 @@ fn scm() -> Result<String, std::io::Error> {
 	let (ecm_keys, ecm_values): (Vec<_>, Vec<_>) = fs::read_dir("res/ecm")?
 		.map(|f| f.unwrap().path())
 		.sorted()
-		.take(LIMIT)
+		.filter(|p| {
+			p.file_stem()
+				.unwrap()
+				.to_str()
+				.unwrap()
+				.split("_")
+				.nth(1)
+				.unwrap()
+				.parse::<usize>()
+				.unwrap() < LIMIT
+		})
 		.tqdm()
 		.map(|path| {
+			// TODO remove last pindakaas dependency
 			let (lits, sizes): (Vec<_>, Vec<_>) = pindakaas::Cnf::from_file(&path)
 				.unwrap()
 				.iter()

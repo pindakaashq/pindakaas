@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, path::PathBuf};
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
-use super::Dom;
+use super::{Dom, SCM};
 use crate::{
 	bool_linear::{Comparator, PosCoeff},
 	helpers,
@@ -444,54 +444,30 @@ impl BinEnc {
 			})
 			.collect_vec();
 
-		let cnf = Cnf::from_file(&PathBuf::from(format!(
-			"{}/res/ecm/{lits}_{c}.dimacs",
-			env!("CARGO_MANIFEST_DIR")
-		)))
-		.unwrap_or_else(|_| panic!("Could not find Dnf method cnf for {lits}_{c}"));
-
 		// TODO use...
-		// let cnf = SCM.get(lits,c,Scm::Dnf);
 
-		// TODO [?] could replace with some arithmetic. Using VarRange?
-		let map = cnf
+		let ecm = SCM
+			.ecm(lits, c)
+			.unwrap_or_else(|| panic!("Could not find Dnf method cnf for {lits}_{c}"));
+
+		let ys = ecm
 			.vars()
-			.zip_longest(xs.iter())
-			.flat_map(|yx| match yx {
-				itertools::EitherOrBoth::Both(x, y) => Some((x, *y)),
-				itertools::EitherOrBoth::Left(x) => {
-					// var in CNF but not in x -> new var y
-					Some((x, new_var!(db, format!("scm_{x}"))))
-				}
-				itertools::EitherOrBoth::Right(_) => unreachable!(), // cnf has at least as many vars as xs
-			})
-			.collect::<FxHashMap<_, _>>();
+			.into_iter()
+			.skip(xs.len())
+			.map(|_| new_var!(db))
+			.collect_vec();
 
-		// add clauses according to Dnf
-		cnf.iter().try_for_each(|clause| {
-			emit_clause!(
-				db,
-				clause
-					.iter()
-					.map(|x| {
-						let lit = map[&x.var()];
-						if x.is_negated() {
-							!lit
-						} else {
-							lit
-						}
-					})
-					.collect::<Vec<_>>()
-			)
-		})?;
+		let map = xs.iter().chain(ys.iter()).cloned().collect_vec();
+		ecm.encode(db, &map)?;
 
-		let lits = [false]
+		let ys = [false]
 			.repeat(bits - lits)
 			.into_iter()
 			.map(LitOrConst::from)
-			.chain(map.into_values().sorted().skip(lits).map(LitOrConst::from))
+			.chain(ys.into_iter().map(LitOrConst::from))
 			.collect_vec();
-		Ok(BinEnc::from_lits(&lits))
+
+		Ok(BinEnc::from_lits(&ys))
 	}
 }
 
