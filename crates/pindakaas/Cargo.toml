@@ -44,6 +44,7 @@ tracing = { workspace = true }
 [features]
 cadical = ["pindakaas-cadical", "pindakaas-derive"]
 default = ["cadical"]
+# default = ["cadical", "scm"]
 external-propagation = ["cadical"]
 intel-sat = ["pindakaas-intel-sat", "pindakaas-derive"]
 kissat = ["pindakaas-kissat", "pindakaas-derive"]

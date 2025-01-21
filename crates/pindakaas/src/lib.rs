@@ -47,7 +47,7 @@ use std::{
 	fmt::{self, Display},
 	fs::File,
 	hash::Hash,
-	io::{self, BufRead, BufReader, Cursor, Write},
+	io::{self, BufRead, BufReader, Cursor, Read, Write},
 	iter::FusedIterator,
 	num::NonZeroI32,
 	ops::{Bound, Not, RangeBounds, RangeInclusive},
@@ -368,11 +368,34 @@ impl From<Wcnf> for Cnf {
 //     }
 // }
 
+// macro_rules! lits {
+// 		() => {
+// 			std::vec::Vec::new()
+// 		};
+// 		($($x:expr),+ $(,)?) => {
+// 			<[Lit]>::into_vec(
+// 				std::boxed::Box::new([$($crate::Lit::from($x)),+])
+// 			)
+// 		};
+//         }
+
+// macro_rules! clauses {
+// 	( ()+ ) => {};
+// }
+
+// TODO rather not make this public, but not sure how to share this
+pub(crate) fn parse_dimacs_file_slice(lines: &str) -> Result<Cnf, io::Error> {
+	if let Dimacs::Cnf(cnf) = parse_dimacs_file::<false>(Cursor::new(lines))? {
+		Ok(cnf)
+	} else {
+		unreachable!()
+	}
+}
+
 /// Internal function used to parse a file in the (weighted) DIMACS format.
 ///
 /// This function is used by `Cnf::from_str` and `Wcnf::from_str`.
-fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Error> {
-	let file = File::open(path)?;
+pub fn parse_dimacs_file<const WEIGHTED: bool>(lines: impl BufRead) -> Result<Dimacs, io::Error> {
 	let mut had_header = false;
 
 	let mut wcnf = Wcnf::default();
@@ -383,7 +406,7 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 	let mut top: Option<Coeff> = None;
 	let weight: Option<Coeff> = None;
 
-	for line in BufReader::new(file).lines() {
+	for line in lines.lines() {
 		match line {
 			Ok(line) if line.is_empty() || line.starts_with('c') => (),
 			// parse header, expected format: "p cnf {num_var} {num_clauses}" or "p wcnf {num_var} {num_clauses} {top}"
@@ -466,9 +489,8 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 								return Err(io::Error::new(
 									io::ErrorKind::InvalidInput,
 									format!(
-										"Number of clauses exceeded p-line parameter of {} in {}",
+										"Number of clauses exceeded p-line parameter of {}",
 										num_cls.unwrap(),
-										path.display(),
 									),
 								));
 							}
@@ -494,8 +516,16 @@ impl Cnf {
 	}
 
 	/// Read a CNF formula from a file formatted in the DIMACS CNF format
+	pub fn from_buf(buf: impl BufRead) -> Result<Self, io::Error> {
+		match parse_dimacs_file::<false>(buf)? {
+			Dimacs::Cnf(cnf) => Ok(cnf),
+			_ => unreachable!(),
+		}
+	}
+
+	/// Read a CNF formula from a file formatted in the DIMACS CNF format
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-		match parse_dimacs_file::<false>(path)? {
+		match parse_dimacs_file::<false>(BufReader::new(File::open(path)?))? {
 			Dimacs::Cnf(cnf) => Ok(cnf),
 			_ => unreachable!(),
 		}
@@ -652,6 +682,21 @@ macro_rules! lit {
 		$crate::Lit(std::num::NonZeroI32::new($lit).unwrap())
 	};
 }
+
+#[macro_export]
+macro_rules! clause {
+	($($x:expr),+ $(,)?) => {
+            &[$($crate::lit!($x)),+]
+	};
+}
+
+#[macro_export]
+macro_rules! clauses {
+	($($x:expr),+ $(,)?) => {
+            &[$($crate::clause!($x)),+]
+	};
+}
+
 impl ExactSizeIterator for CnfIterator<'_> {}
 
 impl<'a> Iterator for CnfIterator<'a> {
@@ -720,7 +765,7 @@ impl Lit {
 	/// This method is only safe to use if the input integer is known to be a
 	/// integer coerced from a literal part of the same formula. Otherwise, the
 	/// usage of the literal may lead to undefined behavior.
-	pub fn from_raw(value: NonZeroI32) -> Lit {
+	pub const fn from_raw(value: NonZeroI32) -> Lit {
 		Lit(value)
 	}
 
@@ -1008,7 +1053,7 @@ impl Wcnf {
 
 	/// Read a WCNF formula from a file formatted in the (W)DIMACS WCNF format
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-		match parse_dimacs_file::<true>(path)? {
+		match parse_dimacs_file::<true>(BufReader::new(File::open(path)?))? {
 			Dimacs::Wcnf(wcnf) => Ok(wcnf),
 			_ => unreachable!(),
 		}

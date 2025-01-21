@@ -1,5 +1,6 @@
 use std::{
 	fs::{self},
+	io::{BufRead, BufReader},
 	path::Path,
 };
 
@@ -10,7 +11,8 @@ use quote::quote;
 use tar::Archive;
 use tqdm::Iter;
 
-const LIMIT: usize = 16;
+const LIMIT: usize = 10;
+const FORMAT: bool = true;
 
 fn scm() -> Result<String, std::io::Error> {
 	// if Path::new("res/scm").exists() {
@@ -28,108 +30,123 @@ fn scm() -> Result<String, std::io::Error> {
 	}
 
 	// TODO stream i/o unpack
-	Archive::new(GzDecoder::new(fs::File::open(db)?))
-		.unpack("res/")
-		.unwrap();
 
-	let (scm_keys, scm_values): (Vec<_>, Vec<_>) = fs::read_dir("res/scm")?
-		.map(|f| f.unwrap().path())
-		.sorted()
-		.take(LIMIT)
-		.map(|path| {
-			println!("Compiling {}", path.display());
-			let scm = fs::read_to_string(&path)
-				.unwrap()
-				.lines()
-				.filter(|line| !(line.is_empty() || line.starts_with('#')))
-				.map(|line| match line.split(',').collect::<Vec<_>>()[..] {
-					// TODO rewrite without using scmnode
-					[i, i1, sh1, add, i2, sh2] => ScmNode {
-						i: i.parse().unwrap(),
-						i1: i1.parse().unwrap(),
-						sh1: sh1.parse().unwrap(),
-						add: match add {
-							"+" => true,
-							"-" => false,
-							_ => unreachable!(),
+	let (scm_keys, scm_values): (Vec<_>, Vec<_>) =
+		Archive::new(GzDecoder::new(fs::File::open(db)?))
+			.entries()
+			.into_iter()
+			.flatten()
+			.skip(1)
+			// .take(LIMIT)
+			.map(|entry| {
+				let mut entry = entry.unwrap();
+				let path = entry.path().unwrap().to_path_buf();
+				println!("Compiling {path:?}");
+				let scm = BufReader::new(entry)
+					.lines()
+					.map(|l| l.unwrap())
+					.filter(|line| !(line.is_empty() || line.starts_with('#')))
+					.map(|line| match line.split(',').collect::<Vec<_>>()[..] {
+						// TODO rewrite without using scmnode
+						[i, i1, sh1, add, i2, sh2] => ScmNode {
+							i: i.parse().unwrap(),
+							i1: i1.parse().unwrap(),
+							sh1: sh1.parse().unwrap(),
+							add: match add {
+								"+" => true,
+								"-" => false,
+								_ => unreachable!(),
+							},
+							i2: i2.parse().unwrap(),
+							sh2: sh2.parse().unwrap(),
 						},
-						i2: i2.parse().unwrap(),
-						sh2: sh2.parse().unwrap(),
-					},
-					_ => panic!("Unexpected line {line}"),
-				})
-				.map(
-					|ScmNode {
-					     i,
-					     i1,
-					     sh1,
-					     add,
-					     i2,
-					     sh2,
-					 }| {
-						quote! {
-							ScmNode {
-								i: #i,
-								i1: #i1,
-																sh1: #sh1,
-																add: #add,
-																i2: #i2,
-																sh2: #sh2,
+						_ => panic!("Unexpected line {line}"),
+					})
+					.map(
+						|ScmNode {
+						     i,
+						     i1,
+						     sh1,
+						     add,
+						     i2,
+						     sh2,
+						 }| {
+							quote! {
+								ScmNode {
+									i: #i,
+									i1: #i1,
+																	sh1: #sh1,
+																	add: #add,
+																	i2: #i2,
+																	sh2: #sh2,
+								}
 							}
-						}
-					},
-				)
-				.collect_vec();
+						},
+					)
+					.collect_vec();
 
-			let key = to_key(&path);
-			(quote! { #key }, quote! { &[#(#scm),*] })
-		})
-		.unzip();
+				let key = to_key(&path);
+				(quote! { #key }, quote! { &[#(#scm),*] })
+			})
+			.unzip();
 
-	let p = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/res/ecm.tar.gz"));
-	Archive::new(GzDecoder::new(fs::File::open(p).unwrap()))
-		.unpack("res/")
-		.unwrap();
-	let (ecm_keys, ecm_values): (Vec<_>, Vec<_>) = fs::read_dir("res/ecm")?
-		.map(|f| f.unwrap().path())
-		.sorted()
-		.filter(|p| {
-			p.file_stem()
-				.unwrap()
-				.to_str()
-				.unwrap()
-				.split("_")
-				.nth(1)
-				.unwrap()
-				.parse::<usize>()
-				.unwrap() < LIMIT
-		})
-		.tqdm()
-		.map(|path| {
-			// TODO remove last pindakaas dependency
-			let (lits, sizes): (Vec<_>, Vec<_>) = pindakaas::Cnf::from_file(&path)
-				.unwrap()
-				.iter()
-				.map(|clause| {
-					let clause = clause
-						.iter()
-						.map(|l| i32::from(*l))
-						.map(|l| quote! { crate::lit!(#l) })
-						.collect_vec();
-					let size = clause.len();
-					(quote! { #(#clause),* }, size)
-				})
-				.unzip();
-			(
-				to_key(&path),
-				quote! { crate::ConstCnf {lits: &[#(#lits),*], sizes: &[#(#sizes),*]} },
-			)
-		})
-		.map(|(key, dimacs)| (quote! { #key }, dimacs))
-		.unzip();
+	let (ecm_keys, ecm_values): (Vec<_>, Vec<_>) = Archive::new(GzDecoder::new(fs::File::open(
+		Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/res/ecm.tar.gz")),
+	)?))
+	.entries()
+	.into_iter()
+	.flatten()
+	.map(|entry| {
+		let entry = entry.unwrap();
+		(entry.path().unwrap().to_path_buf(), entry)
+	})
+	.skip(1)
+	// .take(LIMIT)
+	.filter(|(p, _)| {
+		p.file_stem()
+			.unwrap()
+			.to_str()
+			.unwrap()
+			.split("_")
+			.nth(1)
+			.unwrap()
+			.parse::<usize>()
+			.unwrap() < LIMIT
+	})
+	.tqdm()
+	.map(|(path, entry)| {
+		// let scm = BufReader::new(entry)
+		// 	.lines()
+		// 	.map(|l| l.unwrap())
+		// TODO remove last pindakaas dependency
+
+		// let mut s = String::new();
+
+		let (lits, sizes): (Vec<_>, Vec<_>) = pindakaas::Cnf::from_buf(BufReader::new(entry))
+			.unwrap()
+			.iter()
+			.map(|clause| {
+				let clause = clause
+					.iter()
+					.map(|l| i32::from(*l))
+					.map(|l| quote! { Lit::from_raw(NonZeroI32::new_unchecked(#l)) })
+					.collect_vec();
+				let size = clause.len();
+				(quote! { #(#clause),* }, size)
+			})
+			.unzip();
+		(
+			to_key(&path),
+			quote! { ConstCnf {lits: &[#(#lits),*], sizes: &[#(#sizes),*]} },
+			// quote! { s },
+		)
+	})
+	.map(|(key, dimacs)| (quote! { #key }, dimacs))
+	.unzip();
 
 	Ok(quote! {
-	pub(crate) static SCM: ScmDB = ScmDB {
+			use std::num::NonZeroI32;
+	pub(crate) static SCM: ScmDB = unsafe { ScmDB {
 			scm: phf::phf_map! {
 					#( #scm_keys => #scm_values ),*
 				},
@@ -139,7 +156,7 @@ fn scm() -> Result<String, std::io::Error> {
 
 							 }
 
-		};
+		}};
 		}
 	.to_string())
 }
@@ -151,20 +168,23 @@ pub fn main() {
 			env!("CARGO_MANIFEST_DIR"),
 			"/../pindakaas/src/gen/scm_db.rs"
 		),
-		prettyplease::unparse(
-			&syn::parse_file(&scm)
-				.unwrap_or_else(|e| panic!("Failed to format {scm} with err: {e}")),
-		),
+		if FORMAT {
+			prettyplease::unparse(
+				&syn::parse_file(&scm)
+					.unwrap_or_else(|e| panic!("Failed to format {scm} with err: {e}")),
+			)
+		} else {
+			scm
+		},
 	)
 	.unwrap();
 }
 
-#[cfg(test)]
-mod tests {
-	use crate::main;
-
-	#[test]
-	fn hello() {
-		main();
-	}
-}
+// #[cfg(test)]
+// mod tests {
+// 	use crate::main;
+// 	#[test]
+// 	fn hello() {
+// 		main();
+// 	}
+// }
