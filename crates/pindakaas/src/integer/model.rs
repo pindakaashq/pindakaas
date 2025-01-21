@@ -31,6 +31,7 @@ pub(crate) const USE_CHANNEL: bool = false;
 /// SCM methods
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[allow(dead_code, reason = "TODO expose variants in config")]
 pub(crate) enum Scm {
 	#[cfg(feature = "scm")]
 	/// Use recipe that minimizes adders. Good for ≥12 bits

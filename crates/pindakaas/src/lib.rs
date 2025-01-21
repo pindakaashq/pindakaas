@@ -21,6 +21,8 @@ pub mod swc;
 pub mod propositional_logic;
 pub mod solver;
 
+use std::io::Write;
+
 #[cfg(any(feature = "tracing", test))]
 pub mod trace;
 
@@ -33,28 +35,25 @@ macro_rules! log {
 }
 pub(crate) use log;
 
-// TODO on the way out ..
-pub use integer::ScmNode;
-
 #[cfg(feature = "serde")]
 #[macro_use]
 extern crate serde;
 
 use std::{
 	clone::Clone,
-	cmp::{max, Eq, Ordering},
+	cmp::{max, Ordering},
 	error::Error,
 	fmt::{self, Display},
 	fs::File,
-	hash::Hash,
-	io::{self, BufRead, BufReader, Cursor, Read, Write},
+	io::{self, BufRead, BufReader, Cursor},
 	iter::FusedIterator,
 	num::NonZeroI32,
 	ops::{Bound, Not, RangeBounds, RangeInclusive},
 	path::Path,
+	str::FromStr,
 };
 
-use helpers::{emit_clause, is_unique, subscript_number};
+use helpers::{is_unique, subscript_number};
 use itertools::{traits::HomogeneousTuple, Itertools};
 
 use crate::solver::VarFactory;
@@ -500,6 +499,14 @@ pub fn parse_dimacs_file<const WEIGHTED: bool>(lines: impl BufRead) -> Result<Di
 	}
 }
 
+impl FromStr for Cnf {
+	type Err = io::Error;
+
+	fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+		Self::from_buf(Cursor::new(s))
+	}
+}
+
 impl Cnf {
 	/// Returns the number of clauses in the formula.
 	pub fn clauses(&self) -> usize {
@@ -513,11 +520,6 @@ impl Cnf {
 			Dimacs::Cnf(cnf) => Ok(cnf),
 			_ => unreachable!(),
 		}
-	}
-
-	/// Read a CNF formula from a str DIMACS CNF format
-	pub fn from_str(s: &str) -> Result<Cnf, io::Error> {
-		Self::from_buf(Cursor::new(s))
 	}
 
 	/// Read a CNF formula from a file formatted in the DIMACS CNF format
@@ -668,27 +670,6 @@ impl Display for Cnf {
 		}
 		Ok(())
 	}
-}
-
-#[macro_export]
-macro_rules! lit {
-	($lit:expr) => {
-		$crate::Lit(std::num::NonZeroI32::new($lit).unwrap())
-	};
-}
-
-#[macro_export]
-macro_rules! clause {
-	($($x:expr),+ $(,)?) => {
-            &[$($crate::lit!($x)),+]
-	};
-}
-
-#[macro_export]
-macro_rules! clauses {
-	($($x:expr),+ $(,)?) => {
-            &[$($crate::clause!($x)),+]
-	};
 }
 
 impl ExactSizeIterator for CnfIterator<'_> {}
@@ -1121,58 +1102,6 @@ impl Display for Wcnf {
 			}
 			writeln!(f, "0")?;
 			start += size;
-		}
-		Ok(())
-	}
-}
-
-/// A const Cnf (constructed at compile-time)
-/// TODO lits are assumed to be in a contiguous var range starting from 1..
-#[derive(Debug)]
-pub struct ConstCnf {
-	lits: &'static [Lit],
-	sizes: &'static [usize],
-}
-
-impl ConstCnf {
-	// TODO probably save this as a field
-	fn vars(&self) -> Option<VarRange> {
-		self.lits
-			.iter()
-			.map(|x| x.var())
-			.max()
-			.map(|x| VarRange::new(Var(NonZeroI32::new(1).unwrap()), x))
-	}
-
-	/// Return CNF, replacing literals according to map.
-	fn encode<DB: ClauseDatabase>(&self, db: &mut DB, map: &[Lit]) -> Result {
-		if self.lits.is_empty() {
-			return Ok(());
-		}
-		debug_assert!(
-			map.len()
-				== self
-					.lits
-					.iter()
-					.map(|x| usize::try_from(i32::from(x.var())).unwrap())
-					.max()
-					.unwrap(),
-			"All literals should be mapped but was given map: {map:?}"
-		);
-		let mut i = 0;
-		for size in self.sizes {
-			emit_clause!(
-				db,
-				self.lits[i..i + *size].iter().map(|x| {
-					let lit: Lit = map[usize::try_from(i32::from(x.var())).unwrap() - 1];
-					if x.is_negated() {
-						!lit
-					} else {
-						lit
-					}
-				})
-			)?;
-			i += size;
 		}
 		Ok(())
 	}

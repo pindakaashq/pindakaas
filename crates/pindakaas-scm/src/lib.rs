@@ -119,8 +119,7 @@ pub fn generate(limit: Option<usize>, format: bool) -> Result<String, std::io::E
 	.unzip();
 
 	let scm = quote! {
-			use std::num::NonZeroI32;
-	pub(crate) static SCM: ScmDB = unsafe { ScmDB {
+	pub(crate) static SCM: ScmDB = ScmDB {
 			scm: phf::phf_map! {
 					#( #scm_keys => #scm_values ),*
 				},
@@ -130,7 +129,7 @@ pub fn generate(limit: Option<usize>, format: bool) -> Result<String, std::io::E
 
 							 }
 
-		}};
+		};
 		}
 	.to_string();
 

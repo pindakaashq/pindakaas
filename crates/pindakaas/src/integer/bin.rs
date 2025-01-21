@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use itertools::Itertools;
 
-use super::{Dom, SCM};
+use super::{scm::SCM, Dom};
 use crate::{
 	bool_linear::{Comparator, PosCoeff},
 	helpers,

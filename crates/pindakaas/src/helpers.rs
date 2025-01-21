@@ -261,7 +261,7 @@ pub(crate) mod tests {
 		}};
 	}
 
-	use std::fmt::Display;
+	use std::{fmt::Display, num::NonZeroI32};
 
 	#[cfg(test)]
 	pub(crate) use expect_file;
@@ -271,7 +271,7 @@ pub(crate) mod tests {
 	use crate::{
 		integer::IntVar,
 		solver::{cadical::Cadical, Solver},
-		Checker, Cnf, Lit, Valuation,
+		Checker, ClauseDatabase, Cnf, Lit, Valuation, Var, VarRange,
 	};
 
 	/// Helper functions to ensure that the possible solutions of a formula
@@ -371,5 +371,92 @@ pub(crate) mod tests {
 				false
 			}
 		}
+	}
+
+	// TODO [?] Some unused code I don't know what to do with.
+	macro_rules! lit {
+		($lit:expr) => {
+			$crate::Lit(std::num::NonZeroI32::new($lit).unwrap())
+		};
+	}
+
+	// 	macro_rules! clause {
+	// 	($($x:expr),+ $(,)?) => {
+	//             &[$($crate::lit!($x)),+]
+	// 	};
+	// }
+
+	// 	macro_rules! clauses {
+	// 	($($x:expr),+ $(,)?) => {
+	//             &[$($crate::clause!($x)),+]
+	// 	};
+	// }
+
+	/// A const Cnf (constructed at compile-time)
+	/// TODO lits are assumed to be in a contiguous var range starting from 1..
+	#[derive(Debug)]
+	pub(crate) struct ConstCnf {
+		lits: &'static [Lit],
+		sizes: &'static [usize],
+	}
+
+	impl ConstCnf {
+		// TODO probably save this as a field
+		fn vars(&self) -> Option<VarRange> {
+			self.lits
+				.iter()
+				.map(|x| x.var())
+				.max()
+				.map(|x| VarRange::new(Var(NonZeroI32::new(1).unwrap()), x))
+		}
+
+		/// Return CNF, replacing literals according to map.
+		fn encode<DB: ClauseDatabase>(&self, db: &mut DB, map: &[Lit]) -> crate::Result {
+			if self.lits.is_empty() {
+				return Ok(());
+			}
+			debug_assert!(
+				map.len()
+					== self
+						.lits
+						.iter()
+						.map(|x| usize::try_from(i32::from(x.var())).unwrap())
+						.max()
+						.unwrap(),
+				"All literals should be mapped but was given map: {map:?}"
+			);
+			let mut i = 0;
+			for size in self.sizes {
+				emit_clause!(
+					db,
+					self.lits[i..i + *size].iter().map(|x| {
+						let lit: Lit = map[usize::try_from(i32::from(x.var())).unwrap() - 1];
+						if x.is_negated() {
+							!lit
+						} else {
+							lit
+						}
+					})
+				)?;
+				i += size;
+			}
+			Ok(())
+		}
+	}
+
+	#[test]
+	fn const_cnf_replace_test() {
+		const CNF: ConstCnf = ConstCnf {
+			lits: &[lit![1], lit![-2], lit![2]],
+			sizes: &[2, 1],
+		};
+		assert_eq!(CNF.vars().unwrap().max(), Some(Var::from(2)));
+		let mut db = Cnf::default();
+		CNF.encode(&mut db, &[lit![42], lit![43]]).unwrap();
+		// TODO ?? cannot update for some reason. Might be a local problem
+		// assert_encoding(
+		// 	&db,
+		// 	&expect_file!["integer/term/const_cnf_replace_test.cnf"],
+		// );
 	}
 }

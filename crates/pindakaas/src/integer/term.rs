@@ -11,7 +11,8 @@ use crate::{
 		enc::LitOrConst,
 		helpers::required_lits,
 		model::{Cse, USE_CHANNEL, USE_CSE},
-		IntVar, IntVarRef, Lin, LinExp, SCM,
+		scm::SCM,
+		IntVar, IntVarRef, Lin, LinExp,
 	},
 	log, Coeff, Lit, Unsatisfiable,
 };
@@ -497,25 +498,9 @@ impl Term {
 
 #[cfg(test)]
 mod tests {
-	
 
 	use super::*;
-	use crate::{lit, Cnf, ConstCnf};
-
-	#[test]
-	fn const_cnf_replace_test() {
-		const CNF: ConstCnf = ConstCnf {
-			lits: &[lit![1], lit![-2], lit![2]],
-			sizes: &[2, 1],
-		};
-		let mut db = Cnf::default();
-		CNF.encode(&mut db, &[lit![42], lit![43]]).unwrap();
-		// TODO ?? cannot update for some reason. Might be a local problem
-		// assert_encoding(
-		// 	&db,
-		// 	&expect_file!["integer/term/const_cnf_replace_test.cnf"],
-		// );
-	}
+	use crate::Cnf;
 
 	#[test]
 	fn term_test() {
