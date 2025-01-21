@@ -41,15 +41,18 @@ pindakaas-derive = { path = "../pindakaas-derive" }
 traced_test = { path = "../traced_test" }
 tracing = { workspace = true }
 
+[build-dependencies]
+pindakaas-scm = { path = "../pindakaas-scm", optional = true }
+
 [features]
 cadical = ["pindakaas-cadical", "pindakaas-derive"]
-default = ["cadical"]
-# default = ["cadical", "scm"]
+default = ["cadical", "scm"]
 external-propagation = ["cadical"]
 intel-sat = ["pindakaas-intel-sat", "pindakaas-derive"]
 kissat = ["pindakaas-kissat", "pindakaas-derive"]
 serde = ["dep:serde"]
-scm = []
+scm = ["pindakaas-scm"]
+
 
 [lints]
 workspace = true

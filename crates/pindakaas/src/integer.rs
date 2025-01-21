@@ -28,15 +28,18 @@ pub(crate) use var::{IntVar, IntVarRef};
 use crate::{
 	bool_linear::PosCoeff,
 	helpers::{as_binary, emit_clause, emit_filtered_clause, new_var},
-	ClauseDatabase, Cnf, ConstCnf, Lit, Result, Unsatisfiable,
+	ClauseDatabase, Cnf, Lit, Result, Unsatisfiable,
 };
 
 // TODO move to new scm.rs module
 impl ScmDB {
 	fn get(&self, lits: usize, c: i64, scm: &Scm) -> Option<&[ScmNode]> {
 		match scm {
+			#[cfg(feature = "scm")]
 			Scm::Add => self.scm.get(&format!("{lits}_{c}")).cloned(),
+			#[cfg(feature = "scm")]
 			Scm::Rca => self.scm.get(&format!("0_{c}")).cloned(),
+			#[allow(unreachable_patterns, reason = "reachable if scm enabled")]
 			_ => unreachable!(),
 		}
 	}
@@ -71,7 +74,7 @@ const SCM: ScmDB = ScmDB {
 };
 
 #[cfg(feature = "scm")]
-include!("gen/scm_db.rs");
+include!(concat!(env!("OUT_DIR"), "/scm_db.rs"));
 
 /// Uses lexicographic constraint to constrain x:B ≦ k
 #[cfg_attr(

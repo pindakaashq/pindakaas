@@ -30,20 +30,19 @@ pub(crate) const USE_CHANNEL: bool = false;
 
 /// SCM methods
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[allow(
-	dead_code,
-	reason = "Rca/Pow variants unused, but implemented; will become public with binary aux vars"
-)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) enum Scm {
+	#[cfg(feature = "scm")]
 	/// Use recipe that minimizes adders. Good for ≥12 bits
 	Add,
 	/// Use recipe that minimizes ripple-carry-adders
+	#[cfg(feature = "scm")]
 	Rca,
+	#[cfg(feature = "scm")]
 	/// Use recipe derived by Boolean minimization (min. variables). Good for <12 bits
-	#[default]
 	Dnf,
 	/// Use base-line pow-of-2 approach
+	#[default]
 	Pow,
 }
 
@@ -1187,7 +1186,7 @@ Actual assignments:
 	fn model_test() {
 		// Instantiate model
 		let mut model = Model::default().with_config(ModelConfig {
-			scm: Scm::Add,
+			scm: Scm::Pow,
 			..ModelConfig::default()
 		});
 
@@ -1214,7 +1213,7 @@ Actual assignments:
 	/// All possible currently stable (!) configurations
 	fn get_model_configs() -> Vec<ModelConfig> {
 		iproduct!(
-			[Scm::Dnf],
+			[Scm::Pow],
 			[
 				Decomposer::Gt,
 				// Decomposer::Swc, // TODO
@@ -2395,7 +2394,7 @@ End
 	#[test]
 	fn test_couple_inconsistent() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2425,7 +2424,7 @@ End
 	#[test]
 	fn test_couple_view() {
 		let base = ModelConfig {
-			scm: Scm::Dnf,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2453,7 +2452,7 @@ End
 	#[test]
 	fn test_couple_mid() {
 		let base = ModelConfig {
-			scm: Scm::Dnf,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2562,7 +2561,7 @@ End
 	#[test]
 	fn test_tmp_red() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Mix(2),
 			// cutoff: None,
 			decomposer: Decomposer::Rca,
@@ -2620,7 +2619,7 @@ End
 	// #[test]
 	fn _test_tmp_whiteboard() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2649,7 +2648,7 @@ End
 	// #[test]
 	fn _test_sugar() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2677,7 +2676,7 @@ End
 	#[test]
 	fn test_sugar_2() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2701,7 +2700,7 @@ End
 	#[test]
 	fn test_sugar_4() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2725,7 +2724,7 @@ End
 	#[test]
 	fn test_sugar_le() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2750,7 +2749,7 @@ End
 	// #[test]
 	fn _test_bddpbc() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2774,7 +2773,7 @@ End
 	#[test]
 	fn test_sugar_5() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2798,7 +2797,7 @@ End
 	#[test]
 	fn test_sugar_6() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2823,7 +2822,7 @@ End
 	// #[test]
 	fn _test_sugar_pbc() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2850,7 +2849,7 @@ End
 	#[test]
 	fn test_sugar_singles() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,
@@ -2906,7 +2905,7 @@ End
 	#[test]
 	fn test_sugar_singles_2() {
 		let base = ModelConfig {
-			scm: Scm::Rca,
+			scm: Scm::Pow,
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,

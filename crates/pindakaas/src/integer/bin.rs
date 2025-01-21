@@ -1,7 +1,6 @@
-use std::{collections::BTreeSet, path::PathBuf};
+use std::collections::BTreeSet;
 
 use itertools::Itertools;
-use rustc_hash::FxHashMap;
 
 use super::{Dom, SCM};
 use crate::{

@@ -6,14 +6,14 @@ use rustc_hash::FxHashMap;
 use super::{bin::BinEnc, enc::IntVarEnc, model::Scm, Dom, Model};
 use crate::{
 	bool_linear::{Comparator, PosCoeff},
-	helpers::{as_binary, div_ceil, div_floor, emit_clause},
+	helpers::{as_binary, div_ceil, div_floor},
 	integer::{
 		enc::LitOrConst,
 		helpers::required_lits,
 		model::{Cse, USE_CHANNEL, USE_CSE},
 		IntVar, IntVarRef, Lin, LinExp, SCM,
 	},
-	log, ClauseDatabase, Coeff, ConstCnf, Lit, Unsatisfiable,
+	log, Coeff, Lit, Unsatisfiable,
 };
 /// A linear term (constant times integer variable)
 #[derive(Debug, Clone)]
@@ -254,11 +254,21 @@ impl Term {
 				))
 			}
 			Some(IntVarEnc::Bin(None))
-				if self.c.is_negative()
-					&& model
+				if self.c.is_negative() && {
+					model
 						.as_ref()
-						.map(|model| model.config.scm != Scm::Dnf)
-						.unwrap_or_default() =>
+						.map(|_model| {
+							#[cfg(feature = "scm")]
+							{
+								_model.config.scm != Scm::Dnf
+							}
+							#[cfg(not(feature = "scm"))]
+							{
+								true
+							}
+						})
+						.unwrap_or_default()
+				} =>
 			{
 				let model = model.as_mut().unwrap();
 
@@ -302,6 +312,7 @@ impl Term {
 				assert!(self.c.trailing_zeros() == 0);
 				let model = model.as_mut().unwrap();
 				match model.config.scm {
+					#[cfg(feature = "scm")]
 					Scm::Rca | Scm::Add => {
 						// let lits = if model.config.scm == Scm::Add {
 						// 	required_lits(&self.x.borrow().dom)
@@ -366,6 +377,7 @@ impl Term {
 						}
 						Ok(model.cse.0[&(self.x.borrow().id, self.c, Comparator::Equal)].clone())
 					}
+					#[cfg(feature = "scm")]
 					Scm::Dnf => {
 						let y = model
 							.new_aux_var(
@@ -485,10 +497,10 @@ impl Term {
 
 #[cfg(test)]
 mod tests {
-	use expect_test::expect_file;
+	
 
 	use super::*;
-	use crate::{helpers::tests::assert_encoding, lit, Cnf};
+	use crate::{lit, Cnf, ConstCnf};
 
 	#[test]
 	fn const_cnf_replace_test() {

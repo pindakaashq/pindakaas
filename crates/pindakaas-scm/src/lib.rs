@@ -6,22 +6,10 @@ use std::{
 
 use flate2::read::GzDecoder;
 use itertools::Itertools;
-use pindakaas::ScmNode;
 use quote::quote;
 use tar::Archive;
-use tqdm::Iter;
 
-const LIMIT: Option<usize> = None;
-const FORMAT: bool = true;
-
-fn scm() -> Result<String, std::io::Error> {
-	// if Path::new("res/scm").exists() {
-	// 	fs::remove_dir_all(env::cr "res/scm")?;
-	// 	fs::create_dir("res/scm")?;
-	// } else {
-	// 	fs::create_dir("res/scm")?;
-	// }
-
+pub fn generate(limit: Option<usize>, format: bool) -> Result<String, std::io::Error> {
 	let db = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/res/scm.tar.gz"));
 	assert!(db.exists());
 
@@ -37,52 +25,58 @@ fn scm() -> Result<String, std::io::Error> {
 			.into_iter()
 			.flatten()
 			.skip(1)
-			// .take(LIMIT)
 			.map(|entry| {
-				let mut entry = entry.unwrap();
-				let path = entry.path().unwrap().to_path_buf();
-				println!("Compiling {path:?}");
+				let entry = entry.unwrap();
+				(entry.path().unwrap().to_path_buf(), entry)
+			})
+			.filter(|(p, _)| {
+				if let Some(limit) = limit {
+					p.file_stem()
+						.unwrap()
+						.to_str()
+						.unwrap()
+						.split("_")
+						.nth(1)
+						.unwrap()
+						.parse::<usize>()
+						.unwrap() < limit
+				} else {
+					true
+				}
+			})
+			.map(|(path, entry)| {
 				let scm = BufReader::new(entry)
 					.lines()
 					.map(|l| l.unwrap())
 					.filter(|line| !(line.is_empty() || line.starts_with('#')))
 					.map(|line| match line.split(',').collect::<Vec<_>>()[..] {
-						// TODO rewrite without using scmnode
-						[i, i1, sh1, add, i2, sh2] => ScmNode {
-							i: i.parse().unwrap(),
-							i1: i1.parse().unwrap(),
-							sh1: sh1.parse().unwrap(),
-							add: match add {
+						// TODO how to not output the suffix?
+						[i, i1, sh1, add, i2, sh2] => (
+							i.parse::<usize>().unwrap(),
+							i1.parse::<usize>().unwrap(),
+							sh1.parse::<u32>().unwrap(),
+							match add {
 								"+" => true,
 								"-" => false,
 								_ => unreachable!(),
 							},
-							i2: i2.parse().unwrap(),
-							sh2: sh2.parse().unwrap(),
-						},
+							i2.parse::<usize>().unwrap(),
+							sh2.parse::<u32>().unwrap(),
+						),
 						_ => panic!("Unexpected line {line}"),
 					})
-					.map(
-						|ScmNode {
-						     i,
-						     i1,
-						     sh1,
-						     add,
-						     i2,
-						     sh2,
-						 }| {
-							quote! {
-								ScmNode {
-									i: #i,
-									i1: #i1,
-																	sh1: #sh1,
-																	add: #add,
-																	i2: #i2,
-																	sh2: #sh2,
-								}
+					.map(|(i, i1, sh1, add, i2, sh2)| {
+						quote! {
+							ScmNode {
+								i: #i,
+								i1: #i1,
+								sh1: #sh1,
+																add: #add,
+																i2: #i2,
+																sh2: #sh2,
 							}
-						},
-					)
+						}
+					})
 					.collect_vec();
 
 				let key = to_key(&path);
@@ -101,9 +95,8 @@ fn scm() -> Result<String, std::io::Error> {
 		(entry.path().unwrap().to_path_buf(), entry)
 	})
 	.skip(1)
-	// .take(LIMIT)
 	.filter(|(p, _)| {
-		if let Some(limit) = LIMIT {
+		if let Some(limit) = limit {
 			p.file_stem()
 				.unwrap()
 				.to_str()
@@ -117,7 +110,6 @@ fn scm() -> Result<String, std::io::Error> {
 			true
 		}
 	})
-	.tqdm()
 	.map(|(path, mut entry)| {
 		let mut s = String::new();
 		_ = entry.read_to_string(&mut s);
@@ -126,7 +118,7 @@ fn scm() -> Result<String, std::io::Error> {
 	.map(|(key, dimacs)| (quote! { #key }, dimacs))
 	.unzip();
 
-	Ok(quote! {
+	let scm = quote! {
 			use std::num::NonZeroI32;
 	pub(crate) static SCM: ScmDB = unsafe { ScmDB {
 			scm: phf::phf_map! {
@@ -140,33 +132,25 @@ fn scm() -> Result<String, std::io::Error> {
 
 		}};
 		}
-	.to_string())
+	.to_string();
+
+	Ok(if format {
+		prettyplease::unparse(
+			&syn::parse_file(&scm)
+				.unwrap_or_else(|e| panic!("Failed to format {scm} with err: {e}")),
+		)
+	} else {
+		scm
+	})
 }
 
-pub fn main() {
-	let scm = scm().unwrap();
-	fs::write(
-		concat!(
-			env!("CARGO_MANIFEST_DIR"),
-			"/../pindakaas/src/gen/scm_db.rs"
-		),
-		if FORMAT {
-			prettyplease::unparse(
-				&syn::parse_file(&scm)
-					.unwrap_or_else(|e| panic!("Failed to format {scm} with err: {e}")),
-			)
-		} else {
-			scm
-		},
-	)
-	.unwrap();
-}
+#[cfg(test)]
+mod tests {
+	use super::*;
 
-// #[cfg(test)]
-// mod tests {
-// 	use crate::main;
-// 	#[test]
-// 	fn hello() {
-// 		main();
-// 	}
-// }
+	#[test]
+	fn test_generate() {
+		let out = generate(Some(2), true).unwrap();
+		println!("{out}");
+	}
+}

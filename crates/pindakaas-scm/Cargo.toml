@@ -1,8 +1,9 @@
 [package]
 name = "pindakaas-scm"
-description = "A binary to update the SCM database"
+description = "A crate to generate the SCM database as Rust code"
 
 authors.workspace = true
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true
@@ -11,8 +12,8 @@ keywords.workspace = true
 repository.workspace = true
 
 
+
 [dependencies]
-pindakaas = { path = "../pindakaas/" }
 bzip2 = "0.4"
 flate2 = "1.0"
 itertools = "0.13"
