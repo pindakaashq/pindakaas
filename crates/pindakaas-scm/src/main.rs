@@ -1,6 +1,6 @@
 use std::{
 	fs::{self},
-	io::{BufRead, BufReader},
+	io::{BufRead, BufReader, Read},
 	path::Path,
 };
 
@@ -11,7 +11,7 @@ use quote::quote;
 use tar::Archive;
 use tqdm::Iter;
 
-const LIMIT: usize = 10;
+const LIMIT: Option<usize> = None;
 const FORMAT: bool = true;
 
 fn scm() -> Result<String, std::io::Error> {
@@ -103,43 +103,25 @@ fn scm() -> Result<String, std::io::Error> {
 	.skip(1)
 	// .take(LIMIT)
 	.filter(|(p, _)| {
-		p.file_stem()
-			.unwrap()
-			.to_str()
-			.unwrap()
-			.split("_")
-			.nth(1)
-			.unwrap()
-			.parse::<usize>()
-			.unwrap() < LIMIT
+		if let Some(limit) = LIMIT {
+			p.file_stem()
+				.unwrap()
+				.to_str()
+				.unwrap()
+				.split("_")
+				.nth(1)
+				.unwrap()
+				.parse::<usize>()
+				.unwrap() < limit
+		} else {
+			true
+		}
 	})
 	.tqdm()
-	.map(|(path, entry)| {
-		// let scm = BufReader::new(entry)
-		// 	.lines()
-		// 	.map(|l| l.unwrap())
-		// TODO remove last pindakaas dependency
-
-		// let mut s = String::new();
-
-		let (lits, sizes): (Vec<_>, Vec<_>) = pindakaas::Cnf::from_buf(BufReader::new(entry))
-			.unwrap()
-			.iter()
-			.map(|clause| {
-				let clause = clause
-					.iter()
-					.map(|l| i32::from(*l))
-					.map(|l| quote! { Lit::from_raw(NonZeroI32::new_unchecked(#l)) })
-					.collect_vec();
-				let size = clause.len();
-				(quote! { #(#clause),* }, size)
-			})
-			.unzip();
-		(
-			to_key(&path),
-			quote! { ConstCnf {lits: &[#(#lits),*], sizes: &[#(#sizes),*]} },
-			// quote! { s },
-		)
+	.map(|(path, mut entry)| {
+		let mut s = String::new();
+		_ = entry.read_to_string(&mut s);
+		(to_key(&path), quote! {#s})
 	})
 	.map(|(key, dimacs)| (quote! { #key }, dimacs))
 	.unzip();

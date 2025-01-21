@@ -383,15 +383,6 @@ impl From<Wcnf> for Cnf {
 // 	( ()+ ) => {};
 // }
 
-// TODO rather not make this public, but not sure how to share this
-pub(crate) fn parse_dimacs_file_slice(lines: &str) -> Result<Cnf, io::Error> {
-	if let Dimacs::Cnf(cnf) = parse_dimacs_file::<false>(Cursor::new(lines))? {
-		Ok(cnf)
-	} else {
-		unreachable!()
-	}
-}
-
 /// Internal function used to parse a file in the (weighted) DIMACS format.
 ///
 /// This function is used by `Cnf::from_str` and `Wcnf::from_str`.
@@ -515,7 +506,8 @@ impl Cnf {
 		self.size.len()
 	}
 
-	/// Read a CNF formula from a file formatted in the DIMACS CNF format
+	// TODO how to unify the reading approaches
+	/// Read a CNF formula from a buffer
 	pub fn from_buf(buf: impl BufRead) -> Result<Self, io::Error> {
 		match parse_dimacs_file::<false>(buf)? {
 			Dimacs::Cnf(cnf) => Ok(cnf),
@@ -523,12 +515,14 @@ impl Cnf {
 		}
 	}
 
+	/// Read a CNF formula from a str DIMACS CNF format
+	pub fn from_str(s: &str) -> Result<Cnf, io::Error> {
+		Self::from_buf(Cursor::new(s))
+	}
+
 	/// Read a CNF formula from a file formatted in the DIMACS CNF format
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-		match parse_dimacs_file::<false>(BufReader::new(File::open(path)?))? {
-			Dimacs::Cnf(cnf) => Ok(cnf),
-			_ => unreachable!(),
-		}
+		Self::from_buf(BufReader::new(File::open(path)?))
 	}
 
 	#[cfg(test)]

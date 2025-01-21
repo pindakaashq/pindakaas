@@ -452,13 +452,26 @@ impl BinEnc {
 
 		let ys = ecm
 			.vars()
-			.into_iter()
 			.skip(xs.len())
 			.map(|_| new_var!(db))
 			.collect_vec();
 
 		let map = xs.iter().chain(ys.iter()).cloned().collect_vec();
-		ecm.encode(db, &map)?;
+		for clause in ecm.iter() {
+			emit_clause!(
+				db,
+				clause.iter().map(|x| {
+					let lit: Lit = map[usize::try_from(i32::from(x.var())).unwrap() - 1];
+					if x.is_negated() {
+						!lit
+					} else {
+						lit
+					}
+				})
+			)?;
+		}
+
+		// ecm.encode(db, &map)?;
 
 		let ys = [false]
 			.repeat(bits - lits)

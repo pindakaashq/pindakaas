@@ -28,7 +28,7 @@ pub(crate) use var::{IntVar, IntVarRef};
 use crate::{
 	bool_linear::PosCoeff,
 	helpers::{as_binary, emit_clause, emit_filtered_clause, new_var},
-	ClauseDatabase, ConstCnf, Lit, Result, Unsatisfiable,
+	ClauseDatabase, Cnf, ConstCnf, Lit, Result, Unsatisfiable,
 };
 
 // TODO move to new scm.rs module
@@ -41,8 +41,10 @@ impl ScmDB {
 		}
 	}
 	// TODO merge with above
-	fn ecm(&self, lits: usize, c: i64) -> Option<&ConstCnf> {
-		self.ecm.get(&format!("{lits}_{c}"))
+	fn ecm(&self, lits: usize, c: i64) -> Option<Cnf> {
+		self.ecm
+			.get(&format!("{lits}_{c}"))
+			.map(|s| Cnf::from_str(s).unwrap())
 	}
 }
 
@@ -59,7 +61,7 @@ pub struct ScmNode {
 #[derive(Debug, Default)]
 pub(crate) struct ScmDB {
 	pub(crate) scm: phf::Map<&'static str, &'static [ScmNode]>,
-	pub(crate) ecm: phf::Map<&'static str, ConstCnf>,
+	pub(crate) ecm: phf::Map<&'static str, &'static str>,
 }
 
 #[cfg(not(feature = "scm"))]
