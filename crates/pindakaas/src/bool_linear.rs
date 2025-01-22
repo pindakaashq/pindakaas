@@ -770,10 +770,7 @@ impl BoolLinAggregator {
 						})
 						.collect_vec();
 					// the one or more of the most significant bits have been removed, the upper bound could have dropped to a power of 2 (but not beyond)
-					let u = PosCoeff::new(std::cmp::min(
-						*u,
-						terms.iter().map(|&(_, coef)| *coef).sum(),
-					));
+					let u = PosCoeff::new(min(*u, terms.iter().map(|&(_, coef)| *coef).sum()));
 					Part::Dom(terms, l, u)
 				}
 			})
