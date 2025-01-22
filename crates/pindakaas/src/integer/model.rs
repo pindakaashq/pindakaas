@@ -40,10 +40,10 @@ pub(crate) enum Scm {
 	#[cfg(feature = "scm")]
 	Rca,
 	#[cfg(feature = "scm")]
+	#[default]
 	/// Use recipe derived by Boolean minimization (min. variables). Good for <12 bits
 	Dnf,
 	/// Use base-line pow-of-2 approach
-	#[default]
 	Pow,
 }
 
@@ -1214,7 +1214,7 @@ Actual assignments:
 	/// All possible currently stable (!) configurations
 	fn get_model_configs() -> Vec<ModelConfig> {
 		iproduct!(
-			[Scm::Pow],
+			[Scm::Dnf],
 			[
 				Decomposer::Gt,
 				// Decomposer::Swc, // TODO
@@ -2425,7 +2425,7 @@ End
 	#[test]
 	fn test_couple_view() {
 		let base = ModelConfig {
-			scm: Scm::Pow,
+			scm: Scm::Dnf, // [?] does this test still work without Scm::Pow
 			cutoff: IntVarEncHeuristic::Order,
 			decomposer: Decomposer::Rca,
 			add_consistency: false,

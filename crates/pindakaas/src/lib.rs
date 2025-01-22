@@ -460,7 +460,7 @@ impl From<Unsatisfiable> for Cnf {
 /// Internal function used to parse a file in the (weighted) DIMACS format.
 ///
 /// This function is used by `Cnf::from_str` and `Wcnf::from_str`.
-pub fn parse_dimacs_file<const WEIGHTED: bool>(lines: impl BufRead) -> Result<Dimacs, io::Error> {
+fn parse_dimacs_file<const WEIGHTED: bool>(lines: impl BufRead) -> Result<Dimacs, io::Error> {
 	let mut had_header = false;
 
 	let mut wcnf = Wcnf::default();
