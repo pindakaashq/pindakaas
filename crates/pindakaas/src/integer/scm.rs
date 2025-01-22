@@ -3,7 +3,16 @@ use std::str::FromStr;
 use super::model::Scm;
 use crate::Cnf;
 
+// Preventing clippy errors this way, since adding #[allow(clippy::all)] didn't work immediately.
+
+#[cfg(not(clippy))]
 include!(concat!(env!("OUT_DIR"), "/scm_db.rs"));
+
+#[cfg(clippy)]
+pub(crate) const SCM: ScmDB = ScmDB {
+	scm: phf::Map::new(),
+	ecm: phf::Map::new(),
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct ScmNode {
@@ -14,11 +23,6 @@ pub(super) struct ScmNode {
 	pub i2: usize,
 	pub sh2: u32,
 }
-
-// const SCM: ScmDB = ScmDB {
-// 	scm: phf::Map::new(),
-// 	ecm: phf::Map::new(),
-// };
 
 // TODO move to new scm.rs module
 impl ScmDB {
@@ -40,7 +44,7 @@ impl ScmDB {
 	}
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct ScmDB {
 	pub(crate) scm: phf::Map<&'static str, &'static [ScmNode]>,
 	pub(crate) ecm: phf::Map<&'static str, &'static str>,
