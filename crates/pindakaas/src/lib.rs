@@ -35,6 +35,7 @@ use std::{
 
 use itertools::{traits::HomogeneousTuple, Itertools};
 
+pub use crate::helpers::AsDynClauseDatabase;
 use crate::{helpers::subscript_number, propositional_logic::Formula, solver::VarFactory};
 
 /// A helper type used to represent a Boolean value that can be either a literal
@@ -111,9 +112,10 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		}
 	}
 
-	fn encode<C, E: Encoder<Self, C>>(&mut self, constraint: &C, encoder: &E) -> Result
+	fn encode<C, E>(&mut self, constraint: &C, encoder: &E) -> Result
 	where
-		Self: Sized,
+		C: ?Sized,
+		E: Encoder<Self, C> + ?Sized,
 	{
 		encoder.encode(self, constraint)
 	}
@@ -183,7 +185,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 
 	fn with_conditions(&mut self, conditions: Vec<Lit>) -> impl ClauseDatabase + '_
 	where
-		Self: Sized,
+		Self: AsDynClauseDatabase,
 	{
 		struct ConditionalDatabase<'a> {
 			db: &'a mut dyn ClauseDatabase,
@@ -207,7 +209,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		}
 
 		ConditionalDatabase {
-			db: self,
+			db: self.as_mut_dyn(),
 			conditions,
 		}
 	}
@@ -244,7 +246,7 @@ enum Dimacs {
 }
 
 /// Encoder is the central trait implemented for all the encoding algorithms
-pub trait Encoder<DB: ClauseDatabase, Constraint> {
+pub trait Encoder<DB: ClauseDatabase + ?Sized, Constraint: ?Sized> {
 	fn encode(&self, db: &mut DB, con: &Constraint) -> Result;
 }
 
@@ -669,7 +671,7 @@ impl<'a> Iterator for CnfIterator<'a> {
 	}
 }
 
-impl<DB> ClauseDatabaseTools for DB where DB: ClauseDatabase + ?Sized {}
+impl<DB: ClauseDatabase + ?Sized> ClauseDatabaseTools for DB {}
 
 impl<F: Fn(Lit) -> bool> Valuation for F {
 	fn value(&self, lit: Lit) -> bool {

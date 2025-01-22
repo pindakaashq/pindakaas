@@ -54,8 +54,8 @@ impl From<CardinalityOne> for Cardinality {
 }
 
 // Automatically implement AtMostOne encoding when you can encode Cardinality constraints
-impl<DB: ClauseDatabase, Enc: Encoder<DB, Cardinality> + CardMarker> Encoder<DB, CardinalityOne>
-	for Enc
+impl<DB: ClauseDatabase + ?Sized, Enc: Encoder<DB, Cardinality> + CardMarker>
+	Encoder<DB, CardinalityOne> for Enc
 {
 	fn encode(&self, db: &mut DB, con: &CardinalityOne) -> Result {
 		self.encode(db, &Cardinality::from(con.clone()))
@@ -83,7 +83,7 @@ impl Default for SortingNetworkEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, Cardinality> for SortingNetworkEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))

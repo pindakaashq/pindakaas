@@ -26,7 +26,7 @@ pub struct LadderEncoder {}
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PairwiseEncoder {}
 
-pub(crate) fn at_least_one_clause<DB: ClauseDatabase>(
+pub(crate) fn at_least_one_clause<DB: ClauseDatabase + ?Sized>(
 	db: &mut DB,
 	card1: &CardinalityOne,
 ) -> Result {
@@ -34,7 +34,7 @@ pub(crate) fn at_least_one_clause<DB: ClauseDatabase>(
 	db.add_clause(card1.lits.iter().copied())
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "bitwise_encoder", skip_all, fields(constraint = card1.trace_print()))
@@ -87,7 +87,7 @@ impl Checker for CardinalityOne {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for LadderEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, CardinalityOne> for LadderEncoder {
 	#[cfg_attr(
 	any(feature = "tracing", test),
 	tracing::instrument(name = "ladder_encoder", skip_all, fields(constraint = card1.trace_print()))
@@ -115,7 +115,7 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for LadderEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for PairwiseEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, CardinalityOne> for PairwiseEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "pairwise_encoder", skip_all, fields(constraint = card1.trace_print()))

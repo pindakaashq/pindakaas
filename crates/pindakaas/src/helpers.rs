@@ -1,3 +1,36 @@
+macro_rules! as_dyn_trait {
+	($as_dyn_name:ident, $trait_name:ident) => {
+		/// Helper trait that allows the creation of a dynamic reference to a trait
+		/// object. This trait is automatically implemented for all sized types that
+		/// implement the trait, and for the trait object itself.
+		pub trait $as_dyn_name {
+			/// Cast the object reference to a dynamic trait object reference.
+			fn as_dyn(&self) -> &dyn $trait_name;
+			/// Cast the object mutable reference to a mutable dynamic trait object
+			/// reference.
+			fn as_mut_dyn(&mut self) -> &mut dyn $trait_name;
+		}
+		impl<T: $trait_name> $as_dyn_name for T {
+			fn as_dyn(&self) -> &dyn $trait_name {
+				self
+			}
+			fn as_mut_dyn(&mut self) -> &mut dyn $trait_name {
+				self
+			}
+		}
+		impl $as_dyn_name for dyn $trait_name {
+			fn as_dyn(&self) -> &dyn $trait_name {
+				self
+			}
+			fn as_mut_dyn(&mut self) -> &mut dyn $trait_name {
+				self
+			}
+		}
+	};
+}
+
+as_dyn_trait!(AsDynClauseDatabase, ClauseDatabase);
+
 #[cfg(feature = "splr")]
 macro_rules! concat_slices {
     ([$init:expr; $T:ty]: $($s:expr),+ $(,)?) => {{
@@ -87,7 +120,7 @@ const FILTER_TRIVIAL_CLAUSES: bool = false;
 /// Adds clauses for a DNF formula (disjunction of conjunctions)
 /// Ex. (a /\ -b) \/ c == a \/ c /\ -b \/ c
 /// If any disjunction is empty, this satisfies the whole formula. If any element contains the empty conjunction, that element is falsified in the final clause.
-pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
+pub(crate) fn add_clauses_for<DB: ClauseDatabase + ?Sized>(
 	db: &mut DB,
 	expression: Vec<Vec<Vec<Lit>>>,
 ) -> Result {

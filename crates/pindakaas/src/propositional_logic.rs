@@ -8,7 +8,8 @@ use std::{
 use itertools::{Itertools, Position};
 
 use crate::{
-	BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Result, Unsatisfiable,
+	AsDynClauseDatabase, BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Result,
+	Unsatisfiable,
 };
 
 /// A propositional logic formula
@@ -397,7 +398,7 @@ impl From<Formula<Lit>> for Formula<BoolVal> {
 impl Formula<Lit> {
 	/// Helper function to bind the (sub) formula to a name (literal) for the
 	/// tseitin encoding.
-	fn bind<DB: ClauseDatabase>(&self, db: &mut DB, name: Option<Lit>) -> Result<Lit> {
+	fn bind<DB: ClauseDatabase + ?Sized>(&self, db: &mut DB, name: Option<Lit>) -> Result<Lit> {
 		Ok(match self {
 			Formula::Atom(lit) => {
 				if let Some(name) = name {
@@ -618,7 +619,7 @@ impl BitXor<Lit> for Formula<Lit> {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, Formula<BoolVal>> for TseitinEncoder {
+impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, Formula<BoolVal>> for TseitinEncoder {
 	fn encode(&self, db: &mut DB, con: &Formula<BoolVal>) -> Result {
 		match con.clone().resolve() {
 			Err(false) => Err(Unsatisfiable),
@@ -628,7 +629,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Formula<BoolVal>> for TseitinEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, Formula<Lit>> for TseitinEncoder {
+impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, Formula<Lit>> for TseitinEncoder {
 	fn encode(&self, db: &mut DB, f: &Formula<Lit>) -> Result {
 		match f {
 			Formula::Atom(l) => db.add_clause([*l]),

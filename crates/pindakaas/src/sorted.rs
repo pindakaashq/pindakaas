@@ -76,7 +76,7 @@ impl Checker for Sorted<'_> {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_>> for SortedEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, Sorted<'_>> for SortedEncoder {
 	fn encode(&self, db: &mut DB, sorted: &Sorted) -> Result {
 		let xs = sorted
 			.xs
@@ -97,7 +97,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_>> for SortedEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for SortedEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, TernLeConstraint<'_>> for SortedEncoder {
 	fn encode(&self, db: &mut DB, tern: &TernLeConstraint) -> Result {
 		let TernLeConstraint { x, y, cmp, z } = tern;
 		if tern.is_fixed()? {
@@ -134,7 +134,12 @@ impl SortedEncoder {
 		self.overwrite_recursive_cmp = cmp;
 		self
 	}
-	fn next_int_var<DB: ClauseDatabase>(&self, db: &mut DB, ub: Coeff, lbl: String) -> IntVarEnc {
+	fn next_int_var<DB: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut DB,
+		ub: Coeff,
+		lbl: String,
+	) -> IntVarEnc {
 		// TODO We always have the view x>=1 <-> y>=1, which is now realized using equiv
 		if ub == 0 {
 			IntVarEnc::Const(0)
@@ -148,7 +153,7 @@ impl SortedEncoder {
 	}
 
 	/// The sorted/merged base case of x1{0,1}+x2{0,1}<=y{0,1,2}
-	fn smerge<DB: ClauseDatabase>(
+	fn smerge<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		x1: &IntVarEnc,
@@ -174,7 +179,7 @@ impl SortedEncoder {
 		self.comp(db, x1, &x2, cmp, &y, 1)
 	}
 
-	fn sorted<DB: ClauseDatabase>(
+	fn sorted<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		xs: &[IntVarEnc],
@@ -258,7 +263,7 @@ impl SortedEncoder {
 		}
 	}
 
-	fn sort<DB: ClauseDatabase>(
+	fn sort<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		xs: &[IntVarEnc],
@@ -278,7 +283,7 @@ impl SortedEncoder {
 		}
 	}
 
-	fn merged<DB: ClauseDatabase>(
+	fn merged<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		x1: &IntVarEnc,
@@ -361,7 +366,7 @@ impl SortedEncoder {
 		}
 	}
 
-	fn comp<DB: ClauseDatabase>(
+	fn comp<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		x: &IntVarEnc,

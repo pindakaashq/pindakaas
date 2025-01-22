@@ -21,8 +21,8 @@ use crate::{
 	},
 	propositional_logic::{Formula, TseitinEncoder},
 	sorted::{Sorted, SortedEncoder},
-	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, IntEncoding, Lit,
-	Result, Unsatisfiable, Valuation,
+	AsDynClauseDatabase, BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder,
+	IntEncoding, Lit, Result, Unsatisfiable, Valuation,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -220,7 +220,11 @@ impl AdderEncoder {
 	/// literals (full adder).
 	///
 	/// `output` can be either a literal, or a constant Boolean value.
-	fn carry_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: BoolVal) -> Result {
+	fn carry_circuit<DB: ClauseDatabase + ?Sized>(
+		db: &mut DB,
+		input: &[Lit],
+		output: BoolVal,
+	) -> Result {
 		match output {
 			BoolVal::Lit(carry) => match *input {
 				[a, b] => {
@@ -267,7 +271,11 @@ impl AdderEncoder {
 	/// literals (full adder).
 	///
 	/// `output` can be either a literal, or a constant Boolean value.
-	fn sum_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: BoolVal) -> Result {
+	fn sum_circuit<DB: ClauseDatabase + AsDynClauseDatabase>(
+		db: &mut DB,
+		input: &[Lit],
+		output: BoolVal,
+	) -> Result {
 		match output {
 			BoolVal::Lit(sum) => match *input {
 				[a, b] => {
@@ -332,7 +340,7 @@ impl AdderEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
+impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = lin.trace_print()))
@@ -580,7 +588,7 @@ impl BddEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
@@ -656,7 +664,7 @@ impl BoolLinAggregator {
 		any(feature = "tracing", test),
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	pub fn aggregate<DB: ClauseDatabase>(
+	pub fn aggregate<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		lin: &BoolLinear,
@@ -1522,7 +1530,7 @@ impl From<LimitComp> for Comparator {
 }
 
 // Automatically implement Cardinality encoding when you can encode Linear constraints
-impl<DB: ClauseDatabase, Enc: Encoder<DB, NormalizedBoolLinear> + LinMarker>
+impl<DB: ClauseDatabase + ?Sized, Enc: Encoder<DB, NormalizedBoolLinear> + LinMarker>
 	Encoder<DB, Cardinality> for Enc
 {
 	fn encode(&self, db: &mut DB, con: &Cardinality) -> Result {
@@ -1553,7 +1561,7 @@ impl<Enc, Agg> LinearEncoder<Enc, Agg> {
 	}
 }
 
-impl<DB: ClauseDatabase, Enc: Encoder<DB, BoolLinVariant>> Encoder<DB, BoolLinear>
+impl<DB: ClauseDatabase + ?Sized, Enc: Encoder<DB, BoolLinVariant>> Encoder<DB, BoolLinear>
 	for LinearEncoder<Enc>
 {
 	#[cfg_attr(
@@ -1715,7 +1723,7 @@ impl<LinEnc, CardEnc, AmoEnc> StaticLinEncoder<LinEnc, CardEnc, AmoEnc> {
 }
 
 impl<
-		DB: ClauseDatabase,
+		DB: ClauseDatabase + ?Sized,
 		LinEnc: Encoder<DB, NormalizedBoolLinear>,
 		CardEnc: Encoder<DB, Cardinality>,
 		AmoEnc: Encoder<DB, CardinalityOne>,
@@ -1746,7 +1754,7 @@ impl SwcEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for SwcEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, NormalizedBoolLinear> for SwcEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
@@ -1864,7 +1872,7 @@ impl TotalizerEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for TotalizerEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, NormalizedBoolLinear> for TotalizerEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))

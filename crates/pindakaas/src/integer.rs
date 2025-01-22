@@ -117,7 +117,7 @@ pub(crate) fn display_dom(dom: &BTreeSet<Coeff>) -> String {
 	any(feature = "tracing", test),
 	tracing::instrument(name = "lex_geq", skip_all)
 )]
-pub(crate) fn lex_geq_const<DB: ClauseDatabase>(
+pub(crate) fn lex_geq_const<DB: ClauseDatabase + ?Sized>(
 	db: &mut DB,
 	x: &[Option<Lit>],
 	k: PosCoeff,
@@ -137,7 +137,7 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase>(
 	any(feature = "tracing", test),
 	tracing::instrument(name = "lex_lesseq_const", skip_all)
 )]
-pub(crate) fn lex_leq_const<DB: ClauseDatabase>(
+pub(crate) fn lex_leq_const<DB: ClauseDatabase + ?Sized>(
 	db: &mut DB,
 	x: &[Option<Lit>],
 	k: PosCoeff,
@@ -162,7 +162,7 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase>(
 /// Constrains the slice `z`, to be the result of adding `x` to `y`, all encoded using the log encoding.
 ///
 /// TODO: Should this use the IntEncoding::Log input??
-pub(crate) fn log_enc_add<DB: ClauseDatabase>(
+pub(crate) fn log_enc_add<DB: ClauseDatabase + ?Sized>(
 	db: &mut DB,
 	x: &[Lit],
 	y: &[Lit],
@@ -179,7 +179,7 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase>(
 }
 
 #[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} {cmp} {z:?}"))))]
-pub(crate) fn log_enc_add_<DB: ClauseDatabase>(
+pub(crate) fn log_enc_add_<DB: ClauseDatabase + ?Sized>(
 	db: &mut DB,
 	x: &[BoolVal],
 	y: &[BoolVal],
@@ -285,7 +285,7 @@ impl Checker for ImplicationChainConstraint {
 }
 
 impl ImplicationChainEncoder {
-	pub(crate) fn _encode<DB: ClauseDatabase>(
+	pub(crate) fn _encode<DB: ClauseDatabase + ?Sized>(
 		&mut self,
 		db: &mut DB,
 		ic: &ImplicationChainConstraint,
@@ -298,7 +298,7 @@ impl ImplicationChainEncoder {
 }
 
 impl IntVar {
-	fn encode<DB: ClauseDatabase>(
+	fn encode<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		views: &mut FxHashMap<(usize, Coeff), Lit>,
@@ -401,7 +401,7 @@ impl Display for IntVar {
 }
 
 impl IntVarBin {
-	pub(crate) fn add<DB: ClauseDatabase>(
+	pub(crate) fn add<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		encoder: &TernLeEncoder,
@@ -437,7 +437,7 @@ impl IntVarBin {
 		}
 	}
 
-	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> Result {
+	pub(crate) fn consistent<DB: ClauseDatabase + ?Sized>(&self, db: &mut DB) -> Result {
 		let encoder = TernLeEncoder::default();
 		if !GROUND_BINARY_AT_LB {
 			encoder.encode(
@@ -469,7 +469,7 @@ impl IntVarBin {
 		(self.lb..=self.ub).map(|i| i..(i + 1)).collect()
 	}
 	// TODO change to with_label or something
-	pub(crate) fn from_bounds<DB: ClauseDatabase>(
+	pub(crate) fn from_bounds<DB: ClauseDatabase + ?Sized>(
 		db: &mut DB,
 		lb: Coeff,
 		ub: Coeff,
@@ -569,7 +569,7 @@ impl Display for IntVarBin {
 }
 
 impl IntVarEnc {
-	pub(crate) fn add<DB: ClauseDatabase>(
+	pub(crate) fn add<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		encoder: &TernLeEncoder,
@@ -641,7 +641,7 @@ impl IntVarEnc {
 		}
 	}
 
-	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> Result {
+	pub(crate) fn consistent<DB: ClauseDatabase + ?Sized>(&self, db: &mut DB) -> Result {
 		match self {
 			IntVarEnc::Ord(o) => o.consistent(db),
 			IntVarEnc::Bin(b) => b.consistent(db),
@@ -666,7 +666,7 @@ impl IntVarEnc {
 		}
 	}
 	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
-	pub(crate) fn from_part<DB: ClauseDatabase>(
+	pub(crate) fn from_part<DB: ClauseDatabase + ?Sized>(
 		db: &mut DB,
 		xs: &Part,
 		ub: PosCoeff,
@@ -885,7 +885,7 @@ impl IntVarOrd {
 		}
 	}
 
-	pub(crate) fn consistent<DB: ClauseDatabase>(&self, db: &mut DB) -> Result {
+	pub(crate) fn consistent<DB: ClauseDatabase + ?Sized>(&self, db: &mut DB) -> Result {
 		ImplicationChainEncoder::default()._encode(db, &self.consistency())
 	}
 
@@ -915,7 +915,7 @@ impl IntVarOrd {
 			.chain(self.xs.intervals(..))
 			.collect()
 	}
-	pub(crate) fn from_bounds<DB: ClauseDatabase>(
+	pub(crate) fn from_bounds<DB: ClauseDatabase + ?Sized>(
 		db: &mut DB,
 		lb: Coeff,
 		ub: Coeff,
@@ -924,7 +924,11 @@ impl IntVarOrd {
 		Self::from_dom(db, (lb..=ub).collect_vec().as_slice(), lbl)
 	}
 
-	pub(crate) fn from_dom<DB: ClauseDatabase>(db: &mut DB, dom: &[Coeff], lbl: String) -> Self {
+	pub(crate) fn from_dom<DB: ClauseDatabase + ?Sized>(
+		db: &mut DB,
+		dom: &[Coeff],
+		lbl: String,
+	) -> Self {
 		Self::from_syms(
 			db,
 			dom.iter()
@@ -935,7 +939,7 @@ impl IntVarOrd {
 		)
 	}
 
-	pub(crate) fn from_syms<DB: ClauseDatabase>(
+	pub(crate) fn from_syms<DB: ClauseDatabase + ?Sized>(
 		db: &mut DB,
 		syms: IntervalSet<Coeff>,
 		lbl: String,
@@ -943,7 +947,7 @@ impl IntVarOrd {
 		Self::from_views(db, syms.into_iter(..).map(|c| (c, None)).collect(), lbl)
 	}
 
-	pub(crate) fn from_views<DB: ClauseDatabase>(
+	pub(crate) fn from_views<DB: ClauseDatabase + ?Sized>(
 		db: &mut DB,
 		views: IntervalMap<Coeff, Option<Lit>>,
 		lbl: String,
@@ -1244,7 +1248,7 @@ impl Model {
 		var
 	}
 
-	pub(crate) fn encode<DB: ClauseDatabase>(
+	pub(crate) fn encode<DB: ClauseDatabase + ?Sized>(
 		&mut self,
 		db: &mut DB,
 		cutoff: Option<Coeff>,
@@ -1378,7 +1382,7 @@ impl Display for TernLeConstraint<'_> {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for TernLeEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, TernLeConstraint<'_>> for TernLeEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "tern_le_encoder", skip_all, fields(constraint = format!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z)))
@@ -1827,7 +1831,7 @@ pub(crate) mod tests {
 		assert_eq!(c.geq(45..46), vec![vec![]]);
 	}
 
-	fn get_bin_x<DB: ClauseDatabase>(
+	fn get_bin_x<DB: ClauseDatabase + ?Sized>(
 		db: &mut DB,
 		lb: Coeff,
 		ub: Coeff,
@@ -1841,7 +1845,7 @@ pub(crate) mod tests {
 		IntVarEnc::Bin(x)
 	}
 
-	fn get_ord_x<DB: ClauseDatabase>(
+	fn get_ord_x<DB: ClauseDatabase + ?Sized>(
 		db: &mut DB,
 		dom: IntervalSet<Coeff>,
 		consistent: bool,
