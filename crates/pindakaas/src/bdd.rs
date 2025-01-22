@@ -6,7 +6,7 @@ use crate::{
 		Decompose, Decomposer, Dom, IntVar, IntVarEncHeuristic, Lin, LinExp, Model, ModelConfig,
 		Term,
 	},
-	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
+	AsDynClauseDatabase, ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -225,7 +225,7 @@ fn process_val(iv: Range<Coeff>, cmp: &Comparator) -> Coeff {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
+impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))

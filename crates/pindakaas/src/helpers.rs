@@ -264,6 +264,8 @@ pub(crate) fn is_unique<I: Iterator<Item = V>, V: Eq + std::hash::Hash>(mut i: I
 pub(crate) mod tests {
 	#[cfg(test)]
 	macro_rules! expect_file {
+		// TODO [?] Idea: we are manually including the module structure as the test output
+		// directory (e.g. integer/terms/test.cnf), we should macro in the mod instead
 		($rel_path:expr) => {{
 			let p = std::path::PathBuf::from(
 				format!("{}/corpus/{}", env!("CARGO_MANIFEST_DIR"), $rel_path).to_string(),
@@ -273,7 +275,7 @@ pub(crate) mod tests {
 		}};
 	}
 
-	use std::{fmt::Display, num::NonZeroI32};
+	use std::fmt::Display;
 
 	#[cfg(test)]
 	pub(crate) use expect_file;
@@ -422,7 +424,7 @@ pub(crate) mod tests {
 				.iter()
 				.map(|x| x.var())
 				.max()
-				.map(|x| VarRange::new(Var(NonZeroI32::new(1).unwrap()), x))
+				.map(|x| VarRange::new(Var::from(1), x))
 		}
 
 		/// Return CNF, replacing literals according to map.
@@ -465,10 +467,9 @@ pub(crate) mod tests {
 		assert_eq!(CNF.vars().unwrap().max(), Some(Var::from(2)));
 		let mut db = Cnf::default();
 		CNF.encode(&mut db, &[lit![42], lit![43]]).unwrap();
-		// TODO ?? cannot update for some reason. Might be a local problem
-		// assert_encoding(
-		// 	&db,
-		// 	&expect_file!["integer/term/const_cnf_replace_test.cnf"],
-		// );
+		assert_encoding(
+			&db,
+			&expect_file!["integer/term/const_cnf_replace_test.cnf"],
+		);
 	}
 }
