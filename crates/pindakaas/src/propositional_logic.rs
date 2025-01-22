@@ -41,10 +41,17 @@ pub enum Formula<Base> {
 pub struct TseitinEncoder;
 
 impl<Base> Formula<Base> {
-	fn simplify_with(
+	/// Simplify the formula using a given resolver function.
+	///
+	/// The resolver function is called for each [`Self::Atom`] in the formula.
+	/// The resolver function should return `Err(true)` if the atom is known to be
+	/// true and `Err(false)` if the atom is known to be false. Otherwise, the
+	/// resolver function should return the value of the atom for the simplified
+	/// formula.
+	pub fn simplify_with<Res>(
 		self,
-		resolver: &impl Fn(Base) -> Result<Lit, bool>,
-	) -> Result<Formula<Lit>, bool>
+		resolver: &impl Fn(Base) -> Result<Res, bool>,
+	) -> Result<Formula<Res>, bool>
 	where
 		Self: Clone,
 	{
@@ -267,12 +274,15 @@ impl<Base> Not for Formula<Base> {
 }
 
 impl Formula<BoolVal> {
-	pub fn simplify<Iter>(self, knowledge: Iter) -> Result<Formula<Lit>, bool>
+	/// Simplify the formula using the given literals as proven facts.
+	///
+	///
+	pub fn simplify<Iter>(self, facts: Iter) -> Result<Formula<Lit>, bool>
 	where
 		Iter: IntoIterator,
 		Iter::Item: Into<Lit>,
 	{
-		let knowledge: HashSet<_> = knowledge.into_iter().map_into().collect();
+		let knowledge: HashSet<_> = facts.into_iter().map_into().collect();
 		self.simplify_with(&|l| match l {
 			BoolVal::Const(b) => Err(b),
 			BoolVal::Lit(l) if knowledge.contains(&l) => Err(true),
@@ -281,6 +291,12 @@ impl Formula<BoolVal> {
 		})
 	}
 
+	/// Resolve the constant values in the formula.
+	///
+	/// If the formula is known to be unsatisfiable, then `Err(false)` is
+	/// returned. If the formula is already satisfied, then `Err(true)` is
+	/// returned. Otherwise, a simplified formula without any constant values is
+	/// returned.
 	pub fn resolve(self) -> Result<Formula<Lit>, bool> {
 		self.simplify_with(&|l| match l {
 			BoolVal::Const(b) => Err(b),
@@ -541,12 +557,13 @@ impl Formula<Lit> {
 		Ok(cnf)
 	}
 
-	pub fn simplify<Iter>(self, knowledge: Iter) -> Result<Formula<Lit>, bool>
+	/// Simplify the formula using the given literals as proven facts.
+	pub fn simplify<Iter>(self, facts: Iter) -> Result<Formula<Lit>, bool>
 	where
 		Iter: IntoIterator,
 		Iter::Item: Into<Lit>,
 	{
-		let knowledge: HashSet<_> = knowledge.into_iter().map_into().collect();
+		let knowledge: HashSet<_> = facts.into_iter().map_into().collect();
 		self.simplify_with(&|l| {
 			if knowledge.contains(&l) {
 				Err(true)
