@@ -1,0 +1,4 @@
+p cnf 0 2
+c two empty clauses -> unsat
+0
+0

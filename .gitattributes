@@ -1,0 +1,2 @@
+crates/pindakaas/src/gen/* linguist-generated=true binary
+crates/pindakaas/corpus/**/* linguist-generated=true binary

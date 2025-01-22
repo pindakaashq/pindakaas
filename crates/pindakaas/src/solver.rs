@@ -10,10 +10,9 @@ pub mod libloading;
 pub mod propagation;
 #[cfg(feature = "splr")]
 pub mod splr;
-
 use std::{ffi::c_void, num::NonZeroI32, ptr};
 
-use crate::{ClauseDatabase, Lit, Valuation, Var, VarRange};
+use crate::{integer::MapSol, ClauseDatabase, Cnf, Lit, Unsatisfiable, Valuation, Var, VarRange};
 
 type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
 type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;
@@ -85,6 +84,44 @@ pub trait Solver: ClauseDatabase {
 	/// If the search is interrupted (see [`set_terminate_callback`]) the function
 	/// returns unknown
 	fn solve(&mut self) -> SolveResult<impl Valuation + '_, impl Sized>;
+
+	/// Solve for all solutions for a set of variables
+	fn solve_all<V, I>(&mut self, vars: I) -> Vec<MapSol>
+	where
+		V: Into<Lit>,
+		I: IntoIterator<Item = V> + Clone,
+	{
+		// TODO update this interface to give sols one-by-one and return Valuations i/o MapSols
+		let mut solns = Vec::<MapSol>::new();
+		loop {
+			match self.solve() {
+				SolveResult::Satisfied(sol) => {
+					solns.push(MapSol::new(vars.clone(), &sol));
+				}
+				SolveResult::Unsatisfiable(_) => {
+					return solns;
+				}
+				SolveResult::Unknown => panic!("Ran out of time before finding all solutions"),
+			}
+
+			if self.add_clause(solns.last().unwrap().iter().map(|l| !l)) == Err(Unsatisfiable) {
+				return solns;
+			}
+		}
+		// TODO doesn't compile :)
+		// while let SolveResult::Satisfied(sol) = self.solve() {
+		// 	solns.push(MapSol::new(output, sol));
+		// 	self.add_clause(solns.last().unwrap().iter().map(|l| !l))
+		// 		.unwrap();
+		// };
+		// solns
+	}
+
+	fn add_cnf(&mut self, cnf: Cnf) {
+		for cl in cnf.iter() {
+			self.add_clause(cl.iter().cloned()).unwrap();
+		}
+	}
 }
 
 pub trait TermCallback: Solver {

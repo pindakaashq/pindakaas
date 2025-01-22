@@ -11,30 +11,52 @@ pub mod bool_linear;
 pub mod cardinality;
 pub mod cardinality_one;
 pub(crate) mod helpers;
+
 mod integer;
+
+pub mod bdd;
+pub mod gt;
+pub mod swc;
+
 pub mod propositional_logic;
 pub mod solver;
-mod sorted;
+
+use std::io::Write;
+
 #[cfg(any(feature = "tracing", test))]
 pub mod trace;
 
+/// General log function
+macro_rules! log {
+    ($fmt:expr $(, $args:expr)* ) => {
+        #[cfg(feature = "tracing")]
+        tracing::info!($fmt $(, $args)*)
+    }
+}
+pub(crate) use log;
+
+#[cfg(feature = "serde")]
+#[macro_use]
+extern crate serde;
+
 use std::{
 	clone::Clone,
-	cmp::{max, Eq, Ordering},
+	cmp::{max, Ordering},
 	error::Error,
 	fmt::{self, Display},
 	fs::File,
-	hash::Hash,
-	io::{self, BufRead, BufReader, Write},
+	io::{self, BufRead, BufReader, Cursor},
 	iter::FusedIterator,
 	num::NonZeroI32,
 	ops::{Bound, Not, RangeBounds, RangeInclusive},
 	path::Path,
+	str::FromStr,
 };
 
+use helpers::{is_unique, subscript_number};
 use itertools::{traits::HomogeneousTuple, Itertools};
 
-use crate::{helpers::subscript_number, solver::VarFactory};
+use crate::solver::VarFactory;
 
 /// Checker is a trait implemented by types that represent constraints. The
 /// [`Checker::check`] methods checks whether an assignment (often referred to
@@ -44,9 +66,9 @@ pub trait Checker {
 	///
 	/// - The method returns [`Result::Ok`] when the assignment satisfies
 	///   the constraint,
-	/// - it returns [`Unsatisfiable`] when the assignment violates the
+	/// - it returns [`CheckError`] when the assignment violates the
 	///   constraint
-	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), Unsatisfiable>;
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError>;
 }
 
 /// The `ClauseDatabase` trait is the common trait implemented by types that are
@@ -125,6 +147,11 @@ pub trait ClauseDatabase {
 	}
 
 	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB>;
+
+	/// Add multiple clauses
+	fn add_clauses<I: IntoIterator<Item = Vec<Lit>>>(&mut self, clauses: I) -> Result {
+		clauses.into_iter().try_for_each(|cl| self.add_clause(cl))
+	}
 }
 
 /// A representation for Boolean formulas in conjunctive normal form.
@@ -147,7 +174,6 @@ pub struct CnfIterator<'a> {
 	size: std::slice::Iter<'a, usize>,
 	index: usize,
 }
-
 /// Coeff is a type alias used for the number type used to represent the
 /// coefficients in constraints and expression.
 pub(crate) type Coeff = i64;
@@ -159,7 +185,8 @@ pub struct ConditionalDatabase<'a, DB: ClauseDatabase + ?Sized> {
 	conditions: Vec<Lit>,
 }
 
-enum Dimacs {
+#[derive(Debug)]
+pub enum Dimacs {
 	Cnf(Cnf),
 	Wcnf(Wcnf),
 }
@@ -196,12 +223,35 @@ pub struct Lit(NonZeroI32);
 
 /// Result is a type alias for [`std::result::Result`] that by default returns
 /// an empty value, or the [`Unsatisfiable`] error type.
-type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
+pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 /// Unsatisfiable is an error type returned when the problem being encoded is
 /// found to be inconsistent.
 pub struct Unsatisfiable;
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+/// Errors relating to failing assignments
+pub enum CheckError {
+	Unsatisfiable(Unsatisfiable),
+	Fail(String),
+}
+impl Error for CheckError {}
+impl Display for CheckError {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			CheckError::Fail(err) => err.fmt(f),
+			CheckError::Unsatisfiable(err) => err.fmt(f),
+		}
+	}
+}
+impl From<Unsatisfiable> for CheckError {
+	fn from(value: Unsatisfiable) -> Self {
+		Self::Unsatisfiable(value)
+	}
+}
 
 /// A trait implemented by types that can be used to represent a solution/model
 pub trait Valuation {
@@ -214,7 +264,8 @@ pub trait Valuation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// A cononical implementation of a Boolean decision variable, independent of
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+/// A canonical implementation of a Boolean decision variable, independent of
 /// negation.
 pub struct Var(pub(crate) NonZeroI32);
 
@@ -236,23 +287,162 @@ pub struct Wcnf {
 	// TODO this can be optimised, for example by having all weighted clauses at the start/end
 }
 
+/// Convert into clauses
+impl TryFrom<Vec<Vec<Lit>>> for Cnf {
+	type Error = Unsatisfiable;
+	fn try_from(clauses: Vec<Vec<Lit>>) -> Result<Self, Self::Error> {
+		let mut cnf = Cnf::default();
+		cnf.add_clauses(clauses)?;
+		Ok(cnf)
+	}
+}
+
+/// Create trivial Unsatisfiable formula with single empty clause
+impl From<Unsatisfiable> for Cnf {
+	fn from(_: Unsatisfiable) -> Self {
+		Self {
+			size: vec![0],
+			..Default::default()
+		}
+	}
+}
+
+impl From<Cnf> for Wcnf {
+	fn from(cnf: Cnf) -> Self {
+		let weights = std::iter::repeat(None).take(cnf.clauses()).collect();
+		Wcnf { cnf, weights }
+	}
+}
+
+impl From<Wcnf> for Cnf {
+	// TODO implement iter for Cnf
+	fn from(wcnf: Wcnf) -> Self {
+		let mut start = 0;
+		let lits_size = wcnf
+			.cnf
+			.size
+			.iter()
+			.zip(wcnf.weights.iter())
+			.filter_map(|(size, weight)| {
+				if weight.is_none() {
+					let ret = (
+						wcnf.cnf
+							.lits
+							.iter()
+							.skip(start)
+							.take(*size)
+							.cloned()
+							.collect_vec(),
+						size,
+					);
+					start += size;
+					Some(ret)
+				} else {
+					start += size;
+					None
+				}
+			})
+			.collect_vec();
+		let lits = lits_size
+			.iter()
+			.flat_map(|lit_size| lit_size.0.clone())
+			.collect();
+		let size = lits_size.iter().map(|lit_size| *lit_size.1).collect_vec();
+		Self {
+			nvar: wcnf.cnf.nvar,
+			lits,
+			size,
+		}
+	}
+}
+
+// enum ParseDimacsError {
+//     IO(io::Error),
+//     Unsatisfiable(Unsatisfiable),
+// }
+
+// impl From<io:Error> for ParseDimacsError {
+//     fn from(value: io::Error) -> Self {
+//         Self::IO(value)
+//     }
+// }
+
+// macro_rules! lits {
+// 		() => {
+// 			std::vec::Vec::new()
+// 		};
+// 		($($x:expr),+ $(,)?) => {
+// 			<[Lit]>::into_vec(
+// 				std::boxed::Box::new([$($crate::Lit::from($x)),+])
+// 			)
+// 		};
+//         }
+
+// macro_rules! clauses {
+// 	( ()+ ) => {};
+// }
+
 /// Internal function used to parse a file in the (weighted) DIMACS format.
 ///
 /// This function is used by `Cnf::from_str` and `Wcnf::from_str`.
-fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Error> {
-	let file = File::open(path)?;
+pub fn parse_dimacs_file<const WEIGHTED: bool>(lines: impl BufRead) -> Result<Dimacs, io::Error> {
 	let mut had_header = false;
 
 	let mut wcnf = Wcnf::default();
 
+	let mut vars: Option<VarRange> = None;
+	let mut num_cls: Option<usize> = None;
 	let mut cl: Vec<Lit> = Vec::new();
 	let mut top: Option<Coeff> = None;
 	let weight: Option<Coeff> = None;
 
-	for line in BufReader::new(file).lines() {
+	for line in lines.lines() {
 		match line {
 			Ok(line) if line.is_empty() || line.starts_with('c') => (),
-			Ok(line) if had_header => {
+			// parse header, expected format: "p cnf {num_var} {num_clauses}" or "p wcnf {num_var} {num_clauses} {top}"
+			Ok(line) if !had_header => {
+				let vec: Vec<&str> = line.split_whitespace().collect();
+				// check "p" and "cnf" keyword
+				if !WEIGHTED && (vec.len() != 4 || vec[0..2] != ["p", "cnf"]) {
+					return Err(io::Error::new(
+						io::ErrorKind::InvalidInput,
+						"expected DIMACS CNF header formatted \"p cnf {variables} {clauses}\"",
+					));
+				} else if WEIGHTED && (vec.len() != 4 || vec[0..2] != ["p", "wcnf"]) {
+					return Err(io::Error::new(
+						io::ErrorKind::InvalidInput,
+						"expected DIMACS WCNF header formatted \"p wcnf {variables} {clauses} {top}\"",
+					));
+				}
+				// parse number of variables
+				vars = Some(wcnf.new_var_range(vec[2].parse().map_err(|_| {
+					io::Error::new(
+						io::ErrorKind::InvalidInput,
+						format!("unable to parse number of variables in p-line: {line}"),
+					)
+				})?));
+
+				// parse number of clauses
+				num_cls = Some(vec[3].parse().map_err(|_| {
+					io::Error::new(
+						io::ErrorKind::InvalidInput,
+						"unable to parse number of clauses",
+					)
+				})?);
+
+				wcnf.cnf.lits.reserve(num_cls.unwrap());
+				wcnf.cnf.size.reserve(num_cls.unwrap());
+
+				if WEIGHTED {
+					top = Some(vec[4].parse().map_err(|_| {
+						io::Error::new(io::ErrorKind::InvalidInput, "unable to parse top weight")
+					})?);
+				}
+
+				// parsing header complete
+				had_header = true;
+			}
+			Ok(line) => {
 				for seg in line.split(' ') {
 					if WEIGHTED {
 						if let Ok(weight) = seg.parse::<Coeff>() {
@@ -270,57 +460,33 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 
 					if let Ok(lit) = seg.parse::<i32>() {
 						if lit == 0 {
-							wcnf.add_weighted_clause(cl.drain(..), weight)
-								.expect("CNF::add_clause does not return Unsatisfiable");
+							// TODO before this would panic with expect; now this is slightly improved with returning an Unsat formula, but we should (maybe) split up the errors to handle Unsat differently from io:Error
+							if let Err(unsat) = wcnf.add_weighted_clause(cl.drain(..), weight) {
+								return if WEIGHTED {
+									Ok(Dimacs::Wcnf(Wcnf::from(Cnf::from(unsat))))
+								} else {
+									Ok(Dimacs::Cnf(Cnf::from(unsat)))
+								};
+							}
 						} else {
-							cl.push(Lit(NonZeroI32::new(lit).unwrap()));
+							let l = Lit::from(
+								vars.as_ref()
+									.unwrap()
+									.index((lit.abs() - 1).try_into().unwrap()),
+							);
+							cl.push(if lit.is_negative() { !l } else { l });
+							if wcnf.cnf.clauses() > num_cls.unwrap() {
+								return Err(io::Error::new(
+									io::ErrorKind::InvalidInput,
+									format!(
+										"Number of clauses exceeded p-line parameter of {}",
+										num_cls.unwrap(),
+									),
+								));
+							}
 						}
 					}
 				}
-			}
-			// parse header, expected format: "p cnf {num_var} {num_clauses}" or "p wcnf {num_var} {num_clauses} {top}"
-			Ok(line) => {
-				let vec: Vec<&str> = line.split_whitespace().collect();
-				// check "p" and "cnf" keyword
-				if !WEIGHTED && (vec.len() != 4 || vec[0..2] != ["p", "cnf"]) {
-					return Err(io::Error::new(
-						io::ErrorKind::InvalidInput,
-						"expected DIMACS CNF header formatted \"p cnf {variables} {clauses}\"",
-					));
-				} else if WEIGHTED && (vec.len() != 4 || vec[0..2] != ["p", "wcnf"]) {
-					return Err(io::Error::new(
-						io::ErrorKind::InvalidInput,
-						"expected DIMACS WCNF header formatted \"p wcnf {variables} {clauses} {top}\"",
-					));
-				}
-				// parse number of variables
-				wcnf.cnf.nvar = VarFactory {
-					next_var: Some(Var(vec[2].parse::<NonZeroI32>().map_err(|_| {
-						io::Error::new(
-							io::ErrorKind::InvalidInput,
-							"unable to parse number of variables",
-						)
-					})?)),
-				};
-				// parse number of clauses
-				let num_clauses: usize = vec[3].parse().map_err(|_| {
-					io::Error::new(
-						io::ErrorKind::InvalidInput,
-						"unable to parse number of clauses",
-					)
-				})?;
-
-				wcnf.cnf.lits.reserve(num_clauses);
-				wcnf.cnf.size.reserve(num_clauses);
-
-				if WEIGHTED {
-					top = Some(vec[4].parse().map_err(|_| {
-						io::Error::new(io::ErrorKind::InvalidInput, "unable to parse top weight")
-					})?);
-				}
-
-				// parsing header complete
-				had_header = true;
 			}
 			Err(e) => return Err(e),
 		}
@@ -333,18 +499,32 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 	}
 }
 
+impl FromStr for Cnf {
+	type Err = io::Error;
+
+	fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+		Self::from_buf(Cursor::new(s))
+	}
+}
+
 impl Cnf {
 	/// Returns the number of clauses in the formula.
 	pub fn clauses(&self) -> usize {
 		self.size.len()
 	}
 
-	/// Read a CNF formula from a file formatted in the DIMACS CNF format
-	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-		match parse_dimacs_file::<false>(path)? {
+	// TODO how to unify the reading approaches
+	/// Read a CNF formula from a buffer
+	pub fn from_buf(buf: impl BufRead) -> Result<Self, io::Error> {
+		match parse_dimacs_file::<false>(buf)? {
 			Dimacs::Cnf(cnf) => Ok(cnf),
 			_ => unreachable!(),
 		}
+	}
+
+	/// Read a CNF formula from a file formatted in the DIMACS CNF format
+	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
+		Self::from_buf(BufReader::new(File::open(path)?))
 	}
 
 	#[cfg(test)]
@@ -362,6 +542,15 @@ impl Cnf {
 			size: self.size.iter(),
 			index: 0,
 		}
+	}
+
+	/// Iterate over variables in the actual formula (might be non-contiguous and exceed vars added)
+	// TODO uphold consistency?
+	pub fn vars(&self) -> impl Iterator<Item = Var> {
+		self.iter()
+			.flat_map(|cl| cl.iter().map(|lit| lit.var()))
+			.sorted()
+			.dedup()
 	}
 
 	/// Returns the number of literals in the formula.
@@ -385,6 +574,52 @@ impl Cnf {
 	/// Returns the number of variables in the formula.
 	pub fn variables(&self) -> usize {
 		self.nvar.emited_vars()
+	}
+
+	/// A potentially expensive way (in terms of runtime, not in terms of memory) to add clauses: skips adding the new clause if it is a subset of the last added clause. Use this instead of `add_clause_expensive` if you have some reason to think this is often the case, because it could both reduce the encoding size and speed up the encoding process as well (the function will exit early once we know the new clause is a subset).
+	/// Warning: you will not see this speedup if the previous clause is already collected (but the clause will still be skipped for the encoding)
+	/// Warning: the last added clause should have unique literals (otherwise clauses will not be skipped as often as they could, which is still correct, but sub-optimal)
+	fn add_clause_expensive<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
+		// size of last added clause
+		let mut last_size = if let Some(last_size) = self.size.last() {
+			*last_size
+		} else {
+			return self.add_clause(cl);
+		};
+
+		// current end
+		let end = self.lits.len();
+		// start of last added clause
+		let prev = end - last_size;
+		debug_assert!(
+			is_unique(self.lits[prev..end].iter()),
+			"Add expensive clause for {} called suboptimally while last clause {} was not unique in CNF:\n{}\n{:?}",
+                        cl.into_iter().join(","),
+                        self.lits[prev..end].iter().join(","),
+                        self,
+                        self
+                        );
+
+		for l in cl {
+			if self.lits[prev..end].contains(&l) {
+				last_size -= 1;
+				if last_size == 0 {
+					// reset
+					self.lits.truncate(end);
+					return Ok(());
+				}
+			}
+
+			self.lits.push(l);
+		}
+
+		let len = self.lits.len() - end;
+		self.size.push(len);
+		if len == 0 {
+			Err(Unsatisfiable)
+		} else {
+			Ok(())
+		}
 	}
 }
 
@@ -437,7 +672,7 @@ impl Display for Cnf {
 	}
 }
 
-impl<'a> ExactSizeIterator for CnfIterator<'a> {}
+impl ExactSizeIterator for CnfIterator<'_> {}
 
 impl<'a> Iterator for CnfIterator<'a> {
 	type Item = &'a [Lit];
@@ -467,7 +702,7 @@ impl<'a, DB: ClauseDatabase + ?Sized> ConditionalDatabase<'a, DB> {
 	}
 }
 
-impl<'a, DB: ClauseDatabase + ?Sized> ClauseDatabase for ConditionalDatabase<'a, DB> {
+impl<DB: ClauseDatabase + ?Sized> ClauseDatabase for ConditionalDatabase<'_, DB> {
 	type CondDB = DB;
 
 	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
@@ -505,7 +740,7 @@ impl Lit {
 	/// This method is only safe to use if the input integer is known to be a
 	/// integer coerced from a literal part of the same formula. Otherwise, the
 	/// usage of the literal may lead to undefined behavior.
-	pub fn from_raw(value: NonZeroI32) -> Lit {
+	pub const fn from_raw(value: NonZeroI32) -> Lit {
 		Lit(value)
 	}
 
@@ -793,7 +1028,7 @@ impl Wcnf {
 
 	/// Read a WCNF formula from a file formatted in the (W)DIMACS WCNF format
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-		match parse_dimacs_file::<true>(path)? {
+		match parse_dimacs_file::<true>(BufReader::new(File::open(path)?))? {
 			Dimacs::Wcnf(wcnf) => Ok(wcnf),
 			_ => unreachable!(),
 		}
@@ -872,13 +1107,6 @@ impl Display for Wcnf {
 	}
 }
 
-impl From<Cnf> for Wcnf {
-	fn from(cnf: Cnf) -> Self {
-		let weights = std::iter::repeat(None).take(cnf.clauses()).collect();
-		Wcnf { cnf, weights }
-	}
-}
-
 impl From<Lit> for i32 {
 	fn from(val: Lit) -> Self {
 		val.0.get()
@@ -891,11 +1119,58 @@ impl From<Var> for i32 {
 	}
 }
 
+impl From<i32> for Lit {
+	fn from(value: i32) -> Self {
+		Self(NonZeroI32::new(value).expect("cannot create literal with value zero"))
+	}
+}
+
+impl From<i32> for Var {
+	fn from(value: i32) -> Self {
+		Self(NonZeroI32::new(value).expect("cannot create literal with value zero"))
+	}
+}
+
 #[cfg(test)]
 mod tests {
-	use std::num::NonZeroI32;
+	use helpers::tests::{assert_encoding, expect_file};
 
-	use crate::{solver::VarFactory, Lit, Var};
+	use super::*;
+
+	#[test]
+	fn cnf_from_file_test() {
+		for (f, (vars, cls, lits)) in std::fs::read_dir("res/dimacs")
+			.unwrap()
+			.map(|f| f.unwrap().path())
+			.collect_vec()
+			.into_iter()
+			.sorted()
+			.zip([(2, 1, 2), (0, 1, 0), (0, 0, 0)])
+		// statics; notice ex2 is short-circuited
+		{
+			let cnf = Cnf::from_file(&f).unwrap();
+			assert_encoding(
+				// &Cnf::from_file(&f).unwrap_or_else(Cnf::from),
+				&cnf,
+				&expect_file![f.display()],
+			);
+			assert_eq!(cnf.variables(), vars, "{cnf} did not have {vars} vars");
+			assert_eq!(cnf.clauses(), cls, "{cnf} did not have {cls} clauses");
+			assert_eq!(cnf.literals(), lits, "{cnf} did not have {lits} literal");
+			// println!("{cnf} \n {}", std::fs::read_to_string(&f).unwrap());
+			// assert_eq!(
+			// 	String::from(format!("{cnf}")), // TODO display might not be DIMACS in the future
+			// 	std::fs::read_to_string(&f)
+			// 		.unwrap()
+			// 		.lines()
+			// 		.filter(|l| !l.starts_with("c"))
+			// 		.filter(|l| !l.is_empty())
+			// 		// .chain(["\n"])
+			// 		.join("\n")
+			// );
+		}
+	}
+	use crate::{solver::VarFactory, Var};
 
 	#[test]
 	fn test_var_range() {
@@ -916,11 +1191,5 @@ mod tests {
 		let range = factory.next_var_range(100);
 		assert_eq!(range.len(), 100);
 		assert_eq!(factory.next_var, Some(Var(NonZeroI32::new(104).unwrap())));
-	}
-
-	impl From<i32> for Lit {
-		fn from(value: i32) -> Self {
-			Lit(NonZeroI32::new(value).expect("cannot create literal with value zero"))
-		}
 	}
 }

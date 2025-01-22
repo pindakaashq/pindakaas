@@ -1,0 +1,29 @@
+[package]
+name = "pindakaas-scm"
+description = "A crate to generate the SCM database as Rust code"
+
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords.workspace = true
+repository.workspace = true
+
+
+
+[dependencies]
+bzip2 = "0.4"
+flate2 = "1.0"
+itertools = "0.13"
+tar = "0.4"
+quote.workspace = true
+phf = { version = "0.11.3", features = ["macros"] }
+syn.workspace = true
+rustfmt = "0.10.0"
+prettyplease = "0.2.29"
+tqdm = "0.7.0"
+
+# [[bin]]
+# name = "pindakaas-scm"

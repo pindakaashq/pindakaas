@@ -3,7 +3,7 @@ use itertools::Itertools;
 use crate::{
 	bool_linear::{LimitComp, NormalizedBoolLinear},
 	helpers::{emit_clause, new_var},
-	Checker, ClauseDatabase, Encoder, Lit, Result, Valuation,
+	CheckError, Checker, ClauseDatabase, Encoder, Lit, Result, Valuation,
 };
 
 /// An encoder for [`CardinalityOne`] constraints that uses a logarithm
@@ -83,7 +83,7 @@ impl CardinalityOne {
 }
 
 impl Checker for CardinalityOne {
-	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<()> {
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
 		NormalizedBoolLinear::from(self.clone()).check(value)
 	}
 }

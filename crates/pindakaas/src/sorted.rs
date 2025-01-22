@@ -5,10 +5,7 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	bool_linear::{BoolLinExp, LimitComp},
-	helpers::{add_clauses_for, emit_clause, negate_cnf},
-	integer::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
-	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
+	bool_linear::{BoolLinExp, LimitComp}, helpers::{add_clauses_for, emit_clause, negate_cnf}, integer::IntVarEnc, CheckError, Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation
 };
 
 type SortedCache = FxHashMap<(u128, u128, u128), (SortedStrategy, (u128, u128))>;
@@ -59,7 +56,7 @@ impl<'a> Sorted<'a> {
 }
 
 impl<'a> Checker for Sorted<'a> {
-	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
+	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(),CheckError> {
 		let lhs = BoolLinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
 			.value(sol)?;
 		let rhs = BoolLinExp::from(self.y).value(sol)?;
@@ -96,6 +93,40 @@ impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_>> for SortedEncoder {
 	}
 }
 
+
+/// Encoder for the linear constraints that ∑ litsᵢ ≷ k using a sorting network
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SortingNetworkEncoder {
+	pub sorted_encoder: SortedEncoder,
+}
+
+
+impl Default for SortingNetworkEncoder {
+	fn default() -> Self {
+		let mut sorted_encoder = SortedEncoder::default();
+		_ = sorted_encoder
+			.with_overwrite_direct_cmp(None)
+			.with_overwrite_recursive_cmp(None);
+		Self { sorted_encoder }
+	}
+}
+
+impl<DB: ClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
+	#[cfg_attr(
+		any(feature = "tracing", test),
+		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))
+	)]
+	fn encode(&self, db: &mut DB, card: &Cardinality) -> Result {
+		self.sorted_encoder.encode(
+			db,
+			&Sorted::new(
+				card.lits.as_slice(),
+				card.cmp.clone(),
+				&IntVarEnc::Const(card.k.into()),
+			),
+		)
+	}
+}
 impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for SortedEncoder {
 	fn encode(&self, db: &mut DB, tern: &TernLeConstraint) -> Result {
 		let TernLeConstraint { x, y, cmp, z } = tern;
@@ -507,7 +538,7 @@ impl SortedStrategy {
 			(SortedStrategy::Recursive, rec_cost)
 		};
 
-		let _ = cache.insert(key, ret.clone());
+		_ = cache.insert(key, ret.clone());
 		ret
 	}
 
@@ -569,7 +600,7 @@ mod tests {
 
 	use crate::{
 		bool_linear::LimitComp,
-		helpers::tests::{assert_solutions, expect_file},
+		helpers::tests::expect_file,
 		integer::{IntVarEnc, IntVarOrd, TernLeConstraint},
 		sorted::{Sorted, SortedEncoder, SortedStrategy},
 		ClauseDatabase, Cnf, Encoder, Var, VarRange,

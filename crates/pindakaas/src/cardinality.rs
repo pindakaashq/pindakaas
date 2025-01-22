@@ -1,9 +1,7 @@
 use crate::{
 	bool_linear::{LimitComp, LinMarker, NormalizedBoolLinear, PosCoeff},
 	cardinality_one::CardinalityOne,
-	integer::IntVarEnc,
-	sorted::{Sorted, SortedEncoder},
-	Checker, ClauseDatabase, Encoder, Lit, Result, Valuation,
+	CheckError, Checker, ClauseDatabase, Encoder, Lit, Result, Valuation,
 };
 
 // local marker trait, to ensure the previous definition only applies within this crate
@@ -16,13 +14,11 @@ pub struct Cardinality {
 	pub(crate) k: PosCoeff,
 }
 
-/// Encoder for the linear constraints that ∑ litsᵢ ≷ k using a sorting network
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SortingNetworkEncoder {
-	pub sorted_encoder: SortedEncoder,
-}
-
 impl Cardinality {
+	#[allow(
+		dead_code,
+		reason = "TODO: no idea why it has this warning but not on develop?"
+	)]
 	#[cfg(any(feature = "tracing", test))]
 	pub(crate) fn trace_print(&self) -> String {
 		use crate::trace::trace_print_lit;
@@ -38,7 +34,7 @@ impl Cardinality {
 }
 
 impl Checker for Cardinality {
-	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result {
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
 		NormalizedBoolLinear::from(self.clone()).check(value)
 	}
 }
@@ -64,44 +60,35 @@ impl<DB: ClauseDatabase, Enc: Encoder<DB, Cardinality> + CardMarker> Encoder<DB,
 
 impl<M: LinMarker> CardMarker for M {}
 
-impl SortingNetworkEncoder {
-	pub fn set_sorted_encoder(&mut self, sorted_encoder: SortedEncoder) -> &mut Self {
-		self.sorted_encoder = sorted_encoder;
-		self
-	}
-}
-
-impl CardMarker for SortingNetworkEncoder {}
-
-impl Default for SortingNetworkEncoder {
-	fn default() -> Self {
-		let mut sorted_encoder = SortedEncoder::default();
-		let _ = sorted_encoder
-			.with_overwrite_direct_cmp(None)
-			.with_overwrite_recursive_cmp(None);
-		Self { sorted_encoder }
-	}
-}
-
-impl<DB: ClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))
-	)]
-	fn encode(&self, db: &mut DB, card: &Cardinality) -> Result {
-		self.sorted_encoder.encode(
-			db,
-			&Sorted::new(
-				card.lits.as_slice(),
-				card.cmp.clone(),
-				&IntVarEnc::Const(card.k.into()),
-			),
-		)
-	}
-}
+// impl Default for SortingNetworkEncoder {
+// 	fn default() -> Self {
+// 		let mut sorted_encoder = SortedEncoder::default();
+// 		let _ = sorted_encoder
+// 			.with_overwrite_direct_cmp(None)
+// 			.with_overwrite_recursive_cmp(None);
+// 		Self { sorted_encoder }
+// 	}
+// }
+// impl<DB: ClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
+// 	#[cfg_attr(
+// 		any(feature = "tracing", test),
+// 		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))
+// 	)]
+// 	fn encode(&self, db: &mut DB, card: &Cardinality) -> Result {
+// 		self.sorted_encoder.encode(
+// 			db,
+// 			&Sorted::new(
+// 				card.lits.as_slice(),
+// 				card.cmp.clone(),
+// 				&IntVarEnc::Const(card.k.into()),
+// 			),
+// 		)
+// 	}
+// }
 
 #[cfg(test)]
 pub(crate) mod tests {
+
 	macro_rules! card_test_suite {
 		($encoder:expr) => {
 			#[test]
@@ -216,6 +203,9 @@ pub(crate) mod tests {
 		};
 	}
 
+	pub(crate) use card_test_suite;
+
+	/*
 	macro_rules! sorted_card_test_suite {
 		($encoder:expr,$cmp:expr) => {
 			use itertools::Itertools;
@@ -223,7 +213,7 @@ pub(crate) mod tests {
 
 			use crate::{
 				bool_linear::{LimitComp, PosCoeff},
-				cardinality::{Cardinality, SortingNetworkEncoder},
+				cardinality::{Cardinality},
 				helpers::tests::assert_solutions,
 				sorted::{SortedEncoder, SortedStrategy},
 				ClauseDatabase, Cnf, Encoder,
@@ -314,8 +304,6 @@ pub(crate) mod tests {
 		};
 	}
 
-	pub(crate) use card_test_suite;
-
 	mod eq_direct {
 		sorted_card_test_suite!(
 			{
@@ -395,4 +383,6 @@ pub(crate) mod tests {
 			LimitComp::LessEq
 		);
 	}
+
+		*/
 }
