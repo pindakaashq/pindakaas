@@ -1501,6 +1501,7 @@ Actual assignments:
 				} else {
 					model.lits()
 				})
+				.collect_vec()
 			})
 			.unwrap_or_else(|_| {
 				println!("Warning: encoding decomposition lead to UNSAT");
@@ -1518,8 +1519,8 @@ Actual assignments:
 		};
 
 		let actual_assignments: Vec<_> = lit_assignments
-			.iter()
-			.map(|lit_assignment| checker.assign(lit_assignment))
+			.into_iter()
+			.map(|lit_assignment| checker.assign(&lit_assignment))
 			// .sorted()
 			// .inspect(|(assignment, lit_assignment)| {
 			// 	println!("{assignment} -> {lit_assignment}");
@@ -3084,7 +3085,6 @@ End
 			Ok(()),
 			model.check_assignments(
 				&slv.solve_all(model.lits())
-					.into_iter()
 					.map(|sol| model.assign(&sol))
 					.collect_vec(),
 				None,

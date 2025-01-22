@@ -135,7 +135,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		}
 	}
 
-	// [?] leanr how to do this
+	// TODO Change item from Vec<Lit> to something better?
 	fn add_clauses<I: IntoIterator<Item = Vec<Lit>>>(&mut self, clauses: I) -> Result {
 		clauses.into_iter().try_for_each(|cl| self.add_clause(cl))
 	}

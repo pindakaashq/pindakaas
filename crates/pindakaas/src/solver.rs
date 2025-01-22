@@ -12,9 +12,8 @@ pub mod propagation;
 pub mod splr;
 use std::{ffi::c_void, num::NonZeroI32, ptr};
 
-use itertools::Itertools;
-
-use crate::{integer::MapSol, ClauseDatabase, Cnf, Lit, Unsatisfiable, Valuation, Var, VarRange};
+use crate::Unsatisfiable;
+use crate::{integer::MapSol, ClauseDatabase, ClauseDatabaseTools, Lit, Valuation, Var, VarRange};
 
 type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
 type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;
@@ -77,6 +76,41 @@ pub enum SolveResult<Sol: Valuation, Fail = ()> {
 	Unknown,
 }
 
+struct SolveResultIterator<'a, S: Solver + ?Sized, V: Into<Lit>, I: IntoIterator<Item = V> + Clone>
+{
+	slv: &'a mut S,
+	vars: I,
+	last: Option<MapSol>,
+}
+
+impl<S: Solver + ?Sized, V: Into<Lit>, I: IntoIterator<Item = V> + Clone> Iterator
+	for SolveResultIterator<'_, S, V, I>
+{
+	// TODO return Valuation's as items somehow?
+	type Item = MapSol;
+
+	/// Returns next solution
+	fn next(&mut self) -> Option<Self::Item> {
+		// Add nogood before each call
+		if let Some(nogood) = &self.last {
+			if let Err(Unsatisfiable) = self.slv.add_clause(nogood.iter().map(|v| !v)) {
+				return None;
+			}
+		}
+		match self.slv.solve() {
+			SolveResult::Satisfied(sol) => {
+				let sol = MapSol::new(self.vars.clone(), &sol);
+				self.last = Some(sol.clone());
+				Some(sol)
+			}
+			SolveResult::Unsatisfiable(_) => None,
+			SolveResult::Unknown => {
+				panic!("Ran out of time before finding all solutions, but no timeout was set.")
+			}
+		}
+	}
+}
+
 pub trait Solver: ClauseDatabase {
 	/// Return the name and the version of SAT solver.
 	fn signature(&self) -> &str;
@@ -88,43 +122,15 @@ pub trait Solver: ClauseDatabase {
 	fn solve(&mut self) -> SolveResult<impl Valuation + '_, impl Sized>;
 
 	/// Solve for all solutions for a set of variables
-	fn solve_all<V, I>(&mut self, vars: I) -> Vec<MapSol>
+	fn solve_all<V, I>(&mut self, vars: I) -> impl Iterator<Item = MapSol>
 	where
 		V: Into<Lit>,
 		I: IntoIterator<Item = V> + Clone,
 	{
-		// TODO update this interface to give sols one-by-one and return Valuations i/o MapSols
-		let mut solns = Vec::<MapSol>::new();
-		loop {
-			match self.solve() {
-				SolveResult::Satisfied(sol) => {
-					solns.push(MapSol::new(vars.clone(), &sol));
-				}
-				SolveResult::Unsatisfiable(_) => {
-					return solns;
-				}
-				SolveResult::Unknown => panic!("Ran out of time before finding all solutions"),
-			}
-
-			if self.add_clause_from_slice(&solns.last().unwrap().iter().map(|l| !l).collect_vec())
-				== Err(Unsatisfiable)
-			{
-				return solns;
-			}
-		}
-		// TODO doesn't compile :)
-		// while let SolveResult::Satisfied(sol) = self.solve() {
-		// 	solns.push(MapSol::new(output, sol));
-		// 	self.add_clause(solns.last().unwrap().iter().map(|l| !l))
-		// 		.unwrap();
-		// };
-		// solns
-	}
-
-	fn add_cnf(&mut self, cnf: Cnf) {
-		for cl in cnf.iter() {
-			self.add_clause_from_slice(&cl.iter().cloned().collect_vec())
-				.unwrap();
+		SolveResultIterator {
+			slv: self,
+			vars,
+			last: None,
 		}
 	}
 }

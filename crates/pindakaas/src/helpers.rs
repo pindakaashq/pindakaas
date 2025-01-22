@@ -294,7 +294,6 @@ pub(crate) mod tests {
 	pub(crate) fn assert_checker(formula: &Cnf, checker: &impl Checker) {
 		Cadical::from(formula)
 			.solve_all(formula.get_variables())
-			.into_iter()
 			.for_each(|value| {
 				assert_eq!(checker.check(&value), Ok(()));
 			});
@@ -362,7 +361,6 @@ pub(crate) mod tests {
 		expect.assert_eq(
 			&Cadical::from(formula)
 				.solve_all(vars)
-				.into_iter()
 				.map(|sol| sol.iter().sorted_by_key(|l| l.var()).collect_vec())
 				.sorted()
 				.map(|sol| sol.into_iter().map(i32::from).format(" "))

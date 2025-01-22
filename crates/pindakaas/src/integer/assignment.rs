@@ -120,6 +120,7 @@ impl PartialOrd for Assignment {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MapSol(pub(crate) FxHashMap<Var, bool>);
 
+// TODO perhaps better to just have slice of vars
 impl MapSol {
 	pub fn new<V, I, F>(vars: I, sol: &F) -> Self
 	where

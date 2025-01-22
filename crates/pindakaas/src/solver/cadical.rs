@@ -164,15 +164,18 @@ mod tests {
 		);
 
 		let mut slv = Cadical::default();
-		slv.add_cnf(ex1);
+		slv.add_clauses(ex1.iter().map(|clause| clause.to_vec()))
+			.unwrap();
 		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
 
 		let mut slv = Cadical::default();
-		slv.add_cnf(ex2);
-		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_))); // TODO failing.
+		slv.add_clauses(ex2.iter().map(|clause| clause.to_vec()))
+			.unwrap();
+		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_)));
 
 		let mut slv = Cadical::default();
-		slv.add_cnf(ex3);
+		slv.add_clauses(ex3.iter().map(|clause| clause.to_vec()))
+			.unwrap();
 		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
 	}
 
