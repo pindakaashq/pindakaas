@@ -6,7 +6,7 @@ use super::{
 };
 use crate::{
 	bool_linear::{Comparator, PosCoeff},
-	helpers::{add_clauses_for, div_ceil, div_floor, emit_clause, unsigned_binary_range},
+	helpers::{add_clauses_for, div_ceil, div_floor, unsigned_binary_range},
 	integer::{
 		bin::BinEnc,
 		helpers::{display_cnf, required_lits},
@@ -17,7 +17,7 @@ use crate::{
 		var::{IntVarId, IntVarRef},
 		Assignment, Dom,
 	},
-	log, CheckError, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable,
+	log, CheckError, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -618,7 +618,7 @@ impl Lin {
 						if c.is_empty() {
 							return Err(Unsatisfiable);
 						}
-						emit_clause!(db, c)?;
+						db.add_clause(c)?;
 					}
 					Ok(())
 				})

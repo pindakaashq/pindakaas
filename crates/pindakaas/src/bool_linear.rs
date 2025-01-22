@@ -1,6 +1,7 @@
 use std::{
 	collections::VecDeque,
 	fmt::{self, Display},
+	iter::once,
 	ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign},
 };
 
@@ -10,21 +11,11 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 use crate::{
 	cardinality::Cardinality,
 	cardinality_one::{CardinalityOne, PairwiseEncoder},
-	helpers::{as_binary, emit_clause, is_powers_of_two, new_var},
-	integer::enc::LitOrConst,
-	integer::{lex_leq_const, IntVar},
+	helpers::{as_binary, is_powers_of_two, new_named_lit},
+	integer::{enc::LitOrConst, lex_leq_const, IntVar},
 	propositional_logic::{Formula, TseitinEncoder},
-	// sorted::{Sorted, SortedEncoder},
-	CheckError,
-	Checker,
-	ClauseDatabase,
-	Coeff,
-	Encoder,
-	IntEncoding,
-	Lit,
-	Result,
-	Unsatisfiable,
-	Valuation,
+	AsDynClauseDatabase, BoolVal, CheckError, Checker, ClauseDatabase, Coeff, Encoder, IntEncoding,
+	Lit, Result, Unsatisfiable, Valuation,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -229,6 +220,8 @@ pub struct StaticLinEncoder<
 	amo_enc: Card1Enc,
 }
 
+use crate::ClauseDatabaseTools;
+
 impl AdderEncoder {
 	#[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "carry_circuit", skip_all, fields(constraint = Self::trace_print_carry(input, &output))))]
 	/// Encode the adder carry circuit
@@ -237,40 +230,44 @@ impl AdderEncoder {
 	/// literals (full adder).
 	///
 	/// `output` can be either a literal, or a constant Boolean value.
-	fn carry_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: LitOrConst) -> Result {
+	fn carry_circuit<DB: ClauseDatabase + ?Sized>(
+		db: &mut DB,
+		input: &[Lit],
+		output: BoolVal,
+	) -> Result {
 		match output {
-			LitOrConst::Lit(carry) => match *input {
+			BoolVal::Lit(carry) => match *input {
 				[a, b] => {
-					emit_clause!(db, [!a, !b, carry])?;
-					emit_clause!(db, [a, !carry])?;
-					emit_clause!(db, [b, !carry])
+					db.add_clause([!a, !b, carry])?;
+					db.add_clause([a, !carry])?;
+					db.add_clause([b, !carry])
 				}
 				[a, b, c] => {
-					emit_clause!(db, [a, b, !carry])?;
-					emit_clause!(db, [a, c, !carry])?;
-					emit_clause!(db, [b, c, !carry])?;
+					db.add_clause([a, b, !carry])?;
+					db.add_clause([a, c, !carry])?;
+					db.add_clause([b, c, !carry])?;
 
-					emit_clause!(db, [!a, !b, carry])?;
-					emit_clause!(db, [!a, !c, carry])?;
-					emit_clause!(db, [!b, !c, carry])
+					db.add_clause([!a, !b, carry])?;
+					db.add_clause([!a, !c, carry])?;
+					db.add_clause([!b, !c, carry])
 				}
 				_ => unreachable!(),
 			},
-			LitOrConst::Const(k) => match *input {
+			BoolVal::Const(k) => match *input {
 				[a, b] => {
 					if k {
 						// TODO: Can we avoid this?
-						emit_clause!(db, [a])?;
-						emit_clause!(db, [b])
+						db.add_clause([a])?;
+						db.add_clause([b])
 					} else {
-						emit_clause!(db, [!a, !b])
+						db.add_clause([!a, !b])
 					}
 				}
 				[a, b, c] => {
 					let neg = |x: Lit| if k { x } else { !x };
-					emit_clause!(db, [neg(a), neg(b)])?;
-					emit_clause!(db, [neg(a), neg(c)])?;
-					emit_clause!(db, [neg(b), neg(c)])
+					db.add_clause([neg(a), neg(b)])?;
+					db.add_clause([neg(a), neg(c)])?;
+					db.add_clause([neg(b), neg(c)])
 				}
 				_ => unreachable!(),
 			},
@@ -284,42 +281,46 @@ impl AdderEncoder {
 	/// literals (full adder).
 	///
 	/// `output` can be either a literal, or a constant Boolean value.
-	fn sum_circuit<DB: ClauseDatabase>(db: &mut DB, input: &[Lit], output: LitOrConst) -> Result {
+	fn sum_circuit<DB: ClauseDatabase + AsDynClauseDatabase>(
+		db: &mut DB,
+		input: &[Lit],
+		output: BoolVal,
+	) -> Result {
 		match output {
-			LitOrConst::Lit(sum) => match *input {
+			BoolVal::Lit(sum) => match *input {
 				[a, b] => {
-					emit_clause!(db, [!a, !b, !sum])?;
-					emit_clause!(db, [!a, b, sum])?;
-					emit_clause!(db, [a, !b, sum])?;
-					emit_clause!(db, [a, b, !sum])
+					db.add_clause([!a, !b, !sum])?;
+					db.add_clause([!a, b, sum])?;
+					db.add_clause([a, !b, sum])?;
+					db.add_clause([a, b, !sum])
 				}
 				[a, b, c] => {
-					emit_clause!(db, [a, b, c, !sum])?;
-					emit_clause!(db, [a, !b, !c, !sum])?;
-					emit_clause!(db, [!a, b, !c, !sum])?;
-					emit_clause!(db, [!a, !b, c, !sum])?;
+					db.add_clause([a, b, c, !sum])?;
+					db.add_clause([a, !b, !c, !sum])?;
+					db.add_clause([!a, b, !c, !sum])?;
+					db.add_clause([!a, !b, c, !sum])?;
 
-					emit_clause!(db, [!a, !b, !c, sum])?;
-					emit_clause!(db, [!a, b, c, sum])?;
-					emit_clause!(db, [a, !b, c, sum])?;
-					emit_clause!(db, [a, b, !c, sum])
+					db.add_clause([!a, !b, !c, sum])?;
+					db.add_clause([!a, b, c, sum])?;
+					db.add_clause([a, !b, c, sum])?;
+					db.add_clause([a, b, !c, sum])
 				}
 				_ => unreachable!(),
 			},
-			LitOrConst::Const(true) => {
+			BoolVal::Const(true) => {
 				let xor = Formula::Xor(input.iter().map(|&l| Formula::Atom(l)).collect_vec());
 				TseitinEncoder.encode(db, &xor)
 			}
-			LitOrConst::Const(false) => match *input {
+			BoolVal::Const(false) => match *input {
 				[a, b] => {
-					emit_clause!(db, [a, !b])?;
-					emit_clause!(db, [!a, b])
+					db.add_clause([a, !b])?;
+					db.add_clause([!a, b])
 				}
 				[a, b, c] => {
-					emit_clause!(db, [!a, !b, !c])?;
-					emit_clause!(db, [!a, b, c])?;
-					emit_clause!(db, [a, !b, c])?;
-					emit_clause!(db, [a, b, !c])
+					db.add_clause([!a, !b, !c])?;
+					db.add_clause([!a, b, c])?;
+					db.add_clause([a, !b, c])?;
+					db.add_clause([a, b, !c])
 				}
 				_ => unreachable!(),
 			},
@@ -327,29 +328,29 @@ impl AdderEncoder {
 	}
 
 	#[cfg(any(feature = "tracing", test))]
-	fn trace_print_carry(input: &[Lit], output: &LitOrConst) -> String {
+	fn trace_print_carry(input: &[Lit], output: &BoolVal) -> String {
 		use crate::trace::trace_print_lit;
 		let inner = itertools::join(input.iter().map(trace_print_lit), " + ");
 		match output {
-			LitOrConst::Lit(r) => format!("{} ≡ ({} > 1)", trace_print_lit(r), inner),
-			LitOrConst::Const(true) => format!("{inner} > 1"),
-			LitOrConst::Const(false) => format!("{inner} ≤ 1"),
+			BoolVal::Lit(r) => format!("{} ≡ ({} > 1)", trace_print_lit(r), inner),
+			BoolVal::Const(true) => format!("{inner} > 1"),
+			BoolVal::Const(false) => format!("{inner} ≤ 1"),
 		}
 	}
 
 	#[cfg(any(feature = "tracing", test))]
-	fn trace_print_sum(input: &[Lit], output: &LitOrConst) -> String {
+	fn trace_print_sum(input: &[Lit], output: &BoolVal) -> String {
 		use crate::trace::trace_print_lit;
 		let inner = itertools::join(input.iter().map(trace_print_lit), " ⊻ ");
 		match output {
-			LitOrConst::Lit(r) => format!("{} ≡ {}", trace_print_lit(r), inner),
-			LitOrConst::Const(true) => inner,
-			LitOrConst::Const(false) => format!("¬({inner})"),
+			BoolVal::Lit(r) => format!("{} ≡ {}", trace_print_lit(r), inner),
+			BoolVal::Const(true) => inner,
+			BoolVal::Const(false) => format!("¬({inner})"),
 		}
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
+impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = lin.trace_print()))
@@ -394,7 +395,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 				1 => {
 					let x = bucket[b].pop().unwrap();
 					if lin.cmp == LimitComp::Equal {
-						emit_clause!(db, [if k[b] { x } else { !x }])?;
+						db.add_clause([if k[b] { x } else { !x }])?;
 					} else {
 						sum[b] = Some(x);
 					}
@@ -413,10 +414,10 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 						// Compute sum
 						if last && lin.cmp == LimitComp::Equal {
 							// No need to create a new literal, force the sum to equal the result
-							Self::sum_circuit(db, lits.as_slice(), LitOrConst::Const(k[b]))?;
+							Self::sum_circuit(db, lits.as_slice(), BoolVal::Const(k[b]))?;
 						} else if lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
 							// Literal is not used for the less-than constraint unless a zero has been seen first
-							let sum = new_var!(
+							let sum = new_named_lit!(
 								db,
 								if last {
 									crate::trace::subscripted_name("∑", b)
@@ -427,7 +428,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 									)
 								}
 							);
-							Self::sum_circuit(db, lits.as_slice(), LitOrConst::Lit(sum))?;
+							Self::sum_circuit(db, lits.as_slice(), BoolVal::Lit(sum))?;
 							bucket[b].push(sum);
 						}
 
@@ -437,15 +438,15 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 							if lits.len() == 2 && lin.cmp == LimitComp::Equal {
 								// Already encoded by the XOR to compute the sum
 							} else {
-								Self::carry_circuit(db, &lits[..], LitOrConst::Const(false))?;
+								Self::carry_circuit(db, &lits[..], BoolVal::Const(false))?;
 							}
 						} else if last && lin.cmp == LimitComp::Equal && bucket[b + 1].is_empty() {
 							// No need to create a new literal, force the carry to equal the result
-							Self::carry_circuit(db, &lits[..], LitOrConst::Const(k[b + 1]))?;
+							Self::carry_circuit(db, &lits[..], BoolVal::Const(k[b + 1]))?;
 							// Mark k[b + 1] as false (otherwise next step will fail)
 							k[b + 1] = false;
 						} else {
-							let carry = new_var!(
+							let carry = new_named_lit!(
 								db,
 								if last {
 									crate::trace::subscripted_name("c", b)
@@ -456,7 +457,7 @@ impl<DB: ClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
 									)
 								}
 							);
-							Self::carry_circuit(db, lits.as_slice(), LitOrConst::Lit(carry))?;
+							Self::carry_circuit(db, lits.as_slice(), BoolVal::Lit(carry))?;
 							bucket[b + 1].push(carry);
 						}
 					}
@@ -492,7 +493,7 @@ impl BoolLinAggregator {
 		any(feature = "tracing", test),
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	pub fn aggregate<DB: ClauseDatabase>(
+	pub fn aggregate<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		lin: &BoolLinear,
@@ -610,21 +611,20 @@ impl BoolLinAggregator {
 							let q = -*min_coef;
 
 							// add aux var y and constrain y <-> ( ~x1 /\ ~x2 /\ .. )
-							let y = new_var!(db);
+							let y = db.new_lit();
 
 							// ~x1 /\ ~x2 /\ .. -> y == x1 \/ x2 \/ .. \/ y
-							emit_clause!(
-								db,
+							db.add_clause(
 								terms
 									.iter()
 									.map(|(lit, _)| *lit)
-									.chain(std::iter::once(y))
+									.chain(once(y))
 							)
 							.unwrap();
 
 														// y -> ( ~x1 /\ ~x2 /\ .. ) == ~y \/ ~x1, ~y \/ ~x2, ..
 							for lit in terms.iter().map(|tup| tup.0) {
-								emit_clause!(db, [!y, !lit]).unwrap();
+								db.add_clause( [!y, !lit]).unwrap();
 							}
 
 							// this term will cancel out later when we add q*min_lit to the LHS
@@ -714,7 +714,7 @@ impl BoolLinAggregator {
 		if k == 0 {
 			for part in partition {
 				for (lit, _) in part.iter() {
-					emit_clause!(db, [!lit])?;
+					db.add_clause([!*lit])?;
 				}
 			}
 			return Ok(BoolLinVariant::Trivial);
@@ -730,7 +730,7 @@ impl BoolLinAggregator {
 						.into_iter()
 						.filter(|(lit, coef)| {
 							if coef > &k {
-								emit_clause!(db, [!lit]).unwrap();
+								db.add_clause([!*lit]).unwrap();
 								false
 							} else {
 								true
@@ -747,7 +747,7 @@ impl BoolLinAggregator {
 							.filter(|&(lit, coef)| {
 								acc += *coef;
 								if acc > *k {
-									emit_clause!(db, [!lit]).unwrap();
+									db.add_clause([!lit]).unwrap();
 									false
 								} else {
 									true
@@ -762,7 +762,7 @@ impl BoolLinAggregator {
 						.into_iter()
 						.filter(|(lit, coef)| {
 							if coef > &k {
-								emit_clause!(db, [!lit]).unwrap();
+								db.add_clause([!*lit]).unwrap();
 								false
 							} else {
 								true
@@ -802,13 +802,12 @@ impl BoolLinAggregator {
 
 				// If we have only 2 (unassigned) lits, which together (but not individually) exceed k, then -x1\/-x2
 				if partition.iter().flat_map(|part| part.iter()).count() == 2 {
-					emit_clause!(
-						db,
+					db.add_clause(
 						partition
 							.iter()
 							.flat_map(|part| part.iter())
-							.map(|(lit, _)| !lit)
-							.collect_vec()
+							.map(|(lit, _)| !*lit)
+							.collect_vec(),
 					)?;
 					return Ok(BoolLinVariant::Trivial);
 				}
@@ -821,14 +820,15 @@ impl BoolLinAggregator {
 					for part in partition {
 						match part {
 							Part::Amo(terms) => {
-								emit_clause!(
-									db,
-									[terms.iter().max_by(|(_, a), (_, b)| a.cmp(b)).unwrap().0]
-								)?;
+								db.add_clause([terms
+									.iter()
+									.max_by(|(_, a), (_, b)| a.cmp(b))
+									.unwrap()
+									.0])?;
 							}
 							Part::Ic(terms) | Part::Dom(terms, _, _) => {
 								for (lit, _) in terms {
-									emit_clause!(db, [lit])?;
+									db.add_clause([lit])?;
 								}
 							}
 						};
@@ -882,8 +882,8 @@ impl BoolLinAggregator {
 			// At most n-1 out of n is equivalent to at least *not* one
 			// Ex. at most 2 out of 3 true = at least 1 out of 3 false
 			if partition.len() == (*k + 1) as usize {
-				let neg = partition.iter().map(|l| !l);
-				emit_clause!(db, neg.clone())?;
+				let neg = partition.iter().map(|&l| !l);
+				db.add_clause(neg.clone())?;
 
 				if cmp == LimitComp::LessEq {
 					return Ok(BoolLinVariant::Trivial);
@@ -1040,7 +1040,7 @@ impl BoolLinExp {
 
 	pub(crate) fn iter(&self) -> impl Iterator<Item = (Option<Constraint>, Vec<&(Lit, Coeff)>)> {
 		let mut it = self.terms.iter();
-		std::iter::once((
+		once((
 			None,
 			Vec::from_iter((0..self.num_free).map(|_| it.next().unwrap())),
 		))
@@ -1326,7 +1326,7 @@ impl From<LimitComp> for Comparator {
 }
 
 // Automatically implement Cardinality encoding when you can encode Linear constraints
-impl<DB: ClauseDatabase, Enc: Encoder<DB, NormalizedBoolLinear> + LinMarker>
+impl<DB: ClauseDatabase + ?Sized, Enc: Encoder<DB, NormalizedBoolLinear> + LinMarker>
 	Encoder<DB, Cardinality> for Enc
 {
 	fn encode(&self, db: &mut DB, con: &Cardinality) -> Result {
@@ -1357,7 +1357,7 @@ impl<Enc, Agg> LinearEncoder<Enc, Agg> {
 	}
 }
 
-impl<DB: ClauseDatabase, Enc: Encoder<DB, BoolLinVariant>> Encoder<DB, BoolLinear>
+impl<DB: ClauseDatabase + ?Sized, Enc: Encoder<DB, BoolLinVariant>> Encoder<DB, BoolLinear>
 	for LinearEncoder<Enc>
 {
 	#[cfg_attr(
@@ -1519,7 +1519,7 @@ impl<LinEnc, CardEnc, AmoEnc> StaticLinEncoder<LinEnc, CardEnc, AmoEnc> {
 }
 
 impl<
-		DB: ClauseDatabase,
+		DB: ClauseDatabase + ?Sized,
 		LinEnc: Encoder<DB, NormalizedBoolLinear>,
 		CardEnc: Encoder<DB, Cardinality>,
 		AmoEnc: Encoder<DB, CardinalityOne>,
@@ -1547,7 +1547,7 @@ mod tests {
 						tests::construct_terms, LimitComp, NormalizedBoolLinear, PosCoeff,
 					},
 					helpers::tests::{assert_solutions, expect_file},
-					ClauseDatabase, Cnf, Encoder,
+					ClauseDatabaseTools, Cnf, Encoder,
 				};
 
 				#[test]
@@ -1757,7 +1757,7 @@ mod tests {
 		};
 	}
 
-	use std::num::NonZeroI32;
+	use std::{cmp::Ordering, num::NonZeroI32};
 
 	use itertools::Itertools;
 	pub(crate) use linear_test_suite;
@@ -1765,11 +1765,11 @@ mod tests {
 
 	use super::*;
 	use crate::{
-		cardinality::Cardinality,
-		cardinality_one::{CardinalityOne, PairwiseEncoder},
+		cardinality::{tests::card_test_suite, Cardinality},
+		cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
 		gt::TotalizerEncoder,
 		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
-		ClauseDatabase, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
+		ClauseDatabaseTools, Cnf,
 	};
 
 	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(terms: &[(L, Coeff)]) -> Vec<Part> {
@@ -2606,23 +2606,23 @@ mod tests {
 	}
 
 	impl PartialOrd for Part {
-		fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 			let termcmp = |a: &Vec<(Lit, PosCoeff)>, b: &Vec<(Lit, PosCoeff)>| {
 				let cmp = a.len().cmp(&b.len());
-				if cmp != std::cmp::Ordering::Equal {
+				if cmp != Ordering::Equal {
 					cmp
 				} else {
 					for (a, b) in a.iter().sorted().zip_eq(other.iter().sorted()) {
 						let cmp = a.0.cmp(&b.0);
-						if cmp != std::cmp::Ordering::Equal {
+						if cmp != Ordering::Equal {
 							return cmp;
 						}
 						let cmp = a.1.cmp(&b.1);
-						if cmp != std::cmp::Ordering::Equal {
+						if cmp != Ordering::Equal {
 							return cmp;
 						}
 					}
-					std::cmp::Ordering::Equal
+					Ordering::Equal
 				}
 			};
 			Some(match self {
@@ -2630,21 +2630,21 @@ mod tests {
 					if let Part::Amo(oterms) = other {
 						termcmp(terms, oterms)
 					} else {
-						std::cmp::Ordering::Less
+						Ordering::Less
 					}
 				}
 				Part::Ic(terms) => {
 					if let Part::Ic(oterms) = other {
 						termcmp(terms, oterms)
 					} else {
-						std::cmp::Ordering::Greater
+						Ordering::Greater
 					}
 				}
 				Part::Dom(terms, _, _) => {
 					if let Part::Dom(oterms, _, _) = other {
 						termcmp(terms, oterms)
 					} else {
-						std::cmp::Ordering::Less
+						Ordering::Less
 					}
 				}
 			})
@@ -2660,5 +2660,4 @@ mod tests {
 	linear_test_suite! {totalizer_encoder, crate::gt::TotalizerEncoder::default()}
 	linear_test_suite! {swc_encoder, crate::swc::SwcEncoder::default()}
 	linear_test_suite! {bdd_encoder, crate::bdd::BddEncoder::default()}
-	use crate::{cardinality::tests::card_test_suite, cardinality_one::tests::card1_test_suite};
 }

@@ -2,8 +2,7 @@ use itertools::Itertools;
 
 use crate::{
 	bool_linear::{LimitComp, NormalizedBoolLinear},
-	helpers::{emit_clause, new_var},
-	CheckError, Checker, ClauseDatabase, Encoder, Lit, Result, Valuation,
+	CheckError, Checker, ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result, Valuation,
 };
 
 /// An encoder for [`CardinalityOne`] constraints that uses a logarithm
@@ -27,15 +26,15 @@ pub struct LadderEncoder {}
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PairwiseEncoder {}
 
-pub(crate) fn at_least_one_clause<DB: ClauseDatabase>(
+pub(crate) fn at_least_one_clause<DB: ClauseDatabase + ?Sized>(
 	db: &mut DB,
 	card1: &CardinalityOne,
 ) -> Result {
 	debug_assert_eq!(card1.cmp, LimitComp::Equal);
-	emit_clause!(db, card1.lits.iter().copied())
+	db.add_clause(card1.lits.iter().copied())
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "bitwise_encoder", skip_all, fields(constraint = card1.trace_print()))
@@ -50,15 +49,15 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for BitwiseEncoder {
 		}
 
 		// Create a log encoded selection variable
-		let signals = (0..bits).map(|_| new_var!(db)).collect_vec();
+		let signals = (0..bits).map(|_| db.new_lit()).collect_vec();
 
 		// Enforce that literal can only be true when selected
-		for (i, lit) in card1.lits.iter().enumerate() {
-			for (j, sig) in signals.iter().enumerate() {
+		for (i, &lit) in card1.lits.iter().enumerate() {
+			for (j, &sig) in signals.iter().enumerate() {
 				if i & (1 << j) != 0 {
-					emit_clause!(db, [!lit, *sig])?;
+					db.add_clause([!lit, sig])?;
 				} else {
-					emit_clause!(db, [!lit, !sig])?;
+					db.add_clause([!lit, !sig])?;
 				}
 			}
 		}
@@ -88,35 +87,35 @@ impl Checker for CardinalityOne {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for LadderEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, CardinalityOne> for LadderEncoder {
 	#[cfg_attr(
 	any(feature = "tracing", test),
 	tracing::instrument(name = "ladder_encoder", skip_all, fields(constraint = card1.trace_print()))
 )]
 	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
 		// TODO could be slightly optimised to not introduce fixed lits
-		let mut a = new_var!(db); // y_v-1
+		let mut a = db.new_lit(); // y_v-1
 		if card1.cmp == LimitComp::Equal {
-			emit_clause!(db, [a])?;
+			db.add_clause([a])?;
 		}
-		for x in card1.lits.iter() {
-			let b = new_var!(db); // y_v
-			emit_clause!(db, [!b, a])?; // y_v -> y_v-1
+		for &x in card1.lits.iter() {
+			let b = db.new_lit(); // y_v
+			db.add_clause([!b, a])?; // y_v -> y_v-1
 
 			// "Channelling" clauses for x_v <-> (y_v-1 /\ ¬y_v)
-			emit_clause!(db, [!x, a])?; // x_v -> y_v-1
-			emit_clause!(db, [!x, !b])?; // x_v -> ¬y_v
-			emit_clause!(db, [!a, b, *x])?; // (y_v-1 /\ ¬y_v) -> x=v
+			db.add_clause([!x, a])?; // x_v -> y_v-1
+			db.add_clause([!x, !b])?; // x_v -> ¬y_v
+			db.add_clause([!a, b, x])?; // (y_v-1 /\ ¬y_v) -> x=v
 			a = b;
 		}
 		if card1.cmp == LimitComp::Equal {
-			emit_clause!(db, [!a])?;
+			db.add_clause([!a])?;
 		}
 		Ok(())
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for PairwiseEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, CardinalityOne> for PairwiseEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "pairwise_encoder", skip_all, fields(constraint = card1.trace_print()))
@@ -127,8 +126,8 @@ impl<DB: ClauseDatabase> Encoder<DB, CardinalityOne> for PairwiseEncoder {
 			at_least_one_clause(db, card1)?;
 		}
 		// For every pair of literals (i, j) add "¬i ∨ ¬j"
-		for (a, b) in card1.lits.iter().tuple_combinations() {
-			emit_clause!(db, [!a, !b])?;
+		for (a, b) in card1.lits.iter().copied().tuple_combinations() {
+			db.add_clause([!a, !b])?;
 		}
 		Ok(())
 	}
@@ -145,7 +144,7 @@ pub(crate) mod tests {
 					bool_linear::LimitComp,
 					cardinality_one::CardinalityOne,
 					helpers::tests::{assert_checker, assert_solutions, expect_file},
-					ClauseDatabase, Cnf, Encoder,
+					ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder,
 				};
 
 				const LARGE_N: usize = 50;
@@ -380,7 +379,7 @@ pub(crate) mod tests {
 					let mut cnf = Cnf::default();
 					let vars = cnf.new_var_range(LARGE_N).iter_lits().collect_vec();
 					let con = CardinalityOne {
-						lits: vars.clone().iter().map(|l| !l).collect_vec(),
+						lits: vars.clone().iter().map(|&l| !l).collect_vec(),
 						cmp: LimitComp::Equal,
 					};
 					$encoder.encode(&mut cnf, &con).unwrap();
@@ -414,7 +413,7 @@ pub(crate) mod tests {
 		bool_linear::LimitComp,
 		cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
 		helpers::tests::{assert_encoding, assert_solutions, expect_file},
-		ClauseDatabase, Cnf, Encoder,
+		ClauseDatabaseTools, Cnf, Encoder,
 	};
 
 	#[test]

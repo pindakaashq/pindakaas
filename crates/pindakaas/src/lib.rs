@@ -21,8 +21,6 @@ pub mod swc;
 pub mod propositional_logic;
 pub mod solver;
 
-use std::io::Write;
-
 #[cfg(any(feature = "tracing", test))]
 pub mod trace;
 
@@ -33,6 +31,7 @@ macro_rules! log {
         tracing::info!($fmt $(, $args)*)
     }
 }
+use crate::helpers::is_unique;
 pub(crate) use log;
 
 #[cfg(feature = "serde")]
@@ -45,18 +44,34 @@ use std::{
 	error::Error,
 	fmt::{self, Display},
 	fs::File,
-	io::{self, BufRead, BufReader, Cursor},
+	io::{self, BufRead, BufReader, Cursor, Write},
+	iter::repeat,
 	iter::FusedIterator,
 	num::NonZeroI32,
-	ops::{Bound, Not, RangeBounds, RangeInclusive},
+	ops::{BitAnd, BitOr, BitXor, Bound, Not, RangeBounds, RangeInclusive},
 	path::Path,
+	slice,
 	str::FromStr,
 };
 
-use helpers::{is_unique, subscript_number};
-use itertools::{traits::HomogeneousTuple, Itertools};
+use itertools::traits::HomogeneousTuple;
+use itertools::Itertools;
 
+pub use crate::helpers::AsDynClauseDatabase;
 use crate::solver::VarFactory;
+use crate::{helpers::subscript_number, propositional_logic::Formula};
+
+/// A helper type used to represent a Boolean value that can be either a literal
+/// for a Boolean decision variable, or a constant Boolean value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[expect(
+	variant_size_differences,
+	reason = "bool is 1 byte, but Lit will always require more"
+)]
+pub enum BoolVal {
+	Const(bool),
+	Lit(Lit),
+}
 
 /// Checker is a trait implemented by types that represent constraints. The
 /// [`Checker::check`] methods checks whether an assignment (often referred to
@@ -78,21 +93,57 @@ pub trait Checker {
 /// To satisfy the trait, the type must implement a [`Self::add_clause`] method
 /// and a [`Self::new_var`] method.
 pub trait ClauseDatabase {
-	type CondDB: ClauseDatabase + ?Sized;
-
 	/// Add a clause to the `ClauseDatabase`. The databae is allowed to return
 	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
 	/// unsatisfiable. This is used as a signal to the encoder that any subsequent
 	/// encoding effort can be abandoned.
-	///
-	/// Clauses added this way cannot be removed. The addition of removable
-	/// clauses can be simulated using activation literals and solving the problem
-	/// under assumptions.
-	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result;
+	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result;
+	/// Method to be used to receive a new Boolean variable that can be used in
+	/// the encoding of a problem or constraint.
+	fn new_var_range(&mut self, len: usize) -> VarRange;
+}
 
-	fn encode<C, E: Encoder<Self, C>>(&mut self, constraint: &C, encoder: &E) -> Result
+pub trait ClauseDatabaseTools: ClauseDatabase {
+	/// Add a clause, given as any  to the `ClauseDatabase`. The databae is allowed to return
+	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
+	/// unsatisfiable. This is used as a signal to the encoder that any subsequent
+	/// encoding effort can be abandoned.
+	fn add_clause<Iter>(&mut self, clause: Iter) -> Result
 	where
-		Self: Sized,
+		Iter: IntoIterator,
+		Iter::Item: Into<BoolVal>,
+	{
+		let result: Result<Vec<_>, ()> = clause
+			.into_iter()
+			.filter_map(|v| match v.into() {
+				BoolVal::Const(false) => None,         // Irrelevant literal
+				BoolVal::Const(true) => Some(Err(())), // Clause is already satisfied
+				BoolVal::Lit(lit) => Some(Ok(lit)),    // Add literal to clause
+			})
+			.collect();
+		match result {
+			Ok(clause) => {
+				let result = self.add_clause_from_slice(&clause);
+				#[cfg(any(feature = "tracing", test))]
+				{
+					tracing::info!(clause = ?&clause, fail = result.is_err(), "emit clause");
+				}
+				result
+			}
+			// Collecting revealed the clause was already satisfied
+			Err(()) => Ok(()),
+		}
+	}
+
+	// [?] leanr how to do this
+	fn add_clauses<I: IntoIterator<Item = Vec<Lit>>>(&mut self, clauses: I) -> Result {
+		clauses.into_iter().try_for_each(|cl| self.add_clause(cl))
+	}
+
+	fn encode<C, E>(&mut self, constraint: &C, encoder: &E) -> Result
+	where
+		C: ?Sized,
+		E: Encoder<Self, C> + ?Sized,
 	{
 		encoder.encode(self, constraint)
 	}
@@ -106,7 +157,7 @@ pub trait ClauseDatabase {
 	///
 	/// # Example
 	/// ```
-	/// # use pindakaas::{ClauseDatabase, Cnf};
+	/// # use pindakaas::{ClauseDatabaseTools, Cnf};
 	/// # let mut db = Cnf::default();
 	/// let (a, b, c) = db.new_lits();
 	/// ```
@@ -118,6 +169,24 @@ pub trait ClauseDatabase {
 		range.map(Lit::from).collect_tuple().unwrap()
 	}
 
+	#[cfg(any(feature = "tracing", test))]
+	#[inline]
+	/// Create a new Boolean variable in the form of a positive literal. The given
+	/// name is used when the variable is output by the tracer.
+	fn new_named_lit(&mut self, name: &str) -> Lit {
+		self.new_named_var(name).into()
+	}
+
+	#[cfg(any(feature = "tracing", test))]
+	#[inline]
+	/// Create a new Boolean variable that can be used in the encoding of a
+	/// problem. The given name is used when the variable is output by the tracer.
+	fn new_named_var(&mut self, name: &str) -> Var {
+		let var = self.new_var();
+		tracing::info!(var = ?i32::from(var), label = name, "new variable");
+		var
+	}
+
 	/// Create a new Boolean variable that can be used in the encoding of a problem
 	/// or constraint.
 	fn new_var(&mut self) -> Var {
@@ -126,15 +195,11 @@ pub trait ClauseDatabase {
 		range.next().unwrap()
 	}
 
-	/// Method to be used to receive a new Boolean variable that can be used in
-	/// the encoding of a problem or constraint.
-	fn new_var_range(&mut self, len: usize) -> VarRange;
-
 	/// Create multiple new Boolean variables and capture them in a tuple.
 	///
 	/// # Example
 	/// ```
-	/// # use pindakaas::{ClauseDatabase, Cnf};
+	/// # use pindakaas::{ClauseDatabaseTools, Cnf};
 	/// # let mut db = Cnf::default();
 	/// let (a, b, c) = db.new_vars();
 	/// ```
@@ -146,11 +211,35 @@ pub trait ClauseDatabase {
 		range.collect_tuple().unwrap()
 	}
 
-	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB>;
+	fn with_conditions(&mut self, conditions: Vec<Lit>) -> impl ClauseDatabase + '_
+	where
+		Self: AsDynClauseDatabase,
+	{
+		struct ConditionalDatabase<'a> {
+			db: &'a mut dyn ClauseDatabase,
+			conditions: Vec<Lit>,
+		}
 
-	/// Add multiple clauses
-	fn add_clauses<I: IntoIterator<Item = Vec<Lit>>>(&mut self, clauses: I) -> Result {
-		clauses.into_iter().try_for_each(|cl| self.add_clause(cl))
+		impl ClauseDatabase for ConditionalDatabase<'_> {
+			fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
+				let chain = self
+					.conditions
+					.iter()
+					.copied()
+					.chain(clause.iter().copied())
+					.collect_vec();
+				self.db.add_clause_from_slice(&chain)
+			}
+
+			fn new_var_range(&mut self, len: usize) -> VarRange {
+				self.db.new_var_range(len)
+			}
+		}
+
+		ConditionalDatabase {
+			db: self.as_mut_dyn(),
+			conditions,
+		}
 	}
 }
 
@@ -171,28 +260,20 @@ pub struct Cnf {
 #[derive(Debug, Clone)]
 pub struct CnfIterator<'a> {
 	lits: &'a Vec<Lit>,
-	size: std::slice::Iter<'a, usize>,
+	size: slice::Iter<'a, usize>,
 	index: usize,
 }
 /// Coeff is a type alias used for the number type used to represent the
 /// coefficients in constraints and expression.
 pub(crate) type Coeff = i64;
 
-// TODO: Add usage and think about interface
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub struct ConditionalDatabase<'a, DB: ClauseDatabase + ?Sized> {
-	db: &'a mut DB,
-	conditions: Vec<Lit>,
-}
-
-#[derive(Debug)]
-pub enum Dimacs {
+enum Dimacs {
 	Cnf(Cnf),
 	Wcnf(Wcnf),
 }
 
 /// Encoder is the central trait implemented for all the encoding algorithms
-pub trait Encoder<DB: ClauseDatabase, Constraint> {
+pub trait Encoder<DB: ClauseDatabase + ?Sized, Constraint: ?Sized> {
 	fn encode(&self, db: &mut DB, con: &Constraint) -> Result;
 }
 
@@ -269,7 +350,7 @@ pub trait Valuation {
 /// negation.
 pub struct Var(pub(crate) NonZeroI32);
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct VarRange {
 	start: Var,
 	end: Var,
@@ -292,7 +373,7 @@ impl TryFrom<Vec<Vec<Lit>>> for Cnf {
 	type Error = Unsatisfiable;
 	fn try_from(clauses: Vec<Vec<Lit>>) -> Result<Self, Self::Error> {
 		let mut cnf = Cnf::default();
-		cnf.add_clauses(clauses)?;
+		cnf.add_clauses(clauses.into_iter())?;
 		Ok(cnf)
 	}
 }
@@ -307,54 +388,48 @@ impl From<Unsatisfiable> for Cnf {
 	}
 }
 
-impl From<Cnf> for Wcnf {
-	fn from(cnf: Cnf) -> Self {
-		let weights = std::iter::repeat(None).take(cnf.clauses()).collect();
-		Wcnf { cnf, weights }
-	}
-}
-
-impl From<Wcnf> for Cnf {
-	// TODO implement iter for Cnf
-	fn from(wcnf: Wcnf) -> Self {
-		let mut start = 0;
-		let lits_size = wcnf
-			.cnf
-			.size
-			.iter()
-			.zip(wcnf.weights.iter())
-			.filter_map(|(size, weight)| {
-				if weight.is_none() {
-					let ret = (
-						wcnf.cnf
-							.lits
-							.iter()
-							.skip(start)
-							.take(*size)
-							.cloned()
-							.collect_vec(),
-						size,
-					);
-					start += size;
-					Some(ret)
-				} else {
-					start += size;
-					None
-				}
-			})
-			.collect_vec();
-		let lits = lits_size
-			.iter()
-			.flat_map(|lit_size| lit_size.0.clone())
-			.collect();
-		let size = lits_size.iter().map(|lit_size| *lit_size.1).collect_vec();
-		Self {
-			nvar: wcnf.cnf.nvar,
-			lits,
-			size,
-		}
-	}
-}
+// // TODO [!] remove or refactor
+// impl From<Wcnf> for Cnf {
+// 	// TODO implement iter for Cnf
+// 	fn from(wcnf: Wcnf) -> Self {
+// 		let mut start = 0;
+// 		let lits_size = wcnf
+// 			.cnf
+// 			.size
+// 			.iter()
+// 			.zip(wcnf.weights.iter())
+// 			.filter_map(|(size, weight)| {
+// 				if weight.is_none() {
+// 					let ret = (
+// 						wcnf.cnf
+// 							.lits
+// 							.iter()
+// 							.skip(start)
+// 							.take(*size)
+// 							.cloned()
+// 							.collect_vec(),
+// 						size,
+// 					);
+// 					start += size;
+// 					Some(ret)
+// 				} else {
+// 					start += size;
+// 					None
+// 				}
+// 			})
+// 			.collect_vec();
+// 		let lits = lits_size
+// 			.iter()
+// 			.flat_map(|lit_size| lit_size.0.clone())
+// 			.collect();
+// 		let size = lits_size.iter().map(|lit_size| *lit_size.1).collect_vec();
+// 		Self {
+// 			nvar: wcnf.cnf.nvar,
+// 			lits,
+// 			size,
+// 		}
+// 	}
+// }
 
 // enum ParseDimacsError {
 //     IO(io::Error),
@@ -506,6 +581,147 @@ impl FromStr for Cnf {
 		Self::from_buf(Cursor::new(s))
 	}
 }
+impl BitAnd<bool> for BoolVal {
+	type Output = BoolVal;
+
+	fn bitand(self, rhs: bool) -> Self::Output {
+		match self {
+			BoolVal::Const(b) => (b & rhs).into(),
+			BoolVal::Lit(l) if rhs => (l).into(),
+			BoolVal::Lit(_) => false.into(),
+		}
+	}
+}
+
+impl BitAnd<BoolVal> for BoolVal {
+	type Output = Formula<BoolVal>;
+
+	fn bitand(self, rhs: BoolVal) -> Self::Output {
+		match (self, rhs) {
+			(BoolVal::Const(a), BoolVal::Const(b)) => Formula::Atom((a & b).into()),
+			(BoolVal::Lit(a), BoolVal::Lit(b)) => (a & b).into(),
+			(BoolVal::Lit(a), BoolVal::Const(b)) | (BoolVal::Const(b), BoolVal::Lit(a)) => {
+				Formula::Atom(a & b)
+			}
+		}
+	}
+}
+
+impl BitAnd<Lit> for BoolVal {
+	type Output = Formula<BoolVal>;
+
+	fn bitand(self, rhs: Lit) -> Self::Output {
+		self & BoolVal::Lit(rhs)
+	}
+}
+
+impl BitOr<bool> for BoolVal {
+	type Output = BoolVal;
+
+	fn bitor(self, rhs: bool) -> Self::Output {
+		match self {
+			BoolVal::Const(b) => (b | rhs).into(),
+			BoolVal::Lit(_) if rhs => true.into(),
+			BoolVal::Lit(_) => self,
+		}
+	}
+}
+
+impl BitOr<BoolVal> for BoolVal {
+	type Output = Formula<BoolVal>;
+
+	fn bitor(self, rhs: BoolVal) -> Self::Output {
+		match (self, rhs) {
+			(BoolVal::Const(a), BoolVal::Const(b)) => Formula::Atom((a | b).into()),
+			(BoolVal::Lit(a), BoolVal::Lit(b)) => (a | b).into(),
+			(BoolVal::Lit(a), BoolVal::Const(b)) | (BoolVal::Const(b), BoolVal::Lit(a)) => {
+				Formula::Atom(a | b)
+			}
+		}
+	}
+}
+
+impl BitOr<Lit> for BoolVal {
+	type Output = Formula<BoolVal>;
+
+	fn bitor(self, rhs: Lit) -> Self::Output {
+		self | BoolVal::Lit(rhs)
+	}
+}
+
+impl BitXor<bool> for BoolVal {
+	type Output = BoolVal;
+
+	fn bitxor(self, rhs: bool) -> Self::Output {
+		if rhs {
+			!self
+		} else {
+			self
+		}
+	}
+}
+
+impl BitXor<BoolVal> for BoolVal {
+	type Output = Formula<BoolVal>;
+
+	fn bitxor(self, rhs: BoolVal) -> Self::Output {
+		match (self, rhs) {
+			(BoolVal::Const(a), BoolVal::Const(b)) => Formula::Atom((a ^ b).into()),
+			(BoolVal::Lit(a), BoolVal::Lit(b)) => {
+				Formula::Xor(vec![Formula::Atom(a.into()), Formula::Atom(b.into())])
+			}
+			(BoolVal::Lit(a), BoolVal::Const(b)) | (BoolVal::Const(b), BoolVal::Lit(a)) => {
+				Formula::Atom((a ^ b).into())
+			}
+		}
+	}
+}
+
+impl BitXor<Lit> for BoolVal {
+	type Output = Formula<BoolVal>;
+
+	fn bitxor(self, rhs: Lit) -> Self::Output {
+		self ^ BoolVal::Lit(rhs)
+	}
+}
+
+impl Display for BoolVal {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			BoolVal::Const(b) => write!(f, "{b}"),
+			BoolVal::Lit(l) => write!(f, "{l}"),
+		}
+	}
+}
+
+impl From<bool> for BoolVal {
+	fn from(value: bool) -> Self {
+		BoolVal::Const(value)
+	}
+}
+
+impl From<Lit> for BoolVal {
+	fn from(value: Lit) -> Self {
+		BoolVal::Lit(value)
+	}
+}
+
+impl From<Var> for BoolVal {
+	fn from(value: Var) -> Self {
+		BoolVal::Lit(value.into())
+	}
+}
+
+impl Not for BoolVal {
+	type Output = BoolVal;
+
+	fn not(self) -> Self::Output {
+		match self {
+			BoolVal::Lit(l) => (!l).into(),
+			BoolVal::Const(b) => (!b).into(),
+		}
+	}
+}
 
 impl Cnf {
 	/// Returns the number of clauses in the formula.
@@ -624,11 +840,9 @@ impl Cnf {
 }
 
 impl ClauseDatabase for Cnf {
-	type CondDB = Self;
-
-	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
+	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
 		let size = self.lits.len();
-		self.lits.extend(cl);
+		self.lits.extend(clause);
 		let len = self.lits.len() - size;
 		self.size.push(len);
 		if len == 0 {
@@ -638,19 +852,8 @@ impl ClauseDatabase for Cnf {
 		}
 	}
 
-	fn new_var(&mut self) -> Var {
-		self.nvar.next_var()
-	}
-
 	fn new_var_range(&mut self, len: usize) -> VarRange {
 		self.nvar.next_var_range(len)
-	}
-
-	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
-		ConditionalDatabase {
-			db: self,
-			conditions,
-		}
 	}
 }
 
@@ -696,36 +899,7 @@ impl<'a> Iterator for CnfIterator<'a> {
 	}
 }
 
-impl<'a, DB: ClauseDatabase + ?Sized> ConditionalDatabase<'a, DB> {
-	pub fn new(db: &'a mut DB, conditions: Vec<Lit>) -> Self {
-		Self { db, conditions }
-	}
-}
-
-impl<DB: ClauseDatabase + ?Sized> ClauseDatabase for ConditionalDatabase<'_, DB> {
-	type CondDB = DB;
-
-	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
-		let chain = self.conditions.iter().copied().chain(cl);
-		self.db.add_clause(chain)
-	}
-
-	fn new_var(&mut self) -> Var {
-		self.db.new_var()
-	}
-
-	fn new_var_range(&mut self, len: usize) -> VarRange {
-		self.db.new_var_range(len)
-	}
-
-	fn with_conditions(&mut self, mut conditions: Vec<Lit>) -> ConditionalDatabase<DB> {
-		conditions.extend(self.conditions.iter().copied());
-		ConditionalDatabase {
-			db: self.db,
-			conditions,
-		}
-	}
-}
+impl<DB: ClauseDatabase + ?Sized> ClauseDatabaseTools for DB {}
 
 impl<F: Fn(Lit) -> bool> Valuation for F {
 	fn value(&self, lit: Lit) -> bool {
@@ -766,6 +940,90 @@ impl Display for Lit {
 	}
 }
 
+impl BitAnd<bool> for Lit {
+	type Output = BoolVal;
+
+	fn bitand(self, rhs: bool) -> Self::Output {
+		if rhs {
+			self.into()
+		} else {
+			false.into()
+		}
+	}
+}
+
+impl BitAnd<BoolVal> for Lit {
+	type Output = Formula<BoolVal>;
+
+	fn bitand(self, rhs: BoolVal) -> Self::Output {
+		rhs & self
+	}
+}
+
+impl BitAnd<Lit> for Lit {
+	type Output = Formula<Lit>;
+
+	fn bitand(self, rhs: Lit) -> Self::Output {
+		Formula::And(vec![Formula::Atom(self), Formula::Atom(rhs)])
+	}
+}
+
+impl BitOr<bool> for Lit {
+	type Output = BoolVal;
+
+	fn bitor(self, rhs: bool) -> Self::Output {
+		if rhs {
+			true.into()
+		} else {
+			self.into()
+		}
+	}
+}
+
+impl BitOr<BoolVal> for Lit {
+	type Output = Formula<BoolVal>;
+
+	fn bitor(self, rhs: BoolVal) -> Self::Output {
+		rhs | self
+	}
+}
+
+impl BitOr<Lit> for Lit {
+	type Output = Formula<Lit>;
+
+	fn bitor(self, rhs: Lit) -> Self::Output {
+		Formula::Or(vec![Formula::Atom(self), Formula::Atom(rhs)])
+	}
+}
+
+impl BitXor<bool> for Lit {
+	type Output = Lit;
+
+	fn bitxor(self, rhs: bool) -> Self::Output {
+		if rhs {
+			!self
+		} else {
+			self
+		}
+	}
+}
+
+impl BitXor<BoolVal> for Lit {
+	type Output = Formula<BoolVal>;
+
+	fn bitxor(self, rhs: BoolVal) -> Self::Output {
+		rhs ^ self
+	}
+}
+
+impl BitXor<Lit> for Lit {
+	type Output = Formula<Lit>;
+
+	fn bitxor(self, rhs: Lit) -> Self::Output {
+		Formula::Xor(vec![Formula::Atom(self), Formula::Atom(rhs)])
+	}
+}
+
 impl From<Var> for Lit {
 	fn from(value: Var) -> Self {
 		Lit(value.0)
@@ -777,14 +1035,6 @@ impl Not for Lit {
 
 	fn not(self) -> Self::Output {
 		Lit(-self.0)
-	}
-}
-
-impl Not for &Lit {
-	type Output = Lit;
-
-	fn not(self) -> Self::Output {
-		!(*self)
 	}
 }
 
@@ -860,14 +1110,6 @@ impl Not for Var {
 
 	fn not(self) -> Self::Output {
 		!Lit::from(self)
-	}
-}
-
-impl Not for &Var {
-	type Output = Lit;
-
-	fn not(self) -> Self::Output {
-		!*self
 	}
 }
 
@@ -1008,13 +1250,13 @@ impl RangeBounds<Var> for VarRange {
 
 impl Wcnf {
 	/// Add a weighted clause to the formula.
-	pub fn add_weighted_clause<I: IntoIterator<Item = Lit>>(
-		&mut self,
-		cl: I,
-		weight: Option<Coeff>,
-	) -> Result {
+	pub fn add_weighted_clause<I>(&mut self, clause: I, weight: Option<Coeff>) -> Result
+	where
+		I: IntoIterator,
+		I::Item: Into<BoolVal>,
+	{
 		let clauses = self.cnf.clauses();
-		self.cnf.add_clause(cl)?;
+		self.cnf.add_clause(clause)?;
 		if self.cnf.clauses() > clauses {
 			self.weights.push(weight);
 		}
@@ -1064,25 +1306,12 @@ impl Wcnf {
 }
 
 impl ClauseDatabase for Wcnf {
-	type CondDB = Self;
-
-	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, cl: I) -> Result {
-		self.add_weighted_clause(cl, None)
-	}
-
-	fn new_var(&mut self) -> Var {
-		self.cnf.new_var()
+	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
+		self.add_weighted_clause(clause.iter().copied(), None)
 	}
 
 	fn new_var_range(&mut self, len: usize) -> VarRange {
 		self.cnf.new_var_range(len)
-	}
-
-	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
-		ConditionalDatabase {
-			db: self,
-			conditions,
-		}
 	}
 }
 
@@ -1104,6 +1333,13 @@ impl Display for Wcnf {
 			start += size;
 		}
 		Ok(())
+	}
+}
+
+impl From<Cnf> for Wcnf {
+	fn from(cnf: Cnf) -> Self {
+		let weights = repeat(None).take(cnf.clauses()).collect();
+		Wcnf { cnf, weights }
 	}
 }
 

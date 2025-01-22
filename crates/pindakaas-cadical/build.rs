@@ -94,8 +94,9 @@ fn main() {
 		.include("vendor/cadical/src")
 		.flag_if_supported("-std=c++11")
 		.define("NBUILD", None)
-		.define("NUNLOCKED", None)
+		.define("NCLOSEFROM", None)
 		.define("NTRACING", None)
+		.define("NUNLOCKED", None)
 		.define("QUIET", None);
 
 	#[cfg(not(debug_assertions))]

@@ -12,6 +12,8 @@ pub mod propagation;
 pub mod splr;
 use std::{ffi::c_void, num::NonZeroI32, ptr};
 
+use itertools::Itertools;
+
 use crate::{integer::MapSol, ClauseDatabase, Cnf, Lit, Unsatisfiable, Valuation, Var, VarRange};
 
 type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
@@ -104,7 +106,9 @@ pub trait Solver: ClauseDatabase {
 				SolveResult::Unknown => panic!("Ran out of time before finding all solutions"),
 			}
 
-			if self.add_clause(solns.last().unwrap().iter().map(|l| !l)) == Err(Unsatisfiable) {
+			if self.add_clause_from_slice(&solns.last().unwrap().iter().map(|l| !l).collect_vec())
+				== Err(Unsatisfiable)
+			{
 				return solns;
 			}
 		}
@@ -119,7 +123,8 @@ pub trait Solver: ClauseDatabase {
 
 	fn add_cnf(&mut self, cnf: Cnf) {
 		for cl in cnf.iter() {
-			self.add_clause(cl.iter().cloned()).unwrap();
+			self.add_clause_from_slice(&cl.iter().cloned().collect_vec())
+				.unwrap();
 		}
 	}
 }
@@ -230,15 +235,6 @@ impl VarFactory {
 			x.0.get() as usize - 1
 		} else {
 			Var::MAX_VARS
-		}
-	}
-
-	pub(crate) fn next_var(&mut self) -> Var {
-		if let Some(x) = self.next_var {
-			self.next_var = x.next_var();
-			x
-		} else {
-			panic!("unable to create more than `Var::MAX_VARS` variables")
 		}
 	}
 

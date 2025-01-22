@@ -12,7 +12,7 @@ keywords.workspace = true
 repository.workspace = true
 
 [dependencies]
-iset = "0.3"
+iset = "=0.3.0"
 itertools = "0.13"
 rustc-hash = "2.0"
 phf = { version = "0.11.3", features = ["macros"] }

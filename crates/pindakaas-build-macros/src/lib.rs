@@ -74,7 +74,7 @@ macro_rules! ipasir_up_definitions {
 	($prefix:ident) => {
 		paste! {
 			extern "C" {
-				#[allow(clippy::too_many_arguments)]
+				#[expect(clippy::too_many_arguments)]
 				pub fn [<$prefix _connect_external_propagator>](
 					slv: *mut std::ffi::c_void,
 					propagator_data: *mut std::ffi::c_void,
@@ -99,7 +99,7 @@ macro_rules! ipasir_up_definitions {
 				pub fn [<$prefix _is_decision>](slv: *mut std::ffi::c_void, lit: i32) -> bool;
 				pub fn [<$prefix _force_backtrack>](slv: *mut std::ffi::c_void, new_level: usize);
 			}
-			#[allow(clippy::too_many_arguments)]
+			#[expect(clippy::too_many_arguments)]
 			pub unsafe fn ipasir_connect_external_propagator(
 				slv: *mut std::ffi::c_void,
 				propagator_data: *mut std::ffi::c_void,

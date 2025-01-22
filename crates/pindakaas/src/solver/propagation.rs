@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, ffi::c_void, num::NonZeroI32};
+use std::{collections::VecDeque, ffi::c_void, iter::empty, num::NonZeroI32, slice};
 
 use crate::{
 	solver::{FailedAssumtions, SolveResult},
@@ -81,7 +81,7 @@ pub trait PropagatingSolver<P: Propagator>: ClauseDatabase {
 	/// If the search is interrupted (see [`set_terminate_callback`]) the function
 	/// returns unknown
 	fn solve(&mut self) -> (&P, SolveResult<impl Valuation + '_, impl Sized>) {
-		self.solve_assuming(std::iter::empty())
+		self.solve_assuming(empty())
 	}
 
 	/// Solve the formula with specified clauses under the given assumptions,
@@ -293,7 +293,7 @@ pub(crate) unsafe extern "C" fn ipasir_check_model_cb<P: Propagator, A: SolvingA
 ) -> bool {
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	let sol = if len > 0 {
-		std::slice::from_raw_parts(model, len)
+		slice::from_raw_parts(model, len)
 	} else {
 		&[]
 	};
@@ -339,7 +339,7 @@ pub(crate) unsafe extern "C" fn ipasir_notify_assignments_cb<P: Propagator, A>(
 ) {
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
 	if len > 0 {
-		let lits = std::slice::from_raw_parts(lits as *mut Lit, len);
+		let lits = slice::from_raw_parts(lits as *mut Lit, len);
 		prop.prop.notify_assignments(lits);
 	};
 }

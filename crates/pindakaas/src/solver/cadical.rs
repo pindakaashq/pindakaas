@@ -94,8 +94,8 @@ mod tests {
 		bool_linear::LimitComp,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
 		helpers::tests::{assert_solutions, expect_file},
-		solver::{cadical::Cadical, SlvTermSignal, SolveResult, Solver, TermCallback},
-		ClauseDatabase, Cnf, Encoder, Lit, Valuation,
+		solver::{cadical::Cadical, SlvTermSignal, SolveResult, Solver},
+		ClauseDatabaseTools, Cnf, Encoder, Lit, Unsatisfiable, Valuation,
 	};
 
 	#[test]
@@ -130,6 +130,7 @@ mod tests {
 		);
 	}
 
+	use crate::solver::TermCallback;
 	#[ignore = "TODO"]
 	#[test]
 	fn test_cadical_term() {
@@ -175,11 +176,10 @@ mod tests {
 		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
 	}
 
-	use crate::Unsatisfiable;
 	#[test]
 	fn test_cadical_empty_clause() {
 		let mut slv = Cadical::default();
-		assert_eq!(slv.add_clause([]), Err(Unsatisfiable));
+		assert_eq!(slv.add_clause([false]), Err(Unsatisfiable));
 		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_)));
 	}
 
@@ -199,7 +199,7 @@ mod tests {
 				},
 				VarRange,
 			},
-			Lit,
+			ClauseDatabase, Lit,
 		};
 
 		let mut slv = Cadical::default();
@@ -241,12 +241,12 @@ mod tests {
 		}
 
 		let p = Dist2 {
-			vars: vars.clone(),
+			vars,
 			tmp: Vec::new(),
 		};
 		let mut slv = slv.with_propagator(p);
-		slv.add_clause(vars.clone().map_into()).unwrap();
-		for v in vars.clone() {
+		slv.add_clause(vars).unwrap();
+		for v in vars {
 			PropagatingSolver::add_observed_var(&mut slv, v)
 		}
 
@@ -257,7 +257,7 @@ mod tests {
 				.map(|v| if sol.value(v.into()) { v.into() } else { !v })
 				.collect_vec();
 			solns.push(sol);
-			slv.add_clause(solns.last().unwrap().iter().map(|l| !l))
+			slv.add_clause(solns.last().unwrap().iter().map(|&l| !l))
 				.unwrap()
 		}
 		solns.sort();

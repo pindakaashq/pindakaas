@@ -11,7 +11,7 @@ use crate::{
 		get_trampoline0, get_trampoline1, ExplIter, FFIPointer, FailedAssumtions, LearnCallback,
 		SlvTermSignal, SolveAssuming, SolveResult, Solver, TermCallback, VarFactory,
 	},
-	ClauseDatabase, ConditionalDatabase, Lit, Result, Valuation, Var,
+	ClauseDatabase, Lit, Result, Valuation,
 };
 
 #[derive(Debug)]
@@ -209,14 +209,14 @@ impl Valuation for IpasirSol<'_> {
 	}
 }
 
-impl<'lib> IpasirSolver<'lib> {
-	fn failed_obj(&self) -> IpasirFailed<'lib> {
+impl IpasirSolver<'_> {
+	fn failed_obj(&self) -> IpasirFailed<'_> {
 		IpasirFailed {
 			slv: self.slv,
 			failed_fn: self.failed_fn.clone(),
 		}
 	}
-	fn sol_obj(&self) -> IpasirSol<'lib> {
+	fn sol_obj(&self) -> IpasirSol<'_> {
 		IpasirSol {
 			slv: self.slv,
 			value_fn: self.value_fn.clone(),
@@ -225,11 +225,9 @@ impl<'lib> IpasirSolver<'lib> {
 }
 
 impl ClauseDatabase for IpasirSolver<'_> {
-	type CondDB = Self;
-
-	fn add_clause<I: IntoIterator<Item = Lit>>(&mut self, clause: I) -> Result {
+	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
 		let mut added = false;
-		for lit in clause.into_iter() {
+		for &lit in clause {
 			(self.add_fn)(self.slv, lit.into());
 			added = true;
 		}
@@ -239,19 +237,8 @@ impl ClauseDatabase for IpasirSolver<'_> {
 		Ok(())
 	}
 
-	fn new_var(&mut self) -> Var {
-		self.vars.next_var()
-	}
-
 	fn new_var_range(&mut self, len: usize) -> crate::VarRange {
 		self.vars.next_var_range(len)
-	}
-
-	fn with_conditions(&mut self, conditions: Vec<Lit>) -> ConditionalDatabase<Self::CondDB> {
-		ConditionalDatabase {
-			db: self,
-			conditions,
-		}
 	}
 }
 
@@ -285,7 +272,7 @@ impl LearnCallback for IpasirSolver<'_> {
 }
 
 impl SolveAssuming for IpasirSolver<'_> {
-	#[allow(
+	#[expect(
 		refining_impl_trait,
 		reason = "user can use more specific type if needed"
 	)]
@@ -309,7 +296,7 @@ impl Solver for IpasirSolver<'_> {
 			.unwrap()
 	}
 
-	#[allow(
+	#[expect(
 		refining_impl_trait,
 		reason = "user can use more specific type if needed"
 	)]

@@ -1,3 +1,36 @@
+macro_rules! as_dyn_trait {
+	($as_dyn_name:ident, $trait_name:ident) => {
+		/// Helper trait that allows the creation of a dynamic reference to a trait
+		/// object. This trait is automatically implemented for all sized types that
+		/// implement the trait, and for the trait object itself.
+		pub trait $as_dyn_name {
+			/// Cast the object reference to a dynamic trait object reference.
+			fn as_dyn(&self) -> &dyn $trait_name;
+			/// Cast the object mutable reference to a mutable dynamic trait object
+			/// reference.
+			fn as_mut_dyn(&mut self) -> &mut dyn $trait_name;
+		}
+		impl<T: $trait_name> $as_dyn_name for T {
+			fn as_dyn(&self) -> &dyn $trait_name {
+				self
+			}
+			fn as_mut_dyn(&mut self) -> &mut dyn $trait_name {
+				self
+			}
+		}
+		impl $as_dyn_name for dyn $trait_name {
+			fn as_dyn(&self) -> &dyn $trait_name {
+				self
+			}
+			fn as_mut_dyn(&mut self) -> &mut dyn $trait_name {
+				self
+			}
+		}
+	};
+}
+
+as_dyn_trait!(AsDynClauseDatabase, ClauseDatabase);
+
 #[cfg(feature = "splr")]
 macro_rules! concat_slices {
     ([$init:expr; $T:ty]: $($s:expr),+ $(,)?) => {{
@@ -43,6 +76,70 @@ macro_rules! const_concat {
 	}};
 }
 
+#[cfg(feature = "splr")]
+macro_rules! maybe_std_concat {
+	($e:literal) => {
+		concat!($e)
+	};
+	($e:expr) => {
+		$e
+	};
+}
+
+#[cfg(not(any(feature = "tracing", test)))]
+/// Helper marco to create a new named literal within the library independent of
+/// whether `tracing` is enabled.
+macro_rules! new_named_lit {
+	($db:expr, $lbl:expr) => {
+		$crate::ClauseDatabaseTools::new_lit($db)
+	};
+}
+
+#[cfg(any(feature = "tracing", test))]
+/// Helper marco to create a new named literal within the library independent of
+/// whether `tracing` is enabled.
+macro_rules! new_named_lit {
+	($db:expr, $lbl:expr) => {{
+		$crate::ClauseDatabaseTools::new_named_lit($db, &$lbl)
+	}};
+}
+
+use std::collections::HashSet;
+
+use itertools::Itertools;
+pub(crate) use new_named_lit;
+#[cfg(feature = "splr")]
+pub(crate) use {concat_slices, const_concat, maybe_std_concat};
+
+use crate::{
+	bool_linear::PosCoeff,
+	integer::{enc::LitOrConst, helpers::required_lits, Dom},
+	ClauseDatabase, Coeff, Lit, Result,
+};
+
+use crate::ClauseDatabaseTools;
+pub(crate) fn emit_filtered_clause<
+	DB: ClauseDatabase + ?Sized,
+	I: IntoIterator<Item = LitOrConst>,
+>(
+	db: &mut DB,
+	lits: I,
+) -> Result {
+	if let Ok(clause) = lits
+		.into_iter()
+		.filter_map(|lit| match lit {
+			LitOrConst::Lit(lit) => Some(Ok(lit)),
+			LitOrConst::Const(true) => Some(Err(())), // clause satisfied
+			LitOrConst::Const(false) => None,         // literal falsified
+		})
+		.collect::<std::result::Result<Vec<_>, ()>>()
+	{
+		db.add_clause(clause)
+	} else {
+		Ok(())
+	}
+}
+
 pub(crate) fn pow2(k: u32) -> Coeff {
 	Coeff::from(2).pow(k)
 }
@@ -73,7 +170,7 @@ const FILTER_TRIVIAL_CLAUSES: bool = false;
 /// Adds clauses for a DNF formula (disjunction of conjunctions)
 /// Ex. (a /\ -b) \/ c == a \/ c /\ -b \/ c
 /// If any disjunction is empty, this satisfies the whole formula. If any element contains the empty conjunction, that element is falsified in the final clause.
-pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
+pub(crate) fn add_clauses_for<DB: ClauseDatabase + ?Sized>(
 	db: &mut DB,
 	expression: Vec<Vec<Vec<Lit>>>,
 ) -> Result {
@@ -87,17 +184,17 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase>(
 					unused_results,
 					reason = "since we already use contain, we do not need the insertion result"
 				)]
-				if lits.contains(&(!lit)) {
+				if lits.contains(&!*lit) {
 					true
 				} else {
-					let _ = lits.insert(*lit);
+					_ = lits.insert(*lit);
 					false
 				}
 			}) {
 				continue;
 			}
 		}
-		emit_clause!(db, cls)?;
+		db.add_clause(cls)?;
 	}
 	Ok(())
 }
@@ -126,91 +223,6 @@ pub(crate) fn as_binary(k: PosCoeff, bits: Option<usize>) -> Vec<bool> {
 		"{k} cannot be represented in {bits} bits"
 	);
 	(0..bits).map(|b| *k & (1 << b) != 0).collect()
-}
-
-#[cfg(not(any(feature = "tracing", test)))]
-macro_rules! emit_clause {
-	($db:expr, $cl:expr) => {
-		$db.add_clause($cl)
-	};
-}
-
-/// Helper marco to emit a clause from within an encoder
-#[cfg(any(feature = "tracing", test))]
-macro_rules! emit_clause {
-	($db:expr, $cl:expr) => {{
-		let slice = $cl.into_iter().collect::<Vec<_>>();
-		let res = $db.add_clause(slice.iter().copied());
-		tracing::info!(clause = ?&slice, fail = matches!(res, Err($crate::Unsatisfiable)), "emit clause");
-		res
-	}};
-}
-
-#[cfg(feature = "splr")]
-macro_rules! maybe_std_concat {
-	($e:literal) => {
-		concat!($e)
-	};
-	($e:expr) => {
-		$e
-	};
-}
-#[cfg(not(any(feature = "tracing", test)))]
-macro_rules! new_var {
-	($db:expr) => {
-		$crate::Lit::from($db.new_var())
-	};
-	($db:expr, $lbl:expr) => {
-		$crate::Lit::from($db.new_var())
-	};
-}
-
-/// Helper marco to create a new variable within an Encoder
-#[cfg(any(feature = "tracing", test))]
-macro_rules! new_var {
-	($db:expr) => {{
-		let var = $db.new_var();
-		tracing::info!(var = ?var, "new variable");
-		$crate::Lit::from(var)
-	}};
-	($db:expr, $lbl:expr) => {{
-		let var = $db.new_var();
-		tracing::info!(var = ?var, label = $lbl, "new variable");
-		$crate::Lit::from(var)
-	}};
-}
-
-use std::collections::HashSet;
-
-pub(crate) use emit_clause;
-use itertools::Itertools;
-pub(crate) use new_var;
-#[cfg(feature = "splr")]
-pub(crate) use {concat_slices, const_concat, maybe_std_concat};
-
-use crate::{
-	bool_linear::PosCoeff,
-	integer::{enc::LitOrConst, helpers::required_lits, Dom},
-	ClauseDatabase, Coeff, Lit, Result,
-};
-
-pub(crate) fn emit_filtered_clause<DB: ClauseDatabase, I: IntoIterator<Item = LitOrConst>>(
-	db: &mut DB,
-	lits: I,
-) -> Result {
-	if let Ok(clause) = lits
-		.into_iter()
-		.filter_map(|lit| match lit {
-			LitOrConst::Lit(lit) => Some(Ok(lit)),
-			LitOrConst::Const(true) => Some(Err(())), // clause satisfied
-			LitOrConst::Const(false) => None,         // literal falsified
-		})
-		.collect::<std::result::Result<Vec<_>, ()>>()
-	{
-		emit_clause!(db, clause)
-	} else {
-		Ok(())
-	}
 }
 
 /// Negates CNF (flipping between empty clause and formula)
@@ -269,9 +281,10 @@ pub(crate) mod tests {
 	use itertools::Itertools;
 
 	use crate::{
+		bool_linear::BoolLinExp,
 		integer::IntVar,
-		solver::{cadical::Cadical, Solver},
-		Checker, ClauseDatabase, Cnf, Lit, Valuation, Var, VarRange,
+		solver::{cadical::Cadical, SolveResult, Solver},
+		Checker, ClauseDatabase, ClauseDatabaseTools, Cnf, Lit, Valuation, Var, VarRange,
 	};
 
 	/// Helper functions to ensure that the possible solutions of a formula
@@ -303,36 +316,38 @@ pub(crate) mod tests {
 		V: Into<IntVar>,
 		I: IntoIterator<Item = V> + Clone,
 	{
-		todo!();
-		// let mut slv = Cadical::from(formula);
-		// let vars = vars
-		// 	.into_iter()
-		// 	.map(|x| BoolLinExp::from(&x.into()))
-		// 	.collect_vec();
-		// slv.solve_all(vars).into_iter().for_each(|value| {
-
-		// });
-		// while let SolveResult::Satisfied(value) = slv.solve() {
-		// 	// Collect integer solution
-		// 	solutions.push(
-		// 		vars.clone()
-		// 			.into_iter()
-		// 			.map(|x| x.value(&value).unwrap())
-		// 			.collect(),
-		// 	);
-		// 	// Add nogood clause
-		// 	let nogood: Vec<Lit> = bool_vars
-		// 		.clone()
-		// 		.map(|v| {
-		// 			let l = v.into();
-		// 			if value.value(l) {
-		// 				!l
-		// 			} else {
-		// 				l
-		// 			}
-		// 		})
-		// 		.collect();
-		// 	slv.add_clause(nogood).unwrap();
+		let mut slv = Cadical::from(formula);
+		let vars = vars
+			.into_iter()
+			.map(|x| BoolLinExp::from(&x.into()))
+			.collect_vec();
+		let bool_vars = formula.get_variables();
+		let mut solutions: Vec<Vec<i64>> = Vec::new();
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			// Collect integer solution
+			solutions.push(vars.clone().into_iter().map(|x| x.value(&value)).collect());
+			// Add nogood clause
+			let nogood: Vec<Lit> = bool_vars
+				.map(|v| {
+					let l = v.into();
+					if value.value(l) {
+						!l
+					} else {
+						l
+					}
+				})
+				.collect();
+			slv.add_clause(nogood).unwrap();
+		}
+		solutions.sort();
+		let sol_str = format!(
+			"{}",
+			solutions
+				.into_iter()
+				.map(|sol| sol.into_iter().format(" "))
+				.format("\n")
+		);
+		expect.assert_eq(&sol_str);
 	}
 
 	/// Helper functions to ensure that the possible solutions of a formula, with
@@ -427,17 +442,14 @@ pub(crate) mod tests {
 			);
 			let mut i = 0;
 			for size in self.sizes {
-				emit_clause!(
-					db,
-					self.lits[i..i + *size].iter().map(|x| {
-						let lit: Lit = map[usize::try_from(i32::from(x.var())).unwrap() - 1];
-						if x.is_negated() {
-							!lit
-						} else {
-							lit
-						}
-					})
-				)?;
+				db.add_clause(self.lits[i..i + *size].iter().map(|x| {
+					let lit: Lit = map[usize::try_from(i32::from(x.var())).unwrap() - 1];
+					if x.is_negated() {
+						!lit
+					} else {
+						lit
+					}
+				}))?;
 				i += size;
 			}
 			Ok(())

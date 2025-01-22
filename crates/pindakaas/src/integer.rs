@@ -26,7 +26,7 @@ pub(crate) use var::{IntVar, IntVarRef};
 
 use crate::{
 	bool_linear::PosCoeff,
-	helpers::{as_binary, emit_clause, emit_filtered_clause, new_var},
+	helpers::{as_binary, emit_filtered_clause, new_named_lit},
 	ClauseDatabase, Lit, Result, Unsatisfiable,
 };
 
@@ -66,7 +66,7 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase>(
 	feature = "tracing",
 	tracing::instrument(name = "lex_geq_const", skip_all, fields(constraint = format!("{x:?} >= {k} over {bits} bits")))
 )]
-pub(crate) fn lex_geq_const<DB: ClauseDatabase>(
+pub(crate) fn lex_geq_const<DB: ClauseDatabase + ?Sized>(
 	db: &mut DB,
 	x: &[LitOrConst],
 	k: PosCoeff,
@@ -87,47 +87,52 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase>(
 		})
 }
 
+use crate::ClauseDatabaseTools;
 // TODO implement for given false carry
 #[cfg_attr(feature = "tracing", tracing::instrument(name = "carry", skip_all, fields(constraint = format!("{xs:?} >= 2"))))]
-fn carry<DB: ClauseDatabase>(db: &mut DB, xs: &[LitOrConst], _lbl: String) -> Result<LitOrConst> {
+fn carry<DB: ClauseDatabase + ?Sized>(
+	db: &mut DB,
+	xs: &[LitOrConst],
+	_lbl: String,
+) -> Result<LitOrConst> {
 	// The carry is true iff at least 2 out of 3 `xs` are true
 	let (xs, trues) = filter_fixed_sum(xs);
-	let carry = match &xs[..] {
+	let carry = match xs[..] {
 		[] => (trues >= 2).into(), // trues is {0,1,2,3}
 		[x] => match trues {
 			0 => false.into(),
-			1 => (*x).into(),
+			1 => (x).into(),
 			2 => true.into(),
 			_ => unreachable!(),
 		},
 		[x, y] => match trues {
 			0 => {
-				let and = new_var!(db, _lbl);
-				emit_clause!(db, [!x, !y, and])?;
-				emit_clause!(db, [*x, !and])?;
-				emit_clause!(db, [*y, !and])?;
+				let and = new_named_lit!(db, _lbl);
+				db.add_clause([!x, !y, and])?;
+				db.add_clause([x, !and])?;
+				db.add_clause([y, !and])?;
 				and.into()
 			}
 			1 => {
-				let or = new_var!(db, _lbl);
-				emit_clause!(db, [*x, *y, !or])?;
-				emit_clause!(db, [!x, or])?;
-				emit_clause!(db, [!y, or])?;
+				let or = new_named_lit!(db, _lbl);
+				db.add_clause([x, y, !or])?;
+				db.add_clause([!x, or])?;
+				db.add_clause([!y, or])?;
 				or.into()
 			}
 			_ => unreachable!(),
 		},
 		[x, y, z] => {
 			assert!(trues == 0);
-			let carry = new_var!(db, _lbl);
+			let carry = new_named_lit!(db, _lbl);
 
-			emit_clause!(db, [*x, *y, !carry])?; // 2 false -> ~carry
-			emit_clause!(db, [*x, *z, !carry])?; // " ..
-			emit_clause!(db, [*y, *z, !carry])?;
+			db.add_clause([x, y, !carry])?; // 2 false -> ~carry
+			db.add_clause([x, z, !carry])?; // " ..
+			db.add_clause([y, z, !carry])?;
 
-			emit_clause!(db, [!x, !y, carry])?; // 2 true -> carry
-			emit_clause!(db, [!x, !z, carry])?; // " ..
-			emit_clause!(db, [!y, !z, carry])?;
+			db.add_clause([!x, !y, carry])?; // 2 true -> carry
+			db.add_clause([!x, !z, carry])?; // " ..
+			db.add_clause([!y, !z, carry])?;
 			carry.into()
 		}
 		_ => unreachable!(),
@@ -199,7 +204,7 @@ fn xor_fn<DB: ClauseDatabase>(
 		trues == 0,
 		" TODO probably flip z, but needs to be tested if it comes up"
 	);
-	let z = z.unwrap_or_else(|| LitOrConst::from(new_var!(db, _lbl)));
+	let z = z.unwrap_or_else(|| LitOrConst::from(new_named_lit!(db, _lbl)));
 	// if trues % 2 == 0 {
 	// 	z
 	// } else {
@@ -216,7 +221,7 @@ fn xor_fn<DB: ClauseDatabase>(
 		// Err(Unsatisfiable) if z == LitOrConst::Const(false) => Err(Unsatisfiable),
 		// Err(Unsatisfiable) => Ok(!z),
 		// Err(Unsatisfiable) => Err(Unsatisfiable),
-		Err(Unsatisfiable) => todo!("also has to be handled based on given z"),
+		Err(_) => todo!("also has to be handled based on given z"),
 	}
 }
 

@@ -5,11 +5,11 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use super::{
 	bin::BinEnc, enc::IntVarEnc, helpers::required_lits, model::IntVarEncHeuristic, ord::OrdEnc,
-	Assignment, Dom, Model, PosCoeff,
+	Assignment, ClauseDatabaseTools, Dom, Model, PosCoeff,
 };
 use crate::{
 	bool_linear::{BoolLinExp, Part},
-	helpers::{emit_clause, negate_cnf, new_var},
+	helpers::{negate_cnf, new_named_lit},
 	log, CheckError, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation, Var,
 };
 
@@ -427,9 +427,10 @@ impl IntVar {
 						} else if lits.len() == 1 {
 							(coef, Some(lits[0]))
 						} else {
-							let o = new_var!(db, format!("y_{:?}>={:?}", lits, coef));
+							let o = new_named_lit!(db, format!("y_{:?}>={:?}", lits, coef));
 							for lit in lits {
-								emit_clause!(db, [!lit, o]).unwrap();
+								// TODO Add ?
+								db.add_clause([!lit, o]).unwrap();
 							}
 							(coef, Some(o))
 						}

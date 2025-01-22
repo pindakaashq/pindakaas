@@ -5,6 +5,7 @@ use std::{
 		atomic::{AtomicU64, Ordering},
 		Arc, Mutex,
 	},
+	thread::panicking,
 	time::Instant,
 };
 
@@ -140,7 +141,7 @@ impl FlushGuard {
 		let mut guard = match self.out.lock() {
 			Ok(guard) => guard,
 			Err(e) => {
-				if !std::thread::panicking() {
+				if !panicking() {
 					panic!("{}", e);
 				} else {
 					return;

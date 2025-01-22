@@ -4,8 +4,8 @@ use itertools::Itertools;
 
 use super::Dom;
 use crate::{
-	helpers::{emit_clause, negate_cnf, new_var},
-	ClauseDatabase, Lit, Var,
+	helpers::{negate_cnf, new_named_lit},
+	ClauseDatabase, ClauseDatabaseTools, Lit, Var,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -25,7 +25,7 @@ impl OrdEnc {
 			x: dom
 				.iter()
 				.skip(1)
-				.map(|_v| new_var!(db, format!("{_lbl}≥{_v}")))
+				.map(|_v| new_named_lit!(db, format!("{_lbl}≥{_v}")))
 				.collect(),
 		}
 	}
@@ -41,7 +41,7 @@ impl OrdEnc {
 		} else {
 			self.x
 				.iter()
-				.map(|x| (vec![vec![!x]], true))
+				.map(|x| (vec![vec![!*x]], true))
 				.chain([(vec![], false)])
 				.collect()
 		}
@@ -86,7 +86,7 @@ impl OrdEnc {
 	pub(crate) fn consistent<DB: ClauseDatabase>(&mut self, db: &mut DB) -> crate::Result {
 		self.x.iter().tuple_windows().try_for_each(|(a, b)| {
 			if a.var() != b.var() {
-				emit_clause!(db, [!b, *a])
+				db.add_clause([!*b, *a])
 			} else {
 				Ok(())
 			}

@@ -8,7 +8,7 @@ use std::{fmt::Display, ops::DerefMut, path::PathBuf};
 use ::pindakaas as base;
 use base::{
 	bool_linear::{BoolLinExp, BoolLinear, Comparator, LinearEncoder},
-	ClauseDatabase, Encoder,
+	ClauseDatabaseTools, Encoder,
 };
 use pyo3::{exceptions::PyArithmeticError, prelude::*};
 

@@ -1,4 +1,4 @@
-use std::{hash, mem, sync::Mutex};
+use std::{cmp::min, hash, mem, sync::Mutex};
 
 use iset::interval_map;
 use itertools::Itertools;
@@ -6,6 +6,11 @@ use rustc_hash::FxHashMap;
 
 use crate::{
 	bool_linear::{BoolLinExp, LimitComp}, helpers::{add_clauses_for, emit_clause, negate_cnf}, integer::IntVarEnc, CheckError, Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation
+	bool_linear::{BoolLinExp, LimitComp},
+	helpers::{add_clauses_for, negate_cnf},
+	integer::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+	Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
+	Valuation,
 };
 
 type SortedCache = FxHashMap<(u128, u128, u128), (SortedStrategy, (u128, u128))>;
@@ -55,8 +60,8 @@ impl<'a> Sorted<'a> {
 	}
 }
 
-impl<'a> Checker for Sorted<'a> {
-	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(),CheckError> {
+impl Checker for Sorted<'_> {
+	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
 		let lhs = BoolLinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
 			.value(sol)?;
 		let rhs = BoolLinExp::from(self.y).value(sol)?;
@@ -72,7 +77,7 @@ impl<'a> Checker for Sorted<'a> {
 	}
 }
 
-impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_>> for SortedEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, Sorted<'_>> for SortedEncoder {
 	fn encode(&self, db: &mut DB, sorted: &Sorted) -> Result {
 		let xs = sorted
 			.xs
@@ -93,41 +98,7 @@ impl<DB: ClauseDatabase> Encoder<DB, Sorted<'_>> for SortedEncoder {
 	}
 }
 
-
-/// Encoder for the linear constraints that ∑ litsᵢ ≷ k using a sorting network
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SortingNetworkEncoder {
-	pub sorted_encoder: SortedEncoder,
-}
-
-
-impl Default for SortingNetworkEncoder {
-	fn default() -> Self {
-		let mut sorted_encoder = SortedEncoder::default();
-		_ = sorted_encoder
-			.with_overwrite_direct_cmp(None)
-			.with_overwrite_recursive_cmp(None);
-		Self { sorted_encoder }
-	}
-}
-
-impl<DB: ClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))
-	)]
-	fn encode(&self, db: &mut DB, card: &Cardinality) -> Result {
-		self.sorted_encoder.encode(
-			db,
-			&Sorted::new(
-				card.lits.as_slice(),
-				card.cmp.clone(),
-				&IntVarEnc::Const(card.k.into()),
-			),
-		)
-	}
-}
-impl<DB: ClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for SortedEncoder {
+impl<DB: ClauseDatabase + ?Sized> Encoder<DB, TernLeConstraint<'_>> for SortedEncoder {
 	fn encode(&self, db: &mut DB, tern: &TernLeConstraint) -> Result {
 		let TernLeConstraint { x, y, cmp, z } = tern;
 		if tern.is_fixed()? {
@@ -164,7 +135,12 @@ impl SortedEncoder {
 		self.overwrite_recursive_cmp = cmp;
 		self
 	}
-	fn next_int_var<DB: ClauseDatabase>(&self, db: &mut DB, ub: Coeff, lbl: String) -> IntVarEnc {
+	fn next_int_var<DB: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut DB,
+		ub: Coeff,
+		lbl: String,
+	) -> IntVarEnc {
 		// TODO We always have the view x>=1 <-> y>=1, which is now realized using equiv
 		if ub == 0 {
 			IntVarEnc::Const(0)
@@ -178,7 +154,7 @@ impl SortedEncoder {
 	}
 
 	/// The sorted/merged base case of x1{0,1}+x2{0,1}<=y{0,1,2}
-	fn smerge<DB: ClauseDatabase>(
+	fn smerge<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		x1: &IntVarEnc,
@@ -204,7 +180,7 @@ impl SortedEncoder {
 		self.comp(db, x1, &x2, cmp, &y, 1)
 	}
 
-	fn sorted<DB: ClauseDatabase>(
+	fn sorted<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		xs: &[IntVarEnc],
@@ -233,11 +209,10 @@ impl SortedEncoder {
 					.map(|x| x.geq(1..2)[0][0])
 					.combinations(k as usize)
 					.try_for_each(|lits| {
-						emit_clause!(
-							db,
+						db.add_clause(
 							lits.into_iter()
 								.map(|lit| !lit)
-								.chain(y.geq(k..(k + 1))[0].iter().cloned())
+								.chain(y.geq(k..(k + 1))[0].iter().cloned()),
 						)
 					})
 			});
@@ -263,7 +238,7 @@ impl SortedEncoder {
 					db,
 					&xs[..n],
 					cmp,
-					std::cmp::min((0..n).fold(0, |a, _| a + 1), y.ub()),
+					min((0..n).fold(0, |a, _| a + 1), y.ub()),
 					String::from("y1"),
 					_lvl,
 				);
@@ -271,7 +246,7 @@ impl SortedEncoder {
 					db,
 					&xs[n..],
 					cmp,
-					std::cmp::min((n..xs.len()).fold(0, |a, _| a + 1), y.ub()),
+					min((n..xs.len()).fold(0, |a, _| a + 1), y.ub()),
 					String::from("y2"),
 					_lvl,
 				);
@@ -289,7 +264,7 @@ impl SortedEncoder {
 		}
 	}
 
-	fn sort<DB: ClauseDatabase>(
+	fn sort<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		xs: &[IntVarEnc],
@@ -309,7 +284,7 @@ impl SortedEncoder {
 		}
 	}
 
-	fn merged<DB: ClauseDatabase>(
+	fn merged<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		x1: &IntVarEnc,
@@ -392,7 +367,7 @@ impl SortedEncoder {
 		}
 	}
 
-	fn comp<DB: ClauseDatabase>(
+	fn comp<DB: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut DB,
 		x: &IntVarEnc,
@@ -603,7 +578,7 @@ mod tests {
 		helpers::tests::expect_file,
 		integer::{IntVarEnc, IntVarOrd, TernLeConstraint},
 		sorted::{Sorted, SortedEncoder, SortedStrategy},
-		ClauseDatabase, Cnf, Encoder, Var, VarRange,
+		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Var, VarRange,
 	};
 
 	fn get_sorted_encoder(strategy: SortedStrategy) -> SortedEncoder {

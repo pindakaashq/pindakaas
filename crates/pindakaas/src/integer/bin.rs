@@ -5,13 +5,12 @@ use itertools::Itertools;
 use super::{scm::SCM, Dom};
 use crate::{
 	bool_linear::{Comparator, PosCoeff},
-	helpers,
 	helpers::{
-		add_clauses_for, as_binary, emit_clause, emit_filtered_clause, negate_cnf, new_var, pow2,
+		self, add_clauses_for, as_binary, emit_filtered_clause, negate_cnf, new_named_lit, pow2,
 		unsigned_binary_range,
 	},
 	integer::{enc::LitOrConst, lex_geq_const, lex_leq_const},
-	log, ClauseDatabase, Cnf, Coeff, Lit, Unsatisfiable, Var,
+	log, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Lit, Unsatisfiable, Var,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -40,7 +39,7 @@ impl BinEnc {
 	pub(crate) fn new<DB: ClauseDatabase>(db: &mut DB, lits: usize, _lbl: &str) -> Self {
 		Self {
 			x: (0..lits)
-				.map(|_i| new_var!(db, format!("{_lbl}^{_i}")).into())
+				.map(|_i| new_named_lit!(db, format!("{_lbl}^{_i}")).into())
 				.collect(),
 		}
 	}
@@ -97,7 +96,9 @@ impl BinEnc {
 			&self.xs(),
 			&other.xs(),
 			&(0..n)
-				.map(|_i| LitOrConst::Lit(new_var!(db, crate::trace::subscripted_name("c", _i))))
+				.map(|_i| {
+					LitOrConst::Lit(new_named_lit!(db, crate::trace::subscripted_name("c", _i)))
+				})
 				.chain(std::iter::once(LitOrConst::Const(true)))
 				.collect_vec(),
 		);
@@ -452,22 +453,19 @@ impl BinEnc {
 		let ys = ecm
 			.vars()
 			.skip(xs.len())
-			.map(|_| new_var!(db))
+			.map(|_| db.new_lit())
 			.collect_vec();
 
 		let map = xs.iter().chain(ys.iter()).cloned().collect_vec();
 		for clause in ecm.iter() {
-			emit_clause!(
-				db,
-				clause.iter().map(|x| {
-					let lit: Lit = map[usize::try_from(i32::from(x.var())).unwrap() - 1];
-					if x.is_negated() {
-						!lit
-					} else {
-						lit
-					}
-				})
-			)?;
+			db.add_clause(clause.iter().map(|x| {
+				let lit: Lit = map[usize::try_from(i32::from(x.var())).unwrap() - 1];
+				if x.is_negated() {
+					!lit
+				} else {
+					lit
+				}
+			}))?;
 		}
 
 		// ecm.encode(db, &map)?;

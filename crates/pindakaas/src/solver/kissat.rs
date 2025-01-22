@@ -1,3 +1,5 @@
+use std::ffi::c_void;
+
 use pindakaas_derive::IpasirSolver;
 
 use crate::VarFactory;
@@ -5,7 +7,7 @@ use crate::VarFactory;
 #[derive(Debug, IpasirSolver)]
 #[ipasir(krate = pindakaas_kissat)]
 pub struct Kissat {
-	ptr: *mut std::ffi::c_void,
+	ptr: *mut c_void,
 	vars: VarFactory,
 }
 
@@ -27,7 +29,7 @@ mod tests {
 		bool_linear::LimitComp,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
 		solver::{kissat::Kissat, SolveResult, Solver},
-		ClauseDatabase, Encoder, Valuation,
+		ClauseDatabaseTools, Encoder, Valuation,
 	};
 
 	#[test]
