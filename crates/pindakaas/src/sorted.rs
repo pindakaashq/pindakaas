@@ -5,6 +5,7 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
+	bool_linear::{BoolLinExp, LimitComp}, helpers::{add_clauses_for, emit_clause, negate_cnf}, integer::IntVarEnc, CheckError, Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation
 	bool_linear::{BoolLinExp, LimitComp},
 	helpers::{add_clauses_for, negate_cnf},
 	integer::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
@@ -512,7 +513,7 @@ impl SortedStrategy {
 			(SortedStrategy::Recursive, rec_cost)
 		};
 
-		let _ = cache.insert(key, ret.clone());
+		_ = cache.insert(key, ret.clone());
 		ret
 	}
 
@@ -574,7 +575,7 @@ mod tests {
 
 	use crate::{
 		bool_linear::LimitComp,
-		helpers::tests::{assert_solutions, expect_file},
+		helpers::tests::expect_file,
 		integer::{IntVarEnc, IntVarOrd, TernLeConstraint},
 		sorted::{Sorted, SortedEncoder, SortedStrategy},
 		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Var, VarRange,

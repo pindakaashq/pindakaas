@@ -10,10 +10,12 @@ pub mod libloading;
 pub mod propagation;
 #[cfg(feature = "splr")]
 pub mod splr;
-
 use std::{ffi::c_void, num::NonZeroI32, ptr};
 
-use crate::{ClauseDatabase, Lit, Valuation, Var, VarRange};
+use crate::{
+	integer::MapSol, ClauseDatabase, ClauseDatabaseTools, Lit, Unsatisfiable, Valuation, Var,
+	VarRange,
+};
 
 type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
 type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;
@@ -76,6 +78,41 @@ pub enum SolveResult<Sol: Valuation, Fail = ()> {
 	Unknown,
 }
 
+struct SolveResultIterator<'a, S: Solver + ?Sized, V: Into<Lit>, I: IntoIterator<Item = V> + Clone>
+{
+	slv: &'a mut S,
+	vars: I,
+	last: Option<MapSol>,
+}
+
+impl<S: Solver + ?Sized, V: Into<Lit>, I: IntoIterator<Item = V> + Clone> Iterator
+	for SolveResultIterator<'_, S, V, I>
+{
+	// TODO return Valuation's as items somehow?
+	type Item = MapSol;
+
+	/// Returns next solution
+	fn next(&mut self) -> Option<Self::Item> {
+		// Add nogood before each call
+		if let Some(nogood) = &self.last {
+			if let Err(Unsatisfiable) = self.slv.add_clause(nogood.iter().map(|v| !v)) {
+				return None;
+			}
+		}
+		match self.slv.solve() {
+			SolveResult::Satisfied(sol) => {
+				let sol = MapSol::new(self.vars.clone(), &sol);
+				self.last = Some(sol.clone());
+				Some(sol)
+			}
+			SolveResult::Unsatisfiable(_) => None,
+			SolveResult::Unknown => {
+				panic!("Ran out of time before finding all solutions, but no timeout was set.")
+			}
+		}
+	}
+}
+
 pub trait Solver: ClauseDatabase {
 	/// Return the name and the version of SAT solver.
 	fn signature(&self) -> &str;
@@ -85,6 +122,19 @@ pub trait Solver: ClauseDatabase {
 	/// If the search is interrupted (see [`set_terminate_callback`]) the function
 	/// returns unknown
 	fn solve(&mut self) -> SolveResult<impl Valuation + '_, impl Sized>;
+
+	/// Solve for all solutions for a set of variables
+	fn solve_all<V, I>(&mut self, vars: I) -> impl Iterator<Item = MapSol>
+	where
+		V: Into<Lit>,
+		I: IntoIterator<Item = V> + Clone,
+	{
+		SolveResultIterator {
+			slv: self,
+			vars,
+			last: None,
+		}
+	}
 }
 
 pub trait TermCallback: Solver {

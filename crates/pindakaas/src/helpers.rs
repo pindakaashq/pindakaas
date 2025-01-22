@@ -112,8 +112,56 @@ pub(crate) use new_named_lit;
 pub(crate) use {concat_slices, const_concat, maybe_std_concat};
 
 use crate::{
-	bool_linear::PosCoeff, integer::IntVar, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result,
+	bool_linear::PosCoeff,
+	integer::{enc::LitOrConst, helpers::required_lits, Dom},
+	ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result,
 };
+pub(crate) fn emit_filtered_clause<
+	DB: ClauseDatabase + ?Sized,
+	I: IntoIterator<Item = LitOrConst>,
+>(
+	db: &mut DB,
+	lits: I,
+) -> Result {
+	if let Ok(clause) = lits
+		.into_iter()
+		.filter_map(|lit| match lit {
+			LitOrConst::Lit(lit) => Some(Ok(lit)),
+			LitOrConst::Const(true) => Some(Err(())), // clause satisfied
+			LitOrConst::Const(false) => None,         // literal falsified
+		})
+		.collect::<std::result::Result<Vec<_>, ()>>()
+	{
+		db.add_clause(clause)
+	} else {
+		Ok(())
+	}
+}
+
+pub(crate) fn pow2(k: u32) -> Coeff {
+	Coeff::from(2).pow(k)
+}
+
+// Copied from num library
+pub(crate) const fn div_ceil(a: Coeff, b: Coeff) -> Coeff {
+	let d = a / b;
+	let r = a % b;
+	if (r > 0 && b > 0) || (r < 0 && b < 0) {
+		d + 1
+	} else {
+		d
+	}
+}
+
+pub(crate) const fn div_floor(a: Coeff, b: Coeff) -> Coeff {
+	let d = a / b;
+	let r = a % b;
+	if (r > 0 && b < 0) || (r < 0 && b > 0) {
+		d - 1
+	} else {
+		d
+	}
+}
 
 const FILTER_TRIVIAL_CLAUSES: bool = false;
 
@@ -124,21 +172,20 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase + ?Sized>(
 	db: &mut DB,
 	expression: Vec<Vec<Vec<Lit>>>,
 ) -> Result {
-	// TODO doctor out type of expression (clauses containing conjunctions?)
-
-	for cls in expression
-		.into_iter()
-		.map(|cls| cls.into_iter())
-		.multi_cartesian_product()
-	{
+	// TODO Move cnf: Vec<Vec<Lit>> functions into Cnf
+	for cls in expression.into_iter().multi_cartesian_product() {
 		let cls = cls.concat(); // filter out [] (empty conjunctions?) of the clause
 		if FILTER_TRIVIAL_CLAUSES {
 			let mut lits = HashSet::<Lit>::with_capacity(cls.len());
-			if cls.iter().any(|&lit| {
-				if lits.contains(&(!lit)) {
+			if cls.iter().any(|lit| {
+				#[allow(
+					unused_results,
+					reason = "since we already use contain, we do not need the insertion result"
+				)]
+				if lits.contains(&!*lit) {
 					true
 				} else {
-					let _ = lits.insert(lit);
+					_ = lits.insert(*lit);
 					false
 				}
 			}) {
@@ -148,15 +195,6 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase + ?Sized>(
 		db.add_clause(cls)?;
 	}
 	Ok(())
-}
-/// Convert `k` to unsigned binary in `bits`
-pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| IntVar::required_bits(0, *k));
-	assert!(
-		*k <= unsigned_binary_range_ub(bits),
-		"{k} cannot be represented in {bits} bits"
-	);
-	(0..bits).map(|b| *k & (1 << b) != 0).collect()
 }
 
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
@@ -170,18 +208,39 @@ pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool 
 	}
 }
 
+/// 2^bits - 1
+pub(crate) fn unsigned_binary_range(bits: usize) -> (PosCoeff, PosCoeff) {
+	(PosCoeff::new(0), PosCoeff::new(pow2(bits as u32) - 1))
+}
+
+/// Convert `k` to unsigned binary in `bits`
+pub(crate) fn as_binary(k: PosCoeff, bits: Option<usize>) -> Vec<bool> {
+	let bits = bits.unwrap_or_else(|| required_lits(&Dom::from_bounds(0, *k)));
+	assert!(
+		k <= unsigned_binary_range(bits).1,
+		"{k} cannot be represented in {bits} bits"
+	);
+	(0..bits).map(|b| *k & (1 << b) != 0).collect()
+}
+
 /// Negates CNF (flipping between empty clause and formula)
 pub(crate) fn negate_cnf(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
 	if clauses.is_empty() {
 		vec![vec![]]
 	} else if clauses.contains(&vec![]) {
 		vec![]
-	} else {
-		assert!(clauses.len() == 1);
+	} else if clauses.len() == 1 {
 		clauses
 			.into_iter()
 			.map(|clause| clause.into_iter().map(|lit| !lit).collect())
 			.collect()
+	} else if clauses.iter().all(|c| c.len() == 1) {
+		vec![clauses
+			.into_iter()
+			.flat_map(|clause| clause.into_iter().map(|lit| !lit))
+			.collect()]
+	} else {
+		unimplemented!("Negating CNF {clauses:?} leads to complex expression")
 	}
 }
 
@@ -194,22 +253,24 @@ pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 		.into_iter()
 }
 
-pub(crate) fn unsigned_binary_range_ub(bits: u32) -> Coeff {
-	const TWO: Coeff = 2;
-	(0_u32..bits).fold(0, |sum, i| sum + TWO.pow(i))
+pub(crate) fn is_unique<I: Iterator<Item = V>, V: Eq + std::hash::Hash>(mut i: I) -> bool {
+	let mut seen = HashSet::new();
+	i.all(|x| seen.insert(x))
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
 	#[cfg(test)]
 	macro_rules! expect_file {
-		($rel_path:expr) => {
-			expect_test::expect_file!(format!(
-				"{}/corpus/{}",
-				env!("CARGO_MANIFEST_DIR"),
-				$rel_path
-			))
-		};
+		// TODO [?] Idea: we are manually including the module structure as the test output
+		// directory (e.g. integer/terms/test.cnf), we should macro in the mod instead
+		($rel_path:expr) => {{
+			let p = std::path::PathBuf::from(
+				format!("{}/corpus/{}", env!("CARGO_MANIFEST_DIR"), $rel_path).to_string(),
+			);
+			std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+			expect_test::expect_file!(p)
+		}};
 	}
 
 	use std::fmt::Display;
@@ -221,30 +282,19 @@ pub(crate) mod tests {
 
 	use crate::{
 		bool_linear::BoolLinExp,
-		integer::IntVarEnc,
+		integer::IntVar,
 		solver::{cadical::Cadical, SolveResult, Solver},
-		Checker, ClauseDatabaseTools, Cnf, Lit, Valuation,
+		Checker, ClauseDatabase, ClauseDatabaseTools, Cnf, Lit, Valuation, Var, VarRange,
 	};
 
 	/// Helper functions to ensure that the possible solutions of a formula
 	/// abide by the given checker.
 	pub(crate) fn assert_checker(formula: &Cnf, checker: &impl Checker) {
-		let mut slv = Cadical::from(formula);
-		let vars = formula.get_variables();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			assert_eq!(checker.check(&value), Ok(()));
-			let no_good: Vec<Lit> = vars
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect();
-			slv.add_clause(no_good).unwrap();
-		}
+		Cadical::from(formula)
+			.solve_all(formula.get_variables())
+			.for_each(|value| {
+				assert_eq!(checker.check(&value), Ok(()));
+			});
 	}
 
 	/// Simple helper function to assert the generated formula against an expect
@@ -253,12 +303,16 @@ pub(crate) mod tests {
 		expect.assert_eq(&formula.to_string());
 	}
 
-	#[allow(dead_code, reason = "TODO: prepare for checking integer encodings")]
+	#[allow(
+		unused_variables,
+		dead_code,
+		reason = "TODO: prepare for checking integer encodings"
+	)]
 	/// Helper function that asserts that the integer solutions of a formula are
 	/// as contained in the expect block.
 	pub(crate) fn assert_integer_solutions<V, I>(formula: &Cnf, vars: I, expect: &ExpectFile)
 	where
-		V: Into<IntVarEnc>,
+		V: Into<IntVar>,
 		I: IntoIterator<Item = V> + Clone,
 	{
 		let mut slv = Cadical::from(formula);
@@ -270,12 +324,7 @@ pub(crate) mod tests {
 		let mut solutions: Vec<Vec<i64>> = Vec::new();
 		while let SolveResult::Satisfied(value) = slv.solve() {
 			// Collect integer solution
-			solutions.push(
-				vars.clone()
-					.into_iter()
-					.map(|x| x.value(&value).unwrap())
-					.collect(),
-			);
+			solutions.push(vars.clone().into_iter().map(|x| x.value(&value)).collect());
 			// Add nogood clause
 			let nogood: Vec<Lit> = bool_vars
 				.map(|v| {
@@ -307,34 +356,14 @@ pub(crate) mod tests {
 		V: Into<Lit>,
 		I: IntoIterator<Item = V> + Clone,
 	{
-		let mut slv = Cadical::from(formula);
-		let mut solutions: Vec<Vec<Lit>> = Vec::new();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			solutions.push(
-				vars.clone()
-					.into_iter()
-					.map(|v| {
-						let l = v.into();
-						if value.value(l) {
-							l
-						} else {
-							!l
-						}
-					})
-					.collect(),
-			);
-			slv.add_clause(solutions.last().unwrap().iter().map(|&l| !l))
-				.unwrap();
-		}
-		solutions.sort();
-		let sol_str = format!(
-			"{}",
-			solutions
-				.into_iter()
+		expect.assert_eq(
+			&Cadical::from(formula)
+				.solve_all(vars)
+				.map(|sol| sol.iter().sorted_by_key(|l| l.var()).collect_vec())
+				.sorted()
 				.map(|sol| sol.into_iter().map(i32::from).format(" "))
-				.format("\n")
+				.join("\n"),
 		);
-		expect.assert_eq(&sol_str);
 	}
 
 	/// Helper function to quickly create a valuation from a slice of literals.
@@ -343,6 +372,7 @@ pub(crate) mod tests {
 	/// This function assumes that the literal slice contains all literals
 	/// starting from the first variable, and that the literals are in order of
 	/// the variables.
+	#[allow(dead_code, reason = "Could be useful in the future.")]
 	pub(crate) fn make_valuation<L: Into<Lit> + Copy>(solution: &[L]) -> impl Valuation + '_ {
 		|l: Lit| {
 			let abs: Lit = l.var().into();
@@ -354,5 +384,88 @@ pub(crate) mod tests {
 				false
 			}
 		}
+	}
+
+	// TODO [?] Some unused code I don't know what to do with.
+	macro_rules! lit {
+		($lit:expr) => {
+			$crate::Lit(std::num::NonZeroI32::new($lit).unwrap())
+		};
+	}
+
+	// 	macro_rules! clause {
+	// 	($($x:expr),+ $(,)?) => {
+	//             &[$($crate::lit!($x)),+]
+	// 	};
+	// }
+
+	// 	macro_rules! clauses {
+	// 	($($x:expr),+ $(,)?) => {
+	//             &[$($crate::clause!($x)),+]
+	// 	};
+	// }
+
+	/// A const Cnf (constructed at compile-time)
+	/// TODO lits are assumed to be in a contiguous var range starting from 1..
+	#[derive(Debug)]
+	pub(crate) struct ConstCnf {
+		lits: &'static [Lit],
+		sizes: &'static [usize],
+	}
+
+	impl ConstCnf {
+		// TODO probably save this as a field
+		fn vars(&self) -> Option<VarRange> {
+			self.lits
+				.iter()
+				.map(|x| x.var())
+				.max()
+				.map(|x| VarRange::new(Var::from(1), x))
+		}
+
+		/// Return CNF, replacing literals according to map.
+		fn encode<DB: ClauseDatabase>(&self, db: &mut DB, map: &[Lit]) -> crate::Result {
+			if self.lits.is_empty() {
+				return Ok(());
+			}
+			debug_assert!(
+				map.len()
+					== self
+						.lits
+						.iter()
+						.map(|x| usize::try_from(i32::from(x.var())).unwrap())
+						.max()
+						.unwrap(),
+				"All literals should be mapped but was given map: {map:?}"
+			);
+			let mut i = 0;
+			for size in self.sizes {
+				db.add_clause(self.lits[i..i + *size].iter().map(|x| {
+					let lit: Lit = map[usize::try_from(i32::from(x.var())).unwrap() - 1];
+					if x.is_negated() {
+						!lit
+					} else {
+						lit
+					}
+				}))?;
+				i += size;
+			}
+			Ok(())
+		}
+	}
+
+	#[test]
+	fn const_cnf_replace_test() {
+		const CNF: ConstCnf = ConstCnf {
+			lits: &[lit![1], lit![-2], lit![2]],
+			sizes: &[2, 1],
+		};
+		assert_eq!(CNF.vars().unwrap().max(), Some(Var::from(2)));
+		let mut db = Cnf::default();
+		CNF.encode(&mut db, &[lit![42], lit![43]]).unwrap();
+		assert_encoding(
+			&db,
+			&expect_file!["integer/term/const_cnf_replace_test.cnf"],
+		);
 	}
 }

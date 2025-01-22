@@ -1,6 +1,8 @@
 use std::path::Path;
 
 fn main() {
+	// TODO [?] something like this needs to be added to all build.rs files? Even better, pinpointing the specific files which could change?
+	println!("cargo:rerun-if-changed=build.rs");
 	let src = [
 		"src/ccadical_override.cpp",
 		"vendor/cadical/contrib/craigtracer.cpp",

@@ -86,13 +86,16 @@ impl fmt::Debug for Cadical {
 
 #[cfg(test)]
 mod tests {
+	use std::path::Path;
+
 	use traced_test::test;
 
 	use crate::{
 		bool_linear::LimitComp,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
-		solver::{cadical::Cadical, SolveResult, Solver},
-		ClauseDatabaseTools, Encoder, Unsatisfiable, Valuation,
+		helpers::tests::{assert_solutions, expect_file},
+		solver::{cadical::Cadical, SlvTermSignal, SolveResult, Solver},
+		ClauseDatabaseTools, Cnf, Encoder, Lit, Unsatisfiable, Valuation,
 	};
 
 	#[test]
@@ -127,6 +130,55 @@ mod tests {
 		);
 	}
 
+	use crate::solver::TermCallback;
+	#[ignore = "TODO"]
+	#[test]
+	fn test_cadical_term() {
+		let mut slv = Cadical::default();
+		slv.set_terminate_callback(Some(move || SlvTermSignal::Terminate));
+		assert!(matches!(slv.solve(), SolveResult::Unknown));
+	}
+
+	#[ignore = "TODO"]
+	#[test]
+	fn test_cadical_examples() {
+		let ex1 = Cnf::from_file(Path::new("res/dimacs/ex1.dimacs")).unwrap();
+		let cnf = assert_solutions(
+			&ex1,
+			ex1.get_variables(),
+			&expect_file!["cadical/ex1.cnf.sol"],
+		);
+		// containing two empty clauses
+		let ex2 = Cnf::from_file(Path::new("res/dimacs/ex2.dimacs")).unwrap();
+		assert_solutions(
+			&ex2,
+			Vec::<Lit>::new(),
+			&expect_file!["cadical/ex2.cnf.sol"],
+		);
+		// containing no clauses -> empty formula -> SAT
+		let ex3 = Cnf::from_file(Path::new("res/dimacs/ex3.dimacs")).unwrap();
+		assert_solutions(
+			&ex3,
+			Vec::<Lit>::new(),
+			&expect_file!["cadical/ex3.cnf.sol"],
+		);
+
+		let mut slv = Cadical::default();
+		slv.add_clauses(ex1.iter().map(|clause| clause.to_vec()))
+			.unwrap();
+		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
+
+		let mut slv = Cadical::default();
+		slv.add_clauses(ex2.iter().map(|clause| clause.to_vec()))
+			.unwrap();
+		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_)));
+
+		let mut slv = Cadical::default();
+		slv.add_clauses(ex3.iter().map(|clause| clause.to_vec()))
+			.unwrap();
+		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
+	}
+
 	#[test]
 	fn test_cadical_empty_clause() {
 		let mut slv = Cadical::default();
@@ -142,7 +194,6 @@ mod tests {
 		use itertools::Itertools;
 
 		use crate::{
-			helpers::tests::assert_solutions,
 			solver::{
 				cadical::CadicalSol,
 				propagation::{

@@ -1,14 +1,11 @@
 use std::{
-	cell::RefCell,
-	cmp::{max, min},
-	collections::{BTreeSet, VecDeque},
+	cmp::min,
+	collections::VecDeque,
 	fmt::{self, Display},
 	iter::once,
-	ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign, Range},
-	rc::Rc,
+	ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign},
 };
 
-use iset::IntervalMap;
 use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
@@ -16,13 +13,10 @@ use crate::{
 	cardinality::Cardinality,
 	cardinality_one::{CardinalityOne, PairwiseEncoder},
 	helpers::{as_binary, is_powers_of_two, new_named_lit},
-	integer::{
-		lex_leq_const, Consistency, IntVar, IntVarEnc, IntVarOrd, Lin, Model, GROUND_BINARY_AT_LB,
-	},
+	integer::{enc::LitOrConst, lex_leq_const, IntVar},
 	propositional_logic::{Formula, TseitinEncoder},
-	sorted::{Sorted, SortedEncoder},
-	AsDynClauseDatabase, BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder,
-	IntEncoding, Lit, Result, Unsatisfiable, Valuation,
+	AsDynClauseDatabase, BoolVal, CheckError, Checker, ClauseDatabase, Coeff, Encoder, IntEncoding,
+	Lit, Result, Unsatisfiable, Valuation,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -30,28 +24,11 @@ use crate::{
 /// binary adders circuits
 pub struct AdderEncoder {}
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary
-/// Decision Diagram (BDD)
-pub struct BddEncoder {
-	add_consistency: bool,
-	cutoff: Option<Coeff>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-/// The representation of a Binary Decision Diagram (BDD) node for the
-/// [`BddEncoder`].
-enum BddNode {
-	Val,
-	Gap,
-	View(Coeff),
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 /// A tranformation of a general [`BoolLinear`] constraint into a aggregated and
 /// normalized variant.
 pub struct BoolLinAggregator {
-	sorted_encoder: SortedEncoder,
+	// sorted_encoder: SortedEncoder,
 	sort_same_coefficients: usize,
 }
 
@@ -70,6 +47,22 @@ pub struct BoolLinExp {
 	add: Coeff,
 	/// Multiplicative contant
 	mult: Coeff,
+}
+
+impl BoolLinExp {
+	pub(crate) fn assign<F: Valuation + ?Sized>(&self, solution: &F) -> Coeff {
+		self.iter().fold(self.add, |acc, (_, terms)| {
+			acc + terms.into_iter().fold(0, |acc, (lit, coef)| {
+				acc + if solution.value(*lit) { coef } else { &0 }
+			}) * self.mult
+		})
+	}
+}
+
+impl From<&IntVar> for BoolLinExp {
+	fn from(x: &IntVar) -> Self {
+		x.as_lin_exp()
+	}
 }
 
 #[derive(Debug)]
@@ -100,7 +93,7 @@ pub struct BoolLinear {
 	k: Coeff,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 /// A comparator type used in linear and cardinality constraints.
 pub enum Comparator {
 	/// Force the left hand side of the constraint to be less than or equal to the
@@ -112,6 +105,40 @@ pub enum Comparator {
 	/// Force the left hand side of the constraint to be greater than or equal to
 	/// the right hand side, i.e. `exp ≥ k`.
 	GreaterEq,
+}
+
+impl Comparator {
+	pub(crate) fn split(&self) -> Vec<Comparator> {
+		match self {
+			Comparator::Equal => vec![Comparator::LessEq, Comparator::GreaterEq],
+			_ => vec![*self],
+		}
+	}
+
+	pub(crate) fn reverse(&self) -> Comparator {
+		match *self {
+			Comparator::LessEq => Comparator::GreaterEq,
+			Comparator::Equal => Comparator::Equal,
+			Comparator::GreaterEq => Comparator::LessEq,
+		}
+	}
+
+	pub(crate) fn is_ineq(&self) -> bool {
+		match *self {
+			Comparator::Equal => false,
+			Comparator::LessEq | Comparator::GreaterEq => true,
+		}
+	}
+}
+
+impl Display for Comparator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Comparator::Equal => write!(f, "="),
+			Comparator::LessEq => write!(f, "≤"),
+			Comparator::GreaterEq => write!(f, "≥"),
+		}
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -153,9 +180,9 @@ pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = BoolLinAggregator> {
 /// of using the [`BoolLinAggregator`], and are generally the required input
 /// type for encoders of boolean linear constraints.
 pub struct NormalizedBoolLinear {
-	terms: Vec<Part>,
-	cmp: LimitComp,
-	k: PosCoeff,
+	pub(crate) terms: Vec<Part>,
+	pub(crate) cmp: LimitComp,
+	pub(crate) k: PosCoeff,
 }
 
 // TODO how can we support both Part(itions) of "terms" ( <Lit, C> for pb
@@ -194,23 +221,7 @@ pub struct StaticLinEncoder<
 	amo_enc: Card1Enc,
 }
 
-/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight
-/// Counter (SWC)
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct SwcEncoder {
-	add_consistency: bool,
-	add_propagation: Consistency,
-	cutoff: Option<Coeff>,
-}
-
-/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized
-/// Totalizer (GT)
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct TotalizerEncoder {
-	add_consistency: bool,
-	add_propagation: Consistency,
-	cutoff: Option<Coeff>,
-}
+use crate::ClauseDatabaseTools;
 
 impl AdderEncoder {
 	#[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "carry_circuit", skip_all, fields(constraint = Self::trace_print_carry(input, &output))))]
@@ -355,11 +366,10 @@ impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear>
 		debug_assert!(lin.cmp == LimitComp::LessEq || lin.cmp == LimitComp::Equal);
 		// The number of relevant bits in k
 		const ZERO: Coeff = 0;
-		let bits = ZERO.leading_zeros() - lin.k.leading_zeros();
+		let bits = (ZERO.leading_zeros() - lin.k.leading_zeros()) as usize;
 		let mut k = as_binary(lin.k, Some(bits));
 
 		let first_zero = lin.k.trailing_ones() as usize;
-		let bits = bits as usize;
 		debug_assert!(k[bits - 1]);
 
 		// Create structure with which coefficients use which bits
@@ -466,198 +476,18 @@ impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear>
 
 		// Enforce less-than constraint
 		if lin.cmp == LimitComp::LessEq {
-			lex_leq_const(db, sum.as_slice(), lin.k, bits)?;
+			lex_leq_const(
+				db,
+				&sum.into_iter().map(LitOrConst::from).collect_vec(),
+				lin.k,
+				bits,
+			)?;
 		}
 		Ok(())
 	}
 }
 
 impl LinMarker for AdderEncoder {}
-
-impl BddEncoder {
-	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_consistency = b;
-		self
-	}
-
-	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
-		self.cutoff = c;
-		self
-	}
-
-	fn bdd(
-		i: usize,
-		xs: &Vec<IntVarEnc>,
-		sum: Coeff,
-		ws: &mut Vec<IntervalMap<Coeff, BddNode>>,
-	) -> (Range<Coeff>, BddNode) {
-		match &ws[i].overlap(sum).collect_vec()[..] {
-			[] => {
-				let views = xs[i]
-					.dom()
-					.iter(..)
-					.map(|v| v.end - 1)
-					.map(|v| (v, Self::bdd(i + 1, xs, sum + v, ws)))
-					.collect_vec();
-
-				// TODO could we check whether a domain value of x always leads to gaps?
-				let is_gap = views.iter().all(|(_, (_, v))| v == &BddNode::Gap);
-				// TODO without checking actual Val identity, could we miss when the next layer has two
-				// adjacent nodes that are both views on the same node at the layer below?
-				let view = (views.iter().map(|(_, (iv, _))| iv).all_equal())
-					.then(|| views.first().unwrap().1 .0.end - 1);
-
-				let interval = views
-					.into_iter()
-					.map(|(v, (interval, _))| (interval.start - v)..(interval.end - v))
-					.reduce(|a, b| max(a.start, b.start)..min(a.end, b.end))
-					.unwrap();
-
-				let node = if is_gap {
-					BddNode::Gap
-				} else if let Some(view) = view {
-					BddNode::View(view)
-				} else {
-					BddNode::Val
-				};
-
-				let new_interval_inserted = ws[i].insert(interval.clone(), node.clone()).is_none();
-				debug_assert!(
-					new_interval_inserted,
-					"Duplicate interval {interval:?} inserted into {ws:?} layer {i}"
-				);
-				(interval, node)
-			}
-			[(a, node)] => (a.clone(), (*node).clone()),
-			_ => panic!("ROBDD intervals should be disjoint, but were {:?}", ws[i]),
-		}
-	}
-
-	fn construct_bdd(
-		xs: &Vec<IntVarEnc>,
-		cmp: &LimitComp,
-		k: PosCoeff,
-	) -> Vec<IntervalMap<Coeff, BddNode>> {
-		let k = *k;
-
-		let bounds = xs
-			.iter()
-			.scan((0, 0), |state, x| {
-				*state = (state.0 + x.lb(), state.1 + x.ub());
-				Some(*state)
-			})
-			.chain(once((0, k)))
-			.collect_vec();
-
-		let margins = xs
-			.iter()
-			.rev()
-			.scan((k, k), |state, x| {
-				*state = (state.0 - x.ub(), state.1 - x.lb());
-				Some(*state)
-			})
-			.collect_vec();
-
-		let inf = xs.iter().fold(0, |a, x| a + x.ub()) + 1;
-
-		let mut ws = margins
-			.into_iter()
-			.rev()
-			.chain(once((k, k)))
-			.zip(bounds)
-			.map(|((lb_margin, ub_margin), (lb, ub))| {
-				match cmp {
-					LimitComp::LessEq => vec![
-						(lb_margin > lb).then_some((0..(lb_margin + 1), BddNode::Val)),
-						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, BddNode::Gap)),
-					],
-					LimitComp::Equal => vec![
-						(lb_margin > lb).then_some((0..lb_margin, BddNode::Gap)),
-						(lb_margin == ub_margin).then_some((k..(k + 1), BddNode::Val)),
-						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, BddNode::Gap)),
-					],
-				}
-				.into_iter()
-				.flatten()
-				.collect()
-			})
-			.collect();
-
-		let _ = Self::bdd(0, xs, 0, &mut ws);
-		ws
-	}
-}
-
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
-	)]
-	fn encode(&self, db: &mut DB, lin: &NormalizedBoolLinear) -> Result {
-		let xs = lin
-			.terms
-			.iter()
-			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
-			.sorted_by(|a: &IntVarEnc, b: &IntVarEnc| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
-			.collect_vec();
-
-		let mut model = Model::default();
-
-		let ys = Self::construct_bdd(&xs, &lin.cmp, lin.k);
-		let xs = xs
-			.into_iter()
-			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
-			.collect_vec();
-
-		let ys = ys
-			.into_iter()
-			.map(|nodes| {
-				let mut views = FxHashMap::default();
-				Rc::new(RefCell::new({
-					let mut y = model.new_var(
-						nodes
-							.into_iter(..)
-							.filter_map(|(iv, node)| match node {
-								BddNode::Gap => None,
-								BddNode::Val => Some(iv.end - 1),
-								BddNode::View(view) => {
-									let val = iv.end - 1;
-									let _ = views.insert(val, view);
-									Some(val)
-								}
-							})
-							.collect(),
-						self.add_consistency,
-					);
-					y.views = views
-						.into_iter()
-						.map(|(val, view)| (val, (y.id + 1, view)))
-						.collect();
-					y
-				}))
-			})
-			.collect_vec();
-
-		let mut ys = ys.into_iter();
-		let first = ys.next().unwrap();
-		assert_eq!(first.as_ref().borrow().size(), 1);
-		let _ = xs.iter().zip(ys).fold(first, |curr, (x_i, next)| {
-			model.cons.push(Lin::tern(
-				curr,
-				Rc::clone(x_i),
-				lin.cmp.clone(),
-				Rc::clone(&next),
-			));
-			next
-		});
-
-		model.encode(db, self.cutoff)?;
-		Ok(())
-	}
-}
-
-impl LinMarker for BddEncoder {}
 
 impl BoolLinAggregator {
 	#[cfg_attr(
@@ -1075,6 +905,7 @@ impl BoolLinAggregator {
 			}));
 		}
 
+		/*
 		let partition = if self.sort_same_coefficients >= 2 {
 			let (free_lits, mut partition): (Vec<_>, Vec<_>) = partition.into_iter().partition(
 				|part| matches!(part, Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1),
@@ -1117,6 +948,7 @@ impl BoolLinAggregator {
 		} else {
 			partition
 		};
+				*/
 
 		// Default case: encode pseudo-Boolean linear constraint
 		Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
@@ -1125,12 +957,12 @@ impl BoolLinAggregator {
 			k,
 		}))
 	}
-	/// For non-zero `n`, detect groups of minimum size `n` with free literals and same coefficients, sort them (using provided SortedEncoder) and add them as a single implication chain group
-	pub fn sort_same_coefficients(&mut self, sorted_encoder: SortedEncoder, n: usize) -> &mut Self {
-		self.sorted_encoder = sorted_encoder;
-		self.sort_same_coefficients = n;
-		self
-	}
+	// /// For non-zero `n`, detect groups of minimum size `n` with free literals and same coefficients, sort them (using provided SortedEncoder) and add them as a single implication chain group
+	// pub fn sort_same_coefficients(&mut self, sorted_encoder: SortedEncoder, n: usize) -> &mut Self {
+	// 	self.sorted_encoder = sorted_encoder;
+	// 	self.sort_same_coefficients = n;
+	// 	self
+	// }
 }
 
 impl BoolLinExp {
@@ -1225,46 +1057,8 @@ impl BoolLinExp {
 		self.terms.iter().copied()
 	}
 
-	pub(crate) fn value<F: Valuation + ?Sized>(&self, sol: &F) -> Result<Coeff> {
-		let mut total = self.add;
-		for (constraint, terms) in self.iter() {
-			// Calculate sum for constraint
-			let sum = terms
-				.iter()
-				.filter(|(lit, _)| sol.value(*lit))
-				.map(|(_, i)| i)
-				.sum();
-			match constraint {
-				Some(Constraint::AtMostOne) => {
-					if sum != 0 && terms.iter().filter(|&(l, _)| sol.value(*l)).count() > 1 {
-						return Err(Unsatisfiable);
-					}
-				}
-				Some(Constraint::ImplicationChain) => {
-					if terms
-						.iter()
-						.map(|(l, _)| *l)
-						.tuple_windows()
-						.any(|(a, b)| !sol.value(a) & sol.value(b))
-					{
-						return Err(Unsatisfiable);
-					}
-				}
-				Some(Constraint::Domain { lb, ub }) => {
-					// divide by first coeff to get int assignment
-					if GROUND_BINARY_AT_LB {
-						if sum > ub - lb {
-							return Err(Unsatisfiable);
-						}
-					} else if lb > sum || sum > ub {
-						return Err(Unsatisfiable);
-					}
-				}
-				None => {}
-			};
-			total += sum;
-		}
-		Ok(total * self.mult)
+	pub(crate) fn value<F: Valuation + ?Sized>(&self, sol: &F) -> Coeff {
+		self.terms().map(|(l, c)| c * sol.value(l) as Coeff).sum()
 	}
 }
 
@@ -1484,8 +1278,8 @@ impl BoolLinear {
 }
 
 impl Checker for BoolLinear {
-	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<()> {
-		let lhs = self.exp.value(value)?;
+	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), CheckError> {
+		let lhs = self.exp.value(value);
 		if match self.cmp {
 			Comparator::LessEq => lhs <= self.k,
 			Comparator::Equal => lhs == self.k,
@@ -1493,7 +1287,7 @@ impl Checker for BoolLinear {
 		} {
 			Ok(())
 		} else {
-			Err(Unsatisfiable)
+			Err(Unsatisfiable.into())
 		}
 	}
 }
@@ -1608,7 +1402,7 @@ impl NormalizedBoolLinear {
 }
 
 impl Checker for NormalizedBoolLinear {
-	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
+	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<(), CheckError> {
 		let sum: Coeff = self
 			.terms
 			.iter()
@@ -1627,7 +1421,7 @@ impl Checker for NormalizedBoolLinear {
 		} {
 			Ok(())
 		} else {
-			Err(Unsatisfiable)
+			Err(Unsatisfiable.into())
 		}
 	}
 }
@@ -1738,162 +1532,6 @@ impl<
 		}
 	}
 }
-
-impl SwcEncoder {
-	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_consistency = b;
-		self
-	}
-	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
-		self.cutoff = c;
-		self
-	}
-	pub fn add_propagation(&mut self, c: Consistency) -> &mut Self {
-		self.add_propagation = c;
-		self
-	}
-}
-
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, NormalizedBoolLinear> for SwcEncoder {
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
-	)]
-	fn encode(&self, db: &mut DB, lin: &NormalizedBoolLinear) -> Result {
-		// self.cutoff = -1;
-		// self.add_consistency = true;
-		let mut model = Model::default();
-		let xs = lin
-			.terms
-			.iter()
-			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
-			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
-			.collect_vec();
-		let n = xs.len();
-
-		let ys = once(model.new_constant(0))
-			.chain(
-				(1..n)
-					.map(|_| model.new_var((-(*lin.k)..=0).collect(), self.add_consistency))
-					.take(n),
-			)
-			.collect_vec()
-			.into_iter()
-			.chain(once(model.new_constant(-*lin.k)))
-			.map(|y| Rc::new(RefCell::new(y)))
-			.collect_vec();
-
-		ys.into_iter()
-			.tuple_windows()
-			.zip(xs)
-			.for_each(|((y_curr, y_next), x)| {
-				model
-					.cons
-					.push(Lin::tern(x, y_next, lin.cmp.clone(), y_curr));
-			});
-
-		model.propagate(&self.add_propagation, vec![model.cons.len() - 1]);
-		model.encode(db, self.cutoff)
-	}
-}
-
-impl LinMarker for SwcEncoder {}
-
-impl TotalizerEncoder {
-	const EQUALIZE_INTERMEDIATES: bool = false;
-
-	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_consistency = b;
-		self
-	}
-	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
-		self.cutoff = c;
-		self
-	}
-	pub fn add_propagation(&mut self, c: Consistency) -> &mut Self {
-		self.add_propagation = c;
-		self
-	}
-}
-
-impl TotalizerEncoder {
-	fn build_totalizer(&self, xs: Vec<IntVarEnc>, cmp: &LimitComp, k: Coeff) -> Model {
-		let mut model = Model::default();
-		let mut layer = xs
-			.into_iter()
-			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
-			.collect_vec();
-
-		while layer.len() > 1 {
-			let mut next_layer = Vec::<Rc<RefCell<IntVar>>>::new();
-			for children in layer.chunks(2) {
-				match children {
-					[x] => {
-						next_layer.push(Rc::clone(x));
-					}
-					[left, right] => {
-						let at_root = layer.len() == 2;
-						let dom = if at_root {
-							BTreeSet::from([k])
-						} else {
-							left.borrow()
-								.dom
-								.iter()
-								.cartesian_product(right.borrow().dom.iter())
-								.map(|(&a, &b)| a + b)
-								.filter(|&d| d <= k)
-								.sorted()
-								.dedup()
-								.collect()
-						};
-						let parent =
-							Rc::new(RefCell::new(model.new_var(dom, self.add_consistency)));
-
-						model.cons.push(Lin::tern(
-							Rc::clone(left),
-							Rc::clone(right),
-							if !at_root && Self::EQUALIZE_INTERMEDIATES {
-								LimitComp::Equal
-							} else {
-								cmp.clone()
-							},
-							Rc::clone(&parent),
-						));
-						next_layer.push(parent);
-					}
-					_ => panic!(),
-				}
-			}
-			layer = next_layer;
-		}
-
-		model
-	}
-}
-
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, NormalizedBoolLinear> for TotalizerEncoder {
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
-	)]
-	fn encode(&self, db: &mut DB, lin: &NormalizedBoolLinear) -> Result {
-		let xs = lin
-			.terms
-			.iter()
-			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
-			.sorted_by_key(|x| x.ub())
-			.collect_vec();
-
-		// The totalizer encoding constructs a binary tree starting from a layer of leaves
-		let mut model = self.build_totalizer(xs, &lin.cmp, *lin.k);
-		model.propagate(&self.add_propagation, vec![model.cons.len() - 1]);
-		model.encode(db, self.cutoff)
-	}
-}
-
-impl LinMarker for TotalizerEncoder {}
 
 #[cfg(test)]
 mod tests {
@@ -2123,17 +1761,13 @@ mod tests {
 	pub(crate) use linear_test_suite;
 	use traced_test::test;
 
+	use super::*;
 	use crate::{
-		bool_linear::{
-			AdderEncoder, BoolLinAggregator, BoolLinExp, BoolLinVariant, BoolLinear, Comparator,
-			LimitComp, LinearEncoder, NormalizedBoolLinear, Part, PosCoeff, StaticLinEncoder,
-			TotalizerEncoder,
-		},
 		cardinality::{tests::card_test_suite, Cardinality},
 		cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
+		gt::TotalizerEncoder,
 		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
-		sorted::SortedEncoder,
-		ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
+		ClauseDatabaseTools, Cnf,
 	};
 
 	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(terms: &[(L, Coeff)]) -> Vec<Part> {
@@ -2693,6 +2327,7 @@ mod tests {
 		);
 	}
 
+	/*
 	#[test]
 	fn test_aggregator_sort_same_coefficients() {
 		let mut cnf = Cnf::default();
@@ -2752,6 +2387,7 @@ mod tests {
 			}))
 		);
 	}
+		*/
 
 	#[test]
 	fn test_aggregator_unsat() {
@@ -2875,7 +2511,7 @@ mod tests {
 		let mut db = Cnf::default();
 		let vars = db.new_var_range(5).iter_lits().collect_vec();
 		let mut agg = BoolLinAggregator::default();
-		let _ = agg.sort_same_coefficients(SortedEncoder::default(), 3);
+		// let _ = agg.sort_same_coefficients(SortedEncoder::default(), 3);
 		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default();
 		let _ = encoder.add_linear_aggregater(agg);
 		let con = BoolLinear::new(
@@ -3019,18 +2655,7 @@ mod tests {
 	}
 	linear_test_suite! {adder_encoder, crate::bool_linear::AdderEncoder::default()}
 
-	// FIXME: BDD does not support LimitComp::Equal
-	// card1_test_suite!(BddEncoder::default());
-	linear_test_suite! {bdd_encoder, crate::bool_linear::BddEncoder::default()}
-
-	// FIXME: SWC does not support LimitComp::Equal
-	// card1_test_suite!(SwcEncoder::default());
-	linear_test_suite! {swc_encoder, crate::bool_linear::SwcEncoder::default()}
-
-	// FIXME: Totalizer does not support LimitComp::Equal
-	// card1_test_suite!(TotalizerEncoder::default());
-	linear_test_suite!(
-		totalizer_encoder,
-		crate::bool_linear::TotalizerEncoder::default()
-	);
+	linear_test_suite! {totalizer_encoder, crate::gt::TotalizerEncoder::default()}
+	linear_test_suite! {swc_encoder, crate::swc::SwcEncoder::default()}
+	linear_test_suite! {bdd_encoder, crate::bdd::BddEncoder::default()}
 }

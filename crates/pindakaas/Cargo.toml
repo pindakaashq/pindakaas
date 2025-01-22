@@ -15,6 +15,7 @@ repository.workspace = true
 iset = "=0.3.0"
 itertools = "0.13"
 rustc-hash = "2.0"
+phf = { version = "0.11.3", features = ["macros"] }
 
 # Dynamically load solver libraries (through IPASIR interfaces)
 libloading = { version = "0.8", optional = true }
@@ -28,19 +29,30 @@ pindakaas-intel-sat = { path = "../pindakaas-intel-sat", optional = true }
 pindakaas-kissat = { path = "../pindakaas-kissat", optional = true }
 splr = { version = "0.17", optional = true }
 
+# Other optional dependencies for features
+serde = { version = "1.0", features = ["derive"], optional = true }
+
 [dev-dependencies]
+bzip2 = "0.4"
+flate2 = "1.0"
 expect-test = "1.5.0"
 pindakaas-cadical = { path = "../pindakaas-cadical" }
 pindakaas-derive = { path = "../pindakaas-derive" }
 traced_test = { path = "../traced_test" }
 tracing = { workspace = true }
 
+[build-dependencies]
+pindakaas-scm = { path = "../pindakaas-scm", optional = true }
+
 [features]
 cadical = ["pindakaas-cadical", "pindakaas-derive"]
-default = ["cadical"]
+default = ["cadical", "scm"]
 external-propagation = ["cadical"]
 intel-sat = ["pindakaas-intel-sat", "pindakaas-derive"]
 kissat = ["pindakaas-kissat", "pindakaas-derive"]
+serde = ["dep:serde"]
+scm = ["pindakaas-scm"]
+
 
 [lints]
 workspace = true
