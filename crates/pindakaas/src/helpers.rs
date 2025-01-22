@@ -114,10 +114,8 @@ pub(crate) use {concat_slices, const_concat, maybe_std_concat};
 use crate::{
 	bool_linear::PosCoeff,
 	integer::{enc::LitOrConst, helpers::required_lits, Dom},
-	ClauseDatabase, Coeff, Lit, Result,
+	ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result,
 };
-
-use crate::ClauseDatabaseTools;
 pub(crate) fn emit_filtered_clause<
 	DB: ClauseDatabase + ?Sized,
 	I: IntoIterator<Item = LitOrConst>,

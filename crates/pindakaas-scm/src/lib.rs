@@ -17,8 +17,6 @@ pub fn generate(limit: Option<usize>, format: bool) -> Result<String, std::io::E
 		path.file_stem().unwrap().to_str().unwrap().to_string()
 	}
 
-	// TODO stream i/o unpack
-
 	let (scm_keys, scm_values): (Vec<_>, Vec<_>) =
 		Archive::new(GzDecoder::new(fs::File::open(db)?))
 			.entries()

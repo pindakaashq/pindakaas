@@ -1,8 +1,7 @@
 use std::str::FromStr;
 
-use crate::Cnf;
-
 use super::model::Scm;
+use crate::Cnf;
 
 include!(concat!(env!("OUT_DIR"), "/scm_db.rs"));
 

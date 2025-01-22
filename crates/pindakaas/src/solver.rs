@@ -12,8 +12,10 @@ pub mod propagation;
 pub mod splr;
 use std::{ffi::c_void, num::NonZeroI32, ptr};
 
-use crate::Unsatisfiable;
-use crate::{integer::MapSol, ClauseDatabase, ClauseDatabaseTools, Lit, Valuation, Var, VarRange};
+use crate::{
+	integer::MapSol, ClauseDatabase, ClauseDatabaseTools, Lit, Unsatisfiable, Valuation, Var,
+	VarRange,
+};
 
 type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
 type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;

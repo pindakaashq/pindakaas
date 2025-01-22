@@ -31,8 +31,9 @@ macro_rules! log {
         tracing::info!($fmt $(, $args)*)
     }
 }
-use crate::helpers::is_unique;
 pub(crate) use log;
+
+use crate::helpers::is_unique;
 
 #[cfg(feature = "serde")]
 #[macro_use]
@@ -45,8 +46,7 @@ use std::{
 	fmt::{self, Display},
 	fs::File,
 	io::{self, BufRead, BufReader, Cursor, Write},
-	iter::repeat,
-	iter::FusedIterator,
+	iter::{repeat, FusedIterator},
 	num::NonZeroI32,
 	ops::{BitAnd, BitOr, BitXor, Bound, Not, RangeBounds, RangeInclusive},
 	path::Path,
@@ -54,12 +54,10 @@ use std::{
 	str::FromStr,
 };
 
-use itertools::traits::HomogeneousTuple;
-use itertools::Itertools;
+use itertools::{traits::HomogeneousTuple, Itertools};
 
 pub use crate::helpers::AsDynClauseDatabase;
-use crate::solver::VarFactory;
-use crate::{helpers::subscript_number, propositional_logic::Formula};
+use crate::{helpers::subscript_number, propositional_logic::Formula, solver::VarFactory};
 
 /// A helper type used to represent a Boolean value that can be either a literal
 /// for a Boolean decision variable, or a constant Boolean value.
