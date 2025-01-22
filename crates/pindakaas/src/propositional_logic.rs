@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// A propositional logic formula
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Formula<Base> {
 	/// A conjunction of two or more sub-formulas
 	And(Vec<Formula<Base>>),
