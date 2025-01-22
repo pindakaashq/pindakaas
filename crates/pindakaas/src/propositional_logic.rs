@@ -50,7 +50,7 @@ impl<Base> Formula<Base> {
 	/// formula.
 	pub fn simplify_with<Res>(
 		self,
-		resolver: &impl Fn(Base) -> Result<Res, bool>,
+		resolver: &mut impl FnMut(Base) -> Result<Res, bool>,
 	) -> Result<Formula<Res>, bool>
 	where
 		Self: Clone,
@@ -283,7 +283,7 @@ impl Formula<BoolVal> {
 		Iter::Item: Into<Lit>,
 	{
 		let knowledge: HashSet<_> = facts.into_iter().map_into().collect();
-		self.simplify_with(&|l| match l {
+		self.simplify_with(&mut |l| match l {
 			BoolVal::Const(b) => Err(b),
 			BoolVal::Lit(l) if knowledge.contains(&l) => Err(true),
 			BoolVal::Lit(l) if knowledge.contains(&!l) => Err(false),
@@ -298,7 +298,7 @@ impl Formula<BoolVal> {
 	/// returned. Otherwise, a simplified formula without any constant values is
 	/// returned.
 	pub fn resolve(self) -> Result<Formula<Lit>, bool> {
-		self.simplify_with(&|l| match l {
+		self.simplify_with(&mut |l| match l {
 			BoolVal::Const(b) => Err(b),
 			BoolVal::Lit(l) => Ok(l),
 		})
@@ -564,7 +564,7 @@ impl Formula<Lit> {
 		Iter::Item: Into<Lit>,
 	{
 		let knowledge: HashSet<_> = facts.into_iter().map_into().collect();
-		self.simplify_with(&|l| {
+		self.simplify_with(&mut |l| {
 			if knowledge.contains(&l) {
 				Err(true)
 			} else if knowledge.contains(&!l) {
