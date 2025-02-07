@@ -123,13 +123,18 @@ where
 
 #[cfg(test)]
 mod tests {
+	use std::iter::repeat_with;
+
+	use itertools::Itertools;
 	use traced_test::test;
+	use tracing::warn;
 
 	use crate::{
 		bool_linear::LimitComp,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
-		solver::{cadical::Cadical, SolveResult, Solver},
-		ClauseDatabaseTools, Encoder, Unsatisfiable, Valuation,
+		helpers::tests::{assert_solutions, expect_file},
+		solver::{cadical::Cadical, SlvTermSignal, SolveResult, Solver, TermCallback},
+		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Unsatisfiable, Valuation,
 	};
 
 	#[test]
@@ -181,6 +186,82 @@ mod tests {
 		let mut slv = Cadical::default();
 		assert_eq!(slv.add_clause([false]), Err(Unsatisfiable));
 		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_)));
+	}
+
+	#[test]
+	fn test_cadical_empty_clause_2() {
+		let mut slv = Cadical::default();
+		const EMPTY: [BoolVal; 0] = [];
+		assert_eq!(slv.add_clause(EMPTY), Err(Unsatisfiable));
+		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_)));
+	}
+
+	#[test]
+	fn test_cadical_terminate_callback() {
+		let mut slv = Cadical::default();
+
+		// Encode a pidgeon hole problem that is not trivially solvable
+		const LARGE: usize = 100;
+		let vars: Vec<_> = repeat_with(|| slv.new_var_range(LARGE - 1))
+			.take(LARGE)
+			.collect();
+		for x in vars.iter().permutations(2) {
+			let &[a, b] = x.as_slice() else {
+				unreachable!()
+			};
+			for i in 0..(LARGE - 1) {
+				let a_lit = a.index(i);
+				let b_lit = b.index(i);
+				slv.add_clause([!a_lit, !b_lit]).unwrap();
+			}
+		}
+		// Set termination callback that stops immediately
+		slv.set_terminate_callback(Some(|| SlvTermSignal::Terminate));
+		assert!(matches!(slv.solve(), SolveResult::Unknown));
+	}
+
+	#[test]
+	fn test_cadical_trivial_example() {
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let b = cnf.new_lit();
+		cnf.add_clause([a, !b]).unwrap();
+
+		assert_solutions(
+			&cnf,
+			cnf.get_variables(),
+			&expect_file!["cadical/test_cadical_trivial_example.sol"],
+		);
+		let mut slv = Cadical::from(&cnf);
+		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
+	}
+
+	#[test]
+	fn test_cadical_empty_formula() {
+		let mut cnf = Cnf::default();
+		assert_solutions(
+			&cnf,
+			Vec::<Lit>::new(),
+			&expect_file!["cadical/test_cadical_empty_formula.sol"],
+		);
+
+		let mut slv = Cadical::from(&cnf);
+		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
+	}
+
+	#[test]
+	fn test_cadical_empty_formula_single_var() {
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		assert_solutions(
+			&cnf,
+			Vec::<Lit>::new(),
+			&expect_file!["cadical/test_cadical_empty_formula_single_var.sol"],
+		);
+
+		warn!("{}", cnf);
+		let mut slv = Cadical::from(&cnf);
+		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
 	}
 
 	#[cfg(feature = "external-propagation")]
