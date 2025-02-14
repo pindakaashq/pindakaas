@@ -118,9 +118,15 @@ impl Display for Lit {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+	use pyo3::Python;
+
 	#[test]
 	fn it_works() {
-		let result = 2 + 2;
-		assert_eq!(result, 4);
+		pyo3::append_to_inittab!(pindakaas);
+		pyo3::prepare_freethreaded_python();
+		Python::with_gil(|py| {
+			Python::run_bound(py, "import pindakaas; cnf = pindakaas.CNF()", None, None).unwrap();
+		});
 	}
 }

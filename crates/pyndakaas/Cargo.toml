@@ -18,7 +18,10 @@ doc = false
 
 [dependencies]
 pindakaas = { path = "../pindakaas" }
-pyo3 = { version = "0.22", features = ["extension-module"] }
+pyo3 = "0.22"
+
+[features]
+extension-module = ["pyo3/extension-module"]
 
 [build-dependencies]
 pyo3-build-config = "0.22"
