@@ -10,7 +10,7 @@ use base::{
 	bool_linear::{BoolLinExp, BoolLinear, Comparator, LinearEncoder},
 	ClauseDatabaseTools, Encoder,
 };
-use pyo3::{exceptions::PyArithmeticError, prelude::*};
+use pyo3::{exceptions::PyException, prelude::*};
 
 type Clause = Vec<Lit>;
 
@@ -19,15 +19,43 @@ struct ClauseIter {
 	inner: std::vec::IntoIter<Clause>,
 }
 
-#[pyclass(name = "CNF")]
+#[pyclass(name = "Cnf")]
 struct Cnf(base::Cnf);
 
 #[pyclass]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Lit(base::Lit);
 
+#[pyclass(extends = PyException)]
+struct Unsatisfiable;
+
+type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
+
+#[pymethods]
+impl Unsatisfiable {
+	#[new]
+	fn new() -> Self {
+		Self
+	}
+	fn __str__(&self) -> String {
+		"Unsatisfiable".to_owned()
+	}
+}
+
+impl From<base::Unsatisfiable> for Unsatisfiable {
+	fn from(_: base::Unsatisfiable) -> Self {
+		Self
+	}
+}
+
+impl From<Unsatisfiable> for PyErr {
+	fn from(_: Unsatisfiable) -> PyErr {
+		PyErr::new::<Unsatisfiable, _>(())
+	}
+}
+
 #[pyfunction]
-fn adder_encode(mut db: PyRefMut<'_, Cnf>) -> Result<(), PyErr> {
+fn adder_encode(mut db: PyRefMut<'_, Cnf>) -> Result {
 	let pref = db.deref_mut();
 	let db = &mut pref.0;
 	let x = BoolLinExp::from_slices(
@@ -40,13 +68,13 @@ fn adder_encode(mut db: PyRefMut<'_, Cnf>) -> Result<(), PyErr> {
 	);
 	let con = BoolLinear::new(x, Comparator::Equal, 2);
 	let enc: LinearEncoder = LinearEncoder::default();
-	enc.encode(db, &con)
-		.map_err(|_e| PyArithmeticError::new_err("Unsatisfiable"))
+	Ok(enc.encode(db, &con)?)
 }
 
 #[pymodule]
 fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<Cnf>()?;
+	m.add_class::<Unsatisfiable>()?;
 	m.add_function(wrap_pyfunction!(adder_encode, m)?)?;
 	Ok(())
 }
@@ -72,13 +100,13 @@ impl Cnf {
 	}
 
 	fn __str__(&self) -> String {
-		format!("test:{}", self.0)
+		format!("{}", self.0)
 	}
 
-	fn add_clause(&mut self, cl: Vec<Lit>) -> Result<(), PyErr> {
+	fn add_clause(&mut self, cl: Vec<Lit>) -> Result {
 		self.0
 			.add_clause(cl.into_iter().map(|l| l.0))
-			.map_err(|_e| PyArithmeticError::new_err("Unsatisfiable"))
+			.map_err(|_| Unsatisfiable)
 	}
 
 	fn new_var(&mut self) -> Lit {
@@ -96,20 +124,39 @@ impl Cnf {
 }
 #[pymethods]
 impl Lit {
+	// TODO probably don't add this one
+	// #[new]
+	// fn new(value: NonZeroI32) -> Self {
+	// 	Self(base::Lit::from_raw(value))
+	// }
+
+	/// Returns whether the literal is a negation of the underlying variable.
 	pub fn is_negated(&self) -> bool {
 		self.0.is_negated()
 	}
 
-	// TODO python can't overload `not,` but can overload `~`. Somehow doesn't register on python side?
-	// pub fn __invert__(&self) -> Self {
-	pub fn negate(&self) -> Self {
+	pub fn __invert__(&self) -> Self {
 		Self(!self.0)
 	}
 
-	pub fn var(&self) -> Self {
-		Self(self.0.var().into()) // TODO
+	/// Returns the underlying variable of the literal, whether negated or not.
+	/// TODO not sure whether to also add this, especially if it's not in the rust interface
+	pub fn __abs__(&self) -> Self {
+		self.var()
 	}
+
+	/// Returns the underlying variable of the literal, whether negated or not.
+	pub fn var(&self) -> Self {
+		Self(self.0.var().into())
+	}
+
+	fn __str__(&self) -> String {
+		format!("{}", self.0)
+	}
+
+	// TODO Bit* operations
 }
+
 impl Display for Lit {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		self.0.fmt(f)
@@ -119,14 +166,48 @@ impl Display for Lit {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use pyo3::Python;
+	use pyo3::{ffi::c_str, Python};
+
+	#[pyclass]
+	struct LoggingStdout;
+
+	#[pymethods]
+	impl LoggingStdout {
+		fn write(&self, data: &str) {
+			print!("{}", data);
+		}
+	}
 
 	#[test]
-	fn it_works() {
+	fn test_interface() {
+		let code = c_str!(
+			r#"
+import pindakaas
+cnf = pindakaas.Cnf()
+a = cnf.new_var()
+b = cnf.new_var()
+c = cnf.new_var()
+cnf.add_clause([~a,b])
+cnf.add_clause([abs(~b),c])
+print(f"A literal: {a}")
+print(f"A negated literal: {~a}")
+print(f"The variable of a negated literal: {abs(~a)} or {(~a).var()}")
+print(f"{cnf}")
+try:
+    cnf.add_clause([])
+except pindakaas.Unsatisfiable as e:
+    print(f"Caught Unsatisfiable exception: {e} of type {type(e)}")
+pindakaas.adder_encode(cnf)
+print(f"Encode adder: {cnf}")
+                "#
+		);
 		pyo3::append_to_inittab!(pindakaas);
 		pyo3::prepare_freethreaded_python();
 		Python::with_gil(|py| {
-			Python::run_bound(py, "import pindakaas; cnf = pindakaas.CNF()", None, None).unwrap();
+			let sys = py.import("sys").unwrap();
+			sys.setattr("stdout", LoggingStdout.into_pyobject(py).unwrap())
+				.unwrap();
+			py.run(code, None, None).unwrap();
 		});
 	}
 }
