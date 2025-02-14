@@ -72,7 +72,7 @@ impl Cnf {
 	}
 
 	fn __str__(&self) -> String {
-		"test:".to_owned() + &self.0.to_string()
+		format!("test:{}", self.0)
 	}
 
 	fn add_clause(&mut self, cl: Vec<Lit>) -> Result<(), PyErr> {
