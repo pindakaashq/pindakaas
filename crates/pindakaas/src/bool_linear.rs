@@ -114,7 +114,7 @@ pub enum Comparator {
 	GreaterEq,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 /// Consistency constraint that can be captured by a Boolean linear expression
 /// to improve the encoding of constraints using the expression.
 pub(crate) enum Constraint {
@@ -1271,6 +1271,22 @@ impl BoolLinExp {
 	}
 }
 
+impl Add for Lit {
+	type Output = BoolLinExp;
+
+	fn add(self, rhs: Self) -> Self::Output {
+		BoolLinExp::from_terms(&[(self, 1), (rhs, 1)])
+	}
+}
+
+impl Mul<Lit> for Coeff {
+	type Output = BoolLinExp;
+
+	fn mul(self, rhs: Lit) -> Self::Output {
+		BoolLinExp::from_terms(&[(rhs, self)])
+	}
+}
+
 impl Add<(Lit, Coeff)> for BoolLinExp {
 	type Output = BoolLinExp;
 
@@ -1300,7 +1316,7 @@ impl<'a> Add<IntEncoding<'a>> for BoolLinExp {
 
 impl AddAssign<(Lit, Coeff)> for BoolLinExp {
 	fn add_assign(&mut self, rhs: (Lit, Coeff)) {
-		self.terms.push_front(rhs);
+		self.terms.push_back(rhs);
 		self.num_free += 1;
 	}
 }
@@ -1326,7 +1342,9 @@ impl AddAssign<BoolLinExp> for BoolLinExp {
 		debug_assert!(rh_terms.len() == rhs.num_free);
 		self.terms
 			.extend(rh_terms.into_iter().map(|(l, c)| (l, c * rhs.mult)));
-		self.terms.rotate_right(rhs.num_free);
+		// TODO [?] It's probably important, but I don't understand how the purpose of this
+		// rotate. But it changes the order when adding BoolLinExps
+		// self.terms.rotate_right(rhs.num_free);
 		self.num_free += rhs.num_free;
 		self.constraints.extend(rhs.constraints);
 	}
@@ -1914,6 +1932,20 @@ impl LinMarker for TotalizerEncoder {}
 
 #[cfg(test)]
 mod tests {
+
+	#[test]
+	fn test_interface() {
+		let (a, b) = Cnf::default().new_lits();
+		assert_eq!(a + b, BoolLinExp::from_terms(&[(a, 1), (b, 1)]));
+		assert_eq!((2 * a), BoolLinExp::from_terms(&[(a, 2)]));
+		assert_eq!((2 * a) + (3 * b), BoolLinExp::from_terms(&[(a, 2), (b, 3)]));
+		// TODO impl PartialEq properly for tests with mult
+		// assert_eq!(
+		// 	((2 * a) + (3 * b)) * 3,
+		// 	BoolLinExp::from_terms(&[(a, 2), (b, 3)])
+		// );
+	}
+
 	macro_rules! linear_test_suite {
 		($module:ident, $encoder:expr) => {
 			mod $module {
@@ -2902,6 +2934,15 @@ mod tests {
 		);
 		encoder.encode(&mut db, &con).unwrap();
 		assert_checker(&db, &con);
+	}
+
+	impl PartialEq for BoolLinExp {
+		fn eq(&self, other: &Self) -> bool {
+			if self.mult != 1 {
+				unimplemented!("PartialEq only implmeneted for mult = 1");
+			}
+			self.add == other.add && self.terms().zip(other.terms()).all(|(a, b)| a == b)
+		}
 	}
 
 	impl PartialEq for BoolLinVariant {
