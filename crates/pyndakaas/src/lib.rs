@@ -3,11 +3,12 @@
 	reason = "pyo3 macro will generate unused qualified types"
 )]
 
+use itertools::Itertools;
 use std::{fmt::Display, ops::DerefMut, path::PathBuf};
 
 use ::pindakaas as base;
 use base::{
-	bool_linear::{BoolLinExp, BoolLinear, Comparator, LinearEncoder},
+	bool_linear::{BoolLinExp, BoolLinear, LinearEncoder},
 	ClauseDatabaseTools, Encoder,
 };
 use pyo3::{exceptions::PyException, prelude::*};
@@ -54,27 +55,76 @@ impl From<Unsatisfiable> for PyErr {
 	}
 }
 
-#[pyfunction]
-fn adder_encode(mut db: PyRefMut<'_, Cnf>) -> Result {
+impl From<Lit> for base::Lit {
+	fn from(val: Lit) -> Self {
+		val.0
+	}
+}
+
+// #[pyclass]
+// #[derive(Clone)]
+// struct Comparator(base::bool_linear::Comparator);
+
+#[pyclass(eq, eq_int)]
+#[derive(Clone, PartialEq)]
+enum Comparator {
+	LessEq,
+	Equal,
+	GreaterEq,
+}
+
+// TODO way to avoid duplication?
+impl From<Comparator> for base::bool_linear::Comparator {
+	fn from(val: Comparator) -> Self {
+		match val {
+			Comparator::LessEq => base::bool_linear::Comparator::LessEq,
+			Comparator::Equal => base::bool_linear::Comparator::Equal,
+			Comparator::GreaterEq => base::bool_linear::Comparator::GreaterEq,
+		}
+	}
+}
+
+// TODO why not excport Coeff from lib?
+type Coeff = i64;
+
+///
+/// Encode a linear constraint over Boolean literals
+/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
+#[pyfunction(signature= (db, literals, /, coefficients = None, comparator = Comparator::GreaterEq, k = 1))]
+fn adder_encode(
+	mut db: PyRefMut<'_, Cnf>,
+	literals: Vec<Lit>,
+	coefficients: Option<Vec<Coeff>>,
+	comparator: Comparator,
+	k: Coeff,
+) -> Result {
 	let pref = db.deref_mut();
 	let db = &mut pref.0;
-	let x = BoolLinExp::from_slices(
-		&[1, 2, 3],
-		&[
-			db.new_var().into(),
-			db.new_var().into(),
-			db.new_var().into(),
-		],
+	let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
+	assert_eq!(
+		coefficients.len(),
+		literals.len(),
+		"Literals and coefficients should have the same length"
 	);
-	let con = BoolLinear::new(x, Comparator::Equal, 2);
 	let enc: LinearEncoder = LinearEncoder::default();
-	Ok(enc.encode(db, &con)?)
+	Ok(enc.encode(
+		db,
+		&BoolLinear::new(
+			BoolLinExp::from_slices(
+				&coefficients,
+				&literals.into_iter().map(|l| l.0).collect_vec(),
+			),
+			comparator.into(),
+			k,
+		),
+	)?)
 }
 
 #[pymodule]
 fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<Cnf>()?;
 	m.add_class::<Unsatisfiable>()?;
+	m.add_class::<Comparator>()?;
 	m.add_function(wrap_pyfunction!(adder_encode, m)?)?;
 	Ok(())
 }
@@ -197,8 +247,14 @@ try:
     cnf.add_clause([])
 except pindakaas.Unsatisfiable as e:
     print(f"Caught Unsatisfiable exception: {e} of type {type(e)}")
-pindakaas.adder_encode(cnf)
+print(f"The Comparator enum: {pindakaas.Comparator=}, e.g. {pindakaas.Comparator.LessEq=}")
+pindakaas.adder_encode(cnf, [a,b,c], coefficients=[2,3,5], comparator=pindakaas.Comparator.LessEq, k=6)
 print(f"Encode adder: {cnf}")
+
+pindakaas.adder_encode(cnf, [a,b,c], comparator=pindakaas.Comparator.LessEq)
+print(f"Encode adder of AMO: {cnf}")
+pindakaas.adder_encode(cnf, [a,b,c])
+print(f"Encode adder of clause: {cnf}")
                 "#
 		);
 		pyo3::append_to_inittab!(pindakaas);
