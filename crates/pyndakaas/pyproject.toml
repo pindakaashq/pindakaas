@@ -4,6 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pindakaas"
+dynamic = ["version"]
 description = "Encoding Integer and Pseudo Boolean constraints into CNF"
 requires-python = ">=3.8"
 classifiers = [

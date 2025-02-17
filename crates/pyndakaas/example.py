@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import pindakaas as pk
 
 cnf = pk.Cnf()
@@ -22,4 +23,4 @@ pk.adder_encode(cnf, [a,b,c]) # a + b + c >= 1 == a \/ b \/ c
 for clause in cnf:
     for lit in clause:
         print(f"{lit}, ", end="")
-    print("\n")
+    print("\n", end="")
