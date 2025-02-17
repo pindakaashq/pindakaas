@@ -85,8 +85,9 @@ type Coeff = i64;
 ///
 /// Encode a linear constraint over Boolean literals
 /// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
+/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
 #[pyfunction(signature=(db, literals, /, coefficients = None, comparator = Comparator::GreaterEq, k = 1))]
-fn adder_encode(
+fn encode(
 	mut db: PyRefMut<'_, Cnf>,
 	literals: Vec<Lit>,
 	coefficients: Option<Vec<Coeff>>,
@@ -120,8 +121,7 @@ fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<Cnf>()?;
 	m.add_class::<Unsatisfiable>()?;
 	m.add_class::<Comparator>()?;
-	// m.add_class::<BoolLinExp>()?;
-	m.add_function(wrap_pyfunction!(adder_encode, m)?)?;
+	m.add_function(wrap_pyfunction!(encode, m)?)?;
 	Ok(())
 }
 
