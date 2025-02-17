@@ -16,11 +16,6 @@ use pyo3::{exceptions::PyException, prelude::*};
 type Clause = Vec<Lit>;
 
 #[pyclass]
-struct ClauseIter {
-	inner: std::vec::IntoIter<Clause>,
-}
-
-#[pyclass(name = "Cnf")]
 struct Cnf(base::Cnf);
 
 #[pyclass]
@@ -90,7 +85,7 @@ type Coeff = i64;
 ///
 /// Encode a linear constraint over Boolean literals
 /// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
-#[pyfunction(signature= (db, literals, /, coefficients = None, comparator = Comparator::GreaterEq, k = 1))]
+#[pyfunction(signature=(db, literals, /, coefficients = None, comparator = Comparator::GreaterEq, k = 1))]
 fn adder_encode(
 	mut db: PyRefMut<'_, Cnf>,
 	literals: Vec<Lit>,
@@ -125,8 +120,24 @@ fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<Cnf>()?;
 	m.add_class::<Unsatisfiable>()?;
 	m.add_class::<Comparator>()?;
+	// m.add_class::<BoolLinExp>()?;
 	m.add_function(wrap_pyfunction!(adder_encode, m)?)?;
 	Ok(())
+}
+
+// #[pymethods]
+// impl ClauseIter {
+// 	fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+// 		slf
+// 	}
+// 	fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<Clause> {
+// 		slf.inner.next()
+// 	}
+// }
+
+#[pyclass]
+struct ClauseIter {
+	inner: std::vec::IntoIter<Clause>,
 }
 
 #[pymethods]
@@ -134,6 +145,7 @@ impl ClauseIter {
 	fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
 		slf
 	}
+
 	fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<Clause> {
 		slf.inner.next()
 	}
@@ -141,12 +153,23 @@ impl ClauseIter {
 
 #[pymethods]
 impl Cnf {
+	//  fn __iter__(&self) -> PyResult<Py<ClauseIter>> {
+	//      Py::new(self.py(), ClauseIter {
+	// inner: Vec::from_iter(self.0.iter().map(Vec::from)).into_iter()
+	//          // inner: slf.0.iter().cloned().collect_vec().into_iter(),
+	//      })
+	//  }
+
 	fn __iter__(&self) -> ClauseIter {
 		// FIXME: It would be great if this could be made lazily instead of copying everything when creating the iterator
-		// ClauseIter {
-		// 	inner: Vec::from_iter(self.0.iter().map(Vec::from)).into_iter(),
-		// }
-		todo!()
+		ClauseIter {
+			inner: Vec::from_iter(
+				self.0
+					.iter()
+					.map(|clause| clause.iter().map(|l| Lit(*l)).collect_vec()),
+			)
+			.into_iter(),
+		}
 	}
 
 	fn __str__(&self) -> String {
@@ -215,6 +238,9 @@ impl Display for Lit {
 
 #[cfg(test)]
 mod tests {
+
+	use std::ffi::CString;
+
 	use super::*;
 	use pyo3::{ffi::c_str, Python};
 
@@ -230,40 +256,20 @@ mod tests {
 
 	#[test]
 	fn test_interface() {
-		let code = c_str!(
-			r#"
-import pindakaas
-cnf = pindakaas.Cnf()
-a = cnf.new_var()
-b = cnf.new_var()
-c = cnf.new_var()
-cnf.add_clause([~a,b])
-cnf.add_clause([abs(~b),c])
-print(f"A literal: {a}")
-print(f"A negated literal: {~a}")
-print(f"The variable of a negated literal: {abs(~a)} or {(~a).var()}")
-print(f"{cnf}")
-try:
-    cnf.add_clause([])
-except pindakaas.Unsatisfiable as e:
-    print(f"Caught Unsatisfiable exception: {e} of type {type(e)}")
-print(f"The Comparator enum: {pindakaas.Comparator=}, e.g. {pindakaas.Comparator.LessEq=}")
-pindakaas.adder_encode(cnf, [a,b,c], coefficients=[2,3,5], comparator=pindakaas.Comparator.LessEq, k=6)
-print(f"Encode adder: {cnf}")
-
-pindakaas.adder_encode(cnf, [a,b,c], comparator=pindakaas.Comparator.LessEq)
-print(f"Encode adder of AMO: {cnf}")
-pindakaas.adder_encode(cnf, [a,b,c])
-print(f"Encode adder of clause: {cnf}")
-                "#
-		);
 		pyo3::append_to_inittab!(pindakaas);
 		pyo3::prepare_freethreaded_python();
 		Python::with_gil(|py| {
 			let sys = py.import("sys").unwrap();
-			sys.setattr("stdout", LoggingStdout.into_pyobject(py).unwrap())
-				.unwrap();
-			py.run(code, None, None).unwrap();
+			_ = sys.setattr("stdout", LoggingStdout.into_pyobject(py).unwrap());
+			_ = PyModule::from_code(
+				py,
+				CString::new(include_str!("../example.py"))
+					.unwrap()
+					.as_c_str(),
+				c_str!("example.py"),
+				c_str!("example"),
+			)
+			.unwrap();
 		});
 	}
 }
