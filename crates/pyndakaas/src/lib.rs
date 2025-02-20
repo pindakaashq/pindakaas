@@ -82,46 +82,11 @@ impl From<Comparator> for base::bool_linear::Comparator {
 // TODO why not excport Coeff from lib?
 type Coeff = i64;
 
-///
-/// Encode a linear constraint over Boolean literals
-/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
-/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
-#[pyfunction(signature=(db, literals, /, coefficients = None, comparator = Comparator::GreaterEq, k = 1))]
-fn encode(
-	mut db: PyRefMut<'_, Cnf>,
-	literals: Vec<Lit>,
-	coefficients: Option<Vec<Coeff>>,
-	comparator: Comparator,
-	k: Coeff,
-) -> Result {
-	let pref = db.deref_mut();
-	let db = &mut pref.0;
-	let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
-	assert_eq!(
-		coefficients.len(),
-		literals.len(),
-		"Literals and coefficients should have the same length"
-	);
-	let enc: LinearEncoder = LinearEncoder::default();
-	Ok(enc.encode(
-		db,
-		&BoolLinear::new(
-			BoolLinExp::from_slices(
-				&coefficients,
-				&literals.into_iter().map(|l| l.0).collect_vec(),
-			),
-			comparator.into(),
-			k,
-		),
-	)?)
-}
-
 #[pymodule]
 fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<Cnf>()?;
 	m.add_class::<Unsatisfiable>()?;
 	m.add_class::<Comparator>()?;
-	m.add_function(wrap_pyfunction!(encode, m)?)?;
 	Ok(())
 }
 
@@ -182,7 +147,7 @@ impl Cnf {
 			.map_err(|_| Unsatisfiable)
 	}
 
-	fn new_var(&mut self) -> Lit {
+	fn add_variable(&mut self) -> Lit {
 		Lit(self.0.new_var().into())
 	}
 
@@ -194,7 +159,40 @@ impl Cnf {
 	fn new() -> Self {
 		Self(base::Cnf::default())
 	}
+
+	///
+	/// Encode a linear constraint over Boolean literals
+	/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
+	/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
+	#[pyo3(signature=(literals, /, coefficients = None, comparator = Comparator::GreaterEq, k = 1))]
+	fn add_linear(
+		&mut self,
+		literals: Vec<Lit>,
+		coefficients: Option<Vec<Coeff>>,
+		comparator: Comparator,
+		k: Coeff,
+	) -> Result {
+		let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
+		assert_eq!(
+			coefficients.len(),
+			literals.len(),
+			"Literals and coefficients should have the same length"
+		);
+		let enc: LinearEncoder = LinearEncoder::default();
+		Ok(enc.encode(
+			&mut self.0,
+			&BoolLinear::new(
+				BoolLinExp::from_slices(
+					&coefficients,
+					&literals.into_iter().map(|l| l.0).collect_vec(),
+				),
+				comparator.into(),
+				k,
+			),
+		)?)
+	}
 }
+
 #[pymethods]
 impl Lit {
 	// TODO probably don't add this one
@@ -246,7 +244,6 @@ mod tests {
 
 	#[pyclass]
 	struct LoggingStdout;
-
 	#[pymethods]
 	impl LoggingStdout {
 		fn write(&self, data: &str) {
@@ -269,7 +266,7 @@ mod tests {
 				c_str!("example.py"),
 				c_str!("example"),
 			)
-			.unwrap();
+			.unwrap_or_else(|e| panic!("{e}"));
 		});
 	}
 }
