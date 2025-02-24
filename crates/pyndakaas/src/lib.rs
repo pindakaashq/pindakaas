@@ -4,23 +4,132 @@
 )]
 
 use itertools::Itertools;
-use std::{fmt::Display, ops::DerefMut, path::PathBuf};
+use std::{fmt::Display, path::PathBuf};
 
-use ::pindakaas as base;
+use ::pindakaas::{self as base, ClauseDatabaseTools};
 use base::{
 	bool_linear::{BoolLinExp, BoolLinear, LinearEncoder},
-	ClauseDatabaseTools, Encoder,
+	Encoder,
 };
-use pyo3::{exceptions::PyException, prelude::*};
+use pyo3::{exceptions::PyException, prelude::*, types::PyList};
 
 type Clause = Vec<Lit>;
+
+#[pyclass]
+#[derive(Debug)]
+struct ClauseDatabase(Py<PyAny>);
+
+#[pymethods]
+impl ClauseDatabase {
+	#[new]
+	fn new(db: Py<PyAny>) -> Self {
+		Self(db)
+	}
+
+	fn add_clause(&mut self, clause: Clause) -> Result {
+		base::ClauseDatabase::add_clause_from_slice(self, &clause.iter().map(|l| l.0).collect_vec())
+			.map_err(|_| Unsatisfiable)
+	}
+
+	fn add_variables(&mut self, len: usize) -> Vec<Lit> {
+		base::ClauseDatabase::new_var_range(self, len)
+			.into_iter()
+			.map(|l| Lit(l.into()))
+			.collect()
+	}
+
+	///
+	/// Encode a linear constraint over Boolean literals
+	/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
+	/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
+	#[pyo3(signature=(literals, /, coefficients = None, comparator = Comparator::GreaterEq, k = 1))]
+	fn add_linear(
+		&mut self,
+		literals: Vec<Lit>,
+		coefficients: Option<Vec<Coeff>>,
+		comparator: Comparator,
+		k: Coeff,
+	) -> Result {
+		let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
+		assert_eq!(
+			coefficients.len(),
+			literals.len(),
+			"Literals and coefficients should have the same length"
+		);
+		let enc: LinearEncoder = LinearEncoder::default();
+		Ok(enc.encode(
+			self,
+			&BoolLinear::new(
+				BoolLinExp::from_slices(
+					&coefficients,
+					&literals.into_iter().map(|l| l.0).collect_vec(),
+				),
+				comparator.into(),
+				k,
+			),
+		)?)
+	}
+}
+
+impl base::ClauseDatabase for ClauseDatabase {
+	fn add_clause_from_slice(&mut self, clause: &[base::Lit]) -> base::Result {
+		Python::with_gil(|py| {
+			self.0
+				.bind(py)
+				.call_method(
+					"add_clause",
+					(PyList::new(py, clause.iter().map(|l| Lit(*l))).unwrap(),),
+					None,
+				)
+				.map(|_| ())
+				.map_err(|_| base::Unsatisfiable)
+		})
+	}
+
+	fn new_var_range(&mut self, len: usize) -> base::VarRange {
+		Python::with_gil(|py| {
+			self.0
+				.bind(py)
+				.call_method("add_variables", (len,), None)
+				.map(|vars| vars.extract::<VarRange>().unwrap().0)
+				.unwrap()
+		})
+	}
+}
 
 #[pyclass]
 struct Cnf(base::Cnf);
 
 #[pyclass]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Lit(base::Lit);
+struct Lit(base::Lit);
+
+#[pyclass]
+#[derive(Clone)]
+struct VarRange(base::VarRange);
+
+#[pyclass]
+struct VarRangeIter(std::vec::IntoIter<Lit>);
+
+#[pymethods]
+impl VarRangeIter {
+	fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+		slf
+	}
+
+	fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<Lit> {
+		slf.0.next()
+	}
+}
+
+#[pymethods]
+impl VarRange {
+	// TODO check lifetime
+	fn __iter__(&mut self) -> VarRangeIter {
+		VarRangeIter(self.0.iter_lits().map(|l| Lit(l)).collect_vec().into_iter())
+		// VarRangeIter(self.0.iter_lits().map(|l| Lit(l)))
+	}
+}
 
 #[pyclass(extends = PyException)]
 struct Unsatisfiable;
@@ -82,28 +191,24 @@ impl From<Comparator> for base::bool_linear::Comparator {
 // TODO why not excport Coeff from lib?
 type Coeff = i64;
 
+// #[pyfunction]
+// #[pyo3(name = "ClauseDatabase")]
+// pub fn clause_database_wrapper(model: &mut ClauseDatabase) {
+// 	clause_database(model);
+// }
+
 #[pymodule]
 fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
+	m.add_class::<ClauseDatabase>()?;
 	m.add_class::<Cnf>()?;
+	// m.add_function(wrap_pyfunction!(clause_database_wrapper, m)?)?;
 	m.add_class::<Unsatisfiable>()?;
 	m.add_class::<Comparator>()?;
 	Ok(())
 }
 
-// #[pymethods]
-// impl ClauseIter {
-// 	fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-// 		slf
-// 	}
-// 	fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<Clause> {
-// 		slf.inner.next()
-// 	}
-// }
-
 #[pyclass]
-struct ClauseIter {
-	inner: std::vec::IntoIter<Clause>,
-}
+struct ClauseIter(std::vec::IntoIter<Clause>);
 
 #[pymethods]
 impl ClauseIter {
@@ -112,29 +217,38 @@ impl ClauseIter {
 	}
 
 	fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<Clause> {
-		slf.inner.next()
+		slf.0.next()
 	}
 }
 
 #[pymethods]
 impl Cnf {
-	//  fn __iter__(&self) -> PyResult<Py<ClauseIter>> {
-	//      Py::new(self.py(), ClauseIter {
-	// inner: Vec::from_iter(self.0.iter().map(Vec::from)).into_iter()
-	//          // inner: slf.0.iter().cloned().collect_vec().into_iter(),
-	//      })
-	//  }
+	#[new]
+	fn new() -> Self {
+		Self(base::Cnf::default())
+	}
+
+	// #[new]
+	// fn new() -> ClauseDatabase {
+	// 	ClauseDatabase(Cnf::default())
+	// }
+
+	// #[new]
+	// fn new() -> (Self, ClauseDatabase) {
+	// 	let slf = Self(base::Cnf::default());
+	// 	(slf, ClauseDatabase::new(slf.into()))
+	// }
 
 	fn __iter__(&self) -> ClauseIter {
 		// FIXME: It would be great if this could be made lazily instead of copying everything when creating the iterator
-		ClauseIter {
-			inner: Vec::from_iter(
+		ClauseIter(
+			Vec::from_iter(
 				self.0
 					.iter()
 					.map(|clause| clause.iter().map(|l| Lit(*l)).collect_vec()),
 			)
 			.into_iter(),
-		}
+		)
 	}
 
 	fn __str__(&self) -> String {
@@ -151,45 +265,13 @@ impl Cnf {
 		Lit(self.0.new_var().into())
 	}
 
+	fn add_variables(&mut self, len: usize) -> VarRange {
+		VarRange(base::ClauseDatabase::new_var_range(&mut self.0, len))
+	}
+
 	#[staticmethod]
 	fn from_file(path: PathBuf) -> Result<Self, std::io::Error> {
 		Ok(Self(base::Cnf::from_file(&path)?))
-	}
-	#[new]
-	fn new() -> Self {
-		Self(base::Cnf::default())
-	}
-
-	///
-	/// Encode a linear constraint over Boolean literals
-	/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
-	/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
-	#[pyo3(signature=(literals, /, coefficients = None, comparator = Comparator::GreaterEq, k = 1))]
-	fn add_linear(
-		&mut self,
-		literals: Vec<Lit>,
-		coefficients: Option<Vec<Coeff>>,
-		comparator: Comparator,
-		k: Coeff,
-	) -> Result {
-		let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
-		assert_eq!(
-			coefficients.len(),
-			literals.len(),
-			"Literals and coefficients should have the same length"
-		);
-		let enc: LinearEncoder = LinearEncoder::default();
-		Ok(enc.encode(
-			&mut self.0,
-			&BoolLinear::new(
-				BoolLinExp::from_slices(
-					&coefficients,
-					&literals.into_iter().map(|l| l.0).collect_vec(),
-				),
-				comparator.into(),
-				k,
-			),
-		)?)
 	}
 }
 
@@ -202,22 +284,22 @@ impl Lit {
 	// }
 
 	/// Returns whether the literal is a negation of the underlying variable.
-	pub fn is_negated(&self) -> bool {
+	fn is_negated(&self) -> bool {
 		self.0.is_negated()
 	}
 
-	pub fn __invert__(&self) -> Self {
+	fn __invert__(&self) -> Self {
 		Self(!self.0)
 	}
 
 	/// Returns the underlying variable of the literal, whether negated or not.
 	/// TODO not sure whether to also add this, especially if it's not in the rust interface
-	pub fn __abs__(&self) -> Self {
+	fn __abs__(&self) -> Self {
 		self.var()
 	}
 
 	/// Returns the underlying variable of the literal, whether negated or not.
-	pub fn var(&self) -> Self {
+	fn var(&self) -> Self {
 		Self(self.0.var().into())
 	}
 
@@ -264,7 +346,7 @@ mod tests {
 					.unwrap()
 					.as_c_str(),
 				c_str!("example.py"),
-				c_str!("example"),
+				c_str!("__main__"),
 			)
 			.unwrap_or_else(|e| panic!("{e}"));
 		});

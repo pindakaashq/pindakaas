@@ -277,7 +277,7 @@ pub struct Lit(NonZeroI32);
 
 /// Result is a type alias for [`std::result::Result`] that by default returns
 /// an empty value, or the [`Unsatisfiable`] error type.
-type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
+pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
 /// Unsatisfiable is an error type returned when the problem being encoded is

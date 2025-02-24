@@ -4,10 +4,18 @@ import pindakaas as pk
 
 def main():
 
+    # trait exposure
+    cnf = pk.ClauseDatabase(pk.Cnf())
+    a,b,c = cnf.add_variables(3)
+    cnf.add_clause([~a,b]) # ~a \/ b
+    cnf.add_clause([abs(~b),c]) # ~b \/ c
+    # TODO doesn't subclass... 
+    # d = cnf.add_variable()
+    # cnf.add_clause([d]) # ~b \/ c
+
+    exit(0)
     cnf = pk.Cnf()
-    a = cnf.add_variable()
-    b = cnf.add_variable()
-    c = cnf.add_variable()
+    a,b,c = cnf.add_variables(3)
     cnf.add_clause([~a,b]) # ~a \/ b
     cnf.add_clause([abs(~b),c]) # ~b \/ c
     print(f"{cnf}")
@@ -27,7 +35,9 @@ def main():
             print(f"{lit}, ", end="")
         print("\n", end="")
 
+    # exit(0)
     return
+
 
 # PROPOSED
 
@@ -60,4 +70,5 @@ def main():
     solver.value(a) # True
     solver.value(~a) # False
 
-
+if __name__ in "__main__":
+    main()
