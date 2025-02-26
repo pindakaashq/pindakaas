@@ -28,20 +28,19 @@ def main():
 # PROPOSED
 
 # Future:
-    cnf.add_linear(cnf, (2*a) + (3*b) + (5*c) <= 6) # Low priority: more overloading to create constraint objects
-
-# This week: solving + 
-    pk.solver(name="cadical") # Returns CadicalSolver
-
-# Implement ClauseDatabase as ABC
-# Implement Solver as ABC, extends ClauseDatabase
-
+    # cnf.add_linear(cnf, (2*a) + (3*b) + (5*c) <= 6) # Low priority: more overloading to create constraint objects
 
 # Add IPASIR-Python crate
+    solver = pk.CadicalSolver() # or pk.Solver(name="cadical")
+    # solver.set_terminate_callback(lambda x: False)
+    a = solver.add_variable()
+    b = solver.add_variable()
+    solver.add_clause([a,b])
+    solver.add_clause([~a,~b])
+    res = solver.solve()
+    print(f"RES = {res}")
+    exit(0)
 
-    solver = pk.Cadical() # or pk.Solver(name="cadical")
-    solver.set_terminate_callback(lambda x: False)
-    solver.add_clause([~a,b]) # ~a \/ b (subclass ClauseDatabase)
 # res = solver.solve(ter = lambda x: print("")) # solve interface similar to IPASIR
 
 # res can be based off of:
@@ -53,8 +52,8 @@ def main():
 # }
 
 # Or:
-    solver.value(a) # True
-    solver.value(~a) # False
+    # solver.value(a) # True
+    # solver.value(~a) # False
 
 if __name__ in "__main__":
     main()

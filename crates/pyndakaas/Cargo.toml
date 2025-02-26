@@ -18,7 +18,7 @@ doc = false
 
 [dependencies]
 itertools = "0.14.0"
-pindakaas = { path = "../pindakaas" }
+pindakaas = { path = "../pindakaas", features= ["cadical"] }
 pyo3 = "0.23"
 
 [features]

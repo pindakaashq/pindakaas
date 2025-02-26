@@ -69,10 +69,11 @@ pub trait SolveAssuming: Solver {
 	) -> SolveResult<impl Valuation + '_, impl FailedAssumtions + '_>;
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Default)]
 pub enum SolveResult<Sol: Valuation, Fail = ()> {
 	Satisfied(Sol),
 	Unsatisfiable(Fail),
+	#[default]
 	Unknown,
 }
 

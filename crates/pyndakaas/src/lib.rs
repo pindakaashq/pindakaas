@@ -6,7 +6,7 @@
 use itertools::Itertools;
 use std::{fmt::Display, path::PathBuf};
 
-use ::pindakaas::{self as base, ClauseDatabaseTools};
+use ::pindakaas::{self as base, solver::Solver, ClauseDatabaseTools, MapSol, Valuation};
 use base::{
 	bool_linear::{BoolLinExp, BoolLinear, LinearEncoder},
 	Encoder,
@@ -112,6 +112,7 @@ type Coeff = i64;
 #[pymodule]
 fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<Cnf>()?;
+	m.add_class::<CadicalSolver>()?;
 	m.add_class::<Unsatisfiable>()?;
 	m.add_class::<Comparator>()?;
 	Ok(())
@@ -244,6 +245,85 @@ impl Lit {
 impl Display for Lit {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		self.0.fmt(f)
+	}
+}
+
+// SOLVING
+//
+
+#[pyclass(unsendable)]
+#[derive(Default)]
+struct CadicalSolver {
+	solver: base::solver::cadical::Cadical,
+	vars: Option<base::Var>, // TODO currently hard to remove using MapSol
+}
+
+// solution: Solution,
+// solve_result: base::solver::SolveResult<
+// 	base::solver::cadical::CadicalSol<'a>,
+// 	base::solver::cadical::CadicalFailed<'a>,
+// >,
+
+#[pyclass]
+struct SolveResult(base::solver::SolveResult<MapSol>);
+
+#[pymethods]
+impl SolveResult {
+	// #[new]
+	// fn new() -> Self {
+	// 	Self(base::solver::SolveResult::default())
+	// }
+
+	fn __str__(&self) -> String {
+		match &self.0 {
+			::pindakaas::solver::SolveResult::Satisfied(sol) => format!("{}", sol),
+			::pindakaas::solver::SolveResult::Unsatisfiable(_) => {
+				format!("{}", base::Unsatisfiable)
+			}
+			::pindakaas::solver::SolveResult::Unknown => format!("UNKNOWN"),
+		}
+	}
+}
+
+// #[pyclass]
+// struct Solution(base::solver::cadical::CadicalSol); // TODO can't because of lifetime
+// struct Solution(M);
+
+#[pymethods]
+impl CadicalSolver {
+	#[new]
+	fn new() -> Self {
+		Self::default()
+	}
+
+	// TODO: since trait exposure doesn't quite work how we want, and because it is slow, and
+	// because ABC's are not supported by pyo3, we have code duplication. Perhaps adding
+	// a derive proc macro would be the answer.
+	fn add_clause(&mut self, cl: Vec<Lit>) -> Result {
+		self.solver
+			.add_clause(cl.into_iter().map(|l| l.0))
+			.map_err(|_| Unsatisfiable)
+	}
+
+	fn add_variable(&mut self) -> Lit {
+		self.vars = Some(self.solver.new_var());
+		Lit(self.vars.clone().unwrap().into())
+	}
+
+	fn solve(&mut self) -> SolveResult {
+		SolveResult(match self.solver.solve() {
+			::pindakaas::solver::SolveResult::Satisfied(sol) => {
+				::pindakaas::solver::SolveResult::Satisfied(
+					self.vars
+						.map(|v| MapSol::new(base::VarRange::until(v), &sol))
+						.unwrap_or_default(),
+				)
+			}
+			::pindakaas::solver::SolveResult::Unsatisfiable(_) => {
+				::pindakaas::solver::SolveResult::Unsatisfiable(())
+			}
+			::pindakaas::solver::SolveResult::Unknown => ::pindakaas::solver::SolveResult::Unknown,
+		})
 	}
 }
 

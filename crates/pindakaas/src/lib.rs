@@ -34,6 +34,7 @@ use std::{
 };
 
 use itertools::{traits::HomogeneousTuple, Itertools};
+use rustc_hash::FxHashMap;
 
 pub use crate::helpers::AsDynClauseDatabase;
 use crate::{helpers::subscript_number, propositional_logic::Formula, solver::VarFactory};
@@ -292,6 +293,59 @@ pub trait Valuation {
 	/// Note that the function can return None if the model/solution is independent
 	/// of the given literal.
 	fn value(&self, lit: Lit) -> bool;
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+// #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct MapSol(pub(crate) FxHashMap<Var, bool>);
+
+impl MapSol {
+	pub fn new<V, I, F>(vars: I, sol: &F) -> Self
+	where
+		V: Into<Lit>,
+		I: IntoIterator<Item = V> + Clone,
+		F: Valuation + ?Sized,
+	{
+		Self(
+			vars.into_iter()
+				.map(|v| v.into())
+				.map(|v| (v.clone().var(), sol.value(v)))
+				.collect(),
+		)
+	}
+	pub fn iter(&self) -> impl Iterator<Item = Lit> + use<'_> {
+		self.0
+			.iter()
+			.map(|(&v, &b)| if b { Lit::from(v) } else { !Lit::from(v) })
+	}
+}
+
+impl Valuation for MapSol {
+	fn value(&self, lit: Lit) -> bool {
+		if let Some(&a) = self.0.get(&lit.var()) {
+			if lit.is_negated() {
+				!a
+			} else {
+				a
+			}
+		} else {
+			panic!("Literal {lit} was not assigned")
+		}
+	}
+}
+
+
+impl Display for MapSol {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(
+			f,
+			"{}",
+			self.iter()
+				.sorted_by_key(|lit| lit.var())
+				.map(|lit| format!("{}", lit))
+				.join(", ")
+		)
+	}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -891,6 +945,14 @@ impl VarRange {
 		Self {
 			start: Var(NonZeroI32::new(2).unwrap()),
 			end: Var(NonZeroI32::new(1).unwrap()),
+		}
+	}
+
+	// TODO probably remove
+	pub fn until(end: Var) -> Self {
+		Self {
+			start: Var(NonZeroI32::new(1).unwrap()),
+			end,
 		}
 	}
 
