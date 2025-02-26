@@ -4,16 +4,6 @@ import pindakaas as pk
 
 def main():
 
-    # trait exposure
-    cnf = pk.ClauseDatabase(pk.Cnf())
-    a,b,c = cnf.add_variables(3)
-    cnf.add_clause([~a,b]) # ~a \/ b
-    cnf.add_clause([abs(~b),c]) # ~b \/ c
-    # TODO doesn't subclass... 
-    # d = cnf.add_variable()
-    # cnf.add_clause([d]) # ~b \/ c
-
-    exit(0)
     cnf = pk.Cnf()
     a,b,c = cnf.add_variables(3)
     cnf.add_clause([~a,b]) # ~a \/ b
@@ -35,14 +25,10 @@ def main():
             print(f"{lit}, ", end="")
         print("\n", end="")
 
-    # exit(0)
-    return
-
-
 # PROPOSED
 
 # Future:
-    pk.add_linear(cnf, (2*a) + (3*b) + (5*c) <= 6) # Low priority: more overloading to create constraint objects
+    cnf.add_linear(cnf, (2*a) + (3*b) + (5*c) <= 6) # Low priority: more overloading to create constraint objects
 
 # This week: solving + 
     pk.solver(name="cadical") # Returns CadicalSolver
