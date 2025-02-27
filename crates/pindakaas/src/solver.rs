@@ -202,10 +202,7 @@ impl VarFactory {
 			panic!("unable to create more than `Var::MAX_VARS` variables")
 		};
 		match size {
-			0 => VarRange::new(
-				Var(NonZeroI32::new(2).unwrap()),
-				Var(NonZeroI32::new(1).unwrap()),
-			),
+			0 => VarRange::empty(),
 			1 => {
 				self.next_var = start.next_var();
 				VarRange::new(start, start)

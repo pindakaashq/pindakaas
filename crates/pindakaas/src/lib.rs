@@ -611,6 +611,17 @@ impl Not for BoolVal {
 }
 
 impl Cnf {
+	pub fn new(vars: Option<usize>) -> Self {
+		let mut nvar = VarFactory::default();
+		if let Some(vars) = vars {
+			_ = nvar.next_var_range(vars);
+		}
+		Self {
+			nvar,
+			..Default::default()
+		}
+	}
+
 	/// Returns the number of clauses in the formula.
 	pub fn clauses(&self) -> usize {
 		self.size.len()

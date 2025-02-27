@@ -8,8 +8,12 @@ def main():
     a,b,c = cnf.add_variables(3)
     cnf.add_clause([~a,b]) # ~a \/ b
     cnf.add_clause([abs(~b),c]) # ~b \/ c
-    print(f"{cnf}")
-    cnf = pk.Cnf()
+    # print(f"{cnf}")
+    cnf = pk.Cnf(5) # this Cnf already has 5 vars
+    e = cnf.add_variable()
+    print(f"Starting from 5: {cnf}")
+    cnf.add_clause([~a,b,e]) # ~a \/ b
+    print(f"Adding a clause: {cnf}")
 
     try:
         cnf.add_clause([])
@@ -37,23 +41,22 @@ def main():
     b = solver.add_variable()
     solver.add_clause([a,b])
     solver.add_clause([~a,~b])
-    res = solver.solve()
-    print(f"RES = {res}")
-    exit(0)
+    assert solver.solve() is True
+    print(f"{solver.value(a)}")
+    assert solver.value(a) != solver.value(b)
+
+    # import numpy as np
+    # n = 4
+    # m = 3
+    # php = Cnf()
+    # pigeons = { (i,j): solver.add_variable()
+    #            for i in range(n)
+    #            for j in range(m)
+    #            }
+    # for i in range(n):
+    #     php.add_linear([])
 
 # res = solver.solve(ter = lambda x: print("")) # solve interface similar to IPASIR
-
-# res can be based off of:
-# [derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-# pub enum SolveResult<Sol: Valuation, Fail = ()> {
-# 	Satisfied(Sol),
-# 	Unsatisfiable(Fail),
-# 	Unknown,
-# }
-
-# Or:
-    # solver.value(a) # True
-    # solver.value(~a) # False
 
 if __name__ in "__main__":
     main()

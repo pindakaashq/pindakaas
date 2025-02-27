@@ -4,7 +4,7 @@
 )]
 
 use itertools::Itertools;
-use std::{fmt::Display, path::PathBuf};
+use std::{fmt::Display, num::NonZeroI32, path::PathBuf};
 
 use ::pindakaas::{self as base, solver::Solver, ClauseDatabaseTools, MapSol, Valuation};
 use base::{
@@ -135,8 +135,9 @@ impl ClauseIter {
 #[pymethods]
 impl Cnf {
 	#[new]
-	fn new() -> Self {
-		Self(base::Cnf::default())
+	// #[pyo3(signature=(nvar=None))]
+	fn new(vars: Option<usize>) -> Self {
+		Self(base::Cnf::new(vars))
 	}
 
 	///
@@ -256,6 +257,7 @@ impl Display for Lit {
 struct CadicalSolver {
 	solver: base::solver::cadical::Cadical,
 	vars: Option<base::Var>, // TODO currently hard to remove using MapSol
+	solution: Option<base::MapSol>,
 }
 
 // solution: Solution,
@@ -296,6 +298,11 @@ impl CadicalSolver {
 		Self::default()
 	}
 
+	/// Number of variables
+	fn variables(&self) -> Option<NonZeroI32> {
+		self.vars.map(|v| v.into())
+	}
+
 	// TODO: since trait exposure doesn't quite work how we want, and because it is slow, and
 	// because ABC's are not supported by pyo3, we have code duplication. Perhaps adding
 	// a derive proc macro would be the answer.
@@ -310,20 +317,23 @@ impl CadicalSolver {
 		Lit(self.vars.clone().unwrap().into())
 	}
 
-	fn solve(&mut self) -> SolveResult {
-		SolveResult(match self.solver.solve() {
+	fn solve(&mut self) -> Option<bool> {
+		match self.solver.solve() {
 			::pindakaas::solver::SolveResult::Satisfied(sol) => {
-				::pindakaas::solver::SolveResult::Satisfied(
+				self.solution = Some(
 					self.vars
 						.map(|v| MapSol::new(base::VarRange::until(v), &sol))
 						.unwrap_or_default(),
-				)
+				);
+				Some(true)
 			}
-			::pindakaas::solver::SolveResult::Unsatisfiable(_) => {
-				::pindakaas::solver::SolveResult::Unsatisfiable(())
-			}
-			::pindakaas::solver::SolveResult::Unknown => ::pindakaas::solver::SolveResult::Unknown,
-		})
+			::pindakaas::solver::SolveResult::Unsatisfiable(_) => Some(false),
+			::pindakaas::solver::SolveResult::Unknown => None,
+		}
+	}
+
+	fn value(&self, lit: Lit) -> Option<bool> {
+		self.solution.as_ref().map(|sol| sol.value(lit.into()))
 	}
 }
 
