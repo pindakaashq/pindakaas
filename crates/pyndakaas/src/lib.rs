@@ -4,7 +4,7 @@
 )]
 
 use itertools::Itertools;
-use std::{fmt::Display, num::NonZeroI32, path::PathBuf};
+use std::{default, fmt::Display, num::NonZeroI32, path::PathBuf};
 
 use ::pindakaas::{self as base, solver::Solver, ClauseDatabaseTools, MapSol, Valuation};
 use base::{
@@ -88,10 +88,11 @@ impl From<Lit> for base::Lit {
 // struct Comparator(base::bool_linear::Comparator);
 
 #[pyclass(eq, eq_int)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Default)]
 enum Comparator {
 	LessEq,
 	Equal,
+	#[default]
 	GreaterEq,
 }
 
@@ -144,13 +145,14 @@ impl Cnf {
 	/// Encode a linear constraint over Boolean literals
 	/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
 	/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
-	#[pyo3(signature=(literals, /, coefficients = None, comparator = Comparator::GreaterEq, k = 1))]
+	#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1)))]
 	fn add_linear(
 		&mut self,
 		literals: Vec<Lit>,
 		coefficients: Option<Vec<Coeff>>,
-		comparator: Comparator,
-		k: Coeff,
+		// TODO I'm not sure if adding Option is the best way to allow None to return default
+		comparator: Option<Comparator>,
+		k: Option<Coeff>,
 	) -> Result {
 		let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
 		assert_eq!(
@@ -166,8 +168,8 @@ impl Cnf {
 					&coefficients,
 					&literals.into_iter().map(|l| l.0).collect_vec(),
 				),
-				comparator.into(),
-				k,
+				comparator.unwrap_or_default().into(),
+				k.unwrap_or(1),
 			),
 		)?)
 	}
