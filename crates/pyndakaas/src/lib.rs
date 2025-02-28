@@ -4,7 +4,7 @@
 )]
 
 use itertools::Itertools;
-use std::{default, fmt::Display, num::NonZeroI32, path::PathBuf};
+use std::{fmt::Display, num::NonZeroI32, path::PathBuf};
 
 use ::pindakaas::{self as base, solver::Solver, ClauseDatabaseTools, MapSol, Valuation};
 use base::{
@@ -44,7 +44,7 @@ impl VarRangeIter {
 impl VarRange {
 	// TODO check lifetime
 	fn __iter__(&mut self) -> VarRangeIter {
-		VarRangeIter(self.0.iter_lits().map(|l| Lit(l)).collect_vec().into_iter())
+		VarRangeIter(self.0.iter_lits().map(Lit).collect_vec().into_iter())
 		// VarRangeIter(self.0.iter_lits().map(|l| Lit(l)))
 	}
 }
@@ -136,7 +136,7 @@ impl ClauseIter {
 #[pymethods]
 impl Cnf {
 	#[new]
-	// #[pyo3(signature=(nvar=None))]
+	#[pyo3(signature = (vars=None))]
 	fn new(vars: Option<usize>) -> Self {
 		Self(base::Cnf::new(vars))
 	}
@@ -284,7 +284,7 @@ impl SolveResult {
 			::pindakaas::solver::SolveResult::Unsatisfiable(_) => {
 				format!("{}", base::Unsatisfiable)
 			}
-			::pindakaas::solver::SolveResult::Unknown => format!("UNKNOWN"),
+			::pindakaas::solver::SolveResult::Unknown => "UNKNOWN".to_owned(),
 		}
 	}
 }
@@ -316,7 +316,7 @@ impl CadicalSolver {
 
 	fn add_variable(&mut self) -> Lit {
 		self.vars = Some(self.solver.new_var());
-		Lit(self.vars.clone().unwrap().into())
+		Lit(self.vars.unwrap().into())
 	}
 
 	fn solve(&mut self) -> Option<bool> {

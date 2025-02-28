@@ -38,7 +38,7 @@ def main():
     assert solver.solve() is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
     print(f"2nd {solver.value(a)}") # Also True/False/None
 
-    exit(0)
+    return
 
     # TODO: for completing CPMpy standard: timeouts
     # assert solver.solve(time_limit=datetime.duration(10))

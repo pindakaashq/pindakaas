@@ -334,7 +334,6 @@ impl Valuation for MapSol {
 	}
 }
 
-
 impl Display for MapSol {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
