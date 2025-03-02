@@ -1,7 +1,7 @@
 [package]
 name = "pindakaas-cadical"
 description = "build of the Cadical SAT solver for the pindakaas crate"
-version = "2.1.2"
+version = "2.1.3"
 build = "build.rs"
 links = "cadical"
 exclude = ["vendor/cadical"]
