@@ -22,7 +22,7 @@ use crate::{
 	propositional_logic::{Formula, TseitinEncoder},
 	sorted::{Sorted, SortedEncoder},
 	AsDynClauseDatabase, BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder,
-	IntEncoding, Lit, Result, Unsatisfiable, Valuation,
+	IntEncoding, Lit, Result, Unsatisfiable, Valuation, Var,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -346,12 +346,6 @@ impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear>
 		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&self, db: &mut DB, lin: &NormalizedBoolLinear) -> Result {
-		let pair = &lin
-			.terms
-			.iter()
-			.flat_map(|part| part.iter().map(|&(lit, coef)| (lit, coef)))
-			.collect::<FxHashMap<_, _>>();
-
 		debug_assert!(lin.cmp == LimitComp::LessEq || lin.cmp == LimitComp::Equal);
 		// The number of relevant bits in k
 		const ZERO: Coeff = 0;
@@ -362,12 +356,20 @@ impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear>
 		let bits = bits as usize;
 		debug_assert!(k[bits - 1]);
 
+		// Closure that provides an iterator over all terms independent of the
+		// partitioning
+		let all_terms = || {
+			lin.terms
+				.iter()
+				.flat_map(|part| part.iter().map(|&(lit, coef)| (lit, coef)))
+		};
+
 		// Create structure with which coefficients use which bits
 		let mut bucket = vec![Vec::new(); bits];
 		for (i, bucket) in bucket.iter_mut().enumerate().take(bits) {
-			for (lit, coef) in pair {
-				if **coef & (1 << i) != 0 {
-					bucket.push(*lit);
+			for (lit, coef) in all_terms() {
+				if *coef & (1 << i) != 0 {
+					bucket.push(lit);
 				}
 			}
 		}
@@ -731,8 +733,9 @@ impl BoolLinAggregator {
 
 		// Add remaining (unconstrained) terms
 		debug_assert!(agg.len() <= lin.exp.num_free);
-		for (var, coeff) in agg.drain() {
-			partition.push((Constraint::AtMostOne, vec![(var.into(), coeff)]));
+		let agg_keys: Vec<Var> = agg.keys().copied().sorted().collect();
+		for var in agg_keys {
+			partition.push((Constraint::AtMostOne, vec![(var.into(), agg[&var])]));
 		}
 
 		k -= lin.exp.add;
