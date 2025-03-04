@@ -4,8 +4,7 @@ description = "build of the Kissat SAT solver for the pindakaas crate"
 version = "4.0.2"
 build = "build.rs"
 links = "kissat"
-exclude = ["vendor/kissat"]
-include = ["vendor/kissat/src/*.c"]
+include = ["src/*.{c,h}", "vendor/kissat/LICENSE", "vendor/kissat/src/*.{c,h}"]
 
 authors.workspace = true
 edition.workspace = true
