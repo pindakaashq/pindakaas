@@ -24,5 +24,8 @@ cc = { workspace = true }
 [dependencies]
 pindakaas-build-macros = { path = "../pindakaas-build-macros" }
 
+[features]
+tracing = []
+
 [lints]
 workspace = true

@@ -86,16 +86,21 @@ fn main() {
 		"vendor/cadical/src/watch.cpp",
 	];
 
-	let mut builder = cc::Build::new();
-	let build = builder
+	let mut build = cc::Build::new();
+	let _ = build
 		.cpp(true)
 		.include("vendor/cadical/src")
 		.flag_if_supported("-std=c++11")
 		.define("NBUILD", None)
 		.define("NCLOSEFROM", None)
 		.define("NTRACING", None)
-		.define("NUNLOCKED", None)
-		.define("QUIET", None);
+		.define("NUNLOCKED", None);
+
+	if cfg!(feature = "tracing") {
+		let _ = build.define("LOGGING", None);
+	} else {
+		let _ = build.define("QUIET", None);
+	}
 
 	#[cfg(not(debug_assertions))]
 	// I'm not sure why this is not automatic, but assertions still seem to trigger otherwise.
