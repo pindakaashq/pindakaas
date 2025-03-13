@@ -113,7 +113,7 @@ type Coeff = i64;
 #[pymodule]
 fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<Cnf>()?;
-	m.add_class::<CadicalSolver>()?;
+	m.add_class::<Cadical>()?;
 	m.add_class::<Unsatisfiable>()?;
 	m.add_class::<Comparator>()?;
 	Ok(())
@@ -228,12 +228,6 @@ impl Lit {
 	}
 
 	/// Returns the underlying variable of the literal, whether negated or not.
-	/// TODO not sure whether to also add this, especially if it's not in the rust interface
-	fn __abs__(&self) -> Self {
-		self.var()
-	}
-
-	/// Returns the underlying variable of the literal, whether negated or not.
 	fn var(&self) -> Self {
 		Self(self.0.var().into())
 	}
@@ -256,7 +250,7 @@ impl Display for Lit {
 
 #[pyclass(unsendable)]
 #[derive(Default)]
-struct CadicalSolver {
+struct Cadical {
 	solver: base::solver::cadical::Cadical,
 	vars: Option<base::Var>, // TODO currently hard to remove using MapSol
 	solution: Option<base::MapSol>,
@@ -294,7 +288,7 @@ impl SolveResult {
 // struct Solution(M);
 
 #[pymethods]
-impl CadicalSolver {
+impl Cadical {
 	#[new]
 	fn new() -> Self {
 		Self::default()

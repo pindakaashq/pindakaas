@@ -6,7 +6,7 @@ def main():
     cnf = pk.Cnf()
     a,b,c = cnf.add_variables(3)
     cnf.add_clause([~a,b]) # ~a \/ b
-    cnf.add_clause([abs(~b),c]) # ~b \/ c
+    cnf.add_clause([(~b).var(),c]) # b \/ c
     cnf = pk.Cnf(5) # More or less temporary work-around, starting with 5 vars
     e = cnf.add_variable()
     print(f"Starting from 5: {cnf}")
@@ -27,32 +27,28 @@ def main():
             print(f"{lit}, ", end="")
         print("\n", end="")
 
-    solver = pk.CadicalSolver() # should "inherit" from Cnf/ClauseDatabase
+    solver = pk.Cadical() # should "inherit" from Cnf/ClauseDatabase
     a = solver.add_variable()
     b = solver.add_variable()
     solver.add_clause([a,b])
     solver.add_clause([~a,~b])
     assert solver.solve() is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
-    print(f"{solver.value(a)}") # Also True/False/None
-    assert solver.value(a) != solver.value(b)
-    assert solver.solve() is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
-    print(f"2nd {solver.value(a)}") # Also True/False/None
-
-    return
-
+    # print(f"{solver.value(a)}") # Also True/False/None
+    # assert solver.value(a) != solver.value(b)
     # TODO: for completing CPMpy standard: timeouts
     # assert solver.solve(time_limit=datetime.duration(10))
 
     # TODO: all solutions
-    for sol in solver.solutions():
-        print(f"{sol}")
+    # for sol in solver.solutions():
+    #     print(f"{sol}")
 
     # TODO beyond: solver selection, encoder selection, improve implied constraints
     # `pip install pindakaas[solver]`
-    solver = pk.Solver(name="kissat")
+    # solver = pk.Solver(name="kissat")
 
+    # print(f"2nd {solver.value(a)}") # Also True/False/None
     # TODO nice to have:
-    cnf.add_linear(cnf, (2*a) + (3*b) + (5*c) <= 6) # Low priority: more overloading to create constraint objects
+    # cnf.add_linear(cnf, (2*a) + (3*b) + (5*c) <= 6) # Low priority: more overloading to create constraint objects
 
 if __name__ in "__main__":
     main()
