@@ -1,5 +1,5 @@
 use crate::{
-	bool_linear::{LimitComp, LinMarker, NormalizedBoolLinear, PosCoeff},
+	bool_linear::{Comparator, LimitComp, LinMarker, NormalizedBoolLinear, PosCoeff},
 	cardinality_one::CardinalityOne,
 	integer::IntVarEnc,
 	sorted::{Sorted, SortedEncoder},
@@ -23,6 +23,10 @@ pub struct SortingNetworkEncoder {
 }
 
 impl Cardinality {
+	pub fn comparator(&self) -> Comparator {
+		self.cmp.clone().into()
+	}
+
 	pub fn iter_lits(&self) -> impl Iterator<Item = Lit> + '_ {
 		self.lits.iter().copied()
 	}

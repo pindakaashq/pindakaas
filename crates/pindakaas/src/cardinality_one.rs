@@ -1,7 +1,7 @@
 use itertools::Itertools;
 
 use crate::{
-	bool_linear::{LimitComp, NormalizedBoolLinear},
+	bool_linear::{Comparator, LimitComp, NormalizedBoolLinear},
 	Checker, ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result, Valuation,
 };
 
@@ -67,6 +67,10 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, CardinalityOne> for BitwiseEncoder
 }
 
 impl CardinalityOne {
+	pub fn comparator(&self) -> Comparator {
+		self.cmp.clone().into()
+	}
+
 	pub fn iter_lits(&self) -> impl Iterator<Item = Lit> + '_ {
 		self.lits.iter().copied()
 	}
