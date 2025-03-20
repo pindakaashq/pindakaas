@@ -3,7 +3,7 @@ use crate::{
 	cardinality_one::CardinalityOne,
 	integer::IntVarEnc,
 	sorted::{Sorted, SortedEncoder},
-	Checker, ClauseDatabase, Encoder, Lit, Result, Valuation,
+	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Valuation,
 };
 
 // local marker trait, to ensure the previous definition only applies within this crate
@@ -23,6 +23,14 @@ pub struct SortingNetworkEncoder {
 }
 
 impl Cardinality {
+	pub fn iter_lits(&self) -> impl Iterator<Item = Lit> + '_ {
+		self.lits.iter().copied()
+	}
+
+	pub fn rhs(&self) -> Coeff {
+		self.k.into()
+	}
+
 	#[cfg(any(feature = "tracing", test))]
 	pub(crate) fn trace_print(&self) -> String {
 		use crate::trace::trace_print_lit;

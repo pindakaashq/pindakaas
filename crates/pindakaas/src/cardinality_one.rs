@@ -67,6 +67,10 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, CardinalityOne> for BitwiseEncoder
 }
 
 impl CardinalityOne {
+	pub fn iter_lits(&self) -> impl Iterator<Item = Lit> + '_ {
+		self.lits.iter().copied()
+	}
+
 	#[cfg(any(feature = "tracing", test))]
 	pub(crate) fn trace_print(&self) -> String {
 		use crate::trace::trace_print_lit;

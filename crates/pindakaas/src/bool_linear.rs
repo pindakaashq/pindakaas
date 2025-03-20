@@ -1578,12 +1578,26 @@ impl<DB: ClauseDatabase + ?Sized, Enc: Encoder<DB, BoolLinVariant>> Encoder<DB, 
 }
 
 impl NormalizedBoolLinear {
+	pub fn comparator(&self) -> Comparator {
+		self.cmp.clone().into()
+	}
+
 	pub fn is_empty(&self) -> bool {
 		self.terms.is_empty()
 	}
 
+	pub fn iter_terms(&self) -> impl Iterator<Item = (Lit, Coeff)> + '_ {
+		self.terms
+			.iter()
+			.flat_map(|part| part.iter().map(|&(lit, coef)| (lit, coef.into())))
+	}
+
 	pub fn len(&self) -> usize {
 		self.terms.len()
+	}
+
+	pub fn rhs(&self) -> Coeff {
+		self.k.into()
 	}
 
 	pub fn set_k(&mut self, k: Coeff) {
