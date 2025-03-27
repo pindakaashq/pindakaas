@@ -27,6 +27,9 @@ def main():
     except pk.Unsatisfiable as e:
         print(f"Caught Unsatisfiable exception: {e} of type {type(e)}")
 
+    # ccnf = cnf.with_conditions([~c])
+    # cnf.add_clause([a,b])
+
     cnf = pk.Cnf(5) # More or less temporary work-around, starting with 5 vars
     e = cnf.add_variable()
     print(f"Starting from 5: {cnf}")
@@ -48,6 +51,7 @@ def main():
     wcnf.add_clause([~a,b]) # ~a \/ b
     wcnf.add_clause([(~b).var(),c]) # b \/ c
     # TODO add and test Wcnf features
+
 
 
     solver = pk.Cadical() # should "inherit" from Cnf/ClauseDatabase

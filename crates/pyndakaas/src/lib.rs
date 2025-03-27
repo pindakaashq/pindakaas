@@ -7,7 +7,7 @@ use itertools::Itertools;
 use pindakaas_derive::PythonClauseDatabase;
 use std::{fmt::Display, num::NonZeroI32};
 
-use ::pindakaas::{self as base, solver::Solver, ClauseDatabaseTools, MapSol, Valuation};
+use ::pindakaas::{self as base, solver::Solver, MapSol, Valuation};
 use base::{
 	bool_linear::{BoolLinExp, BoolLinear, LinearEncoder},
 	Encoder,
@@ -164,6 +164,13 @@ impl ClauseIter {
 
 #[pymethods]
 impl Cnf {
+	// TODO more tricky, less useful
+	// fn with_conditions(&mut self, conditions: Vec<Lit>) -> Self {
+	// 	Self(::pindakaas::ClauseDatabaseTools::with_conditions(
+	// 		&mut self, conditions,
+	// 	))
+	// }
+
 	#[new]
 	#[pyo3(signature = (vars=None))]
 	fn new(vars: Option<usize>) -> (Self, ClauseDatabase) {
@@ -241,7 +248,8 @@ impl Display for Lit {
 //
 
 #[pyclass(unsendable)]
-#[derive(Default)]
+#[derive(Default, PythonClauseDatabase)]
+#[python_clause_database(db = solver)]
 struct Cadical {
 	solver: base::solver::cadical::Cadical,
 	vars: Option<base::Var>, // TODO currently hard to remove using MapSol
@@ -289,20 +297,6 @@ impl Cadical {
 	/// Number of variables
 	fn variables(&self) -> Option<NonZeroI32> {
 		self.vars.map(|v| v.into())
-	}
-
-	// TODO: since trait exposure doesn't quite work how we want, and because it is slow, and
-	// because ABC's are not supported by pyo3, we have code duplication. Perhaps adding
-	// a derive proc macro would be the answer.
-	fn add_clause(&mut self, cl: Vec<Lit>) -> Result {
-		self.solver
-			.add_clause(cl.into_iter().map(|l| l.0))
-			.map_err(|_| Unsatisfiable)
-	}
-
-	fn add_variable(&mut self) -> Lit {
-		self.vars = Some(self.solver.new_var());
-		Lit(self.vars.unwrap().into())
 	}
 
 	fn solve(&mut self) -> Option<bool> {

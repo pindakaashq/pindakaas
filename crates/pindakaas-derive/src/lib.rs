@@ -427,11 +427,23 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 	.into()
 }
 
+#[derive(FromDeriveInput)]
+#[darling(attributes(python_clause_database))]
+struct PythonClauseDatabaseOpts {
+	/// The `db` struct field which implements ClauseDatabase and ClauseDatabaseTools
+	#[darling(default)]
+	db: Option<Ident>,
+}
+
 #[proc_macro_derive(PythonClauseDatabase, attributes(python_clause_database))]
 pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(input);
-	// let opts = IpasirOpts::from_derive_input(&input).expect("Invalid options");
+	let opts = PythonClauseDatabaseOpts::from_derive_input(&input).expect("Invalid options");
 	let DeriveInput { ident, .. } = input;
+	let db = match opts.db {
+		Some(x) => quote! {  self.#x },
+		None => quote! { self.0 },
+	};
 
 	quote! {
 			// #[pyclass(extends=ClauseDatabase)]
@@ -442,7 +454,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	impl #ident {
 		fn add_clause_from_slice(&mut self, clause: Vec<Lit>) -> Result {
 			::pindakaas::ClauseDatabase::add_clause_from_slice(
-				&mut self.0,
+				&mut #db,
 				&clause.into_iter().map(|l| l.0).collect_vec(),
 			)
 			.map_err(|_| Unsatisfiable)
@@ -451,7 +463,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	fn new_var_range(&mut self, len: usize) -> VarRange {
 			VarRange(
 			::pindakaas::ClauseDatabase::new_var_range(
-							&mut self.0,
+							&mut #db,
 							len
 							))
 	}
@@ -467,7 +479,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	fn add_variable(&mut self) -> Lit {
 			Lit(
 			::pindakaas::ClauseDatabaseTools::new_var(
-							&mut self.0
+							&mut #db
 						).into())
 	}
 
@@ -502,7 +514,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		);
 		let enc: LinearEncoder = LinearEncoder::default();
 		Ok(enc.encode(
-			&mut self.0,
+			&mut #db,
 			&BoolLinear::new(
 				BoolLinExp::from_slices(
 					&coefficients,
@@ -513,6 +525,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 			),
 		)?)
 	}
+
         //
         // TODO named lits, with_conditions
 
