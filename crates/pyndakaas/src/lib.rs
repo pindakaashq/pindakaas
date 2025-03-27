@@ -7,7 +7,7 @@
 // TODO better type checking and errors (e.g. adding non-list to add_clause currently gives `TypeError: argument 'clause': 'Lit' object cannot be converted to 'Sequence'`)
 use itertools::Itertools;
 use pindakaas_derive::{PythonClauseDatabase, PythonSolver};
-use std::{fmt::Display, num::NonZeroI32};
+use std::fmt::Display;
 
 use ::pindakaas::{self as base, solver::Solver, MapSol, Valuation};
 use base::{
@@ -18,7 +18,6 @@ use pyo3::{exceptions::PyException, prelude::*};
 
 type Clause = Vec<Lit>;
 
-// TODO make ABC?
 #[pyclass(subclass)]
 struct ClauseDatabase();
 
@@ -70,6 +69,7 @@ impl VarRange {
 	}
 }
 
+// TODO use create_exception! ?
 #[pyclass(extends = PyException)]
 struct Unsatisfiable;
 
@@ -104,11 +104,7 @@ impl From<Lit> for base::Lit {
 	}
 }
 
-// TODO use this?
-// #[pyclass]
-// #[derive(Clone)]
-// struct Comparator(base::bool_linear::Comparator);
-
+// TODO [?] How to avoid this duplication?
 #[pyclass(eq, eq_int)]
 #[derive(Clone, PartialEq, Default)]
 enum Comparator {
@@ -118,7 +114,6 @@ enum Comparator {
 	GreaterEq,
 }
 
-// TODO way to avoid duplication?
 impl From<Comparator> for base::bool_linear::Comparator {
 	fn from(val: Comparator) -> Self {
 		match val {
@@ -192,9 +187,10 @@ impl Cnf {
 		format!("{}", self.0)
 	}
 
-	// TODO check if works?
+	// TODO [?] Shouldn't we make reading from_file part of ClauseDatabaseTools?
+	// TODO [?] Doesn't compile for weird reasons, although I'm fairly sure this is right.
 	// #[staticmethod]
-	// fn from_file(path: PathBuf) -> Result<Self, std::io::Error> {
+	// fn from_file(path: PathBuf) -> Result<Cnf, std::io::Error> {
 	// 	Ok(Self(base::Cnf::from_file(&path)?))
 	// }
 }
@@ -259,7 +255,6 @@ struct Cadical {
 
 #[pyclass(unsendable)]
 #[derive(Default, PythonClauseDatabase, PythonSolver)]
-// TODO can we derive PythonClauseDatabase by PythonSolver?
 #[python_clause_database(db = solver)]
 #[python_solver(slv = solver)]
 struct Kissat {

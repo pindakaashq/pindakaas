@@ -7,6 +7,7 @@ def main():
     b,c = cnf.add_variables(2)
     cnf.add_clause([~a,b]) # ~a \/ b
     cnf.add_clause([(~b).var(),c]) # b \/ c
+    # Not allowed: cnf.add_clause([-1,-2]) # `TypeError: argument 'clause': 'int' object cannot be converted to 'Lit'`
 
     try:
         cnf.add_clause([])
