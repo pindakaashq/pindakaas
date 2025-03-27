@@ -3,6 +3,8 @@
 	reason = "pyo3 macro will generate unused qualified types"
 )]
 
+// TODO features -> extra installs via pip (e.g. pip install pindakaas[cadical,kissat])
+// TODO better type checking and errors (e.g. adding non-list to add_clause currently gives `TypeError: argument 'clause': 'Lit' object cannot be converted to 'Sequence'`)
 use itertools::Itertools;
 use pindakaas_derive::{PythonClauseDatabase, PythonSolver};
 use std::{fmt::Display, num::NonZeroI32};
@@ -257,6 +259,17 @@ impl Display for Lit {
 struct Cadical {
 	solver: base::solver::cadical::Cadical,
 	vars: Option<base::Var>, // TODO currently hard to remove using MapSol
+	solution: Option<base::MapSol>,
+}
+
+#[pyclass(unsendable)]
+#[derive(Default, PythonClauseDatabase, PythonSolver)]
+// TODO can we derive PythonClauseDatabase by PythonSolver?
+#[python_clause_database(db = solver)]
+#[python_solver(slv = solver)]
+struct Kissat {
+	solver: base::solver::kissat::Kissat,
+	vars: Option<base::Var>,
 	solution: Option<base::MapSol>,
 }
 

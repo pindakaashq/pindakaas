@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
 import pindakaas as pk
 
-from abc import ABC, abstractmethod
-
-# class Animal(ABC):
-#     @abstractmethod
-#     def do_something(self) -> None: ...
-#     def do_nothing(self) -> None: ...
-#     def make_noise(self) -> None: ...
-# class Dog(Animal):
-#     def __init__(self): ...
-# class LazyCat(Animal):
-#     def __init__(self): ...
-#     def sleep(self) -> None: ...
-
-
 def main():
     cnf = pk.Cnf()
     a = cnf.add_variable()
@@ -60,6 +46,11 @@ def main():
     solver.add_clause([a,b])
     solver.add_clause([~a,~b])
     assert solver.solve() is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
+
+    kissat = pk.Kissat()
+    kissat.add_clause([kissat.add_variable()])
+    assert solver.solve() is True
+
     # print(f"{solver.value(a)}") # Also True/False/None
     # assert solver.value(a) != solver.value(b)
     # TODO: for completing CPMpy standard: timeouts
