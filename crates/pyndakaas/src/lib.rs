@@ -4,7 +4,8 @@
 )]
 
 use itertools::Itertools;
-use std::{fmt::Display, num::NonZeroI32, path::PathBuf};
+use pindakaas_derive::PythonClauseDatabase;
+use std::{fmt::Display, num::NonZeroI32};
 
 use ::pindakaas::{self as base, solver::Solver, ClauseDatabaseTools, MapSol, Valuation};
 use base::{
@@ -15,16 +16,39 @@ use pyo3::{exceptions::PyException, prelude::*};
 
 type Clause = Vec<Lit>;
 
-#[pyclass]
-struct Cnf(base::Cnf);
+// TODO make ABC?
+#[pyclass(subclass)]
+struct ClauseDatabase();
 
-#[pyclass]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Lit(base::Lit);
+#[pymethods]
+impl ClauseDatabase {
+	#[new]
+	fn new() -> Self {
+		Self()
+	}
+
+	#[allow(unused_variables, reason = "Pseudo-abstract method")]
+	fn add_clause_from_slice(&mut self, clause: Vec<Lit>) -> Result {
+		unimplemented!("ABSTRACT")
+	}
+
+	#[allow(unused_variables, reason = "Pseudo-abstract method")]
+	fn new_var_range(&mut self, len: usize) -> VarRange {
+		unimplemented!("ABSTRACT")
+	}
+
+	fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
+		self.add_clause_from_slice(clause)
+	}
+}
 
 #[pyclass]
 #[derive(Clone)]
 struct VarRange(base::VarRange);
+
+#[pyclass]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct Lit(base::Lit);
 
 #[pyclass]
 struct VarRangeIter(std::vec::IntoIter<Lit>);
@@ -42,10 +66,9 @@ impl VarRangeIter {
 
 #[pymethods]
 impl VarRange {
-	// TODO check lifetime
 	fn __iter__(&mut self) -> VarRangeIter {
 		VarRangeIter(self.0.iter_lits().map(Lit).collect_vec().into_iter())
-		// VarRangeIter(self.0.iter_lits().map(|l| Lit(l)))
+		// TODO Non-collect version WIP, might require unsupported lifetimes: VarRangeIter(self.0.iter_lits().map(|l| Lit(l)))
 	}
 }
 
@@ -83,6 +106,7 @@ impl From<Lit> for base::Lit {
 	}
 }
 
+// TODO use this?
 // #[pyclass]
 // #[derive(Clone)]
 // struct Comparator(base::bool_linear::Comparator);
@@ -107,17 +131,22 @@ impl From<Comparator> for base::bool_linear::Comparator {
 	}
 }
 
-// TODO why not excport Coeff from lib?
+// TODO [?] why not export Coeff from lib?
 type Coeff = i64;
 
 #[pymodule]
 fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<Cnf>()?;
+	m.add_class::<Wcnf>()?;
 	m.add_class::<Cadical>()?;
 	m.add_class::<Unsatisfiable>()?;
 	m.add_class::<Comparator>()?;
 	Ok(())
 }
+
+#[pyclass(extends=ClauseDatabase)]
+#[derive(PythonClauseDatabase)]
+struct Cnf(base::Cnf);
 
 #[pyclass]
 struct ClauseIter(std::vec::IntoIter<Clause>);
@@ -137,41 +166,8 @@ impl ClauseIter {
 impl Cnf {
 	#[new]
 	#[pyo3(signature = (vars=None))]
-	fn new(vars: Option<usize>) -> Self {
-		Self(base::Cnf::new(vars))
-	}
-
-	///
-	/// Encode a linear constraint over Boolean literals
-	/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
-	/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
-	#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1)))]
-	fn add_linear(
-		&mut self,
-		literals: Vec<Lit>,
-		coefficients: Option<Vec<Coeff>>,
-		// TODO I'm not sure if adding Option is the best way to allow None to return default
-		comparator: Option<Comparator>,
-		k: Option<Coeff>,
-	) -> Result {
-		let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
-		assert_eq!(
-			coefficients.len(),
-			literals.len(),
-			"Literals and coefficients should have the same length"
-		);
-		let enc: LinearEncoder = LinearEncoder::default();
-		Ok(enc.encode(
-			&mut self.0,
-			&BoolLinear::new(
-				BoolLinExp::from_slices(
-					&coefficients,
-					&literals.into_iter().map(|l| l.0).collect_vec(),
-				),
-				comparator.unwrap_or_default().into(),
-				k.unwrap_or(1),
-			),
-		)?)
+	fn new(vars: Option<usize>) -> (Self, ClauseDatabase) {
+		(Self(base::Cnf::new(vars)), ClauseDatabase::new())
 	}
 
 	fn __iter__(&self) -> ClauseIter {
@@ -190,34 +186,30 @@ impl Cnf {
 		format!("{}", self.0)
 	}
 
-	fn add_clause(&mut self, cl: Vec<Lit>) -> Result {
-		self.0
-			.add_clause(cl.into_iter().map(|l| l.0))
-			.map_err(|_| Unsatisfiable)
-	}
+	// #[staticmethod]
+	// fn from_file(path: PathBuf) -> Result<Self, std::io::Error> {
+	// 	Ok(Self(base::Cnf::from_file(&path)?))
+	// }
+}
 
-	fn add_variable(&mut self) -> Lit {
-		Lit(self.0.new_var().into())
-	}
+#[pyclass(extends=ClauseDatabase)]
+#[derive(PythonClauseDatabase)]
+struct Wcnf(base::Wcnf);
 
-	fn add_variables(&mut self, len: usize) -> VarRange {
-		VarRange(base::ClauseDatabase::new_var_range(&mut self.0, len))
-	}
-
-	#[staticmethod]
-	fn from_file(path: PathBuf) -> Result<Self, std::io::Error> {
-		Ok(Self(base::Cnf::from_file(&path)?))
+#[pymethods]
+impl Wcnf {
+	#[new]
+	#[pyo3(signature = (vars=None))]
+	fn new(vars: Option<usize>) -> (Self, ClauseDatabase) {
+		(
+			Self(base::Wcnf::from(base::Cnf::new(vars))),
+			ClauseDatabase::new(),
+		)
 	}
 }
 
 #[pymethods]
 impl Lit {
-	// TODO probably don't add this one
-	// #[new]
-	// fn new(value: NonZeroI32) -> Self {
-	// 	Self(base::Lit::from_raw(value))
-	// }
-
 	/// Returns whether the literal is a negation of the underlying variable.
 	fn is_negated(&self) -> bool {
 		self.0.is_negated()

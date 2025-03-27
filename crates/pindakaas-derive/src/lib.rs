@@ -427,6 +427,109 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 	.into()
 }
 
+#[proc_macro_derive(PythonClauseDatabase, attributes(python_clause_database))]
+pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
+	let input = parse_macro_input!(input);
+	// let opts = IpasirOpts::from_derive_input(&input).expect("Invalid options");
+	let DeriveInput { ident, .. } = input;
+
+	quote! {
+			// #[pyclass(extends=ClauseDatabase)]
+			// struct #ident(base::Cnf);
+
+			// use ::pindakaas::ClauseDatabase;
+	#[pymethods]
+	impl #ident {
+		fn add_clause_from_slice(&mut self, clause: Vec<Lit>) -> Result {
+			::pindakaas::ClauseDatabase::add_clause_from_slice(
+				&mut self.0,
+				&clause.into_iter().map(|l| l.0).collect_vec(),
+			)
+			.map_err(|_| Unsatisfiable)
+		}
+
+	fn new_var_range(&mut self, len: usize) -> VarRange {
+			VarRange(
+			::pindakaas::ClauseDatabase::new_var_range(
+							&mut self.0,
+							len
+							))
+	}
+
+
+				// TODO split out these functions which come from tools (but for no real reason not
+				// to expose these in python)
+	fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
+			self.add_clause_from_slice(clause)
+
+	}
+
+	fn add_variable(&mut self) -> Lit {
+			Lit(
+			::pindakaas::ClauseDatabaseTools::new_var(
+							&mut self.0
+						).into())
+	}
+
+	fn add_variables(&mut self, len: usize) -> VarRange {
+			self.new_var_range(len)
+							// TODO not sure if we can make a generator here, but perhaps that's
+							// the proper translation to python
+			// Lit(
+			// ::pindakaas::ClauseDatabaseTools::new_vars(
+			// 				&mut self.0
+			// 			).into())
+	}
+
+	///
+	/// Encode a linear constraint over Boolean literals
+	/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
+	/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
+	#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1)))]
+	fn add_linear(
+		&mut self,
+		literals: Vec<Lit>,
+		coefficients: Option<Vec<Coeff>>,
+		// TODO I'm not sure if adding Option is the best way to allow None to return default
+		comparator: Option<Comparator>,
+		k: Option<Coeff>,
+	) -> Result {
+		let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
+		assert_eq!(
+			coefficients.len(),
+			literals.len(),
+			"Literals and coefficients should have the same length"
+		);
+		let enc: LinearEncoder = LinearEncoder::default();
+		Ok(enc.encode(
+			&mut self.0,
+			&BoolLinear::new(
+				BoolLinExp::from_slices(
+					&coefficients,
+					&literals.into_iter().map(|l| l.0).collect_vec(),
+				),
+				comparator.unwrap_or_default().into(),
+				k.unwrap_or(1),
+			),
+		)?)
+	}
+        //
+        // TODO named lits, with_conditions
+
+
+		// Lit(self.0.new_var().into())
+	//
+	// fn add_variables(&mut self, len: usize) -> VarRange {
+	// 	VarRange(base::ClauseDatabase::new_var_range(&mut self.0, len))
+	// }
+
+
+	}
+
+		}
+	.into()
+}
+
 fn default_true() -> bool {
 	true
 }
