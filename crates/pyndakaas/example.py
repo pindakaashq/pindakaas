@@ -40,16 +40,24 @@ def main():
 
 
 
-    solver = pk.Cadical() # should "inherit" from Cnf/ClauseDatabase
-    a = solver.add_variable()
-    b = solver.add_variable()
-    solver.add_clause([a,b])
-    solver.add_clause([~a,~b])
-    assert solver.solve() is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
+    cadical = pk.Cadical() # should "inherit" from Cnf/ClauseDatabase
+    a = cadical.add_variable()
+    b = cadical.add_variable()
+    cadical.add_clause([a,b])
+    cadical.add_clause([~a,~b])
+    assert cadical.solve([a,b]) is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
+    assert cadical.value(a) is not cadical.value(b)
 
     kissat = pk.Kissat()
-    kissat.add_clause([kissat.add_variable()])
-    assert solver.solve() is True
+    a = kissat.add_variable()
+    kissat.add_clause([a])
+    assert kissat.solve([a,b]) is True
+    assert kissat.value(a) is True
+
+    # solver = pk.Solver()
+
+    # TODO translate pysat's pigeonhole problem to pindakaas
+
 
     # print(f"{solver.value(a)}") # Also True/False/None
     # assert solver.value(a) != solver.value(b)

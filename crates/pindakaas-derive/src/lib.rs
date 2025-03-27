@@ -565,18 +565,10 @@ pub fn python_solver_derive(input: TokenStream) -> TokenStream {
 		Self::default()
 	}
 
-	/// Number of variables
-	fn variables(&self) -> Option<NonZeroI32> {
-		self.vars.map(|v| v.into())
-	}
-		fn solve(&mut self) -> Option<bool> {
+		fn solve(&mut self, vars: Vec<Lit>) -> Option<bool> {
 			match #slv.solve() {
 				::pindakaas::solver::SolveResult::Satisfied(sol) => {
-					self.solution = Some(
-						self.vars
-							.map(|v| MapSol::new(base::VarRange::until(v), &sol))
-							.unwrap_or_default(),
-					);
+					self.solution = Some(MapSol::new(vars, &sol));
 					Some(true)
 				}
 				::pindakaas::solver::SolveResult::Unsatisfiable(_) => Some(false),

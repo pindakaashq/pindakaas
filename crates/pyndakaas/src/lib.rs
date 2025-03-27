@@ -38,10 +38,6 @@ impl ClauseDatabase {
 	fn new_var_range(&mut self, len: usize) -> VarRange {
 		unimplemented!("ABSTRACT")
 	}
-
-	fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
-		self.add_clause_from_slice(clause)
-	}
 }
 
 #[pyclass]
@@ -258,7 +254,6 @@ impl Display for Lit {
 #[python_solver(slv = solver)]
 struct Cadical {
 	solver: base::solver::cadical::Cadical,
-	vars: Option<base::Var>, // TODO currently hard to remove using MapSol
 	solution: Option<base::MapSol>,
 }
 
@@ -269,7 +264,6 @@ struct Cadical {
 #[python_solver(slv = solver)]
 struct Kissat {
 	solver: base::solver::kissat::Kissat,
-	vars: Option<base::Var>,
 	solution: Option<base::MapSol>,
 }
 
@@ -302,7 +296,7 @@ impl SolveResult {
 
 // #[pyclass]
 // struct Solution(base::solver::cadical::CadicalSol); // TODO can't because of lifetime
-// struct Solution(M);
+// 													// struct Solution(M);
 
 #[cfg(test)]
 mod tests {
