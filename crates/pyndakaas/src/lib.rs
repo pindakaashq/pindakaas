@@ -4,7 +4,7 @@
 )]
 
 use itertools::Itertools;
-use pindakaas_derive::PythonClauseDatabase;
+use pindakaas_derive::{PythonClauseDatabase, PythonSolver};
 use std::{fmt::Display, num::NonZeroI32};
 
 use ::pindakaas::{self as base, solver::Solver, MapSol, Valuation};
@@ -139,6 +139,7 @@ fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<Cnf>()?;
 	m.add_class::<Wcnf>()?;
 	m.add_class::<Cadical>()?;
+	m.add_class::<Kissat>()?;
 	m.add_class::<Unsatisfiable>()?;
 	m.add_class::<Comparator>()?;
 	Ok(())
@@ -193,6 +194,7 @@ impl Cnf {
 		format!("{}", self.0)
 	}
 
+	// TODO check if works?
 	// #[staticmethod]
 	// fn from_file(path: PathBuf) -> Result<Self, std::io::Error> {
 	// 	Ok(Self(base::Cnf::from_file(&path)?))
@@ -248,8 +250,10 @@ impl Display for Lit {
 //
 
 #[pyclass(unsendable)]
-#[derive(Default, PythonClauseDatabase)]
+#[derive(Default, PythonClauseDatabase, PythonSolver)]
+// TODO can we derive PythonClauseDatabase by PythonSolver?
 #[python_clause_database(db = solver)]
+#[python_solver(slv = solver)]
 struct Cadical {
 	solver: base::solver::cadical::Cadical,
 	vars: Option<base::Var>, // TODO currently hard to remove using MapSol
@@ -286,38 +290,6 @@ impl SolveResult {
 // #[pyclass]
 // struct Solution(base::solver::cadical::CadicalSol); // TODO can't because of lifetime
 // struct Solution(M);
-
-#[pymethods]
-impl Cadical {
-	#[new]
-	fn new() -> Self {
-		Self::default()
-	}
-
-	/// Number of variables
-	fn variables(&self) -> Option<NonZeroI32> {
-		self.vars.map(|v| v.into())
-	}
-
-	fn solve(&mut self) -> Option<bool> {
-		match self.solver.solve() {
-			::pindakaas::solver::SolveResult::Satisfied(sol) => {
-				self.solution = Some(
-					self.vars
-						.map(|v| MapSol::new(base::VarRange::until(v), &sol))
-						.unwrap_or_default(),
-				);
-				Some(true)
-			}
-			::pindakaas::solver::SolveResult::Unsatisfiable(_) => Some(false),
-			::pindakaas::solver::SolveResult::Unknown => None,
-		}
-	}
-
-	fn value(&self, lit: Lit) -> Option<bool> {
-		self.solution.as_ref().map(|sol| sol.value(lit.into()))
-	}
-}
 
 #[cfg(test)]
 mod tests {

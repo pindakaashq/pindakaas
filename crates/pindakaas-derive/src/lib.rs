@@ -430,7 +430,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 #[derive(FromDeriveInput)]
 #[darling(attributes(python_clause_database))]
 struct PythonClauseDatabaseOpts {
-	/// The `db` struct field which implements ClauseDatabase and ClauseDatabaseTools
+	/// The struct field which implements ClauseDatabase and ClauseDatabaseTools
 	#[darling(default)]
 	db: Option<Ident>,
 }
@@ -439,17 +439,14 @@ struct PythonClauseDatabaseOpts {
 pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(input);
 	let opts = PythonClauseDatabaseOpts::from_derive_input(&input).expect("Invalid options");
-	let DeriveInput { ident, .. } = input;
+	// TODO actually, I want to make this non-optional but I can't get an Ident for tuple struct field access
 	let db = match opts.db {
 		Some(x) => quote! {  self.#x },
 		None => quote! { self.0 },
 	};
+	let DeriveInput { ident, .. } = input;
 
 	quote! {
-			// #[pyclass(extends=ClauseDatabase)]
-			// struct #ident(base::Cnf);
-
-			// use ::pindakaas::ClauseDatabase;
 	#[pymethods]
 	impl #ident {
 		fn add_clause_from_slice(&mut self, clause: Vec<Lit>) -> Result {
@@ -540,6 +537,59 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	}
 
 		}
+	.into()
+}
+
+#[derive(FromDeriveInput)]
+#[darling(attributes(python_solver))]
+struct PythonSolverOpts {
+	/// The `slv` struct field which implements Solver
+	slv: Ident,
+}
+
+#[proc_macro_derive(PythonSolver, attributes(python_solver))]
+pub fn python_solver_derive(input: TokenStream) -> TokenStream {
+	let input = parse_macro_input!(input);
+	let slv = PythonSolverOpts::from_derive_input(&input)
+		.expect("Invalid options")
+		.slv;
+	let slv = quote! { self.#slv };
+	let DeriveInput { ident, .. } = input;
+
+	quote! {
+		#[pymethods]
+		impl #ident {
+
+	#[new]
+	fn new() -> Self {
+		Self::default()
+	}
+
+	/// Number of variables
+	fn variables(&self) -> Option<NonZeroI32> {
+		self.vars.map(|v| v.into())
+	}
+		fn solve(&mut self) -> Option<bool> {
+			match #slv.solve() {
+				::pindakaas::solver::SolveResult::Satisfied(sol) => {
+					self.solution = Some(
+						self.vars
+							.map(|v| MapSol::new(base::VarRange::until(v), &sol))
+							.unwrap_or_default(),
+					);
+					Some(true)
+				}
+				::pindakaas::solver::SolveResult::Unsatisfiable(_) => Some(false),
+				::pindakaas::solver::SolveResult::Unknown => None,
+			}
+		}
+
+		fn value(&self, lit: Lit) -> Option<bool> {
+			self.solution.as_ref().map(|sol| sol.value(lit.into()))
+		}
+
+	}
+	}
 	.into()
 }
 
