@@ -9,10 +9,11 @@ def main():
     cnf.add_clause([(~b).var(),c]) # b \/ c
     # Not allowed: cnf.add_clause([-1,-2]) # `TypeError: argument 'clause': 'int' object cannot be converted to 'Lit'`
 
-    ccnf = cnf.with_conditions([a,b])
-    ccnf.add_clause_from_slice([c]) # (-1 /\ -2) -> 3
-    print(f"CCNF {ccnf}")
+    with cnf.with_conditions([a,b]) as ccnf:
+        ccnf.add_clause([c]) # (-1 /\ -2) -> 3
+    print(f"CCNF {ccnf}") # TODO not sure why still available but ok
     print(f"CNF {cnf}")
+    
 
     try:
         cnf.add_clause([])
