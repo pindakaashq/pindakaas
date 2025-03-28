@@ -6,7 +6,7 @@
 // TODO features -> extra installs via pip (e.g. pip install pindakaas[cadical,kissat])
 // TODO better type checking and errors (e.g. adding non-list to add_clause currently gives `TypeError: argument 'clause': 'Lit' object cannot be converted to 'Sequence'`)
 use itertools::Itertools;
-use pindakaas_derive::{PythonClauseDatabase, PythonClauseDatabaseTools, PythonSolver};
+use pindakaas_derive::{PythonClauseDatabase, PythonSolver};
 use std::fmt::Display;
 
 use ::pindakaas::{self as base, solver::Solver, MapSol, Valuation};
@@ -139,7 +139,7 @@ fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 #[pyclass(extends=ClauseDatabase)]
-#[derive(PythonClauseDatabase, PythonClauseDatabaseTools)]
+#[derive(PythonClauseDatabase)]
 struct Cnf(base::Cnf);
 
 #[pyclass]
@@ -188,7 +188,7 @@ impl Cnf {
 }
 
 #[pyclass(extends=ClauseDatabase)]
-#[derive(PythonClauseDatabase, PythonClauseDatabaseTools)]
+#[derive(PythonClauseDatabase)]
 struct Wcnf(base::Wcnf);
 
 #[pymethods]
@@ -232,10 +232,9 @@ impl Display for Lit {
 //
 
 #[pyclass(unsendable)]
-#[derive(Default, PythonClauseDatabase, PythonClauseDatabaseTools, PythonSolver)]
+#[derive(Default, PythonClauseDatabase, PythonSolver)]
 // TODO can we derive PythonClauseDatabase by PythonSolver?
 #[python_clause_database(db = solver)]
-#[python_clause_database_tools(db = solver)]
 #[python_solver(slv = solver)]
 struct Cadical {
 	solver: base::solver::cadical::Cadical,
@@ -243,9 +242,8 @@ struct Cadical {
 }
 
 #[pyclass(unsendable)]
-#[derive(Default, PythonClauseDatabase, PythonClauseDatabaseTools, PythonSolver)]
+#[derive(Default, PythonClauseDatabase, PythonSolver)]
 #[python_clause_database(db = solver)]
-#[python_clause_database_tools(db = solver)]
 #[python_solver(slv = solver)]
 struct Kissat {
 	solver: base::solver::kissat::Kissat,
@@ -288,8 +286,9 @@ mod tests {
 
 	use std::ffi::CString;
 
-	use super::*;
 	use pyo3::{ffi::c_str, Python};
+
+	use super::*;
 
 	#[pyclass]
 	struct LoggingStdout;

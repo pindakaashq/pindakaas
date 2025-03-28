@@ -433,18 +433,8 @@ struct PythonClauseDatabaseOpts {
 	/// The struct field which implements ClauseDatabase and ClauseDatabaseTools
 	#[darling(default)]
 	db: Option<Ident>,
-}
-
-#[derive(FromDeriveInput)]
-#[darling(attributes(python_clause_database_tools))]
-// TODO not sure how to avoid duplication
-struct PythonClauseDatabaseToolsOpts {
-	/// The struct field which implements ClauseDatabase and ClauseDatabaseTools
 	#[darling(default)]
-	db: Option<Ident>,
-	// /// Whether to derive the ConditionalDatabase
-	// #[darling(default)]
-	// conditions: Option<bool>,
+	tools: Option<bool>,
 }
 
 #[proc_macro_derive(PythonClauseDatabase, attributes(python_clause_database))]
@@ -458,46 +448,59 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	};
 	let DeriveInput { ident, .. } = input;
 
-	quote! {
-	#[pymethods]
-	impl #ident {
-		fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
-			::pindakaas::ClauseDatabase::add_clause_from_slice(
-				&mut #db,
-				&clause.into_iter().map(|l| l.0).collect_vec(),
-			)
-			.map_err(|_| Unsatisfiable)
+	let tools = if opts.tools.unwrap_or(true) {
+		quote! {
+		#[pymethods]
+		impl #ident {
+
+					// TODO not entirely sure if this shouldn't also go to ClauseDatabase
+		fn add_variable(&mut self) -> Lit {
+				Lit(
+				::pindakaas::ClauseDatabaseTools::new_var(
+								&mut #db
+							).into())
 		}
 
-	fn add_variables(&mut self, len: usize) -> VarRange {
-			VarRange(
-			::pindakaas::ClauseDatabase::new_var_range(
-							&mut #db,
-							len
-							))
-
-								// TODO not sure if we can make a generator here, but perhaps that's
-								// the proper translation to python
-				// Lit(
-				// ::pindakaas::ClauseDatabaseTools::new_vars(
-				// 				&mut self.0
-				// 			).into())
-	}
+		///// TODO not sure if this one should be in ClauseDatabase or ClauseDatabaseTools
+		///
+		/// Encode a linear constraint over Boolean literals
+		/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
+		/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
+		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
+		fn add_linear(
+			&mut self,
+			literals: Vec<Lit>,
+			coefficients: Option<Vec<Coeff>>,
+			// TODO I'm not sure if adding Option is the best way to allow None to return default
+			comparator: Option<Comparator>,
+			k: Option<Coeff>,
+						conditions: Vec<Lit>,
+		) -> Result {
+			let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
+			assert_eq!(
+				coefficients.len(),
+				literals.len(),
+				"Literals and coefficients should have the same length"
+			);
+			let enc: LinearEncoder = LinearEncoder::default();
+						let mut db = ::pindakaas::ClauseDatabaseTools::with_conditions(&mut #db, conditions.into_iter().map(|l| l.into()).collect());
+			Ok(enc.encode(
+				&mut db,
+				&BoolLinear::new(
+					BoolLinExp::from_slices(
+						&coefficients,
+						&literals.into_iter().map(|l| l.0).collect_vec(),
+					),
+					comparator.unwrap_or_default().into(),
+					k.unwrap_or(1),
+				),
+			)?)
 		}
 		}
-	.into()
-}
-
-#[proc_macro_derive(PythonClauseDatabaseTools, attributes(python_clause_database_tools))]
-pub fn python_clause_database_tools_derive(input: TokenStream) -> TokenStream {
-	let input = parse_macro_input!(input);
-
-	let opts = PythonClauseDatabaseToolsOpts::from_derive_input(&input).expect("Invalid options");
-	let db = match opts.db {
-		Some(x) => quote! {  self.#x },
-		None => quote! { self.0 },
+		}
+	} else {
+		quote! {()}
 	};
-	let DeriveInput { ident, .. } = input;
 
 	/*
 	let conditional_database = if opts.conditions.unwrap_or(true) {
@@ -601,58 +604,34 @@ pub fn python_clause_database_tools_derive(input: TokenStream) -> TokenStream {
 		*/
 
 	quote! {
-		#[pymethods]
-		impl #ident {
-
-                    // TODO not entirely sure if this shouldn't also go to ClauseDatabase
-		fn add_variable(&mut self) -> Lit {
-				Lit(
-				::pindakaas::ClauseDatabaseTools::new_var(
-								&mut #db
-							).into())
+	#[pymethods]
+	impl #ident {
+		fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
+			::pindakaas::ClauseDatabase::add_clause_from_slice(
+				&mut #db,
+				&clause.into_iter().map(|l| l.0).collect_vec(),
+			)
+			.map_err(|_| Unsatisfiable)
 		}
 
-        ///// TODO not sure if this one should be in ClauseDatabase or ClauseDatabaseTools
-		///
-		/// Encode a linear constraint over Boolean literals
-		/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
-		/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
-		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
-		fn add_linear(
-			&mut self,
-			literals: Vec<Lit>,
-			coefficients: Option<Vec<Coeff>>,
-			// TODO I'm not sure if adding Option is the best way to allow None to return default
-			comparator: Option<Comparator>,
-			k: Option<Coeff>,
-                        conditions: Vec<Lit>,
-		) -> Result {
-			let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
-			assert_eq!(
-				coefficients.len(),
-				literals.len(),
-				"Literals and coefficients should have the same length"
-			);
-			let enc: LinearEncoder = LinearEncoder::default();
-                        let mut db = ::pindakaas::ClauseDatabaseTools::with_conditions(&mut #db, conditions.into_iter().map(|l| l.into()).collect());
-			Ok(enc.encode(
-				&mut db,
-				&BoolLinear::new(
-					BoolLinExp::from_slices(
-						&coefficients,
-						&literals.into_iter().map(|l| l.0).collect_vec(),
-					),
-					comparator.unwrap_or_default().into(),
-					k.unwrap_or(1),
-				),
-			)?)
-		}
+	fn add_variables(&mut self, len: usize) -> VarRange {
+			VarRange(
+			::pindakaas::ClauseDatabase::new_var_range(
+							&mut #db,
+							len
+							))
+
+								// TODO not sure if we can make a generator here, but perhaps that's
+								// the proper translation to python
+				// Lit(
+				// ::pindakaas::ClauseDatabaseTools::new_vars(
+				// 				&mut self.0
+				// 			).into())
+	}
 		}
 
-
-
-// #conditional_database
-			}
+		#tools
+		}
 	.into()
 }
 
