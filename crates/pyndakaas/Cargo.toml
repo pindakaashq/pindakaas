@@ -1,6 +1,6 @@
 [package]
 name = "pyndakaas"
-description = "Python interface for to the pindakaas crate"
+description = "Python interface for Pindakaas"
 
 authors.workspace = true
 version.workspace = true
