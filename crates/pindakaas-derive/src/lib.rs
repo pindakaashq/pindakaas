@@ -552,6 +552,13 @@ struct #conditional_database_ident(Py<#ident>, Vec<Lit>);
 #[pymethods]
 impl #conditional_database_ident {
 
+
+	fn __enter__(slf: Py<Self>) -> Py<Self> {
+		slf
+	}
+
+	fn __exit__(&mut self, _exc_type: PyObject, _exc_value: PyObject, _traceback: PyObject) {}
+
 	fn add_clause_from_slice(&mut self, clause: Vec<Lit>) -> Result {
 		Python::with_gil(move |py| {
 			self.0.borrow_mut(py).add_clause_from_slice(

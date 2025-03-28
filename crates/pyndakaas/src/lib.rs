@@ -9,7 +9,7 @@ use itertools::Itertools;
 use pindakaas_derive::{PythonClauseDatabase, PythonSolver};
 use std::fmt::Display;
 
-use ::pindakaas::{self as base, solver::Solver, ClauseDatabaseTools, MapSol, Valuation};
+use ::pindakaas::{self as base, solver::Solver, MapSol, Valuation};
 use base::{
 	bool_linear::{BoolLinExp, BoolLinear, LinearEncoder},
 	Encoder,
