@@ -433,8 +433,12 @@ struct PythonClauseDatabaseOpts {
 	/// The struct field which implements ClauseDatabase and ClauseDatabaseTools
 	#[darling(default)]
 	db: Option<Ident>,
+	#[darling(default = "default_true")]
+	tools: bool,
 	#[darling(default)]
-	tools: Option<bool>,
+	solve: bool,
+	#[darling(default)]
+	assumptions: bool,
 }
 
 #[proc_macro_derive(PythonClauseDatabase, attributes(python_clause_database))]
@@ -448,7 +452,35 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	};
 	let DeriveInput { ident, .. } = input;
 
-	let tools = if opts.tools.unwrap_or(true) {
+	let clause_database = quote! {
+	#[pymethods]
+	impl #ident {
+		fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
+			base::ClauseDatabase::add_clause_from_slice(
+				&mut #db,
+				&clause.into_iter().map(|l| l.0).collect_vec(),
+			)
+			.map_err(|_| Unsatisfiable)
+		}
+
+	fn add_variables(&mut self, len: usize) -> VarRange {
+			VarRange(
+			base::ClauseDatabase::new_var_range(
+							&mut #db,
+							len
+							))
+
+								// TODO not sure if we can make a generator here, but perhaps that's
+								// the proper translation to python
+				// Lit(
+				// base::ClauseDatabaseTools::new_vars(
+				// 				&mut self.0
+				// 			).into())
+	}
+		}
+		};
+
+	let tools = if opts.tools {
 		quote! {
 		#[pymethods]
 		impl #ident {
@@ -456,7 +488,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 					// TODO not entirely sure if this shouldn't also go to ClauseDatabase
 		fn add_variable(&mut self) -> Lit {
 				Lit(
-				::pindakaas::ClauseDatabaseTools::new_var(
+				base::ClauseDatabaseTools::new_var(
 								&mut #db
 							).into())
 		}
@@ -483,7 +515,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 				"Literals and coefficients should have the same length"
 			);
 			let enc: LinearEncoder = LinearEncoder::default();
-						let mut db = ::pindakaas::ClauseDatabaseTools::with_conditions(&mut #db, conditions.into_iter().map(|l| l.into()).collect());
+						let mut db = base::ClauseDatabaseTools::with_conditions(&mut #db, conditions.into_iter().map(|l| l.into()).collect());
 			Ok(enc.encode(
 				&mut db,
 				&BoolLinear::new(
@@ -502,6 +534,33 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		quote! {()}
 	};
 
+	let solver = if opts.solve {
+		quote! {
+			#[pymethods]
+			impl #ident {
+		#[new]
+		fn new() -> Self {
+			Self::default()
+		}
+			fn solve(&mut self, vars: Vec<Lit>) -> Option<bool> {
+				match base::solver::Solver::solve(&mut #db) {
+					base::solver::SolveResult::Satisfied(sol) => {
+						self.solution = Some(MapSol::new(vars, &sol));
+						Some(true)
+					}
+					base::solver::SolveResult::Unsatisfiable(_) => Some(false),
+					base::solver::SolveResult::Unknown => None,
+				}
+			}
+			fn value(&self, lit: Lit) -> Option<bool> {
+				self.solution.as_ref().map(|sol| base::Valuation::value(sol, lit.into()))
+			}
+		}
+		}
+	} else {
+		quote! {()}
+	};
+
 	/*
 	let conditional_database = if opts.conditions.unwrap_or(true) {
 		let conditional_database_ident = format_ident!("Conditional{}", ident);
@@ -513,7 +572,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 
 				fn with_conditions(slf: PyRefMut<'_, Self>, conditions: Vec<Lit>) -> #conditional_database_ident {
 					// TODO can't really use this, because can't keep impl ClauseDatabase as struct field ?
-					// let c_db = ::pindakaas::ClauseDatabaseTools::with_conditions(
+					// let c_db = base::ClauseDatabaseTools::with_conditions(
 					// 	&mut self.0,
 					// 	conditions.into_iter().map(|l| l.into()).collect(),
 					// );
@@ -604,78 +663,9 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		*/
 
 	quote! {
-	#[pymethods]
-	impl #ident {
-		fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
-			::pindakaas::ClauseDatabase::add_clause_from_slice(
-				&mut #db,
-				&clause.into_iter().map(|l| l.0).collect_vec(),
-			)
-			.map_err(|_| Unsatisfiable)
-		}
-
-	fn add_variables(&mut self, len: usize) -> VarRange {
-			VarRange(
-			::pindakaas::ClauseDatabase::new_var_range(
-							&mut #db,
-							len
-							))
-
-								// TODO not sure if we can make a generator here, but perhaps that's
-								// the proper translation to python
-				// Lit(
-				// ::pindakaas::ClauseDatabaseTools::new_vars(
-				// 				&mut self.0
-				// 			).into())
-	}
-		}
-
-		#tools
-		}
-	.into()
-}
-
-#[derive(FromDeriveInput)]
-#[darling(attributes(python_solver))]
-struct PythonSolverOpts {
-	/// The `slv` struct field which implements Solver
-	slv: Ident,
-}
-
-#[proc_macro_derive(PythonSolver, attributes(python_solver))]
-pub fn python_solver_derive(input: TokenStream) -> TokenStream {
-	let input = parse_macro_input!(input);
-	let slv = PythonSolverOpts::from_derive_input(&input)
-		.expect("Invalid options")
-		.slv;
-	let slv = quote! { self.#slv };
-	let DeriveInput { ident, .. } = input;
-
-	quote! {
-		#[pymethods]
-		impl #ident {
-
-	#[new]
-	fn new() -> Self {
-		Self::default()
-	}
-
-		fn solve(&mut self, vars: Vec<Lit>) -> Option<bool> {
-			match #slv.solve() {
-				::pindakaas::solver::SolveResult::Satisfied(sol) => {
-					self.solution = Some(MapSol::new(vars, &sol));
-					Some(true)
-				}
-				::pindakaas::solver::SolveResult::Unsatisfiable(_) => Some(false),
-				::pindakaas::solver::SolveResult::Unknown => None,
-			}
-		}
-
-		fn value(&self, lit: Lit) -> Option<bool> {
-			self.solution.as_ref().map(|sol| sol.value(lit.into()))
-		}
-
-	}
+	#clause_database
+	#tools
+	#solver
 	}
 	.into()
 }

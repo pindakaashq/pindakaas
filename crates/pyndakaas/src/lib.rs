@@ -6,10 +6,10 @@
 // TODO features -> extra installs via pip (e.g. pip install pindakaas[cadical,kissat])
 // TODO better type checking and errors (e.g. adding non-list to add_clause currently gives `TypeError: argument 'clause': 'Lit' object cannot be converted to 'Sequence'`)
 use itertools::Itertools;
-use pindakaas_derive::{PythonClauseDatabase, PythonSolver};
+use pindakaas_derive::PythonClauseDatabase;
 use std::fmt::Display;
 
-use ::pindakaas::{self as base, solver::Solver, MapSol, Valuation};
+use ::pindakaas::{self as base, MapSol};
 use base::{
 	bool_linear::{BoolLinExp, BoolLinear, LinearEncoder},
 	Encoder,
@@ -232,19 +232,16 @@ impl Display for Lit {
 //
 
 #[pyclass(unsendable)]
-#[derive(Default, PythonClauseDatabase, PythonSolver)]
-// TODO can we derive PythonClauseDatabase by PythonSolver?
-#[python_clause_database(db = solver)]
-#[python_solver(slv = solver)]
+#[derive(Default, PythonClauseDatabase)]
+#[python_clause_database(db = solver, solve = true)]
 struct Cadical {
 	solver: base::solver::cadical::Cadical,
 	solution: Option<base::MapSol>,
 }
 
 #[pyclass(unsendable)]
-#[derive(Default, PythonClauseDatabase, PythonSolver)]
-#[python_clause_database(db = solver)]
-#[python_solver(slv = solver)]
+#[derive(Default, PythonClauseDatabase)]
+#[python_clause_database(db = solver, solve = true)]
 struct Kissat {
 	solver: base::solver::kissat::Kissat,
 	solution: Option<base::MapSol>,
