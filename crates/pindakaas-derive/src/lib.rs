@@ -497,6 +497,8 @@ pub fn python_clause_database_tools_derive(input: TokenStream) -> TokenStream {
 		None => quote! { self.0 },
 	};
 	let DeriveInput { ident, .. } = input;
+
+	/*
 	let conditional_database = if opts.conditions.unwrap_or(true) {
 		let conditional_database_ident = format_ident!("Conditional{}", ident);
 		quote! {
@@ -561,10 +563,8 @@ pub fn python_clause_database_tools_derive(input: TokenStream) -> TokenStream {
 							// b/c it has a Py<ClauseDatabase>, but we
 														// only have to duplicate the methods once
 								fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
-									Python::with_gil(move |py| {
-										self.0.borrow_mut(py).add_clause(clause)
-									})
-																}
+									self.add_clause_from_slice(clause)
+								}
 
 		fn add_variable(&mut self) -> Lit {
 					Python::with_gil(move |py| {
@@ -584,12 +584,11 @@ pub fn python_clause_database_tools_derive(input: TokenStream) -> TokenStream {
 			&mut self,
 			literals: Vec<Lit>,
 			coefficients: Option<Vec<Coeff>>,
-			// TODO I'm not sure if adding Option is the best way to allow None to return default
 			comparator: Option<Comparator>,
 			k: Option<Coeff>,
 		) -> Result {
 					Python::with_gil(move |py| {
-						self.0.borrow_mut(py).add_linear(literals, coefficients, comparator, k)
+						self.0.borrow_mut(py).extract().0.with_conditions(self.1).add_linear(literals, coefficients, comparator, k)
 					})
 
 				}
@@ -598,6 +597,7 @@ pub fn python_clause_database_tools_derive(input: TokenStream) -> TokenStream {
 	} else {
 		quote! {()}
 	};
+		*/
 
 	quote! {
 		#[pymethods]
@@ -626,7 +626,7 @@ pub fn python_clause_database_tools_derive(input: TokenStream) -> TokenStream {
 		/// Encode a linear constraint over Boolean literals
 		/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
 		/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
-		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1)))]
+		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
 		fn add_linear(
 			&mut self,
 			literals: Vec<Lit>,
@@ -634,6 +634,7 @@ pub fn python_clause_database_tools_derive(input: TokenStream) -> TokenStream {
 			// TODO I'm not sure if adding Option is the best way to allow None to return default
 			comparator: Option<Comparator>,
 			k: Option<Coeff>,
+                        conditions: Vec<Lit>,
 		) -> Result {
 			let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
 			assert_eq!(
@@ -642,8 +643,9 @@ pub fn python_clause_database_tools_derive(input: TokenStream) -> TokenStream {
 				"Literals and coefficients should have the same length"
 			);
 			let enc: LinearEncoder = LinearEncoder::default();
+                        let mut db = ::pindakaas::ClauseDatabaseTools::with_conditions(&mut #db, conditions.into_iter().map(|l| l.into()).collect());
 			Ok(enc.encode(
-				&mut #db,
+				&mut db,
 				&BoolLinear::new(
 					BoolLinExp::from_slices(
 						&coefficients,
@@ -658,7 +660,7 @@ pub fn python_clause_database_tools_derive(input: TokenStream) -> TokenStream {
 
 
 
-#conditional_database
+// #conditional_database
 			}
 	.into()
 }

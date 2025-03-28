@@ -9,10 +9,13 @@ def main():
     cnf.add_clause([(~b).var(),c]) # b \/ c
     # Not allowed: cnf.add_clause([-1,-2]) # `TypeError: argument 'clause': 'int' object cannot be converted to 'Lit'`
 
-    with cnf.with_conditions([a,b]) as ccnf:
-        ccnf.add_clause([c]) # (-1 /\ -2) -> 3
-    print(f"CCNF {ccnf}") # TODO not sure why still available but ok
-    print(f"CNF {cnf}")
+    # TODO unfortunately, doesn't quite work.
+    # with cnf.with_conditions([a,b]) as ccnf:
+    #     ccnf.add_clause([c]) # (-1 /\ -2) -> 3
+    #     cnf.add_linear([a,b,c], coefficients=[2,3,5], comparator=pk.Comparator.LessEq, k=6)
+    #     print(f"CCNF {ccnf}") # TODO not sure why still available but ok
+    #     print(f"CNF {cnf}")
+    # exit(0)
     
 
     try:
@@ -31,6 +34,7 @@ def main():
 
     # 2*a + 3*b + 5*c <= 6
     cnf.add_linear([a,b,c], coefficients=[2,3,5], comparator=pk.Comparator.LessEq, k=6)
+    cnf.add_linear([a,b,c], coefficients=[2,3,5], comparator=pk.Comparator.LessEq, k=6, conditions=[~e])
     cnf.add_linear([a,b,c]) # a + b + c >= 1 == a \/ b \/ c
 
     for clause in cnf:
