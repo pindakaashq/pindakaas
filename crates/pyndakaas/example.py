@@ -47,6 +47,13 @@ def main():
     cadical.add_clause([~a,~b])
     assert cadical.solve([a,b]) is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
     assert cadical.value(a) is not cadical.value(b)
+    assert cadical.solve([a,b], assumptions=[a]) is True # Solve with assumptions
+    assert cadical.value(a) is True
+    assert cadical.value(b) is False
+    assert cadical.solve([a,b], assumptions=[b]) is True
+    assert cadical.value(a) is False
+    assert cadical.value(b) is True
+    assert cadical.solve([a,b], assumptions=[~a, ~b]) is False 
 
     kissat = pk.Kissat()
     a = kissat.add_variable()

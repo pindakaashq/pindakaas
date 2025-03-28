@@ -436,7 +436,7 @@ struct PythonClauseDatabaseOpts {
 	#[darling(default = "default_true")]
 	tools: bool,
 	#[darling(default)]
-	solve: bool,
+	solver: bool,
 	#[darling(default)]
 	assumptions: bool,
 }
@@ -534,7 +534,13 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		quote! {()}
 	};
 
-	let solver = if opts.solve {
+	let solver = if opts.solver {
+		let solve_assuming = if opts.assumptions {
+			quote! { base::solver::SolveAssuming::solve_assuming(&mut #db, assumptions.into_iter().map(|l| l.into())) }
+		} else {
+			quote! { { assert!(assumptions.is_empty()); base::solver::Solver::solve(&mut #db)} }
+		};
+
 		quote! {
 			#[pymethods]
 			impl #ident {
@@ -542,8 +548,9 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		fn new() -> Self {
 			Self::default()
 		}
-			fn solve(&mut self, vars: Vec<Lit>) -> Option<bool> {
-				match base::solver::Solver::solve(&mut #db) {
+						#[pyo3(signature=(vars, /, assumptions = Vec::default()))]
+			fn solve(&mut self, vars: Vec<Lit>, assumptions: Vec<Lit>) -> Option<bool> {
+				match #solve_assuming {
 					base::solver::SolveResult::Satisfied(sol) => {
 						self.solution = Some(MapSol::new(vars, &sol));
 						Some(true)

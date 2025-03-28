@@ -233,7 +233,7 @@ impl Display for Lit {
 
 #[pyclass(unsendable)]
 #[derive(Default, PythonClauseDatabase)]
-#[python_clause_database(db = solver, solve = true)]
+#[python_clause_database(db = solver, solver = true, assumptions = true)]
 struct Cadical {
 	solver: base::solver::cadical::Cadical,
 	solution: Option<base::MapSol>,
@@ -241,7 +241,7 @@ struct Cadical {
 
 #[pyclass(unsendable)]
 #[derive(Default, PythonClauseDatabase)]
-#[python_clause_database(db = solver, solve = true)]
+#[python_clause_database(db = solver, solver = true)]
 struct Kissat {
 	solver: base::solver::kissat::Kissat,
 	solution: Option<base::MapSol>,
