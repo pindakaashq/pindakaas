@@ -180,9 +180,9 @@ impl Cnf {
 	}
 
 	// TODO [?] Shouldn't we make reading from_file part of ClauseDatabaseTools?
-	// TODO [?] Doesn't compile for weird reasons, although I'm fairly sure this is right.
+	// TODO [?] Doesn't compile, seems like a PyO3 bug
 	// #[staticmethod]
-	// fn from_file(path: PathBuf) -> Result<Cnf, std::io::Error> {
+	// fn from_file(path: PathBuf) -> std::result::Result<Cnf, std::io::Error> {
 	// 	Ok(Self(base::Cnf::from_file(&path)?))
 	// }
 }

@@ -461,7 +461,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	quote! {
 	#[pymethods]
 	impl #ident {
-		fn add_clause_from_slice(&mut self, clause: Vec<Lit>) -> Result {
+		fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
 			::pindakaas::ClauseDatabase::add_clause_from_slice(
 				&mut #db,
 				&clause.into_iter().map(|l| l.0).collect_vec(),
@@ -469,18 +469,19 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 			.map_err(|_| Unsatisfiable)
 		}
 
-	fn new_var_range(&mut self, len: usize) -> VarRange {
+	fn add_variables(&mut self, len: usize) -> VarRange {
 			VarRange(
 			::pindakaas::ClauseDatabase::new_var_range(
 							&mut #db,
 							len
 							))
-	}
 
-
-	fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
-			self.add_clause_from_slice(clause)
-
+								// TODO not sure if we can make a generator here, but perhaps that's
+								// the proper translation to python
+				// Lit(
+				// ::pindakaas::ClauseDatabaseTools::new_vars(
+				// 				&mut self.0
+				// 			).into())
 	}
 		}
 		}
@@ -603,23 +604,13 @@ pub fn python_clause_database_tools_derive(input: TokenStream) -> TokenStream {
 		#[pymethods]
 		impl #ident {
 
+                    // TODO not entirely sure if this shouldn't also go to ClauseDatabase
 		fn add_variable(&mut self) -> Lit {
 				Lit(
 				::pindakaas::ClauseDatabaseTools::new_var(
 								&mut #db
 							).into())
 		}
-
-		fn add_variables(&mut self, len: usize) -> VarRange {
-				self.new_var_range(len)
-								// TODO not sure if we can make a generator here, but perhaps that's
-								// the proper translation to python
-				// Lit(
-				// ::pindakaas::ClauseDatabaseTools::new_vars(
-				// 				&mut self.0
-				// 			).into())
-		}
-
 
         ///// TODO not sure if this one should be in ClauseDatabase or ClauseDatabaseTools
 		///
