@@ -445,6 +445,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		None => quote! { self.0 },
 	};
 	let DeriveInput { ident, .. } = input;
+	let conditional_database_ident = format_ident!("Conditional{}", ident);
 
 	quote! {
 	#[pymethods]
@@ -523,18 +524,53 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		)?)
 	}
 
-        //
-        // TODO named lits, with_conditions
-
-
-		// Lit(self.0.new_var().into())
-	//
-	// fn add_variables(&mut self, len: usize) -> VarRange {
-	// 	VarRange(base::ClauseDatabase::new_var_range(&mut self.0, len))
-	// }
-
-
+	fn with_conditions(slf: PyRefMut<'_, Self>, conditions: Vec<Lit>) -> #conditional_database_ident {
+		// TODO can't really use this, because can't keep impl ClauseDatabase as struct field ?
+		// let c_db = ::pindakaas::ClauseDatabaseTools::with_conditions(
+		// 	&mut self.0,
+		// 	conditions.into_iter().map(|l| l.into()).collect(),
+		// );
+		Python::with_gil(move |py| {
+			#conditional_database_ident(
+				slf.into_py_any(py).unwrap().extract(py).unwrap(),
+				conditions,
+			)
+		})
 	}
+	}
+
+
+// #[pyclass(extends = ClauseDatabase)] // TODO can't quite get this to work
+	// #[new]
+	// fn new(db: Py<#ident>, conditions: Vec<Lit>) -> (Self, ClauseDatabase) {
+	// 	(Self(db, conditions), ClauseDatabase::new())
+	// }
+// TODO this approach works but now we don't get Cnf's methods in ConditionalCnf
+#[pyclass]
+struct #conditional_database_ident(Py<#ident>, Vec<Lit>);
+
+#[pymethods]
+impl #conditional_database_ident {
+
+	fn add_clause_from_slice(&mut self, clause: Vec<Lit>) -> Result {
+		Python::with_gil(move |py| {
+			self.0.borrow_mut(py).add_clause_from_slice(
+				self.1
+					.clone()
+					.into_iter()
+					.chain(clause.into_iter())
+					.collect(),
+			)
+		})
+	}
+
+	fn new_var_range(&mut self, len: usize) -> VarRange {
+		Python::with_gil(move |py| self.0.borrow_mut(py).new_var_range(len))
+	}
+}
+
+
+
 
 		}
 	.into()

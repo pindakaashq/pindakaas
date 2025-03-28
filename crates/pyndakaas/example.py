@@ -5,9 +5,14 @@ def main():
     cnf = pk.Cnf()
     a = cnf.add_variable()
     b,c = cnf.add_variables(2)
-    cnf.add_clause([~a,b]) # ~a \/ b
+    cnf.add_clause_from_slice([~a,b]) # ~a \/ b
     cnf.add_clause([(~b).var(),c]) # b \/ c
     # Not allowed: cnf.add_clause([-1,-2]) # `TypeError: argument 'clause': 'int' object cannot be converted to 'Lit'`
+
+    ccnf = cnf.with_conditions([a,b])
+    ccnf.add_clause_from_slice([c]) # (-1 /\ -2) -> 3
+    print(f"CCNF {ccnf}")
+    print(f"CNF {cnf}")
 
     try:
         cnf.add_clause([])

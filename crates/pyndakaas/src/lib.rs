@@ -9,12 +9,12 @@ use itertools::Itertools;
 use pindakaas_derive::{PythonClauseDatabase, PythonSolver};
 use std::fmt::Display;
 
-use ::pindakaas::{self as base, solver::Solver, MapSol, Valuation};
+use ::pindakaas::{self as base, solver::Solver, ClauseDatabaseTools, MapSol, Valuation};
 use base::{
 	bool_linear::{BoolLinExp, BoolLinear, LinearEncoder},
 	Encoder,
 };
-use pyo3::{exceptions::PyException, prelude::*};
+use pyo3::{exceptions::PyException, prelude::*, IntoPyObjectExt};
 
 type Clause = Vec<Lit>;
 
@@ -158,13 +158,6 @@ impl ClauseIter {
 
 #[pymethods]
 impl Cnf {
-	// TODO more tricky, less useful
-	// fn with_conditions(&mut self, conditions: Vec<Lit>) -> Self {
-	// 	Self(::pindakaas::ClauseDatabaseTools::with_conditions(
-	// 		&mut self, conditions,
-	// 	))
-	// }
-
 	#[new]
 	#[pyo3(signature = (vars=None))]
 	fn new(vars: Option<usize>) -> (Self, ClauseDatabase) {
