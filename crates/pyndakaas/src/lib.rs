@@ -14,7 +14,7 @@ use base::{
 	bool_linear::{BoolLinExp, BoolLinear, LinearEncoder},
 	Encoder,
 };
-use pyo3::{exceptions::PyException, prelude::*, IntoPyObjectExt};
+use pyo3::{exceptions::PyException, prelude::*};
 
 type Clause = Vec<Lit>;
 
@@ -159,9 +159,8 @@ impl ClauseIter {
 #[pymethods]
 impl Cnf {
 	#[new]
-	#[pyo3(signature = (vars=None))]
-	fn new(vars: Option<usize>) -> (Self, ClauseDatabase) {
-		(Self(base::Cnf::new(vars)), ClauseDatabase::new())
+	fn new() -> (Self, ClauseDatabase) {
+		(Self(base::Cnf::default()), ClauseDatabase::new())
 	}
 
 	fn __iter__(&self) -> ClauseIter {
@@ -195,12 +194,8 @@ struct Wcnf(base::Wcnf);
 #[pymethods]
 impl Wcnf {
 	#[new]
-	#[pyo3(signature = (vars=None))]
-	fn new(vars: Option<usize>) -> (Self, ClauseDatabase) {
-		(
-			Self(base::Wcnf::from(base::Cnf::new(vars))),
-			ClauseDatabase::new(),
-		)
+	fn new() -> (Self, ClauseDatabase) {
+		(Self(base::Wcnf::default()), ClauseDatabase::new())
 	}
 }
 

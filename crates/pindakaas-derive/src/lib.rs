@@ -442,9 +442,9 @@ struct PythonClauseDatabaseToolsOpts {
 	/// The struct field which implements ClauseDatabase and ClauseDatabaseTools
 	#[darling(default)]
 	db: Option<Ident>,
-	/// Whether to derive the ConditionalDatabase
-	#[darling(default)]
-	conditions: Option<bool>,
+	// /// Whether to derive the ConditionalDatabase
+	// #[darling(default)]
+	// conditions: Option<bool>,
 }
 
 #[proc_macro_derive(PythonClauseDatabase, attributes(python_clause_database))]

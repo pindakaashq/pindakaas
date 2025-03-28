@@ -278,7 +278,7 @@ pub struct Lit(NonZeroI32);
 
 /// Result is a type alias for [`std::result::Result`] that by default returns
 /// an empty value, or the [`Unsatisfiable`] error type.
-pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
+type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
 /// Unsatisfiable is an error type returned when the problem being encoded is
@@ -610,17 +610,6 @@ impl Not for BoolVal {
 }
 
 impl Cnf {
-	pub fn new(vars: Option<usize>) -> Self {
-		let mut nvar = VarFactory::default();
-		if let Some(vars) = vars {
-			_ = nvar.next_var_range(vars);
-		}
-		Self {
-			nvar,
-			..Default::default()
-		}
-	}
-
 	/// Returns the number of clauses in the formula.
 	pub fn clauses(&self) -> usize {
 		self.size.len()
@@ -955,14 +944,6 @@ impl VarRange {
 		Self {
 			start: Var(NonZeroI32::new(2).unwrap()),
 			end: Var(NonZeroI32::new(1).unwrap()),
-		}
-	}
-
-	// TODO probably remove
-	pub fn until(end: Var) -> Self {
-		Self {
-			start: Var(NonZeroI32::new(1).unwrap()),
-			end,
 		}
 	}
 

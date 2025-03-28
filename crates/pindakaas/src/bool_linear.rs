@@ -114,7 +114,7 @@ pub enum Comparator {
 	GreaterEq,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 /// Consistency constraint that can be captured by a Boolean linear expression
 /// to improve the encoding of constraints using the expression.
 pub(crate) enum Constraint {
@@ -2939,7 +2939,7 @@ mod tests {
 	impl PartialEq for BoolLinExp {
 		fn eq(&self, other: &Self) -> bool {
 			if self.mult != 1 {
-				unimplemented!("PartialEq only implmeneted for mult = 1");
+				unimplemented!("PartialEq only implemented for mult = 1");
 			}
 			self.add == other.add && self.terms().zip(other.terms()).all(|(a, b)| a == b)
 		}

@@ -17,24 +17,15 @@ def main():
     #     print(f"CNF {cnf}")
     # exit(0)
     
-
     try:
         cnf.add_clause([])
     except pk.Unsatisfiable as e:
         print(f"Caught Unsatisfiable exception: {e} of type {type(e)}")
 
-    # ccnf = cnf.with_conditions([~c])
-    # cnf.add_clause([a,b])
-
-    cnf = pk.Cnf(5) # More or less temporary work-around, starting with 5 vars
-    e = cnf.add_variable()
-    print(f"Starting from 5: {cnf}")
-    cnf.add_clause([~a,b,e]) # ~a \/ b
-    print(f"Adding a clause: {cnf}")
-
     # 2*a + 3*b + 5*c <= 6
     cnf.add_linear([a,b,c], coefficients=[2,3,5], comparator=pk.Comparator.LessEq, k=6)
-    cnf.add_linear([a,b,c], coefficients=[2,3,5], comparator=pk.Comparator.LessEq, k=6, conditions=[~e])
+    p = cnf.add_variable()
+    cnf.add_linear([a,b,c], coefficients=[2,3,5], comparator=pk.Comparator.LessEq, k=6, conditions=[~p])
     cnf.add_linear([a,b,c]) # a + b + c >= 1 == a \/ b \/ c
 
     for clause in cnf:
@@ -47,9 +38,7 @@ def main():
     b,c = wcnf.add_variables(2)
     wcnf.add_clause([~a,b]) # ~a \/ b
     wcnf.add_clause([(~b).var(),c]) # b \/ c
-    # TODO add and test Wcnf features
-
-
+    # TODO add weighted clause
 
     cadical = pk.Cadical() # should "inherit" from Cnf/ClauseDatabase
     a = cadical.add_variable()
@@ -65,10 +54,7 @@ def main():
     assert kissat.solve([a,b]) is True
     assert kissat.value(a) is True
 
-    # solver = pk.Solver()
-
     # TODO translate pysat's pigeonhole problem to pindakaas
-
 
     # print(f"{solver.value(a)}") # Also True/False/None
     # assert solver.value(a) != solver.value(b)
