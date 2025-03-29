@@ -40,26 +40,34 @@ def main():
     wcnf.add_clause([(~b).var(),c]) # b \/ c
     # TODO add weighted clause
 
-    cadical = pk.Cadical() # should "inherit" from Cnf/ClauseDatabase
+    cadical = pk.Cadical() # "inherits" from ClauseDatabase
     a = cadical.add_variable()
     b = cadical.add_variable()
     cadical.add_clause([a,b])
     cadical.add_clause([~a,~b])
-    assert cadical.solve([a,b]) is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
+    print("x", cadical.solve())
+    assert cadical.solve() is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
     assert cadical.value(a) is not cadical.value(b)
-    assert cadical.solve([a,b], assumptions=[a]) is True # Solve with assumptions
+    assert cadical.solve(assumptions=[a]) is True # Solve with assumptions
     assert cadical.value(a) is True
     assert cadical.value(b) is False
-    assert cadical.solve([a,b], assumptions=[b]) is True
+    assert cadical.solve(assumptions=[b]) is True
     assert cadical.value(a) is False
     assert cadical.value(b) is True
-    assert cadical.solve([a,b], assumptions=[~a, ~b]) is False 
+    assert cadical.solve(assumptions=[~a, ~b]) is False 
+    print(f"{cadical.fail(a)=}")
+    print(f"{cadical.fail(b)=}")
 
     kissat = pk.Kissat()
     a = kissat.add_variable()
     kissat.add_clause([a])
-    assert kissat.solve([a,b]) is True
+    assert kissat.solve() is True
+    try:
+        kissat.solve(assumptions=[a]) # but Kissat does not support assumptions
+    except TypeError as e:
+        print(f"Caught '{e}' of type {type(e)}") # TODO maybe make this friendlier
     assert kissat.value(a) is True
+    exit(0)
 
     # TODO translate pysat's pigeonhole problem to pindakaas
 

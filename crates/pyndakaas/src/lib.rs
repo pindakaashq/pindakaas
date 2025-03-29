@@ -9,7 +9,7 @@ use itertools::Itertools;
 use pindakaas_derive::PythonClauseDatabase;
 use std::fmt::Display;
 
-use ::pindakaas::{self as base, MapSol};
+use ::pindakaas::{self as base};
 use base::{
 	bool_linear::{BoolLinExp, BoolLinear, LinearEncoder},
 	Encoder,
@@ -228,55 +228,15 @@ impl Display for Lit {
 	}
 }
 
-// SOLVING
-//
+#[pyclass(unsendable)]
+#[derive(Default, PythonClauseDatabase)]
+#[python_clause_database(solver = true, assumptions = true)]
+struct Cadical(base::solver::cadical::Cadical);
 
 #[pyclass(unsendable)]
 #[derive(Default, PythonClauseDatabase)]
-#[python_clause_database(db = solver, solver = true, assumptions = true)]
-struct Cadical {
-	solver: base::solver::cadical::Cadical,
-	solution: Option<base::MapSol>,
-}
-
-#[pyclass(unsendable)]
-#[derive(Default, PythonClauseDatabase)]
-#[python_clause_database(db = solver, solver = true)]
-struct Kissat {
-	solver: base::solver::kissat::Kissat,
-	solution: Option<base::MapSol>,
-}
-
-// solution: Solution,
-// solve_result: base::solver::SolveResult<
-// 	base::solver::cadical::CadicalSol<'a>,
-// 	base::solver::cadical::CadicalFailed<'a>,
-// >,
-
-#[pyclass]
-struct SolveResult(base::solver::SolveResult<MapSol>);
-
-#[pymethods]
-impl SolveResult {
-	// #[new]
-	// fn new() -> Self {
-	// 	Self(base::solver::SolveResult::default())
-	// }
-
-	fn __str__(&self) -> String {
-		match &self.0 {
-			::pindakaas::solver::SolveResult::Satisfied(sol) => format!("{}", sol),
-			::pindakaas::solver::SolveResult::Unsatisfiable(_) => {
-				format!("{}", base::Unsatisfiable)
-			}
-			::pindakaas::solver::SolveResult::Unknown => "UNKNOWN".to_owned(),
-		}
-	}
-}
-
-// #[pyclass]
-// struct Solution(base::solver::cadical::CadicalSol); // TODO can't because of lifetime
-// 													// struct Solution(M);
+#[python_clause_database(solver = true)]
+struct Kissat(base::solver::kissat::Kissat);
 
 #[cfg(test)]
 mod tests {
@@ -311,7 +271,10 @@ mod tests {
 				c_str!("example.py"),
 				c_str!("__main__"),
 			)
-			.unwrap_or_else(|e| panic!("{e}"));
+			.unwrap_or_else(|e| {
+				e.display(py);
+				panic!();
+			})
 		});
 	}
 }

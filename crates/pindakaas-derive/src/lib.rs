@@ -50,7 +50,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		(
 			quote! {
 				impl #ident {
-					fn solver_fail_obj(&self) -> #fail_ident {
+					pub fn solver_fail_obj(&self) -> #fail_ident {
 						#fail_ident { slv: self }
 					}
 				}
@@ -397,7 +397,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		}
 
 		impl #ident {
-			fn solver_solution_obj(&self) -> #sol_ident {
+			pub fn solver_solution_obj(&self) -> #sol_ident {
 				#sol_ident { slv: self }
 			}
 		}
@@ -535,10 +535,31 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	};
 
 	let solver = if opts.solver {
-		let solve_assuming = if opts.assumptions {
-			quote! { base::solver::SolveAssuming::solve_assuming(&mut #db, assumptions.into_iter().map(|l| l.into())) }
+		let solve = if opts.assumptions {
+			quote! {
+						#[pyo3(signature=(assumptions = Vec::default()))]
+			fn solve(&mut self, assumptions: Vec<Lit>) -> Option<bool> {
+				match base::solver::SolveAssuming::solve_assuming(&mut #db, assumptions.into_iter().map(|l| l.into())) {
+					base::solver::SolveResult::Satisfied(_) => Some(true),
+					base::solver::SolveResult::Unsatisfiable(_) => Some(false),
+					base::solver::SolveResult::Unknown => None,
+				}
+			}
+
+					fn fail(&self, lit: Lit) -> bool {
+						base::solver::FailedAssumtions::fail(&#db.solver_fail_obj(), lit.into())
+					}
+			}
 		} else {
-			quote! { { assert!(assumptions.is_empty()); base::solver::Solver::solve(&mut #db)} }
+			quote! {
+			fn solve(&mut self) -> Option<bool> {
+				match base::solver::Solver::solve(&mut #db) {
+					base::solver::SolveResult::Satisfied(_) => Some(true),
+					base::solver::SolveResult::Unsatisfiable(_) => Some(false),
+					base::solver::SolveResult::Unknown => None,
+				}
+			}
+			}
 		};
 
 		quote! {
@@ -548,20 +569,10 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		fn new() -> Self {
 			Self::default()
 		}
-						#[pyo3(signature=(vars, /, assumptions = Vec::default()))]
-			fn solve(&mut self, vars: Vec<Lit>, assumptions: Vec<Lit>) -> Option<bool> {
-				match #solve_assuming {
-					base::solver::SolveResult::Satisfied(sol) => {
-						self.solution = Some(MapSol::new(vars, &sol));
-						Some(true)
-					}
-					base::solver::SolveResult::Unsatisfiable(_) => Some(false),
-					base::solver::SolveResult::Unknown => None,
-				}
-			}
-			fn value(&self, lit: Lit) -> Option<bool> {
-				self.solution.as_ref().map(|sol| base::Valuation::value(sol, lit.into()))
-			}
+				#solve
+						fn value(&self, lit: Lit) -> bool {
+								base::Valuation::value(&#db.solver_solution_obj(), lit.into())
+						}
 		}
 		}
 	} else {

@@ -19,7 +19,7 @@ doc = false
 [dependencies]
 itertools = "0.14.0"
 pindakaas = { path = "../pindakaas", features= ["cadical", "kissat"] }
-pyo3 = {version = "0.23", features = ["multiple-pymethods"]}
+pyo3 = {version = "0.24", features = ["multiple-pymethods"]}
 pindakaas-derive = { path = "../pindakaas-derive"}
 
 [features]
