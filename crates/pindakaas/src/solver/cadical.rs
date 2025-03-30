@@ -52,6 +52,14 @@ impl Cadical {
 		unsafe { pindakaas_cadical::ccadical_set_option(self.ptr, name.as_ptr(), value) }
 	}
 
+	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
+	pub fn set_limit(&mut self, name: &str, value: i32) {
+		let name = CString::new(name).unwrap();
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
+		// handles non-existing options gracefully.
+		unsafe { pindakaas_cadical::ccadical_limit(self.ptr, name.as_ptr(), value) }
+	}
+
 	pub fn unphase(&mut self, lit: Lit) {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		unsafe { ccadical_unphase(self.ptr, lit.0.get()) }
