@@ -455,6 +455,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	let clause_database = quote! {
 	#[pymethods]
 	impl #ident {
+		/// Add a clause
 		fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
 			base::ClauseDatabase::add_clause_from_slice(
 				&mut #db,
@@ -496,6 +497,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		///// TODO not sure if this one should be in ClauseDatabase or ClauseDatabaseTools
 		///
 		/// Encode a linear constraint over Boolean literals
+							///
 		/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
 		/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
 		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1), conditions = vec![]))]

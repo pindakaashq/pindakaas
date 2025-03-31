@@ -3,17 +3,27 @@
 	reason = "pyo3 macro will generate unused qualified types"
 )]
 
+// TODO features -> extra installs via pip (e.g. pip install pindakaas[cadical,kissat])
+// TODO better type checking and errors (e.g. adding non-list to add_clause currently gives `TypeError: argument 'clause': 'Lit' object cannot be converted to 'Sequence'`)
+// VarRange -> implement Range better?
+
 use pyo3::prelude::*;
 
+/// The pindakaas python module
 #[pymodule]
 mod pindakaas {
 
+	///
+	/// Return version
+	#[pyfunction]
+	fn version() -> String {
+		format!("{}", env!("CARGO_PKG_VERSION"))
+	}
+
 	use super::*;
-	use pyo3::exceptions::PyException;
-	// TODO features -> extra installs via pip (e.g. pip install pindakaas[cadical,kissat])
-	// TODO better type checking and errors (e.g. adding non-list to add_clause currently gives `TypeError: argument 'clause': 'Lit' object cannot be converted to 'Sequence'`)
 	use itertools::Itertools;
 	use pindakaas_derive::PythonClauseDatabase;
+	use pyo3::exceptions::PyException;
 	use std::fmt::Display;
 
 	use ::pindakaas::{self as base};
