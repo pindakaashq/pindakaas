@@ -243,6 +243,11 @@ mod pindakaas {
 	#[python_clause_database(solver = true)]
 	struct Kissat(base::solver::kissat::Kissat);
 
+	#[pyclass(unsendable)]
+	#[derive(Default, PythonClauseDatabase)]
+	#[python_clause_database(solver = true, assumptions = true)]
+	struct IntelSat(base::solver::intel_sat::IntelSat);
+
 	#[cfg(test)]
 	mod tests {
 

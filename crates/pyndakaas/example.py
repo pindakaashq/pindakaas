@@ -40,23 +40,23 @@ def main():
     wcnf.add_clause([(~b).var(),c]) # b \/ c
     # TODO add weighted clause
 
-    cadical = pk.Cadical() # "inherits" from ClauseDatabase
-    a = cadical.add_variable()
-    b = cadical.add_variable()
-    cadical.add_clause([a,b])
-    cadical.add_clause([~a,~b])
-    print("x", cadical.solve())
-    assert cadical.solve() is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
-    assert cadical.value(a) is not cadical.value(b)
-    assert cadical.solve(assumptions=[a]) is True # Solve with assumptions
-    assert cadical.value(a) is True
-    assert cadical.value(b) is False
-    assert cadical.solve(assumptions=[b]) is True
-    assert cadical.value(a) is False
-    assert cadical.value(b) is True
-    assert cadical.solve(assumptions=[~a, ~b]) is False 
-    print(f"{cadical.fail(a)=}")
-    print(f"{cadical.fail(b)=}")
+    for solver in [pk.Cadical(), pk.IntelSat()]: # assumption supporting solvers
+        a = solver.add_variable() # any solver "inherits" from
+        b = solver.add_variable()
+        solver.add_clause([a,b])
+        solver.add_clause([~a,~b])
+        print("x", solver.solve())
+        assert solver.solve() is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
+        assert solver.value(a) is not solver.value(b)
+        assert solver.solve(assumptions=[a]) is True # Solve with assumptions
+        assert solver.value(a) is True
+        assert solver.value(b) is False
+        assert solver.solve(assumptions=[b]) is True
+        assert solver.value(a) is False
+        assert solver.value(b) is True
+        assert solver.solve(assumptions=[~a, ~b]) is False 
+        print(f"{solver.fail(a)=}")
+        print(f"{solver.fail(b)=}")
 
     kissat = pk.Kissat()
     a = kissat.add_variable()
@@ -67,7 +67,45 @@ def main():
     except TypeError as e:
         print(f"Caught '{e}' of type {type(e)}") # TODO maybe make this friendlier
     assert kissat.value(a) is True
-    exit(0)
+
+    cadical = pk.Cadical() # "inherits" from ClauseDatabase
+    a,b,c = cadical.add_variables(3)
+    p = list(cadical.add_variables(4))
+    cadical.add_clause([a])
+    cadical.add_clause([~c])
+    cadical.add_clause([~p[0],~a,b])
+    cadical.add_clause([~p[1],~b,c])
+    cadical.add_clause([~p[2],~c,a])
+    cadical.add_clause([~p[3],~a,c])
+
+    # n=3 # pigeons
+    # m=2 # holes
+    # pigeons = cadical.add_variables(n*m)
+    # import numpy as np
+
+    ls = [a,b,c] + p
+    if cadical.solve(assumptions=p) is True:
+        for l in ls:
+            print(f"value of {l} {cadical.value(l)}")
+    else:
+        for l in ls:
+            print(f"failed of {l} {cadical.fail(l)}")
+        core = list(p for p in p if not cadical.fail(p))
+        assert cadical.solve(assumptions=core) is False
+        core = list(p for p in p if not cadical.fail(p))
+        for l in ls:
+            print(f"failed of {l} {cadical.fail(l)}")
+
+    n=4
+    m=n-1
+    # import numpy as np
+    cadical = pk.Cadical()
+    x = [ list(cadical.add_variables(m)) for _ in range(n) ]
+    # for xs in x:
+
+
+
+
 
     # TODO translate pysat's pigeonhole problem to pindakaas
 
