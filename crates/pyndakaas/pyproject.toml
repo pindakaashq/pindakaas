@@ -5,7 +5,6 @@ build-backend = "maturin"
 [project]
 name = "pindakaas"
 dynamic = ["version"]
-description = "Encoding Integer and Pseudo Boolean constraints into CNF"
 requires-python = ">=3.8"
 classifiers = [
 	"License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
@@ -15,7 +14,7 @@ classifiers = [
 	"Programming Language :: Python",
 	"Programming Language :: Rust",
 ]
-dependencies = ["sphinx"]
+dependencies = ["sphinx", "sphinx-autobuild", "sphinx-rtd-theme"]
 
 [tool.maturin]
-features = ["pyo3/extension-module"]
+features = ["pyo3/extension-module", "pyo3/experimental-inspect"]

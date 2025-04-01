@@ -3,13 +3,18 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Pindakaas documentation
-=======================
+Pindakaas: Encoding Integer and Pseudo Boolean constraints into CNF 
+===================================================================
 
-Add your content using ``reStructuredText`` syntax. See the
-`reStructuredText <https://www.sphinx-doc.org/en/master/usage/restructuredtext/index.html>`_
-documentation for details.
+TODOs
+-----
+- Extra installs of feature via pip (e.g. `pip install pindakaas[cadical,kissat]`)
+- Better type checking and errors (e.g. adding non-list to add_clause currently gives `TypeError: argument 'clause': 'Lit' object cannot be converted to 'Sequence'`)
+- Can we somehow share the documentation between pindakaas/lib and pyndakaas/lib? One way is documentation Ellipsis to text_signature to include_str ..
+- VarRange -> implement Range better?
+- Generate `*.pyi` stub file to support type hints
 
+.. todo:: ConditionalDatabase with context manager: ``with ccnf as cnf.if([a,b]):``
 
 .. toctree::
    :maxdepth: 2
@@ -17,5 +22,13 @@ documentation for details.
 
 
 .. automodule:: pindakaas
+   :members:
+   :undoc-members:
+
+
+Solvers
+-------
+
+.. automodule:: pindakaas.solvers
    :members:
    :undoc-members:

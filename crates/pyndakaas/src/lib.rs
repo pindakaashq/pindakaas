@@ -3,18 +3,15 @@
 	reason = "pyo3 macro will generate unused qualified types"
 )]
 
-// TODO features -> extra installs via pip (e.g. pip install pindakaas[cadical,kissat])
-// TODO better type checking and errors (e.g. adding non-list to add_clause currently gives `TypeError: argument 'clause': 'Lit' object cannot be converted to 'Sequence'`)
-// VarRange -> implement Range better?
-
 use pyo3::prelude::*;
 
-/// The pindakaas python module
+///
+/// The ``pindakaas`` Python reference
+/// ==================================
 #[pymodule]
 mod pindakaas {
 
-	///
-	/// Return version
+	/// Return ``pindakaas`` version
 	#[pyfunction]
 	fn version() -> String {
 		format!("{}", env!("CARGO_PKG_VERSION"))
@@ -34,9 +31,11 @@ mod pindakaas {
 
 	type Clause = Vec<Lit>;
 
+	/// :meta private:
 	#[pyclass(subclass)]
 	struct ClauseDatabase();
 
+	/// :meta private:
 	#[pymethods]
 	impl ClauseDatabase {
 		#[new]
@@ -55,14 +54,17 @@ mod pindakaas {
 		}
 	}
 
+	/// A range of Boolean variables
 	#[pyclass]
 	#[derive(Clone)]
 	struct VarRange(base::VarRange);
 
+	/// A Boolean literal
 	#[pyclass]
 	#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 	struct Lit(base::Lit);
 
+	/// :meta private:
 	#[pyclass]
 	struct VarRangeIter(std::vec::IntoIter<Lit>);
 
@@ -85,6 +87,7 @@ mod pindakaas {
 		}
 	}
 
+	/// Raised if Unsatisfiable is derived during encoding
 	// TODO use create_exception! ?
 	#[pyclass(extends = PyException)]
 	struct Unsatisfiable;
@@ -158,6 +161,7 @@ mod pindakaas {
 	struct Cnf(base::Cnf);
 
 	#[pyclass]
+	/// :meta private:
 	struct ClauseIter(std::vec::IntoIter<Clause>);
 
 	#[pymethods]
@@ -243,20 +247,26 @@ mod pindakaas {
 		}
 	}
 
-	#[pyclass(unsendable)]
-	#[derive(Default, PythonClauseDatabase)]
-	#[python_clause_database(solver = true, assumptions = true)]
-	struct Cadical(base::solver::cadical::Cadical);
+	/// All solvers inherit functionality from Cnf
+	#[pymodule]
+	mod solvers {
+		use super::*;
 
-	#[pyclass(unsendable)]
-	#[derive(Default, PythonClauseDatabase)]
-	#[python_clause_database(solver = true)]
-	struct Kissat(base::solver::kissat::Kissat);
+		#[pyclass(unsendable)]
+		#[derive(Default, PythonClauseDatabase)]
+		#[python_clause_database(solver = true, assumptions = true)]
+		struct Cadical(base::solver::cadical::Cadical);
 
-	#[pyclass(unsendable)]
-	#[derive(Default, PythonClauseDatabase)]
-	#[python_clause_database(solver = true, assumptions = true)]
-	struct IntelSat(base::solver::intel_sat::IntelSat);
+		#[pyclass(unsendable)]
+		#[derive(Default, PythonClauseDatabase)]
+		#[python_clause_database(solver = true)]
+		struct Kissat(base::solver::kissat::Kissat);
+
+		#[pyclass(unsendable)]
+		#[derive(Default, PythonClauseDatabase)]
+		#[python_clause_database(solver = true, assumptions = true)]
+		struct IntelSat(base::solver::intel_sat::IntelSat);
+	}
 
 	#[cfg(test)]
 	mod tests {

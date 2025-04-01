@@ -40,7 +40,7 @@ def main():
     wcnf.add_clause([(~b).var(),c]) # b \/ c
     # TODO add weighted clause
 
-    for solver in [pk.Cadical(), pk.IntelSat()]: # assumption supporting solvers
+    for solver in [pk.solvers.Cadical(), pk.solvers.IntelSat()]: # assumption supporting solvers
         a = solver.add_variable() # any solver "inherits" from
         b = solver.add_variable()
         solver.add_clause([a,b])
@@ -58,7 +58,7 @@ def main():
         print(f"{solver.fail(a)=}")
         print(f"{solver.fail(b)=}")
 
-    kissat = pk.Kissat()
+    kissat = pk.solvers.Kissat()
     a = kissat.add_variable()
     kissat.add_clause([a])
     assert kissat.solve() is True
@@ -68,7 +68,7 @@ def main():
         print(f"Caught '{e}' of type {type(e)}") # TODO maybe make this friendlier
     assert kissat.value(a) is True
 
-    cadical = pk.Cadical() # "inherits" from ClauseDatabase
+    cadical = pk.solvers.Cadical() # "inherits" from ClauseDatabase
     a,b,c = cadical.add_variables(3)
     p = list(cadical.add_variables(4))
     cadical.add_clause([a])
@@ -99,7 +99,7 @@ def main():
     n=4
     m=n-1
     # import numpy as np
-    cadical = pk.Cadical()
+    cadical = pk.solvers.Cadical()
     x = [ list(cadical.add_variables(m)) for _ in range(n) ]
     # for xs in x:
 

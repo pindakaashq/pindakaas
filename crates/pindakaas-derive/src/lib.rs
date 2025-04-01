@@ -455,7 +455,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	let clause_database = quote! {
 	#[pymethods]
 	impl #ident {
-		/// Add a clause
+		/// Add a clause to the clause database
 		fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
 			base::ClauseDatabase::add_clause_from_slice(
 				&mut #db,
@@ -464,11 +464,12 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 			.map_err(|_| Unsatisfiable)
 		}
 
-	fn add_variables(&mut self, len: usize) -> VarRange {
+		/// Add ``n`` variables to the clause database
+	fn add_variables(&mut self, n: usize) -> VarRange {
 			VarRange(
 			base::ClauseDatabase::new_var_range(
 							&mut #db,
-							len
+							n
 							))
 
 								// TODO not sure if we can make a generator here, but perhaps that's
@@ -499,7 +500,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		/// Encode a linear constraint over Boolean literals
 							///
 		/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
-		/// Currently, the encoding is fixed as `adder` for PB and Cardinality constraints, and `PairWise` for AMOs/ALOs
+		/// Currently, the encoding is fixed as ``adder`` for PB and Cardinality constraints, and ``PairWise`` for AMOs/ALOs
 		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
 		fn add_linear(
 			&mut self,
