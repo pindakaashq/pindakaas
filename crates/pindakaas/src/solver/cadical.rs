@@ -30,6 +30,15 @@ impl Cadical {
 		unsafe { pindakaas_cadical::ccadical_get_option(self.ptr, name.as_ptr()) }
 	}
 
+	#[cfg(feature = "external-propagation")]
+	/// Check whether a given literal is marked as observed in the solver's
+	/// external propagator interface.
+	fn is_observed(&self, lit: Lit) -> bool {
+		// SAFETY: Pointer known to be non-null, lit is known to be non-zero and not
+		// MIN_INT as required by Cadical.
+		unsafe { pindakaas_cadical::ccadical_is_observed(self.ptr, lit.0.get()) }
+	}
+
 	pub fn phase(&mut self, lit: Lit) {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		unsafe { ccadical_phase(self.ptr, lit.0.get()) }
@@ -84,6 +93,26 @@ impl fmt::Debug for Cadical {
 	}
 }
 
+#[cfg(feature = "external-propagation")]
+impl<P> Clone for PropagatingCadical<P>
+where
+	P: Clone + crate::solver::propagation::Propagator,
+{
+	fn clone(&self) -> Self {
+		use crate::solver::propagation::{PropagatingSolver, WithPropagator};
+
+		let cadical = self.solver().clone();
+		let propagator = self.propagator().clone();
+		let mut cadical = cadical.with_propagator(propagator);
+		for v in self.solver().vars.emitted_vars() {
+			if self.solver().is_observed(v.into()) {
+				cadical.add_observed_var(v);
+			}
+		}
+		cadical
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use traced_test::test;
@@ -117,14 +146,26 @@ mod tests {
 		assert!(
 			(solution.value(!a) && solution.value(b)) || (solution.value(a) && solution.value(!b))
 		);
-		// Test clone implementation
+	}
+
+	#[test]
+	fn test_cadical_clone() {
+		let mut slv = Cadical::default();
+		let (a, b) = slv.new_lits();
+		slv.add_clause([a, b]).unwrap();
+
 		let mut cp = slv.clone();
-		let SolveResult::Satisfied(solution) = cp.solve() else {
+		cp.add_clause([!a]).unwrap();
+		cp.add_clause([!b]).unwrap();
+
+		let SolveResult::Satisfied(solution) = slv.solve() else {
 			unreachable!()
 		};
-		assert!(
-			(solution.value(!a) && solution.value(b)) || (solution.value(a) && solution.value(!b))
-		);
+		assert!(solution.value(a) && solution.value(b));
+
+		let SolveResult::Unsatisfiable(_) = cp.solve() else {
+			unreachable!()
+		};
 	}
 
 	#[test]

@@ -4,7 +4,7 @@ using namespace CaDiCaL;
 
 extern "C" {
 
-#include "ccadical_up.h"
+#include "ccadical_override.h"
 
 void ccadical_connect_external_propagator(
     CCaDiCaL *slv, void *propagator_data,
@@ -48,6 +48,16 @@ void ccadical_force_backtrack(CCaDiCaL *slv, size_t new_level) {
   return ((Wrapper *)slv)->solver->force_backtrack(new_level);
 }
 
+CCaDiCaL *ccadical_copy(CCaDiCaL *slv) {
+  auto *cp = new Wrapper();
+  ((Wrapper *)slv)->solver->copy(*cp->solver);
+  return (CCaDiCaL *)cp;
+}
+
+bool ccadical_is_observed(CCaDiCaL *slv, int lit){
+	return ((Wrapper *)slv)->solver->is_observed(lit);
+}
+
 void ccadical_phase(CCaDiCaL *slv, int lit) {
   ((Wrapper *)slv)->solver->phase(lit);
 }
@@ -55,9 +65,4 @@ void ccadical_unphase(CCaDiCaL *slv, int lit) {
   ((Wrapper *)slv)->solver->unphase(lit);
 }
 
-CCaDiCaL *ccadical_copy(CCaDiCaL *slv) {
-  auto *cp = new Wrapper();
-  ((Wrapper *)slv)->solver->copy(*cp->solver);
-  return (CCaDiCaL *)cp;
-}
 }

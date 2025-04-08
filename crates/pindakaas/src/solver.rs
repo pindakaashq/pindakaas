@@ -188,7 +188,25 @@ impl Drop for FFIPointer {
 }
 
 impl VarFactory {
-	pub fn emited_vars(&self) -> usize {
+	/// Get the [`VarRange`] of all variables that have been created using this
+	/// factory.
+	pub fn emitted_vars(&self) -> VarRange {
+		let mut start = Var(NonZeroI32::new(1).unwrap());
+		let end = if let Some(v) = self.next_var {
+			if let Some(prev) = v.prev_var() {
+				prev
+			} else {
+				start = Var(NonZeroI32::new(2).unwrap());
+				Var(NonZeroI32::new(1).unwrap())
+			}
+		} else {
+			Var(NonZeroI32::MAX)
+		};
+		VarRange { start, end }
+	}
+
+	/// Get the number of variables that have been created using this factory.
+	pub fn num_emitted_vars(&self) -> usize {
 		if let Some(x) = self.next_var {
 			x.0.get() as usize - 1
 		} else {
