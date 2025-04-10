@@ -72,7 +72,7 @@ impl From<&Cnf> for Splr {
 		let mut slv = Splr::instantiate(
 			&Config::default(),
 			&CNFDescription {
-				num_of_variables: cnf.nvar.emited_vars(),
+				num_of_variables: cnf.nvar.num_emitted_vars(),
 				..CNFDescription::default()
 			},
 		);

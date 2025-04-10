@@ -223,7 +223,7 @@ pub(crate) mod tests {
 		bool_linear::BoolLinExp,
 		integer::IntVarEnc,
 		solver::{cadical::Cadical, SolveResult, Solver},
-		Checker, ClauseDatabaseTools, Cnf, Lit, Valuation,
+		Checker, ClauseDatabaseTools, Cnf, Lit, Unsatisfiable, Valuation,
 	};
 
 	/// Helper functions to ensure that the possible solutions of a formula
@@ -323,8 +323,11 @@ pub(crate) mod tests {
 					})
 					.collect(),
 			);
-			slv.add_clause(solutions.last().unwrap().iter().map(|&l| !l))
-				.unwrap();
+			if let Err(Unsatisfiable) =
+				slv.add_clause(solutions.last().unwrap().iter().map(|&l| !l))
+			{
+				break;
+			};
 		}
 		solutions.sort();
 		let sol_str = format!(

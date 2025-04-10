@@ -2293,7 +2293,7 @@ mod tests {
 			}))
 		);
 
-		assert_eq!(cnf.clauses(), 0);
+		assert_eq!(cnf.num_clauses(), 0);
 	}
 
 	#[test]
@@ -2462,7 +2462,7 @@ mod tests {
 				cmp: LimitComp::Equal
 			}))
 		);
-		assert_eq!(cnf.clauses(), 0);
+		assert_eq!(cnf.num_clauses(), 0);
 	}
 
 	#[test]
@@ -2492,7 +2492,7 @@ mod tests {
 				k: PosCoeff::new(4),
 			}))
 		);
-		assert_eq!(cnf.clauses(), 0);
+		assert_eq!(cnf.num_clauses(), 0);
 	}
 
 	#[test]

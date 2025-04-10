@@ -40,9 +40,10 @@ void ccadical_force_backtrack(CCaDiCaL *, size_t new_level);
 
 // Additional C bindings for C++ Cadical
 
+CCaDiCaL *ccadical_copy(CCaDiCaL *slv);
+bool ccadical_is_observed(CCaDiCaL *, int lit);
 void ccadical_phase(CCaDiCaL *, int lit);
 void ccadical_unphase(CCaDiCaL *, int lit);
-CCaDiCaL *ccadical_copy(CCaDiCaL *slv);
 
 /*------------------------------------------------------------------------*/
 

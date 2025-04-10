@@ -26,7 +26,7 @@ use std::{
 	fs::File,
 	hash::Hash,
 	io::{self, BufRead, BufReader, Write},
-	iter::{repeat, FusedIterator},
+	iter::{repeat_n, FusedIterator},
 	num::NonZeroI32,
 	ops::{BitAnd, BitOr, BitXor, Bound, Not, RangeBounds, RangeInclusive},
 	path::Path,
@@ -611,7 +611,7 @@ impl Not for BoolVal {
 
 impl Cnf {
 	/// Returns the number of clauses in the formula.
-	pub fn clauses(&self) -> usize {
+	pub fn num_clauses(&self) -> usize {
 		self.size.len()
 	}
 
@@ -660,7 +660,7 @@ impl Cnf {
 
 	/// Returns the number of variables in the formula.
 	pub fn variables(&self) -> usize {
-		self.nvar.emited_vars()
+		self.nvar.num_emitted_vars()
 	}
 }
 
@@ -909,8 +909,7 @@ impl Var {
 	}
 
 	fn next_var(&self) -> Option<Var> {
-		/// SAFETY: literal 1 is known to be non-zero
-		const ONE: NonZeroI32 = unsafe { NonZeroI32::new_unchecked(1) };
+		const ONE: NonZeroI32 = NonZeroI32::new(1).unwrap();
 		self.checked_add(ONE)
 	}
 
@@ -1080,9 +1079,9 @@ impl Wcnf {
 		I: IntoIterator,
 		I::Item: Into<BoolVal>,
 	{
-		let clauses = self.cnf.clauses();
+		let clauses = self.cnf.num_clauses();
 		self.cnf.add_clause(clause)?;
-		if self.cnf.clauses() > clauses {
+		if self.cnf.num_clauses() > clauses {
 			self.weights.push(weight);
 		}
 		Ok(())
@@ -1090,7 +1089,7 @@ impl Wcnf {
 
 	/// Returns the number of clauses in the formula.
 	pub fn clauses(&self) -> usize {
-		self.cnf.clauses()
+		self.cnf.num_clauses()
 	}
 
 	/// Read a WCNF formula from a file formatted in the (W)DIMACS WCNF format
@@ -1142,7 +1141,7 @@ impl ClauseDatabase for Wcnf {
 
 impl Display for Wcnf {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let num_var = &self.cnf.nvar.emited_vars();
+		let num_var = &self.cnf.nvar.num_emitted_vars();
 		let num_clauses = self.cnf.size.len();
 		let top = self.weights.iter().flatten().fold(1, |a, b| a + *b);
 		writeln!(f, "p wcnf {num_var} {num_clauses} {top}")?;
@@ -1163,7 +1162,7 @@ impl Display for Wcnf {
 
 impl From<Cnf> for Wcnf {
 	fn from(cnf: Cnf) -> Self {
-		let weights = repeat(None).take(cnf.clauses()).collect();
+		let weights = repeat_n(None, cnf.num_clauses()).collect();
 		Wcnf { cnf, weights }
 	}
 }
