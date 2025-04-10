@@ -17,10 +17,6 @@ mod pindakaas {
 		format!("{}", env!("CARGO_PKG_VERSION"))
 	}
 
-	use super::*;
-	use itertools::Itertools;
-	use pindakaas_derive::PythonClauseDatabase;
-	use pyo3::exceptions::PyException;
 	use std::fmt::Display;
 
 	use ::pindakaas::{self as base};
@@ -28,6 +24,11 @@ mod pindakaas {
 		bool_linear::{BoolLinExp, BoolLinear, LinearEncoder},
 		Encoder,
 	};
+	use itertools::Itertools;
+	use pindakaas_derive::PythonClauseDatabase;
+	use pyo3::exceptions::PyException;
+
+	use super::*;
 
 	type Clause = Vec<Lit>;
 
