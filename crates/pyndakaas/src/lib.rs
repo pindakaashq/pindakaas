@@ -14,7 +14,7 @@ mod pindakaas {
 	/// Return ``pindakaas`` version
 	#[pyfunction]
 	fn version() -> String {
-		format!("{}", env!("CARGO_PKG_VERSION"))
+		env!("CARGO_PKG_VERSION").to_owned()
 	}
 
 	use std::fmt::Display;
@@ -305,7 +305,7 @@ mod pindakaas {
 				.unwrap_or_else(|e| {
 					e.display(py);
 					panic!();
-				})
+				});
 			});
 		}
 	}
