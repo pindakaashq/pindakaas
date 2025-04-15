@@ -45,6 +45,8 @@ bool ccadical_is_observed(CCaDiCaL *, int lit);
 void ccadical_phase(CCaDiCaL *, int lit);
 void ccadical_unphase(CCaDiCaL *, int lit);
 
+// Will add additional proof logging functions here.
+
 /*------------------------------------------------------------------------*/
 
 /*------------------------------------------------------------------------*/
