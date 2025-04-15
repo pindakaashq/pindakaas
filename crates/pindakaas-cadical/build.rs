@@ -37,6 +37,7 @@ fn main() {
 		"vendor/cadical/src/format.cpp",
 		"vendor/cadical/src/frattracer.cpp",
 		"vendor/cadical/src/gates.cpp",
+		"vendor/cadical/src/huubtracer.cpp",
 		"vendor/cadical/src/idruptracer.cpp",
 		"vendor/cadical/src/instantiate.cpp",
 		"vendor/cadical/src/internal.cpp",
