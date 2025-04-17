@@ -65,7 +65,10 @@ void ccadical_unphase(CCaDiCaL *slv, int lit) {
   ((Wrapper *)slv)->solver->unphase(lit);
 }
 void ccadical_enable_proof(CCaDiCaL *slv, const char* name) {
-  FILE* file = fopen(name, "a");
-  ((Wrapper *)slv)->solver->trace_proof(file, name);
+  // Enable proof tracing
+  ((Wrapper *)slv)->solver->trace_proof(name);
+   // Custom solver method needed to print the 
+   // `pseudo-Boolean proof version 2.0` header.
+  ((Wrapper *)slv)->solver->begin_proof(0);
 }
 }
