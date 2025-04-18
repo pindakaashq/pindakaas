@@ -251,11 +251,14 @@ mod pindakaas {
 	/// All solvers inherit functionality from Cnf
 	#[pymodule]
 	mod solvers {
+		use pindakaas_derive::add_time_limit_field;
+
 		use super::*;
 
 		#[pyclass(unsendable)]
 		#[derive(Default, PythonClauseDatabase)]
 		#[python_clause_database(solver = true, assumptions = true)]
+		// #[add_time_limit_field]
 		struct Cadical(base::solver::cadical::Cadical);
 
 		#[pyclass(unsendable)]

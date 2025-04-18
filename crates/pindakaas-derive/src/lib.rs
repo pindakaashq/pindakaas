@@ -1,7 +1,7 @@
 use darling::FromDeriveInput;
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
-use syn::{parse_macro_input, DeriveInput, Ident};
+use quote::{format_ident, quote, ToTokens};
+use syn::{parse_macro_input, parse_quote, DeriveInput, Ident, ItemStruct};
 
 #[derive(FromDeriveInput)]
 #[darling(attributes(ipasir))]
@@ -572,8 +572,10 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		let set_time_limit = opts
 			.time_limit
 			.then_some(quote! {
-                        // always set callback, in case of subsequent calls which might have to reset the termination
-                                base::solver::TermCallback::set_terminate_callback(&mut #db, time_limit.map(|_| || base::solver::SlvTermSignal::Terminate));
+						// always set callback, in case of subsequent calls which might have to reset the termination
+								base::solver::TermCallback::set_terminate_callback(&mut #db, time_limit.map(|time_limit| {
+									self.time_limit = time_limit;
+									|| base::solver::SlvTermSignal::Terminate}));
 			})
 			.unwrap_or_default();
 
@@ -595,7 +597,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 
 				#[pyo3(signature=(#(#signature),*))]
 		fn solve(#(#args), *) -> Option<bool> {
-					#set_time_limit
+					// #set_time_limit
 			 match #solve {
 				base::solver::SolveResult::Satisfied(_) => Some(true),
 				base::solver::SolveResult::Unsatisfiable(_) => Some(false),
@@ -723,6 +725,20 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	.into()
 }
 
+#[proc_macro_attribute]
+pub fn add_time_limit_field(_args: TokenStream, input: TokenStream) -> TokenStream {
+	let mut s = parse_macro_input!(input as ItemStruct);
+	match s.fields {
+		syn::Fields::Named(ref mut fields) => {
+			fields.named.push(
+				parse_quote!( {time_limit: std::time::duration} ), // syn::parse(quote! { time_limit: std::time::duration }.into()).unwrap(),
+				                                                   // syn::Field::parse_named(quote! { time_limit: std::time::duration }.into()).unwrap(),
+			);
+		}
+		_ => panic!(),
+	};
+	s.into_token_stream().into()
+}
 fn default_true() -> bool {
 	true
 }
