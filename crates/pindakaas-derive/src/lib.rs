@@ -427,6 +427,7 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 	.into()
 }
 
+// TODO these Opts very much mirror the IpasirOpts, so I'm wondering if we can combine them
 #[derive(FromDeriveInput)]
 #[darling(attributes(python_clause_database))]
 struct PythonClauseDatabaseOpts {
@@ -439,6 +440,8 @@ struct PythonClauseDatabaseOpts {
 	solver: bool,
 	#[darling(default)]
 	assumptions: bool,
+	#[darling(default = "default_true")]
+	time_limit: bool,
 }
 
 #[proc_macro_derive(PythonClauseDatabase, attributes(python_clause_database))]
@@ -538,32 +541,49 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	};
 
 	let solver = if opts.solver {
-		let solve = if opts.assumptions {
-			quote! {
-						#[pyo3(signature=(assumptions = Vec::default()))]
-			fn solve(&mut self, assumptions: Vec<Lit>) -> Option<bool> {
-				match base::solver::SolveAssuming::solve_assuming(&mut #db, assumptions.into_iter().map(|l| l.into())) {
-					base::solver::SolveResult::Satisfied(_) => Some(true),
-					base::solver::SolveResult::Unsatisfiable(_) => Some(false),
-					base::solver::SolveResult::Unknown => None,
-				}
-			}
+		// The pyo3 signature arguments
+		let signature = [
+			opts.time_limit.then_some(quote! { time_limit = None }),
+			opts.assumptions
+				.then_some(quote! { assumptions = Vec::default() }),
+		]
+		.into_iter()
+		.flatten();
 
-					fn fail(&self, lit: Lit) -> bool {
-						base::solver::FailedAssumtions::fail(&#db.solver_fail_obj(), lit.into())
-					}
-			}
+		// The rust arguments
+		let args = [
+			Some(quote! {&mut self}),
+			opts.time_limit
+				.then_some(quote! { time_limit : Option<std::time::Duration> }),
+			opts.assumptions
+				.then_some(quote! { assumptions : Vec<Lit> }),
+		]
+		.into_iter()
+		.flatten();
+
+		// the inner solve call
+		let solve = if opts.assumptions {
+			quote! { base::solver::SolveAssuming::solve_assuming(&mut #db, assumptions.into_iter().map(|l| l.into())) }
 		} else {
-			quote! {
-			fn solve(&mut self) -> Option<bool> {
-				match base::solver::Solver::solve(&mut #db) {
-					base::solver::SolveResult::Satisfied(_) => Some(true),
-					base::solver::SolveResult::Unsatisfiable(_) => Some(false),
-					base::solver::SolveResult::Unknown => None,
-				}
-			}
-			}
+			quote! { base::solver::Solver::solve(&mut #db) }
 		};
+
+		// the callback regulating the timer
+		let set_time_limit = opts
+			.time_limit
+			.then_some(quote! {
+                        // always set callback, in case of subsequent calls which might have to reset the termination
+                                base::solver::TermCallback::set_terminate_callback(&mut #db, time_limit.map(|_| || base::solver::SlvTermSignal::Terminate));
+			})
+			.unwrap_or_default();
+
+		// fail function (if assumptions)
+		let fail = opts
+			.assumptions
+			.then_some(quote! {fn fail(&self, lit: Lit) -> bool {
+				base::solver::FailedAssumtions::fail(&#db.solver_fail_obj(), lit.into())
+			}})
+			.unwrap_or_default();
 
 		quote! {
 			#[pymethods]
@@ -572,10 +592,22 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		fn new() -> Self {
 			Self::default()
 		}
-				#solve
+
+				#[pyo3(signature=(#(#signature),*))]
+		fn solve(#(#args), *) -> Option<bool> {
+					#set_time_limit
+			 match #solve {
+				base::solver::SolveResult::Satisfied(_) => Some(true),
+				base::solver::SolveResult::Unsatisfiable(_) => Some(false),
+				base::solver::SolveResult::Unknown => None,
+			}
+		}
+
 						fn value(&self, lit: Lit) -> bool {
 								base::Valuation::value(&#db.solver_solution_obj(), lit.into())
 						}
+
+												#fail
 		}
 		}
 	} else {

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import pindakaas as pk
+from datetime import timedelta
 
 def main():
     cnf = pk.Cnf()
@@ -45,7 +46,7 @@ def main():
         b = solver.add_variable()
         solver.add_clause([a,b])
         solver.add_clause([~a,~b])
-        print("x", solver.solve())
+        solver.solve(time_limit=timedelta(seconds=5))
         assert solver.solve() is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
         assert solver.value(a) is not solver.value(b)
         assert solver.solve(assumptions=[a]) is True # Solve with assumptions

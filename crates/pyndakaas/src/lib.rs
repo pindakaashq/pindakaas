@@ -260,7 +260,7 @@ mod pindakaas {
 
 		#[pyclass(unsendable)]
 		#[derive(Default, PythonClauseDatabase)]
-		#[python_clause_database(solver = true)]
+		#[python_clause_database(solver = true, time_limit = false)]
 		struct Kissat(base::solver::kissat::Kissat);
 
 		#[pyclass(unsendable)]
