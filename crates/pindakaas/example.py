@@ -46,7 +46,7 @@ def main():
         b = solver.add_variable()
         solver.add_clause([a,b])
         solver.add_clause([~a,~b])
-        solver.solve(time_limit=timedelta(seconds=5))
+        solver.solve(time_limit=5)
         assert solver.solve() is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
         assert solver.value(a) is not solver.value(b)
         assert solver.solve(assumptions=[a]) is True # Solve with assumptions

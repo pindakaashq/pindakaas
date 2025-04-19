@@ -584,7 +584,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 		let args = [
 			Some(quote! {&mut self}),
 			opts.term_callback
-				.then(|| quote! { time_limit : Option<std::time::Duration> }),
+				.then(|| quote! { time_limit : Option<pyo3::Bound<'py, pyo3::PyAny>> }),
 			opts.assumptions
 				.then(|| quote! { assumptions : Vec<crate::python::pindakaas::Lit> }),
 		]
@@ -599,22 +599,34 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 		};
 
 		// the callback regulating the timer
+		#[rustfmt::skip]
 		let set_time_limit = opts
 			.term_callback
 			.then(|| {
 				quote! {
-										let time_limit =
+                                        // convert TimeDelta or integer (seconds) to Duration
+                                        let time_limit = if let Some(time_limit) = time_limit {
+                                            if let Ok(time_limit) = pyo3::types::PyAnyMethods::extract::<std::time::Duration>(&time_limit) {
+                                                Some(time_limit)
+                                            } else if let Ok(time_limit) = pyo3::types::PyAnyMethods::extract(&time_limit) {
+                                                Some(std::time::Duration::from_secs(time_limit))
+                                            } else {
+                                                return Err(pyo3::exceptions::PyTypeError::new_err(format!("The `time_limit` should be a non-negative integer or a `datetime.TimeDelta` object, but was: {time_limit}")));
+                                            }
+                                        } else {
+                                            None
+                                        };
 					// always set callback, in case of subsequent calls which might have to reset the termination
 					crate::solver::TermCallback::set_terminate_callback(
-							&mut self.0,
-							time_limit.map(|time_limit| {
-									let time = std::time::SystemTime::now();
-									move || if time.elapsed().unwrap() <= time_limit {
-										crate::solver::SlvTermSignal::Continue
-									} else {
-										crate::solver::SlvTermSignal::Terminate
-									}
-							})
+                                            &mut self.0,
+                                            time_limit.map(|time_limit| {
+                                                let timer = std::time::SystemTime::now();
+                                                move || if timer.elapsed().unwrap() <= time_limit {
+                                                        crate::solver::SlvTermSignal::Continue
+                                                } else {
+                                                        crate::solver::SlvTermSignal::Terminate
+                                                }
+                                            })
 					);
 				}
 			})
@@ -635,13 +647,16 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 			impl #python_ident {
 
 				#[pyo3(signature=(#(#signature),*))]
-		fn solve(#(#args), *) -> Option<bool> {
+							// Result is type error (on time_limit),
+														// Option<bool> maps to the solve results
+														// (sat, unsat, unknown)
+		fn solve<'py>(#(#args), *) -> pyo3::PyResult<Option<bool>> {
 						#set_time_limit
-			 match #solve {
+			 Ok(match #solve {
 				crate::solver::SolveResult::Satisfied(_) => Some(true),
 				crate::solver::SolveResult::Unsatisfiable(_) => Some(false),
 				crate::solver::SolveResult::Unknown => None,
-			}
+			})
 		}
 
 						fn value(&self, lit: crate::python::pindakaas::Lit) -> bool {
