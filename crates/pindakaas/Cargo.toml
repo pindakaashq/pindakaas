@@ -38,7 +38,7 @@ tracing = { workspace = true }
 
 [features]
 cadical = ["pindakaas-cadical", "pindakaas-derive"]
-default = ["cadical"] # TODO remove python
+default = ["cadical", "kissat", "intel-sat", "python"] # TODO set back to old defaults
 external-propagation = ["cadical"]
 intel-sat = ["pindakaas-intel-sat", "pindakaas-derive"]
 kissat = ["pindakaas-kissat", "pindakaas-derive"]

@@ -174,7 +174,7 @@ pub mod pindakaas {
 			// FIXME: It would be great if this could be made lazily instead of copying everything when creating the iterator
 			ClauseIter(
 				Vec::from_iter(
-					self.0
+					self.ptr
 						.iter()
 						.map(|clause| clause.iter().map(|l| Lit(*l)).collect_vec()),
 				)
@@ -183,7 +183,7 @@ pub mod pindakaas {
 		}
 
 		fn __str__(&self) -> String {
-			format!("{}", self.0)
+			format!("{}", self.ptr)
 		}
 
 		// TODO [?] Shouldn't we make reading from_file part of ClauseDatabaseTools?

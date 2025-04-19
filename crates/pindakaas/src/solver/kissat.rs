@@ -6,7 +6,7 @@ use crate::VarFactory;
 
 #[derive(Debug, IpasirSolver, Pyndakaas)]
 #[ipasir(krate = pindakaas_kissat)]
-#[pyndakaas(solver, term_callback)]
+#[pyndakaas(solver)]
 pub struct Kissat {
 	ptr: *mut c_void,
 	vars: VarFactory,

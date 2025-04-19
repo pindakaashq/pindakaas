@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 import pindakaas as pk
 from datetime import timedelta
 
@@ -29,10 +29,10 @@ def main():
     cnf.add_linear([a,b,c], coefficients=[2,3,5], comparator=pk.Comparator.LessEq, k=6, conditions=[~p])
     cnf.add_linear([a,b,c]) # a + b + c >= 1 == a \/ b \/ c
 
-    for clause in cnf:
-        for lit in clause:
-            print(f"{lit}, ", end="")
-        print("\n", end="")
+    # for clause in cnf:
+    #     for lit in clause:
+    #         print(f"{lit}, ", end="")
+    #     print("\n", end="")
 
     wcnf = pk.Wcnf()
     a = wcnf.add_variable()
@@ -79,11 +79,6 @@ def main():
     cadical.add_clause([~p[2],~c,a])
     cadical.add_clause([~p[3],~a,c])
 
-    # n=3 # pigeons
-    # m=2 # holes
-    # pigeons = cadical.add_variables(n*m)
-    # import numpy as np
-
     ls = [a,b,c] + p
     if cadical.solve(assumptions=p) is True:
         for l in ls:
@@ -96,19 +91,6 @@ def main():
         core = list(p for p in p if not cadical.fail(p))
         for l in ls:
             print(f"failed of {l} {cadical.fail(l)}")
-
-    n=4
-    m=n-1
-    # import numpy as np
-    cadical = pk.solvers.Cadical()
-    x = [ list(cadical.add_variables(m)) for _ in range(n) ]
-    # for xs in x:
-
-
-
-
-
-    # TODO translate pysat's pigeonhole problem to pindakaas
 
     # print(f"{solver.value(a)}") # Also True/False/None
     # assert solver.value(a) != solver.value(b)
