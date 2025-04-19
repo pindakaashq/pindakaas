@@ -429,11 +429,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 
 // TODO these Opts very much mirror the IpasirOpts, so I'm wondering if we can combine them
 #[derive(FromDeriveInput)]
-#[darling(attributes(python_clause_database))]
-struct PythonClauseDatabaseOpts {
-	/// The struct field which implements ClauseDatabase and ClauseDatabaseTools
-	#[darling(default)]
-	db: Option<Ident>,
+#[darling(attributes(pyndakaas))]
+struct PyndakaasOpts {
 	#[darling(default = "default_true")]
 	tools: bool,
 	#[darling(default)]
@@ -441,44 +438,63 @@ struct PythonClauseDatabaseOpts {
 	#[darling(default)]
 	assumptions: bool,
 	#[darling(default = "default_true")]
-	time_limit: bool,
+	term_callback: bool,
 }
 
-#[proc_macro_derive(PythonClauseDatabase, attributes(python_clause_database))]
-pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(Pyndakaas, attributes(pyndakaas))]
+pub fn pyndakaas(input: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(input);
-	let opts = PythonClauseDatabaseOpts::from_derive_input(&input).expect("Invalid options");
-	// TODO actually, I want to make this non-optional but I can't get an Ident for tuple struct field access
-	let db = match opts.db {
-		Some(x) => quote! {  self.#x },
-		None => quote! { self.0 },
-	};
+	let opts = PyndakaasOpts::from_derive_input(&input).expect("Invalid options");
 	let DeriveInput { ident, .. } = input;
+	let python_ident = format_ident!("Py{}", ident);
+	let py_class_name = format!("{ident}");
+	// TODO [?]
+	// let krate = if opts.solver {
+	// 	quote! { crate::solver }
+	// } else {
+	// 	quote! { crate }
+	// };
+
+	let py_strct = quote! {
+	#[pyo3::prelude::pyclass(unsendable, name = #py_class_name, extends = crate::python::pindakaas::ClauseDatabase)]
+			#[derive(Default)]
+
+	pub(crate) struct #python_ident(#ident);
+
+	#[pyo3::prelude::pymethods]
+		impl #python_ident {
+			#[new]
+			pub(crate) fn new() -> (Self, crate::python::pindakaas::ClauseDatabase) {
+				(Self(#ident::default()), crate::python::pindakaas::ClauseDatabase::new())
+			}
+		}
+
+	};
 
 	let clause_database = quote! {
-	#[pymethods]
-	impl #ident {
+	#[pyo3::prelude::pymethods]
+	impl #python_ident {
 		/// Add a clause to the clause database
-		fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
-			base::ClauseDatabase::add_clause_from_slice(
-				&mut #db,
-				&clause.into_iter().map(|l| l.0).collect_vec(),
+		fn add_clause(&mut self, clause: Vec<crate::python::pindakaas::Lit>) -> crate::python::pindakaas::Result {
+			crate::ClauseDatabase::add_clause_from_slice(
+				&mut self.0,
+				&clause.into_iter().map(|l| l.0).collect::<Vec<_>>(),
 			)
-			.map_err(|_| Unsatisfiable)
+			.map_err(|_| crate::python::pindakaas::Unsatisfiable)
 		}
 
 		/// Add ``n`` variables to the clause database
-	fn add_variables(&mut self, n: usize) -> VarRange {
-			VarRange(
-			base::ClauseDatabase::new_var_range(
-							&mut #db,
+	fn add_variables(&mut self, n: usize) -> crate::python::pindakaas::VarRange {
+			crate::python::pindakaas::VarRange(
+			crate::ClauseDatabase::new_var_range(
+							&mut self.0,
 							n
 							))
 
 								// TODO not sure if we can make a generator here, but perhaps that's
 								// the proper translation to python
 				// Lit(
-				// base::ClauseDatabaseTools::new_vars(
+				// crate::ClauseDatabaseTools::new_vars(
 				// 				&mut self.0
 				// 			).into())
 	}
@@ -487,14 +503,14 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 
 	let tools = if opts.tools {
 		quote! {
-		#[pymethods]
-		impl #ident {
+		#[pyo3::prelude::pymethods]
+		impl #python_ident {
 
 					// TODO not entirely sure if this shouldn't also go to ClauseDatabase
-		fn add_variable(&mut self) -> Lit {
-				Lit(
-				base::ClauseDatabaseTools::new_var(
-								&mut #db
+		fn add_variable(&mut self) -> crate::python::pindakaas::Lit {
+				crate::python::pindakaas::Lit(
+				crate::ClauseDatabaseTools::new_var(
+								&mut self.0
 							).into())
 		}
 
@@ -504,30 +520,30 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 							///
 		/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
 		/// Currently, the encoding is fixed as ``adder`` for PB and Cardinality constraints, and ``PairWise`` for AMOs/ALOs
-		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
+		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(crate::python::pindakaas::Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
 		fn add_linear(
 			&mut self,
-			literals: Vec<Lit>,
-			coefficients: Option<Vec<Coeff>>,
+			literals: Vec<crate::python::pindakaas::Lit>,
+			coefficients: Option<Vec<crate::python::pindakaas::Coeff>>,
 			// TODO I'm not sure if adding Option is the best way to allow None to return default
-			comparator: Option<Comparator>,
-			k: Option<Coeff>,
-						conditions: Vec<Lit>,
-		) -> Result {
+			comparator: Option<crate::python::pindakaas::Comparator>,
+			k: Option<crate::python::pindakaas::Coeff>,
+						conditions: Vec<crate::python::pindakaas::Lit>,
+		) -> crate::python::pindakaas::Result {
 			let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
 			assert_eq!(
 				coefficients.len(),
 				literals.len(),
 				"Literals and coefficients should have the same length"
 			);
-			let enc: LinearEncoder = LinearEncoder::default();
-						let mut db = base::ClauseDatabaseTools::with_conditions(&mut #db, conditions.into_iter().map(|l| l.into()).collect());
-			Ok(enc.encode(
+			let enc: crate::bool_linear::LinearEncoder = crate::bool_linear::LinearEncoder::default();
+							let mut db = crate::ClauseDatabaseTools::with_conditions(&mut self.0, conditions.into_iter().map(|l| l.into()).collect());
+			Ok(crate::Encoder::encode(&enc,
 				&mut db,
-				&BoolLinear::new(
-					BoolLinExp::from_slices(
+				&crate::bool_linear::BoolLinear::new(
+					crate::bool_linear::BoolLinExp::from_slices(
 						&coefficients,
-						&literals.into_iter().map(|l| l.0).collect_vec(),
+						&literals.into_iter().map(|l| l.0).collect::<Vec<_>>(),
 					),
 					comparator.unwrap_or_default().into(),
 					k.unwrap_or(1),
@@ -543,7 +559,7 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 	let solver = if opts.solver {
 		// The pyo3 signature arguments
 		let signature = [
-			opts.time_limit.then_some(quote! { time_limit = None }),
+			opts.term_callback.then_some(quote! { time_limit = None }),
 			opts.assumptions
 				.then_some(quote! { assumptions = Vec::default() }),
 		]
@@ -553,175 +569,76 @@ pub fn python_clause_database_derive(input: TokenStream) -> TokenStream {
 		// The rust arguments
 		let args = [
 			Some(quote! {&mut self}),
-			opts.time_limit
+			opts.term_callback
 				.then_some(quote! { time_limit : Option<std::time::Duration> }),
 			opts.assumptions
-				.then_some(quote! { assumptions : Vec<Lit> }),
+				.then_some(quote! { assumptions : Vec<crate::python::pindakaas::Lit> }),
 		]
 		.into_iter()
 		.flatten();
 
 		// the inner solve call
 		let solve = if opts.assumptions {
-			quote! { base::solver::SolveAssuming::solve_assuming(&mut #db, assumptions.into_iter().map(|l| l.into())) }
+			quote! { crate::solver::SolveAssuming::solve_assuming(&mut self.0, assumptions.into_iter().map(|l| l.into())) }
 		} else {
-			quote! { base::solver::Solver::solve(&mut #db) }
+			quote! { crate::solver::Solver::solve(&mut self.0) }
 		};
 
 		// the callback regulating the timer
 		let set_time_limit = opts
-			.time_limit
-			.then_some(quote! {
-						// always set callback, in case of subsequent calls which might have to reset the termination
-								base::solver::TermCallback::set_terminate_callback(&mut #db, time_limit.map(|time_limit| {
-									self.time_limit = time_limit;
-									|| base::solver::SlvTermSignal::Terminate}));
-			})
-			.unwrap_or_default();
+				.term_callback
+				.then_some(quote! {
+							// always set callback, in case of subsequent calls which might have to reset the termination
+									crate::solver::TermCallback::set_terminate_callback(&mut self.0, time_limit.map(|time_limit| {
+										self.time_limit = time_limit;
+										|| crate::solver::SlvTermSignal::Terminate}));
+				})
+				.unwrap_or_default();
 
 		// fail function (if assumptions)
 		let fail = opts
 			.assumptions
-			.then_some(quote! {fn fail(&self, lit: Lit) -> bool {
-				base::solver::FailedAssumtions::fail(&#db.solver_fail_obj(), lit.into())
-			}})
+			.then_some(
+				quote! {fn fail(&self, lit: crate::python::pindakaas::Lit) -> bool {
+					crate::solver::FailedAssumtions::fail(&self.0.solver_fail_obj(), lit.into())
+				}},
+			)
 			.unwrap_or_default();
 
 		quote! {
-			#[pymethods]
-			impl #ident {
-		#[new]
-		fn new() -> Self {
-			Self::default()
-		}
+			#[pyo3::prelude::pymethods]
+			impl #python_ident {
 
 				#[pyo3(signature=(#(#signature),*))]
 		fn solve(#(#args), *) -> Option<bool> {
 					// #set_time_limit
 			 match #solve {
-				base::solver::SolveResult::Satisfied(_) => Some(true),
-				base::solver::SolveResult::Unsatisfiable(_) => Some(false),
-				base::solver::SolveResult::Unknown => None,
+				crate::solver::SolveResult::Satisfied(_) => Some(true),
+				crate::solver::SolveResult::Unsatisfiable(_) => Some(false),
+				crate::solver::SolveResult::Unknown => None,
 			}
 		}
 
-						fn value(&self, lit: Lit) -> bool {
-								base::Valuation::value(&#db.solver_solution_obj(), lit.into())
+						fn value(&self, lit: crate::python::pindakaas::Lit) -> bool {
+								crate::Valuation::value(&self.0.solver_solution_obj(), lit.into())
 						}
 
 												#fail
 		}
 		}
 	} else {
-		quote! {()}
+		quote! {}
 	};
-
-	/*
-	let conditional_database = if opts.conditions.unwrap_or(true) {
-		let conditional_database_ident = format_ident!("Conditional{}", ident);
-		quote! {
-
-					#[pymethods]
-					impl #ident {
-
-
-				fn with_conditions(slf: PyRefMut<'_, Self>, conditions: Vec<Lit>) -> #conditional_database_ident {
-					// TODO can't really use this, because can't keep impl ClauseDatabase as struct field ?
-					// let c_db = base::ClauseDatabaseTools::with_conditions(
-					// 	&mut self.0,
-					// 	conditions.into_iter().map(|l| l.into()).collect(),
-					// );
-					Python::with_gil(move |py| {
-						#conditional_database_ident(
-							slf.into_py_any(py).unwrap().extract(py).unwrap(),
-							conditions,
-						)
-					})
-				}
-
-					}
-
-			// #[pyclass(extends = ClauseDatabase)] // TODO can't quite get this to work
-				// #[new]
-				// fn new(db: Py<#ident>, conditions: Vec<Lit>) -> (Self, ClauseDatabase) {
-				// 	(Self(db, conditions), ClauseDatabase::new())
-				// }
-			// TODO this approach works but now we don't get Cnf's methods in ConditionalCnf
-			#[pyclass]
-						// #[derive(PythonClauseDatabaseTools)]
-						// #[python_clause_database_tools(conditions = false)]
-			struct #conditional_database_ident(Py<#ident>, Vec<Lit>);
-
-			#[pymethods]
-			impl #conditional_database_ident {
-
-				fn __enter__(slf: Py<Self>) -> Py<Self> {
-					slf
-				}
-
-				fn __exit__(&mut self, _exc_type: PyObject, _exc_value: PyObject, _traceback: PyObject) {}
-
-				fn add_clause_from_slice(&mut self, clause: Vec<Lit>) -> Result {
-					Python::with_gil(move |py| {
-						self.0.borrow_mut(py).add_clause_from_slice(
-							self.1
-								.clone()
-								.into_iter()
-								.chain(clause.into_iter())
-								.collect(),
-						)
-					})
-				}
-
-				fn new_var_range(&mut self, len: usize) -> VarRange {
-					Python::with_gil(move |py| self.0.borrow_mut(py).new_var_range(len))
-				}
-
-							// TODO unfortunately, I can't derive ClauseDatabaseTools for Conditional*
-							// b/c it has a Py<ClauseDatabase>, but we
-														// only have to duplicate the methods once
-								fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
-									self.add_clause_from_slice(clause)
-								}
-
-		fn add_variable(&mut self) -> Lit {
-					Python::with_gil(move |py| {
-						self.0.borrow_mut(py).add_variable()
-					})
-				}
-
-
-		fn add_variables(&mut self, len: usize) -> VarRange {
-					Python::with_gil(move |py| {
-						self.0.borrow_mut(py).add_variables(len)
-					})
-		}
-
-		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1)))]
-		fn add_linear(
-			&mut self,
-			literals: Vec<Lit>,
-			coefficients: Option<Vec<Coeff>>,
-			comparator: Option<Comparator>,
-			k: Option<Coeff>,
-		) -> Result {
-					Python::with_gil(move |py| {
-						self.0.borrow_mut(py).extract().0.with_conditions(self.1).add_linear(literals, coefficients, comparator, k)
-					})
-
-				}
-						}
-				}
-	} else {
-		quote! {()}
-	};
-		*/
 
 	quote! {
-	#clause_database
-	#tools
-	#solver
-	}
+	// #[pymodule]
+	// pub mod pindakaas {
+		#py_strct
+		#clause_database
+		#tools
+		#solver
+	// }
+			}
 	.into()
 }
 
@@ -739,6 +656,7 @@ pub fn add_time_limit_field(_args: TokenStream, input: TokenStream) -> TokenStre
 	};
 	s.into_token_stream().into()
 }
+
 fn default_true() -> bool {
 	true
 }

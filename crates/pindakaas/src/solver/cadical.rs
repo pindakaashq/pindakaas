@@ -4,12 +4,16 @@ use std::{
 };
 
 use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
-use pindakaas_derive::IpasirSolver;
+use pindakaas_derive::{IpasirSolver, Pyndakaas};
 
-use crate::{solver::FFIPointer, Lit, VarFactory};
+use crate::{
+	solver::{FFIPointer, FailedAssumtions},
+	Lit, VarFactory,
+};
 
-#[derive(IpasirSolver)]
+#[derive(IpasirSolver, Pyndakaas)]
 #[ipasir(krate = pindakaas_cadical, assumptions, learn_callback, term_callback, ipasir_up)]
+#[pyndakaas(solver, assumptions)]
 pub struct Cadical {
 	/// The raw pointer to the Cadical solver.
 	ptr: *mut c_void,

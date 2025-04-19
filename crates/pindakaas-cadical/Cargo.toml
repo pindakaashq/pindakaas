@@ -23,9 +23,12 @@ cc = { workspace = true }
 
 [dependencies]
 pindakaas-build-macros = { path = "../pindakaas-build-macros" }
+# , optional = true
+# }
 
 [features]
 tracing = []
+# python = ["pyo3"]
 
 [lints]
 workspace = true

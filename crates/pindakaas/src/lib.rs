@@ -13,6 +13,7 @@ pub mod cardinality_one;
 pub(crate) mod helpers;
 mod integer;
 pub mod propositional_logic;
+pub mod python;
 pub mod solver;
 mod sorted;
 #[cfg(any(feature = "tracing", test))]
@@ -34,6 +35,7 @@ use std::{
 };
 
 use itertools::{traits::HomogeneousTuple, Itertools};
+use pindakaas_derive::Pyndakaas;
 use rustc_hash::FxHashMap;
 
 pub use crate::helpers::AsDynClauseDatabase;
@@ -220,7 +222,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 ///
 /// It can be used to create formulas manually, to store the results from
 /// encoders, read formulas from a file, and write them to a file
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Pyndakaas)]
 pub struct Cnf {
 	/// The variable factory used by [`new_var`]
 	nvar: VarFactory,
@@ -361,7 +363,7 @@ pub struct VarRange {
 /// A representation for a weighted CNF formula
 ///
 /// Same as CNF, but every clause has an optional weight. Otherwise, it is a hard clause.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Pyndakaas)]
 pub struct Wcnf {
 	/// The CNF formula
 	cnf: Cnf,

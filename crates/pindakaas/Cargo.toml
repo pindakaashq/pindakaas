@@ -27,6 +27,7 @@ pindakaas-derive = { path = "../pindakaas-derive", optional = true }
 pindakaas-intel-sat = { path = "../pindakaas-intel-sat", optional = true }
 pindakaas-kissat = { path = "../pindakaas-kissat", optional = true }
 splr = { version = "0.17", optional = true }
+pyo3 = {version = "0.24", features = ["multiple-pymethods"], optional = true }
 
 [dev-dependencies]
 expect-test = "1.5.0"
@@ -37,10 +38,15 @@ tracing = { workspace = true }
 
 [features]
 cadical = ["pindakaas-cadical", "pindakaas-derive"]
-default = ["cadical"]
+default = ["cadical"] # TODO remove python
 external-propagation = ["cadical"]
 intel-sat = ["pindakaas-intel-sat", "pindakaas-derive"]
 kissat = ["pindakaas-kissat", "pindakaas-derive"]
+python = [ "pyo3" ]
+extension-module = ["pyo3/extension-module"]
+
+[build-dependencies]
+pyo3-build-config = "0.22"
 
 [lints]
 workspace = true
