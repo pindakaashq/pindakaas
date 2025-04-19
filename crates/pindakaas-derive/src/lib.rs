@@ -455,20 +455,6 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 	// 	quote! { crate }
 	// };
 
-	let fields = [
-		Some(quote! {ptr: #ident}),
-		opts.term_callback.then(|| {
-			assert!(opts.solver, "for {}", ident);
-			quote! {
-				// TODO I don't believe you can only do it with one (e.g. deadline field)
-				time: Option<std::time::SystemTime>,
-				time_limit: Option<std::time::Duration>
-			}
-		}),
-	]
-	.into_iter()
-	.flatten();
-
 	let py_strct = quote! {
 	#[pyo3::prelude::pyclass(
 			unsendable,
@@ -476,7 +462,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 			extends = crate::python::pindakaas::ClauseDatabase)]
 			#[derive(Default)]
 
-	pub(crate) struct #python_ident { #(#fields),* }
+	pub(crate) struct #python_ident(#ident);
 
 	#[pyo3::prelude::pymethods]
 		impl #python_ident {
@@ -505,7 +491,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 		/// Add a clause to the clause database
 		fn add_clause(&mut self, clause: Vec<crate::python::pindakaas::Lit>) -> crate::python::pindakaas::Result {
 			crate::ClauseDatabase::add_clause_from_slice(
-				&mut self.ptr,
+				&mut self.0,
 				&clause.into_iter().map(|l| l.0).collect::<Vec<_>>(),
 			)
 			.map_err(|_| crate::python::pindakaas::Unsatisfiable)
@@ -515,7 +501,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 	fn add_variables(&mut self, n: usize) -> crate::python::pindakaas::VarRange {
 			crate::python::pindakaas::VarRange(
 			crate::ClauseDatabase::new_var_range(
-							&mut self.ptr,
+							&mut self.0,
 							n
 							))
 
@@ -523,7 +509,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 								// the proper translation to python
 				// Lit(
 				// crate::ClauseDatabaseTools::new_vars(
-				// 				&mut self.ptr
+				// 				&mut self.0
 				// 			).into())
 	}
 		}
@@ -538,7 +524,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 		fn add_variable(&mut self) -> crate::python::pindakaas::Lit {
 				crate::python::pindakaas::Lit(
 				crate::ClauseDatabaseTools::new_var(
-								&mut self.ptr
+								&mut self.0
 							).into())
 		}
 
@@ -565,7 +551,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 				"Literals and coefficients should have the same length"
 			);
 			let enc: crate::bool_linear::LinearEncoder = crate::bool_linear::LinearEncoder::default();
-						let mut db = crate::ClauseDatabaseTools::with_conditions(&mut self.ptr, conditions.into_iter().map(|l| l.into()).collect());
+						let mut db = crate::ClauseDatabaseTools::with_conditions(&mut self.0, conditions.into_iter().map(|l| l.into()).collect());
 			Ok(crate::Encoder::encode(&enc,
 				&mut db,
 				&crate::bool_linear::BoolLinear::new(
@@ -607,9 +593,9 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 
 		// the inner solve call
 		let solve = if opts.assumptions {
-			quote! { crate::solver::SolveAssuming::solve_assuming(&mut self.ptr, assumptions.into_iter().map(|l| l.into())) }
+			quote! { crate::solver::SolveAssuming::solve_assuming(&mut self.0, assumptions.into_iter().map(|l| l.into())) }
 		} else {
-			quote! { crate::solver::Solver::solve(&mut self.ptr) }
+			quote! { crate::solver::Solver::solve(&mut self.0) }
 		};
 
 		// the callback regulating the timer
@@ -617,9 +603,10 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 			.term_callback
 			.then(|| {
 				quote! {
+										let time_limit =
 					// always set callback, in case of subsequent calls which might have to reset the termination
 					crate::solver::TermCallback::set_terminate_callback(
-							&mut self.ptr,
+							&mut self.0,
 							time_limit.map(|time_limit| {
 									let time = std::time::SystemTime::now();
 									move || if time.elapsed().unwrap() <= time_limit {
@@ -638,7 +625,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 			.assumptions
 			.then(|| {
 				quote! {fn fail(&self, lit: crate::python::pindakaas::Lit) -> bool {
-					crate::solver::FailedAssumtions::fail(&self.ptr.solver_fail_obj(), lit.into())
+					crate::solver::FailedAssumtions::fail(&self.0.solver_fail_obj(), lit.into())
 				}}
 			})
 			.unwrap_or_default();
@@ -658,7 +645,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 		}
 
 						fn value(&self, lit: crate::python::pindakaas::Lit) -> bool {
-								crate::Valuation::value(&self.ptr.solver_solution_obj(), lit.into())
+								crate::Valuation::value(&self.0.solver_solution_obj(), lit.into())
 						}
 
 												#fail
