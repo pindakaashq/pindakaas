@@ -1,12 +1,11 @@
 use std::ffi::c_void;
 
-use pindakaas_derive::{IpasirSolver, Pyndakaas};
+use pindakaas_derive::IpasirSolver;
 
 use crate::{solver::FFIPointer, VarFactory};
 
-#[derive(Debug, IpasirSolver, Pyndakaas)]
+#[derive(Debug, IpasirSolver)]
 #[ipasir(krate = pindakaas_intel_sat, assumptions, learn_callback, term_callback)]
-#[pyndakaas(solver, assumptions, term_callback)]
 pub struct IntelSat {
 	/// The raw pointer to the Intel SAT solver.
 	ptr: *mut c_void,

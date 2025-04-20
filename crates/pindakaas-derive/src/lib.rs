@@ -441,34 +441,12 @@ struct PyndakaasOpts {
 	term_callback: bool,
 }
 
+#[rustfmt::skip]
 #[proc_macro_derive(Pyndakaas, attributes(pyndakaas))]
 pub fn pyndakaas(input: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(input);
 	let opts = PyndakaasOpts::from_derive_input(&input).expect("Invalid options");
 	let DeriveInput { ident, .. } = input;
-	let py_ident = format_ident!("Py{}", ident);
-	// TODO [?]
-	// let krate = if opts.solver {
-	// 	quote! { crate::solver }
-	// } else {
-	// 	quote! { crate }
-	// };
-
-	let py_strct = {
-		let py_class_name = format!("{ident}");
-		let derives = [
-			Some(quote! { Default }),
-			(!opts.solver).then_some(quote! { Clone }),
-		]
-		.into_iter()
-		.flatten();
-
-		quote! {
-			#[pyo3::prelude::pyclass(unsendable, name = #py_class_name, extends = crate::python::pindakaas::ClauseDatabase)]
-			#[derive(#(#derives),*)]
-			pub(crate) struct #py_ident(#ident);
-		}
-	};
 
 	let py_new = {
 		let signature = opts
@@ -482,8 +460,8 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 				quote! { cnf: Option<pyo3::Bound<'py, pyo3::PyAny>> },
 				quote! {
 				cnf.map(|cnf| {
-					let py_cnf = pyo3::types::PyAnyMethods::extract::<crate::PyCnf>(&cnf).unwrap();
-					Self(#ident::from(&py_cnf.0))
+					let py_cnf = pyo3::types::PyAnyMethods::extract::<py::Cnf>(&cnf).unwrap();
+					Self(base::solver::#ident::from(&py_cnf.0))
 				}).unwrap_or_else(Self::default)
 				},
 			)
@@ -492,33 +470,33 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 		};
 
 		quote! {
-		#[pyo3::prelude::pymethods]
-			impl #py_ident {
-					#[new]
-							#signature
-					pub(crate) fn new<'py>(#cnf_arg) -> (Self, crate::python::pindakaas::ClauseDatabase) {
-						(#construct, crate::python::pindakaas::ClauseDatabase::new())
-					}
-				}
-			}
+                    #[pyo3::prelude::pymethods]
+                    impl py::#ident {
+                        #[new]
+                        #signature
+                        fn new<'py>(#cnf_arg) -> (Self, py::ClauseDatabase) {
+                            (#construct, py::ClauseDatabase::new())
+                        }
+                    }
+                }
 	};
 
 	let clause_database = quote! {
 	#[pyo3::prelude::pymethods]
-	impl #py_ident {
+	impl py::#ident {
 		/// Add a clause to the clause database
-		fn add_clause(&mut self, clause: Vec<crate::python::pindakaas::Lit>) -> crate::python::pindakaas::Result {
-			crate::ClauseDatabase::add_clause_from_slice(
+		fn add_clause(&mut self, clause: Vec<py::Lit>) -> py::Result {
+			base::ClauseDatabase::add_clause_from_slice(
 				&mut self.0,
 				&clause.into_iter().map(|l| l.0).collect::<Vec<_>>(),
 			)
-			.map_err(|_| crate::python::pindakaas::Unsatisfiable)
+			.map_err(|_| py::Unsatisfiable)
 		}
 
 		/// Add ``n`` variables to the clause database
-	fn add_variables(&mut self, n: usize) -> crate::python::pindakaas::VarRange {
-			crate::python::pindakaas::VarRange(
-			crate::ClauseDatabase::new_var_range(
+	fn add_variables(&mut self, n: usize) -> py::VarRange {
+			py::VarRange(
+			base::ClauseDatabase::new_var_range(
 							&mut self.0,
 							n
 							))
@@ -536,12 +514,12 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 	let tools = if opts.tools {
 		quote! {
 		#[pyo3::prelude::pymethods]
-		impl #py_ident {
+		impl py::#ident {
 
 					// TODO not entirely sure if this shouldn't also go to ClauseDatabase
-		fn add_variable(&mut self) -> crate::python::pindakaas::Lit {
-				crate::python::pindakaas::Lit(
-				crate::ClauseDatabaseTools::new_var(
+		fn add_variable(&mut self) -> py::Lit {
+				py::Lit(
+				base::ClauseDatabaseTools::new_var(
 								&mut self.0
 							).into())
 		}
@@ -552,28 +530,28 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 							///
 		/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
 		/// Currently, the encoding is fixed as ``adder`` for PB and Cardinality constraints, and ``PairWise`` for AMOs/also
-		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(crate::python::pindakaas::Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
+		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(py::Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
 		fn add_linear(
 			&mut self,
-			literals: Vec<crate::python::pindakaas::Lit>,
-			coefficients: Option<Vec<crate::python::pindakaas::Coeff>>,
+			literals: Vec<py::Lit>,
+			coefficients: Option<Vec<py::Coeff>>,
 			// TODO I'm not sure if adding Option is the best way to allow None to return default
-			comparator: Option<crate::python::pindakaas::Comparator>,
-			k: Option<crate::python::pindakaas::Coeff>,
-						conditions: Vec<crate::python::pindakaas::Lit>,
-		) -> crate::python::pindakaas::Result {
+			comparator: Option<py::Comparator>,
+			k: Option<py::Coeff>,
+						conditions: Vec<py::Lit>,
+		) -> py::Result {
 			let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
 			assert_eq!(
 				coefficients.len(),
 				literals.len(),
 				"Literals and coefficients should have the same length"
 			);
-			let enc: crate::bool_linear::LinearEncoder = crate::bool_linear::LinearEncoder::default();
-						let mut db = crate::ClauseDatabaseTools::with_conditions(&mut self.0, conditions.into_iter().map(|l| l.into()).collect());
-			Ok(crate::Encoder::encode(&enc,
+			let enc: base::bool_linear::LinearEncoder = base::bool_linear::LinearEncoder::default();
+						let mut db = base::ClauseDatabaseTools::with_conditions(&mut self.0, conditions.into_iter().map(|l| l.into()).collect());
+			Ok(base::Encoder::encode(&enc,
 				&mut db,
-				&crate::bool_linear::BoolLinear::new(
-					crate::bool_linear::BoolLinExp::from_slices(
+				&base::bool_linear::BoolLinear::new(
+					base::bool_linear::BoolLinExp::from_slices(
 						&coefficients,
 						&literals.into_iter().map(|l| l.0).collect::<Vec<_>>(),
 					),
@@ -604,16 +582,16 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 			opts.term_callback
 				.then(|| quote! { time_limit : Option<pyo3::Bound<'py, pyo3::PyAny>> }),
 			opts.assumptions
-				.then(|| quote! { assumptions : Vec<crate::python::pindakaas::Lit> }),
+				.then(|| quote! { assumptions : Vec<py::Lit> }),
 		]
 		.into_iter()
 		.flatten();
 
 		// the inner solve call
 		let solve = if opts.assumptions {
-			quote! { crate::solver::SolveAssuming::solve_assuming(&mut self.0, assumptions.into_iter().map(|l| l.into())) }
+			quote! { base::solver::SolveAssuming::solve_assuming(&mut self.0, assumptions.into_iter().map(|l| l.into())) }
 		} else {
-			quote! { crate::solver::Solver::solve(&mut self.0) }
+			quote! { base::solver::Solver::solve(&mut self.0) }
 		};
 
 		// the callback regulating the timer
@@ -635,14 +613,14 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
                                             None
                                         };
 					// always set callback, in case of subsequent calls which might have to reset the termination
-					crate::solver::TermCallback::set_terminate_callback(
+					base::solver::TermCallback::set_terminate_callback(
                                             &mut self.0,
                                             time_limit.map(|time_limit| {
                                                 let timer = std::time::SystemTime::now();
                                                 move || if timer.elapsed().unwrap() <= time_limit {
-                                                        crate::solver::SlvTermSignal::Continue
+                                                        base::solver::SlvTermSignal::Continue
                                                 } else {
-                                                        crate::solver::SlvTermSignal::Terminate
+                                                        base::solver::SlvTermSignal::Terminate
                                                 }
                                             })
 					);
@@ -654,8 +632,8 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 		let fail = opts
 			.assumptions
 			.then(|| {
-				quote! {fn fail(&self, lit: crate::python::pindakaas::Lit) -> bool {
-					crate::solver::FailedAssumtions::fail(&self.0.solver_fail_obj(), lit.into())
+				quote! {fn fail(&self, lit: py::Lit) -> bool {
+					base::solver::FailedAssumtions::fail(&self.0.solver_fail_obj(), lit.into())
 				}}
 			})
 			.unwrap_or_default();
@@ -663,19 +641,19 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 		#[rustfmt::skip]
 		quote! {
                     #[pyo3::prelude::pymethods]
-                    impl #py_ident {
+                    impl py::#ident {
                         #[pyo3(signature=(#(#signature),*))]
                         // Result is type error (on time_limit)
                         fn solve<'py>(#(#args), *) -> pyo3::PyResult<Option<bool>> {
                             #set_time_limit
                              Ok(match #solve {
-                                crate::solver::SolveResult::Satisfied(_) => Some(true),
-                                crate::solver::SolveResult::Unsatisfiable(_) => Some(false),
-                                crate::solver::SolveResult::Unknown => None,
+                                base::solver::SolveResult::Satisfied(_) => Some(true),
+                                base::solver::SolveResult::Unsatisfiable(_) => Some(false),
+                                base::solver::SolveResult::Unknown => None,
                             })
                         }
-                        fn value(&self, lit: crate::python::pindakaas::Lit) -> bool {
-                            crate::Valuation::value(&self.0.solver_solution_obj(), lit.into())
+                        fn value(&self, lit: py::Lit) -> bool {
+                            base::Valuation::value(&self.0.solver_solution_obj(), lit.into())
                         }
                         #fail
                     }
@@ -685,11 +663,34 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 	};
 
 	quote! {
-	#py_strct
-	#py_new
-	#clause_database
-	#tools
-	#solver
+            use crate::pindakaas as py;
+            #py_new
+            #clause_database
+            #tools
+            #solver
+	}
+	.into()
+}
+
+#[rustfmt::skip]
+#[proc_macro]
+pub fn py_new_type(input: TokenStream) -> TokenStream {
+	let ident: Ident = parse_macro_input!(input);
+	// let py_ident = format_ident!("Py{}", ident);
+	// let py_class_name = format!("{ident}");
+	let derives = [
+		Some(quote! { Default }),
+		Some(quote! { ::pindakaas_derive::Pyndakaas }),
+		// (!opts.solver).then_some(quote! { Clone }),
+	]
+	.into_iter()
+	.flatten();
+
+	quote! {
+            #[pyo3::prelude::pyclass(unsendable, extends = py::ClauseDatabase)]
+            #[derive(#(#derives),*)]
+            #[pyndakaas(tools)]
+            struct #ident(base::#ident);
 	}
 	.into()
 }

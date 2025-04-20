@@ -1,6 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 import pindakaas as pk
 from datetime import timedelta
+
+def show_sol(solver, xs):
+    return "\n".join(f"{x} = {solver.value(x)}" for x in xs)
 
 def main():
     cnf = pk.Cnf()
@@ -8,7 +11,11 @@ def main():
     b,c = cnf.add_variables(2)
     cnf.add_clause([~a,b]) # ~a \/ b
     cnf.add_clause([(~b).var(),c]) # b \/ c
-    # Not allowed: cnf.add_clause([-1,-2]) # `TypeError: argument 'clause': 'int' object cannot be converted to 'Lit'`
+
+    try:
+        cnf.add_clause([-1,-2])
+    except TypeError:
+        pass # `TypeError: argument 'clause': 'int' object cannot be converted to 'Lit'`
 
     # TODO unfortunately, doesn't quite work.
     # with cnf.with_conditions([a,b]) as ccnf:
@@ -29,10 +36,10 @@ def main():
     cnf.add_linear([a,b,c], coefficients=[2,3,5], comparator=pk.Comparator.LessEq, k=6, conditions=[~p])
     cnf.add_linear([a,b,c]) # a + b + c >= 1 == a \/ b \/ c
 
-    for clause in cnf:
-        for lit in clause:
-            print(f"{lit}, ", end="")
-        print("\n", end="")
+    # for clause in cnf:
+    #     for lit in clause:
+    #         print(f"{lit}, ", end="")
+    #     print("\n", end="")
 
     wcnf = pk.Wcnf()
     a = wcnf.add_variable()
@@ -46,7 +53,7 @@ def main():
         b = solver.add_variable()
         solver.add_clause([a,b])
         solver.add_clause([~a,~b])
-        solver.solve(time_limit=timedelta(seconds=5))
+        solver.solve(time_limit=5)
         assert solver.solve() is True # Return True (SAT), False (UNSAT), None (UNKNOWN)
         assert solver.value(a) is not solver.value(b)
         assert solver.solve(assumptions=[a]) is True # Solve with assumptions
@@ -59,10 +66,14 @@ def main():
         print(f"{solver.fail(a)=}")
         print(f"{solver.fail(b)=}")
 
-    kissat = pk.solvers.Kissat()
-    a = kissat.add_variable()
-    kissat.add_clause([a])
-    assert kissat.solve() is True
+    # bootstrap Kissat solver with formula
+    unsat_cnf = pk.Cnf()
+    xs = unsat_cnf.add_variables(2)
+    unsat_cnf.add_clause([xs[0]])
+    unsat_cnf.add_clause([~xs[0],xs[1]])
+    unsat_cnf.add_clause([~xs[1],~xs[0]])
+    kissat = pk.solvers.Kissat(unsat_cnf)
+    assert kissat.solve() is False, f"Unexpected SAT:\n{show_sol(kissat, xs)}"
     try:
         kissat.solve(assumptions=[a]) # but Kissat does not support assumptions
     except TypeError as e:
@@ -79,11 +90,6 @@ def main():
     cadical.add_clause([~p[2],~c,a])
     cadical.add_clause([~p[3],~a,c])
 
-    # n=3 # pigeons
-    # m=2 # holes
-    # pigeons = cadical.add_variables(n*m)
-    # import numpy as np
-
     ls = [a,b,c] + p
     if cadical.solve(assumptions=p) is True:
         for l in ls:
@@ -96,19 +102,6 @@ def main():
         core = list(p for p in p if not cadical.fail(p))
         for l in ls:
             print(f"failed of {l} {cadical.fail(l)}")
-
-    n=4
-    m=n-1
-    # import numpy as np
-    cadical = pk.solvers.Cadical()
-    x = [ list(cadical.add_variables(m)) for _ in range(n) ]
-    # for xs in x:
-
-
-
-
-
-    # TODO translate pysat's pigeonhole problem to pindakaas
 
     # print(f"{solver.value(a)}") # Also True/False/None
     # assert solver.value(a) != solver.value(b)

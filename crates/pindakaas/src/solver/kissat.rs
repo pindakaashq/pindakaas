@@ -1,12 +1,11 @@
 use std::ffi::c_void;
 
-use pindakaas_derive::{IpasirSolver, Pyndakaas};
+use pindakaas_derive::IpasirSolver;
 
 use crate::VarFactory;
 
-#[derive(Debug, IpasirSolver, Pyndakaas)]
+#[derive(Debug, IpasirSolver)]
 #[ipasir(krate = pindakaas_kissat)]
-#[pyndakaas(solver)]
 pub struct Kissat {
 	ptr: *mut c_void,
 	vars: VarFactory,

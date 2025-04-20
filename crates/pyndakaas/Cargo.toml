@@ -18,7 +18,7 @@ doc = false
 
 [dependencies]
 itertools = "0.14.0"
-pindakaas = { path = "../pindakaas", features= ["cadical", "kissat", "intel-sat", "pindakaas-derive"] }
+pindakaas = { path = "../pindakaas", features= [ "pindakaas-derive"] }
 pyo3 = {version = "0.24", features = ["multiple-pymethods"]}
 pindakaas-derive = { path = "../pindakaas-derive"}
 
@@ -27,7 +27,6 @@ extension-module = ["pyo3/extension-module"]
 
 [build-dependencies]
 pyo3-build-config = "0.22"
-
 
 [lints]
 workspace = true

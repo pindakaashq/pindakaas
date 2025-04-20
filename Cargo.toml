@@ -1,7 +1,6 @@
 [workspace]
 members = ["crates/*"]
 resolver = "2"
-exclude = [ "crates/pyndakaas"]
 
 [workspace.package]
 repository = "https://github.com/pindakaashq/pindakaas"

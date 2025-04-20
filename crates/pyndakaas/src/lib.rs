@@ -3,13 +3,19 @@
 	reason = "pyo3 macro will generate unused qualified types"
 )]
 
+use ::pindakaas_derive::py_new_type;
 use pyo3::prelude::*;
 
-///
-/// The ``pindakaas`` Python reference
-/// ==================================
 #[pymodule]
 mod pindakaas {
+
+	use ::pindakaas as base;
+
+	py_new_type!(Cnf);
+	// #[pymodule_export]
+	// use base::PyCnf;
+	// #[pymodule_export]
+	// use base::PyWcnf;
 
 	/// Return ``pindakaas`` version
 	#[pyfunction]
@@ -19,13 +25,8 @@ mod pindakaas {
 
 	use std::fmt::Display;
 
-	use ::pindakaas::{self as base};
-	use base::{
-		bool_linear::{BoolLinExp, BoolLinear, LinearEncoder},
-		Encoder,
-	};
 	use itertools::Itertools;
-	use pindakaas_derive::PythonClauseDatabase;
+	// use pindakaas_derive::PythonClauseDatabase;
 	use pyo3::exceptions::PyException;
 
 	use super::*;
@@ -82,6 +83,10 @@ mod pindakaas {
 
 	#[pymethods]
 	impl VarRange {
+		fn __getitem__(&self, i: usize) -> Lit {
+			Lit(self.0.index(i).into())
+		}
+
 		fn __iter__(&mut self) -> VarRangeIter {
 			VarRangeIter(self.0.iter_lits().map(Lit).collect_vec().into_iter())
 			// TODO Non-collect version WIP, might require unsupported lifetimes: VarRangeIter(self.0.iter_lits().map(|l| Lit(l)))
@@ -147,20 +152,6 @@ mod pindakaas {
 	// TODO [?] why not export Coeff from lib?
 	type Coeff = i64;
 
-	// fn pindakaas(m: &Bound<'_, PyModule>) -> PyResult<()> {
-	// 	m.add_class::<Cnf>()?;
-	// 	m.add_class::<Wcnf>()?;
-	// 	m.add_class::<Cadical>()?;
-	// 	m.add_class::<Kissat>()?;
-	// 	m.add_class::<Unsatisfiable>()?;
-	// 	m.add_class::<Comparator>()?;
-	// 	Ok(())
-	// }
-
-	#[pyclass(extends=ClauseDatabase)]
-	#[derive(PythonClauseDatabase)]
-	struct Cnf(base::Cnf);
-
 	#[pyclass]
 	/// :meta private:
 	struct ClauseIter(std::vec::IntoIter<Clause>);
@@ -178,11 +169,6 @@ mod pindakaas {
 
 	#[pymethods]
 	impl Cnf {
-		#[new]
-		fn new() -> (Self, ClauseDatabase) {
-			(Self(base::Cnf::default()), ClauseDatabase::new())
-		}
-
 		fn __iter__(&self) -> ClauseIter {
 			// FIXME: It would be great if this could be made lazily instead of copying everything when creating the iterator
 			ClauseIter(
@@ -205,18 +191,6 @@ mod pindakaas {
 		// fn from_file(path: PathBuf) -> std::result::Result<Cnf, std::io::Error> {
 		// 	Ok(Self(base::Cnf::from_file(&path)?))
 		// }
-	}
-
-	#[pyclass(extends=ClauseDatabase)]
-	#[derive(PythonClauseDatabase)]
-	struct Wcnf(base::Wcnf);
-
-	#[pymethods]
-	impl Wcnf {
-		#[new]
-		fn new() -> (Self, ClauseDatabase) {
-			(Self(base::Wcnf::default()), ClauseDatabase::new())
-		}
 	}
 
 	#[pymethods]
@@ -248,68 +222,83 @@ mod pindakaas {
 		}
 	}
 
-	/// All solvers inherit functionality from Cnf
-	#[pymodule]
-	mod solvers {
-		use pindakaas_derive::add_time_limit_field;
+	// #[pymodule]
+	// mod solvers {
+	// 	#[cfg(feature = "cadical")]
+	// 	#[pymodule_export]
+	// 	use base::solver::cadical::PyCadical;
+	// 	#[cfg(feature = "intel-sat")]
+	// 	#[pymodule_export]
+	// 	use base::solver::intel_sat::PyIntelSat;
+	// 	#[cfg(feature = "kissat")]
+	// 	#[pymodule_export]
+	// 	use base::solver::kissat::PyKissat;
+	// }
+}
 
-		use super::*;
+/*
+/// All solvers inherit functionality from Cnf
+#[pymodule]
+mod solvers {
+	// use pindakaas_derive::add_time_limit_field;
 
-		#[pyclass(unsendable)]
-		#[derive(Default, PythonClauseDatabase)]
-		#[python_clause_database(solver = true, assumptions = true)]
-		// #[add_time_limit_field]
-		struct Cadical(base::solver::cadical::Cadical);
+	use super::*;
 
-		#[pyclass(unsendable)]
-		#[derive(Default, PythonClauseDatabase)]
-		#[python_clause_database(solver = true, time_limit = false)]
-		struct Kissat(base::solver::kissat::Kissat);
+	// #[pyclass(unsendable)]
+	// #[derive(Default)]
+	// // #[python_clause_database(solver = true, assumptions = true)]
+	// // #[add_time_limit_field]
+	// struct Cadical(base::solver::cadical::Cadical);
+	//
+	// #[pyclass(unsendable)]
+	// #[derive(Default)]
+	// // #[python_clause_database(solver = true, time_limit = false)]
+	// struct Kissat(base::solver::kissat::Kissat);
+	//
+	// #[pyclass(unsendable)]
+	// #[derive(Default)]
+	// // #[python_clause_database(solver = true, assumptions = true)]
+	// struct IntelSat(base::solver::intel_sat::IntelSat);
+}
+	*/
 
-		#[pyclass(unsendable)]
-		#[derive(Default, PythonClauseDatabase)]
-		#[python_clause_database(solver = true, assumptions = true)]
-		struct IntelSat(base::solver::intel_sat::IntelSat);
+#[cfg(test)]
+mod tests {
+
+	use std::ffi::CString;
+
+	use pyo3::{ffi::c_str, Python};
+
+	use super::*;
+
+	#[pyclass]
+	struct LoggingStdout;
+	#[pymethods]
+	impl LoggingStdout {
+		fn write(&self, data: &str) {
+			print!("{}", data);
+		}
 	}
 
-	#[cfg(test)]
-	mod tests {
-
-		use std::ffi::CString;
-
-		use pyo3::{ffi::c_str, Python};
-
-		use super::*;
-
-		#[pyclass]
-		struct LoggingStdout;
-		#[pymethods]
-		impl LoggingStdout {
-			fn write(&self, data: &str) {
-				print!("{}", data);
-			}
-		}
-
-		#[test]
-		fn test_interface() {
-			pyo3::append_to_inittab!(pindakaas);
-			pyo3::prepare_freethreaded_python();
-			Python::with_gil(|py| {
-				let sys = py.import("sys").unwrap();
-				_ = sys.setattr("stdout", LoggingStdout.into_pyobject(py).unwrap());
-				_ = PyModule::from_code(
-					py,
-					CString::new(include_str!("../example.py"))
-						.unwrap()
-						.as_c_str(),
-					c_str!("example.py"),
-					c_str!("__main__"),
-				)
-				.unwrap_or_else(|e| {
-					e.display(py);
-					panic!();
-				});
+	#[test]
+	fn test_interface() {
+		pyo3::append_to_inittab!(pindakaas);
+		pyo3::prepare_freethreaded_python();
+		Python::with_gil(|py| {
+			let sys = py.import("sys").unwrap();
+			_ = sys.setattr("stdout", LoggingStdout.into_pyobject(py).unwrap());
+			_ = PyModule::from_code(
+				py,
+				CString::new(include_str!("../example.py"))
+					.unwrap()
+					.as_c_str(),
+				c_str!("example.py"),
+				c_str!("__main__"),
+			)
+			.unwrap_or_else(|e| {
+				e.display(py);
+				panic!();
 			});
-		}
+		});
 	}
 }
