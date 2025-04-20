@@ -54,11 +54,11 @@ struct IntelSat(base::solver::intel_sat::IntelSat);
 // #[pymodule_export]
 // use base::PyWcnf;
 
-/// Return ``pindakaas`` version
-#[pyfunction]
-fn version() -> String {
-	env!("CARGO_PKG_VERSION").to_owned()
-}
+// /// Return ``pindakaas`` version
+// #[pyfunction]
+// fn version() -> String {
+// 	env!("CARGO_PKG_VERSION").to_owned()
+// }
 
 use std::fmt::Display;
 
