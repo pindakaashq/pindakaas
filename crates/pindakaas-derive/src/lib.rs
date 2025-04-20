@@ -1,4 +1,6 @@
-use darling::FromDeriveInput;
+use std::any::Any;
+
+use darling::{ast::NestedMeta, FromDeriveInput, FromMeta};
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, DeriveInput, Ident};
@@ -428,8 +430,8 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 }
 
 // TODO these Opts very much mirror the IpasirOpts, so I'm wondering if we can combine them
-#[derive(FromDeriveInput)]
-#[darling(attributes(pyndakaas))]
+#[derive(FromMeta)]
+// #[darling(attributes(pyndakaas))]
 struct PyndakaasOpts {
 	#[darling(default = "default_true")]
 	tools: bool,
@@ -441,12 +443,30 @@ struct PyndakaasOpts {
 	term_callback: bool,
 }
 
-#[rustfmt::skip]
-#[proc_macro_derive(Pyndakaas, attributes(pyndakaas))]
-pub fn pyndakaas(input: TokenStream) -> TokenStream {
-	let input = parse_macro_input!(input);
-	let opts = PyndakaasOpts::from_derive_input(&input).expect("Invalid options");
-	let DeriveInput { ident, .. } = input;
+// #[rustfmt::skip]
+#[proc_macro_attribute]
+pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
+	let attr_args = match NestedMeta::parse_meta_list(attr.into()) {
+		Ok(v) => v,
+		Err(e) => {
+			return TokenStream::from(darling::Error::from(e).write_errors());
+		}
+	};
+	let opts = match PyndakaasOpts::from_list(&attr_args) {
+		Ok(v) => v,
+		Err(e) => {
+			return TokenStream::from(e.write_errors());
+		}
+	};
+	let input: syn::ItemStruct = parse_macro_input!(input);
+	let ident = input.ident.clone();
+	let inner = input.fields.iter().next().unwrap().clone().ty;
+	let derives = [
+		Some(quote! { Default }),
+		(!opts.solver).then_some(quote! { Clone }),
+	]
+	.into_iter()
+	.flatten();
 
 	let py_new = {
 		let signature = opts
@@ -460,8 +480,8 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 				quote! { cnf: Option<pyo3::Bound<'py, pyo3::PyAny>> },
 				quote! {
 				cnf.map(|cnf| {
-					let py_cnf = pyo3::types::PyAnyMethods::extract::<py::Cnf>(&cnf).unwrap();
-					Self(base::solver::#ident::from(&py_cnf.0))
+					let py_cnf = pyo3::types::PyAnyMethods::extract::<Cnf>(&cnf).unwrap();
+					Self(#inner::from(&py_cnf.0))
 				}).unwrap_or_else(Self::default)
 				},
 			)
@@ -470,32 +490,32 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 		};
 
 		quote! {
-                    #[pyo3::prelude::pymethods]
-                    impl py::#ident {
-                        #[new]
-                        #signature
-                        fn new<'py>(#cnf_arg) -> (Self, py::ClauseDatabase) {
-                            (#construct, py::ClauseDatabase::new())
-                        }
-                    }
-                }
+			#[pyo3::prelude::pymethods]
+			impl #ident {
+				#[new]
+				#signature
+				fn new<'py>(#cnf_arg) -> (Self, ClauseDatabase) {
+					(#construct, ClauseDatabase::new())
+				}
+			}
+		}
 	};
 
 	let clause_database = quote! {
 	#[pyo3::prelude::pymethods]
-	impl py::#ident {
+	impl #ident {
 		/// Add a clause to the clause database
-		fn add_clause(&mut self, clause: Vec<py::Lit>) -> py::Result {
+		fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
 			base::ClauseDatabase::add_clause_from_slice(
 				&mut self.0,
 				&clause.into_iter().map(|l| l.0).collect::<Vec<_>>(),
 			)
-			.map_err(|_| py::Unsatisfiable)
+			.map_err(|_| Unsatisfiable)
 		}
 
 		/// Add ``n`` variables to the clause database
-	fn add_variables(&mut self, n: usize) -> py::VarRange {
-			py::VarRange(
+	fn add_variables(&mut self, n: usize) -> VarRange {
+			VarRange(
 			base::ClauseDatabase::new_var_range(
 							&mut self.0,
 							n
@@ -514,11 +534,11 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 	let tools = if opts.tools {
 		quote! {
 		#[pyo3::prelude::pymethods]
-		impl py::#ident {
+		impl #ident {
 
 					// TODO not entirely sure if this shouldn't also go to ClauseDatabase
-		fn add_variable(&mut self) -> py::Lit {
-				py::Lit(
+		fn add_variable(&mut self) -> Lit {
+				Lit(
 				base::ClauseDatabaseTools::new_var(
 								&mut self.0
 							).into())
@@ -530,16 +550,16 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 							///
 		/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
 		/// Currently, the encoding is fixed as ``adder`` for PB and Cardinality constraints, and ``PairWise`` for AMOs/also
-		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(py::Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
+		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
 		fn add_linear(
 			&mut self,
-			literals: Vec<py::Lit>,
-			coefficients: Option<Vec<py::Coeff>>,
+			literals: Vec<Lit>,
+			coefficients: Option<Vec<Coeff>>,
 			// TODO I'm not sure if adding Option is the best way to allow None to return default
-			comparator: Option<py::Comparator>,
-			k: Option<py::Coeff>,
-						conditions: Vec<py::Lit>,
-		) -> py::Result {
+			comparator: Option<Comparator>,
+			k: Option<Coeff>,
+						conditions: Vec<Lit>,
+		) -> Result {
 			let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
 			assert_eq!(
 				coefficients.len(),
@@ -581,8 +601,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 			Some(quote! {&mut self}),
 			opts.term_callback
 				.then(|| quote! { time_limit : Option<pyo3::Bound<'py, pyo3::PyAny>> }),
-			opts.assumptions
-				.then(|| quote! { assumptions : Vec<py::Lit> }),
+			opts.assumptions.then(|| quote! { assumptions : Vec<Lit> }),
 		]
 		.into_iter()
 		.flatten();
@@ -632,7 +651,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 		let fail = opts
 			.assumptions
 			.then(|| {
-				quote! {fn fail(&self, lit: py::Lit) -> bool {
+				quote! {fn fail(&self, lit: Lit) -> bool {
 					base::solver::FailedAssumtions::fail(&self.0.solver_fail_obj(), lit.into())
 				}}
 			})
@@ -641,7 +660,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 		#[rustfmt::skip]
 		quote! {
                     #[pyo3::prelude::pymethods]
-                    impl py::#ident {
+                    impl #ident {
                         #[pyo3(signature=(#(#signature),*))]
                         // Result is type error (on time_limit)
                         fn solve<'py>(#(#args), *) -> pyo3::PyResult<Option<bool>> {
@@ -652,7 +671,7 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
                                 base::solver::SolveResult::Unknown => None,
                             })
                         }
-                        fn value(&self, lit: py::Lit) -> bool {
+                        fn value(&self, lit: Lit) -> bool {
                             base::Valuation::value(&self.0.solver_solution_obj(), lit.into())
                         }
                         #fail
@@ -662,37 +681,27 @@ pub fn pyndakaas(input: TokenStream) -> TokenStream {
 		quote! {}
 	};
 
-	quote! {
-            use crate::pindakaas as py;
-            #py_new
-            #clause_database
-            #tools
-            #solver
+	return quote! {
+			#[pyclass(unsendable, extends = ClauseDatabase)]
+			#[derive(#(#derives),*)]
+			#input
+			#py_new
+			#clause_database
+			#tools
+			#solver
 	}
-	.into()
-}
+	.into();
 
-#[rustfmt::skip]
-#[proc_macro]
-pub fn py_new_type(input: TokenStream) -> TokenStream {
-	let ident: Ident = parse_macro_input!(input);
-	// let py_ident = format_ident!("Py{}", ident);
-	// let py_class_name = format!("{ident}");
-	let derives = [
-		Some(quote! { Default }),
-		Some(quote! { ::pindakaas_derive::Pyndakaas }),
-		// (!opts.solver).then_some(quote! { Clone }),
-	]
-	.into_iter()
-	.flatten();
-
-	quote! {
-            #[pyo3::prelude::pyclass(unsendable, extends = py::ClauseDatabase)]
-            #[derive(#(#derives),*)]
-            #[pyndakaas(tools)]
-            struct #ident(base::#ident);
-	}
-	.into()
+	// quote! {
+	//            // #[derive(#(#derives),*)]
+	//            // #[pymodule]
+	//            // mod pindakaas {
+	//            //     #[pymodule_export]
+	//            //     use super::Cnf
+	//            // }
+	//
+	// }
+	// .into()
 }
 
 fn default_true() -> bool {

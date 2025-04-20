@@ -6,6 +6,7 @@ def show_sol(solver, xs):
     return "\n".join(f"{x} = {solver.value(x)}" for x in xs)
 
 def main():
+    print(f"XX {pk} {dir(pk)}")
     cnf = pk.Cnf()
     a = cnf.add_variable()
     b,c = cnf.add_variables(2)
