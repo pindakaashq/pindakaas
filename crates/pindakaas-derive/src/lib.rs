@@ -1,4 +1,3 @@
-use std::any::Any;
 
 use darling::{ast::NestedMeta, FromDeriveInput, FromMeta};
 use proc_macro::TokenStream;
@@ -681,7 +680,7 @@ pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
 		quote! {}
 	};
 
-	return quote! {
+	quote! {
 			#[pyclass(unsendable, extends = ClauseDatabase)]
 			#[derive(#(#derives),*)]
 			#input
@@ -690,7 +689,7 @@ pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
 			#tools
 			#solver
 	}
-	.into();
+	.into()
 
 	// quote! {
 	//            // #[derive(#(#derives),*)]
