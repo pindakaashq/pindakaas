@@ -266,11 +266,11 @@ fn pindakaas(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<ClauseDatabase>()?;
 	m.add_class::<Cnf>()?;
 	m.add_class::<Wcnf>()?;
-	let solvers = PyModule::new(py, "solvers")?;
-	solvers.add_class::<Cadical>()?;
-	solvers.add_class::<Kissat>()?;
-	solvers.add_class::<IntelSat>()?;
-	m.add_submodule(&solvers)?;
+	let solver = PyModule::new(py, "solver")?;
+	solver.add_class::<Cadical>()?;
+	solver.add_class::<Kissat>()?;
+	solver.add_class::<IntelSat>()?;
+	m.add_submodule(&solver)?;
 	Ok(())
 }
 
