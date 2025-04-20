@@ -73,7 +73,7 @@ pub trait Checker {
 /// To satisfy the trait, the type must implement a [`Self::add_clause`] method
 /// and a [`Self::new_var`] method.
 pub trait ClauseDatabase {
-	/// Add a clause to the `ClauseDatabase`. The databae is allowed to return
+	/// Add a clause to the `ClauseDatabase`. The database is allowed to return
 	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
 	/// unsatisfiable. This is used as a signal to the encoder that any subsequent
 	/// encoding effort can be abandoned.
@@ -84,7 +84,7 @@ pub trait ClauseDatabase {
 }
 
 pub trait ClauseDatabaseTools: ClauseDatabase {
-	/// Add a clause, given as any  to the `ClauseDatabase`. The databae is allowed to return
+	/// Add a clause, given as any  to the `ClauseDatabase`. The database is allowed to return
 	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
 	/// unsatisfiable. This is used as a signal to the encoder that any subsequent
 	/// encoding effort can be abandoned.
@@ -227,14 +227,14 @@ pub struct Cnf {
 	/// The variable factory used by [`new_var`]
 	nvar: VarFactory,
 	/// The literals from *all* clauses
-	lits: Vec<Lit>,
+	list: Vec<Lit>,
 	/// The size *for each* clause
 	size: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
 pub struct CnfIterator<'a> {
-	lits: &'a Vec<Lit>,
+	list: &'a Vec<Lit>,
 	size: slice::Iter<'a, usize>,
 	index: usize,
 }
@@ -350,7 +350,7 @@ impl Display for MapSol {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// A cononical implementation of a Boolean decision variable, independent of
+/// A canonical implementation of a Boolean decision variable, independent of
 /// negation.
 pub struct Var(pub(crate) NonZeroI32);
 
@@ -446,7 +446,7 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 					)
 				})?;
 
-				wcnf.cnf.lits.reserve(num_clauses);
+				wcnf.cnf.list.reserve(num_clauses);
 				wcnf.cnf.size.reserve(num_clauses);
 
 				if WEIGHTED {
@@ -636,7 +636,7 @@ impl Cnf {
 
 	pub fn iter(&self) -> impl ExactSizeIterator<Item = &[Lit]> + '_ {
 		CnfIterator {
-			lits: &self.lits,
+			list: &self.list,
 			size: self.size.iter(),
 			index: 0,
 		}
@@ -668,9 +668,9 @@ impl Cnf {
 
 impl ClauseDatabase for Cnf {
 	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
-		let size = self.lits.len();
-		self.lits.extend(clause);
-		let len = self.lits.len() - size;
+		let size = self.list.len();
+		self.list.extend(clause);
+		let len = self.list.len() - size;
 		self.size.push(len);
 		if len == 0 {
 			Err(Unsatisfiable)
@@ -691,7 +691,7 @@ impl Display for Cnf {
 		writeln!(f, "p cnf {num_var} {num_clauses}")?;
 		let mut start = 0;
 		for size in self.size.iter() {
-			let cl = self.lits.iter().skip(start).take(*size);
+			let cl = self.list.iter().skip(start).take(*size);
 			for &lit in cl {
 				write!(f, "{} ", i32::from(lit))?;
 			}
@@ -715,7 +715,7 @@ impl<'a> Iterator for CnfIterator<'a> {
 		if let Some(size) = self.size.next() {
 			let start = self.index;
 			self.index += size;
-			Some(&self.lits[start..self.index])
+			Some(&self.list[start..self.index])
 		} else {
 			None
 		}
@@ -1149,7 +1149,7 @@ impl Display for Wcnf {
 		writeln!(f, "p wcnf {num_var} {num_clauses} {top}")?;
 		let mut start = 0;
 		for (size, weight) in self.cnf.size.iter().zip(self.weights.iter()) {
-			let cl = self.cnf.lits.iter().skip(start).take(*size);
+			let cl = self.cnf.list.iter().skip(start).take(*size);
 			let weight = weight.unwrap_or(top);
 			write!(f, "{weight} ")?;
 			for lit in cl {

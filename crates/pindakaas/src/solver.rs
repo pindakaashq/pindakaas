@@ -13,7 +13,7 @@ pub mod splr;
 
 use std::{ffi::c_void, num::NonZeroI32, ptr};
 
-use crate::{ClauseDatabase, Lit, Valuation, Var, VarRange};
+use crate::{ClauseDatabase, Cnf, Lit, Unsatisfiable, Valuation, Var, VarRange};
 
 type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
 type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;
@@ -37,6 +37,17 @@ pub trait FailedAssumtions {
 	/// of is not specified.
 	fn fail(&self, lit: Lit) -> bool;
 }
+
+// impl TryFrom<Cnf> for dyn Solver {
+// 	type Error = Unsatisfiable;
+// 	fn try_from(cnf: Cnf) -> Result<Self, Self::Error> {
+// 		let s = Self::default();
+// 		for c in cnf.iter() {
+// 			self.add_clause(c)?;
+// 		}
+// 		s
+// 	}
+// }
 
 pub trait LearnCallback: Solver {
 	/// Set a callback function used to extract learned clauses up to a given

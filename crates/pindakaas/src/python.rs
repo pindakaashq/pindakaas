@@ -84,6 +84,10 @@ pub mod pindakaas {
 
 	#[pymethods]
 	impl VarRange {
+		fn __getitem__(&self, i: usize) -> Lit {
+			Lit(self.0.index(i).into())
+		}
+
 		fn __iter__(&mut self) -> VarRangeIter {
 			VarRangeIter(self.0.iter_lits().map(Lit).collect_vec().into_iter())
 			// TODO Non-collect version WIP, might require unsupported lifetimes: VarRangeIter(self.0.iter_lits().map(|l| Lit(l)))

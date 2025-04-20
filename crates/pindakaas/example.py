@@ -2,13 +2,20 @@
 import pindakaas as pk
 from datetime import timedelta
 
+def show_sol(solver, xs):
+    return "\n".join(f"{x} = {solver.value(x)}" for x in xs)
+
 def main():
     cnf = pk.Cnf()
     a = cnf.add_variable()
     b,c = cnf.add_variables(2)
     cnf.add_clause([~a,b]) # ~a \/ b
     cnf.add_clause([(~b).var(),c]) # b \/ c
-    # Not allowed: cnf.add_clause([-1,-2]) # `TypeError: argument 'clause': 'int' object cannot be converted to 'Lit'`
+
+    try:
+        cnf.add_clause([-1,-2])
+    except TypeError:
+        pass # `TypeError: argument 'clause': 'int' object cannot be converted to 'Lit'`
 
     # TODO unfortunately, doesn't quite work.
     # with cnf.with_conditions([a,b]) as ccnf:
@@ -59,10 +66,14 @@ def main():
         print(f"{solver.fail(a)=}")
         print(f"{solver.fail(b)=}")
 
-    kissat = pk.solvers.Kissat()
-    a = kissat.add_variable()
-    kissat.add_clause([a])
-    assert kissat.solve() is True
+    # bootstrap Kissat solver with formula
+    unsat_cnf = pk.Cnf()
+    xs = unsat_cnf.add_variables(2)
+    unsat_cnf.add_clause([xs[0]])
+    unsat_cnf.add_clause([~xs[0],xs[1]])
+    unsat_cnf.add_clause([~xs[1],~xs[0]])
+    kissat = pk.solvers.Kissat(unsat_cnf)
+    assert kissat.solve() is False, f"Unexpected SAT:\n{show_sol(kissat, xs)}"
     try:
         kissat.solve(assumptions=[a]) # but Kissat does not support assumptions
     except TypeError as e:
