@@ -6,11 +6,10 @@
 use pyo3::prelude::*;
 
 #[pymodule]
-pub mod pindakaas {
+pub(crate) mod pindakaas {
 
 	#[pymodule_export]
 	use crate::PyCnf;
-
 	#[pymodule_export]
 	use crate::PyWcnf;
 
@@ -22,10 +21,6 @@ pub mod pindakaas {
 
 	use std::fmt::Display;
 
-	use crate::{
-		bool_linear::{BoolLinExp, BoolLinear, LinearEncoder},
-		Encoder,
-	};
 	use itertools::Itertools;
 	// use pindakaas_derive::PythonClauseDatabase;
 	use pyo3::exceptions::PyException;
@@ -36,7 +31,7 @@ pub mod pindakaas {
 
 	/// :meta private:
 	#[pyclass(subclass)]
-	pub struct ClauseDatabase();
+	pub(crate) struct ClauseDatabase();
 
 	/// :meta private:
 	#[pymethods]
@@ -60,12 +55,12 @@ pub mod pindakaas {
 	/// A range of Boolean variables
 	#[pyclass]
 	#[derive(Clone)]
-	pub struct VarRange(pub crate::VarRange);
+	pub(crate) struct VarRange(pub(crate) crate::VarRange);
 
 	/// A Boolean literal
 	#[pyclass]
 	#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-	pub struct Lit(pub crate::Lit);
+	pub(crate) struct Lit(pub(crate) crate::Lit);
 
 	/// :meta private:
 	#[pyclass]
@@ -97,9 +92,9 @@ pub mod pindakaas {
 	/// Raised if Unsatisfiable is derived during encoding
 	// TODO use create_exception! ?
 	#[pyclass(extends = PyException)]
-	pub struct Unsatisfiable;
+	pub(crate) struct Unsatisfiable;
 
-	pub type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
+	pub(crate) type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
 	#[pymethods]
 	impl Unsatisfiable {
@@ -133,7 +128,7 @@ pub mod pindakaas {
 	// TODO [?] How to avoid this duplication?
 	#[pyclass(eq, eq_int)]
 	#[derive(Clone, PartialEq, Default)]
-	pub enum Comparator {
+	pub(crate) enum Comparator {
 		LessEq,
 		Equal,
 		#[default]
@@ -151,15 +146,11 @@ pub mod pindakaas {
 	}
 
 	// TODO [?] why not export Coeff from lib?
-	pub type Coeff = i64;
-
-	// #[pyclass(extends=ClauseDatabase)]
-	// #[derive(PythonClauseDatabase)]
-	// pub struct Cnf(crate::Cnf);
+	pub(crate) type Coeff = i64;
 
 	#[pyclass]
 	/// :meta private:
-	pub struct ClauseIter(std::vec::IntoIter<Clause>);
+	struct ClauseIter(std::vec::IntoIter<Clause>);
 
 	#[pymethods]
 	impl ClauseIter {
@@ -232,14 +223,12 @@ pub mod pindakaas {
 		#[cfg(feature = "cadical")]
 		#[pymodule_export]
 		use crate::solver::cadical::PyCadical;
-
-		#[cfg(feature = "kissat")]
-		#[pymodule_export]
-		use crate::solver::kissat::PyKissat;
-
 		#[cfg(feature = "intel-sat")]
 		#[pymodule_export]
 		use crate::solver::intel_sat::PyIntelSat;
+		#[cfg(feature = "kissat")]
+		#[pymodule_export]
+		use crate::solver::kissat::PyKissat;
 	}
 }
 

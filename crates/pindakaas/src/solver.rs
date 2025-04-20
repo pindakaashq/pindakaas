@@ -13,7 +13,7 @@ pub mod splr;
 
 use std::{ffi::c_void, num::NonZeroI32, ptr};
 
-use crate::{ClauseDatabase, Cnf, Lit, Unsatisfiable, Valuation, Var, VarRange};
+use crate::{ClauseDatabase, Lit, Valuation, Var, VarRange};
 
 type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
 type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;
