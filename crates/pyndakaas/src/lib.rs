@@ -3,10 +3,9 @@
 	reason = "pyo3 macro will generate unused qualified types"
 )]
 
-use pyo3::prelude::*;
-
 use ::pindakaas::{self as base};
 use ::pindakaas_derive::py_new_type;
+use pyo3::prelude::*;
 
 #[py_new_type]
 struct Cnf(base::Cnf);
