@@ -17,4 +17,4 @@ classifiers = [
 dependencies = ["sphinx", "sphinx-autobuild", "sphinx-rtd-theme"]
 
 [tool.maturin]
-features = ["pyo3/extension-module", "pyo3/experimental-inspect"]
+features = ["pyo3/extension-module"]

@@ -276,13 +276,22 @@ mod tests {
 		pyo3::append_to_inittab!(pindakaas);
 		pyo3::prepare_freethreaded_python();
 		Python::with_gil(|py| {
+			let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
 			let sys = py.import("sys").unwrap();
-			let p = std::fs::read_to_string(path).unwrap();
 			_ = sys.setattr("stdout", LoggingStdout.into_pyobject(py).unwrap());
+			// if let Ok(true) = std::fs::exists(format!("{}/venv", env!("CARGO_MANIFEST_DIR"))) {
+			// 	_ = sys
+			// 		.getattr("path")
+			// 		.unwrap()
+			// 		.call_method("append", ("venv",), None)
+			// 		.unwrap();
+			// }
 			_ = PyModule::from_code(
 				py,
-				CString::new(p).unwrap().as_c_str(),
-				c_str!("example.py"),
+				CString::new(std::fs::read_to_string(path).unwrap())
+					.unwrap()
+					.as_c_str(),
+				CString::new(file_name).unwrap().as_c_str(),
 				c_str!("__main__"),
 			)
 			.unwrap_or_else(|e| {
@@ -293,16 +302,16 @@ mod tests {
 	}
 
 	#[test]
-	fn test_interface() {
-		if std::env::var("CI").is_ok() {
-			return;
-		}
+	fn test_example() {
 		run_file("./example.py".into());
 	}
 
-	// doesn't work because we don't check in the venv
-	// #[test]
-	// fn test_php() {
-	// 	run_file("./php.py".into());
-	// }
+	#[test]
+	fn test_php() {
+		// skip for CI because requires a venv with numpy installed
+		if std::env::var("CI").is_ok() {
+			return;
+		}
+		run_file("./php.py".into());
+	}
 }

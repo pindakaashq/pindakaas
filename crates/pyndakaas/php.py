@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 import sys
-sys.path.append("venv")
 import pindakaas as pk
 import time
 import numpy as np
-from datetime import timedelta
+
+sys.path.append("venv") # loads depedencies if run from rust
 
 try:
     n = int(sys.argv[1])
@@ -14,7 +14,8 @@ m = n - 1
 
 formula = pk.Cnf()
 x = np.fromfunction(
-    np.vectorize(lambda i, j: formula.add_variable()), (n, m), dtype=pk.Lit
+    np.vectorize(lambda i, j: formula.add_variable()),
+    (n, m)
 )
 
 for row in x:  # each pigeons is in at least one hole
