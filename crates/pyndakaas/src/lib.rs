@@ -7,19 +7,22 @@ use ::pindakaas::{self as base};
 use ::pindakaas_derive::py_new_type;
 use pyo3::prelude::*;
 
-#[py_new_type]
+#[py_new_type(baseclass)]
+struct ClauseDatabase();
+
+#[py_new_type(tools)]
 struct Cnf(base::Cnf);
 
-#[py_new_type]
+#[py_new_type(tools)]
 struct Wcnf(base::Wcnf);
 
-#[py_new_type(solver, assumptions, term_callback)]
+#[py_new_type(tools, solver, assumptions, term_callback)]
 struct Cadical(base::solver::cadical::Cadical);
 
-#[py_new_type(solver)]
+#[py_new_type(tools, solver)]
 struct Kissat(base::solver::kissat::Kissat);
 
-#[py_new_type(solver, assumptions, term_callback)]
+#[py_new_type(tools, solver, assumptions, term_callback)]
 struct IntelSat(base::solver::intel_sat::IntelSat);
 
 // py_new_type!(base::solver::cadical::Cadical);
@@ -67,29 +70,6 @@ use itertools::Itertools;
 use pyo3::exceptions::PyException;
 
 type Clause = Vec<Lit>;
-
-/// :meta private:
-#[pyclass(subclass)]
-struct ClauseDatabase();
-
-/// :meta private:
-#[pymethods]
-impl ClauseDatabase {
-	#[new]
-	fn new() -> Self {
-		Self()
-	}
-
-	#[allow(unused_variables, reason = "Pseudo-abstract method")]
-	fn add_clause_from_slice(&mut self, clause: Vec<Lit>) -> Result {
-		unimplemented!("ABSTRACT")
-	}
-
-	#[allow(unused_variables, reason = "Pseudo-abstract method")]
-	fn new_var_range(&mut self, len: usize) -> VarRange {
-		unimplemented!("ABSTRACT")
-	}
-}
 
 /// A range of Boolean variables
 #[pyclass]

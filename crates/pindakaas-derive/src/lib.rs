@@ -429,9 +429,10 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 
 // TODO these Opts very much mirror the IpasirOpts, so I'm wondering if we can combine them
 #[derive(FromMeta)]
-// #[darling(attributes(pyndakaas))]
 struct PyndakaasOpts {
-	#[darling(default = "default_true")]
+	#[darling(default)]
+	baseclass: bool,
+	#[darling(default)]
 	tools: bool,
 	#[darling(default)]
 	solver: bool,
@@ -458,13 +459,31 @@ pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
 	};
 	let input: syn::ItemStruct = parse_macro_input!(input);
 	let ident = input.ident.clone();
-	let inner = input.fields.iter().next().unwrap().clone().ty;
-	let derives = [
-		Some(quote! { Default }),
-		(!opts.solver).then_some(quote! { Clone }),
-	]
-	.into_iter()
-	.flatten();
+	let inner = input.fields.iter().next().map(|inner| inner.ty.clone());
+
+	let py_class = {
+		let derive_opts = [
+			Some(quote! { Default }),
+			(!opts.solver).then_some(quote! { Clone }),
+		]
+		.into_iter()
+		.flatten();
+
+		let pyclass_opts = [
+			quote! { unsendable },
+			if opts.baseclass {
+				quote! { subclass }
+			} else {
+				quote! { extends = ClauseDatabase }
+			},
+		];
+
+		quote! {
+			#[pyclass(#(#pyclass_opts),*)]
+			#[derive(#(#derive_opts),*)]
+			#input
+		}
+	};
 
 	let py_new = {
 		let signature = opts
@@ -473,8 +492,8 @@ pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
 			.unwrap_or_default();
 
 		let (cnf_arg, construct) = if opts.solver {
+			let inner = inner.expect("not present if baseclass");
 			(
-				// .then(|| quote! { time_limit : Option<pyo3::Bound<'py, pyo3::PyAny>> }),
 				quote! { cnf: Option<pyo3::Bound<'py, pyo3::PyAny>> },
 				quote! {
 				cnf.map(|cnf| {
@@ -487,65 +506,65 @@ pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
 			(quote! {}, quote! { Self::default() })
 		};
 
+		let new_function = if opts.baseclass {
+			quote! { fn new() -> Self { Self::default() } }
+		} else {
+			quote! { fn new<'py>(#cnf_arg) -> (Self, ClauseDatabase) { (#construct, ClauseDatabase::new()) } }
+		};
+
 		quote! {
 			#[pyo3::prelude::pymethods]
 			impl #ident {
 				#[new]
 				#signature
-				fn new<'py>(#cnf_arg) -> (Self, ClauseDatabase) {
-					(#construct, ClauseDatabase::new())
-				}
+				#new_function
 			}
 		}
 	};
 
-	let clause_database = quote! {
-	#[pyo3::prelude::pymethods]
-	impl #ident {
-		/// Add a clause to the clause database
-		fn add_clause(&mut self, clause: Vec<Lit>) -> Result {
-			base::ClauseDatabase::add_clause_from_slice(
-				&mut self.0,
-				&clause.into_iter().map(|l| l.0).collect::<Vec<_>>(),
+	let clause_database = {
+		let abstract_body = quote! { panic!("abstract!"); };
+		let (add_clause, add_variables) = if opts.baseclass {
+			(abstract_body.clone(), abstract_body)
+		} else {
+			(
+				quote! {
+					base::ClauseDatabase::add_clause_from_slice(
+						&mut self.0,
+						&clause.into_iter().map(|l| l.0).collect::<Vec<_>>(),
+					)
+						.map_err(|_| Unsatisfiable)
+				},
+				quote! { VarRange(base::ClauseDatabase::new_var_range(&mut self.0, n)) },
 			)
-			.map_err(|_| Unsatisfiable)
-		}
-
-		/// Add ``n`` variables to the clause database
-	fn add_variables(&mut self, n: usize) -> VarRange {
-			VarRange(
-			base::ClauseDatabase::new_var_range(
-							&mut self.0,
-							n
-							))
-
-								// TODO not sure if we can make a generator here, but perhaps that's
-								// the proper translation to python
-				// Lit(
-				// crate::ClauseDatabaseTools::new_vars(
-				// 				&mut self.0
-				// 			).into())
-	}
-		}
 		};
 
-	let tools = if opts.tools {
+		// TODO not sure if we can make a generator here, but perhaps that's
+		// the proper translation to python
+		// Lit(
+		// crate::ClauseDatabaseTools::new_vars(
+		// 				&mut self.0
+		// 			).into())
+
 		quote! {
+			#[pyo3::prelude::pymethods]
+			impl #ident {
+				/// Add a clause to the clause database
+				fn add_clause(&mut self, clause: Vec<Lit>) -> Result { #add_clause }
+
+				/// Add ``n`` variables to the clause database
+				fn add_variables(&mut self, n: usize) -> VarRange { #add_variables }
+			}
+		}
+	};
+
+	let tools = opts.tools.then(|| quote! {
 		#[pyo3::prelude::pymethods]
 		impl #ident {
+                    fn add_variable(&mut self) -> Lit { Lit( base::ClauseDatabaseTools::new_var( &mut self.0).into()) }
 
-					// TODO not entirely sure if this shouldn't also go to ClauseDatabase
-		fn add_variable(&mut self) -> Lit {
-				Lit(
-				base::ClauseDatabaseTools::new_var(
-								&mut self.0
-							).into())
-		}
-
-		///// TODO not sure if this one should be in ClauseDatabase or ClauseDatabaseTools
-		///
 		/// Encode a linear constraint over Boolean literals
-							///
+                ///
 		/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
 		/// Currently, the encoding is fixed as ``adder`` for PB and Cardinality constraints, and ``PairWise`` for AMOs/also
 		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
@@ -579,12 +598,9 @@ pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
 			)?)
 		}
 		}
-		}
-	} else {
-		quote! {()}
-	};
+		}).unwrap_or_default();
 
-	let solver = if opts.solver {
+	let solver = opts.solver.then(|| {
 		// The pyo3 signature arguments
 		let signature = [
 			opts.term_callback.then(|| quote! { time_limit = None }),
@@ -675,14 +691,10 @@ pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
                         #fail
                     }
                 }
-	} else {
-		quote! {}
-	};
+	}).unwrap_or_default();
 
 	quote! {
-			#[pyclass(unsendable, extends = ClauseDatabase)]
-			#[derive(#(#derives),*)]
-			#input
+			#py_class
 			#py_new
 			#clause_database
 			#tools
