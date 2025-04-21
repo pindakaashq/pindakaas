@@ -23,7 +23,7 @@ for col in x.T:  # each hole has at most one pigeon
 
 timer = time.process_time()
 
-cadical = pk.solvers.Cadical(formula)
+cadical = pk.solver.Cadical(formula)
 r = cadical.solve(time_limit=1)
 print("1.", r, time.process_time() - timer)
 assert r is None, f"r={r}"

@@ -49,7 +49,7 @@ def main():
     wcnf.add_clause([(~b).var(),c]) # b \/ c
     # TODO add weighted clause
 
-    for solver in [pk.solvers.Cadical(), pk.solvers.IntelSat()]: # assumption supporting solvers
+    for solver in [pk.solver.Cadical(), pk.solver.IntelSat()]: # assumption supporting solvers
         a = solver.add_variable() # any solver "inherits" from
         b = solver.add_variable()
         solver.add_clause([a,b])
@@ -73,7 +73,7 @@ def main():
     unsat_cnf.add_clause([xs[0]])
     unsat_cnf.add_clause([~xs[0],xs[1]])
     unsat_cnf.add_clause([~xs[1],~xs[0]])
-    kissat = pk.solvers.Kissat(unsat_cnf)
+    kissat = pk.solver.Kissat(unsat_cnf)
     assert kissat.solve() is False, f"Unexpected SAT:\n{show_sol(kissat, xs)}"
     try:
         kissat.solve(assumptions=[a]) # but Kissat does not support assumptions
@@ -81,7 +81,7 @@ def main():
         print(f"Caught '{e}' of type {type(e)}") # TODO maybe make this friendlier
     assert kissat.value(a) is True
 
-    cadical = pk.solvers.Cadical() # "inherits" from ClauseDatabase
+    cadical = pk.solver.Cadical() # "inherits" from ClauseDatabase
     a,b,c = cadical.add_variables(3)
     p = list(cadical.add_variables(4))
     cadical.add_clause([a])
