@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import sys
+sys.path.append("venv")
 import pindakaas as pk
 import time
 import numpy as np

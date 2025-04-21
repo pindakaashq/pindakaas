@@ -257,7 +257,7 @@ fn pindakaas(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
 
-	use std::ffi::CString;
+	use std::{ffi::CString, path::PathBuf};
 
 	use pyo3::{ffi::c_str, Python};
 
@@ -271,18 +271,17 @@ mod tests {
 			print!("{}", data);
 		}
 	}
-	#[test]
-	fn test_interface() {
+
+	fn run_file(path: PathBuf) {
 		pyo3::append_to_inittab!(pindakaas);
 		pyo3::prepare_freethreaded_python();
 		Python::with_gil(|py| {
 			let sys = py.import("sys").unwrap();
+			let p = std::fs::read_to_string(path).unwrap();
 			_ = sys.setattr("stdout", LoggingStdout.into_pyobject(py).unwrap());
 			_ = PyModule::from_code(
 				py,
-				CString::new(include_str!("../example.py"))
-					.unwrap()
-					.as_c_str(),
+				CString::new(p).unwrap().as_c_str(),
 				c_str!("example.py"),
 				c_str!("__main__"),
 			)
@@ -292,4 +291,18 @@ mod tests {
 			});
 		});
 	}
+
+	#[test]
+	fn test_interface() {
+		if std::env::var("CI").is_ok() {
+			return;
+		}
+		run_file("./example.py".into());
+	}
+
+	// doesn't work because we don't check in the venv
+	// #[test]
+	// fn test_php() {
+	// 	run_file("./php.py".into());
+	// }
 }
