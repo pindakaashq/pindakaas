@@ -67,6 +67,8 @@ impl Cadical {
 
 	pub fn enable_proof(&mut self, name: &str) {
 		let name = CString::new(name).unwrap();
+		// SAFETY: Pointer is known to be valid, CaDiCaL's file API should handle
+		// all possible name paths.
 		unsafe {
 			ccadical_enable_proof(self.ptr, name.as_ptr());
 		}
