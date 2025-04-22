@@ -64,5 +64,8 @@ void ccadical_phase(CCaDiCaL *slv, int lit) {
 void ccadical_unphase(CCaDiCaL *slv, int lit) {
   ((Wrapper *)slv)->solver->unphase(lit);
 }
-
+void ccadical_enable_proof(CCaDiCaL *slv, const char* name) {
+  FILE* file = fopen(name, "a");
+  ((Wrapper *)slv)->solver->trace_proof(file, name);
+}
 }
