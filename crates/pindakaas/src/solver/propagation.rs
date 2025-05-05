@@ -31,8 +31,6 @@ pub(crate) struct IpasirPropStore<P, Slv> {
 	pub(crate) prop: P,
 	/// IPASIR Solver object
 	pub(crate) slv: Slv,
-	/// Propagation queue
-	pub(crate) pqueue: VecDeque<Lit>,
 	/// Reason clause queue
 	pub(crate) rqueue: VecDeque<Lit>,
 	/// The current literal that is being explained
@@ -178,9 +176,9 @@ pub trait Propagator {
 	/// current assignment. It returns queue of literals to be propagated in order,
 	/// if an empty queue is returned it indicates that there is no propagation
 	/// under the current assignment.
-	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Vec<Lit> {
+	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Option<Lit> {
 		let _ = slv;
-		Vec::new()
+		None
 	}
 
 	/// Ask the external propagator for the reason clause of a previous external
@@ -350,7 +348,6 @@ pub(crate) unsafe extern "C" fn ipasir_notify_backtrack_cb<P: Propagator, A>(
 	restart: bool,
 ) {
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
-	prop.pqueue.clear();
 	prop.explaining = None;
 	prop.rqueue.clear();
 	prop.cqueue = None;
@@ -377,11 +374,7 @@ pub(crate) unsafe extern "C" fn ipasir_propagate_cb<P: Propagator, A: SolvingAct
 	state: *mut c_void,
 ) -> i32 {
 	let prop = &mut *(state as *mut IpasirPropStore<P, A>);
-	if prop.pqueue.is_empty() {
-		let slv = &mut prop.slv;
-		prop.pqueue = prop.prop.propagate(slv).into();
-	}
-	if let Some(l) = prop.pqueue.pop_front() {
+	if let Some(l) = prop.prop.propagate(&mut prop.slv) {
 		l.0.into()
 	} else {
 		0 // No propagation
@@ -393,7 +386,6 @@ impl<P, A> IpasirPropStore<P, A> {
 		Self {
 			prop,
 			slv,
-			pqueue: VecDeque::default(),
 			rqueue: VecDeque::default(),
 			explaining: None,
 			cqueue: None,

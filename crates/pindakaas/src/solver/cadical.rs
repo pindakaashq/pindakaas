@@ -3,7 +3,7 @@ use std::{
 	fmt,
 };
 
-use pindakaas_cadical::{ccadical_copy, ccadical_phase, ccadical_unphase};
+use pindakaas_cadical::{ccadical_copy, ccadical_enable_proof, ccadical_phase, ccadical_unphase};
 use pindakaas_derive::IpasirSolver;
 
 use crate::{solver::FFIPointer, Lit, VarFactory};
@@ -63,6 +63,15 @@ impl Cadical {
 	pub fn unphase(&mut self, lit: Lit) {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		unsafe { ccadical_unphase(self.ptr, lit.0.get()) }
+	}
+
+	pub fn enable_proof(&mut self, name: &str) {
+		let name = CString::new(name).unwrap();
+		// SAFETY: Pointer is known to be valid, CaDiCaL's file API should handle
+		// all possible name paths.
+		unsafe {
+			ccadical_enable_proof(self.ptr, name.as_ptr());
+		}
 	}
 }
 
