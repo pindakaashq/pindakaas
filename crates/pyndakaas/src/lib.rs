@@ -276,7 +276,7 @@ mod tests {
 		pyo3::append_to_inittab!(pindakaas);
 		pyo3::prepare_freethreaded_python();
 		Python::with_gil(|py| {
-			let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
+			let file_name = path.file_name().unwrap().to_str().unwrap().to_owned();
 			let sys = py.import("sys").unwrap();
 			_ = sys.setattr("stdout", LoggingStdout.into_pyobject(py).unwrap());
 			// if let Ok(true) = std::fs::exists(format!("{}/venv", env!("CARGO_MANIFEST_DIR"))) {
