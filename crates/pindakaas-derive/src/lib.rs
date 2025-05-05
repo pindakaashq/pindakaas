@@ -539,13 +539,6 @@ pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
 			)
 		};
 
-		// TODO not sure if we can make a generator here, but perhaps that's
-		// the proper translation to python
-		// Lit(
-		// crate::ClauseDatabaseTools::new_vars(
-		// 				&mut self.0
-		// 			).into())
-
 		quote! {
 			#[pyo3::prelude::pymethods]
 			impl #ident {
@@ -561,44 +554,44 @@ pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
 	let tools = opts.tools.then(|| quote! {
 		#[pyo3::prelude::pymethods]
 		impl #ident {
-                    fn add_variable(&mut self) -> Lit { Lit( base::ClauseDatabaseTools::new_var( &mut self.0).into()) }
+			fn add_variable(&mut self) -> Lit { Lit( base::ClauseDatabaseTools::new_var( &mut self.0).into()) }
 
-		/// Encode a linear constraint over Boolean literals
-                ///
-		/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
-		/// Currently, the encoding is fixed as ``adder`` for PB and Cardinality constraints, and ``PairWise`` for AMOs/also
-		#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
-		fn add_linear(
-			&mut self,
-			literals: Vec<Lit>,
-			coefficients: Option<Vec<Coeff>>,
-			// TODO I'm not sure if adding Option is the best way to allow None to return default
-			comparator: Option<Comparator>,
-			k: Option<Coeff>,
-						conditions: Vec<Lit>,
-		) -> Result {
-			let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
-			assert_eq!(
-				coefficients.len(),
-				literals.len(),
-				"Literals and coefficients should have the same length"
-			);
-			let enc: base::bool_linear::LinearEncoder = base::bool_linear::LinearEncoder::default();
-						let mut db = base::ClauseDatabaseTools::with_conditions(&mut self.0, conditions.into_iter().map(|l| l.into()).collect());
-			Ok(base::Encoder::encode(&enc,
-				&mut db,
-				&base::bool_linear::BoolLinear::new(
-					base::bool_linear::BoolLinExp::from_slices(
-						&coefficients,
-						&literals.into_iter().map(|l| l.0).collect::<Vec<_>>(),
+			/// Encode a linear constraint over Boolean literals
+			///
+			/// The default arguments encode a clause: all coefficients are one, comparator is >=, and k = 1.
+			/// Currently, the encoding is fixed as ``adder`` for PB and Cardinality constraints, and ``PairWise`` for AMOs/also
+			#[pyo3(signature=(literals, /, coefficients = None, comparator = Some(Comparator::GreaterEq), k = Some(1), conditions = vec![]))]
+			fn add_linear(
+				&mut self,
+				literals: Vec<Lit>,
+				coefficients: Option<Vec<Coeff>>,
+				// TODO I'm not sure if adding Option is the best way to allow None to return default
+				comparator: Option<Comparator>,
+				k: Option<Coeff>,
+				conditions: Vec<Lit>,
+			) -> Result {
+				let coefficients = coefficients.unwrap_or(literals.iter().map(|_| 1).collect());
+				assert_eq!(
+					coefficients.len(),
+					literals.len(),
+					"Literals and coefficients should have the same length"
+				);
+				let enc: base::bool_linear::LinearEncoder = base::bool_linear::LinearEncoder::default();
+							let mut db = base::ClauseDatabaseTools::with_conditions(&mut self.0, conditions.into_iter().map(|l| l.into()).collect());
+				Ok(base::Encoder::encode(&enc,
+					&mut db,
+					&base::bool_linear::BoolLinear::new(
+						base::bool_linear::BoolLinExp::from_slices(
+							&coefficients,
+							&literals.into_iter().map(|l| l.0).collect::<Vec<_>>(),
+						),
+						comparator.unwrap_or_default().into(),
+						k.unwrap_or(1),
 					),
-					comparator.unwrap_or_default().into(),
-					k.unwrap_or(1),
-				),
-			)?)
+				)?)
+			}
 		}
-		}
-		}).unwrap_or_default();
+	}).unwrap_or_default();
 
 	let solver = opts.solver.then(|| {
 		// The pyo3 signature arguments
@@ -628,34 +621,33 @@ pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
 		};
 
 		// the callback regulating the timer
-		#[rustfmt::skip]
 		let set_time_limit = opts
 			.term_callback
 			.then(|| {
 				quote! {
-                                        // convert TimeDelta or integer (seconds) to Duration
-                                        let time_limit = if let Some(time_limit) = time_limit {
-                                            if let Ok(time_limit) = pyo3::types::PyAnyMethods::extract::<std::time::Duration>(&time_limit) {
-                                                Some(time_limit)
-                                            } else if let Ok(time_limit) = pyo3::types::PyAnyMethods::extract(&time_limit) {
-                                                Some(std::time::Duration::from_secs(time_limit))
-                                            } else {
-                                                return Err(pyo3::exceptions::PyTypeError::new_err(format!("The `time_limit` should be a non-negative integer or a `datetime.TimeDelta` object, but was: {time_limit}")));
-                                            }
-                                        } else {
-                                            None
-                                        };
+						// convert TimeDelta or integer (seconds) to Duration
+						let time_limit = if let Some(time_limit) = time_limit {
+							if let Ok(time_limit) = pyo3::types::PyAnyMethods::extract::<std::time::Duration>(&time_limit) {
+								Some(time_limit)
+							} else if let Ok(time_limit) = pyo3::types::PyAnyMethods::extract(&time_limit) {
+								Some(std::time::Duration::from_secs(time_limit))
+							} else {
+								return Err(pyo3::exceptions::PyTypeError::new_err(format!("The `time_limit` should be a non-negative integer or a `datetime.TimeDelta` object, but was: {time_limit}")));
+							}
+						} else {
+							None
+						};
 					// always set callback, in case of subsequent calls which might have to reset the termination
 					base::solver::TermCallback::set_terminate_callback(
-                                            &mut self.0,
-                                            time_limit.map(|time_limit| {
-                                                let timer = std::time::SystemTime::now();
-                                                move || if timer.elapsed().unwrap() <= time_limit {
-                                                        base::solver::SlvTermSignal::Continue
-                                                } else {
-                                                        base::solver::SlvTermSignal::Terminate
-                                                }
-                                            })
+						&mut self.0,
+						time_limit.map(|time_limit| {
+							let timer = std::time::SystemTime::now();
+							move || if timer.elapsed().unwrap() <= time_limit {
+									base::solver::SlvTermSignal::Continue
+							} else {
+									base::solver::SlvTermSignal::Terminate
+							}
+						})
 					);
 				}
 			})
@@ -673,24 +665,24 @@ pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
 
 		#[rustfmt::skip]
 		quote! {
-                    #[pyo3::prelude::pymethods]
-                    impl #ident {
-                        #[pyo3(signature=(#(#signature),*))]
-                        // Result is type error (on time_limit)
-                        fn solve<'py>(#(#args), *) -> pyo3::PyResult<Option<bool>> {
-                            #set_time_limit
-                             Ok(match #solve {
-                                base::solver::SolveResult::Satisfied(_) => Some(true),
-                                base::solver::SolveResult::Unsatisfiable(_) => Some(false),
-                                base::solver::SolveResult::Unknown => None,
-                            })
-                        }
-                        fn value(&self, lit: Lit) -> bool {
-                            base::Valuation::value(&self.0.solver_solution_obj(), lit.into())
-                        }
-                        #fail
-                    }
-                }
+			#[pyo3::prelude::pymethods]
+			impl #ident {
+				#[pyo3(signature=(#(#signature),*))]
+				// Result is type error (on time_limit)
+				fn solve<'py>(#(#args), *) -> pyo3::PyResult<Option<bool>> {
+					#set_time_limit
+					 Ok(match #solve {
+						base::solver::SolveResult::Satisfied(_) => Some(true),
+						base::solver::SolveResult::Unsatisfiable(_) => Some(false),
+						base::solver::SolveResult::Unknown => None,
+					})
+				}
+				fn value(&self, lit: Lit) -> bool {
+					base::Valuation::value(&self.0.solver_solution_obj(), lit.into())
+				}
+				#fail
+			}
+		}
 	}).unwrap_or_default();
 
 	quote! {
@@ -701,17 +693,6 @@ pub fn py_new_type(attr: TokenStream, input: TokenStream) -> TokenStream {
 			#solver
 	}
 	.into()
-
-	// quote! {
-	//            // #[derive(#(#derives),*)]
-	//            // #[pymodule]
-	//            // mod pindakaas {
-	//            //     #[pymodule_export]
-	//            //     use super::Cnf
-	//            // }
-	//
-	// }
-	// .into()
 }
 
 fn default_true() -> bool {
