@@ -1098,7 +1098,7 @@ impl Display for Wcnf {
 			let weight = weight.unwrap_or(top);
 			write!(f, "{weight} ")?;
 			for lit in cl {
-				write!(f, "{lit} ")?;
+				write!(f, "{} ", lit.0)?;
 			}
 			writeln!(f, "0")?;
 			start += size;
