@@ -1021,7 +1021,7 @@ impl RangeBounds<Var> for VarRange {
 
 impl Wcnf {
 	/// Add a weighted clause to the formula.
-	pub fn add_weighted_clause<I>(&mut self, clause: I, weight: Option<Coeff>) -> Result
+	pub fn add_weighted_clause<I>(&mut self, clause: I, weight: Coeff) -> Result
 	where
 		I: IntoIterator,
 		I::Item: Into<BoolVal>,
@@ -1029,7 +1029,7 @@ impl Wcnf {
 		let clauses = self.cnf.num_clauses();
 		self.cnf.add_clause(clause)?;
 		if self.cnf.num_clauses() > clauses {
-			self.weights.push(weight);
+			self.weights.push(Some(weight));
 		}
 		Ok(())
 	}
@@ -1078,7 +1078,12 @@ impl Wcnf {
 
 impl ClauseDatabase for Wcnf {
 	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
-		self.add_weighted_clause(clause.iter().copied(), None)
+		let clauses = self.cnf.num_clauses();
+		self.cnf.add_clause_from_slice(clause)?;
+		if self.cnf.num_clauses() > clauses {
+			self.weights.push(None);
+		}
+		Ok(())
 	}
 
 	fn new_var_range(&mut self, len: usize) -> VarRange {
