@@ -171,6 +171,74 @@ impl<Base> Formula<Base> {
 	}
 }
 
+impl<Base: Display> Formula<Base> {
+	fn fmt_inner(&self, f: &mut Formatter<'_>, sub: bool) -> fmt::Result {
+		if let Formula::Atom(l) = self {
+			return write!(f, "{l}");
+		}
+		if sub {
+			write!(f, "(")?;
+		}
+		match self {
+			Formula::Not(sub) => {
+				write!(f, "¬")?;
+				sub.fmt_inner(f, true)?;
+			}
+			Formula::And(sub) => {
+				for (i, x) in sub.iter().enumerate() {
+					if i > 0 {
+						write!(f, " ∧ ")?;
+					}
+					x.fmt_inner(f, true)?;
+				}
+			}
+			Formula::Or(sub) => {
+				for (i, x) in sub.iter().enumerate() {
+					if i > 0 {
+						write!(f, " ∨ ")?;
+					}
+					x.fmt_inner(f, true)?;
+				}
+			}
+			Formula::Implies(x, y) => {
+				x.fmt_inner(f, true)?;
+				write!(f, " → ")?;
+				y.fmt_inner(f, true)?;
+			}
+			Formula::Equiv(sub) => {
+				for (i, x) in sub.iter().enumerate() {
+					if i > 0 {
+						write!(f, " ≡ ")?;
+					}
+					x.fmt_inner(f, true)?;
+				}
+			}
+			Formula::Xor(sub) => {
+				for (i, x) in sub.iter().enumerate() {
+					if i > 0 {
+						write!(f, " ⊻ ")?;
+					}
+					x.fmt_inner(f, true)?;
+				}
+			}
+			Formula::IfThenElse { cond, then, els } => {
+				write!(f, "if ")?;
+				cond.fmt_inner(f, sub)?;
+				write!(f, " then ")?;
+				then.fmt_inner(f, sub)?;
+				write!(f, " else ")?;
+				els.fmt_inner(f, sub)?;
+				write!(f, " endif")?;
+			}
+			Formula::Atom(_) => unreachable!(),
+		}
+		if sub {
+			write!(f, ")")?;
+		}
+		Ok(())
+	}
+}
+
 impl<Base> BitAnd<Self> for Formula<Base> {
 	type Output = Self;
 
@@ -227,38 +295,7 @@ impl<Base> BitXor<Self> for Formula<Base> {
 
 impl<Base: Display> Display for Formula<Base> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		match self {
-			Formula::Atom(l) => write!(f, "{l}"),
-			Formula::Not(sub) => write!(f, "¬({})", sub),
-			Formula::And(sub) => write!(
-				f,
-				"{}",
-				sub.iter()
-					.format_with(" ∧ ", |elt, f| f(&format_args!("({elt})")))
-			),
-			Formula::Or(sub) => write!(
-				f,
-				"{}",
-				sub.iter()
-					.format_with(" ∨ ", |elt, f| f(&format_args!("({elt})")))
-			),
-			Formula::Implies(x, y) => write!(f, "({x}) → ({y})"),
-			Formula::Equiv(sub) => write!(
-				f,
-				"{}",
-				sub.iter()
-					.format_with(" ≡ ", |elt, f| f(&format_args!("({elt})")))
-			),
-			Formula::Xor(sub) => write!(
-				f,
-				"{}",
-				sub.iter()
-					.format_with(" ⊻ ", |elt, f| f(&format_args!("({elt})")))
-			),
-			Formula::IfThenElse { cond, then, els } => {
-				write!(f, "if ({cond}) then ({then}) else ({els}) endif")
-			}
-		}
+		self.fmt_inner(f, false)
 	}
 }
 
@@ -275,8 +312,6 @@ impl<Base> Not for Formula<Base> {
 
 impl Formula<BoolVal> {
 	/// Simplify the formula using the given literals as proven facts.
-	///
-	///
 	pub fn simplify<Iter>(self, facts: Iter) -> Result<Formula<Lit>, bool>
 	where
 		Iter: IntoIterator,
