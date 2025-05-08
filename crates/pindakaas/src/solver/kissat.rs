@@ -2,13 +2,17 @@ use std::ffi::c_void;
 
 use pindakaas_derive::IpasirSolver;
 
-use crate::VarFactory;
+use crate::{solver::FFIPointer, VarFactory};
 
 #[derive(Debug, IpasirSolver)]
-#[ipasir(krate = pindakaas_kissat)]
+#[ipasir(krate = pindakaas_kissat, term_callback)]
 pub struct Kissat {
+	/// The raw pointer to the Kissat solver.
 	ptr: *mut c_void,
+	/// The variable factory for this solver.
 	vars: VarFactory,
+	/// The callback used to check whether the solver should terminate.
+	term_cb: FFIPointer,
 }
 
 impl Default for Kissat {
@@ -17,6 +21,7 @@ impl Default for Kissat {
 			// SAFETY: Assume correct creation of the solver using the IPASIR API.
 			ptr: unsafe { pindakaas_kissat::ipasir_init() },
 			vars: VarFactory::default(),
+			term_cb: FFIPointer::default(),
 		}
 	}
 }
