@@ -4,7 +4,7 @@ use std::{
 	collections::{BTreeSet, VecDeque},
 	fmt::{self, Display},
 	iter::once,
-	ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign, Range},
+	ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign, Neg, Range, Sub, SubAssign},
 	rc::Rc,
 };
 
@@ -1155,7 +1155,8 @@ impl BoolLinExp {
 	/// in each term is implied by the literal in the consecutive term
 	pub fn add_chain(mut self, chain: &[(Lit, Coeff)]) -> Self {
 		if let [term] = chain {
-			self += *term;
+			self.terms.push_front(*term);
+			self.num_free += 1;
 		} else {
 			self.terms.extend(chain.iter().cloned());
 			self.constraints
@@ -1168,7 +1169,8 @@ impl BoolLinExp {
 	/// can be chosen
 	pub fn add_choice(mut self, choice: &[(Lit, Coeff)]) -> Self {
 		if let [term] = choice {
-			self += *term;
+			self.terms.push_front(*term);
+			self.num_free += 1;
 		} else {
 			self.terms.extend(choice.iter().cloned());
 			self.constraints.push((Constraint::AtMostOne, choice.len()));
@@ -1182,7 +1184,8 @@ impl BoolLinExp {
 	}
 
 	pub fn add_lit(mut self, lit: Lit) -> Self {
-		self += (lit, 1);
+		self.terms.push_front((lit, 1));
+		self.num_free += 1;
 		self
 	}
 
@@ -1271,19 +1274,19 @@ impl BoolLinExp {
 	}
 }
 
-impl Add<(Lit, Coeff)> for BoolLinExp {
+impl Add for BoolLinExp {
 	type Output = BoolLinExp;
 
-	fn add(mut self, rhs: (Lit, Coeff)) -> Self::Output {
+	fn add(mut self, rhs: Self) -> Self::Output {
 		self += rhs;
 		self
 	}
 }
 
-impl Add<BoolLinExp> for BoolLinExp {
+impl Add<Coeff> for BoolLinExp {
 	type Output = BoolLinExp;
 
-	fn add(mut self, rhs: BoolLinExp) -> Self::Output {
+	fn add(mut self, rhs: Coeff) -> Self::Output {
 		self += rhs;
 		self
 	}
@@ -1298,15 +1301,8 @@ impl<'a> Add<IntEncoding<'a>> for BoolLinExp {
 	}
 }
 
-impl AddAssign<(Lit, Coeff)> for BoolLinExp {
-	fn add_assign(&mut self, rhs: (Lit, Coeff)) {
-		self.terms.push_front(rhs);
-		self.num_free += 1;
-	}
-}
-
-impl AddAssign<BoolLinExp> for BoolLinExp {
-	fn add_assign(&mut self, rhs: BoolLinExp) {
+impl AddAssign for BoolLinExp {
+	fn add_assign(&mut self, rhs: Self) {
 		// Multiply the current expression
 		if self.mult != 1 {
 			self.add *= self.mult;
@@ -1329,6 +1325,12 @@ impl AddAssign<BoolLinExp> for BoolLinExp {
 		self.terms.rotate_right(rhs.num_free);
 		self.num_free += rhs.num_free;
 		self.constraints.extend(rhs.constraints);
+	}
+}
+
+impl AddAssign<Coeff> for BoolLinExp {
+	fn add_assign(&mut self, rhs: Coeff) {
+		self.add += rhs;
 	}
 }
 
@@ -1377,6 +1379,30 @@ impl Default for BoolLinExp {
 			add: 0,
 			mult: 1,
 		}
+	}
+}
+
+impl Display for BoolLinExp {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(
+			f,
+			"{}",
+			self.terms
+				.iter()
+				.map(|(lit, c)| (lit, c * self.mult))
+				.format_with(" + ", |elt, f| match elt.1 {
+					1 => f(&format_args!("{}", elt.0)),
+					-1 => f(&format_args!("-{}", elt.0)),
+					_ => f(&format_args!("{}*{}", elt.1, elt.0)),
+				})
+		)?;
+		if self.add != 0 {
+			if !self.terms.is_empty() {
+				write!(f, " + ")?;
+			}
+			write!(f, "{}", self.add)?;
+		}
+		Ok(())
 	}
 }
 
@@ -1442,6 +1468,15 @@ impl From<Lit> for BoolLinExp {
 	}
 }
 
+impl From<bool> for BoolLinExp {
+	fn from(b: bool) -> Self {
+		Self {
+			add: b.into(),
+			..Default::default()
+		}
+	}
+}
+
 impl Mul<Coeff> for BoolLinExp {
 	type Output = BoolLinExp;
 
@@ -1454,6 +1489,31 @@ impl Mul<Coeff> for BoolLinExp {
 impl MulAssign<Coeff> for BoolLinExp {
 	fn mul_assign(&mut self, rhs: Coeff) {
 		self.mult *= rhs;
+	}
+}
+
+impl Neg for BoolLinExp {
+	type Output = Self;
+
+	fn neg(mut self) -> Self::Output {
+		self.mult = -self.mult;
+		self
+	}
+}
+
+impl Sub for BoolLinExp {
+	type Output = Self;
+
+	fn sub(self, rhs: Self) -> Self::Output {
+		let mut res = self.clone();
+		res -= rhs;
+		res
+	}
+}
+
+impl SubAssign for BoolLinExp {
+	fn sub_assign(&mut self, rhs: Self) {
+		self.add_assign(-rhs);
 	}
 }
 
@@ -1498,6 +1558,22 @@ impl Checker for BoolLinear {
 		} else {
 			Err(Unsatisfiable)
 		}
+	}
+}
+
+impl Display for BoolLinear {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(
+			f,
+			"{} {} {}",
+			self.exp,
+			match self.cmp {
+				Comparator::Equal => "==",
+				Comparator::LessEq => "<=",
+				Comparator::GreaterEq => ">=",
+			},
+			self.k
+		)
 	}
 }
 
