@@ -154,7 +154,7 @@ fn main() {
 
 	#[cfg(not(debug_assertions))]
 	// I'm not sure why this is not automatic, but assertions still seem to trigger otherwise.
-	build.define("NDEBUG", None);
+	let _ = build.define("NDEBUG", None);
 
 	let _ = build.files(src);
 
