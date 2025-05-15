@@ -1,27 +1,13 @@
 [package]
 name = "pyndakaas"
-description = "Python interface for to the pindakaas crate"
+version = "0.1.0"
+edition = "2021"
 
-authors.workspace = true
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-homepage.workspace = true
-categories.workspace = true
-keywords.workspace = true
-repository.workspace = true
-
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 name = "pindakaas"
 crate-type = ["cdylib"]
-doc = false
 
 [dependencies]
 pindakaas = { path = "../pindakaas" }
-pyo3 = { version = "0.22", features = ["extension-module"] }
-
-[build-dependencies]
-pyo3-build-config = "0.22"
-
-[lints]
-workspace = true
+pyo3 = "0.24.0"

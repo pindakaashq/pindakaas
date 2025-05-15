@@ -401,6 +401,11 @@ pub fn ipasir_solver_derive(input: TokenStream) -> TokenStream {
 		}
 
 		impl #ident {
+			#[doc(hidden)] // TODO: Unsure whether this is a good idea.
+			pub fn emitted_vars(&self) -> crate::VarRange {
+				#vars .emitted_vars()
+			}
+
 			fn solver_solution_obj(&self) -> #sol_ident {
 				#sol_ident { slv: self }
 			}

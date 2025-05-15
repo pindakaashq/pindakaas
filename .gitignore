@@ -1,2 +1,21 @@
+# Rust building
 /target
 Cargo.lock
+
+# Python Byte-compiled / optimized / DLL files
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# Python C extensions
+*.so
+
+# Python Distribution / packaging
+.venv/
+env/
+dist/
+sdist/
+
+# Python Maturin (files created because it doesn't support workspaces)
+/crates/pyndakaas/target
+/crates/pyndakaas/Cargo.lock
