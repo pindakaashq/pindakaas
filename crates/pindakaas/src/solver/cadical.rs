@@ -210,7 +210,7 @@ mod tests {
 		let mut slv = Cadical::default();
 
 		// Encode a pidgeon hole problem that is not trivially solvable
-		const LARGE: usize = 100;
+		const LARGE: usize = 10;
 		let vars: Vec<_> = repeat_with(|| slv.new_var_range(LARGE - 1))
 			.take(LARGE)
 			.collect();

@@ -1,4 +1,29 @@
-use pindakaas_build_macros::change_ipasir_prefix;
+/// Function that renames the standard `ipasir_` when using the `cc` crate to
+/// avoid conflicts when linking.
+pub fn change_ipasir_prefix(build: &mut cc::Build, prefix: &str) {
+	for f in [
+		"_signature",
+		"_init",
+		"_release",
+		"_add",
+		"_assume",
+		"_solve",
+		"_val",
+		"_failed",
+		"_set_terminate",
+		"_set_learn",
+		"_connect_external_propagator",
+		"_get_external_propagator",
+		"_disconnect_external_propagator",
+		"_add_observed_var",
+		"_remove_observed_var",
+		"_reset_observed_vars",
+		"_is_decision",
+		"_force_backtrack",
+	] {
+		let _ = build.define(&format!("ipasir{f}"), format!("{prefix}{f}").as_ref());
+	}
+}
 
 fn main() {
 	let src = [

@@ -17,8 +17,5 @@ repository.workspace = true
 [build-dependencies]
 cc = { workspace = true }
 
-[dependencies]
-pindakaas-build-macros = { path = "../pindakaas-build-macros" }
-
 [lints]
 workspace = true
