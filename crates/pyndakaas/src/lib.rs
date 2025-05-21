@@ -132,6 +132,7 @@ mod pindakaas {
 		db: &mut Db,
 		con: ConstraintArg,
 		enc: Option<Encoder>,
+		conditions: Vec<Lit>,
 	) -> PyResult<()> {
 		let invalid_enc = |con_ty, enc| {
 			Err(InvalidEncoder::new_err(format!(
@@ -141,6 +142,7 @@ mod pindakaas {
 		let map_unsat = |_err| {
 			Unsatisfiable::new_err("constraint was found to be unsatisfiable during encoding")
 		};
+		let db = &mut db.with_conditions(conditions.into_iter().map(|l| l.0).collect());
 		match con {
 			ConstraintArg::BoolLin(lin) => {
 				let aggregated = BoolLinAggregator::default()
@@ -302,8 +304,13 @@ mod pindakaas {
 			Ok(())
 		}
 
-		fn add_encoding(&mut self, con: ConstraintArg, enc: Option<Encoder>) -> PyResult<()> {
-			encode_constraint(&mut self.0, con, enc)
+		fn add_encoding(
+			&mut self,
+			con: ConstraintArg,
+			enc: Option<Encoder>,
+			conditions: Vec<Lit>,
+		) -> PyResult<()> {
+			encode_constraint(&mut self.0, con, enc, conditions)
 		}
 
 		#[new]
@@ -491,8 +498,13 @@ mod pindakaas {
 			Ok(())
 		}
 
-		fn add_encoding(&mut self, con: ConstraintArg, enc: Option<Encoder>) -> PyResult<()> {
-			encode_constraint(&mut self.0, con, enc)
+		fn add_encoding(
+			&mut self,
+			con: ConstraintArg,
+			enc: Option<Encoder>,
+			conditions: Vec<Lit>,
+		) -> PyResult<()> {
+			encode_constraint(&mut self.0, con, enc, conditions)
 		}
 
 		fn add_weighted_clause(
@@ -598,9 +610,14 @@ mod pindakaas {
 				Ok(())
 			}
 
-			fn add_encoding(&mut self, con: ConstraintArg, enc: Option<Encoder>) -> PyResult<()> {
+			fn add_encoding(
+				&mut self,
+				con: ConstraintArg,
+				enc: Option<Encoder>,
+				conditions: Vec<Lit>,
+			) -> PyResult<()> {
 				let mut guard = self.0.lock().unwrap();
-				encode_constraint(&mut *guard, con, enc)
+				encode_constraint(&mut *guard, con, enc, conditions)
 			}
 
 			#[new]

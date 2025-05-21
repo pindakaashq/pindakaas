@@ -30,7 +30,9 @@ class Solver(ClauseDatabase):
 
     @contextmanager
     def solve(
-        self, assumptions: Optional[Iterable[Lit]] = None, time_limit: Optional[timedelta] = None
+        self,
+        assumptions: Optional[Iterable[Lit]] = None,
+        time_limit: Optional[timedelta] = None,
     ) -> Iterator[Result]:
         self._set_time_limit(time_limit)
         assumptions = assumptions if assumptions is not None else []
@@ -59,8 +61,8 @@ class CaDiCaL(Solver):
     def add_clause(self, clause: Iterable[Lit]):
         return self._inner.add_clause(iter(clause))
 
-    def add_encoding(self, constraint: Constraint, encoder: Optional[Encoder] = None):
-        return self._inner.add_encoding(constraint, encoder)
+    def add_encoding(self, constraint: Constraint, encoder: Optional[Encoder] = None, conditions: Optional[Iterable[Lit]] = []):
+        return self._inner.add_encoding(constraint, encoder, conditions)
 
     def new_vars(self, num: int):
         return self._inner.new_vars(num)
