@@ -6,6 +6,8 @@ def test_bool_lin():
     x, y, z = f.new_vars(3)
     c = x + y - z + 2
     assert str(c) == "-x₃ + x₂ + x₁ + 2"
+    c = sum([x, y, z], pindakaas.BoolLinExp())
+    assert str(c) == "x₃ + x₂ + x₁"
     c = sum([y, y, z], x)
     assert str(c) == "x₃ + x₂ + x₂ + x₁"
     c *= 2

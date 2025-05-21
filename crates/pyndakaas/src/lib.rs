@@ -218,6 +218,11 @@ mod pindakaas {
 
 	#[pymethods]
 	impl BoolLinExp {
+		#[new]
+		fn new() -> Self {
+			Self(Default::default())
+		}
+
 		fn __add__(&self, other: BoolLinArg) -> Self {
 			let mut res = self.clone();
 			res.__iadd__(other);
