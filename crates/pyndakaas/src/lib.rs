@@ -9,6 +9,11 @@ create_exception!(pindakaas, Unsatisfiable, PyException);
 
 #[pymodule]
 mod pindakaas {
+
+	fn map_unsat(_err: pindakaas::Unsatisfiable) -> PyErr {
+		Unsatisfiable::new_err("constraint was found to be unsatisfiable during encoding")
+	}
+
 	use std::fmt::Display;
 
 	use pindakaas::{
@@ -293,7 +298,7 @@ mod pindakaas {
 				.collect::<PyResult<_>>()?;
 			self.0
 				.add_clause(clause.into_iter().map(|lit| lit.0))
-				.unwrap();
+				.map_err(map_unsat)?;
 			Ok(())
 		}
 
@@ -557,6 +562,7 @@ mod pindakaas {
 
 	#[pymodule]
 	mod solver {
+		use super::map_unsat;
 		use std::{
 			collections::HashMap,
 			sync::Mutex,
@@ -621,7 +627,7 @@ mod pindakaas {
 				let mut guard = self.0.lock().unwrap();
 				guard
 					.add_clause(clause.into_iter().map(|lit| lit.0))
-					.unwrap();
+					.map_err(map_unsat)?;
 				Ok(())
 			}
 

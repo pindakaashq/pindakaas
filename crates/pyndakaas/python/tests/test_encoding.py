@@ -1,5 +1,10 @@
 import pindakaas
+import pytest
 
+def test_unsat():
+    f = pindakaas.CNF()
+    with pytest.raises(pindakaas.Unsatisfiable):
+        f.add_clause([])
 
 def test_cnf():
     f = pindakaas.CNF()
@@ -7,6 +12,12 @@ def test_cnf():
     f.add_clause([x, y])
     assert f.to_dimacs() == "p cnf 2 1\n1 2 0\n"
 
+
+def test_encode_bool_lin_unsat():
+    f = pindakaas.CNF()
+    x, y, z = f.new_vars(3)
+    with pytest.raises(pindakaas.Unsatisfiable):
+        f += x * 3 + y * 2 + z >= 10
 
 def test_encode_bool_lin_default():
     f = pindakaas.CNF()
