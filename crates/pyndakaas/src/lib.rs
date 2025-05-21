@@ -412,6 +412,10 @@ mod pindakaas {
 			self.as_bool_lin_exp().__add__(other)
 		}
 
+		fn __radd__(&self, other: i64) -> BoolLinExp {
+			self.as_bool_lin_exp().__add__(BoolLinArg::Int(other))
+		}
+
 		fn __and__(&self, other: FormulaArg) -> Formula {
 			Formula(self.as_formula()).__and__(other)
 		}

@@ -4,14 +4,14 @@ import pindakaas
 def test_bool_lin():
     f = pindakaas.CNF()
     x, y, z = f.new_vars(3)
+    assert str(x + 2) == "x₁ + 2"
+    assert str(2 + x) == "x₁ + 2"
     c = x + y - z + 2
     assert str(c) == "-x₃ + x₂ + x₁ + 2"
-    c = sum([x, y, z], pindakaas.BoolLinExp())
+    c = sum([x, y, z])
     assert str(c) == "x₃ + x₂ + x₁"
-    c = sum([y, y, z], x)
-    assert str(c) == "x₃ + x₂ + x₂ + x₁"
     c *= 2
-    assert str(c) == "2*x₃ + 2*x₂ + 2*x₂ + 2*x₁"
+    assert str(c) == "2*x₃ + 2*x₂ + 2*x₁"
     c = x + y + z
     d = c == 2
     assert str(d) == "x₃ + x₂ + x₁ == 2"
