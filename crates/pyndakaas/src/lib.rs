@@ -562,7 +562,6 @@ mod pindakaas {
 
 	#[pymodule]
 	mod solver {
-		use super::map_unsat;
 		use std::{
 			collections::HashMap,
 			sync::Mutex,
@@ -578,6 +577,7 @@ mod pindakaas {
 		};
 		use pyo3::{prelude::*, types::PyIterator};
 
+		use super::map_unsat;
 		use crate::pindakaas::{encode_constraint, ConstraintArg, Encoder, Lit};
 
 		#[pyclass]
