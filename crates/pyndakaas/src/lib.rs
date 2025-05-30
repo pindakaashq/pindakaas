@@ -132,8 +132,16 @@ mod pindakaas {
 		db: &mut Db,
 		con: ConstraintArg,
 		enc: Option<Encoder>,
-		conditions: Vec<Lit>,
+		conditions: Option<Vec<Lit>>,
 	) -> PyResult<()> {
+		if let Some(conditions) = conditions {
+			return encode_constraint(
+				&mut db.with_conditions(conditions.into_iter().map(|l| l.0).collect()),
+				con,
+				enc,
+				None,
+			);
+		}
 		let invalid_enc = |con_ty, enc| {
 			Err(InvalidEncoder::new_err(format!(
 				"unable to encode `{con_ty}' using {enc:?}"
@@ -142,7 +150,6 @@ mod pindakaas {
 		let map_unsat = |_err| {
 			Unsatisfiable::new_err("constraint was found to be unsatisfiable during encoding")
 		};
-		let db = &mut db.with_conditions(conditions.into_iter().map(|l| l.0).collect());
 		match con {
 			ConstraintArg::BoolLin(lin) => {
 				let aggregated = BoolLinAggregator::default()
@@ -308,7 +315,7 @@ mod pindakaas {
 			&mut self,
 			con: ConstraintArg,
 			enc: Option<Encoder>,
-			conditions: Vec<Lit>,
+			conditions: Option<Vec<Lit>>,
 		) -> PyResult<()> {
 			encode_constraint(&mut self.0, con, enc, conditions)
 		}
@@ -502,7 +509,7 @@ mod pindakaas {
 			&mut self,
 			con: ConstraintArg,
 			enc: Option<Encoder>,
-			conditions: Vec<Lit>,
+			conditions: Option<Vec<Lit>>,
 		) -> PyResult<()> {
 			encode_constraint(&mut self.0, con, enc, conditions)
 		}
@@ -614,7 +621,7 @@ mod pindakaas {
 				&mut self,
 				con: ConstraintArg,
 				enc: Option<Encoder>,
-				conditions: Vec<Lit>,
+				conditions: Option<Vec<Lit>>,
 			) -> PyResult<()> {
 				let mut guard = self.0.lock().unwrap();
 				encode_constraint(&mut *guard, con, enc, conditions)

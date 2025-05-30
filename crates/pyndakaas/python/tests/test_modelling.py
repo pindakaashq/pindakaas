@@ -32,3 +32,4 @@ def test_lit_ops():
     assert str(d) == "x₁ ⊻ true"
     e = x == y
     assert str(e) == "x₁ ≡ x₂"
+
