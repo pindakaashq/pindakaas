@@ -51,5 +51,5 @@ fn main() {
 	let _ = build.define("NDEBUG", None);
 
 	change_ipasir_prefix(build, "intel_sat");
-	build.files(src).cargo_warnings(false).compile("intel_sat");
+	build.files(src).warnings(false).compile("intel_sat");
 }
