@@ -224,6 +224,10 @@ mod pindakaas {
 			res
 		}
 
+		fn __radd__(&self, other: BoolLinArg) -> Self {
+			self.__add__(other)
+		}
+
 		fn __eq__(&self, other: i64) -> BoolLinCon {
 			BoolLinCon(BaseBoolLinCon::new(
 				self.0.clone(),
@@ -272,6 +276,10 @@ mod pindakaas {
 			let mut res = self.clone();
 			res.__imul__(other);
 			res
+		}
+
+		fn __rmul__(&self, other: i64) -> Self {
+			self.__mul__(other)
 		}
 
 		fn __neg__(&self) -> Self {
