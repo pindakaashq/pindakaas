@@ -19,7 +19,7 @@ class ClauseDatabase(ABC):
         self,
         constraint: Constraint,
         encoder: Optional[Encoder] = None,
-        conditions: Optional[Iterable[Lit]] = None,
+        conditions: Iterable[Lit] = [],
     ): ...
 
     def new_var(self):
@@ -42,7 +42,7 @@ class CNF(ClauseDatabase):
         self,
         constraint: Constraint,
         encoder: Optional[Encoder] = None,
-        conditions: Optional[Iterable[Lit]] = None,
+        conditions: Iterable[Lit] = [],
     ):
         return self._inner.add_encoding(constraint, encoder, conditions)
 

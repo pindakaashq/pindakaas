@@ -132,14 +132,14 @@ mod pindakaas {
 		db: &mut Db,
 		con: ConstraintArg,
 		enc: Option<Encoder>,
-		conditions: Option<Vec<Lit>>,
+		conditions: Vec<Lit>,
 	) -> PyResult<()> {
-		if let Some(conditions) = conditions {
+		if !conditions.is_empty() {
 			return encode_constraint(
 				&mut db.with_conditions(conditions.into_iter().map(|l| l.0).collect()),
 				con,
 				enc,
-				None,
+				Vec::new(),
 			);
 		}
 		let invalid_enc = |con_ty, enc| {
@@ -315,7 +315,7 @@ mod pindakaas {
 			&mut self,
 			con: ConstraintArg,
 			enc: Option<Encoder>,
-			conditions: Option<Vec<Lit>>,
+			conditions: Vec<Lit>,
 		) -> PyResult<()> {
 			encode_constraint(&mut self.0, con, enc, conditions)
 		}
@@ -509,7 +509,7 @@ mod pindakaas {
 			&mut self,
 			con: ConstraintArg,
 			enc: Option<Encoder>,
-			conditions: Option<Vec<Lit>>,
+			conditions: Vec<Lit>,
 		) -> PyResult<()> {
 			encode_constraint(&mut self.0, con, enc, conditions)
 		}
@@ -621,7 +621,7 @@ mod pindakaas {
 				&mut self,
 				con: ConstraintArg,
 				enc: Option<Encoder>,
-				conditions: Option<Vec<Lit>>,
+				conditions: Vec<Lit>,
 			) -> PyResult<()> {
 				let mut guard = self.0.lock().unwrap();
 				encode_constraint(&mut *guard, con, enc, conditions)
