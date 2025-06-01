@@ -2,14 +2,53 @@
 	clippy::upper_case_acronyms,
 	reason = "Python naming for exposed types"
 )]
+
+use std::sync::PoisonError;
+
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 
 create_exception!(pindakaas, InvalidEncoder, PyException);
 create_exception!(pindakaas, Unsatisfiable, PyException);
 
+// Use Result i/o PyResult to use `?` to easily return Rust errors as Python exceptions
+type Result<R = (), E = ErrWrapper> = std::result::Result<R, E>;
+
+// Avoid orphan rule preventing impl PyErr on pindakaas::Unsatisfiable
+struct ErrWrapper(PyErr);
+
+// Allow `pindakaas::Unsatisfiable` to become a wrapped Unsatisfiable exception
+impl<T> From<PoisonError<T>> for ErrWrapper {
+	fn from(e: PoisonError<T>) -> Self {
+		Self(PyException::new_err(e.to_string()))
+	}
+}
+
+// Allow other `PyErr`s to become a wrapped exception
+impl From<PyErr> for ErrWrapper {
+	fn from(err: PyErr) -> Self {
+		ErrWrapper(err)
+	}
+}
+
+// Allow `pindakaas::Unsatisfiable` to become a wrapped Unsatisfiable exception
+impl From<::pindakaas::Unsatisfiable> for ErrWrapper {
+	fn from(_: ::pindakaas::Unsatisfiable) -> Self {
+		Self(Unsatisfiable::new_err(
+			"The given constraint was found to be Unsatisfiable during encoding",
+		))
+	}
+}
+
+// Allow ErrWrapper to become PyErr
+impl From<ErrWrapper> for PyErr {
+	fn from(err: ErrWrapper) -> Self {
+		err.0
+	}
+}
+
 #[pymodule]
 mod pindakaas {
-	use std::fmt::Display;
+	use std::fmt::{self, Display};
 
 	use pindakaas::{
 		bool_linear::{
@@ -24,9 +63,10 @@ mod pindakaas {
 	use pyo3::{prelude::*, types::PyIterator};
 
 	#[pymodule_export]
-	use super::InvalidEncoder;
+	use crate::InvalidEncoder;
+	use crate::Result;
 	#[pymodule_export]
-	use super::Unsatisfiable;
+	use crate::Unsatisfiable;
 
 	#[derive(FromPyObject)]
 	/// Argument capture for types that can become [`BoolLinExp`].
@@ -133,7 +173,7 @@ mod pindakaas {
 		con: ConstraintArg,
 		enc: Option<Encoder>,
 		conditions: Vec<Lit>,
-	) -> PyResult<()> {
+	) -> Result {
 		if conditions.is_empty() {
 			encode_constraint(db, con, enc)
 		} else {
@@ -151,64 +191,47 @@ mod pindakaas {
 		db: &mut Db,
 		con: ConstraintArg,
 		enc: Option<Encoder>,
-	) -> PyResult<()> {
+	) -> Result {
 		let invalid_enc = |con_ty, enc| {
 			Err(InvalidEncoder::new_err(format!(
-				"unable to encode `{con_ty}' using {enc:?}"
-			)))
+				"Unable to encode object of type `{con_ty}' using {enc:?}"
+			))
+			.into())
 		};
-		let map_unsat = |_err| {
-			Unsatisfiable::new_err("constraint was found to be unsatisfiable during encoding")
-		};
+
 		match con {
 			ConstraintArg::BoolLin(lin) => {
-				let aggregated = BoolLinAggregator::default()
-					.aggregate(db, &lin.0)
-					.map_err(map_unsat)?;
+				let aggregated = BoolLinAggregator::default().aggregate(db, &lin.0)?;
 				match aggregated {
-					BoolLinVariant::Cardinality(c) => match enc {
-						None | Some(Encoder::SORTING_NETWORK) => {
-							SortingNetworkEncoder::default().encode(db, &c)
-						}
-						Some(Encoder::ADDER) => AdderEncoder::default().encode(db, &c),
-						Some(Encoder::SORTED_WEIGHT_COUNTER) => {
-							SwcEncoder::default().encode(db, &c)
-						}
-						Some(Encoder::TOTALIZER) => TotalizerEncoder::default().encode(db, &c),
+					BoolLinVariant::Cardinality(c) => match enc.unwrap_or(Encoder::SORTING_NETWORK)
+					{
+						Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, &c),
+						Encoder::ADDER => AdderEncoder::default().encode(db, &c),
+						Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, &c),
+						Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, &c),
 						_ => return invalid_enc("Cardinality", enc.unwrap()),
 					},
-					BoolLinVariant::CardinalityOne(c) => match enc {
-						None | Some(Encoder::BITWISE) => BitwiseEncoder::default().encode(db, &c),
-						Some(Encoder::ADDER) => AdderEncoder::default().encode(db, &c),
-						Some(Encoder::LADDER) => LadderEncoder::default().encode(db, &c),
-						Some(Encoder::PAIRWISE) => PairwiseEncoder::default().encode(db, &c),
-						Some(Encoder::SORTED_WEIGHT_COUNTER) => {
-							SwcEncoder::default().encode(db, &c)
-						}
-						Some(Encoder::SORTING_NETWORK) => {
-							SortingNetworkEncoder::default().encode(db, &c)
-						}
-						Some(Encoder::TOTALIZER) => TotalizerEncoder::default().encode(db, &c),
+					BoolLinVariant::CardinalityOne(c) => match enc.unwrap_or(Encoder::BITWISE) {
+						Encoder::BITWISE => BitwiseEncoder::default().encode(db, &c),
+						Encoder::ADDER => AdderEncoder::default().encode(db, &c),
+						Encoder::LADDER => LadderEncoder::default().encode(db, &c),
+						Encoder::PAIRWISE => PairwiseEncoder::default().encode(db, &c),
+						Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, &c),
+						Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, &c),
+						Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, &c),
 						_ => return invalid_enc("CardinalityOne", enc.unwrap()),
 					},
-					BoolLinVariant::Linear(lin) => match enc {
-						None | Some(Encoder::TOTALIZER) => {
-							TotalizerEncoder::default().encode(db, &lin)
-						}
-						Some(Encoder::ADDER) => AdderEncoder::default().encode(db, &lin),
-						Some(Encoder::SORTED_WEIGHT_COUNTER) => {
-							SwcEncoder::default().encode(db, &lin)
-						}
+					BoolLinVariant::Linear(lin) => match enc.unwrap_or(Encoder::TOTALIZER) {
+						Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, &lin),
+						Encoder::ADDER => AdderEncoder::default().encode(db, &lin),
+						Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, &lin),
 						_ => return invalid_enc("BoolLinear", enc.unwrap()),
 					},
 					BoolLinVariant::Trivial => return Ok(()),
-				}
-				.map_err(map_unsat)?;
+				}?;
 			}
-			ConstraintArg::Formula(f) => match enc {
-				None | Some(Encoder::TSEITIN) => {
-					TseitinEncoder.encode(db, &f.0).map_err(map_unsat)?;
-				}
+			ConstraintArg::Formula(f) => match enc.unwrap_or(Encoder::TSEITIN) {
+				Encoder::TSEITIN => TseitinEncoder.encode(db, &f.0)?,
 				_ => {
 					return invalid_enc("Formula", enc.unwrap());
 				}
@@ -241,6 +264,10 @@ mod pindakaas {
 			let mut res = self.clone();
 			res.__iadd__(other);
 			res
+		}
+
+		fn __radd__(&self, other: BoolLinArg) -> Self {
+			self.__add__(other)
 		}
 
 		fn __eq__(&self, other: i64) -> BoolLinCon {
@@ -293,6 +320,10 @@ mod pindakaas {
 			res
 		}
 
+		fn __rmul__(&self, other: i64) -> Self {
+			self.__mul__(other)
+		}
+
 		fn __neg__(&self) -> Self {
 			Self(-self.0.clone())
 		}
@@ -308,16 +339,16 @@ mod pindakaas {
 		}
 	}
 
+	use itertools::Itertools;
+
 	#[pymethods]
 	impl CNFInner {
-		fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> PyResult<()> {
+		fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
 			let clause: Vec<Lit> = clause
 				.into_iter()
 				.map(|any| any.and_then(|lit| lit.extract::<Lit>()))
-				.collect::<PyResult<_>>()?;
-			self.0
-				.add_clause(clause.into_iter().map(|lit| lit.0))
-				.unwrap();
+				.try_collect()?;
+			self.0.add_clause(clause.into_iter().map(|lit| lit.0))?;
 			Ok(())
 		}
 
@@ -326,7 +357,7 @@ mod pindakaas {
 			con: ConstraintArg,
 			enc: Option<Encoder>,
 			conditions: Vec<Lit>,
-		) -> PyResult<()> {
+		) -> Result {
 			encode_constraint_with_conditions(&mut self.0, con, enc, conditions)
 		}
 
@@ -352,6 +383,10 @@ mod pindakaas {
 	impl Formula {
 		fn __and__(&self, other: FormulaArg) -> Self {
 			Self(self.0.clone() & other.as_formula())
+		}
+
+		fn __rand__(&self, other: FormulaArg) -> Self {
+			self.__and__(other)
 		}
 
 		fn __eq__(&self, other: FormulaArg) -> Self {
@@ -392,12 +427,20 @@ mod pindakaas {
 			Formula(self.0.clone() | other.as_formula())
 		}
 
+		fn __ror__(&self, other: FormulaArg) -> Self {
+			self.__or__(other)
+		}
+
 		fn __str__(&self) -> String {
 			self.0.to_string()
 		}
 
 		fn __xor__(&self, other: FormulaArg) -> Self {
 			Formula(self.0.clone() ^ other.as_formula())
+		}
+
+		fn __rxor__(&self, other: FormulaArg) -> Self {
+			self.__xor__(other)
 		}
 	}
 
@@ -431,7 +474,15 @@ mod pindakaas {
 			self.as_bool_lin_exp().__add__(other)
 		}
 
+		fn __radd__(&self, other: BoolLinArg) -> BoolLinExp {
+			self.__add__(other)
+		}
+
 		fn __and__(&self, other: FormulaArg) -> Formula {
+			Formula(self.as_formula()).__and__(other)
+		}
+
+		fn __rand__(&self, other: FormulaArg) -> Formula {
 			Formula(self.as_formula()).__and__(other)
 		}
 
@@ -467,12 +518,20 @@ mod pindakaas {
 			self.as_bool_lin_exp().__mul__(other)
 		}
 
+		fn __rmul__(&self, other: i64) -> BoolLinExp {
+			self.__mul__(other)
+		}
+
 		fn __ne__(&self, other: FormulaArg) -> Formula {
 			Formula(self.as_formula()).__ne__(other)
 		}
 
 		fn __or__(&self, other: FormulaArg) -> Formula {
 			Formula(self.as_formula()).__or__(other)
+		}
+
+		fn __ror__(&self, other: FormulaArg) -> Formula {
+			self.__or__(other)
 		}
 
 		fn __str__(&self) -> String {
@@ -487,6 +546,10 @@ mod pindakaas {
 			Formula(self.as_formula()).__xor__(other)
 		}
 
+		fn __rxor__(&self, other: FormulaArg) -> Formula {
+			self.__xor__(other)
+		}
+
 		pub fn is_negated(&self) -> bool {
 			self.0.is_negated()
 		}
@@ -497,21 +560,19 @@ mod pindakaas {
 	}
 
 	impl Display for Lit {
-		fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 			self.0.fmt(f)
 		}
 	}
 
 	#[pymethods]
 	impl WCNFInner {
-		fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> PyResult<()> {
+		fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
 			let clause: Vec<Lit> = clause
 				.into_iter()
 				.map(|any| any.and_then(|lit| lit.extract::<Lit>()))
-				.collect::<PyResult<_>>()?;
-			self.0
-				.add_clause(clause.into_iter().map(|lit| lit.0))
-				.unwrap();
+				.try_collect()?;
+			self.0.add_clause(clause.into_iter().map(|lit| lit.0))?;
 			Ok(())
 		}
 
@@ -520,22 +581,17 @@ mod pindakaas {
 			con: ConstraintArg,
 			enc: Option<Encoder>,
 			conditions: Vec<Lit>,
-		) -> PyResult<()> {
+		) -> Result {
 			encode_constraint_with_conditions(&mut self.0, con, enc, conditions)
 		}
 
-		fn add_weighted_clause(
-			&mut self,
-			clause: Bound<'_, PyIterator>,
-			weight: i64,
-		) -> PyResult<()> {
+		fn add_weighted_clause(&mut self, clause: Bound<'_, PyIterator>, weight: i64) -> Result {
 			let clause: Vec<Lit> = clause
 				.into_iter()
 				.map(|any| any.and_then(|lit| lit.extract::<Lit>()))
-				.collect::<PyResult<_>>()?;
+				.try_collect()?;
 			self.0
-				.add_weighted_clause(clause.into_iter().map(|lit| lit.0), weight)
-				.unwrap();
+				.add_weighted_clause(clause.into_iter().map(|lit| lit.0), weight)?;
 			Ok(())
 		}
 
@@ -565,6 +621,7 @@ mod pindakaas {
 			time::{Duration, SystemTime},
 		};
 
+		use itertools::Itertools;
 		use pindakaas::{
 			solver::{
 				cadical::Cadical, FailedAssumtions, SlvTermSignal, SolveAssuming, SolveResult,
@@ -574,7 +631,7 @@ mod pindakaas {
 		};
 		use pyo3::{prelude::*, types::PyIterator};
 
-		use super::encode_constraint_with_conditions;
+		use super::{encode_constraint_with_conditions, Result};
 		use crate::pindakaas::{ConstraintArg, Encoder, Lit};
 
 		#[pyclass]
@@ -616,15 +673,13 @@ mod pindakaas {
 
 		#[pymethods]
 		impl CaDiCaLInner {
-			fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> PyResult<()> {
+			fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
 				let clause: Vec<Lit> = clause
 					.into_iter()
 					.map(|any| any.and_then(|lit| lit.extract::<Lit>()))
-					.collect::<PyResult<_>>()?;
-				let mut guard = self.0.lock().unwrap();
-				guard
-					.add_clause(clause.into_iter().map(|lit| lit.0))
-					.unwrap();
+					.try_collect()?;
+				let mut guard = self.0.lock()?;
+				guard.add_clause(clause.into_iter().map(|lit| lit.0))?;
 				Ok(())
 			}
 
@@ -633,7 +688,7 @@ mod pindakaas {
 				con: ConstraintArg,
 				enc: Option<Encoder>,
 				conditions: Vec<Lit>,
-			) -> PyResult<()> {
+			) -> Result {
 				let mut guard = self.0.lock().unwrap();
 				encode_constraint_with_conditions(&mut *guard, con, enc, conditions)
 			}
@@ -643,39 +698,45 @@ mod pindakaas {
 				Self(Default::default())
 			}
 
-			fn new_vars(&mut self, num_vars: usize) -> Vec<Lit> {
-				let mut guard = self.0.lock().unwrap();
-				guard
+			fn new_vars(&mut self, num_vars: usize) -> Result<Vec<Lit>> {
+				let mut guard = self.0.lock()?;
+				Ok(guard
 					.new_var_range(num_vars)
 					.into_iter()
 					.map(|lit| Lit(lit.into()))
-					.collect()
+					.collect())
 			}
 
-			fn set_time_limit(&mut self, limit: Option<Duration>) {
-				let mut guard = self.0.lock().unwrap();
-				guard.set_terminate_callback(limit.map(dur_term_fn))
+			fn set_time_limit(&mut self, limit: Option<Duration>) -> Result {
+				let mut guard = self.0.lock()?;
+				guard.set_terminate_callback(limit.map(dur_term_fn));
+				Ok(())
 			}
 
-			fn solve_assuming(&self, assumptions: Vec<Lit>) -> (Status, HashMap<i32, bool>) {
-				let mut guard = self.0.lock().unwrap();
+			fn solve_assuming(
+				&self,
+				assumptions: Vec<Lit>,
+			) -> Result<(Status, HashMap<i32, bool>)> {
+				let mut guard = self.0.lock()?;
 				let vars = guard.emitted_vars();
-				match guard.solve_assuming(assumptions.iter().map(|&lit| lit.0)) {
-					SolveResult::Satisfied(sol) => (
-						Status::SATISFIED,
-						vars.into_iter()
-							.map(|var| (var.into(), sol.value(var.into())))
-							.collect(),
-					),
-					SolveResult::Unsatisfiable(fail) => (
-						Status::UNSATISFIABLE,
-						assumptions
-							.iter()
-							.map(|&lit| (lit.0.into(), fail.fail(lit.0)))
-							.collect(),
-					),
-					SolveResult::Unknown => (Status::UNKNOWN, HashMap::new()),
-				}
+				Ok(
+					match guard.solve_assuming(assumptions.iter().map(|&lit| lit.0)) {
+						SolveResult::Satisfied(sol) => (
+							Status::SATISFIED,
+							vars.into_iter()
+								.map(|var| (var.into(), sol.value(var.into())))
+								.collect(),
+						),
+						SolveResult::Unsatisfiable(fail) => (
+							Status::UNSATISFIABLE,
+							assumptions
+								.iter()
+								.map(|&lit| (lit.0.into(), fail.fail(lit.0)))
+								.collect(),
+						),
+						SolveResult::Unknown => (Status::UNKNOWN, HashMap::new()),
+					},
+				)
 			}
 		}
 	}
