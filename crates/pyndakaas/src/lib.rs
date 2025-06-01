@@ -3,54 +3,52 @@
 	reason = "Python naming for exposed types"
 )]
 
+use std::sync::PoisonError;
+
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 
 create_exception!(pindakaas, InvalidEncoder, PyException);
 create_exception!(pindakaas, Unsatisfiable, PyException);
 
+// Use Result i/o PyResult to use `?` to easily return Rust errors as Python exceptions
+type Result<R = (), E = ErrWrapper> = std::result::Result<R, E>;
+
+// Avoid orphan rule preventing impl PyErr on pindakaas::Unsatisfiable
+struct ErrWrapper(PyErr);
+
+// Allow `pindakaas::Unsatisfiable` to become a wrapped Unsatisfiable exception
+impl<T> From<PoisonError<T>> for ErrWrapper {
+	fn from(e: PoisonError<T>) -> Self {
+		Self(PyException::new_err(e.to_string()))
+	}
+}
+
+// Allow other `PyErr`s to become a wrapped exception
+impl From<PyErr> for ErrWrapper {
+	fn from(err: PyErr) -> Self {
+		ErrWrapper(err)
+	}
+}
+
+// Allow `pindakaas::Unsatisfiable` to become a wrapped Unsatisfiable exception
+impl From<::pindakaas::Unsatisfiable> for ErrWrapper {
+	fn from(_: ::pindakaas::Unsatisfiable) -> Self {
+		Self(Unsatisfiable::new_err(
+			"The given constraint was found to be Unsatisfiable during encoding",
+		))
+	}
+}
+
+// Allow ErrWrapper to become PyErr
+impl From<ErrWrapper> for PyErr {
+	fn from(err: ErrWrapper) -> Self {
+		err.0
+	}
+}
+
 #[pymodule]
 mod pindakaas {
-
-	// Use Result i/o PyResult to use `?` to easily return Rust errors as Python exceptions
-	type Result = std::result::Result<(), MyErr>;
-
-	// Avoid orphan rule preventing impl PyErr on pindakaas::Unsatisfiable
-	struct MyErr(PyErr);
-
-	// Allow MyErr to become PyErr
-	impl From<MyErr> for PyErr {
-		fn from(err: MyErr) -> Self {
-			err.0
-		}
-	}
-
-	// Allow other `PyErr`s to become the newtype Err
-	impl From<PyErr> for MyErr {
-		fn from(err: PyErr) -> Self {
-			MyErr(err)
-		}
-	}
-
-	// Allow `pindakaas::Unsatisfiable` to become a wrapped Unsatisfiable exception
-	impl From<pindakaas::Unsatisfiable> for MyErr {
-		fn from(_: pindakaas::Unsatisfiable) -> Self {
-			Self(Unsatisfiable::new_err(
-				"The given constraint was found to be Unsatisfiable during encoding",
-			))
-		}
-	}
-
-	// Allow `pindakaas::Unsatisfiable` to become a wrapped Unsatisfiable exception
-	impl<T> From<PoisonError<T>> for MyErr {
-		fn from(e: PoisonError<T>) -> Self {
-			Self(PyException::new_err(e.to_string()))
-		}
-	}
-
-	use std::{
-		fmt::{self, Display},
-		sync::PoisonError,
-	};
+	use std::fmt::{self, Display};
 
 	use pindakaas::{
 		bool_linear::{
@@ -62,12 +60,13 @@ mod pindakaas {
 		propositional_logic::{Formula as BaseFormula, TseitinEncoder},
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as _, Lit as BaseLit, Wcnf,
 	};
-	use pyo3::{exceptions::PyException, prelude::*, types::PyIterator};
+	use pyo3::{prelude::*, types::PyIterator};
 
 	#[pymodule_export]
-	use super::InvalidEncoder;
+	use crate::InvalidEncoder;
+	use crate::Result;
 	#[pymodule_export]
-	use super::Unsatisfiable;
+	use crate::Unsatisfiable;
 
 	#[derive(FromPyObject)]
 	/// Argument capture for types that can become [`BoolLinExp`].
@@ -603,8 +602,10 @@ mod pindakaas {
 		};
 		use pyo3::{prelude::*, types::PyIterator};
 
-		use super::{MyErr, Result};
-		use crate::pindakaas::{encode_constraint, ConstraintArg, Encoder, Lit};
+		use crate::{
+			pindakaas::{encode_constraint, ConstraintArg, Encoder, Lit},
+			Result,
+		};
 
 		#[pyclass]
 		#[derive(Debug, Default)]
@@ -665,7 +666,7 @@ mod pindakaas {
 				Self(Default::default())
 			}
 
-			fn new_vars(&mut self, num_vars: usize) -> std::result::Result<Vec<Lit>, MyErr> {
+			fn new_vars(&mut self, num_vars: usize) -> Result<Vec<Lit>> {
 				let mut guard = self.0.lock()?;
 				Ok(guard
 					.new_var_range(num_vars)
@@ -683,7 +684,7 @@ mod pindakaas {
 			fn solve_assuming(
 				&self,
 				assumptions: Vec<Lit>,
-			) -> std::result::Result<(Status, HashMap<i32, bool>), MyErr> {
+			) -> Result<(Status, HashMap<i32, bool>)> {
 				let mut guard = self.0.lock()?;
 				let vars = guard.emitted_vars();
 				Ok(
