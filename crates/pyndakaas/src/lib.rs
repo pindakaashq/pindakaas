@@ -147,49 +147,36 @@ mod pindakaas {
 					.aggregate(db, &lin.0)
 					.map_err(map_unsat)?;
 				match aggregated {
-					BoolLinVariant::Cardinality(c) => match enc {
-						None | Some(Encoder::SORTING_NETWORK) => {
-							SortingNetworkEncoder::default().encode(db, &c)
-						}
-						Some(Encoder::ADDER) => AdderEncoder::default().encode(db, &c),
-						Some(Encoder::SORTED_WEIGHT_COUNTER) => {
-							SwcEncoder::default().encode(db, &c)
-						}
-						Some(Encoder::TOTALIZER) => TotalizerEncoder::default().encode(db, &c),
+					BoolLinVariant::Cardinality(c) => match enc.unwrap_or(Encoder::SORTING_NETWORK)
+					{
+						Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, &c),
+						Encoder::ADDER => AdderEncoder::default().encode(db, &c),
+						Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, &c),
+						Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, &c),
 						_ => return invalid_enc("Cardinality", enc.unwrap()),
 					},
-					BoolLinVariant::CardinalityOne(c) => match enc {
-						None | Some(Encoder::BITWISE) => BitwiseEncoder::default().encode(db, &c),
-						Some(Encoder::ADDER) => AdderEncoder::default().encode(db, &c),
-						Some(Encoder::LADDER) => LadderEncoder::default().encode(db, &c),
-						Some(Encoder::PAIRWISE) => PairwiseEncoder::default().encode(db, &c),
-						Some(Encoder::SORTED_WEIGHT_COUNTER) => {
-							SwcEncoder::default().encode(db, &c)
-						}
-						Some(Encoder::SORTING_NETWORK) => {
-							SortingNetworkEncoder::default().encode(db, &c)
-						}
-						Some(Encoder::TOTALIZER) => TotalizerEncoder::default().encode(db, &c),
+					BoolLinVariant::CardinalityOne(c) => match enc.unwrap_or(Encoder::BITWISE) {
+						Encoder::BITWISE => BitwiseEncoder::default().encode(db, &c),
+						Encoder::ADDER => AdderEncoder::default().encode(db, &c),
+						Encoder::LADDER => LadderEncoder::default().encode(db, &c),
+						Encoder::PAIRWISE => PairwiseEncoder::default().encode(db, &c),
+						Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, &c),
+						Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, &c),
+						Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, &c),
 						_ => return invalid_enc("CardinalityOne", enc.unwrap()),
 					},
-					BoolLinVariant::Linear(lin) => match enc {
-						None | Some(Encoder::TOTALIZER) => {
-							TotalizerEncoder::default().encode(db, &lin)
-						}
-						Some(Encoder::ADDER) => AdderEncoder::default().encode(db, &lin),
-						Some(Encoder::SORTED_WEIGHT_COUNTER) => {
-							SwcEncoder::default().encode(db, &lin)
-						}
+					BoolLinVariant::Linear(lin) => match enc.unwrap_or(Encoder::TOTALIZER) {
+						Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, &lin),
+						Encoder::ADDER => AdderEncoder::default().encode(db, &lin),
+						Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, &lin),
 						_ => return invalid_enc("BoolLinear", enc.unwrap()),
 					},
 					BoolLinVariant::Trivial => return Ok(()),
 				}
 				.map_err(map_unsat)?;
 			}
-			ConstraintArg::Formula(f) => match enc {
-				None | Some(Encoder::TSEITIN) => {
-					TseitinEncoder.encode(db, &f.0).map_err(map_unsat)?;
-				}
+			ConstraintArg::Formula(f) => match enc.unwrap_or(Encoder::TSEITIN) {
+				Encoder::TSEITIN => TseitinEncoder.encode(db, &f.0).map_err(map_unsat)?,
 				_ => {
 					return invalid_enc("Formula", enc.unwrap());
 				}
