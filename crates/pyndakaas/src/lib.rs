@@ -224,6 +224,10 @@ mod pindakaas {
 			res
 		}
 
+		fn __radd__(&self, other: BoolLinArg) -> Self {
+			self.__add__(other)
+		}
+
 		fn __eq__(&self, other: i64) -> BoolLinCon {
 			BoolLinCon(BaseBoolLinCon::new(
 				self.0.clone(),
@@ -272,6 +276,10 @@ mod pindakaas {
 			let mut res = self.clone();
 			res.__imul__(other);
 			res
+		}
+
+		fn __rmul__(&self, other: i64) -> Self {
+			self.__mul__(other)
 		}
 
 		fn __neg__(&self) -> Self {
@@ -330,6 +338,10 @@ mod pindakaas {
 			Self(self.0.clone() & other.as_formula())
 		}
 
+		fn __rand__(&self, other: FormulaArg) -> Self {
+			self.__and__(other)
+		}
+
 		fn __eq__(&self, other: FormulaArg) -> Self {
 			use BaseFormula::*;
 
@@ -368,12 +380,20 @@ mod pindakaas {
 			Formula(self.0.clone() | other.as_formula())
 		}
 
+		fn __ror__(&self, other: FormulaArg) -> Self {
+			self.__or__(other)
+		}
+
 		fn __str__(&self) -> String {
 			self.0.to_string()
 		}
 
 		fn __xor__(&self, other: FormulaArg) -> Self {
 			Formula(self.0.clone() ^ other.as_formula())
+		}
+
+		fn __rxor__(&self, other: FormulaArg) -> Self {
+			self.__xor__(other)
 		}
 	}
 
@@ -407,7 +427,15 @@ mod pindakaas {
 			self.as_bool_lin_exp().__add__(other)
 		}
 
+		fn __radd__(&self, other: BoolLinArg) -> BoolLinExp {
+			self.__add__(other)
+		}
+
 		fn __and__(&self, other: FormulaArg) -> Formula {
+			Formula(self.as_formula()).__and__(other)
+		}
+
+		fn __rand__(&self, other: FormulaArg) -> Formula {
 			Formula(self.as_formula()).__and__(other)
 		}
 
@@ -443,12 +471,20 @@ mod pindakaas {
 			self.as_bool_lin_exp().__mul__(other)
 		}
 
+		fn __rmul__(&self, other: i64) -> BoolLinExp {
+			self.__mul__(other)
+		}
+
 		fn __ne__(&self, other: FormulaArg) -> Formula {
 			Formula(self.as_formula()).__ne__(other)
 		}
 
 		fn __or__(&self, other: FormulaArg) -> Formula {
 			Formula(self.as_formula()).__or__(other)
+		}
+
+		fn __ror__(&self, other: FormulaArg) -> Formula {
+			self.__or__(other)
 		}
 
 		fn __str__(&self) -> String {
@@ -461,6 +497,10 @@ mod pindakaas {
 
 		fn __xor__(&self, other: FormulaArg) -> Formula {
 			Formula(self.as_formula()).__xor__(other)
+		}
+
+		fn __rxor__(&self, other: FormulaArg) -> Formula {
+			self.__xor__(other)
 		}
 
 		pub fn is_negated(&self) -> bool {
