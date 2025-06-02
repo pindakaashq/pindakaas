@@ -72,3 +72,10 @@ def test_wcnf():
     f.add_weighted_clause([x], 1)
     f.add_weighted_clause([y], 2)
     assert f.to_dimacs() == "p wcnf 2 3 4\n4 1 2 0\n1 1 0\n2 2 0\n"
+
+
+def test_conditions():
+    f = pindakaas.CNF()
+    x, y, p = f.new_vars(3)
+    f.add_encoding(x ^ y, conditions=[p])
+    assert f.to_dimacs() == "p cnf 3 2\n3 1 2 0\n3 -1 -2 0\n"

@@ -8,7 +8,7 @@ Constraint: TypeAlias = Formula
 
 class ClauseDatabase(ABC):
     def __iadd__(self, constraint: Constraint):
-        self.add_encoding(constraint, None)
+        self.add_encoding(constraint)
         return self
 
     @abstractmethod
@@ -16,7 +16,10 @@ class ClauseDatabase(ABC):
 
     @abstractmethod
     def add_encoding(
-        self, constraint: Constraint, encoder: Optional[Encoder] = None
+        self,
+        constraint: Constraint,
+        encoder: Optional[Encoder] = None,
+        conditions: Optional[Iterable[Lit]] = None,
     ): ...
 
     def new_var(self):
@@ -35,8 +38,14 @@ class CNF(ClauseDatabase):
     def add_clause(self, clause: Iterable[Lit]):
         return self._inner.add_clause(iter(clause))
 
-    def add_encoding(self, constraint: Constraint, encoder: Optional[Encoder] = None):
-        return self._inner.add_encoding(constraint, encoder)
+    def add_encoding(
+        self,
+        constraint: Constraint,
+        encoder: Optional[Encoder] = None,
+        conditions: Optional[Iterable[Lit]] = None,
+    ):
+        conditions = list(conditions) if conditions is not None else []
+        return self._inner.add_encoding(constraint, encoder, conditions)
 
     def new_vars(self, num: int) -> Iterable[Lit]:
         return self._inner.new_vars(num)

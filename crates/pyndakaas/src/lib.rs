@@ -166,6 +166,25 @@ mod pindakaas {
 	/// associated weights.
 	struct WCNFInner(Wcnf);
 
+	/// Same `encode_constraint`, but evaluates the conditions if not empty. This prevents
+	/// costly virtual method access if this were done inside `encode_constraint`
+	fn encode_constraint_with_conditions<Db: ClauseDatabase>(
+		db: &mut Db,
+		con: ConstraintArg,
+		enc: Option<Encoder>,
+		conditions: Vec<Lit>,
+	) -> Result {
+		if conditions.is_empty() {
+			encode_constraint(db, con, enc)
+		} else {
+			encode_constraint(
+				&mut db.with_conditions(conditions.into_iter().map(|l| l.0).collect()),
+				con,
+				enc,
+			)
+		}
+	}
+
 	/// Internal function to help with the encoding of a constraint given an
 	/// optional encoder.
 	fn encode_constraint<Db: ClauseDatabase>(
@@ -333,8 +352,13 @@ mod pindakaas {
 			Ok(())
 		}
 
-		fn add_encoding(&mut self, con: ConstraintArg, enc: Option<Encoder>) -> Result {
-			encode_constraint(&mut self.0, con, enc)
+		fn add_encoding(
+			&mut self,
+			con: ConstraintArg,
+			enc: Option<Encoder>,
+			conditions: Vec<Lit>,
+		) -> Result {
+			encode_constraint_with_conditions(&mut self.0, con, enc, conditions)
 		}
 
 		#[new]
@@ -552,8 +576,13 @@ mod pindakaas {
 			Ok(())
 		}
 
-		fn add_encoding(&mut self, con: ConstraintArg, enc: Option<Encoder>) -> Result {
-			encode_constraint(&mut self.0, con, enc)
+		fn add_encoding(
+			&mut self,
+			con: ConstraintArg,
+			enc: Option<Encoder>,
+			conditions: Vec<Lit>,
+		) -> Result {
+			encode_constraint_with_conditions(&mut self.0, con, enc, conditions)
 		}
 
 		fn add_weighted_clause(&mut self, clause: Bound<'_, PyIterator>, weight: i64) -> Result {
@@ -602,10 +631,8 @@ mod pindakaas {
 		};
 		use pyo3::{prelude::*, types::PyIterator};
 
-		use crate::{
-			pindakaas::{encode_constraint, ConstraintArg, Encoder, Lit},
-			Result,
-		};
+		use super::{encode_constraint_with_conditions, Result};
+		use crate::pindakaas::{ConstraintArg, Encoder, Lit};
 
 		#[pyclass]
 		#[derive(Debug, Default)]
@@ -656,9 +683,14 @@ mod pindakaas {
 				Ok(())
 			}
 
-			fn add_encoding(&mut self, con: ConstraintArg, enc: Option<Encoder>) -> Result {
-				let mut guard = self.0.lock()?;
-				encode_constraint(&mut *guard, con, enc)
+			fn add_encoding(
+				&mut self,
+				con: ConstraintArg,
+				enc: Option<Encoder>,
+				conditions: Vec<Lit>,
+			) -> Result {
+				let mut guard = self.0.lock().unwrap();
+				encode_constraint_with_conditions(&mut *guard, con, enc, conditions)
 			}
 
 			#[new]
