@@ -18,4 +18,5 @@ sdist/
 
 # Python Maturin (files created because it doesn't support workspaces)
 /crates/pyndakaas/target
+/crates/pyndakaas/docs/build
 /crates/pyndakaas/Cargo.lock

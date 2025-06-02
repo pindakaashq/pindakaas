@@ -7,8 +7,13 @@ use std::sync::PoisonError;
 
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 
-create_exception!(pindakaas, InvalidEncoder, PyException);
-create_exception!(pindakaas, Unsatisfiable, PyException);
+create_exception!(pindakaas, InvalidEncoder, PyException, "Raised when the chosen encoder does not support the constraint (e.g. the [`PairwiseEncoder`] encoder for AMO constraints on a PB constraint).");
+create_exception!(
+	pindakaas,
+	Unsatisfiable,
+	PyException,
+	"Raised when the given constraint is found to be Unsatisfiable during encoding."
+);
 
 // Use Result i/o PyResult to use `?` to easily return Rust errors as Python exceptions
 type Result<R = (), E = ErrWrapper> = std::result::Result<R, E>;
@@ -343,6 +348,7 @@ mod pindakaas {
 
 	#[pymethods]
 	impl CNFInner {
+		/// hello everyone asdfldsaf
 		fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
 			let clause: Vec<Lit> = clause
 				.into_iter()
