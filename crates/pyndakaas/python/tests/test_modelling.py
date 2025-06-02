@@ -22,6 +22,7 @@ def test_bool_lin():
     d = c >= 2
     assert str(d) == "x₃ + x₂ + x₁ >= 2"
 
+
 def test_bool_lin_ops():
     f = pindakaas.CNF()
     x, y, z = f.new_vars(3)
@@ -32,6 +33,7 @@ def test_bool_lin_ops():
     assert str(f + g) == "-x₃ + x₁ + x₂ + x₁", "__add__ incorrect"
     assert str(f * 2) == "2*x₂ + 2*x₁", "__mul__ incorrect"
     assert str(2 * f) == "2*x₂ + 2*x₁", "__rmul__ incorrect"
+
 
 def test_formula_ops():
     f = pindakaas.CNF()
@@ -47,6 +49,7 @@ def test_formula_ops():
     assert str(f ^ True) == "(x₁ ∧ x₂) ⊻ true", "__xor__ incorrect"
     assert str(True ^ f) == "(x₁ ∧ x₂) ⊻ true", "__rxor__ incorrect"
     assert str(f ^ g) == "(x₁ ∧ x₂) ⊻ (x₁ ∨ x₃)", "__xor__ incorrect"
+
 
 def test_lit_ops():
     f = pindakaas.CNF()

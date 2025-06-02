@@ -61,7 +61,13 @@ class CaDiCaL(Solver):
     def add_clause(self, clause: Iterable[Lit]):
         return self._inner.add_clause(iter(clause))
 
-    def add_encoding(self, constraint: Constraint, encoder: Optional[Encoder] = None, conditions: Optional[Iterable[Lit]] = []):
+    def add_encoding(
+        self,
+        constraint: Constraint,
+        encoder: Optional[Encoder] = None,
+        conditions: Optional[Iterable[Lit]] = None,
+    ):
+        conditions = list(conditions) if conditions is not None else []
         return self._inner.add_encoding(constraint, encoder, conditions)
 
     def new_vars(self, num: int):

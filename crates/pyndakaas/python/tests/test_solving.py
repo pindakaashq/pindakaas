@@ -13,6 +13,7 @@ def test_cadical():
         assert vy is not None
         assert vx != vy
 
+
 def test_assumptions():
     slv = pindakaas.solver.CaDiCaL()
     x, y = slv.new_vars(2)
