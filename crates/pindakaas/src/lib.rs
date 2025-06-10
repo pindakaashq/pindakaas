@@ -73,7 +73,7 @@ pub trait Checker {
 /// To satisfy the trait, the type must implement a [`Self::add_clause`] method
 /// and a [`Self::new_var`] method.
 pub trait ClauseDatabase {
-	/// Add a clause to the `ClauseDatabase`. The databae is allowed to return
+	/// Add a clause to the `ClauseDatabase`. The database is allowed to return
 	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
 	/// unsatisfiable. This is used as a signal to the encoder that any subsequent
 	/// encoding effort can be abandoned.
@@ -84,7 +84,7 @@ pub trait ClauseDatabase {
 }
 
 pub trait ClauseDatabaseTools: ClauseDatabase {
-	/// Add a clause, given as any  to the `ClauseDatabase`. The databae is allowed to return
+	/// Add a clause, given as any to the `ClauseDatabase`. The database is allowed to return
 	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
 	/// unsatisfiable. This is used as a signal to the encoder that any subsequent
 	/// encoding effort can be abandoned.

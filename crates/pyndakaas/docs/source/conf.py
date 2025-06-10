@@ -18,10 +18,12 @@ extensions = [
     'sphinx_rtd_theme',
 ]
 
+autodoc_typehints = "description"  # show type hints from signature in docs
+
 templates_path = ['_templates']
 exclude_patterns = []
 todo_include_todos = True
 
 html_theme = 'sphinx_rtd_theme'
-html_static_path = ['_static']
+# html_static_path = ['_static']
 

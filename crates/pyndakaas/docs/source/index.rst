@@ -1,10 +1,10 @@
-.. Pindakaas documentation master file, created by
-   sphinx-quickstart on Mon Mar 31 13:39:43 2025.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+..
 
-Pindakaas: Encoding Pseudo Boolean constraints into CNF 
-===================================================================
+Pindakaas: Encoding propositional and Pseudo Boolean constraints into CNF 
+=========================================================================
+
+This documentation describes the Python interface to the Pindakaas Rust library.
+See the forthcoming `Rust documentation <https://crates.io/crates/pindakaas>`_ for more in-depth information.
 
 
 .. toctree::
@@ -16,10 +16,8 @@ Pindakaas: Encoding Pseudo Boolean constraints into CNF
    :members:
    :undoc-members:
 
-
-Solvers
--------
-
-.. automodule:: pindakaas.solvers
+.. automodule:: pindakaas.solver
    :members:
    :undoc-members:
+
+

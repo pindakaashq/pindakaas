@@ -15,7 +15,7 @@ repository = "https://github.com/pindakaashq/pindakaas"
 version = "0.1.0"
 authors = [
 	"Jip J. Dekker <jip@dekker.one>",
-	"Hendrik 'Henk' Bierlee <hendrik.bierlee@monash.edu>",
+	"Hendrik 'Henk' Bierlee <henk.bierlee@kuleuven.be>",
 ]
 edition = "2021"
 license = "MPL-2.0"

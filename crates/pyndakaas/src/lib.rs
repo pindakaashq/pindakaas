@@ -7,7 +7,7 @@ use std::sync::PoisonError;
 
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 
-create_exception!(pindakaas, InvalidEncoder, PyException, "Raised when the chosen encoder does not support the constraint (e.g. the [`PairwiseEncoder`] encoder for AMO constraints on a PB constraint).");
+create_exception!(pindakaas, InvalidEncoder, PyException, "Raised when the chosen encoder does not support the constraint (e.g. when the `PairwiseEncoder` encoder for AMO constraints is used to encode a PB constraint).");
 create_exception!(
 	pindakaas,
 	Unsatisfiable,
@@ -74,6 +74,8 @@ mod pindakaas {
 	use crate::Unsatisfiable;
 
 	#[derive(FromPyObject)]
+	// TODO [?] Should the rust doc links be substituted for RST links with
+	// :class:`BoolLinExp`
 	/// Argument capture for types that can become [`BoolLinExp`].
 	enum BoolLinArg {
 		Bool(bool),
@@ -113,11 +115,11 @@ mod pindakaas {
 	#[expect(non_camel_case_types, reason = "match python naming convention")]
 	#[pyclass(eq, eq_int)]
 	#[derive(Clone, Copy, Debug, PartialEq)]
-	/// Method used to encode a constraint
+	/// Method used to encode a constraint.
 	///
-	/// Warning: Not all encoders can be used to encode each [`ConstraintArg`]. If an
-	/// invalid encoder is selected, then an exception will be raised.
+	/// Warning: Not all encoders can be used to encode each type of constraint. If an invalid encoder is selected, then an :class:`InvalidEncoder` exception will be raised.
 	enum Encoder {
+		// TODO [?] How to make this show up?
 		/// Use [`pindakaas::bool_linear::AdderEncoder`], which is able to encode
 		/// all Boolean linear constraints.
 		ADDER,
@@ -348,7 +350,6 @@ mod pindakaas {
 
 	#[pymethods]
 	impl CNFInner {
-		/// hello everyone asdfldsaf
 		fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
 			let clause: Vec<Lit> = clause
 				.into_iter()
@@ -556,10 +557,12 @@ mod pindakaas {
 			self.__xor__(other)
 		}
 
+		/// Return whether the variable is negated
 		pub fn is_negated(&self) -> bool {
 			self.0.is_negated()
 		}
 
+		/// Return the literal's variable
 		pub fn var(&self) -> Self {
 			Self(self.0.var().into())
 		}
@@ -642,6 +645,7 @@ mod pindakaas {
 
 		#[pyclass]
 		#[derive(Debug, Default)]
+		/// :meta private:
 		struct CaDiCaLInner(Mutex<Cadical>);
 
 		#[pyclass(eq, eq_int)]
