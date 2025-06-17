@@ -1,10 +1,12 @@
 ..
 
-Pindakaas: Encoding propositional and Pseudo Boolean constraints into CNF 
+Pindakaas
 =========================================================================
 
+**Encoding propositional and Pseudo Boolean constraints into CNF**
+
 This documentation describes the Python interface to the Pindakaas Rust library.
-See the forthcoming `Rust documentation <https://crates.io/crates/pindakaas>`_ for more in-depth information.
+See the `Rust documentation <https://crates.io/crates/pindakaas>`_ for more in-depth information.
 
 
 .. toctree::

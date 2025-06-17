@@ -5,11 +5,9 @@ from .pindakaas import CNFInner, Encoder, Formula, Lit, WCNFInner
 
 Constraint: TypeAlias = Formula
 
-RAISES_UNSAT = ":raises Unsatisfiable: If the formula has become unsatisfiable"
-
 
 class ClauseDatabase(ABC):
-    """The abstract class to represent objects (e.g. CNF, SAT solver)to which we can add clauses."""
+    """The abstract class to represent objects (e.g. CNF, SAT solver) to which we can add clauses."""
 
     def __iadd__(self, constraint: Constraint):
         self.add_encoding(constraint)
@@ -20,10 +18,9 @@ class ClauseDatabase(ABC):
         """Add a clause to the database.
 
         :param clause: An iterable of literals representing the clause to add
+        :raises Unsatisfiable: If the formula has become unsatisfiable
         """
         ...
-
-    add_clause.__doc__ += RAISES_UNSAT
 
     @abstractmethod
     def add_encoding(
@@ -35,10 +32,9 @@ class ClauseDatabase(ABC):
         """Add an encoding of a `constraint` to the database. Optionally, the constraint is implied by the given `conditions` (i.e. every clause is extended by the `conditions`), and the given `encoder` is used for the encoding.
 
         :param constraint: The constraint or formula to encode and add to the database
+        :raises Unsatisfiable: If the formula has become unsatisfiable
         """
         ...
-
-    add_encoding.__doc__ += RAISES_UNSAT
 
     def new_var(self):
         """Add a new variable to the database."""

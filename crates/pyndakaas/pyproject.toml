@@ -15,8 +15,6 @@ dynamic = ["version"]
 tests = ["pytest"]
 docs = ["sphinx", "sphinx_rtd_theme", "sphinx-autobuild"]
 
-# [project.scripts]
-
 [tool.maturin]
 python-source = "python"
 features = ["pyo3/extension-module"]

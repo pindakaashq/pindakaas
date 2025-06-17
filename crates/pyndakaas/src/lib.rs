@@ -74,9 +74,7 @@ mod pindakaas {
 	use crate::Unsatisfiable;
 
 	#[derive(FromPyObject)]
-	// TODO [?] Should the rust doc links be substituted for RST links with
-	// :class:`BoolLinExp`
-	/// Argument capture for types that can become [`BoolLinExp`].
+	/// Argument capture for types that can become :class:`BoolLinExp`.
 	enum BoolLinArg {
 		Bool(bool),
 		BoolLin(BoolLinExp),
@@ -94,7 +92,7 @@ mod pindakaas {
 	/// A Boolean linear expression, also known as a pseudo-Boolean expression.
 	///
 	/// Using operators `<`, `<=`, `==`, `>=`, and `>` with a `int` right hand
-	/// side, the expression can be turned into a [`BoolLinCon`].
+	/// side, the expression can be turned into a :class:`BoolLinCon`.
 	struct BoolLinExp(BaseBoolLinExp);
 
 	#[pyclass]
@@ -119,32 +117,32 @@ mod pindakaas {
 	///
 	/// Warning: Not all encoders can be used to encode each type of constraint. If an invalid encoder is selected, then an :class:`InvalidEncoder` exception will be raised.
 	enum Encoder {
-		// TODO [?] How to make this show up?
-		/// Use [`pindakaas::bool_linear::AdderEncoder`], which is able to encode
+		// TODO These doc-strings do not show up, upstream issue: https://github.com/PyO3/pyo3/issues/5197
+		/// Use :class:`pindakaas::bool_linear::AdderEncoder`, which is able to encode
 		/// all Boolean linear constraints.
 		ADDER,
-		/// Use [`pindakaas::cardinality_one::BitwiseEncoder`], which is able to
+		/// Use :class:`pindakaas::cardinality_one::BitwiseEncoder`, which is able to
 		/// encode all Boolean cardinality one constraints.
 		BITWISE,
-		/// Use [`pindakaas::bool_linear::BddEncoder`], which is able to encode
+		/// Use :class:`pindakaas::bool_linear::BddEncoder`, which is able to encode
 		/// all Boolean linear constraints.
 		DECISION_DIAGRAM,
-		/// Use [`pindakaas::cardinality_one::LadderEncoder`], which is able to
+		/// Use :class:`pindakaas::cardinality_one::LadderEncoder`, which is able to
 		/// encode all Boolean cardinality one constraints.
 		LADDER,
-		/// Use [`pindakaas::cardinality_one::PairwiseEncoder`], which is able to
+		/// Use :class:`pindakaas::cardinality_one::PairwiseEncoder`, which is able to
 		/// encode all Boolean cardinality one constraints.
 		PAIRWISE,
-		/// Use [`pindakaas::bool_linear::SwcEncoder`], which is able to encode all
+		/// Use :class:`pindakaas::bool_linear::SwcEncoder`, which is able to encode all
 		/// Boolean linear constraints.
 		SORTED_WEIGHT_COUNTER,
-		/// Use [`pindakaas::cardinality::SwcEncoder`], which is able to encode all
+		/// Use :class:`pindakaas::cardinality::SwcEncoder`, which is able to encode all
 		/// Boolean cardinality constraints.
 		SORTING_NETWORK,
-		/// Use [`pindakaas::bool_linear::TotalizerEncoder`], which is able to
+		/// Use :class:`pindakaas::bool_linear::TotalizerEncoder`, which is able to
 		/// encode all Boolean linear constraints.
 		TOTALIZER,
-		/// Use [`pindakaas::propositional_logic::TseitinEncdoer`], which is able to
+		/// Use :class:`pindakaas::propositional_logic::TseitinEncdoer`, which is able to
 		/// encode propositional logic formulas.
 		TSEITIN,
 	}
@@ -155,7 +153,7 @@ mod pindakaas {
 	struct Formula(BaseFormula<BoolVal>);
 
 	#[derive(FromPyObject)]
-	/// Argument capture for types that can become [`Formula`].
+	/// Argument capture for types that can become :class:`Formula`.
 	enum FormulaArg {
 		Const(bool),
 		Formula(Formula),
@@ -452,8 +450,8 @@ mod pindakaas {
 	}
 
 	impl FormulaArg {
-		/// Internal method used to convert the [`FormulaArg`] into a
-		/// [`BaseFormula<BoolVal>`].
+		/// Internal method used to convert the :class:`FormulaArg` into a
+		/// :class:`BaseFormula<BoolVal>`.
 		fn as_formula(&self) -> BaseFormula<BoolVal> {
 			use BaseFormula::*;
 
