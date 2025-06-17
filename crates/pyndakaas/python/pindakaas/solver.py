@@ -2,12 +2,12 @@
 
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import ContextManager, Iterable, Iterator, Optional
 from datetime import timedelta
+from typing import ContextManager, Iterable, Iterator, Optional
 
 from .encoding import ClauseDatabase, Constraint
-from .pindakaas import Lit, Encoder
-from .pindakaas.solver import Status, CaDiCaLInner
+from .pindakaas import Encoder, Lit
+from .pindakaas.solver import CaDiCaLInner, Status
 
 
 class Result(ABC):

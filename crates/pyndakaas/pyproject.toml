@@ -20,3 +20,6 @@ docs = ["sphinx", "sphinx_rtd_theme", "sphinx-autobuild"]
 [tool.maturin]
 python-source = "python"
 features = ["pyo3/extension-module"]
+
+[tool.ruff]
+lint.select = ['B', 'C', 'E', 'I', 'F', 'W']

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Iterable, Optional, TypeAlias
 
 # TODO [?] what should we call the inernal database? Database, encoding, formula.. I'm preferring database so it does not overlap with the other terms too much.
-from .pindakaas import CNFInner, Formula, Lit, WCNFInner, Encoder
+from .pindakaas import CNFInner, Encoder, Formula, Lit, WCNFInner
 
 Constraint: TypeAlias = Formula
 
