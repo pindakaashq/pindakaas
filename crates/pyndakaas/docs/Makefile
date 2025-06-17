@@ -23,6 +23,6 @@ help:
 
 # Live HTML view of the documentation for development (requires `sphinx-autobuild` to be installed). Recompiles the crate on every change.
 livehtml:
-	sphinx-autobuild "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) --pre-build "pip install -e ..[docs]" --open-browser --watch ../src --watch ../python/pindakaas/solver.py --watch ../python/pindakaas/encoding.py $(O)
+	sphinx-autobuild "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) --pre-build "pip install -e ..[docs]" --watch ../src --watch ../python/pindakaas/solver.py --watch ../python/pindakaas/encoding.py $(O)
 	# TODO does not quite work
 	# sphinx-autobuild "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) --pre-build "pip install -e ..[docs]" --open-browser --watch ../src --watch ../python/pindakaas/*.py $(O)
