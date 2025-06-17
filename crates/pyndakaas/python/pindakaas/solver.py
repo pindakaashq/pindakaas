@@ -11,7 +11,7 @@ from .pindakaas.solver import CaDiCaLInner, Status
 
 
 class Result(ABC):
-    """The Result object returned from solving, allowing access to e.g. solver status and the values of variables."""
+    """The Result object returned after calling `solve()`. It allows access to e.g. solver status and the values of variables."""
 
     @property
     @abstractmethod

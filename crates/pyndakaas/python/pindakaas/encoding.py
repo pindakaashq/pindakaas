@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Iterable, Optional, TypeAlias
 
-# TODO [?] what should we call the inernal database? Database, encoding, formula.. I'm preferring database so it does not overlap with the other terms too much.
 from .pindakaas import CNFInner, Encoder, Formula, Lit, WCNFInner
 
 Constraint: TypeAlias = Formula
@@ -10,7 +9,7 @@ RAISES_UNSAT = ":raises Unsatisfiable: If the formula has become unsatisfiable"
 
 
 class ClauseDatabase(ABC):
-    """The abstract class representing an object to which we can add clauses, such as a CNF or solver."""
+    """The abstract class to represent objects (e.g. CNF, SAT solver)to which we can add clauses."""
 
     def __iadd__(self, constraint: Constraint):
         self.add_encoding(constraint)
