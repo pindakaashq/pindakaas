@@ -1,26 +1,52 @@
+"""A module containing solvers and solving related classes."""
+
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import ContextManager, Iterable, Iterator, Optional
 from datetime import timedelta
+from typing import ContextManager, Iterable, Iterator, Optional
 
 from .encoding import ClauseDatabase, Constraint
-from .pindakaas import Lit, Encoder
-from .pindakaas.solver import Status, CaDiCaLInner
+from .pindakaas import Encoder, Lit
+from .pindakaas.solver import CaDiCaLInner, Status
 
 
 class Result(ABC):
+    """The Result object returned after calling `solve()`. It allows access to e.g.
+    solver status and the values of variables.
+    """
+
     @property
     @abstractmethod
-    def status(self) -> Status: ...
+    def status(self) -> Status:
+        """Return result from solving the database."""
+        ...
 
     @abstractmethod
-    def value(self, var: Lit) -> Optional[bool]: ...
+    def value(self, lit: Lit) -> Optional[bool]:
+        """Return value for literal `lit`, or `None` if `lit` is assigned.
+
+        :param lit: the literal for which to return the value
+        :return: the value of `lit` if assigned
+        """
+        ...
 
     @abstractmethod
-    def failed(self, var: Lit) -> Optional[bool]: ...
+    def failed(self, lit: Lit) -> Optional[bool]:
+        """Check if the given assumption literal was used to prove the unsatisfiability
+        of the formula under the assumptions used for the last SAT search. Note that for
+        literals `lit` which are not assumption literals, the behavior of is not
+        specified.
+
+        :param lit: the assumption literal for which to return whether it contributed to
+        the unsatisfiable result
+        :return: whether `lit` contributed to the unsatisfiable result
+        """
+        ...
 
 
 class Solver(ClauseDatabase):
+    """An abstract class which extends a `ClauseDatabase` with solving capabilities."""
+
     def _set_time_limit(self, limit: Optional[timedelta]):
         if limit is not None:
             raise NotImplementedError("Solver does not support setting a time limit")
@@ -34,6 +60,13 @@ class Solver(ClauseDatabase):
         assumptions: Optional[Iterable[Lit]] = None,
         time_limit: Optional[timedelta] = None,
     ) -> Iterator[Result]:
+        """Solve the current `ClauseDatabase`.
+
+        :param assumptions: an optional iterable of assumptions literals which must hold
+        for this solve call
+        :param time_limit: an optional time limit before which the solver is terminated
+        and the result is Unknown
+        """
         self._set_time_limit(time_limit)
         assumptions = assumptions if assumptions is not None else []
         try:
@@ -44,9 +77,12 @@ class Solver(ClauseDatabase):
 
 
 class CaDiCaL(Solver):
+    """The `CaDiCaL <https://github.com/arminbiere/cadical>`_ SAT solver."""
+
     _inner: CaDiCaLInner
 
     def __init__(self):
+        """Initialize solver."""
         self._inner = CaDiCaLInner()
 
     def _set_time_limit(self, limit: Optional[timedelta]):
@@ -70,8 +106,8 @@ class CaDiCaL(Solver):
         conditions = list(conditions) if conditions is not None else []
         return self._inner.add_encoding(constraint, encoder, conditions)
 
-    def new_vars(self, num: int):
-        return self._inner.new_vars(num)
+    def new_vars(self, n: int):
+        return self._inner.new_vars(n)
 
 
 class MapResult(Result):
@@ -83,12 +119,12 @@ class MapResult(Result):
     def status(self) -> Status:
         return self._status
 
-    def value(self, var: Lit) -> Optional[bool]:
+    def value(self, lit: Lit) -> Optional[bool]:
         if self.status == Status.SATISFIED:
-            return self._mapping.get(int(var))
+            return self._mapping.get(int(lit))
         return None
 
-    def failed(self, var: Lit) -> Optional[bool]:
+    def failed(self, lit: Lit) -> Optional[bool]:
         if self.status == Status.UNSATISFIABLE:
-            return self._mapping.get(int(var)) == 0
+            return self._mapping.get(int(lit)) == 0
         return None

@@ -7,8 +7,13 @@ use std::sync::PoisonError;
 
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 
-create_exception!(pindakaas, InvalidEncoder, PyException);
-create_exception!(pindakaas, Unsatisfiable, PyException);
+create_exception!(pindakaas, InvalidEncoder, PyException, "Raised when the chosen encoder does not support the constraint (e.g. when the `PairwiseEncoder` encoder for AMO constraints is used to encode a PB constraint).");
+create_exception!(
+	pindakaas,
+	Unsatisfiable,
+	PyException,
+	"Raised when the given constraint is found to be Unsatisfiable during encoding."
+);
 
 // Use Result i/o PyResult to use `?` to easily return Rust errors as Python exceptions
 type Result<R = (), E = ErrWrapper> = std::result::Result<R, E>;
@@ -69,7 +74,7 @@ mod pindakaas {
 	use crate::Unsatisfiable;
 
 	#[derive(FromPyObject)]
-	/// Argument capture for types that can become [`BoolLinExp`].
+	/// Argument capture for types that can become :class:`BoolLinExp`.
 	enum BoolLinArg {
 		Bool(bool),
 		BoolLin(BoolLinExp),
@@ -87,7 +92,7 @@ mod pindakaas {
 	/// A Boolean linear expression, also known as a pseudo-Boolean expression.
 	///
 	/// Using operators `<`, `<=`, `==`, `>=`, and `>` with a `int` right hand
-	/// side, the expression can be turned into a [`BoolLinCon`].
+	/// side, the expression can be turned into a :class:`BoolLinCon`.
 	struct BoolLinExp(BaseBoolLinExp);
 
 	#[pyclass]
@@ -108,36 +113,36 @@ mod pindakaas {
 	#[expect(non_camel_case_types, reason = "match python naming convention")]
 	#[pyclass(eq, eq_int)]
 	#[derive(Clone, Copy, Debug, PartialEq)]
-	/// Method used to encode a constraint
+	/// Method used to encode a constraint.
 	///
-	/// Warning: Not all encoders can be used to encode each [`ConstraintArg`]. If an
-	/// invalid encoder is selected, then an exception will be raised.
+	/// Warning: Not all encoders can be used to encode each type of constraint. If an invalid encoder is selected, then an :class:`InvalidEncoder` exception will be raised.
 	enum Encoder {
-		/// Use [`pindakaas::bool_linear::AdderEncoder`], which is able to encode
+		// TODO These doc-strings do not show up, upstream issue: https://github.com/PyO3/pyo3/issues/5197
+		/// Use :class:`pindakaas::bool_linear::AdderEncoder`, which is able to encode
 		/// all Boolean linear constraints.
 		ADDER,
-		/// Use [`pindakaas::cardinality_one::BitwiseEncoder`], which is able to
+		/// Use :class:`pindakaas::cardinality_one::BitwiseEncoder`, which is able to
 		/// encode all Boolean cardinality one constraints.
 		BITWISE,
-		/// Use [`pindakaas::bool_linear::BddEncoder`], which is able to encode
+		/// Use :class:`pindakaas::bool_linear::BddEncoder`, which is able to encode
 		/// all Boolean linear constraints.
 		DECISION_DIAGRAM,
-		/// Use [`pindakaas::cardinality_one::LadderEncoder`], which is able to
+		/// Use :class:`pindakaas::cardinality_one::LadderEncoder`, which is able to
 		/// encode all Boolean cardinality one constraints.
 		LADDER,
-		/// Use [`pindakaas::cardinality_one::PairwiseEncoder`], which is able to
+		/// Use :class:`pindakaas::cardinality_one::PairwiseEncoder`, which is able to
 		/// encode all Boolean cardinality one constraints.
 		PAIRWISE,
-		/// Use [`pindakaas::bool_linear::SwcEncoder`], which is able to encode all
+		/// Use :class:`pindakaas::bool_linear::SwcEncoder`, which is able to encode all
 		/// Boolean linear constraints.
 		SORTED_WEIGHT_COUNTER,
-		/// Use [`pindakaas::cardinality::SwcEncoder`], which is able to encode all
+		/// Use :class:`pindakaas::cardinality::SwcEncoder`, which is able to encode all
 		/// Boolean cardinality constraints.
 		SORTING_NETWORK,
-		/// Use [`pindakaas::bool_linear::TotalizerEncoder`], which is able to
+		/// Use :class:`pindakaas::bool_linear::TotalizerEncoder`, which is able to
 		/// encode all Boolean linear constraints.
 		TOTALIZER,
-		/// Use [`pindakaas::propositional_logic::TseitinEncdoer`], which is able to
+		/// Use :class:`pindakaas::propositional_logic::TseitinEncdoer`, which is able to
 		/// encode propositional logic formulas.
 		TSEITIN,
 	}
@@ -148,7 +153,7 @@ mod pindakaas {
 	struct Formula(BaseFormula<BoolVal>);
 
 	#[derive(FromPyObject)]
-	/// Argument capture for types that can become [`Formula`].
+	/// Argument capture for types that can become :class:`Formula`.
 	enum FormulaArg {
 		Const(bool),
 		Formula(Formula),
@@ -445,8 +450,8 @@ mod pindakaas {
 	}
 
 	impl FormulaArg {
-		/// Internal method used to convert the [`FormulaArg`] into a
-		/// [`BaseFormula<BoolVal>`].
+		/// Internal method used to convert the :class:`FormulaArg` into a
+		/// :class:`BaseFormula<BoolVal>`.
 		fn as_formula(&self) -> BaseFormula<BoolVal> {
 			use BaseFormula::*;
 
@@ -550,11 +555,13 @@ mod pindakaas {
 			self.__xor__(other)
 		}
 
-		pub fn is_negated(&self) -> bool {
+		/// Return whether the variable is negated
+		fn is_negated(&self) -> bool {
 			self.0.is_negated()
 		}
 
-		pub fn var(&self) -> Self {
+		/// Return the literal's variable
+		fn var(&self) -> Self {
 			Self(self.0.var().into())
 		}
 	}
@@ -636,6 +643,7 @@ mod pindakaas {
 
 		#[pyclass]
 		#[derive(Debug, Default)]
+		/// The internal representation of a instance of the CaDiCaL solver.
 		struct CaDiCaLInner(Mutex<Cadical>);
 
 		#[pyclass(eq, eq_int)]

@@ -1,7 +1,7 @@
 import pindakaas.solver
 
 from .encoding import CNF, WCNF, ClauseDatabase, Constraint
-from .pindakaas import Formula, Lit, Encoder, Unsatisfiable, InvalidEncoder
+from .pindakaas import Encoder, Formula, InvalidEncoder, Lit, Unsatisfiable
 
 __doc__ = pindakaas.__doc__
 __all__ = [

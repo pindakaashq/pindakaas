@@ -2,6 +2,15 @@
 requires = ["maturin>=1.8,<2.0"]
 build-backend = "maturin"
 
+[dependency-groups]
+dev = ["ruff>=0.12.0"]
+docs = [
+	"sphinx>=7.1.2",
+	"sphinx-autobuild>=2021.3.14",
+	"sphinx-rtd-theme>=3.0.2",
+]
+test = ["pytest>=8.3.5"]
+
 [project]
 name = "pindakaas"
 requires-python = ">=3.8"
@@ -11,8 +20,11 @@ classifiers = [
 	"Programming Language :: Python :: Implementation :: PyPy",
 ]
 dynamic = ["version"]
-[project.optional-dependencies]
-tests = ["pytest"]
+
 [tool.maturin]
 python-source = "python"
 features = ["pyo3/extension-module"]
+
+[tool.ruff]
+lint.select = ['B', 'C', 'E', 'I', 'F', 'W']
+lint.pycodestyle.max-doc-length = 88
