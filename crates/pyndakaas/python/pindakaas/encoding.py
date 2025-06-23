@@ -7,7 +7,9 @@ Constraint: TypeAlias = Formula
 
 
 class ClauseDatabase(ABC):
-    """The abstract class to represent objects (e.g. CNF, SAT solver) to which we can add clauses."""
+    """The abstract class to represent objects (e.g. CNF, SAT solver) to which we can
+    add clauses.
+    """
 
     def __iadd__(self, constraint: Constraint):
         self.add_encoding(constraint)
@@ -29,7 +31,9 @@ class ClauseDatabase(ABC):
         encoder: Optional[Encoder] = None,
         conditions: Optional[Iterable[Lit]] = None,
     ):
-        """Add an encoding of a `constraint` to the database. Optionally, the constraint is implied by the given `conditions` (i.e. every clause is extended by the `conditions`), and the given `encoder` is used for the encoding.
+        """Add an encoding of a `constraint` to the database. Optionally, the constraint
+        is implied by the given `conditions` (i.e. every clause is extended by the
+        `conditions`), and the given `encoder` is used for the encoding.
 
         :param constraint: The constraint or formula to encode and add to the database
         :raises Unsatisfiable: If the formula has become unsatisfiable
@@ -82,7 +86,9 @@ class CNF(ClauseDatabase):
 
 
 class WCNF(CNF):
-    """A representation for Boolean formulas in conjunctive normal form with weighted (soft) clauses."""
+    """A representation for Boolean formulas in conjunctive normal form with weighted
+    (soft) clauses.
+    """
 
     _inner: WCNFInner
 
