@@ -556,12 +556,12 @@ mod pindakaas {
 		}
 
 		/// Return whether the variable is negated
-		pub fn is_negated(&self) -> bool {
+		fn is_negated(&self) -> bool {
 			self.0.is_negated()
 		}
 
 		/// Return the literal's variable
-		pub fn var(&self) -> Self {
+		fn var(&self) -> Self {
 			Self(self.0.var().into())
 		}
 	}
@@ -643,7 +643,7 @@ mod pindakaas {
 
 		#[pyclass]
 		#[derive(Debug, Default)]
-		/// :meta private:
+		/// The internal representation of a instance of the CaDiCaL solver.
 		struct CaDiCaLInner(Mutex<Cadical>);
 
 		#[pyclass(eq, eq_int)]
