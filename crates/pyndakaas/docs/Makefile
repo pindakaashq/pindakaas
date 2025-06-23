@@ -4,7 +4,7 @@
 # You can set these variables from the command line, and also
 # from the environment for the first two.
 # TODO Added -E -a to force reload for autodoc, otherwise the re-generation of the build is very inconsistent!
-SPHINXOPTS    ?= -E -a 
+SPHINXOPTS    ?= -E -a
 SPHINXBUILD   ?= sphinx-build
 SOURCEDIR     = source
 BUILDDIR      = build
@@ -18,7 +18,7 @@ help:
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
 %: Makefile
-	pip install -e ..[docs]
+	pip install --group ../pyproject.toml:docs
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) -E -a $(O)
 
 # Live HTML view of the documentation for development (requires `sphinx-autobuild` to be installed). Recompiles the crate on every change.
