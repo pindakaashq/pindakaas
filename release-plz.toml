@@ -1,5 +1,6 @@
 [workspace]
-allow_dirty = true # TODO: release-plz seems to otherwise complain about the submodules
+allow_dirty = true     # TODO: release-plz seems to otherwise complain about the submodules
+release_always = false
 
 [[package]]
 name = "pindakaas"

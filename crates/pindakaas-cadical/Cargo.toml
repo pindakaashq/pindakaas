@@ -1,15 +1,18 @@
 [package]
 name = "pindakaas-cadical"
 description = "build of the Cadical SAT solver for the pindakaas crate"
-version = "0.1.0"
+version = "0.0.1"
 
+include = [
+	"build.rs",
+	"src/*",
+	"vendor/cadical/LICENSE",
+	"vendor/cadical/VERSION",
+	"vendor/cadical/src/*.{cpp,h,hpp}",
+	"vendor/cadical/contrib/*.{cpp,h,hpp}",
+]
 build = "build.rs"
 links = "cadical"
-include = [
-	"src/*.{cpp,h}",
-	"vendor/cadical/LICENSE",
-	"vendor/cadical/src/*.{cpp,h,hpp}",
-]
 
 authors.workspace = true
 edition.workspace = true
