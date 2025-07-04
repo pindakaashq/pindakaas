@@ -8,10 +8,9 @@ name: CI
 on:
   push:
     branches:
-      - main
-      - master
+      - develop
     tags:
-      - "*"
+      - "pyndakaas-v*"
   pull_request:
   workflow_dispatch:
 
@@ -255,7 +254,7 @@ jobs:
         with:
           subject-path: "wheels-*/*"
       - name: Publish to PyPI
-        if: ${{ startsWith(github.ref, 'refs/tags/pyndakaas-v') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         uses: PyO3/maturin-action@v1
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
