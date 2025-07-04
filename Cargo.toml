@@ -12,7 +12,6 @@ resolver = "2"
 
 [workspace.package]
 repository = "https://github.com/pindakaashq/pindakaas"
-version = "0.1.0"
 authors = [
 	"Jip J. Dekker <jip@dekker.one>",
 	"Hendrik 'Henk' Bierlee <henk.bierlee@kuleuven.be>",

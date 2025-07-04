@@ -1,0 +1,11 @@
+[workspace]
+allow_dirty = true # TODO: release-plz seems to otherwise complain about the submodules
+
+[[package]]
+name = "pindakaas"
+publish_all_features = true
+
+[[package]]
+name = "pyndakaas"
+publish = false
+semver_check = false

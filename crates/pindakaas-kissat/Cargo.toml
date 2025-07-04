@@ -1,7 +1,8 @@
 [package]
 name = "pindakaas-kissat"
 description = "build of the Kissat SAT solver for the pindakaas crate"
-version = "4.0.2"
+version = "0.1.0"
+
 build = "build.rs"
 links = "kissat"
 include = ["src/*.{c,h}", "vendor/kissat/LICENSE", "vendor/kissat/src/*.{c,h}"]

@@ -1,6 +1,12 @@
 use std::path::Path;
 
 fn main() {
+	assert_eq!(
+		include_str!("vendor/cadical/VERSION").trim(),
+		"2.1.3",
+		"unexpected version of CaDiCaL detected"
+	);
+
 	let src = [
 		"src/ccadical_override.cpp",
 		"vendor/cadical/contrib/craigtracer.cpp",
@@ -110,11 +116,6 @@ fn main() {
 	if build.get_compiler().is_like_msvc() {
 		let _ = build.include(Path::new("vendor/cadical/contrib/msvc"));
 	}
-
-	assert_eq!(
-		env!("CARGO_PKG_VERSION"),
-		include_str!("vendor/cadical/VERSION").trim()
-	);
 
 	let _ = build.files(src);
 

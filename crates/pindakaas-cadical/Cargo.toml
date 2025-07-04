@@ -1,7 +1,8 @@
 [package]
 name = "pindakaas-cadical"
 description = "build of the Cadical SAT solver for the pindakaas crate"
-version = "2.1.3"
+version = "0.1.0"
+
 build = "build.rs"
 links = "cadical"
 include = [

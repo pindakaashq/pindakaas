@@ -1,9 +1,9 @@
 [package]
 name = "pindakaas-derive"
 description = "derive macros for the pindakaas crate to connect to SAT solvers"
+version = "0.1.0"
 
 authors.workspace = true
-version.workspace = true
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true

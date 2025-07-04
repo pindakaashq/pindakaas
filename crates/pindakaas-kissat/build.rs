@@ -102,6 +102,7 @@ fn main() {
 
 	let compiler = builder.try_get_compiler().unwrap();
 	let version = include_str!("vendor/kissat/VERSION").trim();
+	assert_eq!(version, "4.0.2", "unexpected version of Kissat detected");
 	let git_id = String::from_utf8(
 		Command::new("git")
 			.current_dir("vendor/kissat")
@@ -127,8 +128,6 @@ fn main() {
 			.stdout,
 	)
 	.unwrap();
-
-	assert_eq!(env!("CARGO_PKG_VERSION"), version);
 
 	let build = builder
 		.include("./src")

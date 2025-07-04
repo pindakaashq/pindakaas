@@ -2,6 +2,7 @@
 name = "pindakaas-intel-sat"
 description = "build of the Intel SAT solver for the pindakaas crate"
 version = "0.1.0"
+
 build = "build.rs"
 links = "intel_sat"
 include = ["vendor/intel_sat/LICENSE", "vendor/intel_sat/*.{cc,hpp}"]
