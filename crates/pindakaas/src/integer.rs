@@ -1177,7 +1177,7 @@ impl Display for Lin {
 			assert!(coef.abs() == 1);
 			let x = x.borrow();
 
-			format!("{}", x)
+			format!("{x}")
 		};
 		write!(
 			f,
@@ -1321,7 +1321,7 @@ impl Model {
 impl Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		for con in &self.cons {
-			writeln!(f, "{}", con)?;
+			writeln!(f, "{con}")?;
 		}
 		Ok(())
 	}

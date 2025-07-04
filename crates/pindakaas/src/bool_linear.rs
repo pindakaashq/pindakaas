@@ -849,7 +849,7 @@ impl BoolLinAggregator {
 						assert!(
 							terms.iter().all(|(_,coef)| coef.is_positive())
 								|| terms.iter().all(|(_,coef)| coef.is_negative()),
-																"Normalizing mixed positive/negative coefficients not yet supported for Dom constraint on {:?}", terms
+																"Normalizing mixed positive/negative coefficients not yet supported for Dom constraint on {terms:?}"
 						);
 						vec![Part::Dom(
 							terms
