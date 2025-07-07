@@ -1,16 +1,19 @@
 import tomllib
+from pathlib import Path
 
-with open("../../../../Cargo.toml", "rb") as f:
+workspace = Path(__file__).parent.parent.parent.parent.parent
+
+with (workspace / "Cargo.toml").open("rb") as f:
     cargo = tomllib.load(f)
     package = cargo["workspace"]["package"]
     author = ", ".join(
         author.replace("<", "(").replace(">", ")") for author in package["authors"]
     )
-    release = package["version"]
 
-with open("../../../pindakaas/Cargo.toml", "rb") as f:
+with (workspace / "crates/pyndakaas/Cargo.toml").open("rb") as f:
     cargo = tomllib.load(f)
     package = cargo["package"]
+    release = package["version"]
     description = package["description"]
     project = package["name"]
     copyright = f"2024-2025, {author}"
