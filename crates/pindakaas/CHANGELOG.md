@@ -1,0 +1,429 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.0.2](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.0.1...pindakaas-v0.0.2) - 2025-07-07
+
+### Added
+
+- *(pindakaas)* implement more operators for `BoolLinExp`(and friends)
+- *(pindakaas)* improve printing of `Formula`
+- *(pindakaas)* enable termination callbacks for kissat
+
+### Fixed
+
+- correct cargo metadata for releasing crates
+- *(pindakaas)* print`Wcnf`as correct DIMACS
+
+### Other
+
+- add release-plz configuration to help with releasing packages
+- inline variables in format! strings
+- *(pyndakaas)* add initial sphinx documentation ([#109](https://github.com/pindakaashq/pindakaas/pull/109))
+- remove `pindakaas-build-macros` crate
+- *(pindakaas)* make `weight` argument of `Wcnf::add_weighted_clause` non-optional
+- Change `Propagator::propagate` to return a single literal at a time
+- Experimental proof logging interface for CaDiCaL ([#94](https://github.com/pindakaashq/pindakaas/pull/94))
+- Add basic edge case tests, one of which fails for cadical
+- Add an interface to set limit for the CaDiCal solver
+- Allow PropagatingCadical to be cloned if the propagator is Clone
+- Add comparator access methods to aggregated cardinality constraints
+- Add accessor methods for aggregated PB constraint
+- Remove iteration over hash-based types to ensure deterministic behaviour
+- Allow `simplify_with` to use `FnMut` callbacks
+- Add derived `Hash` implementation to `Formula`
+- Generalize `simplify_with` in `Formula` and make it `pub`
+- Relaxed `Sized` constraints for encoders
+- Add Formula with constant values
+- Avoid full paths from the standard library
+- Allow external usage of named variables for tracing
+- Lock iset version to 0.3.0 to resolve failing tests
+- Remove unnecessary macro `emit_clauses!`
+- Allow creation of `&dyn ClauseDatabase`
+- Make `solve` methods return solution/fail (reference) objects
+- Simplify the variable management and add `new_lits` convenience feature
+- Simplify the Valuation trait
+- Split out `external-propagation` feature
+- Disambiguate linear from Boolean linear
+- Reorganize to simplify the structure of the code base
+- Update Cadical to version 2.1.0
+- Change DIMACS parser to use const generic
+- Fix handling of empty clauses
+- Move SortedEncoder cache into the struct and remove cached dependency
+- Remove `use super::`
+- Enable additional (stricter) clippy lints and resolve conflicts
+- Update testing infrastructure to use Cadical and expect_test
+- Fix use error when building without `ipasir-up` feature
+- Signal restarts in notify_backtrack IPASIR-UP callbacks
+- Fix the in-place negation of `Xor` in the TseitinEncoder
+- Fix the binding of empty `Or` formulas in the TseitinEncoder
+- Fix the binding of Not formulas in the TseitinEncoder bind helper
+- Change the IPASIR UP implementation to directly use C callback functions
+- Allow propagators to access solving actions in decide callback
+- Silence clippy: unused `Incomplete` error type
+- Add FFIPointer helper type to manage Rust types exposed to C
+- fix SolverAction implementation
+- Resolve one level of dispatch for IPASIR UP callbacks
+- Resolve one level of dispatch for IPASIR callbacks
+- Store solver callbacks in the solver struct
+- Add temporary hidden method to set CaDiCaL options
+- Fix a problem where callbacks given to IPASIR solver where dropped early
+- Implement Debug for types
+- Add public `new` method to ConditionalDatabase
+- Fix clippy warnings in tests
+- Add testing for encodings of propositional logic formulae
+- Add initial support for general propositional logic encoding
+- Use literals in the notify_assignment callback
+- Give SolverActions access when calling check_model and add_external_clause
+- Expose propagator from the solution object when deriving IPASIR-UP
+- Make solvers expose specific value and fail objects rather that &dyn
+- Add additional helper methods for VarRange
+- Fix another problem in DoubleEndedIteration implementation of VarRange
+- Fix the DoubleEndedIterator implementation of VarRange
+- Ensure precondition is met when using slice::from_raw_parts
+- Add trait for creating VarRange objects
+- Fix next_var_range for length 1 and add test cases
+- Rectify invalid assumption in the IPASIR-UP's check model callback
+- Add index and find operations for VarRange
+- Make VarRange visible for other libraries from the solvers module
+- Give (mutable) access to the set external propagator
+- Allow VarRange creation on Cnf and Wcnf
+- Add ability to clone solver
+- Update notify_assignment callback
+- Add IPASIR-UP feature and small test case
+- Make new_var return a Var object
+- Add initial Rust interface for IPASIR UP
+- Change Ipasir traint implementations using proc macro
+- Fix clippy warnings
+- Add missing export of encoder
+- Add ClauseDatabase::encode method
+- Add initial Kissat interface
+- Resolve issues when linking two IPASIR libraries
+- Add initial Intel SAT interface
+- Add initial CaDiCaL interface
+- Add new IPASIR based solver interface
+- Make `Lit` its own type
+- Fix clippy
+- Update dependencies
+- Fix clippy
+- Refactor int into multiple modules
+- Fix clippy
+- Clean up
+- Remove bench.rs
+- Clean up
+- Output test cases for TernLeConstraint
+- Improve binary encoding display
+- Fix equality for binary
+- Add generated solutions to sorter tests
+- Add switch between 0 or lb grounded binary encoding
+- Ground binary at lower bound (to support neg. dom / SWC)
+- Improve handling of binary (aux/principal) vars
+- Remove prints
+- Show missing/extra solutions, with or without aux vars
+- Minimize interval in ternary add geq/leq(..) calls
+- Fix leq/geq clauses for binary
+- Support x:B+y:B<=z:B using adder + lex constraint
+- Support more binary coupling
+- Change heuristics to dom size
+- Fix consistency constraints for binary encoding
+- Refactor
+- Add (hard-coded) option for intermediate equality terns
+- Clean up and refactor
+- Add initial set-up for benchmarking statics of encoders
+- Support missing binary var encodings in TernLeEncoder
+- Remove debug loop
+- Remove faulty assert
+- Cleanup plus clippy
+- Generalize add_clauses_for and (naively) filter out trivial clauses
+- Remove lb field in IntVarOrd
+- Don't add nodes if all paths lead to gaps
+- Implement views
+- Simplify layer to IntVar conversion
+- Replace Const(true) for BddNode::Val
+- Fix Bdd Eq layer init
+- Improve BDD layer initialization (for <=)
+- Create IntVars before creating literals in BDD
+- Remove print
+- Clippy
+- Remove first lit fixing
+- Remove prints
+- Fix first fixed lit behaviour
+- Fix tracing negation output
+- Add equivalence (a->b, b->a) detector
+- Readd BDD sorting
+- Fix BDD with views/lb fixed (breaking sorters)
+- Support views (but missing first true lit)
+- Remove print
+- Add domain based BDD construction
+- Add check for unit clauses
+- Don't instantiate literals <=lb of the BDD layer
+- Export (propagation) Consistency enum
+- Implement Wcnf from Cnf trait
+- Make more LinExp/LinearConstraint fields public
+- Support add_consistency again
+- Optimise ternary encoder
+- Optimise bounds propagater
+- Prevent infinite recursion for fixed constraint
+- Sort totalizer leaves by upper bounds
+- Add propagation queue
+- Support equality for SWC
+- Small fixes
+- Add domain propagator for linear equality constraint
+- Add (naive) bounds propagation for Lin
+- Add another eq test
+- Fix unique IntVar issue
+- Add model (although has conflicts storing vars)
+- Refactor using unzip
+- Propagate GT's ub only for Equality comparator
+- Add fixpoint prop for gt lbs
+- Add fixpoint prop for gt ubs
+- Split creating doms and vars for gt
+- Support eq for BDDs
+- Fix aggregation bug for converting >=
+- Remove old assert
+- Allow more public access to enable splitting eqs
+- Handle tern-le < as <=
+- Fix basic <-clauses for tern-le
+- Fix feature name
+- Make SWC consistent with literature
+- Fix some labels
+- Do not overwrite cmps for SortingNetworkEncoder
+- Change default
+- Implement sequential sorting
+- Match Direct/Recursive cmps with literature
+- Refactor of same coefficient sorting
+- Use same cmp for sort coefficients as constraint
+- Cache sort cost calculations
+- Avoid sub overflow in sorted cost calculations
+- Generalize Sorted encoding, plus support and test TernEqs
+- Allow testing unsatisfiable constraints
+- Re-add base-case for sorted
+- Support LessEq Recursive SortedStrategy
+- Clean up
+- Allow changing/cloning Linear's
+- Derive clone for SortedStrategy
+- Disable direct card network
+- Redo Sorted using integer operations add/div/comp
+- Add statics checking ( = vars/clauses/literals)
+- Avoid overflow in Sorted cost calculations
+- Implement (W)DIMACS (wcnf) file parsing
+- Formatting
+- Implement iter for Wcnf
+- Derive Debug on LinearConstraint
+- Implement CNF::new(last_var)
+- Clean up SortingNetworkEncoder cost calculations
+- Allow access to encoder/aggregator in LinearEncoder
+- Export Sorted* and fix final tests/checker
+- Make additional fields public
+- Sort same coefficients at end of aggregation
+- Add and fix more Sorted tests
+- Make CardinalityOne lits public
+- Add direct card/merge networks and lambda heuristic
+- Add consistency option for Sorted/SortingNetworkEncoder
+- Implement From<Wcnf> for Cnf
+- Add CardMarker to SortingNetworkEncoder
+- Remove print
+- Fix remaining tests for sorted
+- Add sorting network
+- Move checker import to macros
+- Add sorting network
+- Fix actually using aggregate configuration
+- Minor refactor
+- Check side-constraints in LinExp::assign
+- Remove hard-coded setting
+- Fix test
+- Read ub from root var in build_totalizer
+- Only sort groups that are not a Card* constraint
+- Fix top weight
+- Make Sorting declarative and improve chain finding
+- Use totalizer to sort group with same coefficients
+- Improve and fix display of int
+- Detect and group terms with same coefficient
+- Clean up
+- Do not add clause weight in-between every literal
+- Add card test suite
+- Refactor check functions
+- Fix wcnf top weight, and clause delimiters
+- Add variables for statistics
+- Add iterator for terms for LinExp
+- Add basic WCNF struct and writer
+- Remove empty groups another time
+- Improve some labels + clippy
+- Clean up and finalize generated solutions
+- Add support for Part::Dom + clean-up of small TODOs
+- Revert c_int change
+- Fix tests
+- Improve labels and display of vars/constraints
+- Fix heuristic
+- Add special case for x:O+y:O<=z:B
+- Swap x:B + y:O <= * for x:O + y:B <= *
+- Limit aux var ub in SWC to test out Ord/Bin heuristic
+- Build totalizer+swc of Bin/Ord vars using simple heuristic
+- Re-add consistency constraints, improve labeling
+- Add consistent() method for IntVarOrd/Bin
+- Add cmp to TernLeConstraint
+- Add lit counter for IntVar*
+- Improve labeling
+- Improve panic message
+- Support geq over ranges by returning CNF for TernLe's
+- Label IntVarBin lits
+- Test x:O+y:O<=z:O and fix x:O into LinExp
+- Use &dyn i/o &Box<dyn ..> to avoid cloned TernLe vars
+- Support x:B+0<=constant using adder's lex constraint
+- Fix warning / imports
+- Fix and test basic IntVarBin impl
+- Replace c_int for i32 temporarily
+- Add test with dynamic ints and generated solutions
+- Disable non-compiling tests
+- Allow specifying the TestDB in test macros
+- Fix compilation
+- Take `add/mult` into account for assigning linexps
+- Fix tests and some bugs for int
+- Implement Into<LinExp> and checking for IntVar*
+- Add TernLeConstraint/Encoder
+- Fix warnings
+- Replace remaining IntVarOrd::from_term for ::new
+- Fix domains for Ic group to IntVarOrd coupling
+- Label BDD aux variables
+- Fix off-by-one bug in bdd construction
+- Add dynamic IntVar encodings and constraints
+- Change z in x:O+y:O<=z:O to z:E where E in {O,B}
+- Add some idea of eq/geq operator for Ord/Bin VarInts
+- Fix final tests using constraints implementing Checker
+- Allow build_totalizer argument only used for output
+- Add tracing spans for all remaining encoders
+- Restructure adder encoder for better tracing
+- Fix printing of negated literals in the trace
+- Add proc_macro to add tracing to tests when "trace" feature is enabled
+- Add pretty printing of constraints
+- Add tracing::Subscriber to handle tracing instrumentation
+- Use faster hashing algorithm
+- Add tracing infrastructure
+- Detect n-1 out of n cardinality constraint as trivial
+- Add solutions to LadderEncoder unit test
+- Add Bitwise CardinalityOne encoder
+- Fix AMO normalization ([#17](https://github.com/pindakaashq/pindakaas/pull/17))
+- Reinstate multi-arg test macros for given tdb's
+- Allow specifying the TestDB in test macros
+- Resolve feature conditional import warnings
+- Give MakeFalse a better fitting name
+- Small fixes/adjustments in test cases
+- Fix the CardinalityOne Checker implementation
+- Support generation and output of expected solutions
+- Add solver connection for the minisat crate
+- New start for the Python library
+- Add IpasirSolver wrapper with ClauseDatabase implementation
+- Add wrapper for default conditional constraints
+- implement From<Cnf> for SplrSolver
+- Add implementation of ClauseDatabase for splr::Solver
+- Change representation of CNF formulas to explicitly track clause size
+- Add initial implementation of a CNF implementation
+- Merge use statements from same top level location
+- Do not do operations inside debug_assert
+- Up lb of root MDD node by its interval.end
+- Support MDDs
+- Sort by decreasing coefficients/ub for BDD
+- Remove root var
+- Support long edges
+- Fix new_var macro in release mode
+- Remove stale TODO item
+- Remove workaround for resolved SPLR bug
+- Resolve clippy needless_collect exception
+- Fix small bugs
+- Add more tests and fix ROBDD construction
+- Add ROBDD construction
+- Split up gt/swc/bdd methods
+- Move common int helpers to new int.rs module
+- Change option functions to be non-consuming builder methods
+- Add new functions for LinearEncoder and StaticLinEncoder
+- Use a wrapper struct for guarantee that value is positive
+- Add test cases for exactly one
+- Change AtMostOne to CardinalityOne to encapsulate ExactlyOne
+- Add initial AMO test suite
+- Replace derivable Default implementations
+- Replace ArbLinEncoder with StaticLinEncoder
+- Automatically implement Encoder trait on simpler constraints
+- Add from implementations for aggregated linear structures
+- Add framework for tests run for all linear encoders
+- Use more general no-goods for model enumeration in testing
+- Move aggregator to a separate module
+- Add helper function to add two log encoded integer variables together
+- Fix problems detected by clippy
+- Add convenience constructors for LinExp
+- Implement Checker trait for LinearConstraint
+- Improve the printing of SPLR instructions
+- Change the structure of the Encoder trait to make Encoders reusable
+- Expose LinExp from main library module
+- Do not panic in TestDB if test have already failed
+- Add initial design for easily constructing linear expressions
+- Disable labeling
+- Remove print statement
+- Add IntVar::constant for convenience
+- Use lower bound from dom constraint in totalizer
+- Remove coefficients exceeding k for Dom constraint
+- Fix bug in shifting Dom constraint for >= PBs
+- Fix handling binary multiplier of Dom lower bound
+- Fix bug where root is not limited for single leaf totalizers
+- Label variables in totalizer
+- Output clauses with var IDs
+- Support variable labels (in debug mode)
+- Add add_consistency option for aux vars
+- Replace unstable then_some
+- Encode using IntVars and x+y<=z constraint
+- fix optimization of sum literals
+- Fix clippy warnings
+- Update encoders to use references
+- Clean up
+- Fix up rebase, exporting SWC and BDD as Encoders
+- Use couplings for BDD, preventing a redundant clause
+- Fix SWC/GT with order encoded inequalities/additions
+- Replace +nightly Step trait for num::iter::range*
+- Add BDD encoder using totalizers
+- Check in swc.rs
+- Add SWC encoder
+- Formatting
+- Fix clause in AMO normalization implying aux var y
+- Fix Amo normalization when some coefficients are 0
+- Normalize >= for Dom and optimize for <=-totalizer
+- Build separate, small nodes for Le constraint groups
+- Add initial Le side-constraint and its aggregation
+- Assert unsupported pos/neg coefs for binary + clippy/format
+- Merge in and fix changes for totalizer encoder
+- Remove debug print statements
+- Formatting
+- Add regression test, which also requires splr 16.3-dev
+- Refactor totalizer, removing empty node for odd nbr of leaves
+- Fix clause in AMO normalization implying aux var y
+- Fix Amo normalization when some coefficients are 0
+- Fix errors / clippy
+- Normalize >= for Dom and optimize for <=-totalizer
+- Build separate, small nodes for Le constraint groups
+- Add initial Le side-constraint and its aggregation
+- Add (bad) Encoder object for general linear expressions
+- Restructure library for all encoders to be structs
+- Check only principal variables from solutions
+- Add (failing) encoder test case
+- Derive clone for public enums
+- Update SPLR version used for testing
+- Fix copying mistake in the carry literal generation
+- Handle non-unique coefficients for totalizers
+- Improve error messages
+- Filter out empty constraint groups
+- Add initial testing framework functionality ([#3](https://github.com/pindakaashq/pindakaas/pull/3))
+- Fix totalizer bug when layer has odd number of nodes
+- Add README and update authors ([#2](https://github.com/pindakaashq/pindakaas/pull/2))
+- Add totalizer encoder with support for constrained literal groups ([#1](https://github.com/pindakaashq/pindakaas/pull/1))
+- Change variant names of integer encoding representation
+- slightly reduce number of clauses and introduced variables
+- Fix some problems in the binary adder encoding
+- Add initial function to Python interface
+- Remove MPL-2 file headers
+- Differentiate between Boolean variables and literals
+- Update descriptions of interfacing crates
+- Add initial structure for the C library
+- Restructure code to allow for bindings to other languages
