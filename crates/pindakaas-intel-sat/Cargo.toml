@@ -2,6 +2,7 @@
 name = "pindakaas-intel-sat"
 description = "build of the Intel SAT solver for the pindakaas crate"
 version = "0.0.1"
+license = "MIT"
 
 build = "build.rs"
 links = "intel_sat"
@@ -14,7 +15,6 @@ include = [
 
 authors.workspace = true
 edition.workspace = true
-license.workspace = true
 homepage.workspace = true
 categories.workspace = true
 keywords.workspace = true

@@ -2,6 +2,7 @@
 name = "pindakaas-cadical"
 description = "build of the Cadical SAT solver for the pindakaas crate"
 version = "0.0.1"
+license = "MIT"
 
 include = [
 	"build.rs",
@@ -16,7 +17,6 @@ links = "cadical"
 
 authors.workspace = true
 edition.workspace = true
-license.workspace = true
 homepage.workspace = true
 categories.workspace = true
 keywords.workspace = true
