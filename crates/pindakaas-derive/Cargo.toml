@@ -15,7 +15,7 @@ repository.workspace = true
 proc-macro = true
 
 [dependencies]
-darling = "0.20"
+darling = "0.21"
 quote = { workspace = true }
 syn = { workspace = true }
 
