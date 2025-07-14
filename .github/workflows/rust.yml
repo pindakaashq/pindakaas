@@ -19,7 +19,7 @@ jobs:
         with:
           submodules: true
       - name: Install Rust toolchain
-        uses: moonrepo/setup-rust@v0
+        uses: moonrepo/setup-rust@v1
         with:
           cache: false
           channel: ${{ env.RUST_COV_CHANNEL }}
@@ -41,7 +41,7 @@ jobs:
         with:
           submodules: true
       - name: Install Rust toolchain
-        uses: moonrepo/setup-rust@v0
+        uses: moonrepo/setup-rust@v1
         with:
           cache: false
           channel: ${{ env.RUST_COV_CHANNEL }}
@@ -58,7 +58,7 @@ jobs:
         with:
           submodules: true
       - name: Install Rust toolchain and clippy
-        uses: moonrepo/setup-rust@v0
+        uses: moonrepo/setup-rust@v1
         with:
           channel: ${{ env.RUST_CHANNEL }}
           components: clippy
