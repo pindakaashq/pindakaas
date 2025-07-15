@@ -2,6 +2,7 @@
 pub mod cadical;
 #[cfg(feature = "intel-sat")]
 pub mod intel_sat;
+pub(crate) mod ipasir;
 #[cfg(feature = "kissat")]
 pub mod kissat;
 #[cfg(feature = "libloading")]
@@ -11,25 +12,12 @@ pub mod propagation;
 #[cfg(feature = "splr")]
 pub mod splr;
 
-use std::{ffi::c_void, num::NonZeroI32, ptr};
+use std::num::NonZeroI32;
 
 use crate::{ClauseDatabase, Lit, Valuation, Var, VarRange};
 
-type CB0<R> = unsafe extern "C" fn(*mut c_void) -> R;
-type CB1<R, A> = unsafe extern "C" fn(*mut c_void, A) -> R;
-
-#[derive(Debug, Clone, Copy)]
-/// Iterator over the elements of a null-terminated i32 array
-struct ExplIter(*const i32);
-
-#[derive(Debug, PartialEq)]
-struct FFIPointer {
-	ptr: *mut c_void,
-	drop_fn: fn(*mut c_void),
-}
-
 /// Trait implemented by the object given to the callback on detecting failure
-pub trait FailedAssumtions {
+pub trait FailedAssumptions {
 	/// Check if the given assumption literal was used to prove the unsatisfiability
 	/// of the formula under the assumptions used for the last SAT search.
 	///
@@ -66,7 +54,7 @@ pub trait SolveAssuming: Solver {
 	fn solve_assuming<I: IntoIterator<Item = Lit>>(
 		&mut self,
 		assumptions: I,
-	) -> SolveResult<impl Valuation + '_, impl FailedAssumtions + '_>;
+	) -> SolveResult<impl Valuation + '_, impl FailedAssumptions + '_>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -77,9 +65,6 @@ pub enum SolveResult<Sol: Valuation, Fail = ()> {
 }
 
 pub trait Solver: ClauseDatabase {
-	/// Return the name and the version of SAT solver.
-	fn signature(&self) -> &str;
-
 	/// Solve the formula with specified clauses.
 	///
 	/// If the search is interrupted (see [`set_terminate_callback`]) the function
@@ -87,7 +72,7 @@ pub trait Solver: ClauseDatabase {
 	fn solve(&mut self) -> SolveResult<impl Valuation + '_, impl Sized>;
 }
 
-pub trait TermCallback: Solver {
+pub trait TerminateCallback: Solver {
 	/// Set a callback function used to indicate a termination requirement to the
 	/// solver.
 	///
@@ -107,86 +92,6 @@ pub struct VarFactory {
 	pub(crate) next_var: Option<Var>,
 }
 
-fn get_drop_fn<T>(_: &T) -> fn(*mut c_void) {
-	|ptr: *mut c_void| {
-		// SAFETY: This drop function assumes that the pointer was created by Box::leak
-		let b = unsafe { Box::<T>::from_raw(ptr as *mut T) };
-		drop(b);
-	}
-}
-
-fn get_trampoline0<R, F: FnMut() -> R>(_closure: &F) -> CB0<R> {
-	trampoline0::<R, F>
-}
-
-fn get_trampoline1<R, A, F: FnMut(A) -> R>(_closure: &F) -> CB1<R, A> {
-	trampoline1::<R, A, F>
-}
-
-unsafe extern "C" fn trampoline0<R, F: FnMut() -> R>(user_data: *mut c_void) -> R {
-	let user_data = &mut *(user_data as *mut F);
-	user_data()
-}
-
-unsafe extern "C" fn trampoline1<R, A, F: FnMut(A) -> R>(user_data: *mut c_void, arg1: A) -> R {
-	let user_data = &mut *(user_data as *mut F);
-	user_data(arg1)
-}
-
-impl Iterator for ExplIter {
-	type Item = i32;
-
-	#[inline]
-	fn next(&mut self) -> Option<Self::Item> {
-		// SAFETY: ExplIter is assumed to be constructed using a valid pointer to an
-		// correctly aligned and null-terminated array of i32.
-		unsafe {
-			if *self.0 == 0 {
-				None
-			} else {
-				let ptr = self.0;
-				self.0 = ptr.offset(1);
-				Some(*ptr)
-			}
-		}
-	}
-}
-
-impl FFIPointer {
-	/// Get the FFI pointer to the contained object
-	///
-	/// # WARNING
-	/// This pointer is only valid until the FFIPointer object is dropped.
-	fn get_ptr(&self) -> *mut c_void {
-		self.ptr
-	}
-	fn new<T: 'static>(obj: T) -> Self {
-		let drop_fn = get_drop_fn(&obj);
-		let ptr: *mut T = Box::leak(Box::new(obj));
-		Self {
-			ptr: ptr as *mut c_void,
-			drop_fn,
-		}
-	}
-}
-
-impl Default for FFIPointer {
-	fn default() -> Self {
-		Self {
-			ptr: ptr::null_mut(),
-			drop_fn: |_: *mut c_void| {},
-		}
-	}
-}
-
-impl Drop for FFIPointer {
-	fn drop(&mut self) {
-		if !self.ptr.is_null() {
-			(self.drop_fn)(self.ptr);
-		}
-	}
-}
-
 impl VarFactory {
 	/// Get the [`VarRange`] of all variables that have been created using this
 	/// factory.
@@ -203,15 +108,6 @@ impl VarFactory {
 			Var(NonZeroI32::MAX)
 		};
 		VarRange { start, end }
-	}
-
-	/// Get the number of variables that have been created using this factory.
-	pub fn num_emitted_vars(&self) -> usize {
-		if let Some(x) = self.next_var {
-			x.0.get() as usize - 1
-		} else {
-			Var::MAX_VARS
-		}
 	}
 
 	pub(crate) fn next_var_range(&mut self, size: usize) -> VarRange {
@@ -242,6 +138,15 @@ impl VarFactory {
 					panic!("unable to create more than `Var::MAX_VARS` variables")
 				}
 			}
+		}
+	}
+
+	/// Get the number of variables that have been created using this factory.
+	pub fn num_emitted_vars(&self) -> usize {
+		if let Some(x) = self.next_var {
+			x.0.get() as usize - 1
+		} else {
+			Var::MAX_VARS
 		}
 	}
 }

@@ -2004,7 +2004,7 @@ mod tests {
 				};
 
 				#[test]
-				fn test_small_le_1() {
+				fn small_le_1() {
 					let mut cnf = Cnf::default();
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
@@ -2028,7 +2028,7 @@ mod tests {
 				}
 
 				#[test]
-				fn test_small_le_2() {
+				fn small_le_2() {
 					let mut cnf = Cnf::default();
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
@@ -2062,7 +2062,7 @@ mod tests {
 				}
 
 				#[test]
-				fn test_small_le_3() {
+				fn small_le_3() {
 					let mut cnf = Cnf::default();
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
@@ -2086,7 +2086,7 @@ mod tests {
 				}
 
 				#[test]
-				fn test_small_le_4() {
+				fn small_le_4() {
 					let mut cnf = Cnf::default();
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
@@ -2110,7 +2110,7 @@ mod tests {
 				}
 
 				#[test]
-				fn test_small_eq_1() {
+				fn small_eq_1() {
 					let mut cnf = Cnf::default();
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
@@ -2134,7 +2134,7 @@ mod tests {
 				}
 
 				#[test]
-				fn test_small_eq_2() {
+				fn small_eq_2() {
 					let mut cnf = Cnf::default();
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
@@ -2158,7 +2158,7 @@ mod tests {
 				}
 
 				#[test]
-				fn test_small_eq_3() {
+				fn small_eq_3() {
 					let mut cnf = Cnf::default();
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
@@ -2183,7 +2183,7 @@ mod tests {
 				}
 
 				#[test]
-				fn test_small_eq_4() {
+				fn small_eq_4() {
 					let mut cnf = Cnf::default();
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
@@ -2229,15 +2229,8 @@ mod tests {
 		ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 	};
 
-	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(terms: &[(L, Coeff)]) -> Vec<Part> {
-		terms
-			.iter()
-			.map(|(lit, coef)| Part::Amo(vec![(lit.clone().into(), PosCoeff::new(*coef))]))
-			.collect()
-	}
-
 	#[test]
-	fn test_aggregator_at_least_one_negated() {
+	fn aggregator_at_least_one_negated() {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		// Correctly detect that all but one literal can be set to true
@@ -2278,7 +2271,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_aggregator_combine() {
+	fn aggregator_combine() {
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		// Simple aggregation of multiple occurrences of the same literal
@@ -2341,7 +2334,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_aggregator_detection() {
+	fn aggregator_detection() {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 
@@ -2488,7 +2481,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_aggregator_equal_one() {
+	fn aggregator_equal_one() {
 		let mut cnf = Cnf::default();
 		let vars = cnf.new_var_range(3).iter_lits().collect_vec();
 		// An exactly one constraint adds an exactly one constraint
@@ -2510,7 +2503,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_aggregator_false_trivial_unsat() {
+	fn aggregator_false_trivial_unsat() {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d, e, f, g) = cnf.new_lits();
 		assert_eq!(
@@ -2540,7 +2533,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_aggregator_neg_coeff() {
+	fn aggregator_neg_coeff() {
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 
@@ -2787,7 +2780,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_aggregator_sort_same_coefficients() {
+	fn aggregator_sort_same_coefficients() {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 
@@ -2818,7 +2811,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_aggregator_sort_same_coefficients_using_minimal_chain() {
+	fn aggregator_sort_same_coefficients_using_minimal_chain() {
 		let mut cnf = Cnf::default();
 		let vars = cnf.new_var_range(5).iter_lits().collect_vec();
 		assert_eq!(
@@ -2847,7 +2840,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_aggregator_unsat() {
+	fn aggregator_unsat() {
 		let mut db = Cnf::default();
 		let vars = db.new_var_range(3).iter_lits().collect_vec();
 
@@ -2900,8 +2893,15 @@ mod tests {
 		);
 	}
 
+	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(terms: &[(L, Coeff)]) -> Vec<Part> {
+		terms
+			.iter()
+			.map(|(lit, coef)| Part::Amo(vec![(lit.clone().into(), PosCoeff::new(*coef))]))
+			.collect()
+	}
+
 	#[test]
-	fn test_encoders() {
+	fn encoders() {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		// TODO encode this if encoder does not support constraint
@@ -2945,7 +2945,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_pb_encode() {
+	fn pb_encode() {
 		let mut cnf = Cnf::default();
 		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
 		LinearEncoder::<StaticLinEncoder>::default()
@@ -2964,7 +2964,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_sort_same_coefficients_2() {
+	fn sort_same_coefficients_2() {
 		let mut db = Cnf::default();
 		let vars = db.new_var_range(5).iter_lits().collect_vec();
 		let mut agg = BoolLinAggregator::default();

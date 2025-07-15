@@ -2,7 +2,6 @@
 members = [
 	"crates/pindakaas",
 	"crates/pindakaas-cadical",
-	"crates/pindakaas-derive",
 	"crates/pindakaas-intel-sat",
 	"crates/pindakaas-kissat",
 	"crates/pyndakaas",

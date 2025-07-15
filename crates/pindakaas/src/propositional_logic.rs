@@ -1,11 +1,11 @@
 use std::{
-	collections::HashSet,
 	fmt::{self, Display, Formatter},
 	iter::once,
 	ops::{BitAnd, BitOr, BitXor, Not},
 };
 
 use itertools::{Itertools, Position};
+use rustc_hash::FxHashSet;
 
 use crate::{
 	AsDynClauseDatabase, BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Result,
@@ -239,93 +239,7 @@ impl<Base: Display> Formula<Base> {
 	}
 }
 
-impl<Base> BitAnd<Self> for Formula<Base> {
-	type Output = Self;
-
-	fn bitand(self, rhs: Self) -> Self {
-		match (self, rhs) {
-			(Formula::And(mut sub), Formula::And(rhs)) => {
-				sub.extend(rhs);
-				Formula::And(sub)
-			}
-			(Formula::And(mut sub), x) | (x, Formula::And(mut sub)) => {
-				sub.push(x);
-				Formula::And(sub)
-			}
-			(lhs, rhs) => Formula::And(vec![lhs, rhs]),
-		}
-	}
-}
-
-impl<Base> BitOr<Self> for Formula<Base> {
-	type Output = Self;
-
-	fn bitor(self, rhs: Self) -> Self {
-		match (self, rhs) {
-			(Formula::Or(mut sub), Formula::Or(rhs)) => {
-				sub.extend(rhs);
-				Formula::Or(sub)
-			}
-			(Formula::Or(mut sub), x) | (x, Formula::Or(mut sub)) => {
-				sub.push(x);
-				Formula::Or(sub)
-			}
-			(lhs, rhs) => Formula::Or(vec![lhs, rhs]),
-		}
-	}
-}
-
-impl<Base> BitXor<Self> for Formula<Base> {
-	type Output = Self;
-
-	fn bitxor(self, rhs: Self) -> Self {
-		match (self, rhs) {
-			(Formula::Xor(mut sub), Formula::Xor(rhs)) => {
-				sub.extend(rhs);
-				Formula::Xor(sub)
-			}
-			(Formula::Xor(mut sub), x) | (x, Formula::Xor(mut sub)) => {
-				sub.push(x);
-				Formula::Xor(sub)
-			}
-			(lhs, rhs) => Formula::Xor(vec![lhs, rhs]),
-		}
-	}
-}
-
-impl<Base: Display> Display for Formula<Base> {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		self.fmt_inner(f, false)
-	}
-}
-
-impl<Base> Not for Formula<Base> {
-	type Output = Formula<Base>;
-
-	fn not(self) -> Self {
-		match self {
-			Formula::Not(f) => *f,
-			_ => Formula::Not(Box::new(self)),
-		}
-	}
-}
-
 impl Formula<BoolVal> {
-	/// Simplify the formula using the given literals as proven facts.
-	pub fn simplify<Iter>(self, facts: Iter) -> Result<Formula<Lit>, bool>
-	where
-		Iter: IntoIterator,
-		Iter::Item: Into<Lit>,
-	{
-		let knowledge: HashSet<_> = facts.into_iter().map_into().collect();
-		self.simplify_with(&mut |l| match l {
-			BoolVal::Const(b) => Err(b),
-			BoolVal::Lit(l) if knowledge.contains(&l) => Err(true),
-			BoolVal::Lit(l) if knowledge.contains(&!l) => Err(false),
-			BoolVal::Lit(l) => Ok(l),
-		})
-	}
-
 	/// Resolve the constant values in the formula.
 	///
 	/// If the formula is known to be unsatisfiable, then `Err(false)` is
@@ -338,111 +252,19 @@ impl Formula<BoolVal> {
 			BoolVal::Lit(l) => Ok(l),
 		})
 	}
-}
-
-impl BitAnd<bool> for Formula<BoolVal> {
-	type Output = Self;
-
-	fn bitand(self, rhs: bool) -> Self {
-		self & BoolVal::Const(rhs)
-	}
-}
-
-impl BitAnd<BoolVal> for Formula<BoolVal> {
-	type Output = Self;
-
-	fn bitand(self, rhs: BoolVal) -> Self {
-		match rhs {
-			BoolVal::Const(false) => Self::Atom(false.into()),
-			BoolVal::Const(true) => self,
-			BoolVal::Lit(lit) => self & Formula::Atom(BoolVal::Lit(lit)),
-		}
-	}
-}
-
-impl BitAnd<Lit> for Formula<BoolVal> {
-	type Output = Self;
-
-	fn bitand(self, rhs: Lit) -> Self {
-		self & BoolVal::Lit(rhs)
-	}
-}
-
-impl BitOr<bool> for Formula<BoolVal> {
-	type Output = Self;
-
-	fn bitor(self, rhs: bool) -> Self {
-		self | BoolVal::Const(rhs)
-	}
-}
-
-impl BitOr<BoolVal> for Formula<BoolVal> {
-	type Output = Self;
-
-	fn bitor(self, rhs: BoolVal) -> Self {
-		match rhs {
-			BoolVal::Const(true) => Self::Atom(true.into()),
-			BoolVal::Const(false) => self,
-			BoolVal::Lit(lit) => self | Formula::Atom(BoolVal::Lit(lit)),
-		}
-	}
-}
-
-impl BitOr<Lit> for Formula<BoolVal> {
-	type Output = Self;
-
-	fn bitor(self, rhs: Lit) -> Self {
-		self | BoolVal::Lit(rhs)
-	}
-}
-
-impl BitXor<bool> for Formula<BoolVal> {
-	type Output = Self;
-
-	fn bitxor(self, rhs: bool) -> Self {
-		self ^ BoolVal::Const(rhs)
-	}
-}
-
-impl BitXor<BoolVal> for Formula<BoolVal> {
-	type Output = Self;
-
-	fn bitxor(self, rhs: BoolVal) -> Self {
-		match rhs {
-			BoolVal::Const(false) => self,
-			BoolVal::Const(true) => !self,
-			BoolVal::Lit(lit) => self ^ Formula::Atom(BoolVal::Lit(lit)),
-		}
-	}
-}
-
-impl BitXor<Lit> for Formula<BoolVal> {
-	type Output = Self;
-
-	fn bitxor(self, rhs: Lit) -> Self {
-		self ^ BoolVal::Lit(rhs)
-	}
-}
-
-impl From<Formula<Lit>> for Formula<BoolVal> {
-	fn from(value: Formula<Lit>) -> Self {
-		match value {
-			Formula::And(sub) => Self::And(sub.into_iter().map_into().collect()),
-			Formula::Atom(lit) => Self::Atom(lit.into()),
-			Formula::Equiv(sub) => Self::Equiv(sub.into_iter().map_into().collect()),
-			Formula::IfThenElse { cond, then, els } => Self::IfThenElse {
-				cond: Box::new((*cond).into()),
-				then: Box::new((*then).into()),
-				els: Box::new((*els).into()),
-			},
-			Formula::Implies(f, g) => Self::Implies(Box::new((*f).into()), Box::new((*g).into())),
-			Formula::Not(f) => {
-				let f: Self = (*f).into();
-				!f
-			}
-			Formula::Or(sub) => Self::Or(sub.into_iter().map_into().collect()),
-			Formula::Xor(sub) => Self::Xor(sub.into_iter().map_into().collect()),
-		}
+	/// Simplify the formula using the given literals as proven facts.
+	pub fn simplify<Iter>(self, facts: Iter) -> Result<Formula<Lit>, bool>
+	where
+		Iter: IntoIterator,
+		Iter::Item: Into<Lit>,
+	{
+		let knowledge: FxHashSet<_> = facts.into_iter().map_into().collect();
+		self.simplify_with(&mut |l| match l {
+			BoolVal::Const(b) => Err(b),
+			BoolVal::Lit(l) if knowledge.contains(&l) => Err(true),
+			BoolVal::Lit(l) if knowledge.contains(&!l) => Err(false),
+			BoolVal::Lit(l) => Ok(l),
+		})
 	}
 }
 
@@ -598,7 +420,7 @@ impl Formula<Lit> {
 		Iter: IntoIterator,
 		Iter::Item: Into<Lit>,
 	{
-		let knowledge: HashSet<_> = facts.into_iter().map_into().collect();
+		let knowledge: FxHashSet<_> = facts.into_iter().map_into().collect();
 		self.simplify_with(&mut |l| {
 			if knowledge.contains(&l) {
 				Err(true)
@@ -608,6 +430,60 @@ impl Formula<Lit> {
 				Ok(l)
 			}
 		})
+	}
+}
+
+impl BitAnd<BoolVal> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitand(self, rhs: BoolVal) -> Self {
+		match rhs {
+			BoolVal::Const(false) => Self::Atom(false.into()),
+			BoolVal::Const(true) => self,
+			BoolVal::Lit(lit) => self & Formula::Atom(BoolVal::Lit(lit)),
+		}
+	}
+}
+
+impl BitAnd<Lit> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitand(self, rhs: Lit) -> Self {
+		self & BoolVal::Lit(rhs)
+	}
+}
+
+impl BitAnd<Lit> for Formula<Lit> {
+	type Output = Self;
+
+	fn bitand(self, rhs: Lit) -> Self {
+		self & Formula::Atom(rhs)
+	}
+}
+
+impl<Base> BitAnd<Self> for Formula<Base> {
+	type Output = Self;
+
+	fn bitand(self, rhs: Self) -> Self {
+		match (self, rhs) {
+			(Formula::And(mut sub), Formula::And(rhs)) => {
+				sub.extend(rhs);
+				Formula::And(sub)
+			}
+			(Formula::And(mut sub), x) | (x, Formula::And(mut sub)) => {
+				sub.push(x);
+				Formula::And(sub)
+			}
+			(lhs, rhs) => Formula::And(vec![lhs, rhs]),
+		}
+	}
+}
+
+impl BitAnd<bool> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitand(self, rhs: bool) -> Self {
+		self & BoolVal::Const(rhs)
 	}
 }
 
@@ -623,11 +499,57 @@ impl BitAnd<bool> for Formula<Lit> {
 	}
 }
 
-impl BitAnd<Lit> for Formula<Lit> {
+impl BitOr<BoolVal> for Formula<BoolVal> {
 	type Output = Self;
 
-	fn bitand(self, rhs: Lit) -> Self {
-		self & Formula::Atom(rhs)
+	fn bitor(self, rhs: BoolVal) -> Self {
+		match rhs {
+			BoolVal::Const(true) => Self::Atom(true.into()),
+			BoolVal::Const(false) => self,
+			BoolVal::Lit(lit) => self | Formula::Atom(BoolVal::Lit(lit)),
+		}
+	}
+}
+
+impl BitOr<Lit> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitor(self, rhs: Lit) -> Self {
+		self | BoolVal::Lit(rhs)
+	}
+}
+
+impl BitOr<Lit> for Formula<Lit> {
+	type Output = Self;
+
+	fn bitor(self, rhs: Lit) -> Self {
+		self | Formula::Atom(rhs)
+	}
+}
+
+impl<Base> BitOr<Self> for Formula<Base> {
+	type Output = Self;
+
+	fn bitor(self, rhs: Self) -> Self {
+		match (self, rhs) {
+			(Formula::Or(mut sub), Formula::Or(rhs)) => {
+				sub.extend(rhs);
+				Formula::Or(sub)
+			}
+			(Formula::Or(mut sub), x) | (x, Formula::Or(mut sub)) => {
+				sub.push(x);
+				Formula::Or(sub)
+			}
+			(lhs, rhs) => Formula::Or(vec![lhs, rhs]),
+		}
+	}
+}
+
+impl BitOr<bool> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitor(self, rhs: bool) -> Self {
+		self | BoolVal::Const(rhs)
 	}
 }
 
@@ -643,11 +565,57 @@ impl BitOr<bool> for Formula<Lit> {
 	}
 }
 
-impl BitOr<Lit> for Formula<Lit> {
+impl BitXor<BoolVal> for Formula<BoolVal> {
 	type Output = Self;
 
-	fn bitor(self, rhs: Lit) -> Self {
-		self | Formula::Atom(rhs)
+	fn bitxor(self, rhs: BoolVal) -> Self {
+		match rhs {
+			BoolVal::Const(false) => self,
+			BoolVal::Const(true) => !self,
+			BoolVal::Lit(lit) => self ^ Formula::Atom(BoolVal::Lit(lit)),
+		}
+	}
+}
+
+impl BitXor<Lit> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitxor(self, rhs: Lit) -> Self {
+		self ^ BoolVal::Lit(rhs)
+	}
+}
+
+impl BitXor<Lit> for Formula<Lit> {
+	type Output = Self;
+
+	fn bitxor(self, rhs: Lit) -> Self {
+		self ^ Formula::Atom(rhs)
+	}
+}
+
+impl<Base> BitXor<Self> for Formula<Base> {
+	type Output = Self;
+
+	fn bitxor(self, rhs: Self) -> Self {
+		match (self, rhs) {
+			(Formula::Xor(mut sub), Formula::Xor(rhs)) => {
+				sub.extend(rhs);
+				Formula::Xor(sub)
+			}
+			(Formula::Xor(mut sub), x) | (x, Formula::Xor(mut sub)) => {
+				sub.push(x);
+				Formula::Xor(sub)
+			}
+			(lhs, rhs) => Formula::Xor(vec![lhs, rhs]),
+		}
+	}
+}
+
+impl BitXor<bool> for Formula<BoolVal> {
+	type Output = Self;
+
+	fn bitxor(self, rhs: bool) -> Self {
+		self ^ BoolVal::Const(rhs)
 	}
 }
 
@@ -663,11 +631,42 @@ impl BitXor<bool> for Formula<Lit> {
 	}
 }
 
-impl BitXor<Lit> for Formula<Lit> {
-	type Output = Self;
+impl<Base: Display> Display for Formula<Base> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		self.fmt_inner(f, false)
+	}
+}
 
-	fn bitxor(self, rhs: Lit) -> Self {
-		self ^ Formula::Atom(rhs)
+impl From<Formula<Lit>> for Formula<BoolVal> {
+	fn from(value: Formula<Lit>) -> Self {
+		match value {
+			Formula::And(sub) => Self::And(sub.into_iter().map_into().collect()),
+			Formula::Atom(lit) => Self::Atom(lit.into()),
+			Formula::Equiv(sub) => Self::Equiv(sub.into_iter().map_into().collect()),
+			Formula::IfThenElse { cond, then, els } => Self::IfThenElse {
+				cond: Box::new((*cond).into()),
+				then: Box::new((*then).into()),
+				els: Box::new((*els).into()),
+			},
+			Formula::Implies(f, g) => Self::Implies(Box::new((*f).into()), Box::new((*g).into())),
+			Formula::Not(f) => {
+				let f: Self = (*f).into();
+				!f
+			}
+			Formula::Or(sub) => Self::Or(sub.into_iter().map_into().collect()),
+			Formula::Xor(sub) => Self::Xor(sub.into_iter().map_into().collect()),
+		}
+	}
+}
+
+impl<Base> Not for Formula<Base> {
+	type Output = Formula<Base>;
+
+	fn not(self) -> Self {
+		match self {
+			Formula::Not(f) => *f,
+			_ => Formula::Not(Box::new(self)),
+		}
 	}
 }
 

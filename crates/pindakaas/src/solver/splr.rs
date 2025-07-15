@@ -2,10 +2,9 @@ use std::num::NonZeroI32;
 
 use itertools::Itertools;
 pub use splr::Solver as Splr;
-use splr::{Certificate, SatSolverIF, SolveIF, VERSION};
+use splr::{Certificate, SatSolverIF, SolveIF};
 
 use crate::{
-	helpers::const_concat,
 	solver::{SolveResult, Solver},
 	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit, Result, Valuation, Var, VarRange,
 };
@@ -85,11 +84,6 @@ impl From<&Cnf> for Splr {
 }
 
 impl Solver for Splr {
-	fn signature(&self) -> &str {
-		const SPLR_SIG: &str = const_concat!("SPLR-", VERSION);
-		SPLR_SIG
-	}
-
 	#[expect(
 		refining_impl_trait,
 		reason = "user can use more specific type if needed"
@@ -118,7 +112,7 @@ mod tests {
 	// use crate::{linear::LimitComp, solver::SolveResult, CardinalityOne, Encoder, PairwiseEncoder};
 
 	#[test]
-	fn test_splr() {
+	fn splr() {
 		let mut _slv = splr::Solver::default();
 
 		// TODO: Something weird is happening with the Variables

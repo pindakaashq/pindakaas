@@ -1,5 +1,6 @@
 use std::{
 	ffi::{c_char, c_int, c_void, CStr},
+	fmt,
 	num::NonZeroI32,
 	ptr,
 };
@@ -8,8 +9,9 @@ use libloading::{Library, Symbol};
 
 use crate::{
 	solver::{
-		get_trampoline0, get_trampoline1, ExplIter, FFIPointer, FailedAssumtions, LearnCallback,
-		SlvTermSignal, SolveAssuming, SolveResult, Solver, TermCallback, VarFactory,
+		ipasir::{get_trampoline0, get_trampoline1, ExplIter, IpasirLearnCb, IpasirTerminationCb},
+		FailedAssumptions, LearnCallback, SlvTermSignal, SolveAssuming, SolveResult, Solver,
+		TerminateCallback, VarFactory,
 	},
 	ClauseDatabase, Lit, Result, Valuation,
 };
@@ -31,7 +33,6 @@ pub struct IpasirSol<'lib> {
 	value_fn: Symbol<'lib, extern "C" fn(*mut c_void, i32) -> i32>,
 }
 
-#[derive(Debug)]
 pub struct IpasirSolver<'lib> {
 	/// The raw pointer to the Intel SAT solver.
 	slv: *mut c_void,
@@ -39,9 +40,9 @@ pub struct IpasirSolver<'lib> {
 	vars: VarFactory,
 
 	/// The callback used when a clause is learned.
-	learn_cb: FFIPointer,
+	learn_cb: Option<IpasirLearnCb>,
 	/// The callback used to check whether the solver should terminate.
-	term_cb: FFIPointer,
+	term_cb: Option<IpasirTerminationCb>,
 
 	signature_fn: Symbol<'lib, extern "C" fn() -> *const c_char>,
 	release_fn: Symbol<'lib, extern "C" fn(*mut c_void)>,
@@ -68,7 +69,7 @@ pub struct IpasirSolver<'lib> {
 pub type SymResult<'a, S, E = libloading::Error> = std::result::Result<Symbol<'a, S>, E>;
 
 // --- Helpers for C interface ---
-impl FailedAssumtions for IpasirFailed<'_> {
+impl FailedAssumptions for IpasirFailed<'_> {
 	fn fail(&self, lit: Lit) -> bool {
 		let lit: i32 = lit.into();
 		let failed = (self.failed_fn)(self.slv, lit);
@@ -152,8 +153,8 @@ impl IpasirLibrary {
 		IpasirSolver {
 			slv: (self.ipasir_init_sym().unwrap())(),
 			vars: VarFactory::default(),
-			learn_cb: FFIPointer::default(),
-			term_cb: FFIPointer::default(),
+			learn_cb: None,
+			term_cb: None,
 			signature_fn: self.ipasir_signature_sym().unwrap(),
 			release_fn: self.ipasir_release_sym().unwrap(),
 			add_fn: self.ipasir_add_sym().unwrap(),
@@ -216,6 +217,15 @@ impl IpasirSolver<'_> {
 			failed_fn: self.failed_fn.clone(),
 		}
 	}
+
+	pub fn signature(&self) -> &str {
+		// SAFETY: We assume that the signature function as part of the IPASIR
+		// interface returns a valid C string.
+		unsafe { CStr::from_ptr((self.signature_fn)()) }
+			.to_str()
+			.unwrap()
+	}
+
 	fn sol_obj(&self) -> IpasirSol<'_> {
 		IpasirSol {
 			slv: self.slv,
@@ -256,16 +266,15 @@ impl LearnCallback for IpasirSolver<'_> {
 	) {
 		const MAX_LEN: c_int = 512;
 		if let Some(mut cb) = cb {
-			let wrapped_cb = move |clause: *const i32| {
+			let mut wrapped_cb = Box::new(move |clause: *const i32| {
 				let mut iter = ExplIter(clause).map(|i: i32| Lit(NonZeroI32::new(i).unwrap()));
 				cb(&mut iter);
-			};
-
-			let trampoline = get_trampoline1(&wrapped_cb);
-			self.learn_cb = FFIPointer::new(wrapped_cb);
-			(self.set_learn_fn)(self.slv, self.learn_cb.get_ptr(), MAX_LEN, Some(trampoline));
+			});
+			let (data_ptr, fn_ptr) = get_trampoline1(&mut wrapped_cb);
+			self.learn_cb = Some(wrapped_cb);
+			(self.set_learn_fn)(self.slv, data_ptr, MAX_LEN, Some(fn_ptr));
 		} else {
-			self.learn_cb = FFIPointer::default();
+			self.learn_cb = None;
 			(self.set_learn_fn)(self.slv, ptr::null_mut(), MAX_LEN, None);
 		}
 	}
@@ -288,14 +297,6 @@ impl SolveAssuming for IpasirSolver<'_> {
 }
 
 impl Solver for IpasirSolver<'_> {
-	fn signature(&self) -> &str {
-		// SAFETY: We assume that the signature function as part of the IPASIR
-		// interface returns a valid C string.
-		unsafe { CStr::from_ptr((self.signature_fn)()) }
-			.to_str()
-			.unwrap()
-	}
-
 	#[expect(
 		refining_impl_trait,
 		reason = "user can use more specific type if needed"
@@ -313,21 +314,44 @@ impl Solver for IpasirSolver<'_> {
 	}
 }
 
-impl TermCallback for IpasirSolver<'_> {
+impl TerminateCallback for IpasirSolver<'_> {
 	fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>) {
 		if let Some(mut cb) = cb {
-			let wrapped_cb = move || -> c_int {
+			let mut wrapped_cb = Box::new(move || -> c_int {
 				match cb() {
 					SlvTermSignal::Continue => c_int::from(0),
 					SlvTermSignal::Terminate => c_int::from(1),
 				}
-			};
-			let trampoline = get_trampoline0(&wrapped_cb);
-			self.term_cb = FFIPointer::new(wrapped_cb);
-			(self.set_terminate_fn)(self.slv, self.term_cb.get_ptr(), Some(trampoline));
+			});
+			let (data_ptr, fn_ptr) = get_trampoline0(&mut wrapped_cb);
+			self.term_cb = Some(wrapped_cb);
+			(self.set_terminate_fn)(self.slv, data_ptr, Some(fn_ptr));
 		} else {
-			self.term_cb = FFIPointer::default();
+			self.term_cb = None;
 			(self.set_terminate_fn)(self.slv, ptr::null_mut(), None);
 		}
+	}
+}
+
+impl fmt::Debug for IpasirSolver<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("IpasirSolver")
+			.field("slv", &self.slv)
+			.field("vars", &self.vars)
+			.field(
+				"learn_cb",
+				&self.learn_cb.as_ref().map(|b| {
+					let p: *const _ = b.as_ref();
+					p
+				}),
+			)
+			.field(
+				"term_cb",
+				&self.learn_cb.as_ref().map(|b| {
+					let p: *const _ = b.as_ref();
+					p
+				}),
+			)
+			.finish()
 	}
 }

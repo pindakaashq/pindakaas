@@ -1,68 +1,48 @@
 use std::{
-	ffi::{c_void, CString},
-	fmt,
+	ffi::{c_int, c_void, CString},
+	marker::PhantomData,
 };
 
-use pindakaas_cadical::{ccadical_copy, ccadical_enable_proof, ccadical_phase, ccadical_unphase};
-use pindakaas_derive::IpasirSolver;
+use pindakaas_cadical::{
+	ccadical_add, ccadical_assume, ccadical_copy, ccadical_enable_proof, ccadical_failed,
+	ccadical_get_option, ccadical_init, ccadical_limit, ccadical_phase, ccadical_release,
+	ccadical_set_learn, ccadical_set_option, ccadical_set_terminate, ccadical_solve,
+	ccadical_unphase, ccadical_val,
+};
+#[cfg(feature = "external-propagation")]
+use pindakaas_cadical::{
+	ccadical_add_observed_var, ccadical_connect_external_propagator,
+	ccadical_disconnect_external_propagator, ccadical_force_backtrack, ccadical_is_decision,
+	ccadical_is_observed, ccadical_remove_observed_var, ccadical_reset_observed_vars,
+};
 
-use crate::{solver::FFIPointer, Lit, VarFactory};
+#[cfg(feature = "external-propagation")]
+use crate::solver::{
+	ipasir::user_propagation::IpasirUserPropagationMethods, propagation::PropagatingSolver,
+};
+use crate::{
+	helpers::opt_field::OptField,
+	solver::{
+		ipasir::{
+			AccessIpasirStore, BasicIpasirStorage, IpasirAssumptionMethods,
+			IpasirLearnCallbackMethod, IpasirSolverMethods, IpasirStore, IpasirStoreInner,
+			IpasirTermCallbackMethod,
+		},
+		LearnCallback, SlvTermSignal, TerminateCallback,
+	},
+	ClauseDatabaseTools, Cnf, Lit, VarRange,
+};
 
-#[derive(IpasirSolver)]
-#[ipasir(krate = pindakaas_cadical, assumptions, learn_callback, term_callback, ipasir_up)]
+#[derive(Debug, Default)]
 pub struct Cadical {
-	/// The raw pointer to the Cadical solver.
-	ptr: *mut c_void,
-	/// The variable factory for this solver.
-	vars: VarFactory,
-	/// The callback used when a clause is learned.
-	learn_cb: FFIPointer,
-	/// The callback used to check whether the solver should terminate.
-	term_cb: FFIPointer,
+	store: IpasirStore<Cadical, 1, 1, 1>,
 }
 
 impl Cadical {
-	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
-	pub fn get_option(&self, name: &str) -> i32 {
-		let name = CString::new(name).unwrap();
-		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
-		// handles non-existing options gracefully.
-		unsafe { pindakaas_cadical::ccadical_get_option(self.ptr, name.as_ptr()) }
-	}
-
-	#[cfg(feature = "external-propagation")]
-	/// Check whether a given literal is marked as observed in the solver's
-	/// external propagator interface.
-	fn is_observed(&self, lit: Lit) -> bool {
-		// SAFETY: Pointer known to be non-null, lit is known to be non-zero and not
-		// MIN_INT as required by Cadical.
-		unsafe { pindakaas_cadical::ccadical_is_observed(self.ptr, lit.0.get()) }
-	}
-
-	pub fn phase(&mut self, lit: Lit) {
-		// SAFETY: Pointer known to be non-null, no other known safety concerns.
-		unsafe { ccadical_phase(self.ptr, lit.0.get()) }
-	}
-
-	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
-	pub fn set_option(&mut self, name: &str, value: i32) {
-		let name = CString::new(name).unwrap();
-		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
-		// handles non-existing options gracefully.
-		unsafe { pindakaas_cadical::ccadical_set_option(self.ptr, name.as_ptr(), value) }
-	}
-
-	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
-	pub fn set_limit(&mut self, name: &str, value: i32) {
-		let name = CString::new(name).unwrap();
-		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
-		// handles non-existing options gracefully.
-		unsafe { pindakaas_cadical::ccadical_limit(self.ptr, name.as_ptr(), value) }
-	}
-
-	pub fn unphase(&mut self, lit: Lit) {
-		// SAFETY: Pointer known to be non-null, no other known safety concerns.
-		unsafe { ccadical_unphase(self.ptr, lit.0.get()) }
+	// TODO: Unsure whether this is a good idea.
+	#[doc(hidden)]
+	pub fn emitted_vars(&self) -> VarRange {
+		self.ipasir_store().vars().emitted_vars()
 	}
 
 	pub fn enable_proof(&mut self, name: &str) {
@@ -70,64 +50,173 @@ impl Cadical {
 		// SAFETY: Pointer is known to be valid, CaDiCaL's file API should handle
 		// all possible name paths.
 		unsafe {
-			ccadical_enable_proof(self.ptr, name.as_ptr());
+			ccadical_enable_proof(self.ipasir_store().solver_ptr(), name.as_ptr());
 		}
 	}
-}
 
-impl Clone for Cadical {
-	fn clone(&self) -> Self {
+	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
+	pub fn get_option(&self, name: &str) -> i32 {
+		let name = CString::new(name).unwrap();
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
+		// handles non-existing options gracefully.
+		unsafe { ccadical_get_option(self.ipasir_store().solver_ptr(), name.as_ptr()) }
+	}
+
+	#[cfg(feature = "external-propagation")]
+	/// Check whether a given literal is marked as observed in the solver's
+	/// for the [`PropagatingSolver`] interface.
+	pub fn is_observed(&self, lit: Lit) -> bool {
+		// SAFETY: Pointer known to be non-null, lit is known to be non-zero and not
+		// MIN_INT as required by Cadical.
+		unsafe { ccadical_is_observed(self.ipasir_store().solver_ptr(), lit.0.get()) }
+	}
+
+	pub fn phase(&mut self, lit: Lit) {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
-		let ptr = unsafe { ccadical_copy(self.ptr) };
-		let vars = self.vars; // Copy
-		Self {
-			ptr,
-			vars,
-			learn_cb: FFIPointer::default(),
-			term_cb: FFIPointer::default(),
-		}
+		unsafe { ccadical_phase(self.ipasir_store().solver_ptr(), lit.0.get()) }
+	}
+
+	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
+	pub fn set_limit(&mut self, name: &str, value: i32) {
+		let name = CString::new(name).unwrap();
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
+		// handles non-existing options gracefully.
+		unsafe { ccadical_limit(self.ipasir_store().solver_ptr(), name.as_ptr(), value) }
+	}
+
+	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
+	pub fn set_option(&mut self, name: &str, value: i32) {
+		let name = CString::new(name).unwrap();
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
+		// handles non-existing options gracefully.
+		unsafe { ccadical_set_option(self.ipasir_store().solver_ptr(), name.as_ptr(), value) }
+	}
+
+	/// Make a shallow clone of the [`Cadical`] solver using an efficient internal method.
+	///
+	/// The shallow copy includes the permanent clauses, but will not include
+	/// learned clauses, connected callbacks, or external propagator.
+	pub fn shallow_clone(&self) -> Self {
+		// SAFETY: Pointer known to be non-null, no other known safety concerns.
+		let ptr = unsafe { ccadical_copy(self.ipasir_store().solver_ptr()) };
+		let vars = *self.ipasir_store().vars(); // Copy
+
+		// Initialize [`Self`] instance.
+		let mut slv = Self {
+			store: IpasirStore {
+				store: Box::new(IpasirStoreInner {
+					ptr,
+					vars,
+					learn_cb: OptField::default(),
+					term_cb: OptField::default(),
+					#[cfg(feature = "external-propagation")]
+					propagator: OptField::default(),
+					#[cfg(not(feature = "external-propagation"))]
+					_propagator: PhantomData,
+				}),
+				_methods: PhantomData,
+			},
+		};
+		// Make sure no pointers are left behind in the backend.
+		slv.set_learn_callback::<fn(&mut dyn Iterator<Item = Lit>)>(None);
+		slv.set_terminate_callback::<fn() -> SlvTermSignal>(None);
+		#[cfg(feature = "external-propagation")]
+		slv.disconnect_propagator();
+
+		slv
+	}
+
+	pub fn unphase(&mut self, lit: Lit) {
+		// SAFETY: Pointer known to be non-null, no other known safety concerns.
+		unsafe { ccadical_unphase(self.ipasir_store().solver_ptr(), lit.0.get()) }
 	}
 }
 
-impl Default for Cadical {
-	fn default() -> Self {
-		Self {
-			// SAFETY: Assume ipasir_init() returns a non-null pointer.
-			ptr: unsafe { pindakaas_cadical::ipasir_init() },
-			vars: VarFactory::default(),
-			learn_cb: FFIPointer::default(),
-			term_cb: FFIPointer::default(),
-		}
+impl AccessIpasirStore for Cadical {
+	type Store = IpasirStore<Self, 1, 1, 1>;
+
+	fn ipasir_store(&self) -> &Self::Store {
+		&self.store
+	}
+
+	fn ipasir_store_mut(&mut self) -> &mut Self::Store {
+		&mut self.store
 	}
 }
 
-impl fmt::Debug for Cadical {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("Cadical")
-			.field("ptr", &self.ptr)
-			.field("vars", &self.vars)
-			.finish()
+impl From<&Cnf> for Cadical {
+	fn from(value: &Cnf) -> Self {
+		let mut slv: Self = Default::default();
+		*slv.ipasir_store_mut().vars_mut() = value.nvar;
+		for cl in value.iter() {
+			// Ignore early detected unsatisfiability
+			let _ = slv.add_clause(cl.iter().copied());
+		}
+		slv
 	}
+}
+
+impl IpasirAssumptionMethods for Cadical {
+	const IPASIR_ASSUME: unsafe extern "C" fn(*mut c_void, i32) = ccadical_assume;
+	const IPASIR_FAILED: unsafe extern "C" fn(*mut c_void, i32) -> c_int = ccadical_failed;
+}
+
+impl IpasirLearnCallbackMethod for Cadical {
+	const IPASIR_SET_LEARN_CALLBACK: unsafe extern "C" fn(
+		*mut c_void,
+		*mut c_void,
+		c_int,
+		Option<unsafe extern "C" fn(*mut c_void, *const i32)>,
+	) = ccadical_set_learn;
+}
+
+impl IpasirSolverMethods for Cadical {
+	const IPASIR_ADD: unsafe extern "C" fn(*mut c_void, i32) = ccadical_add;
+	const IPASIR_INIT: unsafe extern "C" fn() -> *mut c_void = ccadical_init;
+	const IPASIR_RELEASE: unsafe extern "C" fn(*mut c_void) = ccadical_release;
+	const IPASIR_SOLVE: unsafe extern "C" fn(*mut c_void) -> c_int = ccadical_solve;
+	const IPASIR_VAL: unsafe extern "C" fn(*mut c_void, i32) -> i32 = ccadical_val;
+}
+
+impl IpasirTermCallbackMethod for Cadical {
+	const IPASIR_SET_TERMINATE_CALLBACK: unsafe extern "C" fn(
+		*mut c_void,
+		*mut c_void,
+		Option<unsafe extern "C" fn(*mut c_void) -> c_int>,
+	) = ccadical_set_terminate;
 }
 
 #[cfg(feature = "external-propagation")]
-impl<P> Clone for PropagatingCadical<P>
-where
-	P: Clone + crate::solver::propagation::Propagator,
-{
-	fn clone(&self) -> Self {
-		use crate::solver::propagation::{PropagatingSolver, WithPropagator};
-
-		let cadical = self.solver().clone();
-		let propagator = self.propagator().clone();
-		let mut cadical = cadical.with_propagator(propagator);
-		for v in self.solver().vars.emitted_vars() {
-			if self.solver().is_observed(v.into()) {
-				cadical.add_observed_var(v);
-			}
-		}
-		cadical
-	}
+impl IpasirUserPropagationMethods for Cadical {
+	const IPASIR_ADD_OBSERVED_VAR: unsafe extern "C" fn(slv: *mut c_void, lit: i32) =
+		ccadical_add_observed_var;
+	const IPASIR_CONNECT_EXTERNAL_PROPAGATOR: unsafe extern "C" fn(
+		slv: *mut c_void,
+		propagator_data: *mut c_void,
+		notify_assignments: unsafe extern "C" fn(*mut c_void, *const i32, usize),
+		notify_new_decision_level: unsafe extern "C" fn(*mut c_void),
+		notify_backtrack: unsafe extern "C" fn(*mut c_void, usize, bool),
+		cb_check_found_model: unsafe extern "C" fn(*mut c_void, *const i32, usize) -> bool,
+		cb_has_external_clause: unsafe extern "C" fn(*mut c_void, *mut bool) -> bool,
+		cb_add_external_clause_lit: unsafe extern "C" fn(*mut c_void) -> i32,
+		is_lazy: bool,
+		forgettable_reasons: bool,
+		notify_fixed: bool,
+		cb_decide: unsafe extern "C" fn(*mut c_void) -> i32,
+		cb_propagate: unsafe extern "C" fn(*mut c_void) -> i32,
+		cb_add_reason_clause_lit: unsafe extern "C" fn(*mut c_void, i32) -> i32,
+		notify_fixed_assignment: unsafe extern "C" fn(*mut c_void, i32),
+	) = ccadical_connect_external_propagator;
+	const IPASIR_DISCONNECT_EXTERNAL_PROPAGATOR: unsafe extern "C" fn(slv: *mut c_void) =
+		ccadical_disconnect_external_propagator;
+	const IPASIR_FORCE_BACKTRACK: unsafe extern "C" fn(slv: *mut c_void, level: usize) =
+		ccadical_force_backtrack;
+	const IPASIR_IS_DECISION: unsafe extern "C" fn(slv: *mut c_void, lit: i32) -> bool =
+		ccadical_is_decision;
+	const IPASIR_REMOVE_OBSERVED_VAR: unsafe extern "C" fn(slv: *mut c_void, lit: i32) =
+		ccadical_remove_observed_var;
+	const IPASIR_RESET_OBSERVED_VARS: unsafe extern "C" fn(slv: *mut c_void) =
+		ccadical_reset_observed_vars;
 }
 
 #[cfg(test)]
@@ -136,20 +225,80 @@ mod tests {
 
 	use itertools::Itertools;
 	use traced_test::test;
-	use tracing::warn;
 
 	use crate::{
 		bool_linear::LimitComp,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
 		helpers::tests::{assert_solutions, expect_file},
-		solver::{cadical::Cadical, SlvTermSignal, SolveResult, Solver, TermCallback},
+		solver::{cadical::Cadical, SlvTermSignal, SolveResult, Solver, TerminateCallback},
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Unsatisfiable, Valuation,
 	};
 
 	#[test]
-	fn test_cadical() {
+	fn clone() {
 		let mut slv = Cadical::default();
-		assert!(slv.signature().starts_with("cadical"));
+		let (a, b) = slv.new_lits();
+		slv.add_clause([a, b]).unwrap();
+
+		let mut cp = slv.shallow_clone();
+		cp.add_clause([!a]).unwrap();
+		cp.add_clause([!b]).unwrap();
+
+		let SolveResult::Satisfied(solution) = slv.solve() else {
+			unreachable!()
+		};
+		assert!(solution.value(a) && solution.value(b));
+
+		let SolveResult::Unsatisfiable(_) = cp.solve() else {
+			unreachable!()
+		};
+	}
+
+	#[test]
+	fn empty_clause() {
+		let mut slv = Cadical::default();
+		assert_eq!(slv.add_clause([false]), Err(Unsatisfiable));
+		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_)));
+	}
+
+	#[test]
+	fn empty_clause_2() {
+		let mut slv = Cadical::default();
+		const EMPTY: [BoolVal; 0] = [];
+		assert_eq!(slv.add_clause(EMPTY), Err(Unsatisfiable));
+		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_)));
+	}
+
+	#[test]
+	fn empty_formula() {
+		let mut cnf = Cnf::default();
+		assert_solutions(
+			&cnf,
+			Vec::<Lit>::new(),
+			&expect_file!["cadical/test_cadical_empty_formula.sol"],
+		);
+
+		let mut slv = Cadical::from(&cnf);
+		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
+	}
+
+	#[test]
+	fn empty_formula_single_var() {
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		assert_solutions(
+			&cnf,
+			Vec::<Lit>::new(),
+			&expect_file!["cadical/test_cadical_empty_formula_single_var.sol"],
+		);
+
+		let mut slv = Cadical::from(&cnf);
+		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
+	}
+
+	#[test]
+	fn solve() {
+		let mut slv = Cadical::default();
 
 		let a = slv.new_var().into();
 		let b = slv.new_var().into();
@@ -171,42 +320,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_cadical_clone() {
-		let mut slv = Cadical::default();
-		let (a, b) = slv.new_lits();
-		slv.add_clause([a, b]).unwrap();
-
-		let mut cp = slv.clone();
-		cp.add_clause([!a]).unwrap();
-		cp.add_clause([!b]).unwrap();
-
-		let SolveResult::Satisfied(solution) = slv.solve() else {
-			unreachable!()
-		};
-		assert!(solution.value(a) && solution.value(b));
-
-		let SolveResult::Unsatisfiable(_) = cp.solve() else {
-			unreachable!()
-		};
-	}
-
-	#[test]
-	fn test_cadical_empty_clause() {
-		let mut slv = Cadical::default();
-		assert_eq!(slv.add_clause([false]), Err(Unsatisfiable));
-		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_)));
-	}
-
-	#[test]
-	fn test_cadical_empty_clause_2() {
-		let mut slv = Cadical::default();
-		const EMPTY: [BoolVal; 0] = [];
-		assert_eq!(slv.add_clause(EMPTY), Err(Unsatisfiable));
-		assert!(matches!(slv.solve(), SolveResult::Unsatisfiable(_)));
-	}
-
-	#[test]
-	fn test_cadical_terminate_callback() {
+	fn terminate_callback() {
 		let mut slv = Cadical::default();
 
 		// Encode a pidgeon hole problem that is not trivially solvable
@@ -230,7 +344,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_cadical_trivial_example() {
+	fn trivial_example() {
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		let b = cnf.new_lit();
@@ -245,48 +359,19 @@ mod tests {
 		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
 	}
 
-	#[test]
-	fn test_cadical_empty_formula() {
-		let mut cnf = Cnf::default();
-		assert_solutions(
-			&cnf,
-			Vec::<Lit>::new(),
-			&expect_file!["cadical/test_cadical_empty_formula.sol"],
-		);
-
-		let mut slv = Cadical::from(&cnf);
-		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
-	}
-
-	#[test]
-	fn test_cadical_empty_formula_single_var() {
-		let mut cnf = Cnf::default();
-		let a = cnf.new_lit();
-		assert_solutions(
-			&cnf,
-			Vec::<Lit>::new(),
-			&expect_file!["cadical/test_cadical_empty_formula_single_var.sol"],
-		);
-
-		warn!("{}", cnf);
-		let mut slv = Cadical::from(&cnf);
-		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
-	}
-
 	#[cfg(feature = "external-propagation")]
 	#[test]
-	fn test_ipasir_up() {
-		use std::any::Any;
+	fn user_propagator() {
+		use std::{cell::RefCell, rc::Rc};
 
 		use itertools::Itertools;
 
 		use crate::{
 			helpers::tests::assert_solutions,
 			solver::{
-				cadical::CadicalSol,
 				propagation::{
-					ClausePersistence, PropagatingSolver, Propagator, SolvingActions,
-					WithPropagator,
+					ClausePersistence, PropagatingSolver, Propagator, PropagatorDefinition,
+					SolvingActions,
 				},
 				VarRange,
 			},
@@ -302,9 +387,6 @@ mod tests {
 			tmp: Vec<Vec<Lit>>,
 		}
 		impl Propagator for Dist2 {
-			fn is_check_only(&self) -> bool {
-				true
-			}
 			fn check_solution(
 				&mut self,
 				_slv: &mut dyn SolvingActions,
@@ -330,19 +412,25 @@ mod tests {
 				self.tmp.pop().map(|c| (c, ClausePersistence::Forgettable))
 			}
 		}
+		impl PropagatorDefinition for Dist2 {
+			const CHECK_ONLY: bool = true;
+			const PERSISTENT_ASSIGNMENTS: bool = false;
+		}
 
-		let p = Dist2 {
+		let p = Rc::new(RefCell::new(Dist2 {
 			vars,
 			tmp: Vec::new(),
-		};
-		let mut slv = slv.with_propagator(p);
+		}));
+		assert_eq!(Rc::strong_count(&p), 1);
+		slv.connect_propagator(Rc::clone(&p));
+		assert_eq!(Rc::strong_count(&p), 2);
 		slv.add_clause(vars).unwrap();
 		for v in vars {
-			PropagatingSolver::add_observed_var(&mut slv, v)
+			slv.add_observed_var(v)
 		}
 
 		let mut solns: Vec<Vec<Lit>> = Vec::new();
-		while let (_, SolveResult::Satisfied(sol)) = slv.solve() {
+		while let SolveResult::Satisfied(sol) = slv.solve() {
 			let sol: Vec<Lit> = vars
 				.clone()
 				.map(|v| if sol.value(v.into()) { v.into() } else { !v })
@@ -367,6 +455,15 @@ mod tests {
 				vec![!a, !b, !c, !d, e],
 			]
 		);
-		assert!(slv.propagator().tmp.is_empty())
+		assert!(p.borrow().tmp.is_empty());
+
+		// Test disconnecting propagator
+		slv.disconnect_propagator();
+		assert_eq!(Rc::strong_count(&p), 1);
+		slv.connect_propagator(Rc::clone(&p));
+		assert_eq!(Rc::strong_count(&p), 2);
+		// Test correct release of propagator on drop
+		drop(slv);
+		assert_eq!(Rc::strong_count(&p), 1);
 	}
 }

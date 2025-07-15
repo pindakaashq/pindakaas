@@ -31,61 +31,6 @@ macro_rules! as_dyn_trait {
 
 as_dyn_trait!(AsDynClauseDatabase, ClauseDatabase);
 
-#[cfg(feature = "splr")]
-macro_rules! concat_slices {
-    ([$init:expr; $T:ty]: $($s:expr),+ $(,)?) => {{
-        $(
-            const _: &[$T] = $s; // require constants
-        )*
-        const LEN: usize = $( $s.len() + )* 0;
-        const ARR: [$T; LEN] = {
-            let mut arr: [$T; LEN] = [$init; LEN];
-            let mut base: usize = 0;
-            $({
-                let mut i = 0;
-                while i < $s.len() {
-                    arr[base + i] = $s[i];
-                    i += 1;
-                }
-                base += $s.len();
-            })*
-            if base != LEN { panic!("invalid length"); }
-            arr
-        };
-        &ARR
-    }};
-
-    ([$T:ty]: $($s:expr),+ $(,)?) => {
-        $crate::helpers::concat_slices!([0; $T]: $($s),+)
-    };
-}
-
-#[cfg(feature = "splr")]
-macro_rules! const_concat {
-	($($e:expr),+) => {{
-			$crate::helpers::const_concat!(@impl $($crate::helpers::maybe_std_concat!($e)),+)
-	}};
-
-	(@impl $($e:expr),+) => {{
-			$(
-					const _: &str = $e;
-			)*
-			let slice: &[u8] = $crate::helpers::concat_slices!([u8]: $($e.as_bytes()),+);
-			// SAFETY: the slice is constructed from string literals, so it is valid UTF-8
-			unsafe { std::str::from_utf8_unchecked(slice) }
-	}};
-}
-
-#[cfg(feature = "splr")]
-macro_rules! maybe_std_concat {
-	($e:literal) => {
-		concat!($e)
-	};
-	($e:expr) => {
-		$e
-	};
-}
-
 #[cfg(not(any(feature = "tracing", test)))]
 /// Helper marco to create a new named literal within the library independent of
 /// whether `tracing` is enabled.
@@ -104,12 +49,11 @@ macro_rules! new_named_lit {
 	}};
 }
 
-use std::collections::HashSet;
+pub(crate) mod opt_field;
 
 use itertools::Itertools;
 pub(crate) use new_named_lit;
-#[cfg(feature = "splr")]
-pub(crate) use {concat_slices, const_concat, maybe_std_concat};
+use rustc_hash::FxHashSet;
 
 use crate::{
 	bool_linear::PosCoeff, integer::IntVar, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result,
@@ -133,7 +77,7 @@ pub(crate) fn add_clauses_for<DB: ClauseDatabase + ?Sized>(
 	{
 		let cls = cls.concat(); // filter out [] (empty conjunctions?) of the clause
 		if FILTER_TRIVIAL_CLAUSES {
-			let mut lits = HashSet::<Lit>::with_capacity(cls.len());
+			let mut lits = FxHashSet::default();
 			if cls.iter().any(|&lit| {
 				if lits.contains(&(!lit)) {
 					true

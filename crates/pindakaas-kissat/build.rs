@@ -95,7 +95,6 @@ fn main() {
 		"vendor/kissat/src/watch.c",
 		"vendor/kissat/src/weaken.c",
 		"vendor/kissat/src/witness.c",
-		"src/ipasir.c",
 	];
 
 	let mut builder = cc::Build::new();

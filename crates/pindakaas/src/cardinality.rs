@@ -117,7 +117,7 @@ pub(crate) mod tests {
 	macro_rules! card_test_suite {
 		($encoder:expr) => {
 			#[test]
-			fn test_card_le_2_3() {
+			fn card_le_2_3() {
 				let mut cnf = Cnf::default();
 				let vars = cnf.new_var_range(3).iter_lits().collect_vec();
 				$encoder
@@ -139,7 +139,7 @@ pub(crate) mod tests {
 			}
 
 			#[test]
-			fn test_card_eq_1_3() {
+			fn card_eq_1_3() {
 				let mut cnf = Cnf::default();
 				let vars = cnf.new_var_range(3).iter_lits().collect_vec();
 				$encoder
@@ -161,7 +161,7 @@ pub(crate) mod tests {
 			}
 
 			#[test]
-			fn test_card_eq_2_3() {
+			fn card_eq_2_3() {
 				let mut cnf = Cnf::default();
 				let vars = cnf.new_var_range(3).iter_lits().collect_vec();
 				$encoder
@@ -183,7 +183,7 @@ pub(crate) mod tests {
 			}
 
 			#[test]
-			fn test_card_eq_2_4() {
+			fn card_eq_2_4() {
 				let mut cnf = Cnf::default();
 				let vars = cnf.new_var_range(4).iter_lits().collect_vec();
 				$encoder
@@ -205,7 +205,7 @@ pub(crate) mod tests {
 			}
 
 			#[test]
-			fn test_card_eq_3_5() {
+			fn card_eq_3_5() {
 				let mut cnf = Cnf::default();
 				let vars = cnf.new_var_range(5).iter_lits().collect_vec();
 				$encoder
@@ -242,57 +242,57 @@ pub(crate) mod tests {
 			};
 
 			#[test]
-			fn test_card_2_1() {
+			fn card_2_1() {
 				test_card!($encoder, 2, $cmp, 1);
 			}
 
 			#[test]
-			fn test_card_2_2() {
+			fn card_2_2() {
 				test_card!($encoder, 2, $cmp, 2);
 			}
 
 			#[test]
-			fn test_card_3_1() {
+			fn card_3_1() {
 				test_card!($encoder, 3, $cmp, 1);
 			}
 
 			#[test]
-			fn test_card_3_2() {
+			fn card_3_2() {
 				test_card!($encoder, 3, $cmp, 2);
 			}
 
 			#[test]
-			fn test_card_3_3() {
+			fn card_3_3() {
 				test_card!($encoder, 3, $cmp, 3);
 			}
 
 			#[test]
-			fn test_card_4_2() {
+			fn card_4_2() {
 				test_card!($encoder, 4, $cmp, 2);
 			}
 
 			#[test]
-			fn test_card_4_3() {
+			fn card_4_3() {
 				test_card!($encoder, 4, $cmp, 3);
 			}
 
 			#[test]
-			fn test_card_4_4() {
+			fn card_4_4() {
 				test_card!($encoder, 4, $cmp, 4);
 			}
 
 			#[test]
-			fn test_card_5_3() {
+			fn card_5_3() {
 				test_card!($encoder, 5, $cmp, 3);
 			}
 
 			#[test]
-			fn test_card_6_1() {
+			fn card_6_1() {
 				test_card!($encoder, 6, $cmp, 1);
 			}
 
 			#[test]
-			fn test_card_5_2() {
+			fn card_5_2() {
 				test_card!($encoder, 5, $cmp, 1);
 			}
 		};

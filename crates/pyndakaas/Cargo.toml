@@ -16,7 +16,7 @@ name = "pindakaas"
 crate-type = ["cdylib"]
 
 [dependencies]
-itertools = "0.14.0"
+itertools = "0.14"
 pindakaas = { version = "0.1.0", path = "../pindakaas" }
 pyo3 = "0.25.1"
 

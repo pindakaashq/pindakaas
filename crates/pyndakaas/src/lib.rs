@@ -631,8 +631,8 @@ mod pindakaas {
 		use itertools::Itertools;
 		use pindakaas::{
 			solver::{
-				cadical::Cadical, FailedAssumtions, SlvTermSignal, SolveAssuming, SolveResult,
-				TermCallback,
+				cadical::Cadical, FailedAssumptions, SlvTermSignal, SolveAssuming, SolveResult,
+				TerminateCallback,
 			},
 			ClauseDatabase, ClauseDatabaseTools, Valuation,
 		};
@@ -727,24 +727,23 @@ mod pindakaas {
 			) -> Result<(Status, HashMap<i32, bool>)> {
 				let mut guard = self.0.lock()?;
 				let vars = guard.emitted_vars();
-				Ok(
-					match guard.solve_assuming(assumptions.iter().map(|&lit| lit.0)) {
-						SolveResult::Satisfied(sol) => (
-							Status::SATISFIED,
-							vars.into_iter()
-								.map(|var| (var.into(), sol.value(var.into())))
-								.collect(),
-						),
-						SolveResult::Unsatisfiable(fail) => (
-							Status::UNSATISFIABLE,
-							assumptions
-								.iter()
-								.map(|&lit| (lit.0.into(), fail.fail(lit.0)))
-								.collect(),
-						),
-						SolveResult::Unknown => (Status::UNKNOWN, HashMap::new()),
-					},
-				)
+				let result = guard.solve_assuming(assumptions.iter().map(|&lit| lit.0));
+				Ok(match result {
+					SolveResult::Satisfied(sol) => (
+						Status::SATISFIED,
+						vars.into_iter()
+							.map(|var| (var.into(), sol.value(var.into())))
+							.collect(),
+					),
+					SolveResult::Unsatisfiable(fail) => (
+						Status::UNSATISFIABLE,
+						assumptions
+							.iter()
+							.map(|&lit| (lit.0.into(), fail.fail(lit.0)))
+							.collect(),
+					),
+					SolveResult::Unknown => (Status::UNKNOWN, HashMap::new()),
+				})
 			}
 		}
 	}
