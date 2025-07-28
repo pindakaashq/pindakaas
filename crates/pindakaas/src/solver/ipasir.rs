@@ -522,10 +522,12 @@ impl<Impl: IpasirSolverMethods, const LRN: usize, const TRM: usize, const UP: us
 
 // Safety: No one besides us has the raw solver pointer, so we can safely
 // transfer the solver to another thread.
-unsafe impl<const LRN: usize, const TRM: usize, const UP: usize> Send
-	for IpasirStoreInner<LRN, TRM, UP>
-{
-}
+unsafe impl<const LRN: usize, const TRM: usize> Send for IpasirStoreInner<LRN, TRM, 0> {}
+
+#[cfg(not(feature = "external-propagation"))]
+// Safety: No one besides us has the raw solver pointer, so we can safely
+// transfer the solver to another thread.
+unsafe impl<const LRN: usize, const TRM: usize> Send for IpasirStoreInner<LRN, TRM, 1> {}
 
 impl<Impl: IpasirSolverMethods> Valuation for IpasirValuation<Impl> {
 	fn value(&self, lit: Lit) -> bool {

@@ -30,6 +30,66 @@ pub struct CFixedAssignmentListener {
 	pub notify_fixed_assignment: unsafe extern "C" fn(data: *mut c_void, lit: c_int),
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct CTracer {
+	pub data: *mut c_void,
+	pub add_original_clause: unsafe extern "C" fn(
+		data: *mut c_void,
+		id: u64,
+		redundant: bool,
+		clause: *const c_int,
+		clause_len: usize,
+		restored: bool,
+	),
+	pub add_derived_clause: unsafe extern "C" fn(
+		data: *mut c_void,
+		id: u64,
+		redundant: bool,
+		clause: *const c_int,
+		clause_len: usize,
+		antecedents: *const u64,
+		antecedents_len: usize,
+	),
+	pub delete_clause: unsafe extern "C" fn(
+		data: *mut c_void,
+		id: u64,
+		redundant: bool,
+		clause: *const c_int,
+		clause_len: usize,
+	),
+	pub weaken_minus:
+		unsafe extern "C" fn(data: *mut c_void, id: u64, clause: *const c_int, clause_len: usize),
+	pub strengthen: unsafe extern "C" fn(data: *mut c_void, id: u64),
+	pub report_status: unsafe extern "C" fn(data: *mut c_void, status: c_int, id: u64),
+	pub finalize_clause:
+		unsafe extern "C" fn(data: *mut c_void, id: u64, clause: *const c_int, clause_lens: usize),
+	pub begin_proof: unsafe extern "C" fn(data: *mut c_void, first_derived: u64),
+	pub solve_query: unsafe extern "C" fn(data: *mut c_void),
+	pub add_assumption: unsafe extern "C" fn(data: *mut c_void, lit: c_int),
+	pub add_constraint:
+		unsafe extern "C" fn(data: *mut c_void, clause: *const c_int, clause_len: usize),
+	pub reset_assumptions: unsafe extern "C" fn(data: *mut c_void),
+	pub add_assumption_clause: unsafe extern "C" fn(
+		data: *mut c_void,
+		id: u64,
+		clause: *const c_int,
+		clause_len: usize,
+		antecedents: *const u64,
+		antecedents_len: usize,
+	),
+	pub conclude_unsat: unsafe extern "C" fn(
+		data: *mut c_void,
+		conclusion_type: u8,
+		clause_ids: *const u64,
+		clause_ids_len: usize,
+	),
+	pub conclude_sat:
+		unsafe extern "C" fn(data: *mut c_void, assignment: *const c_int, assignment_len: usize),
+	pub conclude_unknown:
+		unsafe extern "C" fn(data: *mut c_void, trail: *const c_int, trail_len: usize),
+}
+
 extern "C" {
 	// IPASIR definitions
 	pub fn ccadical_signature() -> *const c_char;
@@ -83,5 +143,13 @@ extern "C" {
 	pub fn ccadical_simplify(slv: *mut CCaDiCaL) -> c_int;
 	pub fn ccadical_terminate(slv: *mut CCaDiCaL);
 	pub fn ccadical_unphase(slv: *mut CCaDiCaL, lit: i32);
-	pub fn ccadical_enable_proof(slv: *mut CCaDiCaL, name: *const c_char);
+
+	// Proof Tracer API
+	pub fn ccadical_connect_proof_tracer(
+		slv: *mut CCaDiCaL,
+		tracer: CTracer,
+		antecedents: bool,
+		finalize_clauses: bool,
+	);
+	pub fn ccadical_disconnect_proof_tracer(slv: *mut CCaDiCaL, tracer_data: *mut c_void) -> bool;
 }

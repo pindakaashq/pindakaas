@@ -641,7 +641,7 @@ mod pindakaas {
 		use super::{encode_constraint_with_conditions, Result};
 		use crate::pindakaas::{ConstraintArg, Encoder, Lit};
 
-		#[pyclass]
+		#[pyclass(unsendable)]
 		#[derive(Debug, Default)]
 		/// The internal representation of a instance of the CaDiCaL solver.
 		struct CaDiCaLInner(Mutex<Cadical>);

@@ -1,12 +1,16 @@
 use std::{
+	cell::RefCell,
 	ffi::{c_int, c_void, CString},
+	fmt,
 	marker::PhantomData,
+	rc::Rc,
 };
 
 use pindakaas_cadical::{
-	ccadical_add, ccadical_assume, ccadical_copy, ccadical_failed, ccadical_get_option,
-	ccadical_init, ccadical_limit, ccadical_phase, ccadical_release, ccadical_set_learn,
-	ccadical_set_option, ccadical_set_terminate, ccadical_solve, ccadical_unphase, ccadical_val,
+	ccadical_add, ccadical_assume, ccadical_connect_proof_tracer, ccadical_copy,
+	ccadical_disconnect_proof_tracer, ccadical_failed, ccadical_get_option, ccadical_init,
+	ccadical_limit, ccadical_phase, ccadical_release, ccadical_set_learn, ccadical_set_option,
+	ccadical_set_terminate, ccadical_solve, ccadical_unphase, ccadical_val, CTracer,
 };
 #[cfg(feature = "external-propagation")]
 use pindakaas_cadical::{
@@ -33,12 +37,197 @@ use crate::{
 	ClauseDatabaseTools, Cnf, Lit, VarRange,
 };
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Cadical {
 	store: IpasirStore<Cadical, 1, 1, 1>,
+	tracers: Vec<Rc<RefCell<dyn ProofTracer>>>,
+}
+
+/// Enum to represent the proof conclusion type of a SAT solver run.
+#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
+pub enum ProofConclusionType {
+	Conflict = 1,
+	Assumptions = 2,
+	Constraint = 4,
+}
+
+/// Trait that observers can implement to receive notifications about proof
+/// events.
+pub trait ProofTracer {
+	// -----------------------------
+	// Basic Events
+	// -----------------------------
+
+	/// An original clause is added.
+	fn add_original_clause(&mut self, id: u64, redundant: bool, clause: &[Lit], restored: bool) {
+		let _ = (id, redundant, clause, restored);
+	}
+
+	/// A derived clause is added.
+	fn add_derived_clause(
+		&mut self,
+		id: u64,
+		redundant: bool,
+		clause: &[Lit],
+		antecedents: &[u64],
+	) {
+		let _ = (id, redundant, clause, antecedents);
+	}
+
+	/// A clause is deleted.
+	fn delete_clause(&mut self, id: u64, redundant: bool, clause: &[Lit]) {
+		let _ = (id, redundant, clause);
+	}
+
+	/// Mark a clause as potentially restorable later.
+	fn weaken_minus(&mut self, id: u64, clause: &[Lit]) {
+		let _ = (id, clause);
+	}
+
+	/// A clause was strengthened.
+	fn strengthen(&mut self, id: u64) {
+		let _ = id;
+	}
+
+	/// Reports the result of the solver.
+	///
+	/// - `status`: Status code.
+	/// - `id`: Clause ID of the conflict clause.
+	fn report_status(&mut self, status: i32, id: u64) {
+		let _ = (status, id);
+	}
+
+	// -----------------------------
+	// Non-Incremental Features
+	// -----------------------------
+
+	/// Finalizes a clause.
+	///
+	/// - `id`: Clause ID.
+	/// - `clause`: Clause literals.
+	fn finalize_clause(&mut self, id: u64, clause: &[Lit]) {
+		let _ = (id, clause);
+	}
+
+	/// Notification that the proof begins with a set of reserved ids for original
+	/// clauses.
+	///
+	/// - `first_derived_id`: Clause ID of the first derived clause ID.
+	fn begin_proof(&mut self, first_derived_id: u64) {
+		let _ = first_derived_id;
+	}
+
+	// -----------------------------
+	// Incremental Features
+	// -----------------------------
+
+	/// Notification that an assumption has been added.
+	fn solve_query(&mut self) {}
+
+	/// Adds an assumption literal.
+	fn add_assumption(&mut self, lit: Lit) {
+		let _ = lit;
+	}
+
+	/// Adds constraint clause has been added.
+	fn add_constraint(&mut self, clause: &[Lit]) {
+		let _ = clause;
+	}
+
+	/// All assumptions and constraints have been reset.
+	fn reset_assumptions(&mut self) {}
+
+	/// This clause could be derived, which is the negation of a core of failing
+	/// assumptions/constraints. If antecedents are derived they will be included
+	/// here.
+	fn add_assumption_clause(&mut self, id: u64, clause: &[Lit], antecedents: &[u64]) {
+		let _ = (id, clause, antecedents);
+	}
+
+	/// Conclude unsat was requested. It will give either the id of the empty
+	/// clause, the id of a failing assumption clause or the ids of the failing
+	/// constrain clauses
+	fn conclude_unsat(&mut self, conclusion_type: ProofConclusionType, clause_ids: &[u64]) {
+		let _ = (conclusion_type, clause_ids);
+	}
+
+	/// SAT has been concluded, and the satisfying assignment provided
+	fn conclude_sat(&mut self, assignment: &[Lit]) {
+		let _ = assignment;
+	}
+
+	/// Reports that the result is unknown, providing the current trail.
+	fn conclude_unknown(&mut self, trail: &[Lit]) {
+		let _ = trail;
+	}
+}
+
+pub trait ProofTracerDefinition: ProofTracer {
+	/// Whether the [`ProofTracer`] uses the antecedents of derived clauses.
+	const ANTECEDENTS: bool;
+	/// Whether the [`ProofTracer`] needs the solver to finalize non-deleted
+	/// clauses in proof.
+	const FINALIZE_CLAUSES: bool = false;
 }
 
 impl Cadical {
+	// TODO: HIdden for now as it requires the user to set the proof tracer during
+	// CONFIGURATION. This should probably be a seperate state/builder.
+	#[doc(hidden)]
+	pub fn connect_proof_tracer<P: ProofTracerDefinition + 'static>(
+		&mut self,
+		tracer: Rc<RefCell<P>>,
+	) {
+		let ptr = Rc::as_ptr(&tracer);
+		let ctracer = CTracer {
+			data: ptr as *mut c_void,
+			add_original_clause: ffi::add_original_clause::<P>,
+			add_derived_clause: ffi::add_derived_clause::<P>,
+			delete_clause: ffi::delete_clause::<P>,
+			weaken_minus: ffi::weaken_minus::<P>,
+			strengthen: ffi::strengthen::<P>,
+			report_status: ffi::report_status::<P>,
+			finalize_clause: ffi::finalize_clause::<P>,
+			begin_proof: ffi::begin_proof::<P>,
+			solve_query: ffi::solve_query::<P>,
+			add_assumption: ffi::add_assumption::<P>,
+			add_constraint: ffi::add_constraint::<P>,
+			reset_assumptions: ffi::reset_assumptions::<P>,
+			add_assumption_clause: ffi::add_assumption_clause::<P>,
+			conclude_unsat: ffi::conclude_unsat::<P>,
+			conclude_sat: ffi::conclude_sat::<P>,
+			conclude_unknown: ffi::conclude_unknown::<P>,
+		};
+		self.tracers.push(tracer);
+		// SAFETY: Pointer known to be non-null, no other known safety concerns.
+		unsafe {
+			ccadical_connect_proof_tracer(
+				self.ipasir_store().solver_ptr(),
+				ctracer,
+				P::ANTECEDENTS,
+				P::FINALIZE_CLAUSES,
+			);
+		}
+	}
+
+	#[doc(hidden)]
+	// TODO: Hidden until [`Self::connect_proof_tracer`] has been finalized.
+	pub fn disconnect_proof_tracer<P: ProofTracer + 'static>(&mut self, tracer: Rc<RefCell<P>>) {
+		let len = self.tracers.len();
+		let ptr = Rc::as_ptr(&tracer);
+		let dyn_rc: Rc<RefCell<dyn ProofTracer>> = tracer;
+		self.tracers.retain(|t| !Rc::ptr_eq(t, &dyn_rc));
+		if len != self.tracers.len() {
+			// SAFETY: Pointer known to be non-null, no other known safety concerns.
+			unsafe {
+				let removed = ccadical_disconnect_proof_tracer(
+					self.ipasir_store().solver_ptr(),
+					ptr as *mut c_void,
+				);
+				debug_assert!(removed);
+			}
+		}
+	}
 	// TODO: Unsure whether this is a good idea.
 	#[doc(hidden)]
 	pub fn emitted_vars(&self) -> VarRange {
@@ -107,6 +296,7 @@ impl Cadical {
 				}),
 				_methods: PhantomData,
 			},
+			tracers: Vec::new(),
 		};
 		// Make sure no pointers are left behind in the backend.
 		slv.set_learn_callback::<fn(&mut dyn Iterator<Item = Lit>)>(None);
@@ -195,6 +385,248 @@ impl IpasirUserPropagationMethods for Cadical {
 		ccadical_remove_observed_var;
 	const IPASIR_RESET_OBSERVED_VARS: unsafe extern "C" fn(slv: *mut c_void) =
 		ccadical_reset_observed_vars;
+}
+
+impl fmt::Debug for Cadical {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let tracers: Vec<_> = self.tracers.iter().map(Rc::as_ptr).collect();
+		f.debug_struct("Cadical")
+			.field("store", &self.store)
+			.field("tracers", &tracers)
+			.finish()
+	}
+}
+
+mod ffi {
+	use std::{
+		cell::RefCell,
+		ffi::{c_int, c_void},
+		num::NonZero,
+		slice,
+	};
+
+	use crate::{
+		solver::cadical::{ProofConclusionType, ProofTracer},
+		Lit,
+	};
+
+	pub(super) unsafe extern "C" fn add_assumption<P: ProofTracer>(data: *mut c_void, lit: c_int) {
+		let tracer = &*(data as *const RefCell<P>);
+		tracer.borrow_mut().add_assumption(Lit::from_raw(
+			NonZero::new(lit).expect("zero cannot be a literal"),
+		));
+	}
+
+	pub(super) unsafe extern "C" fn add_assumption_clause<P: ProofTracer>(
+		data: *mut c_void,
+		id: u64,
+		clause: *const c_int,
+		clause_len: usize,
+		antecedents: *const u64,
+		antecedents_len: usize,
+	) {
+		let tracer = &*(data as *const RefCell<P>);
+		let clause = if clause_len != 0 {
+			slice::from_raw_parts(clause as *const Lit, clause_len)
+		} else {
+			&[]
+		};
+		let antecedents = if antecedents_len != 0 {
+			slice::from_raw_parts(antecedents, antecedents_len)
+		} else {
+			&[]
+		};
+		tracer
+			.borrow_mut()
+			.add_assumption_clause(id, clause, antecedents);
+	}
+
+	pub(super) unsafe extern "C" fn add_constraint<P: ProofTracer>(
+		data: *mut c_void,
+		clause: *const c_int,
+		clause_len: usize,
+	) {
+		let tracer = &*(data as *const RefCell<P>);
+		let clause = if clause_len != 0 {
+			slice::from_raw_parts(clause as *const Lit, clause_len)
+		} else {
+			&[]
+		};
+		tracer.borrow_mut().add_constraint(clause);
+	}
+
+	pub(super) unsafe extern "C" fn add_derived_clause<P: ProofTracer>(
+		data: *mut c_void,
+		id: u64,
+		redundant: bool,
+		clause: *const c_int,
+		clause_len: usize,
+		antecedents: *const u64,
+		antecedents_len: usize,
+	) {
+		let tracer = &*(data as *const RefCell<P>);
+		let clause = if clause_len != 0 {
+			slice::from_raw_parts(clause as *const Lit, clause_len)
+		} else {
+			&[]
+		};
+		let antecedents = if antecedents_len != 0 {
+			slice::from_raw_parts(antecedents, antecedents_len)
+		} else {
+			&[]
+		};
+		tracer
+			.borrow_mut()
+			.add_derived_clause(id, redundant, clause, antecedents);
+	}
+
+	pub(super) unsafe extern "C" fn add_original_clause<P: ProofTracer>(
+		data: *mut c_void,
+		id: u64,
+		redundant: bool,
+		clause: *const c_int,
+		clause_len: usize,
+		restored: bool,
+	) {
+		let tracer = &*(data as *const RefCell<P>);
+		let clause = if clause_len != 0 {
+			slice::from_raw_parts(clause as *const Lit, clause_len)
+		} else {
+			&[]
+		};
+		tracer
+			.borrow_mut()
+			.add_original_clause(id, redundant, clause, restored);
+	}
+
+	pub(super) unsafe extern "C" fn begin_proof<P: ProofTracer>(
+		data: *mut c_void,
+		first_derived: u64,
+	) {
+		let tracer = &*(data as *const RefCell<P>);
+		tracer.borrow_mut().begin_proof(first_derived);
+	}
+
+	pub(super) unsafe extern "C" fn conclude_sat<P: ProofTracer>(
+		data: *mut c_void,
+		assignment: *const c_int,
+		assignment_len: usize,
+	) {
+		let tracer = &*(data as *const RefCell<P>);
+		let assignment = if assignment_len != 0 {
+			slice::from_raw_parts(assignment as *const Lit, assignment_len)
+		} else {
+			&[]
+		};
+		tracer.borrow_mut().conclude_sat(assignment);
+	}
+
+	pub(super) unsafe extern "C" fn conclude_unknown<P: ProofTracer>(
+		data: *mut c_void,
+		trail: *const c_int,
+		trail_len: usize,
+	) {
+		let tracer = &*(data as *const RefCell<P>);
+		let trail = if trail_len != 0 {
+			slice::from_raw_parts(trail as *const Lit, trail_len)
+		} else {
+			&[]
+		};
+		tracer.borrow_mut().conclude_unknown(trail);
+	}
+
+	pub(super) unsafe extern "C" fn conclude_unsat<P: ProofTracer>(
+		data: *mut c_void,
+		conclusion_type: u8,
+		clause_ids: *const u64,
+		clause_ids_len: usize,
+	) {
+		let tracer = &*(data as *const RefCell<P>);
+		let clause_ids = if clause_ids_len != 0 {
+			slice::from_raw_parts(clause_ids, clause_ids_len)
+		} else {
+			&[]
+		};
+		let conclusion_type = match conclusion_type {
+			1 => ProofConclusionType::Conflict,
+			2 => ProofConclusionType::Assumptions,
+			4 => ProofConclusionType::Constraint,
+			_ => panic!("invalid conclusion type"),
+		};
+		tracer
+			.borrow_mut()
+			.conclude_unsat(conclusion_type, clause_ids);
+	}
+
+	pub(super) unsafe extern "C" fn delete_clause<P: ProofTracer>(
+		data: *mut c_void,
+		id: u64,
+		redundant: bool,
+		clause: *const c_int,
+		clause_len: usize,
+	) {
+		let tracer = &*(data as *const RefCell<P>);
+		let clause = if clause_len != 0 {
+			slice::from_raw_parts(clause as *const Lit, clause_len)
+		} else {
+			&[]
+		};
+		tracer.borrow_mut().delete_clause(id, redundant, clause);
+	}
+
+	pub(super) unsafe extern "C" fn finalize_clause<P: ProofTracer>(
+		data: *mut c_void,
+		id: u64,
+		clause: *const c_int,
+		clause_lens: usize,
+	) {
+		let tracer = &*(data as *const RefCell<P>);
+		let clause = if clause_lens != 0 {
+			slice::from_raw_parts(clause as *const Lit, clause_lens)
+		} else {
+			&[]
+		};
+		tracer.borrow_mut().finalize_clause(id, clause);
+	}
+
+	pub(super) unsafe extern "C" fn report_status<P: ProofTracer>(
+		data: *mut c_void,
+		status: c_int,
+		id: u64,
+	) {
+		let tracer = &*(data as *const RefCell<P>);
+		tracer.borrow_mut().report_status(status, id);
+	}
+
+	pub(super) unsafe extern "C" fn reset_assumptions<P: ProofTracer>(data: *mut c_void) {
+		let tracer = &*(data as *const RefCell<P>);
+		tracer.borrow_mut().reset_assumptions();
+	}
+
+	pub(super) unsafe extern "C" fn solve_query<P: ProofTracer>(data: *mut c_void) {
+		let tracer = &*(data as *const RefCell<P>);
+		tracer.borrow_mut().solve_query();
+	}
+
+	pub(super) unsafe extern "C" fn strengthen<P: ProofTracer>(data: *mut c_void, id: u64) {
+		let tracer = &*(data as *const RefCell<P>);
+		tracer.borrow_mut().strengthen(id);
+	}
+
+	pub(super) unsafe extern "C" fn weaken_minus<P: ProofTracer>(
+		data: *mut c_void,
+		id: u64,
+		clause: *const c_int,
+		clause_len: usize,
+	) {
+		let tracer = &*(data as *const RefCell<P>);
+		let clause = if clause_len != 0 {
+			slice::from_raw_parts(clause as *const Lit, clause_len)
+		} else {
+			&[]
+		};
+		tracer.borrow_mut().weaken_minus(id, clause);
+	}
 }
 
 #[cfg(test)]
