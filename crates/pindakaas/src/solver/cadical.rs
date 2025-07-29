@@ -22,7 +22,7 @@ use pindakaas_cadical::{
 
 #[cfg(feature = "external-propagation")]
 use crate::solver::{
-	ipasir::user_propagation::IpasirUserPropagationMethods, propagation::PropagatingSolver,
+	ipasir::user_propagation::IpasirUserPropagationMethods, propagation::ExternalPropagation,
 };
 use crate::{
 	helpers::opt_field::OptField,
@@ -32,7 +32,7 @@ use crate::{
 			IpasirLearnCallbackMethod, IpasirSolverMethods, IpasirStore, IpasirStoreInner,
 			IpasirTermCallbackMethod,
 		},
-		LearnCallback, SlvTermSignal, TerminateCallback,
+		LearnCallback, TermSignal, TerminateCallback,
 	},
 	ClauseDatabaseTools, Cnf, Lit, VarRange,
 };
@@ -300,7 +300,7 @@ impl Cadical {
 		};
 		// Make sure no pointers are left behind in the backend.
 		slv.set_learn_callback::<fn(&mut dyn Iterator<Item = Lit>)>(None);
-		slv.set_terminate_callback::<fn() -> SlvTermSignal>(None);
+		slv.set_terminate_callback::<fn() -> TermSignal>(None);
 		#[cfg(feature = "external-propagation")]
 		slv.disconnect_propagator();
 
@@ -640,7 +640,7 @@ mod tests {
 		bool_linear::LimitComp,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
 		helpers::tests::{assert_solutions, expect_file},
-		solver::{cadical::Cadical, SlvTermSignal, SolveResult, Solver, TerminateCallback},
+		solver::{cadical::Cadical, SolveResult, Solver, TermSignal, TerminateCallback},
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Unsatisfiable, Valuation,
 	};
 
@@ -749,7 +749,7 @@ mod tests {
 			}
 		}
 		// Set termination callback that stops immediately
-		slv.set_terminate_callback(Some(|| SlvTermSignal::Terminate));
+		slv.set_terminate_callback(Some(|| TermSignal::Terminate));
 		assert!(matches!(slv.solve(), SolveResult::Unknown));
 	}
 
@@ -780,7 +780,7 @@ mod tests {
 			helpers::tests::assert_solutions,
 			solver::{
 				propagation::{
-					ClausePersistence, PropagatingSolver, Propagator, PropagatorDefinition,
+					ClausePersistence, ExternalPropagation, Propagator, PropagatorDefinition,
 					SolvingActions,
 				},
 				VarRange,

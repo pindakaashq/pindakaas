@@ -19,9 +19,9 @@ use crate::{
 			IpasirStoreInner,
 		},
 		propagation::{
-			ClausePersistence, ExtendedSolvingActions, PersistentAssignmentListener,
-			PersistentAssignmentNotifier, PropagatingSolver, Propagator, PropagatorDefinition,
-			SearchDecision, SolvingActions,
+			ClausePersistence, ExternalPropagation, PersistentAssignmentListener,
+			PersistentAssignmentNotifier, Propagator, PropagatorDefinition, SearchDecision,
+			SolvingActions,
 		},
 		VarFactory,
 	},
@@ -159,8 +159,8 @@ where
 	}
 }
 
-impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirUserPropagationMethods> PropagatingSolver
-	for Impl
+impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirUserPropagationMethods>
+	ExternalPropagation for Impl
 where
 	Impl::Store: BasicIpasirStorage + IpasirPropagatorStorage,
 {
@@ -268,15 +268,6 @@ impl fmt::Debug for IpasirPropagator {
 			.field("explaining", &self.explaining)
 			.field("clause_queue", &self.clause_queue)
 			.finish()
-	}
-}
-
-impl<Impl: IpasirUserPropagationMethods> ExtendedSolvingActions for IpasirSolvingActions<'_, Impl> {
-	fn force_backtrack(&mut self, level: usize) {
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_FORCE_BACKTRACK function is expected to abide by the IPASIR-UP
-		// interface specification.
-		unsafe { Impl::IPASIR_FORCE_BACKTRACK(self.ptr, level) }
 	}
 }
 
@@ -388,7 +379,10 @@ impl<
 		{
 			SearchDecision::Assign(lit) => lit.0.into(),
 			SearchDecision::Backtrack(level) => {
-				slv.force_backtrack(level);
+				// Safety: Pointer is a valid (non-null) pointer to the solver, and the
+				// IPASIR_FORCE_BACKTRACK function is expected to abide by the IPASIR-UP
+				// interface specification.
+				unsafe { Impl::IPASIR_FORCE_BACKTRACK(store.ptr, level) }
 				0
 			}
 			SearchDecision::Free => 0,

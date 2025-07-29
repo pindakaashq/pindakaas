@@ -631,7 +631,7 @@ mod pindakaas {
 		use itertools::Itertools;
 		use pindakaas::{
 			solver::{
-				cadical::Cadical, FailedAssumptions, SlvTermSignal, SolveAssuming, SolveResult,
+				cadical::Cadical, Assumptions, FailedAssumptions, SolveResult, TermSignal,
 				TerminateCallback,
 			},
 			ClauseDatabase, ClauseDatabaseTools, Valuation,
@@ -658,13 +658,13 @@ mod pindakaas {
 			UNKNOWN,
 		}
 
-		fn dur_term_fn(dur: Duration) -> impl Fn() -> SlvTermSignal + 'static {
+		fn dur_term_fn(dur: Duration) -> impl Fn() -> TermSignal + 'static {
 			let deadline = SystemTime::now() + dur;
 			move || {
 				if SystemTime::now() > deadline {
-					SlvTermSignal::Terminate
+					TermSignal::Terminate
 				} else {
-					SlvTermSignal::Continue
+					TermSignal::Continue
 				}
 			}
 		}

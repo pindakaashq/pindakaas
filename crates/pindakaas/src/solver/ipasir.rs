@@ -12,7 +12,7 @@ use std::{
 use crate::{
 	helpers::opt_field::OptField,
 	solver::{
-		FailedAssumptions, LearnCallback, SlvTermSignal, SolveAssuming, SolveResult, Solver,
+		Assumptions, FailedAssumptions, LearnCallback, SolveResult, Solver, TermSignal,
 		TerminateCallback, VarFactory,
 	},
 	ClauseDatabase, Lit, Result, Unsatisfiable, Valuation, VarRange,
@@ -237,6 +237,26 @@ impl Iterator for ExplIter {
 	}
 }
 
+impl<Impl: AccessIpasirStore + IpasirAssumptionMethods> Assumptions for Impl
+where
+	Impl::Store: BasicIpasirStorage,
+{
+	fn solve_assuming<I: IntoIterator<Item = Lit>>(
+		&mut self,
+		assumptions: I,
+	) -> SolveResult<impl Valuation + '_, impl FailedAssumptions + '_> {
+		for i in assumptions {
+			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
+			// IPASIR_ASSUME function is expected to abide by the
+			// IPASIR interface specification.
+			unsafe {
+				Self::IPASIR_ASSUME(self.ipasir_store().solver_ptr(), i.into());
+			}
+		}
+		self.solve()
+	}
+}
+
 impl<Impl: AccessIpasirStore + IpasirSolverMethods> ClauseDatabase for Impl
 where
 	Impl::Store: BasicIpasirStorage,
@@ -310,26 +330,6 @@ where
 	}
 }
 
-impl<Impl: AccessIpasirStore + IpasirAssumptionMethods> SolveAssuming for Impl
-where
-	Impl::Store: BasicIpasirStorage,
-{
-	fn solve_assuming<I: IntoIterator<Item = Lit>>(
-		&mut self,
-		assumptions: I,
-	) -> SolveResult<impl Valuation + '_, impl FailedAssumptions + '_> {
-		for i in assumptions {
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_ASSUME function is expected to abide by the
-			// IPASIR interface specification.
-			unsafe {
-				Self::IPASIR_ASSUME(self.ipasir_store().solver_ptr(), i.into());
-			}
-		}
-		self.solve()
-	}
-}
-
 impl<Impl: AccessIpasirStore + IpasirSolverMethods> Solver for Impl
 where
 	Impl::Store: BasicIpasirStorage,
@@ -371,12 +371,12 @@ impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirTermCallbackMethod> T
 where
 	Impl::Store: BasicIpasirStorage + TerminationCallbackIpasirStorage,
 {
-	fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>) {
+	fn set_terminate_callback<F: FnMut() -> TermSignal + 'static>(&mut self, cb: Option<F>) {
 		if let Some(mut cb) = cb {
 			let mut wrapped_cb = Box::new(move || -> c_int {
 				match cb() {
-					SlvTermSignal::Continue => c_int::from(0),
-					SlvTermSignal::Terminate => c_int::from(1),
+					TermSignal::Continue => c_int::from(0),
+					TermSignal::Terminate => c_int::from(1),
 				}
 			});
 			let (data_ptr, fn_ptr) = get_trampoline0(wrapped_cb.as_mut());

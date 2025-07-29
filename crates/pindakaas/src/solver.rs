@@ -16,6 +16,17 @@ use std::num::NonZeroI32;
 
 use crate::{ClauseDatabase, Lit, Valuation, Var, VarRange};
 
+pub trait Assumptions: Solver {
+	/// Solve the formula with specified clauses under the given assumptions.
+	///
+	/// If the search is interrupted (see [`set_terminate_callback`]) the function
+	/// returns unknown
+	fn solve_assuming<I: IntoIterator<Item = Lit>>(
+		&mut self,
+		assumptions: I,
+	) -> SolveResult<impl Valuation + '_, impl FailedAssumptions + '_>;
+}
+
 /// Trait implemented by the object given to the callback on detecting failure
 pub trait FailedAssumptions {
 	/// Check if the given assumption literal was used to prove the unsatisfiability
@@ -40,23 +51,6 @@ pub trait LearnCallback: Solver {
 	);
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-pub enum SlvTermSignal {
-	Continue,
-	Terminate,
-}
-
-pub trait SolveAssuming: Solver {
-	/// Solve the formula with specified clauses under the given assumptions.
-	///
-	/// If the search is interrupted (see [`set_terminate_callback`]) the function
-	/// returns unknown
-	fn solve_assuming<I: IntoIterator<Item = Lit>>(
-		&mut self,
-		assumptions: I,
-	) -> SolveResult<impl Valuation + '_, impl FailedAssumptions + '_>;
-}
-
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SolveResult<Sol: Valuation, Fail = ()> {
 	Satisfied(Sol),
@@ -72,6 +66,14 @@ pub trait Solver: ClauseDatabase {
 	fn solve(&mut self) -> SolveResult<impl Valuation + '_, impl Sized>;
 }
 
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+/// Signal sent by termination callbacks telling the solver whether to continue
+/// or terminate the search.
+pub enum TermSignal {
+	Continue,
+	Terminate,
+}
+
 pub trait TerminateCallback: Solver {
 	/// Set a callback function used to indicate a termination requirement to the
 	/// solver.
@@ -84,7 +86,7 @@ pub trait TerminateCallback: Solver {
 	///
 	/// Subsequent calls to this method override the previously set
 	/// callback function.
-	fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>);
+	fn set_terminate_callback<F: FnMut() -> TermSignal + 'static>(&mut self, cb: Option<F>);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

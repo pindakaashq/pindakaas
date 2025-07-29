@@ -14,45 +14,7 @@ pub enum ClausePersistence {
 	Irreduntant,
 }
 
-/// A trait containing additional actions that the solver can perform during
-/// solving. In contrast to [`SolvingActions`], these additional actions are not
-/// exposed to the propagator.
-pub(crate) trait ExtendedSolvingActions: SolvingActions {
-	fn force_backtrack(&mut self, level: usize);
-}
-
-// Connected listener gets notified whenever the truth value of a variable
-// is fixed (for example during inprocessing or due to some derived unit
-// clauses).
-pub trait PersistentAssignmentListener {
-	/// Notify the listener that a variable has been assigned a value that is
-	/// considered persistent. This means that the variable will not be
-	/// backtracked over during the solving process.
-	fn notify_persistent_assignment(&mut self, lit: Lit) {
-		let _ = lit;
-	}
-}
-
-pub trait PersistentAssignmentNotifier: Solver {
-	/// Connect a listener that gets notified whenever the truth value of a
-	/// variable is permanently set (e.g. during inprocessing or when a unit
-	/// clause is derived).
-	///
-	/// # Warning
-	///
-	/// Only one [`PersistentAssignmentListener`] can be connected, any previously
-	/// connected [`PersistentAssignmentListener`]s will be disconnected (see
-	/// [`Self::disconnect_persistent_assignment_notifier`]).
-	fn connect_persistent_assignment_listener<L: PersistentAssignmentListener + 'static>(
-		&mut self,
-		listener: Rc<RefCell<L>>,
-	);
-
-	/// Disconnect the any connected [`PersistentAssignmentListener`].
-	fn disconnect_persistent_assignment_listener(&mut self);
-}
-
-pub trait PropagatingSolver: Solver {
+pub trait ExternalPropagation: Solver {
 	/// Add a variable to the set of observed variables.
 	///
 	/// The external propagator will be notified when the variable is assigned.
@@ -93,6 +55,37 @@ pub trait PropagatingSolver: Solver {
 	///
 	/// Disconnecting the [`Propagator`] will reset the observed variable set.
 	fn disconnect_propagator(&mut self);
+}
+
+// Connected listener gets notified whenever the truth value of a variable
+// is fixed (for example during inprocessing or due to some derived unit
+// clauses).
+pub trait PersistentAssignmentListener {
+	/// Notify the listener that a variable has been assigned a value that is
+	/// considered persistent. This means that the variable will not be
+	/// backtracked over during the solving process.
+	fn notify_persistent_assignment(&mut self, lit: Lit) {
+		let _ = lit;
+	}
+}
+
+pub trait PersistentAssignmentNotifier: Solver {
+	/// Connect a listener that gets notified whenever the truth value of a
+	/// variable is permanently set (e.g. during inprocessing or when a unit
+	/// clause is derived).
+	///
+	/// # Warning
+	///
+	/// Only one [`PersistentAssignmentListener`] can be connected, any previously
+	/// connected [`PersistentAssignmentListener`]s will be disconnected (see
+	/// [`Self::disconnect_persistent_assignment_notifier`]).
+	fn connect_persistent_assignment_listener<L: PersistentAssignmentListener + 'static>(
+		&mut self,
+		listener: Rc<RefCell<L>>,
+	);
+
+	/// Disconnect the any connected [`PersistentAssignmentListener`].
+	fn disconnect_persistent_assignment_listener(&mut self);
 }
 
 pub trait Propagator {
@@ -187,8 +180,8 @@ pub enum SearchDecision {
 	Backtrack(usize),
 }
 
-/// A trait containing the solver methods that are exposed to the propagator
-/// during solving.
+/// Actions that a [`Propagator`] can generally undertake when making
+/// inferences.
 pub trait SolvingActions {
 	/// Add a new observed variable to the solver.
 	fn new_observed_var(&mut self) -> Var;

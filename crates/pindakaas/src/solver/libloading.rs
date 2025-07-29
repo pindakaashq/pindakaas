@@ -10,7 +10,7 @@ use libloading::{Library, Symbol};
 use crate::{
 	solver::{
 		ipasir::{get_trampoline0, get_trampoline1, ExplIter, IpasirLearnCb, IpasirTerminationCb},
-		FailedAssumptions, LearnCallback, SlvTermSignal, SolveAssuming, SolveResult, Solver,
+		Assumptions, FailedAssumptions, LearnCallback, SolveResult, Solver, TermSignal,
 		TerminateCallback, VarFactory,
 	},
 	ClauseDatabase, Lit, Result, Valuation,
@@ -234,6 +234,22 @@ impl IpasirSolver<'_> {
 	}
 }
 
+impl Assumptions for IpasirSolver<'_> {
+	#[expect(
+		refining_impl_trait,
+		reason = "user can use more specific type if needed"
+	)]
+	fn solve_assuming<I: IntoIterator<Item = Lit>>(
+		&mut self,
+		assumptions: I,
+	) -> SolveResult<IpasirSol<'_>, IpasirFailed<'_>> {
+		for i in assumptions {
+			(self.assume_fn)(self.slv, i.into());
+		}
+		self.solve()
+	}
+}
+
 impl ClauseDatabase for IpasirSolver<'_> {
 	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
 		let mut added = false;
@@ -280,22 +296,6 @@ impl LearnCallback for IpasirSolver<'_> {
 	}
 }
 
-impl SolveAssuming for IpasirSolver<'_> {
-	#[expect(
-		refining_impl_trait,
-		reason = "user can use more specific type if needed"
-	)]
-	fn solve_assuming<I: IntoIterator<Item = Lit>>(
-		&mut self,
-		assumptions: I,
-	) -> SolveResult<IpasirSol<'_>, IpasirFailed<'_>> {
-		for i in assumptions {
-			(self.assume_fn)(self.slv, i.into());
-		}
-		self.solve()
-	}
-}
-
 impl Solver for IpasirSolver<'_> {
 	#[expect(
 		refining_impl_trait,
@@ -315,12 +315,12 @@ impl Solver for IpasirSolver<'_> {
 }
 
 impl TerminateCallback for IpasirSolver<'_> {
-	fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>) {
+	fn set_terminate_callback<F: FnMut() -> TermSignal + 'static>(&mut self, cb: Option<F>) {
 		if let Some(mut cb) = cb {
 			let mut wrapped_cb = Box::new(move || -> c_int {
 				match cb() {
-					SlvTermSignal::Continue => c_int::from(0),
-					SlvTermSignal::Terminate => c_int::from(1),
+					TermSignal::Continue => c_int::from(0),
+					TermSignal::Terminate => c_int::from(1),
 				}
 			});
 			let (data_ptr, fn_ptr) = get_trampoline0(&mut wrapped_cb);
