@@ -4,16 +4,16 @@ use std::{
 };
 
 use pindakaas_cadical::{
-	ccadical_add, ccadical_assume, ccadical_copy, ccadical_enable_proof, ccadical_failed,
-	ccadical_get_option, ccadical_init, ccadical_limit, ccadical_phase, ccadical_release,
-	ccadical_set_learn, ccadical_set_option, ccadical_set_terminate, ccadical_solve,
-	ccadical_unphase, ccadical_val,
+	ccadical_add, ccadical_assume, ccadical_copy, ccadical_failed, ccadical_get_option,
+	ccadical_init, ccadical_limit, ccadical_phase, ccadical_release, ccadical_set_learn,
+	ccadical_set_option, ccadical_set_terminate, ccadical_solve, ccadical_unphase, ccadical_val,
 };
 #[cfg(feature = "external-propagation")]
 use pindakaas_cadical::{
 	ccadical_add_observed_var, ccadical_connect_external_propagator,
 	ccadical_disconnect_external_propagator, ccadical_force_backtrack, ccadical_is_decision,
 	ccadical_is_observed, ccadical_remove_observed_var, ccadical_reset_observed_vars,
+	CExternalPropagator,
 };
 
 #[cfg(feature = "external-propagation")]
@@ -43,15 +43,6 @@ impl Cadical {
 	#[doc(hidden)]
 	pub fn emitted_vars(&self) -> VarRange {
 		self.ipasir_store().vars().emitted_vars()
-	}
-
-	pub fn enable_proof(&mut self, name: &str) {
-		let name = CString::new(name).unwrap();
-		// SAFETY: Pointer is known to be valid, CaDiCaL's file API should handle
-		// all possible name paths.
-		unsafe {
-			ccadical_enable_proof(self.ipasir_store().solver_ptr(), name.as_ptr());
-		}
 	}
 
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
@@ -192,20 +183,7 @@ impl IpasirUserPropagationMethods for Cadical {
 		ccadical_add_observed_var;
 	const IPASIR_CONNECT_EXTERNAL_PROPAGATOR: unsafe extern "C" fn(
 		slv: *mut c_void,
-		propagator_data: *mut c_void,
-		notify_assignments: unsafe extern "C" fn(*mut c_void, *const i32, usize),
-		notify_new_decision_level: unsafe extern "C" fn(*mut c_void),
-		notify_backtrack: unsafe extern "C" fn(*mut c_void, usize, bool),
-		cb_check_found_model: unsafe extern "C" fn(*mut c_void, *const i32, usize) -> bool,
-		cb_has_external_clause: unsafe extern "C" fn(*mut c_void, *mut bool) -> bool,
-		cb_add_external_clause_lit: unsafe extern "C" fn(*mut c_void) -> i32,
-		is_lazy: bool,
-		forgettable_reasons: bool,
-		notify_fixed: bool,
-		cb_decide: unsafe extern "C" fn(*mut c_void) -> i32,
-		cb_propagate: unsafe extern "C" fn(*mut c_void) -> i32,
-		cb_add_reason_clause_lit: unsafe extern "C" fn(*mut c_void, i32) -> i32,
-		notify_fixed_assignment: unsafe extern "C" fn(*mut c_void, i32),
+		propagator: CExternalPropagator,
 	) = ccadical_connect_external_propagator;
 	const IPASIR_DISCONNECT_EXTERNAL_PROPAGATOR: unsafe extern "C" fn(slv: *mut c_void) =
 		ccadical_disconnect_external_propagator;
@@ -414,7 +392,6 @@ mod tests {
 		}
 		impl PropagatorDefinition for Dist2 {
 			const CHECK_ONLY: bool = true;
-			const PERSISTENT_ASSIGNMENTS: bool = false;
 		}
 
 		let p = Rc::new(RefCell::new(Dist2 {

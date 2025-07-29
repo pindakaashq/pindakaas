@@ -21,6 +21,37 @@ pub(crate) trait ExtendedSolvingActions: SolvingActions {
 	fn force_backtrack(&mut self, level: usize);
 }
 
+// Connected listener gets notified whenever the truth value of a variable
+// is fixed (for example during inprocessing or due to some derived unit
+// clauses).
+pub trait PersistentAssignmentListener {
+	/// Notify the listener that a variable has been assigned a value that is
+	/// considered persistent. This means that the variable will not be
+	/// backtracked over during the solving process.
+	fn notify_persistent_assignment(&mut self, lit: Lit) {
+		let _ = lit;
+	}
+}
+
+pub trait PersistentAssignmentNotifier: Solver {
+	/// Connect a listener that gets notified whenever the truth value of a
+	/// variable is permanently set (e.g. during inprocessing or when a unit
+	/// clause is derived).
+	///
+	/// # Warning
+	///
+	/// Only one [`PersistentAssignmentListener`] can be connected, any previously
+	/// connected [`PersistentAssignmentListener`]s will be disconnected (see
+	/// [`Self::disconnect_persistent_assignment_notifier`]).
+	fn connect_persistent_assignment_listener<L: PersistentAssignmentListener + 'static>(
+		&mut self,
+		listener: Rc<RefCell<L>>,
+	);
+
+	/// Disconnect the any connected [`PersistentAssignmentListener`].
+	fn disconnect_persistent_assignment_listener(&mut self);
+}
+
 pub trait PropagatingSolver: Solver {
 	/// Add a variable to the set of observed variables.
 	///
@@ -79,9 +110,6 @@ pub trait Propagator {
 		let _ = new_level;
 		let _ = restart;
 	}
-	fn notify_persistent_assignment(&mut self, lit: Lit) {
-		let _ = lit;
-	}
 
 	/// Method called to check the found complete solution (after solution
 	/// reconstruction). If it returns false, the propagator must provide an
@@ -138,11 +166,6 @@ pub trait PropagatorDefinition: Propagator {
 	///
 	/// If the set to `true`, then only [`Propagator::check_solution`] is called.
 	const CHECK_ONLY: bool = false;
-
-	/// Whether the [`Propagator`] implementation should be notified about
-	/// persistent assignments of literals using
-	/// [`Self::notify_persistent_assignment`].
-	const PERSISTENT_ASSIGNMENTS: bool = true;
 
 	/// The persistence level of the [`Propagator`] implementation's produced
 	/// reasons using [`Propagator::add_reason_clause`].

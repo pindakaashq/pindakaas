@@ -8,7 +8,6 @@ fn main() {
 	);
 
 	let src = [
-		"src/ccadical_override.cpp",
 		"vendor/cadical/contrib/craigtracer.cpp",
 		"vendor/cadical/src/analyze.cpp",
 		"vendor/cadical/src/arena.cpp",
@@ -18,7 +17,7 @@ fn main() {
 		"vendor/cadical/src/backward.cpp",
 		"vendor/cadical/src/bins.cpp",
 		"vendor/cadical/src/block.cpp",
-		// "vendor/cadical/src/ccadical.cpp", // included by src/ccadical_override.cpp
+		"vendor/cadical/src/ccadical.cpp",
 		"vendor/cadical/src/checker.cpp",
 		"vendor/cadical/src/clause.cpp",
 		"vendor/cadical/src/collect.cpp",
@@ -43,7 +42,6 @@ fn main() {
 		"vendor/cadical/src/format.cpp",
 		"vendor/cadical/src/frattracer.cpp",
 		"vendor/cadical/src/gates.cpp",
-		"vendor/cadical/src/huubtracer.cpp",
 		"vendor/cadical/src/idruptracer.cpp",
 		"vendor/cadical/src/instantiate.cpp",
 		"vendor/cadical/src/internal.cpp",
