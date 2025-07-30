@@ -126,5 +126,5 @@ class MapResult(Result):
 
     def failed(self, lit: Lit) -> Optional[bool]:
         if self.status == Status.UNSATISFIABLE:
-            return self._mapping.get(int(lit)) == 0
+            return self._mapping.get(int(lit))
         return None
