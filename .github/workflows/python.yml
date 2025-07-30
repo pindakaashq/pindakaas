@@ -118,7 +118,7 @@ jobs:
           options: -v ${{ github.workspace }}:/io -w /io
           run: |
             set -e
-            apk add py3-pip py3-virtualenv
+            apk add py3-pip py3-virtualenv build-base
             python3 -m virtualenv .venv
             source .venv/bin/activate
             cd crates/pyndakaas
