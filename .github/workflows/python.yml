@@ -58,9 +58,10 @@ jobs:
           set -e
           python3 -m venv .venv
           source .venv/bin/activate
+          cd crates/pyndakaas
           pip install . --find-links dist --force-reinstall
           pip install pytest
-          cd crates/pyndakaas && pytest
+          pytest
       - name: pytest
         if: ${{ !startsWith(matrix.platform.target, 'x86') && matrix.platform.target != 'ppc64' }}
         uses: uraimo/run-on-arch-action@v3
@@ -74,8 +75,9 @@ jobs:
             pip3 install -U pip pytest
           run: |
             set -e
+            cd crates/pyndakaas
             pip3 install . --find-links dist --force-reinstall
-            cd crates/pyndakaas && pytest
+            pytest
   musllinux:
     runs-on: ${{ matrix.platform.runner }}
     strategy:
@@ -119,9 +121,10 @@ jobs:
             apk add py3-pip py3-virtualenv
             python3 -m virtualenv .venv
             source .venv/bin/activate
+            cd crates/pyndakaas
             pip install . --no-index --find-links dist --force-reinstall
             pip install pytest
-            cd crates/pyndakaas && pytest
+            pytest
       - name: pytest
         if: ${{ !startsWith(matrix.platform.target, 'x86') }}
         uses: uraimo/run-on-arch-action@v3
@@ -135,9 +138,10 @@ jobs:
             set -e
             python3 -m virtualenv .venv
             source .venv/bin/activate
+            cd crates/pyndakaas
             pip install . --find-links dist --force-reinstall
             pip install pytest
-            cd crates/pyndakaas && pytest
+            pytest
   windows:
     runs-on: ${{ matrix.platform.runner }}
     strategy:
@@ -173,9 +177,10 @@ jobs:
           set -e
           python3 -m venv .venv
           source .venv/Scripts/activate
+          cd crates/pyndakaas
           pip install . --find-links dist --force-reinstall
           pip install pytest
-          cd crates/pyndakaas && pytest
+          pytest
   macos:
     runs-on: ${{ matrix.platform.runner }}
     strategy:
@@ -208,9 +213,10 @@ jobs:
           set -e
           python3 -m venv .venv
           source .venv/bin/activate
+          cd crates/pyndakaas
           pip install . --find-links dist --force-reinstall
           pip install pytest
-          cd crates/pyndakaas && pytest
+          pytest
   sdist:
     runs-on: ubuntu-latest
     steps:
