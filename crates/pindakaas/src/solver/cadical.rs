@@ -640,7 +640,10 @@ mod tests {
 		bool_linear::LimitComp,
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
 		helpers::tests::{assert_solutions, expect_file},
-		solver::{cadical::Cadical, SolveResult, Solver, TermSignal, TerminateCallback},
+		solver::{
+			cadical::Cadical, Assumptions, FailedAssumptions, SolveResult, Solver, TermSignal,
+			TerminateCallback,
+		},
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Unsatisfiable, Valuation,
 	};
 
@@ -767,6 +770,29 @@ mod tests {
 		);
 		let mut slv = Cadical::from(&cnf);
 		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
+	}
+
+	#[test]
+	fn test_failed() {
+		let mut cnf = Cnf::default();
+		let x = cnf.new_lit();
+		let y = cnf.new_lit();
+		// An unsatisfiable problem with only `x` in the unsat core
+		// same as the tie/shirt example unit test in the Cadical repo
+		cnf.add_clause([x, y]).unwrap();
+		cnf.add_clause([!x, !y]).unwrap();
+		cnf.add_clause([!x, y]).unwrap();
+		let mut slv = Cadical::from(&cnf);
+		match slv.solve_assuming([x, y]) {
+			SolveResult::Unsatisfiable(fail) => {
+				assert!(fail.fail(x), "`x` should be responsible");
+				assert!(
+					!fail.fail(y),
+					"`y` is not an assumption, so is not in the core"
+				);
+			}
+			_ => panic!(),
+		};
 	}
 
 	#[cfg(feature = "external-propagation")]
