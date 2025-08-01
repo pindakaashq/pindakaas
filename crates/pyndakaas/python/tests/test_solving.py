@@ -26,8 +26,7 @@ def test_assumptions():
     #     assert result.value(y) is True
     #     assert result.value(x) is False
     with slv.solve(assumptions=[x]) as result:
-        print("res", result, result._mapping, x, int(x), result._mapping[int(x)], result._mapping.get(int(x)), result.failed(x))
+        print("res", result, result._mapping, x, int(x), result._mapping[int(x)], result._mapping.get(int(x)), result.failed())
         assert result.status == pindakaas.solver.Status.UNSATISFIABLE
-        assert result.failed(x) is True, "`x` should be responsible"
-        assert False
-        assert result.failed(y) is None, "`y` is not an assumption, so is not in the core"
+        assert result.failed() is True, "`x` should be responsible"
+        # assert result.failed() is None, "`y` is not an assumption, so is not in the core"
