@@ -29,4 +29,5 @@ def test_assumptions():
         print("res", result, result._mapping, x, int(x), result._mapping[int(x)], result._mapping.get(int(x)), result.failed(x))
         assert result.status == pindakaas.solver.Status.UNSATISFIABLE
         assert result.failed(x) is True, "`x` should be responsible"
+        assert False
         assert result.failed(y) is None, "`y` is not an assumption, so is not in the core"

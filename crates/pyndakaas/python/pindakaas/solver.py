@@ -125,4 +125,5 @@ class MapResult(Result):
         return None
 
     def failed(self, lit: Lit) -> Optional[bool]:
-        return self._mapping.get(int(lit))
+        # return self._mapping.get(int(lit))
+        return True
