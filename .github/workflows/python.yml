@@ -214,7 +214,7 @@ jobs:
           set -e
           python3 -m venv .venv
           source .venv/bin/activate
-          pip install pindakaas --find-links dist --force-reinstall --no-index
+          pip install pindakaas --find-links dist --force-reinstall
           pip install pytest
           cd crates/pyndakaas && pytest
 

@@ -14,19 +14,18 @@ def test_cadical():
         assert vx != vy
 
 
-import sys
 def test_assumptions():
     slv = pindakaas.solver.CaDiCaL()
-    # same as the tie/shirt example unit test in Cadical
     x, y = slv.new_vars(2)
     slv += x ^ y
-    slv.add_clause([~x, y])
-    # with slv.solve(assumptions=[y]) as result:
-    #     assert result.status == pindakaas.solver.Status.SATISFIED
-    #     assert result.value(y) is True
-    #     assert result.value(x) is False
     with slv.solve(assumptions=[x]) as result:
-        print("res", result, result._mapping, x, int(x), result._mapping[int(x)], result._mapping.get(int(x)), result.failed())
+        assert result.status == pindakaas.solver.Status.SATISFIED
+        assert result.value(x) is True
+        assert result.value(y) is False
+    with slv.solve(assumptions=[y]) as result:
+        assert result.status == pindakaas.solver.Status.SATISFIED
+        assert result.value(x) is False
+        assert result.value(y) is True
+    with slv.solve(assumptions=[x, y]) as result:
         assert result.status == pindakaas.solver.Status.UNSATISFIABLE
-        assert result.failed() is True, "`x` should be responsible"
-        # assert result.failed() is None, "`y` is not an assumption, so is not in the core"
+        assert result.failed(x) or result.failed(y), "One or the other variable should have been used to prove UNSAT"

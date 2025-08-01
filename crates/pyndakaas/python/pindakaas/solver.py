@@ -31,7 +31,7 @@ class Result(ABC):
         ...
 
     @abstractmethod
-    def failed(self) -> Optional[bool]:
+    def failed(self, lit: Lit) -> Optional[bool]:
         """Check if the given assumption literal was used to prove the unsatisfiability
         of the formula under the assumptions used for the last SAT search. Note that for
         literals `lit` which are not assumption literals, the behavior of is not
@@ -124,6 +124,7 @@ class MapResult(Result):
             return self._mapping.get(int(lit))
         return None
 
-    def failed(self):
-        # return self._mapping.get(int(lit))
-        return True
+    def failed(self, lit: Lit) -> Optional[bool]:
+        if self.status == Status.UNSATISFIABLE:
+            return self._mapping.get(int(lit))
+        return None
