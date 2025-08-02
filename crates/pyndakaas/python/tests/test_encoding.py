@@ -35,7 +35,6 @@ def test_encode_bool_lin_default():
     f += x * 3 + y * 2 + z >= 3
     x, y, z = f.new_vars(3)
     f.add_encoding(x + y + z == 1)
-    print(f.to_dimacs())
     assert (
         f.to_dimacs()
         == """p cnf 11 13
