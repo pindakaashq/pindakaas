@@ -78,31 +78,31 @@ impl FailedAssumptions for IpasirFailed<'_> {
 }
 
 impl IpasirLibrary {
-	fn ipasir_add_sym(&self) -> SymResult<extern "C" fn(*mut c_void, i32)> {
+	fn ipasir_add_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void, i32)> {
 		// SAFETY: We assume that if this symbol is present, then it is part of a
 		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_add") }
 	}
 
-	fn ipasir_assume_sym(&self) -> SymResult<extern "C" fn(*mut c_void, i32)> {
+	fn ipasir_assume_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void, i32)> {
 		// SAFETY: We assume that if this symbol is present, then it is part of a
 		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_assume") }
 	}
 
-	fn ipasir_failed_sym(&self) -> SymResult<extern "C" fn(*mut c_void, i32) -> c_int> {
+	fn ipasir_failed_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void, i32) -> c_int> {
 		// SAFETY: We assume that if this symbol is present, then it is part of a
 		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_failed") }
 	}
 
-	fn ipasir_init_sym(&self) -> SymResult<extern "C" fn() -> *mut c_void> {
+	fn ipasir_init_sym(&self) -> SymResult<'_, extern "C" fn() -> *mut c_void> {
 		// SAFETY: We assume that if this symbol is present, then it is part of a
 		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_init") }
 	}
 
-	fn ipasir_release_sym(&self) -> SymResult<extern "C" fn(*mut c_void)> {
+	fn ipasir_release_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void)> {
 		// SAFETY: We assume that if this symbol is present, then it is part of a
 		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_release") }
@@ -111,6 +111,7 @@ impl IpasirLibrary {
 	fn ipasir_set_learn_sym(
 		&self,
 	) -> SymResult<
+		'_,
 		extern "C" fn(
 			*mut c_void,
 			*mut c_void,
@@ -126,24 +127,25 @@ impl IpasirLibrary {
 	fn ipasir_set_terminate_sym(
 		&self,
 	) -> SymResult<
+		'_,
 		extern "C" fn(*mut c_void, *mut c_void, Option<unsafe extern "C" fn(*mut c_void) -> c_int>),
 	> {
 		// SAFETY: We assume that if this symbol is present, then it is part of a
 		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_set_terminate") }
 	}
-	fn ipasir_signature_sym(&self) -> SymResult<extern "C" fn() -> *const c_char> {
+	fn ipasir_signature_sym(&self) -> SymResult<'_, extern "C" fn() -> *const c_char> {
 		// SAFETY: We assume that if this symbol is present, then it is part of a
 		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_signature") }
 	}
 
-	fn ipasir_solve_sym(&self) -> SymResult<extern "C" fn(*mut c_void) -> c_int> {
+	fn ipasir_solve_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void) -> c_int> {
 		// SAFETY: We assume that if this symbol is present, then it is part of a
 		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_solve") }
 	}
-	fn ipasir_value_sym(&self) -> SymResult<extern "C" fn(*mut c_void, i32) -> i32> {
+	fn ipasir_value_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void, i32) -> i32> {
 		// SAFETY: We assume that if this symbol is present, then it is part of a
 		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_val") }
