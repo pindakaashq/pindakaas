@@ -1,14 +1,13 @@
-use std::{cmp::min, hash, mem, sync::Mutex};
+use std::{cmp::min, hash, iter::once, mem, sync::Mutex};
 
-use iset::interval_map;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
 	bool_linear::{BoolLinExp, LimitComp},
-	helpers::{add_clauses_for, negate_cnf},
 	integer::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
-	Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
+	propositional_logic::{Formula, TseitinEncoder},
+	AsDynClauseDatabase, Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable,
 	Valuation,
 };
 
@@ -77,7 +76,7 @@ impl Checker for Sorted<'_> {
 }
 
 impl SortedEncoder {
-	fn comp<DB: ClauseDatabase + ?Sized>(
+	fn comp<DB: ClauseDatabase + AsDynClauseDatabase>(
 		&self,
 		db: &mut DB,
 		x: &IntVarEnc,
@@ -87,35 +86,20 @@ impl SortedEncoder {
 		c: Coeff,
 	) -> Result {
 		let cmp = self.overwrite_recursive_cmp.as_ref().unwrap_or(cmp);
-		let to_iv = |c: Coeff| c..(c + 1);
-		let empty_clause: Vec<Vec<Lit>> = vec![Vec::new()];
 		let c1 = c;
 		let c2 = c + 1;
-		let x = x.geq(to_iv(c1)); // c
-		let y = y.geq(to_iv(c2)); // c+1
-		let z1 = z.geq(to_iv(c1 + c1)); // 2c
-		let z2 = z.geq(to_iv(c1 + c2)); // 2c+1
+		let x = x.geq(c1); // c
+		let y = y.geq(c2); // c+1
+		let z1 = z.geq(c1 + c1); // 2c
+		let z2 = z.geq(c1 + c2); // 2c+1
 
-		add_clauses_for(
-			db,
-			vec![negate_cnf(x.clone()), empty_clause.clone(), z1.clone()],
-		)?;
-		add_clauses_for(
-			db,
-			vec![negate_cnf(y.clone()), empty_clause.clone(), z1.clone()],
-		)?;
-		add_clauses_for(
-			db,
-			vec![negate_cnf(x.clone()), negate_cnf(y.clone()), z2.clone()],
-		)?;
-
+		TseitinEncoder.encode(db, &Formula::Or(vec![!x.clone(), z1.clone()]))?;
+		TseitinEncoder.encode(db, &Formula::Or(vec![!y.clone(), z1.clone()]))?;
+		TseitinEncoder.encode(db, &Formula::Or(vec![!x.clone(), !y.clone(), z2.clone()]))?;
 		if cmp == &LimitComp::Equal {
-			add_clauses_for(
-				db,
-				vec![x.clone(), empty_clause.clone(), negate_cnf(z2.clone())],
-			)?;
-			add_clauses_for(db, vec![y.clone(), empty_clause, negate_cnf(z2)])?;
-			add_clauses_for(db, vec![x, y, negate_cnf(z1)])?;
+			TseitinEncoder.encode(db, &Formula::Or(vec![x.clone(), !z2.clone()]))?;
+			TseitinEncoder.encode(db, &Formula::Or(vec![y.clone(), !z2]))?;
+			TseitinEncoder.encode(db, &Formula::Or(vec![x, y, !z1]))?;
 		}
 		Ok(())
 	}
@@ -127,7 +111,7 @@ impl SortedEncoder {
 		self
 	}
 
-	fn merged<DB: ClauseDatabase + ?Sized>(
+	fn merged<DB: ClauseDatabase + AsDynClauseDatabase>(
 		&self,
 		db: &mut DB,
 		x1: &IntVarEnc,
@@ -210,7 +194,7 @@ impl SortedEncoder {
 		}
 	}
 
-	fn next_int_var<DB: ClauseDatabase + ?Sized>(
+	fn next_int_var<DB: ClauseDatabase + AsDynClauseDatabase>(
 		&self,
 		db: &mut DB,
 		ub: Coeff,
@@ -229,7 +213,7 @@ impl SortedEncoder {
 	}
 
 	/// The sorted/merged base case of x1{0,1}+x2{0,1}<=y{0,1,2}
-	fn smerge<DB: ClauseDatabase + ?Sized>(
+	fn smerge<DB: ClauseDatabase + AsDynClauseDatabase>(
 		&self,
 		db: &mut DB,
 		x1: &IntVarEnc,
@@ -255,7 +239,7 @@ impl SortedEncoder {
 		self.comp(db, x1, &x2, cmp, &y, 1)
 	}
 
-	fn sort<DB: ClauseDatabase + ?Sized>(
+	fn sort<DB: ClauseDatabase + AsDynClauseDatabase>(
 		&self,
 		db: &mut DB,
 		xs: &[IntVarEnc],
@@ -275,7 +259,7 @@ impl SortedEncoder {
 		}
 	}
 
-	fn sorted<DB: ClauseDatabase + ?Sized>(
+	fn sorted<DB: ClauseDatabase + AsDynClauseDatabase>(
 		&self,
 		db: &mut DB,
 		xs: &[IntVarEnc],
@@ -301,14 +285,15 @@ impl SortedEncoder {
 		if direct {
 			return (1..=m + 1).try_for_each(|k| {
 				xs.iter()
-					.map(|x| x.geq(1..2)[0][0])
+					.map(|x| x.geq(1))
 					.combinations(k as usize)
 					.try_for_each(|lits| {
-						db.add_clause(
-							lits.into_iter()
-								.map(|lit| !lit)
-								.chain(y.geq(k..(k + 1))[0].iter().cloned()),
-						)
+						let lits = lits
+							.into_iter()
+							.map(|lit| !lit)
+							.chain(once(y.geq(k)))
+							.collect();
+						TseitinEncoder.encode(db, &Formula::Or(lits))
 					})
 			});
 		}
@@ -403,7 +388,7 @@ impl Default for SortedEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, Sorted<'_>> for SortedEncoder {
+impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, Sorted<'_>> for SortedEncoder {
 	fn encode(&self, db: &mut DB, sorted: &Sorted) -> Result {
 		let xs = sorted
 			.xs
@@ -411,8 +396,7 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, Sorted<'_>> for SortedEncoder {
 			.map(|x| Some(*x))
 			.enumerate()
 			.map(|(i, x)| {
-				IntVarOrd::from_views(db, interval_map! { 1..2 => x }, format!("x_{}", i + 1))
-					.into()
+				IntVarOrd::from_views(db, (0..=1).into(), vec![x], format!("x_{}", i + 1)).into()
 			})
 			.collect_vec();
 
@@ -424,7 +408,7 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, Sorted<'_>> for SortedEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, TernLeConstraint<'_>> for SortedEncoder {
+impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for SortedEncoder {
 	fn encode(&self, db: &mut DB, tern: &TernLeConstraint) -> Result {
 		let TernLeConstraint { x, y, cmp, z } = tern;
 		if tern.is_fixed()? {

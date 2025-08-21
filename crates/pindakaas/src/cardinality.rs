@@ -3,7 +3,7 @@ use crate::{
 	cardinality_one::CardinalityOne,
 	integer::IntVarEnc,
 	sorted::{Sorted, SortedEncoder},
-	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Valuation,
+	AsDynClauseDatabase, Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Valuation,
 };
 
 // local marker trait, to ensure the previous definition only applies within this crate
@@ -95,7 +95,7 @@ impl Default for SortingNetworkEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, Cardinality> for SortingNetworkEncoder {
+impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))

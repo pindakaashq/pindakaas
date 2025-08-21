@@ -12,9 +12,9 @@ keywords.workspace = true
 repository.workspace = true
 
 [dependencies]
-iset = "=0.3.0"
 itertools = "0.14"
 rustc-hash = "2.0"
+rangelist = "0.3.1"
 
 # Dynamically load solver libraries (through IPASIR interfaces)
 libloading = { version = "0.8", optional = true }

@@ -53,46 +53,9 @@ pub(crate) mod opt_field;
 
 use itertools::Itertools;
 pub(crate) use new_named_lit;
-use rustc_hash::FxHashSet;
 
-use crate::{
-	bool_linear::PosCoeff, integer::IntVar, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result,
-};
+use crate::{bool_linear::PosCoeff, integer::IntVar, ClauseDatabase, Coeff};
 
-const FILTER_TRIVIAL_CLAUSES: bool = false;
-
-/// Adds clauses for a DNF formula (disjunction of conjunctions)
-/// Ex. (a /\ -b) \/ c == a \/ c /\ -b \/ c
-/// If any disjunction is empty, this satisfies the whole formula. If any element contains the empty conjunction, that element is falsified in the final clause.
-pub(crate) fn add_clauses_for<DB: ClauseDatabase + ?Sized>(
-	db: &mut DB,
-	expression: Vec<Vec<Vec<Lit>>>,
-) -> Result {
-	// TODO doctor out type of expression (clauses containing conjunctions?)
-
-	for cls in expression
-		.into_iter()
-		.map(|cls| cls.into_iter())
-		.multi_cartesian_product()
-	{
-		let cls = cls.concat(); // filter out [] (empty conjunctions?) of the clause
-		if FILTER_TRIVIAL_CLAUSES {
-			let mut lits = FxHashSet::default();
-			if cls.iter().any(|&lit| {
-				if lits.contains(&(!lit)) {
-					true
-				} else {
-					let _ = lits.insert(lit);
-					false
-				}
-			}) {
-				continue;
-			}
-		}
-		db.add_clause(cls)?;
-	}
-	Ok(())
-}
 /// Convert `k` to unsigned binary in `bits`
 pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
 	let bits = bits.unwrap_or_else(|| IntVar::required_bits(0, *k));
@@ -111,21 +74,6 @@ pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool 
 		it.all(|(i, c)| c == (TWO.pow(i as u32) * mult))
 	} else {
 		false
-	}
-}
-
-/// Negates CNF (flipping between empty clause and formula)
-pub(crate) fn negate_cnf(clauses: Vec<Vec<Lit>>) -> Vec<Vec<Lit>> {
-	if clauses.is_empty() {
-		vec![vec![]]
-	} else if clauses.contains(&vec![]) {
-		vec![]
-	} else {
-		assert!(clauses.len() == 1);
-		clauses
-			.into_iter()
-			.map(|clause| clause.into_iter().map(|lit| !lit).collect())
-			.collect()
 	}
 }
 

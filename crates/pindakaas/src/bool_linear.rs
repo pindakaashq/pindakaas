@@ -1,14 +1,13 @@
 use std::{
 	cell::RefCell,
-	cmp::{max, min},
-	collections::{BTreeSet, VecDeque},
+	cmp::{max, min, Ordering},
+	collections::VecDeque,
 	fmt::{self, Display},
 	iter::once,
 	ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign, Neg, Range, Sub, SubAssign},
 	rc::Rc,
 };
 
-use iset::IntervalMap;
 use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
@@ -491,55 +490,73 @@ impl BddEncoder {
 		i: usize,
 		xs: &Vec<IntVarEnc>,
 		sum: Coeff,
-		ws: &mut Vec<IntervalMap<Coeff, BddNode>>,
+		ws: &mut Vec<Vec<(Range<Coeff>, BddNode)>>,
 	) -> (Range<Coeff>, BddNode) {
-		match &ws[i].overlap(sum).collect_vec()[..] {
-			[] => {
-				let views = xs[i]
-					.dom()
-					.iter(..)
-					.map(|v| v.end - 1)
-					.map(|v| (v, Self::bdd(i + 1, xs, sum + v, ws)))
-					.collect_vec();
-
-				// TODO could we check whether a domain value of x always leads to gaps?
-				let is_gap = views.iter().all(|(_, (_, v))| v == &BddNode::Gap);
-				// TODO without checking actual Val identity, could we miss when the next layer has two
-				// adjacent nodes that are both views on the same node at the layer below?
-				let view = (views.iter().map(|(_, (iv, _))| iv).all_equal())
-					.then(|| views.first().unwrap().1 .0.end - 1);
-
-				let interval = views
-					.into_iter()
-					.map(|(v, (interval, _))| (interval.start - v)..(interval.end - v))
-					.reduce(|a, b| max(a.start, b.start)..min(a.end, b.end))
-					.unwrap();
-
-				let node = if is_gap {
-					BddNode::Gap
-				} else if let Some(view) = view {
-					BddNode::View(view)
-				} else {
-					BddNode::Val
-				};
-
-				let new_interval_inserted = ws[i].insert(interval.clone(), node.clone()).is_none();
-				debug_assert!(
-					new_interval_inserted,
-					"Duplicate interval {interval:?} inserted into {ws:?} layer {i}"
-				);
-				(interval, node)
+		// See if the node for `sum` is already available
+		if let Ok(pos) = ws[i].binary_search_by(|(r, _)| {
+			if r.contains(&sum) {
+				Ordering::Equal
+			} else if r.end <= sum {
+				Ordering::Less
+			} else {
+				Ordering::Greater
 			}
-			[(a, node)] => (a.clone(), (*node).clone()),
-			_ => panic!("ROBDD intervals should be disjoint, but were {:?}", ws[i]),
+		}) {
+			return ws[i][pos].clone();
 		}
+
+		let views = xs[i]
+			.dom()
+			.iter()
+			.flatten()
+			.map(|v| (v, Self::bdd(i + 1, xs, sum + v, ws)))
+			.collect_vec();
+
+		// TODO could we check whether a domain value of x always leads to gaps?
+		let is_gap = views.iter().all(|(_, (_, v))| v == &BddNode::Gap);
+		// TODO without checking actual Val identity, could we miss when the next layer has two
+		// adjacent nodes that are both views on the same node at the layer below?
+		let view = (views.iter().map(|(_, (iv, _))| iv).all_equal())
+			.then(|| views.first().unwrap().1 .0.end - 1);
+
+		let interval = views
+			.into_iter()
+			.map(|(v, (interval, _))| (interval.start - v)..(interval.end - v))
+			.reduce(|a, b| max(a.start, b.start)..min(a.end, b.end))
+			.unwrap();
+
+		let node = if is_gap {
+			BddNode::Gap
+		} else if let Some(view) = view {
+			BddNode::View(view)
+		} else {
+			BddNode::Val
+		};
+
+		let pos = match ws[i].binary_search_by_key(&interval.start, |(r, _)| r.start) {
+			Ok(i) | Err(i) => i,
+		};
+		ws[i].insert(pos, (interval.clone(), node.clone()));
+		debug_assert!(
+			pos == 0 || ws[i][pos - 1].0.end <= ws[i][pos].0.start,
+			"Overlapping interval {interval:?} (overlapping with {:?}) inserted into {:?}",
+			ws[i][pos - 1].0,
+			ws[i]
+		);
+		debug_assert!(
+			pos + 1 == ws[i].len() || ws[i][pos].0.end <= ws[i][pos + 1].0.start,
+			"Overlapping interval {interval:?} (overlapping with {:?}) inserted into {:?}",
+			ws[i][pos + 1].1,
+			ws[i]
+		);
+		(interval, node)
 	}
 
 	fn construct_bdd(
 		xs: &Vec<IntVarEnc>,
 		cmp: &LimitComp,
 		k: PosCoeff,
-	) -> Vec<IntervalMap<Coeff, BddNode>> {
+	) -> Vec<Vec<(Range<Coeff>, BddNode)>> {
 		let k = *k;
 
 		let bounds = xs
@@ -562,7 +579,7 @@ impl BddEncoder {
 
 		let inf = xs.iter().fold(0, |a, x| a + x.ub()) + 1;
 
-		let mut ws = margins
+		let mut ws: Vec<Vec<(Range<Coeff>, BddNode)>> = margins
 			.into_iter()
 			.rev()
 			.chain(once((k, k)))
@@ -584,13 +601,20 @@ impl BddEncoder {
 				.collect()
 			})
 			.collect();
+		debug_assert!(
+			ws.iter().all(|layer| layer
+				.iter()
+				.tuple_windows()
+				.all(|((a, _), (b, _))| a.end <= b.end)),
+			"layers must be sorted and non-overlapping"
+		);
 
 		let _ = Self::bdd(0, xs, 0, &mut ws);
 		ws
 	}
 }
 
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
+impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
@@ -619,7 +643,7 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, NormalizedBoolLinear> for BddEncod
 				Rc::new(RefCell::new({
 					let mut y = model.new_var(
 						nodes
-							.into_iter(..)
+							.into_iter()
 							.filter_map(|(iv, node)| match node {
 								BddNode::Gap => None,
 								BddNode::Val => Some(iv.end - 1),
@@ -629,6 +653,7 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, NormalizedBoolLinear> for BddEncod
 									Some(val)
 								}
 							})
+							.map(|v| v..=v)
 							.collect(),
 						self.add_consistency,
 					);
@@ -666,7 +691,7 @@ impl BoolLinAggregator {
 		any(feature = "tracing", test),
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	pub fn aggregate<DB: ClauseDatabase + ?Sized>(
+	pub fn aggregate<DB: ClauseDatabase + AsDynClauseDatabase>(
 		&self,
 		db: &mut DB,
 		lin: &BoolLinear,
@@ -1627,21 +1652,23 @@ impl Display for LimitComp {
 }
 
 impl<Enc, Agg> LinearEncoder<Enc, Agg> {
-	pub fn add_linear_aggregater(&mut self, agg: Agg) -> &mut Self {
+	pub fn add_linear_aggregator(&mut self, agg: Agg) -> &mut Self {
 		self.agg = agg;
 		self
 	}
+
 	pub fn add_variant_encoder(&mut self, enc: Enc) -> &mut Self {
 		self.enc = enc;
 		self
 	}
+
 	pub fn new(enc: Enc, agg: Agg) -> Self {
 		Self { enc, agg }
 	}
 }
 
-impl<DB: ClauseDatabase + ?Sized, Enc: Encoder<DB, BoolLinVariant>> Encoder<DB, BoolLinear>
-	for LinearEncoder<Enc>
+impl<DB: ClauseDatabase + AsDynClauseDatabase, Enc: Encoder<DB, BoolLinVariant>>
+	Encoder<DB, BoolLinear> for LinearEncoder<Enc>
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
@@ -1847,7 +1874,7 @@ impl SwcEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, NormalizedBoolLinear> for SwcEncoder {
+impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear> for SwcEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
@@ -1868,7 +1895,7 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, NormalizedBoolLinear> for SwcEncod
 		let ys = once(model.new_constant(0))
 			.chain(
 				(1..n)
-					.map(|_| model.new_var((-(*lin.k)..=0).collect(), self.add_consistency))
+					.map(|_| model.new_var((-(*lin.k)..=0).into(), self.add_consistency))
 					.take(n),
 			)
 			.collect_vec()
@@ -1928,16 +1955,16 @@ impl TotalizerEncoder {
 					[left, right] => {
 						let at_root = layer.len() == 2;
 						let dom = if at_root {
-							BTreeSet::from([k])
+							(k..=k).into()
 						} else {
 							left.borrow()
 								.dom
 								.iter()
-								.cartesian_product(right.borrow().dom.iter())
-								.map(|(&a, &b)| a + b)
+								.flatten()
+								.cartesian_product(right.borrow().dom.iter().flatten())
+								.map(|(a, b)| a + b)
 								.filter(|&d| d <= k)
-								.sorted()
-								.dedup()
+								.map(|v| v..=v)
 								.collect()
 						};
 						let parent =
@@ -1965,7 +1992,9 @@ impl TotalizerEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, NormalizedBoolLinear> for TotalizerEncoder {
+impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear>
+	for TotalizerEncoder
+{
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
@@ -2970,7 +2999,7 @@ mod tests {
 		let mut agg = BoolLinAggregator::default();
 		let _ = agg.sort_same_coefficients(SortedEncoder::default(), 3);
 		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default();
-		let _ = encoder.add_linear_aggregater(agg);
+		let _ = encoder.add_linear_aggregator(agg);
 		let con = BoolLinear::new(
 			BoolLinExp::from_slices(&[3, 3, 1, 1, 3], &vars),
 			Comparator::GreaterEq,

@@ -1,25 +1,22 @@
 use std::{
 	cell::RefCell,
 	cmp::{max, min},
-	collections::BTreeSet,
 	fmt::{self, Display},
 	iter::once,
-	ops::Range,
+	ops::Bound,
 	rc::Rc,
 };
 
-use iset::{interval_map, interval_set, IntervalMap, IntervalSet};
 use itertools::Itertools;
-use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
+use rangelist::{IntervalIterator, RangeList};
+use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
 	bool_linear::{BoolLinExp, LimitComp, Part, PosCoeff},
-	helpers::{
-		add_clauses_for, as_binary, is_powers_of_two, negate_cnf, new_named_lit,
-		unsigned_binary_range_ub,
-	},
-	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
-	Unsatisfiable, Valuation,
+	helpers::{as_binary, is_powers_of_two, new_named_lit, unsigned_binary_range_ub},
+	propositional_logic::{Formula, TseitinEncoder},
+	AsDynClauseDatabase, BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder,
+	Lit, Result, Unsatisfiable, Valuation,
 };
 
 const COUPLE_DOM_PART_TO_ORD: bool = false;
@@ -45,7 +42,7 @@ pub(crate) struct ImplicationChainEncoder {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IntVar {
 	pub(crate) id: usize,
-	pub(crate) dom: BTreeSet<Coeff>,
+	pub(crate) dom: RangeList<Coeff>,
 	add_consistency: bool,
 	pub(crate) views: FxHashMap<Coeff, (usize, Coeff)>,
 }
@@ -67,7 +64,8 @@ pub(crate) enum IntVarEnc {
 
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarOrd {
-	pub(crate) xs: IntervalMap<Coeff, Lit>,
+	pub(crate) dom: RangeList<Coeff>,
+	pub(crate) xs: Vec<Lit>,
 	pub(crate) lbl: String,
 }
 
@@ -95,20 +93,22 @@ pub(crate) struct TernLeConstraint<'a> {
 #[derive(Debug, Default)]
 pub(crate) struct TernLeEncoder {}
 
-pub(crate) fn display_dom(dom: &BTreeSet<Coeff>) -> String {
+pub(crate) fn display_dom(dom: &RangeList<Coeff>) -> String {
 	const ELIPSIZE: usize = 8;
-	let (lb, ub) = (*dom.first().unwrap(), *dom.last().unwrap());
-	if dom.len() > ELIPSIZE && dom.len() == (ub - lb + 1) as usize {
-		format!("{}..{}", dom.first().unwrap(), dom.last().unwrap())
-	} else if dom.len() > ELIPSIZE {
+	let card = dom.card().unwrap();
+	let lb = *dom.lower_bound().unwrap();
+	let ub = *dom.upper_bound().unwrap();
+	if card > ELIPSIZE && dom.iter().len() == 1 {
+		format!("{}..{}", lb, ub)
+	} else if card > ELIPSIZE {
 		format!(
 			"{{{},..,{ub}}} ({}|{})",
-			dom.iter().take(ELIPSIZE).join(","),
-			dom.len(),
+			dom.iter().flatten().take(ELIPSIZE).join(","),
+			card,
 			IntVar::required_bits(lb, ub)
 		)
 	} else {
-		format!("{{{}}}", dom.iter().join(","))
+		format!("{{{}}}", dom.iter().flatten().join(","))
 	}
 }
 
@@ -249,28 +249,29 @@ pub(crate) fn log_enc_add_<DB: ClauseDatabase + ?Sized>(
 		}
 	}
 }
-pub(crate) fn ord_plus_ord_le_ord_sparse_dom(
-	a: Vec<Coeff>,
-	b: Vec<Coeff>,
+
+pub(crate) fn ord_plus_ord_le_ord_sparse_dom<I1, I2>(
+	a: I1,
+	b: I2,
 	l: Coeff,
 	u: Coeff,
-) -> IntervalSet<Coeff> {
-	// TODO optimize by dedup (if already sorted?)
-	FxHashSet::<Coeff>::from_iter(a.iter().flat_map(|a| {
-		b.iter().filter_map(move |b| {
-			// TODO refactor: use then_some when stabilized
-			if *a + *b >= l && *a + *b <= u {
-				Some(*a + *b)
+) -> RangeList<Coeff>
+where
+	I1: IntoIterator<Item = Coeff>,
+	I2: IntoIterator<Item = Coeff>,
+	I2::IntoIter: Clone,
+{
+	a.into_iter()
+		.cartesian_product(b)
+		.filter_map(|(a, b)| {
+			if a + b >= l && a + b <= u {
+				Some(a + b)
 			} else {
 				None
 			}
 		})
-	}))
-	.into_iter()
-	.sorted()
-	.tuple_windows()
-	.map(|(a, b)| (a + 1)..(b + 1))
-	.collect::<IntervalSet<_>>()
+		.map(|v| v..=v)
+		.collect()
 }
 
 impl Checker for ImplicationChainConstraint {
@@ -298,31 +299,34 @@ impl ImplicationChainEncoder {
 }
 
 impl IntVar {
-	fn encode<DB: ClauseDatabase + ?Sized>(
+	fn encode<DB: ClauseDatabase + AsDynClauseDatabase>(
 		&self,
 		db: &mut DB,
 		views: &mut FxHashMap<(usize, Coeff), Lit>,
 		prefer_order: bool,
 	) -> IntVarEnc {
 		if self.size() == 1 {
-			IntVarEnc::Const(*self.dom.first().unwrap())
+			IntVarEnc::Const(*self.dom.lower_bound().unwrap())
 		} else {
 			let x = if prefer_order {
-				let dom = self
+				let views = self
 					.dom
 					.iter()
-					.sorted()
-					.cloned()
-					.tuple_windows()
-					.map(|(a, b)| (a + 1)..(b + 1))
-					.map(|v| (v.clone(), views.get(&(self.id, v.end - 1)).cloned()))
-					.collect::<IntervalMap<_, _>>();
-				IntVarEnc::Ord(IntVarOrd::from_views(db, dom, "x".to_owned()))
+					.flatten()
+					.skip(1)
+					.map(|v| views.get(&(self.id, v)).cloned())
+					.collect();
+				IntVarEnc::Ord(IntVarOrd::from_views(
+					db,
+					self.dom.clone(),
+					views,
+					"x".to_owned(),
+				))
 			} else {
 				let y = IntVarBin::from_bounds(
 					db,
-					*self.dom.first().unwrap(),
-					*self.dom.last().unwrap(),
+					*self.dom.lower_bound().unwrap(),
+					*self.dom.upper_bound().unwrap(),
 					"x".to_owned(),
 				);
 				IntVarEnc::Bin(y)
@@ -332,42 +336,42 @@ impl IntVar {
 				x.consistent(db).unwrap();
 			}
 
-			for view in self
+			for (view, f) in self
 				.views
 				.iter()
-				.map(|(c, (id, val))| ((*id, *val), x.geq(*c..(*c + 1))))
+				.map(|(c, (id, val))| ((*id, *val), x.geq(*c)))
 			{
 				// TODO refactor
-				if !view.1.is_empty() {
-					let _ = views.insert(view.0, view.1[0][0]);
+				if let Formula::Atom(BoolVal::Lit(l)) = f {
+					let _ = views.insert(view, l);
 				}
 			}
 			x
 		}
 	}
 
-	fn ge(&mut self, bound: &Coeff) {
-		self.dom = self.dom.split_off(bound);
+	fn ge(&mut self, bound: Coeff) {
+		self.dom = self.dom.intersect(&RangeList::from(bound..=Coeff::MAX));
 	}
 
-	pub(crate) fn lb(&self, c: &Coeff) -> Coeff {
-		*c * *(if c.is_negative() {
-			self.dom.last()
+	pub(crate) fn lb(&self, c: Coeff) -> Coeff {
+		c * if c.is_negative() {
+			self.dom.upper_bound()
 		} else {
-			self.dom.first()
-		})
+			self.dom.lower_bound()
+		}
 		.unwrap()
 	}
 
-	fn le(&mut self, bound: &Coeff) {
-		let _ = self.dom.split_off(&(*bound + 1));
+	fn le(&mut self, bound: Coeff) {
+		self.dom = self.dom.intersect(&RangeList::from(Coeff::MIN..=bound));
 	}
 
 	fn prefer_order(&self, cutoff: Option<Coeff>) -> bool {
 		match cutoff {
 			None => true,
 			Some(0) => false,
-			Some(cutoff) => (self.dom.len() as Coeff) < cutoff,
+			Some(cutoff) => (self.dom.card().unwrap() as Coeff) < cutoff,
 		}
 	}
 
@@ -381,15 +385,15 @@ impl IntVar {
 	}
 
 	pub(crate) fn size(&self) -> usize {
-		self.dom.len()
+		self.dom.card().unwrap()
 	}
 
-	pub(crate) fn ub(&self, c: &Coeff) -> Coeff {
-		*c * *(if c.is_negative() {
-			self.dom.first()
+	pub(crate) fn ub(&self, c: Coeff) -> Coeff {
+		c * if c.is_negative() {
+			self.dom.lower_bound()
 		} else {
-			self.dom.last()
-		})
+			self.dom.upper_bound()
+		}
 		.unwrap()
 	}
 }
@@ -401,7 +405,7 @@ impl Display for IntVar {
 }
 
 impl IntVarBin {
-	pub(crate) fn add<DB: ClauseDatabase + ?Sized>(
+	pub(crate) fn add<DB: ClauseDatabase + AsDynClauseDatabase>(
 		&self,
 		db: &mut DB,
 		encoder: &TernLeEncoder,
@@ -437,7 +441,10 @@ impl IntVarBin {
 		}
 	}
 
-	pub(crate) fn consistent<DB: ClauseDatabase + ?Sized>(&self, db: &mut DB) -> Result {
+	pub(crate) fn consistent<DB: ClauseDatabase + AsDynClauseDatabase>(
+		&self,
+		db: &mut DB,
+	) -> Result {
 		let encoder = TernLeEncoder::default();
 		if !GROUND_BINARY_AT_LB {
 			encoder.encode(
@@ -465,9 +472,10 @@ impl IntVarBin {
 		todo!()
 	}
 
-	fn dom(&self) -> IntervalSet<Coeff> {
-		(self.lb..=self.ub).map(|i| i..(i + 1)).collect()
+	fn dom(&self) -> RangeList<Coeff> {
+		(self.lb..=self.ub).into()
 	}
+
 	// TODO change to with_label or something
 	pub(crate) fn from_bounds<DB: ClauseDatabase + ?Sized>(
 		db: &mut DB,
@@ -500,14 +508,14 @@ impl IntVarBin {
 		}
 	}
 
-	pub(crate) fn geq(&self, v: Range<Coeff>) -> Vec<Vec<Lit>> {
+	pub(crate) fn geq(&self, v: Coeff) -> Formula<BoolVal> {
 		self.ineq(v, true)
 	}
 
-	fn ineq(&self, v: Range<Coeff>, geq: bool) -> Vec<Vec<Lit>> {
+	fn ineq(&self, v: Coeff, geq: bool) -> Formula<BoolVal> {
 		// TODO could *maybe* be domain lb/ub
 		let v = if GROUND_BINARY_AT_LB {
-			(v.start - self.lb())..(v.end - self.lb())
+			v - self.lb()
 		} else {
 			v
 		};
@@ -516,34 +524,44 @@ impl IntVarBin {
 		let range_lb = 0;
 		let range_ub = unsigned_binary_range_ub(self.lits() as u32);
 
-		let range = max(range_lb - 1, v.start)..min(v.end, range_ub + 1 + 1);
-		range
-			.filter_map(|v| {
-				let v = if geq { v - 1 } else { v + 1 };
-				if v < range_lb {
-					(!geq).then_some(vec![])
-				} else if v > range_ub {
-					geq.then_some(vec![])
-				} else {
-					Some(
-						as_binary(PosCoeff::new(v), Some(self.lits() as u32))
-							.into_iter()
-							.zip(self.xs.iter())
-							// if >=, find 0s, if <=, find 1s
-							.filter_map(|(b, x)| (b != geq).then_some(x))
-							.map(|&x| if geq { x } else { !x })
-							.collect(),
-					)
+		if v <= range_lb {
+			Formula::Atom(BoolVal::Const(geq))
+		} else if v >= range_ub {
+			Formula::Atom(BoolVal::Const(!geq))
+		} else {
+			// generalized from `lex_leq_const`
+			let v = as_binary(PosCoeff::new(v), Some(self.lits() as u32));
+			let mut conj = Vec::new();
+			for (i, _) in v.iter().enumerate().filter(|(_, &v)| v == geq) {
+				let mut disj = Vec::new();
+				for (j, _) in v
+					.iter()
+					.enumerate()
+					.skip(i)
+					.filter(|&(j, &v)| j == i || v != geq)
+				{
+					let lit = self.xs[j];
+					disj.push(Formula::Atom(BoolVal::Lit(if geq { lit } else { !lit })));
 				}
-			})
-			.collect()
+				conj.push(if disj.len() == 1 {
+					disj.pop().unwrap()
+				} else {
+					Formula::Or(disj)
+				});
+			}
+			if conj.len() == 1 {
+				conj.pop().unwrap()
+			} else {
+				Formula::And(conj)
+			}
+		}
 	}
 
 	pub(crate) fn lb(&self) -> Coeff {
 		self.lb
 	}
 
-	pub(crate) fn leq(&self, v: Range<Coeff>) -> Vec<Vec<Lit>> {
+	pub(crate) fn leq(&self, v: Coeff) -> Formula<BoolVal> {
 		self.ineq(v, false)
 	}
 
@@ -562,14 +580,14 @@ impl Display for IntVarBin {
 			f,
 			"{}:B ∈ {} [{}]",
 			self.lbl,
-			display_dom(&self.dom().iter(..).map(|d| d.end - 1).collect()),
+			display_dom(&self.dom()),
 			self.lits()
 		)
 	}
 }
 
 impl IntVarEnc {
-	pub(crate) fn add<DB: ClauseDatabase + ?Sized>(
+	pub(crate) fn add<DB: ClauseDatabase + AsDynClauseDatabase>(
 		&self,
 		db: &mut DB,
 		encoder: &TernLeEncoder,
@@ -589,23 +607,26 @@ impl IntVarEnc {
 			(IntVarEnc::Const(a), IntVarEnc::Const(b)) => Ok(IntVarEnc::Const(*a + *b)),
 			// TODO only used in sorters which enforce the constraints later!
 			(IntVarEnc::Const(c), x) | (x, IntVarEnc::Const(c)) if (*c == 0) => Ok(x.clone()),
-			(IntVarEnc::Ord(x), IntVarEnc::Ord(y)) => Ok(IntVarEnc::Ord(IntVarOrd::from_syms(
+			(IntVarEnc::Ord(x), IntVarEnc::Ord(y)) => Ok(IntVarEnc::Ord(IntVarOrd::from_dom(
 				db,
 				ord_plus_ord_le_ord_sparse_dom(
-					x.dom().iter(..).map(|d| d.end - 1).collect(),
-					y.dom().iter(..).map(|d| d.end - 1).collect(),
+					x.dom().iter().flatten(),
+					y.dom().iter().flatten(),
 					lb,
 					ub,
 				),
 				format!("{}+{}", x.lbl, y.lbl),
 			))),
-			(IntVarEnc::Ord(x), IntVarEnc::Const(y)) | (IntVarEnc::Const(y), IntVarEnc::Ord(x)) => {
-				let xs =
-					x.xs.iter(..)
-						.map(|(c, l)| ((c.start + *y)..(c.end + *y), *l))
-						.collect();
+			(IntVarEnc::Ord(x), &IntVarEnc::Const(y))
+			| (&IntVarEnc::Const(y), IntVarEnc::Ord(x)) => {
+				let dom = x
+					.dom
+					.iter()
+					.map(|r| *r.start() + y..=*r.end() + y)
+					.collect();
 				Ok(IntVarOrd {
-					xs,
+					dom,
+					xs: x.xs.clone(),
 					lbl: format!("{}+{}", x.lbl, y),
 				}
 				.into())
@@ -641,7 +662,10 @@ impl IntVarEnc {
 		}
 	}
 
-	pub(crate) fn consistent<DB: ClauseDatabase + ?Sized>(&self, db: &mut DB) -> Result {
+	pub(crate) fn consistent<DB: ClauseDatabase + AsDynClauseDatabase>(
+		&self,
+		db: &mut DB,
+	) -> Result {
 		match self {
 			IntVarEnc::Ord(o) => o.consistent(db),
 			IntVarEnc::Bin(b) => b.consistent(db),
@@ -658,15 +682,15 @@ impl IntVarEnc {
 	}
 
 	/// Returns a partitioned domain
-	pub(crate) fn dom(&self) -> IntervalSet<Coeff> {
+	pub(crate) fn dom(&self) -> RangeList<Coeff> {
 		match self {
 			IntVarEnc::Ord(o) => o.dom(),
 			IntVarEnc::Bin(b) => b.dom(),
-			&IntVarEnc::Const(c) => interval_set!(c..(c + 1)),
+			&IntVarEnc::Const(c) => (c..=c).into(),
 		}
 	}
 	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
-	pub(crate) fn from_part<DB: ClauseDatabase + ?Sized>(
+	pub(crate) fn from_part<DB: ClauseDatabase + AsDynClauseDatabase>(
 		db: &mut DB,
 		xs: &Part,
 		ub: PosCoeff,
@@ -686,40 +710,36 @@ impl IntVarEnc {
 					debug_assert!(coef <= *ub);
 					h.entry(coef).or_default().push(lit);
 				}
-
-				let dom = once((0, vec![]))
-					.chain(h)
-					.sorted_by(|(a, _), (b, _)| a.cmp(b))
-					.tuple_windows()
-					.map(|((prev, _), (coef, lits))| {
-						let interval = (prev + 1)..(coef + 1);
+				let dom = once(0..=0).chain(h.keys().map(|&v| v..=v)).collect();
+				let views = h
+					.into_iter()
+					.sorted_by_key(|(c, _)| *c)
+					.map(|(_coef, lits)| {
 						if lits.len() == 1 {
-							(interval, Some(lits[0]))
+							Some(lits[0])
 						} else {
-							let o = new_named_lit!(db, format!("y_{:?}>={:?}", lits, coef));
+							let o = new_named_lit!(db, format!("y_{:?}>={:?}", lits, _coef));
 							for lit in lits {
 								db.add_clause([!lit, o]).unwrap();
 							}
-							(interval, Some(o))
+							Some(o)
 						}
 					})
-					.collect::<IntervalMap<_, _>>();
-				vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, lbl))]
+					.collect();
+
+				vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, views, lbl))]
 			}
 			// Leaves built from Ic/Dom groups are guaranteed to have unique values
 			Part::Ic(terms) => {
 				let mut acc = 0; // running sum
-				let dom = once(&(terms[0].0, PosCoeff::new(0)))
-					.chain(terms.iter())
-					.map(|&(lit, coef)| {
+				let dom = once(0..=0)
+					.chain(terms.iter().map(|&(_, coef)| {
 						acc += *coef;
-						debug_assert!(acc <= *ub);
-						(acc, lit)
-					})
-					.tuple_windows()
-					.map(|((prev, _), (coef, lit))| ((prev + 1)..(coef + 1), Some(lit)))
-					.collect::<IntervalMap<_, _>>();
-				vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, lbl))]
+						acc..=acc
+					}))
+					.collect();
+				let views = terms.iter().map(|&(lit, _)| Some(lit)).collect();
+				vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, views, lbl))]
 			}
 			Part::Dom(terms, l, u) => {
 				// TODO account for bounds (or even better, create IntVarBin)
@@ -749,10 +769,11 @@ impl IntVarEnc {
 					terms
 						.iter()
 						.enumerate()
-						.map(|(i, (lit, coef))| {
+						.map(|(i, &(lit, coef))| {
 							IntVarEnc::Ord(IntVarOrd::from_views(
 								db,
-								interval_map! { 1..(**coef+1) => Some(*lit) },
+								RangeList::from_iter([0..=0, *coef..=*coef]),
+								vec![Some(lit)],
 								format!("{lbl}^{i}"),
 							))
 						})
@@ -774,29 +795,18 @@ impl IntVarEnc {
 	}
 
 	/// Returns a clause constraining `x>=v`, which is None if true and empty if false
-	pub(crate) fn geq(&self, v: Range<Coeff>) -> Vec<Vec<Lit>> {
+	pub(crate) fn geq(&self, v: Coeff) -> Formula<BoolVal> {
 		match self {
 			IntVarEnc::Ord(o) => o.geq(v),
 			IntVarEnc::Bin(b) => b.geq(v),
-			IntVarEnc::Const(c) => {
-				let v = v.end - 1;
-				if v <= *c {
-					vec![]
-				} else {
-					vec![vec![]]
-				}
-			}
+			&IntVarEnc::Const(c) => Formula::Atom(BoolVal::Const(v <= c)),
 		}
 	}
 
-	pub(crate) fn geqs(&self) -> Vec<(Range<Coeff>, Vec<Vec<Lit>>)> {
+	pub(crate) fn geqs(&self) -> Vec<(Coeff, Formula<BoolVal>)> {
 		match self {
 			IntVarEnc::Ord(o) => o.geqs(),
-			x => x
-				.dom()
-				.into_iter(..)
-				.map(|c| (c.clone(), x.geq(c)))
-				.collect(),
+			x => x.dom().iter().flatten().map(|c| (c, x.geq(c))).collect(),
 		}
 	}
 
@@ -810,29 +820,18 @@ impl IntVarEnc {
 	}
 
 	/// Returns cnf constraining `x<=v`, which is empty if true and contains empty if false
-	pub(crate) fn leq(&self, v: Range<Coeff>) -> Vec<Vec<Lit>> {
+	pub(crate) fn leq(&self, v: Coeff) -> Formula<BoolVal> {
 		match self {
 			IntVarEnc::Ord(o) => o.leq(v),
 			IntVarEnc::Bin(b) => b.leq(v),
-			IntVarEnc::Const(c) => {
-				let v = v.start + 1; // [x<=v] = [x < v+1]
-				if v <= *c {
-					vec![vec![]]
-				} else {
-					vec![]
-				}
-			}
+			&IntVarEnc::Const(c) => Formula::Atom(BoolVal::Const(v >= c)),
 		}
 	}
 
-	pub(crate) fn leqs(&self) -> Vec<(Range<Coeff>, Vec<Vec<Lit>>)> {
+	pub(crate) fn leqs(&self) -> Vec<(Coeff, Formula<BoolVal>)> {
 		match self {
 			IntVarEnc::Ord(o) => o.leqs(),
-			x => x
-				.dom()
-				.into_iter(..)
-				.map(|c| (c.clone(), x.leq(c)))
-				.collect(),
+			x => x.dom().iter().flatten().map(|c| (c, x.leq(c))).collect(),
 		}
 	}
 
@@ -881,7 +880,7 @@ impl From<IntVarOrd> for IntVarEnc {
 impl IntVarOrd {
 	pub(crate) fn consistency(&self) -> ImplicationChainConstraint {
 		ImplicationChainConstraint {
-			lits: self.xs.values(..).cloned().collect_vec(),
+			lits: self.xs.clone(),
 		}
 	}
 
@@ -890,19 +889,28 @@ impl IntVarOrd {
 	}
 
 	pub(crate) fn div(&self, c: Coeff) -> IntVarEnc {
-		assert!(c == 2, "Can only divide IntVarOrd by 2");
-		let xs: IntervalMap<_, _> = self
-			.xs
-			.iter(..)
-			.filter(|(c, _)| (c.end - 1) % 2 == 0)
-			.map(|(c, l)| (((c.end - 1) / (1 + 1)), *l))
-			.map(|(c, l)| (c..(c + 1), l))
+		assert_eq!(c, 2, "Can only divide IntVarOrd by 2");
+		let mut last = self.lb() / c;
+		let mut xs = Vec::new();
+		for (d, &l) in self.dom().iter().flatten().skip(1).zip_eq(&self.xs) {
+			let nd = d / c;
+			if nd == last {
+				continue;
+			}
+			last = nd;
+			xs.push(l);
+		}
+		let dom = self
+			.dom()
+			.iter()
+			.map(|r| r.start() / c..=r.end() / 2)
 			.collect();
 
 		if xs.is_empty() {
 			IntVarEnc::Const(self.lb() / c)
 		} else {
 			IntVarOrd {
+				dom,
 				xs,
 				lbl: self.lbl.clone(),
 			}
@@ -910,111 +918,101 @@ impl IntVarOrd {
 		}
 	}
 
-	pub(crate) fn dom(&self) -> IntervalSet<Coeff> {
-		once(self.lb()..(self.lb() + 1))
-			.chain(self.xs.intervals(..))
-			.collect()
+	pub(crate) fn dom(&self) -> RangeList<Coeff> {
+		self.dom.clone()
 	}
+
 	pub(crate) fn from_bounds<DB: ClauseDatabase + ?Sized>(
 		db: &mut DB,
 		lb: Coeff,
 		ub: Coeff,
 		lbl: String,
 	) -> Self {
-		Self::from_dom(db, (lb..=ub).collect_vec().as_slice(), lbl)
+		Self::from_dom(db, (lb..=ub).into(), lbl)
 	}
 
 	pub(crate) fn from_dom<DB: ClauseDatabase + ?Sized>(
 		db: &mut DB,
-		dom: &[Coeff],
+		dom: RangeList<Coeff>,
 		lbl: String,
 	) -> Self {
-		Self::from_syms(
-			db,
-			dom.iter()
-				.tuple_windows()
-				.map(|(a, b)| (a + 1)..(b + 1))
-				.collect(),
-			lbl,
-		)
-	}
-
-	pub(crate) fn from_syms<DB: ClauseDatabase + ?Sized>(
-		db: &mut DB,
-		syms: IntervalSet<Coeff>,
-		lbl: String,
-	) -> Self {
-		Self::from_views(db, syms.into_iter(..).map(|c| (c, None)).collect(), lbl)
+		let card = dom.card().unwrap();
+		Self::from_views(db, dom, vec![None; card - 1], lbl)
 	}
 
 	pub(crate) fn from_views<DB: ClauseDatabase + ?Sized>(
 		db: &mut DB,
-		views: IntervalMap<Coeff, Option<Lit>>,
+		dom: RangeList<Coeff>,
+		views: Vec<Option<Lit>>,
 		lbl: String,
 	) -> Self {
-		assert!(!views.is_empty());
-		assert!(
-			views
-				.iter(..)
-				.tuple_windows()
-				.all(|(a, b)| a.0.end == b.0.start),
-			"Expecting contiguous domain of intervals but was {views:?}"
-		);
+		assert!(!dom.is_empty());
+		assert_eq!(dom.card().unwrap() - 1, views.len(), "Expecting the same number of views as there are inequalities literals to represent the domain");
 
-		let xs = views
-			.into_iter(..)
-			.map(|(v, lit)| {
+		let mut dom_it = dom.iter().flatten();
+		// No need for a `<=lb` literal, since it would be `true` and thus redundant.
+		let mut _lb = dom_it.next().unwrap();
+
+		let xs = dom_it
+			.zip_eq(views)
+			.map(|(_v, lit)| {
 				#[cfg(any(feature = "tracing", test))]
-				let lbl = format!("{lbl}>={}..{}", v.start, v.end - 1);
-				(v, lit.unwrap_or_else(|| new_named_lit!(db, lbl)))
+				let lbl = format!("{lbl}>={}", _v);
+				lit.unwrap_or_else(|| new_named_lit!(db, lbl))
 			})
-			.collect::<IntervalMap<_, _>>();
-		Self { xs, lbl }
+			.collect();
+
+		Self { dom, xs, lbl }
 	}
 
-	pub(crate) fn geq(&self, v: Range<Coeff>) -> Vec<Vec<Lit>> {
-		let v = v.end - 1;
-		if v <= self.lb() {
-			vec![]
+	pub(crate) fn geq(&self, v: Coeff) -> Formula<BoolVal> {
+		Formula::Atom(if v <= self.lb() {
+			BoolVal::Const(true)
 		} else if v > self.ub() {
-			vec![vec![]]
+			BoolVal::Const(false)
 		} else {
-			match self.xs.overlap(v).collect_vec()[..] {
-				[(_, x)] => vec![vec![*x]],
-				_ => panic!("No or multiples literals at {v:?} for var {self:?}"),
-			}
-		}
+			let pos = self.dom.first_position_bound(&Bound::Included(v)).unwrap() - 1;
+			BoolVal::Lit(self.xs[pos])
+		})
 	}
 
-	pub(crate) fn geqs(&self) -> Vec<(Range<Coeff>, Vec<Vec<Lit>>)> {
-		once((self.lb()..(self.lb() + 1), vec![]))
-			.chain(self.xs.iter(..).map(|(v, x)| (v, vec![vec![*x]])))
+	pub(crate) fn geqs(&self) -> Vec<(Coeff, Formula<BoolVal>)> {
+		self.dom()
+			.iter()
+			.flatten()
+			.zip_eq(
+				once(Formula::Atom(BoolVal::Const(true)))
+					.chain(self.xs.iter().map(|&l| Formula::Atom(BoolVal::Lit(l)))),
+			)
 			.collect()
 	}
 
 	pub(crate) fn lb(&self) -> Coeff {
-		self.xs.range().unwrap().start - 1
+		*self.dom.lower_bound().unwrap()
 	}
 
-	pub(crate) fn leq(&self, v: Range<Coeff>) -> Vec<Vec<Lit>> {
-		let v = v.start + 1; // [x<=v] = [x < v+1]
-		if v <= self.lb() {
-			vec![vec![]]
+	pub(crate) fn leq(&self, v: Coeff) -> Formula<BoolVal> {
+		let v = v + 1; // [x<=v] = [x < v+1]
+		Formula::Atom(if v <= self.lb() {
+			BoolVal::Const(false)
 		} else if v > self.ub() {
-			vec![]
+			BoolVal::Const(true)
 		} else {
-			match self.xs.overlap(v).collect_vec()[..] {
-				[(_, &x)] => vec![vec![!x]],
-				_ => panic!("No or multiples literals at {v:?} for var {self:?}"),
-			}
-		}
+			let pos = self.dom.first_position_bound(&Bound::Included(v)).unwrap() - 1;
+			BoolVal::Lit(!self.xs[pos])
+		})
 	}
 
-	pub(crate) fn leqs(&self) -> Vec<(Range<Coeff>, Vec<Vec<Lit>>)> {
-		self.xs
-			.iter(..)
-			.map(|(v, &x)| ((v.start - 1)..(v.end - 1), vec![vec![!x]]))
-			.chain(once((self.ub()..self.ub() + 1, vec![])))
+	pub(crate) fn leqs(&self) -> Vec<(Coeff, Formula<BoolVal>)> {
+		self.dom()
+			.iter()
+			.flatten()
+			.zip_eq(
+				self.xs
+					.iter()
+					.map(|&l| Formula::Atom(BoolVal::Lit(!l)))
+					.chain(once(Formula::Atom(BoolVal::Const(true)))),
+			)
 			.collect()
 	}
 
@@ -1024,24 +1022,19 @@ impl IntVarOrd {
 	}
 
 	pub(crate) fn ub(&self) -> Coeff {
-		self.xs.range().unwrap().end - 1
+		*self.dom.upper_bound().unwrap()
 	}
 }
 
 impl Display for IntVarOrd {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"{}:O ∈ {}",
-			self.lbl,
-			display_dom(&self.dom().iter(..).map(|d| d.end - 1).collect())
-		)
+		write!(f, "{}:O ∈ {}", self.lbl, display_dom(&self.dom()))
 	}
 }
 
 impl Lin {
 	pub(crate) fn lb(&self) -> Coeff {
-		self.xs.iter().map(|(c, x)| x.borrow().lb(c)).sum::<i64>()
+		self.xs.iter().map(|(c, x)| x.borrow().lb(*c)).sum::<i64>()
 	}
 
 	pub(crate) fn propagate(&mut self, consistency: &Consistency) -> Vec<usize> {
@@ -1058,18 +1051,18 @@ impl Lin {
 
 						let id = x.id;
 						let x_ub = if c.is_positive() {
-							*x.dom.last().unwrap()
+							*x.dom.upper_bound().unwrap()
 						} else {
-							*x.dom.first().unwrap()
+							*x.dom.lower_bound().unwrap()
 						};
 
 						// c*d >= x_ub*c + xs_ub := d >= x_ub - xs_ub/c
 						let b = x_ub - (xs_ub / *c);
 
 						if !c.is_negative() {
-							x.ge(&b);
+							x.ge(b);
 						} else {
-							x.le(&b);
+							x.le(b);
 						}
 
 						if x.size() < size {
@@ -1085,9 +1078,9 @@ impl Lin {
 					let mut x = x.borrow_mut();
 					let size = x.size();
 					let x_lb = if c.is_positive() {
-						*x.dom.first().unwrap()
+						*x.dom.lower_bound().unwrap()
 					} else {
-						*x.dom.last().unwrap()
+						*x.dom.upper_bound().unwrap()
 					};
 
 					let id = x.id;
@@ -1097,9 +1090,9 @@ impl Lin {
 					let b = x_lb - (rs_lb / *c);
 
 					if c.is_negative() {
-						x.ge(&b);
+						x.ge(b);
 					} else {
-						x.le(&b);
+						x.le(b);
 					}
 
 					if x.size() < size {
@@ -1119,31 +1112,39 @@ impl Lin {
 				loop {
 					let mut fixpoint = true;
 					for (i, (c_i, x_i)) in self.xs.iter().enumerate() {
-						let id = x_i.borrow().id;
-						x_i.borrow_mut().dom.retain(|d_i| {
-							if self
-								.xs
-								.iter()
-								.enumerate()
-								.filter(|&(j, (_c_j, _x_j))| (i != j))
-								.map(|(_j, (c_j, x_j))| {
-									x_j.borrow()
-										.dom
-										.iter()
-										.map(|d_j_k| *c_j * *d_j_k)
-										.collect_vec()
-								})
-								.multi_cartesian_product()
-								.any(|rs| *c_i * *d_i + rs.into_iter().sum::<i64>() == 0)
-							{
-								true
-							} else {
-								fixpoint = false;
-								changed.push(id);
-								false
-							}
-						});
-						assert!(x_i.borrow().size() > 0);
+						let mut x_i = x_i.borrow_mut();
+						let id = x_i.id;
+						x_i.dom = x_i
+							.dom
+							.iter()
+							.flatten()
+							.filter(|d_i| {
+								if self
+									.xs
+									.iter()
+									.enumerate()
+									.filter(|&(j, _)| (i != j))
+									.map(|(_, (c_j, x_j))| {
+										x_j.borrow()
+											.dom
+											.iter()
+											.flatten()
+											.map(|d_j_k| *c_j * d_j_k)
+											.collect_vec()
+									})
+									.multi_cartesian_product()
+									.any(|rs| *c_i * *d_i + rs.into_iter().sum::<i64>() == 0)
+								{
+									true
+								} else {
+									fixpoint = false;
+									changed.push(id);
+									false
+								}
+							})
+							.map(|v| v..=v)
+							.collect();
+						assert!(x_i.size() > 0);
 					}
 
 					if fixpoint {
@@ -1166,7 +1167,7 @@ impl Lin {
 	}
 
 	pub(crate) fn ub(&self) -> Coeff {
-		self.xs.iter().map(|(c, x)| x.borrow().ub(c)).sum::<i64>()
+		self.xs.iter().map(|(c, x)| x.borrow().ub(*c)).sum::<i64>()
 	}
 }
 
@@ -1225,13 +1226,14 @@ impl From<&IntVarEnc> for BoolLinExp {
 impl From<&IntVarOrd> for BoolLinExp {
 	fn from(value: &IntVarOrd) -> Self {
 		let mut acc = value.lb();
+		let mut dom_it = value.dom.iter().flatten();
+		let _ = dom_it.next();
 		BoolLinExp::default()
 			.add_chain(
-				&value
-					.xs
-					.iter(..)
+				&dom_it
+					.zip_eq(&value.xs)
 					.map(|(iv, lit)| {
-						let v = iv.end - 1 - acc;
+						let v = iv - acc;
 						acc += v;
 						(*lit, v)
 					})
@@ -1243,12 +1245,12 @@ impl From<&IntVarOrd> for BoolLinExp {
 
 impl Model {
 	pub(crate) fn add_int_var_enc(&mut self, x: IntVarEnc) -> IntVar {
-		let var = self.new_var(x.dom().iter(..).map(|d| d.end - 1).collect(), false);
+		let var = self.new_var(x.dom(), false);
 		let _ = self.vars.insert(var.id, x);
 		var
 	}
 
-	pub(crate) fn encode<DB: ClauseDatabase + ?Sized>(
+	pub(crate) fn encode<DB: ClauseDatabase + AsDynClauseDatabase>(
 		&mut self,
 		db: &mut DB,
 		cutoff: Option<Coeff>,
@@ -1283,10 +1285,10 @@ impl Model {
 	}
 
 	pub(crate) fn new_constant(&mut self, c: Coeff) -> IntVar {
-		self.new_var(BTreeSet::from([c]), false)
+		self.new_var((c..=c).into(), false)
 	}
 
-	pub(crate) fn new_var(&mut self, dom: BTreeSet<Coeff>, add_consistency: bool) -> IntVar {
+	pub(crate) fn new_var(&mut self, dom: RangeList<Coeff>, add_consistency: bool) -> IntVar {
 		self.var_ids += 1;
 		IntVar {
 			id: self.var_ids,
@@ -1382,7 +1384,7 @@ impl Display for TernLeConstraint<'_> {
 	}
 }
 
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, TernLeConstraint<'_>> for TernLeEncoder {
+impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for TernLeEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "tern_le_encoder", skip_all, fields(constraint = format!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z)))
@@ -1393,17 +1395,35 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, TernLeConstraint<'_>> for TernLeEn
 			const PRINT_TESTCASES: bool = false;
 			if PRINT_TESTCASES {
 				println!(" // {tern}");
-				let x = tern.x.dom().iter(..).map(|iv| iv.end - 1).collect_vec();
-				let y = tern.y.dom().iter(..).map(|iv| iv.end - 1).collect_vec();
-				let z = tern.z.dom().iter(..).map(|iv| iv.end - 1).collect_vec();
+				let x = tern
+					.x
+					.dom()
+					.iter()
+					.flatten()
+					.map(|v| v.to_string())
+					.collect_vec();
+				let y = tern
+					.y
+					.dom()
+					.iter()
+					.flatten()
+					.map(|v| v.to_string())
+					.collect_vec();
+				let z = tern
+					.z
+					.dom()
+					.iter()
+					.flatten()
+					.map(|v| v.to_string())
+					.collect_vec();
 				println!(
 					"mod _test_{}_{}_{} {{\n\ttest_int_lin!($encoder, &[{}], &[{}], $cmp, &[{}]);\n}}\n",
-					x.iter().join(""),
-					y.iter().join(""),
-					z.iter().join(""),
-					x.iter().join(", "),
-					y.iter().join(", "),
-					z.iter().join(", "),
+					x.clone().join(""),
+					y.clone().join(""),
+					z.clone().join(""),
+					x.join(", "),
+					y.join(", "),
+					z.join(", "),
 				);
 			}
 		}
@@ -1562,24 +1582,19 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, TernLeConstraint<'_>> for TernLeEn
 				// x + c <= z == z-c >= x == /\ (z'<=a -> x<=a)
 				for (c_a, z_leq_c_a) in z.leqs() {
 					// TODO alt; just propagate by adding lex constraint
-					let c_a = if z_leq_c_a.is_empty() {
-						c_a.start..(x.ub() + 1)
+					let c_a = if z_leq_c_a == Formula::Atom(BoolVal::Const(true)) {
+						x.ub() + 1
 					} else {
 						c_a
 					};
 
-					let x_leq_c_a = x_bin.leq(c_a.clone());
-					add_clauses_for(db, vec![negate_cnf(z_leq_c_a.clone()), x_leq_c_a])?;
+					let x_leq_c_a = x_bin.leq(c_a);
+					TseitinEncoder.encode(db, &Formula::Or(vec![!z_leq_c_a, x_leq_c_a]))?;
 				}
 				if cmp == &LimitComp::Equal {
 					for (c_a, z_geq_c_a) in z.geqs() {
-						let c_a = if z_geq_c_a.is_empty() {
-							x.lb()..c_a.end
-						} else {
-							c_a
-						};
-						let x_geq_c_a = x_bin.geq(c_a.clone());
-						add_clauses_for(db, vec![negate_cnf(z_geq_c_a.clone()), x_geq_c_a])?;
+						let x_geq_c_a = x_bin.geq(c_a);
+						TseitinEncoder.encode(db, &Formula::Or(vec![!z_geq_c_a, x_geq_c_a]))?;
 					}
 				}
 				Ok(())
@@ -1588,19 +1603,11 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, TernLeConstraint<'_>> for TernLeEn
 				// couple or constrain x:E + y:E <= z:E
 				for (c_a, x_geq_c_a) in x.geqs() {
 					for (c_b, y_geq_c_b) in y.geqs() {
-						// TODO is the max actually correct/good?
-						let c_c =
-							(max(c_a.start, c_b.start))..(((c_a.end - 1) + (c_b.end - 1)) + 1);
+						let z_geq_c_c = z.geq(c_a + c_b);
 
-						let z_geq_c_c = z.geq(c_c.clone());
-
-						add_clauses_for(
+						TseitinEncoder.encode(
 							db,
-							vec![
-								negate_cnf(x_geq_c_a.clone()),
-								negate_cnf(y_geq_c_b),
-								z_geq_c_c,
-							],
+							&Formula::Or(vec![!x_geq_c_a.clone(), !y_geq_c_b, z_geq_c_c]),
 						)?;
 					}
 				}
@@ -1609,17 +1616,11 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, TernLeConstraint<'_>> for TernLeEn
 				if cmp == &LimitComp::Equal {
 					for (c_a, x_leq_c_a) in x.leqs() {
 						for (c_b, y_leq_c_b) in y.leqs() {
-							let c_c = (c_a.start + c_b.start)..(c_a.end - 1 + c_b.end - 1) + 1;
+							let z_leq_c_c = z.leq(c_a + c_b);
 
-							let z_leq_c_c = z.leq(c_c.clone());
-
-							add_clauses_for(
+							TseitinEncoder.encode(
 								db,
-								vec![
-									negate_cnf(x_leq_c_a.clone()),
-									negate_cnf(y_leq_c_b),
-									z_leq_c_c,
-								],
+								&Formula::Or(vec![!x_leq_c_a.clone(), !y_leq_c_b, z_leq_c_c]),
 							)?;
 						}
 					}
@@ -1634,14 +1635,15 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, TernLeConstraint<'_>> for TernLeEn
 pub(crate) mod tests {
 	use std::num::NonZeroI32;
 
-	use iset::{interval_set, IntervalSet};
+	use rangelist::RangeList;
 	use traced_test::test;
 
 	use crate::{
 		bool_linear::{BoolLinExp, LimitComp},
 		helpers::tests::{assert_solutions, expect_file, make_valuation},
 		integer::{IntVarBin, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
-		ClauseDatabase, Cnf, Coeff, Encoder, Lit, Var, VarRange,
+		propositional_logic::Formula,
+		AsDynClauseDatabase, BoolVal, ClauseDatabase, Cnf, Coeff, Encoder, Lit, Var, VarRange,
 	};
 
 	#[test]
@@ -1827,11 +1829,11 @@ pub(crate) mod tests {
 		let c = IntVarEnc::Const(42);
 		assert_eq!(c.lb(), 42);
 		assert_eq!(c.ub(), 42);
-		assert_eq!(c.geq(6..7), Vec::<Vec<_>>::new());
-		assert_eq!(c.geq(45..46), vec![vec![]]);
+		assert_eq!(c.geq(6), Formula::Atom(BoolVal::Const(true)));
+		assert_eq!(c.geq(45), Formula::Atom(BoolVal::Const(false)));
 	}
 
-	fn get_bin_x<DB: ClauseDatabase + ?Sized>(
+	fn get_bin_x<DB: ClauseDatabase + AsDynClauseDatabase>(
 		db: &mut DB,
 		lb: Coeff,
 		ub: Coeff,
@@ -1847,11 +1849,11 @@ pub(crate) mod tests {
 
 	fn get_ord_x<DB: ClauseDatabase + ?Sized>(
 		db: &mut DB,
-		dom: IntervalSet<Coeff>,
+		dom: RangeList<Coeff>,
 		consistent: bool,
 		lbl: String,
 	) -> IntVarEnc {
-		let x = IntVarOrd::from_syms(db, dom, lbl);
+		let x = IntVarOrd::from_dom(db, dom, lbl);
 		if consistent {
 			x.consistent(db).unwrap();
 		}
@@ -1863,7 +1865,7 @@ pub(crate) mod tests {
 		let mut cnf = Cnf::default();
 		let x = get_ord_x(
 			&mut cnf,
-			interval_set!(3..5, 5..7, 7..11),
+			RangeList::from_iter([2..=2, 4..=4, 6..=6, 10..=10]),
 			true,
 			"x".to_owned(),
 		);
@@ -1875,8 +1877,14 @@ pub(crate) mod tests {
 		assert_eq!(x.lits(), 3);
 		assert_eq!(x.lb(), 2);
 		assert_eq!(x.ub(), 10);
-		assert_eq!(x.geq(6..7), vec![vec![Lit(NonZeroI32::new(2).unwrap())]]);
-		assert_eq!(x.geq(4..7), vec![vec![Lit(NonZeroI32::new(2).unwrap())]]);
+		assert_eq!(
+			x.geq(6),
+			Formula::Atom(BoolVal::Lit(Lit(NonZeroI32::new(2).unwrap())))
+		);
+		assert_eq!(
+			x.geq(5),
+			Formula::Atom(BoolVal::Lit(Lit(NonZeroI32::new(2).unwrap())))
+		);
 
 		let x_lin = BoolLinExp::from(&x);
 		assert!(x_lin.value(&make_valuation(&[1, -2, 3])).is_err());
@@ -1904,7 +1912,12 @@ pub(crate) mod tests {
 	fn ord_le_bin_test() {
 		let mut cnf = Cnf::default();
 		let (x, y, z) = (
-			get_ord_x(&mut cnf, interval_set!(1..2, 2..7), true, "x".to_owned()),
+			get_ord_x(
+				&mut cnf,
+				RangeList::from_iter([0..=0, 1..=1, 6..=6]),
+				true,
+				"x".to_owned(),
+			),
 			// TODO 'gapped' in interval_set:
 			// get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x".to_string()),
 			IntVarEnc::Const(0),
@@ -1937,8 +1950,18 @@ pub(crate) mod tests {
 	fn ord_plus_ord_le_bin_test() {
 		let mut cnf = Cnf::default();
 		let (x, y, z) = (
-			get_ord_x(&mut cnf, interval_set!(1..3), true, "x".to_owned()),
-			get_ord_x(&mut cnf, interval_set!(1..4), true, "y".to_owned()),
+			get_ord_x(
+				&mut cnf,
+				RangeList::from_iter([0..=0, 2..=2]),
+				true,
+				"x".to_owned(),
+			),
+			get_ord_x(
+				&mut cnf,
+				RangeList::from_iter([0..=0, 3..=3]),
+				true,
+				"y".to_owned(),
+			),
 			get_bin_x(&mut cnf, 0, 6, true, "z".to_owned()),
 		);
 		let vars = VarRange::new(
@@ -1968,9 +1991,24 @@ pub(crate) mod tests {
 	fn ord_plus_ord_le_ord_test() {
 		let mut cnf = Cnf::default();
 		let (x, y, z) = (
-			get_ord_x(&mut cnf, interval_set!(1..2, 2..7), true, "x".to_owned()),
-			get_ord_x(&mut cnf, interval_set!(2..3, 3..5), true, "y".to_owned()),
-			get_ord_x(&mut cnf, interval_set!(0..4, 4..11), true, "z".to_owned()),
+			get_ord_x(
+				&mut cnf,
+				RangeList::from_iter([0..=0, 1..=1, 6..=6]),
+				true,
+				"x".to_owned(),
+			),
+			get_ord_x(
+				&mut cnf,
+				RangeList::from_iter([1..=1, 2..=2, 4..=4]),
+				true,
+				"y".to_owned(),
+			),
+			get_ord_x(
+				&mut cnf,
+				RangeList::from_iter([-1..=-1, 3..=3, 10..=10]),
+				true,
+				"z".to_owned(),
+			),
 		);
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
