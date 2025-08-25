@@ -108,55 +108,18 @@ struct IpasirSolvingActions<'a, Impl> {
 /// [`IpasirStore`] with `UP = 1`, then [`PropagatingSolver`] is implemented
 /// automatically.
 pub(crate) trait IpasirUserPropagationMethods {
+	const IPASIR_ADD_OBSERVED_VAR: unsafe extern "C" fn(slv: *mut c_void, lit: i32);
 	const IPASIR_CONNECT_EXTERNAL_PROPAGATOR: unsafe extern "C" fn(
 		slv: *mut c_void,
 		propagator: CExternalPropagator,
 	);
 	const IPASIR_DISCONNECT_EXTERNAL_PROPAGATOR: unsafe extern "C" fn(slv: *mut c_void);
-	const IPASIR_ADD_OBSERVED_VAR: unsafe extern "C" fn(slv: *mut c_void, lit: i32);
+	const IPASIR_FORCE_BACKTRACK: unsafe extern "C" fn(slv: *mut c_void, level: usize);
+	const IPASIR_IS_DECISION: unsafe extern "C" fn(slv: *mut c_void, lit: i32) -> bool;
+	const IPASIR_PHASE: unsafe extern "C" fn(slv: *mut c_void, lit: i32);
 	const IPASIR_REMOVE_OBSERVED_VAR: unsafe extern "C" fn(slv: *mut c_void, lit: i32);
 	const IPASIR_RESET_OBSERVED_VARS: unsafe extern "C" fn(slv: *mut c_void);
-	const IPASIR_IS_DECISION: unsafe extern "C" fn(slv: *mut c_void, lit: i32) -> bool;
-	const IPASIR_FORCE_BACKTRACK: unsafe extern "C" fn(slv: *mut c_void, level: usize);
-}
-
-impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirFixedAssignmentMethods>
-	PersistentAssignmentNotifier for Impl
-where
-	Impl::Store: BasicIpasirStorage + IpasirPropagatorStorage,
-{
-	fn connect_persistent_assignment_listener<L: PersistentAssignmentListener + 'static>(
-		&mut self,
-		listener: Rc<RefCell<L>>,
-	) {
-		// Disconnect previous listener (if any)
-		self.disconnect_persistent_assignment_listener();
-
-		// Store the propagator and receive the data pointer and callback pointers
-		let c_listener = self.ipasir_store_mut().set_persistent_listener(listener);
-
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_CONNECT_FIXED_ASSIGNMENT_LISTENER function is expected to abide by
-		// the IPASIR-UP interface specification.
-		unsafe {
-			Self::IPASIR_CONNECT_FIXED_ASSIGNMENT_LISTENER(
-				self.ipasir_store_mut().solver_ptr(),
-				c_listener,
-			);
-		}
-	}
-
-	fn disconnect_persistent_assignment_listener(&mut self) {
-		if self.ipasir_store().has_persistent_assignment_listener() {
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_DISCONNECT_FIXED_ASSIGNMENT_LISTENER function is expected to
-			// abide by the IPASIR-UP interface specification.
-			unsafe {
-				Self::IPASIR_DISCONNECT_FIXED_ASSIGNMENT_LISTENER(self.ipasir_store().solver_ptr());
-			}
-			self.ipasir_store_mut().reset_persistent_listener();
-		}
-	}
+	const IPASIR_UNPHASE: unsafe extern "C" fn(slv: *mut c_void, lit: i32);
 }
 
 impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirUserPropagationMethods>
@@ -203,6 +166,15 @@ where
 		}
 	}
 
+	fn phase(&mut self, lit: Lit) {
+		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
+		// IPASIR_PHASE function is expected to abide by the IPASIR-UP
+		// interface specification.
+		unsafe {
+			Self::IPASIR_PHASE(self.ipasir_store_mut().solver_ptr(), lit.into());
+		}
+	}
+
 	fn remove_observed_var(&mut self, var: Var) {
 		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
 		// IPASIR_REMOVE_OBSERVED_VAR function is expected to abide by the IPASIR-UP
@@ -220,23 +192,53 @@ where
 			Self::IPASIR_RESET_OBSERVED_VARS(self.ipasir_store_mut().solver_ptr());
 		}
 	}
+
+	fn unphase(&mut self, lit: Lit) {
+		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
+		// IPASIR_UNPHASE function is expected to abide by the IPASIR-UP
+		// interface specification.
+		unsafe {
+			Self::IPASIR_UNPHASE(self.ipasir_store_mut().solver_ptr(), lit.into());
+		}
+	}
 }
 
-impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirUserPropagationMethods> SolvingActions
-	for Impl
+impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirFixedAssignmentMethods>
+	PersistentAssignmentNotifier for Impl
 where
 	Impl::Store: BasicIpasirStorage + IpasirPropagatorStorage,
 {
-	fn is_decision(&mut self, lit: Lit) -> bool {
+	fn connect_persistent_assignment_listener<L: PersistentAssignmentListener + 'static>(
+		&mut self,
+		listener: Rc<RefCell<L>>,
+	) {
+		// Disconnect previous listener (if any)
+		self.disconnect_persistent_assignment_listener();
+
+		// Store the propagator and receive the data pointer and callback pointers
+		let c_listener = self.ipasir_store_mut().set_persistent_listener(listener);
+
 		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_IS_DECISION function is expected to abide by the IPASIR-UP
-		// interface specification.
-		unsafe { Self::IPASIR_IS_DECISION(self.ipasir_store_mut().solver_ptr(), lit.into()) }
+		// IPASIR_CONNECT_FIXED_ASSIGNMENT_LISTENER function is expected to abide by
+		// the IPASIR-UP interface specification.
+		unsafe {
+			Self::IPASIR_CONNECT_FIXED_ASSIGNMENT_LISTENER(
+				self.ipasir_store_mut().solver_ptr(),
+				c_listener,
+			);
+		}
 	}
-	fn new_observed_var(&mut self) -> Var {
-		let var = self.ipasir_store_mut().vars_mut().next_var.unwrap();
-		self.add_observed_var(var);
-		var
+
+	fn disconnect_persistent_assignment_listener(&mut self) {
+		if self.ipasir_store().has_persistent_assignment_listener() {
+			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
+			// IPASIR_DISCONNECT_FIXED_ASSIGNMENT_LISTENER function is expected to
+			// abide by the IPASIR-UP interface specification.
+			unsafe {
+				Self::IPASIR_DISCONNECT_FIXED_ASSIGNMENT_LISTENER(self.ipasir_store().solver_ptr());
+			}
+			self.ipasir_store_mut().reset_persistent_listener();
+		}
 	}
 }
 
@@ -278,6 +280,7 @@ impl<Impl: IpasirUserPropagationMethods> SolvingActions for IpasirSolvingActions
 		// interface specification.
 		unsafe { Impl::IPASIR_IS_DECISION(self.ptr, lit.into()) }
 	}
+
 	fn new_observed_var(&mut self) -> Var {
 		let var = self.vars.next_var_range(1).next().unwrap();
 		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
@@ -285,6 +288,24 @@ impl<Impl: IpasirUserPropagationMethods> SolvingActions for IpasirSolvingActions
 		// interface specification.
 		unsafe { Impl::IPASIR_ADD_OBSERVED_VAR(self.ptr, var.into()) }
 		var
+	}
+
+	fn phase(&mut self, lit: Lit) {
+		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
+		// IPASIR_PHASE function is expected to abide by the IPASIR-UP
+		// interface specification.
+		unsafe {
+			Impl::IPASIR_PHASE(self.ptr, lit.into());
+		}
+	}
+
+	fn unphase(&mut self, lit: Lit) {
+		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
+		// IPASIR_UNPHASE function is expected to abide by the IPASIR-UP
+		// interface specification.
+		unsafe {
+			Impl::IPASIR_UNPHASE(self.ptr, lit.into());
+		}
 	}
 }
 

@@ -251,6 +251,8 @@ impl Cadical {
 		unsafe { ccadical_is_observed(self.ipasir_store().solver_ptr(), lit.0.get()) }
 	}
 
+	// TODO: This can be replaced by [`ExternalPropagation::phase`] if
+	// `external_propagation` feature is ever automatically enabled.
 	pub fn phase(&mut self, lit: Lit) {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		unsafe { ccadical_phase(self.ipasir_store().solver_ptr(), lit.0.get()) }
@@ -307,6 +309,8 @@ impl Cadical {
 		slv
 	}
 
+	// TODO: This can be replaced by [`ExternalPropagation::unphase`] if
+	// `external_propagation` feature is ever automatically enabled.
 	pub fn unphase(&mut self, lit: Lit) {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		unsafe { ccadical_unphase(self.ipasir_store().solver_ptr(), lit.0.get()) }
@@ -381,10 +385,12 @@ impl IpasirUserPropagationMethods for Cadical {
 		ccadical_force_backtrack;
 	const IPASIR_IS_DECISION: unsafe extern "C" fn(slv: *mut c_void, lit: i32) -> bool =
 		ccadical_is_decision;
+	const IPASIR_PHASE: unsafe extern "C" fn(slv: *mut c_void, lit: i32) = ccadical_phase;
 	const IPASIR_REMOVE_OBSERVED_VAR: unsafe extern "C" fn(slv: *mut c_void, lit: i32) =
 		ccadical_remove_observed_var;
 	const IPASIR_RESET_OBSERVED_VARS: unsafe extern "C" fn(slv: *mut c_void) =
 		ccadical_reset_observed_vars;
+	const IPASIR_UNPHASE: unsafe extern "C" fn(slv: *mut c_void, lit: i32) = ccadical_unphase;
 }
 
 impl fmt::Debug for Cadical {
@@ -757,22 +763,6 @@ mod tests {
 	}
 
 	#[test]
-	fn trivial_example() {
-		let mut cnf = Cnf::default();
-		let a = cnf.new_lit();
-		let b = cnf.new_lit();
-		cnf.add_clause([a, !b]).unwrap();
-
-		assert_solutions(
-			&cnf,
-			cnf.get_variables(),
-			&expect_file!["cadical/test_cadical_trivial_example.sol"],
-		);
-		let mut slv = Cadical::from(&cnf);
-		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
-	}
-
-	#[test]
 	fn test_failed() {
 		let mut cnf = Cnf::default();
 		let x = cnf.new_lit();
@@ -793,6 +783,22 @@ mod tests {
 			}
 			_ => panic!(),
 		};
+	}
+
+	#[test]
+	fn trivial_example() {
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let b = cnf.new_lit();
+		cnf.add_clause([a, !b]).unwrap();
+
+		assert_solutions(
+			&cnf,
+			cnf.get_variables(),
+			&expect_file!["cadical/test_cadical_trivial_example.sol"],
+		);
+		let mut slv = Cadical::from(&cnf);
+		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
 	}
 
 	#[cfg(feature = "external-propagation")]

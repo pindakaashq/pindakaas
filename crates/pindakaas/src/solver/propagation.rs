@@ -20,18 +20,6 @@ pub trait ExternalPropagation: Solver {
 	/// The external propagator will be notified when the variable is assigned.
 	fn add_observed_var(&mut self, var: Var);
 
-	/// Remove a variable from the set of observed variables.
-	///
-	/// The external propagator will no longer be notified of assignments to
-	/// the variable.
-	fn remove_observed_var(&mut self, var: Var);
-
-	/// Reset the set of observed variables.
-	///
-	/// The external propagator will no longer be notified of assignments to
-	/// any variables.
-	fn reset_observed_vars(&mut self);
-
 	/// Connect a [`Propagator`] implementation which allows to learn, propagate
 	/// and backtrack based on external constraints.
 	///
@@ -55,6 +43,37 @@ pub trait ExternalPropagation: Solver {
 	///
 	/// Disconnecting the [`Propagator`] will reset the observed variable set.
 	fn disconnect_propagator(&mut self);
+
+	/// Add a new observed literal to the solver.
+	fn new_observed_lit(&mut self) -> Lit {
+		self.new_observed_var().into()
+	}
+
+	/// Add a new observed variable to the solver.
+	fn new_observed_var(&mut self) -> Var {
+		let var = self.new_var_range(1).next().unwrap();
+		self.add_observed_var(var);
+		var
+	}
+
+	/// Set the default decision phase of a variable to the given [`Lit`].
+	fn phase(&mut self, lit: Lit);
+
+	/// Remove a variable from the set of observed variables.
+	///
+	/// The external propagator will no longer be notified of assignments to
+	/// the variable.
+	fn remove_observed_var(&mut self, var: Var);
+
+	/// Reset the set of observed variables.
+	///
+	/// The external propagator will no longer be notified of assignments to
+	/// any variables.
+	fn reset_observed_vars(&mut self);
+
+	/// Remove the default decision phase of the given variable (given as a
+	/// [`Lit`]).
+	fn unphase(&mut self, lit: Lit);
 }
 
 // Connected listener gets notified whenever the truth value of a variable
@@ -183,12 +202,21 @@ pub enum SearchDecision {
 /// Actions that a [`Propagator`] can generally undertake when making
 /// inferences.
 pub trait SolvingActions {
-	/// Add a new observed variable to the solver.
-	fn new_observed_var(&mut self) -> Var;
+	/// Query whether a literal was assigned as a search decision.
+	fn is_decision(&mut self, lit: Lit) -> bool;
+
 	/// Add a new observed literal to the solver.
 	fn new_observed_lit(&mut self) -> Lit {
 		self.new_observed_var().into()
 	}
-	/// Query whether a literal was assigned as a search decision.
-	fn is_decision(&mut self, lit: Lit) -> bool;
+
+	/// Add a new observed variable to the solver.
+	fn new_observed_var(&mut self) -> Var;
+
+	/// Set the default decision phase of a variable to the given [`Lit`].
+	fn phase(&mut self, lit: Lit);
+
+	/// Remove the default decision phase of the given variable (given as a
+	/// [`Lit`]).
+	fn unphase(&mut self, lit: Lit);
 }
