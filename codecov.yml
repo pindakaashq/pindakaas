@@ -1,0 +1,2 @@
+ignore:
+  - "crates/pyndakaas" # codecov has not been setup for Python testing
