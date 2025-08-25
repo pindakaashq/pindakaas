@@ -53,7 +53,10 @@ impl From<ErrWrapper> for PyErr {
 
 #[pymodule]
 mod pindakaas {
-	use std::fmt::{self, Display};
+	use std::{
+		fmt::{self, Display},
+		num::NonZeroI32,
+	};
 
 	use pindakaas::{
 		bool_linear::{
@@ -63,7 +66,8 @@ mod pindakaas {
 		cardinality::SortingNetworkEncoder,
 		cardinality_one::{BitwiseEncoder, LadderEncoder, PairwiseEncoder},
 		propositional_logic::{Formula as BaseFormula, TseitinEncoder},
-		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as _, Lit as BaseLit, Wcnf,
+		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as _, Lit as BaseLit, VarRange,
+		Wcnf,
 	};
 	use pyo3::{prelude::*, types::PyIterator};
 
@@ -142,7 +146,7 @@ mod pindakaas {
 		/// Use :class:`pindakaas::bool_linear::TotalizerEncoder`, which is able to
 		/// encode all Boolean linear constraints.
 		TOTALIZER,
-		/// Use :class:`pindakaas::propositional_logic::TseitinEncdoer`, which is able to
+		/// Use :class:`pindakaas::propositional_logic::TseitinEncoder`, which is able to
 		/// encode propositional logic formulas.
 		TSEITIN,
 	}
@@ -243,6 +247,47 @@ mod pindakaas {
 			},
 		};
 		Ok(())
+	}
+
+	#[pyfunction]
+	fn _wrap_encode_constraint(
+		obj: &Bound<'_, PyAny>,
+		con: ConstraintArg,
+		enc: Option<Encoder>,
+		conditions: Vec<Lit>,
+	) -> Result {
+		struct PyDbWrapper<'a>(&'a Bound<'a, PyAny>);
+		impl ClauseDatabase for PyDbWrapper<'_> {
+			fn add_clause_from_slice(
+				&mut self,
+				clause: &[BaseLit],
+			) -> Result<(), pindakaas::Unsatisfiable> {
+				let clause: Vec<_> = clause.iter().map(|&l| Lit(l)).collect();
+				let res = self.0.call_method1("add_clause", (clause,));
+				match res {
+					Err(e) if e.is_instance_of::<Unsatisfiable>(self.0.py()) => {
+						Err(pindakaas::Unsatisfiable)
+					}
+					Err(e) => {
+						panic!("unexpected error in add_clause implementation: {}", e)
+					}
+					Ok(_) => Ok(()),
+				}
+			}
+
+			fn new_var_range(&mut self, len: usize) -> VarRange {
+				let tup = self
+					.0
+					.call_method1("new_var_range", (len,))
+					.expect("unexpected error in new_var_range implementation");
+				let (start, end): (Lit, Lit) = tup
+					.extract()
+					.expect("new_var_range did not return a tuple of two literals");
+				VarRange::new(start.0.var(), end.0.var())
+			}
+		}
+
+		encode_constraint_with_conditions(&mut PyDbWrapper(obj), con, enc, conditions)
 	}
 
 	impl BoolLinArg {
@@ -371,12 +416,9 @@ mod pindakaas {
 			Self(Default::default())
 		}
 
-		fn new_vars(&mut self, num_vars: usize) -> Vec<Lit> {
-			self.0
-				.new_var_range(num_vars)
-				.into_iter()
-				.map(|lit| Lit(lit.into()))
-				.collect()
+		fn new_var_range(&mut self, num_vars: usize) -> (Lit, Lit) {
+			let range = self.0.new_var_range(num_vars);
+			(Lit(range.start().into()), Lit(range.end().into()))
 		}
 
 		fn to_dimacs(&self) -> String {
@@ -555,6 +597,11 @@ mod pindakaas {
 			self.__xor__(other)
 		}
 
+		#[staticmethod]
+		fn from_raw(value: NonZeroI32) -> Self {
+			Self(BaseLit::from_raw(value))
+		}
+
 		/// Return whether the variable is negated
 		fn is_negated(&self) -> bool {
 			self.0.is_negated()
@@ -607,12 +654,9 @@ mod pindakaas {
 			Self(Default::default())
 		}
 
-		fn new_vars(&mut self, num_vars: usize) -> Vec<Lit> {
-			self.0
-				.new_var_range(num_vars)
-				.into_iter()
-				.map(|lit| Lit(lit.into()))
-				.collect()
+		fn new_var_range(&mut self, num_vars: usize) -> (Lit, Lit) {
+			let range = self.0.new_var_range(num_vars);
+			(Lit(range.start().into()), Lit(range.end().into()))
 		}
 
 		fn to_dimacs(&self) -> String {
@@ -706,13 +750,10 @@ mod pindakaas {
 				Self(Default::default())
 			}
 
-			fn new_vars(&mut self, num_vars: usize) -> Result<Vec<Lit>> {
+			fn new_var_range(&mut self, num_vars: usize) -> Result<(Lit, Lit)> {
 				let mut guard = self.0.lock()?;
-				Ok(guard
-					.new_var_range(num_vars)
-					.into_iter()
-					.map(|lit| Lit(lit.into()))
-					.collect())
+				let range = guard.new_var_range(num_vars);
+				Ok((Lit(range.start().into()), Lit(range.end().into())))
 			}
 
 			fn set_time_limit(&mut self, limit: Option<Duration>) -> Result {

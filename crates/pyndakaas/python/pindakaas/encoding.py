@@ -1,9 +1,16 @@
 from abc import ABC, abstractmethod
-from typing import Iterable, Optional, TypeAlias
+from typing import Iterable, Optional
 
-from .pindakaas import CNFInner, Encoder, Formula, Lit, WCNFInner
+from .pindakaas import (
+    CNFInner,
+    Encoder,
+    Formula,
+    Lit,
+    WCNFInner,
+    _wrap_encode_constraint,
+)
 
-Constraint: TypeAlias = Formula
+Constraint = Formula
 
 
 class ClauseDatabase(ABC):
@@ -24,7 +31,6 @@ class ClauseDatabase(ABC):
         """
         ...
 
-    @abstractmethod
     def add_encoding(
         self,
         constraint: Constraint,
@@ -38,18 +44,30 @@ class ClauseDatabase(ABC):
         :param constraint: The constraint or formula to encode and add to the database
         :raises Unsatisfiable: If the formula has become unsatisfiable
         """
-        ...
+        _wrap_encode_constraint(self, constraint, encoder, conditions)
 
     def new_var(self):
         """Add a new variable to the database."""
-        return self.new_vars(1).__iter__().__next__()
+        (start, end) = self.new_var_range(1)
+        assert start == end
+        return start
 
-    @abstractmethod
     def new_vars(self, n: int) -> Iterable[Lit]:
         """Add `n` new variables to the database.
 
         :param n: The number of new variables
         :return: The new variables returned as literals
+        """
+        (start, end) = self.new_var_range(n)
+        return [Lit.from_raw(i) for i in range(int(start), int(end) + 1)]
+
+    @abstractmethod
+    def new_var_range(self, n: int) -> tuple[Lit, Lit]:
+        """Add a continuous range of `n` new variables to the database.
+
+        :param n: The number of new variables
+        :return: The start and end of the range of the new variables (inclusive), given
+            as literals.
         """
         ...
 
@@ -74,8 +92,8 @@ class CNF(ClauseDatabase):
         conditions = list(conditions) if conditions is not None else []
         return self._inner.add_encoding(constraint, encoder, conditions)
 
-    def new_vars(self, n: int) -> Iterable[Lit]:
-        return self._inner.new_vars(n)
+    def new_var_range(self, n: int) -> tuple[Lit, Lit]:
+        return self._inner.new_var_range(n)
 
     def to_dimacs(self) -> str:
         """Return a textual representation in the DIMACS format.

@@ -106,8 +106,8 @@ class CaDiCaL(Solver):
         conditions = list(conditions) if conditions is not None else []
         return self._inner.add_encoding(constraint, encoder, conditions)
 
-    def new_vars(self, n: int):
-        return self._inner.new_vars(n)
+    def new_var_range(self, n: int):
+        return self._inner.new_var_range(n)
 
 
 class MapResult(Result):

@@ -1,5 +1,6 @@
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 workspace = Path(__file__).parent.parent.parent.parent.parent
 

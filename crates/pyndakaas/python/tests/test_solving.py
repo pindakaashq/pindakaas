@@ -28,4 +28,6 @@ def test_assumptions():
         assert result.value(y) is True
     with slv.solve(assumptions=[x, y]) as result:
         assert result.status == pindakaas.solver.Status.UNSATISFIABLE
-        assert result.failed(x) or result.failed(y), "One or the other variable should have been used to prove UNSAT"
+        assert result.failed(x) or result.failed(y), (
+            "One or the other variable should have been used to prove UNSAT"
+        )

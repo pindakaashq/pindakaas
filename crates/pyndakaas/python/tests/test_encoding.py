@@ -1,36 +1,63 @@
-import pindakaas
+from typing import Iterable
+
 import pytest
+from pindakaas import (
+    CNF,
+    WCNF,
+    ClauseDatabase,
+    Encoder,
+    InvalidEncoder,
+    Lit,
+    Unsatisfiable,
+)
+
+
+class CustomDB(ClauseDatabase):
+    clauses: list[list[int]]
+    next_var: int
+
+    def __init__(self):
+        self.clauses = []
+        self.next_var = 1
+
+    def add_clause(self, clause: Iterable[Lit]):
+        self.clauses.append([int(lit) for lit in clause])
+
+    def new_var_range(self, n: int) -> tuple[Lit, Lit]:
+        start = self.next_var
+        self.next_var += n
+        return Lit.from_raw(start), Lit.from_raw(self.next_var - 1)
 
 
 def test_unsat():
-    f = pindakaas.CNF()
-    with pytest.raises(pindakaas.Unsatisfiable):
+    f = CNF()
+    with pytest.raises(Unsatisfiable):
         f.add_clause([])
 
 
 def test_cnf():
-    f = pindakaas.CNF()
+    f = CNF()
     x, y = f.new_vars(2)
     f.add_clause([x, y])
     assert f.to_dimacs() == "p cnf 2 1\n1 2 0\n"
 
 
 def test_encode_bool_lin_unsat():
-    f = pindakaas.CNF()
+    f = CNF()
     x, y, z = f.new_vars(3)
-    with pytest.raises(pindakaas.Unsatisfiable):
+    with pytest.raises(Unsatisfiable):
         f += x * 3 + y * 2 + z >= 10
 
 
 def test_invalid_encoder():
-    f = pindakaas.CNF()
+    f = CNF()
     x, y, z = f.new_vars(3)
-    with pytest.raises(pindakaas.InvalidEncoder):
-        f.add_encoding(x * 3 + y * 2 + z >= 3, encoder=pindakaas.Encoder.PAIRWISE)
+    with pytest.raises(InvalidEncoder):
+        f.add_encoding(x * 3 + y * 2 + z >= 3, encoder=Encoder.PAIRWISE)
 
 
 def test_encode_bool_lin_default():
-    f = pindakaas.CNF()
+    f = CNF()
     x, y, z = f.new_vars(3)
     f += x * 3 + y * 2 + z >= 3
     x, y, z = f.new_vars(3)
@@ -56,16 +83,16 @@ def test_encode_bool_lin_default():
 
 
 def test_encode_formula():
-    f = pindakaas.CNF()
+    f = CNF()
     x, y, z = f.new_vars(3)
     f += x ^ z
-    f.add_encoding(x == y, pindakaas.Encoder.TSEITIN)
+    f.add_encoding(x == y, Encoder.TSEITIN)
     f.add_encoding(x & y)
     assert f.to_dimacs() == "p cnf 3 6\n1 3 0\n-1 -3 0\n-1 2 0\n1 -2 0\n1 0\n2 0\n"
 
 
 def test_wcnf():
-    f = pindakaas.WCNF()
+    f = WCNF()
     x, y = f.new_vars(2)
     f.add_clause([x, y])
     f.add_weighted_clause([x], 1)
@@ -74,7 +101,24 @@ def test_wcnf():
 
 
 def test_conditions():
-    f = pindakaas.CNF()
+    f = CNF()
     x, y, p = f.new_vars(3)
     f.add_encoding(x ^ y, conditions=[p])
     assert f.to_dimacs() == "p cnf 3 2\n3 1 2 0\n3 -1 -2 0\n"
+
+
+def test_custom_db():
+    f = CustomDB()
+    assert f.new_var() == Lit.from_raw(1)
+    x, y, p = f.new_vars(3)
+    assert [x, y, p] == [
+        Lit.from_raw(2),
+        Lit.from_raw(3),
+        Lit.from_raw(4),
+    ]
+
+    f.add_encoding(x ^ y, conditions=[p])
+    assert f.clauses == [
+        [4, 2, 3],
+        [4, -2, -3],
+    ]
