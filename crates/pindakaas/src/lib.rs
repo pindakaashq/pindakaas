@@ -606,8 +606,13 @@ impl Cnf {
 	}
 
 	/// Returns the number of variables in the formula.
-	pub fn variables(&self) -> usize {
+	pub fn num_vars(&self) -> usize {
 		self.nvar.num_emitted_vars()
+	}
+
+	/// Returns the range of variables emitted to be used by this formula.
+	pub fn variables(&self) -> VarRange {
+		self.nvar.emitted_vars()
 	}
 }
 
@@ -631,7 +636,7 @@ impl ClauseDatabase for Cnf {
 
 impl Display for Cnf {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let num_var = &self.variables();
+		let num_var = &self.num_vars();
 		let num_clauses = self.size.len();
 		writeln!(f, "p cnf {num_var} {num_clauses}")?;
 		let mut start = 0;
@@ -1075,8 +1080,13 @@ impl Wcnf {
 	}
 
 	/// Returns the number of clauses in the formula.
-	pub fn clauses(&self) -> usize {
+	pub fn num_clauses(&self) -> usize {
 		self.cnf.num_clauses()
+	}
+
+	/// Returns the number of variables in the formula.
+	pub fn num_vars(&self) -> usize {
+		self.cnf.num_vars()
 	}
 
 	/// Read a WCNF formula from a file formatted in the (W)DIMACS WCNF format
@@ -1110,8 +1120,8 @@ impl Wcnf {
 		write!(file, "{self}")
 	}
 
-	/// Returns the number of variables in the formula.
-	pub fn variables(&self) -> usize {
+	/// Returns the range of variables emitted to be used by this formula.
+	pub fn variables(&self) -> VarRange {
 		self.cnf.variables()
 	}
 }
