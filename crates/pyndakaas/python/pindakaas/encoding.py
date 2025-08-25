@@ -6,6 +6,7 @@ from .pindakaas import (
     Encoder,
     Formula,
     Lit,
+    VarRange,
     WCNFInner,
     _wrap_encode_constraint,
 )
@@ -48,9 +49,9 @@ class ClauseDatabase(ABC):
 
     def new_var(self):
         """Add a new variable to the database."""
-        (start, end) = self.new_var_range(1)
-        assert start == end
-        return start
+        r = self.new_var_range(1)
+        assert r.start() == r.end()
+        return r.start()
 
     def new_vars(self, n: int) -> Iterable[Lit]:
         """Add `n` new variables to the database.
@@ -58,11 +59,10 @@ class ClauseDatabase(ABC):
         :param n: The number of new variables
         :return: The new variables returned as literals
         """
-        (start, end) = self.new_var_range(n)
-        return [Lit.from_raw(i) for i in range(int(start), int(end) + 1)]
+        return self.new_var_range(n)
 
     @abstractmethod
-    def new_var_range(self, n: int) -> tuple[Lit, Lit]:
+    def new_var_range(self, n: int) -> VarRange:
         """Add a continuous range of `n` new variables to the database.
 
         :param n: The number of new variables
@@ -92,7 +92,15 @@ class CNF(ClauseDatabase):
         conditions = list(conditions) if conditions is not None else []
         return self._inner.add_encoding(constraint, encoder, conditions)
 
-    def new_var_range(self, n: int) -> tuple[Lit, Lit]:
+    def clauses(self) -> Iterable[list[Lit]]:
+        """
+        Returns an iterable representation of the clauses currently included in the CNF.
+
+        :return: An iterable of lists of literals representing the clauses.
+        """
+        return self._inner.clauses()
+
+    def new_var_range(self, n: int) -> VarRange:
         return self._inner.new_var_range(n)
 
     def to_dimacs(self) -> str:
@@ -102,10 +110,22 @@ class CNF(ClauseDatabase):
         """
         return self._inner.to_dimacs()
 
+    def variables(self) -> Iterable[Lit]:
+        """
+        Returns a iterable representation of the variables currently included in the
+        CNF.
+
+        :return: An iterable of literals representing the variables.
+        """
+        return self._inner.variables()
+
 
 class WCNF(CNF):
     """A representation for Boolean formulas in conjunctive normal form with weighted
     (soft) clauses.
+
+    Note that `WCNF.clauses` only iterates over the hard clauses. Use
+    `WCNF.weighted_clauses` to iterate over all clauses.
     """
 
     _inner: WCNFInner
@@ -120,3 +140,12 @@ class WCNF(CNF):
         :param weight: the weight of the clause
         """
         return self._inner.add_weighted_clause(iter(clause), weight)
+
+    def weighted_clauses(self) -> Iterable[tuple[Optional[int], list[Lit]]]:
+        """
+        Returns an iterable representation of the weighted clauses currently included in
+        the WCNF.
+
+        :return: An iterable of lists of literals representing the clauses.
+        """
+        return self._inner.weighted_clauses()

@@ -66,10 +66,10 @@ mod pindakaas {
 		cardinality::SortingNetworkEncoder,
 		cardinality_one::{BitwiseEncoder, LadderEncoder, PairwiseEncoder},
 		propositional_logic::{Formula as BaseFormula, TseitinEncoder},
-		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as _, Lit as BaseLit, VarRange,
-		Wcnf,
+		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as _, Lit as BaseLit,
+		VarRange as BaseVarRange, Wcnf,
 	};
-	use pyo3::{prelude::*, types::PyIterator};
+	use pyo3::{exceptions::PyValueError, prelude::*, types::PyIterator};
 
 	#[pymodule_export]
 	use crate::InvalidEncoder;
@@ -170,6 +170,11 @@ mod pindakaas {
 	struct Lit(BaseLit);
 
 	#[pyclass]
+	#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+	/// Representation of a continuous range of variables.
+	struct VarRange(BaseVarRange);
+
+	#[pyclass]
 	#[derive(Clone, Debug, Default)]
 	/// The internal representation of a CNF formula where clauses have optional
 	/// associated weights.
@@ -262,7 +267,7 @@ mod pindakaas {
 				&mut self,
 				clause: &[BaseLit],
 			) -> Result<(), pindakaas::Unsatisfiable> {
-				let clause: Vec<_> = clause.iter().map(|&l| Lit(l)).collect();
+				let clause = clause.iter().map(|&l| Lit(l)).collect_vec();
 				let res = self.0.call_method1("add_clause", (clause,));
 				match res {
 					Err(e) if e.is_instance_of::<Unsatisfiable>(self.0.py()) => {
@@ -275,7 +280,7 @@ mod pindakaas {
 				}
 			}
 
-			fn new_var_range(&mut self, len: usize) -> VarRange {
+			fn new_var_range(&mut self, len: usize) -> BaseVarRange {
 				let tup = self
 					.0
 					.call_method1("new_var_range", (len,))
@@ -283,7 +288,7 @@ mod pindakaas {
 				let (start, end): (Lit, Lit) = tup
 					.extract()
 					.expect("new_var_range did not return a tuple of two literals");
-				VarRange::new(start.0.var(), end.0.var())
+				BaseVarRange::new(start.0.var(), end.0.var())
 			}
 		}
 
@@ -411,18 +416,31 @@ mod pindakaas {
 			encode_constraint_with_conditions(&mut self.0, con, enc, conditions)
 		}
 
+		fn clauses(&self) -> Vec<Vec<Lit>> {
+			// TODO: It would be great if this could be converted to be lazy, but it
+			// seems a little tricky. This should probably be okay for now.
+			self.0
+				.iter()
+				.map(|c| c.iter().map(|&lit| Lit(lit)).collect())
+				.collect()
+		}
+
 		#[new]
 		fn new() -> Self {
 			Self(Default::default())
 		}
 
-		fn new_var_range(&mut self, num_vars: usize) -> (Lit, Lit) {
+		fn new_var_range(&mut self, num_vars: usize) -> VarRange {
 			let range = self.0.new_var_range(num_vars);
-			(Lit(range.start().into()), Lit(range.end().into()))
+			VarRange(range)
 		}
 
 		fn to_dimacs(&self) -> String {
 			self.0.to_string()
+		}
+
+		fn variables(&self) -> VarRange {
+			VarRange(self.0.variables())
 		}
 	}
 
@@ -620,6 +638,39 @@ mod pindakaas {
 	}
 
 	#[pymethods]
+	impl VarRange {
+		fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+			slf
+		}
+
+		fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<Lit> {
+			slf.0.next().map(|lit| Lit(lit.into()))
+		}
+
+		/// Returns the final variable included in the range.
+		fn end(&self) -> Lit {
+			Lit(self.0.end().into())
+		}
+
+		#[new]
+		/// Create a new variable range that includes all variables between `start`
+		/// and `end` (inclusive).
+		fn new(start: Lit, end: Lit) -> PyResult<Self> {
+			if start.is_negated() || end.is_negated() {
+				return Err(PyValueError::new_err(
+					"`start' and `end' must be positive literals (directly representing variables)",
+				));
+			}
+			Ok(Self(BaseVarRange::new(start.0.var(), end.0.var())))
+		}
+
+		/// Returns the first variable included in the range.
+		fn start(&self) -> Lit {
+			Lit(self.0.start().into())
+		}
+	}
+
+	#[pymethods]
 	impl WCNFInner {
 		fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
 			let clause: Vec<Lit> = clause
@@ -649,18 +700,41 @@ mod pindakaas {
 			Ok(())
 		}
 
+		fn clauses(&self) -> Vec<Vec<Lit>> {
+			// TODO: It would be great if this could be converted to be lazy, but it
+			// seems a little tricky. This should probably be okay for now.
+			self.0
+				.iter()
+				.filter(|(_, w)| w.is_none())
+				.map(|(c, _)| c.iter().map(|&lit| Lit(lit)).collect_vec())
+				.collect()
+		}
+
 		#[new]
 		fn new() -> Self {
 			Self(Default::default())
 		}
 
-		fn new_var_range(&mut self, num_vars: usize) -> (Lit, Lit) {
+		fn new_var_range(&mut self, num_vars: usize) -> VarRange {
 			let range = self.0.new_var_range(num_vars);
-			(Lit(range.start().into()), Lit(range.end().into()))
+			VarRange(range)
 		}
 
 		fn to_dimacs(&self) -> String {
 			self.0.to_string()
+		}
+
+		fn variables(&self) -> VarRange {
+			VarRange(self.0.variables())
+		}
+
+		fn weighted_clauses(&self) -> Vec<(Option<i64>, Vec<Lit>)> {
+			// TODO: It would be great if this could be converted to be lazy, but it
+			// seems a little tricky. This should probably be okay for now.
+			self.0
+				.iter()
+				.map(|(c, &w)| (w, (c.iter().map(|&lit| Lit(lit)).collect())))
+				.collect()
 		}
 	}
 

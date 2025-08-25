@@ -10,6 +10,7 @@ from pindakaas import (
     Lit,
     Unsatisfiable,
 )
+from pindakaas.encoding import VarRange
 
 
 class CustomDB(ClauseDatabase):
@@ -23,10 +24,10 @@ class CustomDB(ClauseDatabase):
     def add_clause(self, clause: Iterable[Lit]):
         self.clauses.append([int(lit) for lit in clause])
 
-    def new_var_range(self, n: int) -> tuple[Lit, Lit]:
+    def new_var_range(self, n: int) -> VarRange:
         start = self.next_var
         self.next_var += n
-        return Lit.from_raw(start), Lit.from_raw(self.next_var - 1)
+        return VarRange(Lit.from_raw(start), Lit.from_raw(self.next_var - 1))
 
 
 def test_unsat():
@@ -38,8 +39,10 @@ def test_unsat():
 def test_cnf():
     f = CNF()
     x, y = f.new_vars(2)
+    assert list(f.variables()) == [x, y]
     f.add_clause([x, y])
     assert f.to_dimacs() == "p cnf 2 1\n1 2 0\n"
+    assert f.clauses() == [[x, y]]
 
 
 def test_encode_bool_lin_unsat():
