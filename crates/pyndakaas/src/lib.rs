@@ -742,7 +742,6 @@ mod pindakaas {
 	mod solver {
 		use std::{
 			collections::HashMap,
-			sync::Mutex,
 			time::{Duration, SystemTime},
 		};
 
@@ -762,7 +761,7 @@ mod pindakaas {
 		#[pyclass(unsendable)]
 		#[derive(Debug, Default)]
 		/// The internal representation of a instance of the CaDiCaL solver.
-		struct CaDiCaLInner(Mutex<Cadical>);
+		struct CaDiCaLInner(Cadical);
 
 		#[pyclass(eq, eq_int)]
 		#[derive(Clone, Copy, Debug, PartialEq)]
@@ -804,8 +803,7 @@ mod pindakaas {
 					.into_iter()
 					.map(|any| any.and_then(|lit| lit.extract::<Lit>()))
 					.try_collect()?;
-				let mut guard = self.0.lock()?;
-				guard.add_clause(clause.into_iter().map(|lit| lit.0))?;
+				self.0.add_clause(clause.into_iter().map(|lit| lit.0))?;
 				Ok(())
 			}
 
@@ -815,8 +813,7 @@ mod pindakaas {
 				enc: Option<Encoder>,
 				conditions: Vec<Lit>,
 			) -> Result {
-				let mut guard = self.0.lock().unwrap();
-				encode_constraint_with_conditions(&mut *guard, con, enc, conditions)
+				encode_constraint_with_conditions(&mut self.0, con, enc, conditions)
 			}
 
 			#[new]
@@ -825,24 +822,21 @@ mod pindakaas {
 			}
 
 			fn new_var_range(&mut self, num_vars: usize) -> Result<(Lit, Lit)> {
-				let mut guard = self.0.lock()?;
-				let range = guard.new_var_range(num_vars);
+				let range = self.0.new_var_range(num_vars);
 				Ok((Lit(range.start().into()), Lit(range.end().into())))
 			}
 
 			fn set_time_limit(&mut self, limit: Option<Duration>) -> Result {
-				let mut guard = self.0.lock()?;
-				guard.set_terminate_callback(limit.map(dur_term_fn));
+				self.0.set_terminate_callback(limit.map(dur_term_fn));
 				Ok(())
 			}
 
 			fn solve_assuming(
-				&self,
+				&mut self,
 				assumptions: Vec<Lit>,
 			) -> Result<(Status, HashMap<i32, bool>)> {
-				let mut guard = self.0.lock()?;
-				let vars = guard.emitted_vars();
-				let result = guard.solve_assuming(assumptions.iter().map(|&lit| lit.0));
+				let vars = self.0.emitted_vars();
+				let result = self.0.solve_assuming(assumptions.iter().map(|&lit| lit.0));
 				Ok(match result {
 					SolveResult::Satisfied(sol) => (
 						Status::SATISFIED,
