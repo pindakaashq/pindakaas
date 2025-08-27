@@ -219,11 +219,10 @@ impl AdderEncoder {
 	/// literals (full adder).
 	///
 	/// `output` can be either a literal, or a constant Boolean value.
-	fn carry_circuit<DB: ClauseDatabase + ?Sized>(
-		db: &mut DB,
-		input: &[Lit],
-		output: BoolVal,
-	) -> Result {
+	fn carry_circuit<Db>(db: &mut Db, input: &[Lit], output: BoolVal) -> Result
+	where
+		Db: ClauseDatabase + ?Sized,
+	{
 		match output {
 			BoolVal::Lit(carry) => match *input {
 				[a, b] => {
@@ -270,11 +269,10 @@ impl AdderEncoder {
 	/// literals (full adder).
 	///
 	/// `output` can be either a literal, or a constant Boolean value.
-	fn sum_circuit<DB: ClauseDatabase + AsDynClauseDatabase>(
-		db: &mut DB,
-		input: &[Lit],
-		output: BoolVal,
-	) -> Result {
+	fn sum_circuit<Db>(db: &mut Db, input: &[Lit], output: BoolVal) -> Result
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		match output {
 			BoolVal::Lit(sum) => match *input {
 				[a, b] => {
@@ -339,12 +337,15 @@ impl AdderEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear> for AdderEncoder {
+impl<Db> Encoder<Db, NormalizedBoolLinear> for AdderEncoder
+where
+	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+{
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&self, db: &mut DB, lin: &NormalizedBoolLinear) -> Result {
+	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
 		debug_assert!(lin.cmp == LimitComp::LessEq || lin.cmp == LimitComp::Equal);
 		// The number of relevant bits in k
 		const ZERO: Coeff = 0;
@@ -614,12 +615,15 @@ impl BddEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear> for BddEncoder {
+impl<Db> Encoder<Db, NormalizedBoolLinear> for BddEncoder
+where
+	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+{
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&self, db: &mut DB, lin: &NormalizedBoolLinear) -> Result {
+	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
 		let xs = lin
 			.terms
 			.iter()
@@ -691,11 +695,10 @@ impl BoolLinAggregator {
 		any(feature = "tracing", test),
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	pub fn aggregate<DB: ClauseDatabase + AsDynClauseDatabase>(
-		&self,
-		db: &mut DB,
-		lin: &BoolLinear,
-	) -> Result<BoolLinVariant> {
+	pub fn aggregate<Db>(&self, db: &mut Db, lin: &BoolLinear) -> Result<BoolLinVariant>
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		let mut k = lin.k;
 		// Aggregate multiple occurrences of the same
 		// variable.
@@ -1634,10 +1637,12 @@ impl From<LimitComp> for Comparator {
 }
 
 // Automatically implement Cardinality encoding when you can encode Linear constraints
-impl<DB: ClauseDatabase + ?Sized, Enc: Encoder<DB, NormalizedBoolLinear> + LinMarker>
-	Encoder<DB, Cardinality> for Enc
+impl<Db, Enc> Encoder<Db, Cardinality> for Enc
+where
+	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	Enc: Encoder<Db, NormalizedBoolLinear> + LinMarker,
 {
-	fn encode(&self, db: &mut DB, con: &Cardinality) -> Result {
+	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
 		self.encode(db, &NormalizedBoolLinear::from(con.clone()))
 	}
 }
@@ -1667,14 +1672,16 @@ impl<Enc, Agg> LinearEncoder<Enc, Agg> {
 	}
 }
 
-impl<DB: ClauseDatabase + AsDynClauseDatabase, Enc: Encoder<DB, BoolLinVariant>>
-	Encoder<DB, BoolLinear> for LinearEncoder<Enc>
+impl<Db, Enc> Encoder<Db, BoolLinear> for LinearEncoder<Enc>
+where
+	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	Enc: Encoder<Db, BoolLinVariant>,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "linear_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&self, db: &mut DB, lin: &BoolLinear) -> Result {
+	fn encode(&self, db: &mut Db, lin: &BoolLinear) -> Result {
 		let variant = self.agg.aggregate(db, lin)?;
 		self.enc.encode(db, &variant)
 	}
@@ -1842,14 +1849,15 @@ impl<LinEnc, CardEnc, AmoEnc> StaticLinEncoder<LinEnc, CardEnc, AmoEnc> {
 	}
 }
 
-impl<
-		DB: ClauseDatabase + ?Sized,
-		LinEnc: Encoder<DB, NormalizedBoolLinear>,
-		CardEnc: Encoder<DB, Cardinality>,
-		AmoEnc: Encoder<DB, CardinalityOne>,
-	> Encoder<DB, BoolLinVariant> for StaticLinEncoder<LinEnc, CardEnc, AmoEnc>
+impl<Db, LinEnc, CardEnc, AmoEnc> Encoder<Db, BoolLinVariant>
+	for StaticLinEncoder<LinEnc, CardEnc, AmoEnc>
+where
+	Db: ClauseDatabase + ?Sized,
+	LinEnc: Encoder<Db, NormalizedBoolLinear>,
+	CardEnc: Encoder<Db, Cardinality>,
+	AmoEnc: Encoder<Db, CardinalityOne>,
 {
-	fn encode(&self, db: &mut DB, lin: &BoolLinVariant) -> Result {
+	fn encode(&self, db: &mut Db, lin: &BoolLinVariant) -> Result {
 		match &lin {
 			BoolLinVariant::Linear(lin) => self.lin_enc.encode(db, lin),
 			BoolLinVariant::Cardinality(card) => self.card_enc.encode(db, card),
@@ -1874,12 +1882,15 @@ impl SwcEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear> for SwcEncoder {
+impl<Db> Encoder<Db, NormalizedBoolLinear> for SwcEncoder
+where
+	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+{
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&self, db: &mut DB, lin: &NormalizedBoolLinear) -> Result {
+	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
 		// self.cutoff = -1;
 		// self.add_consistency = true;
 		let mut model = Model::default();
@@ -1992,14 +2003,15 @@ impl TotalizerEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, NormalizedBoolLinear>
-	for TotalizerEncoder
+impl<Db> Encoder<Db, NormalizedBoolLinear> for TotalizerEncoder
+where
+	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&self, db: &mut DB, lin: &NormalizedBoolLinear) -> Result {
+	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
 		let xs = lin
 			.terms
 			.iter()

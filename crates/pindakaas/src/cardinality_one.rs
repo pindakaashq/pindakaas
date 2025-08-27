@@ -26,20 +26,20 @@ pub struct LadderEncoder {}
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PairwiseEncoder {}
 
-pub(crate) fn at_least_one_clause<DB: ClauseDatabase + ?Sized>(
-	db: &mut DB,
-	card1: &CardinalityOne,
-) -> Result {
+pub(crate) fn at_least_one_clause<Db>(db: &mut Db, card1: &CardinalityOne) -> Result
+where
+	Db: ClauseDatabase + ?Sized,
+{
 	debug_assert_eq!(card1.cmp, LimitComp::Equal);
 	db.add_clause(card1.lits.iter().copied())
 }
 
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, CardinalityOne> for BitwiseEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for BitwiseEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "bitwise_encoder", skip_all, fields(constraint = card1.trace_print()))
 	)]
-	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
+	fn encode(&self, db: &mut Db, card1: &CardinalityOne) -> Result {
 		let size = card1.lits.len();
 		let bits = (usize::BITS - (size - 1).leading_zeros()) as usize;
 
@@ -95,12 +95,12 @@ impl Checker for CardinalityOne {
 	}
 }
 
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, CardinalityOne> for LadderEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for LadderEncoder {
 	#[cfg_attr(
 	any(feature = "tracing", test),
 	tracing::instrument(name = "ladder_encoder", skip_all, fields(constraint = card1.trace_print()))
 )]
-	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
+	fn encode(&self, db: &mut Db, card1: &CardinalityOne) -> Result {
 		// TODO could be slightly optimised to not introduce fixed lits
 		let mut a = db.new_lit(); // y_v-1
 		if card1.cmp == LimitComp::Equal {
@@ -123,12 +123,12 @@ impl<DB: ClauseDatabase + ?Sized> Encoder<DB, CardinalityOne> for LadderEncoder 
 	}
 }
 
-impl<DB: ClauseDatabase + ?Sized> Encoder<DB, CardinalityOne> for PairwiseEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for PairwiseEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "pairwise_encoder", skip_all, fields(constraint = card1.trace_print()))
 	)]
-	fn encode(&self, db: &mut DB, card1: &CardinalityOne) -> Result {
+	fn encode(&self, db: &mut Db, card1: &CardinalityOne) -> Result {
 		// Add clause to ensure "at least one" literal holds
 		if card1.cmp == LimitComp::Equal {
 			at_least_one_clause(db, card1)?;

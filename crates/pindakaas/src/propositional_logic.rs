@@ -271,7 +271,7 @@ impl Formula<BoolVal> {
 impl Formula<Lit> {
 	/// Helper function to bind the (sub) formula to a name (literal) for the
 	/// tseitin encoding.
-	fn bind<DB: ClauseDatabase + ?Sized>(&self, db: &mut DB, name: Option<Lit>) -> Result<Lit> {
+	fn bind<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db, name: Option<Lit>) -> Result<Lit> {
 		Ok(match self {
 			Formula::Atom(lit) => {
 				if let Some(name) = name {
@@ -670,8 +670,11 @@ impl<Base> Not for Formula<Base> {
 	}
 }
 
-impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, Formula<BoolVal>> for TseitinEncoder {
-	fn encode(&self, db: &mut DB, con: &Formula<BoolVal>) -> Result {
+impl<Db> Encoder<Db, Formula<BoolVal>> for TseitinEncoder
+where
+	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+{
+	fn encode(&self, db: &mut Db, con: &Formula<BoolVal>) -> Result {
 		match con.clone().resolve() {
 			Err(false) => Err(Unsatisfiable),
 			Err(true) => Ok(()),
@@ -680,8 +683,11 @@ impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, Formula<BoolVal>> for
 	}
 }
 
-impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, Formula<Lit>> for TseitinEncoder {
-	fn encode(&self, db: &mut DB, f: &Formula<Lit>) -> Result {
+impl<Db> Encoder<Db, Formula<Lit>> for TseitinEncoder
+where
+	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+{
+	fn encode(&self, db: &mut Db, f: &Formula<Lit>) -> Result {
 		match f {
 			Formula::Atom(l) => db.add_clause([*l]),
 			Formula::Not(f) => match f.as_ref() {

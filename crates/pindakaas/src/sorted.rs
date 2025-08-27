@@ -76,15 +76,18 @@ impl Checker for Sorted<'_> {
 }
 
 impl SortedEncoder {
-	fn comp<DB: ClauseDatabase + AsDynClauseDatabase>(
+	fn comp<Db>(
 		&self,
-		db: &mut DB,
+		db: &mut Db,
 		x: &IntVarEnc,
 		y: &IntVarEnc,
 		cmp: &LimitComp,
 		z: &IntVarEnc,
 		c: Coeff,
-	) -> Result {
+	) -> Result
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		let cmp = self.overwrite_recursive_cmp.as_ref().unwrap_or(cmp);
 		let c1 = c;
 		let c2 = c + 1;
@@ -111,15 +114,18 @@ impl SortedEncoder {
 		self
 	}
 
-	fn merged<DB: ClauseDatabase + AsDynClauseDatabase>(
+	fn merged<Db>(
 		&self,
-		db: &mut DB,
+		db: &mut Db,
 		x1: &IntVarEnc,
 		x2: &IntVarEnc,
 		cmp: &LimitComp,
 		y: &IntVarEnc,
 		_lvl: usize,
-	) -> Result {
+	) -> Result
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
 		let strat = if let SortedStrategy::Mixed(lambda) = &self.strategy {
 			let mut cache = self.strategy_cost_cache.lock().unwrap();
@@ -194,12 +200,10 @@ impl SortedEncoder {
 		}
 	}
 
-	fn next_int_var<DB: ClauseDatabase + AsDynClauseDatabase>(
-		&self,
-		db: &mut DB,
-		ub: Coeff,
-		lbl: String,
-	) -> IntVarEnc {
+	fn next_int_var<Db>(&self, db: &mut Db, ub: Coeff, lbl: String) -> IntVarEnc
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		// TODO We always have the view x>=1 <-> y>=1, which is now realized using equiv
 		if ub == 0 {
 			IntVarEnc::Const(0)
@@ -213,14 +217,17 @@ impl SortedEncoder {
 	}
 
 	/// The sorted/merged base case of x1{0,1}+x2{0,1}<=y{0,1,2}
-	fn smerge<DB: ClauseDatabase + AsDynClauseDatabase>(
+	fn smerge<Db>(
 		&self,
-		db: &mut DB,
+		db: &mut Db,
 		x1: &IntVarEnc,
 		x2: &IntVarEnc,
 		cmp: &LimitComp,
 		y: &IntVarEnc,
-	) -> Result {
+	) -> Result
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		// we let x2 take the place of z_ceil, so we need to add 1 to both sides
 		let x2 = x2.add(
 			db,
@@ -239,15 +246,18 @@ impl SortedEncoder {
 		self.comp(db, x1, &x2, cmp, &y, 1)
 	}
 
-	fn sort<DB: ClauseDatabase + AsDynClauseDatabase>(
+	fn sort<Db>(
 		&self,
-		db: &mut DB,
+		db: &mut Db,
 		xs: &[IntVarEnc],
 		cmp: &LimitComp,
 		ub: Coeff,
 		lbl: String,
 		_lvl: usize,
-	) -> Option<IntVarEnc> {
+	) -> Option<IntVarEnc>
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		match xs {
 			[] => None,
 			[x] => Some(x.clone()),
@@ -259,14 +269,17 @@ impl SortedEncoder {
 		}
 	}
 
-	fn sorted<DB: ClauseDatabase + AsDynClauseDatabase>(
+	fn sorted<Db>(
 		&self,
-		db: &mut DB,
+		db: &mut Db,
 		xs: &[IntVarEnc],
 		cmp: &LimitComp,
 		y: &IntVarEnc,
 		_lvl: usize,
-	) -> Result {
+	) -> Result
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		let (n, m) = (xs.len(), y.ub());
 		let direct = false;
 
@@ -388,8 +401,8 @@ impl Default for SortedEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, Sorted<'_>> for SortedEncoder {
-	fn encode(&self, db: &mut DB, sorted: &Sorted) -> Result {
+impl<Db: ClauseDatabase + AsDynClauseDatabase + ?Sized> Encoder<Db, Sorted<'_>> for SortedEncoder {
+	fn encode(&self, db: &mut Db, sorted: &Sorted) -> Result {
 		let xs = sorted
 			.xs
 			.iter()
@@ -408,8 +421,11 @@ impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, Sorted<'_>> for Sorte
 	}
 }
 
-impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for SortedEncoder {
-	fn encode(&self, db: &mut DB, tern: &TernLeConstraint) -> Result {
+impl<Db> Encoder<Db, TernLeConstraint<'_>> for SortedEncoder
+where
+	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+{
+	fn encode(&self, db: &mut Db, tern: &TernLeConstraint) -> Result {
 		let TernLeConstraint { x, y, cmp, z } = tern;
 		if tern.is_fixed()? {
 			Ok(())

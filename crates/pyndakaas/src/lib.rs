@@ -182,12 +182,15 @@ mod pindakaas {
 
 	/// Same `encode_constraint`, but evaluates the conditions if not empty. This prevents
 	/// costly virtual method access if this were done inside `encode_constraint`
-	fn encode_constraint_with_conditions<Db: ClauseDatabase>(
+	fn encode_constraint_with_conditions<Db>(
 		db: &mut Db,
 		con: ConstraintArg,
 		enc: Option<Encoder>,
 		conditions: Vec<Lit>,
-	) -> Result {
+	) -> Result
+	where
+		Db: ClauseDatabase,
+	{
 		if conditions.is_empty() {
 			encode_constraint(db, con, enc)
 		} else {
@@ -201,11 +204,10 @@ mod pindakaas {
 
 	/// Internal function to help with the encoding of a constraint given an
 	/// optional encoder.
-	fn encode_constraint<Db: ClauseDatabase>(
-		db: &mut Db,
-		con: ConstraintArg,
-		enc: Option<Encoder>,
-	) -> Result {
+	fn encode_constraint<Db>(db: &mut Db, con: ConstraintArg, enc: Option<Encoder>) -> Result
+	where
+		Db: ClauseDatabase,
+	{
 		let invalid_enc = |con_ty, enc| {
 			Err(InvalidEncoder::new_err(format!(
 				"Unable to encode object of type `{con_ty}' using {enc:?}"

@@ -117,12 +117,10 @@ pub(crate) fn display_dom(dom: &RangeList<Coeff>) -> String {
 	any(feature = "tracing", test),
 	tracing::instrument(name = "lex_geq", skip_all)
 )]
-pub(crate) fn lex_geq_const<DB: ClauseDatabase + ?Sized>(
-	db: &mut DB,
-	x: &[Option<Lit>],
-	k: PosCoeff,
-	bits: usize,
-) -> Result {
+pub(crate) fn lex_geq_const<Db>(db: &mut Db, x: &[Option<Lit>], k: PosCoeff, bits: usize) -> Result
+where
+	Db: ClauseDatabase + ?Sized,
+{
 	let k = as_binary(k, Some(bits as u32));
 	for i in 0..bits {
 		if k[i] && x[i].is_some() {
@@ -137,12 +135,10 @@ pub(crate) fn lex_geq_const<DB: ClauseDatabase + ?Sized>(
 	any(feature = "tracing", test),
 	tracing::instrument(name = "lex_lesseq_const", skip_all)
 )]
-pub(crate) fn lex_leq_const<DB: ClauseDatabase + ?Sized>(
-	db: &mut DB,
-	x: &[Option<Lit>],
-	k: PosCoeff,
-	bits: usize,
-) -> Result {
+pub(crate) fn lex_leq_const<Db>(db: &mut Db, x: &[Option<Lit>], k: PosCoeff, bits: usize) -> Result
+where
+	Db: ClauseDatabase + ?Sized,
+{
 	let k = as_binary(k, Some(bits as u32));
 	// For every zero bit in k:
 	// - either the `x` bit is also zero, or
@@ -162,13 +158,16 @@ pub(crate) fn lex_leq_const<DB: ClauseDatabase + ?Sized>(
 /// Constrains the slice `z`, to be the result of adding `x` to `y`, all encoded using the log encoding.
 ///
 /// TODO: Should this use the IntEncoding::Log input??
-pub(crate) fn log_enc_add<DB: ClauseDatabase + ?Sized>(
-	db: &mut DB,
+pub(crate) fn log_enc_add<Db>(
+	db: &mut Db,
 	x: &[Lit],
 	y: &[Lit],
 	cmp: &LimitComp,
 	z: &[Lit],
-) -> Result {
+) -> Result
+where
+	Db: ClauseDatabase + ?Sized,
+{
 	log_enc_add_(
 		db,
 		&x.iter().copied().map(BoolVal::from).collect_vec(),
@@ -179,13 +178,16 @@ pub(crate) fn log_enc_add<DB: ClauseDatabase + ?Sized>(
 }
 
 #[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} {cmp} {z:?}"))))]
-pub(crate) fn log_enc_add_<DB: ClauseDatabase + ?Sized>(
-	db: &mut DB,
+pub(crate) fn log_enc_add_<Db>(
+	db: &mut Db,
 	x: &[BoolVal],
 	y: &[BoolVal],
 	cmp: &LimitComp,
 	z: &[BoolVal],
-) -> Result {
+) -> Result
+where
+	Db: ClauseDatabase + ?Sized,
+{
 	let n = itertools::max([x.len(), y.len(), z.len()]).unwrap();
 
 	let bit =
@@ -286,11 +288,10 @@ impl Checker for ImplicationChainConstraint {
 }
 
 impl ImplicationChainEncoder {
-	pub(crate) fn _encode<DB: ClauseDatabase + ?Sized>(
-		&mut self,
-		db: &mut DB,
-		ic: &ImplicationChainConstraint,
-	) -> Result {
+	pub(crate) fn _encode<Db>(&mut self, db: &mut Db, ic: &ImplicationChainConstraint) -> Result
+	where
+		Db: ClauseDatabase + ?Sized,
+	{
 		for (a, b) in ic.lits.iter().copied().tuple_windows() {
 			db.add_clause([!b, a])?;
 		}
@@ -299,12 +300,15 @@ impl ImplicationChainEncoder {
 }
 
 impl IntVar {
-	fn encode<DB: ClauseDatabase + AsDynClauseDatabase>(
+	fn encode<Db>(
 		&self,
-		db: &mut DB,
+		db: &mut Db,
 		views: &mut FxHashMap<(usize, Coeff), Lit>,
 		prefer_order: bool,
-	) -> IntVarEnc {
+	) -> IntVarEnc
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		if self.size() == 1 {
 			IntVarEnc::Const(*self.dom.lower_bound().unwrap())
 		} else {
@@ -405,12 +409,10 @@ impl Display for IntVar {
 }
 
 impl IntVarBin {
-	pub(crate) fn add<DB: ClauseDatabase + AsDynClauseDatabase>(
-		&self,
-		db: &mut DB,
-		encoder: &TernLeEncoder,
-		y: Coeff,
-	) -> Result<Self> {
+	pub(crate) fn add<Db>(&self, db: &mut Db, encoder: &TernLeEncoder, y: Coeff) -> Result<Self>
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		if y == 0 {
 			Ok(self.clone())
 		} else if GROUND_BINARY_AT_LB {
@@ -441,10 +443,10 @@ impl IntVarBin {
 		}
 	}
 
-	pub(crate) fn consistent<DB: ClauseDatabase + AsDynClauseDatabase>(
-		&self,
-		db: &mut DB,
-	) -> Result {
+	pub(crate) fn consistent<Db>(&self, db: &mut Db) -> Result
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		let encoder = TernLeEncoder::default();
 		if !GROUND_BINARY_AT_LB {
 			encoder.encode(
@@ -477,12 +479,10 @@ impl IntVarBin {
 	}
 
 	// TODO change to with_label or something
-	pub(crate) fn from_bounds<DB: ClauseDatabase + ?Sized>(
-		db: &mut DB,
-		lb: Coeff,
-		ub: Coeff,
-		lbl: String,
-	) -> Self {
+	pub(crate) fn from_bounds<Db>(db: &mut Db, lb: Coeff, ub: Coeff, lbl: String) -> Self
+	where
+		Db: ClauseDatabase + ?Sized,
+	{
 		Self {
 			xs: (0..IntVar::required_bits(lb, ub))
 				.map(|_i| new_named_lit!(db, format!("{}^{}", lbl, _i)))
@@ -587,16 +587,19 @@ impl Display for IntVarBin {
 }
 
 impl IntVarEnc {
-	pub(crate) fn add<DB: ClauseDatabase + AsDynClauseDatabase>(
+	pub(crate) fn add<Db>(
 		&self,
-		db: &mut DB,
+		db: &mut Db,
 		encoder: &TernLeEncoder,
 		y: &IntVarEnc,
 		lb: Option<Coeff>,
 		ub: Option<Coeff>,
 		// cmp: &LimitComp,
-		// enc: &'a mut dyn Encoder<DB, TernLeConstraint<'a, DB, C>>,
-	) -> Result<IntVarEnc> {
+		// enc: &'a mut dyn Encoder<Db, TernLeConstraint<'a, Db, C>>,
+	) -> Result<IntVarEnc>
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		let comp_lb = self.lb() + y.lb();
 		let lb = max(lb.unwrap_or(comp_lb), comp_lb);
 
@@ -662,10 +665,10 @@ impl IntVarEnc {
 		}
 	}
 
-	pub(crate) fn consistent<DB: ClauseDatabase + AsDynClauseDatabase>(
-		&self,
-		db: &mut DB,
-	) -> Result {
+	pub(crate) fn consistent<Db>(&self, db: &mut Db) -> Result
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		match self {
 			IntVarEnc::Ord(o) => o.consistent(db),
 			IntVarEnc::Bin(b) => b.consistent(db),
@@ -690,12 +693,10 @@ impl IntVarEnc {
 		}
 	}
 	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
-	pub(crate) fn from_part<DB: ClauseDatabase + AsDynClauseDatabase>(
-		db: &mut DB,
-		xs: &Part,
-		ub: PosCoeff,
-		lbl: String,
-	) -> Vec<Self> {
+	pub(crate) fn from_part<Db>(db: &mut Db, xs: &Part, ub: PosCoeff, lbl: String) -> Vec<Self>
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		match xs {
 			Part::Amo(terms) => {
 				let terms: Vec<(Coeff, Lit)> = terms
@@ -884,7 +885,7 @@ impl IntVarOrd {
 		}
 	}
 
-	pub(crate) fn consistent<DB: ClauseDatabase + ?Sized>(&self, db: &mut DB) -> Result {
+	pub(crate) fn consistent<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		ImplicationChainEncoder::default()._encode(db, &self.consistency())
 	}
 
@@ -922,17 +923,15 @@ impl IntVarOrd {
 		self.dom.clone()
 	}
 
-	pub(crate) fn from_bounds<DB: ClauseDatabase + ?Sized>(
-		db: &mut DB,
-		lb: Coeff,
-		ub: Coeff,
-		lbl: String,
-	) -> Self {
+	pub(crate) fn from_bounds<Db>(db: &mut Db, lb: Coeff, ub: Coeff, lbl: String) -> Self
+	where
+		Db: ClauseDatabase + ?Sized,
+	{
 		Self::from_dom(db, (lb..=ub).into(), lbl)
 	}
 
-	pub(crate) fn from_dom<DB: ClauseDatabase + ?Sized>(
-		db: &mut DB,
+	pub(crate) fn from_dom<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
 		dom: RangeList<Coeff>,
 		lbl: String,
 	) -> Self {
@@ -940,12 +939,15 @@ impl IntVarOrd {
 		Self::from_views(db, dom, vec![None; card - 1], lbl)
 	}
 
-	pub(crate) fn from_views<DB: ClauseDatabase + ?Sized>(
-		db: &mut DB,
+	pub(crate) fn from_views<Db>(
+		db: &mut Db,
 		dom: RangeList<Coeff>,
 		views: Vec<Option<Lit>>,
 		lbl: String,
-	) -> Self {
+	) -> Self
+	where
+		Db: ClauseDatabase + ?Sized,
+	{
 		assert!(!dom.is_empty());
 		assert_eq!(dom.card().unwrap() - 1, views.len(), "Expecting the same number of views as there are inequalities literals to represent the domain");
 
@@ -1250,11 +1252,10 @@ impl Model {
 		var
 	}
 
-	pub(crate) fn encode<DB: ClauseDatabase + AsDynClauseDatabase>(
-		&mut self,
-		db: &mut DB,
-		cutoff: Option<Coeff>,
-	) -> Result {
+	pub(crate) fn encode<Db>(&mut self, db: &mut Db, cutoff: Option<Coeff>) -> Result
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		let mut all_views = FxHashMap::default();
 		for con in &self.cons {
 			let Lin { xs, cmp } = con;
@@ -1384,12 +1385,15 @@ impl Display for TernLeConstraint<'_> {
 	}
 }
 
-impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, TernLeConstraint<'_>> for TernLeEncoder {
+impl<Db> Encoder<Db, TernLeConstraint<'_>> for TernLeEncoder
+where
+	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+{
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "tern_le_encoder", skip_all, fields(constraint = format!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z)))
 	)]
-	fn encode(&self, db: &mut DB, tern: &TernLeConstraint) -> Result {
+	fn encode(&self, db: &mut Db, tern: &TernLeConstraint) -> Result {
 		#[cfg(debug_assertions)]
 		{
 			const PRINT_TESTCASES: bool = false;
@@ -1833,13 +1837,10 @@ pub(crate) mod tests {
 		assert_eq!(c.geq(45), Formula::Atom(BoolVal::Const(false)));
 	}
 
-	fn get_bin_x<DB: ClauseDatabase + AsDynClauseDatabase>(
-		db: &mut DB,
-		lb: Coeff,
-		ub: Coeff,
-		consistent: bool,
-		lbl: String,
-	) -> IntVarEnc {
+	fn get_bin_x<Db>(db: &mut Db, lb: Coeff, ub: Coeff, consistent: bool, lbl: String) -> IntVarEnc
+	where
+		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	{
 		let x = IntVarBin::from_bounds(db, lb, ub, lbl);
 		if consistent {
 			x.consistent(db).unwrap();
@@ -1847,12 +1848,10 @@ pub(crate) mod tests {
 		IntVarEnc::Bin(x)
 	}
 
-	fn get_ord_x<DB: ClauseDatabase + ?Sized>(
-		db: &mut DB,
-		dom: RangeList<Coeff>,
-		consistent: bool,
-		lbl: String,
-	) -> IntVarEnc {
+	fn get_ord_x<Db>(db: &mut Db, dom: RangeList<Coeff>, consistent: bool, lbl: String) -> IntVarEnc
+	where
+		Db: ClauseDatabase + ?Sized,
+	{
 		let x = IntVarOrd::from_dom(db, dom, lbl);
 		if consistent {
 			x.consistent(db).unwrap();

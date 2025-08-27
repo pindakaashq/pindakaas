@@ -66,10 +66,12 @@ impl From<CardinalityOne> for Cardinality {
 }
 
 // Automatically implement AtMostOne encoding when you can encode Cardinality constraints
-impl<DB: ClauseDatabase + ?Sized, Enc: Encoder<DB, Cardinality> + CardMarker>
-	Encoder<DB, CardinalityOne> for Enc
+impl<Db, Enc> Encoder<Db, CardinalityOne> for Enc
+where
+	Db: ClauseDatabase + ?Sized,
+	Enc: Encoder<Db, Cardinality> + CardMarker,
 {
-	fn encode(&self, db: &mut DB, con: &CardinalityOne) -> Result {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
 		self.encode(db, &Cardinality::from(con.clone()))
 	}
 }
@@ -95,12 +97,15 @@ impl Default for SortingNetworkEncoder {
 	}
 }
 
-impl<DB: ClauseDatabase + AsDynClauseDatabase> Encoder<DB, Cardinality> for SortingNetworkEncoder {
+impl<Db> Encoder<Db, Cardinality> for SortingNetworkEncoder
+where
+	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+{
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))
 	)]
-	fn encode(&self, db: &mut DB, card: &Cardinality) -> Result {
+	fn encode(&self, db: &mut Db, card: &Cardinality) -> Result {
 		self.sorted_encoder.encode(
 			db,
 			&Sorted::new(
