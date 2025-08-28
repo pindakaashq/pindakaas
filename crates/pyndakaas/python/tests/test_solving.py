@@ -31,3 +31,16 @@ def test_assumptions():
         assert result.failed(x) or result.failed(y), (
             "One or the other variable should have been used to prove UNSAT"
         )
+
+
+def test_kissat():
+    slv = pindakaas.solver.Kissat()
+    x, y = slv.new_vars(2)
+    slv.add_clause([x, y])
+    slv.add_clause([~x, ~y])
+    with slv.solve() as result:
+        assert result.status == pindakaas.solver.Status.SATISFIED
+        vx, vy = result.value(x), result.value(y)
+        assert vx is not None
+        assert vy is not None
+        assert vx != vy

@@ -7,7 +7,7 @@ from typing import ContextManager, Iterable, Iterator, Optional
 
 from .encoding import ClauseDatabase, Constraint
 from .pindakaas import Encoder, Lit
-from .pindakaas.solver import CaDiCaLInner, Status
+from .pindakaas.solver import CaDiCaLInner, KissatInner, Status
 
 
 class Result(ABC):
@@ -84,6 +84,39 @@ class CaDiCaL(Solver):
     def __init__(self):
         """Initialize solver."""
         self._inner = CaDiCaLInner()
+
+    def _set_time_limit(self, limit: Optional[timedelta]):
+        return self._inner.set_time_limit(limit)
+
+    @contextmanager
+    def _solve_assuming(self, assumptions: Iterable[Lit]) -> Iterator[Result]:
+        # TODO: Investigate whether it is possible to avoid copying the solution
+        (status, mapping) = self._inner.solve_assuming(assumptions)
+        yield MapResult(status, mapping)
+
+    def add_clause(self, clause: Iterable[Lit]):
+        return self._inner.add_clause(iter(clause))
+
+    def add_encoding(
+        self,
+        constraint: Constraint,
+        encoder: Optional[Encoder] = None,
+        conditions: Optional[Iterable[Lit]] = None,
+    ):
+        conditions = list(conditions) if conditions is not None else []
+        return self._inner.add_encoding(constraint, encoder, conditions)
+
+    def new_var_range(self, n: int):
+        return self._inner.new_var_range(n)
+
+
+class Kissat(Solver):
+    """The `Kissat <https://github.com/arminbiere/kissat>`_ SAT solver."""
+
+    _inner: KissatInner
+
+    def __init__(self):
+        self._inner = KissatInner()
 
     def _set_time_limit(self, limit: Optional[timedelta]):
         return self._inner.set_time_limit(limit)

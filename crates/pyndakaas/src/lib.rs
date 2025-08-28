@@ -744,18 +744,19 @@ mod pindakaas {
 	mod solver {
 		use std::{
 			collections::HashMap,
+			sync::Mutex,
 			time::{Duration, SystemTime},
 		};
 
 		use itertools::Itertools;
 		use pindakaas::{
 			solver::{
-				cadical::Cadical, Assumptions, FailedAssumptions, SolveResult, TermSignal,
-				TerminateCallback,
+				cadical::Cadical, kissat::Kissat, Assumptions, FailedAssumptions, SolveResult,
+				Solver, TermSignal, TerminateCallback,
 			},
 			ClauseDatabase, ClauseDatabaseTools, Valuation,
 		};
-		use pyo3::{prelude::*, types::PyIterator};
+		use pyo3::{exceptions::PyNotImplementedError, prelude::*, types::PyIterator};
 
 		use super::{encode_constraint_with_conditions, Result};
 		use crate::pindakaas::{ConstraintArg, Encoder, Lit};
@@ -764,6 +765,10 @@ mod pindakaas {
 		#[derive(Debug, Default)]
 		/// The internal representation of a instance of the CaDiCaL solver.
 		struct CaDiCaLInner(Cadical);
+
+		#[pyclass]
+		#[derive(Debug, Default)]
+		struct KissatInner(Mutex<Kissat>);
 
 		#[pyclass(eq, eq_int)]
 		#[derive(Clone, Copy, Debug, PartialEq)]
@@ -853,6 +858,70 @@ mod pindakaas {
 							.map(|&lit| (lit.0.into(), fail.fail(lit.0)))
 							.collect(),
 					),
+					SolveResult::Unknown => (Status::UNKNOWN, HashMap::new()),
+				})
+			}
+		}
+
+		#[pymethods]
+		impl KissatInner {
+			fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> PyResult<()> {
+				let clause: Vec<Lit> = clause
+					.into_iter()
+					.map(|any| any.and_then(|lit| lit.extract::<Lit>()))
+					.collect::<PyResult<_>>()?;
+				let mut guard = self.0.lock().unwrap();
+				guard
+					.add_clause(clause.into_iter().map(|lit| lit.0))
+					.unwrap();
+				Ok(())
+			}
+
+			fn add_encoding(
+				&mut self,
+				con: ConstraintArg,
+				enc: Option<Encoder>,
+				conditions: Vec<Lit>,
+			) -> Result {
+				let mut guard = self.0.lock().unwrap();
+				encode_constraint_with_conditions(&mut *guard, con, enc, conditions)
+			}
+
+			#[new]
+			fn new() -> Self {
+				Self(Default::default())
+			}
+
+			fn new_var_range(&mut self, num_vars: usize) -> Result<(Lit, Lit)> {
+				let mut guard = self.0.lock().unwrap();
+				let range = guard.new_var_range(num_vars);
+				Ok((Lit(range.start().into()), Lit(range.end().into())))
+			}
+
+			fn set_time_limit(&mut self, limit: Option<Duration>) {
+				let mut guard = self.0.lock().unwrap();
+				guard.set_terminate_callback(limit.map(dur_term_fn));
+			}
+
+			fn solve_assuming(
+				&self,
+				assumptions: Vec<Lit>,
+			) -> PyResult<(Status, HashMap<i32, bool>)> {
+				if !assumptions.is_empty() {
+					return Err(PyNotImplementedError::new_err(
+						"Kissat does not support assumptions",
+					));
+				}
+				let mut guard = self.0.lock().unwrap();
+				let vars = guard.emitted_vars();
+				Ok(match guard.solve() {
+					SolveResult::Satisfied(sol) => (
+						Status::SATISFIED,
+						vars.into_iter()
+							.map(|var| (var.into(), sol.value(var.into())))
+							.collect(),
+					),
+					SolveResult::Unsatisfiable(_) => (Status::UNSATISFIABLE, Default::default()),
 					SolveResult::Unknown => (Status::UNKNOWN, HashMap::new()),
 				})
 			}

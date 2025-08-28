@@ -9,12 +9,20 @@ use crate::{
 		AccessIpasirStore, BasicIpasirStorage, IpasirSolverMethods, IpasirStore,
 		IpasirTermCallbackMethod,
 	},
-	ClauseDatabaseTools, Cnf,
+	ClauseDatabaseTools, Cnf, VarRange,
 };
 
 #[derive(Debug, Default)]
 pub struct Kissat {
 	store: IpasirStore<Self, 0, 1, 0>,
+}
+
+impl Kissat {
+	// TODO: Unsure whether this is a good idea.
+	#[doc(hidden)]
+	pub fn emitted_vars(&self) -> VarRange {
+		self.ipasir_store().vars().emitted_vars()
+	}
 }
 
 impl AccessIpasirStore for Kissat {

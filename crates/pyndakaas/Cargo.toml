@@ -17,7 +17,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 itertools = "0.14"
-pindakaas = { version = "0.1.0", path = "../pindakaas" }
+pindakaas = { version = "0.1.0", path = "../pindakaas", features = ["kissat"] }
 pyo3 = "0.25.1"
 
 [lints]
