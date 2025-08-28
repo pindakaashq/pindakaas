@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::{path::Path, process::Command};
 
 fn main() {
 	let src = [
@@ -130,6 +130,7 @@ fn main() {
 
 	let build = builder
 		.include("./src")
+		.flag_if_supported("-std=c99")
 		.define("VERSION", format!("\"{version}\"").as_str())
 		.define(
 			"COMPILER",
@@ -153,6 +154,10 @@ fn main() {
 	#[cfg(not(debug_assertions))]
 	// I'm not sure why this is not automatic, but assertions still seem to trigger otherwise.
 	let _ = build.define("NDEBUG", None);
+
+	if build.get_compiler().is_like_msvc() {
+		let _ = build.include(Path::new("vendor/kissat/src/msvc"));
+	}
 
 	let _ = build.files(src);
 
