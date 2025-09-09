@@ -12,6 +12,7 @@ build:
     install:
       - pip install --upgrade pip
       - pip install --group ./crates/pyndakaas/pyproject.toml:docs
+      - pip install ./crates/pyndakaas/
 
 # Build documentation in the "crates/pyndakaas/docs/" directory with Sphinx
 sphinx:
