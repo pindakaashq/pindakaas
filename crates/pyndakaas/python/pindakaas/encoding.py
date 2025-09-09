@@ -15,8 +15,10 @@ Constraint = Formula
 
 
 class ClauseDatabase(ABC):
-    """The abstract class to represent objects (e.g. CNF, SAT solver) to which we can
-    add clauses.
+    """The abstract class to represent objects to which we can add clauses.
+
+    Examples of such classes include `CNF`, `WCNF`, and the various `Solver`
+        implementations.
     """
 
     def __iadd__(self, constraint: Constraint):
@@ -38,9 +40,11 @@ class ClauseDatabase(ABC):
         encoder: Optional[Encoder] = None,
         conditions: Optional[Iterable[Lit]] = None,
     ):
-        """Add an encoding of a `constraint` to the database. Optionally, the constraint
-        is implied by the given `conditions` (i.e. every clause is extended by the
-        `conditions`), and the given `encoder` is used for the encoding.
+        """Add an encoding of a `constraint` to the database.
+
+        Optionally, the constraint is implied by the given `conditions` (i.e. every
+            clause is extended by the `conditions`), and the given `encoder` is used
+            for the encoding.
 
         :param constraint: The constraint or formula to encode and add to the database
         :raises Unsatisfiable: If the formula has become unsatisfiable
@@ -93,8 +97,7 @@ class CNF(ClauseDatabase):
         return self._inner.add_encoding(constraint, encoder, conditions)
 
     def clauses(self) -> Iterable[list[Lit]]:
-        """
-        Returns an iterable representation of the clauses currently included in the CNF.
+        """Returns an iterator of the clauses currently included in the CNF.
 
         :return: An iterable of lists of literals representing the clauses.
         """
@@ -111,9 +114,7 @@ class CNF(ClauseDatabase):
         return self._inner.to_dimacs()
 
     def variables(self) -> Iterable[Lit]:
-        """
-        Returns a iterable representation of the variables currently included in the
-        CNF.
+        """Returns an iterator of the variables currently included in the CNF.
 
         :return: An iterable of literals representing the variables.
         """
@@ -121,8 +122,7 @@ class CNF(ClauseDatabase):
 
 
 class WCNF(CNF):
-    """A representation for Boolean formulas in conjunctive normal form with weighted
-    (soft) clauses.
+    """A representation for conjunctive normal form with weighted clauses.
 
     Note that `WCNF.clauses` only iterates over the hard clauses. Use
     `WCNF.weighted_clauses` to iterate over all clauses.
@@ -142,9 +142,7 @@ class WCNF(CNF):
         return self._inner.add_weighted_clause(iter(clause), weight)
 
     def weighted_clauses(self) -> Iterable[tuple[Optional[int], list[Lit]]]:
-        """
-        Returns an iterable representation of the weighted clauses currently included in
-        the WCNF.
+        """Returns an iterator of the weighted clauses currently included in the WCNF.
 
         :return: An iterable of lists of literals representing the clauses.
         """

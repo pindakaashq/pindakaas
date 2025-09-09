@@ -11,8 +11,9 @@ from .pindakaas.solver import CaDiCaLInner, KissatInner, Status
 
 
 class Result(ABC):
-    """The Result object returned after calling `solve()`. It allows access to e.g.
-    solver status and the values of variables.
+    """The Result object returned after calling `solve()`.
+
+    It gives access to e.g. solver status and the values of variables.
     """
 
     @property
@@ -26,19 +27,23 @@ class Result(ABC):
         """Return value for literal `lit`, or `None` if `lit` is assigned.
 
         :param lit: the literal for which to return the value
+
         :return: the value of `lit` if assigned
+
         """
         ...
 
     @abstractmethod
     def failed(self, lit: Lit) -> Optional[bool]:
-        """Check if the given assumption literal was used to prove the unsatisfiability
-        of the formula under the assumptions used for the last SAT search. Note that for
-        literals `lit` which are not assumption literals, the behavior of is not
-        specified.
+        """Check if the given assumption literal was used to prove the unsatisfiability.
+
+        The unsatisfiability of the formula is under the assumptions used for the last
+        SAT search. Note also that for literals `lit` which are not assumption literals,
+        the behavior of is not specified.
 
         :param lit: the assumption literal for which to return whether it contributed to
-        the unsatisfiable result
+            the unsatisfiable result
+
         :return: whether `lit` contributed to the unsatisfiable result
         """
         ...
@@ -63,9 +68,9 @@ class Solver(ClauseDatabase):
         """Solve the current `ClauseDatabase`.
 
         :param assumptions: an optional iterable of assumptions literals which must hold
-        for this solve call
+            for this solve call
         :param time_limit: an optional time limit before which the solver is terminated
-        and the result is Unknown
+            and the result is Unknown
         """
         self._set_time_limit(time_limit)
         assumptions = assumptions if assumptions is not None else []

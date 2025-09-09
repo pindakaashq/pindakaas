@@ -3,6 +3,9 @@
 
 version: 2
 
+submodules:
+  include: all
+
 # Set the OS, Python version, and other tools you might need
 build:
   os: ubuntu-24.04
@@ -12,6 +15,7 @@ build:
     install:
       - pip install --upgrade pip
       - pip install --group ./crates/pyndakaas/pyproject.toml:docs
+      - pip install ./crates/pyndakaas/
 
 # Build documentation in the "crates/pyndakaas/docs/" directory with Sphinx
 sphinx:
