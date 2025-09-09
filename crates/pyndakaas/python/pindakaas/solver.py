@@ -11,7 +11,8 @@ from .pindakaas.solver import CaDiCaLInner, KissatInner, Status
 
 
 class Result(ABC):
-    """The Result object returned after calling `solve()`. It allows access to e.g.
+    """
+    The Result object returned after calling `solve()`. It allows access to e.g.
     solver status and the values of variables.
     """
 
@@ -23,7 +24,8 @@ class Result(ABC):
 
     @abstractmethod
     def value(self, lit: Lit) -> Optional[bool]:
-        """Return value for literal `lit`, or `None` if `lit` is assigned.
+        """
+        Return value for literal `lit`, or `None` if `lit` is assigned.
 
         :param lit: the literal for which to return the value
         :return: the value of `lit` if assigned
@@ -32,7 +34,8 @@ class Result(ABC):
 
     @abstractmethod
     def failed(self, lit: Lit) -> Optional[bool]:
-        """Check if the given assumption literal was used to prove the unsatisfiability
+        """
+        Check if the given assumption literal was used to prove the unsatisfiability
         of the formula under the assumptions used for the last SAT search. Note that for
         literals `lit` which are not assumption literals, the behavior of is not
         specified.
@@ -60,7 +63,8 @@ class Solver(ClauseDatabase):
         assumptions: Optional[Iterable[Lit]] = None,
         time_limit: Optional[timedelta] = None,
     ) -> Iterator[Result]:
-        """Solve the current `ClauseDatabase`.
+        """
+        Solve the current `ClauseDatabase`.
 
         :param assumptions: an optional iterable of assumptions literals which must hold
         for this solve call
