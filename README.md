@@ -34,7 +34,7 @@
 
 ## Installation and usage
 
-Although the main pindakaas library is written in rust, it is also available from Python. (A C(++) interface is also under consideration).
+Although the main Pindakaas library is written in rust, it is also available from Python.
 
 ### Rust
 
@@ -42,19 +42,17 @@ Although the main pindakaas library is written in rust, it is also available fro
 cargo add pindakaas
 ```
 
+For more information about the Rust library, please visit the [official documentation](https://docs.rs/pindakaas).
+
 ### Python
 
 ```bash
 pip install pindakaas
 ```
 
+For more information about the Python library, please visit the [official documentation](https://pindakaas.readthedocs.io/en/latest/).
+
 ## Acknowledgements
-
-The encoding algorithms implemented in this library are based partially on the following academic research.
-
-- **TODO**
-
-This library is also heavily inspired by PBLib, an earlier library containing different encoding algorithms for pseudo-Boolean constraints. More information about PBLib can be found in its [accompanying publication](https://doi.org/10.1007/978-3-319-24318-4_2), and the source code for the library can be found on [GitHub](https://github.com/RealPete/PBLib)
 
 This research was partially funded by the Australian Government through the Australian Research Council Industrial Transformation Training Centre in Optimisation Technologies, Integrated Methodologies, and Applications ([OPTIMA](https://optima.org.au)), Project ID IC200100009
 

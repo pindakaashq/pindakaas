@@ -11,6 +11,11 @@ categories.workspace = true
 keywords.workspace = true
 repository.workspace = true
 
+readme = "../../README.md"
+
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 itertools = "0.14"
 rustc-hash = "2.0"
