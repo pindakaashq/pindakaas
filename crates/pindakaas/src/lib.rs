@@ -6,6 +6,8 @@
 //! ≥. Two forms of PB constraints are seen as special forms of PB
 //! constraints: ensuring a set of booleans is *At Most One (AMO)* or *At Most K
 //! (AMK)*. Specialised encodings are used when these cases are detected.
+//!
+//! *Acknowledgements.* This research was partially funded by the Australian Government through the Australian Research Council Industrial Transformation Training Centre in Optimisation Technologies, Integrated Methodologies, and Applications (OPTIMA), Project ID IC200100009.
 
 pub mod bool_linear;
 pub mod cardinality;
