@@ -1,6 +1,5 @@
 //! This module contains pindakaas interface for (at runtime) dynamically loaded
 //! libraries implementing the IPASIR interface.
-//!
 use std::{
 	ffi::{c_char, c_int, c_void, CStr},
 	fmt,
@@ -165,8 +164,8 @@ impl IpasirLibrary {
 		unsafe { self.lib.get(b"ipasir_val") }
 	}
 
-	/// Create a new solver instance that uses the IPASIR methods included in the
-	/// [`IpasirLibrary`].
+	/// Create a new solver instance that uses the IPASIR methods included in
+	/// the [`IpasirLibrary`].
 	pub fn new_solver(&self) -> IpasirSolver<'_> {
 		IpasirSolver {
 			slv: (self.ipasir_init_sym().unwrap())(),

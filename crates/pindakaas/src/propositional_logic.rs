@@ -1,4 +1,5 @@
-//! This module contains representations and encoding algorithms for propositional logic formulas.
+//! This module contains representations and encoding algorithms for
+//! propositional logic formulas.
 //!
 //! These formulas can be represented using the [`Formula`] type, which
 //! implementation is specialized for both [`Lit`] and [`BoolVal`]. The
@@ -57,10 +58,10 @@ impl<Base> Formula<Base> {
 	/// Simplify the formula using a given resolver function.
 	///
 	/// The resolver function is called for each [`Self::Atom`] in the formula.
-	/// The resolver function should return `Err(true)` if the atom is known to be
-	/// true and `Err(false)` if the atom is known to be false. Otherwise, the
-	/// resolver function should return the value of the atom for the simplified
-	/// formula.
+	/// The resolver function should return `Err(true)` if the atom is known to
+	/// be true and `Err(false)` if the atom is known to be false. Otherwise,
+	/// the resolver function should return the value of the atom for the
+	/// simplified formula.
 	pub fn simplify_with<Res>(
 		self,
 		resolver: &mut impl FnMut(Base) -> Result<Res, bool>,

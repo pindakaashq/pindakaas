@@ -5,7 +5,7 @@
 //! [`CardinalityOne`] type. In this module specialized [`Encoder`]
 //! implementations are available, such as [`BitwiseEncoder`],
 //! [`LadderEncoder`], and [`PairwiseEncoder`]. However, other [`Encoder`]
-//! implementations for [`crate::cardinality::Cardinality`] and
+//! implementations for [`Cardinality`](crate::cardinality::Cardinality) and
 //! [`NormalizedBoolLinear`] can also be used.
 
 use itertools::Itertools;
@@ -25,8 +25,8 @@ pub struct BitwiseEncoder {}
 
 /// Linear constraint that enforces that ∑ litᵢ ≷ 1.
 ///
-/// Compared to [`crate::cardinality::Cardinality`], the right hand side
-/// constant is always 1.
+/// Compared to [`Cardinality`](crate::cardinality::Cardinality), the right hand
+/// side constant is always 1.
 ///
 /// All literals in the constraint are guaranteed to be from distinct Boolean
 /// variables.

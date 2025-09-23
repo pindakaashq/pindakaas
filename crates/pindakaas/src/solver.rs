@@ -38,11 +38,12 @@ pub trait Assumptions: Solver {
 
 /// Trait implemented by the object given to the callback on detecting failure
 pub trait FailedAssumptions {
-	/// Check if the given assumption literal was used to prove the unsatisfiability
-	/// of the formula under the assumptions used for the last SAT search.
+	/// Check if the given assumption literal was used to prove the
+	/// unsatisfiability of the formula under the assumptions used for the last
+	/// SAT search.
 	///
-	/// Note that for literals 'lit' which are not assumption literals, the behavior
-	/// of is not specified.
+	/// Note that for literals 'lit' which are not assumption literals, the
+	/// behavior of is not specified.
 	fn fail(&self, lit: Lit) -> bool;
 }
 
@@ -70,8 +71,8 @@ pub enum SolveResult<Sol: Valuation, Fail = ()> {
 	Satisfied(Sol),
 	/// The solver proved no satisfying assignment exists.
 	Unsatisfiable(Fail),
-	/// The solver was unable to determine whether a satisfying assignment exists
-	/// given the computational limits.
+	/// The solver was unable to determine whether a satisfying assignment
+	/// exists given the computational limits.
 	Unknown,
 }
 
@@ -99,12 +100,12 @@ pub enum TermSignal {
 /// Trait implemented by solvers that will make a call to the given callback
 /// function to determine whether to continue or terminate the search.
 pub trait TerminateCallback: Solver {
-	/// Set a callback function used to indicate a termination requirement to the
-	/// solver.
+	/// Set a callback function used to indicate a termination requirement to
+	/// the solver.
 	///
-	/// The solver will periodically call this function and check its return value
-	/// during the search. Subsequent calls to this method override the previously
-	/// set callback function.
+	/// The solver will periodically call this function and check its return
+	/// value during the search. Subsequent calls to this method override the
+	/// previously set callback function.
 	///
 	/// # Warning
 	///

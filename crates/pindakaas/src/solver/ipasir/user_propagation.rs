@@ -42,15 +42,15 @@ pub(crate) trait IpasirFixedAssignmentMethods {
 pub(crate) struct IpasirPropagator {
 	/// An external propagator used by the solver.
 	///
-	/// This attribute ensures that the [`Propagator`] is correctly released (and
-	/// dropped) when the [`IpasirSolver`] is dropped. It is given by the solver
-	/// using a pointer.
+	/// This attribute ensures that the [`Propagator`] is correctly released
+	/// (and dropped) when the [`IpasirSolver`] is dropped. It is given by the
+	/// solver using a pointer.
 	external_propagator: Option<Rc<RefCell<dyn Propagator>>>,
 	/// An persistent assignment listener being notified by the solver.
 	///
 	/// This attribute ensures that the [`PersistentAssignmentListener`] is
-	/// correctly released (and dropped) when the [`IpasirSolver`] is dropped. It
-	/// is given by the solver using a pointer.
+	/// correctly released (and dropped) when the [`IpasirSolver`] is dropped.
+	/// It is given by the solver using a pointer.
 	persistent_assignment_listener: Option<Rc<RefCell<dyn PersistentAssignmentListener>>>,
 	/// Reason clause queue
 	reason_queue: VecDeque<Lit>,
@@ -70,8 +70,8 @@ trait IpasirPropagatorStorage {
 	fn has_propagator(&self) -> bool;
 
 	/// Stores a new persistent listener in the storage, returning the
-	/// [`CFixedAssignmentListener`] that can be passed to the solver's C methods
-	/// to register the listener.
+	/// [`CFixedAssignmentListener`] that can be passed to the solver's C
+	/// methods to register the listener.
 	fn set_persistent_listener<L: PersistentAssignmentListener + 'static>(
 		&mut self,
 		listener: Rc<RefCell<L>>,
@@ -89,7 +89,8 @@ trait IpasirPropagatorStorage {
 	/// (if any).
 	fn reset_persistent_listener(&mut self);
 
-	/// Resets the propagator storage, dropping the connected propagator (if any).
+	/// Resets the propagator storage, dropping the connected propagator (if
+	/// any).
 	fn reset_propagator(&mut self);
 }
 
@@ -149,8 +150,8 @@ where
 		// Connect the wrapped propagator to the solver
 		//
 		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_CONNECT_EXTERNAL_PROPAGATOR function is expected to abide by the IPASIR-UP
-		// interface specification.
+		// IPASIR_CONNECT_EXTERNAL_PROPAGATOR function is expected to abide by the
+		// IPASIR-UP interface specification.
 		unsafe {
 			Self::IPASIR_CONNECT_EXTERNAL_PROPAGATOR(self.ipasir_store().solver_ptr(), c_prop);
 		}
@@ -247,8 +248,8 @@ impl IpasirPropagator {
 	/// type `P`.
 	///
 	/// This method is unsafe because it requires that the propagator is of type
-	/// `P` and the cell is not borrowed. If the propagator is not of type `P` or
-	/// if the cell is already borrowed, this method will panic.
+	/// `P` and the cell is not borrowed. If the propagator is not of type `P`
+	/// or if the cell is already borrowed, this method will panic.
 	unsafe fn borrow_propagator_mut<P>(&self) -> RefMut<'_, P> {
 		let cell: *const _ = Rc::as_ptr(self.external_propagator.as_ref().unwrap());
 		let ptr = cell as *const RefCell<P>;

@@ -13,7 +13,8 @@ use crate::{
 	AsDynClauseDatabase, Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Valuation,
 };
 
-// local marker trait, to ensure the previous definition only applies within this crate
+// local marker trait, to ensure the previous definition only applies within
+// this crate
 pub(crate) trait CardMarker {}
 
 #[derive(Clone, Debug)]
@@ -48,8 +49,8 @@ impl Cardinality {
 		self.lits.iter().copied()
 	}
 
-	/// Get the right-hand side constant against which the cardinality constraint
-	/// compares its left-hand side literals.
+	/// Get the right-hand side constant against which the cardinality
+	/// constraint compares its left-hand side literals.
 	pub fn rhs(&self) -> Coeff {
 		self.k.into()
 	}
@@ -84,7 +85,8 @@ impl From<CardinalityOne> for Cardinality {
 	}
 }
 
-// Automatically implement AtMostOne encoding when you can encode Cardinality constraints
+// Automatically implement AtMostOne encoding when you can encode Cardinality
+// constraints
 impl<Db, Enc> Encoder<Db, CardinalityOne> for Enc
 where
 	Db: ClauseDatabase + ?Sized,

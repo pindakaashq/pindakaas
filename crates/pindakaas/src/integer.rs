@@ -155,7 +155,8 @@ where
 	Ok(())
 }
 
-/// Constrains the slice `z`, to be the result of adding `x` to `y`, all encoded using the log encoding.
+/// Constrains the slice `z`, to be the result of adding `x` to `y`, all encoded
+/// using the log encoding.
 ///
 /// TODO: Should this use the IntEncoding::Log input??
 pub(crate) fn log_enc_add<Db>(
@@ -692,7 +693,8 @@ impl IntVarEnc {
 			&IntVarEnc::Const(c) => (c..=c).into(),
 		}
 	}
-	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that ∑ xs ≦ ∑ ys
+	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that
+	/// ∑ xs ≦ ∑ ys
 	pub(crate) fn from_part<Db>(db: &mut Db, xs: &Part, ub: PosCoeff, lbl: String) -> Vec<Self>
 	where
 		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
@@ -704,7 +706,8 @@ impl IntVarEnc {
 					.copied()
 					.map(|(lit, coef)| (*coef, lit))
 					.collect();
-				// for a set of terms with the same coefficients, replace by a single term with fresh variable o (implied by each literal)
+				// for a set of terms with the same coefficients, replace by a single term with
+				// fresh variable o (implied by each literal)
 				let mut h: FxHashMap<Coeff, Vec<Lit>> =
 					FxHashMap::with_capacity_and_hasher(terms.len(), FxBuildHasher);
 				for (coef, lit) in terms {
@@ -780,22 +783,24 @@ impl IntVarEnc {
 						})
 						.collect()
 				}
-			} // TODO Not so easy to transfer a binary encoded int var
-			  // Part::Dom(terms, l, u) => {
-			  // let coef = (terms[0].1);
-			  // let false_ if (coef > 1).then(|| let false_ = Some(new_var!(db)); emit_clause!(&[-false_]); false_ });
-			  // let terms = (1..coef).map(|_| false_.clone()).chain(terms.to_vec());
+			} /* TODO Not so easy to transfer a binary encoded int var
+			   * Part::Dom(terms, l, u) => {
+			   * let coef = (terms[0].1);
+			   * let false_ if (coef > 1).then(|| let false_ = Some(new_var!(db));
+			   * emit_clause!(&[-false_]); false_ }); let terms = (1..coef).map(|_|
+			   * false_.clone()).chain(terms.to_vec()); */
 
-			  // IntVarEnc::Bin(IntVarBin::from_terms(
-			  // 	terms.to_vec(),
-			  // 	l.clone(),
-			  // 	u.clone(),
-			  // 	String::from("x"),
-			  // ))},
+			  /* IntVarEnc::Bin(IntVarBin::from_terms(
+			   * 	terms.to_vec(),
+			   * 	l.clone(),
+			   * 	u.clone(),
+			   * 	String::from("x"),
+			   * ))}, */
 		}
 	}
 
-	/// Returns a clause constraining `x>=v`, which is None if true and empty if false
+	/// Returns a clause constraining `x>=v`, which is None if true and empty if
+	/// false
 	pub(crate) fn geq(&self, v: Coeff) -> Formula<BoolVal> {
 		match self {
 			IntVarEnc::Ord(o) => o.geq(v),
@@ -820,7 +825,8 @@ impl IntVarEnc {
 		}
 	}
 
-	/// Returns cnf constraining `x<=v`, which is empty if true and contains empty if false
+	/// Returns cnf constraining `x<=v`, which is empty if true and contains
+	/// empty if false
 	pub(crate) fn leq(&self, v: Coeff) -> Formula<BoolVal> {
 		match self {
 			IntVarEnc::Ord(o) => o.leq(v),
@@ -1528,8 +1534,8 @@ where
 				}
 			}
 			(IntVarEnc::Bin(_), IntVarEnc::Bin(_), _) => {
-				// y/y is bin but z is not bin ~ redundantly encode y + z_bin in 0..z # z and z_bin <= z
-				// TODO better coupling ;
+				// y/y is bin but z is not bin ~ redundantly encode y + z_bin in 0..z # z and
+				// z_bin <= z TODO better coupling ;
 				let z_bin = x.add(db, self, y, None, Some(z.ub()))?;
 				z_bin.consistent(db)?;
 				self.encode(
@@ -1539,7 +1545,8 @@ where
 			}
 			(IntVarEnc::Bin(x_bin), IntVarEnc::Ord(y_ord), _)
 			| (IntVarEnc::Ord(y_ord), IntVarEnc::Bin(x_bin), _) => {
-				// y is order and z is bin or const ~ redundant y_bin = y_ord and x_bin + y_bin # z
+				// y is order and z is bin or const ~ redundant y_bin = y_ord and x_bin + y_bin
+				// # z
 				let y_bin = IntVarBin::from_bounds(
 					db,
 					y_ord.lb(),

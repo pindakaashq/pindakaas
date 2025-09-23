@@ -66,7 +66,8 @@ pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
 	(0..bits).map(|b| *k & (1 << b) != 0).collect()
 }
 
-/// Given coefficients are powers of two multiplied by some value (1*c, 2*c, 4*c, 8*c, ..)
+/// Given coefficients are powers of two multiplied by some value (1*c, 2*c,
+/// 4*c, 8*c, ..)
 pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool {
 	let mut it = coefs.into_iter().enumerate();
 	if let Some((_, mult)) = it.next() {
@@ -192,8 +193,9 @@ pub(crate) mod tests {
 		expect.assert_eq(&sol_str);
 	}
 
-	/// Helper functions to ensure that the possible solutions of a formula, with
-	/// relation to a set of variables, match the expected solutions string.
+	/// Helper functions to ensure that the possible solutions of a formula,
+	/// with relation to a set of variables, match the expected solutions
+	/// string.
 	pub(crate) fn assert_solutions<V, I>(formula: &Cnf, vars: I, expect: &ExpectFile)
 	where
 		V: Into<Lit>,

@@ -9,8 +9,8 @@ use crate::{solver::Solver, Lit, Valuation, Var};
 /// Whether a clause could possibly be removed from the clause database.
 pub enum ClausePersistence {
 	/// The clause is to be considered forgettable. Its removal would not affect
-	/// the solver's correctness (in combination with the propagator), and it can
-	/// be re-derived if needed.
+	/// the solver's correctness (in combination with the propagator), and it
+	/// can be re-derived if needed.
 	Forgettable,
 	/// The clause is to be considered irreduntant. It contains information that
 	/// can not (easily) be re-derived.
@@ -29,7 +29,7 @@ pub trait ExternalPropagation: Solver {
 	/// and backtrack based on external constraints.
 	///
 	/// The connected [`Propagator`] is notified of all changes to which it has
-	/// subscribed, using the [`add_observed_var`] method.
+	/// subscribed, using the [`Self::add_observed_var`] method.
 	///
 	/// # Warning
 	///
@@ -102,9 +102,9 @@ pub trait PersistentAssignmentNotifier: Solver {
 	///
 	/// # Warning
 	///
-	/// Only one [`PersistentAssignmentListener`] can be connected, any previously
-	/// connected [`PersistentAssignmentListener`]s will be disconnected (see
-	/// [`Self::disconnect_persistent_assignment_notifier`]).
+	/// Only one [`PersistentAssignmentListener`] can be connected, any
+	/// previously connected [`PersistentAssignmentListener`]s will be
+	/// disconnected (see [`Self::disconnect_persistent_assignment_listener`]).
 	fn connect_persistent_assignment_listener<L: PersistentAssignmentListener + 'static>(
 		&mut self,
 		listener: Rc<RefCell<L>>,
@@ -148,17 +148,17 @@ pub trait Propagator {
 	/// Method called when the solver asks for the next search decision.
 	///
 	/// The propagator can either decide to assign a given literal, force the
-	/// solver to backtrack to a given decision level, or leave the decision to the
-	/// solver.
+	/// solver to backtrack to a given decision level, or leave the decision to
+	/// the solver.
 	fn decide(&mut self, slv: &mut dyn SolvingActions) -> SearchDecision {
 		let _ = slv;
 		SearchDecision::Free
 	}
 
-	/// Method to ask the propagator if there is an propagation to make under the
-	/// current assignment. It returns queue of literals to be propagated in order,
-	/// if an empty queue is returned it indicates that there is no propagation
-	/// under the current assignment.
+	/// Method to ask the propagator if there is an propagation to make under
+	/// the current assignment. It returns queue of literals to be propagated
+	/// in order, if an empty queue is returned it indicates that there is no
+	/// propagation under the current assignment.
 	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Option<Lit> {
 		let _ = slv;
 		None
@@ -189,15 +189,17 @@ pub trait PropagatorDefinition: Propagator {
 	/// Whether the [`Propagator`] implementation only checks complete
 	/// assignments.
 	///
-	/// If the set to `true`, then only [`Propagator::check_solution`] is called.
+	/// If the set to `true`, then only [`Propagator::check_solution`] is
+	/// called.
 	const CHECK_ONLY: bool = false;
 
 	/// The persistence level of the [`Propagator`] implementation's produced
 	/// reasons using [`Propagator::add_reason_clause`].
 	///
-	/// If set to [`ClausePersistence::Forgettable`], then the solver might remove
-	/// the reason clauses to save memory. The [`Propagator`] implementation must
-	/// be able to re-derive the reason clause at a later point.
+	/// If set to [`ClausePersistence::Forgettable`], then the solver might
+	/// remove the reason clauses to save memory. The [`Propagator`]
+	/// implementation must be able to re-derive the reason clause at a later
+	/// point.
 	const REASON_PERSISTENCE: ClausePersistence = ClausePersistence::Irreduntant;
 }
 

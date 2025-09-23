@@ -367,8 +367,8 @@ impl SortedEncoder {
 		self
 	}
 
-	/// Set whether the encoder should use the direct or recursive strategy, or a
-	/// mix of both.
+	/// Set whether the encoder should use the direct or recursive strategy, or
+	/// a mix of both.
 	pub fn with_strategy(&mut self, strategy: SortedStrategy) -> &mut Self {
 		self.strategy = strategy;
 		self

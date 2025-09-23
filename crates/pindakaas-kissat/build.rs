@@ -1,6 +1,6 @@
 //! This module contains the build script for the `pindakaas-kissat` crate. It
-//! is responsible for compiling the Kissat SAT solver using a C compiler and linking
-//! it to the crate.
+//! is responsible for compiling the Kissat SAT solver using a C compiler and
+//! linking it to the crate.
 
 use std::{path::Path, process::Command};
 

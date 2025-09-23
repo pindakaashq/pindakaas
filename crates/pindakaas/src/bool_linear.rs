@@ -78,8 +78,8 @@ pub struct BoolLinExp {
 	terms: VecDeque<(Lit, Coeff)>,
 	/// Number of unconstrained terms (located at the front of `terms`)
 	num_free: usize,
-	/// Constraints placed on different terms, and the number of terms involved in
-	/// the constraint
+	/// Constraints placed on different terms, and the number of terms involved
+	/// in the constraint
 	constraints: Vec<(Constraint, usize)>,
 	/// Additive constant
 	add: Coeff,
@@ -95,9 +95,9 @@ pub struct BoolLinExp {
 /// ([`BoolLinAggregator::aggregate`]), which will simplify a constraint to its
 /// most simplified form.
 pub enum BoolLinVariant {
-	/// Most general form of Boolean linear expression: a sum of Boolean literals
-	/// multiplied by positive coefficients that must be (smaller-or-)equal to a
-	/// positive constant.
+	/// Most general form of Boolean linear expression: a sum of Boolean
+	/// literals multiplied by positive coefficients that must be
+	/// (smaller-or-)equal to a positive constant.
 	Linear(NormalizedBoolLinear),
 	/// Cardinality constraint (also known as a counting constraint): a sum of
 	/// Boolean literals that must be (smaller-or-)equal to a positive constant.
@@ -132,14 +132,14 @@ pub struct BoolLinear {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// A comparator type used in linear and cardinality constraints.
 pub enum Comparator {
-	/// Force the left hand side of the constraint to be less than or equal to the
-	/// right hand side, i.e. `exp ≤ k`.
+	/// Force the left hand side of the constraint to be less than or equal to
+	/// the right hand side, i.e. `exp ≤ k`.
 	LessEq,
 	/// Force the left hand side of the constraint to be equal to the right hand
 	/// side, i.e. `exp = k`.
 	Equal,
-	/// Force the left hand side of the constraint to be greater than or equal to
-	/// the right hand side, i.e. `exp ≥ k`.
+	/// Force the left hand side of the constraint to be greater than or equal
+	/// to the right hand side, i.e. `exp ≥ k`.
 	GreaterEq,
 }
 
@@ -156,8 +156,8 @@ pub(crate) enum Constraint {
 /// A comparator that has been limited to a either `Equal` or `LessEq`.
 ///
 /// This type is used to ensure that the comparator of [`NormalizedBoolLinear`],
-/// [`Cardinality`], and [`CardinalityOne`] constraints are limited to a specific
-/// set of values.
+/// [`Cardinality`], and [`CardinalityOne`] constraints are limited to a
+/// specific set of values.
 pub(crate) enum LimitComp {
 	Equal,
 	LessEq,
@@ -408,8 +408,9 @@ where
 		}
 
 		// Compute the sums and carries for each bit layer
-		// if comp == Equal, then this is directly enforced (to avoid creating additional literals)
-		// otherwise, sum literals are left in the buckets for further processing
+		// if comp == Equal, then this is directly enforced (to avoid creating
+		// additional literals) otherwise, sum literals are left in the buckets for
+		// further processing
 		let mut sum = vec![None; bits];
 		for b in 0..bits {
 			match bucket[b].len() {
@@ -442,7 +443,8 @@ where
 							// No need to create a new literal, force the sum to equal the result
 							Self::sum_circuit(db, lits.as_slice(), BoolVal::Const(k[b]))?;
 						} else if lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
-							// Literal is not used for the less-than constraint unless a zero has been seen first
+							// Literal is not used for the less-than constraint unless a zero has
+							// been seen first
 							let sum = new_named_lit!(
 								db,
 								if last {
@@ -552,8 +554,9 @@ impl BddEncoder {
 
 		// TODO could we check whether a domain value of x always leads to gaps?
 		let is_gap = views.iter().all(|(_, (_, v))| v == &BddNode::Gap);
-		// TODO without checking actual Val identity, could we miss when the next layer has two
-		// adjacent nodes that are both views on the same node at the layer below?
+		// TODO without checking actual Val identity, could we miss when the next layer
+		// has two adjacent nodes that are both views on the same node at the layer
+		// below?
 		let view = (views.iter().map(|(_, (iv, _))| iv).all_equal())
 			.then(|| views.first().unwrap().1 .0.end - 1);
 
@@ -732,9 +735,9 @@ impl BoolLinAggregator {
 		any(feature = "tracing", test),
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	/// Perform (internal) aggregation of [`BoolLinear`] constraints, normalizing
-	/// them and simplify them into specialized forms for which different encoding
-	/// algorithms exist.
+	/// Perform (internal) aggregation of [`BoolLinear`] constraints,
+	/// normalizing them and simplify them into specialized forms for which
+	/// different encoding algorithms exist.
 	pub fn aggregate<Db>(&self, db: &mut Db, lin: &BoolLinear) -> Result<BoolLinVariant>
 	where
 		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
@@ -762,7 +765,8 @@ impl BoolLinAggregator {
 
 		let mut partition: Vec<(Constraint, Vec<(Lit, Coeff)>)> =
 			Vec::with_capacity(lin.exp.constraints.len());
-		// Adjust side constraints when literals are combined (and currently transform to partition structure)
+		// Adjust side constraints when literals are combined (and currently transform
+		// to partition structure)
 		let mut iter = lin.exp.terms.iter().skip(lin.exp.num_free);
 		for con in &lin.exp.constraints {
 			let mut terms = Vec::with_capacity(con.1);
@@ -775,7 +779,8 @@ impl BoolLinAggregator {
 			if !terms.is_empty() {
 				match con.0 {
 					Constraint::Domain { lb, ub } => {
-						// Domain constraint can only be enforced when PB is coef*(x1 + 2x2 + 4x3 + ...), where l <= x1 + 2*x2 + 4*x3 + ... <= u
+						// Domain constraint can only be enforced when PB is coef*(x1 + 2x2 + 4x3 +
+						// ...), where l <= x1 + 2*x2 + 4*x3 + ... <= u
 						if terms.len() == con.1 && is_powers_of_two(terms.iter().map(|(_, c)| *c)) {
 							// Adjust the bounds to account for coef
 							let (lb, ub) = if lin.cmp == Comparator::GreaterEq {
@@ -1011,7 +1016,8 @@ impl BoolLinAggregator {
 							}
 						})
 						.collect_vec();
-					// the one or more of the most significant bits have been removed, the upper bound could have dropped to a power of 2 (but not beyond)
+					// the one or more of the most significant bits have been removed, the upper
+					// bound could have dropped to a power of 2 (but not beyond)
 					let u = PosCoeff::new(min(*u, terms.iter().map(|&(_, coef)| *coef).sum()));
 					Part::Dom(terms, l, u)
 				}
@@ -1039,7 +1045,8 @@ impl BoolLinAggregator {
 					return Ok(BoolLinVariant::Trivial);
 				}
 
-				// If we have only 2 (unassigned) lits, which together (but not individually) exceed k, then -x1\/-x2
+				// If we have only 2 (unassigned) lits, which together (but not individually)
+				// exceed k, then -x1\/-x2
 				if partition.iter().flat_map(|part| part.iter()).count() == 2 {
 					db.add_clause(
 						partition
@@ -1196,7 +1203,9 @@ impl BoolLinAggregator {
 			k,
 		}))
 	}
-	/// For non-zero `n`, detect groups of minimum size `n` with free literals and same coefficients, sort them (using provided SortedEncoder) and add them as a single implication chain group
+	/// For non-zero `n`, detect groups of minimum size `n` with free literals
+	/// and same coefficients, sort them (using provided SortedEncoder) and add
+	/// them as a single implication chain group
 	pub fn sort_same_coefficients(&mut self, sorted_encoder: SortedEncoder, n: usize) -> &mut Self {
 		self.sorted_encoder = sorted_encoder;
 		self.sort_same_coefficients = n;
@@ -1266,8 +1275,9 @@ impl BoolLinExp {
 		self
 	}
 
-	/// Create a linear expression from a slice of coefficients and literals, where
-	/// each literal is multiplied by the coefficient in the corresponding position.
+	/// Create a linear expression from a slice of coefficients and literals,
+	/// where each literal is multiplied by the coefficient in the
+	/// corresponding position.
 	///
 	/// Note that the number of coefficients and literals must be equal.
 	pub fn from_slices(coeffs: &[Coeff], lits: &[Lit]) -> Self {
@@ -1283,9 +1293,9 @@ impl BoolLinExp {
 		}
 	}
 
-	/// Create a linear expression from a slice of terms, where each term consist
-	/// of a literal and coefficient and the former will be multiplied by the
-	/// latter.
+	/// Create a linear expression from a slice of terms, where each term
+	/// consist of a literal and coefficient and the former will be multiplied
+	/// by the latter.
 	pub fn from_terms(terms: &[(Lit, Coeff)]) -> Self {
 		Self {
 			terms: terms.iter().cloned().collect(),
@@ -1697,7 +1707,8 @@ impl From<LimitComp> for Comparator {
 	}
 }
 
-// Automatically implement Cardinality encoding when you can encode Linear constraints
+// Automatically implement Cardinality encoding when you can encode Linear
+// constraints
 impl<Db, Enc> Encoder<Db, Cardinality> for Enc
 where
 	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
@@ -2119,7 +2130,8 @@ where
 			.sorted_by_key(|x| x.ub())
 			.collect_vec();
 
-		// The totalizer encoding constructs a binary tree starting from a layer of leaves
+		// The totalizer encoding constructs a binary tree starting from a layer of
+		// leaves
 		let mut model = self.build_totalizer(xs, &lin.cmp, *lin.k);
 		model.propagate(&self.add_propagation, vec![model.cons.len() - 1]);
 		model.encode(db, self.cutoff)

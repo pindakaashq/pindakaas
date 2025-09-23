@@ -18,7 +18,8 @@ create_exception!(
 	"Raised when the given constraint is found to be Unsatisfiable during encoding."
 );
 
-// Use Result i/o PyResult to use `?` to easily return Rust errors as Python exceptions
+// Use Result i/o PyResult to use `?` to easily return Rust errors as Python
+// exceptions
 type Result<R = (), E = ErrWrapper> = std::result::Result<R, E>;
 
 // Avoid orphan rule preventing impl PyErr on pindakaas::Unsatisfiable
@@ -122,35 +123,37 @@ mod pindakaas {
 	#[derive(Clone, Copy, Debug, PartialEq)]
 	/// Method used to encode a constraint.
 	///
-	/// Warning: Not all encoders can be used to encode each type of constraint. If an invalid encoder is selected, then an :class:`InvalidEncoder` exception will be raised.
+	/// Warning: Not all encoders can be used to encode each type of constraint.
+	/// If an invalid encoder is selected, then an :class:`InvalidEncoder`
+	/// exception will be raised.
 	enum Encoder {
 		// TODO These doc-strings do not show up, upstream issue: https://github.com/PyO3/pyo3/issues/5197
-		/// Use :class:`pindakaas::bool_linear::AdderEncoder`, which is able to encode
-		/// all Boolean linear constraints.
-		ADDER,
-		/// Use :class:`pindakaas::cardinality_one::BitwiseEncoder`, which is able to
-		/// encode all Boolean cardinality one constraints.
-		BITWISE,
-		/// Use :class:`pindakaas::bool_linear::BddEncoder`, which is able to encode
-		/// all Boolean linear constraints.
-		DECISION_DIAGRAM,
-		/// Use :class:`pindakaas::cardinality_one::LadderEncoder`, which is able to
-		/// encode all Boolean cardinality one constraints.
-		LADDER,
-		/// Use :class:`pindakaas::cardinality_one::PairwiseEncoder`, which is able to
-		/// encode all Boolean cardinality one constraints.
-		PAIRWISE,
-		/// Use :class:`pindakaas::bool_linear::SwcEncoder`, which is able to encode all
-		/// Boolean linear constraints.
-		SORTED_WEIGHT_COUNTER,
-		/// Use :class:`pindakaas::cardinality::SwcEncoder`, which is able to encode all
-		/// Boolean cardinality constraints.
-		SORTING_NETWORK,
-		/// Use :class:`pindakaas::bool_linear::TotalizerEncoder`, which is able to
+		/// Use :class:`pindakaas::bool_linear::AdderEncoder`, which is able to
 		/// encode all Boolean linear constraints.
+		ADDER,
+		/// Use :class:`pindakaas::cardinality_one::BitwiseEncoder`, which is
+		/// able to encode all Boolean cardinality one constraints.
+		BITWISE,
+		/// Use :class:`pindakaas::bool_linear::BddEncoder`, which is able to
+		/// encode all Boolean linear constraints.
+		DECISION_DIAGRAM,
+		/// Use :class:`pindakaas::cardinality_one::LadderEncoder`, which is
+		/// able to encode all Boolean cardinality one constraints.
+		LADDER,
+		/// Use :class:`pindakaas::cardinality_one::PairwiseEncoder`, which is
+		/// able to encode all Boolean cardinality one constraints.
+		PAIRWISE,
+		/// Use :class:`pindakaas::bool_linear::SwcEncoder`, which is able to
+		/// encode all Boolean linear constraints.
+		SORTED_WEIGHT_COUNTER,
+		/// Use :class:`pindakaas::cardinality::SwcEncoder`, which is able to
+		/// encode all Boolean cardinality constraints.
+		SORTING_NETWORK,
+		/// Use :class:`pindakaas::bool_linear::TotalizerEncoder`, which is able
+		/// to encode all Boolean linear constraints.
 		TOTALIZER,
-		/// Use :class:`pindakaas::propositional_logic::TseitinEncoder`, which is able to
-		/// encode propositional logic formulas.
+		/// Use :class:`pindakaas::propositional_logic::TseitinEncoder`, which
+		/// is able to encode propositional logic formulas.
 		TSEITIN,
 	}
 
@@ -183,8 +186,9 @@ mod pindakaas {
 	/// associated weights.
 	struct WCNFInner(Wcnf);
 
-	/// Same `encode_constraint`, but evaluates the conditions if not empty. This prevents
-	/// costly virtual method access if this were done inside `encode_constraint`
+	/// Same `encode_constraint`, but evaluates the conditions if not empty.
+	/// This prevents costly virtual method access if this were done inside
+	/// `encode_constraint`
 	fn encode_constraint_with_conditions<Db>(
 		db: &mut Db,
 		con: ConstraintArg,
@@ -658,8 +662,8 @@ mod pindakaas {
 		}
 
 		#[new]
-		/// Create a new variable range that includes all variables between `start`
-		/// and `end` (inclusive).
+		/// Create a new variable range that includes all variables between
+		/// `start` and `end` (inclusive).
 		fn new(start: Lit, end: Lit) -> PyResult<Self> {
 			if start.is_negated() || end.is_negated() {
 				return Err(PyValueError::new_err(

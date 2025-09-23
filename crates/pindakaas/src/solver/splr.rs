@@ -112,7 +112,8 @@ impl Solver for Splr {
 mod tests {
 	use traced_test::test;
 
-	// use crate::{linear::LimitComp, solver::SolveResult, CardinalityOne, Encoder, PairwiseEncoder};
+	// use crate::{linear::LimitComp, solver::SolveResult, CardinalityOne, Encoder,
+	// PairwiseEncoder};
 
 	#[test]
 	fn splr() {
@@ -134,7 +135,7 @@ mod tests {
 		// 	unreachable!()
 		// };
 		// assert!(
-		// 	(solution.value(!a) && solution.value(b)) || (solution.value(a) && solution.value(!b))
-		// );
+		// 	(solution.value(!a) && solution.value(b)) || (solution.value(a) &&
+		// solution.value(!b)) );
 	}
 }

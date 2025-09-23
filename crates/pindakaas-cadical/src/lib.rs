@@ -14,8 +14,8 @@ pub struct CExternalPropagator {
 	pub data: *mut c_void,
 	/// Whether the propagator only checks solutions.
 	pub is_lazy: bool,
-	/// Whether the reasons the propagator produces are safe to forget (i.e. they
-	/// will be reproduced by the propagator if required).
+	/// Whether the reasons the propagator produces are safe to forget (i.e.
+	/// they will be reproduced by the propagator if required).
 	pub are_reasons_forgettable: bool,
 	/// Callback to notify the propagator of assignments to observed literals.
 	pub notify_assignments:
@@ -33,10 +33,12 @@ pub struct CExternalPropagator {
 	/// Callback to allow the propagator to propagate literals.
 	pub propagate: unsafe extern "C" fn(data: *mut c_void) -> c_int,
 	/// Callback to allow the propagator to add a literal to the reason of a
-	/// literal that is propagated, allowing `0` to be returned to end the clause.
+	/// literal that is propagated, allowing `0` to be returned to end the
+	/// clause.
 	pub add_reason_clause_lit:
 		unsafe extern "C" fn(data: *mut c_void, propagated_lit: c_int) -> c_int,
-	/// Callback to check whether the propagator wants to add an additional clause.
+	/// Callback to check whether the propagator wants to add an additional
+	/// clause.
 	pub has_external_clause:
 		unsafe extern "C" fn(data: *mut c_void, is_forgettable: *mut bool) -> bool,
 	/// Callback to allow the propagator to add a literal to the current

@@ -117,8 +117,8 @@ pub trait ProofTracer {
 		let _ = (id, clause);
 	}
 
-	/// Notification that the proof begins with a set of reserved ids for original
-	/// clauses.
+	/// Notification that the proof begins with a set of reserved ids for
+	/// original clauses.
 	///
 	/// - `first_derived_id`: Clause ID of the first derived clause ID.
 	fn begin_proof(&mut self, first_derived_id: u64) {
@@ -146,8 +146,8 @@ pub trait ProofTracer {
 	fn reset_assumptions(&mut self) {}
 
 	/// This clause could be derived, which is the negation of a core of failing
-	/// assumptions/constraints. If antecedents are derived they will be included
-	/// here.
+	/// assumptions/constraints. If antecedents are derived they will be
+	/// included here.
 	fn add_assumption_clause(&mut self, id: u64, clause: &[Lit], antecedents: &[u64]) {
 		let _ = (id, clause, antecedents);
 	}
@@ -254,8 +254,8 @@ impl Cadical {
 	}
 
 	#[cfg(feature = "external-propagation")]
-	/// Check whether a given literal is marked as observed in the solver's
-	/// for the [`PropagatingSolver`] interface.
+	/// Check whether a given literal is marked as observed in the solver's for
+	/// the [`ExternalPropagation`] interface.
 	pub fn is_observed(&self, lit: Lit) -> bool {
 		// SAFETY: Pointer known to be non-null, lit is known to be non-zero and not
 		// MIN_INT as required by Cadical.
@@ -286,7 +286,8 @@ impl Cadical {
 		unsafe { ccadical_set_option(self.ipasir_store().solver_ptr(), name.as_ptr(), value) }
 	}
 
-	/// Make a shallow clone of the [`Cadical`] solver using an efficient internal method.
+	/// Make a shallow clone of the [`Cadical`] solver using an efficient
+	/// internal method.
 	///
 	/// The shallow copy includes the permanent clauses, but will not include
 	/// learned clauses, connected callbacks, or external propagator.

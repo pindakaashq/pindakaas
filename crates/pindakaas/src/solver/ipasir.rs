@@ -105,7 +105,8 @@ pub trait IpasirSolverMethods {
 
 /// Internal structure used to capture all necessary data for an IPASIR solver.
 ///
-/// Depending on the capabilities of the solver, the following generics can be used:
+/// Depending on the capabilities of the solver, the following generics can be
+/// used:
 /// - `LRN`: Set to 1 if the solver supports a callback for learned clauses and
 ///   implement [`IpasirLearnCallbackMethod`]. Set to 0 otherwise.
 /// - `TRM`: Set to 1 if the solver supports a callback to check whether to
@@ -137,14 +138,14 @@ pub(crate) struct IpasirStoreInner<const LRN: usize, const TRM: usize, const UP:
 	/// The callback used when a clause is learned.
 	///
 	/// This attribute ensures that the callback is correctly dropped when the
-	/// [`IpasirSolver`] is dropped, but is already known to the [`IpasirSolver`]
-	/// by pointer.
+	/// [`IpasirSolver`] is dropped, but is already known to the
+	/// [`IpasirSolver`] by pointer.
 	pub(crate) learn_cb: OptField<LRN, Option<IpasirLearnCb>>,
 	/// The callback used to check whether the solver should terminate.
 	///
 	/// This attribute ensures that the callback is correctly dropped when the
-	/// [`IpasirSolver`] is dropped, but is already known to the [`IpasirSolver`]
-	/// by pointer.
+	/// [`IpasirSolver`] is dropped, but is already known to the
+	/// [`IpasirSolver`] by pointer.
 	pub(crate) term_cb: OptField<TRM, Option<IpasirTerminationCb>>,
 	#[cfg(feature = "external-propagation")]
 	/// Data structures used for the IPASIR-UP external propagator interface.
