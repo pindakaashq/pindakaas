@@ -1,3 +1,13 @@
+//! This module contains representations and encoding algorithms for Boolean
+//! cardinality constraints counting to 1.
+//!
+//! These cardinality constraints can be represented using the
+//! [`CardinalityOne`] type. In this module specialized [`Encoder`]
+//! implementations are available, such as [`BitwiseEncoder`],
+//! [`LadderEncoder`], and [`PairwiseEncoder`]. However, other [`Encoder`]
+//! implementations for [`crate::cardinality::Cardinality`] and
+//! [`NormalizedBoolLinear`] can also be used.
+
 use itertools::Itertools;
 
 use crate::{
@@ -12,6 +22,14 @@ use crate::{
 pub struct BitwiseEncoder {}
 
 #[derive(Debug, Clone)]
+
+/// Linear constraint that enforces that ∑ litᵢ ≷ 1.
+///
+/// Compared to [`crate::cardinality::Cardinality`], the right hand side
+/// constant is always 1.
+///
+/// All literals in the constraint are guaranteed to be from distinct Boolean
+/// variables.
 pub struct CardinalityOne {
 	pub(crate) lits: Vec<Lit>,
 	pub(crate) cmp: LimitComp,
@@ -67,10 +85,12 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for BitwiseEncoder
 }
 
 impl CardinalityOne {
+	/// Get the comparator of the cardinality constraint.
 	pub fn comparator(&self) -> Comparator {
 		self.cmp.clone().into()
 	}
 
+	/// Iterate over the literals of the cardinality constraint.
 	pub fn iter_lits(&self) -> impl Iterator<Item = Lit> + '_ {
 		self.lits.iter().copied()
 	}

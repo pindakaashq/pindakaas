@@ -1,3 +1,6 @@
+//! This module contains the pindakaas interface to the
+//! [Intel SAT](https://github.com/alexander-nadel/intel_sat_solver) solver.
+
 use std::ffi::{c_int, c_void};
 
 use pindakaas_intel_sat::{
@@ -14,6 +17,8 @@ use crate::{
 };
 
 #[derive(Debug, Default)]
+/// Representation of an instance of the [Intel
+/// SAT](https://github.com/alexander-nadel/intel_sat_solver) solver.
 pub struct IntelSat {
 	store: IpasirStore<IntelSat, 1, 1, 0>,
 }

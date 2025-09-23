@@ -51,7 +51,9 @@ use crate::{
 	reason = "bool is 1 byte, but Lit will always require more"
 )]
 pub enum BoolVal {
+	/// A constant Boolean value.
 	Const(bool),
+	/// A literal for a Boolean decision variable.
 	Lit(Lit),
 }
 
@@ -69,11 +71,11 @@ pub trait Checker {
 }
 
 /// The `ClauseDatabase` trait is the common trait implemented by types that are
-/// used to manage the encoding of PB constraints and contain their output. This
-/// trait can be used for all encoding methods in this library.
+/// used to manage the CNF encoding of constraints and contain their output.
+/// This trait can be used for all encoding methods in this library.
 ///
-/// To satisfy the trait, the type must implement a [`Self::add_clause`] method
-/// and a [`Self::new_var`] method.
+/// To satisfy the trait, the type must implement a
+/// [`Self::add_clause_from_slice`] method and a [`Self::new_var_range`] method.
 pub trait ClauseDatabase {
 	/// Add a clause to the `ClauseDatabase`. The database is allowed to return
 	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
@@ -85,6 +87,9 @@ pub trait ClauseDatabase {
 	fn new_var_range(&mut self, len: usize) -> VarRange;
 }
 
+/// A trait automatically implemented for types that implement
+/// [`ClauseDatabase`] providing a variety of utility methods that make it
+/// easier to write common clause encoding patterns.
 pub trait ClauseDatabaseTools: ClauseDatabase {
 	/// Add a clause, given as any to the `ClauseDatabase`. The database is allowed to return
 	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
@@ -117,6 +122,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		}
 	}
 
+	/// Encode a constraint using the provided encoder.
 	fn encode<C, E>(&mut self, constraint: &C, encoder: &E) -> Result
 	where
 		C: ?Sized,
@@ -188,6 +194,11 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		range.collect_tuple().unwrap()
 	}
 
+	/// Create a [`ClauseDatabase`] wrapper that adds the given conditions to each
+	/// clause that it adds to the wrapped database.
+	///
+	/// Note that the wrapped database type itself implements the
+	/// [`ClauseDatabase`] trait.
 	fn with_conditions(&mut self, conditions: Vec<Lit>) -> impl ClauseDatabase + '_
 	where
 		Self: AsDynClauseDatabase,
@@ -235,7 +246,8 @@ pub struct Cnf {
 }
 
 #[derive(Debug, Clone)]
-pub struct CnfIterator<'a> {
+/// An iterator over the clauses in a CNF formula.
+struct CnfIterator<'a> {
 	lits: &'a Vec<Lit>,
 	size: slice::Iter<'a, usize>,
 	index: usize,
@@ -252,27 +264,47 @@ enum Dimacs {
 
 /// Encoder is the central trait implemented for all the encoding algorithms
 pub trait Encoder<Db: ClauseDatabase + ?Sized, Constraint: ?Sized> {
+	/// Encode the constraint into the given clausal database.
 	fn encode(&self, db: &mut Db, con: &Constraint) -> Result;
 }
 
-/// IntEncoding is a enumerated type use to represent Boolean encodings of
-/// integer variables within this library
+/// IntEncoding is a enumerated type use to represent an Boolean encoding of a
+/// integer variable within this library
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IntEncoding<'a> {
 	/// The Direct variant represents a integer variable encoded using domain
 	/// or direct encoding of an integer variable. Each given Boolean literal
 	/// represents whether the integer takes the associated value (i.e., X =
 	/// (first+i) ↔ vals\[i\]).
-	Direct { first: Coeff, vals: &'a [Lit] },
+	Direct {
+		/// The offset of the value of the encoded integer variable, i.e. the value
+		/// if the first literal is `true`.
+		first: Coeff,
+		/// The list of literals representing the each value of the integer
+		/// variable.
+		vals: &'a [Lit],
+	},
 	/// The Order variant represents a integer variable using an order
 	/// encoding. Each given Boolean literal represents whether the integer
 	/// is bigger than the associated value(i.e., X > (first+i) ↔ vals\[i\]).
-	Order { first: Coeff, vals: &'a [Lit] },
+	Order {
+		/// The offset of the value of the encoded integer variable, i.e. the value
+		/// if no literal is `true`.
+		first: Coeff,
+		/// The list of literals representing the each value of the integer
+		/// variable.
+		vals: &'a [Lit],
+	},
 	/// The Log variant represents a integer variable using a two's complement
 	/// encoding. The sum of the Boolean literals multiplied by their
 	/// associated power of two represents value of the integer (i.e., X = ∑
 	/// 2ⁱ·bits\[i\]).
-	Log { signed: bool, bits: &'a [Lit] },
+	Log {
+		/// Whether the first bit is interpreted as a sign bit.
+		signed: bool,
+		/// The list of literals representing the each bit of the integer variable.
+		bits: &'a [Lit],
+	},
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -300,11 +332,15 @@ pub trait Valuation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// A cononical implementation of a Boolean decision variable, independent of
+/// A canonical implementation of a Boolean decision variable, independent of
 /// negation.
 pub struct Var(pub(crate) NonZeroI32);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// A continuous range of Boolean variables.
+///
+/// This is a representation that is used to represent a range of variables in a
+/// more compact way.
 pub struct VarRange {
 	start: Var,
 	end: Var,
@@ -577,6 +613,7 @@ impl Cnf {
 		)
 	}
 
+	/// Returns an iterator over the clauses in the formula.
 	pub fn iter(&self) -> impl ExactSizeIterator<Item = &[Lit]> + '_ {
 		CnfIterator {
 			lits: &self.lits,
@@ -984,10 +1021,13 @@ impl VarRange {
 		self.start > self.end
 	}
 
+	/// Returns an iterator of the Boolean variables in the range represented as
+	/// [`Lit`]s.
 	pub fn iter_lits(&mut self) -> impl Iterator<Item = Lit> + '_ {
 		self.map(Lit::from)
 	}
-	/// Create a range starting from [`start`] and ending at [`end`] (inclusive)
+
+	/// Create a range starting from `start` and ending at `end` (inclusive)
 	pub fn new(start: Var, end: Var) -> Self {
 		Self { start, end }
 	}

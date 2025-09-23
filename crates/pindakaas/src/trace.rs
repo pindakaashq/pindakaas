@@ -1,3 +1,6 @@
+//! Module containing a specialized [`Subscriber`] for tracing encoding methods
+//! in the Pindakaas library, named [`Tracer`] .
+
 use std::{
 	fmt,
 	io::{stderr, BufWriter, Stderr, Write},
@@ -35,6 +38,7 @@ struct EventVisitor {
 }
 
 #[derive(Debug)]
+/// Guarding type that will ensure a [`BufWriter`] is flushed when dropped.
 pub struct FlushGuard {
 	out: Arc<Mutex<BufWriter<Stderr>>>,
 }
@@ -55,6 +59,11 @@ struct SpanVisitor {
 }
 
 #[derive(Debug)]
+/// Specialized [`Subscriber`] implementation that will trace CNF encoding
+/// methods in pindakaas library.
+///
+/// Tracer will track literal names, and will visualize the recursive calls to
+/// different encoders.
 pub struct Tracer {
 	lit_names: Mutex<rustc_hash::FxHashMap<String, String>>,
 	next_span_id: AtomicU64,
@@ -137,7 +146,7 @@ impl Visit for EventVisitor {
 	}
 }
 impl FlushGuard {
-	pub fn flush(&self) {
+	fn flush(&self) {
 		let mut guard = match self.out.lock() {
 			Ok(guard) => guard,
 			Err(e) => {
@@ -198,6 +207,9 @@ impl Tracer {
 		}
 		writeln!(out, "{line}").unwrap();
 	}
+
+	/// Creates a new `Tracer` instance with a `FlushGuard` that will flush the
+	/// `Tracer`'s writers when it is dropped.
 	pub fn new() -> (Self, FlushGuard) {
 		let writer = BufWriter::new(stderr());
 		let tracer = Self {

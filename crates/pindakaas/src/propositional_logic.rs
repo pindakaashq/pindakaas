@@ -1,3 +1,9 @@
+//! This module contains representations and encoding algorithms for propositional logic formulas.
+//!
+//! These formulas can be represented using the [`Formula`] type, which
+//! implementation is specialized for both [`Lit`] and [`BoolVal`]. The
+//! [`TseitinEncoder`] is can be used to encode formulas into CNF.
+
 use std::{
 	fmt::{self, Display, Formatter},
 	iter::once,
@@ -23,8 +29,13 @@ pub enum Formula<Base> {
 	Equiv(Vec<Formula<Base>>),
 	/// A choice between two sub-formulas
 	IfThenElse {
+		/// The expression that determines which sub-formula is chosen:
+		/// - If it evaluates to `true`, the `then` branch is chosen.
+		/// - If it evaluates to `false`, the `els` branch is chosen.
 		cond: Box<Formula<Base>>,
+		/// The expression that is chosen when `cond` evaluates to `true`.
 		then: Box<Formula<Base>>,
+		/// The expression that is chosen when `cond` evaluates to `false`.
 		els: Box<Formula<Base>>,
 	},
 	/// An implication of two sub-formulas
@@ -38,6 +49,8 @@ pub enum Formula<Base> {
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
+/// An encoder for propositional logic formulas, based on the standard Tseitin
+/// transformations.
 pub struct TseitinEncoder;
 
 impl<Base> Formula<Base> {

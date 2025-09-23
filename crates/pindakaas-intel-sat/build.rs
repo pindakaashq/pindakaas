@@ -1,3 +1,7 @@
+//! This module contains the build script for the `pindakaas-intel-sat` crate.
+//! It is responsible for compiling the Intel SAT solver using a C++ compiler
+//! and linking it to the crate.
+
 /// Function that renames the standard `ipasir_` when using the `cc` crate to
 /// avoid conflicts when linking.
 pub fn change_ipasir_prefix(build: &mut cc::Build, prefix: &str) {

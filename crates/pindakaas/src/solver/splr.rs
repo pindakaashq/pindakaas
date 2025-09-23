@@ -1,3 +1,6 @@
+//! This module implements common Pindakaas [`Solver`] interfaces for the
+//! [SPLR](https://github.com/shnarazk/splr) SAT solver.
+
 use std::num::NonZeroI32;
 
 use itertools::Itertools;

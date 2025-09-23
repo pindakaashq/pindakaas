@@ -1,3 +1,6 @@
+//! This module contains the pindakaas interface to the
+//! [Kissat](https://github.com/arminbiere/kissat) SAT solver.
+
 use std::ffi::{c_int, c_void};
 
 use pindakaas_kissat::{
@@ -13,6 +16,8 @@ use crate::{
 };
 
 #[derive(Debug, Default)]
+/// Representation of an instance of the
+/// [Kissat](https://github.com/arminbiere/kissat) SAT solver.
 pub struct Kissat {
 	store: IpasirStore<Self, 0, 1, 0>,
 }

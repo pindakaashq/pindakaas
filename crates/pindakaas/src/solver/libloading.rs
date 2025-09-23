@@ -1,3 +1,6 @@
+//! This module contains pindakaas interface for (at runtime) dynamically loaded
+//! libraries implementing the IPASIR interface.
+//!
 use std::{
 	ffi::{c_char, c_int, c_void, CStr},
 	fmt,
@@ -17,22 +20,29 @@ use crate::{
 };
 
 #[derive(Debug)]
+/// Wrapper around the `ipasir_failed` function that can be used to retrieve the
+/// failed assumptions.
 pub struct IpasirFailed<'lib> {
 	slv: *mut c_void,
 	failed_fn: Symbol<'lib, extern "C" fn(*mut c_void, i32) -> c_int>,
 }
 
 #[derive(Debug)]
+/// A dynamically loaded library implementing the IPASIR interface.
 pub struct IpasirLibrary {
 	lib: Library,
 }
 
 #[derive(Debug)]
+/// Wrapper around the `ipasir_value` function that can be used to retrieve the
+/// value of a literal in the current satisfying assignment.
 pub struct IpasirSol<'lib> {
 	slv: *mut c_void,
 	value_fn: Symbol<'lib, extern "C" fn(*mut c_void, i32) -> i32>,
 }
 
+/// Instance of a dynamically loaded IPASIR solver, created using a
+/// [`IpasirLibrary`].
 pub struct IpasirSolver<'lib> {
 	/// The raw pointer to the Intel SAT solver.
 	slv: *mut c_void,
@@ -66,7 +76,9 @@ pub struct IpasirSolver<'lib> {
 	>,
 }
 
-pub type SymResult<'a, S, E = libloading::Error> = std::result::Result<Symbol<'a, S>, E>;
+/// Internal wrapper to simplify the result of different symbol lookup
+/// functions.
+type SymResult<'a, S, E = libloading::Error> = std::result::Result<Symbol<'a, S>, E>;
 
 // --- Helpers for C interface ---
 impl FailedAssumptions for IpasirFailed<'_> {
@@ -134,6 +146,7 @@ impl IpasirLibrary {
 		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_set_terminate") }
 	}
+
 	fn ipasir_signature_sym(&self) -> SymResult<'_, extern "C" fn() -> *const c_char> {
 		// SAFETY: We assume that if this symbol is present, then it is part of a
 		// valid implementation of the IPASIR interface.
@@ -145,12 +158,15 @@ impl IpasirLibrary {
 		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_solve") }
 	}
+
 	fn ipasir_value_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void, i32) -> i32> {
 		// SAFETY: We assume that if this symbol is present, then it is part of a
 		// valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_val") }
 	}
 
+	/// Create a new solver instance that uses the IPASIR methods included in the
+	/// [`IpasirLibrary`].
 	pub fn new_solver(&self) -> IpasirSolver<'_> {
 		IpasirSolver {
 			slv: (self.ipasir_init_sym().unwrap())(),
@@ -169,6 +185,7 @@ impl IpasirLibrary {
 		}
 	}
 
+	/// Wrapper for the `ipasir_signature` function.
 	pub fn signature(&self) -> &str {
 		// SAFETY: We assume that the signature function as part of the IPASIR
 		// interface returns a valid C string.
@@ -220,6 +237,7 @@ impl IpasirSolver<'_> {
 		}
 	}
 
+	/// Wrapper for the `ipasir_signature` function.
 	pub fn signature(&self) -> &str {
 		// SAFETY: We assume that the signature function as part of the IPASIR
 		// interface returns a valid C string.

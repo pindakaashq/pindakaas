@@ -1,3 +1,10 @@
+//! This module contains representations and encoding algorithms for general
+//! Boolean cardinality constraints.
+//!
+//! Cardinality constraints can be represented using the [`Cardinality`] type.
+//! [`SortingNetworkEncoder`] can then be used to encode the constraint into
+//! CNF, as well as [`Encoder`] implementations for [`NormalizedBoolLinear`].
+
 use crate::{
 	bool_linear::{Comparator, LimitComp, LinMarker, NormalizedBoolLinear, PosCoeff},
 	cardinality_one::CardinalityOne,
@@ -10,27 +17,39 @@ use crate::{
 pub(crate) trait CardMarker {}
 
 #[derive(Clone, Debug)]
+/// Linear constraint that enforces that ∑ litᵢ ≷ k.
+///
+/// Compared to [`NormalizedBoolLinear`], this constraint does not multiply
+/// literals by coefficients.
+///
+/// All literals in the constraint are guaranteed to be from distinct Boolean
+/// variables.
 pub struct Cardinality {
 	pub(crate) lits: Vec<Lit>,
 	pub(crate) cmp: LimitComp,
 	pub(crate) k: PosCoeff,
 }
 
-/// Encoder for the linear constraints that ∑ litsᵢ ≷ k using a sorting network
+/// Encoder for the linear constraints that ∑ litᵢ ≷ k using a sorting network
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SortingNetworkEncoder {
-	pub sorted_encoder: SortedEncoder,
+	/// Encoder used to encode the [`Sorted`] constraints.
+	sorted_encoder: SortedEncoder,
 }
 
 impl Cardinality {
+	/// Get the comparator of the cardinality constraint.
 	pub fn comparator(&self) -> Comparator {
 		self.cmp.clone().into()
 	}
 
+	/// Iterate over the literals of the cardinality constraint.
 	pub fn iter_lits(&self) -> impl Iterator<Item = Lit> + '_ {
 		self.lits.iter().copied()
 	}
 
+	/// Get the right-hand side constant against which the cardinality constraint
+	/// compares its left-hand side literals.
 	pub fn rhs(&self) -> Coeff {
 		self.k.into()
 	}
@@ -79,7 +98,10 @@ where
 impl<M: LinMarker> CardMarker for M {}
 
 impl SortingNetworkEncoder {
-	pub fn set_sorted_encoder(&mut self, sorted_encoder: SortedEncoder) -> &mut Self {
+	// TODO: Sorted is currently private.
+	/// Set the [`Encoder`] used to encode the `Sorted` constraints within the
+	/// sorting network.
+	pub fn with_sorted_encoder(&mut self, sorted_encoder: SortedEncoder) -> &mut Self {
 		self.sorted_encoder = sorted_encoder;
 		self
 	}
@@ -342,7 +364,7 @@ pub(crate) mod tests {
 					.with_strategy(SortedStrategy::Direct)
 					.with_overwrite_direct_cmp(None)
 					.with_overwrite_recursive_cmp(None);
-				let _ = e.set_sorted_encoder(f);
+				let _ = e.with_sorted_encoder(f);
 				e
 			},
 			LimitComp::Equal
@@ -358,7 +380,7 @@ pub(crate) mod tests {
 					.with_strategy(SortedStrategy::Recursive)
 					.with_overwrite_direct_cmp(None)
 					.with_overwrite_recursive_cmp(None);
-				let _ = e.set_sorted_encoder(f);
+				let _ = e.with_sorted_encoder(f);
 				e
 			},
 			LimitComp::Equal
@@ -374,7 +396,7 @@ pub(crate) mod tests {
 					.with_strategy(SortedStrategy::Direct)
 					.with_overwrite_direct_cmp(None)
 					.with_overwrite_recursive_cmp(None);
-				let _ = e.set_sorted_encoder(f);
+				let _ = e.with_sorted_encoder(f);
 				e
 			},
 			LimitComp::LessEq
@@ -390,7 +412,7 @@ pub(crate) mod tests {
 					.with_strategy(SortedStrategy::Mixed(2))
 					.with_overwrite_direct_cmp(None)
 					.with_overwrite_recursive_cmp(None);
-				let _ = e.set_sorted_encoder(f);
+				let _ = e.with_sorted_encoder(f);
 				e
 			},
 			LimitComp::LessEq
@@ -406,7 +428,7 @@ pub(crate) mod tests {
 					.with_strategy(SortedStrategy::Recursive)
 					.with_overwrite_direct_cmp(None)
 					.with_overwrite_recursive_cmp(None);
-				let _ = e.set_sorted_encoder(f);
+				let _ = e.with_sorted_encoder(f);
 				e
 			},
 			LimitComp::LessEq

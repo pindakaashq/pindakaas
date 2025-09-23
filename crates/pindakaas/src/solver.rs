@@ -1,3 +1,7 @@
+//! This module contains common traits for Boolean satisfiability (SAT) solvers
+//! as well as direct interfaces for different SAT solvers, which implement
+//! these traits.
+
 #[cfg(any(feature = "cadical", test))]
 pub mod cadical;
 #[cfg(feature = "intel-sat")]
@@ -16,11 +20,16 @@ use std::num::NonZeroI32;
 
 use crate::{ClauseDatabase, Lit, Valuation, Var, VarRange};
 
+/// Trait implemented by solver that support assumptions, a list of literals
+/// that are assumed to be true during the solving call. The resulting
+/// [`SolveResult`] will allow inspection of which assumptions failed if the
+/// formula is unsatisfiable under the assumptions.
 pub trait Assumptions: Solver {
 	/// Solve the formula with specified clauses under the given assumptions.
 	///
-	/// If the search is interrupted (see [`set_terminate_callback`]) the function
-	/// returns unknown
+	/// If the search is interrupted (see
+	/// [`TerminateCallback::set_terminate_callback`]) the function returns
+	/// unknown
 	fn solve_assuming<I: IntoIterator<Item = Lit>>(
 		&mut self,
 		assumptions: I,
@@ -37,6 +46,9 @@ pub trait FailedAssumptions {
 	fn fail(&self, lit: Lit) -> bool;
 }
 
+/// Trait implemented by solvers that support a callback when it infers a new
+/// clause. In CDCL solvers, this generally happens when a clause is learned on
+/// conflict.
 pub trait LearnCallback: Solver {
 	/// Set a callback function used to extract learned clauses up to a given
 	/// length from the solver.
@@ -52,17 +64,25 @@ pub trait LearnCallback: Solver {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// The result of a [`Solver::solve`] call.
 pub enum SolveResult<Sol: Valuation, Fail = ()> {
+	/// The solver found a satisfying assignment.
 	Satisfied(Sol),
+	/// The solver proved no satisfying assignment exists.
 	Unsatisfiable(Fail),
+	/// The solver was unable to determine whether a satisfying assignment exists
+	/// given the computational limits.
 	Unknown,
 }
 
+/// General trait for SAT solvers, extending the general [`ClauseDatabase`]
+/// capabilities with being able to look for satisfying assignments.
 pub trait Solver: ClauseDatabase {
 	/// Solve the formula with specified clauses.
 	///
-	/// If the search is interrupted (see [`set_terminate_callback`]) the function
-	/// returns unknown
+	/// If the search is interrupted (see
+	/// [`TerminateCallback::set_terminate_callback`]) the function returns
+	/// unknown
 	fn solve(&mut self) -> SolveResult<impl Valuation + '_, impl Sized>;
 }
 
@@ -70,10 +90,14 @@ pub trait Solver: ClauseDatabase {
 /// Signal sent by termination callbacks telling the solver whether to continue
 /// or terminate the search.
 pub enum TermSignal {
+	/// Continue the search process.
 	Continue,
+	/// Terminate the search process.
 	Terminate,
 }
 
+/// Trait implemented by solvers that will make a call to the given callback
+/// function to determine whether to continue or terminate the search.
 pub trait TerminateCallback: Solver {
 	/// Set a callback function used to indicate a termination requirement to the
 	/// solver.
@@ -90,6 +114,7 @@ pub trait TerminateCallback: Solver {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Type that helps create [`Var`]s in a consecutive manner.
 pub struct VarFactory {
 	pub(crate) next_var: Option<Var>,
 }

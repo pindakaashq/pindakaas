@@ -1,3 +1,6 @@
+//! This crate provides a procedural macro that registers a
+//! [`pindakaas::tracer::Tracer`] as a global subscriber to the test case.
+
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{parse, ItemFn, Stmt};

@@ -1,3 +1,19 @@
+//! This module contains representations and encoding algorithms for general
+//! Boolean linear constraints.
+//!
+//! Boolean linear constraints can be modelled using [`BoolLinExp`] and
+//! subsequently [`BoolLinear`]. These representations can then be normalized
+//! and simplified using [`BoolLinAggregator`]. Resulting
+//! [`NormalizedBoolLinear`] can be encoded using a variety of [`Encoder`]s such
+//! as the [`AdderEncoder`], [`BddEncoder`], [`SwcEncoder`], and
+//! [`TotalizerEncoder`].
+//!
+//! This module contains some additional helper types that can be used to
+//! simplify this encoding process. [`StaticLinEncoder`] can help choose an
+//! encoder based on the [`BoolLinVariant`] produced by [`BoolLinAggregator`].
+//! [`LinearEncoder`] can be used to pipeline [`BoolLinAggregator`] and a
+//! [`BoolLinVariant`] [`Encoder`].
+
 use std::{
 	cell::RefCell,
 	cmp::{max, min, Ordering},
@@ -25,12 +41,12 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-/// Encoder for the linear constraints that ∑ coeffᵢ·litsᵢ ≷ k using a
-/// binary adders circuits
+/// Encoder for the linear constraints that ∑ coeffᵢ·litᵢ ≷ k using a binary
+/// adders circuits
 pub struct AdderEncoder {}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Binary
+/// Encode the constraint that ∑ coeffᵢ·litᵢ ≦ k using a Binary
 /// Decision Diagram (BDD)
 pub struct BddEncoder {
 	add_consistency: bool,
@@ -47,8 +63,8 @@ enum BddNode {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-/// A tranformation of a general [`BoolLinear`] constraint into a aggregated and
-/// normalized variant.
+/// A transformation of a general [`BoolLinear`] constraint into a aggregated
+/// and normalized variant.
 pub struct BoolLinAggregator {
 	sorted_encoder: SortedEncoder,
 	sort_same_coefficients: usize,
@@ -72,10 +88,24 @@ pub struct BoolLinExp {
 }
 
 #[derive(Debug)]
+/// Type used to distinguish between different variants of Boolean linear
+/// constraints for which specialized encoding algorithms exist.
+///
+/// This type is used as the result of the aggregation/normalization process
+/// ([`BoolLinAggregator::aggregate`]), which will simplify a constraint to its
+/// most simplified form.
 pub enum BoolLinVariant {
+	/// Most general form of Boolean linear expression: a sum of Boolean literals
+	/// multiplied by positive coefficients that must be (smaller-or-)equal to a
+	/// positive constant.
 	Linear(NormalizedBoolLinear),
+	/// Cardinality constraint (also known as a counting constraint): a sum of
+	/// Boolean literals that must be (smaller-or-)equal to a positive constant.
 	Cardinality(Cardinality),
+	/// Cardinality constraint with the constant 1 (i.e. at-least or exactly 1
+	/// literal must be true).
 	CardinalityOne(CardinalityOne),
+	/// Constraint was trivially encoded into clauses.
 	Trivial,
 }
 
@@ -138,6 +168,9 @@ pub(crate) enum LimitComp {
 pub(crate) trait LinMarker {}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+/// An encoder for Boolean linear constraints that performs aggregation using a
+/// [`BoolLinAggregator`] and then encodes the aggregated constraints using a
+/// [`Encoder`] for [`BoolLinVariant`].
 pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = BoolLinAggregator> {
 	enc: Enc,
 	agg: Agg,
@@ -148,9 +181,9 @@ pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = BoolLinAggregator> {
 ///
 /// The constraint captured by this struct contains only positive coefficients,
 /// contains at most one term with the same variable, and its comparator has
-/// been limited to [`LimitComp`]. Objects of this type are generally the result
-/// of using the [`BoolLinAggregator`], and are generally the required input
-/// type for encoders of boolean linear constraints.
+/// been limited to `≤` or `=`. Objects of this type are generally the result of
+/// using the [`BoolLinAggregator`], and are generally the required input type
+/// for encoders of boolean linear constraints.
 pub struct NormalizedBoolLinear {
 	terms: Vec<Part>,
 	cmp: LimitComp,
@@ -477,12 +510,16 @@ where
 impl LinMarker for AdderEncoder {}
 
 impl BddEncoder {
-	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
+	/// Set whether to add consistency constraints on the intermediate integer
+	/// variables.
+	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
 
-	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
+	/// Set the largest domain size for which the intermediate integer variables
+	/// are encoded using order encoding.
+	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
@@ -695,6 +732,9 @@ impl BoolLinAggregator {
 		any(feature = "tracing", test),
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
 	)]
+	/// Perform (internal) aggregation of [`BoolLinear`] constraints, normalizing
+	/// them and simplify them into specialized forms for which different encoding
+	/// algorithms exist.
 	pub fn aggregate<Db>(&self, db: &mut Db, lin: &BoolLinear) -> Result<BoolLinVariant>
 	where
 		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
@@ -1167,6 +1207,8 @@ impl BoolLinAggregator {
 impl BoolLinExp {
 	// TODO I'm not really happy with this interface yet...
 	// Probably makes more sense to use something like int encodings
+	/// Add a log encoding to the linear expression, where it is given that the
+	/// log encoding is known to be within `lb..=ub`.
 	pub fn add_bounded_log_encoding(
 		mut self,
 		terms: &[(Lit, Coeff)],
@@ -1206,30 +1248,44 @@ impl BoolLinExp {
 		self
 	}
 
+	/// Add a constant to the linear expression
+	///
+	/// Note that this is a more explicit version of the `+` or `+=` operator.
 	pub fn add_constant(mut self, k: Coeff) -> Self {
 		self.add += k;
 		self
 	}
 
+	/// Add a literal to the linear expression, taking the value `0` if `false`
+	/// and `1` if `true`.
+	///
+	/// Note that this is a more explicit version of the `+` or `+=` operator.
 	pub fn add_lit(mut self, lit: Lit) -> Self {
 		self.terms.push_front((lit, 1));
 		self.num_free += 1;
 		self
 	}
 
-	pub fn from_slices(weights: &[Coeff], lits: &[Lit]) -> Self {
+	/// Create a linear expression from a slice of coefficients and literals, where
+	/// each literal is multiplied by the coefficient in the corresponding position.
+	///
+	/// Note that the number of coefficients and literals must be equal.
+	pub fn from_slices(coeffs: &[Coeff], lits: &[Lit]) -> Self {
 		assert_eq!(
-			weights.len(),
+			coeffs.len(),
 			lits.len(),
 			"the number of weights and literals must be equal"
 		);
 		Self {
-			terms: lits.iter().cloned().zip(weights.iter().cloned()).collect(),
+			terms: lits.iter().cloned().zip(coeffs.iter().cloned()).collect(),
 			num_free: lits.len(),
 			..Default::default()
 		}
 	}
 
+	/// Create a linear expression from a slice of terms, where each term consist
+	/// of a literal and coefficient and the former will be multiplied by the
+	/// latter.
 	pub fn from_terms(terms: &[(Lit, Coeff)]) -> Self {
 		Self {
 			terms: terms.iter().cloned().collect(),
@@ -1255,6 +1311,8 @@ impl BoolLinExp {
 		}))
 	}
 
+	/// Iterate over the terms of the linear expression, consisting of a literal
+	/// and the coefficient by which it is multiplied.
 	pub fn terms(&self) -> impl Iterator<Item = (Lit, Coeff)> + '_ {
 		self.terms.iter().copied()
 	}
@@ -1546,10 +1604,13 @@ impl SubAssign for BoolLinExp {
 }
 
 impl BoolLinear {
+	/// Create a new Boolean linear constraint from a left hand side Boolean
+	/// linear expression, a comparator, and a right hand side coefficient.
 	pub fn new(exp: BoolLinExp, cmp: Comparator, k: Coeff) -> Self {
 		Self { exp, cmp, k }
 	}
 
+	/// Change the comparator of the Boolean linear constraint.
 	pub fn set_cmp(&mut self, cmp: Comparator) {
 		self.cmp = cmp;
 	}
@@ -1657,16 +1718,20 @@ impl Display for LimitComp {
 }
 
 impl<Enc, Agg> LinearEncoder<Enc, Agg> {
-	pub fn add_linear_aggregator(&mut self, agg: Agg) -> &mut Self {
+	/// Change the [`BoolLinAggregator`] used by this encoder.
+	pub fn with_linear_aggregator(&mut self, agg: Agg) -> &mut Self {
 		self.agg = agg;
 		self
 	}
 
-	pub fn add_variant_encoder(&mut self, enc: Enc) -> &mut Self {
+	/// Change the [`Encoder`] for [`BoolLinVariant`]s used by this encoder.
+	pub fn with_variant_encoder(&mut self, enc: Enc) -> &mut Self {
 		self.enc = enc;
 		self
 	}
 
+	/// Create a new [`LinearEncoder`] with the given [`Encoder`] for
+	/// [`BoolLinVariant`]s and [`BoolLinAggregator`].
 	pub fn new(enc: Enc, agg: Agg) -> Self {
 		Self { enc, agg }
 	}
@@ -1688,29 +1753,38 @@ where
 }
 
 impl NormalizedBoolLinear {
+	/// Get the comparator of the linear constraint.
 	pub fn comparator(&self) -> Comparator {
 		self.cmp.clone().into()
 	}
 
+	/// Test whether the linear constraint has any terms.
 	pub fn is_empty(&self) -> bool {
 		self.terms.is_empty()
 	}
 
+	/// Iterate over the terms of the linear constraint, consisting of literals
+	/// and the coefficients by which they are multiplied.
 	pub fn iter_terms(&self) -> impl Iterator<Item = (Lit, Coeff)> + '_ {
 		self.terms
 			.iter()
 			.flat_map(|part| part.iter().map(|&(lit, coef)| (lit, coef.into())))
 	}
 
+	/// Get the number of terms in the linear constraint.
 	pub fn len(&self) -> usize {
 		self.terms.len()
 	}
 
+	/// Get the right-hand side constant against which the linear constraint
+	/// compares its left-hand side terms.
 	pub fn rhs(&self) -> Coeff {
 		self.k.into()
 	}
 
-	pub fn set_k(&mut self, k: Coeff) {
+	/// Set the right-hand side constant against which the linear constraint
+	/// compares its left-hand side terms.
+	pub fn set_rhs(&mut self, k: Coeff) {
 		self.k = PosCoeff::new(k);
 	}
 
@@ -1828,18 +1902,27 @@ impl Display for PosCoeff {
 }
 
 impl<LinEnc, CardEnc, AmoEnc> StaticLinEncoder<LinEnc, CardEnc, AmoEnc> {
+	/// Get mutable access to the encoder that is used to encode
+	/// [`BoolLinVariant::CardinalityOne`] variants.
 	pub fn amo_encoder(&mut self) -> &mut AmoEnc {
 		&mut self.amo_enc
 	}
 
+	/// Get mutable access to the encoder that is used to encode
+	/// [`BoolLinVariant::Cardinality`] variants.
 	pub fn card_encoder(&mut self) -> &mut CardEnc {
 		&mut self.card_enc
 	}
 
+	/// Get mutable access to the encoder that is used to encode
+	/// [`BoolLinVariant::Linear`] variants.
 	pub fn lin_encoder(&mut self) -> &mut LinEnc {
 		&mut self.lin_enc
 	}
 
+	/// Create a new [`StaticLinEncoder`] with the given encoders to encode
+	/// [`BoolLinVariant::Linear`], [`BoolLinVariant::Cardinality`], and
+	/// [`BoolLinVariant::CardinalityOne`] variants respectively.
 	pub fn new(lin_enc: LinEnc, card_enc: CardEnc, amo_enc: AmoEnc) -> Self {
 		Self {
 			lin_enc,
@@ -1868,15 +1951,23 @@ where
 }
 
 impl SwcEncoder {
-	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
+	/// Set whether to add consistency constraints on the intermediate integer
+	/// variables.
+	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
+
+	/// Set the largest domain size for which the intermediate integer variables
+	/// are encoded using order encoding.
+	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
-	pub fn add_propagation(&mut self, c: Consistency) -> &mut Self {
+
+	/// Set whether to perform additional propagation of the linear constraint
+	/// before encoding the constraint into CNF.
+	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
 		self.add_propagation = c;
 		self
 	}
@@ -1934,15 +2025,23 @@ impl LinMarker for SwcEncoder {}
 impl TotalizerEncoder {
 	const EQUALIZE_INTERMEDIATES: bool = false;
 
-	pub fn add_consistency(&mut self, b: bool) -> &mut Self {
+	/// Set whether to add consistency constraints on the intermediate integer
+	/// variables.
+	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
-	pub fn add_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
+
+	/// Set the largest domain size for which the intermediate integer variables
+	/// are encoded using order encoding.
+	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
-	pub fn add_propagation(&mut self, c: Consistency) -> &mut Self {
+
+	/// Set whether to perform additional propagation of the linear constraint
+	/// before encoding the constraint into CNF.
+	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
 		self.add_propagation = c;
 		self
 	}
@@ -3011,7 +3110,7 @@ mod tests {
 		let mut agg = BoolLinAggregator::default();
 		let _ = agg.sort_same_coefficients(SortedEncoder::default(), 3);
 		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default();
-		let _ = encoder.add_linear_aggregator(agg);
+		let _ = encoder.with_linear_aggregator(agg);
 		let con = BoolLinear::new(
 			BoolLinExp::from_slices(&[3, 3, 1, 1, 3], &vars),
 			Comparator::GreaterEq,

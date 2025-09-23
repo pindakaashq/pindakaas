@@ -1,3 +1,7 @@
+//! This module contains the build script for the `pindakaas-cadical` crate. It
+//! is responsible for compiling the CaDiCaL SAT solver using a C++ compiler and
+//! linking it to the crate.
+
 use std::path::Path;
 
 fn main() {

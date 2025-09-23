@@ -1,3 +1,6 @@
+//! This module contains the pindakaas interface to the
+//! [CaDiCaL](https://github.com/arminbiere/cadical) SAT solver.
+
 use std::{
 	cell::RefCell,
 	ffi::{c_int, c_void, CString},
@@ -38,6 +41,8 @@ use crate::{
 };
 
 #[derive(Default)]
+/// Representation of an instance of the
+/// [CaDiCaL](https://github.com/arminbiere/cadical) SAT solver.
 pub struct Cadical {
 	store: IpasirStore<Cadical, 1, 1, 1>,
 	tracers: Vec<Rc<RefCell<dyn ProofTracer>>>,
@@ -46,8 +51,11 @@ pub struct Cadical {
 /// Enum to represent the proof conclusion type of a SAT solver run.
 #[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
 pub enum ProofConclusionType {
+	/// Problem is unsatisfiable because of a inherent conflict in the clauses.
 	Conflict = 1,
+	/// Problem is unsatisfiable because of assumptions made.
 	Assumptions = 2,
+	/// Problem unsatisfiability is caused by a constraint.
 	Constraint = 4,
 }
 
@@ -162,6 +170,9 @@ pub trait ProofTracer {
 	}
 }
 
+/// Trait that gives extra information about the [`ProofTracer`] implementation.
+/// This information is used to optimize the interaction between the
+/// [`ProofTracer`] and the solver.
 pub trait ProofTracerDefinition: ProofTracer {
 	/// Whether the [`ProofTracer`] uses the antecedents of derived clauses.
 	const ANTECEDENTS: bool;
@@ -171,8 +182,8 @@ pub trait ProofTracerDefinition: ProofTracer {
 }
 
 impl Cadical {
-	// TODO: HIdden for now as it requires the user to set the proof tracer during
-	// CONFIGURATION. This should probably be a seperate state/builder.
+	// TODO: Hidden for now as it requires the user to set the proof tracer during
+	// CONFIGURATION. This should probably be a separate state/builder.
 	#[doc(hidden)]
 	pub fn connect_proof_tracer<P: ProofTracerDefinition + 'static>(
 		&mut self,
@@ -253,6 +264,7 @@ impl Cadical {
 
 	// TODO: This can be replaced by [`ExternalPropagation::phase`] if
 	// `external_propagation` feature is ever automatically enabled.
+	/// Set the default decision phase of a variable to the given [`Lit`].
 	pub fn phase(&mut self, lit: Lit) {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		unsafe { ccadical_phase(self.ipasir_store().solver_ptr(), lit.0.get()) }
@@ -311,6 +323,8 @@ impl Cadical {
 
 	// TODO: This can be replaced by [`ExternalPropagation::unphase`] if
 	// `external_propagation` feature is ever automatically enabled.
+	/// Remove the default decision phase of the given variable (given as a
+	/// [`Lit`]).
 	pub fn unphase(&mut self, lit: Lit) {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		unsafe { ccadical_unphase(self.ipasir_store().solver_ptr(), lit.0.get()) }

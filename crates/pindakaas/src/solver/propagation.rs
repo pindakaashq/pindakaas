@@ -1,3 +1,6 @@
+//! This module contains interfaces for extending SAT solvers with external
+//! propagation functionality.
+
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{solver::Solver, Lit, Valuation, Var};
@@ -14,6 +17,8 @@ pub enum ClausePersistence {
 	Irreduntant,
 }
 
+/// Trait implemented by [`Solver`]s that allow connecting an external
+/// propagator.
 pub trait ExternalPropagation: Solver {
 	/// Add a variable to the set of observed variables.
 	///
@@ -76,9 +81,9 @@ pub trait ExternalPropagation: Solver {
 	fn unphase(&mut self, lit: Lit);
 }
 
-// Connected listener gets notified whenever the truth value of a variable
-// is fixed (for example during inprocessing or due to some derived unit
-// clauses).
+/// Connected listener gets notified whenever the truth value of a variable
+/// is fixed (for example during inprocessing or due to some derived unit
+/// clauses).
 pub trait PersistentAssignmentListener {
 	/// Notify the listener that a variable has been assigned a value that is
 	/// considered persistent. This means that the variable will not be
@@ -88,6 +93,8 @@ pub trait PersistentAssignmentListener {
 	}
 }
 
+/// Trait implemented by [`Solver`]s that support persistent assignment
+/// notifications.
 pub trait PersistentAssignmentNotifier: Solver {
 	/// Connect a listener that gets notified whenever the truth value of a
 	/// variable is permanently set (e.g. during inprocessing or when a unit
@@ -107,6 +114,8 @@ pub trait PersistentAssignmentNotifier: Solver {
 	fn disconnect_persistent_assignment_listener(&mut self);
 }
 
+/// Trait implemented to provide external propagation for [`Solver`]s
+/// implementing the [`ExternalPropagation`] trait.
 pub trait Propagator {
 	/// Method called to notify the propagator about assignments of literals
 	/// concerning observed variables.
@@ -117,7 +126,11 @@ pub trait Propagator {
 	fn notify_assignments(&mut self, lits: &[Lit]) {
 		let _ = lits;
 	}
+	/// Method called to notify the propagator about a new decision level.
 	fn notify_new_decision_level(&mut self) {}
+
+	/// Method called to notify the propagator about a backtrack to an earlier
+	/// decision level.
 	fn notify_backtrack(&mut self, new_level: usize, restart: bool) {
 		let _ = new_level;
 		let _ = restart;

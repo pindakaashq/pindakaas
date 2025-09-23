@@ -1,3 +1,6 @@
+//! This crate implements the the internal `pindakaas.pindakaas` Python module,
+//! which provides bindings for the `pindakaas` Rust crate.
+
 #![expect(
 	clippy::upper_case_acronyms,
 	reason = "Python naming for exposed types"
