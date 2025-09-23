@@ -1125,7 +1125,7 @@ impl Lin {
 									.xs
 									.iter()
 									.enumerate()
-									.filter(|&(j, _)| (i != j))
+									.filter(|&(j, _)| i != j)
 									.map(|(_, (c_j, x_j))| {
 										x_j.borrow()
 											.dom
