@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/pindakaashq/pindakaas/compare/pindakaas-kissat-v0.1.0...pindakaas-kissat-v0.2.0) - 2025-09-25
+
+### Added
+
+- redesign the way that IPASIR solvers are defined in pindakaas
+
+### Fixed
+
+- ensure MSVC compatibility
+
+
 ## [0.1.0](https://github.com/pindakaashq/pindakaas/releases/tag/pindakaas-kissat-v0.1.0) - 2025-07-09
 
 ### Added
