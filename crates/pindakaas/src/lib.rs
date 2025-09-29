@@ -227,7 +227,7 @@ pub mod trace;
 
 use std::{
 	clone::Clone,
-	cmp::{max, Eq, Ordering},
+	cmp::{Eq, Ordering},
 	error::Error,
 	fmt::{self, Display},
 	fs::File,
@@ -1227,14 +1227,23 @@ impl VarRange {
 	/// # use pindakaas::VarRange;
 	/// assert!(VarRange::empty().is_empty());
 	/// ```
-	pub fn is_empty(&self) -> bool {
-		self.start > self.end
+	pub const fn is_empty(&self) -> bool {
+		self.len() == 0
 	}
 
 	/// Returns an iterator of the Boolean variables in the range represented as
 	/// [`Lit`]s.
 	pub fn iter_lits(&mut self) -> impl Iterator<Item = Lit> + '_ {
 		self.map(Lit::from)
+	}
+
+	/// Returns the number of variables in the range.
+	pub const fn len(&self) -> usize {
+		let len = self.end.0.get() - self.start.0.get() + 1;
+		if len < 0 {
+			return 0;
+		}
+		len as usize
 	}
 
 	/// Create a range starting from `start` and ending at `end` (inclusive)
@@ -1269,9 +1278,7 @@ impl DoubleEndedIterator for VarRange {
 
 impl ExactSizeIterator for VarRange {
 	fn len(&self) -> usize {
-		let (lower, upper) = self.size_hint();
-		debug_assert_eq!(upper, Some(lower));
-		lower
+		self.len()
 	}
 }
 
@@ -1301,9 +1308,10 @@ impl Iterator for VarRange {
 			None
 		}
 	}
+
 	fn size_hint(&self) -> (usize, Option<usize>) {
-		let size = max(self.end.0.get() - self.start.0.get() + 1, 0) as usize;
-		(size, Some(size))
+		let len = self.len();
+		(len, Some(len))
 	}
 }
 

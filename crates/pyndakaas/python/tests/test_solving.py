@@ -44,3 +44,8 @@ def test_kissat():
         assert vx is not None
         assert vy is not None
         assert vx != vy
+
+
+def test_issue_159():
+    slv = pindakaas.solver.CaDiCaL()
+    assert len(slv.new_vars(1)) == 1

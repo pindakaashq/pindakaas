@@ -439,9 +439,9 @@ mod pindakaas {
 			Self(Default::default())
 		}
 
-		fn new_var_range(&mut self, num_vars: usize) -> VarRange {
+		fn new_var_range(&mut self, num_vars: usize) -> PyResult<VarRange> {
 			let range = self.0.new_var_range(num_vars);
-			VarRange(range)
+			Ok(VarRange(range))
 		}
 
 		fn to_dimacs(&self) -> String {
@@ -652,6 +652,10 @@ mod pindakaas {
 			slf
 		}
 
+		fn __len__(&self) -> usize {
+			self.0.len()
+		}
+
 		fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<Lit> {
 			slf.0.next().map(|lit| Lit(lit.into()))
 		}
@@ -724,9 +728,9 @@ mod pindakaas {
 			Self(Default::default())
 		}
 
-		fn new_var_range(&mut self, num_vars: usize) -> VarRange {
+		fn new_var_range(&mut self, num_vars: usize) -> PyResult<VarRange> {
 			let range = self.0.new_var_range(num_vars);
-			VarRange(range)
+			Ok(VarRange(range))
 		}
 
 		fn to_dimacs(&self) -> String {
@@ -766,7 +770,7 @@ mod pindakaas {
 		use pyo3::{exceptions::PyNotImplementedError, prelude::*, types::PyIterator};
 
 		use super::{encode_constraint_with_conditions, Result};
-		use crate::pindakaas::{ConstraintArg, Encoder, Lit};
+		use crate::pindakaas::{ConstraintArg, Encoder, Lit, VarRange};
 
 		#[pyclass(unsendable)]
 		#[derive(Debug, Default)]
@@ -835,9 +839,9 @@ mod pindakaas {
 				Self(Default::default())
 			}
 
-			fn new_var_range(&mut self, num_vars: usize) -> Result<(Lit, Lit)> {
+			fn new_var_range(&mut self, num_vars: usize) -> PyResult<VarRange> {
 				let range = self.0.new_var_range(num_vars);
-				Ok((Lit(range.start().into()), Lit(range.end().into())))
+				Ok(VarRange(range))
 			}
 
 			fn set_time_limit(&mut self, limit: Option<Duration>) -> Result {
@@ -899,10 +903,10 @@ mod pindakaas {
 				Self(Default::default())
 			}
 
-			fn new_var_range(&mut self, num_vars: usize) -> Result<(Lit, Lit)> {
+			fn new_var_range(&mut self, num_vars: usize) -> PyResult<VarRange> {
 				let mut guard = self.0.lock().unwrap();
 				let range = guard.new_var_range(num_vars);
-				Ok((Lit(range.start().into()), Lit(range.end().into())))
+				Ok(VarRange(range))
 			}
 
 			fn set_time_limit(&mut self, limit: Option<Duration>) {
