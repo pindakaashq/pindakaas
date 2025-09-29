@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.2.0...pyndakaas-v0.2.1) - 2025-09-29
+
+### Fixed
+
+- consistent `new_var_range` returns for solvers
+
 ## [0.1.1](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.1.0...pyndakaas-v0.1.1) - 2025-09-25
 
 ### Added

@@ -1,7 +1,7 @@
 [package]
 name = "pyndakaas"
 description = "Python bindings for the pindakaas crate"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 
 authors.workspace = true
@@ -17,7 +17,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 itertools = "0.14"
-pindakaas = { version = "0.2.0", path = "../pindakaas", features = ["kissat"] }
+pindakaas = { version = "0.2.1", path = "../pindakaas", features = ["kissat"] }
 pyo3 = "0.26.0"
 
 [lints]
