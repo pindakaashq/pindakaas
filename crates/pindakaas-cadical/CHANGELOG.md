@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/pindakaashq/pindakaas/compare/pindakaas-cadical-v0.2.0...pindakaas-cadical-v0.2.1) - 2025-09-30
+
+### Fixed
+
+- package unistd.h for windows release
+
 ## [0.2.0](https://github.com/pindakaashq/pindakaas/compare/pindakaas-cadical-v0.1.0...pindakaas-cadical-v0.2.0) - 2025-09-25
 
 ### Added

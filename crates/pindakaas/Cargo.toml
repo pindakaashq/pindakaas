@@ -1,7 +1,7 @@
 [package]
 name = "pindakaas"
 description = "Encoding Integer and Pseudo Boolean constraints into CNF"
-version = "0.2.1"
+version = "0.2.2"
 
 authors.workspace = true
 edition.workspace = true
@@ -27,7 +27,7 @@ libloading = { version = "0.8", optional = true }
 tracing = { workspace = true, optional = true }
 
 # Optional Solver Interfaces
-pindakaas-cadical = { version = "0.2.0", path = "../pindakaas-cadical", optional = true }
+pindakaas-cadical = { version = "0.2.1", path = "../pindakaas-cadical", optional = true }
 pindakaas-intel-sat = { version = "0.2.0", path = "../pindakaas-intel-sat", optional = true }
 pindakaas-kissat = { version = "0.2.0", path = "../pindakaas-kissat", optional = true }
 splr = { version = "0.17", optional = true }
