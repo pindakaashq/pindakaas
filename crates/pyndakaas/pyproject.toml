@@ -13,13 +13,36 @@ test = ["pytest>=8.3.5"]
 
 [project]
 name = "pindakaas"
+description	= "Boolean satisfiability (SAT) library with efficient encoding of complex constraints and solver interaction"
+authors = [
+	{name = "Jip J. Dekker", email = "jip@dekker.one"},
+	{name = "Hendrik 'Henk' Bierlee", email = "henk.bierlee@kuleuven.be"},
+]
+readme = "README.md"
+license = "MPL-2.0"
+keywords = ["satisfiability", "encoding", "boolean", "logic", "sat"]
 requires-python = ">=3.8"
 classifiers = [
+	"Development Status :: 4 - Beta",
 	"Programming Language :: Rust",
+	"Topic :: Scientific/Engineering :: Artificial Intelligence",
+	"Topic :: Scientific/Engineering :: Mathematics",
 	"Programming Language :: Python :: Implementation :: CPython",
 	"Programming Language :: Python :: Implementation :: PyPy",
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3.8",
+	"Programming Language :: Python :: 3.9",
+	"Programming Language :: Python :: 3.10",
+	"Programming Language :: Python :: 3.11",
+	"Programming Language :: Python :: 3.12",
 ]
 dynamic = ["version"]
+
+[project.urls]
+documentation = "https://pindakaas.readthedocs.io/en/latest/"
+repository = "https://github.com/pindakaashq/pindakaas.git"
+issues = "https://github.com/pindakaashq/pindakaas/issues"
+changelog = "https://github.com/pindakaashq/pindakaas/blob/develop/crates/pyndakaas/CHANGELOG.md"
 
 [tool.maturin]
 python-source = "python"
