@@ -18,7 +18,7 @@ macro_rules! as_dyn_trait {
 				self
 			}
 		}
-		impl $as_dyn_name for dyn $trait_name {
+		impl $as_dyn_name for dyn $trait_name + '_ {
 			fn as_dyn(&self) -> &dyn $trait_name {
 				self
 			}
