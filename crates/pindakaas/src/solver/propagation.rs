@@ -123,7 +123,7 @@ pub trait Propagator {
 	/// The notification is not necessarily eager. It usually happens before the
 	/// call of propagator callbacks and when a driving clause is leading to an
 	/// assignment.
-	fn notify_assignments(&mut self, lits: &[Lit]) {
+	fn notify_assignment(&mut self, lits: &[Lit]) {
 		let _ = lits;
 	}
 	/// Method called to notify the propagator about a new decision level.

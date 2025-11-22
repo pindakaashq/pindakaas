@@ -18,8 +18,7 @@ pub struct CExternalPropagator {
 	/// they will be reproduced by the propagator if required).
 	pub are_reasons_forgettable: bool,
 	/// Callback to notify the propagator of assignments to observed literals.
-	pub notify_assignments:
-		unsafe extern "C" fn(data: *mut c_void, lits: *const c_int, size: usize),
+	pub notify_assignment: unsafe extern "C" fn(data: *mut c_void, lits: *const c_int, size: usize),
 	/// Callback to notify the propagator of new decision levels.
 	pub notify_new_decision_level: unsafe extern "C" fn(data: *mut c_void),
 	/// Callback to notify the propagator of backtracks.
@@ -65,7 +64,7 @@ pub struct CTracer {
 	/// Callback to add an original clause to the tracer.
 	pub add_original_clause: unsafe extern "C" fn(
 		data: *mut c_void,
-		id: u64,
+		id: i64,
 		redundant: bool,
 		clause: *const c_int,
 		clause_len: usize,
@@ -74,33 +73,34 @@ pub struct CTracer {
 	/// Callback to add a derived clause to the tracer.
 	pub add_derived_clause: unsafe extern "C" fn(
 		data: *mut c_void,
-		id: u64,
+		id: i64,
 		redundant: bool,
+		witness: c_int,
 		clause: *const c_int,
 		clause_len: usize,
-		antecedents: *const u64,
+		antecedents: *const i64,
 		antecedents_len: usize,
 	),
 	/// Callback to delete a clause from the tracer.
 	pub delete_clause: unsafe extern "C" fn(
 		data: *mut c_void,
-		id: u64,
+		id: i64,
 		redundant: bool,
 		clause: *const c_int,
 		clause_len: usize,
 	),
 	/// Callback to weaken a clause in the tracer.
 	pub weaken_minus:
-		unsafe extern "C" fn(data: *mut c_void, id: u64, clause: *const c_int, clause_len: usize),
+		unsafe extern "C" fn(data: *mut c_void, id: i64, clause: *const c_int, clause_len: usize),
 	/// Callback to strengthen a clause in the tracer.
-	pub strengthen: unsafe extern "C" fn(data: *mut c_void, id: u64),
+	pub strengthen: unsafe extern "C" fn(data: *mut c_void, id: i64),
 	/// Callback to report the status to the tracer.
-	pub report_status: unsafe extern "C" fn(data: *mut c_void, status: c_int, id: u64),
+	pub report_status: unsafe extern "C" fn(data: *mut c_void, status: c_int, id: i64),
 	/// Callback to finalize a clause in the tracer.
 	pub finalize_clause:
-		unsafe extern "C" fn(data: *mut c_void, id: u64, clause: *const c_int, clause_lens: usize),
+		unsafe extern "C" fn(data: *mut c_void, id: i64, clause: *const c_int, clause_lens: usize),
 	/// Callback used when a proof is started.
-	pub begin_proof: unsafe extern "C" fn(data: *mut c_void, first_derived: u64),
+	pub begin_proof: unsafe extern "C" fn(data: *mut c_void, first_derived: i64),
 	/// Callback to notify an assumption has been added.
 	pub solve_query: unsafe extern "C" fn(data: *mut c_void),
 	/// Callback to add an assumption literal to the tracer.
@@ -113,17 +113,17 @@ pub struct CTracer {
 	/// Callback to add an assumption clause to the tracer.
 	pub add_assumption_clause: unsafe extern "C" fn(
 		data: *mut c_void,
-		id: u64,
+		id: i64,
 		clause: *const c_int,
 		clause_len: usize,
-		antecedents: *const u64,
+		antecedents: *const i64,
 		antecedents_len: usize,
 	),
 	/// Callback to conclude the proof as unsatisfiable.
 	pub conclude_unsat: unsafe extern "C" fn(
 		data: *mut c_void,
 		conclusion_type: u8,
-		clause_ids: *const u64,
+		clause_ids: *const i64,
 		clause_ids_len: usize,
 	),
 	/// Callback to conclude the proof as satisfiable.
@@ -132,6 +132,9 @@ pub struct CTracer {
 	/// Callback to finish the proof without a conclusion.
 	pub conclude_unknown:
 		unsafe extern "C" fn(data: *mut c_void, trail: *const c_int, trail_len: usize),
+	/// Notify the observer that a clause is demoted.
+	pub demote_clause:
+		unsafe extern "C" fn(data: *mut c_void, id: i64, clause: *const c_int, clause_len: usize),
 }
 
 extern "C" {

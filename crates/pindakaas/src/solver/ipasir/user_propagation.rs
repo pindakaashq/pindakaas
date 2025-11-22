@@ -432,7 +432,7 @@ impl<
 		prop.clause_queue.is_some()
 	}
 
-	unsafe extern "C" fn notify_assignments<P: Propagator>(
+	unsafe extern "C" fn notify_assignment<P: Propagator>(
 		store: *mut c_void,
 		lits: *const i32,
 		len: usize,
@@ -444,7 +444,7 @@ impl<
 				.propagator
 				.some_ref()
 				.borrow_propagator_mut::<P>()
-				.notify_assignments(lits);
+				.notify_assignment(lits);
 		};
 	}
 
@@ -579,7 +579,7 @@ where
 			data: store_ptr as *mut c_void,
 			is_lazy: P::CHECK_ONLY,
 			are_reasons_forgettable: P::REASON_PERSISTENCE == ClausePersistence::Forgettable,
-			notify_assignments: Self::notify_assignments::<P>,
+			notify_assignment: Self::notify_assignment::<P>,
 			notify_new_decision_level: Self::notify_new_decision_level::<P>,
 			notify_backtrack: Self::notify_backtrack::<P>,
 			check_found_model: Self::check_model::<P>,

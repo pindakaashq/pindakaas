@@ -7,9 +7,11 @@ use std::path::Path;
 fn main() {
 	assert_eq!(
 		include_str!("vendor/cadical/VERSION").trim(),
-		"2.1.3",
+		"2.2.0",
 		"unexpected version of CaDiCaL detected"
 	);
+
+	println!("cargo:rerun-if-changed=vendor/cadical");
 
 	let src = [
 		"vendor/cadical/contrib/craigtracer.cpp",
@@ -17,6 +19,7 @@ fn main() {
 		"vendor/cadical/src/arena.cpp",
 		"vendor/cadical/src/assume.cpp",
 		"vendor/cadical/src/averages.cpp",
+		"vendor/cadical/src/backbone.cpp",
 		"vendor/cadical/src/backtrack.cpp",
 		"vendor/cadical/src/backward.cpp",
 		"vendor/cadical/src/bins.cpp",
@@ -27,19 +30,23 @@ fn main() {
 		"vendor/cadical/src/collect.cpp",
 		"vendor/cadical/src/compact.cpp",
 		"vendor/cadical/src/condition.cpp",
+		"vendor/cadical/src/congruence.cpp",
 		"vendor/cadical/src/config.cpp",
 		"vendor/cadical/src/constrain.cpp",
 		"vendor/cadical/src/contract.cpp",
 		"vendor/cadical/src/cover.cpp",
 		"vendor/cadical/src/decide.cpp",
+		"vendor/cadical/src/definition.cpp",
 		"vendor/cadical/src/decompose.cpp",
 		"vendor/cadical/src/deduplicate.cpp",
 		"vendor/cadical/src/drattracer.cpp",
 		"vendor/cadical/src/elim.cpp",
+		"vendor/cadical/src/elimfast.cpp",
 		"vendor/cadical/src/ema.cpp",
 		"vendor/cadical/src/extend.cpp",
 		"vendor/cadical/src/external.cpp",
 		"vendor/cadical/src/external_propagate.cpp",
+		"vendor/cadical/src/factor.cpp",
 		"vendor/cadical/src/file.cpp",
 		"vendor/cadical/src/flags.cpp",
 		"vendor/cadical/src/flip.cpp",
@@ -49,11 +56,11 @@ fn main() {
 		"vendor/cadical/src/idruptracer.cpp",
 		"vendor/cadical/src/instantiate.cpp",
 		"vendor/cadical/src/internal.cpp",
+		"vendor/cadical/src/kitten.c",
 		"vendor/cadical/src/lidruptracer.cpp",
 		"vendor/cadical/src/limit.cpp",
 		"vendor/cadical/src/logging.cpp",
 		"vendor/cadical/src/lookahead.cpp",
-		"vendor/cadical/src/lratbuilder.cpp",
 		"vendor/cadical/src/lratchecker.cpp",
 		"vendor/cadical/src/lrattracer.cpp",
 		"vendor/cadical/src/lucky.cpp",
@@ -81,17 +88,23 @@ fn main() {
 		"vendor/cadical/src/signal.cpp",
 		"vendor/cadical/src/solution.cpp",
 		"vendor/cadical/src/solver.cpp",
+		"vendor/cadical/src/stable.cpp",
 		"vendor/cadical/src/stats.cpp",
 		"vendor/cadical/src/subsume.cpp",
+		"vendor/cadical/src/sweep.cpp",
 		"vendor/cadical/src/terminal.cpp",
 		"vendor/cadical/src/ternary.cpp",
+		"vendor/cadical/src/tier.cpp",
 		"vendor/cadical/src/transred.cpp",
+		"vendor/cadical/src/unstable.cpp",
 		"vendor/cadical/src/util.cpp",
 		"vendor/cadical/src/var.cpp",
 		"vendor/cadical/src/veripbtracer.cpp",
 		"vendor/cadical/src/version.cpp",
 		"vendor/cadical/src/vivify.cpp",
 		"vendor/cadical/src/walk.cpp",
+		"vendor/cadical/src/walk_full_occs.cpp",
+		"vendor/cadical/src/warmup.cpp",
 		"vendor/cadical/src/watch.cpp",
 	];
 
@@ -109,6 +122,39 @@ fn main() {
 		let _ = build.define("LOGGING", None);
 	} else {
 		let _ = build.define("QUIET", None);
+	}
+
+	// WORKAROUND: Some "kitten_" functions are defined in CaDiCaL and Kissat.
+	// We rename them here to avoid linking conflicts.
+	const KITTEN_FNS: &[&str] = &[
+		"kitten_assume",
+		"kitten_binary",
+		"kitten_clause",
+		"kitten_clause_with_id_and_exception",
+		"kitten_clear",
+		"kitten_compute_clausal_core",
+		"kitten_failed",
+		"kitten_fixed",
+		"kitten_flip_literal",
+		"kitten_flip_phases",
+		"kitten_no_ticks_limit",
+		"kitten_randomize_phases",
+		"kitten_release",
+		"kitten_set_ticks_limit",
+		"kitten_shrink_to_clausal_core",
+		"kitten_shuffle_clauses",
+		"kitten_solve",
+		"kitten_status",
+		"kitten_track_antecedents",
+		"kitten_traverse_core_clauses",
+		"kitten_traverse_core_ids",
+		"kitten_unit",
+		"kitten_value",
+		"completely_backtrack_to_root_level",
+		"new_learned_klause",
+	];
+	for f in KITTEN_FNS {
+		let _ = build.define(f, format!("cadical_mangled_{f}").as_str());
 	}
 
 	#[cfg(not(debug_assertions))]
