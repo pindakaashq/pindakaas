@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+title: Pindakaas
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Hendrik
+    family-names: Bierlee
+    email: henk.bierlee@kuleuven.be
+    affiliation: KU Leuven
+    orcid: 'https://orcid.org/0000-0001-6766-5435'
+  - given-names: Jip J.
+    family-names: Dekker
+    email: jip.dekker@monash.edu
+    affiliation: Monash University
+    orcid: 'https://orcid.org/0000-0002-0053-6724'
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.10851855
+repository-code: 'https://github.com/pindakaashq/pindakaas'
+abstract: >-
+  Pindakaas is a library to transform pseudo-Boolean and
+  integer constraints into conjunctive normal form, and to
+  efficiently interact with Boolean satisfiability solvers.
+keywords:
+  - Boolean satisfiability
+  - constraint modelling
+  - logic
+license: MPL-2.0
