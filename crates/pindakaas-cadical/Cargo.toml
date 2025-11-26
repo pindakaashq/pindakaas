@@ -9,9 +9,9 @@ include = [
 	"src/*",
 	"vendor/cadical/LICENSE",
 	"vendor/cadical/VERSION",
-	"vendor/cadical/src/*.{cpp,h,hpp}",
-	"vendor/cadical/contrib/*.{cpp,h,hpp}",
-	"vendor/cadical/contrib/msvc/*.{cpp,h,hpp}",
+	"vendor/cadical/src/*.{c,cpp,h,hpp}",
+	"vendor/cadical/contrib/*.{c,cpp,h,hpp}",
+	"vendor/cadical/contrib/msvc/*.{c,cpp,h,hpp}",
 ]
 build = "build.rs"
 links = "cadical"
