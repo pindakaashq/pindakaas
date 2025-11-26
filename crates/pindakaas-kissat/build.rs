@@ -5,6 +5,11 @@
 use std::{path::Path, process::Command};
 
 fn main() {
+	let version = include_str!("vendor/kissat/VERSION").trim();
+	assert_eq!(version, "4.0.4", "unexpected version of Kissat detected");
+
+	println!("cargo:rerun-if-changed=vendor/kissat");
+
 	let src = [
 		"vendor/kissat/src/allocate.c",
 		"vendor/kissat/src/analyze.c",
@@ -82,7 +87,6 @@ fn main() {
 		"vendor/kissat/src/shrink.c",
 		"vendor/kissat/src/smooth.c",
 		"vendor/kissat/src/sort.c",
-		"vendor/kissat/src/stack.c",
 		"vendor/kissat/src/statistics.c",
 		"vendor/kissat/src/strengthen.c",
 		"vendor/kissat/src/substitute.c",
@@ -104,8 +108,6 @@ fn main() {
 	let mut builder = cc::Build::new();
 
 	let compiler = builder.try_get_compiler().unwrap();
-	let version = include_str!("vendor/kissat/VERSION").trim();
-	assert_eq!(version, "4.0.2", "unexpected version of Kissat detected");
 	let git_id = String::from_utf8(
 		Command::new("git")
 			.current_dir("vendor/kissat")
