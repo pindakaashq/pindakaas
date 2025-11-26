@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.2.3...pyndakaas-v0.3.0) - 2025-11-26
+
+### Other
+
+- updated the following local packages: pindakaas
+- add citation to the documentation
+
 ## [0.2.3](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.2.2...pyndakaas-v0.2.3) - 2025-11-04
 
 ### Other
