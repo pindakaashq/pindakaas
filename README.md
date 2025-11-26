@@ -52,6 +52,22 @@ pip install pindakaas
 
 For more information about the Python library, please visit the [official documentation](https://pindakaas.readthedocs.io/en/latest/).
 
+## Citation
+
+If you want to cite Pindakaas please use our general software citation, in addition to any citation to a specific version or paper:
+
+```biblatex
+@software{Pindakaas,
+author = {Bierlee, Hendrik and Dekker, Jip J.},
+license = {MPL-2.0},
+title = {{Pindakaas}},
+url = {https://doi.org/10.5281/zenodo.10851855},
+doi = {10.5281/zenodo.10851855},
+}
+```
+
+Note that you might have to use `misc` instead of `software`, if your system does not support `software` as a type.
+
 ## Acknowledgements
 
 This research was partially funded by the Australian Government through the Australian Research Council Industrial Transformation Training Centre in Optimisation Technologies, Integrated Methodologies, and Applications ([OPTIMA](https://optima.org.au)), Project ID IC200100009
