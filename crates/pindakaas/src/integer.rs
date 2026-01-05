@@ -25,8 +25,8 @@ pub(crate) const GROUND_BINARY_AT_LB: bool = false;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Consistency {
-	None,
 	#[default]
+	None,
 	Bounds,
 	Domain,
 }
