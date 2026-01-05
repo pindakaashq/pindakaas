@@ -2365,7 +2365,6 @@ mod tests {
 	use std::{cmp::Ordering, num::NonZeroI32};
 
 	use itertools::Itertools;
-	pub(crate) use linear_test_suite;
 	use traced_test::test;
 
 	use crate::{
