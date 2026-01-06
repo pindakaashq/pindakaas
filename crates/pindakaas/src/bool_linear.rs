@@ -29,7 +29,7 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
 	cardinality::Cardinality,
-	cardinality_one::{CardinalityOne, PairwiseEncoder},
+	cardinality_one::{BitwiseEncoder, CardinalityOne},
 	helpers::{as_binary, is_powers_of_two, new_named_lit},
 	integer::{
 		lex_leq_const, Consistency, IntVar, IntVarEnc, IntVarOrd, Lin, Model, GROUND_BINARY_AT_LB,
@@ -219,7 +219,7 @@ pub(crate) struct PosCoeff(Coeff);
 pub struct StaticLinEncoder<
 	LinEnc = AdderEncoder,
 	CardEnc = AdderEncoder, // TODO: Actual Cardinality encoding
-	Card1Enc = PairwiseEncoder,
+	Card1Enc = BitwiseEncoder,
 > {
 	lin_enc: LinEnc,
 	card_enc: CardEnc,

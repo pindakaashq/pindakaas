@@ -226,8 +226,7 @@ mod pindakaas {
 			ConstraintArg::BoolLin(lin) => {
 				let aggregated = BoolLinAggregator::default().aggregate(db, &lin.0)?;
 				match aggregated {
-					BoolLinVariant::Cardinality(c) => match enc.unwrap_or(Encoder::SORTING_NETWORK)
-					{
+					BoolLinVariant::Cardinality(c) => match enc.unwrap_or(Encoder::ADDER) {
 						Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, &c),
 						Encoder::ADDER => AdderEncoder::default().encode(db, &c),
 						Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, &c),
@@ -244,7 +243,7 @@ mod pindakaas {
 						Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, &c),
 						_ => return invalid_enc("CardinalityOne", enc.unwrap()),
 					},
-					BoolLinVariant::Linear(lin) => match enc.unwrap_or(Encoder::TOTALIZER) {
+					BoolLinVariant::Linear(lin) => match enc.unwrap_or(Encoder::ADDER) {
 						Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, &lin),
 						Encoder::ADDER => AdderEncoder::default().encode(db, &lin),
 						Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, &lin),
