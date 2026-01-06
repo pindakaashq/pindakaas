@@ -418,8 +418,8 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		range.collect_tuple().unwrap()
 	}
 
-	/// Create a [`ClauseDatabase`] wrapper that adds the given conditions to
-	/// each clause that it adds to the wrapped database.
+	/// Create a [`ClauseDatabase`] wrapper that adds the negation of the given
+	/// conditions to each clause before adding it to the wrapped database.
 	///
 	/// Note that the wrapped database type itself implements the
 	/// [`ClauseDatabase`] trait.
@@ -438,6 +438,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 					.conditions
 					.iter()
 					.copied()
+					.map(Lit::not)
 					.chain(clause.iter().copied())
 					.collect_vec();
 				self.db.add_clause_from_slice(&chain)

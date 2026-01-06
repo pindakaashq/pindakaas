@@ -722,11 +722,11 @@ where
 				Formula::IfThenElse { cond, then, els } => {
 					let name = cond.bind(db, None)?;
 					{
-						let mut cdb = db.with_conditions(vec![!name]);
+						let mut cdb = db.with_conditions(vec![name]);
 						let neg_then: Formula<Lit> = !*then.clone();
 						self.encode(&mut cdb, &neg_then)?;
 					}
-					let mut cdb = db.with_conditions(vec![name]);
+					let mut cdb = db.with_conditions(vec![!name]);
 					let neg_els: Formula<Lit> = !*els.clone();
 					self.encode(&mut cdb, &neg_els)
 				}
@@ -763,7 +763,7 @@ where
 			}
 			Formula::Implies(left, right) => {
 				let x = left.bind(db, None)?;
-				let mut cdb = db.with_conditions(vec![!x]);
+				let mut cdb = db.with_conditions(vec![x]);
 				self.encode(&mut cdb, right.as_ref())
 			}
 			Formula::Equiv(sub) => {
@@ -803,10 +803,10 @@ where
 			Formula::IfThenElse { cond, then, els } => {
 				let name = cond.bind(db, None)?;
 				{
-					let mut cdb = db.with_conditions(vec![!name]);
+					let mut cdb = db.with_conditions(vec![name]);
 					self.encode(&mut cdb, then.as_ref())?;
 				}
-				let mut cdb = db.with_conditions(vec![name]);
+				let mut cdb = db.with_conditions(vec![!name]);
 				self.encode(&mut cdb, els.as_ref())
 			}
 		}
