@@ -43,7 +43,7 @@ class ClauseDatabase(ABC):
         """Add an encoding of a `constraint` to the database.
 
         Optionally, the constraint is implied by the given `conditions` (i.e. every
-            clause is extended by the `conditions`), and the given `encoder` is used
+            clause is extended by the negated `conditions`), and the given `encoder` is used
             for the encoding.
 
         :param constraint: The constraint or formula to encode and add to the database
