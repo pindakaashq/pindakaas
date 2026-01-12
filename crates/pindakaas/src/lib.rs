@@ -429,6 +429,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 	{
 		struct ConditionalDatabase<'a> {
 			db: &'a mut dyn ClauseDatabase,
+			/// The (already negated) conditions
 			conditions: Vec<Lit>,
 		}
 
@@ -438,7 +439,6 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 					.conditions
 					.iter()
 					.copied()
-					.map(Lit::not)
 					.chain(clause.iter().copied())
 					.collect_vec();
 				self.db.add_clause_from_slice(&chain)
@@ -451,7 +451,8 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 
 		ConditionalDatabase {
 			db: self.as_mut_dyn(),
-			conditions,
+			// negate here in order to avoid doing it for each added clause
+			conditions: conditions.into_iter().map(Lit::not).collect(),
 		}
 	}
 }
