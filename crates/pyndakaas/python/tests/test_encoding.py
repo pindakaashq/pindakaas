@@ -107,7 +107,7 @@ def test_conditions():
     f = CNF()
     x, y, p = f.new_vars(3)
     f.add_encoding(x ^ y, conditions=[p])
-    assert f.to_dimacs() == "p cnf 3 2\n3 1 2 0\n3 -1 -2 0\n"
+    assert f.to_dimacs() == "p cnf 3 2\n-3 1 2 0\n-3 -1 -2 0\n"
 
 
 def test_custom_db():
@@ -122,6 +122,6 @@ def test_custom_db():
 
     f.add_encoding(x ^ y, conditions=[p])
     assert f.clauses == [
-        [4, 2, 3],
-        [4, -2, -3],
+        [-4, 2, 3],
+        [-4, -2, -3],
     ]
