@@ -216,9 +216,10 @@ mod pindakaas {
 		}
 	}
 
+	/// Distinguish between unsat and other exceptions become `PyErr`s
 	enum EncodingError {
 		Unsatisfiable(::pindakaas::Unsatisfiable),
-		InvalidEncoder(String),
+		PyErr(PyErr),
 	}
 
 	impl From<::pindakaas::Unsatisfiable> for EncodingError {
@@ -227,12 +228,12 @@ mod pindakaas {
 		}
 	}
 
-	// Allow other `PyErr`s to become a wrapped exception
+	// Allow other `EncodingError`s to become a wrapped exception
 	impl From<EncodingError> for ErrWrapper {
 		fn from(err: EncodingError) -> Self {
 			match err {
 				EncodingError::Unsatisfiable(e) => e.into(),
-				EncodingError::InvalidEncoder(e) => ErrWrapper(InvalidEncoder::new_err(e)),
+				EncodingError::PyErr(e) => ErrWrapper(e),
 			}
 		}
 	}
@@ -248,9 +249,9 @@ mod pindakaas {
 		Db: ClauseDatabase,
 	{
 		let invalid_enc = |con_ty, enc| {
-			Err(EncodingError::InvalidEncoder(format!(
+			Err(EncodingError::PyErr(InvalidEncoder::new_err(format!(
 				"Unable to encode object of type `{con_ty}' using {enc:?}"
-			)))
+			))))
 		};
 
 		match con {
