@@ -110,6 +110,13 @@ def test_conditions():
     assert f.to_dimacs() == "p cnf 3 2\n3 1 2 0\n3 -1 -2 0\n"
 
 
+def test_add_unsat_with_conditions():
+    f = CNF()
+    x, y, p = f.new_vars(3)
+    f.add_encoding(x + y >= 5, conditions=[p])
+    assert f.to_dimacs() == "p cnf 3 1\n-3 0\n"
+
+
 def test_custom_db():
     f = CustomDB()
     assert f.new_var() == Lit.from_raw(1)

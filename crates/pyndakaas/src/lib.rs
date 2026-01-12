@@ -77,9 +77,12 @@ mod pindakaas {
 
 	#[pymodule_export]
 	use crate::InvalidEncoder;
-	use crate::Result;
 	#[pymodule_export]
 	use crate::Unsatisfiable;
+	use crate::{ErrWrapper, Result};
+
+	/// Add alias for BaseResult (since this is private to ::pindakaas)
+	type BaseResult = Result<(), ::pindakaas::Unsatisfiable>;
 
 	#[derive(FromPyObject)]
 	/// Argument capture for types that can become :class:`BoolLinExp`.
@@ -199,27 +202,55 @@ mod pindakaas {
 		Db: ClauseDatabase,
 	{
 		if conditions.is_empty() {
-			encode_constraint(db, con, enc)
+			Ok(encode_constraint(db, con, enc)?)
 		} else {
-			encode_constraint(
-				&mut db.with_conditions(conditions.into_iter().map(|l| l.0).collect()),
-				con,
-				enc,
-			)
+			let conditions = conditions.into_iter().map(|l| l.0).collect_vec();
+			let res = encode_constraint(&mut db.with_conditions(conditions.clone()), con, enc);
+			match res {
+				Err(EncodingError::Unsatisfiable(::pindakaas::Unsatisfiable)) => {
+					Ok(db.add_clause(conditions.into_iter().map(|l| !l))?)
+				}
+				Err(e) => Err(e.into()),
+				Ok(_) => Ok(()),
+			}
+		}
+	}
+
+	enum EncodingError {
+		Unsatisfiable(::pindakaas::Unsatisfiable),
+		InvalidEncoder(String),
+	}
+
+	impl From<::pindakaas::Unsatisfiable> for EncodingError {
+		fn from(value: ::pindakaas::Unsatisfiable) -> Self {
+			EncodingError::Unsatisfiable(value)
+		}
+	}
+
+	// Allow other `PyErr`s to become a wrapped exception
+	impl From<EncodingError> for ErrWrapper {
+		fn from(err: EncodingError) -> Self {
+			match err {
+				EncodingError::Unsatisfiable(e) => e.into(),
+				EncodingError::InvalidEncoder(e) => ErrWrapper(InvalidEncoder::new_err(e)),
+			}
 		}
 	}
 
 	/// Internal function to help with the encoding of a constraint given an
 	/// optional encoder.
-	fn encode_constraint<Db>(db: &mut Db, con: ConstraintArg, enc: Option<Encoder>) -> Result
+	fn encode_constraint<Db>(
+		db: &mut Db,
+		con: ConstraintArg,
+		enc: Option<Encoder>,
+	) -> Result<(), EncodingError>
 	where
 		Db: ClauseDatabase,
 	{
 		let invalid_enc = |con_ty, enc| {
-			Err(InvalidEncoder::new_err(format!(
+			Err(EncodingError::InvalidEncoder(format!(
 				"Unable to encode object of type `{con_ty}' using {enc:?}"
-			))
-			.into())
+			)))
 		};
 
 		match con {
@@ -271,10 +302,7 @@ mod pindakaas {
 	) -> Result {
 		struct PyDbWrapper<'a>(&'a Bound<'a, PyAny>);
 		impl ClauseDatabase for PyDbWrapper<'_> {
-			fn add_clause_from_slice(
-				&mut self,
-				clause: &[BaseLit],
-			) -> Result<(), pindakaas::Unsatisfiable> {
+			fn add_clause_from_slice(&mut self, clause: &[BaseLit]) -> BaseResult {
 				let clause = clause.iter().map(|&l| Lit(l)).collect_vec();
 				let res = self.0.call_method1("add_clause", (clause,));
 				match res {
