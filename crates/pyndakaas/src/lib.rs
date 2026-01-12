@@ -216,7 +216,7 @@ mod pindakaas {
 		}
 	}
 
-	/// Distinguish between unsat and other exceptions become `PyErr`s
+	/// Distinguish between unsat and other exceptions which become `PyErr`s
 	enum EncodingError {
 		Unsatisfiable(::pindakaas::Unsatisfiable),
 		PyErr(PyErr),
