@@ -9,9 +9,13 @@ use pindakaas_intel_sat::{
 };
 
 use crate::{
-	solver::ipasir::{
-		AccessIpasirStore, BasicIpasirStorage, IpasirAssumptionMethods, IpasirLearnCallbackMethod,
-		IpasirSolverMethods, IpasirStore, IpasirTermCallbackMethod,
+	solver::{
+		ipasir::{
+			var_factory_next_var, var_factory_next_var_range, AccessIpasirStore,
+			IpasirAssumptionMethods, IpasirLearnCallbackMethod, IpasirLiteralMethods,
+			IpasirSolverMethods, IpasirStore, IpasirTermCallbackMethod,
+		},
+		VarFactory,
 	},
 	ClauseDatabaseTools, Cnf,
 };
@@ -20,11 +24,11 @@ use crate::{
 /// Representation of an instance of the [Intel
 /// SAT](https://github.com/alexander-nadel/intel_sat_solver) solver.
 pub struct IntelSat {
-	store: IpasirStore<IntelSat, 1, 1, 0>,
+	store: IpasirStore<IntelSat, VarFactory, 1, 1, 0>,
 }
 
 impl AccessIpasirStore for IntelSat {
-	type Store = IpasirStore<IntelSat, 1, 1, 0>;
+	type Store = IpasirStore<IntelSat, VarFactory, 1, 1, 0>;
 
 	fn ipasir_store(&self) -> &Self::Store {
 		&self.store
@@ -37,7 +41,7 @@ impl AccessIpasirStore for IntelSat {
 impl From<&Cnf> for IntelSat {
 	fn from(value: &Cnf) -> Self {
 		let mut slv: Self = Default::default();
-		*slv.ipasir_store_mut().vars_mut() = value.nvar;
+		slv.store.store.vars = value.nvar;
 		for cl in value.iter() {
 			// Ignore early detected unsatisfiability
 			let _ = slv.add_clause(cl.iter().copied());
@@ -50,6 +54,12 @@ impl IpasirAssumptionMethods for IntelSat {
 	const IPASIR_ASSUME: unsafe extern "C" fn(slv: *mut c_void, lit: i32) = intel_sat_assume;
 	const IPASIR_FAILED: unsafe extern "C" fn(slv: *mut c_void, lit: i32) -> c_int =
 		intel_sat_failed;
+}
+
+impl IpasirLiteralMethods for IntelSat {
+	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2] =
+		var_factory_next_var_range;
+	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32 = var_factory_next_var;
 }
 
 impl IpasirLearnCallbackMethod for IntelSat {

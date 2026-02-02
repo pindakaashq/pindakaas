@@ -8,9 +8,12 @@ use pindakaas_kissat::{
 };
 
 use crate::{
-	solver::ipasir::{
-		AccessIpasirStore, BasicIpasirStorage, IpasirSolverMethods, IpasirStore,
-		IpasirTermCallbackMethod,
+	solver::{
+		ipasir::{
+			var_factory_next_var, var_factory_next_var_range, AccessIpasirStore,
+			IpasirLiteralMethods, IpasirSolverMethods, IpasirStore, IpasirTermCallbackMethod,
+		},
+		VarFactory,
 	},
 	ClauseDatabaseTools, Cnf, VarRange,
 };
@@ -19,19 +22,19 @@ use crate::{
 /// Representation of an instance of the
 /// [Kissat](https://github.com/arminbiere/kissat) SAT solver.
 pub struct Kissat {
-	store: IpasirStore<Self, 0, 1, 0>,
+	store: IpasirStore<Self, VarFactory, 0, 1, 0>,
 }
 
 impl Kissat {
 	// TODO: Unsure whether this is a good idea.
 	#[doc(hidden)]
 	pub fn emitted_vars(&self) -> VarRange {
-		self.ipasir_store().vars().emitted_vars()
+		self.store.store.vars.emitted_vars()
 	}
 }
 
 impl AccessIpasirStore for Kissat {
-	type Store = IpasirStore<Self, 0, 1, 0>;
+	type Store = IpasirStore<Self, VarFactory, 0, 1, 0>;
 
 	fn ipasir_store(&self) -> &Self::Store {
 		&self.store
@@ -44,7 +47,7 @@ impl AccessIpasirStore for Kissat {
 impl From<&Cnf> for Kissat {
 	fn from(value: &Cnf) -> Self {
 		let mut slv: Self = Default::default();
-		*slv.ipasir_store_mut().vars_mut() = value.nvar;
+		slv.store.store.vars = value.nvar;
 		for cl in value.iter() {
 			// Ignore early detected unsatisfiability
 			let _ = slv.add_clause(cl.iter().copied());
@@ -59,6 +62,12 @@ impl IpasirSolverMethods for Kissat {
 	const IPASIR_RELEASE: unsafe extern "C" fn(*mut c_void) = kissat_release;
 	const IPASIR_SOLVE: unsafe extern "C" fn(*mut c_void) -> c_int = kissat_solve;
 	const IPASIR_VAL: unsafe extern "C" fn(*mut c_void, i32) -> c_int = kissat_value;
+}
+
+impl IpasirLiteralMethods for Kissat {
+	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2] =
+		var_factory_next_var_range;
+	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32 = var_factory_next_var;
 }
 
 impl IpasirTermCallbackMethod for Kissat {

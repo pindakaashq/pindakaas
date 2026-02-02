@@ -15,15 +15,14 @@ use rustc_hash::FxHashMap;
 use crate::{
 	solver::{
 		ipasir::{
-			AccessIpasirStore, BasicIpasirStorage, IpasirSolverMethods, IpasirStore,
-			IpasirStoreInner,
+			AccessIpasirStore, BasicIpasirStorage, IpasirLiteralMethods, IpasirSolverMethods,
+			IpasirStore, IpasirStoreInner,
 		},
 		propagation::{
 			ClausePersistence, ExternalPropagation, PersistentAssignmentListener,
 			PersistentAssignmentNotifier, Propagator, PropagatorDefinition, SearchDecision,
 			SolvingActions,
 		},
-		VarFactory,
 	},
 	Lit, Var,
 };
@@ -96,9 +95,9 @@ trait IpasirPropagatorStorage {
 
 /// Helping wrapper struct to provide [`ExtendedSolvingActions`] to propagators
 /// when connected to an IPASIR-UP solver.
-struct IpasirSolvingActions<'a, Impl> {
+struct IpasirSolvingActions<Impl> {
 	ptr: *mut c_void,
-	vars: &'a mut VarFactory,
+	vars: *mut c_void,
 	_methods: PhantomData<Impl>,
 }
 
@@ -123,8 +122,12 @@ pub(crate) trait IpasirUserPropagationMethods {
 	const IPASIR_UNPHASE: unsafe extern "C" fn(slv: *mut c_void, lit: i32);
 }
 
-impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirUserPropagationMethods>
-	ExternalPropagation for Impl
+impl<
+		Impl: AccessIpasirStore
+			+ IpasirSolverMethods
+			+ IpasirLiteralMethods
+			+ IpasirUserPropagationMethods,
+	> ExternalPropagation for Impl
 where
 	Impl::Store: BasicIpasirStorage + IpasirPropagatorStorage,
 {
@@ -204,8 +207,12 @@ where
 	}
 }
 
-impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirFixedAssignmentMethods>
-	PersistentAssignmentNotifier for Impl
+impl<
+		Impl: AccessIpasirStore
+			+ IpasirSolverMethods
+			+ IpasirLiteralMethods
+			+ IpasirFixedAssignmentMethods,
+	> PersistentAssignmentNotifier for Impl
 where
 	Impl::Store: BasicIpasirStorage + IpasirPropagatorStorage,
 {
@@ -274,7 +281,9 @@ impl fmt::Debug for IpasirPropagator {
 	}
 }
 
-impl<Impl: IpasirUserPropagationMethods> SolvingActions for IpasirSolvingActions<'_, Impl> {
+impl<Impl: IpasirUserPropagationMethods + IpasirLiteralMethods> SolvingActions
+	for IpasirSolvingActions<Impl>
+{
 	fn is_decision(&mut self, lit: Lit) -> bool {
 		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
 		// IPASIR_IS_DECISION function is expected to abide by the IPASIR-UP
@@ -283,12 +292,12 @@ impl<Impl: IpasirUserPropagationMethods> SolvingActions for IpasirSolvingActions
 	}
 
 	fn new_observed_var(&mut self) -> Var {
-		let var = self.vars.next_var_range(1).next().unwrap();
+		let var = Impl::IPASIR_NEW_VAR(self.ptr, self.vars);
 		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
 		// IPASIR_ADD_OBSERVED_VAR function is expected to abide by the IPASIR-UP
 		// interface specification.
-		unsafe { Impl::IPASIR_ADD_OBSERVED_VAR(self.ptr, var.into()) }
-		var
+		unsafe { Impl::IPASIR_ADD_OBSERVED_VAR(self.ptr, var) };
+		Var(NonZeroI32::new(var).unwrap())
 	}
 
 	fn phase(&mut self, lit: Lit) {
@@ -311,13 +320,14 @@ impl<Impl: IpasirUserPropagationMethods> SolvingActions for IpasirSolvingActions
 }
 
 impl<
-		Impl: IpasirSolverMethods + IpasirUserPropagationMethods,
+		Impl: IpasirSolverMethods + IpasirLiteralMethods + IpasirUserPropagationMethods,
+		VarStore,
 		const LRN: usize,
 		const TRM: usize,
-	> IpasirStore<Impl, LRN, TRM, 1>
+	> IpasirStore<Impl, VarStore, LRN, TRM, 1>
 {
 	unsafe extern "C" fn add_external_clause_lit(store: *mut c_void) -> i32 {
-		let store = &mut *(store as *mut IpasirStoreInner<LRN, TRM, 1>);
+		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
 		let prop = &mut store.propagator.some_mut();
 		let Some(queue) = &mut prop.clause_queue else {
 			debug_assert!(false, "has_external_clause did not return true");
@@ -335,7 +345,7 @@ impl<
 		store: *mut c_void,
 		propagated_lit: i32,
 	) -> i32 {
-		let store = &mut *(store as *mut IpasirStoreInner<LRN, TRM, 1>);
+		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
 		let prop = &mut store.propagator.some_mut();
 		let lit = Lit(NonZeroI32::new(propagated_lit).unwrap());
 		debug_assert!(prop.explaining.is_none() || prop.explaining == Some(lit));
@@ -362,7 +372,7 @@ impl<
 		model: *const i32,
 		len: usize,
 	) -> bool {
-		let store = &mut *(store as *mut IpasirStoreInner<LRN, TRM, 1>);
+		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
 		let sol = if len > 0 {
 			slice::from_raw_parts(model, len)
 		} else {
@@ -373,9 +383,10 @@ impl<
 			.map(|&i| (Var(NonZeroI32::new(i.abs()).unwrap()), i >= 0))
 			.collect();
 		let value = |l: Lit| sol.get(&l.var()).copied().unwrap_or(false);
+		let vars: *mut VarStore = &mut store.vars;
 		let mut slv = IpasirSolvingActions::<Impl> {
 			ptr: store.ptr,
-			vars: &mut store.vars,
+			vars: vars as *mut c_void,
 			_methods: PhantomData,
 		};
 		store
@@ -386,10 +397,11 @@ impl<
 			.check_solution(&mut slv, &value)
 	}
 	unsafe extern "C" fn decide<P: Propagator>(store: *mut c_void) -> i32 {
-		let store = &mut *(store as *mut IpasirStoreInner<LRN, TRM, 1>);
+		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
+		let vars: *mut VarStore = &mut store.vars;
 		let mut slv = IpasirSolvingActions::<Impl> {
 			ptr: store.ptr,
-			vars: &mut store.vars,
+			vars: vars as *mut c_void,
 			_methods: PhantomData,
 		};
 		match store
@@ -415,10 +427,11 @@ impl<
 		store: *mut c_void,
 		is_forgettable: *mut bool,
 	) -> bool {
-		let store = &mut *(store as *mut IpasirStoreInner<LRN, TRM, 1>);
+		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
+		let vars: *mut VarStore = &mut store.vars;
 		let mut slv = IpasirSolvingActions::<Impl> {
 			ptr: store.ptr,
-			vars: &mut store.vars,
+			vars: vars as *mut c_void,
 			_methods: PhantomData,
 		};
 		let prop = store.propagator.some_mut();
@@ -437,7 +450,7 @@ impl<
 		lits: *const i32,
 		len: usize,
 	) {
-		let store = &mut *(store as *mut IpasirStoreInner<LRN, TRM, 1>);
+		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
 		if len > 0 {
 			let lits = slice::from_raw_parts(lits as *mut Lit, len);
 			store
@@ -453,7 +466,7 @@ impl<
 		level: usize,
 		restart: bool,
 	) {
-		let store = &mut *(store as *mut IpasirStoreInner<LRN, TRM, 1>);
+		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
 		let prop = store.propagator.some_mut();
 		prop.explaining = None;
 		prop.reason_queue.clear();
@@ -463,7 +476,7 @@ impl<
 	}
 
 	unsafe extern "C" fn notify_new_decision_level<P: Propagator>(store: *mut c_void) {
-		let store = &mut *(store as *mut IpasirStoreInner<LRN, TRM, 1>);
+		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
 		store
 			.propagator
 			.some_ref()
@@ -482,10 +495,11 @@ impl<
 	}
 
 	unsafe extern "C" fn propagate<P: Propagator>(store: *mut c_void) -> i32 {
-		let store = &mut *(store as *mut IpasirStoreInner<LRN, TRM, 1>);
+		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
+		let vars: *mut VarStore = &mut store.vars;
 		let mut slv = IpasirSolvingActions::<Impl> {
 			ptr: store.ptr,
-			vars: &mut store.vars,
+			vars: vars as *mut c_void,
 			_methods: PhantomData,
 		};
 		if let Some(l) = store
@@ -501,10 +515,10 @@ impl<
 	}
 }
 
-impl<Impl, const LRN: usize, const TRM: usize> IpasirPropagatorStorage
-	for IpasirStore<Impl, LRN, TRM, 1>
+impl<Impl, VarStore, const LRN: usize, const TRM: usize> IpasirPropagatorStorage
+	for IpasirStore<Impl, VarStore, LRN, TRM, 1>
 where
-	Impl: IpasirSolverMethods + IpasirUserPropagationMethods,
+	Impl: IpasirSolverMethods + IpasirLiteralMethods + IpasirUserPropagationMethods,
 {
 	fn has_persistent_assignment_listener(&self) -> bool {
 		self.store

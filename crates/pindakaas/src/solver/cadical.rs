@@ -6,14 +6,16 @@ use std::{
 	ffi::{c_int, c_void, CString},
 	fmt,
 	marker::PhantomData,
+	num::NonZero,
 	rc::Rc,
 };
 
 use pindakaas_cadical::{
 	ccadical_add, ccadical_assume, ccadical_connect_proof_tracer, ccadical_copy,
+	ccadical_declare_more_variables, ccadical_declare_one_more_variable,
 	ccadical_disconnect_proof_tracer, ccadical_failed, ccadical_get_option, ccadical_init,
 	ccadical_limit, ccadical_phase, ccadical_release, ccadical_set_learn, ccadical_set_option,
-	ccadical_set_terminate, ccadical_solve, ccadical_unphase, ccadical_val, CTracer,
+	ccadical_set_terminate, ccadical_solve, ccadical_unphase, ccadical_val, ccadical_vars, CTracer,
 };
 #[cfg(feature = "external-propagation")]
 use pindakaas_cadical::{
@@ -32,19 +34,19 @@ use crate::{
 	solver::{
 		ipasir::{
 			AccessIpasirStore, BasicIpasirStorage, IpasirAssumptionMethods,
-			IpasirLearnCallbackMethod, IpasirSolverMethods, IpasirStore, IpasirStoreInner,
-			IpasirTermCallbackMethod,
+			IpasirLearnCallbackMethod, IpasirLiteralMethods, IpasirSolverMethods, IpasirStore,
+			IpasirStoreInner, IpasirTermCallbackMethod,
 		},
 		LearnCallback, TermSignal, TerminateCallback,
 	},
-	ClauseDatabaseTools, Cnf, Lit, VarRange,
+	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit, Var, VarRange,
 };
 
 #[derive(Default)]
 /// Representation of an instance of the
 /// [CaDiCaL](https://github.com/arminbiere/cadical) SAT solver.
 pub struct Cadical {
-	store: IpasirStore<Cadical, 1, 1, 1>,
+	store: IpasirStore<Cadical, (), 1, 1, 1>,
 	tracers: Vec<Rc<RefCell<dyn ProofTracer>>>,
 }
 
@@ -176,6 +178,19 @@ pub trait ProofTracer {
 	}
 }
 
+fn cadical_next_var(slv: *mut c_void, _: *mut c_void) -> i32 {
+	// SAFETY: Pointer is guaranteed to point to a valid and initialized
+	// CCadical instance.
+	unsafe { ccadical_declare_one_more_variable(slv) }
+}
+
+fn cadical_next_var_range(slv: *mut c_void, _: *mut c_void, len: usize) -> [i32; 2] {
+	// SAFETY: Pointer is guaranteed to point to a valid and initialized
+	// CCadical instance.
+	let end = unsafe { ccadical_declare_more_variables(slv, len as i32) };
+	[end + 1 - len as i32, end]
+}
+
 /// Trait that gives extra information about the [`ProofTracer`] implementation.
 /// This information is used to optimize the interaction between the
 /// [`ProofTracer`] and the solver.
@@ -249,7 +264,13 @@ impl Cadical {
 	// TODO: Unsure whether this is a good idea.
 	#[doc(hidden)]
 	pub fn emitted_vars(&self) -> VarRange {
-		self.ipasir_store().vars().emitted_vars()
+		// SAFETY: Pointer is guaranteed to point to a valid and initialized
+		// CCadical instance.
+		let end = unsafe { ccadical_vars(self.ipasir_store().solver_ptr()) };
+		VarRange::new(
+			Var(NonZero::new(1).unwrap()),
+			Var(NonZero::new(end).unwrap()),
+		)
 	}
 
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
@@ -301,14 +322,13 @@ impl Cadical {
 	pub fn shallow_clone(&self) -> Self {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		let ptr = unsafe { ccadical_copy(self.ipasir_store().solver_ptr()) };
-		let vars = *self.ipasir_store().vars(); // Copy
 
 		// Initialize [`Self`] instance.
 		let mut slv = Self {
 			store: IpasirStore {
 				store: Box::new(IpasirStoreInner {
 					ptr,
-					vars,
+					vars: (),
 					learn_cb: OptField::default(),
 					term_cb: OptField::default(),
 					#[cfg(feature = "external-propagation")]
@@ -340,7 +360,7 @@ impl Cadical {
 }
 
 impl AccessIpasirStore for Cadical {
-	type Store = IpasirStore<Self, 1, 1, 1>;
+	type Store = IpasirStore<Self, (), 1, 1, 1>;
 
 	fn ipasir_store(&self) -> &Self::Store {
 		&self.store
@@ -354,8 +374,10 @@ impl AccessIpasirStore for Cadical {
 impl From<&Cnf> for Cadical {
 	fn from(value: &Cnf) -> Self {
 		let mut slv: Self = Default::default();
-		*slv.ipasir_store_mut().vars_mut() = value.nvar;
+		let _r = slv.new_var_range(value.num_vars());
+		debug_assert_eq!(_r.end(), value.nvar.emitted_vars().end());
 		for cl in value.iter() {
+			println!("{:?}", cl);
 			// Ignore early detected unsatisfiability
 			let _ = slv.add_clause(cl.iter().copied());
 		}
@@ -366,6 +388,13 @@ impl From<&Cnf> for Cadical {
 impl IpasirAssumptionMethods for Cadical {
 	const IPASIR_ASSUME: unsafe extern "C" fn(*mut c_void, i32) = ccadical_assume;
 	const IPASIR_FAILED: unsafe extern "C" fn(*mut c_void, i32) -> c_int = ccadical_failed;
+}
+
+impl IpasirLiteralMethods for Cadical {
+	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2] =
+		cadical_next_var_range;
+
+	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32 = cadical_next_var;
 }
 
 impl IpasirLearnCallbackMethod for Cadical {

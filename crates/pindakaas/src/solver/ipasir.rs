@@ -13,7 +13,7 @@ use crate::{
 	helpers::opt_field::OptField,
 	solver::{
 		Assumptions, FailedAssumptions, LearnCallback, SolveResult, Solver, TermSignal,
-		TerminateCallback, VarFactory,
+		TerminateCallback,
 	},
 	ClauseDatabase, Lit, Result, Unsatisfiable, Valuation, VarRange,
 };
@@ -37,11 +37,8 @@ pub(crate) trait BasicIpasirStorage {
 	/// Access the raw pointer of the IPASIR solver.
 	fn solver_ptr(&self) -> *mut c_void;
 
-	/// Access the [`VarFactory`].
-	fn vars(&self) -> &VarFactory;
-
 	/// Mutable access to the [`VarFactory`].
-	fn vars_mut(&mut self) -> &mut VarFactory;
+	fn vars_mut(&mut self) -> *mut c_void;
 }
 
 /// Generic callback function type used by [`get_trampoline0`].
@@ -58,7 +55,9 @@ pub(crate) struct ExplIter(pub(crate) *const i32);
 ///
 /// If a type implements this trait and [`AccessIpasirSolver`], then
 /// [`SolveAssuming`] is implemented automatically.
-pub(crate) trait IpasirAssumptionMethods: IpasirSolverMethods {
+pub(crate) trait IpasirAssumptionMethods:
+	IpasirSolverMethods + IpasirLiteralMethods
+{
 	const IPASIR_ASSUME: unsafe extern "C" fn(slv: *mut c_void, lit: i32);
 	const IPASIR_FAILED: unsafe extern "C" fn(slv: *mut c_void, lit: i32) -> c_int;
 }
@@ -66,7 +65,7 @@ pub(crate) trait IpasirAssumptionMethods: IpasirSolverMethods {
 #[derive(Debug)]
 /// Object that allows querying which assumptions were responsible for the
 /// unsatisfiability of the formula for a given IPASIR solver.
-pub struct IpasirFailedAssumptions<Impl: IpasirSolverMethods> {
+pub struct IpasirFailedAssumptions<Impl: IpasirSolverMethods + IpasirLiteralMethods> {
 	ptr: *mut c_void,
 	_methods: PhantomData<Impl>,
 }
@@ -103,6 +102,11 @@ pub trait IpasirSolverMethods {
 	const IPASIR_VAL: unsafe extern "C" fn(slv: *mut c_void, lit: i32) -> i32;
 }
 
+pub trait IpasirLiteralMethods {
+	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2];
+	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32;
+}
+
 /// Internal structure used to capture all necessary data for an IPASIR solver.
 ///
 /// Depending on the capabilities of the solver, the following generics can be
@@ -116,13 +120,14 @@ pub trait IpasirSolverMethods {
 ///   propagation, and implement [`IpasirUserPropagationMethods`]. Set to 0
 ///   otherwise.
 pub(crate) struct IpasirStore<
-	Impl: IpasirSolverMethods,
+	Impl: IpasirSolverMethods + IpasirLiteralMethods,
+	Var,
 	const LRN: usize,
 	const TRM: usize,
 	const UP: usize,
 > {
 	/// Wrapped inner storage to ensure stable heap allocations for callbacks.
-	pub(crate) store: Box<IpasirStoreInner<LRN, TRM, UP>>,
+	pub(crate) store: Box<IpasirStoreInner<Var, LRN, TRM, UP>>,
 	/// Phantom data to allow the usage of `Impl` type, which must implement the
 	/// different solver methods.
 	pub(crate) _methods: PhantomData<Impl>,
@@ -130,11 +135,11 @@ pub(crate) struct IpasirStore<
 
 /// Inner storage for [`IpasirStore`] to allow unmoved heap allocation using
 /// [`Box`].
-pub(crate) struct IpasirStoreInner<const LRN: usize, const TRM: usize, const UP: usize> {
+pub(crate) struct IpasirStoreInner<Var, const LRN: usize, const TRM: usize, const UP: usize> {
 	/// The raw pointer to the IPASIRs solver.
 	pub(crate) ptr: *mut c_void,
 	/// The variable factory for the solver.
-	pub(crate) vars: VarFactory,
+	pub(crate) vars: Var,
 	/// The callback used when a clause is learned.
 	///
 	/// This attribute ensures that the callback is correctly dropped when the
@@ -219,6 +224,27 @@ unsafe extern "C" fn trampoline1<R, A, F: FnMut(A) -> R>(user_data: *mut c_void,
 	user_data(arg1)
 }
 
+#[cfg(any(feature = "intel-sat", feature = "kissat"))]
+pub(crate) fn var_factory_next_var(_slv: *mut c_void, vars: *mut c_void) -> i32 {
+	// SAFETY: The pointer `vars` is assumed to be valid and point to a
+	// correctly aligned and initialized `VarFactory` instance.
+	let vars = unsafe { &mut *(vars as *mut crate::VarFactory) };
+	vars.next_var_range(1).start().into()
+}
+
+#[cfg(any(feature = "intel-sat", feature = "kissat"))]
+pub(crate) fn var_factory_next_var_range(
+	_slv: *mut c_void,
+	vars: *mut c_void,
+	size: usize,
+) -> [i32; 2] {
+	// SAFETY: The pointer `vars` is assumed to be valid and point to a
+	// correctly aligned and initialized `VarFactory` instance.
+	let vars = unsafe { &mut *(vars as *mut crate::VarFactory) };
+	let range = vars.next_var_range(size);
+	[range.start().into(), range.end().into()]
+}
+
 impl Iterator for ExplIter {
 	type Item = i32;
 
@@ -258,7 +284,7 @@ where
 	}
 }
 
-impl<Impl: AccessIpasirStore + IpasirSolverMethods> ClauseDatabase for Impl
+impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirLiteralMethods> ClauseDatabase for Impl
 where
 	Impl::Store: BasicIpasirStorage,
 {
@@ -281,12 +307,24 @@ where
 	}
 
 	fn new_var_range(&mut self, len: usize) -> VarRange {
-		self.ipasir_store_mut().vars_mut().next_var_range(len)
+		if len == 0 {
+			return VarRange::empty();
+		}
+		let [from, to] = Self::IPASIR_NEW_RANGE(
+			self.ipasir_store().solver_ptr(),
+			self.ipasir_store_mut().vars_mut(),
+			len,
+		);
+		VarRange::new(
+			crate::Var(NonZeroI32::new(from).unwrap()),
+			crate::Var(NonZeroI32::new(to).unwrap()),
+		)
 	}
 }
 
-impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirLearnCallbackMethod> LearnCallback
-	for Impl
+impl<
+		Impl: AccessIpasirStore + IpasirSolverMethods + IpasirLiteralMethods + IpasirLearnCallbackMethod,
+	> LearnCallback for Impl
 where
 	Impl::Store: BasicIpasirStorage + LearnCallbackIpasirStorage,
 {
@@ -331,7 +369,7 @@ where
 	}
 }
 
-impl<Impl: AccessIpasirStore + IpasirSolverMethods> Solver for Impl
+impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirLiteralMethods> Solver for Impl
 where
 	Impl::Store: BasicIpasirStorage,
 {
@@ -367,8 +405,9 @@ where
 	}
 }
 
-impl<Impl: AccessIpasirStore + IpasirSolverMethods + IpasirTermCallbackMethod> TerminateCallback
-	for Impl
+impl<
+		Impl: AccessIpasirStore + IpasirSolverMethods + IpasirLiteralMethods + IpasirTermCallbackMethod,
+	> TerminateCallback for Impl
 where
 	Impl::Store: BasicIpasirStorage + TerminationCallbackIpasirStorage,
 {
@@ -419,24 +458,31 @@ impl<Impl: IpasirAssumptionMethods> FailedAssumptions for IpasirFailedAssumption
 	}
 }
 
-impl<Impl: IpasirSolverMethods, const LRN: usize, const TRM: usize, const UP: usize>
-	BasicIpasirStorage for IpasirStore<Impl, LRN, TRM, UP>
+impl<
+		Impl: IpasirSolverMethods + IpasirLiteralMethods,
+		Var,
+		const LRN: usize,
+		const TRM: usize,
+		const UP: usize,
+	> BasicIpasirStorage for IpasirStore<Impl, Var, LRN, TRM, UP>
 {
 	fn solver_ptr(&self) -> *mut c_void {
 		self.store.ptr
 	}
 
-	fn vars(&self) -> &VarFactory {
-		&self.store.vars
-	}
-
-	fn vars_mut(&mut self) -> &mut VarFactory {
-		&mut self.store.vars
+	fn vars_mut(&mut self) -> *mut c_void {
+		let ptr: *mut Var = &mut self.store.vars;
+		ptr as *mut c_void
 	}
 }
 
-impl<Impl: IpasirSolverMethods, const LRN: usize, const TRM: usize, const UP: usize> Default
-	for IpasirStore<Impl, LRN, TRM, UP>
+impl<
+		Impl: IpasirSolverMethods + IpasirLiteralMethods,
+		Var: Default,
+		const LRN: usize,
+		const TRM: usize,
+		const UP: usize,
+	> Default for IpasirStore<Impl, Var, LRN, TRM, UP>
 {
 	fn default() -> Self {
 		// Safety: The IPASIR_INIT function is expected to abide by the IPASIR
@@ -447,7 +493,7 @@ impl<Impl: IpasirSolverMethods, const LRN: usize, const TRM: usize, const UP: us
 		Self {
 			store: Box::new(IpasirStoreInner {
 				ptr: p,
-				vars: VarFactory::default(),
+				vars: Default::default(),
 				learn_cb: OptField::default(),
 				term_cb: OptField::default(),
 				#[cfg(feature = "external-propagation")]
@@ -460,8 +506,13 @@ impl<Impl: IpasirSolverMethods, const LRN: usize, const TRM: usize, const UP: us
 	}
 }
 
-impl<Impl: IpasirSolverMethods, const LRN: usize, const TRM: usize, const UP: usize> Drop
-	for IpasirStore<Impl, LRN, TRM, UP>
+impl<
+		Impl: IpasirSolverMethods + IpasirLiteralMethods,
+		Var,
+		const LRN: usize,
+		const TRM: usize,
+		const UP: usize,
+	> Drop for IpasirStore<Impl, Var, LRN, TRM, UP>
 {
 	fn drop(&mut self) {
 		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
@@ -471,24 +522,29 @@ impl<Impl: IpasirSolverMethods, const LRN: usize, const TRM: usize, const UP: us
 	}
 }
 
-impl<Impl: IpasirSolverMethods, const TRM: usize, const UP: usize> LearnCallbackIpasirStorage
-	for IpasirStore<Impl, 1, TRM, UP>
+impl<Impl: IpasirSolverMethods + IpasirLiteralMethods, Var, const TRM: usize, const UP: usize>
+	LearnCallbackIpasirStorage for IpasirStore<Impl, Var, 1, TRM, UP>
 {
 	fn learn_callback(&mut self) -> &mut Option<IpasirLearnCb> {
 		self.store.learn_cb.some_mut()
 	}
 }
 
-impl<Impl: IpasirSolverMethods, const LRN: usize, const UP: usize> TerminationCallbackIpasirStorage
-	for IpasirStore<Impl, LRN, 1, UP>
+impl<Impl: IpasirSolverMethods + IpasirLiteralMethods, Var, const LRN: usize, const UP: usize>
+	TerminationCallbackIpasirStorage for IpasirStore<Impl, Var, LRN, 1, UP>
 {
 	fn termination_callback(&mut self) -> &mut Option<IpasirTerminationCb> {
 		self.store.term_cb.some_mut()
 	}
 }
 
-impl<Impl: IpasirSolverMethods, const LRN: usize, const TRM: usize, const UP: usize> fmt::Debug
-	for IpasirStore<Impl, LRN, TRM, UP>
+impl<
+		Impl: IpasirSolverMethods + IpasirLiteralMethods,
+		Var: fmt::Debug,
+		const LRN: usize,
+		const TRM: usize,
+		const UP: usize,
+	> fmt::Debug for IpasirStore<Impl, Var, LRN, TRM, UP>
 {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let mut builder = f.debug_struct("IpasirSolver");
@@ -523,12 +579,18 @@ impl<Impl: IpasirSolverMethods, const LRN: usize, const TRM: usize, const UP: us
 
 // Safety: No one besides us has the raw solver pointer, so we can safely
 // transfer the solver to another thread.
-unsafe impl<const LRN: usize, const TRM: usize> Send for IpasirStoreInner<LRN, TRM, 0> {}
+unsafe impl<Var: Send, const LRN: usize, const TRM: usize> Send
+	for IpasirStoreInner<Var, LRN, TRM, 0>
+{
+}
 
 #[cfg(not(feature = "external-propagation"))]
 // Safety: No one besides us has the raw solver pointer, so we can safely
 // transfer the solver to another thread.
-unsafe impl<const LRN: usize, const TRM: usize> Send for IpasirStoreInner<LRN, TRM, 1> {}
+unsafe impl<Var: Send, const LRN: usize, const TRM: usize> Send
+	for IpasirStoreInner<Var, LRN, TRM, 1>
+{
+}
 
 impl<Impl: IpasirSolverMethods> Valuation for IpasirValuation<Impl> {
 	fn value(&self, lit: Lit) -> bool {

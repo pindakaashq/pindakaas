@@ -227,6 +227,12 @@ extern "C" {
 	pub fn ccadical_terminate(slv: *mut CCaDiCaL);
 	/// C binding for the `unphase` function.
 	pub fn ccadical_unphase(slv: *mut CCaDiCaL, lit: i32);
+	/// C binding for the `declare_one_more_variable` function.
+	pub fn ccadical_declare_more_variables(slv: *mut CCaDiCaL, num_vars: i32) -> i32;
+	/// C binding for the `declare_more_variables` function.
+	pub fn ccadical_declare_one_more_variable(slv: *mut CCaDiCaL) -> i32;
+	/// C bindings for the `vars` function.
+	pub fn ccadical_vars(slv: *mut CCaDiCaL) -> i32;
 
 	// Proof Tracer API
 	/// C binding for the `connect_proof_tracer` function.
