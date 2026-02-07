@@ -3302,4 +3302,17 @@ mod tests {
 		totalizer_encoder,
 		crate::bool_linear::TotalizerEncoder::default()
 	);
+
+	// Test propagation feature
+	linear_test_suite!(
+		totalizer_encoder_prop_bounds,
+		crate::bool_linear::TotalizerEncoder::default()
+			.with_propagation(crate::integer::Consistency::Bounds)
+	);
+
+	linear_test_suite!(
+		totalizer_encoder_prop_doms,
+		crate::bool_linear::TotalizerEncoder::default()
+			.with_propagation(crate::integer::Consistency::Domain)
+	);
 }
