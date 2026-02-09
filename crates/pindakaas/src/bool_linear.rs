@@ -680,11 +680,11 @@ where
 			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
 			.collect_vec();
 
-		let ys = ys
+		let ys: Vec<_> = ys
 			.into_iter()
-			.map(|nodes| {
+			.map(|nodes| -> Result<_, Unsatisfiable> {
 				let mut views = FxHashMap::default();
-				Rc::new(RefCell::new({
+				Ok(Rc::new(RefCell::new({
 					let mut y = model.new_var(
 						nodes
 							.into_iter()
@@ -701,18 +701,20 @@ where
 							.collect(),
 						self.add_consistency,
 					);
+					if y.dom.is_empty() {
+						return Err(Unsatisfiable);
+					}
 					y.views = views
 						.into_iter()
 						.map(|(val, view)| (val, (y.id + 1, view)))
 						.collect();
 					y
-				}))
+				})))
 			})
-			.collect_vec();
+			.try_collect()?;
 
 		let mut ys = ys.into_iter();
 		let first = ys.next().unwrap();
-		assert_eq!(first.as_ref().borrow().size(), 1);
 		let _ = xs.iter().zip(ys).fold(first, |curr, (x_i, next)| {
 			model.cons.push(Lin::tern(
 				curr,
@@ -2026,7 +2028,7 @@ where
 					.push(Lin::tern(x, y_next, lin.cmp.clone(), y_curr));
 			});
 
-		model.propagate(&self.add_propagation, vec![model.cons.len() - 1]);
+		model.propagate(&self.add_propagation, vec![model.cons.len() - 1])?;
 		model.encode(db, self.cutoff)
 	}
 }
@@ -2133,7 +2135,7 @@ where
 		// The totalizer encoding constructs a binary tree starting from a layer of
 		// leaves
 		let mut model = self.build_totalizer(xs, &lin.cmp, *lin.k);
-		model.propagate(&self.add_propagation, vec![model.cons.len() - 1]);
+		model.propagate(&self.add_propagation, vec![model.cons.len() - 1])?;
 		model.encode(db, self.cutoff)
 	}
 }
@@ -2357,6 +2359,29 @@ mod tests {
 						vec![a, b, c, d],
 						&expect_file!["linear/test_small_eq_4.sol"],
 					);
+				}
+
+				#[test]
+				fn issue_177() {
+					let mut cnf = Cnf::default();
+					let a = cnf.new_lit();
+					let b = cnf.new_lit();
+					let res = $encoder.encode(
+						// &mut cnf.with_conditions(vec![!a]),
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: construct_terms(&[(a, 3), (b, 9)]),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(10),
+						},
+					);
+					if res.is_ok() {
+						assert_solutions(
+							&cnf,
+							vec![a, b],
+							&expect_file!["linear/test_issue_177.sol"],
+						);
+					}
 				}
 			}
 		};
@@ -3276,5 +3301,18 @@ mod tests {
 	linear_test_suite!(
 		totalizer_encoder,
 		crate::bool_linear::TotalizerEncoder::default()
+	);
+
+	// Test propagation feature
+	linear_test_suite!(
+		totalizer_encoder_prop_bounds,
+		crate::bool_linear::TotalizerEncoder::default()
+			.with_propagation(crate::integer::Consistency::Bounds)
+	);
+
+	linear_test_suite!(
+		totalizer_encoder_prop_doms,
+		crate::bool_linear::TotalizerEncoder::default()
+			.with_propagation(crate::integer::Consistency::Domain)
 	);
 }

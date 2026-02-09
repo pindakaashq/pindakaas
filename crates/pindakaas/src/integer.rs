@@ -355,8 +355,14 @@ impl IntVar {
 		}
 	}
 
-	fn ge(&mut self, bound: Coeff) {
+	fn ge(&mut self, bound: Coeff) -> Result {
 		self.dom = self.dom.intersect(&RangeList::from(bound..=Coeff::MAX));
+		self.check()
+	}
+
+	/// Checks for failure i.e. empty domain
+	fn check(&self) -> Result {
+		(!self.dom.is_empty()).then_some(()).ok_or(Unsatisfiable)
 	}
 
 	pub(crate) fn lb(&self, c: Coeff) -> Coeff {
@@ -368,8 +374,9 @@ impl IntVar {
 		.unwrap()
 	}
 
-	fn le(&mut self, bound: Coeff) {
+	fn le(&mut self, bound: Coeff) -> Result {
 		self.dom = self.dom.intersect(&RangeList::from(Coeff::MIN..=bound));
+		self.check()
 	}
 
 	fn prefer_order(&self, cutoff: Option<Coeff>) -> bool {
@@ -1045,11 +1052,14 @@ impl Lin {
 		self.xs.iter().map(|(c, x)| x.borrow().lb(*c)).sum::<i64>()
 	}
 
-	pub(crate) fn propagate(&mut self, consistency: &Consistency) -> Vec<usize> {
+	pub(crate) fn propagate(
+		&mut self,
+		consistency: &Consistency,
+	) -> Result<Vec<usize>, Unsatisfiable> {
 		let mut changed = vec![];
-		match consistency {
-			Consistency::None => unreachable!(),
-			Consistency::Bounds => loop {
+		match (consistency, &self.cmp) {
+			(Consistency::None, _) => unreachable!(),
+			(Consistency::Bounds, _) | (Consistency::Domain, &LimitComp::LessEq) => loop {
 				let mut fixpoint = true;
 				if self.cmp == LimitComp::Equal {
 					for (c, x) in &self.xs {
@@ -1068,16 +1078,16 @@ impl Lin {
 						let b = x_ub - (xs_ub / *c);
 
 						if !c.is_negative() {
-							x.ge(b);
+							x.ge(b)?;
 						} else {
-							x.le(b);
+							x.le(b)?;
 						}
 
 						if x.size() < size {
 							changed.push(id);
 							fixpoint = false;
 						}
-						assert!(x.size() > 0);
+						debug_assert!(x.size() > 0);
 					}
 				}
 
@@ -1098,9 +1108,9 @@ impl Lin {
 					let b = x_lb - (rs_lb / *c);
 
 					if c.is_negative() {
-						x.ge(b);
+						x.ge(b)?;
 					} else {
-						x.le(b);
+						x.le(b)?;
 					}
 
 					if x.size() < size {
@@ -1108,58 +1118,54 @@ impl Lin {
 						changed.push(id);
 						fixpoint = false;
 					}
-					assert!(x.size() > 0);
 				}
 
 				if fixpoint {
-					return changed;
+					return Ok(changed);
 				}
 			},
-			Consistency::Domain => {
-				assert!(self.cmp == LimitComp::Equal);
-				loop {
-					let mut fixpoint = true;
-					for (i, (c_i, x_i)) in self.xs.iter().enumerate() {
-						let mut x_i = x_i.borrow_mut();
-						let id = x_i.id;
-						x_i.dom = x_i
-							.dom
-							.iter()
-							.flatten()
-							.filter(|d_i| {
-								if self
-									.xs
-									.iter()
-									.enumerate()
-									.filter(|&(j, _)| i != j)
-									.map(|(_, (c_j, x_j))| {
-										x_j.borrow()
-											.dom
-											.iter()
-											.flatten()
-											.map(|d_j_k| *c_j * d_j_k)
-											.collect_vec()
-									})
-									.multi_cartesian_product()
-									.any(|rs| *c_i * *d_i + rs.into_iter().sum::<i64>() == 0)
-								{
-									true
-								} else {
-									fixpoint = false;
-									changed.push(id);
-									false
-								}
-							})
-							.map(|v| v..=v)
-							.collect();
-						assert!(x_i.size() > 0);
-					}
-
-					if fixpoint {
-						return changed;
-					}
+			(Consistency::Domain, LimitComp::Equal) => loop {
+				let mut fixpoint = true;
+				for (i, (c_i, x_i)) in self.xs.iter().enumerate() {
+					let mut x_i = x_i.borrow_mut();
+					let id = x_i.id;
+					x_i.dom = x_i
+						.dom
+						.iter()
+						.flatten()
+						.filter(|d_i| {
+							if self
+								.xs
+								.iter()
+								.enumerate()
+								.filter(|&(j, _)| i != j)
+								.map(|(_, (c_j, x_j))| {
+									x_j.borrow()
+										.dom
+										.iter()
+										.flatten()
+										.map(|d_j_k| *c_j * d_j_k)
+										.collect_vec()
+								})
+								.multi_cartesian_product()
+								.any(|rs| *c_i * *d_i + rs.into_iter().sum::<i64>() == 0)
+							{
+								true
+							} else {
+								fixpoint = false;
+								changed.push(id);
+								false
+							}
+						})
+						.map(|v| v..=v)
+						.collect();
+					x_i.check()?;
 				}
-			}
+
+				if fixpoint {
+					return Ok(changed);
+				}
+			},
 		}
 	}
 	pub(crate) fn tern(
@@ -1305,12 +1311,12 @@ impl Model {
 		}
 	}
 
-	pub(crate) fn propagate(&mut self, consistency: &Consistency, mut queue: Vec<usize>) {
+	pub(crate) fn propagate(&mut self, consistency: &Consistency, mut queue: Vec<usize>) -> Result {
 		if consistency == &Consistency::None {
-			return;
+			return Ok(());
 		}
 		while let Some(con) = queue.pop() {
-			let changed = self.cons[con].propagate(consistency);
+			let changed = self.cons[con].propagate(consistency)?;
 			let mut cons = self
 				.cons
 				.iter()
@@ -1324,6 +1330,7 @@ impl Model {
 				.collect_vec();
 			queue.append(&mut cons);
 		}
+		Ok(())
 	}
 }
 
