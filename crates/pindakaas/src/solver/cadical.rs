@@ -267,10 +267,10 @@ impl Cadical {
 		// SAFETY: Pointer is guaranteed to point to a valid and initialized
 		// CCadical instance.
 		let end = unsafe { ccadical_vars(self.ipasir_store().solver_ptr()) };
-		VarRange::new(
-			Var(NonZero::new(1).unwrap()),
-			Var(NonZero::new(end).unwrap()),
-		)
+		// Return VarRange with emitted vars, or empty if end is zero
+		NonZero::new(end)
+			.map(|end| VarRange::new(Var(NonZero::new(1).unwrap()), Var(end)))
+			.unwrap_or_else(VarRange::empty)
 	}
 
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
