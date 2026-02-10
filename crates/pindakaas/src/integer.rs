@@ -15,8 +15,8 @@ use crate::{
 	bool_linear::{BoolLinExp, LimitComp, Part, PosCoeff},
 	helpers::{as_binary, is_powers_of_two, new_named_lit, unsigned_binary_range_ub},
 	propositional_logic::{Formula, TseitinEncoder},
-	AsDynClauseDatabase, BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder,
-	Lit, Result, Unsatisfiable, Valuation,
+	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
+	Unsatisfiable, Valuation,
 };
 
 const COUPLE_DOM_PART_TO_ORD: bool = false;
@@ -277,6 +277,58 @@ where
 		.collect()
 }
 
+impl From<&IntVarBin> for BoolLinExp {
+	fn from(value: &IntVarBin) -> Self {
+		let mut k = 1;
+		let terms = value
+			.xs
+			.iter()
+			.map(|x| {
+				let term = (*x, k);
+				k *= 2;
+				term
+			})
+			.collect_vec();
+		let lin_exp =
+			BoolLinExp::default().add_bounded_log_encoding(terms.as_slice(), value.lb, value.ub);
+		if GROUND_BINARY_AT_LB {
+			lin_exp.add_constant(value.lb)
+		} else {
+			lin_exp
+		}
+	}
+}
+
+impl From<&IntVarEnc> for BoolLinExp {
+	fn from(value: &IntVarEnc) -> Self {
+		match value {
+			IntVarEnc::Ord(o) => o.into(),
+			IntVarEnc::Bin(b) => b.into(),
+			&IntVarEnc::Const(c) => c.into(),
+		}
+	}
+}
+
+impl From<&IntVarOrd> for BoolLinExp {
+	fn from(value: &IntVarOrd) -> Self {
+		let mut acc = value.lb();
+		let mut dom_it = value.dom.iter().flatten();
+		let _ = dom_it.next();
+		BoolLinExp::default()
+			.add_chain(
+				&dom_it
+					.zip_eq(&value.xs)
+					.map(|(iv, lit)| {
+						let v = iv - acc;
+						acc += v;
+						(*lit, v)
+					})
+					.collect_vec(),
+			)
+			.add_constant(value.lb())
+	}
+}
+
 impl Checker for ImplicationChainConstraint {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result {
 		for (a, b) in self.lits.iter().copied().tuple_windows() {
@@ -301,6 +353,11 @@ impl ImplicationChainEncoder {
 }
 
 impl IntVar {
+	/// Checks for failure i.e. empty domain
+	fn check(&self) -> Result {
+		(!self.dom.is_empty()).then_some(()).ok_or(Unsatisfiable)
+	}
+
 	fn encode<Db>(
 		&self,
 		db: &mut Db,
@@ -308,7 +365,7 @@ impl IntVar {
 		prefer_order: bool,
 	) -> IntVarEnc
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		if self.size() == 1 {
 			IntVarEnc::Const(*self.dom.lower_bound().unwrap())
@@ -358,11 +415,6 @@ impl IntVar {
 	fn ge(&mut self, bound: Coeff) -> Result {
 		self.dom = self.dom.intersect(&RangeList::from(bound..=Coeff::MAX));
 		self.check()
-	}
-
-	/// Checks for failure i.e. empty domain
-	fn check(&self) -> Result {
-		(!self.dom.is_empty()).then_some(()).ok_or(Unsatisfiable)
 	}
 
 	pub(crate) fn lb(&self, c: Coeff) -> Coeff {
@@ -419,7 +471,7 @@ impl Display for IntVar {
 impl IntVarBin {
 	pub(crate) fn add<Db>(&self, db: &mut Db, encoder: &TernLeEncoder, y: Coeff) -> Result<Self>
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		if y == 0 {
 			Ok(self.clone())
@@ -453,7 +505,7 @@ impl IntVarBin {
 
 	pub(crate) fn consistent<Db>(&self, db: &mut Db) -> Result
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		let encoder = TernLeEncoder::default();
 		if !GROUND_BINARY_AT_LB {
@@ -606,7 +658,7 @@ impl IntVarEnc {
 		// enc: &'a mut dyn Encoder<Db, TernLeConstraint<'a, Db, C>>,
 	) -> Result<IntVarEnc>
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		let comp_lb = self.lb() + y.lb();
 		let lb = max(lb.unwrap_or(comp_lb), comp_lb);
@@ -675,7 +727,7 @@ impl IntVarEnc {
 
 	pub(crate) fn consistent<Db>(&self, db: &mut Db) -> Result
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		match self {
 			IntVarEnc::Ord(o) => o.consistent(db),
@@ -704,7 +756,7 @@ impl IntVarEnc {
 	/// ∑ xs ≦ ∑ ys
 	pub(crate) fn from_part<Db>(db: &mut Db, xs: &Part, ub: PosCoeff, lbl: String) -> Vec<Self>
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		match xs {
 			Part::Amo(terms) => {
@@ -1205,58 +1257,6 @@ impl Display for Lin {
 	}
 }
 
-impl From<&IntVarBin> for BoolLinExp {
-	fn from(value: &IntVarBin) -> Self {
-		let mut k = 1;
-		let terms = value
-			.xs
-			.iter()
-			.map(|x| {
-				let term = (*x, k);
-				k *= 2;
-				term
-			})
-			.collect_vec();
-		let lin_exp =
-			BoolLinExp::default().add_bounded_log_encoding(terms.as_slice(), value.lb, value.ub);
-		if GROUND_BINARY_AT_LB {
-			lin_exp.add_constant(value.lb)
-		} else {
-			lin_exp
-		}
-	}
-}
-
-impl From<&IntVarEnc> for BoolLinExp {
-	fn from(value: &IntVarEnc) -> Self {
-		match value {
-			IntVarEnc::Ord(o) => o.into(),
-			IntVarEnc::Bin(b) => b.into(),
-			&IntVarEnc::Const(c) => c.into(),
-		}
-	}
-}
-
-impl From<&IntVarOrd> for BoolLinExp {
-	fn from(value: &IntVarOrd) -> Self {
-		let mut acc = value.lb();
-		let mut dom_it = value.dom.iter().flatten();
-		let _ = dom_it.next();
-		BoolLinExp::default()
-			.add_chain(
-				&dom_it
-					.zip_eq(&value.xs)
-					.map(|(iv, lit)| {
-						let v = iv - acc;
-						acc += v;
-						(*lit, v)
-					})
-					.collect_vec(),
-			)
-			.add_constant(value.lb())
-	}
-}
-
 impl Model {
 	pub(crate) fn add_int_var_enc(&mut self, x: IntVarEnc) -> IntVar {
 		let var = self.new_var(x.dom(), false);
@@ -1266,7 +1266,7 @@ impl Model {
 
 	pub(crate) fn encode<Db>(&mut self, db: &mut Db, cutoff: Option<Coeff>) -> Result
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		let mut all_views = FxHashMap::default();
 		for con in &self.cons {
@@ -1400,7 +1400,7 @@ impl Display for TernLeConstraint<'_> {
 
 impl<Db> Encoder<Db, TernLeConstraint<'_>> for TernLeEncoder
 where
-	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	Db: ClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
@@ -1452,7 +1452,8 @@ where
 				if tern.check(&|_| unreachable!()).is_ok() {
 					Ok(())
 				} else {
-					Err(Unsatisfiable)
+					db.contradiction()?;
+					unreachable!();
 				}
 			}
 			(IntVarEnc::Const(x_con), IntVarEnc::Const(y_con), IntVarEnc::Bin(z_bin)) => {
@@ -1661,7 +1662,7 @@ pub(crate) mod tests {
 		helpers::tests::{assert_solutions, expect_file, make_valuation},
 		integer::{IntVarBin, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 		propositional_logic::Formula,
-		AsDynClauseDatabase, BoolVal, ClauseDatabase, Cnf, Coeff, Encoder, Lit, Var, VarRange,
+		BoolVal, ClauseDatabase, Cnf, Coeff, Encoder, Lit, Var, VarRange,
 	};
 
 	#[test]
@@ -1853,7 +1854,7 @@ pub(crate) mod tests {
 
 	fn get_bin_x<Db>(db: &mut Db, lb: Coeff, ub: Coeff, consistent: bool, lbl: String) -> IntVarEnc
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		let x = IntVarBin::from_bounds(db, lb, ub, lbl);
 		if consistent {

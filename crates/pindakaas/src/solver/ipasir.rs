@@ -96,9 +96,9 @@ pub(crate) type IpasirLearnCb = Box<dyn FnMut(*const i32)>;
 /// If a type implements this trait and [`AccessIpasirSolver`], then
 /// [`Solver`] is implemented automatically.
 pub trait IpasirSolverMethods {
+	const IPASIR_ADD: unsafe extern "C" fn(slv: *mut c_void, lit_or_zero: i32);
 	const IPASIR_INIT: unsafe extern "C" fn() -> *mut c_void;
 	const IPASIR_RELEASE: unsafe extern "C" fn(slv: *mut c_void);
-	const IPASIR_ADD: unsafe extern "C" fn(slv: *mut c_void, lit_or_zero: i32);
 	const IPASIR_SOLVE: unsafe extern "C" fn(slv: *mut c_void) -> c_int;
 	const IPASIR_VAL: unsafe extern "C" fn(slv: *mut c_void, lit: i32) -> i32;
 }

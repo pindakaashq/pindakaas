@@ -22,7 +22,10 @@ class CustomDB(ClauseDatabase):
         self.next_var = 1
 
     def add_clause(self, clause: Iterable[Lit]):
-        self.clauses.append([int(lit) for lit in clause])
+        clause = [int(lit) for lit in clause]
+        if clause == []:
+            raise Unsatisfiable()
+        self.clauses.append(clause)
 
     def new_var_range(self, n: int) -> VarRange:
         start = self.next_var
@@ -107,7 +110,14 @@ def test_conditions():
     f = CNF()
     x, y, p = f.new_vars(3)
     f.add_encoding(x ^ y, conditions=[p])
-    assert f.to_dimacs() == "p cnf 3 2\n3 1 2 0\n3 -1 -2 0\n"
+    assert f.to_dimacs() == "p cnf 3 2\n-3 1 2 0\n-3 -1 -2 0\n"
+
+
+def test_add_unsat_with_conditions():
+    f = CNF()
+    x, y, p = f.new_vars(3)
+    f.add_encoding(x + y >= 5, conditions=[p])
+    assert f.to_dimacs() == "p cnf 3 1\n-3 0\n"
 
 
 def test_custom_db():
@@ -122,6 +132,6 @@ def test_custom_db():
 
     f.add_encoding(x ^ y, conditions=[p])
     assert f.clauses == [
-        [4, 2, 3],
-        [4, -2, -3],
+        [-4, 2, 3],
+        [-4, -2, -3],
     ]

@@ -69,6 +69,14 @@ trait IpasirPropagatorStorage {
 	/// Returns whether a propagator is currently connected.
 	fn has_propagator(&self) -> bool;
 
+	/// Resets the persistent listener storage, dropping the connected listener
+	/// (if any).
+	fn reset_persistent_listener(&mut self);
+
+	/// Resets the propagator storage, dropping the connected propagator (if
+	/// any).
+	fn reset_propagator(&mut self);
+
 	/// Stores a new persistent listener in the storage, returning the
 	/// [`CFixedAssignmentListener`] that can be passed to the solver's C
 	/// methods to register the listener.
@@ -84,14 +92,6 @@ trait IpasirPropagatorStorage {
 		&mut self,
 		propagator: Rc<RefCell<P>>,
 	) -> CExternalPropagator;
-
-	/// Resets the persistent listener storage, dropping the connected listener
-	/// (if any).
-	fn reset_persistent_listener(&mut self);
-
-	/// Resets the propagator storage, dropping the connected propagator (if
-	/// any).
-	fn reset_propagator(&mut self);
 }
 
 /// Helping wrapper struct to provide [`ExtendedSolvingActions`] to propagators

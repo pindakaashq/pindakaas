@@ -36,8 +36,8 @@ use crate::{
 	},
 	propositional_logic::{Formula, TseitinEncoder},
 	sorted::{Sorted, SortedEncoder},
-	AsDynClauseDatabase, BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder,
-	IntEncoding, Lit, Result, Unsatisfiable, Valuation, Var,
+	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, IntEncoding, Lit,
+	Result, Unsatisfiable, Valuation, Var,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -304,7 +304,7 @@ impl AdderEncoder {
 	/// `output` can be either a literal, or a constant Boolean value.
 	fn sum_circuit<Db>(db: &mut Db, input: &[Lit], output: BoolVal) -> Result
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		match output {
 			BoolVal::Lit(sum) => match *input {
@@ -372,7 +372,7 @@ impl AdderEncoder {
 
 impl<Db> Encoder<Db, NormalizedBoolLinear> for AdderEncoder
 where
-	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	Db: ClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
@@ -416,7 +416,7 @@ where
 			match bucket[b].len() {
 				0 => {
 					if k[b] && lin.cmp == LimitComp::Equal {
-						return Err(Unsatisfiable);
+						return db.contradiction();
 					}
 				}
 				1 => {
@@ -512,20 +512,6 @@ where
 impl LinMarker for AdderEncoder {}
 
 impl BddEncoder {
-	/// Set whether to add consistency constraints on the intermediate integer
-	/// variables.
-	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_consistency = b;
-		self
-	}
-
-	/// Set the largest domain size for which the intermediate integer variables
-	/// are encoded using order encoding.
-	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
-		self.cutoff = c;
-		self
-	}
-
 	fn bdd(
 		i: usize,
 		xs: &Vec<IntVarEnc>,
@@ -653,11 +639,25 @@ impl BddEncoder {
 		let _ = Self::bdd(0, xs, 0, &mut ws);
 		ws
 	}
+
+	/// Set whether to add consistency constraints on the intermediate integer
+	/// variables.
+	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
+		self.add_consistency = b;
+		self
+	}
+
+	/// Set the largest domain size for which the intermediate integer variables
+	/// are encoded using order encoding.
+	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
+		self.cutoff = c;
+		self
+	}
 }
 
 impl<Db> Encoder<Db, NormalizedBoolLinear> for BddEncoder
 where
-	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	Db: ClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
@@ -702,7 +702,8 @@ where
 						self.add_consistency,
 					);
 					if y.dom.is_empty() {
-						return Err(Unsatisfiable);
+						db.contradiction()?;
+						unreachable!();
 					}
 					y.views = views
 						.into_iter()
@@ -742,7 +743,7 @@ impl BoolLinAggregator {
 	/// different encoding algorithms exist.
 	pub fn aggregate<Db>(&self, db: &mut Db, lin: &BoolLinear) -> Result<BoolLinVariant>
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		let mut k = lin.k;
 		// Aggregate multiple occurrences of the same
@@ -957,7 +958,8 @@ impl BoolLinAggregator {
 
 		// trivial case: constraint is unsatisfiable
 		if k < 0 {
-			return Err(Unsatisfiable);
+			db.contradiction()?;
+			unreachable!();
 		}
 		// trivial case: no literals can be activated
 		if k == 0 {
@@ -1062,7 +1064,8 @@ impl BoolLinAggregator {
 			}
 			LimitComp::Equal => {
 				if lhs_ub < k {
-					return Err(Unsatisfiable);
+					db.contradiction()?;
+					unreachable!();
 				}
 				if lhs_ub == k {
 					for part in partition {
@@ -1110,7 +1113,8 @@ impl BoolLinAggregator {
 		{
 			// trivial case: k cannot be made from the coefficients
 			if cmp == LimitComp::Equal && *k % *val != 0 {
-				return Err(Unsatisfiable);
+				db.contradiction()?;
+				unreachable!();
 			}
 
 			k = PosCoeff::new(*k / *val);
@@ -1340,7 +1344,7 @@ impl BoolLinExp {
 				.sum();
 			match constraint {
 				Some(Constraint::AtMostOne) => {
-					if sum != 0 && terms.iter().filter(|&(l, _)| sol.value(*l)).count() > 1 {
+					if sum != 0 && terms.iter().filter(|&&&(l, _)| sol.value(l)).count() > 1 {
 						return Err(Unsatisfiable);
 					}
 				}
@@ -1713,7 +1717,7 @@ impl From<LimitComp> for Comparator {
 // constraints
 impl<Db, Enc> Encoder<Db, Cardinality> for Enc
 where
-	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	Db: ClauseDatabase + ?Sized,
 	Enc: Encoder<Db, NormalizedBoolLinear> + LinMarker,
 {
 	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
@@ -1731,6 +1735,22 @@ impl Display for LimitComp {
 }
 
 impl<Enc, Agg> LinearEncoder<Enc, Agg> {
+	/// Access the [`BoolLinAggregator`] used by this encoder.
+	pub fn linear_aggregator(&self) -> &Agg {
+		&self.agg
+	}
+
+	/// Create a new [`LinearEncoder`] with the given [`Encoder`] for
+	/// [`BoolLinVariant`]s and [`BoolLinAggregator`].
+	pub fn new(enc: Enc, agg: Agg) -> Self {
+		Self { enc, agg }
+	}
+
+	/// Access the [`Encoder`] for [`BoolLinVariant`]s used by this encoder.
+	pub fn variant_encoder(&self) -> &Enc {
+		&self.enc
+	}
+
 	/// Change the [`BoolLinAggregator`] used by this encoder.
 	pub fn with_linear_aggregator(&mut self, agg: Agg) -> &mut Self {
 		self.agg = agg;
@@ -1742,17 +1762,11 @@ impl<Enc, Agg> LinearEncoder<Enc, Agg> {
 		self.enc = enc;
 		self
 	}
-
-	/// Create a new [`LinearEncoder`] with the given [`Encoder`] for
-	/// [`BoolLinVariant`]s and [`BoolLinAggregator`].
-	pub fn new(enc: Enc, agg: Agg) -> Self {
-		Self { enc, agg }
-	}
 }
 
 impl<Db, Enc> Encoder<Db, BoolLinear> for LinearEncoder<Enc>
 where
-	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	Db: ClauseDatabase + ?Sized,
 	Enc: Encoder<Db, BoolLinVariant>,
 {
 	#[cfg_attr(
@@ -1988,7 +2002,7 @@ impl SwcEncoder {
 
 impl<Db> Encoder<Db, NormalizedBoolLinear> for SwcEncoder
 where
-	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	Db: ClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
@@ -2117,7 +2131,7 @@ impl TotalizerEncoder {
 
 impl<Db> Encoder<Db, NormalizedBoolLinear> for TotalizerEncoder
 where
-	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	Db: ClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
@@ -2367,7 +2381,6 @@ mod tests {
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
 					let res = $encoder.encode(
-						// &mut cnf.with_conditions(vec![!a]),
 						&mut cnf,
 						&NormalizedBoolLinear {
 							terms: construct_terms(&[(a, 3), (b, 9)]),

@@ -117,23 +117,21 @@ pub trait PersistentAssignmentNotifier: Solver {
 /// Trait implemented to provide external propagation for [`Solver`]s
 /// implementing the [`ExternalPropagation`] trait.
 pub trait Propagator {
-	/// Method called to notify the propagator about assignments of literals
-	/// concerning observed variables.
-	///
-	/// The notification is not necessarily eager. It usually happens before the
-	/// call of propagator callbacks and when a driving clause is leading to an
-	/// assignment.
-	fn notify_assignment(&mut self, lits: &[Lit]) {
-		let _ = lits;
+	/// Method to ask whether there is an external clause to add to the solver.
+	fn add_external_clause(
+		&mut self,
+		slv: &mut dyn SolvingActions,
+	) -> Option<(Vec<Lit>, ClausePersistence)> {
+		let _ = slv;
+		None
 	}
-	/// Method called to notify the propagator about a new decision level.
-	fn notify_new_decision_level(&mut self) {}
 
-	/// Method called to notify the propagator about a backtrack to an earlier
-	/// decision level.
-	fn notify_backtrack(&mut self, new_level: usize, restart: bool) {
-		let _ = new_level;
-		let _ = restart;
+	/// Ask the external propagator for the reason clause of a previous external
+	/// propagation step (done by [`Propagator::propagate`]). The clause must
+	/// contain the propagated literal.
+	fn add_reason_clause(&mut self, propagated_lit: Lit) -> Vec<Lit> {
+		let _ = propagated_lit;
+		Vec::new()
 	}
 
 	/// Method called to check the found complete solution (after solution
@@ -155,28 +153,30 @@ pub trait Propagator {
 		SearchDecision::Free
 	}
 
+	/// Method called to notify the propagator about assignments of literals
+	/// concerning observed variables.
+	///
+	/// The notification is not necessarily eager. It usually happens before the
+	/// call of propagator callbacks and when a driving clause is leading to an
+	/// assignment.
+	fn notify_assignment(&mut self, lits: &[Lit]) {
+		let _ = lits;
+	}
+
+	/// Method called to notify the propagator about a backtrack to an earlier
+	/// decision level.
+	fn notify_backtrack(&mut self, new_level: usize, restart: bool) {
+		let _ = new_level;
+		let _ = restart;
+	}
+	/// Method called to notify the propagator about a new decision level.
+	fn notify_new_decision_level(&mut self) {}
+
 	/// Method to ask the propagator if there is an propagation to make under
 	/// the current assignment. It returns queue of literals to be propagated
 	/// in order, if an empty queue is returned it indicates that there is no
 	/// propagation under the current assignment.
 	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Option<Lit> {
-		let _ = slv;
-		None
-	}
-
-	/// Ask the external propagator for the reason clause of a previous external
-	/// propagation step (done by [`Propagator::propagate`]). The clause must
-	/// contain the propagated literal.
-	fn add_reason_clause(&mut self, propagated_lit: Lit) -> Vec<Lit> {
-		let _ = propagated_lit;
-		Vec::new()
-	}
-
-	/// Method to ask whether there is an external clause to add to the solver.
-	fn add_external_clause(
-		&mut self,
-		slv: &mut dyn SolvingActions,
-	) -> Option<(Vec<Lit>, ClausePersistence)> {
 		let _ = slv;
 		None
 	}

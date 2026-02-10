@@ -345,6 +345,16 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		}
 	}
 
+	/// Encoder helper that signals a contradiction has been detected in the
+	/// constraint being encoded.
+	///
+	/// This will add an empty clause to the clause database.
+	fn contradiction(&mut self) -> Result {
+		let err = self.add_clause_from_slice(&[]);
+		debug_assert_eq!(err, Err(Unsatisfiable));
+		err
+	}
+
 	/// Encode a constraint using the provided encoder.
 	fn encode<C, E>(&mut self, constraint: &C, encoder: &E) -> Result
 	where
@@ -352,6 +362,18 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		E: Encoder<Self, C> + ?Sized,
 	{
 		encoder.encode(self, constraint)
+	}
+
+	/// Encode an implied constraint of the form `conditions -> constraint`.
+	///
+	/// This is a thin convenience wrapper around
+	/// [`Encoder::encode_implied`].
+	fn encode_implied<C, E>(&mut self, conditions: &[Lit], constraint: &C, encoder: &E) -> Result
+	where
+		C: ?Sized,
+		E: Encoder<Self, C> + ?Sized + for<'a> Encoder<dyn ClauseDatabase + 'a, C>,
+	{
+		encoder.encode_implied(self, conditions, constraint)
 	}
 
 	/// Create a new Boolean variable in the form of a positive literal.
@@ -417,42 +439,6 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		let range = self.new_var_range(T::num_items());
 		range.collect_tuple().unwrap()
 	}
-
-	/// Create a [`ClauseDatabase`] wrapper that adds the given conditions to
-	/// each clause that it adds to the wrapped database.
-	///
-	/// Note that the wrapped database type itself implements the
-	/// [`ClauseDatabase`] trait.
-	fn with_conditions(&mut self, conditions: Vec<Lit>) -> impl ClauseDatabase + '_
-	where
-		Self: AsDynClauseDatabase,
-	{
-		struct ConditionalDatabase<'a> {
-			db: &'a mut dyn ClauseDatabase,
-			conditions: Vec<Lit>,
-		}
-
-		impl ClauseDatabase for ConditionalDatabase<'_> {
-			fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
-				let chain = self
-					.conditions
-					.iter()
-					.copied()
-					.chain(clause.iter().copied())
-					.collect_vec();
-				self.db.add_clause_from_slice(&chain)
-			}
-
-			fn new_var_range(&mut self, len: usize) -> VarRange {
-				self.db.new_var_range(len)
-			}
-		}
-
-		ConditionalDatabase {
-			db: self.as_mut_dyn(),
-			conditions,
-		}
-	}
 }
 
 /// A representation for Boolean formulas in conjunctive normal form.
@@ -490,6 +476,74 @@ enum Dimacs {
 pub trait Encoder<Db: ClauseDatabase + ?Sized, Constraint: ?Sized> {
 	/// Encode the constraint into the given clausal database.
 	fn encode(&self, db: &mut Db, con: &Constraint) -> Result;
+
+	/// Encode the implied constraint `conditions -> constraint`.
+	///
+	/// Clauses emitted while encoding are guarded with the condition literals.
+	/// If encoding returns [`Unsatisfiable`], the conditions are forced to be
+	/// false.
+	fn encode_implied(&self, db: &mut Db, conditions: &[Lit], con: &Constraint) -> Result
+	where
+		Self: for<'a> Encoder<dyn ClauseDatabase + 'a, Constraint>,
+	{
+		if conditions.is_empty() {
+			return self.encode(db, con);
+		}
+
+		struct ClauseBuffer<'a, Db: ClauseDatabase + ?Sized> {
+			db: &'a mut Db,
+			lits: Vec<Lit>,
+			size: Vec<usize>,
+		}
+
+		impl<Db: ClauseDatabase + ?Sized> ClauseDatabase for ClauseBuffer<'_, Db> {
+			fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
+				let start = self.lits.len();
+				self.lits.extend_from_slice(clause);
+				let len = self.lits.len() - start;
+				self.size.push(len);
+				if len == 0 {
+					Err(Unsatisfiable)
+				} else {
+					Ok(())
+				}
+			}
+
+			fn new_var_range(&mut self, len: usize) -> VarRange {
+				self.db.new_var_range(len)
+			}
+		}
+
+		let (result, lits, sizes) = {
+			let mut cdb = ClauseBuffer {
+				db,
+				lits: Vec::new(),
+				size: Vec::new(),
+			};
+			let result = {
+				let cdb_dyn: &mut (dyn ClauseDatabase + '_) = &mut cdb;
+				self.encode(cdb_dyn, con)
+			};
+			(result, cdb.lits, cdb.size)
+		};
+
+		let conditions: Vec<_> = conditions.iter().map(|&l| !l).collect();
+		let (lits, sizes) = match result {
+			Ok(()) => (lits, sizes),
+			Err(Unsatisfiable) => return db.add_clause_from_slice(&conditions),
+		};
+
+		let mut index = 0;
+		let mut clause = Vec::with_capacity(conditions.len());
+		for size in sizes {
+			clause.clear();
+			clause.extend_from_slice(&conditions);
+			clause.extend_from_slice(&lits[index..index + size]);
+			db.add_clause_from_slice(&clause)?;
+			index += size;
+		}
+		Ok(())
+	}
 }
 
 /// IntEncoding is a enumerated type use to represent an Boolean encoding of a
@@ -859,6 +913,11 @@ impl Cnf {
 		self.size.len()
 	}
 
+	/// Returns the number of variables in the formula.
+	pub fn num_vars(&self) -> usize {
+		self.nvar.num_emitted_vars()
+	}
+
 	/// Store CNF formula at given path in DIMACS format
 	///
 	/// File will optionally be prefaced by a given comment
@@ -870,11 +929,6 @@ impl Cnf {
 			}
 		}
 		write!(file, "{self}")
-	}
-
-	/// Returns the number of variables in the formula.
-	pub fn num_vars(&self) -> usize {
-		self.nvar.num_emitted_vars()
 	}
 
 	/// Returns the range of variables emitted to be used by this formula.
@@ -1357,16 +1411,6 @@ impl Wcnf {
 		Ok(())
 	}
 
-	/// Returns the number of clauses in the formula.
-	pub fn num_clauses(&self) -> usize {
-		self.cnf.num_clauses()
-	}
-
-	/// Returns the number of variables in the formula.
-	pub fn num_vars(&self) -> usize {
-		self.cnf.num_vars()
-	}
-
 	/// Read a WCNF formula from a file formatted in the (W)DIMACS WCNF format
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
 		match parse_dimacs_file::<true>(path)? {
@@ -1383,6 +1427,16 @@ impl Wcnf {
 	/// Returns the number of literals in the formula.
 	pub fn literals(&self) -> usize {
 		self.cnf.literals()
+	}
+
+	/// Returns the number of clauses in the formula.
+	pub fn num_clauses(&self) -> usize {
+		self.cnf.num_clauses()
+	}
+
+	/// Returns the number of variables in the formula.
+	pub fn num_vars(&self) -> usize {
+		self.cnf.num_vars()
 	}
 
 	/// Store WCNF formula at given path in WDIMACS format

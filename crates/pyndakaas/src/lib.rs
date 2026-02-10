@@ -18,12 +18,21 @@ create_exception!(
 	"Raised when the given constraint is found to be Unsatisfiable during encoding."
 );
 
+// Avoid orphan rule preventing impl PyErr on pindakaas::Unsatisfiable
+struct ErrWrapper(PyErr);
+
 // Use Result i/o PyResult to use `?` to easily return Rust errors as Python
 // exceptions
 type Result<R = (), E = ErrWrapper> = std::result::Result<R, E>;
 
-// Avoid orphan rule preventing impl PyErr on pindakaas::Unsatisfiable
-struct ErrWrapper(PyErr);
+// Allow `pindakaas::Unsatisfiable` to become a wrapped Unsatisfiable exception
+impl From<::pindakaas::Unsatisfiable> for ErrWrapper {
+	fn from(_: ::pindakaas::Unsatisfiable) -> Self {
+		Self(Unsatisfiable::new_err(
+			"The given constraint was found to be Unsatisfiable during encoding",
+		))
+	}
+}
 
 // Allow `pindakaas::Unsatisfiable` to become a wrapped Unsatisfiable exception
 impl<T> From<PoisonError<T>> for ErrWrapper {
@@ -39,15 +48,6 @@ impl From<PyErr> for ErrWrapper {
 	}
 }
 
-// Allow `pindakaas::Unsatisfiable` to become a wrapped Unsatisfiable exception
-impl From<::pindakaas::Unsatisfiable> for ErrWrapper {
-	fn from(_: ::pindakaas::Unsatisfiable) -> Self {
-		Self(Unsatisfiable::new_err(
-			"The given constraint was found to be Unsatisfiable during encoding",
-		))
-	}
-}
-
 // Allow ErrWrapper to become PyErr
 impl From<ErrWrapper> for PyErr {
 	fn from(err: ErrWrapper) -> Self {
@@ -60,17 +60,20 @@ mod pindakaas {
 	use std::{
 		fmt::{self, Display},
 		num::NonZeroI32,
+		sync::Mutex,
 	};
 
+	use itertools::Itertools;
 	use pindakaas::{
 		bool_linear::{
 			AdderEncoder, BoolLinAggregator, BoolLinExp as BaseBoolLinExp, BoolLinVariant,
-			BoolLinear as BaseBoolLinCon, Comparator, SwcEncoder, TotalizerEncoder,
+			BoolLinear as BaseBoolLinCon, Comparator, LinearEncoder, NormalizedBoolLinear,
+			SwcEncoder, TotalizerEncoder,
 		},
-		cardinality::SortingNetworkEncoder,
-		cardinality_one::{BitwiseEncoder, LadderEncoder, PairwiseEncoder},
+		cardinality::{Cardinality, SortingNetworkEncoder},
+		cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
 		propositional_logic::{Formula as BaseFormula, TseitinEncoder},
-		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as _, Lit as BaseLit,
+		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as EncoderTrait, Lit as BaseLit,
 		VarRange as BaseVarRange, Wcnf,
 	};
 	use pyo3::{exceptions::PyValueError, prelude::*, types::PyIterator};
@@ -170,6 +173,13 @@ mod pindakaas {
 		Lit(Lit),
 	}
 
+	struct LinEncoderWrapper {
+		/// Method chosen by the user.
+		method: Option<Encoder>,
+		/// Error message for an invalid choice.
+		error_message: Mutex<Option<PyErr>>,
+	}
+
 	#[pyclass]
 	#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 	/// A Boolean literal, representing a Boolean variable or its negation.
@@ -186,82 +196,6 @@ mod pindakaas {
 	/// associated weights.
 	struct WCNFInner(Wcnf);
 
-	/// Same `encode_constraint`, but evaluates the conditions if not empty.
-	/// This prevents costly virtual method access if this were done inside
-	/// `encode_constraint`
-	fn encode_constraint_with_conditions<Db>(
-		db: &mut Db,
-		con: ConstraintArg,
-		enc: Option<Encoder>,
-		conditions: Vec<Lit>,
-	) -> Result
-	where
-		Db: ClauseDatabase,
-	{
-		if conditions.is_empty() {
-			encode_constraint(db, con, enc)
-		} else {
-			encode_constraint(
-				&mut db.with_conditions(conditions.into_iter().map(|l| l.0).collect()),
-				con,
-				enc,
-			)
-		}
-	}
-
-	/// Internal function to help with the encoding of a constraint given an
-	/// optional encoder.
-	fn encode_constraint<Db>(db: &mut Db, con: ConstraintArg, enc: Option<Encoder>) -> Result
-	where
-		Db: ClauseDatabase,
-	{
-		let invalid_enc = |con_ty, enc| {
-			Err(InvalidEncoder::new_err(format!(
-				"Unable to encode object of type `{con_ty}' using {enc:?}"
-			))
-			.into())
-		};
-
-		match con {
-			ConstraintArg::BoolLin(lin) => {
-				let aggregated = BoolLinAggregator::default().aggregate(db, &lin.0)?;
-				match aggregated {
-					BoolLinVariant::Cardinality(c) => match enc.unwrap_or(Encoder::ADDER) {
-						Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, &c),
-						Encoder::ADDER => AdderEncoder::default().encode(db, &c),
-						Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, &c),
-						Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, &c),
-						_ => return invalid_enc("Cardinality", enc.unwrap()),
-					},
-					BoolLinVariant::CardinalityOne(c) => match enc.unwrap_or(Encoder::BITWISE) {
-						Encoder::BITWISE => BitwiseEncoder::default().encode(db, &c),
-						Encoder::ADDER => AdderEncoder::default().encode(db, &c),
-						Encoder::LADDER => LadderEncoder::default().encode(db, &c),
-						Encoder::PAIRWISE => PairwiseEncoder::default().encode(db, &c),
-						Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, &c),
-						Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, &c),
-						Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, &c),
-						_ => return invalid_enc("CardinalityOne", enc.unwrap()),
-					},
-					BoolLinVariant::Linear(lin) => match enc.unwrap_or(Encoder::ADDER) {
-						Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, &lin),
-						Encoder::ADDER => AdderEncoder::default().encode(db, &lin),
-						Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, &lin),
-						_ => return invalid_enc("BoolLinear", enc.unwrap()),
-					},
-					BoolLinVariant::Trivial => return Ok(()),
-				}?;
-			}
-			ConstraintArg::Formula(f) => match enc.unwrap_or(Encoder::TSEITIN) {
-				Encoder::TSEITIN => TseitinEncoder.encode(db, &f.0)?,
-				_ => {
-					return invalid_enc("Formula", enc.unwrap());
-				}
-			},
-		};
-		Ok(())
-	}
-
 	#[pyfunction]
 	fn _wrap_encode_constraint(
 		obj: &Bound<'_, PyAny>,
@@ -275,8 +209,8 @@ mod pindakaas {
 				&mut self,
 				clause: &[BaseLit],
 			) -> Result<(), pindakaas::Unsatisfiable> {
-				let clause = clause.iter().map(|&l| Lit(l)).collect_vec();
-				let res = self.0.call_method1("add_clause", (clause,));
+				let clause_vec = clause.iter().map(|&l| Lit(l)).collect_vec();
+				let res = self.0.call_method1("add_clause", (clause_vec,));
 				match res {
 					Err(e) if e.is_instance_of::<Unsatisfiable>(self.0.py()) => {
 						Err(pindakaas::Unsatisfiable)
@@ -284,6 +218,10 @@ mod pindakaas {
 					Err(e) => {
 						panic!("unexpected error in add_clause implementation: {}", e)
 					}
+					// We would have expected the user implementation to raise `Unsatisfiable`, but
+					// is did not. Since encodings depend on this behaviour, we return the error
+					// instead.
+					Ok(_) if clause.is_empty() => Err(pindakaas::Unsatisfiable),
 					Ok(_) => Ok(()),
 				}
 			}
@@ -300,7 +238,54 @@ mod pindakaas {
 			}
 		}
 
-		encode_constraint_with_conditions(&mut PyDbWrapper(obj), con, enc, conditions)
+		encode_constraint(&mut PyDbWrapper(obj), con, enc, conditions)
+	}
+
+	/// Internal function to help with the encoding of a constraint given an
+	/// optional encoder.
+	///
+	/// If conditions are provided, the constraint is encoded to only hold if
+	/// all conditions are true.
+	fn encode_constraint<Db>(
+		db: &mut Db,
+		con: ConstraintArg,
+		enc: Option<Encoder>,
+		conditions: Vec<Lit>,
+	) -> Result
+	where
+		Db: ClauseDatabase + ?Sized,
+	{
+		let invalid_enc = |con_ty, enc| {
+			Err(InvalidEncoder::new_err(format!(
+				"Unable to encode object of type `{con_ty}' using {enc:?}"
+			))
+			.into())
+		};
+		let conditions: Vec<_> = conditions.into_iter().map(|l| l.0).collect();
+
+		match con {
+			ConstraintArg::BoolLin(lin) => {
+				let encoder = LinEncoderWrapper::new(enc);
+				let encoder = LinearEncoder::new(encoder, BoolLinAggregator::default());
+				encoder.encode_implied(db, &conditions, &lin.0)?;
+				let err = encoder
+					.variant_encoder()
+					.error_message
+					.lock()
+					.unwrap()
+					.take();
+				if let Some(err) = err {
+					return Err(err.into());
+				}
+			}
+			ConstraintArg::Formula(f) => match enc.unwrap_or(Encoder::TSEITIN) {
+				Encoder::TSEITIN => TseitinEncoder.encode_implied(db, &conditions, &f.0)?,
+				_ => {
+					return invalid_enc("Formula", enc.unwrap());
+				}
+			},
+		};
+		Ok(())
 	}
 
 	impl BoolLinArg {
@@ -327,10 +312,6 @@ mod pindakaas {
 			let mut res = self.clone();
 			res.__iadd__(other);
 			res
-		}
-
-		fn __radd__(&self, other: BoolLinArg) -> Self {
-			self.__add__(other)
 		}
 
 		fn __eq__(&self, other: i64) -> BoolLinCon {
@@ -383,12 +364,16 @@ mod pindakaas {
 			res
 		}
 
-		fn __rmul__(&self, other: i64) -> Self {
-			self.__mul__(other)
-		}
-
 		fn __neg__(&self) -> Self {
 			Self(-self.0.clone())
+		}
+
+		fn __radd__(&self, other: BoolLinArg) -> Self {
+			self.__add__(other)
+		}
+
+		fn __rmul__(&self, other: i64) -> Self {
+			self.__mul__(other)
 		}
 
 		fn __str__(&self) -> String {
@@ -401,8 +386,6 @@ mod pindakaas {
 			res
 		}
 	}
-
-	use itertools::Itertools;
 
 	#[pymethods]
 	impl CNFInner {
@@ -421,7 +404,7 @@ mod pindakaas {
 			enc: Option<Encoder>,
 			conditions: Vec<Lit>,
 		) -> Result {
-			encode_constraint_with_conditions(&mut self.0, con, enc, conditions)
+			encode_constraint(&mut self.0, con, enc, conditions)
 		}
 
 		fn clauses(&self) -> Vec<Vec<Lit>> {
@@ -458,10 +441,6 @@ mod pindakaas {
 			Self(self.0.clone() & other.as_formula())
 		}
 
-		fn __rand__(&self, other: FormulaArg) -> Self {
-			self.__and__(other)
-		}
-
 		fn __eq__(&self, other: FormulaArg) -> Self {
 			use BaseFormula::*;
 
@@ -478,6 +457,10 @@ mod pindakaas {
 			Self(self.0.clone() & !other.as_formula())
 		}
 
+		fn __invert__(&self) -> Self {
+			Self(!self.0.clone())
+		}
+
 		fn __le__(&self, other: FormulaArg) -> Self {
 			use BaseFormula::*;
 
@@ -488,10 +471,6 @@ mod pindakaas {
 			Self(!self.0.clone() & other.as_formula())
 		}
 
-		fn __invert__(&self) -> Self {
-			Self(!self.0.clone())
-		}
-
 		fn __ne__(&self, other: FormulaArg) -> Self {
 			self.__xor__(other)
 		}
@@ -500,8 +479,16 @@ mod pindakaas {
 			Formula(self.0.clone() | other.as_formula())
 		}
 
+		fn __rand__(&self, other: FormulaArg) -> Self {
+			self.__and__(other)
+		}
+
 		fn __ror__(&self, other: FormulaArg) -> Self {
 			self.__or__(other)
+		}
+
+		fn __rxor__(&self, other: FormulaArg) -> Self {
+			self.__xor__(other)
 		}
 
 		fn __str__(&self) -> String {
@@ -510,10 +497,6 @@ mod pindakaas {
 
 		fn __xor__(&self, other: FormulaArg) -> Self {
 			Formula(self.0.clone() ^ other.as_formula())
-		}
-
-		fn __rxor__(&self, other: FormulaArg) -> Self {
-			self.__xor__(other)
 		}
 	}
 
@@ -527,6 +510,95 @@ mod pindakaas {
 				FormulaArg::Const(b) => Atom(BoolVal::Const(*b)),
 				FormulaArg::Formula(formula) => formula.0.clone(),
 				FormulaArg::Lit(lit) => lit.as_formula(),
+			}
+		}
+	}
+
+	impl LinEncoderWrapper {
+		fn new(method: Option<Encoder>) -> Self {
+			Self {
+				method,
+				error_message: Mutex::new(None),
+			}
+		}
+
+		fn set_err(&self, con_ty: &str, enc: Encoder) {
+			let _ = self
+				.error_message
+				.lock()
+				.unwrap()
+				.replace(InvalidEncoder::new_err(format!(
+					"Unable to encode object of type `{con_ty}' using {enc:?}"
+				)));
+		}
+	}
+
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, BoolLinVariant> for LinEncoderWrapper {
+		fn encode(
+			&self,
+			db: &mut Db,
+			con: &BoolLinVariant,
+		) -> Result<(), pindakaas::Unsatisfiable> {
+			match con {
+				BoolLinVariant::Linear(lin) => self.encode(db, lin),
+				BoolLinVariant::Cardinality(card) => self.encode(db, card),
+				BoolLinVariant::CardinalityOne(card1) => self.encode(db, card1),
+				BoolLinVariant::Trivial => Ok(()),
+			}
+		}
+	}
+
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, Cardinality> for LinEncoderWrapper {
+		fn encode(&self, db: &mut Db, con: &Cardinality) -> Result<(), pindakaas::Unsatisfiable> {
+			match self.method.unwrap_or(Encoder::ADDER) {
+				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
+				Encoder::ADDER => AdderEncoder::default().encode(db, con),
+				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
+				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
+				enc => {
+					self.set_err("Cardinality", enc);
+					Ok(())
+				}
+			}
+		}
+	}
+
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, CardinalityOne> for LinEncoderWrapper {
+		fn encode(
+			&self,
+			db: &mut Db,
+			con: &CardinalityOne,
+		) -> Result<(), pindakaas::Unsatisfiable> {
+			match self.method.unwrap_or(Encoder::BITWISE) {
+				Encoder::BITWISE => BitwiseEncoder::default().encode(db, con),
+				Encoder::ADDER => AdderEncoder::default().encode(db, con),
+				Encoder::LADDER => LadderEncoder::default().encode(db, con),
+				Encoder::PAIRWISE => PairwiseEncoder::default().encode(db, con),
+				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
+				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
+				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
+				enc => {
+					self.set_err("CardinalityOne", enc);
+					Ok(())
+				}
+			}
+		}
+	}
+
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, NormalizedBoolLinear> for LinEncoderWrapper {
+		fn encode(
+			&self,
+			db: &mut Db,
+			con: &NormalizedBoolLinear,
+		) -> Result<(), pindakaas::Unsatisfiable> {
+			match self.method.unwrap_or(Encoder::ADDER) {
+				Encoder::ADDER => AdderEncoder::default().encode(db, con),
+				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
+				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
+				enc => {
+					self.set_err("BoolLinear", enc);
+					Ok(())
+				}
 			}
 		}
 	}
@@ -547,15 +619,7 @@ mod pindakaas {
 			self.as_bool_lin_exp().__add__(other)
 		}
 
-		fn __radd__(&self, other: BoolLinArg) -> BoolLinExp {
-			self.__add__(other)
-		}
-
 		fn __and__(&self, other: FormulaArg) -> Formula {
-			Formula(self.as_formula()).__and__(other)
-		}
-
-		fn __rand__(&self, other: FormulaArg) -> Formula {
 			Formula(self.as_formula()).__and__(other)
 		}
 
@@ -571,14 +635,6 @@ mod pindakaas {
 			Formula(self.as_formula()).__gt__(other)
 		}
 
-		fn __le__(&self, other: FormulaArg) -> Formula {
-			Formula(self.as_formula()).__le__(other)
-		}
-
-		fn __lt__(&self, other: FormulaArg) -> Formula {
-			Formula(self.as_formula()).__lt__(other)
-		}
-
 		fn __int__(&self) -> i32 {
 			self.0.into()
 		}
@@ -587,12 +643,16 @@ mod pindakaas {
 			Self(!self.0)
 		}
 
-		fn __mul__(&self, other: i64) -> BoolLinExp {
-			self.as_bool_lin_exp().__mul__(other)
+		fn __le__(&self, other: FormulaArg) -> Formula {
+			Formula(self.as_formula()).__le__(other)
 		}
 
-		fn __rmul__(&self, other: i64) -> BoolLinExp {
-			self.__mul__(other)
+		fn __lt__(&self, other: FormulaArg) -> Formula {
+			Formula(self.as_formula()).__lt__(other)
+		}
+
+		fn __mul__(&self, other: i64) -> BoolLinExp {
+			self.as_bool_lin_exp().__mul__(other)
 		}
 
 		fn __ne__(&self, other: FormulaArg) -> Formula {
@@ -603,8 +663,24 @@ mod pindakaas {
 			Formula(self.as_formula()).__or__(other)
 		}
 
+		fn __radd__(&self, other: BoolLinArg) -> BoolLinExp {
+			self.__add__(other)
+		}
+
+		fn __rand__(&self, other: FormulaArg) -> Formula {
+			Formula(self.as_formula()).__and__(other)
+		}
+
+		fn __rmul__(&self, other: i64) -> BoolLinExp {
+			self.__mul__(other)
+		}
+
 		fn __ror__(&self, other: FormulaArg) -> Formula {
 			self.__or__(other)
+		}
+
+		fn __rxor__(&self, other: FormulaArg) -> Formula {
+			self.__xor__(other)
 		}
 
 		fn __str__(&self) -> String {
@@ -617,10 +693,6 @@ mod pindakaas {
 
 		fn __xor__(&self, other: FormulaArg) -> Formula {
 			Formula(self.as_formula()).__xor__(other)
-		}
-
-		fn __rxor__(&self, other: FormulaArg) -> Formula {
-			self.__xor__(other)
 		}
 
 		#[staticmethod]
@@ -699,7 +771,7 @@ mod pindakaas {
 			enc: Option<Encoder>,
 			conditions: Vec<Lit>,
 		) -> Result {
-			encode_constraint_with_conditions(&mut self.0, con, enc, conditions)
+			encode_constraint(&mut self.0, con, enc, conditions)
 		}
 
 		fn add_weighted_clause(&mut self, clause: Bound<'_, PyIterator>, weight: i64) -> Result {
@@ -768,8 +840,8 @@ mod pindakaas {
 		};
 		use pyo3::{exceptions::PyNotImplementedError, prelude::*, types::PyIterator};
 
-		use super::{encode_constraint_with_conditions, Result};
-		use crate::pindakaas::{ConstraintArg, Encoder, Lit, VarRange};
+		use super::Result;
+		use crate::pindakaas::{encode_constraint, ConstraintArg, Encoder, Lit, VarRange};
 
 		#[pyclass(unsendable)]
 		#[derive(Debug, Default)]
@@ -830,7 +902,7 @@ mod pindakaas {
 				enc: Option<Encoder>,
 				conditions: Vec<Lit>,
 			) -> Result {
-				encode_constraint_with_conditions(&mut self.0, con, enc, conditions)
+				encode_constraint(&mut self.0, con, enc, conditions)
 			}
 
 			#[new]
@@ -894,7 +966,7 @@ mod pindakaas {
 				conditions: Vec<Lit>,
 			) -> Result {
 				let mut guard = self.0.lock().unwrap();
-				encode_constraint_with_conditions(&mut *guard, con, enc, conditions)
+				encode_constraint(&mut *guard, con, enc, conditions)
 			}
 
 			#[new]

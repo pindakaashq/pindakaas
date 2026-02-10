@@ -7,8 +7,7 @@ use crate::{
 	bool_linear::{BoolLinExp, LimitComp},
 	integer::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
 	propositional_logic::{Formula, TseitinEncoder},
-	AsDynClauseDatabase, Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable,
-	Valuation,
+	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -86,7 +85,7 @@ impl SortedEncoder {
 		c: Coeff,
 	) -> Result
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		let cmp = self.overwrite_recursive_cmp.as_ref().unwrap_or(cmp);
 		let c1 = c;
@@ -124,7 +123,7 @@ impl SortedEncoder {
 		_lvl: usize,
 	) -> Result
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
 		let strat = if let SortedStrategy::Mixed(lambda) = &self.strategy {
@@ -202,7 +201,7 @@ impl SortedEncoder {
 
 	fn next_int_var<Db>(&self, db: &mut Db, ub: Coeff, lbl: String) -> IntVarEnc
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		// TODO We always have the view x>=1 <-> y>=1, which is now realized using equiv
 		if ub == 0 {
@@ -226,7 +225,7 @@ impl SortedEncoder {
 		y: &IntVarEnc,
 	) -> Result
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		// we let x2 take the place of z_ceil, so we need to add 1 to both sides
 		let x2 = x2.add(
@@ -256,7 +255,7 @@ impl SortedEncoder {
 		_lvl: usize,
 	) -> Option<IntVarEnc>
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		match xs {
 			[] => None,
@@ -278,7 +277,7 @@ impl SortedEncoder {
 		_lvl: usize,
 	) -> Result
 	where
-		Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+		Db: ClauseDatabase + ?Sized,
 	{
 		let (n, m) = (xs.len(), y.ub());
 		let direct = false;
@@ -401,7 +400,7 @@ impl Default for SortedEncoder {
 	}
 }
 
-impl<Db: ClauseDatabase + AsDynClauseDatabase + ?Sized> Encoder<Db, Sorted<'_>> for SortedEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Sorted<'_>> for SortedEncoder {
 	fn encode(&self, db: &mut Db, sorted: &Sorted) -> Result {
 		let xs = sorted
 			.xs
@@ -423,7 +422,7 @@ impl<Db: ClauseDatabase + AsDynClauseDatabase + ?Sized> Encoder<Db, Sorted<'_>> 
 
 impl<Db> Encoder<Db, TernLeConstraint<'_>> for SortedEncoder
 where
-	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	Db: ClauseDatabase + ?Sized,
 {
 	fn encode(&self, db: &mut Db, tern: &TernLeConstraint) -> Result {
 		let TernLeConstraint { x, y, cmp, z } = tern;

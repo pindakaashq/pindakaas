@@ -14,10 +14,7 @@ use std::{
 use itertools::{Itertools, Position};
 use rustc_hash::FxHashSet;
 
-use crate::{
-	AsDynClauseDatabase, BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Result,
-	Unsatisfiable,
-};
+use crate::{BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Result};
 
 /// A propositional logic formula
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -686,11 +683,14 @@ impl<Base> Not for Formula<Base> {
 
 impl<Db> Encoder<Db, Formula<BoolVal>> for TseitinEncoder
 where
-	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	Db: ClauseDatabase + ?Sized,
 {
 	fn encode(&self, db: &mut Db, con: &Formula<BoolVal>) -> Result {
 		match con.clone().resolve() {
-			Err(false) => Err(Unsatisfiable),
+			Err(false) => {
+				db.contradiction()?;
+				unreachable!();
+			}
 			Err(true) => Ok(()),
 			Ok(con) => self.encode(db, &con),
 		}
@@ -699,7 +699,7 @@ where
 
 impl<Db> Encoder<Db, Formula<Lit>> for TseitinEncoder
 where
-	Db: ClauseDatabase + AsDynClauseDatabase + ?Sized,
+	Db: ClauseDatabase + ?Sized,
 {
 	fn encode(&self, db: &mut Db, f: &Formula<Lit>) -> Result {
 		match f {
@@ -721,14 +721,10 @@ where
 				}
 				Formula::IfThenElse { cond, then, els } => {
 					let name = cond.bind(db, None)?;
-					{
-						let mut cdb = db.with_conditions(vec![!name]);
-						let neg_then: Formula<Lit> = !*then.clone();
-						self.encode(&mut cdb, &neg_then)?;
-					}
-					let mut cdb = db.with_conditions(vec![name]);
+					let neg_then: Formula<Lit> = !*then.clone();
+					db.encode_implied(&[name], &neg_then, self)?;
 					let neg_els: Formula<Lit> = !*els.clone();
-					self.encode(&mut cdb, &neg_els)
+					db.encode_implied(&[!name], &neg_els, self)
 				}
 				Formula::Equiv(sub) if sub.len() == 2 => {
 					self.encode(db, &Formula::Xor(sub.clone()))
@@ -753,7 +749,8 @@ where
 			}
 			Formula::Or(sub) => {
 				if sub.is_empty() {
-					return Err(Unsatisfiable);
+					db.contradiction()?;
+					unreachable!();
 				}
 				let lits = sub
 					.iter()
@@ -763,8 +760,7 @@ where
 			}
 			Formula::Implies(left, right) => {
 				let x = left.bind(db, None)?;
-				let mut cdb = db.with_conditions(vec![!x]);
-				self.encode(&mut cdb, right.as_ref())
+				db.encode_implied(&[x], right.as_ref(), self)
 			}
 			Formula::Equiv(sub) => {
 				match sub.len() {
@@ -786,7 +782,10 @@ where
 				Ok(())
 			}
 			Formula::Xor(sub) => match sub.len() {
-				0 => Err(Unsatisfiable),
+				0 => {
+					db.contradiction()?;
+					unreachable!()
+				}
 				1 => self.encode(db, &sub[0]),
 				_ => {
 					let mut sub = sub.clone();
@@ -802,12 +801,8 @@ where
 			},
 			Formula::IfThenElse { cond, then, els } => {
 				let name = cond.bind(db, None)?;
-				{
-					let mut cdb = db.with_conditions(vec![!name]);
-					self.encode(&mut cdb, then.as_ref())?;
-				}
-				let mut cdb = db.with_conditions(vec![name]);
-				self.encode(&mut cdb, els.as_ref())
+				db.encode_implied(&[name], then.as_ref(), self)?;
+				db.encode_implied(&[!name], els.as_ref(), self)
 			}
 		}
 	}
@@ -820,7 +815,8 @@ mod tests {
 	use crate::{
 		helpers::tests::{assert_encoding, assert_solutions, expect_file},
 		propositional_logic::{Formula, TseitinEncoder},
-		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder,
+		solver::{cadical::Cadical, SolveResult, Solver},
+		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Valuation,
 	};
 
 	#[test]
@@ -1176,5 +1172,23 @@ mod tests {
 			[a, b, c, d],
 			&expect_file!["propositional_logic/encode_prop_xor_neg3.sol"],
 		);
+	}
+
+	#[test]
+	fn issue_175_implied_unsat() {
+		let mut cnf = Cadical::default();
+		let a = cnf.new_lit();
+		TseitinEncoder
+			.encode_implied(
+				&mut cnf,
+				&[a],
+				&Formula::Implies(Box::new(Formula::Atom(a)), Box::new(Formula::Xor(vec![]))),
+			)
+			.unwrap();
+
+		let SolveResult::Satisfied(sol) = cnf.solve() else {
+			panic!("Expected a solution");
+		};
+		assert!(!sol.value(a));
 	}
 }
