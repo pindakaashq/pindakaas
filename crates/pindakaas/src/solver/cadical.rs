@@ -834,6 +834,14 @@ mod tests {
 	}
 
 	#[test]
+	fn test_emitted_vars() {
+		let mut slv = Cadical::default();
+		assert!(slv.emitted_vars().len() == 0);
+		_ = slv.new_var();
+		assert!(slv.emitted_vars().len() == 1);
+	}
+
+	#[test]
 	fn test_failed() {
 		let mut cnf = Cnf::default();
 		let x = cnf.new_lit();
