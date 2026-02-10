@@ -16,6 +16,9 @@ def test_cadical():
 
 def test_assumptions():
     slv = pindakaas.solver.CaDiCaL()
+    with slv.solve() as _:
+        pass
+
     x, y = slv.new_vars(2)
     slv += x ^ y
     with slv.solve(assumptions=[x]) as result:

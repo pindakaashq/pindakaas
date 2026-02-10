@@ -267,10 +267,10 @@ impl Cadical {
 		// SAFETY: Pointer is guaranteed to point to a valid and initialized
 		// CCadical instance.
 		let end = unsafe { ccadical_vars(self.ipasir_store().solver_ptr()) };
-		VarRange::new(
-			Var(NonZero::new(1).unwrap()),
-			Var(NonZero::new(end).unwrap()),
-		)
+		// Return VarRange with emitted vars, or empty if end is zero
+		NonZero::new(end)
+			.map(|end| VarRange::new(Var(NonZero::new(1).unwrap()), Var(end)))
+			.unwrap_or_else(VarRange::empty)
 	}
 
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
@@ -831,6 +831,14 @@ mod tests {
 		// Set termination callback that stops immediately
 		slv.set_terminate_callback(Some(|| TermSignal::Terminate));
 		assert!(matches!(slv.solve(), SolveResult::Unknown));
+	}
+
+	#[test]
+	fn test_emitted_vars() {
+		let mut slv = Cadical::default();
+		assert!(slv.emitted_vars().len() == 0);
+		_ = slv.new_var();
+		assert!(slv.emitted_vars().len() == 1);
 	}
 
 	#[test]
