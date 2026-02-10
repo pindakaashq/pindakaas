@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.3.0...pyndakaas-v0.4.0) - 2026-02-10
+
+### Fixed
+
+- replace broken `with_conditions` with `encode_implied`
+
+### Other
+
+- [**breaking**] update default encoder choices
+
 ## [0.3.0](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.2.3...pyndakaas-v0.3.0) - 2025-11-26
 
 ### Other

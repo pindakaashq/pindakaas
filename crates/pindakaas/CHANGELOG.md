@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.3.0...pindakaas-v0.4.0) - 2026-02-10
+
+### Added
+
+- update CaDiCaL to version 3.0.0
+
+### Fixed
+
+- [**breaking**] replace broken `with_conditions` with `encode_implied`
+- propagation failure during linear simplication ([#184](https://github.com/pindakaashq/pindakaas/pull/184))
+
+### Other
+
+- [**breaking**] update default encoder choices
+- set default propagation consistency to None
+- remove unnecessary `use` ([#179](https://github.com/pindakaashq/pindakaas/pull/179))
+
 ## [0.3.0](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.2.3...pindakaas-v0.3.0) - 2025-11-26
 
 ### Added
