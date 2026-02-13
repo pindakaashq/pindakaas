@@ -42,7 +42,6 @@ use crate::{
 	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit, Var, VarRange,
 };
 
-#[derive(Default)]
 /// Representation of an instance of the
 /// [CaDiCaL](https://github.com/arminbiere/cadical) SAT solver.
 pub struct Cadical {
@@ -200,6 +199,17 @@ pub trait ProofTracerDefinition: ProofTracer {
 	/// Whether the [`ProofTracer`] needs the solver to finalize non-deleted
 	/// clauses in proof.
 	const FINALIZE_CLAUSES: bool = false;
+}
+
+impl Default for Cadical {
+	fn default() -> Self {
+		let mut slf = Self {
+			store: Default::default(),
+			tracers: Default::default(),
+		};
+		slf.set_option("factor", 0);
+		slf
+	}
 }
 
 impl Cadical {
