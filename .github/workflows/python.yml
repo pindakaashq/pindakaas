@@ -34,6 +34,8 @@ jobs:
             target: ppc64le
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: true
       - uses: actions/setup-python@v6
         with:
           python-version: 3.x
@@ -89,6 +91,8 @@ jobs:
             target: armv7
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: true
       - uses: actions/setup-python@v6
         with:
           python-version: 3.x
@@ -112,7 +116,7 @@ jobs:
             apk add py3-pip py3-virtualenv
             python3 -m virtualenv .venv
             source .venv/bin/activate
-            pip install pindakaas --no-index --find-links dist --force-reinstall --no-index
+            pip install pindakaas --find-links dist --force-reinstall --no-index
             pip install pytest
             cd crates/pyndakaas && pytest
           '
@@ -148,6 +152,8 @@ jobs:
             python_arch: arm64
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: true
       - uses: actions/setup-python@v6
         with:
           python-version: 3.13
@@ -183,6 +189,8 @@ jobs:
             target: aarch64
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: true
       - uses: actions/setup-python@v6
         with:
           python-version: 3.x
@@ -209,6 +217,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: true
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
