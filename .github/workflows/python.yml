@@ -110,9 +110,12 @@ jobs:
           path: dist
       - name: pytest
         if: ${{ startsWith(matrix.platform.target, 'x86_64') }}
-        run: |
-          set -e
-          docker run --rm -v ${{ github.workspace }}:/io -w /io alpine:latest sh -c '
+        uses: addnab/docker-run-action@v3
+        with:
+          image: alpine:latest
+          options: -v ${{ github.workspace }}:/io -w /io
+          run: |
+            set -e
             apk add py3-pip py3-virtualenv
             python3 -m virtualenv .venv
             source .venv/bin/activate
