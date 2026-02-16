@@ -7,10 +7,9 @@ name: CI
 on:
   push:
     branches:
-      - main
-      - master
+      - develop
     tags:
-      - '*'
+      - "pyndakaas-v*"
   pull_request:
   workflow_dispatch:
 permissions:
