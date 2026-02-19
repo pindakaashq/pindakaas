@@ -945,7 +945,7 @@ mod pindakaas {
 			}
 
 			fn _set_option(&mut self, name: &str, value: i32) {
-				self.0.set_option(name, value)
+				self.0.set_option(name, value);
 			}
 		}
 
