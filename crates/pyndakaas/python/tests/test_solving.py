@@ -52,3 +52,8 @@ def test_kissat():
 def test_issue_159():
     slv = pindakaas.solver.CaDiCaL()
     assert len(slv.new_vars(1)) == 1
+
+
+def test_set_option():
+    slv = pindakaas.solver.CaDiCaL()
+    slv._set_option("factor", 0)
