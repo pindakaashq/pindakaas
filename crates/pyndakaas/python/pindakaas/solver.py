@@ -114,6 +114,8 @@ class CaDiCaL(Solver):
     def new_var_range(self, n: int):
         return self._inner.new_var_range(n)
 
+    def _set_option(self, option: str, value: int):
+        return self._inner._set_option(option, value)
 
 class Kissat(Solver):
     """The `Kissat <https://github.com/arminbiere/kissat>`_ SAT solver."""
