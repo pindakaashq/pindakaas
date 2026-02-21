@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.4.0...pyndakaas-v0.4.1) - 2026-02-21
+
+### Added
+
+- _set_option for CaDiCaL ([#195](https://github.com/pindakaashq/pindakaas/pull/195))
+- Windows ARM compatibility
+
 ## [0.4.0](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.3.0...pyndakaas-v0.4.0) - 2026-02-10
 
 ### Fixed
