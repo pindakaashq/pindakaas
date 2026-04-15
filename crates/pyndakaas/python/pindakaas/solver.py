@@ -95,9 +95,8 @@ class CaDiCaL(Solver):
 
     @contextmanager
     def _solve_assuming(self, assumptions: Iterable[Lit]) -> Iterator[Result]:
-        # TODO: Investigate whether it is possible to avoid copying the solution
-        (status, mapping) = self._inner.solve_assuming(assumptions)
-        yield MapResult(status, mapping)
+        with self._inner.solve_assuming(list(assumptions)) as result:
+            yield result
 
     def add_clause(self, clause: Iterable[Lit]):
         return self._inner.add_clause(iter(clause))
@@ -130,9 +129,8 @@ class Kissat(Solver):
 
     @contextmanager
     def _solve_assuming(self, assumptions: Iterable[Lit]) -> Iterator[Result]:
-        # TODO: Investigate whether it is possible to avoid copying the solution
-        (status, mapping) = self._inner.solve_assuming(assumptions)
-        yield MapResult(status, mapping)
+        with self._inner.solve_assuming(list(assumptions)) as result:
+            yield result
 
     def add_clause(self, clause: Iterable[Lit]):
         return self._inner.add_clause(iter(clause))
@@ -148,23 +146,3 @@ class Kissat(Solver):
 
     def new_var_range(self, n: int):
         return self._inner.new_var_range(n)
-
-
-class MapResult(Result):
-    def __init__(self, status: Status, mapping: dict[int, bool]):
-        self._status = status
-        self._mapping = mapping
-
-    @property
-    def status(self) -> Status:
-        return self._status
-
-    def value(self, lit: Lit) -> Optional[bool]:
-        if self.status == Status.SATISFIED:
-            return self._mapping.get(int(lit))
-        return None
-
-    def failed(self, lit: Lit) -> Optional[bool]:
-        if self.status == Status.UNSATISFIABLE:
-            return self._mapping.get(int(lit))
-        return None

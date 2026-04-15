@@ -604,9 +604,6 @@ pub struct Unsatisfiable;
 pub trait Valuation {
 	/// Returns the valuation/truth-value for a given literal in the
 	/// current solution/model.
-	///
-	/// Note that the function can return None if the model/solution is
-	/// independent of the given literal.
 	fn value(&self, lit: Lit) -> bool;
 }
 

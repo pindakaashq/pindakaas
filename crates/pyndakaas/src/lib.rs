@@ -1,6 +1,5 @@
 //! This crate implements the the internal `pindakaas.pindakaas` Python module,
 //! which provides bindings for the `pindakaas` Rust crate.
-
 #![expect(
 	clippy::upper_case_acronyms,
 	reason = "Python naming for exposed types"
@@ -9,14 +8,6 @@
 use std::sync::PoisonError;
 
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
-
-create_exception!(pindakaas, InvalidEncoder, PyException, "Raised when the chosen encoder does not support the constraint (e.g. when the `PairwiseEncoder` encoder for AMO constraints is used to encode a PB constraint).");
-create_exception!(
-	pindakaas,
-	Unsatisfiable,
-	PyException,
-	"Raised when the given constraint is found to be Unsatisfiable during encoding."
-);
 
 // Avoid orphan rule preventing impl PyErr on pindakaas::Unsatisfiable
 struct ErrWrapper(PyErr);
@@ -53,6 +44,19 @@ impl From<ErrWrapper> for PyErr {
 	fn from(err: ErrWrapper) -> Self {
 		err.0
 	}
+}
+
+create_exception! {
+	pindakaas,
+	InvalidEncoder,
+	PyException,
+	"Raised when the chosen encoder does not support the constraint (e.g. when the `PairwiseEncoder` encoder for AMO constraints is used to encode a PB constraint)."
+}
+create_exception! {
+	pindakaas,
+	Unsatisfiable,
+	PyException,
+	"Raised when the given constraint is found to be Unsatisfiable during encoding."
 }
 
 #[pymodule]
@@ -824,9 +828,42 @@ mod pindakaas {
 
 	#[pymodule]
 	mod solver {
+		macro_rules! py_solver_result {
+			($name:ident, $owner:ident, $solver:ty) => {
+				#[pymethods]
+				impl $name {
+					fn __enter__(slf: Py<Self>) -> Py<Self> {
+						slf
+					}
+
+					fn __exit__(
+						&mut self,
+						py: Python<'_>,
+						_exc_type: Option<&Bound<'_, PyAny>>,
+						_exc: Option<&Bound<'_, PyAny>>,
+						_traceback: Option<&Bound<'_, PyAny>>,
+					) -> PyResult<bool> {
+						self.0.exit(py, |owner| &mut owner.0)
+					}
+
+					fn failed(&self, lit: Lit) -> PyResult<Option<bool>> {
+						self.0.failed(lit)
+					}
+
+					#[getter]
+					fn status(&self) -> PyResult<Status> {
+						self.0.status()
+					}
+
+					fn value(&self, lit: Lit) -> PyResult<Option<bool>> {
+						self.0.value(lit)
+					}
+				}
+			};
+		}
+
 		use std::{
-			collections::HashMap,
-			sync::Mutex,
+			mem::transmute,
 			time::{Duration, SystemTime},
 		};
 
@@ -836,21 +873,59 @@ mod pindakaas {
 				cadical::Cadical, kissat::Kissat, Assumptions, FailedAssumptions, SolveResult,
 				Solver, TermSignal, TerminateCallback,
 			},
-			ClauseDatabase, ClauseDatabaseTools, Valuation,
+			ClauseDatabase, ClauseDatabaseTools, Lit as BaseLit, Valuation,
 		};
-		use pyo3::{exceptions::PyNotImplementedError, prelude::*, types::PyIterator};
+		use pyo3::{
+			exceptions::{PyNotImplementedError, PyRuntimeError},
+			prelude::*,
+			pyclass::boolean_struct::False,
+			types::{PyAny, PyIterator},
+			PyClass,
+		};
 
-		use super::Result;
-		use crate::pindakaas::{encode_constraint, ConstraintArg, Encoder, Lit, VarRange};
+		use crate::{
+			pindakaas::{encode_constraint, ConstraintArg, Encoder, Lit, VarRange},
+			Result,
+		};
+
+		const CHECKED_OUT_ERROR: &str = "solver is currently checked out by an active result";
+		const INACTIVE_RESULT_ERROR: &str = "solver result is no longer active";
+		const RESTORED_ERROR: &str = "solver was already restored to its owner";
 
 		#[pyclass(unsendable)]
-		#[derive(Debug, Default)]
-		/// The internal representation of a instance of the CaDiCaL solver.
-		struct CaDiCaLInner(Cadical);
+		#[derive(Debug)]
+		struct CaDiCaLInner(SolverImpl<Cadical>);
 
-		#[pyclass]
-		#[derive(Debug, Default)]
-		struct KissatInner(Mutex<Kissat>);
+		#[pyclass(unsendable)]
+		struct CaDiCaLResult(SolverResultImpl<CaDiCaLInner, Cadical>);
+
+		#[pyclass(unsendable)]
+		#[derive(Debug)]
+		struct KissatInner(SolverImpl<Kissat>);
+
+		#[pyclass(unsendable)]
+		struct KissatResult(SolverResultImpl<KissatInner, Kissat>);
+
+		#[derive(Debug)]
+		struct SolverImpl<S> {
+			solver: Option<S>,
+		}
+
+		struct SolverResultImpl<Owner, S> {
+			owner: Py<Owner>,
+			result: Option<SolverResultState>,
+			solver: Option<S>,
+			supports_assumptions: bool,
+		}
+
+		enum SolverResultState {
+			/// A satisfying valuation for the current solve call.
+			Satisfied(Box<dyn Valuation + 'static>),
+			/// Failed assumptions for the current solve call.
+			Unsatisfiable(Box<dyn Fn(BaseLit) -> Option<bool> + 'static>),
+			/// The solver terminated without a definitive result.
+			Unknown,
+		}
 
 		#[pyclass(eq, eq_int)]
 		#[derive(Clone, Copy, Debug, PartialEq)]
@@ -862,17 +937,6 @@ mod pindakaas {
 			UNSATISFIABLE,
 			/// The solving process was interrupted before a result was found.
 			UNKNOWN,
-		}
-
-		fn dur_term_fn(dur: Duration) -> impl Fn() -> TermSignal + 'static {
-			let deadline = SystemTime::now() + dur;
-			move || {
-				if SystemTime::now() > deadline {
-					TermSignal::Terminate
-				} else {
-					TermSignal::Continue
-				}
-			}
 		}
 
 		/// Hack: workaround for https://github.com/PyO3/pyo3/issues/759
@@ -887,13 +951,13 @@ mod pindakaas {
 
 		#[pymethods]
 		impl CaDiCaLInner {
-			fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
-				let clause: Vec<Lit> = clause
-					.into_iter()
-					.map(|any| any.and_then(|lit| lit.extract::<Lit>()))
-					.try_collect()?;
-				self.0.add_clause(clause.into_iter().map(|lit| lit.0))?;
+			fn _set_option(&mut self, name: &str, value: i32) -> PyResult<()> {
+				self.0.solver_mut()?.set_option(name, value);
 				Ok(())
+			}
+
+			fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
+				self.0.add_clause(clause)
 			}
 
 			fn add_encoding(
@@ -902,64 +966,110 @@ mod pindakaas {
 				enc: Option<Encoder>,
 				conditions: Vec<Lit>,
 			) -> Result {
-				encode_constraint(&mut self.0, con, enc, conditions)
+				self.0.add_encoding(con, enc, conditions)
 			}
 
 			#[new]
 			fn new() -> Self {
-				Self(Default::default())
+				Self(SolverImpl::default())
 			}
 
 			fn new_var_range(&mut self, num_vars: usize) -> PyResult<VarRange> {
-				let range = self.0.new_var_range(num_vars);
-				Ok(VarRange(range))
+				self.0.new_var_range(num_vars)
 			}
 
 			fn set_time_limit(&mut self, limit: Option<Duration>) -> Result {
-				self.0.set_terminate_callback(limit.map(dur_term_fn));
-				Ok(())
+				self.0.set_time_limit(limit)
 			}
 
 			fn solve_assuming(
-				&mut self,
+				slf: Py<Self>,
+				py: Python<'_>,
 				assumptions: Vec<Lit>,
-			) -> Result<(Status, HashMap<i32, bool>)> {
-				let vars = self.0.emitted_vars();
-				let result = self.0.solve_assuming(assumptions.iter().map(|&lit| lit.0));
-				Ok(match result {
-					SolveResult::Satisfied(sol) => (
-						Status::SATISFIED,
-						vars.into_iter()
-							.map(|var| (var.into(), sol.value(var.into())))
-							.collect(),
-					),
-					SolveResult::Unsatisfiable(fail) => (
-						Status::UNSATISFIABLE,
-						assumptions
-							.iter()
-							.map(|&lit| (lit.0.into(), fail.fail(lit.0)))
-							.collect(),
-					),
-					SolveResult::Unknown => (Status::UNKNOWN, HashMap::new()),
-				})
-			}
-
-			fn _set_option(&mut self, name: &str, value: i32) {
-				self.0.set_option(name, value);
+			) -> Result<Py<CaDiCaLResult>> {
+				let mut inner = slf.bind(py).borrow_mut();
+				let solver = inner.0.take()?;
+				Ok(Py::new(
+					py,
+					CaDiCaLResult(SolverResultImpl::from_assumptions_solver(
+						slf.clone_ref(py),
+						solver,
+						&assumptions,
+					)),
+				)?)
 			}
 		}
 
 		#[pymethods]
 		impl KissatInner {
-			fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> PyResult<()> {
+			fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
+				self.0.add_clause(clause)
+			}
+
+			fn add_encoding(
+				&mut self,
+				con: ConstraintArg,
+				enc: Option<Encoder>,
+				conditions: Vec<Lit>,
+			) -> Result {
+				self.0.add_encoding(con, enc, conditions)
+			}
+
+			#[new]
+			fn new() -> Self {
+				Self(SolverImpl::default())
+			}
+
+			fn new_var_range(&mut self, num_vars: usize) -> PyResult<VarRange> {
+				self.0.new_var_range(num_vars)
+			}
+
+			fn set_time_limit(&mut self, limit: Option<Duration>) -> Result {
+				self.0.set_time_limit(limit)
+			}
+
+			fn solve_assuming(
+				slf: Py<Self>,
+				py: Python<'_>,
+				assumptions: Vec<Lit>,
+			) -> Result<Py<KissatResult>> {
+				if !assumptions.is_empty() {
+					return Err(PyNotImplementedError::new_err(
+						"solver does not support assumptions",
+					)
+					.into());
+				}
+				let mut inner = slf.bind(py).borrow_mut();
+				let solver = inner.0.take()?;
+				Ok(Py::new(
+					py,
+					KissatResult(SolverResultImpl::from_solver(slf.clone_ref(py), solver)),
+				)?)
+			}
+		}
+
+		impl<S> SolverImpl<S> {
+			fn solver_mut(&mut self) -> PyResult<&mut S> {
+				self.solver
+					.as_mut()
+					.ok_or_else(|| PyRuntimeError::new_err(CHECKED_OUT_ERROR))
+			}
+
+			fn take(&mut self) -> PyResult<S> {
+				self.solver
+					.take()
+					.ok_or_else(|| PyRuntimeError::new_err(CHECKED_OUT_ERROR))
+			}
+		}
+
+		impl<S: ClauseDatabase> SolverImpl<S> {
+			fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
 				let clause: Vec<Lit> = clause
 					.into_iter()
 					.map(|any| any.and_then(|lit| lit.extract::<Lit>()))
-					.collect::<PyResult<_>>()?;
-				let mut guard = self.0.lock().unwrap();
-				guard
-					.add_clause(clause.into_iter().map(|lit| lit.0))
-					.unwrap();
+					.try_collect()?;
+				self.solver_mut()?
+					.add_clause(clause.into_iter().map(|lit| lit.0))?;
 				Ok(())
 			}
 
@@ -969,48 +1079,158 @@ mod pindakaas {
 				enc: Option<Encoder>,
 				conditions: Vec<Lit>,
 			) -> Result {
-				let mut guard = self.0.lock().unwrap();
-				encode_constraint(&mut *guard, con, enc, conditions)
-			}
-
-			#[new]
-			fn new() -> Self {
-				Self(Default::default())
+				encode_constraint(self.solver_mut()?, con, enc, conditions)
 			}
 
 			fn new_var_range(&mut self, num_vars: usize) -> PyResult<VarRange> {
-				let mut guard = self.0.lock().unwrap();
-				let range = guard.new_var_range(num_vars);
-				Ok(VarRange(range))
+				Ok(VarRange(self.solver_mut()?.new_var_range(num_vars)))
 			}
+		}
 
-			fn set_time_limit(&mut self, limit: Option<Duration>) {
-				let mut guard = self.0.lock().unwrap();
-				guard.set_terminate_callback(limit.map(dur_term_fn));
+		impl<S: TerminateCallback> SolverImpl<S> {
+			fn set_time_limit(&mut self, limit: Option<Duration>) -> Result {
+				self.solver_mut()?.set_terminate_callback(limit.map(|dur| {
+					let deadline = SystemTime::now() + dur;
+					move || {
+						if SystemTime::now() > deadline {
+							TermSignal::Terminate
+						} else {
+							TermSignal::Continue
+						}
+					}
+				}));
+				Ok(())
 			}
+		}
 
-			fn solve_assuming(
-				&self,
-				assumptions: Vec<Lit>,
-			) -> PyResult<(Status, HashMap<i32, bool>)> {
-				if !assumptions.is_empty() {
-					return Err(PyNotImplementedError::new_err(
-						"Kissat does not support assumptions",
-					));
+		impl<S: Default> Default for SolverImpl<S> {
+			fn default() -> Self {
+				Self {
+					solver: Some(S::default()),
 				}
-				let mut guard = self.0.lock().unwrap();
-				let vars = guard.emitted_vars();
-				Ok(match guard.solve() {
-					SolveResult::Satisfied(sol) => (
-						Status::SATISFIED,
-						vars.into_iter()
-							.map(|var| (var.into(), sol.value(var.into())))
-							.collect(),
-					),
-					SolveResult::Unsatisfiable(_) => (Status::UNSATISFIABLE, Default::default()),
-					SolveResult::Unknown => (Status::UNKNOWN, HashMap::new()),
+			}
+		}
+
+		impl<Owner: PyClass<Frozen = False>, S> SolverResultImpl<Owner, S> {
+			fn exit(
+				&mut self,
+				py: Python<'_>,
+				slot: fn(&mut Owner) -> &mut SolverImpl<S>,
+			) -> PyResult<bool> {
+				self.result = None;
+				if let Some(solver) = self.solver.take() {
+					let mut owner = self.owner.bind(py).borrow_mut();
+					let inner = slot(std::ops::DerefMut::deref_mut(&mut owner));
+					if inner.solver.is_some() {
+						return Err(PyRuntimeError::new_err(RESTORED_ERROR));
+					}
+					inner.solver = Some(solver);
+				}
+				Ok(false)
+			}
+		}
+
+		impl<Owner, S: Solver> SolverResultImpl<Owner, S> {
+			fn from_solver(owner: Py<Owner>, mut solver: S) -> Self {
+				let result = match solver.solve() {
+					SolveResult::Satisfied(sol) => {
+						let sol: Box<dyn Valuation + '_> = Box::new(sol);
+						// SAFETY: The returned valuation is tied to the checked-out
+						// solver and is dropped before solver access is restored.
+						let sol: Box<dyn Valuation + 'static> = unsafe { transmute(sol) };
+						SolverResultState::Satisfied(sol)
+					}
+					SolveResult::Unsatisfiable(_) => {
+						SolverResultState::Unsatisfiable(Box::new(|_| None))
+					}
+					SolveResult::Unknown => SolverResultState::Unknown,
+				};
+				Self::new(owner, result, solver, false)
+			}
+		}
+
+		impl<Owner, S: Assumptions> SolverResultImpl<Owner, S> {
+			fn from_assumptions_solver(
+				owner: Py<Owner>,
+				mut solver: S,
+				assumptions: &[Lit],
+			) -> Self {
+				let result = match solver.solve_assuming(assumptions.iter().map(|lit| lit.0)) {
+					SolveResult::Satisfied(sol) => {
+						let sol: Box<dyn Valuation + '_> = Box::new(sol);
+						// SAFETY: The returned valuation is only valid while the solver
+						// state remains alive and unchanged. The corresponding result
+						// object owns the checked-out solver and drops this boxed value
+						// before restoring solver access.
+						let sol: Box<dyn Valuation + 'static> = unsafe { transmute(sol) };
+						SolverResultState::Satisfied(sol)
+					}
+					SolveResult::Unsatisfiable(fail) => {
+						let fail: Box<dyn FailedAssumptions + '_> = Box::new(fail);
+						// SAFETY: Same reasoning as above for the failed-assumptions
+						// object.
+						let fail: Box<dyn FailedAssumptions + 'static> = unsafe { transmute(fail) };
+						let fail = move |lit: BaseLit| Some(fail.fail(lit));
+						SolverResultState::Unsatisfiable(Box::new(fail))
+					}
+					SolveResult::Unknown => SolverResultState::Unknown,
+				};
+				Self::new(owner, result, solver, true)
+			}
+		}
+
+		impl<Owner, S> SolverResultImpl<Owner, S> {
+			fn failed(&self, lit: Lit) -> PyResult<Option<bool>> {
+				let Some(result) = self.result.as_ref() else {
+					return Err(PyRuntimeError::new_err(INACTIVE_RESULT_ERROR));
+				};
+				if !self.supports_assumptions {
+					return Ok(None);
+				}
+				Ok(match result {
+					SolverResultState::Unsatisfiable(fail) => fail(lit.0),
+					_ => None,
+				})
+			}
+
+			fn new(
+				owner: Py<Owner>,
+				result: SolverResultState,
+				solver: S,
+				supports_assumptions: bool,
+			) -> Self {
+				Self {
+					owner,
+					result: Some(result),
+					solver: Some(solver),
+					supports_assumptions,
+				}
+			}
+
+			fn status(&self) -> PyResult<Status> {
+				let Some(result) = self.result.as_ref() else {
+					return Err(PyRuntimeError::new_err(INACTIVE_RESULT_ERROR));
+				};
+				Ok(match result {
+					SolverResultState::Satisfied(_) => Status::SATISFIED,
+					SolverResultState::Unsatisfiable(_) => Status::UNSATISFIABLE,
+					SolverResultState::Unknown => Status::UNKNOWN,
+				})
+			}
+
+			fn value(&self, lit: Lit) -> PyResult<Option<bool>> {
+				let Some(result) = self.result.as_ref() else {
+					return Err(PyRuntimeError::new_err(INACTIVE_RESULT_ERROR));
+				};
+				Ok(match result {
+					SolverResultState::Satisfied(sol) => Some(sol.value(lit.0)),
+					_ => None,
 				})
 			}
 		}
+
+		py_solver_result!(CaDiCaLResult, CaDiCaLInner, Cadical);
+
+		py_solver_result!(KissatResult, KissatInner, Kissat);
 	}
 }

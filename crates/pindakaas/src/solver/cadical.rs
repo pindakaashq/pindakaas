@@ -6,7 +6,6 @@ use std::{
 	ffi::{c_int, c_void, CString},
 	fmt,
 	marker::PhantomData,
-	num::NonZero,
 	rc::Rc,
 };
 
@@ -15,7 +14,7 @@ use pindakaas_cadical::{
 	ccadical_declare_more_variables, ccadical_declare_one_more_variable,
 	ccadical_disconnect_proof_tracer, ccadical_failed, ccadical_get_option, ccadical_init,
 	ccadical_limit, ccadical_phase, ccadical_release, ccadical_set_learn, ccadical_set_option,
-	ccadical_set_terminate, ccadical_solve, ccadical_unphase, ccadical_val, ccadical_vars, CTracer,
+	ccadical_set_terminate, ccadical_solve, ccadical_unphase, ccadical_val, CTracer,
 };
 #[cfg(feature = "external-propagation")]
 use pindakaas_cadical::{
@@ -39,7 +38,7 @@ use crate::{
 		},
 		LearnCallback, TermSignal, TerminateCallback,
 	},
-	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit, Var, VarRange,
+	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit,
 };
 
 #[derive(Default)]
@@ -260,17 +259,6 @@ impl Cadical {
 				debug_assert!(removed);
 			}
 		}
-	}
-	// TODO: Unsure whether this is a good idea.
-	#[doc(hidden)]
-	pub fn emitted_vars(&self) -> VarRange {
-		// SAFETY: Pointer is guaranteed to point to a valid and initialized
-		// CCadical instance.
-		let end = unsafe { ccadical_vars(self.ipasir_store().solver_ptr()) };
-		// Return VarRange with emitted vars, or empty if end is zero
-		NonZero::new(end)
-			.map(|end| VarRange::new(Var(NonZero::new(1).unwrap()), Var(end)))
-			.unwrap_or_else(VarRange::empty)
 	}
 
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
@@ -831,14 +819,6 @@ mod tests {
 		// Set termination callback that stops immediately
 		slv.set_terminate_callback(Some(|| TermSignal::Terminate));
 		assert!(matches!(slv.solve(), SolveResult::Unknown));
-	}
-
-	#[test]
-	fn test_emitted_vars() {
-		let mut slv = Cadical::default();
-		assert!(slv.emitted_vars().len() == 0);
-		_ = slv.new_var();
-		assert!(slv.emitted_vars().len() == 1);
 	}
 
 	#[test]
