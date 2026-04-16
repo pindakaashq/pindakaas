@@ -941,12 +941,12 @@ mod pindakaas {
 
 		/// Hack: workaround for https://github.com/PyO3/pyo3/issues/759
 		#[pymodule_init]
-		fn init(m: &Bound<'_, PyModule>) -> PyResult<()> {
-			Python::attach(|py| {
-				py.import("sys")?
-					.getattr("modules")?
-					.set_item("pindakaas.pindakaas.solver", m)
-			})
+		fn init(module: &Bound<'_, PyModule>) -> PyResult<()> {
+			module
+				.py()
+				.import("sys")?
+				.getattr("modules")?
+				.set_item("pindakaas.pindakaas.solver", module)
 		}
 
 		#[pymethods]
