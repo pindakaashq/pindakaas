@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.4.1...pyndakaas-v0.5.0) - 2026-04-17
+
+### Added
+
+- Use custom `Result` object, implemented in Rust, for solver implementations originating from the Rust Pindakaas library.
+
+### Added
+
+- Fix a `solver.CaDiCaL` error that was caused by `MapResult` creation accessing literals that are meant to only be accessed by CaDiCaL itself.
+
+### Removed
+
+- Remove `solver.MapResult` after it became unused for internal `solver.Solver` implementations.
+
 ## [0.4.1](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.4.0...pyndakaas-v0.4.1) - 2026-02-21
 
 ### Added

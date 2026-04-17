@@ -15,7 +15,7 @@ use crate::{
 		},
 		VarFactory,
 	},
-	ClauseDatabaseTools, Cnf, VarRange,
+	ClauseDatabaseTools, Cnf,
 };
 
 #[derive(Debug, Default)]
@@ -23,14 +23,6 @@ use crate::{
 /// [Kissat](https://github.com/arminbiere/kissat) SAT solver.
 pub struct Kissat {
 	store: IpasirStore<Self, VarFactory, 0, 1, 0>,
-}
-
-impl Kissat {
-	// TODO: Unsure whether this is a good idea.
-	#[doc(hidden)]
-	pub fn emitted_vars(&self) -> VarRange {
-		self.store.store.vars.emitted_vars()
-	}
 }
 
 impl AccessIpasirStore for Kissat {
