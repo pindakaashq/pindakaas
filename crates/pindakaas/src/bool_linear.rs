@@ -1343,20 +1343,19 @@ impl BoolLinExp {
 				.map(|(_, i)| i)
 				.sum();
 			match constraint {
-				Some(Constraint::AtMostOne) => {
-					if sum != 0 && terms.iter().filter(|&&&(l, _)| sol.value(l)).count() > 1 {
-						return Err(Unsatisfiable);
-					}
+				Some(Constraint::AtMostOne)
+					if sum != 0 && terms.iter().filter(|&&&(l, _)| sol.value(l)).count() > 1 =>
+				{
+					return Err(Unsatisfiable);
 				}
-				Some(Constraint::ImplicationChain) => {
+				Some(Constraint::ImplicationChain)
 					if terms
 						.iter()
 						.map(|(l, _)| *l)
 						.tuple_windows()
-						.any(|(a, b)| !sol.value(a) & sol.value(b))
-					{
-						return Err(Unsatisfiable);
-					}
+						.any(|(a, b)| !sol.value(a) & sol.value(b)) =>
+				{
+					return Err(Unsatisfiable);
 				}
 				Some(Constraint::Domain { lb, ub }) => {
 					// divide by first coeff to get int assignment
@@ -1368,7 +1367,7 @@ impl BoolLinExp {
 						return Err(Unsatisfiable);
 					}
 				}
-				None => {}
+				_ => {}
 			};
 			total += sum;
 		}
@@ -1440,10 +1439,8 @@ impl<'a> AddAssign<IntEncoding<'a>> for BoolLinExp {
 	fn add_assign(&mut self, rhs: IntEncoding<'a>) {
 		match rhs {
 			IntEncoding::Direct { first, vals } => {
-				let mut k = first;
-				for lit in vals {
+				for (k, lit) in (first..).zip(vals.iter()) {
 					self.terms.push_back((*lit, k));
-					k += 1;
 				}
 				self.constraints.push((Constraint::AtMostOne, vals.len()));
 			}
@@ -1522,10 +1519,8 @@ impl<'a> From<IntEncoding<'a>> for BoolLinExp {
 		match var {
 			IntEncoding::Direct { first, vals } => {
 				let mut terms = VecDeque::with_capacity(vals.len());
-				let mut k = first;
-				for lit in vals {
+				for (k, lit) in (first..).zip(vals.iter()) {
 					terms.push_back((*lit, k));
-					k += 1;
 				}
 				Self {
 					terms,

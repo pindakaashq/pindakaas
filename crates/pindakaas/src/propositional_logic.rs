@@ -333,7 +333,7 @@ impl Formula<Lit> {
 							db.add_clause([name, !lit])?;
 						}
 						// name -> (lit[0] or lit[1] or ...)
-						db.add_clause(once(!name).chain(lits.into_iter()))?;
+						db.add_clause(once(!name).chain(lits))?;
 						name
 					}
 				}
@@ -366,7 +366,7 @@ impl Formula<Lit> {
 					db.add_clause([!name, x, !y])?;
 				}
 				db.add_clause(once(name).chain(lits.iter().map(|&l| !l)))?;
-				db.add_clause(once(name).chain(lits.into_iter()))?;
+				db.add_clause(once(name).chain(lits))?;
 				name
 			}
 			Formula::Xor(sub) => {
