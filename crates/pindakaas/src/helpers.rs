@@ -50,8 +50,8 @@ macro_rules! new_named_lit {
 }
 
 pub(crate) mod opt_field;
+pub(crate) mod scm;
 
-use itertools::Itertools;
 pub(crate) use new_named_lit;
 
 use crate::{bool_linear::PosCoeff, integer::IntVar, ClauseDatabase, Coeff};
@@ -80,16 +80,13 @@ pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool 
 
 pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 	num.to_string()
-		.chars()
-		.map(|d| d.to_digit(10).unwrap())
-		.map(|d| char::from_u32(0x2080 + d).unwrap())
-		.collect_vec()
+		.into_bytes()
 		.into_iter()
+		.map(|b| char::from_u32(0x2080 + (b - b'0') as u32).unwrap())
 }
 
 pub(crate) fn unsigned_binary_range_ub(bits: u32) -> Coeff {
-	const TWO: Coeff = 2;
-	(0_u32..bits).fold(0, |sum, i| sum + TWO.pow(i))
+	(1 << bits) - 1
 }
 
 #[cfg(test)]
