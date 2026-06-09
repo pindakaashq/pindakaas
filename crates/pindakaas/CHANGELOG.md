@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.5.0...pindakaas-v0.5.1) - 2026-06-09
+
+### Added
+
+- *(external-propagation)* clone solvers with external propagator
+
+### Removed
+
+- *(external-propagation)* remove `Cadical::is_observed`; variable observation is now handled when cloning a solver through the new `Cadical::shallow_clone_with_propagator` method.
+
+### Other
+
+- update dependencies
+- *(deps)* update rangelist requirement from 0.3.1 to 0.4.0
+- *(deps)* update libloading requirement from 0.8 to 0.9
+
 ## [0.5.0](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.4.1...pindakaas-v0.5.0) - 2026-04-17
 
 ### Other

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/pindakaashq/pindakaas/compare/pindakaas-cadical-v0.3.2...pindakaas-cadical-v0.4.0) - 2026-06-09
+
+### Added
+
+- *(external-propagation)* clone solvers with external propagator
+
 ## [0.3.2](https://github.com/pindakaashq/pindakaas/compare/pindakaas-cadical-v0.3.1...pindakaas-cadical-v0.3.2) - 2026-02-21
 
 ### Added
