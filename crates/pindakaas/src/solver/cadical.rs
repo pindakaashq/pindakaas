@@ -18,25 +18,22 @@ use pindakaas_cadical::{
 };
 #[cfg(feature = "external-propagation")]
 use pindakaas_cadical::{
-	ccadical_add_observed_var, ccadical_connect_external_propagator,
+	ccadical_add_observed_var, ccadical_connect_external_propagator, ccadical_copy_with_propagator,
 	ccadical_disconnect_external_propagator, ccadical_force_backtrack, ccadical_is_decision,
-	ccadical_is_observed, ccadical_remove_observed_var, ccadical_reset_observed_vars,
-	CExternalPropagator,
+	ccadical_remove_observed_var, ccadical_reset_observed_vars, CExternalPropagator,
 };
 
 #[cfg(feature = "external-propagation")]
 use crate::solver::{
-	ipasir::user_propagation::IpasirUserPropagationMethods, propagation::ExternalPropagation,
+	ipasir::user_propagation::{IpasirPropagatorStorage, IpasirUserPropagationMethods},
+	propagation::PropagatorDefinition,
 };
 use crate::{
 	helpers::opt_field::OptField,
-	solver::{
-		ipasir::{
-			AccessIpasirStore, BasicIpasirStorage, IpasirAssumptionMethods,
-			IpasirLearnCallbackMethod, IpasirLiteralMethods, IpasirSolverMethods, IpasirStore,
-			IpasirStoreInner, IpasirTermCallbackMethod,
-		},
-		LearnCallback, TermSignal, TerminateCallback,
+	solver::ipasir::{
+		AccessIpasirStore, BasicIpasirStorage, IpasirAssumptionMethods, IpasirLearnCallbackMethod,
+		IpasirLiteralMethods, IpasirSolverMethods, IpasirStore, IpasirStoreInner,
+		IpasirTermCallbackMethod,
 	},
 	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit,
 };
@@ -269,15 +266,6 @@ impl Cadical {
 		unsafe { ccadical_get_option(self.ipasir_store().solver_ptr(), name.as_ptr()) }
 	}
 
-	#[cfg(feature = "external-propagation")]
-	/// Check whether a given literal is marked as observed in the solver's for
-	/// the [`ExternalPropagation`] interface.
-	pub fn is_observed(&self, lit: Lit) -> bool {
-		// SAFETY: Pointer known to be non-null, lit is known to be non-zero and not
-		// MIN_INT as required by Cadical.
-		unsafe { ccadical_is_observed(self.ipasir_store().solver_ptr(), lit.0.get()) }
-	}
-
 	// TODO: This can be replaced by [`ExternalPropagation::phase`] if
 	// `external_propagation` feature is ever automatically enabled.
 	/// Set the default decision phase of a variable to the given [`Lit`].
@@ -311,8 +299,11 @@ impl Cadical {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		let ptr = unsafe { ccadical_copy(self.ipasir_store().solver_ptr()) };
 
-		// Initialize [`Self`] instance.
-		let mut slv = Self {
+		// `ccadical_copy` constructs a fresh backend wrapper and `Solver::copy`
+		// transfers only the options, permanent clauses, witnesses and flags — no
+		// learn/terminate callbacks or external propagator. The new store is thus
+		// initialised with none of those connected.
+		Self {
 			store: IpasirStore {
 				store: Box::new(IpasirStoreInner {
 					ptr,
@@ -327,12 +318,56 @@ impl Cadical {
 				_methods: PhantomData,
 			},
 			tracers: Vec::new(),
+		}
+	}
+
+	/// Make a shallow clone of the [`Cadical`] solver (see
+	/// [`Self::shallow_clone`]) that additionally connects the given external
+	/// propagator and re-observes every variable that is currently observed by
+	/// `self`.
+	///
+	/// As with [`Self::shallow_clone`], the copy includes the permanent
+	/// clauses, but not the learned clauses or connected callbacks. The caller
+	/// must supply an appropriate clone of the propagator, since the
+	/// propagator's own state cannot be cloned automatically.
+	#[cfg(feature = "external-propagation")]
+	pub fn shallow_clone_with_propagator<P: PropagatorDefinition + 'static>(
+		&self,
+		propagator: Rc<RefCell<P>>,
+	) -> Self {
+		// Build the new store up front so the propagator's callback data pointer
+		// (which must reference this store) is valid before the backend connects
+		// it. The backend solver is created and returned by
+		// `ccadical_copy_with_propagator`, so `ptr` is filled in afterwards. This
+		// is sound because the only callback that can fire during the copy is
+		// `notify_assignment` (when re-observing an already-fixed variable), which
+		// reaches the propagator via the store's data pointer and never reads
+		// `ptr`.
+		let mut slv = Self {
+			store: IpasirStore {
+				store: Box::new(IpasirStoreInner {
+					ptr: std::ptr::null_mut(),
+					vars: (),
+					learn_cb: OptField::default(),
+					term_cb: OptField::default(),
+					propagator: OptField::default(),
+				}),
+				_methods: PhantomData,
+			},
+			tracers: Vec::new(),
 		};
-		// Make sure no pointers are left behind in the backend.
-		slv.set_learn_callback::<fn(&mut dyn Iterator<Item = Lit>)>(None);
-		slv.set_terminate_callback::<fn() -> TermSignal>(None);
-		#[cfg(feature = "external-propagation")]
-		slv.disconnect_propagator();
+		// Store the propagator in the new store and build its callback structure.
+		// The data pointer references the boxed store, whose address is stable
+		// across the move of `slv`. The propagator is connected to the backend
+		// inside `ccadical_copy_with_propagator`, not here.
+		let c_prop = slv.ipasir_store_mut().set_propagator(propagator);
+		// Copy the clauses, connect the propagator, and re-observe `self`'s
+		// observed variables onto the new solver, all in a single backend call.
+		// SAFETY: `self` is a valid (non-null) solver pointer and `c_prop`
+		// references the store owned by `slv`.
+		let ptr =
+			unsafe { ccadical_copy_with_propagator(self.ipasir_store().solver_ptr(), c_prop) };
+		slv.store.store.ptr = ptr;
 
 		slv
 	}
@@ -965,5 +1000,177 @@ mod tests {
 		// Test correct release of propagator on drop
 		drop(slv);
 		assert_eq!(Rc::strong_count(&p), 1);
+	}
+
+	#[cfg(feature = "external-propagation")]
+	#[test]
+	fn user_propagator_shallow_clone() {
+		use std::{cell::RefCell, rc::Rc};
+
+		use itertools::Itertools;
+
+		use crate::{
+			solver::{
+				propagation::{
+					ClausePersistence, ExternalPropagation, Propagator, PropagatorDefinition,
+					SolvingActions,
+				},
+				VarRange,
+			},
+			ClauseDatabase, Lit,
+		};
+
+		struct Dist2 {
+			vars: VarRange,
+			tmp: Vec<Vec<Lit>>,
+		}
+		impl Propagator for Dist2 {
+			fn check_solution(
+				&mut self,
+				_slv: &mut dyn SolvingActions,
+				model: &dyn crate::Valuation,
+			) -> bool {
+				let mut vars = self.vars.clone();
+				while let Some(v) = vars.next() {
+					if model.value(v.into()) {
+						let next_2 = vars.clone().take(2);
+						for o in next_2 {
+							if model.value(o.into()) {
+								self.tmp.push(vec![!v, !o]);
+							}
+						}
+					}
+				}
+				self.tmp.is_empty()
+			}
+			fn add_external_clause(
+				&mut self,
+				_slv: &mut dyn SolvingActions,
+			) -> Option<(Vec<Lit>, ClausePersistence)> {
+				self.tmp.pop().map(|c| (c, ClausePersistence::Forgettable))
+			}
+		}
+		impl PropagatorDefinition for Dist2 {
+			const CHECK_ONLY: bool = true;
+		}
+
+		let mut slv = Cadical::default();
+		let vars = slv.new_var_range(5);
+
+		let p = Rc::new(RefCell::new(Dist2 {
+			vars,
+			tmp: Vec::new(),
+		}));
+		slv.connect_propagator(Rc::clone(&p));
+		slv.add_clause(vars).unwrap();
+		for v in vars {
+			slv.add_observed_var(v)
+		}
+
+		// Clone the solver together with a fresh clone of the propagator. The
+		// clone must inherit the permanent clauses, the propagator connection, and
+		// the observed variable set.
+		let cp_p = Rc::new(RefCell::new(Dist2 {
+			vars,
+			tmp: Vec::new(),
+		}));
+		assert_eq!(Rc::strong_count(&cp_p), 1);
+		let mut cp = slv.shallow_clone_with_propagator(Rc::clone(&cp_p));
+		assert_eq!(Rc::strong_count(&cp_p), 2);
+
+		// Dropping the original solver must not affect the clone.
+		drop(slv);
+		assert_eq!(Rc::strong_count(&p), 1);
+
+		// Enumerating on the clone must reproduce the same constrained solutions,
+		// proving the clauses and the propagator were carried over.
+		let mut solns: Vec<Vec<Lit>> = Vec::new();
+		while let SolveResult::Satisfied(sol) = cp.solve() {
+			let sol: Vec<Lit> = vars
+				.clone()
+				.map(|v| if sol.value(v.into()) { v.into() } else { !v })
+				.collect_vec();
+			solns.push(sol);
+			cp.add_clause(solns.last().unwrap().iter().map(|&l| !l))
+				.unwrap()
+		}
+		solns.sort();
+
+		let (a, b, c, d, e) = vars.clone().iter_lits().collect_tuple().unwrap();
+		assert_eq!(
+			solns,
+			vec![
+				vec![a, !b, !c, d, !e],
+				vec![a, !b, !c, !d, e],
+				vec![a, !b, !c, !d, !e],
+				vec![!a, b, !c, !d, e],
+				vec![!a, b, !c, !d, !e],
+				vec![!a, !b, c, !d, !e],
+				vec![!a, !b, !c, d, !e],
+				vec![!a, !b, !c, !d, e],
+			]
+		);
+		assert!(cp_p.borrow().tmp.is_empty());
+
+		// Test correct release of the cloned propagator on drop.
+		drop(cp);
+		assert_eq!(Rc::strong_count(&cp_p), 1);
+	}
+
+	#[cfg(feature = "external-propagation")]
+	#[test]
+	fn shallow_clone_with_propagator_observes() {
+		use std::{cell::RefCell, collections::HashSet, rc::Rc};
+
+		use crate::{
+			solver::propagation::{ExternalPropagation, Propagator, PropagatorDefinition},
+			ClauseDatabase, Lit,
+		};
+
+		// A propagator that records every assignment notification it receives. A
+		// non-lazy propagator is only notified about *observed* variables, so a
+		// non-empty record on the clone proves the observed set was transferred.
+		#[derive(Default)]
+		struct Recorder {
+			notified: Vec<Lit>,
+		}
+		impl Propagator for Recorder {
+			fn notify_assignment(&mut self, lits: &[Lit]) {
+				self.notified.extend_from_slice(lits);
+			}
+		}
+		impl PropagatorDefinition for Recorder {}
+
+		let mut slv = Cadical::default();
+		let vars = slv.new_var_range(3);
+		// Force every variable so that solving assigns all of them.
+		for v in vars {
+			slv.add_clause([v]).unwrap();
+		}
+
+		let p = Rc::new(RefCell::new(Recorder::default()));
+		slv.connect_propagator(Rc::clone(&p));
+		for v in vars {
+			slv.add_observed_var(v);
+		}
+
+		// Clone with a fresh recorder; the clone must re-observe `vars`.
+		let cp_p = Rc::new(RefCell::new(Recorder::default()));
+		let mut cp = slv.shallow_clone_with_propagator(Rc::clone(&cp_p));
+
+		assert!(matches!(cp.solve(), SolveResult::Satisfied(_)));
+
+		// The clone's propagator must have been notified about every observed
+		// variable, proving the observations were copied onto the clone.
+		let notified: HashSet<Lit> = cp_p.borrow().notified.iter().copied().collect();
+		for v in vars {
+			assert!(
+				notified.contains(&v.into()),
+				"clone propagator was not notified about observed variable {v:?}"
+			);
+		}
+
+		drop(cp);
+		assert_eq!(Rc::strong_count(&cp_p), 1);
 	}
 }

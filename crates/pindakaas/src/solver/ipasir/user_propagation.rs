@@ -61,7 +61,7 @@ pub(crate) struct IpasirPropagator {
 
 /// Helper trait that allows abstraction over different [`IpasirStore`] generics
 /// as long as `UP` is set to 1.
-trait IpasirPropagatorStorage {
+pub(crate) trait IpasirPropagatorStorage {
 	/// Returns whether a persistent assignment listener is currently connected.
 	fn has_persistent_assignment_listener(&self) -> bool;
 

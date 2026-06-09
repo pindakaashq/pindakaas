@@ -176,8 +176,13 @@ extern "C" {
 	pub fn ccadical_disconnect_external_propagator(slv: *mut CCaDiCaL);
 	/// C binding to the IPASIR-UP `add_observed_var` function.
 	pub fn ccadical_add_observed_var(slv: *mut CCaDiCaL, var: i32);
-	/// C binding to the IPASIR-UP `is_observed` function.
-	pub fn ccadical_is_observed(slv: *mut CCaDiCaL, lit: i32) -> bool;
+	/// C binding to copy `src` into a fresh solver, connecting `prop` to the
+	/// copy and re-observing on it every variable observed by `src`. Returns
+	/// the newly created solver (like [`ccadical_copy`]).
+	pub fn ccadical_copy_with_propagator(
+		src: *const CCaDiCaL,
+		prop: CExternalPropagator,
+	) -> *mut c_void;
 	/// C binding to the IPASIR-UP `remove_observed_var` function.
 	pub fn ccadical_remove_observed_var(slv: *mut CCaDiCaL, var: i32);
 	/// C binding to the IPASIR-UP `reset_observed_vars` function.
