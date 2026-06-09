@@ -21,7 +21,7 @@ authors = [
 readme = "README.md"
 license = "MPL-2.0"
 keywords = ["satisfiability", "encoding", "boolean", "logic", "sat"]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 classifiers = [
 	"Development Status :: 4 - Beta",
 	"Programming Language :: Rust",
@@ -30,11 +30,11 @@ classifiers = [
 	"Programming Language :: Python :: Implementation :: CPython",
 	"Programming Language :: Python :: Implementation :: PyPy",
 	"Programming Language :: Python :: 3",
-	"Programming Language :: Python :: 3.8",
 	"Programming Language :: Python :: 3.9",
 	"Programming Language :: Python :: 3.10",
 	"Programming Language :: Python :: 3.11",
 	"Programming Language :: Python :: 3.12",
+	"Programming Language :: Python :: 3.13",
 ]
 dynamic = ["version"]
 
@@ -47,6 +47,11 @@ changelog = "https://github.com/pindakaashq/pindakaas/blob/develop/crates/pyndak
 [tool.maturin]
 python-source = "python"
 features = ["pyo3/extension-module"]
+
+[tool.maturin.generate-ci.github]
+trusted-publishing = true
+pytest = true
+
 
 [tool.ruff]
 lint.select = ['B', 'C', 'E', 'I', 'F', 'W']

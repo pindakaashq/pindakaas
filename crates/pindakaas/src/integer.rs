@@ -96,8 +96,8 @@ pub(crate) struct TernLeEncoder {}
 pub(crate) fn display_dom(dom: &RangeList<Coeff>) -> String {
 	const ELIPSIZE: usize = 8;
 	let card = dom.card().unwrap();
-	let lb = *dom.lower_bound().unwrap();
-	let ub = *dom.upper_bound().unwrap();
+	let lb = *dom.min().unwrap();
+	let ub = *dom.max().unwrap();
 	if card > ELIPSIZE && dom.iter().len() == 1 {
 		format!("{}..{}", lb, ub)
 	} else if card > ELIPSIZE {
@@ -368,7 +368,7 @@ impl IntVar {
 		Db: ClauseDatabase + ?Sized,
 	{
 		if self.size() == 1 {
-			IntVarEnc::Const(*self.dom.lower_bound().unwrap())
+			IntVarEnc::Const(*self.dom.min().unwrap())
 		} else {
 			let x = if prefer_order {
 				let views = self
@@ -387,8 +387,8 @@ impl IntVar {
 			} else {
 				let y = IntVarBin::from_bounds(
 					db,
-					*self.dom.lower_bound().unwrap(),
-					*self.dom.upper_bound().unwrap(),
+					*self.dom.min().unwrap(),
+					*self.dom.max().unwrap(),
 					"x".to_owned(),
 				);
 				IntVarEnc::Bin(y)
@@ -419,9 +419,9 @@ impl IntVar {
 
 	pub(crate) fn lb(&self, c: Coeff) -> Coeff {
 		c * if c.is_negative() {
-			self.dom.upper_bound()
+			self.dom.max()
 		} else {
-			self.dom.lower_bound()
+			self.dom.min()
 		}
 		.unwrap()
 	}
@@ -454,9 +454,9 @@ impl IntVar {
 
 	pub(crate) fn ub(&self, c: Coeff) -> Coeff {
 		c * if c.is_negative() {
-			self.dom.lower_bound()
+			self.dom.min()
 		} else {
-			self.dom.upper_bound()
+			self.dom.max()
 		}
 		.unwrap()
 	}
@@ -1055,7 +1055,7 @@ impl IntVarOrd {
 	}
 
 	pub(crate) fn lb(&self) -> Coeff {
-		*self.dom.lower_bound().unwrap()
+		*self.dom.min().unwrap()
 	}
 
 	pub(crate) fn leq(&self, v: Coeff) -> Formula<BoolVal> {
@@ -1089,7 +1089,7 @@ impl IntVarOrd {
 	}
 
 	pub(crate) fn ub(&self) -> Coeff {
-		*self.dom.upper_bound().unwrap()
+		*self.dom.max().unwrap()
 	}
 }
 
@@ -1121,9 +1121,9 @@ impl Lin {
 
 						let id = x.id;
 						let x_ub = if c.is_positive() {
-							*x.dom.upper_bound().unwrap()
+							*x.dom.max().unwrap()
 						} else {
-							*x.dom.lower_bound().unwrap()
+							*x.dom.min().unwrap()
 						};
 
 						// c*d >= x_ub*c + xs_ub := d >= x_ub - xs_ub/c
@@ -1148,9 +1148,9 @@ impl Lin {
 					let mut x = x.borrow_mut();
 					let size = x.size();
 					let x_lb = if c.is_positive() {
-						*x.dom.lower_bound().unwrap()
+						*x.dom.min().unwrap()
 					} else {
-						*x.dom.upper_bound().unwrap()
+						*x.dom.max().unwrap()
 					};
 
 					let id = x.id;

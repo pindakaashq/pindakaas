@@ -97,12 +97,12 @@ mod pindakaas {
 		Lit(Lit),
 	}
 
-	#[pyclass]
+	#[pyclass(from_py_object)]
 	#[derive(Clone, Debug)]
 	/// A Boolean linear constraint, also known as a pseudo-Boolean constraint.
 	struct BoolLinCon(BaseBoolLinCon);
 
-	#[pyclass]
+	#[pyclass(from_py_object)]
 	#[derive(Clone, Debug)]
 	/// A Boolean linear expression, also known as a pseudo-Boolean expression.
 	///
@@ -110,7 +110,7 @@ mod pindakaas {
 	/// side, the expression can be turned into a :class:`BoolLinCon`.
 	struct BoolLinExp(BaseBoolLinExp);
 
-	#[pyclass]
+	#[pyclass(skip_from_py_object)]
 	#[derive(Clone, Debug, Default)]
 	/// The internal representation of a CNF formula.
 	struct CNFInner(Cnf);
@@ -126,7 +126,7 @@ mod pindakaas {
 	}
 
 	#[expect(non_camel_case_types, reason = "match python naming convention")]
-	#[pyclass(eq, eq_int)]
+	#[pyclass(eq, eq_int, from_py_object)]
 	#[derive(Clone, Copy, Debug, PartialEq)]
 	/// Method used to encode a constraint.
 	///
@@ -164,7 +164,7 @@ mod pindakaas {
 		TSEITIN,
 	}
 
-	#[pyclass]
+	#[pyclass(from_py_object)]
 	#[derive(Clone, Debug)]
 	/// A propositional logic formula.
 	struct Formula(BaseFormula<BoolVal>);
@@ -184,17 +184,17 @@ mod pindakaas {
 		error_message: Mutex<Option<PyErr>>,
 	}
 
-	#[pyclass]
+	#[pyclass(from_py_object)]
 	#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 	/// A Boolean literal, representing a Boolean variable or its negation.
 	struct Lit(BaseLit);
 
-	#[pyclass]
+	#[pyclass(skip_from_py_object)]
 	#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 	/// Representation of a continuous range of variables.
 	struct VarRange(BaseVarRange);
 
-	#[pyclass]
+	#[pyclass(skip_from_py_object)]
 	#[derive(Clone, Debug, Default)]
 	/// The internal representation of a CNF formula where clauses have optional
 	/// associated weights.
@@ -396,7 +396,7 @@ mod pindakaas {
 		fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
 			let clause: Vec<Lit> = clause
 				.into_iter()
-				.map(|any| any.and_then(|lit| lit.extract::<Lit>()))
+				.map(|any| any.and_then(|lit| lit.extract::<Lit>().map_err(PyErr::from)))
 				.try_collect()?;
 			self.0.add_clause(clause.into_iter().map(|lit| lit.0))?;
 			Ok(())
@@ -763,7 +763,7 @@ mod pindakaas {
 		fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
 			let clause: Vec<Lit> = clause
 				.into_iter()
-				.map(|any| any.and_then(|lit| lit.extract::<Lit>()))
+				.map(|any| any.and_then(|lit| lit.extract::<Lit>().map_err(PyErr::from)))
 				.try_collect()?;
 			self.0.add_clause(clause.into_iter().map(|lit| lit.0))?;
 			Ok(())
@@ -781,7 +781,7 @@ mod pindakaas {
 		fn add_weighted_clause(&mut self, clause: Bound<'_, PyIterator>, weight: i64) -> Result {
 			let clause: Vec<Lit> = clause
 				.into_iter()
-				.map(|any| any.and_then(|lit| lit.extract::<Lit>()))
+				.map(|any| any.and_then(|lit| lit.extract::<Lit>().map_err(PyErr::from)))
 				.try_collect()?;
 			self.0
 				.add_weighted_clause(clause.into_iter().map(|lit| lit.0), weight)?;
@@ -927,7 +927,7 @@ mod pindakaas {
 			Unknown,
 		}
 
-		#[pyclass(eq, eq_int)]
+		#[pyclass(eq, eq_int, skip_from_py_object)]
 		#[derive(Clone, Copy, Debug, PartialEq)]
 		/// The resulting status of solving a problem.
 		enum Status {
@@ -1066,7 +1066,7 @@ mod pindakaas {
 			fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
 				let clause: Vec<Lit> = clause
 					.into_iter()
-					.map(|any| any.and_then(|lit| lit.extract::<Lit>()))
+					.map(|any| any.and_then(|lit| lit.extract::<Lit>().map_err(PyErr::from)))
 					.try_collect()?;
 				self.solver_mut()?
 					.add_clause(clause.into_iter().map(|lit| lit.0))?;
