@@ -11,7 +11,7 @@ use std::{
 	ops::{BitAnd, BitOr, BitXor, Not},
 };
 
-use itertools::{Itertools, Position};
+use itertools::Itertools;
 use rustc_hash::FxHashSet;
 
 use crate::{BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Result};
@@ -382,9 +382,10 @@ impl Formula<Lit> {
 
 				let mut left = lits.pop().unwrap();
 				for (pos, right) in lits.into_iter().with_position() {
-					let new_name = match pos {
-						Position::Last | Position::Only => name,
-						_ => db.new_var().into(),
+					let new_name = if pos.is_last() {
+						name
+					} else {
+						db.new_var().into()
 					};
 					// new_name -> (left xor right)
 					db.add_clause([!new_name, !left, !right])?;

@@ -17,7 +17,7 @@ readme = "../../README.md"
 all-features = true
 
 [dependencies]
-itertools = "0.14"
+itertools = "0.15"
 rustc-hash = "2.0"
 rangelist = "0.5.0"
 

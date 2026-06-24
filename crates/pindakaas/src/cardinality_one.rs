@@ -154,7 +154,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for PairwiseEncode
 			at_least_one_clause(db, card1)?;
 		}
 		// For every pair of literals (i, j) add "¬i ∨ ¬j"
-		for (a, b) in card1.lits.iter().copied().tuple_combinations() {
+		for [a, b] in card1.lits.iter().copied().array_combinations() {
 			db.add_clause([!a, !b])?;
 		}
 		Ok(())
