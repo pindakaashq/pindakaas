@@ -3,7 +3,14 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{solver::Solver, Lit, Valuation, Var};
+use crate::{solver::Solver, Lit, Var};
+
+/// A builder for a clause (a disjunction of literals) being communicated to the
+/// solver (see [`Propagator::provide_clause`]).
+#[derive(Debug)]
+pub struct ClauseBuilder<'a> {
+	clause: &'a mut Vec<Lit>,
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// Whether a clause could possibly be removed from the clause database.
@@ -12,9 +19,9 @@ pub enum ClausePersistence {
 	/// the solver's correctness (in combination with the propagator), and it
 	/// can be re-derived if needed.
 	Forgettable,
-	/// The clause is to be considered irreduntant. It contains information that
+	/// The clause is to be considered irredundant. It contains information that
 	/// can not (easily) be re-derived.
-	Irreduntant,
+	Irredundant,
 }
 
 /// Trait implemented by [`Solver`]s that allow connecting an external
@@ -39,7 +46,7 @@ pub trait ExternalPropagation: Solver {
 	/// Only one [`Propagator`] can be connected, any previously connected
 	/// [`Propagator`]s will be disconnected (see
 	/// [`Self::disconnect_propagator`]).
-	fn connect_propagator<P: PropagatorDefinition + 'static>(&mut self, propagator: Rc<RefCell<P>>);
+	fn connect_propagator<P: PropagatorConfig + 'static>(&mut self, propagator: Rc<RefCell<P>>);
 
 	/// Disconnect any previously connected a [`Propagator`] (using
 	/// [`Self::connect_propagator`])
@@ -117,28 +124,11 @@ pub trait PersistentAssignmentNotifier: Solver {
 /// Trait implemented to provide external propagation for [`Solver`]s
 /// implementing the [`ExternalPropagation`] trait.
 pub trait Propagator {
-	/// Method to ask whether there is an external clause to add to the solver.
-	fn add_external_clause(
-		&mut self,
-		slv: &mut dyn SolvingActions,
-	) -> Option<(Vec<Lit>, ClausePersistence)> {
-		let _ = slv;
-		None
-	}
-
-	/// Ask the external propagator for the reason clause of a previous external
-	/// propagation step (done by [`Propagator::propagate`]). The clause must
-	/// contain the propagated literal.
-	fn add_reason_clause(&mut self, propagated_lit: Lit) -> Vec<Lit> {
-		let _ = propagated_lit;
-		Vec::new()
-	}
-
-	/// Method called to check the found complete solution (after solution
+	/// Method called to check the found complete `solution` (after solution
 	/// reconstruction). If it returns false, the propagator must provide an
 	/// external clause during the next callback.
-	fn check_solution(&mut self, slv: &mut dyn SolvingActions, value: &dyn Valuation) -> bool {
-		let _ = value;
+	fn check_solution(&mut self, slv: &mut dyn SolvingActions, solution: Solution<'_>) -> bool {
+		let _ = solution;
 		let _ = slv;
 		true
 	}
@@ -151,6 +141,18 @@ pub trait Propagator {
 	fn decide(&mut self, slv: &mut dyn SolvingActions) -> SearchDecision {
 		let _ = slv;
 		SearchDecision::Free
+	}
+
+	/// Ask the propagator to explain a literal it previously propagated (using
+	/// [`Propagator::propagate`]).
+	///
+	/// The propagator pushes the premises — the literals that currently hold
+	/// and together caused `propagated_lit` to be propagated — into `reason`.
+	/// The solver constructs the reason clause from these premises, so the
+	/// propagator must not negate them or add `propagated_lit` itself.
+	fn explain_propagation(&mut self, propagated_lit: Lit, reason: ReasonBuilder<'_>) {
+		let _ = propagated_lit;
+		let _ = reason;
 	}
 
 	/// Method called to notify the propagator about assignments of literals
@@ -172,12 +174,30 @@ pub trait Propagator {
 	/// Method called to notify the propagator about a new decision level.
 	fn notify_new_decision_level(&mut self) {}
 
-	/// Method to ask the propagator if there is an propagation to make under
-	/// the current assignment. It returns queue of literals to be propagated
-	/// in order, if an empty queue is returned it indicates that there is no
-	/// propagation under the current assignment.
+	/// Ask the propagator for the next literal to propagate under the current
+	/// assignment.
+	///
+	/// This is called repeatedly: each call returns one literal to propagate,
+	/// and `None` indicates that there is nothing (more) to propagate under
+	/// the current assignment.
 	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Option<Lit> {
 		let _ = slv;
+		None
+	}
+
+	/// Ask the propagator to provide a clause to add to the solver.
+	///
+	/// If there is a clause to provide, the propagator pushes its literals into
+	/// `clause` and returns its [`ClausePersistence`]. Returning `None` (and
+	/// leaving `clause` untouched) indicates that there is no clause to
+	/// provide.
+	fn provide_clause(
+		&mut self,
+		slv: &mut dyn SolvingActions,
+		clause: ClauseBuilder<'_>,
+	) -> Option<ClausePersistence> {
+		let _ = slv;
+		let _ = clause;
 		None
 	}
 }
@@ -185,7 +205,7 @@ pub trait Propagator {
 /// Trait that gives extra information about the [`Propagator`] implementation.
 /// This information is used to optimize the interaction between the
 /// [`Propagator`] and the solver.
-pub trait PropagatorDefinition: Propagator {
+pub trait PropagatorConfig: Propagator {
 	/// Whether the [`Propagator`] implementation only checks complete
 	/// assignments.
 	///
@@ -194,13 +214,26 @@ pub trait PropagatorDefinition: Propagator {
 	const CHECK_ONLY: bool = false;
 
 	/// The persistence level of the [`Propagator`] implementation's produced
-	/// reasons using [`Propagator::add_reason_clause`].
+	/// reasons using [`Propagator::explain_propagation`].
 	///
 	/// If set to [`ClausePersistence::Forgettable`], then the solver might
 	/// remove the reason clauses to save memory. The [`Propagator`]
 	/// implementation must be able to re-derive the reason clause at a later
 	/// point.
-	const REASON_PERSISTENCE: ClausePersistence = ClausePersistence::Irreduntant;
+	const REASON_PERSISTENCE: ClausePersistence = ClausePersistence::Irredundant;
+}
+
+/// A builder for the reason of an external propagation: the conjunction of
+/// premise literals that together caused a literal to be propagated (see
+/// [`Propagator::explain_propagation`]).
+///
+/// The premises are literals that currently hold. The solver forms the reason
+/// clause by negating each premise and appending the propagated literal, so a
+/// [`Propagator`] must push only the premises; it must not negate them or
+/// include the propagated literal itself.
+#[derive(Debug)]
+pub struct ReasonBuilder<'a> {
+	clause: &'a mut Vec<Lit>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -212,6 +245,19 @@ pub enum SearchDecision {
 	Assign(Lit),
 	/// Force the solver to backtrack to the given decision level.
 	Backtrack(usize),
+}
+
+/// A complete solution found by the solver, handed to
+/// [`Propagator::check_solution`].
+///
+/// The solver must provide the literals sorted by variable, which lets
+/// [`Solution::value`] look up a literal's value with a binary search and
+/// without any allocation.
+#[derive(Clone, Copy, Debug)]
+pub struct Solution<'a> {
+	/// The assigned literals of the observed variables, sorted by variable, as
+	/// provided by the solver.
+	model: &'a [Lit],
 }
 
 /// Actions that a [`Propagator`] can generally undertake when making
@@ -234,4 +280,99 @@ pub trait SolvingActions {
 	/// Remove the default decision phase of the given variable (given as a
 	/// [`Lit`]).
 	fn unphase(&mut self, lit: Lit);
+}
+
+impl<'a> ClauseBuilder<'a> {
+	/// Create a clause builder that appends into the given buffer.
+	pub(crate) fn new(clause: &'a mut Vec<Lit>) -> Self {
+		debug_assert!(
+			clause.is_empty(),
+			"clause does not contain any previous leftovers"
+		);
+		Self { clause }
+	}
+
+	/// Add a literal to the clause.
+	pub fn push(&mut self, lit: Lit) {
+		self.clause.push(lit);
+	}
+
+	/// Reserve capacity for at least `additional` more literals.
+	pub fn reserve(&mut self, additional: usize) {
+		self.clause.reserve(additional);
+	}
+}
+
+impl Extend<Lit> for ClauseBuilder<'_> {
+	fn extend<I: IntoIterator<Item = Lit>>(&mut self, lits: I) {
+		self.clause.extend(lits);
+	}
+}
+
+impl<'a> ReasonBuilder<'a> {
+	/// Create a reason builder that appends premises into the given buffer.
+	pub(crate) fn new(clause: &'a mut Vec<Lit>) -> Self {
+		debug_assert_eq!(
+			clause.len(),
+			1,
+			"clause is prefilled with the literal to be explained"
+		);
+		Self { clause }
+	}
+
+	/// Add a premise literal (a literal that currently holds) to the reason.
+	pub fn push(&mut self, premise: Lit) {
+		self.clause.push(!premise);
+	}
+
+	/// Reserve capacity for at least `additional` more premise literals.
+	pub fn reserve(&mut self, additional: usize) {
+		self.clause.reserve(additional);
+	}
+}
+
+impl Extend<Lit> for ReasonBuilder<'_> {
+	fn extend<I: IntoIterator<Item = Lit>>(&mut self, premises: I) {
+		self.clause.extend(premises.into_iter().map(|l| !l));
+	}
+}
+
+impl<'a> Solution<'a> {
+	/// The assigned literals of the observed variables, in order of their
+	/// variable.
+	pub fn literals(&self) -> &'a [Lit] {
+		self.model
+	}
+
+	/// Creates a solution view over the model literals provided by the solver.
+	///
+	/// The literals must be sorted by variable, as the solver provides them;
+	/// [`Solution::value`] relies on this ordering.
+	pub(crate) fn new(model: &'a [Lit]) -> Self {
+		debug_assert!(
+			model.windows(2).all(|w| w[0].var() < w[1].var()),
+			"the solver must provide the model sorted by (distinct) variable"
+		);
+		Self { model }
+	}
+
+	/// Returns the truth value of `lit` in the solution.
+	///
+	/// The literal's variable must be observed by the propagator, and hence be
+	/// part of the solution. Querying any other variable is a usage error that
+	/// is caught by a debug assertion and otherwise treated as `false`.
+	pub fn value(&self, lit: Lit) -> bool {
+		match self
+			.model
+			.binary_search_by(|assigned| assigned.var().cmp(&lit.var()))
+		{
+			Ok(i) => self.model[i] == lit,
+			Err(_) => {
+				// A literal absent from the model belongs to a variable that is not
+				// observed by the propagator, which it should therefore not query.
+				debug_assert!(false, "queried an unobserved variable");
+				false
+			}
+		}
+	}
 }

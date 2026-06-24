@@ -1,6 +1,5 @@
 use std::{
 	cell::{RefCell, RefMut},
-	collections::VecDeque,
 	ffi::c_void,
 	fmt,
 	marker::PhantomData,
@@ -10,7 +9,6 @@ use std::{
 };
 
 use pindakaas_cadical::{CExternalPropagator, CFixedAssignmentListener};
-use rustc_hash::FxHashMap;
 
 use crate::{
 	solver::{
@@ -19,9 +17,9 @@ use crate::{
 			IpasirStore, IpasirStoreInner,
 		},
 		propagation::{
-			ClausePersistence, ExternalPropagation, PersistentAssignmentListener,
-			PersistentAssignmentNotifier, Propagator, PropagatorDefinition, SearchDecision,
-			SolvingActions,
+			ClauseBuilder, ClausePersistence, ExternalPropagation, PersistentAssignmentListener,
+			PersistentAssignmentNotifier, Propagator, PropagatorConfig, ReasonBuilder,
+			SearchDecision, Solution, SolvingActions,
 		},
 	},
 	Lit, Var,
@@ -51,12 +49,16 @@ pub(crate) struct IpasirPropagator {
 	/// correctly released (and dropped) when the [`IpasirSolver`] is dropped.
 	/// It is given by the solver using a pointer.
 	persistent_assignment_listener: Option<Rc<RefCell<dyn PersistentAssignmentListener>>>,
-	/// Reason clause queue
-	reason_queue: VecDeque<Lit>,
-	/// The current literal that is being explained
+	/// Reusable buffer holding the clause currently being yielded to the
+	/// solver: a reason clause when `explaining` is set, or an external clause
+	/// when `clause_active` is set. At most one of the two is yielded at a
+	/// time, so a single buffer suffices.
+	clause: Vec<Lit>,
+	/// The literal whose reason clause is currently in `clause`, or `None` when
+	/// a reason clause is not being yielded.
 	explaining: Option<Lit>,
-	/// Queue of literals for the external clause to be yielded.
-	clause_queue: Option<VecDeque<Lit>>,
+	/// Whether an external clause is currently being yielded from `clause`.
+	clause_active: bool,
 }
 
 /// Helper trait that allows abstraction over different [`IpasirStore`] generics
@@ -87,7 +89,7 @@ pub(crate) trait IpasirPropagatorStorage {
 	/// Stores a new propagator in the storage, returning the
 	/// [`CExternalPropagator`] that can be passed to the solver's C methods to
 	/// register the propagator.
-	fn set_propagator<P: PropagatorDefinition + 'static>(
+	fn set_propagator<P: PropagatorConfig + 'static>(
 		&mut self,
 		propagator: Rc<RefCell<P>>,
 	) -> CExternalPropagator;
@@ -140,10 +142,7 @@ where
 		}
 	}
 
-	fn connect_propagator<P: PropagatorDefinition + 'static>(
-		&mut self,
-		propagator: Rc<RefCell<P>>,
-	) {
+	fn connect_propagator<P: PropagatorConfig + 'static>(&mut self, propagator: Rc<RefCell<P>>) {
 		// Disconnect previous propagator (if any)
 		self.disconnect_propagator();
 
@@ -251,16 +250,41 @@ where
 }
 
 impl IpasirPropagator {
-	/// Borrow the propagator in the `external_propagator` field, as a specific
-	/// type `P`.
+	/// Borrow the connected propagator, stored in the given `cell`, as a
+	/// specific type `P`.
 	///
 	/// This method is unsafe because it requires that the propagator is of type
 	/// `P` and the cell is not borrowed. If the propagator is not of type `P`
 	/// or if the cell is already borrowed, this method will panic.
-	unsafe fn borrow_propagator_mut<P>(&self) -> RefMut<'_, P> {
-		let cell: *const _ = Rc::as_ptr(self.external_propagator.as_ref().unwrap());
-		let ptr = cell as *const RefCell<P>;
+	unsafe fn borrow_cell<P>(cell: &Rc<RefCell<dyn Propagator>>) -> RefMut<'_, P> {
+		let ptr = Rc::as_ptr(cell) as *const RefCell<P>;
 		(&*ptr).borrow_mut()
+	}
+
+	/// Borrow the propagator in the `external_propagator` field, as a specific
+	/// type `P`.
+	///
+	/// See [`Self::borrow_cell`] for the safety requirements.
+	unsafe fn borrow_propagator_mut<P>(&self) -> RefMut<'_, P> {
+		Self::borrow_cell(self.external_propagator.as_ref().unwrap())
+	}
+
+	/// Call `f` with the propagator (as a specific type `P`) and a mutable
+	/// reference to the reusable `clause` buffer.
+	///
+	/// Building a reason or external clause needs both at once: the propagator
+	/// writes its literals into the buffer through the builder. Scoping the
+	/// borrows to `f` keeps the pointer handling of [`Self::borrow_cell`] in a
+	/// single place (rather than inlined at each call site) and releases the
+	/// propagator borrow before the caller touches `self` again.
+	///
+	/// See [`Self::borrow_cell`] for the safety requirements.
+	unsafe fn with_propagator_and_clause<P, R>(
+		&mut self,
+		f: impl FnOnce(&mut P, &mut Vec<Lit>) -> R,
+	) -> R {
+		let mut propagator = Self::borrow_cell::<P>(self.external_propagator.as_ref().unwrap());
+		f(&mut propagator, &mut self.clause)
 	}
 }
 
@@ -274,9 +298,9 @@ impl fmt::Debug for IpasirPropagator {
 					x as *const c_void
 				}),
 			)
-			.field("reason_queue", &self.reason_queue)
+			.field("clause", &self.clause)
 			.field("explaining", &self.explaining)
-			.field("clause_queue", &self.clause_queue)
+			.field("clause_active", &self.clause_active)
 			.finish()
 	}
 }
@@ -328,16 +352,17 @@ impl<
 {
 	unsafe extern "C" fn add_external_clause_lit(store: *mut c_void) -> i32 {
 		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
-		let prop = &mut store.propagator.some_mut();
-		let Some(queue) = &mut prop.clause_queue else {
+		let prop = store.propagator.some_mut();
+		if !prop.clause_active {
 			debug_assert!(false, "has_external_clause did not return true");
 			return 0;
-		};
-		if let Some(l) = queue.pop_front() {
-			l.0.get()
-		} else {
-			prop.clause_queue = None;
-			0 // End of clause
+		}
+		match prop.clause.pop() {
+			Some(l) => l.0.get(),
+			None => {
+				prop.clause_active = false;
+				0 // End of clause
+			}
 		}
 	}
 
@@ -346,24 +371,31 @@ impl<
 		propagated_lit: i32,
 	) -> i32 {
 		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
-		let prop = &mut store.propagator.some_mut();
+		let prop = store.propagator.some_mut();
 		let lit = Lit(NonZeroI32::new(propagated_lit).unwrap());
-		debug_assert!(prop.explaining.is_none() || prop.explaining == Some(lit));
-		// // TODO: Can this be prop.explaining.is_none()?
+		// A reason and an external clause share `clause` and are never yielded
+		// simultaneously.
+		debug_assert!(!prop.clause_active);
+
+		// When this is a fresh request (we are not already yielding `lit`'s reason),
+		// construct the clause: seed it with the explained literal, then let the
+		// propagator append the (negated) premises.
 		if prop.explaining != Some(lit) {
-			let new_reason = {
-				let mut user_prop: RefMut<P> = prop.borrow_propagator_mut();
-				user_prop.add_reason_clause(lit)
-			};
-			prop.reason_queue = new_reason.into();
+			prop.clause.clear();
+			prop.clause.push(lit);
+			prop.with_propagator_and_clause::<P, _>(|propagator, clause| {
+				propagator.explain_propagation(lit, ReasonBuilder::new(clause));
+			});
 			prop.explaining = Some(lit);
 		}
-		if let Some(l) = prop.reason_queue.pop_front() {
-			l.0.into()
-		} else {
-			// End of explanation
-			prop.explaining = None;
-			0
+
+		// Yield the members of the constructed clause, then the end-of-clause `0`.
+		match prop.clause.pop() {
+			Some(lit) => lit.0.get(),
+			None => {
+				prop.explaining = None;
+				0
+			}
 		}
 	}
 
@@ -373,16 +405,16 @@ impl<
 		len: usize,
 	) -> bool {
 		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
-		let sol = if len > 0 {
-			slice::from_raw_parts(model, len)
+		let model: &[Lit] = if len > 0 {
+			// SAFETY: `model` points to `len` model literals provided by the solver,
+			// each a non-zero `i32`. `Lit` is `#[repr(transparent)]` over
+			// `NonZeroI32` (and thus over `i32`), so reinterpreting the non-zero
+			// literals as `Lit` is sound.
+			unsafe { slice::from_raw_parts(model as *const Lit, len) }
 		} else {
 			&[]
 		};
-		let sol: FxHashMap<Var, bool> = sol
-			.iter()
-			.map(|&i| (Var(NonZeroI32::new(i.abs()).unwrap()), i >= 0))
-			.collect();
-		let value = |l: Lit| sol.get(&l.var()).copied().unwrap_or(false);
+		let solution = Solution::new(model);
 		let vars: *mut VarStore = &mut store.vars;
 		let mut slv = IpasirSolvingActions::<Impl> {
 			ptr: store.ptr,
@@ -394,7 +426,7 @@ impl<
 			.as_ref()
 			.unwrap()
 			.borrow_propagator_mut::<P>()
-			.check_solution(&mut slv, &value)
+			.check_solution(&mut slv, solution)
 	}
 	unsafe extern "C" fn decide<P: Propagator>(store: *mut c_void) -> i32 {
 		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
@@ -435,14 +467,23 @@ impl<
 			_methods: PhantomData,
 		};
 		let prop = store.propagator.some_mut();
-		let ext_clause = prop
-			.borrow_propagator_mut::<P>()
-			.add_external_clause(&mut slv);
-		if let Some((clause, p)) = ext_clause {
+		// A reason and an external clause share `clause` and are never yielded
+		// simultaneously.
+		debug_assert!(prop.explaining.is_none());
+		debug_assert!(prop.clause.is_empty());
+		debug_assert!(!prop.clause_active);
+		prop.clause.clear();
+		let persistence = prop.with_propagator_and_clause::<P, _>(|propagator, clause| {
+			propagator.provide_clause(&mut slv, ClauseBuilder::new(clause))
+		});
+		if let Some(p) = persistence {
 			*is_forgettable = p == ClausePersistence::Forgettable;
-			prop.clause_queue = Some(clause.into());
+			prop.clause_active = true;
+			true
+		} else {
+			prop.clause_active = false;
+			false
 		}
-		prop.clause_queue.is_some()
 	}
 
 	unsafe extern "C" fn notify_assignment<P: Propagator>(
@@ -468,9 +509,9 @@ impl<
 	) {
 		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
 		let prop = store.propagator.some_mut();
+		prop.clause.clear();
 		prop.explaining = None;
-		prop.reason_queue.clear();
-		prop.clause_queue = None;
+		prop.clause_active = false;
 		prop.borrow_propagator_mut::<P>()
 			.notify_backtrack(level, restart);
 	}
@@ -546,9 +587,9 @@ where
 	fn reset_propagator(&mut self) {
 		let prop_store = self.store.propagator.some_mut();
 		prop_store.external_propagator = None;
-		prop_store.reason_queue.clear();
+		prop_store.clause.clear();
 		prop_store.explaining = None;
-		prop_store.clause_queue = None;
+		prop_store.clause_active = false;
 	}
 
 	fn set_persistent_listener<L: PersistentAssignmentListener + 'static>(
@@ -578,7 +619,7 @@ where
 		}
 	}
 
-	fn set_propagator<P: PropagatorDefinition + 'static>(
+	fn set_propagator<P: PropagatorConfig + 'static>(
 		&mut self,
 		propagator: Rc<RefCell<P>>,
 	) -> CExternalPropagator {

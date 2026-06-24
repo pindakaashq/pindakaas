@@ -587,6 +587,7 @@ pub enum IntEncoding<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
 /// Literal is type that can be use to represent Boolean decision variables and
 /// their negations
 pub struct Lit(NonZeroI32);

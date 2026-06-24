@@ -26,7 +26,7 @@ use pindakaas_cadical::{
 #[cfg(feature = "external-propagation")]
 use crate::solver::{
 	ipasir::user_propagation::{IpasirPropagatorStorage, IpasirUserPropagationMethods},
-	propagation::PropagatorDefinition,
+	propagation::PropagatorConfig,
 };
 use crate::{
 	helpers::opt_field::OptField,
@@ -174,6 +174,17 @@ pub trait ProofTracer {
 	}
 }
 
+/// Trait that gives extra information about the [`ProofTracer`] implementation.
+/// This information is used to optimize the interaction between the
+/// [`ProofTracer`] and the solver.
+pub trait ProofTracerConfig: ProofTracer {
+	/// Whether the [`ProofTracer`] uses the antecedents of derived clauses.
+	const ANTECEDENTS: bool;
+	/// Whether the [`ProofTracer`] needs the solver to finalize non-deleted
+	/// clauses in proof.
+	const FINALIZE_CLAUSES: bool = false;
+}
+
 fn cadical_next_var(slv: *mut c_void, _: *mut c_void) -> i32 {
 	// SAFETY: Pointer is guaranteed to point to a valid and initialized
 	// CCadical instance.
@@ -187,25 +198,11 @@ fn cadical_next_var_range(slv: *mut c_void, _: *mut c_void, len: usize) -> [i32;
 	[end + 1 - len as i32, end]
 }
 
-/// Trait that gives extra information about the [`ProofTracer`] implementation.
-/// This information is used to optimize the interaction between the
-/// [`ProofTracer`] and the solver.
-pub trait ProofTracerDefinition: ProofTracer {
-	/// Whether the [`ProofTracer`] uses the antecedents of derived clauses.
-	const ANTECEDENTS: bool;
-	/// Whether the [`ProofTracer`] needs the solver to finalize non-deleted
-	/// clauses in proof.
-	const FINALIZE_CLAUSES: bool = false;
-}
-
 impl Cadical {
 	// TODO: Hidden for now as it requires the user to set the proof tracer during
 	// CONFIGURATION. This should probably be a separate state/builder.
 	#[doc(hidden)]
-	pub fn connect_proof_tracer<P: ProofTracerDefinition + 'static>(
-		&mut self,
-		tracer: Rc<RefCell<P>>,
-	) {
+	pub fn connect_proof_tracer<P: ProofTracerConfig + 'static>(&mut self, tracer: Rc<RefCell<P>>) {
 		let ptr = Rc::as_ptr(&tracer);
 		let ctracer = CTracer {
 			data: ptr as *mut c_void,
@@ -331,7 +328,7 @@ impl Cadical {
 	/// must supply an appropriate clone of the propagator, since the
 	/// propagator's own state cannot be cloned automatically.
 	#[cfg(feature = "external-propagation")]
-	pub fn shallow_clone_with_propagator<P: PropagatorDefinition + 'static>(
+	pub fn shallow_clone_with_propagator<P: PropagatorConfig + 'static>(
 		&self,
 		propagator: Rc<RefCell<P>>,
 	) -> Self {
@@ -413,13 +410,6 @@ impl IpasirAssumptionMethods for Cadical {
 	const IPASIR_FAILED: unsafe extern "C" fn(*mut c_void, i32) -> c_int = ccadical_failed;
 }
 
-impl IpasirLiteralMethods for Cadical {
-	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2] =
-		cadical_next_var_range;
-
-	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32 = cadical_next_var;
-}
-
 impl IpasirLearnCallbackMethod for Cadical {
 	const IPASIR_SET_LEARN_CALLBACK: unsafe extern "C" fn(
 		*mut c_void,
@@ -427,6 +417,13 @@ impl IpasirLearnCallbackMethod for Cadical {
 		c_int,
 		Option<unsafe extern "C" fn(*mut c_void, *const i32)>,
 	) = ccadical_set_learn;
+}
+
+impl IpasirLiteralMethods for Cadical {
+	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2] =
+		cadical_next_var_range;
+
+	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32 = cadical_next_var;
 }
 
 impl IpasirSolverMethods for Cadical {
@@ -809,6 +806,63 @@ mod tests {
 		assert!(matches!(slv.solve(), SolveResult::Satisfied(_)));
 	}
 
+	#[cfg(feature = "external-propagation")]
+	#[test]
+	fn shallow_clone_with_propagator_observes() {
+		use std::{cell::RefCell, collections::HashSet, rc::Rc};
+
+		use crate::{
+			solver::propagation::{ExternalPropagation, Propagator, PropagatorConfig},
+			ClauseDatabase, Lit,
+		};
+
+		// A propagator that records every assignment notification it receives. A
+		// non-lazy propagator is only notified about *observed* variables, so a
+		// non-empty record on the clone proves the observed set was transferred.
+		#[derive(Default)]
+		struct Recorder {
+			notified: Vec<Lit>,
+		}
+		impl Propagator for Recorder {
+			fn notify_assignment(&mut self, lits: &[Lit]) {
+				self.notified.extend_from_slice(lits);
+			}
+		}
+		impl PropagatorConfig for Recorder {}
+
+		let mut slv = Cadical::default();
+		let vars = slv.new_var_range(3);
+		// Force every variable so that solving assigns all of them.
+		for v in vars {
+			slv.add_clause([v]).unwrap();
+		}
+
+		let p = Rc::new(RefCell::new(Recorder::default()));
+		slv.connect_propagator(Rc::clone(&p));
+		for v in vars {
+			slv.add_observed_var(v);
+		}
+
+		// Clone with a fresh recorder; the clone must re-observe `vars`.
+		let cp_p = Rc::new(RefCell::new(Recorder::default()));
+		let mut cp = slv.shallow_clone_with_propagator(Rc::clone(&cp_p));
+
+		assert!(matches!(cp.solve(), SolveResult::Satisfied(_)));
+
+		// The clone's propagator must have been notified about every observed
+		// variable, proving the observations were copied onto the clone.
+		let notified: HashSet<Lit> = cp_p.borrow().notified.iter().copied().collect();
+		for v in vars {
+			assert!(
+				notified.contains(&v.into()),
+				"clone propagator was not notified about observed variable {v:?}"
+			);
+		}
+
+		drop(cp);
+		assert_eq!(Rc::strong_count(&cp_p), 1);
+	}
+
 	#[test]
 	fn solve() {
 		let mut slv = Cadical::default();
@@ -906,8 +960,8 @@ mod tests {
 			helpers::tests::assert_solutions,
 			solver::{
 				propagation::{
-					ClausePersistence, ExternalPropagation, Propagator, PropagatorDefinition,
-					SolvingActions,
+					ClauseBuilder, ClausePersistence, ExternalPropagation, Propagator,
+					PropagatorConfig, Solution, SolvingActions,
 				},
 				VarRange,
 			},
@@ -926,7 +980,7 @@ mod tests {
 			fn check_solution(
 				&mut self,
 				_slv: &mut dyn SolvingActions,
-				model: &dyn crate::Valuation,
+				model: Solution<'_>,
 			) -> bool {
 				let mut vars = self.vars.clone();
 				while let Some(v) = vars.next() {
@@ -941,14 +995,17 @@ mod tests {
 				}
 				self.tmp.is_empty()
 			}
-			fn add_external_clause(
+			fn provide_clause(
 				&mut self,
 				_slv: &mut dyn SolvingActions,
-			) -> Option<(Vec<Lit>, ClausePersistence)> {
-				self.tmp.pop().map(|c| (c, ClausePersistence::Forgettable))
+				mut clause: ClauseBuilder<'_>,
+			) -> Option<ClausePersistence> {
+				let c = self.tmp.pop()?;
+				clause.extend(c);
+				Some(ClausePersistence::Forgettable)
 			}
 		}
-		impl PropagatorDefinition for Dist2 {
+		impl PropagatorConfig for Dist2 {
 			const CHECK_ONLY: bool = true;
 		}
 
@@ -1012,8 +1069,8 @@ mod tests {
 		use crate::{
 			solver::{
 				propagation::{
-					ClausePersistence, ExternalPropagation, Propagator, PropagatorDefinition,
-					SolvingActions,
+					ClauseBuilder, ClausePersistence, ExternalPropagation, Propagator,
+					PropagatorConfig, Solution, SolvingActions,
 				},
 				VarRange,
 			},
@@ -1028,7 +1085,7 @@ mod tests {
 			fn check_solution(
 				&mut self,
 				_slv: &mut dyn SolvingActions,
-				model: &dyn crate::Valuation,
+				model: Solution<'_>,
 			) -> bool {
 				let mut vars = self.vars.clone();
 				while let Some(v) = vars.next() {
@@ -1043,14 +1100,17 @@ mod tests {
 				}
 				self.tmp.is_empty()
 			}
-			fn add_external_clause(
+			fn provide_clause(
 				&mut self,
 				_slv: &mut dyn SolvingActions,
-			) -> Option<(Vec<Lit>, ClausePersistence)> {
-				self.tmp.pop().map(|c| (c, ClausePersistence::Forgettable))
+				mut clause: ClauseBuilder<'_>,
+			) -> Option<ClausePersistence> {
+				let c = self.tmp.pop()?;
+				clause.extend(c);
+				Some(ClausePersistence::Forgettable)
 			}
 		}
-		impl PropagatorDefinition for Dist2 {
+		impl PropagatorConfig for Dist2 {
 			const CHECK_ONLY: bool = true;
 		}
 
@@ -1113,63 +1173,6 @@ mod tests {
 		assert!(cp_p.borrow().tmp.is_empty());
 
 		// Test correct release of the cloned propagator on drop.
-		drop(cp);
-		assert_eq!(Rc::strong_count(&cp_p), 1);
-	}
-
-	#[cfg(feature = "external-propagation")]
-	#[test]
-	fn shallow_clone_with_propagator_observes() {
-		use std::{cell::RefCell, collections::HashSet, rc::Rc};
-
-		use crate::{
-			solver::propagation::{ExternalPropagation, Propagator, PropagatorDefinition},
-			ClauseDatabase, Lit,
-		};
-
-		// A propagator that records every assignment notification it receives. A
-		// non-lazy propagator is only notified about *observed* variables, so a
-		// non-empty record on the clone proves the observed set was transferred.
-		#[derive(Default)]
-		struct Recorder {
-			notified: Vec<Lit>,
-		}
-		impl Propagator for Recorder {
-			fn notify_assignment(&mut self, lits: &[Lit]) {
-				self.notified.extend_from_slice(lits);
-			}
-		}
-		impl PropagatorDefinition for Recorder {}
-
-		let mut slv = Cadical::default();
-		let vars = slv.new_var_range(3);
-		// Force every variable so that solving assigns all of them.
-		for v in vars {
-			slv.add_clause([v]).unwrap();
-		}
-
-		let p = Rc::new(RefCell::new(Recorder::default()));
-		slv.connect_propagator(Rc::clone(&p));
-		for v in vars {
-			slv.add_observed_var(v);
-		}
-
-		// Clone with a fresh recorder; the clone must re-observe `vars`.
-		let cp_p = Rc::new(RefCell::new(Recorder::default()));
-		let mut cp = slv.shallow_clone_with_propagator(Rc::clone(&cp_p));
-
-		assert!(matches!(cp.solve(), SolveResult::Satisfied(_)));
-
-		// The clone's propagator must have been notified about every observed
-		// variable, proving the observations were copied onto the clone.
-		let notified: HashSet<Lit> = cp_p.borrow().notified.iter().copied().collect();
-		for v in vars {
-			assert!(
-				notified.contains(&v.into()),
-				"clone propagator was not notified about observed variable {v:?}"
-			);
-		}
-
 		drop(cp);
 		assert_eq!(Rc::strong_count(&cp_p), 1);
 	}
