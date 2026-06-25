@@ -5,8 +5,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{solver::Solver, Lit, Var};
 
-/// A builder for a clause (a disjunction of literals) being communicated to the
-/// solver (see [`Propagator::provide_clause`]).
+/// A builder for a clause being communicated to the solver, used by
+/// [`Propagator::provide_clause`] and [`Propagator::explain_propagation`].
 #[derive(Debug)]
 pub struct ClauseBuilder<'a> {
 	clause: &'a mut Vec<Lit>,
@@ -146,13 +146,13 @@ pub trait Propagator {
 	/// Ask the propagator to explain a literal it previously propagated (using
 	/// [`Propagator::propagate`]).
 	///
-	/// The propagator pushes the premises — the literals that currently hold
-	/// and together caused `propagated_lit` to be propagated — into `reason`.
-	/// The solver constructs the reason clause from these premises, so the
-	/// propagator must not negate them or add `propagated_lit` itself.
-	fn explain_propagation(&mut self, propagated_lit: Lit, reason: ReasonBuilder<'_>) {
+	/// The propagator must push the complete reason clause into `clause`, e.g.
+	/// an implication `(p_1 ∧ … ∧ p_n) → propagated_lit` with premises `p_i`
+	/// that currently hold and imply `propagated_lit`, which would be expressed
+	/// as the clause `(¬p_1 ∨ … ∨ ¬p_n ∨ propagated_lit)`.
+	fn explain_propagation(&mut self, propagated_lit: Lit, clause: ClauseBuilder<'_>) {
 		let _ = propagated_lit;
-		let _ = reason;
+		let _ = clause;
 	}
 
 	/// Method called to notify the propagator about assignments of literals
@@ -223,19 +223,6 @@ pub trait PropagatorConfig: Propagator {
 	const REASON_PERSISTENCE: ClausePersistence = ClausePersistence::Irredundant;
 }
 
-/// A builder for the reason of an external propagation: the conjunction of
-/// premise literals that together caused a literal to be propagated (see
-/// [`Propagator::explain_propagation`]).
-///
-/// The premises are literals that currently hold. The solver forms the reason
-/// clause by negating each premise and appending the propagated literal, so a
-/// [`Propagator`] must push only the premises; it must not negate them or
-/// include the propagated literal itself.
-#[derive(Debug)]
-pub struct ReasonBuilder<'a> {
-	clause: &'a mut Vec<Lit>,
-}
-
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// A representation of a search decision made by a propagator.
 pub enum SearchDecision {
@@ -284,11 +271,10 @@ pub trait SolvingActions {
 
 impl<'a> ClauseBuilder<'a> {
 	/// Create a clause builder that appends into the given buffer.
-	pub(crate) fn new(clause: &'a mut Vec<Lit>) -> Self {
-		debug_assert!(
-			clause.is_empty(),
-			"clause does not contain any previous leftovers"
-		);
+	///
+	/// Literals are appended to the buffer as-is, so any literals already in it
+	/// remain part of the clause.
+	pub fn new(clause: &'a mut Vec<Lit>) -> Self {
 		Self { clause }
 	}
 
@@ -306,34 +292,6 @@ impl<'a> ClauseBuilder<'a> {
 impl Extend<Lit> for ClauseBuilder<'_> {
 	fn extend<I: IntoIterator<Item = Lit>>(&mut self, lits: I) {
 		self.clause.extend(lits);
-	}
-}
-
-impl<'a> ReasonBuilder<'a> {
-	/// Create a reason builder that appends premises into the given buffer.
-	pub(crate) fn new(clause: &'a mut Vec<Lit>) -> Self {
-		debug_assert_eq!(
-			clause.len(),
-			1,
-			"clause is prefilled with the literal to be explained"
-		);
-		Self { clause }
-	}
-
-	/// Add a premise literal (a literal that currently holds) to the reason.
-	pub fn push(&mut self, premise: Lit) {
-		self.clause.push(!premise);
-	}
-
-	/// Reserve capacity for at least `additional` more premise literals.
-	pub fn reserve(&mut self, additional: usize) {
-		self.clause.reserve(additional);
-	}
-}
-
-impl Extend<Lit> for ReasonBuilder<'_> {
-	fn extend<I: IntoIterator<Item = Lit>>(&mut self, premises: I) {
-		self.clause.extend(premises.into_iter().map(|l| !l));
 	}
 }
 

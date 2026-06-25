@@ -18,8 +18,8 @@ use crate::{
 		},
 		propagation::{
 			ClauseBuilder, ClausePersistence, ExternalPropagation, PersistentAssignmentListener,
-			PersistentAssignmentNotifier, Propagator, PropagatorConfig, ReasonBuilder,
-			SearchDecision, Solution, SolvingActions,
+			PersistentAssignmentNotifier, Propagator, PropagatorConfig, SearchDecision, Solution,
+			SolvingActions,
 		},
 	},
 	Lit, Var,
@@ -377,15 +377,17 @@ impl<
 		// simultaneously.
 		debug_assert!(!prop.clause_active);
 
-		// When this is a fresh request (we are not already yielding `lit`'s reason),
-		// construct the clause: seed it with the explained literal, then let the
-		// propagator append the (negated) premises.
+		// If we are not already yielding `lit`'s reason, make the propagator
+		// construct the reason clause.
 		if prop.explaining != Some(lit) {
 			prop.clause.clear();
-			prop.clause.push(lit);
 			prop.with_propagator_and_clause::<P, _>(|propagator, clause| {
-				propagator.explain_propagation(lit, ReasonBuilder::new(clause));
+				propagator.explain_propagation(lit, ClauseBuilder::new(clause));
 			});
+			debug_assert!(
+				prop.clause.contains(&lit),
+				"the reason clause must contain the propagated literal"
+			);
 			prop.explaining = Some(lit);
 		}
 
