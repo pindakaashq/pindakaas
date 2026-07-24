@@ -50,9 +50,9 @@ fn main() {
 	let mut builder = cc::Build::new();
 	let build = builder.cpp(true).flag_if_supported("-std=c++20");
 
-	#[cfg(not(debug_assertions))]
-	// I'm not sure why this is not automatic, but assertions still seem to trigger otherwise.
-	let _ = build.define("NDEBUG", None);
+	if std::env::var("PROFILE").as_deref() != Ok("debug") {
+		let _ = build.define("NDEBUG", None);
+	}
 
 	change_ipasir_prefix(build, "intel_sat");
 	build.files(src).cargo_warnings(false).compile("intel_sat");

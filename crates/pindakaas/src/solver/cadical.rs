@@ -59,6 +59,13 @@ pub enum ProofConclusionType {
 
 /// Trait that observers can implement to receive notifications about proof
 /// events.
+///
+/// # Warning
+///
+/// The methods of this trait are invoked by CaDiCaL from C, through an
+/// `extern "C"` trampoline. Implementations must therefore not panic (a panic
+/// aborts the process rather than unwinding) and must not re-enter the solver,
+/// which would panic on the tracer's already mutably borrowed [`RefCell`].
 pub trait ProofTracer {
 	// -----------------------------
 	// Basic Events
@@ -397,7 +404,6 @@ impl From<&Cnf> for Cadical {
 		let _r = slv.new_var_range(value.num_vars());
 		debug_assert_eq!(_r.end(), value.nvar.emitted_vars().end());
 		for cl in value.iter() {
-			println!("{:?}", cl);
 			// Ignore early detected unsatisfiability
 			let _ = slv.add_clause(cl.iter().copied());
 		}
@@ -474,6 +480,27 @@ impl fmt::Debug for Cadical {
 	}
 }
 
+/// Trampolines through which CaDiCaL reports proof events to a [`ProofTracer`].
+///
+/// Every function in this module is called by CaDiCaL through the [`CTracer`]
+/// vtable built in [`Cadical::connect_proof_tracer`], and they all share the
+/// same safety contract:
+///
+/// - `data` is the pointer taken with `Rc::as_ptr` from the `Rc<RefCell<P>>`
+///   registered for this exact `P`. The [`Cadical`] keeps that `Rc` alive in
+///   its `tracers` field for as long as the tracer is connected, so the pointer
+///   is valid and the concrete type matches the `P` each function is
+///   monomorphised with.
+/// - Literal arrays are passed as a `(*const c_int, usize)` pair that is valid
+///   for the duration of the call. They are reinterpreted as `&[Lit]`, which is
+///   sound because [`Lit`] is `#[repr(transparent)]` over `NonZeroI32` (hence
+///   over `i32`) — **provided the solver never puts a `0` in them**. A `0`
+///   would produce an invalid `NonZeroI32` and is immediate undefined
+///   behaviour, so this relies on CaDiCaL honouring its own API contract.
+/// - Panicking out of these functions aborts the process (they are `extern
+///   "C"`). Tracer implementations should therefore avoid panicking; note that
+///   re-entering a tracer that is already mutably borrowed will panic in
+///   `RefCell::borrow_mut`.
 mod ffi {
 	use std::{
 		cell::RefCell,

@@ -495,7 +495,12 @@ impl<
 	) {
 		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
 		if len > 0 {
-			let lits = slice::from_raw_parts(lits as *mut Lit, len);
+			// SAFETY: `lits` points to `len` assigned literals provided by the
+			// solver, each a non-zero `i32`. `Lit` is `#[repr(transparent)]` over
+			// `NonZeroI32` (and thus over `i32`), so reinterpreting the non-zero
+			// literals as `Lit` is sound. A `0` from the solver would make an
+			// invalid `NonZeroI32` and is undefined behaviour.
+			let lits = unsafe { slice::from_raw_parts(lits as *mut Lit, len) };
 			store
 				.propagator
 				.some_ref()

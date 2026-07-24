@@ -87,7 +87,11 @@ pub(crate) trait IpasirLearnCallbackMethod {
 
 /// The type for a callback function that can be used by IPASIR solver when
 /// learning new clauses.
-pub(crate) type IpasirLearnCb = Box<dyn FnMut(*const i32)>;
+///
+/// The callback must be [`Send`]: the solver stores are declared [`Send`] (see
+/// the `unsafe impl`s below), so the solver — and with it this callback — can
+/// be moved to another thread and invoked there.
+pub(crate) type IpasirLearnCb = Box<dyn FnMut(*const i32) + Send>;
 
 /// Trait that must be implemented by all IPASIR solvers, providing basic
 /// functionality of initilization, instantiation, and solving.
@@ -176,7 +180,9 @@ pub(crate) trait IpasirTermCallbackMethod {
 
 /// The type for a callback function that can be used by IPASIR solver to check
 /// whether it should terminate.
-pub(crate) type IpasirTerminationCb = Box<dyn FnMut() -> c_int>;
+///
+/// The callback must be [`Send`] for the same reason as [`IpasirLearnCb`].
+pub(crate) type IpasirTerminationCb = Box<dyn FnMut() -> c_int + Send>;
 
 #[derive(Debug)]
 /// Object that can be queried about the values that each variable has been
@@ -202,14 +208,29 @@ trait TerminationCallbackIpasirStorage {
 
 /// Function used to split a closure with no arguments into a thin data pointer
 /// and a thin function pointer.
-pub(crate) fn get_trampoline0<R, F: FnMut() -> R>(closure: &mut F) -> (*mut c_void, CB0<R>) {
-	let ptr: *mut F = closure;
+///
+/// The closure must be boxed, and the returned data pointer references the
+/// closure *inside* the box rather than the box handle itself. The caller is
+/// therefore free to move the handle (e.g. into the solver store) afterwards
+/// without invalidating the pointer, which is what keeps it valid for as long
+/// as the box is alive.
+///
+/// Taking `&mut Box<F>` (instead of `&mut F`) is deliberate: `Box<F>` itself
+/// implements `FnMut`, so a plain `&mut F` parameter would also accept a
+/// `&mut Box<F>` pointing at a soon-to-be-moved stack handle, silently
+/// producing a dangling data pointer.
+pub(crate) fn get_trampoline0<R, F: FnMut() -> R>(closure: &mut Box<F>) -> (*mut c_void, CB0<R>) {
+	let ptr: *mut F = closure.as_mut();
 	(ptr as *mut c_void, trampoline0::<R, F>)
 }
 /// Function used to split a closure with a single arguments into a thin data
 /// pointer and a thin function pointer.
-pub(crate) fn get_trampoline1<R, A, F: FnMut(A) -> R>(closure: &mut F) -> (*mut c_void, CB1<R, A>) {
-	let ptr: *mut F = closure;
+///
+/// See [`get_trampoline0`] for why the closure must be boxed.
+pub(crate) fn get_trampoline1<R, A, F: FnMut(A) -> R>(
+	closure: &mut Box<F>,
+) -> (*mut c_void, CB1<R, A>) {
+	let ptr: *mut F = closure.as_mut();
 	(ptr as *mut c_void, trampoline1::<R, A, F>)
 }
 
@@ -328,7 +349,7 @@ impl<
 where
 	Impl::Store: BasicIpasirStorage + LearnCallbackIpasirStorage,
 {
-	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>) + 'static>(
+	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>) + Send + 'static>(
 		&mut self,
 		cb: Option<F>,
 	) {
@@ -339,7 +360,7 @@ where
 				let mut iter = ExplIter(clause).map(|i: i32| Lit(NonZeroI32::new(i).unwrap()));
 				cb(&mut iter);
 			});
-			let (data_ptr, fn_ptr) = get_trampoline1(wrapped_cb.as_mut());
+			let (data_ptr, fn_ptr) = get_trampoline1(&mut wrapped_cb);
 			*self.ipasir_store_mut().learn_callback() = Some(wrapped_cb);
 			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
 			// IPASIR_SET_LEARN_CALLBACK function is expected to abide by the IPASIR
@@ -411,7 +432,7 @@ impl<
 where
 	Impl::Store: BasicIpasirStorage + TerminationCallbackIpasirStorage,
 {
-	fn set_terminate_callback<F: FnMut() -> TermSignal + 'static>(&mut self, cb: Option<F>) {
+	fn set_terminate_callback<F: FnMut() -> TermSignal + Send + 'static>(&mut self, cb: Option<F>) {
 		if let Some(mut cb) = cb {
 			let mut wrapped_cb = Box::new(move || -> c_int {
 				match cb() {
@@ -419,7 +440,7 @@ where
 					TermSignal::Terminate => c_int::from(1),
 				}
 			});
-			let (data_ptr, fn_ptr) = get_trampoline0(wrapped_cb.as_mut());
+			let (data_ptr, fn_ptr) = get_trampoline0(&mut wrapped_cb);
 			*self.ipasir_store_mut().termination_callback() = Some(wrapped_cb);
 			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
 			// IPASIR_SET_TERMINATE_CALLBACK function is expected to abide by the

@@ -91,6 +91,11 @@ pub trait ExternalPropagation: Solver {
 /// Connected listener gets notified whenever the truth value of a variable
 /// is fixed (for example during inprocessing or due to some derived unit
 /// clauses).
+///
+/// # Warning
+///
+/// As with [`Propagator`], this method is called by the solver from C and must
+/// not panic or re-enter the solver.
 pub trait PersistentAssignmentListener {
 	/// Notify the listener that a variable has been assigned a value that is
 	/// considered persistent. This means that the variable will not be
@@ -123,6 +128,23 @@ pub trait PersistentAssignmentNotifier: Solver {
 
 /// Trait implemented to provide external propagation for [`Solver`]s
 /// implementing the [`ExternalPropagation`] trait.
+///
+/// # Warning
+///
+/// The methods of this trait are invoked by the solver from C, through an
+/// `extern "C"` trampoline. Two consequences follow for implementations:
+///
+/// - **Do not panic.** A panic cannot unwind through the C frames and aborts
+///   the process instead. This includes the implicit panics from `unwrap`,
+///   indexing, and arithmetic overflow in debug builds.
+/// - **Do not re-enter the solver.** These methods are called while the
+///   propagator's [`RefCell`] is mutably borrowed, so calling back into the
+///   solver in a way that triggers another propagator callback panics in
+///   `RefCell::borrow_mut` (and thus aborts, per the previous point). The
+///   actions that *are* safe to perform during a callback are the ones offered
+///   by [`SolvingActions`].
+///
+/// [`RefCell`]: std::cell::RefCell
 pub trait Propagator {
 	/// Method called to check the found complete `solution` (after solution
 	/// reconstruction). If it returns false, the propagator must provide an

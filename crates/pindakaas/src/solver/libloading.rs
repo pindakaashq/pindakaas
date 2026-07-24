@@ -295,7 +295,7 @@ impl Drop for IpasirSolver<'_> {
 }
 
 impl LearnCallback for IpasirSolver<'_> {
-	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>) + 'static>(
+	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>) + Send + 'static>(
 		&mut self,
 		cb: Option<F>,
 	) {
@@ -334,7 +334,7 @@ impl Solver for IpasirSolver<'_> {
 }
 
 impl TerminateCallback for IpasirSolver<'_> {
-	fn set_terminate_callback<F: FnMut() -> TermSignal + 'static>(&mut self, cb: Option<F>) {
+	fn set_terminate_callback<F: FnMut() -> TermSignal + Send + 'static>(&mut self, cb: Option<F>) {
 		if let Some(mut cb) = cb {
 			let mut wrapped_cb = Box::new(move || -> c_int {
 				match cb() {

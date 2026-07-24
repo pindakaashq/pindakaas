@@ -58,7 +58,10 @@ pub trait LearnCallback: Solver {
 	///
 	/// Subsequent calls to this method override the previously set
 	/// callback function.
-	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>) + 'static>(
+	///
+	/// The callback must be [`Send`], since solvers can be moved to another
+	/// thread and will invoke the callback from whichever thread is solving.
+	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>) + Send + 'static>(
 		&mut self,
 		cb: Option<F>,
 	);
@@ -111,7 +114,10 @@ pub trait TerminateCallback: Solver {
 	///
 	/// Subsequent calls to this method override the previously set
 	/// callback function.
-	fn set_terminate_callback<F: FnMut() -> TermSignal + 'static>(&mut self, cb: Option<F>);
+	///
+	/// The callback must be [`Send`], since solvers can be moved to another
+	/// thread and will invoke the callback from whichever thread is solving.
+	fn set_terminate_callback<F: FnMut() -> TermSignal + Send + 'static>(&mut self, cb: Option<F>);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

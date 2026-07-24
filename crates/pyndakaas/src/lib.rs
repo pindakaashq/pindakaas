@@ -911,13 +911,38 @@ mod pindakaas {
 			solver: Option<S>,
 		}
 
+		/// A solve call that has "checked out" the solver from its owner.
+		///
+		/// # Safety invariant
+		///
+		/// `result` borrows from `solver`: the boxed values in
+		/// [`SolverResultState`] are produced by `S::solve`, so they are only
+		/// valid while `solver` is alive and unmutated. Their lifetimes are
+		/// laundered to `'static` (see `from_solver` /
+		/// `from_assumptions_solver`), which means the compiler no longer
+		/// enforces that relation — this code must.
+		///
+		/// Two rules keep that sound, and any change here must preserve both:
+		/// 1. `solver` is owned by this struct for as long as `result` exists.
+		///    It is taken out of the owner on entry and only handed back in
+		///    `exit`.
+		/// 2. `result` is cleared *before* `solver` is moved back to the owner
+		///    (`exit` sets `self.result = None` first). Reordering those two
+		///    statements reintroduces a use-after-free.
 		struct SolverResultImpl<Owner, S> {
 			owner: Py<Owner>,
+			/// The laundered borrow of `solver`; see the type-level invariant.
+			///
+			/// Must be dropped before `solver` is released back to `owner`.
 			result: Option<SolverResultState>,
 			solver: Option<S>,
 			supports_assumptions: bool,
 		}
 
+		/// The outcome of a solve call.
+		///
+		/// The boxed values borrow from the solver that produced them, despite
+		/// the `'static` bound; see the invariant on [`SolverResultImpl`].
 		enum SolverResultState {
 			/// A satisfying valuation for the current solve call.
 			Satisfied(Box<dyn Valuation + 'static>),
@@ -1117,6 +1142,9 @@ mod pindakaas {
 				py: Python<'_>,
 				slot: fn(&mut Owner) -> &mut SolverImpl<S>,
 			) -> PyResult<bool> {
+				// Must come first: `result` borrows from `solver`, so it has to be
+				// dropped before the solver is handed back. See the safety
+				// invariant on `SolverResultImpl`.
 				self.result = None;
 				if let Some(solver) = self.solver.take() {
 					let mut owner = self.owner.bind(py).borrow_mut();

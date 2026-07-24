@@ -4,6 +4,17 @@
 
 use std::{path::Path, process::Command};
 
+/// Run a command purely for its stdout, yielding an empty string if it cannot
+/// be spawned or exits unsuccessfully.
+///
+/// Used only for informational build metadata, which must never fail the build.
+fn run_command(cmd: &mut Command) -> String {
+	match cmd.output() {
+		Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
+		_ => String::new(),
+	}
+}
+
 fn main() {
 	let version = include_str!("vendor/kissat/VERSION").trim();
 	assert_eq!(version, "4.0.4", "unexpected version of Kissat detected");
@@ -108,31 +119,17 @@ fn main() {
 	let mut builder = cc::Build::new();
 
 	let compiler = builder.try_get_compiler().unwrap();
-	let git_id = String::from_utf8(
+	// The `ID`/`BUILD` defines below only feed Kissat's informational banner, so
+	// these commands are best-effort: they are unavailable when building from a
+	// packaged crate (no `.git`), without `git` installed, or on Windows (no
+	// `date`/`uname`). Never fail the build over them.
+	let git_id = run_command(
 		Command::new("git")
 			.current_dir("vendor/kissat")
-			.args(["rev-parse", "HEAD"])
-			.output()
-			.unwrap()
-			.stdout,
-	)
-	.unwrap();
-	let date = String::from_utf8(
-		Command::new("date")
-			.env("LC_LANG", "en_US")
-			.output()
-			.unwrap()
-			.stdout,
-	)
-	.unwrap();
-	let uname = String::from_utf8(
-		Command::new("uname")
-			.args(["-srmn"])
-			.output()
-			.unwrap()
-			.stdout,
-	)
-	.unwrap();
+			.args(["rev-parse", "HEAD"]),
+	);
+	let date = run_command(Command::new("date").env("LC_LANG", "en_US"));
+	let uname = run_command(Command::new("uname").args(["-srmn"]));
 
 	let build = builder
 		.include("./src")
@@ -157,9 +154,9 @@ fn main() {
 		)
 		.define("QUIET", None);
 
-	#[cfg(not(debug_assertions))]
-	// I'm not sure why this is not automatic, but assertions still seem to trigger otherwise.
-	let _ = build.define("NDEBUG", None);
+	if std::env::var("PROFILE").as_deref() != Ok("debug") {
+		let _ = build.define("NDEBUG", None);
+	}
 
 	if build.get_compiler().is_like_msvc() {
 		let _ = build.include(Path::new("vendor/kissat/src/msvc"));

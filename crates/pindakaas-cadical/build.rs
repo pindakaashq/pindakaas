@@ -157,9 +157,9 @@ fn main() {
 		let _ = build.define(f, format!("cadical_mangled_{f}").as_str());
 	}
 
-	#[cfg(not(debug_assertions))]
-	// I'm not sure why this is not automatic, but assertions still seem to trigger otherwise.
-	let _ = build.define("NDEBUG", None);
+	if std::env::var("PROFILE").as_deref() != Ok("debug") {
+		let _ = build.define("NDEBUG", None);
+	}
 
 	if build.get_compiler().is_like_msvc() {
 		let _ = build.include(Path::new("vendor/cadical/contrib/msvc"));
