@@ -668,7 +668,15 @@ where
 			.terms
 			.iter()
 			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
+			.flat_map(|(i, part)| {
+				IntVarEnc::from_part(
+					db,
+					part,
+					lin.k,
+					format!("x_{i}"),
+					lin.cmp == LimitComp::Equal,
+				)
+			})
 			.sorted_by(|a: &IntVarEnc, b: &IntVarEnc| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect_vec();
 
@@ -2077,7 +2085,15 @@ where
 			.terms
 			.iter()
 			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
+			.flat_map(|(i, part)| {
+				IntVarEnc::from_part(
+					db,
+					part,
+					lin.k,
+					format!("x_{i}"),
+					lin.cmp == LimitComp::Equal,
+				)
+			})
 			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
 			.collect_vec();
 		let n = xs.len();
@@ -2203,7 +2219,15 @@ where
 			.terms
 			.iter()
 			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
+			.flat_map(|(i, part)| {
+				IntVarEnc::from_part(
+					db,
+					part,
+					lin.k,
+					format!("x_{i}"),
+					lin.cmp == LimitComp::Equal,
+				)
+			})
 			.sorted_by_key(|x| x.ub())
 			.collect_vec();
 
@@ -2226,10 +2250,11 @@ mod tests {
 
 				use crate::{
 					bool_linear::{
-						tests::construct_terms, LimitComp, NormalizedBoolLinear, PosCoeff,
+						tests::construct_terms, LimitComp, NormalizedBoolLinear, Part, PosCoeff,
 					},
+					cardinality_one::{CardinalityOne, PairwiseEncoder},
 					helpers::tests::{assert_solutions, expect_file},
-					ClauseDatabaseTools, Cnf, Encoder,
+					ClauseDatabaseTools, Cnf, Encoder, Lit,
 				};
 
 				#[test]
@@ -2433,6 +2458,169 @@ mod tests {
 						&cnf,
 						vec![a, b, c, d],
 						&expect_file!["linear/test_small_eq_4.sol"],
+					);
+				}
+
+				/// Encode the at-most-one constraint over each of the `groups`, so
+				/// that the solutions of the formula can be compared against those
+				/// of encoders that ignore the grouping of the terms.
+				fn amo(cnf: &mut Cnf, groups: &[&[Lit]]) {
+					for lits in groups {
+						PairwiseEncoder::default()
+							.encode(
+								cnf,
+								&CardinalityOne {
+									lits: lits.to_vec(),
+									cmp: LimitComp::LessEq,
+								},
+							)
+							.unwrap();
+					}
+				}
+
+				#[test]
+				fn choice_le() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					amo(&mut cnf, &[&[a, b], &[c, d]]);
+					$encoder
+						.encode(
+							&mut cnf,
+							&NormalizedBoolLinear {
+								terms: vec![
+									Part::Amo(vec![(a, PosCoeff::new(3)), (b, PosCoeff::new(5))]),
+									Part::Amo(vec![(c, PosCoeff::new(2)), (d, PosCoeff::new(4))]),
+								],
+								cmp: LimitComp::LessEq,
+								k: PosCoeff::new(7),
+							},
+						)
+						.unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_choice_le.sol"],
+					);
+				}
+
+				#[test]
+				fn choice_eq() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					amo(&mut cnf, &[&[a, b], &[c, d]]);
+					$encoder
+						.encode(
+							&mut cnf,
+							&NormalizedBoolLinear {
+								terms: vec![
+									Part::Amo(vec![(a, PosCoeff::new(3)), (b, PosCoeff::new(5))]),
+									Part::Amo(vec![(c, PosCoeff::new(2)), (d, PosCoeff::new(4))]),
+								],
+								cmp: LimitComp::Equal,
+								k: PosCoeff::new(7),
+							},
+						)
+						.unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_choice_eq.sol"],
+					);
+				}
+
+				#[test]
+				fn choice_shared_coefficient() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					amo(&mut cnf, &[&[a, b, c]]);
+					// Two of the mutually exclusive terms share a coefficient.
+					$encoder
+						.encode(
+							&mut cnf,
+							&NormalizedBoolLinear {
+								terms: vec![
+									Part::Amo(vec![
+										(a, PosCoeff::new(3)),
+										(b, PosCoeff::new(3)),
+										(c, PosCoeff::new(5)),
+									]),
+									Part::Amo(vec![(d, PosCoeff::new(4))]),
+								],
+								cmp: LimitComp::LessEq,
+								k: PosCoeff::new(7),
+							},
+						)
+						.unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_choice_shared_coefficient.sol"],
+					);
+				}
+
+				#[test]
+				fn choice_shared_coefficient_eq() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					amo(&mut cnf, &[&[a, b, c]]);
+					$encoder
+						.encode(
+							&mut cnf,
+							&NormalizedBoolLinear {
+								terms: vec![
+									Part::Amo(vec![
+										(a, PosCoeff::new(3)),
+										(b, PosCoeff::new(3)),
+										(c, PosCoeff::new(5)),
+									]),
+									Part::Amo(vec![(d, PosCoeff::new(4))]),
+								],
+								cmp: LimitComp::Equal,
+								k: PosCoeff::new(7),
+							},
+						)
+						.unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_choice_shared_coefficient_eq.sol"],
+					);
+				}
+
+				#[test]
+				fn chain_le() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					// The literal of each term is implied by the literal of the next.
+					for (x, y) in [(a, b), (b, c)] {
+						cnf.add_clause([!y, x]).unwrap();
+					}
+					$encoder
+						.encode(
+							&mut cnf,
+							&NormalizedBoolLinear {
+								terms: vec![
+									Part::Ic(vec![
+										(a, PosCoeff::new(2)),
+										(b, PosCoeff::new(3)),
+										(c, PosCoeff::new(4)),
+									]),
+									Part::Amo(vec![(d, PosCoeff::new(5))]),
+								],
+								cmp: LimitComp::LessEq,
+								k: PosCoeff::new(8),
+							},
+						)
+						.unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_chain_le.sol"],
 					);
 				}
 

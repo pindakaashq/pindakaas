@@ -754,41 +754,82 @@ impl IntVarEnc {
 	}
 	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that
 	/// ∑ xs ≦ ∑ ys
-	pub(crate) fn from_part<Db>(db: &mut Db, xs: &Part, ub: PosCoeff, lbl: String) -> Vec<Self>
+	///
+	/// When `exact` is set, the order encoding of the resulting variables also
+	/// implies an upper bound on their value, rather than just a lower bound.
+	/// This costs additional literals and clauses, and is only required when
+	/// the variables are used in a constraint that reasons about their upper
+	/// bound, such as an equality.
+	pub(crate) fn from_part<Db>(
+		db: &mut Db,
+		xs: &Part,
+		ub: PosCoeff,
+		lbl: String,
+		exact: bool,
+	) -> Vec<Self>
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
 		match xs {
 			Part::Amo(terms) => {
-				let terms: Vec<(Coeff, Lit)> = terms
-					.iter()
-					.copied()
-					.map(|(lit, coef)| (*coef, lit))
-					.collect();
-				// for a set of terms with the same coefficients, replace by a single term with
-				// fresh variable o (implied by each literal)
+				// Group the terms by their coefficient.
 				let mut h: FxHashMap<Coeff, Vec<Lit>> =
 					FxHashMap::with_capacity_and_hasher(terms.len(), FxBuildHasher);
-				for (coef, lit) in terms {
-					debug_assert!(coef <= *ub);
-					h.entry(coef).or_default().push(lit);
+				for &(lit, coef) in terms {
+					debug_assert!(*coef <= *ub);
+					h.entry(*coef).or_default().push(lit);
 				}
 				let dom = once(0..=0).chain(h.keys().map(|&v| v..=v)).collect();
-				let views = h
+
+				// Construct the order encoding. The value of the group is the largest
+				// coefficient whose term is chosen, since at most one of them can be,
+				// which the caller guarantees. So the literal for `y≥c` is implied by
+				// each term whose coefficient is at least `c`, and, when an upper
+				// bound is required, implies their disjunction as well.
+				//
+				// The values are visited from the largest down, so `above` holds the
+				// literal for the next larger value in the domain (if any). Without
+				// the upper bound the values are independent, and a term's own
+				// literal can be reused whenever its coefficient is unique.
+				let mut above: Option<Lit> = None;
+				let mut views: Vec<Option<Lit>> = h
 					.into_iter()
 					.sorted_by_key(|(c, _)| *c)
+					.rev()
 					.map(|(_coef, lits)| {
-						if lits.len() == 1 {
-							Some(lits[0])
-						} else {
-							let o = new_named_lit!(db, format!("y_{:?}>={:?}", lits, _coef));
-							for lit in lits {
-								db.add_clause([!lit, o]).unwrap();
+						let prev = if exact { above } else { None };
+						let y = match (prev, lits.as_slice()) {
+							// A value reached by a single term is represented by that
+							// term's own literal, unless it also has to represent the
+							// values above it.
+							(None, &[lit]) => lit,
+							_ => {
+								let y = new_named_lit!(db, format!("y_{lits:?}>={_coef:?}"));
+								if exact {
+									// Add the clause `¬y ∨ prev ∨ ⋁ lits`: the value
+									// is reached only if one of these terms, or one
+									// with a larger coefficient, is chosen.
+									db.add_clause(
+										[!y].into_iter().chain(prev).chain(lits.iter().copied()),
+									)
+									.unwrap();
+								}
+								y
 							}
-							Some(o)
+						};
+						// Add the clause `¬l ∨ y` for each of these terms, and for the
+						// literal of the next larger value: choosing any of them means
+						// that this value is reached as well.
+						for lit in prev.into_iter().chain(lits) {
+							if lit != y {
+								db.add_clause([!lit, y]).unwrap();
+							}
 						}
+						above = Some(y);
+						Some(y)
 					})
 					.collect();
+				views.reverse();
 
 				vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, views, lbl))]
 			}
