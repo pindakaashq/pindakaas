@@ -177,7 +177,9 @@
 //! one” constraint, then it could use the
 //! [`BitwiseEncoder`](cardinality_one::BitwiseEncoder). However, we can always
 //! use general pseudo-Boolean encoders, such as the
-//! [`TotalizerEncoder`](bool_linear::TotalizerEncoder). Making the choice of
+//! [`TotalizerEncoder`](bool_linear::TotalizerEncoder) or the
+//! [`ModuloTotalizerEncoder`](bool_linear::ModuloTotalizerEncoder). Making the
+//! choice of
 //! encoding can be streamlined by using the
 //! [`StaticLinEncoder`](bool_linear::StaticLinEncoder), which makes a choice
 //! based on the constraint's variant.

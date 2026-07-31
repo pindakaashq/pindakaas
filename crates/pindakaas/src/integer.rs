@@ -140,17 +140,51 @@ where
 	Db: ClauseDatabase + ?Sized,
 {
 	let k = as_binary(k, Some(bits as u32));
-	// For every zero bit in k:
-	// - either the `x` bit is also zero, or
-	// - a higher `x` bit is zero that was one in k.
-	for i in 0..bits {
-		if !k[i] && x[i].is_some() {
-			db.add_clause(
-				(i..bits)
-					.filter_map(|j| if j == i || k[j] { x[j] } else { None })
-					.map(|lit| !lit),
-			)?;
-		}
+	// A bit that is absent is known to be zero.
+	let bit = |i: usize| Formula::Atom(x[i].map_or(BoolVal::Const(false), BoolVal::Lit));
+	lex_leq(
+		db,
+		&(0..bits)
+			.map(|i| {
+				if k[i] {
+					// The bit is at least the one of `k` only when it is set, and
+					// it can never exceed it.
+					(bit(i), Formula::Atom(BoolVal::Const(false)))
+				} else {
+					(Formula::Atom(BoolVal::Const(true)), bit(i))
+				}
+			})
+			.collect_vec(),
+	)
+}
+
+/// Uses a lexicographic constraint to constrain a number in a mixed radix base
+/// to be at most a constant.
+///
+/// The digits are given least significant first, as the pair of conditions that
+/// the digit is at least, and that it exceeds, the corresponding digit of the
+/// constant.
+///
+/// The number exceeds the constant exactly when, for some digit, that digit
+/// exceeds the one of the constant while every more significant digit is at
+/// least the one of the constant.
+#[cfg_attr(
+	any(feature = "tracing", test),
+	tracing::instrument(name = "lex_lesseq", skip_all)
+)]
+pub(crate) fn lex_leq<Db>(db: &mut Db, digits: &[(Formula<BoolVal>, Formula<BoolVal>)]) -> Result
+where
+	Db: ClauseDatabase + ?Sized,
+{
+	for (i, (_, greater)) in digits.iter().enumerate() {
+		let clause = once(!greater.clone())
+			.chain(
+				digits[i + 1..]
+					.iter()
+					.map(|(at_least, _)| !at_least.clone()),
+			)
+			.collect();
+		TseitinEncoder.encode(db, &Formula::Or(clause))?;
 	}
 	Ok(())
 }

@@ -27,6 +27,7 @@
   - BDD encoding
   - Sequential Weight Counter encoding
   - Totalizer encoding
+  - Modulo Totalizer encoding
 - Integer (linear)
   - Direct / Domain / Unary encoding
   - Order encoding
