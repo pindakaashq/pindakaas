@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pindakaas
 
 
@@ -57,3 +59,12 @@ def test_issue_159():
 def test_set_option():
     slv = pindakaas.solver.CaDiCaL()
     slv._set_option("factor", 0)
+
+
+def test_time_limit():
+    # timedelta -> Duration takes a different code path under the limited API
+    slv = pindakaas.solver.CaDiCaL()
+    x, y = slv.new_vars(2)
+    slv.add_clause([x, y])
+    with slv.solve(time_limit=timedelta(seconds=10)) as result:
+        assert result.status == pindakaas.solver.Status.SATISFIED
