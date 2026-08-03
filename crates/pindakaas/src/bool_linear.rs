@@ -3296,16 +3296,19 @@ mod tests {
 	}
 	linear_test_suite! {adder_encoder, crate::bool_linear::AdderEncoder::default()}
 
-	// FIXME: BDD does not support LimitComp::Equal
-	// card1_test_suite!(BddEncoder::default());
+	card1_test_suite! {
+		bdd_encoder_card1, crate::bool_linear::AdderEncoder::default()
+	}
 	linear_test_suite! {bdd_encoder, crate::bool_linear::BddEncoder::default()}
 
-	// FIXME: SWC does not support LimitComp::Equal
-	// card1_test_suite!(SwcEncoder::default());
+	card1_test_suite! {
+		swc_encoder_card1, crate::bool_linear::AdderEncoder::default()
+	}
 	linear_test_suite! {swc_encoder, crate::bool_linear::SwcEncoder::default()}
 
-	// FIXME: Totalizer does not support LimitComp::Equal
-	// card1_test_suite!(TotalizerEncoder::default());
+	card1_test_suite! {
+		totalizer_encoder_card1, crate::bool_linear::AdderEncoder::default()
+	}
 	linear_test_suite!(
 		totalizer_encoder,
 		crate::bool_linear::TotalizerEncoder::default()
