@@ -5,8 +5,8 @@
 //! subsequently [`BoolLinear`]. These representations can then be normalized
 //! and simplified using [`BoolLinAggregator`]. Resulting
 //! [`NormalizedBoolLinear`] can be encoded using a variety of [`Encoder`]s such
-//! as the [`AdderEncoder`], [`BddEncoder`], [`SwcEncoder`], and
-//! [`TotalizerEncoder`].
+//! as the [`AdderEncoder`], [`BddEncoder`], [`SwcEncoder`],
+//! [`TotalizerEncoder`], and [`ModuloTotalizerEncoder`].
 //!
 //! This module contains some additional helper types that can be used to
 //! simplify this encoding process. [`StaticLinEncoder`] can help choose an
@@ -25,6 +25,7 @@ use std::{
 };
 
 use itertools::Itertools;
+use rangelist::{IntervalIterator, RangeList};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
@@ -32,7 +33,8 @@ use crate::{
 	cardinality_one::{BitwiseEncoder, CardinalityOne},
 	helpers::{as_binary, is_powers_of_two, new_named_lit},
 	integer::{
-		lex_leq_const, Consistency, IntVar, IntVarEnc, IntVarOrd, Lin, Model, GROUND_BINARY_AT_LB,
+		lex_leq, lex_leq_const, ord_plus_ord_le_ord_sparse_dom, Consistency, IntVar, IntVarEnc,
+		IntVarOrd, Lin, Model, TernLeConstraint, TernLeEncoder, GROUND_BINARY_AT_LB,
 	},
 	propositional_logic::{Formula, TseitinEncoder},
 	sorted::{Sorted, SortedEncoder},
@@ -174,6 +176,28 @@ pub(crate) trait LinMarker {}
 pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = BoolLinAggregator> {
 	enc: Enc,
 	agg: Agg,
+}
+
+/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≷ k using a Generalized n-Level
+/// Modulo Totalizer (GMTO).
+///
+/// Like the [`TotalizerEncoder`], the constraint is encoded as a binary tree of
+/// integer additions. Unlike the totalizer, the value of a node is not
+/// represented by a single order encoded integer variable, but as a sequence of
+/// order encoded digits in a mixed radix base β, i.e. ∑ⱼ digitⱼ·(β₀·…·βⱼ₋₁).
+/// Adding two nodes is then a ripple carry addition over their digits. This
+/// shrinks a node whose value ranges over `d` values from `O(d)` literals and
+/// `O(d²)` clauses to `O(β·log(d))` literals and `O(β²·log(d))` clauses.
+///
+/// The base is chosen to suit the coefficients of the constraint, see
+/// [`ModuloTotalizerEncoder::with_base`].
+///
+/// Terms that are known to be mutually exclusive (see
+/// [`BoolLinExp::add_choice`] and [`BoolLinExp::add_chain`]) are collapsed into
+/// a single leaf of the tree, rather than contributing a leaf each.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct ModuloTotalizerEncoder {
+	base: Option<Vec<Coeff>>,
 }
 
 #[derive(Debug, Clone)]
@@ -668,7 +692,15 @@ where
 			.terms
 			.iter()
 			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
+			.flat_map(|(i, part)| {
+				IntVarEnc::from_part(
+					db,
+					part,
+					lin.k,
+					format!("x_{i}"),
+					lin.cmp == LimitComp::Equal,
+				)
+			})
 			.sorted_by(|a: &IntVarEnc, b: &IntVarEnc| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
 			.collect_vec();
 
@@ -1774,6 +1806,362 @@ where
 	}
 }
 
+impl ModuloTotalizerEncoder {
+	/// Set the mixed radix base used to represent the value of the nodes of the
+	/// totalizer.
+	///
+	/// The value of a node is represented as `∑ⱼ digitⱼ·(β₀·…·βⱼ₋₁)`, where
+	/// `digitⱼ < βⱼ`. The last element of the given base is repeated for any
+	/// further digits, so `vec![2]` represents the nodes in binary, and any
+	/// base larger than `k` gives every node a single digit, as the
+	/// [`TotalizerEncoder`] does.
+	///
+	/// Note that neither extreme reproduces the encoding of the
+	/// [`AdderEncoder`] or of the [`TotalizerEncoder`]: only the representation
+	/// of the node values coincides, not the way they are added.
+	///
+	/// When left `None` (the default), the base is chosen greedily from the
+	/// coefficients of the constraint: values are added to the base until it
+	/// can represent every value up to `k`, and each added value is the one
+	/// that divides the largest number of coefficients.
+	pub fn with_base(&mut self, base: Option<Vec<Coeff>>) -> &mut Self {
+		self.base = base;
+		self
+	}
+
+	/// Encode `x + y = z`, where `z` is a freshly created integer variable
+	/// restricted to the values in `[0, ub]`.
+	fn add_eq<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		x: &IntVarEnc,
+		y: &IntVarEnc,
+		ub: Coeff,
+	) -> Result<IntVarEnc> {
+		// Adding zero requires no clauses, as long as it cannot overflow `ub`.
+		if matches!(x, IntVarEnc::Const(0)) && y.ub() <= ub {
+			return Ok(y.clone());
+		} else if matches!(y, IntVarEnc::Const(0)) && x.ub() <= ub {
+			return Ok(x.clone());
+		}
+		let z = Self::new_int_var(
+			db,
+			ord_plus_ord_le_ord_sparse_dom(
+				x.dom().iter().flatten(),
+				y.dom().iter().flatten(),
+				0,
+				ub,
+			),
+			"s",
+		)?;
+		TernLeEncoder::default().encode(db, &TernLeConstraint::new(x, y, LimitComp::Equal, &z))?;
+		Ok(z)
+	}
+
+	/// Encode the ripple carry addition of the digits of two nodes, returning
+	/// the digits of their sum restricted to the values in `[0, ub]`.
+	fn add_nodes<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		x: &[IntVarEnc],
+		y: &[IntVarEnc],
+		base: &[Coeff],
+		ub: Coeff,
+	) -> Result<Vec<IntVarEnc>> {
+		let zero = IntVarEnc::Const(0);
+		let len = max(x.len(), y.len());
+		let mut digits = Vec::with_capacity(len + 1);
+		let mut carry = IntVarEnc::Const(0);
+		// Upper bound on the value represented by the digits from the current
+		// position upwards. Anything larger would make the value of the node
+		// exceed `ub`.
+		let mut pos_ub = ub;
+		for j in 0..len {
+			let b = Self::base_at(base, j);
+			let x_j = x.get(j).unwrap_or(&zero);
+			let y_j = y.get(j).unwrap_or(&zero);
+			let w = Self::add_eq(db, x_j, &carry, min(b, pos_ub))?;
+			let s = Self::add_eq(
+				db,
+				&w,
+				y_j,
+				min(b.saturating_mul(2).saturating_sub(1), pos_ub),
+			)?;
+			let (digit, next) = Self::split(db, &s, b)?;
+			digits.push(digit);
+			carry = next;
+			pos_ub /= b;
+		}
+		// The carry out of the most significant position is zero unless the sum
+		// requires an additional digit.
+		if !matches!(carry, IntVarEnc::Const(0)) {
+			digits.push(carry);
+		}
+		Ok(digits)
+	}
+
+	/// The radix of the digit at position `j`, where the last element of the
+	/// base is repeated for any further positions.
+	fn base_at(base: &[Coeff], j: usize) -> Coeff {
+		base[min(j, base.len() - 1)]
+	}
+
+	/// The `len` least significant digits of `k` in `base`, least significant
+	/// digit first, or `None` if `k` does not fit in `len` digits.
+	fn const_digits(base: &[Coeff], len: usize, k: Coeff) -> Option<Vec<Coeff>> {
+		let mut rem = k;
+		let ks: Vec<Coeff> = (0..len)
+			.map(|j| {
+				let b = Self::base_at(base, j);
+				let digit = rem % b;
+				rem /= b;
+				digit
+			})
+			.collect();
+		(rem == 0).then_some(ks)
+	}
+
+	/// Represent the value of `x` as a sequence of order encoded digits in
+	/// `base`, least significant digit first.
+	fn digits<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		x: &IntVarEnc,
+		base: &[Coeff],
+	) -> Result<Vec<IntVarEnc>> {
+		let mut digits = Vec::new();
+		let mut rem = x.clone();
+		while rem.ub() >= Self::base_at(base, digits.len()) {
+			let (digit, carry) = Self::split(db, &rem, Self::base_at(base, digits.len()))?;
+			digits.push(digit);
+			rem = carry;
+		}
+		digits.push(rem);
+		Ok(digits)
+	}
+
+	/// Greedily construct a mixed radix base from the coefficients of the
+	/// constraint.
+	///
+	/// This follows the heuristic of Zha et al. [^1] as used to build the
+	/// generalized n-level modulo totalizer by Bofill et al. [^2]: values are
+	/// added to the base until it can represent every value up to `k`, and each
+	/// added value is the one that divides the largest number of coefficients,
+	/// preferring the largest value in case of a tie. After a value is added,
+	/// the coefficients are divided by it, so that the next value is chosen to
+	/// suit the next digit.
+	///
+	/// [^1]: A. Zha, M. Koshimura, H. Fujita, "N-level modulo-based CNF
+	/// encodings of pseudo-Boolean constraints for MaxSAT", Constraints 24(2)
+	/// (2019) 133–161.
+	///
+	/// [^2]: M. Bofill, J. Coll, P. Nightingale, J. Suy, F. Ulrich-Oltean, M.
+	/// Villaret, "SAT encodings for pseudo-Boolean constraints together with
+	/// at-most-one constraints", Artificial Intelligence 302 (2022) 103604.
+	fn greedy_base(coefs: impl IntoIterator<Item = Coeff>, k: Coeff) -> Vec<Coeff> {
+		// candidate divisors are enumerated up to `MAX_DIVISOR` rather than
+		// factorizing the coefficients. We might switch to a factorization if
+		// constraints with large, highly composite coefficients show up.
+		const MAX_DIVISOR: Coeff = 1 << 10;
+
+		let mut coefs = coefs.into_iter().collect_vec();
+		let mut base = Vec::new();
+		let mut product: Coeff = 1;
+		while product <= k {
+			// Lexicographic on `(count, divisor)`, so ties prefer the largest
+			// divisor. Falls back to a binary digit if nothing divides.
+			let b = (2..=min(MAX_DIVISOR, coefs.iter().copied().max().unwrap_or_default()))
+				.map(|d| (coefs.iter().filter(|&&q| q > 0 && q % d == 0).count(), d))
+				.max()
+				.filter(|&(count, _)| count > 0)
+				.map_or(2, |(_, d)| d);
+			base.push(b);
+			product = product.saturating_mul(b);
+			for q in &mut coefs {
+				*q /= b;
+			}
+		}
+		if base.is_empty() {
+			base.push(2);
+		}
+		base
+	}
+
+	/// Encode that the value represented by `digits` is at most `k`.
+	fn lex_leq<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		digits: &[IntVarEnc],
+		base: &[Coeff],
+		k: Coeff,
+	) -> Result {
+		let Some(ks) = Self::const_digits(base, digits.len(), k) else {
+			// `k` is larger than any value that the digits can represent.
+			return Ok(());
+		};
+		lex_leq(
+			db,
+			&digits
+				.iter()
+				.zip_eq(ks)
+				.map(|(digit, k_j)| (digit.geq(k_j), digit.geq(k_j + 1)))
+				.collect_vec(),
+		)
+	}
+
+	/// Create an order encoded integer variable with the given domain, or a
+	/// constant when the domain contains a single value.
+	fn new_int_var<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		dom: RangeList<Coeff>,
+		lbl: &str,
+	) -> Result<IntVarEnc> {
+		if dom.is_empty() {
+			db.contradiction()?;
+			unreachable!()
+		} else if dom.card() == Some(1) {
+			Ok(IntVarEnc::Const(*dom.min().unwrap()))
+		} else {
+			let x = IntVarOrd::from_dom(db, dom, lbl.to_owned());
+			// The implications between the order encoding literals are not added
+			// by construction, but they are required for the upper bounds that
+			// `LimitComp::Equal` reasons about to be correct.
+			x.consistent(db)?;
+			Ok(IntVarEnc::Ord(x))
+		}
+	}
+
+	/// Encode that the value represented by `digits` is equal to `k`.
+	fn pin<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		digits: &[IntVarEnc],
+		base: &[Coeff],
+		k: Coeff,
+	) -> Result {
+		let Some(ks) = Self::const_digits(base, digits.len(), k) else {
+			// `k` is larger than any value that the digits can represent.
+			db.contradiction()?;
+			unreachable!()
+		};
+		for (digit, k_j) in digits.iter().zip_eq(ks) {
+			TseitinEncoder.encode(db, &digit.geq(k_j))?;
+			TseitinEncoder.encode(db, &!digit.geq(k_j + 1))?;
+		}
+		Ok(())
+	}
+
+	/// Split `x` into the pair `(x mod base, x div base)`.
+	fn split<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		x: &IntVarEnc,
+		base: Coeff,
+	) -> Result<(IntVarEnc, IntVarEnc)> {
+		if x.ub() < base {
+			return Ok((x.clone(), IntVarEnc::Const(0)));
+		}
+		let dom = x.dom();
+		let digit = Self::new_int_var(
+			db,
+			dom.iter().flatten().map(|v| v % base..=v % base).collect(),
+			"r",
+		)?;
+		let carry = Self::new_int_var(
+			db,
+			dom.iter().flatten().map(|v| v / base..=v / base).collect(),
+			"q",
+		)?;
+		TernLeEncoder::default().encode(
+			db,
+			&TernLeConstraint::new(&digit, &Self::scale(&carry, base), LimitComp::Equal, x),
+		)?;
+		Ok((digit, carry))
+	}
+
+	/// Multiply the value of `x` by `factor`, reusing its literals.
+	fn scale(x: &IntVarEnc, factor: Coeff) -> IntVarEnc {
+		match x {
+			// Note that the domain has to be scaled value by value: scaling the
+			// bounds of an interval would change its cardinality, and the order
+			// encoding literals are indexed by their position in the domain.
+			IntVarEnc::Ord(o) => IntVarEnc::Ord(IntVarOrd {
+				dom: o
+					.dom
+					.iter()
+					.flatten()
+					.map(|v| v * factor..=v * factor)
+					.collect(),
+				xs: o.xs.clone(),
+				lbl: o.lbl.clone(),
+			}),
+			&IntVarEnc::Const(c) => IntVarEnc::Const(c * factor),
+			IntVarEnc::Bin(_) => unreachable!("the encoder only creates order encoded variables"),
+		}
+	}
+}
+
+impl<Db> Encoder<Db, NormalizedBoolLinear> for ModuloTotalizerEncoder
+where
+	Db: ClauseDatabase + ?Sized,
+{
+	#[cfg_attr(
+		any(feature = "tracing", test),
+		tracing::instrument(name = "modulo_totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
+	)]
+	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
+		let k = *lin.k;
+		let base = match &self.base {
+			Some(base) => base.clone(),
+			None => Self::greedy_base(lin.terms.iter().flatten().map(|&(_, coef)| *coef), k),
+		};
+		debug_assert!(base.iter().all(|&b| b > 1));
+
+		// Terms that are mutually exclusive are collapsed into a single leaf.
+		let xs = lin
+			.terms
+			.iter()
+			.enumerate()
+			.flat_map(|(i, part)| {
+				// The digits are added exactly, even for a `≤` constraint, so the
+				// leaves have to imply an upper bound as well.
+				IntVarEnc::from_part(db, part, lin.k, format!("x_{i}"), true)
+			})
+			.sorted_by_key(IntVarEnc::ub)
+			.collect_vec();
+
+		// Every node of the totalizer is represented by its digits, together
+		// with an upper bound on its value. Since all coefficients are positive,
+		// any partial sum that exceeds `k` already violates the constraint.
+		let mut layer = Vec::with_capacity(xs.len());
+		for x in xs {
+			let ub = min(x.ub(), k);
+			let digits = Self::digits(db, &x, &base)?;
+			Self::lex_leq(db, &digits, &base, k)?;
+			layer.push((digits, ub));
+		}
+
+		while layer.len() > 1 {
+			let mut next = Vec::with_capacity(layer.len().div_ceil(2));
+			for children in layer.chunks(2) {
+				match children {
+					[x] => next.push(x.clone()),
+					[x, y] => {
+						let ub = min(x.1 + y.1, k);
+						let digits = Self::add_nodes(db, &x.0, &y.0, &base, ub)?;
+						Self::lex_leq(db, &digits, &base, k)?;
+						next.push((digits, ub));
+					}
+					_ => unreachable!(),
+				}
+			}
+			layer = next;
+		}
+
+		let root = layer.pop().map(|(digits, _)| digits).unwrap_or_default();
+		match lin.cmp {
+			LimitComp::LessEq => Self::lex_leq(db, &root, &base, k),
+			LimitComp::Equal => Self::pin(db, &root, &base, k),
+		}
+	}
+}
+
+impl LinMarker for ModuloTotalizerEncoder {}
+
 impl NormalizedBoolLinear {
 	/// Get the comparator of the linear constraint.
 	pub fn comparator(&self) -> Comparator {
@@ -2011,7 +2399,15 @@ where
 			.terms
 			.iter()
 			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
+			.flat_map(|(i, part)| {
+				IntVarEnc::from_part(
+					db,
+					part,
+					lin.k,
+					format!("x_{i}"),
+					lin.cmp == LimitComp::Equal,
+				)
+			})
 			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
 			.collect_vec();
 		let n = xs.len();
@@ -2137,7 +2533,15 @@ where
 			.terms
 			.iter()
 			.enumerate()
-			.flat_map(|(i, part)| IntVarEnc::from_part(db, part, lin.k, format!("x_{i}")))
+			.flat_map(|(i, part)| {
+				IntVarEnc::from_part(
+					db,
+					part,
+					lin.k,
+					format!("x_{i}"),
+					lin.cmp == LimitComp::Equal,
+				)
+			})
 			.sorted_by_key(|x| x.ub())
 			.collect_vec();
 
@@ -2160,10 +2564,11 @@ mod tests {
 
 				use crate::{
 					bool_linear::{
-						tests::construct_terms, LimitComp, NormalizedBoolLinear, PosCoeff,
+						tests::construct_terms, LimitComp, NormalizedBoolLinear, Part, PosCoeff,
 					},
+					cardinality_one::{CardinalityOne, PairwiseEncoder},
 					helpers::tests::{assert_solutions, expect_file},
-					ClauseDatabaseTools, Cnf, Encoder,
+					ClauseDatabaseTools, Cnf, Encoder, Lit,
 				};
 
 				#[test]
@@ -2370,6 +2775,139 @@ mod tests {
 					);
 				}
 
+				/// Encode the at-most-one constraint over each of the `groups`, so
+				/// that the solutions of the formula can be compared against those
+				/// of encoders that ignore the grouping of the terms.
+				fn amo(cnf: &mut Cnf, groups: &[&[Lit]]) {
+					for lits in groups {
+						PairwiseEncoder::default()
+							.encode(
+								cnf,
+								&CardinalityOne {
+									lits: lits.to_vec(),
+									cmp: LimitComp::LessEq,
+								},
+							)
+							.unwrap();
+					}
+				}
+
+				#[test]
+				fn choice_le() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					amo(&mut cnf, &[&[a, b], &[c, d]]);
+					$encoder
+						.encode(
+							&mut cnf,
+							&NormalizedBoolLinear {
+								terms: vec![
+									Part::Amo(vec![(a, PosCoeff::new(3)), (b, PosCoeff::new(5))]),
+									Part::Amo(vec![(c, PosCoeff::new(2)), (d, PosCoeff::new(4))]),
+								],
+								cmp: LimitComp::LessEq,
+								k: PosCoeff::new(7),
+							},
+						)
+						.unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_choice_le.sol"],
+					);
+				}
+
+				#[test]
+				fn choice_eq() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					amo(&mut cnf, &[&[a, b], &[c, d]]);
+					$encoder
+						.encode(
+							&mut cnf,
+							&NormalizedBoolLinear {
+								terms: vec![
+									Part::Amo(vec![(a, PosCoeff::new(3)), (b, PosCoeff::new(5))]),
+									Part::Amo(vec![(c, PosCoeff::new(2)), (d, PosCoeff::new(4))]),
+								],
+								cmp: LimitComp::Equal,
+								k: PosCoeff::new(7),
+							},
+						)
+						.unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_choice_eq.sol"],
+					);
+				}
+
+				#[test]
+				fn choice_shared_coefficient() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					amo(&mut cnf, &[&[a, b, c]]);
+					// Two of the mutually exclusive terms share a coefficient.
+					$encoder
+						.encode(
+							&mut cnf,
+							&NormalizedBoolLinear {
+								terms: vec![
+									Part::Amo(vec![
+										(a, PosCoeff::new(3)),
+										(b, PosCoeff::new(3)),
+										(c, PosCoeff::new(5)),
+									]),
+									Part::Amo(vec![(d, PosCoeff::new(4))]),
+								],
+								cmp: LimitComp::LessEq,
+								k: PosCoeff::new(7),
+							},
+						)
+						.unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_choice_shared_coefficient.sol"],
+					);
+				}
+
+				#[test]
+				fn chain_le() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					// The literal of each term is implied by the literal of the next.
+					for (x, y) in [(a, b), (b, c)] {
+						cnf.add_clause([!y, x]).unwrap();
+					}
+					$encoder
+						.encode(
+							&mut cnf,
+							&NormalizedBoolLinear {
+								terms: vec![
+									Part::Ic(vec![
+										(a, PosCoeff::new(2)),
+										(b, PosCoeff::new(3)),
+										(c, PosCoeff::new(4)),
+									]),
+									Part::Amo(vec![(d, PosCoeff::new(5))]),
+								],
+								cmp: LimitComp::LessEq,
+								k: PosCoeff::new(8),
+							},
+						)
+						.unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_chain_le.sol"],
+					);
+				}
+
 				#[test]
 				fn issue_177() {
 					let mut cnf = Cnf::default();
@@ -2403,8 +2941,8 @@ mod tests {
 	use crate::{
 		bool_linear::{
 			AdderEncoder, BoolLinAggregator, BoolLinExp, BoolLinVariant, BoolLinear, Comparator,
-			LimitComp, LinearEncoder, NormalizedBoolLinear, Part, PosCoeff, StaticLinEncoder,
-			TotalizerEncoder,
+			LimitComp, LinearEncoder, ModuloTotalizerEncoder, NormalizedBoolLinear, Part, PosCoeff,
+			StaticLinEncoder, TotalizerEncoder,
 		},
 		cardinality::{tests::card_test_suite, Cardinality},
 		cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
@@ -3296,16 +3834,13 @@ mod tests {
 	}
 	linear_test_suite! {adder_encoder, crate::bool_linear::AdderEncoder::default()}
 
-	// FIXME: BDD does not support LimitComp::Equal
-	// card1_test_suite!(BddEncoder::default());
+	card1_test_suite! { bdd_card1, crate::bool_linear::BddEncoder::default() }
 	linear_test_suite! {bdd_encoder, crate::bool_linear::BddEncoder::default()}
 
-	// FIXME: SWC does not support LimitComp::Equal
-	// card1_test_suite!(SwcEncoder::default());
+	card1_test_suite! { swc_card1, crate::bool_linear::SwcEncoder::default() }
 	linear_test_suite! {swc_encoder, crate::bool_linear::SwcEncoder::default()}
 
-	// FIXME: Totalizer does not support LimitComp::Equal
-	// card1_test_suite!(TotalizerEncoder::default());
+	card1_test_suite! { totalizer_card1, crate::bool_linear::TotalizerEncoder::default() }
 	linear_test_suite!(
 		totalizer_encoder,
 		crate::bool_linear::TotalizerEncoder::default()
@@ -3323,4 +3858,100 @@ mod tests {
 		crate::bool_linear::TotalizerEncoder::default()
 			.with_propagation(crate::integer::Consistency::Domain)
 	);
+
+	mod modulo_totalizer_encoder_card {
+		use itertools::Itertools;
+		use traced_test::test;
+
+		use crate::{
+			bool_linear::{LimitComp, ModuloTotalizerEncoder, PosCoeff},
+			cardinality::{tests::card_test_suite, Cardinality},
+			helpers::tests::{assert_solutions, expect_file},
+			ClauseDatabase, Cnf, Encoder,
+		};
+
+		card_test_suite!(ModuloTotalizerEncoder::default());
+	}
+	card1_test_suite! {
+		modulo_totalizer_encoder_card1, crate::bool_linear::ModuloTotalizerEncoder::default()
+	}
+	linear_test_suite! {
+		modulo_totalizer_encoder, crate::bool_linear::ModuloTotalizerEncoder::default()
+	}
+
+	// The radix determines the number of levels of the encoding: two represents
+	// the nodes in binary, and anything larger than `k` gives them a single
+	// digit.
+	linear_test_suite! {
+		modulo_totalizer_encoder_base_2,
+		crate::bool_linear::ModuloTotalizerEncoder::default().with_base(Some(vec![2]))
+	}
+	linear_test_suite! {
+		modulo_totalizer_encoder_base_3,
+		crate::bool_linear::ModuloTotalizerEncoder::default().with_base(Some(vec![3]))
+	}
+	linear_test_suite! {
+		modulo_totalizer_encoder_base_100,
+		crate::bool_linear::ModuloTotalizerEncoder::default().with_base(Some(vec![100]))
+	}
+	linear_test_suite! {
+		modulo_totalizer_encoder_base_3_2,
+		crate::bool_linear::ModuloTotalizerEncoder::default().with_base(Some(vec![3, 2]))
+	}
+
+	#[test]
+	fn modulo_totalizer_greedy_base() {
+		let base = |coefs: &[Coeff], k| ModuloTotalizerEncoder::greedy_base(coefs.to_vec(), k);
+		// Three divides every coefficient, so the first digit of each of them
+		// is zero. Afterwards the coefficients share no divisor.
+		assert_eq!(base(&[3, 6, 9, 12], 30), vec![3, 2, 2, 2, 2]);
+		// Without any divisor to exploit the base is binary.
+		assert_eq!(base(&[1, 1, 1], 7), vec![2, 2, 2]);
+		// Dividing a single coefficient still beats dividing none, and ties are
+		// broken towards the largest divisor, so seven is preferred over five.
+		assert_eq!(base(&[5, 7], 12), vec![7, 2]);
+		assert_eq!(base(&[6, 6], 5), vec![6]);
+		// The base must always be usable, even for a degenerate bound.
+		assert_eq!(base(&[1], 0), vec![2]);
+	}
+
+	/// The whole point of the modulo totalizer is that its nodes are smaller
+	/// than those of the totalizer, so guard against a regression that would
+	/// make it pointless.
+	#[test]
+	fn modulo_totalizer_is_smaller_than_totalizer() {
+		const N: usize = 40;
+		let con = |vars: &[Lit]| {
+			BoolLinear::new(
+				BoolLinExp::from_slices(&(1..=N as Coeff).collect_vec(), vars),
+				Comparator::LessEq,
+				400,
+			)
+		};
+
+		let mut gt = Cnf::default();
+		let vars = gt.new_var_range(N).iter_lits().collect_vec();
+		LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default()
+			.encode(&mut gt, &con(&vars))
+			.unwrap();
+
+		let mut gmto = Cnf::default();
+		let vars = gmto.new_var_range(N).iter_lits().collect_vec();
+		LinearEncoder::<StaticLinEncoder<ModuloTotalizerEncoder>>::default()
+			.encode(&mut gmto, &con(&vars))
+			.unwrap();
+
+		assert!(
+			gmto.num_vars() < gt.num_vars(),
+			"expected fewer variables than the totalizer, got {} instead of {}",
+			gmto.num_vars(),
+			gt.num_vars()
+		);
+		assert!(
+			gmto.num_clauses() < gt.num_clauses(),
+			"expected fewer clauses than the totalizer, got {} instead of {}",
+			gmto.num_clauses(),
+			gt.num_clauses()
+		);
+	}
 }

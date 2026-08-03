@@ -71,8 +71,8 @@ mod pindakaas {
 	use pindakaas::{
 		bool_linear::{
 			AdderEncoder, BoolLinAggregator, BoolLinExp as BaseBoolLinExp, BoolLinVariant,
-			BoolLinear as BaseBoolLinCon, Comparator, LinearEncoder, NormalizedBoolLinear,
-			SwcEncoder, TotalizerEncoder,
+			BoolLinear as BaseBoolLinCon, Comparator, LinearEncoder, ModuloTotalizerEncoder,
+			NormalizedBoolLinear, SwcEncoder, TotalizerEncoder,
 		},
 		cardinality::{Cardinality, SortingNetworkEncoder},
 		cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
@@ -147,6 +147,9 @@ mod pindakaas {
 		/// Use :class:`pindakaas::cardinality_one::LadderEncoder`, which is
 		/// able to encode all Boolean cardinality one constraints.
 		LADDER,
+		/// Use :class:`pindakaas::bool_linear::ModuloTotalizerEncoder`, which
+		/// is able to encode all Boolean linear constraints.
+		MODULO_TOTALIZER,
 		/// Use :class:`pindakaas::cardinality_one::PairwiseEncoder`, which is
 		/// able to encode all Boolean cardinality one constraints.
 		PAIRWISE,
@@ -558,6 +561,7 @@ mod pindakaas {
 				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
 				Encoder::ADDER => AdderEncoder::default().encode(db, con),
 				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
+				Encoder::MODULO_TOTALIZER => ModuloTotalizerEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
 				enc => {
 					self.set_err("Cardinality", enc);
@@ -580,6 +584,7 @@ mod pindakaas {
 				Encoder::PAIRWISE => PairwiseEncoder::default().encode(db, con),
 				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
 				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
+				Encoder::MODULO_TOTALIZER => ModuloTotalizerEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
 				enc => {
 					self.set_err("CardinalityOne", enc);
@@ -598,6 +603,7 @@ mod pindakaas {
 			match self.method.unwrap_or(Encoder::ADDER) {
 				Encoder::ADDER => AdderEncoder::default().encode(db, con),
 				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
+				Encoder::MODULO_TOTALIZER => ModuloTotalizerEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
 				enc => {
 					self.set_err("BoolLinear", enc);
