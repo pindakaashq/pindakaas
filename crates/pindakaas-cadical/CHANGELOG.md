@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1](https://github.com/pindakaashq/pindakaas/compare/pindakaas-cadical-v0.4.0...pindakaas-cadical-v0.4.1) - 2026-08-03
+
+### Fixed
+
+- C robustness issues
+
 ## [0.4.0](https://github.com/pindakaashq/pindakaas/compare/pindakaas-cadical-v0.3.2...pindakaas-cadical-v0.4.0) - 2026-06-09
 
 ### Added

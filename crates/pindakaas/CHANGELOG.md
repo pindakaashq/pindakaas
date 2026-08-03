@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.5.1...pindakaas-v0.6.0) - 2026-08-03
+
+### Added
+
+- *(external-propagation)* streamline allocation in ExternalPropagation API
+
+### Fixed
+
+- re-enable already working testcases
+- C robustness issues
+
+### Other
+
+- *(external-propagation)* remove ReasonBuilder
+- update itertools from 0.14 to 0.15
+
 ## [0.5.1](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.5.0...pindakaas-v0.5.1) - 2026-06-09
 
 ### Added
