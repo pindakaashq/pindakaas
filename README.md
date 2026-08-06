@@ -20,6 +20,7 @@
   - Bitwise encoding
   - Ladder encoding
   - Pairwise encoding
+  - Product encoding
 - Cardinality constraints
   - Sorting Network encoding
 - Boolean linear
