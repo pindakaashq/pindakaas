@@ -873,14 +873,16 @@ impl BoolLinAggregator {
 							// this term will cancel out later when we add q*min_lit to the LHS
 							let _ = terms.remove(min_index);
 
-							// since y + x1 + x2 + ... = 1 (exactly-one), we have q*y + q*x1 + q*x2 + ... = q
-							// after adding term 0*y, we can add q*y + q*x1 + q*x2 + ... on the LHS, and q on the RHS
+							// since y + x1 + x2 + ... = 1 (exactly-one), we have q*y + q*x1 + q*x2
+							// + ... = q after adding term 0*y, we can add q*y + q*x1 + q*x2
+							// + ... on the LHS, and q on the RHS
 							terms.push((y, 0)); // note: it's fine to add y into the same AMO group
 							terms = terms.iter().map(|(lit, coef)| (*lit, *coef + q)).collect();
 							k += q;
 						}
 
-						// all coefficients should be positive (since we subtracted the most negative coefficient)
+						// all coefficients should be positive (since we subtracted the most
+						// negative coefficient)
 						vec![Part::Amo(
 							terms
 								.into_iter()
@@ -890,7 +892,8 @@ impl BoolLinAggregator {
 					}
 
 					(Constraint::ImplicationChain, terms) => {
-						// normalize by splitting up the chain into two chains by coef polarity, inverting the coefs of the neg
+						// normalize by splitting up the chain into two chains by coef polarity,
+						// inverting the coefs of the neg
 						let (pos_chain, neg_chain): (_, Vec<_>) =
 							terms.into_iter().partition(|(_, coef)| coef.is_positive());
 						vec![
@@ -1056,10 +1059,19 @@ impl BoolLinAggregator {
 			partition
 				.iter()
 				.map(|part| match part {
+					// Only a single literal of the group can be true.
 					Part::Amo(terms) => terms.iter().map(|&(_, i)| *i).max().unwrap_or(0),
-					Part::Ic(terms) | Part::Dom(terms, _, _) => {
-						terms.iter().map(|&(_, coef)| *coef).sum()
-						// TODO max(k, acc + ..)
+					// Every literal of the chain can be true at the same time.
+					Part::Ic(terms) => terms.iter().map(|&(_, coef)| *coef).sum(),
+					// The group is known to stay within its declared bounds, which
+					// can be tighter than the sum of its coefficients.
+					Part::Dom(terms, _, u) => {
+						debug_assert!(
+							**u <= terms.iter().map(|&(_, coef)| *coef).sum(),
+							"upper bound {u:?} of a domain group exceeds the sum of \
+							 its coefficients, so it cannot be used as a bound here"
+						);
+						**u
 					}
 				})
 				.sum(),
@@ -1234,12 +1246,28 @@ impl BoolLinExp {
 	// Probably makes more sense to use something like int encodings
 	/// Add a log encoding to the linear expression, where it is given that the
 	/// log encoding is known to be within `lb..=ub`.
+	///
+	/// Note that `lb` and `ub` bound the integer that the terms encode, not the
+	/// value the terms contribute to the expression. For terms `(x₀, c)`,
+	/// `(x₁, 2c)`, `(x₂, 4c)`, a bound of `0..=3` means the contribution is at
+	/// most `3c`.
 	pub fn add_bounded_log_encoding(
 		mut self,
 		terms: &[(Lit, Coeff)],
 		lb: Coeff,
 		ub: Coeff,
 	) -> Self {
+		debug_assert!(
+			lb <= ub,
+			"lower bound {lb} of a log encoding exceeds its upper bound {ub}"
+		);
+		debug_assert!(
+			terms.is_empty()
+				|| (lb >= 0
+					&& terms[0].1.abs().saturating_mul(ub)
+						<= terms.iter().map(|(_, coef)| coef.abs()).sum::<Coeff>()),
+			"bounds {lb}..={ub} lie outside the range the given terms can represent"
+		);
 		self.constraints
 			.push((Constraint::Domain { lb, ub }, terms.len()));
 		self.terms.extend(terms.iter().cloned());
@@ -3054,7 +3082,9 @@ mod tests {
 			}))
 		);
 
-		// Correctly account for the coefficient in the Dom bounds
+		// The declared upper bound of the group, rather than the sum of its
+		// coefficients, decides whether the constraint can still be violated. The
+		// group is known to be at most 3, so it can never exceed 5.
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		assert_eq!(
@@ -3062,6 +3092,21 @@ mod tests {
 				&mut cnf,
 				&BoolLinear::new(
 					BoolLinExp::default().add_bounded_log_encoding(&[(a, 1), (b, 2), (c, 4)], 0, 3),
+					Comparator::LessEq,
+					5,
+				)
+			),
+			Ok(BoolLinVariant::Trivial)
+		);
+
+		// Raising the bound above `k` leaves a constraint that must be encoded
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		assert_eq!(
+			BoolLinAggregator::default().aggregate(
+				&mut cnf,
+				&BoolLinear::new(
+					BoolLinExp::default().add_bounded_log_encoding(&[(a, 1), (b, 2), (c, 4)], 0, 6),
 					Comparator::LessEq,
 					5,
 				)
@@ -3074,11 +3119,32 @@ mod tests {
 						(c, PosCoeff::new(4))
 					],
 					PosCoeff::new(0),
-					PosCoeff::new(7)
+					PosCoeff::new(6)
 				),],
 				cmp: LimitComp::LessEq,
 				k: PosCoeff::new(5),
 			}))
+		);
+
+		// Dropping the most significant term lowers the value the group can still
+		// reach, so its upper bound is re-clamped to what is left. Here 8d cannot
+		// be true, and the remaining bits cannot exceed 7 either.
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		assert_eq!(
+			BoolLinAggregator::default().aggregate(
+				&mut cnf,
+				&BoolLinear::new(
+					BoolLinExp::default().add_bounded_log_encoding(
+						&[(a, 1), (b, 2), (c, 4), (d, 8)],
+						0,
+						15
+					),
+					Comparator::LessEq,
+					7,
+				)
+			),
+			Ok(BoolLinVariant::Trivial)
 		);
 
 		// Correctly convert GreaterEq into LessEq with side constrains
