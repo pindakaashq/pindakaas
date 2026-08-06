@@ -15,7 +15,7 @@ use itertools::Itertools;
 
 use crate::{
 	bool_linear::{Comparator, LimitComp, NormalizedBoolLinear},
-	Checker, ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result, Valuation,
+	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result, Valuation,
 };
 
 /// An encoder for [`CardinalityOne`] constraints that uses a logarithm
@@ -139,22 +139,35 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for LadderEncoder 
 	tracing::instrument(name = "ladder_encoder", skip_all, fields(constraint = card1.trace_print()))
 )]
 	fn encode(&self, db: &mut Db, card1: &CardinalityOne) -> Result {
-		// TODO could be slightly optimised to not introduce fixed lits
-		let mut a = db.new_lit(); // y_v-1
-		if card1.cmp == LimitComp::Equal {
-			db.add_clause([a])?;
-		}
-		for &x in card1.lits.iter() {
-			let b = db.new_lit(); // y_v
+		// For an Exactly One constraint the ladder is known to start out `true`
+		// and to have come down by the end, so both ends are constants rather
+		// than literals that would only be fixed by a unit clause.
+		let equal = card1.cmp == LimitComp::Equal;
+		let mut a: BoolVal = if equal {
+			true.into()
+		} else {
+			db.new_lit().into()
+		}; // y_v-1
+		for (i, &x) in card1.lits.iter().enumerate() {
+			let last = i + 1 == card1.lits.len();
+			let b: BoolVal = if equal && last {
+				false.into()
+			} else {
+				db.new_lit().into()
+			}; // y_v
 			db.add_clause([!b, a])?; // y_v -> y_v-1
 
 			// "Channelling" clauses for x_v <-> (y_v-1 /\ ¬y_v)
-			db.add_clause([!x, a])?; // x_v -> y_v-1
-			db.add_clause([!x, !b])?; // x_v -> ¬y_v
-			db.add_clause([!a, b, x])?; // (y_v-1 /\ ¬y_v) -> x=v
+			db.add_clause([(!x).into(), a])?; // x_v -> y_v-1
+			db.add_clause([(!x).into(), !b])?; // x_v -> ¬y_v
+			db.add_clause([!a, b, x.into()])?; // (y_v-1 /\ ¬y_v) -> x=v
 			a = b;
 		}
-		if card1.cmp == LimitComp::Equal {
+		// The ladder has to have come down by the end of an Exactly One
+		// constraint. Its final step is already the constant `false` whenever
+		// there was at least one literal, so this only has an effect when there
+		// were none at all, where it reports that nothing can be selected.
+		if equal {
 			db.add_clause([!a])?;
 		}
 		Ok(())
@@ -561,7 +574,7 @@ pub(crate) mod tests {
 			BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder, ProductEncoder,
 		},
 		helpers::tests::{assert_encoding, assert_solutions, expect_file},
-		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder,
+		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Unsatisfiable,
 	};
 
 	/// Seven literals is the smallest number that is laid out on a grid, here a
@@ -849,6 +862,49 @@ pub(crate) mod tests {
 			&cnf,
 			vec![a, b],
 			&expect_file!["cardinality_one/bitwise/test_eo_bitwise.sol"],
+		);
+	}
+
+	/// The ends of the ladder are known for an Exactly One constraint, so they
+	/// are constants rather than literals introduced only to be fixed by a unit
+	/// clause. Neither end should appear in the encoding.
+	#[test]
+	fn eo_ladder_has_no_fixed_literals() {
+		let mut cnf = Cnf::default();
+		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
+		LadderEncoder::default()
+			.encode(
+				&mut cnf,
+				&CardinalityOne {
+					lits: vars,
+					cmp: LimitComp::Equal,
+				},
+			)
+			.unwrap();
+
+		// Three ladder steps for four literals, of which the first and the last
+		// are constants, leaving four literals and three steps.
+		assert_eq!(cnf.num_vars(), 7);
+		assert!(
+			cnf.iter().all(|clause| clause.len() > 1),
+			"the encoding should not contain a unit clause"
+		);
+	}
+
+	/// An Exactly One constraint over no literals cannot be satisfied, which
+	/// the ladder reports rather than silently accepting.
+	#[test]
+	fn eo_ladder_empty() {
+		let mut cnf = Cnf::default();
+		assert_eq!(
+			LadderEncoder::default().encode(
+				&mut cnf,
+				&CardinalityOne {
+					lits: Vec::new(),
+					cmp: LimitComp::Equal,
+				},
+			),
+			Err(Unsatisfiable)
 		);
 	}
 
