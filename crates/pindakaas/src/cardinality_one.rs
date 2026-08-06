@@ -9,7 +9,7 @@
 //! [`Cardinality`](crate::cardinality::Cardinality) and
 //! [`NormalizedBoolLinear`] can also be used.
 
-use std::{borrow::Cow, cmp::max};
+use std::{borrow::Cow, cmp::max, iter::once};
 
 use itertools::Itertools;
 
@@ -243,10 +243,6 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for ProductEncoder
 		tracing::instrument(name = "product_encoder", skip_all, fields(constraint = card1.trace_print()))
 	)]
 	fn encode(&self, db: &mut Db, card1: &CardinalityOne) -> Result {
-		// Add clause to ensure "at least one" literal holds
-		if card1.cmp == LimitComp::Equal {
-			at_least_one_clause(db, card1)?;
-		}
 		let mut to_constain: Vec<Cow<[Lit]>> = vec![(&card1.lits).into()];
 		while let Some(lits) = to_constain.pop() {
 			if lits.len() <= self.pairwise_cutoff {
@@ -254,7 +250,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for ProductEncoder
 					db,
 					&CardinalityOne {
 						lits: lits.to_vec(),
-						cmp: LimitComp::LessEq,
+						cmp: card1.cmp.clone(),
 					},
 				)?;
 				continue;
@@ -276,10 +272,17 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for ProductEncoder
 			let col_lits = (0..cols).map(|_| db.new_lit()).collect_vec();
 
 			// A literal implies the selection of both the row and the column it was
-			// placed in.
+			// placed in, and a selected row or column has to hold one of its
+			// literals.
 			for (i, &lit) in lits.iter().enumerate() {
 				db.add_clause([!lit, row_lits[i / cols]])?;
 				db.add_clause([!lit, col_lits[i % cols]])?;
+			}
+			for (&row, row_lits) in row_lits.iter().zip(lits.chunks(cols)) {
+				db.add_clause(once(!row).chain(row_lits.iter().copied()))?;
+			}
+			for (c, &col) in col_lits.iter().enumerate() {
+				db.add_clause(once(!col).chain(lits.iter().skip(c).step_by(cols).copied()))?;
 			}
 
 			// Two distinct literals differ in their row or in their column, so
@@ -658,8 +661,13 @@ pub(crate) mod tests {
 	/// Every correct encoding allows the same solutions, so the tests above
 	/// would still pass if the cutoff never reached the encoder. Compare the
 	/// formulas themselves: a cutoff above the number of literals leaves a
-	/// plain pairwise encoding, while the smallest one splits the literals
-	/// over grids, trading clauses for selector literals.
+	/// plain pairwise encoding, while the smallest one splits the literals over
+	/// grids and introduces selectors.
+	///
+	/// Note that the smallest cutoff is not the smallest encoding. Ten literals
+	/// split all the way down cost more clauses than encoding them pairwise,
+	/// since every grid adds selectors to tie back to their literals, which is
+	/// what the default cutoff is there to avoid.
 	#[test]
 	fn amo_product_cutoff_changes_encoding() {
 		let sizes = |cutoff: usize| {
@@ -683,7 +691,7 @@ pub(crate) mod tests {
 		let (grid_clauses, grid_selectors) = sizes(2);
 		assert_eq!((pairwise_clauses, pairwise_selectors), (45, 0));
 		assert!(grid_selectors > 0);
-		assert!(grid_clauses < pairwise_clauses);
+		assert_ne!(grid_clauses, pairwise_clauses);
 	}
 
 	/// A pair of literals is laid out as a single row of two columns, so a
@@ -742,8 +750,32 @@ pub(crate) mod tests {
 		);
 	}
 
-	/// The same grid as [`amo_product`], with the additional clause that keeps
-	/// the all-false assignment out.
+	/// The "at least one" half is expressed per row, so a grid whose final row
+	/// is only partly filled has to pair each row selector with just the
+	/// literals actually placed in it. Here the last row holds two of the ten.
+	#[test]
+	fn eo_product_partial_row() {
+		let mut cnf = Cnf::default();
+		let vars = cnf.new_var_range(10).iter_lits().collect_vec();
+		ProductEncoder::default()
+			.encode(
+				&mut cnf,
+				&CardinalityOne {
+					lits: vars.clone(),
+					cmp: LimitComp::Equal,
+				},
+			)
+			.unwrap();
+
+		assert_solutions(
+			&cnf,
+			vars,
+			&expect_file!["cardinality_one/product/test_eo_product_partial_row.sol"],
+		);
+	}
+
+	/// The same grid as [`amo_product`], with the row clauses that keep the
+	/// all-false assignment out.
 	#[test]
 	fn eo_product() {
 		let mut cnf = Cnf::default();
