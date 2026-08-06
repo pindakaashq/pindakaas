@@ -973,7 +973,7 @@ impl BoolLinAggregator {
 		let mut k = PosCoeff::new(k);
 
 		// Remove terms with coefs higher than k
-		let partition = partition
+		let mut partition = partition
 			.into_iter()
 			.map(|part| match part {
 				Part::Amo(terms) => Part::Amo(
@@ -1028,6 +1028,40 @@ impl BoolLinAggregator {
 			})
 			.filter(|part| part.iter().next().is_some()) // filter out empty groups
 			.collect_vec();
+
+		// Normalize the constraint by the greatest common divisor of its
+		// coefficients, shrinking both the coefficients and `k` for every encoder
+		// downstream.
+		{
+			let mut iter = partition
+				.iter()
+				.flat_map(|part| part.iter())
+				.map(|&(_, coef)| coef.0);
+			if let Some(mut divisor) = iter.next() {
+				for coef in iter {
+					let mut other = coef;
+					while other != 0 {
+						(divisor, other) = (other, divisor % other);
+					}
+					if divisor == 1 {
+						break;
+					}
+				}
+				if divisor > 1 {
+					// The left hand side can only take on multiples of the divisor, so an
+					// equality that does not sit on one of those multiples is unsatisfiable.
+					if cmp == LimitComp::Equal && *k % divisor != 0 {
+						db.contradiction()?;
+						unreachable!();
+					}
+					for part in &mut partition {
+						part.div_assign(divisor);
+					}
+					// Rounding down is sound for `≤` for the same reason.
+					k = PosCoeff::new(*k / divisor);
+				}
+			}
+		}
 
 		// Check whether some literals can violate / satisfy the constraint
 		let lhs_ub = PosCoeff::new(
@@ -1099,25 +1133,13 @@ impl BoolLinAggregator {
 			.next()
 			.is_some());
 
-		// special case: all coefficients are equal (and can be made one)
-		let val = partition
-			.iter()
-			.flat_map(|part| part.iter().map(|&(_, coef)| coef))
-			.next()
-			.unwrap();
-
+		// special case: all coefficients are equal, which the normalization above
+		// will have reduced to one
 		if partition
 			.iter()
 			.flat_map(|part| part.iter())
-			.all(|&(_, coef)| coef == val)
+			.all(|&(_, coef)| *coef == 1)
 		{
-			// trivial case: k cannot be made from the coefficients
-			if cmp == LimitComp::Equal && *k % *val != 0 {
-				db.contradiction()?;
-				unreachable!();
-			}
-
-			k = PosCoeff::new(*k / *val);
 			let partition = partition
 				.iter()
 				.flat_map(|part| part.iter())
@@ -1876,6 +1898,33 @@ impl From<CardinalityOne> for NormalizedBoolLinear {
 }
 
 impl Part {
+	/// Divide every coefficient in the part, and any domain bounds it carries,
+	/// by `g`.
+	///
+	/// The caller is required to ensure that `g` divides each of these values
+	/// exactly.
+	pub(crate) fn div_assign(&mut self, g: Coeff) {
+		let terms = match self {
+			Part::Amo(terms) | Part::Ic(terms) => terms,
+			Part::Dom(terms, lb, ub) => {
+				debug_assert!(
+					**lb % g == 0 && **ub % g == 0,
+					"domain bounds {lb}..{ub} are not divisible by {g}"
+				);
+				**lb /= g;
+				**ub /= g;
+				terms
+			}
+		};
+		for (_, coef) in terms {
+			debug_assert!(
+				**coef % g == 0,
+				"coefficient {coef} is not divisible by {g}"
+			);
+			**coef /= g;
+		}
+	}
+
 	pub(crate) fn iter(&self) -> impl Iterator<Item = &(Lit, PosCoeff)> {
 		self.into_iter()
 	}
@@ -2450,6 +2499,101 @@ mod tests {
 			Ok(BoolLinVariant::CardinalityOne(CardinalityOne {
 				lits: vec![!a, !b, !c],
 				cmp: LimitComp::LessEq,
+			}))
+		);
+	}
+
+	#[test]
+	fn aggregator_gcd() {
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		// 2a + 4b + 6c ≤ 7 is divided by 2, rounding the right hand side down
+		assert_eq!(
+			BoolLinAggregator::default().aggregate(
+				&mut cnf,
+				&BoolLinear::new(
+					BoolLinExp::from_slices(&[2, 4, 6], &[a, b, c]),
+					Comparator::LessEq,
+					7
+				)
+			),
+			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
+				terms: construct_terms(&[(a, 1), (b, 2), (c, 3)]),
+				cmp: LimitComp::LessEq,
+				k: PosCoeff::new(3)
+			}))
+		);
+
+		// An equality that does not sit on a multiple of the divisor is
+		// unsatisfiable
+		let mut cnf = Cnf::default();
+		let (a, b) = cnf.new_lits();
+		assert_eq!(
+			BoolLinAggregator::default().aggregate(
+				&mut cnf,
+				&BoolLinear::new(
+					BoolLinExp::from_slices(&[2, 4], &[a, b]),
+					Comparator::Equal,
+					5
+				)
+			),
+			Err(Unsatisfiable)
+		);
+
+		// Dropping terms whose coefficient exceeds k can leave behind a set of
+		// coefficients with a larger common divisor than the constraint started
+		// with, which is why normalization runs after that step. Here
+		// gcd(3, 3, 3, 7) is 1, but once 7d is dropped the rest divides by 3,
+		// leaving `a + b + c ≤ 1`.
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		assert_eq!(
+			BoolLinAggregator::default().aggregate(
+				&mut cnf,
+				&BoolLinear::new(
+					BoolLinExp::from_slices(&[3, 3, 3, 7], &[a, b, c, d]),
+					Comparator::LessEq,
+					5
+				)
+			),
+			Ok(BoolLinVariant::CardinalityOne(CardinalityOne {
+				lits: vec![a, b, c],
+				cmp: LimitComp::LessEq,
+			}))
+		);
+
+		// The same under `=`: once 7d is dropped the remaining sum can only reach
+		// multiples of 3, so it can never equal 5.
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		assert_eq!(
+			BoolLinAggregator::default().aggregate(
+				&mut cnf,
+				&BoolLinear::new(
+					BoolLinExp::from_slices(&[3, 3, 3, 7], &[a, b, c, d]),
+					Comparator::Equal,
+					5
+				)
+			),
+			Err(Unsatisfiable)
+		);
+
+		// Coprime coefficients are left untouched
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		assert_eq!(
+			BoolLinAggregator::default().aggregate(
+				&mut cnf,
+				&BoolLinear::new(
+					BoolLinExp::from_slices(&[2, 3, 4], &[a, b, c]),
+					Comparator::LessEq,
+					7
+				)
+			),
+			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
+				terms: construct_terms(&[(a, 2), (b, 3), (c, 4)]),
+				cmp: LimitComp::LessEq,
+				k: PosCoeff::new(7)
 			}))
 		);
 	}
