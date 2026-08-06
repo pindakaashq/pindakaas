@@ -7,7 +7,7 @@ use std::path::Path;
 fn main() {
 	assert_eq!(
 		include_str!("vendor/cadical/VERSION").trim(),
-		"3.0.0",
+		"3.0.1",
 		"unexpected version of CaDiCaL detected"
 	);
 
