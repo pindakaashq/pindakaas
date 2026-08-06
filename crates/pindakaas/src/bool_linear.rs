@@ -37,7 +37,7 @@ use crate::{
 	propositional_logic::{Formula, TseitinEncoder},
 	sorted::{Sorted, SortedEncoder},
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, IntEncoding, Lit,
-	Result, Unsatisfiable, Valuation, Var,
+	Result, Unsatisfiable, Valuation,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -807,11 +807,10 @@ impl BoolLinAggregator {
 			}
 		}
 
-		// Add remaining (unconstrained) terms
+		// Add remaining (unconstrained) terms.
 		debug_assert!(agg.len() <= lin.exp.num_free);
-		let agg_keys: Vec<Var> = agg.keys().copied().sorted().collect();
-		for var in agg_keys {
-			partition.push((Constraint::AtMostOne, vec![(var.into(), agg[&var])]));
+		for (var, coef) in agg.into_iter().sorted_by_key(|&(var, _)| var) {
+			partition.push((Constraint::AtMostOne, vec![(var.into(), coef)]));
 		}
 
 		k -= lin.exp.add;
@@ -841,7 +840,6 @@ impl BoolLinAggregator {
 							return vec![Part::Amo(
 								terms
 									.into_iter()
-									.filter(|&(_, coef)| coef != 0)
 									.map(|(lit, coef)| {
 										convert_term_if_negative((lit, coef), &mut k)
 									})
@@ -864,29 +862,21 @@ impl BoolLinAggregator {
 							let y = db.new_lit();
 
 							// ~x1 /\ ~x2 /\ .. -> y == x1 \/ x2 \/ .. \/ y
-							db.add_clause(
-								terms
-									.iter()
-									.map(|(lit, _)| *lit)
-									.chain(once(y))
-							)
-							.unwrap();
+							db.add_clause(terms.iter().map(|(lit, _)| *lit).chain(once(y)))
+								.unwrap();
 
-														// y -> ( ~x1 /\ ~x2 /\ .. ) == ~y \/ ~x1, ~y \/ ~x2, ..
+							// y -> ( ~x1 /\ ~x2 /\ .. ) == ~y \/ ~x1, ~y \/ ~x2, ..
 							for lit in terms.iter().map(|tup| tup.0) {
-								db.add_clause( [!y, !lit]).unwrap();
+								db.add_clause([!y, !lit]).unwrap();
 							}
 
 							// this term will cancel out later when we add q*min_lit to the LHS
-							let _ =terms.remove(min_index);
+							let _ = terms.remove(min_index);
 
 							// since y + x1 + x2 + ... = 1 (exactly-one), we have q*y + q*x1 + q*x2 + ... = q
 							// after adding term 0*y, we can add q*y + q*x1 + q*x2 + ... on the LHS, and q on the RHS
 							terms.push((y, 0)); // note: it's fine to add y into the same AMO group
-							terms = terms
-								.iter()
-								.map(|(lit, coef)| (*lit, *coef + q))
-								.collect();
+							terms = terms.iter().map(|(lit, coef)| (*lit, *coef + q)).collect();
 							k += q;
 						}
 
@@ -921,11 +911,12 @@ impl BoolLinAggregator {
 							),
 						]
 					}
-					(Constraint::Domain { lb: l, ub: u },  terms) => {
+					(Constraint::Domain { lb: l, ub: u }, terms) => {
 						assert!(
-							terms.iter().all(|(_,coef)| coef.is_positive())
-								|| terms.iter().all(|(_,coef)| coef.is_negative()),
-																"Normalizing mixed positive/negative coefficients not yet supported for Dom constraint on {terms:?}"
+							terms.iter().all(|(_, coef)| coef.is_positive())
+								|| terms.iter().all(|(_, coef)| coef.is_negative()),
+							"Normalizing mixed positive/negative coefficients not yet \
+							 supported for Dom constraint on {terms:?}"
 						);
 						vec![Part::Dom(
 							terms
@@ -940,12 +931,10 @@ impl BoolLinAggregator {
 			})
 			.map(|part| {
 				// This step has to come *after* Amo normalization
-				let filter_zero_coefficients = |terms: Vec<(Lit, PosCoeff)>| -> Vec<(Lit, PosCoeff)> {
-					terms
-						.into_iter()
-						.filter(|&(_, coef)| *coef != 0)
-						.collect()
-				};
+				let filter_zero_coefficients =
+					|terms: Vec<(Lit, PosCoeff)>| -> Vec<(Lit, PosCoeff)> {
+						terms.into_iter().filter(|&(_, coef)| *coef != 0).collect()
+					};
 
 				match part {
 					Part::Amo(terms) => Part::Amo(filter_zero_coefficients(terms)),
@@ -2498,6 +2487,29 @@ mod tests {
 			Ok(BoolLinVariant::CardinalityOne(CardinalityOne {
 				lits: vec![!a, !b, !c],
 				cmp: LimitComp::LessEq,
+			}))
+		);
+	}
+
+	#[test]
+	fn aggregator_zero_coefficient() {
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		// A term that cannot contribute to the sum is dropped entirely, rather
+		// than kept with a coefficient of zero
+		assert_eq!(
+			BoolLinAggregator::default().aggregate(
+				&mut cnf,
+				&BoolLinear::new(
+					BoolLinExp::from_slices(&[0, 2, 3, 4], &[a, b, c, d]),
+					Comparator::LessEq,
+					8
+				)
+			),
+			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
+				terms: construct_terms(&[(b, 2), (c, 3), (d, 4)]),
+				cmp: LimitComp::LessEq,
+				k: PosCoeff::new(8)
 			}))
 		);
 	}
