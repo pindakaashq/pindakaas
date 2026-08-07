@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.5.1...pyndakaas-v0.5.2) - 2026-08-07
+
+### Added
+
+- add product encoding for at-most-one constraints
+
+### Fixed
+
+- C robustness issues
+
+### Other
+
+- *(pyndakaas)* build a single abi3 wheel per platform
+- update itertools from 0.14 to 0.15
+- *(deps)* update pyo3 requirement from 0.28.3 to 0.29.0
+
 ## [0.5.1](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.5.0...pyndakaas-v0.5.1) - 2026-06-09
 
 ### Other
