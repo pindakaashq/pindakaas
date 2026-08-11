@@ -49,10 +49,41 @@ macro_rules! new_named_lit {
 	}};
 }
 
+#[cfg(not(any(feature = "tracing", test)))]
+/// Helper macro to create a consecutive range of Boolean variables, naming each
+/// of them independently of whether `tracing` is enabled.
+///
+/// The name is produced by a closure over the index within the range, and is
+/// not evaluated at all when `tracing` is disabled.
+macro_rules! new_named_var_range {
+	($db:expr, $len:expr, $name:expr) => {
+		$crate::ClauseDatabase::new_var_range($db, $len)
+	};
+}
+
+#[cfg(any(feature = "tracing", test))]
+/// Helper macro to create a consecutive range of Boolean variables, naming each
+/// of them independently of whether `tracing` is enabled.
+///
+/// The name is produced by a closure over the index within the range, and is
+/// not evaluated at all when `tracing` is disabled.
+macro_rules! new_named_var_range {
+	($db:expr, $len:expr, $name:expr) => {{
+		let range = $crate::ClauseDatabase::new_var_range($db, $len);
+		// Naming is separate from allocation, so the variables can be handed
+		// out in one block and still show up named in a trace.
+		for (i, var) in range.enumerate() {
+			tracing::info!(var = ?i32::from(var), label = ($name)(i), "new variable");
+		}
+		range
+	}};
+}
+
 pub(crate) mod opt_field;
 
 use itertools::Itertools;
 pub(crate) use new_named_lit;
+pub(crate) use new_named_var_range;
 
 use crate::{bool_linear::PosCoeff, integer::IntVar, BoolVal, ClauseDatabase, Coeff};
 
