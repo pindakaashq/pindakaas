@@ -54,7 +54,13 @@ pub(crate) mod opt_field;
 use itertools::Itertools;
 pub(crate) use new_named_lit;
 
-use crate::{bool_linear::PosCoeff, integer::IntVar, ClauseDatabase, Coeff};
+use crate::{bool_linear::PosCoeff, integer::IntVar, BoolVal, ClauseDatabase, Coeff};
+
+/// The `i`'th bit of a binary encoding, where bits beyond the encoding's width
+/// are zero.
+pub(crate) fn bit(x: &[BoolVal], i: usize) -> BoolVal {
+	x.get(i).copied().unwrap_or(BoolVal::Const(false))
+}
 
 /// Convert `k` to unsigned binary in `bits`
 pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
@@ -116,8 +122,51 @@ pub(crate) mod tests {
 		bool_linear::BoolLinExp,
 		integer::IntVarEnc,
 		solver::{cadical::Cadical, SolveResult, Solver},
-		Checker, ClauseDatabaseTools, Cnf, Lit, Unsatisfiable, Valuation,
+		BoolVal, Checker, ClauseDatabaseTools, Cnf, Coeff, Lit, Unsatisfiable, Valuation,
 	};
+
+	/// The value of a binary encoding under an assignment.
+	pub(crate) fn bin_value<F: Valuation + ?Sized>(x: &[BoolVal], value: &F) -> Coeff {
+		x.iter()
+			.enumerate()
+			.filter(|(_, b)| match b {
+				BoolVal::Const(b) => *b,
+				BoolVal::Lit(l) => value.value(*l),
+			})
+			.map(|(i, _)| 1 << i)
+			.sum()
+	}
+
+	/// Every model of `cnf`, each decoded into the values of the given binary
+	/// encodings.
+	pub(crate) fn all_bin_solutions(cnf: &Cnf, xs: &[&[BoolVal]]) -> Vec<Vec<Coeff>> {
+		let mut slv = Cadical::from(cnf);
+		let vars = cnf.get_variables();
+		let mut solutions = Vec::new();
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			solutions.push(xs.iter().map(|x| bin_value(x, &value)).collect());
+			let no_good: Vec<Lit> = vars
+				.map(|v| {
+					let l = v.into();
+					if value.value(l) {
+						!l
+					} else {
+						l
+					}
+				})
+				.collect();
+			if slv.add_clause(no_good).is_err() {
+				break;
+			}
+		}
+		solutions.sort();
+		solutions
+	}
+
+	/// A fresh binary encoding of `bits` free bits.
+	pub(crate) fn bin_lits(cnf: &mut Cnf, bits: usize) -> Vec<BoolVal> {
+		(0..bits).map(|_| BoolVal::Lit(cnf.new_lit())).collect()
+	}
 
 	/// Helper functions to ensure that the possible solutions of a formula
 	/// abide by the given checker.

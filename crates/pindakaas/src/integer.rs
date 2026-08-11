@@ -13,7 +13,7 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
 	bool_linear::{BoolLinExp, LimitComp, Part, PosCoeff},
-	helpers::{as_binary, is_powers_of_two, new_named_lit, unsigned_binary_range_ub},
+	helpers::{as_binary, bit, is_powers_of_two, new_named_lit, unsigned_binary_range_ub},
 	propositional_logic::{Formula, TseitinEncoder},
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
 	Unsatisfiable, Valuation,
@@ -117,14 +117,17 @@ pub(crate) fn display_dom(dom: &RangeList<Coeff>) -> String {
 	any(feature = "tracing", test),
 	tracing::instrument(name = "lex_geq", skip_all)
 )]
-pub(crate) fn lex_geq_const<Db>(db: &mut Db, x: &[Option<Lit>], k: PosCoeff, bits: usize) -> Result
+pub(crate) fn lex_geq_const<Db>(db: &mut Db, x: &[BoolVal], k: PosCoeff, bits: usize) -> Result
 where
 	Db: ClauseDatabase + ?Sized,
 {
 	let k = as_binary(k, Some(bits as u32));
+	// For every one bit in k:
+	// - either the `x` bit is also one, or
+	// - a higher `x` bit is one that was zero in k.
 	for i in 0..bits {
-		if k[i] && x[i].is_some() {
-			db.add_clause((i..bits).filter_map(|j| if j == i || !k[j] { x[j] } else { None }))?;
+		if k[i] {
+			db.add_clause((i..bits).filter(|&j| j == i || !k[j]).map(|j| bit(x, j)))?;
 		}
 	}
 	Ok(())
@@ -135,7 +138,7 @@ where
 	any(feature = "tracing", test),
 	tracing::instrument(name = "lex_lesseq_const", skip_all)
 )]
-pub(crate) fn lex_leq_const<Db>(db: &mut Db, x: &[Option<Lit>], k: PosCoeff, bits: usize) -> Result
+pub(crate) fn lex_leq_const<Db>(db: &mut Db, x: &[BoolVal], k: PosCoeff, bits: usize) -> Result
 where
 	Db: ClauseDatabase + ?Sized,
 {
@@ -144,12 +147,8 @@ where
 	// - either the `x` bit is also zero, or
 	// - a higher `x` bit is zero that was one in k.
 	for i in 0..bits {
-		if !k[i] && x[i].is_some() {
-			db.add_clause(
-				(i..bits)
-					.filter_map(|j| if j == i || k[j] { x[j] } else { None })
-					.map(|lit| !lit),
-			)?;
+		if !k[i] {
+			db.add_clause((i..bits).filter(|&j| j == i || k[j]).map(|j| !bit(x, j)))?;
 		}
 	}
 	Ok(())
@@ -190,9 +189,6 @@ where
 	Db: ClauseDatabase + ?Sized,
 {
 	let n = itertools::max([x.len(), y.len(), z.len()]).unwrap();
-
-	let bit =
-		|x: &[BoolVal], i: usize| -> BoolVal { x.get(i).copied().unwrap_or(BoolVal::Const(false)) };
 
 	match cmp {
 		LimitComp::Equal => {
@@ -1503,7 +1499,13 @@ where
 					// put z_bin on the left, const on the right
 					LimitComp::LessEq => lex_geq_const(
 						db,
-						z_bin.xs.iter().map(|x| Some(*x)).collect_vec().as_slice(),
+						z_bin
+							.xs
+							.iter()
+							.copied()
+							.map(BoolVal::Lit)
+							.collect_vec()
+							.as_slice(),
 						PosCoeff::new(if GROUND_BINARY_AT_LB {
 							lhs - z_bin.lb()
 						} else {
@@ -1538,7 +1540,13 @@ where
 				match cmp {
 					LimitComp::LessEq => lex_leq_const(
 						db,
-						x_bin.xs.iter().map(|x| Some(*x)).collect_vec().as_slice(),
+						x_bin
+							.xs
+							.iter()
+							.copied()
+							.map(BoolVal::Lit)
+							.collect_vec()
+							.as_slice(),
 						rhs,
 						x_bin.lits(),
 					),
@@ -1699,12 +1707,62 @@ pub(crate) mod tests {
 	use traced_test::test;
 
 	use crate::{
-		bool_linear::{BoolLinExp, LimitComp},
-		helpers::tests::{assert_solutions, expect_file, make_valuation},
-		integer::{IntVarBin, IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
+		bool_linear::{BoolLinExp, LimitComp, PosCoeff},
+		helpers::tests::{
+			all_bin_solutions, assert_solutions, bin_lits, expect_file, make_valuation,
+		},
+		integer::{
+			lex_geq_const, lex_leq_const, IntVarBin, IntVarEnc, IntVarOrd, TernLeConstraint,
+			TernLeEncoder,
+		},
 		propositional_logic::Formula,
-		BoolVal, ClauseDatabase, Cnf, Coeff, Encoder, Lit, Var, VarRange,
+		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Var, VarRange,
 	};
+
+	#[test]
+	fn lex_const_bounds_a_binary_encoding() {
+		for k in 0..8 {
+			for (leq, expected) in [
+				(true, (0..=k).collect::<Vec<Coeff>>()),
+				(false, (k..8).collect()),
+			] {
+				let mut cnf = Cnf::default();
+				let x = bin_lits(&mut cnf, 3);
+				let k = PosCoeff::new(k);
+				if leq {
+					lex_leq_const(&mut cnf, &x, k, 3).unwrap();
+				} else {
+					lex_geq_const(&mut cnf, &x, k, 3).unwrap();
+				}
+				let solutions: Vec<Coeff> = all_bin_solutions(&cnf, &[&x])
+					.into_iter()
+					.map(|s| s[0])
+					.collect();
+				assert_eq!(solutions, expected, "{} {k}", if leq { "<=" } else { ">=" });
+			}
+		}
+	}
+
+	#[test]
+	fn lex_geq_const_with_a_fixed_zero_bit() {
+		// The clause for a one bit of `k` is not satisfied when the matching
+		// `x` bit is fixed to zero: it just loses that disjunct and still has
+		// to be enforced by the remaining higher bits.
+		let mut cnf = Cnf::default();
+		let x = vec![
+			BoolVal::Lit(cnf.new_lit()),
+			BoolVal::Const(false),
+			BoolVal::Lit(cnf.new_lit()),
+		];
+		lex_geq_const(&mut cnf, &x, PosCoeff::new(2), 3).unwrap();
+
+		let solutions: Vec<Coeff> = all_bin_solutions(&cnf, &[&x])
+			.into_iter()
+			.map(|s| s[0])
+			.collect();
+		// Representable values are {0, 1, 4, 5}; only 4 and 5 are at least 2.
+		assert_eq!(solutions, vec![4, 5]);
+	}
 
 	#[test]
 	fn bin_geq_2_test() {

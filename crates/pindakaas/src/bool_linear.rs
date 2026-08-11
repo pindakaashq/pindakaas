@@ -30,7 +30,7 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 use crate::{
 	cardinality::Cardinality,
 	cardinality_one::{BitwiseEncoder, CardinalityOne},
-	helpers::{as_binary, is_powers_of_two, new_named_lit},
+	helpers::{as_binary, bit, is_powers_of_two, new_named_lit},
 	integer::{
 		lex_leq_const, Consistency, IntVar, IntVarEnc, IntVarOrd, Lin, Model, GROUND_BINARY_AT_LB,
 	},
@@ -244,128 +244,210 @@ pub struct TotalizerEncoder {
 	cutoff: Option<Coeff>,
 }
 
+/// Above this many literals, enumerating the assignments of the wrong parity
+/// costs more clauses than a Tseitin transformation costs auxiliary variables.
+const DIRECT_PARITY_LITS: usize = 4;
+
 impl AdderEncoder {
-	#[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "carry_circuit", skip_all, fields(constraint = Self::trace_print_carry(input, &output))))]
-	/// Encode the adder carry circuit
+	/// Encode the adder carry circuit, i.e. whether at least two of `xs` are
+	/// true.
 	///
-	/// This function accepts either 2 literals as `input` (half adder) or 3
-	/// literals (full adder).
-	///
-	/// `output` can be either a literal, or a constant Boolean value.
-	fn carry_circuit<Db>(db: &mut Db, input: &[Lit], output: BoolVal) -> Result
+	/// The carry is constrained to equal `out` when given, and otherwise
+	/// created, or returned directly when the fixed bits already determine it.
+	#[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "carry_circuit", skip_all, fields(constraint = Self::trace_print_carry(xs, &out))))]
+	pub(crate) fn carry_circuit<Db>(
+		db: &mut Db,
+		xs: &[BoolVal],
+		out: Option<BoolVal>,
+		_lbl: String,
+	) -> Result<BoolVal>
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		match output {
-			BoolVal::Lit(carry) => match *input {
-				[a, b] => {
-					db.add_clause([!a, !b, carry])?;
-					db.add_clause([a, !carry])?;
-					db.add_clause([b, !carry])
+		let (lits, trues) = Self::filter_fixed_sum(xs);
+		// With fewer than two free literals the fixed bits settle the carry.
+		let determined = match lits[..] {
+			[] => Some(BoolVal::Const(trues >= 2)),
+			[x] => Some(match trues {
+				0 => BoolVal::Const(false),
+				1 => x,
+				_ => BoolVal::Const(true),
+			}),
+			_ => None,
+		};
+		if let Some(c) = determined {
+			return match out {
+				None => Ok(c),
+				Some(out) => {
+					db.add_clause([!c, out])?;
+					db.add_clause([c, !out])?;
+					Ok(out)
 				}
-				[a, b, c] => {
-					db.add_clause([a, b, !carry])?;
-					db.add_clause([a, c, !carry])?;
-					db.add_clause([b, c, !carry])?;
-
-					db.add_clause([!a, !b, carry])?;
-					db.add_clause([!a, !c, carry])?;
-					db.add_clause([!b, !c, carry])
-				}
-				_ => unreachable!(),
-			},
-			BoolVal::Const(k) => match *input {
-				[a, b] => {
-					if k {
-						// TODO: Can we avoid this?
-						db.add_clause([a])?;
-						db.add_clause([b])
-					} else {
-						db.add_clause([!a, !b])
-					}
-				}
-				[a, b, c] => {
-					let neg = |x: Lit| if k { x } else { !x };
-					db.add_clause([neg(a), neg(b)])?;
-					db.add_clause([neg(a), neg(c)])?;
-					db.add_clause([neg(b), neg(c)])
-				}
-				_ => unreachable!(),
-			},
+			};
 		}
-	}
 
-	#[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "sum_circuit", skip_all, fields(constraint = Self::trace_print_sum(input, &output))))]
-	/// Encode the adder sum circuit
-	///
-	/// This function accepts either 2 literals as `input` (half adder) or 3
-	/// literals (full adder).
-	///
-	/// `output` can be either a literal, or a constant Boolean value.
-	fn sum_circuit<Db>(db: &mut Db, input: &[Lit], output: BoolVal) -> Result
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		match output {
-			BoolVal::Lit(sum) => match *input {
-				[a, b] => {
-					db.add_clause([!a, !b, !sum])?;
-					db.add_clause([!a, b, sum])?;
-					db.add_clause([a, !b, sum])?;
-					db.add_clause([a, b, !sum])
-				}
-				[a, b, c] => {
-					db.add_clause([a, b, c, !sum])?;
-					db.add_clause([a, !b, !c, !sum])?;
-					db.add_clause([!a, b, !c, !sum])?;
-					db.add_clause([!a, !b, c, !sum])?;
-
-					db.add_clause([!a, !b, !c, sum])?;
-					db.add_clause([!a, b, c, sum])?;
-					db.add_clause([a, !b, c, sum])?;
-					db.add_clause([a, b, !c, sum])
-				}
-				_ => unreachable!(),
-			},
-			BoolVal::Const(true) => {
-				let xor = Formula::Xor(input.iter().map(|&l| Formula::Atom(l)).collect_vec());
-				TseitinEncoder.encode(db, &xor)
+		let carry = out.unwrap_or_else(|| BoolVal::Lit(new_named_lit!(db, _lbl)));
+		match lits[..] {
+			[x, y] if trues == 0 => {
+				// carry = x ∧ y
+				db.add_clause([!x, !y, carry])?;
+				db.add_clause([x, !carry])?;
+				db.add_clause([y, !carry])?;
 			}
-			BoolVal::Const(false) => match *input {
-				[a, b] => {
-					db.add_clause([a, !b])?;
-					db.add_clause([!a, b])
+			[x, y] => {
+				debug_assert_eq!(trues, 1);
+				// carry = x ∨ y
+				db.add_clause([x, y, !carry])?;
+				db.add_clause([!x, carry])?;
+				db.add_clause([!y, carry])?;
+			}
+			[x, y, z] => {
+				debug_assert_eq!(trues, 0);
+				// Two false inputs force no carry, two true inputs force one.
+				db.add_clause([x, y, !carry])?;
+				db.add_clause([x, z, !carry])?;
+				db.add_clause([y, z, !carry])?;
+				db.add_clause([!x, !y, carry])?;
+				db.add_clause([!x, !z, carry])?;
+				db.add_clause([!y, !z, carry])?;
+			}
+			_ => unreachable!("a full adder has at most three inputs"),
+		}
+		Ok(carry)
+	}
+
+	/// Split `xs` into its literals and the number of its bits fixed to one.
+	fn filter_fixed_sum(xs: &[BoolVal]) -> (Vec<BoolVal>, usize) {
+		let mut trues = 0;
+		let lits = xs
+			.iter()
+			.filter(|x| match x {
+				BoolVal::Lit(_) => true,
+				BoolVal::Const(b) => {
+					trues += usize::from(*b);
+					false
 				}
-				[a, b, c] => {
-					db.add_clause([!a, !b, !c])?;
-					db.add_clause([!a, b, c])?;
-					db.add_clause([a, !b, c])?;
-					db.add_clause([a, b, !c])
-				}
-				_ => unreachable!(),
-			},
+			})
+			.copied()
+			.collect();
+		(lits, trues)
+	}
+
+	/// Ripple-carry adder over the binary encodings `xs` and `ys`.
+	///
+	/// When `zs` is given the sum is *constrained* to equal it; otherwise the
+	/// sum bits are created and returned, truncated to `bits` (defaulting to
+	/// the width needed to hold any sum, so that no overflow is possible).
+	#[allow(
+		dead_code,
+		reason = "consumed by the binary integer encoding, added in a later change"
+	)]
+	#[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "ripple_carry_adder", skip_all, fields(constraint = format!("{xs:?} + {ys:?} = {zs:?}"))))]
+	pub(crate) fn ripple_carry_adder<Db>(
+		db: &mut Db,
+		xs: &[BoolVal],
+		ys: &[BoolVal],
+		bits: Option<usize>,
+		zs: Option<&[BoolVal]>,
+	) -> Result<Vec<BoolVal>>
+	where
+		Db: ClauseDatabase + ?Sized,
+	{
+		let max_bits = max(xs.len(), ys.len()) + 1;
+		let bits = bits.unwrap_or(max_bits);
+		let mut c = BoolVal::Const(false);
+		(0..max_bits)
+			.map(|i| {
+				let (x, y) = (bit(xs, i), bit(ys, i));
+				let z = match zs {
+					// Relational: the sum bit is given, so constrain it.
+					Some(zs) => Some(bit(zs, i)),
+					// Functional: create a bit, unless it is past the requested
+					// width and therefore has to be zero.
+					None if i < bits => None,
+					None => Some(BoolVal::Const(false)),
+				};
+				let z = Self::sum_circuit(db, &[x, y, c], z, format!("z_{i}"))?;
+				c = Self::carry_circuit(db, &[x, y, c], None, format!("c_{}", i + 1))?;
+				Ok(z)
+			})
+			.collect()
+	}
+
+	/// Encode the adder sum circuit, i.e. `out ≡ xs[0] ⊕ .. ⊕ xs[n]`.
+	///
+	/// The sum is constrained to equal `out` when given, and otherwise created.
+	#[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "sum_circuit", skip_all, fields(constraint = Self::trace_print_sum(xs, &out))))]
+	pub(crate) fn sum_circuit<Db>(
+		db: &mut Db,
+		xs: &[BoolVal],
+		out: Option<BoolVal>,
+		_lbl: String,
+	) -> Result<BoolVal>
+	where
+		Db: ClauseDatabase + ?Sized,
+	{
+		let out = out.unwrap_or_else(|| BoolVal::Lit(new_named_lit!(db, _lbl)));
+		// `out = ⊕xs` is exactly `⊕xs ⊕ out = 0`, and each bit fixed to one
+		// flips the parity the remaining literals have to add up to.
+		let (lits, trues) = Self::filter_fixed_sum(&[xs, &[out]].concat());
+		let target = (trues % 2) as u32;
+		if lits.is_empty() {
+			return if target == 0 {
+				Ok(out)
+			} else {
+				Err(Unsatisfiable)
+			};
+		}
+		if lits.len() > DIRECT_PARITY_LITS {
+			let xor = Formula::Xor(lits.into_iter().map(Formula::Atom).collect_vec());
+			TseitinEncoder.encode(
+				db,
+				&if target == 1 {
+					xor
+				} else {
+					Formula::Not(Box::new(xor))
+				},
+			)?;
+			return Ok(out);
+		}
+		// Forbid every assignment of the wrong parity. That is `2ⁿ⁻¹` clauses
+		// and no auxiliary variables, which beats Tseitin at adder widths.
+		for assign in 0..(1_u32 << lits.len()) {
+			if assign.count_ones() % 2 != target {
+				db.add_clause(lits.iter().enumerate().map(|(i, &x)| {
+					if assign & (1 << i) == 0 {
+						x
+					} else {
+						!x
+					}
+				}))?;
+			}
+		}
+		Ok(out)
+	}
+
+	#[cfg(any(feature = "tracing", test))]
+	fn trace_print_carry(input: &[BoolVal], output: &Option<BoolVal>) -> String {
+		let inner = itertools::join(input.iter().map(|l| format!("{l}")), " + ");
+		match output {
+			None => format!("_ ≡ ({inner} > 1)"),
+			Some(BoolVal::Lit(r)) => {
+				format!("{} ≡ ({} > 1)", crate::trace::trace_print_lit(r), inner)
+			}
+			Some(BoolVal::Const(true)) => format!("{inner} > 1"),
+			Some(BoolVal::Const(false)) => format!("{inner} ≤ 1"),
 		}
 	}
 
 	#[cfg(any(feature = "tracing", test))]
-	fn trace_print_carry(input: &[Lit], output: &BoolVal) -> String {
-		use crate::trace::trace_print_lit;
-		let inner = itertools::join(input.iter().map(trace_print_lit), " + ");
+	fn trace_print_sum(input: &[BoolVal], output: &Option<BoolVal>) -> String {
+		let inner = itertools::join(input.iter().map(|l| format!("{l}")), " ⊻ ");
 		match output {
-			BoolVal::Lit(r) => format!("{} ≡ ({} > 1)", trace_print_lit(r), inner),
-			BoolVal::Const(true) => format!("{inner} > 1"),
-			BoolVal::Const(false) => format!("{inner} ≤ 1"),
-		}
-	}
-
-	#[cfg(any(feature = "tracing", test))]
-	fn trace_print_sum(input: &[Lit], output: &BoolVal) -> String {
-		use crate::trace::trace_print_lit;
-		let inner = itertools::join(input.iter().map(trace_print_lit), " ⊻ ");
-		match output {
-			BoolVal::Lit(r) => format!("{} ≡ {}", trace_print_lit(r), inner),
-			BoolVal::Const(true) => inner,
-			BoolVal::Const(false) => format!("¬({inner})"),
+			None => format!("_ ≡ {inner}"),
+			Some(BoolVal::Lit(r)) => format!("{} ≡ {}", crate::trace::trace_print_lit(r), inner),
+			Some(BoolVal::Const(true)) => inner,
+			Some(BoolVal::Const(false)) => format!("¬({inner})"),
 		}
 	}
 }
@@ -437,11 +519,17 @@ where
 							bucket[b].split_off(i)
 						};
 						debug_assert!(lits.len() == 3 || lits.len() == 2);
+						let lits = lits.into_iter().map(BoolVal::Lit).collect_vec();
 
 						// Compute sum
 						if last && lin.cmp == LimitComp::Equal {
 							// No need to create a new literal, force the sum to equal the result
-							Self::sum_circuit(db, lits.as_slice(), BoolVal::Const(k[b]))?;
+							let _ = Self::sum_circuit(
+								db,
+								&lits,
+								Some(BoolVal::Const(k[b])),
+								String::new(),
+							)?;
 						} else if lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
 							// Literal is not used for the less-than constraint unless a zero has
 							// been seen first
@@ -456,7 +544,12 @@ where
 									)
 								}
 							);
-							Self::sum_circuit(db, lits.as_slice(), BoolVal::Lit(sum))?;
+							let _ = Self::sum_circuit(
+								db,
+								&lits,
+								Some(BoolVal::Lit(sum)),
+								String::new(),
+							)?;
 							bucket[b].push(sum);
 						}
 
@@ -466,15 +559,25 @@ where
 							if lits.len() == 2 && lin.cmp == LimitComp::Equal {
 								// Already encoded by the XOR to compute the sum
 							} else {
-								Self::carry_circuit(db, &lits[..], BoolVal::Const(false))?;
+								let _ = Self::carry_circuit(
+									db,
+									&lits,
+									Some(BoolVal::Const(false)),
+									String::new(),
+								)?;
 							}
 						} else if last && lin.cmp == LimitComp::Equal && bucket[b + 1].is_empty() {
 							// No need to create a new literal, force the carry to equal the result
-							Self::carry_circuit(db, &lits[..], BoolVal::Const(k[b + 1]))?;
+							let _ = Self::carry_circuit(
+								db,
+								&lits,
+								Some(BoolVal::Const(k[b + 1])),
+								String::new(),
+							)?;
 							// Mark k[b + 1] as false (otherwise next step will fail)
 							k[b + 1] = false;
 						} else {
-							let carry = new_named_lit!(
+							let carry_lit = new_named_lit!(
 								db,
 								if last {
 									crate::trace::subscripted_name("c", b)
@@ -485,8 +588,13 @@ where
 									)
 								}
 							);
-							Self::carry_circuit(db, lits.as_slice(), BoolVal::Lit(carry))?;
-							bucket[b + 1].push(carry);
+							let _ = Self::carry_circuit(
+								db,
+								&lits,
+								Some(BoolVal::Lit(carry_lit)),
+								String::new(),
+							)?;
+							bucket[b + 1].push(carry_lit);
 						}
 					}
 					debug_assert!(
@@ -503,7 +611,12 @@ where
 
 		// Enforce less-than constraint
 		if lin.cmp == LimitComp::LessEq {
-			lex_leq_const(db, sum.as_slice(), lin.k, bits)?;
+			// A bucket that stayed empty means that bit of the sum is zero.
+			let sum = sum
+				.iter()
+				.map(|&l| l.map_or(BoolVal::Const(false), BoolVal::Lit))
+				.collect_vec();
+			lex_leq_const(db, &sum, lin.k, bits)?;
 		}
 		Ok(())
 	}
@@ -2662,10 +2775,71 @@ mod tests {
 		},
 		cardinality::{tests::card_test_suite, Cardinality},
 		cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
-		helpers::tests::{assert_checker, assert_encoding, assert_solutions, expect_file},
+		helpers::tests::{
+			all_bin_solutions, assert_checker, assert_encoding, assert_solutions, bin_lits,
+			expect_file,
+		},
 		sorted::SortedEncoder,
-		ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
+		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 	};
+
+	#[test]
+	fn ripple_carry_adder_computes_the_sum() {
+		for (x_bits, y_bits) in [(1, 1), (2, 2), (3, 1)] {
+			let mut cnf = Cnf::default();
+			let (x, y) = (bin_lits(&mut cnf, x_bits), bin_lits(&mut cnf, y_bits));
+			let z = AdderEncoder::ripple_carry_adder(&mut cnf, &x, &y, None, None).unwrap();
+
+			let solutions = all_bin_solutions(&cnf, &[&x, &y, &z]);
+			// The sum is wide enough to never overflow, so every assignment of
+			// the inputs extends to exactly one model.
+			assert_eq!(solutions.len(), 1 << (x_bits + y_bits));
+			for s in &solutions {
+				assert_eq!(s[2], s[0] + s[1], "{} + {} != {}", s[0], s[1], s[2]);
+			}
+		}
+	}
+
+	#[test]
+	fn ripple_carry_adder_handles_fixed_bits() {
+		// Shifting and grounding a binary encoding leaves constant bits in it,
+		// so the adder has to fold them into the sum and the carry rather than
+		// assume every bit is a literal.
+		let mut cnf = Cnf::default();
+		let x = vec![
+			BoolVal::Const(true),
+			BoolVal::Lit(cnf.new_lit()),
+			BoolVal::Const(false),
+		];
+		let y = vec![BoolVal::Const(true), BoolVal::Lit(cnf.new_lit())];
+		let z = AdderEncoder::ripple_carry_adder(&mut cnf, &x, &y, None, None).unwrap();
+
+		let solutions = all_bin_solutions(&cnf, &[&x, &y, &z]);
+		assert_eq!(solutions.len(), 4);
+		for s in &solutions {
+			assert_eq!(s[2], s[0] + s[1], "{} + {} != {}", s[0], s[1], s[2]);
+		}
+	}
+
+	#[test]
+	fn ripple_carry_adder_constrains_a_given_sum() {
+		let mut cnf = Cnf::default();
+		let (x, y, z) = (
+			bin_lits(&mut cnf, 2),
+			bin_lits(&mut cnf, 2),
+			bin_lits(&mut cnf, 2),
+		);
+		let _ = AdderEncoder::ripple_carry_adder(&mut cnf, &x, &y, None, Some(&z)).unwrap();
+
+		let solutions = all_bin_solutions(&cnf, &[&x, &y, &z]);
+		// `z` is only two bits wide, so sums that do not fit are ruled out.
+		let expected: Vec<Vec<Coeff>> = (0..4)
+			.flat_map(|a| (0..4).map(move |b| (a, b)))
+			.filter(|(a, b)| a + b < 4)
+			.map(|(a, b)| vec![a, b, a + b])
+			.collect();
+		assert_eq!(solutions, expected);
+	}
 
 	#[test]
 	fn aggregator_at_least_one_negated() {
