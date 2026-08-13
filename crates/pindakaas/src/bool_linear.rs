@@ -143,6 +143,29 @@ pub enum Comparator {
 	GreaterEq,
 }
 
+#[allow(
+	dead_code,
+	reason = "used once the integer constraint encoding is reachable from the pseudo-Boolean entry point"
+)]
+impl Comparator {
+	/// The comparator that holds when the sides are swapped.
+	pub(crate) fn reverse(self) -> Self {
+		match self {
+			Comparator::LessEq => Comparator::GreaterEq,
+			Comparator::Equal => Comparator::Equal,
+			Comparator::GreaterEq => Comparator::LessEq,
+		}
+	}
+
+	/// The inequalities that together mean the same as this comparator.
+	pub(crate) fn split(self) -> Vec<Self> {
+		match self {
+			Comparator::Equal => vec![Comparator::LessEq, Comparator::GreaterEq],
+			cmp => vec![cmp],
+		}
+	}
+}
+
 #[derive(Debug, Clone)]
 /// Consistency constraint that can be captured by a Boolean linear expression
 /// to improve the encoding of constraints using the expression.
@@ -353,7 +376,9 @@ impl AdderEncoder {
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		let max_bits = max(xs.len(), ys.len()) + 1;
+		// A given sum may be wider than the inputs can reach, and its top bits
+		// still have to be driven to zero rather than left free.
+		let max_bits = max(max(xs.len(), ys.len()) + 1, zs.map_or(0, <[_]>::len));
 		let bits = bits.unwrap_or(max_bits);
 		let mut c = BoolVal::Const(false);
 		(0..max_bits)

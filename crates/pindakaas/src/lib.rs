@@ -236,6 +236,11 @@ pub mod bool_linear;
 pub mod cardinality;
 pub mod cardinality_one;
 pub(crate) mod helpers;
+#[allow(
+	dead_code,
+	reason = "used once the integer constraint encoding is reachable from the pseudo-Boolean entry point"
+)]
+mod int_linear;
 mod integer;
 pub mod propositional_logic;
 pub mod solver;

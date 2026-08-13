@@ -103,6 +103,36 @@ pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
 	(0..bits).map(|b| *k & (1 << b) != 0).collect()
 }
 
+/// Divide rounding towards positive infinity.
+// `Coeff::div_ceil` is still unstable for signed integers.
+#[allow(
+	dead_code,
+	reason = "used once the integer constraint encoding is reachable from the pseudo-Boolean entry point"
+)]
+pub(crate) const fn div_ceil(a: Coeff, b: Coeff) -> Coeff {
+	let (d, r) = (a / b, a % b);
+	if (r > 0) == (b > 0) && r != 0 {
+		d + 1
+	} else {
+		d
+	}
+}
+
+/// Divide rounding towards negative infinity.
+// `Coeff::div_floor` is still unstable for signed integers.
+#[allow(
+	dead_code,
+	reason = "used once the integer constraint encoding is reachable from the pseudo-Boolean entry point"
+)]
+pub(crate) const fn div_floor(a: Coeff, b: Coeff) -> Coeff {
+	let (d, r) = (a / b, a % b);
+	if (r > 0) != (b > 0) && r != 0 {
+		d - 1
+	} else {
+		d
+	}
+}
+
 /// Given coefficients are powers of two multiplied by some value (1*c, 2*c,
 /// 4*c, 8*c, ..)
 pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool {

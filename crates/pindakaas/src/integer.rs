@@ -1,8 +1,11 @@
 // The integer variable and its Boolean encodings. Nothing outside their own
 // tests reaches these yet; the constraint encoding that uses them is the next
 // change.
-#[allow(dead_code, reason = "used by the integer constraint encoding to come")]
-mod var;
+#[allow(
+	dead_code,
+	reason = "used once the integer constraint encoding is reachable from the pseudo-Boolean entry point"
+)]
+pub(crate) mod var;
 
 use std::{
 	cell::RefCell,

@@ -5,9 +5,9 @@ use rangelist::{IntervalIterator, RangeList};
 use rustc_hash::FxHashMap;
 
 use crate::{
-	bool_linear::PosCoeff,
+	bool_linear::{Comparator, PosCoeff},
 	helpers::{as_binary, new_named_lit, new_named_var_range},
-	integer::lex_leq_const,
+	integer::{lex_geq_const, lex_leq_const},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Var, VarRange,
 };
 
@@ -116,6 +116,36 @@ impl BinEnc {
 		Ok(())
 	}
 
+	/// Restrict the encoding to the values on one side of `v`.
+	pub(crate) fn encode_bound<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		cmp: Comparator,
+		v: Coeff,
+		dom: &RangeList<Coeff>,
+	) -> Result {
+		let (lb, ub) = (*dom.min().unwrap(), *dom.max().unwrap());
+		match cmp {
+			Comparator::LessEq if v >= ub => Ok(()),
+			Comparator::LessEq if v < lb => db.contradiction(),
+			Comparator::LessEq => lex_leq_const(
+				db,
+				&self.x.to_vec(),
+				PosCoeff::new(v - self.lb),
+				self.bits(),
+			),
+			Comparator::GreaterEq if v <= lb => Ok(()),
+			Comparator::GreaterEq if v > ub => db.contradiction(),
+			Comparator::GreaterEq => lex_geq_const(
+				db,
+				&self.x.to_vec(),
+				PosCoeff::new(v - self.lb),
+				self.bits(),
+			),
+			Comparator::Equal => unreachable!("an equality is split before it is encoded"),
+		}
+	}
+
 	/// Forbid the encoding from taking the value `v`.
 	pub(crate) fn encode_neq<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db, v: Coeff) -> Result {
 		let k = as_binary(PosCoeff::new(v - self.lb), Some(self.bits() as u32));
@@ -145,6 +175,11 @@ impl BinEnc {
 				.collect(),
 		);
 		Self { x, lb }
+	}
+
+	/// The bits of the encoding, least significant first.
+	pub(crate) fn to_vec(&self) -> Vec<BoolVal> {
+		self.x.to_vec()
 	}
 
 	/// The value the encoding is offset by.
@@ -284,6 +319,55 @@ impl IntVar {
 		self.state.borrow().dom.clone()
 	}
 
+	/// Whether either encoding has been created.
+	///
+	/// Once one has, the literals are committed and the domain can no longer
+	/// move.
+	pub(crate) fn is_encoded(&self) -> bool {
+		let state = self.state.borrow();
+		state.ord.is_some() || state.bin.is_some()
+	}
+
+	/// Drop the values below `v` from the domain, reporting whether any went.
+	pub(crate) fn set_lb(&self, v: Coeff) -> bool {
+		debug_assert!(
+			!self.is_encoded(),
+			"the domain of {} cannot move once it is encoded",
+			self.lbl
+		);
+		let mut state = self.state.borrow_mut();
+		if v <= *state.dom.min().unwrap() {
+			return false;
+		}
+		state.dom.tighten_min(v);
+		true
+	}
+
+	/// Drop the values above `v` from the domain, reporting whether any went.
+	pub(crate) fn set_ub(&self, v: Coeff) -> bool {
+		debug_assert!(
+			!self.is_encoded(),
+			"the domain of {} cannot move once it is encoded",
+			self.lbl
+		);
+		let mut state = self.state.borrow_mut();
+		if v >= *state.dom.max().unwrap() {
+			return false;
+		}
+		state.dom.tighten_max(v);
+		true
+	}
+
+	/// The greatest value the variable can take.
+	pub(crate) fn ub(&self) -> Coeff {
+		*self.state.borrow().dom.max().unwrap()
+	}
+
+	/// The least value the variable can take.
+	pub(crate) fn lb(&self) -> Coeff {
+		*self.state.borrow().dom.min().unwrap()
+	}
+
 	/// The label of the variable.
 	pub(crate) fn lbl(&self) -> &str {
 		&self.lbl
@@ -302,6 +386,22 @@ impl IntVar {
 				ord_views: FxHashMap::default(),
 			}),
 		})
+	}
+
+	/// Whether the variable is better held in binary than in order form.
+	///
+	/// An encoding it already has settles the question: reaching for the other
+	/// one would mean paying to channel between them. Otherwise a variable is
+	/// held in binary once its domain grows past `cutoff`, and always in order
+	/// form when there is no cutoff.
+	pub(crate) fn prefers_binary(&self, cutoff: Option<Coeff>) -> bool {
+		let state = self.state.borrow();
+		match (state.bin.is_some(), state.ord.is_some(), cutoff) {
+			(true, _, _) => true,
+			(_, true, _) => false,
+			(_, _, None) => false,
+			(_, _, Some(cutoff)) => state.dom.card().unwrap() as Coeff >= cutoff,
+		}
 	}
 
 	/// The order encoding of the variable, created if this is the first request
@@ -327,6 +427,43 @@ impl IntVar {
 			self.channel(db)?;
 		}
 		Ok(ord)
+	}
+
+	/// Whether the variable has been given an order encoding.
+	#[cfg(test)]
+	pub(crate) fn has_ord(&self) -> bool {
+		self.state.borrow().ord.is_some()
+	}
+
+	/// The literals that decide the variable, through whichever encoding it was
+	/// given.
+	#[cfg(test)]
+	pub(crate) fn lits(&self) -> Vec<Lit> {
+		let state = self.state.borrow();
+		match (state.ord.as_ref(), state.bin.as_ref()) {
+			(Some(ord), _) => ord.lits(),
+			(_, Some(bin)) => bin
+				.to_vec()
+				.into_iter()
+				.filter_map(|b| match b {
+					BoolVal::Lit(l) => Some(l),
+					BoolVal::Const(_) => None,
+				})
+				.collect(),
+			_ => Vec::new(),
+		}
+	}
+
+	/// The value the variable takes under an assignment, read through whichever
+	/// encoding it was given.
+	#[cfg(test)]
+	pub(crate) fn value<F: crate::Valuation + ?Sized>(&self, value: &F) -> Coeff {
+		let state = self.state.borrow();
+		match (state.ord.as_ref(), state.bin.as_ref()) {
+			(Some(ord), _) => ord.value(value),
+			(_, Some(bin)) => bin.value(value),
+			_ => *state.dom.min().unwrap(),
+		}
 	}
 
 	/// Reuse `lit` as the literal for `x ≥ v` when the order encoding is
@@ -420,10 +557,35 @@ impl OrdEnc {
 		}
 	}
 
+	/// The steps of a sequential decomposition over this variable.
+	///
+	/// Each step is a domain value `d` paired with the clause that holds unless
+	/// the variable reaches `d` — from below when `geq`, from above otherwise.
+	/// Whatever the constraint demands once `d` is reached can therefore just
+	/// be disjoined onto that clause.
+	///
+	/// The step at the far end of the domain guards nothing, since the variable
+	/// always reaches it; its clause is `false` and drops out, leaving the
+	/// demand unconditional.
+	pub(crate) fn steps(&self, geq: bool) -> Vec<(Coeff, BoolVal)> {
+		let vals = self.dom.iter().flatten();
+		if geq {
+			vals.map(|d| (d, self.leq_val(d - 1))).collect()
+		} else {
+			vals.rev().map(|d| (d, self.geq_val(d + 1))).collect()
+		}
+	}
+
 	/// The single literal of a two-valued variable, which on its own already
 	/// distinguishes both of its values.
 	pub(crate) fn single_lit(&self) -> Option<Lit> {
 		(self.x.len() == 1).then(|| self.x.get(0).unwrap())
+	}
+
+	/// The literals of the encoding.
+	#[cfg(test)]
+	pub(crate) fn lits(&self) -> Vec<Lit> {
+		self.x.to_vec()
 	}
 
 	/// The value represented under an assignment.
