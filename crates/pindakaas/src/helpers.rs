@@ -86,7 +86,7 @@ use itertools::Itertools;
 pub(crate) use new_named_lit;
 pub(crate) use new_named_var_range;
 
-use crate::{bool_linear::PosCoeff, integer::IntVar, BoolVal, ClauseDatabase, Coeff};
+use crate::{bool_linear::PosCoeff, integer::var::BinEnc, BoolVal, ClauseDatabase, Coeff};
 
 /// The `i`'th bit of a binary encoding, where bits beyond the encoding's width
 /// are zero.
@@ -103,9 +103,9 @@ pub(crate) fn shifted(bits: &[BoolVal], shift: u32) -> Vec<BoolVal> {
 
 /// Convert `k` to unsigned binary in `bits`
 pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| IntVar::required_bits(0, *k));
+	let bits = bits.unwrap_or_else(|| BinEnc::required_bits(*k) as u32);
 	assert!(
-		*k <= unsigned_binary_range_ub(bits),
+		*k <= BinEnc::largest_in(bits),
 		"{k} cannot be represented in {bits} bits"
 	);
 	(0..bits).map(|b| *k & (1 << b) != 0).collect()
@@ -160,11 +160,6 @@ pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 		.map(|d| char::from_u32(0x2080 + d).unwrap())
 		.collect_vec()
 		.into_iter()
-}
-
-pub(crate) fn unsigned_binary_range_ub(bits: u32) -> Coeff {
-	const TWO: Coeff = 2;
-	(0_u32..bits).fold(0, |sum, i| sum + TWO.pow(i))
 }
 
 #[cfg(test)]

@@ -8,27 +8,24 @@
 pub(crate) mod var;
 
 use std::{
-	cell::RefCell,
 	cmp::{max, min},
 	fmt::{self, Display},
 	iter::once,
 	ops::Bound,
-	rc::Rc,
 };
 
 use itertools::Itertools;
 use rangelist::{IntervalIterator, RangeList};
-use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
-	bool_linear::{BoolLinExp, LimitComp, Part, PosCoeff},
-	helpers::{as_binary, bit, is_powers_of_two, new_named_lit, unsigned_binary_range_ub},
+	bool_linear::{BoolLinExp, LimitComp, PosCoeff},
+	helpers::{as_binary, bit, new_named_lit},
+	integer::var::BinEnc,
 	propositional_logic::{Formula, TseitinEncoder},
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
 	Unsatisfiable, Valuation,
 };
 
-const COUPLE_DOM_PART_TO_ORD: bool = false;
 const ENCODE_REDUNDANT_X_O_Y_O_Z_B: bool = true;
 pub(crate) const GROUND_BINARY_AT_LB: bool = false;
 
@@ -46,15 +43,6 @@ pub(crate) struct ImplicationChainConstraint {
 
 #[derive(Default)]
 pub(crate) struct ImplicationChainEncoder {}
-
-// TODO perhaps id can be used by replacing vars HashMap to just vec
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct IntVar {
-	pub(crate) id: usize,
-	pub(crate) dom: RangeList<Coeff>,
-	add_consistency: bool,
-	pub(crate) views: FxHashMap<Coeff, (usize, Coeff)>,
-}
 
 #[derive(Debug, Clone)]
 pub(crate) struct IntVarBin {
@@ -76,19 +64,6 @@ pub(crate) struct IntVarOrd {
 	pub(crate) dom: RangeList<Coeff>,
 	pub(crate) xs: Vec<Lit>,
 	pub(crate) lbl: String,
-}
-
-#[derive(Debug)]
-pub(crate) struct Lin {
-	pub(crate) xs: Vec<(Coeff, Rc<RefCell<IntVar>>)>,
-	pub(crate) cmp: LimitComp,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct Model {
-	vars: FxHashMap<usize, IntVarEnc>,
-	pub(crate) cons: Vec<Lin>,
-	var_ids: usize,
 }
 
 #[derive(Debug)]
@@ -114,7 +89,7 @@ pub(crate) fn display_dom(dom: &RangeList<Coeff>) -> String {
 			"{{{},..,{ub}}} ({}|{})",
 			dom.iter().flatten().take(ELIPSIZE).join(","),
 			card,
-			IntVar::required_bits(lb, ub)
+			BinEnc::required_bits(if GROUND_BINARY_AT_LB { ub - lb } else { ub })
 		)
 	} else {
 		format!("{{{}}}", dom.iter().flatten().join(","))
@@ -357,122 +332,6 @@ impl ImplicationChainEncoder {
 	}
 }
 
-impl IntVar {
-	/// Checks for failure i.e. empty domain
-	fn check(&self) -> Result {
-		(!self.dom.is_empty()).then_some(()).ok_or(Unsatisfiable)
-	}
-
-	fn encode<Db>(
-		&self,
-		db: &mut Db,
-		views: &mut FxHashMap<(usize, Coeff), Lit>,
-		prefer_order: bool,
-	) -> IntVarEnc
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		if self.size() == 1 {
-			IntVarEnc::Const(*self.dom.min().unwrap())
-		} else {
-			let x = if prefer_order {
-				let views = self
-					.dom
-					.iter()
-					.flatten()
-					.skip(1)
-					.map(|v| views.get(&(self.id, v)).cloned())
-					.collect();
-				IntVarEnc::Ord(IntVarOrd::from_views(
-					db,
-					self.dom.clone(),
-					views,
-					"x".to_owned(),
-				))
-			} else {
-				let y = IntVarBin::from_bounds(
-					db,
-					*self.dom.min().unwrap(),
-					*self.dom.max().unwrap(),
-					"x".to_owned(),
-				);
-				IntVarEnc::Bin(y)
-			};
-
-			if self.add_consistency {
-				x.consistent(db).unwrap();
-			}
-
-			for (view, f) in self
-				.views
-				.iter()
-				.map(|(c, (id, val))| ((*id, *val), x.geq(*c)))
-			{
-				// TODO refactor
-				if let Formula::Atom(BoolVal::Lit(l)) = f {
-					let _ = views.insert(view, l);
-				}
-			}
-			x
-		}
-	}
-
-	fn ge(&mut self, bound: Coeff) -> Result {
-		self.dom = self.dom.intersect(&RangeList::from(bound..=Coeff::MAX));
-		self.check()
-	}
-
-	pub(crate) fn lb(&self, c: Coeff) -> Coeff {
-		c * if c.is_negative() {
-			self.dom.max()
-		} else {
-			self.dom.min()
-		}
-		.unwrap()
-	}
-
-	fn le(&mut self, bound: Coeff) -> Result {
-		self.dom = self.dom.intersect(&RangeList::from(Coeff::MIN..=bound));
-		self.check()
-	}
-
-	fn prefer_order(&self, cutoff: Option<Coeff>) -> bool {
-		match cutoff {
-			None => true,
-			Some(0) => false,
-			Some(cutoff) => (self.dom.card().unwrap() as Coeff) < cutoff,
-		}
-	}
-
-	pub(crate) fn required_bits(lb: Coeff, ub: Coeff) -> u32 {
-		const ZERO: Coeff = 0;
-		if GROUND_BINARY_AT_LB {
-			ZERO.leading_zeros() - ((ub - lb).leading_zeros())
-		} else {
-			ZERO.leading_zeros() - (ub.leading_zeros())
-		}
-	}
-
-	pub(crate) fn size(&self) -> usize {
-		self.dom.card().unwrap()
-	}
-
-	pub(crate) fn ub(&self, c: Coeff) -> Coeff {
-		c * if c.is_negative() {
-			self.dom.min()
-		} else {
-			self.dom.max()
-		}
-		.unwrap()
-	}
-}
-
-impl Display for IntVar {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "x{} ∈ {}", self.id, display_dom(&self.dom))
-	}
-}
-
 impl IntVarBin {
 	pub(crate) fn add<Db>(&self, db: &mut Db, encoder: &TernLeEncoder, y: Coeff) -> Result<Self>
 	where
@@ -549,26 +408,11 @@ impl IntVarBin {
 		Db: ClauseDatabase + ?Sized,
 	{
 		Self {
-			xs: (0..IntVar::required_bits(lb, ub))
+			xs: (0..BinEnc::required_bits(if GROUND_BINARY_AT_LB { ub - lb } else { ub }))
 				.map(|_i| new_named_lit!(db, format!("{}^{}", lbl, _i)))
 				.collect(),
 			lb,
 			ub,
-			lbl,
-		}
-	}
-
-	pub(crate) fn from_terms(
-		terms: Vec<(Lit, PosCoeff)>,
-		lb: PosCoeff,
-		ub: PosCoeff,
-		lbl: String,
-	) -> Self {
-		debug_assert!(is_powers_of_two(terms.iter().map(|(_, c)| **c)));
-		Self {
-			xs: terms.into_iter().map(|(l, _)| l).collect(),
-			lb: *lb, // TODO support non-zero
-			ub: *ub,
 			lbl,
 		}
 	}
@@ -587,7 +431,7 @@ impl IntVarBin {
 
 		// The range 0..(2^n)-1 covered by the (unsigned) binary representation
 		let range_lb = 0;
-		let range_ub = unsigned_binary_range_ub(self.lits() as u32);
+		let range_ub = BinEnc::largest_in(self.lits() as u32);
 
 		if v <= range_lb {
 			Formula::Atom(BoolVal::Const(geq))
@@ -755,152 +599,6 @@ impl IntVarEnc {
 			IntVarEnc::Ord(o) => o.dom(),
 			IntVarEnc::Bin(b) => b.dom(),
 			&IntVarEnc::Const(c) => (c..=c).into(),
-		}
-	}
-	/// Constructs (one or more) IntVar `ys` for linear expression `xs` so that
-	/// ∑ xs ≦ ∑ ys
-	///
-	/// When `exact` is set, the order encoding of the resulting variables also
-	/// implies an upper bound on their value, rather than just a lower bound.
-	/// This costs additional literals and clauses, and is only required when
-	/// the variables are used in a constraint that reasons about their upper
-	/// bound, such as an equality.
-	pub(crate) fn from_part<Db>(
-		db: &mut Db,
-		xs: &Part,
-		ub: PosCoeff,
-		lbl: String,
-		exact: bool,
-	) -> Vec<Self>
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		match xs {
-			Part::Amo(terms) => {
-				// Group the terms by their coefficient.
-				let mut h: FxHashMap<Coeff, Vec<Lit>> =
-					FxHashMap::with_capacity_and_hasher(terms.len(), FxBuildHasher);
-				for &(lit, coef) in terms {
-					debug_assert!(*coef <= *ub);
-					h.entry(*coef).or_default().push(lit);
-				}
-				let dom = once(0..=0).chain(h.keys().map(|&v| v..=v)).collect();
-
-				// Construct the order encoding. The value of the group is the largest
-				// coefficient whose term is chosen, since at most one of them can be,
-				// which the caller guarantees. So the literal for `y≥c` is implied by
-				// each term whose coefficient is at least `c`, and, when an upper
-				// bound is required, implies their disjunction as well.
-				//
-				// The values are visited from the largest down, so `above` holds the
-				// literal for the next larger value in the domain (if any). Without
-				// the upper bound the values are independent, and a term's own
-				// literal can be reused whenever its coefficient is unique.
-				let mut above: Option<Lit> = None;
-				let mut views: Vec<Option<Lit>> = h
-					.into_iter()
-					.sorted_by_key(|(c, _)| *c)
-					.rev()
-					.map(|(_coef, lits)| {
-						let prev = if exact { above } else { None };
-						let y = match (prev, lits.as_slice()) {
-							// A value reached by a single term is represented by that
-							// term's own literal, unless it also has to represent the
-							// values above it.
-							(None, &[lit]) => lit,
-							_ => {
-								let y = new_named_lit!(db, format!("y_{lits:?}>={_coef:?}"));
-								if exact {
-									// Add the clause `¬y ∨ prev ∨ ⋁ lits`: the value
-									// is reached only if one of these terms, or one
-									// with a larger coefficient, is chosen.
-									db.add_clause(
-										[!y].into_iter().chain(prev).chain(lits.iter().copied()),
-									)
-									.unwrap();
-								}
-								y
-							}
-						};
-						// Add the clause `¬l ∨ y` for each of these terms, and for the
-						// literal of the next larger value: choosing any of them means
-						// that this value is reached as well.
-						for lit in prev.into_iter().chain(lits) {
-							if lit != y {
-								db.add_clause([!lit, y]).unwrap();
-							}
-						}
-						above = Some(y);
-						Some(y)
-					})
-					.collect();
-				views.reverse();
-
-				vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, views, lbl))]
-			}
-			// Leaves built from Ic/Dom groups are guaranteed to have unique values
-			Part::Ic(terms) => {
-				let mut acc = 0; // running sum
-				let dom = once(0..=0)
-					.chain(terms.iter().map(|&(_, coef)| {
-						acc += *coef;
-						acc..=acc
-					}))
-					.collect();
-				let views = terms.iter().map(|&(lit, _)| Some(lit)).collect();
-				vec![IntVarEnc::Ord(IntVarOrd::from_views(db, dom, views, lbl))]
-			}
-			Part::Dom(terms, l, u) => {
-				// TODO account for bounds (or even better, create IntVarBin)
-				// TODO old method (which at least respected bounds)
-				if COUPLE_DOM_PART_TO_ORD {
-					let x_bin = IntVarBin::from_terms(terms.clone(), *l, *u, String::from("x"));
-					let x_ord = IntVarEnc::Ord(IntVarOrd::from_bounds(
-						db,
-						x_bin.lb(),
-						x_bin.ub(),
-						String::from("x"),
-					));
-
-					TernLeEncoder::default()
-						.encode(
-							db,
-							&TernLeConstraint::new(
-								&x_ord,
-								&IntVarEnc::Const(0),
-								LimitComp::LessEq,
-								&x_bin.into(),
-							),
-						)
-						.unwrap();
-					vec![x_ord]
-				} else {
-					terms
-						.iter()
-						.enumerate()
-						.map(|(i, &(lit, coef))| {
-							IntVarEnc::Ord(IntVarOrd::from_views(
-								db,
-								RangeList::from_iter([0..=0, *coef..=*coef]),
-								vec![Some(lit)],
-								format!("{lbl}^{i}"),
-							))
-						})
-						.collect()
-				}
-			} /* TODO Not so easy to transfer a binary encoded int var
-			   * Part::Dom(terms, l, u) => {
-			   * let coef = (terms[0].1);
-			   * let false_ if (coef > 1).then(|| let false_ = Some(new_var!(db));
-			   * emit_clause!(&[-false_]); false_ }); let terms = (1..coef).map(|_|
-			   * false_.clone()).chain(terms.to_vec()); */
-
-			  /* IntVarEnc::Bin(IntVarBin::from_terms(
-			   * 	terms.to_vec(),
-			   * 	l.clone(),
-			   * 	u.clone(),
-			   * 	String::from("x"),
-			   * ))}, */
 		}
 	}
 
@@ -1142,250 +840,6 @@ impl IntVarOrd {
 impl Display for IntVarOrd {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}:O ∈ {}", self.lbl, display_dom(&self.dom()))
-	}
-}
-
-impl Lin {
-	pub(crate) fn lb(&self) -> Coeff {
-		self.xs.iter().map(|(c, x)| x.borrow().lb(*c)).sum::<i64>()
-	}
-
-	pub(crate) fn propagate(
-		&mut self,
-		consistency: &Consistency,
-	) -> Result<Vec<usize>, Unsatisfiable> {
-		let mut changed = vec![];
-		match (consistency, &self.cmp) {
-			(Consistency::None, _) => unreachable!(),
-			(Consistency::Bounds, _) | (Consistency::Domain, &LimitComp::LessEq) => loop {
-				let mut fixpoint = true;
-				if self.cmp == LimitComp::Equal {
-					for (c, x) in &self.xs {
-						let xs_ub = self.ub();
-						let mut x = x.borrow_mut();
-						let size = x.size();
-
-						let id = x.id;
-						let x_ub = if c.is_positive() {
-							*x.dom.max().unwrap()
-						} else {
-							*x.dom.min().unwrap()
-						};
-
-						// c*d >= x_ub*c + xs_ub := d >= x_ub - xs_ub/c
-						let b = x_ub - (xs_ub / *c);
-
-						if !c.is_negative() {
-							x.ge(b)?;
-						} else {
-							x.le(b)?;
-						}
-
-						if x.size() < size {
-							changed.push(id);
-							fixpoint = false;
-						}
-						debug_assert!(x.size() > 0);
-					}
-				}
-
-				let rs_lb = self.lb();
-				for (c, x) in &self.xs {
-					let mut x = x.borrow_mut();
-					let size = x.size();
-					let x_lb = if c.is_positive() {
-						*x.dom.min().unwrap()
-					} else {
-						*x.dom.max().unwrap()
-					};
-
-					let id = x.id;
-
-					// c*d <= c*x_lb - rs_lb
-					// d <= x_lb - (rs_lb / c) (or d >= .. if d<0)
-					let b = x_lb - (rs_lb / *c);
-
-					if c.is_negative() {
-						x.ge(b)?;
-					} else {
-						x.le(b)?;
-					}
-
-					if x.size() < size {
-						//println!("Pruned {}", size - x.size());
-						changed.push(id);
-						fixpoint = false;
-					}
-				}
-
-				if fixpoint {
-					return Ok(changed);
-				}
-			},
-			(Consistency::Domain, LimitComp::Equal) => loop {
-				let mut fixpoint = true;
-				for (i, (c_i, x_i)) in self.xs.iter().enumerate() {
-					let mut x_i = x_i.borrow_mut();
-					let id = x_i.id;
-					x_i.dom = x_i
-						.dom
-						.iter()
-						.flatten()
-						.filter(|d_i| {
-							if self
-								.xs
-								.iter()
-								.enumerate()
-								.filter(|&(j, _)| i != j)
-								.map(|(_, (c_j, x_j))| {
-									x_j.borrow()
-										.dom
-										.iter()
-										.flatten()
-										.map(|d_j_k| *c_j * d_j_k)
-										.collect_vec()
-								})
-								.multi_cartesian_product()
-								.any(|rs| *c_i * *d_i + rs.into_iter().sum::<i64>() == 0)
-							{
-								true
-							} else {
-								fixpoint = false;
-								changed.push(id);
-								false
-							}
-						})
-						.map(|v| v..=v)
-						.collect();
-					x_i.check()?;
-				}
-
-				if fixpoint {
-					return Ok(changed);
-				}
-			},
-		}
-	}
-	pub(crate) fn tern(
-		x: Rc<RefCell<IntVar>>,
-		y: Rc<RefCell<IntVar>>,
-		cmp: LimitComp,
-		z: Rc<RefCell<IntVar>>,
-	) -> Self {
-		Lin {
-			xs: vec![(1, x), (1, y), (-1, z)],
-			cmp,
-		}
-	}
-
-	pub(crate) fn ub(&self) -> Coeff {
-		self.xs.iter().map(|(c, x)| x.borrow().ub(*c)).sum::<i64>()
-	}
-}
-
-impl Display for Lin {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let disp_x = |x: &(Coeff, Rc<RefCell<IntVar>>)| -> String {
-			let (coef, x) = x;
-			assert!(coef.abs() == 1);
-			let x = x.borrow();
-
-			format!("{x}")
-		};
-		write!(
-			f,
-			"{} {} {}",
-			self.xs[0..2].iter().map(disp_x).join(" + "),
-			self.cmp,
-			disp_x(&self.xs[2])
-		)?;
-		Ok(())
-	}
-}
-
-impl Model {
-	pub(crate) fn add_int_var_enc(&mut self, x: IntVarEnc) -> IntVar {
-		let var = self.new_var(x.dom(), false);
-		let _ = self.vars.insert(var.id, x);
-		var
-	}
-
-	pub(crate) fn encode<Db>(&mut self, db: &mut Db, cutoff: Option<Coeff>) -> Result
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		let mut all_views = FxHashMap::default();
-		for con in &self.cons {
-			let Lin { xs, cmp } = con;
-			assert!(
-				con.xs.len() == 3 && con.xs.iter().map(|(c, _)| c).collect_vec() == [&1, &1, &-1]
-			);
-
-			for (_, x) in xs {
-				let x = x.borrow();
-				let _ = self
-					.vars
-					.entry(x.id)
-					.or_insert_with(|| x.encode(db, &mut all_views, x.prefer_order(cutoff)));
-			}
-
-			let (x, y, z) = (
-				&self.vars[&xs[0].1.borrow().id],
-				&self.vars[&xs[1].1.borrow().id],
-				&self.vars[&xs[2].1.borrow().id],
-			);
-
-			TernLeEncoder::default()
-				.encode(db, &TernLeConstraint::new(x, y, cmp.clone(), z))
-				.unwrap();
-		}
-
-		Ok(())
-	}
-
-	pub(crate) fn new_constant(&mut self, c: Coeff) -> IntVar {
-		self.new_var((c..=c).into(), false)
-	}
-
-	pub(crate) fn new_var(&mut self, dom: RangeList<Coeff>, add_consistency: bool) -> IntVar {
-		self.var_ids += 1;
-		IntVar {
-			id: self.var_ids,
-			dom,
-			add_consistency,
-			views: FxHashMap::default(),
-		}
-	}
-
-	pub(crate) fn propagate(&mut self, consistency: &Consistency, mut queue: Vec<usize>) -> Result {
-		if consistency == &Consistency::None {
-			return Ok(());
-		}
-		while let Some(con) = queue.pop() {
-			let changed = self.cons[con].propagate(consistency)?;
-			let mut cons = self
-				.cons
-				.iter()
-				.enumerate()
-				.filter_map(|(i, con)| {
-					con.xs
-						.iter()
-						.any(|(_, x)| changed.contains(&x.borrow().id))
-						.then_some(i)
-				})
-				.collect_vec();
-			queue.append(&mut cons);
-		}
-		Ok(())
-	}
-}
-
-impl Display for Model {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		for con in &self.cons {
-			writeln!(f, "{con}")?;
-		}
-		Ok(())
 	}
 }
 

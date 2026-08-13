@@ -15,7 +15,6 @@
 //! [`BoolLinVariant`] [`Encoder`].
 
 use std::{
-	cell::RefCell,
 	cmp::{max, min, Ordering},
 	collections::VecDeque,
 	fmt::{self, Display},
@@ -33,7 +32,7 @@ use crate::{
 	cardinality_one::{BitwiseEncoder, CardinalityOne},
 	helpers::{as_binary, bit, is_powers_of_two, new_named_lit},
 	int_linear::{Decompose, IntLinEncoder, IntLinear, Term},
-	integer::{lex_leq_const, Consistency, IntVarEnc, IntVarOrd, Lin, Model, GROUND_BINARY_AT_LB},
+	integer::{lex_leq_const, Consistency, IntVarOrd, GROUND_BINARY_AT_LB},
 	propositional_logic::{Formula, TseitinEncoder},
 	sorted::{Sorted, SortedEncoder},
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, IntEncoding, Lit,
@@ -652,7 +651,7 @@ impl LinMarker for AdderEncoder {}
 impl BddEncoder {
 	fn bdd(
 		i: usize,
-		xs: &Vec<IntVarEnc>,
+		xs: &[Term],
 		sum: Coeff,
 		ws: &mut Vec<Vec<(Range<Coeff>, BddNode)>>,
 	) -> (Range<Coeff>, BddNode) {
@@ -670,9 +669,8 @@ impl BddEncoder {
 		}
 
 		let views = xs[i]
-			.dom()
-			.iter()
-			.flatten()
+			.values()
+			.into_iter()
 			.map(|v| (v, Self::bdd(i + 1, xs, sum + v, ws)))
 			.collect_vec();
 
@@ -717,13 +715,7 @@ impl BddEncoder {
 		(interval, node)
 	}
 
-	fn construct_bdd(
-		xs: &Vec<IntVarEnc>,
-		cmp: &LimitComp,
-		k: PosCoeff,
-	) -> Vec<Vec<(Range<Coeff>, BddNode)>> {
-		let k = *k;
-
+	fn construct_bdd(xs: &[Term], cmp: Comparator, k: Coeff) -> Vec<Vec<(Range<Coeff>, BddNode)>> {
 		let bounds = xs
 			.iter()
 			.scan((0, 0), |state, x| {
@@ -751,11 +743,11 @@ impl BddEncoder {
 			.zip(bounds)
 			.map(|((lb_margin, ub_margin), (lb, ub))| {
 				match cmp {
-					LimitComp::LessEq => vec![
+					Comparator::LessEq => vec![
 						(lb_margin > lb).then_some((0..(lb_margin + 1), BddNode::Val)),
 						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, BddNode::Gap)),
 					],
-					LimitComp::Equal => vec![
+					_ => vec![
 						(lb_margin > lb).then_some((0..lb_margin, BddNode::Gap)),
 						(lb_margin == ub_margin).then_some((k..(k + 1), BddNode::Val)),
 						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, BddNode::Gap)),
@@ -793,6 +785,80 @@ impl BddEncoder {
 	}
 }
 
+impl Decompose for BddEncoder {
+	/// Follow the terms one at a time, keeping a layer of the totals still
+	/// worth telling apart.
+	///
+	/// Totals that lead to the same outcome whatever the remaining terms do are
+	/// one node, so a layer holds intervals rather than values and the diagram
+	/// stays narrow. Where a layer agrees with the next one from some total
+	/// upwards, its literal for that total is the next layer's, which is what
+	/// keeps the layers from each paying for their own.
+	fn decompose(&self, con: &IntLinear) -> Result<Vec<IntLinear>, Unsatisfiable> {
+		// The widest terms first, so that the layers narrow early and the ones
+		// after them have less to tell apart.
+		let terms = con
+			.terms()
+			.iter()
+			.cloned()
+			.sorted_by(|a: &Term, b: &Term| b.ub().cmp(&a.ub()))
+			.collect_vec();
+		let (cmp, k) = (con.cmp(), con.k());
+
+		// A variable per layer, over the totals its nodes stand for.
+		let mut layers = Vec::with_capacity(terms.len() + 1);
+		let mut shared = Vec::with_capacity(terms.len() + 1);
+		for (i, nodes) in Self::construct_bdd(&terms, cmp, k).into_iter().enumerate() {
+			let mut vals = Vec::new();
+			let mut views = Vec::new();
+			for (interval, node) in nodes {
+				// A node stands for the largest total in its interval.
+				let val = interval.end - 1;
+				match node {
+					BddNode::Gap => {}
+					BddNode::Val => vals.push(val),
+					BddNode::View(of) => {
+						vals.push(val);
+						views.push((val, of));
+					}
+				}
+			}
+			if vals.is_empty() {
+				return Err(Unsatisfiable);
+			}
+			layers.push(crate::integer::var::IntVar::new(
+				vals.into_iter().map(|v| v..=v).collect(),
+				self.add_consistency,
+				format!("y{i}"),
+			));
+			shared.push(views);
+		}
+
+		// Now that every layer exists, say which of their literals are shared.
+		for (i, views) in shared.into_iter().enumerate() {
+			for (val, of) in views {
+				layers[i].set_ord_view_of(val, Rc::clone(&layers[i + 1]), of);
+			}
+		}
+
+		Ok(terms
+			.into_iter()
+			.enumerate()
+			.map(|(i, x)| {
+				IntLinear::new(
+					vec![
+						Term::new(1, Rc::clone(&layers[i])),
+						x,
+						Term::new(-1, Rc::clone(&layers[i + 1])),
+					],
+					cmp,
+					0,
+				)
+			})
+			.collect())
+	}
+}
+
 impl<Db> Encoder<Db, NormalizedBoolLinear> for BddEncoder
 where
 	Db: ClauseDatabase + ?Sized,
@@ -802,78 +868,8 @@ where
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
-		let xs = lin
-			.terms
-			.iter()
-			.enumerate()
-			.flat_map(|(i, part)| {
-				IntVarEnc::from_part(
-					db,
-					part,
-					lin.k,
-					format!("x_{i}"),
-					lin.cmp == LimitComp::Equal,
-				)
-			})
-			.sorted_by(|a: &IntVarEnc, b: &IntVarEnc| b.ub().cmp(&a.ub())) // sort by *decreasing* ub
-			.collect_vec();
-
-		let mut model = Model::default();
-
-		let ys = Self::construct_bdd(&xs, &lin.cmp, lin.k);
-		let xs = xs
-			.into_iter()
-			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
-			.collect_vec();
-
-		let ys: Vec<_> = ys
-			.into_iter()
-			.map(|nodes| -> Result<_, Unsatisfiable> {
-				let mut views = FxHashMap::default();
-				Ok(Rc::new(RefCell::new({
-					let mut y = model.new_var(
-						nodes
-							.into_iter()
-							.filter_map(|(iv, node)| match node {
-								BddNode::Gap => None,
-								BddNode::Val => Some(iv.end - 1),
-								BddNode::View(view) => {
-									let val = iv.end - 1;
-									let _ = views.insert(val, view);
-									Some(val)
-								}
-							})
-							.map(|v| v..=v)
-							.collect(),
-						self.add_consistency,
-					);
-					if y.dom.is_empty() {
-						db.contradiction()?;
-						unreachable!();
-					}
-					y.views = views
-						.into_iter()
-						.map(|(val, view)| (val, (y.id + 1, view)))
-						.collect();
-					y
-				})))
-			})
-			.try_collect()?;
-
-		let mut ys = ys.into_iter();
-		let first = ys.next().unwrap();
-		let _ = xs.iter().zip(ys).fold(first, |curr, (x_i, next)| {
-			model.cons.push(Lin::tern(
-				curr,
-				Rc::clone(x_i),
-				lin.cmp.clone(),
-				Rc::clone(&next),
-			));
-			next
-		});
-
-		model.encode(db, self.cutoff)?;
-		Ok(())
+		let con = IntLinear::from_normalized(db, lin)?;
+		IntLinEncoder::default().encode_decomposed(db, &con, self)
 	}
 }
 
@@ -2212,6 +2208,55 @@ impl SwcEncoder {
 	}
 }
 
+impl Decompose for SwcEncoder {
+	/// Carry a running total along the terms, one at a time.
+	///
+	/// Each step passes on what is left of the bound after the term it sees, so
+	/// the totals telescope: adding the steps together leaves the first total
+	/// against the last, which is the constraint. Counting down from nothing to
+	/// minus the bound keeps every total within it.
+	fn decompose(&self, con: &IntLinear) -> Result<Vec<IntLinear>, Unsatisfiable> {
+		// Two terms or fewer are already as small as the chain would make them.
+		if con.terms().len() <= 2 {
+			return Ok(vec![con.clone()]);
+		}
+		let (cmp, k, n) = (con.cmp(), con.k(), con.terms().len());
+		let totals = (0..=n)
+			.map(|i| {
+				// The ends are fixed, so that what the chain proves between
+				// them is the constraint itself.
+				let dom = match i {
+					0 => 0..=0,
+					_ if i == n => -k..=-k,
+					_ => -k..=0,
+				};
+				crate::integer::var::IntVar::new(
+					RangeList::from_iter([dom]),
+					self.add_consistency,
+					format!("y{i}"),
+				)
+			})
+			.collect_vec();
+
+		Ok(con
+			.terms()
+			.iter()
+			.zip(totals.iter().tuple_windows())
+			.map(|(x, (carried, left))| {
+				IntLinear::new(
+					vec![
+						x.clone(),
+						Term::new(1, Rc::clone(left)),
+						Term::new(-1, Rc::clone(carried)),
+					],
+					cmp,
+					0,
+				)
+			})
+			.collect())
+	}
+}
+
 impl<Db> Encoder<Db, NormalizedBoolLinear> for SwcEncoder
 where
 	Db: ClauseDatabase + ?Sized,
@@ -2221,49 +2266,8 @@ where
 		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
-		// self.cutoff = -1;
-		// self.add_consistency = true;
-		let mut model = Model::default();
-		let xs = lin
-			.terms
-			.iter()
-			.enumerate()
-			.flat_map(|(i, part)| {
-				IntVarEnc::from_part(
-					db,
-					part,
-					lin.k,
-					format!("x_{i}"),
-					lin.cmp == LimitComp::Equal,
-				)
-			})
-			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
-			.collect_vec();
-		let n = xs.len();
-
-		let ys = once(model.new_constant(0))
-			.chain(
-				(1..n)
-					.map(|_| model.new_var((-(*lin.k)..=0).into(), self.add_consistency))
-					.take(n),
-			)
-			.collect_vec()
-			.into_iter()
-			.chain(once(model.new_constant(-*lin.k)))
-			.map(|y| Rc::new(RefCell::new(y)))
-			.collect_vec();
-
-		ys.into_iter()
-			.tuple_windows()
-			.zip(xs)
-			.for_each(|((y_curr, y_next), x)| {
-				model
-					.cons
-					.push(Lin::tern(x, y_next, lin.cmp.clone(), y_curr));
-			});
-
-		model.propagate(&self.add_propagation, vec![model.cons.len() - 1])?;
-		model.encode(db, self.cutoff)
+		let con = IntLinear::from_normalized(db, lin)?;
+		IntLinEncoder::default().encode_decomposed(db, &con, self)
 	}
 }
 

@@ -172,10 +172,12 @@ impl IntLinEncoder {
 		con: &IntLinear,
 		decompose: &impl Decompose,
 	) -> Result {
-		decompose
-			.decompose(con)?
-			.iter()
-			.try_for_each(|con| self.encode(db, con))
+		// A decomposition that cannot be built is a constraint that cannot be
+		// met, which the database has to be told rather than only the caller.
+		let Ok(cons) = decompose.decompose(con) else {
+			return db.contradiction();
+		};
+		cons.iter().try_for_each(|con| self.encode(db, con))
 	}
 
 	/// Encode `con`, adding the clauses to `db`.
@@ -730,7 +732,10 @@ impl Term {
 
 	/// The values the term can take.
 	pub(crate) fn values(&self) -> Vec<Coeff> {
-		self.x.dom().iter().flatten().map(|v| self.c * v).collect()
+		let mut vs: Vec<Coeff> = self.x.dom().iter().flatten().map(|v| self.c * v).collect();
+		// A negative coefficient turns the domain around.
+		vs.sort_unstable();
+		vs
 	}
 
 	/// The term with its coefficient negated.

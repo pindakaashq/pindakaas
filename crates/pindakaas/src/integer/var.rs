@@ -85,6 +85,10 @@ struct IntVarState {
 	/// Literals to reuse as `x ≥ v` when the order encoding is created, rather
 	/// than introducing a fresh one.
 	ord_views: FxHashMap<Coeff, Lit>,
+	/// Values whose literal is to be taken from another variable, and which of
+	/// its values to take it from. Resolved when the order encoding is created,
+	/// since the literal may not exist before then.
+	view_of: FxHashMap<Coeff, (Rc<IntVar>, Coeff)>,
 }
 
 /// The order encoding of an integer variable.
@@ -100,6 +104,15 @@ pub(crate) struct OrdEnc {
 }
 
 impl BinEnc {
+	/// The largest value `bits` bits can hold, the inverse of
+	/// [`Self::required_bits`].
+	pub(crate) fn largest_in(bits: u32) -> Coeff {
+		// Summed rather than `(1 << bits) - 1`, which overflows at the width of
+		// a coefficient where the sum lands exactly on its largest value.
+		const TWO: Coeff = 2;
+		(0..bits).fold(0, |sum, i| sum + TWO.pow(i))
+	}
+
 	/// The number of bits needed to represent `0..=span`.
 	pub(crate) fn required_bits(span: Coeff) -> usize {
 		debug_assert!(
@@ -555,6 +568,7 @@ impl IntVar {
 			|| state.bin.is_some()
 			|| state.dir.is_some()
 			|| !state.ord_views.is_empty()
+			|| !state.view_of.is_empty()
 	}
 
 	/// Drop the values below `v` from the domain, reporting whether any went.
@@ -615,6 +629,7 @@ impl IntVar {
 				dir: None,
 				channelled: [false; 2],
 				ord_views: FxHashMap::default(),
+				view_of: FxHashMap::default(),
 			}),
 		})
 	}
@@ -641,6 +656,22 @@ impl IntVar {
 		if let Some(ord) = self.state.borrow().ord.as_ref() {
 			return Ok(ord.clone());
 		}
+		// Fetch the literals taken from elsewhere first, which may encode the
+		// variables they come from. Collected before any of that, so that this
+		// variable is not borrowed while another is being encoded.
+		let pulls: Vec<(Coeff, Rc<IntVar>, Coeff)> = self
+			.state
+			.borrow()
+			.view_of
+			.iter()
+			.map(|(&v, (src, sv))| (v, Rc::clone(src), *sv))
+			.collect();
+		for (v, src, src_val) in pulls {
+			if let BoolVal::Lit(l) = src.ord(db)?.geq_val(src_val) {
+				let _ = self.state.borrow_mut().ord_views.insert(v, l);
+			}
+		}
+
 		let (dom, views) = {
 			let state = self.state.borrow();
 			(state.dom.clone(), state.ord_views.clone())
@@ -714,6 +745,23 @@ impl IntVar {
 		let x = Self::new(dom, false, lbl);
 		x.state.borrow_mut().ord_views = ord_views;
 		x
+	}
+
+	/// Take the literal for `x ≥ v` from `src`, which has the same values from
+	/// `src_val` upwards.
+	///
+	/// Two variables often agree above some point — a layer of a decision
+	/// diagram and the one after it reach the same totals once enough has been
+	/// decided — and where they do, one literal can serve both. The literal is
+	/// fetched when this variable is encoded rather than now, since `src` may
+	/// not have been encoded yet.
+	pub(crate) fn set_ord_view_of(&self, v: Coeff, src: Rc<IntVar>, src_val: Coeff) {
+		debug_assert!(
+			self.state.borrow().ord.is_none(),
+			"the order encoding of {} already exists",
+			self.lbl
+		);
+		let _ = self.state.borrow_mut().view_of.insert(v, (src, src_val));
 	}
 
 	/// Reuse `lit` as the literal for `x ≥ v` when the order encoding is
@@ -857,7 +905,7 @@ mod tests {
 	use rangelist::RangeList;
 	use traced_test::test;
 
-	use super::IntVar;
+	use super::{BinEnc, IntVar};
 	use crate::{
 		solver::{cadical::Cadical, SolveResult, Solver},
 		ClauseDatabaseTools, Cnf, Coeff, Valuation,
@@ -948,6 +996,20 @@ mod tests {
 				"direct encoding of {dom}"
 			);
 		}
+	}
+
+	#[test]
+	fn a_width_and_the_values_it_holds_are_inverses() {
+		for bits in 0..=8 {
+			let largest = BinEnc::largest_in(bits);
+			assert_eq!(BinEnc::required_bits(largest), bits as usize);
+			if bits > 0 {
+				assert_eq!(BinEnc::required_bits(largest + 1), bits as usize + 1);
+			}
+		}
+		// The widest a coefficient goes lands exactly on its largest value,
+		// where computing it as a power of two would overflow.
+		assert_eq!(BinEnc::largest_in(Coeff::BITS - 1), Coeff::MAX);
 	}
 
 	#[test]
