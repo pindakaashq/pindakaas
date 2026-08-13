@@ -80,6 +80,7 @@ macro_rules! new_named_var_range {
 }
 
 pub(crate) mod opt_field;
+pub(crate) mod scm;
 
 use itertools::Itertools;
 pub(crate) use new_named_lit;
@@ -91,6 +92,13 @@ use crate::{bool_linear::PosCoeff, integer::IntVar, BoolVal, ClauseDatabase, Coe
 /// are zero.
 pub(crate) fn bit(x: &[BoolVal], i: usize) -> BoolVal {
 	x.get(i).copied().unwrap_or(BoolVal::Const(false))
+}
+
+/// A bit vector multiplied by a power of two, which only moves its bits up.
+pub(crate) fn shifted(bits: &[BoolVal], shift: u32) -> Vec<BoolVal> {
+	std::iter::repeat_n(BoolVal::Const(false), shift as usize)
+		.chain(bits.iter().copied())
+		.collect()
 }
 
 /// Convert `k` to unsigned binary in `bits`

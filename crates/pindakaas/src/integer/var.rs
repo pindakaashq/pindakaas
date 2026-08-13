@@ -84,6 +84,15 @@ pub(crate) struct OrdEnc {
 }
 
 impl BinEnc {
+	/// The number of bits needed to represent `0..=span`.
+	pub(crate) fn required_bits(span: Coeff) -> usize {
+		debug_assert!(
+			span >= 0,
+			"a domain cannot span a negative number of values"
+		);
+		(Coeff::BITS - span.leading_zeros()) as usize
+	}
+
 	/// The `i`'th bit, where bits beyond the encoding's width are zero.
 	pub(crate) fn bit(&self, i: usize) -> BoolVal {
 		self.x.get(i).unwrap_or(BoolVal::Const(false))
@@ -177,6 +186,14 @@ impl BinEnc {
 		Self { x, lb }
 	}
 
+	/// An encoding of bits already built, counting from `lb`.
+	pub(crate) fn from_bits(bits: Vec<BoolVal>, lb: Coeff) -> Self {
+		Self {
+			x: Lits::Explicit(bits),
+			lb,
+		}
+	}
+
 	/// The bits of the encoding, least significant first.
 	pub(crate) fn to_vec(&self) -> Vec<BoolVal> {
 		self.x.to_vec()
@@ -196,7 +213,7 @@ impl BinEnc {
 		let (lb, ub) = (*dom.min().unwrap(), *dom.max().unwrap());
 		let x = Lits::Range(new_named_var_range!(
 			db,
-			required_bits(ub - lb),
+			Self::required_bits(ub - lb),
 			|i| format!("{_lbl}^{i}")
 		));
 		Self { x, lb }
@@ -598,15 +615,6 @@ impl OrdEnc {
 			.nth(reached)
 			.expect("the order literals cannot reach past the domain")
 	}
-}
-
-/// The number of bits needed to represent `0..=span`.
-pub(crate) fn required_bits(span: Coeff) -> usize {
-	debug_assert!(
-		span >= 0,
-		"a domain cannot span a negative number of values"
-	);
-	(Coeff::BITS - span.leading_zeros()) as usize
 }
 
 #[cfg(test)]

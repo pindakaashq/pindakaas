@@ -1,13 +1,36 @@
-use std::rc::Rc;
+use std::{
+	hash::{Hash, Hasher},
+	num::NonZero,
+	rc::{Rc, Weak},
+};
 
 use rangelist::RangeList;
+use rustc_hash::FxHashMap;
 
 use crate::{
 	bool_linear::{AdderEncoder, Comparator},
-	helpers::{div_ceil, div_floor},
-	integer::var::{IntVar, OrdEnc},
+	helpers::{
+		div_ceil, div_floor,
+		scm::{ScmObjective, ScmOperation, ScmSolution},
+		shifted,
+	},
+	integer::var::{BinEnc, IntVar, OrdEnc},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Result, Unsatisfiable,
 };
+
+impl Eq for VarKey {}
+
+impl Hash for VarKey {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		self.0.as_ptr().hash(state);
+	}
+}
+
+impl PartialEq for VarKey {
+	fn eq(&self, other: &Self) -> bool {
+		Weak::ptr_eq(&self.0, &other.0)
+	}
+}
 
 /// A linear constraint over integer variables, `Σ cᵢ·xᵢ ≷ k`.
 #[derive(Clone, Debug)]
@@ -25,7 +48,23 @@ pub(crate) struct IntLinear {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct IntLinEncoder {
 	config: IntLinConfig,
+	/// The bits of `c·(x − lb)` for products already built, so that a
+	/// coefficient met again — in this constraint or a later one — costs
+	/// nothing, and so that a synthesis shares the steps it has in common with
+	/// one already done.
+	///
+	/// Only ever looked up, never iterated: the keys are addresses, and their
+	/// order would differ between runs.
+	products: FxHashMap<(VarKey, Coeff), Vec<BoolVal>>,
 }
+
+/// An integer variable, as the identity of one rather than a hold on it.
+///
+/// A `Weak` keeps the allocation alive after the variable itself is dropped, so
+/// its address cannot be handed to a later variable while this key still exists
+/// — which a raw pointer could not promise.
+#[derive(Clone, Debug)]
+struct VarKey(Weak<IntVar>);
 
 /// Configuration for an [`IntLinEncoder`].
 #[derive(Clone, Debug)]
@@ -85,7 +124,7 @@ impl IntLinEncoder {
 		con: &IntLinear,
 	) -> Result {
 		if self.config.propagate {
-			propagate(con)?;
+			con.propagate()?;
 		}
 		let terms = &con.exp.terms;
 		let binary = |t: &Term| t.x.prefers_binary(self.config.cutoff);
@@ -93,36 +132,37 @@ impl IntLinEncoder {
 		// A sum of two binary variables against a third is what a ripple-carry
 		// adder does directly, and it is the shape a coefficient decomposes
 		// into, so it is worth recognising before anything else.
-		if let Some((x, y, z)) = as_addition(con) {
+		if let Some((x, y, z)) = con.as_addition() {
 			if [x, y, z].iter().all(|t| binary(t)) {
-				return encode_addition(db, x, y, z);
+				return Term::encode_addition(db, x, y, z);
 			}
 		}
-		if let [t] = &terms[..] {
-			if binary(t) {
-				return encode_bound(db, t, con.cmp, con.k);
+		// Binary variables added together, whatever their coefficients: build
+		// the sum out of adders and bound it, rather than sending them all
+		// through the walk, which would channel each to order form — the very
+		// cost binary was chosen to avoid. A sum that is negative throughout is
+		// the same constraint read the other way round against `−k`.
+		let negated = !terms.is_empty() && terms.iter().all(|t| t.c < 0);
+		if !terms.is_empty() && terms.iter().all(|t| binary(t) && (t.c > 0) != negated) {
+			let scaled = if negated {
+				terms.iter().map(Term::negated).collect()
+			} else {
+				terms.clone()
+			};
+			let (cmp, k) = if negated {
+				(con.cmp.reverse(), -con.k)
+			} else {
+				(con.cmp, con.k)
+			};
+			if let Some(total) = self.binary_sum(db, &scaled)? {
+				// The sum reaches what its terms reach together.
+				let reach = |f: fn(&Term) -> Coeff| scaled.iter().map(f).sum::<Coeff>();
+				let dom = RangeList::from_iter([reach(Term::lb)..=reach(Term::ub)]);
+				return cmp
+					.split()
+					.into_iter()
+					.try_for_each(|cmp| total.encode_bound(db, cmp, k, &dom));
 			}
-		}
-		// Several binary variables added together: sum them pairwise and bound
-		// the total, rather than sending them all through the walk, which would
-		// channel each to order form — the cost binary was chosen to avoid.
-		if terms.len() > 1 && terms.iter().all(|t| t.c == 1 && binary(t)) {
-			let mut acc = terms[0].clone();
-			for t in &terms[1..] {
-				// The running total spans what its inputs can reach, so it
-				// starts where their lower bounds add up and every addition in
-				// the chain is one the adder can take.
-				let sum = IntVar::new(
-					RangeList::from_iter([(acc.x.lb() + t.x.lb())..=(acc.x.ub() + t.x.ub())]),
-					// The adder pins the total to its inputs, which already
-					// keeps it inside that span.
-					false,
-					format!("{}+{}", acc.x.lbl(), t.x.lbl()),
-				);
-				encode_addition(db, &acc, t, &Term::new(1, Rc::clone(&sum)))?;
-				acc = Term::new(1, sum);
-			}
-			return encode_bound(db, &acc, con.cmp, con.k);
 		}
 
 		// Otherwise walk the terms in order form. Any variable can produce an
@@ -140,11 +180,131 @@ impl IntLinEncoder {
 
 		// An equality holds exactly when both of its inequalities do.
 		for cmp in con.cmp.split() {
-			for clause in encode_rec(&encoded, cmp, con.k) {
+			for clause in Encoded::walk(&encoded, cmp, con.k) {
 				db.add_clause(clause)?;
 			}
 		}
 		Ok(())
+	}
+
+	/// The encoding of `Σ cᵢ·xᵢ`, or `None` if some coefficient cannot be
+	/// decomposed into shifts and adders.
+	fn binary_sum<Db: ClauseDatabase + ?Sized>(
+		&mut self,
+		db: &mut Db,
+		terms: &[Term],
+	) -> Result<Option<BinEnc>, Unsatisfiable> {
+		let mut total: Option<Vec<BoolVal>> = None;
+		for t in terms {
+			let Some(bits) = self.scaled_bits(db, &t.x, t.c)? else {
+				return Ok(None);
+			};
+			total = Some(match total {
+				None => bits,
+				Some(acc) => AdderEncoder::ripple_carry_adder(db, &acc, &bits, None, None)?,
+			});
+		}
+		// The bits of each term count from its own lower bound, so the sum
+		// counts from all of them together.
+		Ok(Some(BinEnc::from_bits(
+			total.unwrap_or_default(),
+			terms.iter().map(Term::lb).sum(),
+		)))
+	}
+
+	/// The bits of `c·(x − lb)`, built from shifts and adders.
+	///
+	/// A shift costs nothing, being leading zero bits on the vector, so what is
+	/// left is to find the fewest additions that reach `c`. That is the
+	/// single-constant multiplication problem, and [`ScmSolution::synthesize`]
+	/// plans it.
+	fn scaled_bits<Db: ClauseDatabase + ?Sized>(
+		&mut self,
+		db: &mut Db,
+		x: &Rc<IntVar>,
+		c: Coeff,
+	) -> Result<Option<Vec<BoolVal>>, Unsatisfiable> {
+		debug_assert!(c > 0, "a product is decomposed only for a positive factor");
+		let key = (VarKey(Rc::downgrade(x)), c);
+		if let Some(bits) = self.products.get(&key) {
+			return Ok(Some(bits.clone()));
+		}
+		let Ok(c32) = u32::try_from(c) else {
+			return Ok(None);
+		};
+		let input = x.bin(db)?.to_vec();
+		let Some(width) = NonZero::new(input.len() as u32) else {
+			// A variable of one value contributes nothing to the sum.
+			return Ok(Some(Vec::new()));
+		};
+
+		// Every step of the plan names what it computes by the factor it
+		// reaches, which is the same thing the cache is keyed on, so a step
+		// shared with an earlier synthesis is picked up rather than rebuilt.
+		let plan = ScmSolution::synthesize(c32, ScmObjective::MinAdders(width));
+		let _ = self.products.insert((VarKey(Rc::downgrade(x)), 1), input);
+		for op in plan.operations {
+			let factor = Coeff::from(op.result().get());
+			if self
+				.products
+				.contains_key(&(VarKey(Rc::downgrade(x)), factor))
+			{
+				continue;
+			}
+			let bits = match op {
+				ScmOperation::ShiftLeft { source, shift } => {
+					shifted(&self.product(x, source.get()), shift)
+				}
+				ScmOperation::ShiftAdd { left, right, shift } => {
+					let left = shifted(&self.product(x, left.get()), shift);
+					AdderEncoder::ripple_carry_adder(
+						db,
+						&left,
+						&self.product(x, right.get()),
+						None,
+						None,
+					)?
+				}
+				ScmOperation::ShiftSub { left, right, shift } => {
+					let left = shifted(&self.product(x, left.get()), shift);
+					self.difference(db, &left, &self.product(x, right.get()), factor, &width)?
+				}
+				ScmOperation::SubShift { left, right, shift } => {
+					let right = shifted(&self.product(x, right.get()), shift);
+					let left = self.product(x, left.get());
+					self.difference(db, &left, &right, factor, &width)?
+				}
+			};
+			let _ = self
+				.products
+				.insert((VarKey(Rc::downgrade(x)), factor), bits);
+		}
+		Ok(Some(self.product(x, c32)))
+	}
+
+	/// The bits of a difference `a − b`, which is known to be positive.
+	///
+	/// Subtraction is addition read the other way round: the bits are created
+	/// and then constrained so that adding `b` back gives `a`.
+	fn difference<Db: ClauseDatabase + ?Sized>(
+		&mut self,
+		db: &mut Db,
+		a: &[BoolVal],
+		b: &[BoolVal],
+		factor: Coeff,
+		width: &NonZero<u32>,
+	) -> Result<Vec<BoolVal>, Unsatisfiable> {
+		let span = factor * ((1 << width.get()) - 1);
+		let bits: Vec<BoolVal> = (0..BinEnc::required_bits(span))
+			.map(|_| BoolVal::Lit(db.new_lit()))
+			.collect();
+		let _ = AdderEncoder::ripple_carry_adder(db, b, &bits, None, Some(a))?;
+		Ok(bits)
+	}
+
+	/// The bits of a product already built.
+	fn product(&self, x: &Rc<IntVar>, factor: u32) -> Vec<BoolVal> {
+		self.products[&(VarKey(Rc::downgrade(x)), Coeff::from(factor))].clone()
 	}
 
 	/// Create an integer variable over `dom`.
@@ -159,11 +319,38 @@ impl IntLinEncoder {
 
 	/// Create an encoder with the given configuration.
 	pub(crate) fn with_config(config: IntLinConfig) -> Self {
-		Self { config }
+		Self {
+			config,
+			..Self::default()
+		}
 	}
 }
 
 impl IntLinear {
+	/// Read `con` as `x + y = z`, the shape a ripple-carry adder encodes.
+	fn as_addition(&self) -> Option<(&Term, &Term, &Term)> {
+		if !matches!(self.cmp, Comparator::Equal) || self.k != 0 {
+			return None;
+		}
+		let [a, b, c] = &self.exp.terms[..] else {
+			return None;
+		};
+		let (x, y, z) = match (a.c, b.c, c.c) {
+			(1, 1, -1) => (a, b, c),
+			(1, -1, 1) => (a, c, b),
+			(-1, 1, 1) => (b, c, a),
+			_ => return None,
+		};
+		// Each encoding counts from its own lower bound, so an adder lines the sum
+		// up with the result only when the bound of the result is the sum of the
+		// other two. Anything else is left to the walk over the terms, which does
+		// not care where an encoding starts.
+		// ponytail: reconciling a mismatch would take a second adder for the
+		// offset. Nothing builds one today, since the result of an addition is
+		// given the bound its inputs imply.
+		(z.x.lb() == x.x.lb() + y.x.lb()).then_some((x, y, z))
+	}
+
 	/// Create the constraint `Σ terms ≷ k`.
 	pub(crate) fn new(terms: Vec<Term>, cmp: Comparator, k: Coeff) -> Self {
 		Self {
@@ -172,9 +359,99 @@ impl IntLinear {
 			k,
 		}
 	}
+
+	/// Narrow the domains of the variables of `con` to the values that can
+	/// still take part in a solution, up to a fixpoint.
+	///
+	/// A variable that is already encoded is left alone: its literals are
+	/// committed and the values they stand for cannot be taken back.
+	fn propagate(&self) -> Result {
+		for cmp in self.cmp.split() {
+			loop {
+				let mut changed = false;
+				for (i, term) in self.exp.terms.iter().enumerate() {
+					// What the other terms contribute at their most favourable
+					// leaves the rest of the budget for this one.
+					let others: Coeff = self
+						.exp
+						.terms
+						.iter()
+						.enumerate()
+						.filter(|(j, _)| *j != i)
+						.map(|(_, t)| match cmp {
+							Comparator::LessEq => t.lb(),
+							_ => t.ub(),
+						})
+						.sum();
+					let slack = self.k - others;
+					if term.x.is_encoded() {
+						continue;
+					}
+					// `c·x ≷ slack`, turned around when `c` is negative.
+					let cmp = if term.c >= 0 { cmp } else { cmp.reverse() };
+					changed |= match cmp {
+						Comparator::LessEq => term.x.set_ub(div_floor(slack, term.c)),
+						_ => term.x.set_lb(div_ceil(slack, term.c)),
+					};
+					if term.x.dom().is_empty() {
+						return Err(Unsatisfiable);
+					}
+				}
+				if !changed {
+					break;
+				}
+			}
+		}
+		Ok(())
+	}
 }
 
 impl Encoded<'_> {
+	/// The clauses for `Σ terms ≷ k`, by taking the terms one at a time.
+	///
+	/// The head term is walked over the values it can take. Reaching a value
+	/// costs the sum a known amount, so what is left for the remaining terms
+	/// is a smaller constraint of the same shape, and the clauses for it need
+	/// only hold when that value is in fact reached.
+	fn walk(terms: &[Encoded], cmp: Comparator, k: Coeff) -> Vec<Vec<BoolVal>> {
+		let Some((head, tail)) = terms.split_first() else {
+			// Nothing left to give, so the empty sum either satisfies what remains
+			// of the constraint or nothing can.
+			let holds = match cmp {
+				Comparator::LessEq => 0 <= k,
+				Comparator::GreaterEq => 0 >= k,
+				Comparator::Equal => unreachable!("an equality is split before it is encoded"),
+			};
+			return if holds { Vec::new() } else { vec![Vec::new()] };
+		};
+		if tail.is_empty() {
+			return vec![vec![head.bound(cmp, k)]];
+		}
+		// Guard on the head reaching a value from whichever side pushes the sum
+		// towards breaking the constraint.
+		let geq = (head.c >= 0) == matches!(cmp, Comparator::LessEq);
+		let mut clauses = Vec::new();
+		let mut last: Option<Vec<Vec<BoolVal>>> = None;
+		for (d, guard) in head.ord.steps(geq) {
+			let sub = Self::walk(tail, cmp, k - head.c * d);
+			// Advancing the walk only weakens the guard, so a step that asks of the
+			// remaining terms exactly what the step before it asked is already
+			// covered by that one. Consecutive steps land on the same demand often:
+			// dividing by a coefficient rounds to the same bound, and the order
+			// literals snap to the values the domain actually has.
+			if last.as_ref() == Some(&sub) {
+				continue;
+			}
+			clauses.extend(sub.iter().map(|clause| {
+				std::iter::once(guard)
+					.chain(clause.iter().copied())
+					.collect()
+			}));
+			last = Some(sub);
+		}
+		clauses
+	}
+
 	/// The literal that holds when this term alone satisfies `term ≷ k`.
 	fn bound(&self, cmp: Comparator, k: Coeff) -> BoolVal {
 		// Dividing by a negative coefficient turns the comparison around.
@@ -187,6 +464,29 @@ impl Encoded<'_> {
 }
 
 impl Term {
+	/// Encode `x + y = z` with a ripple-carry adder over the binary encodings.
+	fn encode_addition<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		x: &Term,
+		y: &Term,
+		z: &Term,
+	) -> Result {
+		let (xs, ys, zs) = (x.x.bin(db)?, y.x.bin(db)?, z.x.bin(db)?);
+		let _ = AdderEncoder::ripple_carry_adder(
+			db,
+			&xs.to_vec(),
+			&ys.to_vec(),
+			None,
+			Some(&zs.to_vec()),
+		)?;
+		Ok(())
+	}
+
+	/// The term with its coefficient negated.
+	fn negated(&self) -> Self {
+		Self::new(-self.c, Rc::clone(&self.x))
+	}
+
 	/// The greatest value the term can take.
 	pub(crate) fn ub(&self) -> Coeff {
 		if self.c >= 0 {
@@ -209,157 +509,6 @@ impl Term {
 	pub(crate) fn new(c: Coeff, x: Rc<IntVar>) -> Self {
 		Self { c, x }
 	}
-}
-
-/// The clauses for `Σ terms ≷ k`, by taking the terms one at a time.
-///
-/// The head term is walked over the values it can take. Reaching a value costs
-/// the sum a known amount, so what is left for the remaining terms is a smaller
-/// constraint of the same shape, and the clauses for it need only hold when
-/// that value is in fact reached.
-fn encode_rec(terms: &[Encoded], cmp: Comparator, k: Coeff) -> Vec<Vec<BoolVal>> {
-	let Some((head, tail)) = terms.split_first() else {
-		// Nothing left to give, so the empty sum either satisfies what remains
-		// of the constraint or nothing can.
-		let holds = match cmp {
-			Comparator::LessEq => 0 <= k,
-			Comparator::GreaterEq => 0 >= k,
-			Comparator::Equal => unreachable!("an equality is split before it is encoded"),
-		};
-		return if holds { Vec::new() } else { vec![Vec::new()] };
-	};
-	if tail.is_empty() {
-		return vec![vec![head.bound(cmp, k)]];
-	}
-	// Guard on the head reaching a value from whichever side pushes the sum
-	// towards breaking the constraint.
-	let geq = (head.c >= 0) == matches!(cmp, Comparator::LessEq);
-	let mut clauses = Vec::new();
-	let mut last: Option<Vec<Vec<BoolVal>>> = None;
-	for (d, guard) in head.ord.steps(geq) {
-		let sub = encode_rec(tail, cmp, k - head.c * d);
-		// Advancing the walk only weakens the guard, so a step that asks of the
-		// remaining terms exactly what the step before it asked is already
-		// covered by that one. Consecutive steps land on the same demand often:
-		// dividing by a coefficient rounds to the same bound, and the order
-		// literals snap to the values the domain actually has.
-		if last.as_ref() == Some(&sub) {
-			continue;
-		}
-		clauses.extend(sub.iter().map(|clause| {
-			std::iter::once(guard)
-				.chain(clause.iter().copied())
-				.collect()
-		}));
-		last = Some(sub);
-	}
-	clauses
-}
-
-/// Narrow the domains of the variables of `con` to the values that can still
-/// take part in a solution, up to a fixpoint.
-///
-/// A variable that is already encoded is left alone: its literals are committed
-/// and the values they stand for cannot be taken back.
-fn propagate(con: &IntLinear) -> Result {
-	for cmp in con.cmp.split() {
-		loop {
-			let mut changed = false;
-			for (i, term) in con.exp.terms.iter().enumerate() {
-				// What the other terms contribute at their most favourable
-				// leaves the rest of the budget for this one.
-				let others: Coeff = con
-					.exp
-					.terms
-					.iter()
-					.enumerate()
-					.filter(|(j, _)| *j != i)
-					.map(|(_, t)| match cmp {
-						Comparator::LessEq => t.lb(),
-						_ => t.ub(),
-					})
-					.sum();
-				let slack = con.k - others;
-				if term.x.is_encoded() {
-					continue;
-				}
-				// `c·x ≷ slack`, turned around when `c` is negative.
-				let cmp = if term.c >= 0 { cmp } else { cmp.reverse() };
-				changed |= match cmp {
-					Comparator::LessEq => term.x.set_ub(div_floor(slack, term.c)),
-					_ => term.x.set_lb(div_ceil(slack, term.c)),
-				};
-				if term.x.dom().is_empty() {
-					return Err(Unsatisfiable);
-				}
-			}
-			if !changed {
-				break;
-			}
-		}
-	}
-	Ok(())
-}
-
-/// Encode `c·x ≷ k` over the binary encoding of `x`.
-fn encode_bound<Db: ClauseDatabase + ?Sized>(
-	db: &mut Db,
-	t: &Term,
-	cmp: Comparator,
-	k: Coeff,
-) -> Result {
-	let (bin, dom) = (t.x.bin(db)?, t.x.dom());
-	cmp.split().into_iter().try_for_each(|cmp| {
-		// `c·x ≷ k` is `x ≷ k/c`, turned around for a negative `c`.
-		let cmp = if t.c >= 0 { cmp } else { cmp.reverse() };
-		bin.encode_bound(db, cmp, div_bound(cmp, k, t.c), &dom)
-	})
-}
-
-/// Read `con` as `x + y = z`, the shape a ripple-carry adder encodes.
-fn as_addition(con: &IntLinear) -> Option<(&Term, &Term, &Term)> {
-	if !matches!(con.cmp, Comparator::Equal) || con.k != 0 {
-		return None;
-	}
-	let [a, b, c] = &con.exp.terms[..] else {
-		return None;
-	};
-	let (x, y, z) = match (a.c, b.c, c.c) {
-		(1, 1, -1) => (a, b, c),
-		(1, -1, 1) => (a, c, b),
-		(-1, 1, 1) => (b, c, a),
-		_ => return None,
-	};
-	// Each encoding counts from its own lower bound, so an adder lines the sum
-	// up with the result only when the bound of the result is the sum of the
-	// other two. Anything else is left to the walk over the terms, which does
-	// not care where an encoding starts.
-	// ponytail: reconciling a mismatch would take a second adder for the
-	// offset. Nothing builds one today, since the result of an addition is
-	// given the bound its inputs imply.
-	(z.x.lb() == x.x.lb() + y.x.lb()).then_some((x, y, z))
-}
-
-/// The tightest integer `v` with `c·x ≷ k` equivalent to `x ≷ v`.
-fn div_bound(cmp: Comparator, k: Coeff, c: Coeff) -> Coeff {
-	match cmp {
-		Comparator::LessEq => div_floor(k, c),
-		Comparator::GreaterEq => div_ceil(k, c),
-		Comparator::Equal => unreachable!("an equality is split before it is encoded"),
-	}
-}
-
-/// Encode `x + y = z` with a ripple-carry adder over the binary encodings.
-fn encode_addition<Db: ClauseDatabase + ?Sized>(
-	db: &mut Db,
-	x: &Term,
-	y: &Term,
-	z: &Term,
-) -> Result {
-	let (xs, ys, zs) = (x.x.bin(db)?, y.x.bin(db)?, z.x.bin(db)?);
-	let _ =
-		AdderEncoder::ripple_carry_adder(db, &xs.to_vec(), &ys.to_vec(), None, Some(&zs.to_vec()))?;
-	Ok(())
 }
 
 #[cfg(test)]
@@ -590,6 +739,111 @@ mod tests {
 				cnf.num_clauses()
 			);
 		}
+	}
+
+	#[test]
+	fn coefficients_decompose_into_shifts_and_adders() {
+		// The database this replaces stopped at a hundred, so the point of
+		// synthesising a plan instead is that nothing here is out of reach.
+		let dom = RangeList::from_iter([0..=7]);
+		for c in [
+			1, 2, 3, 5, 7, 9, 11, 15, 23, 45, 99, 101, 127, 255, 341, 569, 1023,
+		] {
+			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
+				// Around each value the product can take, and just off it.
+				for k in (0..=7).flat_map(|v: Coeff| [c * v - 1, c * v, c * v + 1]) {
+					let (solutions, xs) =
+						solutions_with(&[c], std::slice::from_ref(&dom), cmp, k, false, Some(0));
+					assert_eq!(
+						solutions,
+						brute_force(&[c], std::slice::from_ref(&dom), cmp, k),
+						"{c}·x {cmp:?} {k}"
+					);
+					assert!(
+						!xs.iter().any(|x| x.has_ord()),
+						"{c}·x {cmp:?} {k} fell back to the walk"
+					);
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn a_sum_that_is_negative_throughout_reads_positive() {
+		let doms = [
+			RangeList::from_iter([0..=3]),
+			RangeList::from_elements([1, 2, 5]),
+		];
+		for coeffs in [vec![-1, -1], vec![-3, -5], vec![-1, -45]] {
+			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
+				for k in (-14..=2).map(|v: Coeff| v * 7) {
+					let (solutions, xs) = solutions_with(&coeffs, &doms, cmp, k, false, Some(0));
+					assert_eq!(
+						solutions,
+						brute_force(&coeffs, &doms, cmp, k),
+						"{coeffs:?} {cmp:?} {k}"
+					);
+					assert!(
+						!xs.iter().any(|x| x.has_ord()),
+						"{coeffs:?} {cmp:?} {k} fell back to the walk"
+					);
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn products_combine_with_each_other() {
+		let doms = [
+			RangeList::from_iter([0..=3]),
+			RangeList::from_elements([0, 1, 4]),
+			RangeList::from_iter([2..=5]),
+		];
+		for coeffs in [
+			vec![3, 5, 7],
+			vec![1, 45, 2],
+			vec![11, 11, 11],
+			vec![101, 1, 23],
+		] {
+			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
+				for k in (0..=12).map(|v: Coeff| v * 13) {
+					assert_eq!(
+						solutions_with(&coeffs, &doms, cmp, k, false, Some(0)).0,
+						brute_force(&coeffs, &doms, cmp, k),
+						"{coeffs:?} {cmp:?} {k}"
+					);
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn a_product_is_built_once() {
+		// The same coefficient over the same variable, in two constraints. The
+		// second should cost nothing beyond its own bound.
+		let dom = RangeList::from_iter([0..=15]);
+		let mut cnf = Cnf::default();
+		let mut enc = IntLinEncoder::with_config(IntLinConfig {
+			propagate: false,
+			cutoff: Some(0),
+		});
+		let x = enc.new_int_var(dom, true, "x".to_owned());
+
+		let con = |k| IntLinear::new(vec![Term::new(45, Rc::clone(&x))], Comparator::LessEq, k);
+		enc.encode(&mut cnf, &con(300)).unwrap();
+		let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
+		enc.encode(&mut cnf, &con(200)).unwrap();
+
+		assert_eq!(
+			cnf.num_vars(),
+			vars,
+			"the second constraint should reuse the product, not rebuild it"
+		);
+		assert!(
+			cnf.num_clauses() - clauses < 10,
+			"the second constraint added {} clauses, so more than a bound",
+			cnf.num_clauses() - clauses
+		);
 	}
 
 	#[test]
