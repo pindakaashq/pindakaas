@@ -541,19 +541,26 @@ impl IntVar {
 		x
 	}
 
-	/// Whether either encoding has been created.
+	/// Whether the variable's literals are settled, so that its domain can no
+	/// longer move.
 	///
-	/// Once one has, the literals are committed and the domain can no longer
-	/// move.
-	pub(crate) fn is_encoded(&self) -> bool {
+	/// An encoding that exists is settled for the obvious reason. So is one
+	/// that does not exist yet but is spoken for: a variable found on literals
+	/// that were already there cannot drop a value, because the literal
+	/// standing for it is out in the world regardless, and dropping the value
+	/// would leave nothing to say it cannot hold.
+	pub(crate) fn is_committed(&self) -> bool {
 		let state = self.state.borrow();
-		state.ord.is_some() || state.bin.is_some() || state.dir.is_some()
+		state.ord.is_some()
+			|| state.bin.is_some()
+			|| state.dir.is_some()
+			|| !state.ord_views.is_empty()
 	}
 
 	/// Drop the values below `v` from the domain, reporting whether any went.
 	pub(crate) fn set_lb(&self, v: Coeff) -> bool {
 		debug_assert!(
-			!self.is_encoded(),
+			!self.is_committed(),
 			"the domain of {} cannot move once it is encoded",
 			self.lbl
 		);
@@ -568,7 +575,7 @@ impl IntVar {
 	/// Drop the values above `v` from the domain, reporting whether any went.
 	pub(crate) fn set_ub(&self, v: Coeff) -> bool {
 		debug_assert!(
-			!self.is_encoded(),
+			!self.is_committed(),
 			"the domain of {} cannot move once it is encoded",
 			self.lbl
 		);

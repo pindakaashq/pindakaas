@@ -10,14 +10,14 @@ use rangelist::RangeList;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	bool_linear::{AdderEncoder, Comparator, Part},
+	bool_linear::{AdderEncoder, Comparator, LinMarker, NormalizedBoolLinear, Part},
 	helpers::{
 		div_ceil, div_floor, new_named_lit,
 		scm::{ScmObjective, ScmOperation, ScmSolution},
 		shifted,
 	},
 	integer::var::{BinEnc, DirEnc, IntVar, OrdEnc},
-	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable,
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
 
 impl Eq for VarKey {}
@@ -67,6 +67,45 @@ pub(crate) struct IntLinEncoder {
 /// — which a raw pointer could not promise.
 #[derive(Clone, Debug)]
 struct VarKey(Weak<IntVar>);
+
+/// A way of breaking a linear constraint into smaller ones.
+///
+/// What the encodings in the literature differ in is mostly the shape they give
+/// the intermediate sums — a chain, a balanced tree, the layers of a decision
+/// diagram — rather than how any one step is encoded. Producing constraints
+/// rather than clauses keeps that difference in one place and leaves each step
+/// to be encoded on whichever view its variables have.
+pub(crate) trait Decompose {
+	/// Break `con` into constraints that together mean the same.
+	fn decompose(&self, con: &IntLinear) -> Result<Vec<IntLinear>, Unsatisfiable>;
+}
+
+/// Encoder for pseudo-Boolean constraints that reads them as integer ones.
+///
+/// Aggregation has already found which terms belong together and what each
+/// group means; this hands the constraint to [`IntLinEncoder`] as integers, so
+/// that a group is encoded on the literals it arrived on rather than on a view
+/// built to match.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct IntegerEncoder {
+	config: IntLinConfig,
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for IntegerEncoder {
+	#[cfg_attr(
+		any(feature = "tracing", test),
+		tracing::instrument(name = "integer_encoder", skip_all, fields(constraint = lin.trace_print()))
+	)]
+	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
+		let con = IntLinear::from_normalized(db, lin)?;
+		// A constraint at a time, so nothing is shared between them yet. The
+		// encoder is built to keep what it learns, which is what a caller
+		// working in integers directly would get.
+		IntLinEncoder::with_config(self.config.clone()).encode(db, &con)
+	}
+}
+
+impl LinMarker for IntegerEncoder {}
 
 /// Configuration for an [`IntLinEncoder`].
 #[derive(Clone, Debug)]
@@ -126,6 +165,19 @@ impl Default for IntLinConfig {
 }
 
 impl IntLinEncoder {
+	/// Break `con` apart and encode each piece.
+	pub(crate) fn encode_decomposed<Db: ClauseDatabase + ?Sized>(
+		&mut self,
+		db: &mut Db,
+		con: &IntLinear,
+		decompose: &impl Decompose,
+	) -> Result {
+		decompose
+			.decompose(con)?
+			.iter()
+			.try_for_each(|con| self.encode(db, con))
+	}
+
 	/// Encode `con`, adding the clauses to `db`.
 	///
 	/// Encoding a constraint fixes the literals of the variables it mentions,
@@ -350,6 +402,45 @@ impl IntLinEncoder {
 }
 
 impl IntLinear {
+	/// The comparator of the constraint.
+	pub(crate) fn cmp(&self) -> Comparator {
+		self.cmp
+	}
+
+	/// The constant the sum is compared against.
+	pub(crate) fn k(&self) -> Coeff {
+		self.k
+	}
+
+	/// The terms of the sum.
+	pub(crate) fn terms(&self) -> &[Term] {
+		&self.exp.terms
+	}
+
+	/// The integer linear constraint a normalised pseudo-Boolean one stands
+	/// for.
+	///
+	/// Aggregation has already found what structure the terms have; this reads
+	/// each group as the integer it encodes, so that whichever encoder takes
+	/// the constraint from here works on integers rather than on the literals
+	/// they happen to be written in.
+	pub(crate) fn from_normalized<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		lin: &NormalizedBoolLinear,
+	) -> Result<Self, Unsatisfiable> {
+		let cmp = match lin.comparator() {
+			Comparator::Equal => Comparator::Equal,
+			_ => Comparator::LessEq,
+		};
+		let terms = lin
+			.parts()
+			.enumerate()
+			.map(|(i, part)| Term::from_part(db, part, &format!("x{i}"), cmp == Comparator::Equal))
+			.collect::<Result<Vec<_>, _>>()?
+			.concat();
+		Ok(Self::new(terms, cmp, lin.rhs()))
+	}
+
 	/// Read `con` as `x + y = z`, the shape a ripple-carry adder encodes.
 	fn as_addition(&self) -> Option<(&Term, &Term, &Term)> {
 		if !matches!(self.cmp, Comparator::Equal) || self.k != 0 {
@@ -407,7 +498,7 @@ impl IntLinear {
 						})
 						.sum();
 					let slack = self.k - others;
-					if term.x.is_encoded() {
+					if term.x.is_committed() {
 						continue;
 					}
 					// `c·x ≷ slack`, turned around when `c` is negative.
@@ -637,6 +728,11 @@ impl Term {
 		}
 	}
 
+	/// The values the term can take.
+	pub(crate) fn values(&self) -> Vec<Coeff> {
+		self.x.dom().iter().flatten().map(|v| self.c * v).collect()
+	}
+
 	/// The term with its coefficient negated.
 	fn negated(&self) -> Self {
 		Self::new(-self.c, Rc::clone(&self.x))
@@ -652,7 +748,7 @@ impl Term {
 	}
 
 	/// The least value the term can take.
-	fn lb(&self) -> Coeff {
+	pub(crate) fn lb(&self) -> Coeff {
 		if self.c >= 0 {
 			self.c * self.x.lb()
 		} else {

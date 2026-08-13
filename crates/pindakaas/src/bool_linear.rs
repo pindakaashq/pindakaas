@@ -25,15 +25,15 @@ use std::{
 };
 
 use itertools::Itertools;
+use rangelist::RangeList;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
 	cardinality::Cardinality,
 	cardinality_one::{BitwiseEncoder, CardinalityOne},
 	helpers::{as_binary, bit, is_powers_of_two, new_named_lit},
-	integer::{
-		lex_leq_const, Consistency, IntVar, IntVarEnc, IntVarOrd, Lin, Model, GROUND_BINARY_AT_LB,
-	},
+	int_linear::{Decompose, IntLinEncoder, IntLinear, Term},
+	integer::{lex_leq_const, Consistency, IntVarEnc, IntVarOrd, Lin, Model, GROUND_BINARY_AT_LB},
 	propositional_logic::{Formula, TseitinEncoder},
 	sorted::{Sorted, SortedEncoder},
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, IntEncoding, Lit,
@@ -1960,6 +1960,11 @@ where
 }
 
 impl NormalizedBoolLinear {
+	/// The groups of terms the constraint was found to have.
+	pub(crate) fn parts(&self) -> impl Iterator<Item = &Part> + '_ {
+		self.terms.iter()
+	}
+
 	/// Get the comparator of the linear constraint.
 	pub fn comparator(&self) -> Comparator {
 		self.cmp.clone().into()
@@ -2265,8 +2270,6 @@ where
 impl LinMarker for SwcEncoder {}
 
 impl TotalizerEncoder {
-	const EQUALIZE_INTERMEDIATES: bool = false;
-
 	/// Set whether to add consistency constraints on the intermediate integer
 	/// variables.
 	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
@@ -2289,58 +2292,73 @@ impl TotalizerEncoder {
 	}
 }
 
-impl TotalizerEncoder {
-	fn build_totalizer(&self, xs: Vec<IntVarEnc>, cmp: &LimitComp, k: Coeff) -> Model {
-		let mut model = Model::default();
-		let mut layer = xs
-			.into_iter()
-			.map(|x| Rc::new(RefCell::new(model.add_int_var_enc(x))))
+impl Decompose for TotalizerEncoder {
+	/// Sum the terms up a balanced binary tree, so that no intermediate holds
+	/// more than half of them and none is wider than the terms beneath it can
+	/// reach.
+	fn decompose(&self, con: &IntLinear) -> Result<Vec<IntLinear>, Unsatisfiable> {
+		// Two terms or fewer are already as small as the tree would make them.
+		if con.terms().len() <= 2 {
+			return Ok(vec![con.clone()]);
+		}
+		let (cmp, k) = (con.cmp(), con.k());
+		let mut cons = Vec::new();
+		// Start from the narrowest, so that the wide terms meet late and the
+		// intermediates below them stay small.
+		let mut layer = con
+			.terms()
+			.iter()
+			.cloned()
+			.sorted_by_key(|t| t.ub() - t.lb())
 			.collect_vec();
 
 		while layer.len() > 1 {
-			let mut next_layer = Vec::<Rc<RefCell<IntVar>>>::new();
-			for children in layer.chunks(2) {
-				match children {
-					[x] => {
-						next_layer.push(Rc::clone(x));
-					}
+			let at_root = layer.len() == 2;
+			let mut next = Vec::with_capacity(layer.len().div_ceil(2));
+			for (i, pair) in layer.chunks(2).enumerate() {
+				match pair {
+					// An odd one out waits for the next layer.
+					[t] => next.push(t.clone()),
 					[left, right] => {
-						let at_root = layer.len() == 2;
-						let dom = if at_root {
-							(k..=k).into()
+						// The root is what the constraint compares; below it an
+						// intermediate reaches what its two terms reach
+						// together, less anything already past the bound.
+						let dom: RangeList<Coeff> = if at_root {
+							RangeList::from_iter([k..=k])
 						} else {
-							left.borrow()
-								.dom
-								.iter()
-								.flatten()
-								.cartesian_product(right.borrow().dom.iter().flatten())
+							left.values()
+								.into_iter()
+								.cartesian_product(right.values())
 								.map(|(a, b)| a + b)
 								.filter(|&d| d <= k)
-								.map(|v| v..=v)
+								.map(|d| d..=d)
 								.collect()
 						};
-						let parent =
-							Rc::new(RefCell::new(model.new_var(dom, self.add_consistency)));
-
-						model.cons.push(Lin::tern(
-							Rc::clone(left),
-							Rc::clone(right),
-							if !at_root && Self::EQUALIZE_INTERMEDIATES {
-								LimitComp::Equal
-							} else {
-								cmp.clone()
-							},
-							Rc::clone(&parent),
+						if dom.is_empty() {
+							return Err(Unsatisfiable);
+						}
+						let parent = crate::integer::var::IntVar::new(
+							dom,
+							self.add_consistency,
+							format!("t{i}"),
+						);
+						cons.push(IntLinear::new(
+							vec![
+								left.clone(),
+								right.clone(),
+								Term::new(-1, Rc::clone(&parent)),
+							],
+							cmp,
+							0,
 						));
-						next_layer.push(parent);
+						next.push(Term::new(1, parent));
 					}
-					_ => panic!(),
+					_ => unreachable!("terms are taken two at a time"),
 				}
 			}
-			layer = next_layer;
+			layer = next;
 		}
-
-		model
+		Ok(cons)
 	}
 }
 
@@ -2353,27 +2371,8 @@ where
 		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
-		let xs = lin
-			.terms
-			.iter()
-			.enumerate()
-			.flat_map(|(i, part)| {
-				IntVarEnc::from_part(
-					db,
-					part,
-					lin.k,
-					format!("x_{i}"),
-					lin.cmp == LimitComp::Equal,
-				)
-			})
-			.sorted_by_key(|x| x.ub())
-			.collect_vec();
-
-		// The totalizer encoding constructs a binary tree starting from a layer of
-		// leaves
-		let mut model = self.build_totalizer(xs, &lin.cmp, *lin.k);
-		model.propagate(&self.add_propagation, vec![model.cons.len() - 1])?;
-		model.encode(db, self.cutoff)
+		let con = IntLinear::from_normalized(db, lin)?;
+		IntLinEncoder::default().encode_decomposed(db, &con, self)
 	}
 }
 
@@ -3904,6 +3903,8 @@ mod tests {
 		adder_encoder_card1, crate::bool_linear::AdderEncoder::default()
 	}
 	linear_test_suite! {adder_encoder, crate::bool_linear::AdderEncoder::default()}
+
+	linear_test_suite! {integer_encoder, crate::int_linear::IntegerEncoder::default()}
 
 	card1_test_suite! {
 		bdd_encoder_card1, crate::bool_linear::BddEncoder::default()
