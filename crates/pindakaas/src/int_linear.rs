@@ -1,3 +1,11 @@
+//! Linear constraints over integer variables, and the encoders that turn them
+//! into clauses.
+//!
+//! A constraint is a sum of terms, each an integer variable scaled by a
+//! coefficient, compared against a constant. Aggregating a pseudo-Boolean
+//! constraint produces one of these, its groups of related terms having become
+//! the integers they encode, so this is where every linear encoder starts.
+
 use std::{
 	hash::{Hash, Hasher},
 	iter::once,
@@ -10,7 +18,9 @@ use rangelist::RangeList;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	bool_linear::{AdderEncoder, Comparator, LinMarker, NormalizedBoolLinear, Part},
+	bool_linear::{
+		AdderEncoder, Comparator, LimitComp, LinMarker, NormalizedBoolLinear, Part, PosCoeff,
+	},
 	helpers::{
 		div_ceil, div_floor, new_named_lit,
 		scm::{ScmObjective, ScmOperation, ScmSolution},
@@ -34,9 +44,23 @@ impl PartialEq for VarKey {
 	}
 }
 
+/// A linear constraint over integer variables as aggregation leaves it.
+///
+/// Every coefficient is positive, the sum is compared with `≤` or `=` rather
+/// than `≥`, and the constant it is compared against is not negative. An
+/// encoder that only ever sees aggregated constraints can rely on that instead
+/// of checking for it, which is most of them: only the constraints a
+/// decomposition makes for itself fall outside it, and those it encodes itself.
+#[derive(Clone, Debug)]
+pub struct NormalizedIntLinear {
+	exp: IntLinExp,
+	cmp: LimitComp,
+	k: PosCoeff,
+}
+
 /// A linear constraint over integer variables, `Σ cᵢ·xᵢ ≷ k`.
 #[derive(Clone, Debug)]
-pub(crate) struct IntLinear {
+pub struct IntLinear {
 	exp: IntLinExp,
 	cmp: Comparator,
 	k: Coeff,
@@ -77,31 +101,29 @@ struct VarKey(Weak<IntVar>);
 /// to be encoded on whichever view its variables have.
 pub(crate) trait Decompose {
 	/// Break `con` into constraints that together mean the same.
-	fn decompose(&self, con: &IntLinear) -> Result<Vec<IntLinear>, Unsatisfiable>;
+	fn decompose(&self, con: &NormalizedIntLinear) -> Result<Vec<IntLinear>, Unsatisfiable>;
 }
 
-/// Encoder for pseudo-Boolean constraints that reads them as integer ones.
+/// Encoder that takes an integer linear constraint as it is, without breaking
+/// it apart.
 ///
-/// Aggregation has already found which terms belong together and what each
-/// group means; this hands the constraint to [`IntLinEncoder`] as integers, so
-/// that a group is encoded on the literals it arrived on rather than on a view
-/// built to match.
+/// The others give the intermediate sums a shape; this gives them none, which
+/// suits a constraint over few enough terms that a shape would only add to it.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct IntegerEncoder {
 	config: IntLinConfig,
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for IntegerEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedIntLinear> for IntegerEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
-		tracing::instrument(name = "integer_encoder", skip_all, fields(constraint = lin.trace_print()))
+		tracing::instrument(name = "integer_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
-	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
-		let con = IntLinear::from_normalized(db, lin)?;
+	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
 		// A constraint at a time, so nothing is shared between them yet. The
 		// encoder is built to keep what it learns, which is what a caller
 		// working in integers directly would get.
-		IntLinEncoder::with_config(self.config.clone()).encode(db, &con)
+		IntLinEncoder::with_config(self.config.clone()).encode(db, &con.into())
 	}
 }
 
@@ -169,7 +191,7 @@ impl IntLinEncoder {
 	pub(crate) fn encode_decomposed<Db: ClauseDatabase + ?Sized>(
 		&mut self,
 		db: &mut Db,
-		con: &IntLinear,
+		con: &NormalizedIntLinear,
 		decompose: &impl Decompose,
 	) -> Result {
 		// A decomposition that cannot be built is a constraint that cannot be
@@ -403,6 +425,81 @@ impl IntLinEncoder {
 	}
 }
 
+impl NormalizedIntLinear {
+	/// The comparator of the constraint, which is never `≥`.
+	pub(crate) fn cmp(&self) -> LimitComp {
+		self.cmp.clone()
+	}
+
+	/// The integer linear constraint a normalised pseudo-Boolean one stands
+	/// for.
+	///
+	/// Aggregation has already found what structure the terms have; this reads
+	/// each group as the integer it encodes, so that whichever encoder takes
+	/// the constraint from here works on integers rather than on the literals
+	/// they happen to be written in.
+	pub(crate) fn from_normalized<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		lin: &NormalizedBoolLinear,
+	) -> Result<Self, Unsatisfiable> {
+		let cmp = lin.limit_comparator();
+		let terms = lin
+			.parts()
+			.enumerate()
+			.map(|(i, part)| Term::from_part(db, part, &format!("x{i}"), cmp == LimitComp::Equal))
+			.collect::<Result<Vec<_>, _>>()?
+			.concat();
+		debug_assert!(
+			terms.iter().all(|t| t.c > 0),
+			"aggregation leaves every coefficient positive"
+		);
+		Ok(Self {
+			exp: IntLinExp { terms },
+			cmp: cmp.clone(),
+			k: PosCoeff::new(lin.rhs()),
+		})
+	}
+
+	/// The constraint as a weighted sum of literals against a constant, for
+	/// encoders that work on literals rather than on integers.
+	pub(crate) fn as_weighted<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result<(Vec<(Lit, Coeff)>, Coeff), Unsatisfiable> {
+		IntLinear::from(self).as_weighted(db)
+	}
+
+	/// What each term is worth, as the literals standing for it and what each
+	/// of them adds.
+	#[cfg(test)]
+	pub(crate) fn grouped_weights<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result<Vec<Vec<(Lit, Coeff)>>, Unsatisfiable> {
+		IntLinear::from(self).grouped_weights(db)
+	}
+
+	/// The constant the sum is compared against, which is not negative.
+	pub(crate) fn k(&self) -> Coeff {
+		*self.k
+	}
+
+	/// The terms of the sum, each with a positive coefficient.
+	pub(crate) fn terms(&self) -> &[Term] {
+		&self.exp.terms
+	}
+}
+
+impl From<&NormalizedIntLinear> for IntLinear {
+	fn from(con: &NormalizedIntLinear) -> Self {
+		Self {
+			exp: con.exp.clone(),
+			cmp: con.cmp.clone().into(),
+			k: *con.k,
+		}
+	}
+}
+
 impl IntLinear {
 	/// The comparator of the constraint.
 	pub(crate) fn cmp(&self) -> Comparator {
@@ -419,6 +516,56 @@ impl IntLinear {
 		&self.exp.terms
 	}
 
+	/// The constraint as a weighted sum of literals against a constant, for
+	/// encoders that work on literals rather than on integers.
+	///
+	/// A term of a pseudo-Boolean constraint that nothing groups comes back out
+	/// as the literal it went in as, since a group of one is encoded on it.
+	/// Only where a group had to introduce a literal of its own does the sum
+	/// differ from the one it was read from.
+	pub(crate) fn as_weighted<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result<(Vec<(Lit, Coeff)>, Coeff), Unsatisfiable> {
+		let mut terms = Vec::new();
+		let mut constant = 0;
+		for t in self.terms() {
+			let (lits, offset) = t.x.as_weighted(db)?;
+			terms.extend(
+				lits.into_iter()
+					.map(|(l, w)| (l, t.c * w))
+					// A literal worth nothing is not worth mentioning.
+					.filter(|&(_, w)| w != 0),
+			);
+			constant += t.c * offset;
+		}
+		Ok((terms, constant))
+	}
+
+	/// What each term is worth, as the literals standing for it and what each
+	/// of them adds.
+	///
+	/// The same information as [`Self::as_weighted`], kept term by term rather
+	/// than flattened, so that which literals share a variable is still
+	/// visible.
+	#[cfg(test)]
+	pub(crate) fn grouped_weights<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result<Vec<Vec<(Lit, Coeff)>>, Unsatisfiable> {
+		self.terms()
+			.iter()
+			.map(|t| {
+				let (lits, _) = t.x.as_weighted(db)?;
+				Ok(lits
+					.into_iter()
+					.map(|(l, w)| (l, t.c * w))
+					.filter(|&(_, w)| w != 0)
+					.collect())
+			})
+			.collect()
+	}
+
 	/// The integer linear constraint a normalised pseudo-Boolean one stands
 	/// for.
 	///
@@ -426,23 +573,6 @@ impl IntLinear {
 	/// each group as the integer it encodes, so that whichever encoder takes
 	/// the constraint from here works on integers rather than on the literals
 	/// they happen to be written in.
-	pub(crate) fn from_normalized<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		lin: &NormalizedBoolLinear,
-	) -> Result<Self, Unsatisfiable> {
-		let cmp = match lin.comparator() {
-			Comparator::Equal => Comparator::Equal,
-			_ => Comparator::LessEq,
-		};
-		let terms = lin
-			.parts()
-			.enumerate()
-			.map(|(i, part)| Term::from_part(db, part, &format!("x{i}"), cmp == Comparator::Equal))
-			.collect::<Result<Vec<_>, _>>()?
-			.concat();
-		Ok(Self::new(terms, cmp, lin.rhs()))
-	}
-
 	/// Read `con` as `x + y = z`, the shape a ripple-carry adder encodes.
 	fn as_addition(&self) -> Option<(&Term, &Term, &Term)> {
 		if !matches!(self.cmp, Comparator::Equal) || self.k != 0 {
@@ -654,11 +784,22 @@ impl Term {
 					.chain(by_coeff.keys().sorted().map(|&v| v..=v))
 					.collect();
 
+				let by_coeff = by_coeff
+					.into_iter()
+					.sorted_by_key(|(c, _)| *c)
+					.collect_vec();
 				// The group is worth nothing when no term is chosen, which is a
-				// value like any other and so needs a literal of its own.
-				let none = new_named_lit!(db, format!("{lbl}=0"));
+				// value like any other. A group of one term says that already:
+				// it is worth nothing exactly when that term is not chosen. Any
+				// other group needs a literal of its own, and clauses tying it
+				// to the rest.
+				let single = matches!(by_coeff.as_slice(), [(_, terms)] if terms.len() == 1);
+				let none = match by_coeff.as_slice() {
+					[(_, terms)] if terms.len() == 1 => !terms[0],
+					_ => new_named_lit!(db, format!("{lbl}=0")),
+				};
 				let mut lits = vec![none];
-				for (_coeff, terms) in by_coeff.into_iter().sorted_by_key(|(c, _)| *c) {
+				for (_coeff, terms) in by_coeff {
 					let d = match terms.as_slice() {
 						// One term reaching a value is the literal for it.
 						&[lit] => lit,
@@ -672,19 +813,25 @@ impl Term {
 							d
 						}
 					};
-					if exact {
-						// The group is worth this only if one of these terms is
-						// chosen. Without it the group may say it is worth more
-						// than it is, which a `≤` can live with and costs the
-						// solver nothing, since nothing forces it to.
+					// The group is worth this only if one of these terms is
+					// chosen. Without it the group may say it is worth more
+					// than it is, which a `≤` can live with and costs the
+					// solver nothing, since nothing forces it to. A value one
+					// term reaches says it already, that term being the literal
+					// for it.
+					if exact && terms.len() > 1 {
 						db.add_clause([!d].into_iter().chain(terms))?;
 					}
 					// Nothing is chosen only if this value is not taken.
-					db.add_clause([!d, !none])?;
+					if !single {
+						db.add_clause([!d, !none])?;
+					}
 					lits.push(d);
 				}
 				// Some value is taken.
-				db.add_clause(lits.iter().copied())?;
+				if !single {
+					db.add_clause(lits.iter().copied())?;
+				}
 				Ok(vec![Self::new(
 					1,
 					IntVar::with_dir(dom.clone(), lbl.to_owned(), DirEnc::from_lits(dom, lits)),
@@ -1016,6 +1163,73 @@ mod tests {
 				.map(|(_, w)| w)
 				.sum();
 			assert_eq!(value, worth, "chose {chosen:?}");
+		}
+	}
+
+	#[test]
+	fn a_plain_constraint_weighs_the_literals_it_came_from() {
+		// Reading a pseudo-Boolean constraint as integers and weighing it back
+		// out has to give what went in, or an encoder that works on literals
+		// would pay for the detour.
+		let mut cnf = Cnf::default();
+		let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
+		let coeffs = [1, 2, 5];
+		let parts = lits
+			.iter()
+			.zip(coeffs)
+			.map(|(&l, c)| Part::Amo(vec![(l, PosCoeff::new(c))]))
+			.collect_vec();
+
+		let terms = parts
+			.iter()
+			.map(|part| Term::from_part(&mut cnf, part, "x", true).map(|ts| ts[0].clone()))
+			.collect::<Result<Vec<_>, _>>()
+			.unwrap();
+		let con = IntLinear::new(terms, Comparator::LessEq, 6);
+
+		let (weighed, constant) = con.as_weighted(&mut cnf).unwrap();
+		assert_eq!(constant, 0);
+		assert_eq!(
+			weighed,
+			lits.iter().copied().zip(coeffs).collect_vec(),
+			"the literals and coefficients should be the ones given"
+		);
+	}
+
+	#[test]
+	fn a_lone_term_is_a_group_that_costs_nothing() {
+		// Every term of a pseudo-Boolean constraint that nothing groups arrives
+		// as a group of one, so this is the common case rather than a corner:
+		// the term is worth its coefficient when chosen and nothing when not,
+		// which its own literal already says both ways.
+		for exact in [false, true] {
+			let mut cnf = Cnf::default();
+			let lit = cnf.new_lit();
+			let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
+
+			let part = Part::Amo(vec![(lit, PosCoeff::new(5))]);
+			let ts = Term::from_part(&mut cnf, &part, "x", exact).unwrap();
+			assert_eq!(
+				(cnf.num_vars(), cnf.num_clauses()),
+				(vars, clauses),
+				"a group of one term should need nothing of its own"
+			);
+
+			// And it still reads as the integer it stands for.
+			let x = &ts[0].x;
+			let mut slv = Cadical::from(&cnf);
+			let mut seen = Vec::new();
+			while let SolveResult::Satisfied(value) = slv.solve() {
+				seen.push((value.value(lit), x.value(&value)));
+				if slv
+					.add_clause([if value.value(lit) { !lit } else { lit }])
+					.is_err()
+				{
+					break;
+				}
+			}
+			seen.sort();
+			assert_eq!(seen, vec![(false, 0), (true, 5)]);
 		}
 	}
 

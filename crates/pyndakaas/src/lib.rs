@@ -69,13 +69,14 @@ mod pindakaas {
 
 	use itertools::Itertools;
 	use pindakaas::{
+		aggregator::{BoolLinAggregator, LinVariant, LinearEncoder},
 		bool_linear::{
-			AdderEncoder, BoolLinAggregator, BoolLinExp as BaseBoolLinExp, BoolLinVariant,
-			BoolLinear as BaseBoolLinCon, Comparator, LinearEncoder, NormalizedBoolLinear,
+			AdderEncoder, BoolLinExp as BaseBoolLinExp, BoolLinear as BaseBoolLinCon, Comparator,
 			SwcEncoder, TotalizerEncoder,
 		},
 		cardinality::{Cardinality, SortingNetworkEncoder},
 		cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
+		int_linear::NormalizedIntLinear,
 		propositional_logic::{Formula as BaseFormula, TseitinEncoder},
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as EncoderTrait, Lit as BaseLit,
 		VarRange as BaseVarRange, Wcnf,
@@ -537,17 +538,13 @@ mod pindakaas {
 		}
 	}
 
-	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, BoolLinVariant> for LinEncoderWrapper {
-		fn encode(
-			&self,
-			db: &mut Db,
-			con: &BoolLinVariant,
-		) -> Result<(), pindakaas::Unsatisfiable> {
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, LinVariant> for LinEncoderWrapper {
+		fn encode(&self, db: &mut Db, con: &LinVariant) -> Result<(), pindakaas::Unsatisfiable> {
 			match con {
-				BoolLinVariant::Linear(lin) => self.encode(db, lin),
-				BoolLinVariant::Cardinality(card) => self.encode(db, card),
-				BoolLinVariant::CardinalityOne(card1) => self.encode(db, card1),
-				BoolLinVariant::Trivial => Ok(()),
+				LinVariant::Linear(lin) => self.encode(db, lin),
+				LinVariant::Cardinality(card) => self.encode(db, card),
+				LinVariant::CardinalityOne(card1) => self.encode(db, card1),
+				LinVariant::Trivial => Ok(()),
 			}
 		}
 	}
@@ -589,11 +586,11 @@ mod pindakaas {
 		}
 	}
 
-	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, NormalizedBoolLinear> for LinEncoderWrapper {
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, NormalizedIntLinear> for LinEncoderWrapper {
 		fn encode(
 			&self,
 			db: &mut Db,
-			con: &NormalizedBoolLinear,
+			con: &NormalizedIntLinear,
 		) -> Result<(), pindakaas::Unsatisfiable> {
 			match self.method.unwrap_or(Encoder::ADDER) {
 				Encoder::ADDER => AdderEncoder::default().encode(db, con),

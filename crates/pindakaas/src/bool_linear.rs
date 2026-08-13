@@ -10,9 +10,9 @@
 //!
 //! This module contains some additional helper types that can be used to
 //! simplify this encoding process. [`StaticLinEncoder`] can help choose an
-//! encoder based on the [`BoolLinVariant`] produced by [`BoolLinAggregator`].
+//! encoder based on the [`LinVariant`] produced by [`BoolLinAggregator`].
 //! [`LinearEncoder`] can be used to pipeline [`BoolLinAggregator`] and a
-//! [`BoolLinVariant`] [`Encoder`].
+//! [`LinVariant`] [`Encoder`].
 
 use std::{
 	cmp::{max, min, Ordering},
@@ -25,16 +25,14 @@ use std::{
 
 use itertools::Itertools;
 use rangelist::RangeList;
-use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
 	cardinality::Cardinality,
-	cardinality_one::{BitwiseEncoder, CardinalityOne},
-	helpers::{as_binary, bit, is_powers_of_two, new_named_lit},
-	int_linear::{Decompose, IntLinEncoder, IntLinear, Term},
-	integer::{lex_leq_const, Consistency, IntVarOrd, GROUND_BINARY_AT_LB},
+	cardinality_one::CardinalityOne,
+	helpers::{as_binary, bit, new_named_lit},
+	int_linear::{Decompose, IntLinEncoder, IntLinear, NormalizedIntLinear, Term},
+	integer::{lex_leq_const, Consistency, GROUND_BINARY_AT_LB},
 	propositional_logic::{Formula, TseitinEncoder},
-	sorted::{Sorted, SortedEncoder},
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, IntEncoding, Lit,
 	Result, Unsatisfiable, Valuation,
 };
@@ -61,51 +59,21 @@ enum BddNode {
 	View(Coeff),
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-/// A transformation of a general [`BoolLinear`] constraint into a aggregated
-/// and normalized variant.
-pub struct BoolLinAggregator {
-	sorted_encoder: SortedEncoder,
-	sort_same_coefficients: usize,
-}
-
 #[derive(Clone, Debug)]
 /// A linear combination of boolean variables, where Boolean literals are
 /// multiplied by constant coefficients and added together.
 pub struct BoolLinExp {
 	/// All terms of the pseudo-Boolean linear expression
-	terms: VecDeque<(Lit, Coeff)>,
+	pub(crate) terms: VecDeque<(Lit, Coeff)>,
 	/// Number of unconstrained terms (located at the front of `terms`)
-	num_free: usize,
+	pub(crate) num_free: usize,
 	/// Constraints placed on different terms, and the number of terms involved
 	/// in the constraint
-	constraints: Vec<(Constraint, usize)>,
+	pub(crate) constraints: Vec<(Constraint, usize)>,
 	/// Additive constant
-	add: Coeff,
+	pub(crate) add: Coeff,
 	/// Multiplicative contant
-	mult: Coeff,
-}
-
-#[derive(Debug)]
-/// Type used to distinguish between different variants of Boolean linear
-/// constraints for which specialized encoding algorithms exist.
-///
-/// This type is used as the result of the aggregation/normalization process
-/// ([`BoolLinAggregator::aggregate`]), which will simplify a constraint to its
-/// most simplified form.
-pub enum BoolLinVariant {
-	/// Most general form of Boolean linear expression: a sum of Boolean
-	/// literals multiplied by positive coefficients that must be
-	/// (smaller-or-)equal to a positive constant.
-	Linear(NormalizedBoolLinear),
-	/// Cardinality constraint (also known as a counting constraint): a sum of
-	/// Boolean literals that must be (smaller-or-)equal to a positive constant.
-	Cardinality(Cardinality),
-	/// Cardinality constraint with the constant 1 (i.e. at-least or exactly 1
-	/// literal must be true).
-	CardinalityOne(CardinalityOne),
-	/// Constraint was trivially encoded into clauses.
-	Trivial,
+	pub(crate) mult: Coeff,
 }
 
 #[derive(Debug, Clone)]
@@ -120,12 +88,12 @@ pub enum BoolLinVariant {
 /// comparison and the constant takes the right hand side.
 pub struct BoolLinear {
 	/// Expression being constrained
-	exp: BoolLinExp,
+	pub(crate) exp: BoolLinExp,
 	/// Comparator when exp is on the left hand side and k is on the right hand
 	/// side
-	cmp: Comparator,
+	pub(crate) cmp: Comparator,
 	/// Coefficient providing the upper bound or lower bound to exp, or both
-	k: Coeff,
+	pub(crate) k: Coeff,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -189,15 +157,6 @@ pub(crate) enum LimitComp {
 /// to encoders implemented by this crate.
 pub(crate) trait LinMarker {}
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-/// An encoder for Boolean linear constraints that performs aggregation using a
-/// [`BoolLinAggregator`] and then encodes the aggregated constraints using a
-/// [`Encoder`] for [`BoolLinVariant`].
-pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = BoolLinAggregator> {
-	enc: Enc,
-	agg: Agg,
-}
-
 #[derive(Debug, Clone)]
 /// An [`BoolLinear`] expression that has been aggregated and normalized.
 ///
@@ -207,9 +166,9 @@ pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = BoolLinAggregator> {
 /// using the [`BoolLinAggregator`], and are generally the required input type
 /// for encoders of boolean linear constraints.
 pub struct NormalizedBoolLinear {
-	terms: Vec<Part>,
-	cmp: LimitComp,
-	k: PosCoeff,
+	pub(crate) terms: Vec<Part>,
+	pub(crate) cmp: LimitComp,
+	pub(crate) k: PosCoeff,
 }
 
 // TODO how can we support both Part(itions) of "terms" ( <Lit, C> for pb
@@ -229,24 +188,43 @@ pub(crate) enum Part {
 	Dom(Vec<(Lit, PosCoeff)>, PosCoeff, PosCoeff),
 }
 
+impl Part {
+	/// Divide every coefficient in the part, and any domain bounds it carries,
+	/// by `g`.
+	///
+	/// The caller is required to ensure that `g` divides each of these values
+	/// exactly.
+	pub(crate) fn div_assign(&mut self, g: Coeff) {
+		let terms = match self {
+			Part::Amo(terms) | Part::Ic(terms) => terms,
+			Part::Dom(terms, lb, ub) => {
+				debug_assert!(
+					**lb % g == 0 && **ub % g == 0,
+					"domain bounds {lb}..{ub} are not divisible by {g}"
+				);
+				**lb /= g;
+				**ub /= g;
+				terms
+			}
+		};
+		for (_, coef) in terms {
+			debug_assert!(
+				**coef % g == 0,
+				"coefficient {coef} is not divisible by {g}"
+			);
+			**coef /= g;
+		}
+	}
+
+	pub(crate) fn iter(&self) -> impl Iterator<Item = &(Lit, PosCoeff)> {
+		self.into_iter()
+	}
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 /// PosCoeff is a type for coefficients that are guaranteed by the programmer to
 /// be 0 or greater.
-pub(crate) struct PosCoeff(Coeff);
-
-/// An encoder for general boolean linear constraints that dispatches to a
-/// different choice of sub-encoder for cardinality and cardinality-one
-/// constraints.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct StaticLinEncoder<
-	LinEnc = AdderEncoder,
-	CardEnc = AdderEncoder, // TODO: Actual Cardinality encoding
-	Card1Enc = BitwiseEncoder,
-> {
-	lin_enc: LinEnc,
-	card_enc: CardEnc,
-	amo_enc: Card1Enc,
-}
+pub(crate) struct PosCoeff(pub(crate) Coeff);
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight
 /// Counter (SWC)
@@ -476,31 +454,38 @@ impl AdderEncoder {
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedBoolLinear> for AdderEncoder
+impl<Db> Encoder<Db, NormalizedIntLinear> for AdderEncoder
 where
 	Db: ClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
-		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = lin.trace_print()))
+		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
-	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
-		debug_assert!(lin.cmp == LimitComp::LessEq || lin.cmp == LimitComp::Equal);
+	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
+		let cmp = con.cmp();
+		// Adding bit by bit has no use for how the terms are grouped, so the
+		// constraint is weighed back out into the literals standing for it.
+		let (weighed, constant) = con.as_weighted(db)?;
+		let rhs = con.k() - constant;
+		if rhs < 0 {
+			return db.contradiction();
+		}
+		let rhs = PosCoeff::new(rhs);
+
 		// The number of relevant bits in k
 		const ZERO: Coeff = 0;
-		let bits = ZERO.leading_zeros() - lin.k.leading_zeros();
-		let mut k = as_binary(lin.k, Some(bits));
+		let bits = ZERO.leading_zeros() - rhs.leading_zeros();
+		let mut k = as_binary(rhs, Some(bits));
 
-		let first_zero = lin.k.trailing_ones() as usize;
+		let first_zero = rhs.trailing_ones() as usize;
 		let bits = bits as usize;
 		debug_assert!(k[bits - 1]);
 
-		// Closure that provides an iterator over all terms independent of the
-		// partitioning
 		let all_terms = || {
-			lin.terms
+			weighed
 				.iter()
-				.flat_map(|part| part.iter().map(|&(lit, coef)| (lit, coef)))
+				.map(|&(lit, coef)| (lit, PosCoeff::new(coef)))
 		};
 
 		// Create structure with which coefficients use which bits
@@ -521,13 +506,13 @@ where
 		for b in 0..bits {
 			match bucket[b].len() {
 				0 => {
-					if k[b] && lin.cmp == LimitComp::Equal {
+					if k[b] && cmp == LimitComp::Equal {
 						return db.contradiction();
 					}
 				}
 				1 => {
 					let x = bucket[b].pop().unwrap();
-					if lin.cmp == LimitComp::Equal {
+					if cmp == LimitComp::Equal {
 						db.add_clause([if k[b] { x } else { !x }])?;
 					} else {
 						sum[b] = Some(x);
@@ -546,7 +531,7 @@ where
 						let lits = lits.into_iter().map(BoolVal::Lit).collect_vec();
 
 						// Compute sum
-						if last && lin.cmp == LimitComp::Equal {
+						if last && cmp == LimitComp::Equal {
 							// No need to create a new literal, force the sum to equal the result
 							let _ = Self::sum_circuit(
 								db,
@@ -554,7 +539,7 @@ where
 								Some(BoolVal::Const(k[b])),
 								String::new(),
 							)?;
-						} else if lin.cmp != LimitComp::LessEq || !last || b >= first_zero {
+						} else if cmp != LimitComp::LessEq || !last || b >= first_zero {
 							// Literal is not used for the less-than constraint unless a zero has
 							// been seen first
 							let sum = new_named_lit!(
@@ -580,7 +565,7 @@ where
 						// Compute carry
 						if b + 1 >= bits {
 							// Carry will bring the sum to be greater than k, force to be false
-							if lits.len() == 2 && lin.cmp == LimitComp::Equal {
+							if lits.len() == 2 && cmp == LimitComp::Equal {
 								// Already encoded by the XOR to compute the sum
 							} else {
 								let _ = Self::carry_circuit(
@@ -590,7 +575,7 @@ where
 									String::new(),
 								)?;
 							}
-						} else if last && lin.cmp == LimitComp::Equal && bucket[b + 1].is_empty() {
+						} else if last && cmp == LimitComp::Equal && bucket[b + 1].is_empty() {
 							// No need to create a new literal, force the carry to equal the result
 							let _ = Self::carry_circuit(
 								db,
@@ -622,8 +607,8 @@ where
 						}
 					}
 					debug_assert!(
-						(lin.cmp == LimitComp::Equal && bucket[b].is_empty())
-							|| (lin.cmp == LimitComp::LessEq
+						(cmp == LimitComp::Equal && bucket[b].is_empty())
+							|| (cmp == LimitComp::LessEq
 								&& (bucket[b].len() == 1 || b < first_zero))
 					);
 					sum[b] = bucket[b].pop();
@@ -631,16 +616,16 @@ where
 			}
 		}
 		// In case of equality this has been enforced
-		debug_assert!(lin.cmp != LimitComp::Equal || sum.iter().all(|x| x.is_none()));
+		debug_assert!(cmp != LimitComp::Equal || sum.iter().all(|x| x.is_none()));
 
 		// Enforce less-than constraint
-		if lin.cmp == LimitComp::LessEq {
+		if cmp == LimitComp::LessEq {
 			// A bucket that stayed empty means that bit of the sum is zero.
 			let sum = sum
 				.iter()
 				.map(|&l| l.map_or(BoolVal::Const(false), BoolVal::Lit))
 				.collect_vec();
-			lex_leq_const(db, &sum, lin.k, bits)?;
+			lex_leq_const(db, &sum, rhs, bits)?;
 		}
 		Ok(())
 	}
@@ -794,7 +779,7 @@ impl Decompose for BddEncoder {
 	/// stays narrow. Where a layer agrees with the next one from some total
 	/// upwards, its literal for that total is the next layer's, which is what
 	/// keeps the layers from each paying for their own.
-	fn decompose(&self, con: &IntLinear) -> Result<Vec<IntLinear>, Unsatisfiable> {
+	fn decompose(&self, con: &NormalizedIntLinear) -> Result<Vec<IntLinear>, Unsatisfiable> {
 		// The widest terms first, so that the layers narrow early and the ones
 		// after them have less to tell apart.
 		let terms = con
@@ -803,7 +788,7 @@ impl Decompose for BddEncoder {
 			.cloned()
 			.sorted_by(|a: &Term, b: &Term| b.ub().cmp(&a.ub()))
 			.collect_vec();
-		let (cmp, k) = (con.cmp(), con.k());
+		let (cmp, k) = (Comparator::from(con.cmp()), con.k());
 
 		// A variable per layer, over the totals its nodes stand for.
 		let mut layers = Vec::with_capacity(terms.len() + 1);
@@ -859,530 +844,20 @@ impl Decompose for BddEncoder {
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedBoolLinear> for BddEncoder
+impl<Db> Encoder<Db, NormalizedIntLinear> for BddEncoder
 where
 	Db: ClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
-		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = lin.trace_print()))
+		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
-	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
-		let con = IntLinear::from_normalized(db, lin)?;
-		IntLinEncoder::default().encode_decomposed(db, &con, self)
+	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
+		IntLinEncoder::default().encode_decomposed(db, con, self)
 	}
 }
 
 impl LinMarker for BddEncoder {}
-
-impl BoolLinAggregator {
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
-	)]
-	/// Perform (internal) aggregation of [`BoolLinear`] constraints,
-	/// normalizing them and simplify them into specialized forms for which
-	/// different encoding algorithms exist.
-	pub fn aggregate<Db>(&self, db: &mut Db, lin: &BoolLinear) -> Result<BoolLinVariant>
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		let mut k = lin.k;
-		// Aggregate multiple occurrences of the same
-		// variable.
-		let mut agg = FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), FxBuildHasher);
-		for term in &lin.exp.terms {
-			let var = term.0.var();
-			let entry = agg.entry(var).or_insert(0);
-			let mut coef = term.1 * lin.exp.mult;
-			if term.0.is_negated() {
-				k -= coef;
-				coef = -coef;
-			}
-			*entry += coef;
-		}
-
-		// Convert ≥ to ≤
-		if lin.cmp == Comparator::GreaterEq {
-			agg = agg.into_iter().map(|(var, coef)| (var, -coef)).collect();
-			k = -k;
-		}
-
-		let mut partition: Vec<(Constraint, Vec<(Lit, Coeff)>)> =
-			Vec::with_capacity(lin.exp.constraints.len());
-		// Adjust side constraints when literals are combined (and currently transform
-		// to partition structure)
-		let mut iter = lin.exp.terms.iter().skip(lin.exp.num_free);
-		for con in &lin.exp.constraints {
-			let mut terms = Vec::with_capacity(con.1);
-			for _ in 0..con.1 {
-				let term = iter.next().unwrap();
-				if let Some((var, i)) = agg.remove_entry(&term.0.var()) {
-					terms.push((var.into(), i));
-				}
-			}
-			if !terms.is_empty() {
-				match con.0 {
-					Constraint::Domain { lb, ub } => {
-						// Domain constraint can only be enforced when PB is coef*(x1 + 2x2 + 4x3 +
-						// ...), where l <= x1 + 2*x2 + 4*x3 + ... <= u
-						if terms.len() == con.1 && is_powers_of_two(terms.iter().map(|(_, c)| *c)) {
-							// Adjust the bounds to account for coef
-							let (lb, ub) = if lin.cmp == Comparator::GreaterEq {
-								// 0..range can be encoded by the bits multiplied by coef
-								let range = -terms.iter().fold(0, |acc, (_, coef)| acc + *coef);
-								// this range is inverted if we have flipped the comparator
-								(range - ub, range - lb)
-							} else {
-								// in both cases, l and u now represent the true constraint
-								(terms[0].1 * lb, terms[0].1 * ub)
-							};
-							partition.push((Constraint::Domain { lb, ub }, terms));
-						} else {
-							for term in terms {
-								partition.push((Constraint::AtMostOne, vec![term]));
-							}
-						}
-					}
-					_ => partition.push((con.0.clone(), terms)),
-				}
-			}
-		}
-
-		// Add remaining (unconstrained) terms.
-		debug_assert!(agg.len() <= lin.exp.num_free);
-		for (var, coef) in agg.into_iter().sorted_by_key(|&(var, _)| var) {
-			partition.push((Constraint::AtMostOne, vec![(var.into(), coef)]));
-		}
-
-		k -= lin.exp.add;
-		let cmp = match lin.cmp {
-			Comparator::LessEq | Comparator::GreaterEq => LimitComp::LessEq,
-			Comparator::Equal => LimitComp::Equal,
-		};
-
-		let convert_term_if_negative = |term: (Lit, Coeff), k: &mut Coeff| -> (Lit, PosCoeff) {
-			let (mut lit, mut coef) = term;
-			if coef.is_negative() {
-				coef = -coef;
-				lit = !lit;
-				*k += coef;
-			};
-			(lit, PosCoeff::new(coef))
-		};
-
-		let partition: Vec<Part> = partition
-			.into_iter()
-			.filter(|(_, t)| !t.is_empty()) // filter out empty groups
-			.flat_map(|part| -> Vec<Part> {
-				// convert terms with negative coefficients
-				match part {
-					(Constraint::AtMostOne, mut terms) => {
-						if terms.len() == 1 {
-							return vec![Part::Amo(
-								terms
-									.into_iter()
-									.map(|(lit, coef)| {
-										convert_term_if_negative((lit, coef), &mut k)
-									})
-									.collect(),
-							)];
-						}
-
-						// Find most negative coefficient
-						let (min_index, (_, min_coef)) = terms
-							.iter()
-							.enumerate()
-							.min_by(|(_, (_, a)), (_, (_, b))| a.cmp(b))
-							.expect("Partition should not contain constraint on zero terms");
-
-						// If negative, normalize without breaking AMO constraint
-						if min_coef.is_negative() {
-							let q = -*min_coef;
-
-							// add aux var y and constrain y <-> ( ~x1 /\ ~x2 /\ .. )
-							let y = db.new_lit();
-
-							// ~x1 /\ ~x2 /\ .. -> y == x1 \/ x2 \/ .. \/ y
-							db.add_clause(terms.iter().map(|(lit, _)| *lit).chain(once(y)))
-								.unwrap();
-
-							// y -> ( ~x1 /\ ~x2 /\ .. ) == ~y \/ ~x1, ~y \/ ~x2, ..
-							for lit in terms.iter().map(|tup| tup.0) {
-								db.add_clause([!y, !lit]).unwrap();
-							}
-
-							// this term will cancel out later when we add q*min_lit to the LHS
-							let _ = terms.remove(min_index);
-
-							// since y + x1 + x2 + ... = 1 (exactly-one), we have q*y + q*x1 + q*x2
-							// + ... = q after adding term 0*y, we can add q*y + q*x1 + q*x2
-							// + ... on the LHS, and q on the RHS
-							terms.push((y, 0)); // note: it's fine to add y into the same AMO group
-							terms = terms.iter().map(|(lit, coef)| (*lit, *coef + q)).collect();
-							k += q;
-						}
-
-						// all coefficients should be positive (since we subtracted the most
-						// negative coefficient)
-						vec![Part::Amo(
-							terms
-								.into_iter()
-								.map(|(lit, coef)| (lit, PosCoeff::new(coef)))
-								.collect(),
-						)]
-					}
-
-					(Constraint::ImplicationChain, terms) => {
-						// normalize by splitting up the chain into two chains by coef polarity,
-						// inverting the coefs of the neg
-						let (pos_chain, neg_chain): (_, Vec<_>) =
-							terms.into_iter().partition(|(_, coef)| coef.is_positive());
-						vec![
-							Part::Ic(
-								pos_chain
-									.into_iter()
-									.map(|(lit, coef)| (lit, PosCoeff::new(coef)))
-									.collect(),
-							),
-							Part::Ic(
-								neg_chain
-									.into_iter()
-									.map(|(lit, coef)| {
-										convert_term_if_negative((lit, coef), &mut k)
-									})
-									.rev() // x1 <- x2 <- x3 <- ... becomes ~x1 -> ~x2 -> ~x3 -> ...
-									.collect(),
-							),
-						]
-					}
-					(Constraint::Domain { lb: l, ub: u }, terms) => {
-						assert!(
-							terms.iter().all(|(_, coef)| coef.is_positive())
-								|| terms.iter().all(|(_, coef)| coef.is_negative()),
-							"Normalizing mixed positive/negative coefficients not yet \
-							 supported for Dom constraint on {terms:?}"
-						);
-						vec![Part::Dom(
-							terms
-								.into_iter()
-								.map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k))
-								.collect(),
-							PosCoeff::new(l),
-							PosCoeff::new(u),
-						)]
-					}
-				}
-			})
-			.map(|part| {
-				// This step has to come *after* Amo normalization
-				let filter_zero_coefficients =
-					|terms: Vec<(Lit, PosCoeff)>| -> Vec<(Lit, PosCoeff)> {
-						terms.into_iter().filter(|&(_, coef)| *coef != 0).collect()
-					};
-
-				match part {
-					Part::Amo(terms) => Part::Amo(filter_zero_coefficients(terms)),
-					Part::Ic(terms) => Part::Ic(filter_zero_coefficients(terms)),
-					Part::Dom(terms, l, u) => Part::Dom(filter_zero_coefficients(terms), l, u),
-				}
-			})
-			.filter(|part| part.iter().next().is_some()) // filter out empty groups
-			.collect();
-
-		// trivial case: constraint is unsatisfiable
-		if k < 0 {
-			db.contradiction()?;
-			unreachable!();
-		}
-		// trivial case: no literals can be activated
-		if k == 0 {
-			for part in partition {
-				for (lit, _) in part.iter() {
-					db.add_clause([!*lit])?;
-				}
-			}
-			return Ok(BoolLinVariant::Trivial);
-		}
-		let mut k = PosCoeff::new(k);
-
-		// Remove terms with coefs higher than k
-		let mut partition = partition
-			.into_iter()
-			.map(|part| match part {
-				Part::Amo(terms) => Part::Amo(
-					terms
-						.into_iter()
-						.filter(|(lit, coef)| {
-							if coef > &k {
-								db.add_clause([!*lit]).unwrap();
-								false
-							} else {
-								true
-							}
-						})
-						.collect(),
-				),
-				Part::Ic(terms) => {
-					// for IC, we can compare the running sum to k
-					let mut acc = 0;
-					Part::Ic(
-						terms
-							.into_iter()
-							.filter(|&(lit, coef)| {
-								acc += *coef;
-								if acc > *k {
-									db.add_clause([!lit]).unwrap();
-									false
-								} else {
-									true
-								}
-							})
-							.collect(),
-					)
-				}
-				Part::Dom(terms, l, u) => {
-					// remove terms exceeding k
-					let terms = terms
-						.into_iter()
-						.filter(|(lit, coef)| {
-							if coef > &k {
-								db.add_clause([!*lit]).unwrap();
-								false
-							} else {
-								true
-							}
-						})
-						.collect_vec();
-					// the one or more of the most significant bits have been removed, the upper
-					// bound could have dropped to a power of 2 (but not beyond)
-					let u = PosCoeff::new(min(*u, terms.iter().map(|&(_, coef)| *coef).sum()));
-					Part::Dom(terms, l, u)
-				}
-			})
-			.filter(|part| part.iter().next().is_some()) // filter out empty groups
-			.collect_vec();
-
-		// Normalize the constraint by the greatest common divisor of its
-		// coefficients, shrinking both the coefficients and `k` for every encoder
-		// downstream.
-		{
-			let mut iter = partition
-				.iter()
-				.flat_map(|part| part.iter())
-				.map(|&(_, coef)| coef.0);
-			if let Some(mut divisor) = iter.next() {
-				for coef in iter {
-					let mut other = coef;
-					while other != 0 {
-						(divisor, other) = (other, divisor % other);
-					}
-					if divisor == 1 {
-						break;
-					}
-				}
-				if divisor > 1 {
-					// The left hand side can only take on multiples of the divisor, so an
-					// equality that does not sit on one of those multiples is unsatisfiable.
-					if cmp == LimitComp::Equal && *k % divisor != 0 {
-						db.contradiction()?;
-						unreachable!();
-					}
-					for part in &mut partition {
-						part.div_assign(divisor);
-					}
-					// Rounding down is sound for `≤` for the same reason.
-					k = PosCoeff::new(*k / divisor);
-				}
-			}
-		}
-
-		// Check whether some literals can violate / satisfy the constraint
-		let lhs_ub = PosCoeff::new(
-			partition
-				.iter()
-				.map(|part| match part {
-					// Only a single literal of the group can be true.
-					Part::Amo(terms) => terms.iter().map(|&(_, i)| *i).max().unwrap_or(0),
-					// Every literal of the chain can be true at the same time.
-					Part::Ic(terms) => terms.iter().map(|&(_, coef)| *coef).sum(),
-					// The group is known to stay within its declared bounds, which
-					// can be tighter than the sum of its coefficients.
-					Part::Dom(terms, _, u) => {
-						debug_assert!(
-							**u <= terms.iter().map(|&(_, coef)| *coef).sum(),
-							"upper bound {u:?} of a domain group exceeds the sum of \
-							 its coefficients, so it cannot be used as a bound here"
-						);
-						**u
-					}
-				})
-				.sum(),
-		);
-
-		match cmp {
-			LimitComp::LessEq => {
-				if lhs_ub <= k {
-					return Ok(BoolLinVariant::Trivial);
-				}
-
-				// If we have only 2 (unassigned) lits, which together (but not individually)
-				// exceed k, then -x1\/-x2
-				if partition.iter().flat_map(|part| part.iter()).count() == 2 {
-					db.add_clause(
-						partition
-							.iter()
-							.flat_map(|part| part.iter())
-							.map(|(lit, _)| !*lit)
-							.collect_vec(),
-					)?;
-					return Ok(BoolLinVariant::Trivial);
-				}
-			}
-			LimitComp::Equal => {
-				if lhs_ub < k {
-					db.contradiction()?;
-					unreachable!();
-				}
-				if lhs_ub == k {
-					for part in partition {
-						match part {
-							Part::Amo(terms) => {
-								db.add_clause([terms
-									.iter()
-									.max_by(|(_, a), (_, b)| a.cmp(b))
-									.unwrap()
-									.0])?;
-							}
-							Part::Ic(terms) | Part::Dom(terms, _, _) => {
-								for (lit, _) in terms {
-									db.add_clause([lit])?;
-								}
-							}
-						};
-					}
-					return Ok(BoolLinVariant::Trivial);
-				}
-			}
-		}
-
-		// debug_assert!(!partition.flat().is_empty());
-
-		// TODO any smart way to implement len() method?
-		// TODO assert all groups are non-empty / discard empty groups?
-		debug_assert!(partition
-			.iter()
-			.flat_map(|part| part.iter())
-			.next()
-			.is_some());
-
-		// special case: all coefficients are equal, which the normalization above
-		// will have reduced to one
-		if partition
-			.iter()
-			.flat_map(|part| part.iter())
-			.all(|&(_, coef)| *coef == 1)
-		{
-			let partition = partition
-				.iter()
-				.flat_map(|part| part.iter())
-				.map(|&(lit, _)| lit)
-				.collect_vec();
-			if *k == 1 {
-				// Cardinality One constraint
-				return Ok(BoolLinVariant::CardinalityOne(CardinalityOne {
-					lits: partition,
-					cmp,
-				}));
-			}
-
-			// At most n-1 out of n is equivalent to at least *not* one
-			// Ex. at most 2 out of 3 true = at least 1 out of 3 false
-			if partition.len() == (*k + 1) as usize {
-				let neg = partition.iter().map(|&l| !l);
-				db.add_clause(neg.clone())?;
-
-				if cmp == LimitComp::LessEq {
-					return Ok(BoolLinVariant::Trivial);
-				} else {
-					// we still need to constrain x1 + x2 .. >= n-1
-					//   == (1 - ~x1) + (1 - ~x2) + .. >= n-1
-					//   == - ~x1 - ~x2 - .. <= n-1-n ( == .. <= -1)
-					//   == ~x1 + ~x2 + .. <= 1
-					return Ok(BoolLinVariant::CardinalityOne(CardinalityOne {
-						lits: neg.collect_vec(),
-						cmp: LimitComp::LessEq,
-					}));
-				}
-			}
-
-			// Encode count constraint
-			return Ok(BoolLinVariant::Cardinality(Cardinality {
-				lits: partition,
-				cmp,
-				k,
-			}));
-		}
-
-		let partition = if self.sort_same_coefficients >= 2 {
-			let (free_lits, mut partition): (Vec<_>, Vec<_>) = partition.into_iter().partition(
-				|part| matches!(part, Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1),
-			);
-
-			for (coef, lits) in free_lits
-				.into_iter()
-				.map(|part| match part {
-					Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1 => x[0],
-					_ => unreachable!(),
-				})
-				.map(|(lit, coef)| (coef, lit))
-				.into_group_map()
-				.into_iter()
-			{
-				if self.sort_same_coefficients >= 2 && lits.len() >= self.sort_same_coefficients {
-					let c = *k / *coef;
-
-					let y = IntVarOrd::from_bounds(db, 0, c, String::from("s")).into();
-					self.sorted_encoder
-						.encode(db, &Sorted::new(&lits, cmp.clone(), &y))
-						.unwrap();
-
-					let lin_exp = BoolLinExp::from(&y);
-					partition.push(Part::Ic(
-						lin_exp
-							.terms
-							.into_iter()
-							.map(|(lit, _)| (lit, coef))
-							.collect(),
-					));
-				} else {
-					for x in lits {
-						partition.push(Part::Amo(vec![(x, coef)]));
-					}
-				}
-			}
-
-			partition
-		} else {
-			partition
-		};
-
-		// Default case: encode pseudo-Boolean linear constraint
-		Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-			terms: partition,
-			cmp,
-			k,
-		}))
-	}
-	/// For non-zero `n`, detect groups of minimum size `n` with free literals
-	/// and same coefficients, sort them (using provided SortedEncoder) and add
-	/// them as a single implication chain group
-	pub fn sort_same_coefficients(&mut self, sorted_encoder: SortedEncoder, n: usize) -> &mut Self {
-		self.sorted_encoder = sorted_encoder;
-		self.sort_same_coefficients = n;
-		self
-	}
-}
 
 impl BoolLinExp {
 	// TODO I'm not really happy with this interface yet...
@@ -1894,10 +1369,14 @@ impl From<LimitComp> for Comparator {
 impl<Db, Enc> Encoder<Db, Cardinality> for Enc
 where
 	Db: ClauseDatabase + ?Sized,
-	Enc: Encoder<Db, NormalizedBoolLinear> + LinMarker,
+	Enc: Encoder<Db, NormalizedIntLinear> + LinMarker,
 {
 	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
-		self.encode(db, &NormalizedBoolLinear::from(con.clone()))
+		// A cardinality constraint is a linear one whose terms all count for
+		// one, so it is read as an integer constraint the same way.
+		let lin = NormalizedBoolLinear::from(con.clone());
+		let con = NormalizedIntLinear::from_normalized(db, &lin)?;
+		self.encode(db, &con)
 	}
 }
 
@@ -1910,52 +1389,13 @@ impl Display for LimitComp {
 	}
 }
 
-impl<Enc, Agg> LinearEncoder<Enc, Agg> {
-	/// Access the [`BoolLinAggregator`] used by this encoder.
-	pub fn linear_aggregator(&self) -> &Agg {
-		&self.agg
-	}
-
-	/// Create a new [`LinearEncoder`] with the given [`Encoder`] for
-	/// [`BoolLinVariant`]s and [`BoolLinAggregator`].
-	pub fn new(enc: Enc, agg: Agg) -> Self {
-		Self { enc, agg }
-	}
-
-	/// Access the [`Encoder`] for [`BoolLinVariant`]s used by this encoder.
-	pub fn variant_encoder(&self) -> &Enc {
-		&self.enc
-	}
-
-	/// Change the [`BoolLinAggregator`] used by this encoder.
-	pub fn with_linear_aggregator(&mut self, agg: Agg) -> &mut Self {
-		self.agg = agg;
-		self
-	}
-
-	/// Change the [`Encoder`] for [`BoolLinVariant`]s used by this encoder.
-	pub fn with_variant_encoder(&mut self, enc: Enc) -> &mut Self {
-		self.enc = enc;
-		self
-	}
-}
-
-impl<Db, Enc> Encoder<Db, BoolLinear> for LinearEncoder<Enc>
-where
-	Db: ClauseDatabase + ?Sized,
-	Enc: Encoder<Db, BoolLinVariant>,
-{
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "linear_encoder", skip_all, fields(constraint = lin.trace_print()))
-	)]
-	fn encode(&self, db: &mut Db, lin: &BoolLinear) -> Result {
-		let variant = self.agg.aggregate(db, lin)?;
-		self.enc.encode(db, &variant)
-	}
-}
-
 impl NormalizedBoolLinear {
+	/// The comparator of the constraint, which normalising leaves as `≤` or
+	/// `=`.
+	pub(crate) fn limit_comparator(&self) -> LimitComp {
+		self.cmp.clone()
+	}
+
 	/// The groups of terms the constraint was found to have.
 	pub(crate) fn parts(&self) -> impl Iterator<Item = &Part> + '_ {
 		self.terms.iter()
@@ -1994,25 +1434,6 @@ impl NormalizedBoolLinear {
 	/// compares its left-hand side terms.
 	pub fn set_rhs(&mut self, k: Coeff) {
 		self.k = PosCoeff::new(k);
-	}
-
-	#[cfg(any(feature = "tracing", test))]
-	pub(crate) fn trace_print(&self) -> String {
-		use crate::trace::trace_print_lit;
-
-		let x = itertools::join(
-			self.terms
-				.iter()
-				.flat_map(|part| part.iter().map(|(lit, coef)| (lit, **coef)))
-				.map(|(l, c)| format!("{c:?}·{}", trace_print_lit(l))),
-			" + ",
-		);
-		let op = if self.cmp == LimitComp::LessEq {
-			"≤"
-		} else {
-			"="
-		};
-		format!("{x} {op} {:?}", *self.k)
 	}
 }
 
@@ -2061,39 +1482,6 @@ impl From<CardinalityOne> for NormalizedBoolLinear {
 	}
 }
 
-impl Part {
-	/// Divide every coefficient in the part, and any domain bounds it carries,
-	/// by `g`.
-	///
-	/// The caller is required to ensure that `g` divides each of these values
-	/// exactly.
-	pub(crate) fn div_assign(&mut self, g: Coeff) {
-		let terms = match self {
-			Part::Amo(terms) | Part::Ic(terms) => terms,
-			Part::Dom(terms, lb, ub) => {
-				debug_assert!(
-					**lb % g == 0 && **ub % g == 0,
-					"domain bounds {lb}..{ub} are not divisible by {g}"
-				);
-				**lb /= g;
-				**ub /= g;
-				terms
-			}
-		};
-		for (_, coef) in terms {
-			debug_assert!(
-				**coef % g == 0,
-				"coefficient {coef} is not divisible by {g}"
-			);
-			**coef /= g;
-		}
-	}
-
-	pub(crate) fn iter(&self) -> impl Iterator<Item = &(Lit, PosCoeff)> {
-		self.into_iter()
-	}
-}
-
 impl<'a> IntoIterator for &'a Part {
 	type IntoIter = std::slice::Iter<'a, (Lit, PosCoeff)>;
 	type Item = &'a (Lit, PosCoeff);
@@ -2136,55 +1524,6 @@ impl Display for PosCoeff {
 	}
 }
 
-impl<LinEnc, CardEnc, AmoEnc> StaticLinEncoder<LinEnc, CardEnc, AmoEnc> {
-	/// Get mutable access to the encoder that is used to encode
-	/// [`BoolLinVariant::CardinalityOne`] variants.
-	pub fn amo_encoder(&mut self) -> &mut AmoEnc {
-		&mut self.amo_enc
-	}
-
-	/// Get mutable access to the encoder that is used to encode
-	/// [`BoolLinVariant::Cardinality`] variants.
-	pub fn card_encoder(&mut self) -> &mut CardEnc {
-		&mut self.card_enc
-	}
-
-	/// Get mutable access to the encoder that is used to encode
-	/// [`BoolLinVariant::Linear`] variants.
-	pub fn lin_encoder(&mut self) -> &mut LinEnc {
-		&mut self.lin_enc
-	}
-
-	/// Create a new [`StaticLinEncoder`] with the given encoders to encode
-	/// [`BoolLinVariant::Linear`], [`BoolLinVariant::Cardinality`], and
-	/// [`BoolLinVariant::CardinalityOne`] variants respectively.
-	pub fn new(lin_enc: LinEnc, card_enc: CardEnc, amo_enc: AmoEnc) -> Self {
-		Self {
-			lin_enc,
-			card_enc,
-			amo_enc,
-		}
-	}
-}
-
-impl<Db, LinEnc, CardEnc, AmoEnc> Encoder<Db, BoolLinVariant>
-	for StaticLinEncoder<LinEnc, CardEnc, AmoEnc>
-where
-	Db: ClauseDatabase + ?Sized,
-	LinEnc: Encoder<Db, NormalizedBoolLinear>,
-	CardEnc: Encoder<Db, Cardinality>,
-	AmoEnc: Encoder<Db, CardinalityOne>,
-{
-	fn encode(&self, db: &mut Db, lin: &BoolLinVariant) -> Result {
-		match &lin {
-			BoolLinVariant::Linear(lin) => self.lin_enc.encode(db, lin),
-			BoolLinVariant::Cardinality(card) => self.card_enc.encode(db, card),
-			BoolLinVariant::CardinalityOne(amo) => self.amo_enc.encode(db, amo),
-			BoolLinVariant::Trivial => Ok(()),
-		}
-	}
-}
-
 impl SwcEncoder {
 	/// Set whether to add consistency constraints on the intermediate integer
 	/// variables.
@@ -2215,12 +1554,12 @@ impl Decompose for SwcEncoder {
 	/// the totals telescope: adding the steps together leaves the first total
 	/// against the last, which is the constraint. Counting down from nothing to
 	/// minus the bound keeps every total within it.
-	fn decompose(&self, con: &IntLinear) -> Result<Vec<IntLinear>, Unsatisfiable> {
+	fn decompose(&self, con: &NormalizedIntLinear) -> Result<Vec<IntLinear>, Unsatisfiable> {
 		// Two terms or fewer are already as small as the chain would make them.
 		if con.terms().len() <= 2 {
-			return Ok(vec![con.clone()]);
+			return Ok(vec![con.into()]);
 		}
-		let (cmp, k, n) = (con.cmp(), con.k(), con.terms().len());
+		let (cmp, k, n) = (Comparator::from(con.cmp()), con.k(), con.terms().len());
 		let totals = (0..=n)
 			.map(|i| {
 				// The ends are fixed, so that what the chain proves between
@@ -2257,17 +1596,16 @@ impl Decompose for SwcEncoder {
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedBoolLinear> for SwcEncoder
+impl<Db> Encoder<Db, NormalizedIntLinear> for SwcEncoder
 where
 	Db: ClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
-		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = lin.trace_print()))
+		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
-	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
-		let con = IntLinear::from_normalized(db, lin)?;
-		IntLinEncoder::default().encode_decomposed(db, &con, self)
+	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
+		IntLinEncoder::default().encode_decomposed(db, con, self)
 	}
 }
 
@@ -2300,12 +1638,12 @@ impl Decompose for TotalizerEncoder {
 	/// Sum the terms up a balanced binary tree, so that no intermediate holds
 	/// more than half of them and none is wider than the terms beneath it can
 	/// reach.
-	fn decompose(&self, con: &IntLinear) -> Result<Vec<IntLinear>, Unsatisfiable> {
+	fn decompose(&self, con: &NormalizedIntLinear) -> Result<Vec<IntLinear>, Unsatisfiable> {
 		// Two terms or fewer are already as small as the tree would make them.
 		if con.terms().len() <= 2 {
-			return Ok(vec![con.clone()]);
+			return Ok(vec![con.into()]);
 		}
-		let (cmp, k) = (con.cmp(), con.k());
+		let (cmp, k) = (Comparator::from(con.cmp()), con.k());
 		let mut cons = Vec::new();
 		// Start from the narrowest, so that the wide terms meet late and the
 		// intermediates below them stay small.
@@ -2366,17 +1704,16 @@ impl Decompose for TotalizerEncoder {
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedBoolLinear> for TotalizerEncoder
+impl<Db> Encoder<Db, NormalizedIntLinear> for TotalizerEncoder
 where
 	Db: ClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
-		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = lin.trace_print()))
+		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
-	fn encode(&self, db: &mut Db, lin: &NormalizedBoolLinear) -> Result {
-		let con = IntLinear::from_normalized(db, lin)?;
-		IntLinEncoder::default().encode_decomposed(db, &con, self)
+	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
+		IntLinEncoder::default().encode_decomposed(db, con, self)
 	}
 }
 
@@ -2395,6 +1732,7 @@ mod tests {
 					},
 					cardinality_one::{CardinalityOne, PairwiseEncoder},
 					helpers::tests::{assert_solutions, expect_file},
+					int_linear::NormalizedIntLinear,
 					ClauseDatabaseTools, Cnf, Encoder, Lit,
 				};
 
@@ -2404,16 +1742,16 @@ mod tests {
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: construct_terms(&[(a, 2), (b, 3), (c, 5)]),
-								cmp: LimitComp::LessEq,
-								k: PosCoeff::new(6),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: construct_terms(&[(a, 2), (b, 3), (c, 5)]),
+							cmp: LimitComp::LessEq,
+							k: PosCoeff::new(6),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2431,23 +1769,23 @@ mod tests {
 					let d = cnf.new_lit();
 					let e = cnf.new_lit();
 					let f = cnf.new_lit();
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: construct_terms(&[
-									(!a, 3),
-									(!b, 6),
-									(!c, 1),
-									(!d, 2),
-									(!e, 3),
-									(!f, 6),
-								]),
-								cmp: LimitComp::LessEq,
-								k: PosCoeff::new(19),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: construct_terms(&[
+								(!a, 3),
+								(!b, 6),
+								(!c, 1),
+								(!d, 2),
+								(!e, 3),
+								(!f, 6),
+							]),
+							cmp: LimitComp::LessEq,
+							k: PosCoeff::new(19),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2462,16 +1800,16 @@ mod tests {
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: construct_terms(&[(a, 1), (b, 2), (c, 4)]),
-								cmp: LimitComp::LessEq,
-								k: PosCoeff::new(5),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: construct_terms(&[(a, 1), (b, 2), (c, 4)]),
+							cmp: LimitComp::LessEq,
+							k: PosCoeff::new(5),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2486,16 +1824,16 @@ mod tests {
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: construct_terms(&[(a, 4), (b, 6), (c, 7)]),
-								cmp: LimitComp::LessEq,
-								k: PosCoeff::new(10),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: construct_terms(&[(a, 4), (b, 6), (c, 7)]),
+							cmp: LimitComp::LessEq,
+							k: PosCoeff::new(10),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2510,16 +1848,16 @@ mod tests {
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: construct_terms(&[(a, 1), (b, 2), (c, 4)]),
-								cmp: LimitComp::Equal,
-								k: PosCoeff::new(5),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: construct_terms(&[(a, 1), (b, 2), (c, 4)]),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(5),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2534,16 +1872,16 @@ mod tests {
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: construct_terms(&[(a, 1), (b, 2), (c, 3)]),
-								cmp: LimitComp::Equal,
-								k: PosCoeff::new(3),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: construct_terms(&[(a, 1), (b, 2), (c, 3)]),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(3),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2559,16 +1897,16 @@ mod tests {
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
 					let d = cnf.new_lit();
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: construct_terms(&[(a, 2), (b, 3), (c, 5), (d, 7)]),
-								cmp: LimitComp::Equal,
-								k: PosCoeff::new(10),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: construct_terms(&[(a, 2), (b, 3), (c, 5), (d, 7)]),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(10),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2584,16 +1922,16 @@ mod tests {
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
 					let d = cnf.new_lit();
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: construct_terms(&[(a, 2), (b, 1), (c, 2), (d, 2)]),
-								cmp: LimitComp::Equal,
-								k: PosCoeff::new(4),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: construct_terms(&[(a, 2), (b, 1), (c, 2), (d, 2)]),
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(4),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2624,19 +1962,19 @@ mod tests {
 					let mut cnf = Cnf::default();
 					let (a, b, c, d) = cnf.new_lits();
 					amo(&mut cnf, &[&[a, b], &[c, d]]);
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: vec![
-									Part::Amo(vec![(a, PosCoeff::new(3)), (b, PosCoeff::new(5))]),
-									Part::Amo(vec![(c, PosCoeff::new(2)), (d, PosCoeff::new(4))]),
-								],
-								cmp: LimitComp::LessEq,
-								k: PosCoeff::new(7),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: vec![
+								Part::Amo(vec![(a, PosCoeff::new(3)), (b, PosCoeff::new(5))]),
+								Part::Amo(vec![(c, PosCoeff::new(2)), (d, PosCoeff::new(4))]),
+							],
+							cmp: LimitComp::LessEq,
+							k: PosCoeff::new(7),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2650,19 +1988,19 @@ mod tests {
 					let mut cnf = Cnf::default();
 					let (a, b, c, d) = cnf.new_lits();
 					amo(&mut cnf, &[&[a, b], &[c, d]]);
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: vec![
-									Part::Amo(vec![(a, PosCoeff::new(3)), (b, PosCoeff::new(5))]),
-									Part::Amo(vec![(c, PosCoeff::new(2)), (d, PosCoeff::new(4))]),
-								],
-								cmp: LimitComp::Equal,
-								k: PosCoeff::new(7),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: vec![
+								Part::Amo(vec![(a, PosCoeff::new(3)), (b, PosCoeff::new(5))]),
+								Part::Amo(vec![(c, PosCoeff::new(2)), (d, PosCoeff::new(4))]),
+							],
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(7),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2677,23 +2015,23 @@ mod tests {
 					let (a, b, c, d) = cnf.new_lits();
 					amo(&mut cnf, &[&[a, b, c]]);
 					// Two of the mutually exclusive terms share a coefficient.
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: vec![
-									Part::Amo(vec![
-										(a, PosCoeff::new(3)),
-										(b, PosCoeff::new(3)),
-										(c, PosCoeff::new(5)),
-									]),
-									Part::Amo(vec![(d, PosCoeff::new(4))]),
-								],
-								cmp: LimitComp::LessEq,
-								k: PosCoeff::new(7),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: vec![
+								Part::Amo(vec![
+									(a, PosCoeff::new(3)),
+									(b, PosCoeff::new(3)),
+									(c, PosCoeff::new(5)),
+								]),
+								Part::Amo(vec![(d, PosCoeff::new(4))]),
+							],
+							cmp: LimitComp::LessEq,
+							k: PosCoeff::new(7),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2707,23 +2045,23 @@ mod tests {
 					let mut cnf = Cnf::default();
 					let (a, b, c, d) = cnf.new_lits();
 					amo(&mut cnf, &[&[a, b, c]]);
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: vec![
-									Part::Amo(vec![
-										(a, PosCoeff::new(3)),
-										(b, PosCoeff::new(3)),
-										(c, PosCoeff::new(5)),
-									]),
-									Part::Amo(vec![(d, PosCoeff::new(4))]),
-								],
-								cmp: LimitComp::Equal,
-								k: PosCoeff::new(7),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: vec![
+								Part::Amo(vec![
+									(a, PosCoeff::new(3)),
+									(b, PosCoeff::new(3)),
+									(c, PosCoeff::new(5)),
+								]),
+								Part::Amo(vec![(d, PosCoeff::new(4))]),
+							],
+							cmp: LimitComp::Equal,
+							k: PosCoeff::new(7),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2740,23 +2078,23 @@ mod tests {
 					for (x, y) in [(a, b), (b, c)] {
 						cnf.add_clause([!y, x]).unwrap();
 					}
-					$encoder
-						.encode(
-							&mut cnf,
-							&NormalizedBoolLinear {
-								terms: vec![
-									Part::Ic(vec![
-										(a, PosCoeff::new(2)),
-										(b, PosCoeff::new(3)),
-										(c, PosCoeff::new(4)),
-									]),
-									Part::Amo(vec![(d, PosCoeff::new(5))]),
-								],
-								cmp: LimitComp::LessEq,
-								k: PosCoeff::new(8),
-							},
-						)
-						.unwrap();
+					let con = NormalizedIntLinear::from_normalized(
+						&mut cnf,
+						&NormalizedBoolLinear {
+							terms: vec![
+								Part::Ic(vec![
+									(a, PosCoeff::new(2)),
+									(b, PosCoeff::new(3)),
+									(c, PosCoeff::new(4)),
+								]),
+								Part::Amo(vec![(d, PosCoeff::new(5))]),
+							],
+							cmp: LimitComp::LessEq,
+							k: PosCoeff::new(8),
+						},
+					)
+					.unwrap();
+					$encoder.encode(&mut cnf, &con).unwrap();
 
 					assert_solutions(
 						&cnf,
@@ -2770,14 +2108,15 @@ mod tests {
 					let mut cnf = Cnf::default();
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
-					let res = $encoder.encode(
+					let res = NormalizedIntLinear::from_normalized(
 						&mut cnf,
 						&NormalizedBoolLinear {
 							terms: construct_terms(&[(a, 3), (b, 9)]),
 							cmp: LimitComp::Equal,
 							k: PosCoeff::new(10),
 						},
-					);
+					)
+					.and_then(|con| $encoder.encode(&mut cnf, &con));
 					if res.is_ok() {
 						assert_solutions(
 							&cnf,
@@ -2796,9 +2135,9 @@ mod tests {
 	use traced_test::test;
 
 	use crate::{
+		aggregator::{BoolLinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},
 		bool_linear::{
-			AdderEncoder, BoolLinAggregator, BoolLinExp, BoolLinVariant, BoolLinear, Comparator,
-			LimitComp, LinearEncoder, NormalizedBoolLinear, Part, PosCoeff, StaticLinEncoder,
+			AdderEncoder, BoolLinExp, BoolLinear, Comparator, LimitComp, Part, PosCoeff,
 			TotalizerEncoder,
 		},
 		cardinality::{tests::card_test_suite, Cardinality},
@@ -2810,6 +2149,72 @@ mod tests {
 		sorted::SortedEncoder,
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 	};
+
+	/// An aggregated constraint as a test wants to read it: what each group of
+	/// terms is worth, and what the sum is compared against.
+	///
+	/// A group is an integer by the time aggregation is done, so what it is
+	/// worth is read back off whichever encoding it was given — which for every
+	/// kind of group gives the literals and coefficients it was made from.
+	#[derive(Debug, PartialEq)]
+	pub(crate) enum Aggregated {
+		Cardinality(Vec<Lit>, LimitComp, Coeff),
+		CardinalityOne(Vec<Lit>, LimitComp),
+		Linear(Vec<Vec<(Lit, Coeff)>>, LimitComp, Coeff),
+		Trivial,
+	}
+
+	/// Aggregate `con` and read the result back.
+	fn aggregated(
+		db: &mut Cnf,
+		agg: &BoolLinAggregator,
+		con: &BoolLinear,
+	) -> Result<Aggregated, Unsatisfiable> {
+		Ok(match agg.aggregate(db, con)? {
+			LinVariant::Linear(lin) => {
+				let (cmp, k) = (lin.cmp(), lin.k());
+				Aggregated::Linear(sorted_weights(lin.grouped_weights(db)?), cmp, k)
+			}
+			LinVariant::Cardinality(card) => Aggregated::Cardinality(
+				card.iter_lits().collect(),
+				into_limit(card.comparator()),
+				card.rhs(),
+			),
+			LinVariant::CardinalityOne(amo) => {
+				Aggregated::CardinalityOne(amo.iter_lits().collect(), into_limit(amo.comparator()))
+			}
+			LinVariant::Trivial => Aggregated::Trivial,
+		})
+	}
+
+	/// A comparator as normalisation leaves it, which is never `≥`.
+	fn into_limit(cmp: Comparator) -> LimitComp {
+		match cmp {
+			Comparator::Equal => LimitComp::Equal,
+			_ => LimitComp::LessEq,
+		}
+	}
+
+	/// The literals and coefficients of each group, as the parts a test names
+	/// them by.
+	fn weights(parts: Vec<Part>) -> Vec<Vec<(Lit, Coeff)>> {
+		sorted_weights(
+			parts
+				.iter()
+				.map(|p| p.iter().map(|&(l, c)| (l, *c)).collect())
+				.collect(),
+		)
+	}
+
+	/// Groups in a settled order, neither the grouping nor what is in one
+	/// depending on which way round they came out.
+	fn sorted_weights(mut groups: Vec<Vec<(Lit, Coeff)>>) -> Vec<Vec<(Lit, Coeff)>> {
+		for group in &mut groups {
+			group.sort();
+		}
+		groups.sort();
+		groups
+	}
 
 	#[test]
 	fn ripple_carry_adder_computes_the_sum() {
@@ -2875,15 +2280,16 @@ mod tests {
 		let (a, b, c, d) = cnf.new_lits();
 		// Correctly detect that all but one literal can be set to true
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 1, 1, 1], &[a, b, c, d]),
 					Comparator::LessEq,
 					3
 				)
 			),
-			Ok(BoolLinVariant::Trivial)
+			Ok(Aggregated::Trivial)
 		);
 		assert_encoding(
 			&cnf,
@@ -2894,8 +2300,9 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 1, 1], &[a, b, c]),
 					Comparator::Equal,
@@ -2903,10 +2310,10 @@ mod tests {
 				)
 			),
 			// actually leaves over a CardinalityOne constraint
-			Ok(BoolLinVariant::CardinalityOne(CardinalityOne {
-				lits: vec![!a, !b, !c],
-				cmp: LimitComp::LessEq,
-			}))
+			Ok(Aggregated::CardinalityOne(
+				vec![!a, !b, !c],
+				LimitComp::LessEq
+			))
 		);
 	}
 
@@ -2917,19 +2324,20 @@ mod tests {
 		// A term that cannot contribute to the sum is dropped entirely, rather
 		// than kept with a coefficient of zero
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[0, 2, 3, 4], &[a, b, c, d]),
 					Comparator::LessEq,
 					8
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: construct_terms(&[(b, 2), (c, 3), (d, 4)]),
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(8)
-			}))
+			Ok(Aggregated::Linear(
+				weights(construct_terms(&[(b, 2), (c, 3), (d, 4)])),
+				LimitComp::LessEq,
+				*PosCoeff::new(8)
+			))
 		);
 	}
 
@@ -2939,19 +2347,20 @@ mod tests {
 		let (a, b, c) = cnf.new_lits();
 		// 2a + 4b + 6c ≤ 7 is divided by 2, rounding the right hand side down
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[2, 4, 6], &[a, b, c]),
 					Comparator::LessEq,
 					7
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: construct_terms(&[(a, 1), (b, 2), (c, 3)]),
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(3)
-			}))
+			Ok(Aggregated::Linear(
+				weights(construct_terms(&[(a, 1), (b, 2), (c, 3)])),
+				LimitComp::LessEq,
+				*PosCoeff::new(3)
+			))
 		);
 
 		// An equality that does not sit on a multiple of the divisor is
@@ -2959,8 +2368,9 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let (a, b) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[2, 4], &[a, b]),
 					Comparator::Equal,
@@ -2978,18 +2388,16 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[3, 3, 3, 7], &[a, b, c, d]),
 					Comparator::LessEq,
 					5
 				)
 			),
-			Ok(BoolLinVariant::CardinalityOne(CardinalityOne {
-				lits: vec![a, b, c],
-				cmp: LimitComp::LessEq,
-			}))
+			Ok(Aggregated::CardinalityOne(vec![a, b, c], LimitComp::LessEq))
 		);
 
 		// The same under `=`: once 7d is dropped the remaining sum can only reach
@@ -2997,8 +2405,9 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[3, 3, 3, 7], &[a, b, c, d]),
 					Comparator::Equal,
@@ -3012,19 +2421,20 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[2, 3, 4], &[a, b, c]),
 					Comparator::LessEq,
 					7
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: construct_terms(&[(a, 2), (b, 3), (c, 4)]),
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(7)
-			}))
+			Ok(Aggregated::Linear(
+				weights(construct_terms(&[(a, 2), (b, 3), (c, 4)])),
+				LimitComp::LessEq,
+				*PosCoeff::new(7)
+			))
 		);
 	}
 
@@ -3034,19 +2444,20 @@ mod tests {
 		let (a, b, c) = cnf.new_lits();
 		// Simple aggregation of multiple occurrences of the same literal
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 2, 1, 2], &[a, a, b, c]),
 					Comparator::LessEq,
 					3
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: construct_terms(&[(1, 3), (2, 1), (3, 2)]),
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(3)
-			}))
+			Ok(Aggregated::Linear(
+				weights(construct_terms(&[(1, 3), (2, 1), (3, 2)])),
+				LimitComp::LessEq,
+				*PosCoeff::new(3)
+			))
 		);
 
 		// Aggregation of positive and negative occurrences of the same literal
@@ -3056,36 +2467,38 @@ mod tests {
 		// -1*x1 + ... <= 1
 		// +1*~x1 + ... <= 2
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 2, 1, 2], &[a, !a, b, c]),
 					Comparator::LessEq,
 					3
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: construct_terms(&[(!a, 1), (b, 1), (c, 2)]),
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(2)
-			}))
+			Ok(Aggregated::Linear(
+				weights(construct_terms(&[(!a, 1), (b, 1), (c, 2)])),
+				LimitComp::LessEq,
+				*PosCoeff::new(2)
+			))
 		);
 
 		// Aggregation of positive and negative coefficients of the same literal
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, -2, 1, 2], &[a, a, b, c]),
 					Comparator::LessEq,
 					2,
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: construct_terms(&[(!a, 1), (b, 1), (c, 2)]),
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(3)
-			}))
+			Ok(Aggregated::Linear(
+				weights(construct_terms(&[(!a, 1), (b, 1), (c, 2)])),
+				LimitComp::LessEq,
+				*PosCoeff::new(3)
+			))
 		);
 
 		assert_eq!(cnf.num_clauses(), 0);
@@ -3098,143 +2511,146 @@ mod tests {
 
 		// Correctly detect at most one
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 1, 1], &[a, b, c]),
 					Comparator::LessEq,
 					1
 				)
 			),
-			Ok(BoolLinVariant::CardinalityOne(CardinalityOne {
-				lits: vec![a, b, c],
-				cmp: LimitComp::LessEq
-			}))
+			Ok(Aggregated::CardinalityOne(vec![a, b, c], LimitComp::LessEq))
 		);
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[2, 2, 2], &[a, b, c]),
 					Comparator::LessEq,
 					2
 				)
 			),
-			Ok(BoolLinVariant::CardinalityOne(CardinalityOne {
-				lits: vec![a, b, c],
-				cmp: LimitComp::LessEq
-			}))
+			Ok(Aggregated::CardinalityOne(vec![a, b, c], LimitComp::LessEq))
 		);
 
 		// Correctly detect at most k
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 1, 1, 1], &[a, b, c, d]),
 					Comparator::LessEq,
 					2
 				)
 			),
-			Ok(BoolLinVariant::Cardinality(Cardinality {
-				lits: vec![a, b, c, d],
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(2),
-			}))
+			Ok(Aggregated::Cardinality(
+				vec![a, b, c, d],
+				LimitComp::LessEq,
+				*PosCoeff::new(2)
+			))
 		);
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[3, 3, 3, 3], &[a, b, c, d]),
 					Comparator::LessEq,
 					7
 				)
 			),
-			Ok(BoolLinVariant::Cardinality(Cardinality {
-				lits: vec![a, b, c, d],
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(2),
-			}))
+			Ok(Aggregated::Cardinality(
+				vec![a, b, c, d],
+				LimitComp::LessEq,
+				*PosCoeff::new(2)
+			))
 		);
 
 		// Correctly detect equal k
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 1, 1, 1], &[a, b, c, d]),
 					Comparator::Equal,
 					2
 				)
 			),
-			Ok(BoolLinVariant::Cardinality(Cardinality {
-				lits: vec![a, b, c, d],
-				cmp: LimitComp::Equal,
-				k: PosCoeff::new(2),
-			}))
+			Ok(Aggregated::Cardinality(
+				vec![a, b, c, d],
+				LimitComp::Equal,
+				*PosCoeff::new(2)
+			))
 		);
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[3, 3, 3, 3], &[a, b, c, d]),
 					Comparator::Equal,
 					6
 				)
 			),
-			Ok(BoolLinVariant::Cardinality(Cardinality {
-				lits: vec![a, b, c, d],
-				cmp: LimitComp::Equal,
-				k: PosCoeff::new(2),
-			}))
+			Ok(Aggregated::Cardinality(
+				vec![a, b, c, d],
+				LimitComp::Equal,
+				*PosCoeff::new(2)
+			))
 		);
 
 		// Is still normal Boolean linear in-equality
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 2, 2], &[a, b, c]),
 					Comparator::LessEq,
 					2
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: construct_terms(&[(a, 1), (b, 2), (c, 2)]),
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(2),
-			}))
+			Ok(Aggregated::Linear(
+				weights(construct_terms(&[(a, 1), (b, 2), (c, 2)])),
+				LimitComp::LessEq,
+				*PosCoeff::new(2)
+			))
 		);
 
 		// Is still normal Boolean linear equality
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 2, 2], &[a, b, c]),
 					Comparator::Equal,
 					2
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: construct_terms(&[(a, 1), (b, 2), (c, 2)]),
-				cmp: LimitComp::Equal,
-				k: PosCoeff::new(2),
-			}))
+			Ok(Aggregated::Linear(
+				weights(construct_terms(&[(a, 1), (b, 2), (c, 2)])),
+				LimitComp::Equal,
+				*PosCoeff::new(2)
+			))
 		);
 
 		// Correctly identify that the AMO is limiting the LHS ub
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_terms(&[(c, -1)]).add_choice(&[(a, -1), (b, -1)]),
 					Comparator::LessEq,
 					-2,
 				)
 			),
-			Ok(BoolLinVariant::Trivial)
+			Ok(Aggregated::Trivial)
 		);
 	}
 
@@ -3244,18 +2660,16 @@ mod tests {
 		let vars = cnf.new_var_range(3).iter_lits().collect_vec();
 		// An exactly one constraint adds an exactly one constraint
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 1, 1], &vars),
 					Comparator::Equal,
 					1
 				)
 			),
-			Ok(BoolLinVariant::CardinalityOne(CardinalityOne {
-				lits: vars,
-				cmp: LimitComp::Equal
-			}))
+			Ok(Aggregated::CardinalityOne(vars, LimitComp::Equal))
 		);
 		assert_eq!(cnf.num_clauses(), 0);
 	}
@@ -3265,16 +2679,17 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d, e, f, g) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 2, 1, 1, 4, 1, 1], &[a, !b, c, d, !e, f, !g]),
 					Comparator::GreaterEq,
 					7
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: construct_terms(&[
+			Ok(Aggregated::Linear(
+				weights(construct_terms(&[
 					(e, 4),
 					(b, 2),
 					(g, 1),
@@ -3282,10 +2697,10 @@ mod tests {
 					(!a, 1),
 					(!f, 1),
 					(!c, 1)
-				]),
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(4),
-			}))
+				])),
+				LimitComp::LessEq,
+				*PosCoeff::new(4)
+			))
 		);
 		assert_eq!(cnf.num_clauses(), 0);
 	}
@@ -3297,58 +2712,62 @@ mod tests {
 
 		// Correctly convert a negative coefficient
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[2, 3, -2], &[a, b, c]),
 					Comparator::LessEq,
 					2
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: construct_terms(&[(a, 2), (b, 3), (!c, 2)]),
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(4),
-			}))
+			Ok(Aggregated::Linear(
+				weights(construct_terms(&[(a, 2), (b, 3), (!c, 2)])),
+				LimitComp::LessEq,
+				*PosCoeff::new(4)
+			))
 		);
 
 		// Correctly convert multiple negative coefficients
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[-1, -1, -1], &[a, b, c]),
 					Comparator::LessEq,
 					-2,
 				)
 			),
-			Ok(BoolLinVariant::CardinalityOne(CardinalityOne {
-				lits: vec![!a, !b, !c],
-				cmp: LimitComp::LessEq
-			}))
+			Ok(Aggregated::CardinalityOne(
+				vec![!a, !b, !c],
+				LimitComp::LessEq
+			))
 		);
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[-1, -2, -3], &[a, b, c]),
 					Comparator::LessEq,
 					-2,
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: construct_terms(&[(!a, 1), (!b, 2), (!c, 3)]),
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(4),
-			}))
+			Ok(Aggregated::Linear(
+				weights(construct_terms(&[(!a, 1), (!b, 2), (!c, 3)])),
+				LimitComp::LessEq,
+				*PosCoeff::new(4)
+			))
 		);
 
 		// Correctly convert multiple negative coefficients with AMO constraints
 		let mut cnf = Cnf::default();
 		let (a, b, c, d, e, f) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::default()
 						.add_choice(&[(a, -1), (b, -3), (c, -4)])
@@ -3357,8 +2776,8 @@ mod tests {
 					-4,
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: vec![
+			Ok(Aggregated::Linear(
+				weights(vec![
 					Part::Amo(vec![
 						(a, PosCoeff::new(3)),
 						(b, PosCoeff::new(1)),
@@ -3369,18 +2788,19 @@ mod tests {
 						(e, PosCoeff::new(2)),
 						(Lit(NonZeroI32::new(8).unwrap()), PosCoeff::new(5))
 					]),
-				],
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(5),
-			}))
+				]),
+				LimitComp::LessEq,
+				*PosCoeff::new(5)
+			))
 		);
 
 		// Correctly convert multiple negative coefficients with side constraints
 		let mut cnf = Cnf::default();
 		let (a, b, c, d, e, f) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::default().add_chain(&[
 						(a, 1),
@@ -3394,8 +2814,8 @@ mod tests {
 					3
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: vec![
+			Ok(Aggregated::Linear(
+				weights(vec![
 					Part::Ic(vec![
 						(a, PosCoeff::new(1)),
 						(d, PosCoeff::new(2)),
@@ -3406,18 +2826,19 @@ mod tests {
 						(!c, PosCoeff::new(2)),
 						(!b, PosCoeff::new(3))
 					]),
-				],
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(11),
-			}))
+				]),
+				LimitComp::LessEq,
+				*PosCoeff::new(11)
+			))
 		);
 
 		// Correctly convert GreaterEq into LessEq with side constrains
 		let mut cnf = Cnf::default();
 		let (a, b, c, d, e, f) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::default()
 						.add_choice(&[(a, 1), (b, 2), (c, 3), (d, 4)])
@@ -3426,8 +2847,8 @@ mod tests {
 					3,
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: vec![
+			Ok(Aggregated::Linear(
+				weights(vec![
 					Part::Amo(vec![
 						(a, PosCoeff::new(3)),
 						(b, PosCoeff::new(2)),
@@ -3438,18 +2859,19 @@ mod tests {
 						(e, PosCoeff::new(2)),
 						(Lit(NonZeroI32::new(8).unwrap()), PosCoeff::new(3))
 					]),
-				],
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(4), // -3 + 4 + 3
-			}))
+				]),
+				LimitComp::LessEq,
+				*PosCoeff::new(4)
+			))
 		);
 
 		// Correctly convert GreaterEq into LessEq with side constrains
 		let mut cnf = Cnf::default();
 		let (a, b, c, d, e, f) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::default()
 						.add_chain(&[(a, 1), (b, 1), (c, 1), (d, 1)])
@@ -3458,8 +2880,8 @@ mod tests {
 					3,
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: vec![
+			Ok(Aggregated::Linear(
+				weights(vec![
 					Part::Ic(vec![
 						(!d, PosCoeff::new(1)),
 						(!c, PosCoeff::new(1)),
@@ -3467,10 +2889,10 @@ mod tests {
 						(!a, PosCoeff::new(1)),
 					]),
 					Part::Ic(vec![(!f, PosCoeff::new(2)), (!e, PosCoeff::new(1))]),
-				],
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(4),
-			}))
+				]),
+				LimitComp::LessEq,
+				*PosCoeff::new(4)
+			))
 		);
 
 		// The declared upper bound of the group, rather than the sum of its
@@ -3479,31 +2901,33 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::default().add_bounded_log_encoding(&[(a, 1), (b, 2), (c, 4)], 0, 3),
 					Comparator::LessEq,
 					5,
 				)
 			),
-			Ok(BoolLinVariant::Trivial)
+			Ok(Aggregated::Trivial)
 		);
 
 		// Raising the bound above `k` leaves a constraint that must be encoded
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::default().add_bounded_log_encoding(&[(a, 1), (b, 2), (c, 4)], 0, 6),
 					Comparator::LessEq,
 					5,
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: vec![Part::Dom(
+			Ok(Aggregated::Linear(
+				weights(vec![Part::Dom(
 					vec![
 						(a, PosCoeff::new(1)),
 						(b, PosCoeff::new(2)),
@@ -3511,10 +2935,10 @@ mod tests {
 					],
 					PosCoeff::new(0),
 					PosCoeff::new(6)
-				),],
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(5),
-			}))
+				),]),
+				LimitComp::LessEq,
+				*PosCoeff::new(5)
+			))
 		);
 
 		// Dropping the most significant term lowers the value the group can still
@@ -3523,8 +2947,9 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::default().add_bounded_log_encoding(
 						&[(a, 1), (b, 2), (c, 4), (d, 8)],
@@ -3535,15 +2960,16 @@ mod tests {
 					7,
 				)
 			),
-			Ok(BoolLinVariant::Trivial)
+			Ok(Aggregated::Trivial)
 		);
 
 		// Correctly convert GreaterEq into LessEq with side constrains
 		let mut cnf = Cnf::default();
 		let (a, b, c, d, e) = cnf.new_lits();
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut cnf,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::default()
 						.add_bounded_log_encoding(&[(a, 1), (b, 2), (c, 4)], 0, 5)
@@ -3552,8 +2978,8 @@ mod tests {
 					3,
 				)
 			),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: vec![
+			Ok(Aggregated::Linear(
+				weights(vec![
 					Part::Dom(
 						vec![
 							(!a, PosCoeff::new(1)),
@@ -3568,10 +2994,10 @@ mod tests {
 						PosCoeff::new(7),
 						PosCoeff::new(9),
 					),
-				],
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(13),
-			}))
+				]),
+				LimitComp::LessEq,
+				*PosCoeff::new(13)
+			))
 		);
 	}
 
@@ -3581,28 +3007,27 @@ mod tests {
 		let (a, b, c, d) = cnf.new_lits();
 
 		assert_eq!(
-			BoolLinAggregator::default()
-				.sort_same_coefficients(SortedEncoder::default(), 2)
-				.aggregate(
-					&mut cnf,
-					&BoolLinear::new(
-						BoolLinExp::from_slices(&[3, 3, 5, 3], &[a, b, d, c]),
-						Comparator::LessEq,
-						10
-					)
-				),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: vec![
+			aggregated(
+				&mut cnf,
+				BoolLinAggregator::default().sort_same_coefficients(SortedEncoder::default(), 2),
+				&BoolLinear::new(
+					BoolLinExp::from_slices(&[3, 3, 5, 3], &[a, b, d, c]),
+					Comparator::LessEq,
+					10
+				)
+			),
+			Ok(Aggregated::Linear(
+				weights(vec![
 					Part::Ic(vec![
 						(Lit(NonZeroI32::new(5).unwrap()), PosCoeff::new(3)),
 						(Lit(NonZeroI32::new(6).unwrap()), PosCoeff::new(3)),
 						(Lit(NonZeroI32::new(7).unwrap()), PosCoeff::new(3))
 					]),
 					Part::Amo(vec![(d, PosCoeff::new(5))]),
-				],
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(10),
-			}))
+				]),
+				LimitComp::LessEq,
+				*PosCoeff::new(10)
+			))
 		);
 	}
 
@@ -3611,27 +3036,26 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let vars = cnf.new_var_range(5).iter_lits().collect_vec();
 		assert_eq!(
-			BoolLinAggregator::default()
-				.sort_same_coefficients(SortedEncoder::default(), 2)
-				.aggregate(
-					&mut cnf,
-					&BoolLinear::new(
-						BoolLinExp::from_slices(&[5, 5, 5, 5, 4], &vars),
-						Comparator::LessEq,
-						12 // only need 2 to sort
-					)
-				),
-			Ok(BoolLinVariant::Linear(NormalizedBoolLinear {
-				terms: vec![
+			aggregated(
+				&mut cnf,
+				BoolLinAggregator::default().sort_same_coefficients(SortedEncoder::default(), 2),
+				&BoolLinear::new(
+					BoolLinExp::from_slices(&[5, 5, 5, 5, 4], &vars),
+					Comparator::LessEq,
+					12 // only need 2 to sort
+				)
+			),
+			Ok(Aggregated::Linear(
+				weights(vec![
 					Part::Amo(vec![(*vars.last().unwrap(), PosCoeff::new(4))]),
 					Part::Ic(vec![
 						(Lit(NonZeroI32::new(6).unwrap()), PosCoeff::new(5)),
 						(Lit(NonZeroI32::new(7).unwrap()), PosCoeff::new(5))
 					]),
-				],
-				cmp: LimitComp::LessEq,
-				k: PosCoeff::new(12),
-			}))
+				]),
+				LimitComp::LessEq,
+				*PosCoeff::new(12)
+			))
 		);
 	}
 
@@ -3642,8 +3066,9 @@ mod tests {
 
 		// Constant cannot be reached
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut db,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 2, 2], &vars),
 					Comparator::Equal,
@@ -3653,8 +3078,9 @@ mod tests {
 			Err(Unsatisfiable)
 		);
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut db,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 2, 2], &vars),
 					Comparator::GreaterEq,
@@ -3664,8 +3090,9 @@ mod tests {
 			Err(Unsatisfiable)
 		);
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut db,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[1, 2, 2], &vars),
 					Comparator::LessEq,
@@ -3677,8 +3104,9 @@ mod tests {
 
 		// Scaled counting constraint with off-scaled Constant
 		assert_eq!(
-			BoolLinAggregator::default().aggregate(
+			aggregated(
 				&mut db,
+				&BoolLinAggregator::default(),
 				&BoolLinear::new(
 					BoolLinExp::from_slices(&[4, 4, 4], &vars),
 					Comparator::Equal,
@@ -3774,55 +3202,6 @@ mod tests {
 		);
 		encoder.encode(&mut db, &con).unwrap();
 		assert_checker(&db, &con);
-	}
-
-	impl PartialEq for BoolLinVariant {
-		fn eq(&self, other: &Self) -> bool {
-			let liteq =
-				|a: &Vec<Lit>, b: &Vec<Lit>| itertools::equal(a.iter().sorted(), b.iter().sorted());
-			let parteq = |a: &Vec<Part>, b: &Vec<Part>| {
-				itertools::equal(
-					a.iter().map(|p| p.iter().sorted().collect_vec()).sorted(),
-					b.iter().map(|p| p.iter().sorted().collect_vec()).sorted(),
-				)
-			};
-			match self {
-				BoolLinVariant::Linear(NormalizedBoolLinear { terms, cmp, k }) => {
-					if let BoolLinVariant::Linear(NormalizedBoolLinear {
-						terms: oterms,
-						cmp: oc,
-						k: l,
-					}) = other
-					{
-						cmp == oc && k == l && parteq(terms, oterms)
-					} else {
-						false
-					}
-				}
-				BoolLinVariant::Cardinality(Cardinality { lits, cmp, k }) => {
-					if let BoolLinVariant::Cardinality(Cardinality {
-						lits: olits,
-						cmp: oc,
-						k: l,
-					}) = other
-					{
-						cmp == oc && k == l && liteq(lits, olits)
-					} else {
-						false
-					}
-				}
-				BoolLinVariant::CardinalityOne(amo) => {
-					if let BoolLinVariant::CardinalityOne(oamo) = other {
-						liteq(&amo.lits, &oamo.lits)
-					} else {
-						false
-					}
-				}
-				BoolLinVariant::Trivial => {
-					matches!(other, BoolLinVariant::Trivial)
-				}
-			}
-		}
 	}
 
 	impl PartialEq for Part {

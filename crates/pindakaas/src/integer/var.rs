@@ -229,6 +229,30 @@ impl BinEnc {
 		}
 	}
 
+	/// The encoding as a weighted sum of literals, plus what it is worth when
+	/// none of them hold.
+	pub(crate) fn as_weighted(&self) -> (Vec<(Lit, Coeff)>, Coeff) {
+		let mut constant = self.lb;
+		let terms = self
+			.x
+			.iter()
+			.enumerate()
+			.filter_map(|(i, b)| {
+				let weight = 1 << i;
+				match b {
+					BoolVal::Lit(l) => Some((l, weight)),
+					// A bit that is fixed is worth what it is worth regardless.
+					BoolVal::Const(true) => {
+						constant += weight;
+						None
+					}
+					BoolVal::Const(false) => None,
+				}
+			})
+			.collect();
+		(terms, constant)
+	}
+
 	/// The bits of the encoding, least significant first.
 	pub(crate) fn to_vec(&self) -> Vec<BoolVal> {
 		self.x.to_vec()
@@ -327,6 +351,23 @@ impl DirEnc {
 			dom,
 			x: Lits::Explicit(x),
 		}
+	}
+
+	/// The encoding as a weighted sum of literals, plus what it is worth when
+	/// none of them hold.
+	///
+	/// Exactly one literal holds, so the variable is worth whichever value that
+	/// one stands for.
+	pub(crate) fn as_weighted(&self) -> (Vec<(Lit, Coeff)>, Coeff) {
+		(
+			self.dom
+				.iter()
+				.flatten()
+				.zip(self.x.iter())
+				.map(|(v, l)| (l, v))
+				.collect(),
+			0,
+		)
 	}
 
 	/// The literals of the encoding.
@@ -537,6 +578,30 @@ impl IntVar {
 		self.state.borrow().dom.clone()
 	}
 
+	/// The variable as a weighted sum of literals, plus what it is worth when
+	/// none of them hold.
+	///
+	/// Read through whichever encoding it has, so that a constraint wanting
+	/// literals rather than integers gets the ones already standing for it.
+	pub(crate) fn as_weighted<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result<(Vec<(Lit, Coeff)>, Coeff), Unsatisfiable> {
+		{
+			let state = self.state.borrow();
+			match (state.dir.as_ref(), state.ord.as_ref(), state.bin.as_ref()) {
+				(Some(dir), ..) => return Ok(dir.as_weighted()),
+				(_, Some(ord), _) => return Ok(ord.as_weighted()),
+				(.., Some(bin)) => return Ok(bin.as_weighted()),
+				_ => {}
+			}
+		}
+		// Nothing has been asked of it yet. The order encoding is the one that
+		// costs least to make, and nothing at all where the literals for it are
+		// already there.
+		Ok(self.ord(db)?.as_weighted())
+	}
+
 	/// Whether the variable is held in a direct encoding.
 	pub(crate) fn has_dir(&self) -> bool {
 		self.state.borrow().dir.is_some()
@@ -696,9 +761,9 @@ impl IntVar {
 	#[cfg(test)]
 	pub(crate) fn lits(&self) -> Vec<Lit> {
 		let state = self.state.borrow();
-		match (state.ord.as_ref(), state.bin.as_ref()) {
-			(Some(ord), _) => ord.lits(),
-			(_, Some(bin)) => bin
+		match (state.ord.as_ref(), state.bin.as_ref(), state.dir.as_ref()) {
+			(Some(ord), _, _) => ord.lits(),
+			(_, Some(bin), _) => bin
 				.to_vec()
 				.into_iter()
 				.filter_map(|b| match b {
@@ -706,6 +771,7 @@ impl IntVar {
 					BoolVal::Const(_) => None,
 				})
 				.collect(),
+			(_, _, Some(dir)) => dir.lits(),
 			_ => Vec::new(),
 		}
 	}
@@ -715,9 +781,11 @@ impl IntVar {
 	#[cfg(test)]
 	pub(crate) fn value<F: crate::Valuation + ?Sized>(&self, value: &F) -> Coeff {
 		let state = self.state.borrow();
-		match (state.ord.as_ref(), state.bin.as_ref()) {
-			(Some(ord), _) => ord.value(value),
-			(_, Some(bin)) => bin.value(value),
+		match (state.ord.as_ref(), state.bin.as_ref(), state.dir.as_ref()) {
+			(Some(ord), _, _) => ord.value(value),
+			(_, Some(bin), _) => bin.value(value),
+			(_, _, Some(dir)) => dir.value(value),
+			// Nothing was ever asked of it, so it can only be its one value.
 			_ => *state.dom.min().unwrap(),
 		}
 	}
@@ -795,6 +863,23 @@ impl OrdEnc {
 			}
 		}
 		Ok(())
+	}
+
+	/// The encoding as a weighted sum of literals, plus what it is worth when
+	/// none of them hold.
+	///
+	/// Each literal is worth the step it takes from the value before it, so the
+	/// ones that hold add up to how far past the first value it has reached.
+	pub(crate) fn as_weighted(&self) -> (Vec<(Lit, Coeff)>, Coeff) {
+		let vals = self.dom.iter().flatten().collect_vec();
+		(
+			vals.iter()
+				.zip(vals.iter().skip(1))
+				.zip(self.x.iter())
+				.map(|((below, above), l)| (l, above - below))
+				.collect(),
+			vals[0],
+		)
 	}
 
 	/// Whether the variable is at least `v`.

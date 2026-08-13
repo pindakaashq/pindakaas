@@ -169,9 +169,9 @@
 //!
 //! Before the constraint is encoded, it is first simplified, normalized, and
 //! specialized by the
-//! [`BoolLinAggregator::aggregate`](bool_linear::BoolLinAggregator::aggregate).
+//! [`BoolLinAggregator::aggregate`](aggregator::BoolLinAggregator::aggregate).
 //! The result of this is a constraint of the form
-//! [`BoolLinVariant`](bool_linear::BoolLinVariant). Depending on the form of
+//! [`LinVariant`](aggregator::LinVariant). Depending on the form of
 //! the specialized constraint, the constraint can be encoded using different
 //! encoding methods. For example, if the constraint was found to be a “at most
 //! one” constraint, then it could use the
@@ -179,19 +179,18 @@
 //! use general pseudo-Boolean encoders, such as the
 //! [`TotalizerEncoder`](bool_linear::TotalizerEncoder). Making the choice of
 //! encoding can be streamlined by using the
-//! [`StaticLinEncoder`](bool_linear::StaticLinEncoder), which makes a choice
+//! [`StaticLinEncoder`](aggregator::StaticLinEncoder), which makes a choice
 //! based on the constraint's variant.
 //!
-//! Additionally, the [`LinearEncoder`](bool_linear::LinearEncoder) is meant to
+//! Additionally, the [`LinearEncoder`](aggregator::LinearEncoder) is meant to
 //! help streamline the process of aggregating and encoding linear expressions.
 //! The following fragment shows the creation of a linear constraint and the
-//! usage of the [`LinearEncoder`](bool_linear::LinearEncoder) to encode it.
+//! usage of the [`LinearEncoder`](aggregator::LinearEncoder) to encode it.
 //!
 //! ```rust
 //! use pindakaas::{
-//!     bool_linear::{
-//!         BoolLinear, BoolLinAggregator, Comparator, LinearEncoder, StaticLinEncoder
-//!     },
+//!     aggregator::{BoolLinAggregator, LinearEncoder, StaticLinEncoder},
+//!     bool_linear::{BoolLinear, Comparator},
 //!     Cnf, ClauseDatabaseTools
 //! };
 //!
@@ -232,6 +231,7 @@
 //! Optimisation Technologies, Integrated Methodologies, and Applications
 //! (OPTIMA), Project ID IC200100009.
 
+pub mod aggregator;
 pub mod bool_linear;
 pub mod cardinality;
 pub mod cardinality_one;
@@ -240,7 +240,7 @@ pub(crate) mod helpers;
 	dead_code,
 	reason = "used once the integer constraint encoding is reachable from the pseudo-Boolean entry point"
 )]
-mod int_linear;
+pub mod int_linear;
 mod integer;
 pub mod propositional_logic;
 pub mod solver;
