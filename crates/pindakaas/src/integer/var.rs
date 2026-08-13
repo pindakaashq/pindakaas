@@ -8,7 +8,7 @@ use crate::{
 	bool_linear::{Comparator, PosCoeff},
 	helpers::{as_binary, new_named_lit, new_named_var_range},
 	integer::{lex_geq_const, lex_leq_const},
-	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Var, VarRange,
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable, Var, VarRange,
 };
 
 /// The binary encoding of an integer variable.
@@ -34,6 +34,18 @@ pub(crate) struct BinEnc {
 pub(crate) enum Lits<T> {
 	Explicit(Vec<T>),
 	Range(VarRange),
+}
+
+/// The direct encoding of an integer variable.
+///
+/// There is one literal per domain value except the first, holding when the
+/// variable takes exactly that value; none of them holding means it takes the
+/// first. At most one may hold, which for a group of mutually exclusive
+/// pseudo-Boolean terms is what the caller has already asserted.
+#[derive(Clone, Debug)]
+pub(crate) struct DirEnc {
+	dom: RangeList<Coeff>,
+	x: Lits<Lit>,
 }
 
 /// An integer decision variable, together with whichever Boolean encodings of
@@ -66,6 +78,10 @@ struct IntVarState {
 	dom: RangeList<Coeff>,
 	ord: Option<OrdEnc>,
 	bin: Option<BinEnc>,
+	dir: Option<DirEnc>,
+	/// Which pairs of encodings have been tied together already. With three of
+	/// them, "the channel fires when the second appears" no longer says enough.
+	channelled: [bool; 2],
 	/// Literals to reuse as `x ≥ v` when the order encoding is created, rather
 	/// than introducing a fresh one.
 	ord_views: FxHashMap<Coeff, Lit>,
@@ -105,13 +121,19 @@ impl BinEnc {
 
 	/// Restrict the encoding to the values of `dom`.
 	///
-	/// Only the upper bound needs clauses: the bits represent `value - lb`,
-	/// which cannot fall below the lower bound to begin with.
+	/// The lower bound costs nothing when the bits count from it, which is how
+	/// an encoding made for a variable is grounded. One taken from literals
+	/// that were already there counts from wherever they do, and then it needs
+	/// enforcing like any other.
 	pub(crate) fn consistent<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
 		dom: &RangeList<Coeff>,
 	) -> Result {
+		let floor = *dom.min().unwrap() - self.lb;
+		if floor > 0 {
+			lex_geq_const(db, &self.x.to_vec(), PosCoeff::new(floor), self.bits())?;
+		}
 		let span = *dom.max().unwrap() - self.lb;
 		lex_leq_const(db, &self.x.to_vec(), PosCoeff::new(span), self.bits())?;
 		// ponytail: one clause per value in a gap, so a sparse domain over a
@@ -257,6 +279,90 @@ impl<T: Copy + From<Var>> Lits<T> {
 	}
 }
 
+impl DirEnc {
+	/// Restrict the encoding to holding for exactly one value.
+	pub(crate) fn consistent<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
+		db.add_clause(self.x.iter())?;
+		// ponytail: pairwise, so quadratic in the domain. A variable that also
+		// has an order encoding gets exclusivity from the channel for nothing,
+		// which is the case that arises in practice.
+		for (i, a) in self.x.iter().enumerate() {
+			for b in self.x.iter().skip(i + 1) {
+				db.add_clause([!a, !b])?;
+			}
+		}
+		Ok(())
+	}
+
+	/// Whether the variable takes exactly `v`.
+	pub(crate) fn eq_val(&self, v: Coeff) -> BoolVal {
+		match self.dom.iter().flatten().position(|d| d == v) {
+			None => BoolVal::Const(false),
+			Some(pos) => BoolVal::Lit(self.x.get(pos).unwrap()),
+		}
+	}
+
+	/// Create a direct encoding from the literals it is already on, one for
+	/// each value of `dom` in order.
+	pub(crate) fn from_lits(dom: RangeList<Coeff>, x: Vec<Lit>) -> Self {
+		debug_assert_eq!(
+			x.len(),
+			dom.card().unwrap(),
+			"a direct encoding has a literal for every value"
+		);
+		Self {
+			dom,
+			x: Lits::Explicit(x),
+		}
+	}
+
+	/// The literals of the encoding.
+	pub(crate) fn lits(&self) -> Vec<Lit> {
+		self.x.to_vec()
+	}
+
+	/// The steps of a sequential decomposition over this variable.
+	///
+	/// Each step is a value paired with the clause that holds unless the
+	/// variable takes it, so that what the constraint then demands can be
+	/// disjoined onto it — the same shape the order encoding gives, except that
+	/// a step here pins the value exactly rather than bounding it.
+	///
+	/// The value at the far end contributes the least of any, so what it
+	/// demands holds whatever the variable turns out to be; its clause is
+	/// `false` and drops out, leaving that demand unconditional.
+	pub(crate) fn steps(&self, geq: bool) -> Vec<(Coeff, BoolVal)> {
+		let vals: Vec<Coeff> = self.dom.iter().flatten().collect();
+		let step = |(i, d): (usize, Coeff)| {
+			(
+				d,
+				if i == 0 {
+					BoolVal::Const(false)
+				} else {
+					!self.eq_val(d)
+				},
+			)
+		};
+		if geq {
+			vals.into_iter().enumerate().map(step).collect()
+		} else {
+			vals.into_iter().rev().enumerate().map(step).collect()
+		}
+	}
+
+	/// The value represented under an assignment.
+	#[cfg(test)]
+	pub(crate) fn value<F: crate::Valuation + ?Sized>(&self, value: &F) -> Coeff {
+		self.dom
+			.iter()
+			.flatten()
+			.zip(self.x.to_vec())
+			.find(|(_, l)| value.value(*l))
+			.expect("a direct encoding holds for one of its values")
+			.0
+	}
+}
+
 impl IntVar {
 	/// The binary encoding of the variable, created if this is the first
 	/// request for it.
@@ -290,14 +396,14 @@ impl IntVar {
 			}
 		};
 
-		let channel = {
+		{
 			let mut state = self.state.borrow_mut();
 			state.bin = Some(bin.clone());
-			!derived && state.ord.is_some()
-		};
-		if channel {
-			self.channel(db)?;
+			// A two-valued variable needs no tying: its order literal is
+			// already the whole of its binary encoding.
+			state.channelled[0] |= derived;
 		}
+		self.reconcile(db)?;
 		Ok(bin)
 	}
 
@@ -311,9 +417,13 @@ impl IntVar {
 	/// their bounds resolve to constants.
 	fn channel<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		let (ord, bin) = {
-			let state = self.state.borrow();
+			let mut state = self.state.borrow_mut();
 			match (state.ord.as_ref(), state.bin.as_ref()) {
-				(Some(ord), Some(bin)) => (ord.clone(), bin.clone()),
+				(Some(ord), Some(bin)) if !state.channelled[0] => {
+					let pair = (ord.clone(), bin.clone());
+					state.channelled[0] = true;
+					pair
+				}
 				_ => return Ok(()),
 			}
 		};
@@ -331,9 +441,104 @@ impl IntVar {
 		Ok(())
 	}
 
+	/// The direct encoding of the variable, created if this is the first
+	/// request for it.
+	pub(crate) fn dir<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result<DirEnc> {
+		if let Some(dir) = self.state.borrow().dir.as_ref() {
+			return Ok(dir.clone());
+		}
+		let dom = self.dom();
+		let lits = new_named_var_range!(db, dom.card().unwrap(), |i| format!("{}={i}", self.lbl))
+			.map(Lit::from)
+			.collect();
+		let dir = DirEnc::from_lits(dom, lits);
+		// Literals it was found on are already exclusive, the caller having
+		// said so; ones made here are not, and nothing else says it.
+		dir.consistent(db)?;
+		self.state.borrow_mut().dir = Some(dir.clone());
+		self.reconcile(db)?;
+		Ok(dir)
+	}
+
+	/// Tie together whatever encodings the variable now has, so that every view
+	/// of it reads the same value.
+	///
+	/// The order encoding is the go-between: tying a new encoding to it is
+	/// enough for the new one to agree with everything already tied to it. A
+	/// variable holding only the other two therefore gains one, which is the
+	/// price of reading it two ways at once.
+	fn reconcile<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
+		let (has_ord, others) = {
+			let state = self.state.borrow();
+			(
+				state.ord.is_some(),
+				usize::from(state.bin.is_some()) + usize::from(state.dir.is_some()),
+			)
+		};
+		if others + usize::from(has_ord) < 2 {
+			return Ok(());
+		}
+		if !has_ord {
+			// Creating it reconciles in turn.
+			let _ = self.ord(db)?;
+			return Ok(());
+		}
+		self.channel(db)?;
+		self.channel_dir(db)
+	}
+
+	/// Constrain the order and direct encodings to represent the same value.
+	///
+	/// Taking a value means reaching it, and reaching a value without reaching
+	/// the next is taking it. Those two are the whole of it, and they are one
+	/// clause each per value.
+	fn channel_dir<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
+		let (ord, dir, dom) = {
+			let mut state = self.state.borrow_mut();
+			match (state.ord.as_ref(), state.dir.as_ref()) {
+				(Some(ord), Some(dir)) if !state.channelled[1] => {
+					let all = (ord.clone(), dir.clone(), state.dom.clone());
+					state.channelled[1] = true;
+					all
+				}
+				_ => return Ok(()),
+			}
+		};
+		let vals: Vec<Coeff> = dom.iter().flatten().collect();
+		for (i, &v) in vals.iter().enumerate() {
+			// Beyond the last value there is nothing to reach.
+			let beyond = vals
+				.get(i + 1)
+				.map_or(BoolVal::Const(false), |&n| ord.geq_val(n));
+			// Taking a value is reaching it and going no further, and reaching
+			// it and going no further is taking it.
+			db.add_clause([!dir.eq_val(v), ord.geq_val(v)])?;
+			db.add_clause([!dir.eq_val(v), !beyond])?;
+			db.add_clause([!ord.geq_val(v), beyond, dir.eq_val(v)])?;
+		}
+		Ok(())
+	}
+
 	/// The domain of the variable.
 	pub(crate) fn dom(&self) -> RangeList<Coeff> {
 		self.state.borrow().dom.clone()
+	}
+
+	/// Whether the variable is held in a direct encoding.
+	pub(crate) fn has_dir(&self) -> bool {
+		self.state.borrow().dir.is_some()
+	}
+
+	/// The direct encoding of the variable, if it has one.
+	pub(crate) fn dir_now(&self) -> Option<DirEnc> {
+		self.state.borrow().dir.clone()
+	}
+
+	/// Create a variable held in the direct encoding it was found on.
+	pub(crate) fn with_dir(dom: RangeList<Coeff>, lbl: String, dir: DirEnc) -> Rc<Self> {
+		let x = Self::new(dom, false, lbl);
+		x.state.borrow_mut().dir = Some(dir);
+		x
 	}
 
 	/// Whether either encoding has been created.
@@ -342,7 +547,7 @@ impl IntVar {
 	/// move.
 	pub(crate) fn is_encoded(&self) -> bool {
 		let state = self.state.borrow();
-		state.ord.is_some() || state.bin.is_some()
+		state.ord.is_some() || state.bin.is_some() || state.dir.is_some()
 	}
 
 	/// Drop the values below `v` from the domain, reporting whether any went.
@@ -400,6 +605,8 @@ impl IntVar {
 				dom,
 				ord: None,
 				bin: None,
+				dir: None,
+				channelled: [false; 2],
 				ord_views: FxHashMap::default(),
 			}),
 		})
@@ -435,14 +642,8 @@ impl IntVar {
 		let ord = OrdEnc::new(db, &dom, &views, &self.lbl);
 		ord.consistent(db)?;
 
-		let channel = {
-			let mut state = self.state.borrow_mut();
-			state.ord = Some(ord.clone());
-			state.bin.is_some()
-		};
-		if channel {
-			self.channel(db)?;
-		}
+		self.state.borrow_mut().ord = Some(ord.clone());
+		self.reconcile(db)?;
 		Ok(ord)
 	}
 
@@ -481,6 +682,31 @@ impl IntVar {
 			(_, Some(bin)) => bin.value(value),
 			_ => *state.dom.min().unwrap(),
 		}
+	}
+
+	/// Create a variable held in the binary encoding it was found on, and
+	/// restrict it to `dom`.
+	pub(crate) fn with_bin<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		dom: RangeList<Coeff>,
+		lbl: String,
+		bin: BinEnc,
+	) -> Result<Rc<Self>, Unsatisfiable> {
+		bin.consistent(db, &dom)?;
+		let x = Self::new(dom, false, lbl);
+		x.state.borrow_mut().bin = Some(bin);
+		Ok(x)
+	}
+
+	/// Create a variable whose order encoding will reuse the given literals.
+	pub(crate) fn with_ord_views(
+		dom: RangeList<Coeff>,
+		lbl: String,
+		ord_views: FxHashMap<Coeff, Lit>,
+	) -> Rc<Self> {
+		let x = Self::new(dom, false, lbl);
+		x.state.borrow_mut().ord_views = ord_views;
+		x
 	}
 
 	/// Reuse `lit` as the literal for `x ≥ v` when the order encoding is
@@ -668,6 +894,53 @@ mod tests {
 		}
 		solutions.sort();
 		solutions
+	}
+
+	#[test]
+	fn all_three_encodings_agree_on_every_value() {
+		// Whichever order they are asked for in, and whichever two or three of
+		// them exist, every view of the variable must read the same value.
+		for dom in test_domains() {
+			for order in [[0, 1, 2], [2, 1, 0], [1, 2, 0], [2, 0, 1]] {
+				let mut cnf = Cnf::default();
+				let x = IntVar::new(dom.clone(), true, "x".to_owned());
+				let mut read: Vec<Box<dyn Fn(&dyn Valuation) -> Coeff>> = Vec::new();
+				for which in order {
+					match which {
+						0 => {
+							let e = x.ord(&mut cnf).unwrap();
+							read.push(Box::new(move |v| e.value(v)));
+						}
+						1 => {
+							let e = x.bin(&mut cnf).unwrap();
+							read.push(Box::new(move |v| e.value(v)));
+						}
+						_ => {
+							let e = x.dir(&mut cnf).unwrap();
+							read.push(Box::new(move |v| e.value(v)));
+						}
+					}
+				}
+				let solutions = all_values(&cnf, &|v| read.iter().map(|f| f(v)).collect());
+				let expected: Vec<Vec<Coeff>> = dom.iter().flatten().map(|d| vec![d; 3]).collect();
+				assert_eq!(solutions, expected, "dom {dom} asked in order {order:?}");
+			}
+		}
+	}
+
+	#[test]
+	fn a_direct_encoding_represents_exactly_the_domain() {
+		for dom in test_domains() {
+			let mut cnf = Cnf::default();
+			let dir = IntVar::new(dom.clone(), true, "x".to_owned())
+				.dir(&mut cnf)
+				.unwrap();
+			assert_eq!(
+				all_values(&cnf, &|v| vec![dir.value(v)]),
+				dom.iter().flatten().map(|d| vec![d]).collect::<Vec<_>>(),
+				"direct encoding of {dom}"
+			);
+		}
 	}
 
 	#[test]

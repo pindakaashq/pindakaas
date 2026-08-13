@@ -1,21 +1,23 @@
 use std::{
 	hash::{Hash, Hasher},
+	iter::once,
 	num::NonZero,
 	rc::{Rc, Weak},
 };
 
+use itertools::Itertools;
 use rangelist::RangeList;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	bool_linear::{AdderEncoder, Comparator},
+	bool_linear::{AdderEncoder, Comparator, Part},
 	helpers::{
-		div_ceil, div_floor,
+		div_ceil, div_floor, new_named_lit,
 		scm::{ScmObjective, ScmOperation, ScmSolution},
 		shifted,
 	},
-	integer::var::{BinEnc, IntVar, OrdEnc},
-	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Result, Unsatisfiable,
+	integer::var::{BinEnc, DirEnc, IntVar, OrdEnc},
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable,
 };
 
 impl Eq for VarKey {}
@@ -77,14 +79,28 @@ pub(crate) struct IntLinConfig {
 	pub cutoff: Option<Coeff>,
 }
 
-/// A term of a constraint, together with the encoding of its variable.
+/// A term of a constraint, together with the view of its variable the walk
+/// will guard on.
 ///
 /// Materialising every encoding before the clauses are built keeps the walk
 /// over the terms a pure function of what is already there.
 #[derive(Clone, Copy, Debug)]
 struct Encoded<'a> {
 	c: Coeff,
-	ord: &'a OrdEnc,
+	view: &'a View,
+}
+
+/// A view of a variable that a step of the walk can be guarded on.
+///
+/// Either will do: an order literal says the variable has reached a value and a
+/// direct literal says it has taken one, and a step of the walk asks only what
+/// the variable is worth once the guard fails. Which one a variable is read
+/// through is whichever it already has, so a group of pseudo-Boolean terms is
+/// read on the literals it arrived on rather than on a view built to match.
+#[derive(Clone, Debug)]
+enum View {
+	Dir(DirEnc),
+	Ord(OrdEnc),
 }
 
 /// A sum of integer terms.
@@ -168,14 +184,21 @@ impl IntLinEncoder {
 		// Otherwise walk the terms in order form. Any variable can produce an
 		// order encoding, channelling to one it already has if need be, so this
 		// is always available even where it is not the cheapest.
-		let ords: Vec<OrdEnc> = terms
+		let views: Vec<View> = terms
 			.iter()
-			.map(|t| t.x.ord(db))
+			.map(|t| {
+				// A variable already read directly is read that way again,
+				// rather than gaining a second view to be tied to the first.
+				match t.x.dir_now() {
+					Some(dir) => Ok(View::Dir(dir)),
+					None => t.x.ord(db).map(View::Ord),
+				}
+			})
 			.collect::<Result<_, _>>()?;
 		let encoded: Vec<Encoded> = terms
 			.iter()
-			.zip(&ords)
-			.map(|(t, ord)| Encoded { c: t.c, ord })
+			.zip(&views)
+			.map(|(t, view)| Encoded { c: t.c, view })
 			.collect();
 
 		// An equality holds exactly when both of its inequalities do.
@@ -406,6 +429,16 @@ impl IntLinear {
 	}
 }
 
+impl View {
+	/// The steps of a sequential decomposition over the variable.
+	fn steps(&self, geq: bool) -> Vec<(Coeff, BoolVal)> {
+		match self {
+			View::Dir(dir) => dir.steps(geq),
+			View::Ord(ord) => ord.steps(geq),
+		}
+	}
+}
+
 impl Encoded<'_> {
 	/// The clauses for `Σ terms ≷ k`, by taking the terms one at a time.
 	///
@@ -425,14 +458,14 @@ impl Encoded<'_> {
 			return if holds { Vec::new() } else { vec![Vec::new()] };
 		};
 		if tail.is_empty() {
-			return vec![vec![head.bound(cmp, k)]];
+			return head.bound(cmp, k);
 		}
 		// Guard on the head reaching a value from whichever side pushes the sum
 		// towards breaking the constraint.
 		let geq = (head.c >= 0) == matches!(cmp, Comparator::LessEq);
 		let mut clauses = Vec::new();
 		let mut last: Option<Vec<Vec<BoolVal>>> = None;
-		for (d, guard) in head.ord.steps(geq) {
+		for (d, guard) in head.view.steps(geq) {
 			let sub = Self::walk(tail, cmp, k - head.c * d);
 			// Advancing the walk only weakens the guard, so a step that asks of the
 			// remaining terms exactly what the step before it asked is already
@@ -442,23 +475,37 @@ impl Encoded<'_> {
 			if last.as_ref() == Some(&sub) {
 				continue;
 			}
-			clauses.extend(sub.iter().map(|clause| {
-				std::iter::once(guard)
-					.chain(clause.iter().copied())
-					.collect()
-			}));
+			clauses.extend(
+				sub.iter()
+					.map(|clause| once(guard).chain(clause.iter().copied()).collect()),
+			);
 			last = Some(sub);
 		}
 		clauses
 	}
 
-	/// The literal that holds when this term alone satisfies `term ≷ k`.
-	fn bound(&self, cmp: Comparator, k: Coeff) -> BoolVal {
+	/// The clauses for `c·x ≷ k`, this term being the only one left.
+	fn bound(&self, cmp: Comparator, k: Coeff) -> Vec<Vec<BoolVal>> {
 		// Dividing by a negative coefficient turns the comparison around.
-		match if self.c >= 0 { cmp } else { cmp.reverse() } {
-			Comparator::LessEq => self.ord.leq_val(div_floor(k, self.c)),
-			Comparator::GreaterEq => self.ord.geq_val(div_ceil(k, self.c)),
-			Comparator::Equal => unreachable!("an equality is split before it is encoded"),
+		let cmp = if self.c >= 0 { cmp } else { cmp.reverse() };
+		match self.view {
+			// One literal says where the variable stands against the bound.
+			View::Ord(ord) => vec![vec![match cmp {
+				Comparator::LessEq => ord.leq_val(div_floor(k, self.c)),
+				Comparator::GreaterEq => ord.geq_val(div_ceil(k, self.c)),
+				Comparator::Equal => unreachable!("an equality is split before it is encoded"),
+			}]],
+			// Nothing says it in one literal, so rule out each value that would
+			// break the bound instead.
+			View::Dir(dir) => dir
+				.steps(true)
+				.into_iter()
+				.filter(|&(d, _)| match cmp {
+					Comparator::LessEq => self.c * d > k,
+					_ => self.c * d < k,
+				})
+				.map(|(d, _)| vec![!dir.eq_val(d)])
+				.collect(),
 		}
 	}
 }
@@ -480,6 +527,114 @@ impl Term {
 			Some(&zs.to_vec()),
 		)?;
 		Ok(())
+	}
+
+	/// The integer terms a group of pseudo-Boolean terms stands for.
+	///
+	/// A group the aggregator has recognised already behaves like an integer,
+	/// so the literals that are there can serve as its encoding rather than
+	/// having new ones made and tied to them. Which encoding depends on what
+	/// the group is: exclusive or implication-ordered terms give the order
+	/// literals of a value, and a group declared to be a log encoding gives the
+	/// bits of one.
+	///
+	/// `exact` asks for the upper bound as well, which a group only needs when
+	/// the constraint it belongs to is an equality.
+	pub(crate) fn from_part<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		part: &Part,
+		lbl: &str,
+		exact: bool,
+	) -> Result<Vec<Self>, Unsatisfiable> {
+		match part {
+			Part::Amo(terms) => {
+				// At most one term is chosen, so the group takes the value of
+				// whichever it is, and zero when none is. That is a direct
+				// encoding, and the terms already are one: a literal here says
+				// the group *is* its coefficient, which is what a direct
+				// literal says and not what an order literal says.
+				let mut by_coeff: FxHashMap<Coeff, Vec<Lit>> = FxHashMap::default();
+				for &(lit, coeff) in terms {
+					by_coeff.entry(*coeff).or_default().push(lit);
+				}
+				let dom: RangeList<Coeff> = once(0..=0)
+					.chain(by_coeff.keys().sorted().map(|&v| v..=v))
+					.collect();
+
+				// The group is worth nothing when no term is chosen, which is a
+				// value like any other and so needs a literal of its own.
+				let none = new_named_lit!(db, format!("{lbl}=0"));
+				let mut lits = vec![none];
+				for (_coeff, terms) in by_coeff.into_iter().sorted_by_key(|(c, _)| *c) {
+					let d = match terms.as_slice() {
+						// One term reaching a value is the literal for it.
+						&[lit] => lit,
+						// Several are not one literal, so they need one, which
+						// each of them reaches.
+						_ => {
+							let d = new_named_lit!(db, format!("{lbl}={_coeff}"));
+							for &lit in &terms {
+								db.add_clause([!lit, d])?;
+							}
+							d
+						}
+					};
+					if exact {
+						// The group is worth this only if one of these terms is
+						// chosen. Without it the group may say it is worth more
+						// than it is, which a `≤` can live with and costs the
+						// solver nothing, since nothing forces it to.
+						db.add_clause([!d].into_iter().chain(terms))?;
+					}
+					// Nothing is chosen only if this value is not taken.
+					db.add_clause([!d, !none])?;
+					lits.push(d);
+				}
+				// Some value is taken.
+				db.add_clause(lits.iter().copied())?;
+				Ok(vec![Self::new(
+					1,
+					IntVar::with_dir(dom.clone(), lbl.to_owned(), DirEnc::from_lits(dom, lits)),
+				)])
+			}
+			Part::Ic(terms) => {
+				// Each term implies the one before it, so the group counts up
+				// through the running sums and a term's literal is already the
+				// order literal for its sum.
+				let mut acc = 0;
+				let (dom, views): (Vec<_>, FxHashMap<_, _>) = terms
+					.iter()
+					.map(|&(lit, coeff)| {
+						acc += *coeff;
+						(acc..=acc, (acc, lit))
+					})
+					.unzip();
+				Ok(vec![Self::new(
+					1,
+					IntVar::with_ord_views(once(0..=0).chain(dom).collect(), lbl.to_owned(), views),
+				)])
+			}
+			Part::Dom(terms, lb, ub) => {
+				// The caller has declared these literals to be the bits of an
+				// integer, so they are taken as exactly that rather than being
+				// split into a variable each. Their coefficients are a multiple
+				// of the powers of two, and the aggregator has already scaled
+				// the bounds to match, so what the bits hold is the value over
+				// that multiple and the multiple stays on the term.
+				let multiple = *terms[0].1;
+				let bits: Vec<BoolVal> = terms.iter().map(|&(lit, _)| BoolVal::Lit(lit)).collect();
+				let dom =
+					RangeList::from_iter([div_ceil(**lb, multiple)..=div_floor(**ub, multiple)]);
+				if dom.is_empty() {
+					db.contradiction()?;
+				}
+				Ok(vec![Self::new(
+					multiple,
+					// The bits count from zero, whatever the bounds say.
+					IntVar::with_bin(db, dom, lbl.to_owned(), BinEnc::from_bits(bits, 0))?,
+				)])
+			}
+		}
 	}
 
 	/// The term with its coefficient negated.
@@ -519,11 +674,13 @@ mod tests {
 	use rangelist::RangeList;
 	use traced_test::test;
 
-	use super::{IntLinConfig, IntLinEncoder, IntLinear, IntVar, Term};
+	use super::{IntLinConfig, IntLinEncoder, IntLinear, Term};
 	use crate::{
-		bool_linear::Comparator,
+		bool_linear::{Comparator, LimitComp, Part, PosCoeff},
+		cardinality_one::{CardinalityOne, PairwiseEncoder},
+		integer::var::IntVar,
 		solver::{cadical::Cadical, SolveResult, Solver},
-		ClauseDatabaseTools, Cnf, Coeff, Valuation,
+		ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Valuation,
 	};
 
 	/// Encode `Σ cᵢ·xᵢ ≷ k` over the given domains and return the assignments
@@ -634,6 +791,378 @@ mod tests {
 					}
 				}
 			}
+		}
+	}
+
+	/// Every model of `cnf`, as the value `x` takes together with which of
+	/// `lits` were chosen.
+	fn group_solutions(cnf: &Cnf, x: &IntVar, lits: &[Lit]) -> Vec<(Coeff, Vec<bool>)> {
+		let mut slv = Cadical::from(cnf);
+		let vars = cnf.get_variables();
+		let mut solutions = Vec::new();
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			solutions.push((
+				x.value(&value),
+				lits.iter().map(|&l| value.value(l)).collect(),
+			));
+			let no_good: Vec<_> = vars
+				.map(|v| {
+					let l = v.into();
+					if value.value(l) {
+						!l
+					} else {
+						l
+					}
+				})
+				.collect();
+			if slv.add_clause(no_good).is_err() {
+				break;
+			}
+		}
+		solutions.sort();
+		solutions
+	}
+
+	#[test]
+	fn a_group_of_exclusive_terms_becomes_its_largest_chosen_value() {
+		for exact in [false, true] {
+			let mut cnf = Cnf::default();
+			let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
+			// The terms are mutually exclusive, which is what lets the group be
+			// read as one integer.
+			PairwiseEncoder::default()
+				.encode(
+					&mut cnf,
+					&CardinalityOne {
+						lits: lits.clone(),
+						cmp: LimitComp::LessEq,
+					},
+				)
+				.unwrap();
+			let part = Part::Amo(vec![
+				(lits[0], PosCoeff::new(2)),
+				(lits[1], PosCoeff::new(5)),
+				(lits[2], PosCoeff::new(2)),
+			]);
+			let ts = Term::from_part(&mut cnf, &part, "x", exact).unwrap();
+			let [t] = &ts[..] else {
+				panic!("a group of exclusive terms is one variable")
+			};
+			let x = &t.x;
+			let _ = x.ord(&mut cnf).unwrap();
+
+			let solutions = group_solutions(&cnf, x, &lits);
+			let choices: Vec<_> = solutions
+				.iter()
+				.map(|(_, chosen)| chosen.clone())
+				.sorted()
+				.dedup()
+				.collect();
+			assert_eq!(
+				choices.len(),
+				4,
+				"reading the group as an integer must not rule out a choice of terms"
+			);
+			for (value, chosen) in solutions {
+				let worth: Coeff = chosen
+					.iter()
+					.zip([2, 5, 2])
+					.filter(|(c, _)| **c)
+					.map(|(_, w)| w)
+					.sum();
+				if exact {
+					// With the upper bound the group is exactly its chosen term.
+					assert_eq!(value, worth, "chose {chosen:?}");
+				} else {
+					// Without it, choosing a term only forces the group up, so
+					// it may over-state and never under-states. That is sound
+					// for a `≤`, which is all a group without the bound is for,
+					// and costs no solutions: the terms are still free.
+					assert!(value >= worth, "{value} under {worth} for {chosen:?}");
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn a_chain_of_terms_becomes_its_running_sum() {
+		let mut cnf = Cnf::default();
+		let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
+		// Each term implies the one before it, which is what the group means.
+		for (a, b) in lits.iter().zip(lits.iter().skip(1)) {
+			cnf.add_clause([!*b, *a]).unwrap();
+		}
+		let part = Part::Ic(vec![
+			(lits[0], PosCoeff::new(2)),
+			(lits[1], PosCoeff::new(3)),
+			(lits[2], PosCoeff::new(4)),
+		]);
+		let ts = Term::from_part(&mut cnf, &part, "x", true).unwrap();
+		let x = &ts[0].x;
+		let _ = x.ord(&mut cnf).unwrap();
+
+		let solutions = group_solutions(&cnf, x, &lits);
+		// The chain admits four assignments, worth nothing, two, five and nine.
+		assert_eq!(
+			solutions.iter().map(|(v, _)| *v).collect::<Vec<_>>(),
+			vec![0, 2, 5, 9]
+		);
+		for (value, chosen) in solutions {
+			let worth: Coeff = chosen
+				.iter()
+				.zip([2, 3, 4])
+				.filter(|(c, _)| **c)
+				.map(|(_, w)| w)
+				.sum();
+			assert_eq!(value, worth, "chose {chosen:?}");
+		}
+	}
+
+	#[test]
+	fn a_group_of_distinct_coefficients_can_still_take_them() {
+		// Every value is reached by exactly one term, so nothing forces a fresh
+		// literal to stand for it.
+		let mut cnf = Cnf::default();
+		let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
+		PairwiseEncoder::default()
+			.encode(
+				&mut cnf,
+				&CardinalityOne {
+					lits: lits.clone(),
+					cmp: LimitComp::LessEq,
+				},
+			)
+			.unwrap();
+		let part = Part::Amo(
+			lits.iter()
+				.zip([2, 5, 7])
+				.map(|(&l, c)| (l, PosCoeff::new(c)))
+				.collect(),
+		);
+		let ts = Term::from_part(&mut cnf, &part, "x", false).unwrap();
+		let x = &ts[0].x;
+		let _ = x.ord(&mut cnf).unwrap();
+
+		let mut slv = Cadical::from(&cnf);
+		let mut reachable = Vec::new();
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			reachable.push(
+				lits.iter()
+					.zip([2, 5, 7])
+					.find(|(&l, _)| value.value(l))
+					.map_or(0, |(_, c)| c),
+			);
+			let no_good: Vec<_> = lits
+				.iter()
+				.map(|&l| if value.value(l) { !l } else { l })
+				.collect();
+			if slv.add_clause(no_good).is_err() {
+				break;
+			}
+		}
+		reachable.sort();
+		reachable.dedup();
+		assert_eq!(
+			reachable,
+			vec![0, 2, 5, 7],
+			"every term must still be choosable"
+		);
+	}
+
+	#[test]
+	fn a_group_on_its_own_is_bounded_on_its_own_literals() {
+		// One term left and read directly: no literal says where the group
+		// stands against the bound, so the values that break it are ruled out
+		// one by one.
+		for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
+			for k in -1..=9 {
+				let mut cnf = Cnf::default();
+				let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
+				PairwiseEncoder::default()
+					.encode(
+						&mut cnf,
+						&CardinalityOne {
+							lits: lits.clone(),
+							cmp: LimitComp::LessEq,
+						},
+					)
+					.unwrap();
+				let part = Part::Amo(
+					lits.iter()
+						.zip([2, 5, 7])
+						.map(|(&l, c)| (l, PosCoeff::new(c)))
+						.collect(),
+				);
+				let ts = Term::from_part(&mut cnf, &part, "x", true).unwrap();
+				let mut enc = IntLinEncoder::default();
+				let ok = enc
+					.encode(&mut cnf, &IntLinear::new(ts.clone(), cmp, k))
+					.is_ok();
+				assert!(!ts[0].x.has_ord(), "read on the group's own literals");
+
+				let mut seen = Vec::new();
+				if ok {
+					let mut slv = Cadical::from(&cnf);
+					while let SolveResult::Satisfied(value) = slv.solve() {
+						seen.push(
+							lits.iter()
+								.zip([2, 5, 7])
+								.find(|(&l, _)| value.value(l))
+								.map_or(0, |(_, c)| c),
+						);
+						let no_good: Vec<_> = lits
+							.iter()
+							.map(|&l| if value.value(l) { !l } else { l })
+							.collect();
+						if slv.add_clause(no_good).is_err() {
+							break;
+						}
+					}
+				}
+				seen.sort();
+				seen.dedup();
+				let expected: Vec<Coeff> = [0, 2, 5, 7]
+					.into_iter()
+					.filter(|&v| match cmp {
+						Comparator::LessEq => v <= k,
+						Comparator::Equal => v == k,
+						Comparator::GreaterEq => v >= k,
+					})
+					.collect();
+				assert_eq!(seen, expected, "group {cmp:?} {k}");
+			}
+		}
+	}
+
+	#[test]
+	fn a_group_is_encoded_on_the_literals_it_arrived_on() {
+		// The whole point of reading a group as an integer: the walk guards on
+		// whichever view the group came with, so no second view is built and
+		// nothing has to be channelled.
+		let mut cnf = Cnf::default();
+		let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
+		PairwiseEncoder::default()
+			.encode(
+				&mut cnf,
+				&CardinalityOne {
+					lits: lits.clone(),
+					cmp: LimitComp::LessEq,
+				},
+			)
+			.unwrap();
+		let part = Part::Amo(
+			lits.iter()
+				.zip([2, 5, 7])
+				.map(|(&l, c)| (l, PosCoeff::new(c)))
+				.collect(),
+		);
+		let ts = Term::from_part(&mut cnf, &part, "x", true).unwrap();
+		let y = IntVar::new(RangeList::from_iter([0..=3]), true, "y".to_owned());
+
+		let mut enc = IntLinEncoder::default();
+		let con = IntLinear::new(
+			vec![ts[0].clone(), Term::new(1, Rc::clone(&y))],
+			Comparator::LessEq,
+			8,
+		);
+		enc.encode(&mut cnf, &con).unwrap();
+
+		assert!(
+			!ts[0].x.has_ord(),
+			"the group came with a direct encoding and should be read on it"
+		);
+
+		// And it still encodes the constraint.
+		let mut slv = Cadical::from(&cnf);
+		let mut seen = Vec::new();
+		let watched: Vec<Lit> = lits.iter().copied().chain(y.lits()).collect();
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			let group: Coeff = lits
+				.iter()
+				.zip([2, 5, 7])
+				.find(|(&l, _)| value.value(l))
+				.map_or(0, |(_, c)| c);
+			seen.push((group, y.value(&value)));
+			let no_good: Vec<_> = watched
+				.iter()
+				.map(|&l| if value.value(l) { !l } else { l })
+				.collect();
+			if slv.add_clause(no_good).is_err() {
+				break;
+			}
+		}
+		seen.sort();
+		seen.dedup();
+		let expected: Vec<(Coeff, Coeff)> = [0, 2, 5, 7]
+			.into_iter()
+			.flat_map(|g| (0..=3).map(move |v| (g, v)))
+			.filter(|(g, v)| g + v <= 8)
+			.collect();
+		assert_eq!(seen, expected);
+	}
+
+	#[test]
+	fn a_log_encoded_group_keeps_its_bits() {
+		// The caller declared these literals to be the bits of an integer, so
+		// the group is that integer: the bits are its encoding and the multiple
+		// its coefficients are built from stays on the term.
+		for multiple in [1, 3] {
+			let mut cnf = Cnf::default();
+			let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
+			let terms = lits
+				.iter()
+				.enumerate()
+				.map(|(i, &l)| (l, PosCoeff::new(multiple << i)))
+				.collect();
+			// Bounds come already scaled by the multiple, as the aggregator
+			// leaves them.
+			let part = Part::Dom(
+				terms,
+				PosCoeff::new(2 * multiple),
+				PosCoeff::new(5 * multiple),
+			);
+			let ts = Term::from_part(&mut cnf, &part, "x", true).unwrap();
+
+			let [t] = &ts[..] else {
+				panic!("a log encoding is one integer, not one per bit")
+			};
+			assert_eq!(t.c, multiple, "the multiple belongs on the term");
+			assert_eq!((t.x.lb(), t.x.ub()), (2, 5), "the declared bounds hold");
+			assert!(
+				!t.x.has_ord(),
+				"the bits are already there, so nothing should be channelled"
+			);
+			let vars_before = cnf.num_vars();
+			let _ = t.x.bin(&mut cnf).unwrap();
+			assert_eq!(
+				cnf.num_vars(),
+				vars_before,
+				"the encoding should be the literals it was given"
+			);
+
+			// The group takes exactly the declared values, and the bits say
+			// which.
+			let mut slv = Cadical::from(&cnf);
+			let mut seen = Vec::new();
+			while let SolveResult::Satisfied(value) = slv.solve() {
+				let bits: Coeff = lits
+					.iter()
+					.enumerate()
+					.filter(|(_, &l)| value.value(l))
+					.map(|(i, _)| 1 << i)
+					.sum();
+				assert_eq!(t.x.value(&value), bits, "the value is what the bits say");
+				seen.push(bits);
+				let no_good: Vec<_> = lits
+					.iter()
+					.map(|&l| if value.value(l) { !l } else { l })
+					.collect();
+				if slv.add_clause(no_good).is_err() {
+					break;
+				}
+			}
+			seen.sort();
+			assert_eq!(seen, vec![2, 3, 4, 5], "multiple {multiple}");
 		}
 	}
 
