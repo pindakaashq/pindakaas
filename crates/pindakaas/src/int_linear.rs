@@ -26,7 +26,7 @@ use crate::{
 		scm::{ScmObjective, ScmOperation, ScmSolution},
 		shifted,
 	},
-	integer::var::{BinEnc, DirEnc, IntVar, OrdEnc},
+	integer::{BinEnc, DirEnc, IntVar, OrdEnc},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
 
@@ -922,11 +922,11 @@ mod tests {
 	use rangelist::RangeList;
 	use traced_test::test;
 
-	use super::{IntLinConfig, IntLinEncoder, IntLinear, Term};
 	use crate::{
 		bool_linear::{Comparator, LimitComp, Part, PosCoeff},
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
-		integer::var::IntVar,
+		int_linear::{IntLinConfig, IntLinEncoder, IntLinear, Term},
+		integer::IntVar,
 		solver::{cadical::Cadical, SolveResult, Solver},
 		ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Valuation,
 	};

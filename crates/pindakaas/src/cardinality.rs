@@ -5,10 +5,12 @@
 //! [`SortingNetworkEncoder`] can then be used to encode the constraint into
 //! CNF, as well as [`Encoder`] implementations for [`NormalizedBoolLinear`].
 
+use rangelist::RangeList;
+
 use crate::{
 	bool_linear::{Comparator, LimitComp, LinMarker, NormalizedBoolLinear, PosCoeff},
 	cardinality_one::CardinalityOne,
-	integer::IntVarEnc,
+	integer::IntVar,
 	sorted::{Sorted, SortedEncoder},
 	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Valuation,
 };
@@ -130,14 +132,10 @@ where
 		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))
 	)]
 	fn encode(&self, db: &mut Db, card: &Cardinality) -> Result {
-		self.sorted_encoder.encode(
-			db,
-			&Sorted::new(
-				card.lits.as_slice(),
-				card.cmp.clone(),
-				&IntVarEnc::Const(card.k.into()),
-			),
-		)
+		let k: Coeff = card.k.into();
+		let y = IntVar::new(RangeList::from_iter([k..=k]), false, String::from("k"));
+		self.sorted_encoder
+			.encode(db, &Sorted::new(card.lits.as_slice(), card.cmp.clone(), &y))
 	}
 }
 

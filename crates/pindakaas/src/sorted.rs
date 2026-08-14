@@ -1,13 +1,15 @@
-use std::{cmp::min, hash, iter::once, mem, sync::Mutex};
+use std::{cmp::min, hash, iter::once, mem, rc::Rc, sync::Mutex};
 
 use itertools::Itertools;
+use rangelist::RangeList;
 use rustc_hash::FxHashMap;
 
 use crate::{
 	bool_linear::{BoolLinExp, LimitComp},
-	integer::{IntVarEnc, IntVarOrd, TernLeConstraint, TernLeEncoder},
-	propositional_logic::{Formula, TseitinEncoder},
-	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
+	int_linear::{IntLinEncoder, IntLinear, Term},
+	integer::{IntVar, OrdEnc},
+	Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
+	Valuation,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -21,7 +23,7 @@ pub(crate) enum SortN {
 pub struct Sorted<'a> {
 	pub(crate) xs: &'a [Lit],
 	pub(crate) cmp: LimitComp,
-	pub(crate) y: &'a IntVarEnc,
+	pub(crate) y: &'a Rc<IntVar>,
 }
 
 type SortedCache = FxHashMap<(u128, u128, u128), (SortedStrategy, (u128, u128))>;
@@ -52,7 +54,7 @@ pub enum SortedStrategy {
 }
 
 impl<'a> Sorted<'a> {
-	pub(crate) fn new(xs: &'a [Lit], cmp: LimitComp, y: &'a IntVarEnc) -> Self {
+	pub(crate) fn new(xs: &'a [Lit], cmp: LimitComp, y: &'a Rc<IntVar>) -> Self {
 		Self { xs, cmp, y }
 	}
 }
@@ -61,7 +63,7 @@ impl Checker for Sorted<'_> {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
 		let lhs = BoolLinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
 			.value(sol)?;
-		let rhs = BoolLinExp::from(self.y).value(sol)?;
+		let rhs = self.y.value(sol);
 
 		if match self.cmp {
 			LimitComp::LessEq => lhs <= rhs,
@@ -74,34 +76,64 @@ impl Checker for Sorted<'_> {
 	}
 }
 
+/// The variable `⌊x / 2⌋`, which reaches `w` exactly when `x` reaches `2·w`.
+///
+/// Its literals are `x`'s, every other one, so halving costs nothing.
+fn halved(x: &Rc<IntVar>) -> Rc<IntVar> {
+	let ub = x.ub() / 2;
+	let y = IntVar::new(
+		RangeList::from_iter([0..=ub]),
+		false,
+		format!("{}/2", x.lbl()),
+	);
+	for w in 1..=ub {
+		y.set_ord_view_of(w, Rc::clone(x), 2 * w);
+	}
+	y
+}
+
+/// The variable `x + k`, which reaches `v` exactly when `x` reaches `v - k`.
+///
+/// Its literals are `x`'s, the domain having only moved along.
+fn shifted(x: &Rc<IntVar>, k: Coeff) -> Rc<IntVar> {
+	let dom = x.dom();
+	let y = IntVar::new(
+		dom.iter().flatten().map(|v| (v + k)..=(v + k)).collect(),
+		false,
+		format!("{}+{k}", x.lbl()),
+	);
+	// The first value of an order encoding has no literal of its own.
+	for v in dom.iter().flatten().skip(1) {
+		y.set_ord_view_of(v + k, Rc::clone(x), v);
+	}
+	y
+}
+
 impl SortedEncoder {
+	/// One step of a merge: what `x` and `y` reach between them, `z` reaches.
 	fn comp<Db>(
 		&self,
 		db: &mut Db,
-		x: &IntVarEnc,
-		y: &IntVarEnc,
+		x: &OrdEnc,
+		y: &OrdEnc,
 		cmp: &LimitComp,
-		z: &IntVarEnc,
+		z: &OrdEnc,
 		c: Coeff,
 	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
 		let cmp = self.overwrite_recursive_cmp.as_ref().unwrap_or(cmp);
-		let c1 = c;
-		let c2 = c + 1;
-		let x = x.geq(c1); // c
-		let y = y.geq(c2); // c+1
-		let z1 = z.geq(c1 + c1); // 2c
-		let z2 = z.geq(c1 + c2); // 2c+1
+		let (x, y) = (x.geq_val(c), y.geq_val(c + 1));
+		let (z1, z2) = (z.geq_val(c + c), z.geq_val(c + c + 1));
 
-		TseitinEncoder.encode(db, &Formula::Or(vec![!x.clone(), z1.clone()]))?;
-		TseitinEncoder.encode(db, &Formula::Or(vec![!y.clone(), z1.clone()]))?;
-		TseitinEncoder.encode(db, &Formula::Or(vec![!x.clone(), !y.clone(), z2.clone()]))?;
+		db.add_clause([!x, z1])?;
+		db.add_clause([!y, z1])?;
+		db.add_clause([!x, !y, z2])?;
 		if cmp == &LimitComp::Equal {
-			TseitinEncoder.encode(db, &Formula::Or(vec![x.clone(), !z2.clone()]))?;
-			TseitinEncoder.encode(db, &Formula::Or(vec![y.clone(), !z2]))?;
-			TseitinEncoder.encode(db, &Formula::Or(vec![x, y, !z1]))?;
+			db.add_clause([x, !z2])?;
+			db.add_clause([y, !z2])?;
+			db.add_clause([x, y, !z1])?;
 		}
 		Ok(())
 	}
@@ -113,19 +145,47 @@ impl SortedEncoder {
 		self
 	}
 
-	fn merged<Db>(
+	/// Constrain `z` to be what `x` and `y` come to together.
+	///
+	/// A variable with a single value has nothing to merge, and merging it
+	/// anyway would not converge, since halving it leaves it just as large. So
+	/// once any of the three is fixed, the constraint is stated outright. The
+	/// two inputs are checked alike even though the corpus only exercises the
+	/// first: the alternative to a redundant check here is a hang.
+	fn merge<Db>(
 		&self,
 		db: &mut Db,
-		x1: &IntVarEnc,
-		x2: &IntVarEnc,
+		x: &Rc<IntVar>,
+		y: &Rc<IntVar>,
 		cmp: &LimitComp,
-		y: &IntVarEnc,
-		_lvl: usize,
+		z: &Rc<IntVar>,
+		lvl: usize,
 	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		let (a, b, c) = (x1.ub(), x2.ub(), y.ub());
+		if x.size() == 1 || y.size() == 1 || z.size() == 1 {
+			self.ternary(db, x, y, cmp, z)
+		} else {
+			self.merged(db, x, y, cmp, z, lvl)
+		}
+	}
+
+	/// Merge `x` and `y` into `z` a bit at a time, or state the addition
+	/// outright where that is cheaper.
+	fn merged<Db>(
+		&self,
+		db: &mut Db,
+		x: &Rc<IntVar>,
+		y: &Rc<IntVar>,
+		cmp: &LimitComp,
+		z: &Rc<IntVar>,
+		lvl: usize,
+	) -> Result
+	where
+		Db: ClauseDatabase + ?Sized,
+	{
+		let (a, b, c) = (x.ub(), y.ub(), z.ub());
 		let strat = if let SortedStrategy::Mixed(lambda) = &self.strategy {
 			let mut cache = self.strategy_cost_cache.lock().unwrap();
 			SortedStrategy::mixed_cost(&mut cache, a as u128, b as u128, c as u128, *lambda).0
@@ -135,225 +195,174 @@ impl SortedEncoder {
 
 		match strat {
 			SortedStrategy::Direct => {
-				let cmp = self.overwrite_direct_cmp.as_ref().unwrap_or(cmp).clone();
-				TernLeEncoder::default().encode(
-					db,
-					&TernLeConstraint {
-						x: x1,
-						y: x2,
-						cmp,
-						z: y, // TODO no consistency implemented for this bound yet
-					},
-				)
+				let cmp = self.overwrite_direct_cmp.as_ref().unwrap_or(cmp);
+				self.ternary(db, x, y, cmp, z)
 			}
 			SortedStrategy::Recursive => {
 				if a == 0 && b == 0 {
 					Ok(())
 				} else if a == 1 && b == 1 && c <= 2 {
-					self.smerge(db, x1, x2, cmp, y)
+					self.smerge(db, x, y, cmp, z)
 				} else {
-					let x1_floor = x1.div(2);
-					let x1_ceil = x1
-						.add(
-							db,
-							&TernLeEncoder::default(),
-							&IntVarEnc::Const(1),
-							None,
-							None,
-						)?
-						.div(2);
+					// Split each side into the halves that round down and up,
+					// merge those separately, and let the comparators put the
+					// two results back together.
+					let (x_floor, y_floor) = (halved(x), halved(y));
+					let (x_ceil, y_ceil) = (halved(&shifted(x, 1)), halved(&shifted(y, 1)));
 
-					let x2_floor = x2.div(2);
-					let x2_ceil = x2
-						.add(
-							db,
-							&TernLeEncoder::default(),
-							&IntVarEnc::Const(1),
-							None,
-							None,
-						)?
-						.div(2);
+					let z_floor = self.sum_var(db, &x_floor, &y_floor)?;
+					self.merge(db, &x_floor, &y_floor, cmp, &z_floor, lvl + 1)?;
 
-					let z_floor =
-						x1_floor.add(db, &TernLeEncoder::default(), &x2_floor, None, None)?;
-					self.encode(
-						db,
-						&TernLeConstraint::new(&x1_floor, &x2_floor, cmp.clone(), &z_floor),
-					)?;
+					let z_ceil = self.sum_var(db, &x_ceil, &y_ceil)?;
+					self.merge(db, &x_ceil, &y_ceil, cmp, &z_ceil, lvl + 1)?;
 
-					let z_ceil =
-						x1_ceil.add(db, &TernLeEncoder::default(), &x2_ceil, None, None)?;
-					self.encode(
-						db,
-						&TernLeConstraint::new(&x1_ceil, &x2_ceil, cmp.clone(), &z_ceil),
-					)?;
-
-					for c in 0..=c {
-						self.comp(db, &z_floor, &z_ceil, cmp, y, c)?;
-					}
-
-					Ok(())
+					let (z_floor, z_ceil, z_enc) = (z_floor.ord(db)?, z_ceil.ord(db)?, z.ord(db)?);
+					(0..=c).try_for_each(|c| self.comp(db, &z_floor, &z_ceil, cmp, &z_enc, c))
 				}
 			}
-			_ => unreachable!(),
+			SortedStrategy::Mixed(_) => unreachable!("a strategy is settled before it is used"),
 		}
 	}
 
-	fn next_int_var<Db>(&self, db: &mut Db, ub: Coeff, lbl: String) -> IntVarEnc
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		// TODO We always have the view x>=1 <-> y>=1, which is now realized using equiv
-		if ub == 0 {
-			IntVarEnc::Const(0)
-		} else {
-			let y = IntVarOrd::from_bounds(db, 0, ub, lbl);
-			if self.add_consistency {
-				y.consistent(db).unwrap();
-			}
-			y.into()
-		}
+	/// A variable over `0..=ub`, or the constant zero where there is nothing to
+	/// count.
+	fn next_int_var(&self, ub: Coeff, lbl: String) -> Rc<IntVar> {
+		IntVar::new(RangeList::from_iter([0..=ub]), self.add_consistency, lbl)
 	}
 
-	/// The sorted/merged base case of x1{0,1}+x2{0,1}<=y{0,1,2}
+	/// The base case, `x{0,1} + y{0,1} ≷ z{0,1,2}`.
 	fn smerge<Db>(
 		&self,
 		db: &mut Db,
-		x1: &IntVarEnc,
-		x2: &IntVarEnc,
+		x: &Rc<IntVar>,
+		y: &Rc<IntVar>,
 		cmp: &LimitComp,
-		y: &IntVarEnc,
+		z: &Rc<IntVar>,
 	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		// we let x2 take the place of z_ceil, so we need to add 1 to both sides
-		let x2 = x2.add(
-			db,
-			&TernLeEncoder::default(),
-			&IntVarEnc::Const(1),
-			None,
-			None,
-		)?;
-		let y = y.add(
-			db,
-			&TernLeEncoder::default(),
-			&IntVarEnc::Const(1),
-			None,
-			None,
-		)?;
-		self.comp(db, x1, &x2, cmp, &y, 1)
+		// `y` stands in for the half that rounds up, so both sides move along
+		// by one to meet it.
+		let (y, z) = (shifted(y, 1), shifted(z, 1));
+		let (x, y, z) = (x.ord(db)?, y.ord(db)?, z.ord(db)?);
+		self.comp(db, &x, &y, cmp, &z, 1)
 	}
 
+	/// Sort `xs` into a variable counting how many of them hold, up to `ub`.
 	fn sort<Db>(
 		&self,
 		db: &mut Db,
-		xs: &[IntVarEnc],
+		xs: &[Rc<IntVar>],
 		cmp: &LimitComp,
 		ub: Coeff,
 		lbl: String,
-		_lvl: usize,
-	) -> Option<IntVarEnc>
+		lvl: usize,
+	) -> Result<Option<Rc<IntVar>>, Unsatisfiable>
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		match xs {
+		Ok(match xs {
 			[] => None,
-			[x] => Some(x.clone()),
+			[x] => Some(Rc::clone(x)),
 			xs => {
-				let y = self.next_int_var(db, ub, lbl);
-				self.sorted(db, xs, cmp, &y, _lvl).unwrap();
+				let y = self.next_int_var(ub, lbl);
+				self.sorted(db, xs, cmp, &y, lvl)?;
 				Some(y)
 			}
-		}
+		})
 	}
 
+	/// Constrain `y` to count how many of `xs` hold.
 	fn sorted<Db>(
 		&self,
 		db: &mut Db,
-		xs: &[IntVarEnc],
+		xs: &[Rc<IntVar>],
 		cmp: &LimitComp,
-		y: &IntVarEnc,
-		_lvl: usize,
+		y: &Rc<IntVar>,
+		lvl: usize,
 	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		let (n, m) = (xs.len(), y.ub());
-		let direct = false;
-
-		// TODO: Add tracing
-		// eprintln!(
-		// 	"{:_lvl$}sorted([{}] {} {}, {})",
-		// 	"",
-		// 	xs.iter().join(", "),
-		// 	cmp,
-		// 	y,
-		// 	direct,
-		// 	_lvl = _lvl
-		// );
-
 		debug_assert!(xs.iter().all(|x| x.ub() == 1));
-		if direct {
-			return (1..=m + 1).try_for_each(|k| {
-				xs.iter()
-					.map(|x| x.geq(1))
-					.combinations(k as usize)
-					.try_for_each(|lits| {
-						let lits = lits
-							.into_iter()
-							.map(|lit| !lit)
-							.chain(once(y.geq(k)))
-							.collect();
-						TseitinEncoder.encode(db, &Formula::Or(lits))
-					})
-			});
-		}
 		match xs {
 			[] => Ok(()),
-			[x] => TernLeEncoder::default().encode(
-				db,
-				&TernLeConstraint {
-					x,
-					y: &IntVarEnc::Const(0),
-					cmp: cmp.clone(),
-					z: y,
-				},
-			),
-			[x1, x2] if m <= 2 => self.smerge(db, x1, x2, cmp, y),
+			[x] => {
+				let zero = IntVar::new(RangeList::from_iter([0..=0]), false, "0".to_owned());
+				self.ternary(db, x, &zero, cmp, y)
+			}
+			[x1, x2] if y.ub() <= 2 => self.smerge(db, x1, x2, cmp, y),
 			xs => {
 				let n = match self.sort_n {
 					SortN::One => 1,
-					SortN::DivTwo => n / 2,
+					SortN::DivTwo => xs.len() / 2,
 				};
 				let y1 = self.sort(
 					db,
 					&xs[..n],
 					cmp,
-					min((0..n).fold(0, |a, _| a + 1), y.ub()),
+					min(n as Coeff, y.ub()),
 					String::from("y1"),
-					_lvl,
-				);
+					lvl,
+				)?;
 				let y2 = self.sort(
 					db,
 					&xs[n..],
 					cmp,
-					min((n..xs.len()).fold(0, |a, _| a + 1), y.ub()),
+					min((xs.len() - n) as Coeff, y.ub()),
 					String::from("y2"),
-					_lvl,
-				);
-
-				if let Some(y1) = y1 {
-					if let Some(y2) = y2 {
-						self.merged(db, &y1, &y2, cmp, y, _lvl + 1)
-					} else {
-						Ok(())
-					}
-				} else {
-					Ok(())
+					lvl,
+				)?;
+				match (y1, y2) {
+					(Some(y1), Some(y2)) => self.merged(db, &y1, &y2, cmp, y, lvl + 1),
+					_ => Ok(()),
 				}
 			}
 		}
+	}
+
+	/// A variable over what `x` and `y` can come to together.
+	fn sum_var<Db>(
+		&self,
+		_db: &mut Db,
+		x: &Rc<IntVar>,
+		y: &Rc<IntVar>,
+	) -> Result<Rc<IntVar>, Unsatisfiable>
+	where
+		Db: ClauseDatabase + ?Sized,
+	{
+		Ok(IntVar::new(
+			RangeList::from_iter([(x.lb() + y.lb())..=(x.ub() + y.ub())]),
+			self.add_consistency,
+			format!("{}+{}", x.lbl(), y.lbl()),
+		))
+	}
+
+	/// Encode `x + y ≷ z` as the linear constraint it is.
+	fn ternary<Db>(
+		&self,
+		db: &mut Db,
+		x: &Rc<IntVar>,
+		y: &Rc<IntVar>,
+		cmp: &LimitComp,
+		z: &Rc<IntVar>,
+	) -> Result
+	where
+		Db: ClauseDatabase + ?Sized,
+	{
+		IntLinEncoder::default().encode(
+			db,
+			&IntLinear::new(
+				vec![
+					Term::new(1, Rc::clone(x)),
+					Term::new(1, Rc::clone(y)),
+					Term::new(-1, Rc::clone(z)),
+				],
+				cmp.clone().into(),
+				0,
+			),
+		)
 	}
 
 	pub(crate) fn with_overwrite_direct_cmp(&mut self, cmp: Option<LimitComp>) -> &mut Self {
@@ -402,40 +411,21 @@ impl Default for SortedEncoder {
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Sorted<'_>> for SortedEncoder {
 	fn encode(&self, db: &mut Db, sorted: &Sorted) -> Result {
+		// Each literal is an integer worth one when it holds.
 		let xs = sorted
 			.xs
 			.iter()
-			.map(|x| Some(*x))
 			.enumerate()
-			.map(|(i, x)| {
-				IntVarOrd::from_views(db, (0..=1).into(), vec![x], format!("x_{}", i + 1)).into()
+			.map(|(i, &x)| {
+				IntVar::with_ord_views(
+					RangeList::from_iter([0..=1]),
+					format!("x_{}", i + 1),
+					once((1, x)).collect(),
+				)
 			})
 			.collect_vec();
 
-		if self.add_consistency {
-			sorted.y.consistent(db).unwrap();
-		}
-
 		self.sorted(db, &xs, &sorted.cmp, sorted.y, 0)
-	}
-}
-
-impl<Db> Encoder<Db, TernLeConstraint<'_>> for SortedEncoder
-where
-	Db: ClauseDatabase + ?Sized,
-{
-	fn encode(&self, db: &mut Db, tern: &TernLeConstraint) -> Result {
-		let TernLeConstraint { x, y, cmp, z } = tern;
-		if tern.is_fixed()? {
-			Ok(())
-		} else if matches!(x, IntVarEnc::Ord(_))
-			&& matches!(y, IntVarEnc::Ord(_))
-			&& matches!(z, IntVarEnc::Ord(_))
-		{
-			self.merged(db, x, y, cmp, z, 0)
-		} else {
-			TernLeEncoder::default().encode(db, tern)
-		}
 	}
 }
 
@@ -572,12 +562,13 @@ mod tests {
 	use std::num::NonZeroI32;
 
 	use itertools::Itertools;
+	use rangelist::RangeList;
 	use traced_test::test;
 
 	use crate::{
 		bool_linear::LimitComp,
 		helpers::tests::{assert_solutions, expect_file},
-		integer::{IntVarEnc, IntVarOrd, TernLeConstraint},
+		integer::IntVar,
 		sorted::{Sorted, SortedEncoder, SortedStrategy},
 		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Var, VarRange,
 	};
@@ -594,9 +585,13 @@ mod tests {
 	#[test]
 	fn merged_2_eq() {
 		let mut cnf = Cnf::default();
-		let x: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 1, String::from("x")).into();
-		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 1, String::from("y")).into();
-		let z: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 2, String::from("z")).into();
+		let x = IntVar::new(RangeList::from_iter([0..=1]), false, String::from("x"));
+		let _ = x.ord(&mut cnf).unwrap();
+		let y = IntVar::new(RangeList::from_iter([0..=1]), false, String::from("y"));
+		// Materialise before the variable range is captured below.
+		let _ = y.ord(&mut cnf).unwrap();
+		let z = IntVar::new(RangeList::from_iter([0..=2]), false, String::from("z"));
+		let _ = z.ord(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -604,13 +599,31 @@ mod tests {
 		.iter_lits()
 		.collect_vec();
 		get_sorted_encoder(SortedStrategy::Recursive)
-			.encode(
-				&mut cnf,
-				&TernLeConstraint::new(&x, &y, LimitComp::Equal, &z),
-			)
+			.merge(&mut cnf, &x, &y, &LimitComp::Equal, &z, 0)
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_2_merged_eq.sol"]);
+	}
+
+	#[test]
+	fn sorted_1_eq() {
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let y = IntVar::new(RangeList::from_iter([0..=1]), false, String::from("y"));
+		// Materialise before the variable range is captured below.
+		let _ = y.ord(&mut cnf).unwrap();
+		let vars = VarRange::new(
+			Var(NonZeroI32::new(1).unwrap()),
+			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
+		)
+		.iter_lits()
+		.collect_vec();
+
+		get_sorted_encoder(SortedStrategy::Recursive)
+			.encode(&mut cnf, &Sorted::new(&[a], LimitComp::Equal, &y))
+			.unwrap();
+
+		assert_solutions(&cnf, vars, &expect_file!["sorted/test_1_sorted_eq.sol"]);
 	}
 
 	#[test]
@@ -618,7 +631,9 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		let b = cnf.new_lit();
-		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 2, String::from("y")).into();
+		let y = IntVar::new(RangeList::from_iter([0..=2]), false, String::from("y"));
+		// Materialise before the variable range is captured below.
+		let _ = y.ord(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -639,7 +654,9 @@ mod tests {
 		let a = cnf.new_lit();
 		let b = cnf.new_lit();
 		let c = cnf.new_lit();
-		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 2, String::from("y")).into();
+		let y = IntVar::new(RangeList::from_iter([0..=2]), false, String::from("y"));
+		// Materialise before the variable range is captured below.
+		let _ = y.ord(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -660,7 +677,9 @@ mod tests {
 		let a = cnf.new_lit();
 		let b = cnf.new_lit();
 		let c = cnf.new_lit();
-		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 3, String::from("y")).into();
+		let y = IntVar::new(RangeList::from_iter([0..=3]), false, String::from("y"));
+		// Materialise before the variable range is captured below.
+		let _ = y.ord(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -679,7 +698,9 @@ mod tests {
 	fn sorted_4_2_eq() {
 		let mut cnf = Cnf::default();
 		let lits = cnf.new_var_range(4).iter_lits().collect_vec();
-		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 2, String::from("y")).into();
+		let y = IntVar::new(RangeList::from_iter([0..=2]), false, String::from("y"));
+		// Materialise before the variable range is captured below.
+		let _ = y.ord(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -698,7 +719,9 @@ mod tests {
 	fn sorted_4_3_eq() {
 		let mut cnf = Cnf::default();
 		let lits = cnf.new_var_range(4).iter_lits().collect_vec();
-		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 3, String::from("y")).into();
+		let y = IntVar::new(RangeList::from_iter([0..=3]), false, String::from("y"));
+		// Materialise before the variable range is captured below.
+		let _ = y.ord(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -717,7 +740,9 @@ mod tests {
 	fn sorted_4_eq() {
 		let mut cnf = Cnf::default();
 		let lits = cnf.new_var_range(4).iter_lits().collect_vec();
-		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 4, String::from("y")).into();
+		let y = IntVar::new(RangeList::from_iter([0..=4]), false, String::from("y"));
+		// Materialise before the variable range is captured below.
+		let _ = y.ord(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -736,7 +761,9 @@ mod tests {
 	fn sorted_5_1_eq_negated() {
 		let mut cnf = Cnf::default();
 		let lits = cnf.new_var_range(5).iter_lits().map(|l| !l).collect_vec();
-		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 1, String::from("y")).into();
+		let y = IntVar::new(RangeList::from_iter([0..=1]), false, String::from("y"));
+		// Materialise before the variable range is captured below.
+		let _ = y.ord(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -759,7 +786,9 @@ mod tests {
 	fn sorted_5_3_eq() {
 		let mut cnf = Cnf::default();
 		let lits = cnf.new_var_range(5).iter_lits().collect_vec();
-		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 3, String::from("y")).into();
+		let y = IntVar::new(RangeList::from_iter([0..=3]), false, String::from("y"));
+		// Materialise before the variable range is captured below.
+		let _ = y.ord(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -778,7 +807,9 @@ mod tests {
 	fn sorted_5_eq() {
 		let mut cnf = Cnf::default();
 		let lits = cnf.new_var_range(5).iter_lits().collect_vec();
-		let y: IntVarEnc = IntVarOrd::from_bounds(&mut cnf, 0, 5, String::from("y")).into();
+		let y = IntVar::new(RangeList::from_iter([0..=5]), false, String::from("y"));
+		// Materialise before the variable range is captured below.
+		let _ = y.ord(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),

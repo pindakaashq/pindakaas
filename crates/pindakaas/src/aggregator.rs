@@ -11,18 +11,19 @@
 use std::{cmp::min, iter::once};
 
 use itertools::Itertools;
+use rangelist::RangeList;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
 	bool_linear::{
-		AdderEncoder, BoolLinExp, BoolLinear, Comparator, Constraint, LimitComp,
-		NormalizedBoolLinear, Part, PosCoeff,
+		AdderEncoder, BoolLinear, Comparator, Constraint, LimitComp, NormalizedBoolLinear, Part,
+		PosCoeff,
 	},
 	cardinality::Cardinality,
 	cardinality_one::{BitwiseEncoder, CardinalityOne},
 	helpers::is_powers_of_two,
 	int_linear::NormalizedIntLinear,
-	integer::IntVarOrd,
+	integer::IntVar,
 	sorted::{Sorted, SortedEncoder},
 	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
 };
@@ -516,19 +517,15 @@ impl BoolLinAggregator {
 				if self.sort_same_coefficients >= 2 && lits.len() >= self.sort_same_coefficients {
 					let c = *k / *coef;
 
-					let y = IntVarOrd::from_bounds(db, 0, c, String::from("s")).into();
+					let y = IntVar::new(RangeList::from_iter([0..=c]), false, String::from("s"));
+					// The sorted variable counts how many hold, so each of its
+					// order literals is worth another `coef`. They are wanted
+					// either way, so there is nothing to gain by waiting.
+					let terms = y.ord(db)?.lits().into_iter().map(|l| (l, coef)).collect();
 					self.sorted_encoder
 						.encode(db, &Sorted::new(&lits, cmp.clone(), &y))
 						.unwrap();
-
-					let lin_exp = BoolLinExp::from(&y);
-					partition.push(Part::Ic(
-						lin_exp
-							.terms
-							.into_iter()
-							.map(|(lit, _)| (lit, coef))
-							.collect(),
-					));
+					partition.push(Part::Ic(terms));
 				} else {
 					for x in lits {
 						partition.push(Part::Amo(vec![(x, coef)]));

@@ -86,7 +86,19 @@ use itertools::Itertools;
 pub(crate) use new_named_lit;
 pub(crate) use new_named_var_range;
 
-use crate::{bool_linear::PosCoeff, integer::var::BinEnc, BoolVal, ClauseDatabase, Coeff};
+use crate::{bool_linear::PosCoeff, integer::BinEnc, BoolVal, ClauseDatabase, Coeff, Valuation};
+
+/// The value of a binary encoding under an assignment.
+pub(crate) fn bin_value<F: Valuation + ?Sized>(x: &[BoolVal], value: &F) -> Coeff {
+	x.iter()
+		.enumerate()
+		.filter(|(_, b)| match b {
+			BoolVal::Const(b) => *b,
+			BoolVal::Lit(l) => value.value(*l),
+		})
+		.map(|(i, _)| 1 << i)
+		.sum()
+}
 
 /// The `i`'th bit of a binary encoding, where bits beyond the encoding's width
 /// are zero.
@@ -183,23 +195,10 @@ pub(crate) mod tests {
 	use itertools::Itertools;
 
 	use crate::{
-		bool_linear::BoolLinExp,
-		integer::IntVarEnc,
+		helpers::bin_value,
 		solver::{cadical::Cadical, SolveResult, Solver},
 		BoolVal, Checker, ClauseDatabaseTools, Cnf, Coeff, Lit, Unsatisfiable, Valuation,
 	};
-
-	/// The value of a binary encoding under an assignment.
-	pub(crate) fn bin_value<F: Valuation + ?Sized>(x: &[BoolVal], value: &F) -> Coeff {
-		x.iter()
-			.enumerate()
-			.filter(|(_, b)| match b {
-				BoolVal::Const(b) => *b,
-				BoolVal::Lit(l) => value.value(*l),
-			})
-			.map(|(i, _)| 1 << i)
-			.sum()
-	}
 
 	/// Every model of `cnf`, each decoded into the values of the given binary
 	/// encodings.
@@ -259,53 +258,6 @@ pub(crate) mod tests {
 		expect.assert_eq(&formula.to_string());
 	}
 
-	#[allow(dead_code, reason = "TODO: prepare for checking integer encodings")]
-	/// Helper function that asserts that the integer solutions of a formula are
-	/// as contained in the expect block.
-	pub(crate) fn assert_integer_solutions<V, I>(formula: &Cnf, vars: I, expect: &ExpectFile)
-	where
-		V: Into<IntVarEnc>,
-		I: IntoIterator<Item = V> + Clone,
-	{
-		let mut slv = Cadical::from(formula);
-		let vars = vars
-			.into_iter()
-			.map(|x| BoolLinExp::from(&x.into()))
-			.collect_vec();
-		let bool_vars = formula.get_variables();
-		let mut solutions: Vec<Vec<i64>> = Vec::new();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			// Collect integer solution
-			solutions.push(
-				vars.clone()
-					.into_iter()
-					.map(|x| x.value(&value).unwrap())
-					.collect(),
-			);
-			// Add nogood clause
-			let nogood: Vec<Lit> = bool_vars
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect();
-			slv.add_clause(nogood).unwrap();
-		}
-		solutions.sort();
-		let sol_str = format!(
-			"{}",
-			solutions
-				.into_iter()
-				.map(|sol| sol.into_iter().format(" "))
-				.format("\n")
-		);
-		expect.assert_eq(&sol_str);
-	}
-
 	/// Helper functions to ensure that the possible solutions of a formula,
 	/// with relation to a set of variables, match the expected solutions
 	/// string.
@@ -345,24 +297,5 @@ pub(crate) mod tests {
 				.format("\n")
 		);
 		expect.assert_eq(&sol_str);
-	}
-
-	/// Helper function to quickly create a valuation from a slice of literals.
-	///
-	/// ### Warning
-	/// This function assumes that the literal slice contains all literals
-	/// starting from the first variable, and that the literals are in order of
-	/// the variables.
-	pub(crate) fn make_valuation<L: Into<Lit> + Copy>(solution: &[L]) -> impl Valuation + '_ {
-		|l: Lit| {
-			let abs: Lit = l.var().into();
-			let v = Into::<i32>::into(abs) as usize;
-			if v <= solution.len() {
-				debug_assert_eq!(solution[v - 1].into().var(), l.var());
-				solution[v - 1].into() == l
-			} else {
-				false
-			}
-		}
 	}
 }

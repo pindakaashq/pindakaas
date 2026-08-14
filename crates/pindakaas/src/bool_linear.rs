@@ -31,7 +31,7 @@ use crate::{
 	cardinality_one::CardinalityOne,
 	helpers::{as_binary, bit, new_named_lit},
 	int_linear::{Decompose, IntLinEncoder, IntLinear, NormalizedIntLinear, Term},
-	integer::{lex_leq_const, Consistency, GROUND_BINARY_AT_LB},
+	integer::{lex_leq_const, Consistency},
 	propositional_logic::{Formula, TseitinEncoder},
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, IntEncoding, Lit,
 	Result, Unsatisfiable, Valuation,
@@ -811,7 +811,7 @@ impl Decompose for BddEncoder {
 			if vals.is_empty() {
 				return Err(Unsatisfiable);
 			}
-			layers.push(crate::integer::var::IntVar::new(
+			layers.push(crate::integer::IntVar::new(
 				vals.into_iter().map(|v| v..=v).collect(),
 				self.add_consistency,
 				format!("y{i}"),
@@ -1013,15 +1013,8 @@ impl BoolLinExp {
 				{
 					return Err(Unsatisfiable);
 				}
-				Some(Constraint::Domain { lb, ub }) => {
-					// divide by first coeff to get int assignment
-					if GROUND_BINARY_AT_LB {
-						if sum > ub - lb {
-							return Err(Unsatisfiable);
-						}
-					} else if lb > sum || sum > ub {
-						return Err(Unsatisfiable);
-					}
+				Some(Constraint::Domain { lb, ub }) if lb > sum || sum > ub => {
+					return Err(Unsatisfiable);
 				}
 				_ => {}
 			};
@@ -1569,7 +1562,7 @@ impl Decompose for SwcEncoder {
 					_ if i == n => -k..=-k,
 					_ => -k..=0,
 				};
-				crate::integer::var::IntVar::new(
+				crate::integer::IntVar::new(
 					RangeList::from_iter([dom]),
 					self.add_consistency,
 					format!("y{i}"),
@@ -1679,11 +1672,8 @@ impl Decompose for TotalizerEncoder {
 						if dom.is_empty() {
 							return Err(Unsatisfiable);
 						}
-						let parent = crate::integer::var::IntVar::new(
-							dom,
-							self.add_consistency,
-							format!("t{i}"),
-						);
+						let parent =
+							crate::integer::IntVar::new(dom, self.add_consistency, format!("t{i}"));
 						cons.push(IntLinear::new(
 							vec![
 								left.clone(),

@@ -1,33 +1,17 @@
-// The integer variable and its Boolean encodings. Nothing outside their own
-// tests reaches these yet; the constraint encoding that uses them is the next
-// change.
-#[allow(
-	dead_code,
-	reason = "used once the integer constraint encoding is reachable from the pseudo-Boolean entry point"
-)]
-pub(crate) mod var;
+//! Integer decision variables, their Boolean encodings, and the bit-level
+//! constraints shared between them.
 
-use std::{
-	cmp::{max, min},
-	fmt::{self, Display},
-	iter::once,
-	ops::Bound,
-};
+use std::{cell::RefCell, ops::Bound, rc::Rc};
 
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use rangelist::{IntervalIterator, RangeList};
+use rustc_hash::FxHashMap;
 
 use crate::{
-	bool_linear::{BoolLinExp, LimitComp, PosCoeff},
-	helpers::{as_binary, bit, new_named_lit},
-	integer::var::BinEnc,
-	propositional_logic::{Formula, TseitinEncoder},
-	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
-	Unsatisfiable, Valuation,
+	bool_linear::{Comparator, PosCoeff},
+	helpers::{as_binary, bit, new_named_lit, new_named_var_range},
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable, Var, VarRange,
 };
-
-const ENCODE_REDUNDANT_X_O_Y_O_Z_B: bool = true;
-pub(crate) const GROUND_BINARY_AT_LB: bool = false;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Consistency {
@@ -35,65 +19,6 @@ pub enum Consistency {
 	None,
 	Bounds,
 	Domain,
-}
-
-pub(crate) struct ImplicationChainConstraint {
-	lits: Vec<Lit>,
-}
-
-#[derive(Default)]
-pub(crate) struct ImplicationChainEncoder {}
-
-#[derive(Debug, Clone)]
-pub(crate) struct IntVarBin {
-	pub(crate) xs: Vec<Lit>,
-	lb: Coeff,
-	ub: Coeff,
-	lbl: String,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum IntVarEnc {
-	Ord(IntVarOrd),
-	Bin(IntVarBin),
-	Const(Coeff),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct IntVarOrd {
-	pub(crate) dom: RangeList<Coeff>,
-	pub(crate) xs: Vec<Lit>,
-	pub(crate) lbl: String,
-}
-
-#[derive(Debug)]
-pub(crate) struct TernLeConstraint<'a> {
-	pub(crate) x: &'a IntVarEnc,
-	pub(crate) y: &'a IntVarEnc,
-	pub(crate) cmp: LimitComp,
-	pub(crate) z: &'a IntVarEnc,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct TernLeEncoder {}
-
-pub(crate) fn display_dom(dom: &RangeList<Coeff>) -> String {
-	const ELIPSIZE: usize = 8;
-	let card = dom.card().unwrap();
-	let lb = *dom.min().unwrap();
-	let ub = *dom.max().unwrap();
-	if card > ELIPSIZE && dom.iter().len() == 1 {
-		format!("{}..{}", lb, ub)
-	} else if card > ELIPSIZE {
-		format!(
-			"{{{},..,{ub}}} ({}|{})",
-			dom.iter().flatten().take(ELIPSIZE).join(","),
-			card,
-			BinEnc::required_bits(if GROUND_BINARY_AT_LB { ub - lb } else { ub })
-		)
-	} else {
-		format!("{{{}}}", dom.iter().flatten().join(","))
-	}
 }
 
 /// Uses lexicographic constraint to constrain x:B >= k
@@ -138,1048 +63,1001 @@ where
 	Ok(())
 }
 
-/// Constrains the slice `z`, to be the result of adding `x` to `y`, all encoded
-/// using the log encoding.
+/// The binary encoding of an integer variable.
 ///
-/// TODO: Should this use the IntEncoding::Log input??
-pub(crate) fn log_enc_add<Db>(
-	db: &mut Db,
-	x: &[Lit],
-	y: &[Lit],
-	cmp: &LimitComp,
-	z: &[Lit],
-) -> Result
-where
-	Db: ClauseDatabase + ?Sized,
-{
-	log_enc_add_(
-		db,
-		&x.iter().copied().map(BoolVal::from).collect_vec(),
-		&y.iter().copied().map(BoolVal::from).collect_vec(),
-		cmp,
-		&z.iter().copied().map(BoolVal::from).collect_vec(),
-	)
+/// The bits are those of `value - lb`, least significant first, so that the
+/// lower bound of the domain costs nothing to enforce. A bit may be fixed
+/// rather than free, which is what lets a shifted, complemented or otherwise
+/// derived encoding be expressed without introducing literals for it.
+#[derive(Clone, Debug)]
+pub(crate) struct BinEnc {
+	x: Lits<BoolVal>,
+	lb: Coeff,
 }
 
-#[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "log_enc_add", skip_all, fields(constraint = format!("{x:?} + {y:?} {cmp} {z:?}"))))]
-pub(crate) fn log_enc_add_<Db>(
-	db: &mut Db,
-	x: &[BoolVal],
-	y: &[BoolVal],
-	cmp: &LimitComp,
-	z: &[BoolVal],
-) -> Result
-where
-	Db: ClauseDatabase + ?Sized,
-{
-	let n = itertools::max([x.len(), y.len(), z.len()]).unwrap();
+/// The literals of an encoding.
+///
+/// Literals created for an encoding are allocated in one block and so are
+/// consecutive, which a range holds in a couple of words however wide the
+/// encoding is — worth having, since an encoding is handed out by value every
+/// time a constraint asks for it. Literals recovered from a constraint that
+/// already mentions them, or bits fixed by a shift, are kept as given.
+#[derive(Clone, Debug)]
+pub(crate) enum Lits<T> {
+	Explicit(Vec<T>),
+	Range(VarRange),
+}
 
-	match cmp {
-		LimitComp::Equal => {
-			let c = &once(BoolVal::Const(false))
-				.chain((1..n).map(|_i| {
-					BoolVal::Lit(new_named_lit!(db, crate::trace::subscripted_name("c", _i)))
-				}))
-				.collect_vec();
-			for i in 0..n {
-				// sum circuit
-				db.add_clause([bit(x, i), bit(y, i), bit(c, i), !bit(z, i)])?;
-				db.add_clause([bit(x, i), !bit(y, i), !bit(c, i), !bit(z, i)])?;
-				db.add_clause([!bit(x, i), bit(y, i), !bit(c, i), !bit(z, i)])?;
-				db.add_clause([!bit(x, i), !bit(y, i), bit(c, i), !bit(z, i)])?;
+/// The direct encoding of an integer variable.
+///
+/// There is one literal per domain value except the first, holding when the
+/// variable takes exactly that value; none of them holding means it takes the
+/// first. At most one may hold, which for a group of mutually exclusive
+/// pseudo-Boolean terms is what the caller has already asserted.
+#[derive(Clone, Debug)]
+pub(crate) struct DirEnc {
+	dom: RangeList<Coeff>,
+	x: Lits<Lit>,
+}
 
-				db.add_clause([!bit(x, i), !bit(y, i), !bit(c, i), bit(z, i)])?;
-				db.add_clause([!bit(x, i), bit(y, i), bit(c, i), bit(z, i)])?;
-				db.add_clause([bit(x, i), !bit(y, i), bit(c, i), bit(z, i)])?;
-				db.add_clause([bit(x, i), bit(y, i), !bit(c, i), bit(z, i)])?;
+/// An integer decision variable, together with whichever Boolean encodings of
+/// it have been asked for so far.
+///
+/// A variable may hold several encodings at once. They are created on first
+/// request rather than up front, and the moment a second one appears it is
+/// channelled against the first, so that every view of the variable agrees on
+/// its value. A constraint can therefore ask for whichever view suits it — the
+/// order literals for a sequential decomposition, the bits for an adder —
+/// without having to commit to one in advance or introduce a second variable
+/// to hold the other.
+///
+/// Variables are shared between the constraints that mention them, as
+/// `Rc<IntVar>`.
+// ponytail: `Rc` rather than `Arc`, since nothing needs integer constraints to
+// be `Send`; the interior `RefCell` would have to become an `RwLock` anyway.
+#[derive(Debug)]
+pub(crate) struct IntVar {
+	lbl: String,
+	/// Whether the encodings are restricted to the domain. The order encoding
+	/// is exact by construction, so this only concerns the binary one.
+	add_consistency: bool,
+	state: RefCell<IntVarState>,
+}
 
-				// carry circuit
-				db.add_clause([bit(x, i), bit(y, i), !bit(c, i + 1)])?;
-				db.add_clause([bit(x, i), bit(c, i), !bit(c, i + 1)])?;
-				db.add_clause([bit(y, i), bit(c, i), !bit(c, i + 1)])?;
-				db.add_clause([!bit(x, i), !bit(y, i), bit(c, i + 1)])?;
-				db.add_clause([!bit(x, i), !bit(c, i), bit(c, i + 1)])?;
-				db.add_clause([!bit(y, i), !bit(c, i), bit(c, i + 1)])?;
-			}
-			Ok(())
-		}
-		LimitComp::LessEq => {
-			let c = &(0..n)
-				.map(|_i| BoolVal::Lit(new_named_lit!(db, crate::trace::subscripted_name("c", _i))))
-				.chain(once(BoolVal::Const(true)))
-				.collect_vec();
+/// The parts of a variable that change as it is encoded.
+#[derive(Debug)]
+struct IntVarState {
+	dom: RangeList<Coeff>,
+	ord: Option<OrdEnc>,
+	bin: Option<BinEnc>,
+	dir: Option<DirEnc>,
+	/// Which pairs of encodings have been tied together already. With three of
+	/// them, "the channel fires when the second appears" no longer says enough.
+	channelled: [bool; 2],
+	/// Literals to reuse as `x ≥ v` when the order encoding is created, rather
+	/// than introducing a fresh one.
+	ord_views: FxHashMap<Coeff, Lit>,
+	/// Values whose literal is to be taken from another variable, and which of
+	/// its values to take it from. Resolved when the order encoding is created,
+	/// since the literal may not exist before then.
+	view_of: FxHashMap<Coeff, (Rc<IntVar>, Coeff)>,
+}
 
-			// higher i -> more significant
-			for i in 0..n {
-				// c = all more significant bits are equal AND current one is
-				// if up to i is equal, all preceding must be equal
-				db.add_clause([!bit(c, i), bit(c, i + 1)])?;
-				// if up to i is equal, x<->z
-				db.add_clause([!bit(c, i), !bit(x, i), bit(z, i)])?;
-				db.add_clause([!bit(c, i), !bit(z, i), bit(x, i)])?;
+/// The order encoding of an integer variable.
+///
+/// There is one literal per domain value except the first, where `x[i]` holds
+/// exactly when the variable is at least the `i+1`'th value of the domain. The
+/// domain is kept alongside the literals so that a value can be resolved to a
+/// literal without consulting the variable it came from.
+#[derive(Clone, Debug)]
+pub(crate) struct OrdEnc {
+	dom: RangeList<Coeff>,
+	x: Lits<Lit>,
+}
 
-				// if not up to i is equal, either preceding bit was not equal, or x!=z
-				db.add_clause([bit(c, i), !bit(c, i + 1), bit(x, i), bit(z, i)])?;
-				db.add_clause([bit(c, i), !bit(c, i + 1), !bit(x, i), !bit(z, i)])?;
-
-				// if preceding bits are equal, then x<=z
-				db.add_clause([!bit(c, i + 1), !bit(x, i), bit(z, i)])?;
-			}
-
-			db.add_clause([!bit(x, n - 1), bit(z, n - 1)])?;
-
-			Ok(())
-		}
+impl BinEnc {
+	/// The largest value `bits` bits can hold, the inverse of
+	/// [`Self::required_bits`].
+	pub(crate) fn largest_in(bits: u32) -> Coeff {
+		// Summed rather than `(1 << bits) - 1`, which overflows at the width of
+		// a coefficient where the sum lands exactly on its largest value.
+		const TWO: Coeff = 2;
+		(0..bits).fold(0, |sum, i| sum + TWO.pow(i))
 	}
-}
 
-pub(crate) fn ord_plus_ord_le_ord_sparse_dom<I1, I2>(
-	a: I1,
-	b: I2,
-	l: Coeff,
-	u: Coeff,
-) -> RangeList<Coeff>
-where
-	I1: IntoIterator<Item = Coeff>,
-	I2: IntoIterator<Item = Coeff>,
-	I2::IntoIter: Clone,
-{
-	a.into_iter()
-		.cartesian_product(b)
-		.filter_map(|(a, b)| {
-			if a + b >= l && a + b <= u {
-				Some(a + b)
-			} else {
-				None
-			}
-		})
-		.map(|v| v..=v)
-		.collect()
-}
+	/// The number of bits needed to represent `0..=span`.
+	pub(crate) fn required_bits(span: Coeff) -> usize {
+		debug_assert!(
+			span >= 0,
+			"a domain cannot span a negative number of values"
+		);
+		(Coeff::BITS - span.leading_zeros()) as usize
+	}
 
-impl From<&IntVarBin> for BoolLinExp {
-	fn from(value: &IntVarBin) -> Self {
-		let mut k = 1;
-		let terms = value
-			.xs
-			.iter()
-			.map(|x| {
-				let term = (*x, k);
-				k *= 2;
-				term
-			})
-			.collect_vec();
-		let lin_exp =
-			BoolLinExp::default().add_bounded_log_encoding(terms.as_slice(), value.lb, value.ub);
-		if GROUND_BINARY_AT_LB {
-			lin_exp.add_constant(value.lb)
-		} else {
-			lin_exp
+	/// The `i`'th bit, where bits beyond the encoding's width are zero.
+	pub(crate) fn bit(&self, i: usize) -> BoolVal {
+		self.x.get(i).unwrap_or(BoolVal::Const(false))
+	}
+
+	/// The width of the encoding.
+	pub(crate) fn bits(&self) -> usize {
+		self.x.len()
+	}
+
+	/// Restrict the encoding to the values of `dom`.
+	///
+	/// The lower bound costs nothing when the bits count from it, which is how
+	/// an encoding made for a variable is grounded. One taken from literals
+	/// that were already there counts from wherever they do, and then it needs
+	/// enforcing like any other.
+	pub(crate) fn consistent<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		dom: &RangeList<Coeff>,
+	) -> Result {
+		let floor = *dom.min().unwrap() - self.lb;
+		if floor > 0 {
+			lex_geq_const(db, &self.x.to_vec(), PosCoeff::new(floor), self.bits())?;
 		}
-	}
-}
-
-impl From<&IntVarEnc> for BoolLinExp {
-	fn from(value: &IntVarEnc) -> Self {
-		match value {
-			IntVarEnc::Ord(o) => o.into(),
-			IntVarEnc::Bin(b) => b.into(),
-			&IntVarEnc::Const(c) => c.into(),
-		}
-	}
-}
-
-impl From<&IntVarOrd> for BoolLinExp {
-	fn from(value: &IntVarOrd) -> Self {
-		let mut acc = value.lb();
-		let mut dom_it = value.dom.iter().flatten();
-		let _ = dom_it.next();
-		BoolLinExp::default()
-			.add_chain(
-				&dom_it
-					.zip_eq(&value.xs)
-					.map(|(iv, lit)| {
-						let v = iv - acc;
-						acc += v;
-						(*lit, v)
-					})
-					.collect_vec(),
-			)
-			.add_constant(value.lb())
-	}
-}
-
-impl Checker for ImplicationChainConstraint {
-	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result {
-		for (a, b) in self.lits.iter().copied().tuple_windows() {
-			if sol.value(a) & !sol.value(b) {
-				return Err(Unsatisfiable);
+		let span = *dom.max().unwrap() - self.lb;
+		lex_leq_const(db, &self.x.to_vec(), PosCoeff::new(span), self.bits())?;
+		// ponytail: one clause per value in a gap, so a sparse domain over a
+		// wide range pays for every value it skips. Worth revisiting only if
+		// such domains show up; a range-aware exclusion would be the fix.
+		for (below, above) in dom.iter().tuple_windows() {
+			for v in (*below.end() + 1)..*above.start() {
+				self.encode_neq(db, v)?;
 			}
 		}
 		Ok(())
 	}
-}
 
-impl ImplicationChainEncoder {
-	pub(crate) fn _encode<Db>(&mut self, db: &mut Db, ic: &ImplicationChainConstraint) -> Result
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		for (a, b) in ic.lits.iter().copied().tuple_windows() {
-			db.add_clause([!b, a])?;
-		}
-		Ok(())
-	}
-}
-
-impl IntVarBin {
-	pub(crate) fn add<Db>(&self, db: &mut Db, encoder: &TernLeEncoder, y: Coeff) -> Result<Self>
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		if y == 0 {
-			Ok(self.clone())
-		} else if GROUND_BINARY_AT_LB {
-			Ok(IntVarBin {
-				xs: self.xs.clone(),
-				lb: self.lb() + y,
-				ub: self.ub() + y,
-				lbl: format!("{}+{}", self.lbl, y),
-			})
-		} else {
-			let z_bin = IntVarBin::from_bounds(
+	/// Restrict the encoding to the values on one side of `v`.
+	pub(crate) fn encode_bound<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		cmp: Comparator,
+		v: Coeff,
+		dom: &RangeList<Coeff>,
+	) -> Result {
+		let (lb, ub) = (*dom.min().unwrap(), *dom.max().unwrap());
+		match cmp {
+			Comparator::LessEq if v >= ub => Ok(()),
+			Comparator::LessEq if v < lb => db.contradiction(),
+			Comparator::LessEq => lex_leq_const(
 				db,
-				self.lb() + y,
-				self.ub() + y,
-				format!("{}+{}", self.lbl, y),
-			);
-
-			encoder.encode(
+				&self.x.to_vec(),
+				PosCoeff::new(v - self.lb),
+				self.bits(),
+			),
+			Comparator::GreaterEq if v <= lb => Ok(()),
+			Comparator::GreaterEq if v > ub => db.contradiction(),
+			Comparator::GreaterEq => lex_geq_const(
 				db,
-				&TernLeConstraint {
-					x: &IntVarEnc::Bin(self.clone()),
-					y: &IntVarEnc::Const(y),
-					cmp: LimitComp::Equal,
-					z: &IntVarEnc::Bin(z_bin.clone()),
-				},
-			)?;
-			Ok(z_bin)
+				&self.x.to_vec(),
+				PosCoeff::new(v - self.lb),
+				self.bits(),
+			),
+			Comparator::Equal => unreachable!("an equality is split before it is encoded"),
 		}
 	}
 
-	pub(crate) fn consistent<Db>(&self, db: &mut Db) -> Result
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		let encoder = TernLeEncoder::default();
-		if !GROUND_BINARY_AT_LB {
-			encoder.encode(
-				db,
-				&TernLeConstraint {
-					x: &IntVarEnc::Const(self.lb),
-					y: &IntVarEnc::Const(0),
-					cmp: LimitComp::LessEq,
-					z: &IntVarEnc::Bin(self.clone()),
-				},
-			)?;
-		}
-		encoder.encode(
-			db,
-			&TernLeConstraint {
-				x: &IntVarEnc::Bin(self.clone()),
-				y: &IntVarEnc::Const(0),
-				cmp: LimitComp::LessEq,
-				z: &IntVarEnc::Const(self.ub),
-			},
+	/// Forbid the encoding from taking the value `v`.
+	pub(crate) fn encode_neq<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db, v: Coeff) -> Result {
+		let k = as_binary(PosCoeff::new(v - self.lb), Some(self.bits() as u32));
+		db.add_clause(
+			self.x
+				.iter()
+				.zip(k)
+				.map(|(b, set)| if set { !b } else { b }),
 		)
 	}
 
-	fn div(&self, _: Coeff) -> IntVarEnc {
-		todo!()
-	}
-
-	fn dom(&self) -> RangeList<Coeff> {
-		(self.lb..=self.ub).into()
-	}
-
-	// TODO change to with_label or something
-	pub(crate) fn from_bounds<Db>(db: &mut Db, lb: Coeff, ub: Coeff, lbl: String) -> Self
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		Self {
-			xs: (0..BinEnc::required_bits(if GROUND_BINARY_AT_LB { ub - lb } else { ub }))
-				.map(|_i| new_named_lit!(db, format!("{}^{}", lbl, _i)))
+	/// The encoding of a two-valued variable, whose single order literal
+	/// already distinguishes both values and so can stand in for every bit
+	/// that tells them apart.
+	pub(crate) fn from_two_valued(lit: Lit, dom: &RangeList<Coeff>) -> Self {
+		let (lb, ub) = (*dom.min().unwrap(), *dom.max().unwrap());
+		let x = Lits::Explicit(
+			as_binary(PosCoeff::new(ub - lb), None)
+				.into_iter()
+				.map(|set| {
+					if set {
+						BoolVal::Lit(lit)
+					} else {
+						BoolVal::Const(false)
+					}
+				})
 				.collect(),
+		);
+		Self { x, lb }
+	}
+
+	/// An encoding of bits already built, counting from `lb`.
+	pub(crate) fn from_bits(bits: Vec<BoolVal>, lb: Coeff) -> Self {
+		Self {
+			x: Lits::Explicit(bits),
 			lb,
-			ub,
-			lbl,
 		}
 	}
 
-	pub(crate) fn geq(&self, v: Coeff) -> Formula<BoolVal> {
-		self.ineq(v, true)
-	}
-
-	fn ineq(&self, v: Coeff, geq: bool) -> Formula<BoolVal> {
-		// TODO could *maybe* be domain lb/ub
-		let v = if GROUND_BINARY_AT_LB {
-			v - self.lb()
-		} else {
-			v
-		};
-
-		// The range 0..(2^n)-1 covered by the (unsigned) binary representation
-		let range_lb = 0;
-		let range_ub = BinEnc::largest_in(self.lits() as u32);
-
-		if v <= range_lb {
-			Formula::Atom(BoolVal::Const(geq))
-		} else if v >= range_ub {
-			Formula::Atom(BoolVal::Const(!geq))
-		} else {
-			// generalized from `lex_leq_const`
-			let v = as_binary(PosCoeff::new(v), Some(self.lits() as u32));
-			let mut conj = Vec::new();
-			for (i, _) in v.iter().enumerate().filter(|(_, &v)| v == geq) {
-				let mut disj = Vec::new();
-				for (j, _) in v
-					.iter()
-					.enumerate()
-					.skip(i)
-					.filter(|&(j, &v)| j == i || v != geq)
-				{
-					let lit = self.xs[j];
-					disj.push(Formula::Atom(BoolVal::Lit(if geq { lit } else { !lit })));
+	/// The encoding as a weighted sum of literals, plus what it is worth when
+	/// none of them hold.
+	pub(crate) fn as_weighted(&self) -> (Vec<(Lit, Coeff)>, Coeff) {
+		let mut constant = self.lb;
+		let terms = self
+			.x
+			.iter()
+			.enumerate()
+			.filter_map(|(i, b)| {
+				let weight = 1 << i;
+				match b {
+					BoolVal::Lit(l) => Some((l, weight)),
+					// A bit that is fixed is worth what it is worth regardless.
+					BoolVal::Const(true) => {
+						constant += weight;
+						None
+					}
+					BoolVal::Const(false) => None,
 				}
-				conj.push(if disj.len() == 1 {
-					disj.pop().unwrap()
-				} else {
-					Formula::Or(disj)
-				});
-			}
-			if conj.len() == 1 {
-				conj.pop().unwrap()
-			} else {
-				Formula::And(conj)
-			}
-		}
+			})
+			.collect();
+		(terms, constant)
 	}
 
+	/// The bits of the encoding, least significant first.
+	pub(crate) fn to_vec(&self) -> Vec<BoolVal> {
+		self.x.to_vec()
+	}
+
+	/// The value the encoding is offset by.
 	pub(crate) fn lb(&self) -> Coeff {
 		self.lb
 	}
 
-	pub(crate) fn leq(&self, v: Coeff) -> Formula<BoolVal> {
-		self.ineq(v, false)
+	/// Create the bits for `dom`, all of them free.
+	pub(crate) fn new<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		dom: &RangeList<Coeff>,
+		_lbl: &str,
+	) -> Self {
+		let (lb, ub) = (*dom.min().unwrap(), *dom.max().unwrap());
+		let x = Lits::Range(new_named_var_range!(
+			db,
+			Self::required_bits(ub - lb),
+			|i| format!("{_lbl}^{i}")
+		));
+		Self { x, lb }
 	}
 
-	pub(crate) fn lits(&self) -> usize {
-		self.xs.len()
-	}
-
-	pub(crate) fn ub(&self) -> Coeff {
-		self.ub
+	/// The value represented under an assignment.
+	pub(crate) fn value<F: crate::Valuation + ?Sized>(&self, value: &F) -> Coeff {
+		self.lb + crate::helpers::bin_value(&self.x.to_vec(), value)
 	}
 }
 
-impl Display for IntVarBin {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"{}:B ∈ {} [{}]",
-			self.lbl,
-			display_dom(&self.dom()),
-			self.lits()
+impl<T: Copy + From<Var>> Lits<T> {
+	/// The `i`'th literal, if the encoding is that wide.
+	pub(crate) fn get(&self, i: usize) -> Option<T> {
+		match self {
+			Lits::Explicit(x) => x.get(i).copied(),
+			Lits::Range(r) => (i < r.len()).then(|| r.index(i).into()),
+		}
+	}
+
+	/// The literals, in order.
+	pub(crate) fn iter(&self) -> impl Iterator<Item = T> + '_ {
+		match self {
+			Lits::Explicit(x) => Either::Left(x.iter().copied()),
+			Lits::Range(r) => Either::Right(r.map(T::from)),
+		}
+	}
+
+	/// The number of literals.
+	pub(crate) fn len(&self) -> usize {
+		match self {
+			Lits::Explicit(x) => x.len(),
+			Lits::Range(r) => r.len(),
+		}
+	}
+
+	/// The literals as a slice, materialising a range into one.
+	pub(crate) fn to_vec(&self) -> Vec<T> {
+		self.iter().collect()
+	}
+}
+
+impl DirEnc {
+	/// Restrict the encoding to holding for exactly one value.
+	#[allow(
+		dead_code,
+		reason = "nothing chooses to build a direct encoding yet; it only ever arrives on an at-most-one group"
+	)]
+	pub(crate) fn consistent<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
+		db.add_clause(self.x.iter())?;
+		// ponytail: pairwise, so quadratic in the domain. A variable that also
+		// has an order encoding gets exclusivity from the channel for nothing,
+		// which is the case that arises in practice.
+		for (i, a) in self.x.iter().enumerate() {
+			for b in self.x.iter().skip(i + 1) {
+				db.add_clause([!a, !b])?;
+			}
+		}
+		Ok(())
+	}
+
+	/// Whether the variable takes exactly `v`.
+	pub(crate) fn eq_val(&self, v: Coeff) -> BoolVal {
+		match self.dom.iter().flatten().position(|d| d == v) {
+			None => BoolVal::Const(false),
+			Some(pos) => BoolVal::Lit(self.x.get(pos).unwrap()),
+		}
+	}
+
+	/// Create a direct encoding from the literals it is already on, one for
+	/// each value of `dom` in order.
+	pub(crate) fn from_lits(dom: RangeList<Coeff>, x: Vec<Lit>) -> Self {
+		debug_assert_eq!(
+			x.len(),
+			dom.card().unwrap(),
+			"a direct encoding has a literal for every value"
+		);
+		Self {
+			dom,
+			x: Lits::Explicit(x),
+		}
+	}
+
+	/// The encoding as a weighted sum of literals, plus what it is worth when
+	/// none of them hold.
+	///
+	/// Exactly one literal holds, so the variable is worth whichever value that
+	/// one stands for.
+	pub(crate) fn as_weighted(&self) -> (Vec<(Lit, Coeff)>, Coeff) {
+		(
+			self.dom
+				.iter()
+				.flatten()
+				.zip(self.x.iter())
+				.map(|(v, l)| (l, v))
+				.collect(),
+			0,
 		)
 	}
+
+	/// The literals of the encoding.
+	#[allow(
+		dead_code,
+		reason = "nothing chooses to build a direct encoding yet; it only ever arrives on an at-most-one group"
+	)]
+	pub(crate) fn lits(&self) -> Vec<Lit> {
+		self.x.to_vec()
+	}
+
+	/// The steps of a sequential decomposition over this variable.
+	///
+	/// Each step is a value paired with the clause that holds unless the
+	/// variable takes it, so that what the constraint then demands can be
+	/// disjoined onto it — the same shape the order encoding gives, except that
+	/// a step here pins the value exactly rather than bounding it.
+	///
+	/// The value at the far end contributes the least of any, so what it
+	/// demands holds whatever the variable turns out to be; its clause is
+	/// `false` and drops out, leaving that demand unconditional.
+	pub(crate) fn steps(&self, geq: bool) -> Vec<(Coeff, BoolVal)> {
+		let vals: Vec<Coeff> = self.dom.iter().flatten().collect();
+		let step = |(i, d): (usize, Coeff)| {
+			(
+				d,
+				if i == 0 {
+					BoolVal::Const(false)
+				} else {
+					!self.eq_val(d)
+				},
+			)
+		};
+		if geq {
+			vals.into_iter().enumerate().map(step).collect()
+		} else {
+			vals.into_iter().rev().enumerate().map(step).collect()
+		}
+	}
+
+	/// The value represented under an assignment.
+	pub(crate) fn value<F: crate::Valuation + ?Sized>(&self, value: &F) -> Coeff {
+		self.dom
+			.iter()
+			.flatten()
+			.zip(self.x.to_vec())
+			.find(|(_, l)| value.value(*l))
+			.expect("a direct encoding holds for one of its values")
+			.0
+	}
 }
 
-impl IntVarEnc {
-	pub(crate) fn add<Db>(
+impl IntVar {
+	/// The binary encoding of the variable, created if this is the first
+	/// request for it.
+	pub(crate) fn bin<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result<BinEnc> {
+		if let Some(bin) = self.state.borrow().bin.as_ref() {
+			return Ok(bin.clone());
+		}
+		// Take what is needed out of the variable before touching the database,
+		// so that no borrow is held while clauses are emitted.
+		let (dom, view) = {
+			let state = self.state.borrow();
+			let view = state
+				.ord
+				.as_ref()
+				.and_then(OrdEnc::single_lit)
+				.map(|l| BinEnc::from_two_valued(l, &state.dom));
+			(state.dom.clone(), view)
+		};
+
+		// A two-valued variable needs no channelling: its order literal is
+		// already the whole of its binary encoding.
+		let derived = view.is_some();
+		let bin = match view {
+			Some(bin) => bin,
+			None => {
+				let bin = BinEnc::new(db, &dom, &self.lbl);
+				if self.add_consistency {
+					bin.consistent(db, &dom)?;
+				}
+				bin
+			}
+		};
+
+		{
+			let mut state = self.state.borrow_mut();
+			state.bin = Some(bin.clone());
+			// A two-valued variable needs no tying: its order literal is
+			// already the whole of its binary encoding.
+			state.channelled[0] |= derived;
+		}
+		self.reconcile(db)?;
+		Ok(bin)
+	}
+
+	/// Constrain the order and binary encodings to represent the same value.
+	///
+	/// For each bit, the values it separates form blocks of `2ⁱ` consecutive
+	/// values, alternating between the bit being zero and one. Placing the
+	/// variable in a block therefore fixes the bit, and conversely the bits of
+	/// a value pin down which blocks it lies in, so the two directions come out
+	/// of the same clauses. Blocks reaching past the domain fold away, since
+	/// their bounds resolve to constants.
+	fn channel<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
+		let (ord, bin) = {
+			let mut state = self.state.borrow_mut();
+			match (state.ord.as_ref(), state.bin.as_ref()) {
+				(Some(ord), Some(bin)) if !state.channelled[0] => {
+					let pair = (ord.clone(), bin.clone());
+					state.channelled[0] = true;
+					pair
+				}
+				_ => return Ok(()),
+			}
+		};
+		for i in 0..bin.bits() {
+			let width = 1 << i;
+			for k in 0..(1 << (bin.bits() - i)) {
+				let below = bin.lb() + width * k;
+				db.add_clause([
+					ord.leq_val(below - 1),
+					ord.geq_val(below + width),
+					if k % 2 == 0 { !bin.bit(i) } else { bin.bit(i) },
+				])?;
+			}
+		}
+		Ok(())
+	}
+
+	/// Tie together whatever encodings the variable now has, so that every view
+	/// of it reads the same value.
+	///
+	/// The order encoding is the go-between: tying a new encoding to it is
+	/// enough for the new one to agree with everything already tied to it. A
+	/// variable holding only the other two therefore gains one, which is the
+	/// price of reading it two ways at once.
+	fn reconcile<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
+		let (has_ord, others) = {
+			let state = self.state.borrow();
+			(
+				state.ord.is_some(),
+				usize::from(state.bin.is_some()) + usize::from(state.dir.is_some()),
+			)
+		};
+		if others + usize::from(has_ord) < 2 {
+			return Ok(());
+		}
+		if !has_ord {
+			// Creating it reconciles in turn.
+			let _ = self.ord(db)?;
+			return Ok(());
+		}
+		self.channel(db)?;
+		self.channel_dir(db)
+	}
+
+	/// The direct encoding of the variable, created if this is the first
+	/// request for it.
+	#[allow(
+		dead_code,
+		reason = "nothing chooses to build a direct encoding yet; it only ever arrives on an at-most-one group"
+	)]
+	pub(crate) fn dir<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result<DirEnc> {
+		if let Some(dir) = self.state.borrow().dir.as_ref() {
+			return Ok(dir.clone());
+		}
+		let dom = self.state.borrow().dom.clone();
+		let vals = || dom.iter().flatten();
+		let dir = DirEnc {
+			x: Lits::Range(new_named_var_range!(db, vals().count(), |i| format!(
+				"{}={}",
+				self.lbl,
+				vals().nth(i).unwrap()
+			))),
+			dom: dom.clone(),
+		};
+		// One value and no more, which the order encoding gets from its chain
+		// but the direct encoding has to be told.
+		dir.consistent(db)?;
+		self.state.borrow_mut().dir = Some(dir.clone());
+		self.reconcile(db)?;
+		Ok(dir)
+	}
+
+	/// Constrain the order and direct encodings to represent the same value.
+	///
+	/// Taking a value means reaching it, and reaching a value without reaching
+	/// the next is taking it. Those two are the whole of it, and they are one
+	/// clause each per value.
+	fn channel_dir<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
+		let (ord, dir, dom) = {
+			let mut state = self.state.borrow_mut();
+			match (state.ord.as_ref(), state.dir.as_ref()) {
+				(Some(ord), Some(dir)) if !state.channelled[1] => {
+					let all = (ord.clone(), dir.clone(), state.dom.clone());
+					state.channelled[1] = true;
+					all
+				}
+				_ => return Ok(()),
+			}
+		};
+		let vals: Vec<Coeff> = dom.iter().flatten().collect();
+		for (i, &v) in vals.iter().enumerate() {
+			// Beyond the last value there is nothing to reach.
+			let beyond = vals
+				.get(i + 1)
+				.map_or(BoolVal::Const(false), |&n| ord.geq_val(n));
+			// Taking a value is reaching it and going no further, and reaching
+			// it and going no further is taking it.
+			db.add_clause([!dir.eq_val(v), ord.geq_val(v)])?;
+			db.add_clause([!dir.eq_val(v), !beyond])?;
+			db.add_clause([!ord.geq_val(v), beyond, dir.eq_val(v)])?;
+		}
+		Ok(())
+	}
+
+	/// The domain of the variable.
+	pub(crate) fn dom(&self) -> RangeList<Coeff> {
+		self.state.borrow().dom.clone()
+	}
+
+	/// The variable as a weighted sum of literals, plus what it is worth when
+	/// none of them hold.
+	///
+	/// Read through whichever encoding it has, so that a constraint wanting
+	/// literals rather than integers gets the ones already standing for it.
+	pub(crate) fn as_weighted<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
-		encoder: &TernLeEncoder,
-		y: &IntVarEnc,
-		lb: Option<Coeff>,
-		ub: Option<Coeff>,
-		// cmp: &LimitComp,
-		// enc: &'a mut dyn Encoder<Db, TernLeConstraint<'a, Db, C>>,
-	) -> Result<IntVarEnc>
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		let comp_lb = self.lb() + y.lb();
-		let lb = max(lb.unwrap_or(comp_lb), comp_lb);
-
-		let comp_ub = self.ub() + y.ub();
-		let ub = min(ub.unwrap_or(comp_ub), comp_ub);
-
-		match (self, y) {
-			(IntVarEnc::Const(a), IntVarEnc::Const(b)) => Ok(IntVarEnc::Const(*a + *b)),
-			// TODO only used in sorters which enforce the constraints later!
-			(IntVarEnc::Const(c), x) | (x, IntVarEnc::Const(c)) if (*c == 0) => Ok(x.clone()),
-			(IntVarEnc::Ord(x), IntVarEnc::Ord(y)) => Ok(IntVarEnc::Ord(IntVarOrd::from_dom(
-				db,
-				ord_plus_ord_le_ord_sparse_dom(
-					x.dom().iter().flatten(),
-					y.dom().iter().flatten(),
-					lb,
-					ub,
-				),
-				format!("{}+{}", x.lbl, y.lbl),
-			))),
-			(IntVarEnc::Ord(x), &IntVarEnc::Const(y))
-			| (&IntVarEnc::Const(y), IntVarEnc::Ord(x)) => {
-				let dom = x
-					.dom
-					.iter()
-					.map(|r| *r.start() + y..=*r.end() + y)
-					.collect();
-				Ok(IntVarOrd {
-					dom,
-					xs: x.xs.clone(),
-					lbl: format!("{}+{}", x.lbl, y),
-				}
-				.into())
-			}
-			(IntVarEnc::Bin(x_bin), IntVarEnc::Bin(y_bin)) => {
-				if GROUND_BINARY_AT_LB && comp_lb != x_bin.lb() + y_bin.lb() {
-					unimplemented!(
-					"Not implemented addition for unequal lbs for zero-grounded binary encodings"
-				);
-				}
-				let z = IntVarEnc::Bin(IntVarBin::from_bounds(
-					db,
-					lb,
-					ub,
-					format!("{}+{}", x_bin.lbl, y_bin.lbl),
-				));
-				encoder.encode(
-					db,
-					&TernLeConstraint {
-						x: &IntVarEnc::Bin(x_bin.clone()),
-						y,
-						cmp: LimitComp::Equal,
-						z: &z,
-					},
-				)?;
-				Ok(z)
-			}
-			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y))
-			| (IntVarEnc::Const(y), IntVarEnc::Bin(x_bin)) => {
-				Ok(IntVarEnc::Bin(x_bin.add(db, encoder, *y)?))
-			}
-			_ => todo!("{self} + {y}"),
-		}
-	}
-
-	pub(crate) fn consistent<Db>(&self, db: &mut Db) -> Result
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		match self {
-			IntVarEnc::Ord(o) => o.consistent(db),
-			IntVarEnc::Bin(b) => b.consistent(db),
-			IntVarEnc::Const(_) => Ok(()),
-		}
-	}
-
-	pub(crate) fn div(&self, c: Coeff) -> IntVarEnc {
-		match self {
-			IntVarEnc::Ord(o) => o.div(c),
-			IntVarEnc::Bin(b) => b.div(c),
-			&IntVarEnc::Const(m) => IntVarEnc::Const(m / c),
-		}
-	}
-
-	/// Returns a partitioned domain
-	pub(crate) fn dom(&self) -> RangeList<Coeff> {
-		match self {
-			IntVarEnc::Ord(o) => o.dom(),
-			IntVarEnc::Bin(b) => b.dom(),
-			&IntVarEnc::Const(c) => (c..=c).into(),
-		}
-	}
-
-	/// Returns a clause constraining `x>=v`, which is None if true and empty if
-	/// false
-	pub(crate) fn geq(&self, v: Coeff) -> Formula<BoolVal> {
-		match self {
-			IntVarEnc::Ord(o) => o.geq(v),
-			IntVarEnc::Bin(b) => b.geq(v),
-			&IntVarEnc::Const(c) => Formula::Atom(BoolVal::Const(v <= c)),
-		}
-	}
-
-	pub(crate) fn geqs(&self) -> Vec<(Coeff, Formula<BoolVal>)> {
-		match self {
-			IntVarEnc::Ord(o) => o.geqs(),
-			x => x.dom().iter().flatten().map(|c| (c, x.geq(c))).collect(),
-		}
-	}
-
-	pub(crate) fn lb(&self) -> Coeff {
-		match self {
-			IntVarEnc::Ord(o) => o.lb(),
-			IntVarEnc::Bin(b) => b.lb(),
-			IntVarEnc::Const(c) => *c,
-			// _ => self.dom().range().unwrap().start - 1,
-		}
-	}
-
-	/// Returns cnf constraining `x<=v`, which is empty if true and contains
-	/// empty if false
-	pub(crate) fn leq(&self, v: Coeff) -> Formula<BoolVal> {
-		match self {
-			IntVarEnc::Ord(o) => o.leq(v),
-			IntVarEnc::Bin(b) => b.leq(v),
-			&IntVarEnc::Const(c) => Formula::Atom(BoolVal::Const(v >= c)),
-		}
-	}
-
-	pub(crate) fn leqs(&self) -> Vec<(Coeff, Formula<BoolVal>)> {
-		match self {
-			IntVarEnc::Ord(o) => o.leqs(),
-			x => x.dom().iter().flatten().map(|c| (c, x.leq(c))).collect(),
-		}
-	}
-
-	/// Return number of lits in encoding
-	#[cfg(test)]
-	pub(crate) fn lits(&self) -> usize {
-		match self {
-			IntVarEnc::Ord(o) => o.lits(),
-			IntVarEnc::Bin(b) => b.lits(),
-			IntVarEnc::Const(_) => 0,
-		}
-	}
-
-	pub(crate) fn ub(&self) -> Coeff {
-		match self {
-			IntVarEnc::Ord(o) => o.ub(),
-			IntVarEnc::Bin(b) => b.ub(),
-			IntVarEnc::Const(c) => *c,
-			// _ => self.dom().range().unwrap().end - 1,
-		}
-	}
-}
-
-impl Display for IntVarEnc {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			IntVarEnc::Ord(o) => o.fmt(f),
-			IntVarEnc::Bin(b) => b.fmt(f),
-			IntVarEnc::Const(o) => write!(f, "{o:?}"),
-		}
-	}
-}
-
-impl From<IntVarBin> for IntVarEnc {
-	fn from(b: IntVarBin) -> Self {
-		Self::Bin(b)
-	}
-}
-
-impl From<IntVarOrd> for IntVarEnc {
-	fn from(o: IntVarOrd) -> Self {
-		Self::Ord(o)
-	}
-}
-
-impl IntVarOrd {
-	pub(crate) fn consistency(&self) -> ImplicationChainConstraint {
-		ImplicationChainConstraint {
-			lits: self.xs.clone(),
-		}
-	}
-
-	pub(crate) fn consistent<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
-		ImplicationChainEncoder::default()._encode(db, &self.consistency())
-	}
-
-	pub(crate) fn div(&self, c: Coeff) -> IntVarEnc {
-		assert_eq!(c, 2, "Can only divide IntVarOrd by 2");
-		let mut last = self.lb() / c;
-		let mut xs = Vec::new();
-		for (d, &l) in self.dom().iter().flatten().skip(1).zip_eq(&self.xs) {
-			let nd = d / c;
-			if nd == last {
-				continue;
-			}
-			last = nd;
-			xs.push(l);
-		}
-		let dom = self
-			.dom()
-			.iter()
-			.map(|r| r.start() / c..=r.end() / 2)
-			.collect();
-
-		if xs.is_empty() {
-			IntVarEnc::Const(self.lb() / c)
-		} else {
-			IntVarOrd {
-				dom,
-				xs,
-				lbl: self.lbl.clone(),
-			}
-			.into()
-		}
-	}
-
-	pub(crate) fn dom(&self) -> RangeList<Coeff> {
-		self.dom.clone()
-	}
-
-	pub(crate) fn from_bounds<Db>(db: &mut Db, lb: Coeff, ub: Coeff, lbl: String) -> Self
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		Self::from_dom(db, (lb..=ub).into(), lbl)
-	}
-
-	pub(crate) fn from_dom<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		dom: RangeList<Coeff>,
-		lbl: String,
-	) -> Self {
-		let card = dom.card().unwrap();
-		Self::from_views(db, dom, vec![None; card - 1], lbl)
-	}
-
-	pub(crate) fn from_views<Db>(
-		db: &mut Db,
-		dom: RangeList<Coeff>,
-		views: Vec<Option<Lit>>,
-		lbl: String,
-	) -> Self
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		assert!(!dom.is_empty());
-		assert_eq!(dom.card().unwrap() - 1, views.len(), "Expecting the same number of views as there are inequalities literals to represent the domain");
-
-		let mut dom_it = dom.iter().flatten();
-		// No need for a `<=lb` literal, since it would be `true` and thus redundant.
-		let mut _lb = dom_it.next().unwrap();
-
-		let xs = dom_it
-			.zip_eq(views)
-			.map(|(_v, lit)| {
-				#[cfg(any(feature = "tracing", test))]
-				let lbl = format!("{lbl}>={}", _v);
-				lit.unwrap_or_else(|| new_named_lit!(db, lbl))
-			})
-			.collect();
-
-		Self { dom, xs, lbl }
-	}
-
-	pub(crate) fn geq(&self, v: Coeff) -> Formula<BoolVal> {
-		Formula::Atom(if v <= self.lb() {
-			BoolVal::Const(true)
-		} else if v > self.ub() {
-			BoolVal::Const(false)
-		} else {
-			let pos = self.dom.first_position_bound(&Bound::Included(v)).unwrap() - 1;
-			BoolVal::Lit(self.xs[pos])
-		})
-	}
-
-	pub(crate) fn geqs(&self) -> Vec<(Coeff, Formula<BoolVal>)> {
-		self.dom()
-			.iter()
-			.flatten()
-			.zip_eq(
-				once(Formula::Atom(BoolVal::Const(true)))
-					.chain(self.xs.iter().map(|&l| Formula::Atom(BoolVal::Lit(l)))),
-			)
-			.collect()
-	}
-
-	pub(crate) fn lb(&self) -> Coeff {
-		*self.dom.min().unwrap()
-	}
-
-	pub(crate) fn leq(&self, v: Coeff) -> Formula<BoolVal> {
-		let v = v + 1; // [x<=v] = [x < v+1]
-		Formula::Atom(if v <= self.lb() {
-			BoolVal::Const(false)
-		} else if v > self.ub() {
-			BoolVal::Const(true)
-		} else {
-			let pos = self.dom.first_position_bound(&Bound::Included(v)).unwrap() - 1;
-			BoolVal::Lit(!self.xs[pos])
-		})
-	}
-
-	pub(crate) fn leqs(&self) -> Vec<(Coeff, Formula<BoolVal>)> {
-		self.dom()
-			.iter()
-			.flatten()
-			.zip_eq(
-				self.xs
-					.iter()
-					.map(|&l| Formula::Atom(BoolVal::Lit(!l)))
-					.chain(once(Formula::Atom(BoolVal::Const(true)))),
-			)
-			.collect()
-	}
-
-	#[cfg(test)]
-	pub(crate) fn lits(&self) -> usize {
-		self.xs.len()
-	}
-
-	pub(crate) fn ub(&self) -> Coeff {
-		*self.dom.max().unwrap()
-	}
-}
-
-impl Display for IntVarOrd {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:O ∈ {}", self.lbl, display_dom(&self.dom()))
-	}
-}
-
-impl<'a> TernLeConstraint<'a> {
-	fn check(x: Coeff, y: Coeff, cmp: &LimitComp, z: Coeff) -> bool {
-		match cmp {
-			LimitComp::LessEq => x + y <= z,
-			LimitComp::Equal => x + y == z,
-		}
-	}
-
-	pub(crate) fn is_fixed(&self) -> Result<bool, Unsatisfiable> {
-		let TernLeConstraint { x, y, cmp, z } = self;
-		if let IntVarEnc::Const(x) = x {
-			if let IntVarEnc::Const(y) = y {
-				if let IntVarEnc::Const(z) = z {
-					return if Self::check(*x, *y, cmp, *z) {
-						Ok(true)
-					} else {
-						Err(Unsatisfiable)
-					};
-				}
-			}
-		}
-		Ok(false)
-	}
-	pub(crate) fn new(
-		x: &'a IntVarEnc,
-		y: &'a IntVarEnc,
-		cmp: LimitComp,
-		z: &'a IntVarEnc,
-	) -> Self {
-		Self { x, y, cmp, z }
-	}
-}
-
-impl Checker for TernLeConstraint<'_> {
-	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result {
-		let x = BoolLinExp::from(self.x).value(sol)?;
-		let y = BoolLinExp::from(self.y).value(sol)?;
-		let z = BoolLinExp::from(self.z).value(sol)?;
-		if Self::check(x, y, &self.cmp, z) {
-			Ok(())
-		} else {
-			todo!()
-			// Err(CheckError::Fail(format!(
-			// 	"Failed constraint {self} since {x}+{y} # {z}"
-			// )))
-		}
-	}
-}
-
-impl Display for TernLeConstraint<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{} + {} {} {}", self.x, self.y, self.cmp, self.z)
-	}
-}
-
-impl<Db> Encoder<Db, TernLeConstraint<'_>> for TernLeEncoder
-where
-	Db: ClauseDatabase + ?Sized,
-{
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "tern_le_encoder", skip_all, fields(constraint = format!("{} + {} {} {}", tern.x, tern.y, tern.cmp, tern.z)))
-	)]
-	fn encode(&self, db: &mut Db, tern: &TernLeConstraint) -> Result {
-		#[cfg(debug_assertions)]
+	) -> Result<(Vec<(Lit, Coeff)>, Coeff), Unsatisfiable> {
 		{
-			const PRINT_TESTCASES: bool = false;
-			if PRINT_TESTCASES {
-				println!(" // {tern}");
-				let x = tern
-					.x
-					.dom()
-					.iter()
-					.flatten()
-					.map(|v| v.to_string())
-					.collect_vec();
-				let y = tern
-					.y
-					.dom()
-					.iter()
-					.flatten()
-					.map(|v| v.to_string())
-					.collect_vec();
-				let z = tern
-					.z
-					.dom()
-					.iter()
-					.flatten()
-					.map(|v| v.to_string())
-					.collect_vec();
-				println!(
-					"mod _test_{}_{}_{} {{\n\ttest_int_lin!($encoder, &[{}], &[{}], $cmp, &[{}]);\n}}\n",
-					x.clone().join(""),
-					y.clone().join(""),
-					z.clone().join(""),
-					x.join(", "),
-					y.join(", "),
-					z.join(", "),
-				);
+			let state = self.state.borrow();
+			match (state.dir.as_ref(), state.ord.as_ref(), state.bin.as_ref()) {
+				(Some(dir), ..) => return Ok(dir.as_weighted()),
+				(_, Some(ord), _) => return Ok(ord.as_weighted()),
+				(.., Some(bin)) => return Ok(bin.as_weighted()),
+				_ => {}
+			}
+		}
+		// Nothing has been asked of it yet. The order encoding is the one that
+		// costs least to make, and nothing at all where the literals for it are
+		// already there.
+		Ok(self.ord(db)?.as_weighted())
+	}
+
+	/// The direct encoding of the variable, if it has one.
+	pub(crate) fn dir_now(&self) -> Option<DirEnc> {
+		self.state.borrow().dir.clone()
+	}
+
+	/// Create a variable held in the direct encoding it was found on.
+	pub(crate) fn with_dir(dom: RangeList<Coeff>, lbl: String, dir: DirEnc) -> Rc<Self> {
+		let x = Self::new(dom, false, lbl);
+		x.state.borrow_mut().dir = Some(dir);
+		x
+	}
+
+	/// Whether the variable's literals are settled, so that its domain can no
+	/// longer move.
+	///
+	/// An encoding that exists is settled for the obvious reason. So is one
+	/// that does not exist yet but is spoken for: a variable found on literals
+	/// that were already there cannot drop a value, because the literal
+	/// standing for it is out in the world regardless, and dropping the value
+	/// would leave nothing to say it cannot hold.
+	pub(crate) fn is_committed(&self) -> bool {
+		let state = self.state.borrow();
+		state.ord.is_some()
+			|| state.bin.is_some()
+			|| state.dir.is_some()
+			|| !state.ord_views.is_empty()
+			|| !state.view_of.is_empty()
+	}
+
+	/// Drop the values below `v` from the domain, reporting whether any went.
+	pub(crate) fn set_lb(&self, v: Coeff) -> bool {
+		debug_assert!(
+			!self.is_committed(),
+			"the domain of {} cannot move once it is encoded",
+			self.lbl
+		);
+		let mut state = self.state.borrow_mut();
+		if v <= *state.dom.min().unwrap() {
+			return false;
+		}
+		state.dom.tighten_min(v);
+		true
+	}
+
+	/// Drop the values above `v` from the domain, reporting whether any went.
+	pub(crate) fn set_ub(&self, v: Coeff) -> bool {
+		debug_assert!(
+			!self.is_committed(),
+			"the domain of {} cannot move once it is encoded",
+			self.lbl
+		);
+		let mut state = self.state.borrow_mut();
+		if v >= *state.dom.max().unwrap() {
+			return false;
+		}
+		state.dom.tighten_max(v);
+		true
+	}
+
+	/// The greatest value the variable can take.
+	pub(crate) fn ub(&self) -> Coeff {
+		*self.state.borrow().dom.max().unwrap()
+	}
+
+	/// The least value the variable can take.
+	pub(crate) fn lb(&self) -> Coeff {
+		*self.state.borrow().dom.min().unwrap()
+	}
+
+	/// The label of the variable.
+	pub(crate) fn lbl(&self) -> &str {
+		&self.lbl
+	}
+
+	/// Create a variable over `dom`.
+	pub(crate) fn new(dom: RangeList<Coeff>, add_consistency: bool, lbl: String) -> Rc<Self> {
+		debug_assert!(!dom.is_empty(), "an integer variable needs a domain");
+		Rc::new(Self {
+			lbl,
+			add_consistency,
+			state: RefCell::new(IntVarState {
+				dom,
+				ord: None,
+				bin: None,
+				dir: None,
+				channelled: [false; 2],
+				ord_views: FxHashMap::default(),
+				view_of: FxHashMap::default(),
+			}),
+		})
+	}
+
+	/// Whether the variable is better held in binary than in order form.
+	///
+	/// An encoding it already has settles the question: reaching for the other
+	/// one would mean paying to channel between them. Otherwise a variable is
+	/// held in binary once its domain grows past `cutoff`, and always in order
+	/// form when there is no cutoff.
+	pub(crate) fn prefers_binary(&self, cutoff: Option<Coeff>) -> bool {
+		let state = self.state.borrow();
+		match (state.bin.is_some(), state.ord.is_some(), cutoff) {
+			(true, _, _) => true,
+			(_, true, _) => false,
+			(_, _, None) => false,
+			(_, _, Some(cutoff)) => state.dom.card().unwrap() as Coeff >= cutoff,
+		}
+	}
+
+	/// The order encoding of the variable, created if this is the first request
+	/// for it.
+	pub(crate) fn ord<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result<OrdEnc> {
+		if let Some(ord) = self.state.borrow().ord.as_ref() {
+			return Ok(ord.clone());
+		}
+		// Fetch the literals taken from elsewhere first, which may encode the
+		// variables they come from. Collected before any of that, so that this
+		// variable is not borrowed while another is being encoded.
+		let pulls: Vec<(Coeff, Rc<IntVar>, Coeff)> = self
+			.state
+			.borrow()
+			.view_of
+			.iter()
+			.map(|(&v, (src, sv))| (v, Rc::clone(src), *sv))
+			.collect();
+		for (v, src, src_val) in pulls {
+			if let BoolVal::Lit(l) = src.ord(db)?.geq_val(src_val) {
+				let _ = self.state.borrow_mut().ord_views.insert(v, l);
 			}
 		}
 
-		let TernLeConstraint { x, y, cmp, z } = tern;
+		let (dom, views) = {
+			let state = self.state.borrow();
+			(state.dom.clone(), state.ord_views.clone())
+		};
 
-		match (x, y, z) {
-			(IntVarEnc::Const(_), IntVarEnc::Const(_), IntVarEnc::Const(_)) => {
-				if tern.check(&|_| unreachable!()).is_ok() {
-					Ok(())
-				} else {
-					db.contradiction()?;
-					unreachable!();
-				}
-			}
-			(IntVarEnc::Const(x_con), IntVarEnc::Const(y_con), IntVarEnc::Bin(z_bin)) => {
-				let lhs = *x_con + *y_con;
-				match cmp {
-					// put z_bin on the left, const on the right
-					LimitComp::LessEq => lex_geq_const(
-						db,
-						z_bin
-							.xs
-							.iter()
-							.copied()
-							.map(BoolVal::Lit)
-							.collect_vec()
-							.as_slice(),
-						PosCoeff::new(if GROUND_BINARY_AT_LB {
-							lhs - z_bin.lb()
-						} else {
-							lhs
-						}),
-						z_bin.lits(),
-					),
-					LimitComp::Equal => self.encode(
-						db,
-						&TernLeConstraint {
-							x: z,
-							y: &IntVarEnc::Const(0),
-							cmp: cmp.clone(),
-							z: &IntVarEnc::Const(lhs),
-						},
-					),
-				}
-			}
-			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y_con), IntVarEnc::Const(z_con))
-			| (IntVarEnc::Const(y_con), IntVarEnc::Bin(x_bin), IntVarEnc::Const(z_con)) => {
-				// and rest is const ~ lex constraint
-				// assert!(
-				// 	cmp == &LimitComp::LessEq,
-				// 	"Only support <= for x:B+y:Constant ? z:Constant"
-				// );
+		let ord = OrdEnc::new(db, &dom, &views, &self.lbl);
+		ord.consistent(db)?;
 
-				let rhs = PosCoeff::new(if GROUND_BINARY_AT_LB {
-					*z_con - *y_con - x_bin.lb()
-				} else {
-					*z_con - *y_con
-				});
-				match cmp {
-					LimitComp::LessEq => lex_leq_const(
-						db,
-						x_bin
-							.xs
-							.iter()
-							.copied()
-							.map(BoolVal::Lit)
-							.collect_vec()
-							.as_slice(),
-						rhs,
-						x_bin.lits(),
-					),
-					LimitComp::Equal => as_binary(rhs, Some(x_bin.lits() as u32))
-						.into_iter()
-						.zip(x_bin.xs.iter().copied())
-						.try_for_each(|(b, x)| db.add_clause([if b { x } else { !x }])),
-				}
-			}
-			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(y_const), IntVarEnc::Bin(z_bin))
-			| (IntVarEnc::Const(y_const), IntVarEnc::Bin(x_bin), IntVarEnc::Bin(z_bin)) => {
-				let x_bin = if matches!(cmp, LimitComp::LessEq) {
-					let x_bin = x_bin.add(db, self, *y_const)?;
-					x_bin.consistent(db)?;
-					x_bin
-				} else {
-					x_bin.clone()
-				};
-				log_enc_add_(
-					db,
-					&x_bin.xs.iter().cloned().map(BoolVal::from).collect_vec(),
-					&as_binary(PosCoeff::new(*y_const), Some(x_bin.lits() as u32))
-						.into_iter()
-						.map(BoolVal::Const)
-						.collect_vec(),
-					cmp,
-					&z_bin.xs.iter().cloned().map(BoolVal::from).collect_vec(),
-				)
-			}
-			(IntVarEnc::Bin(x_bin), IntVarEnc::Bin(y_bin), IntVarEnc::Bin(z_bin)) => {
-				// y and z are also bin ~ use adder
-				match cmp {
-					LimitComp::Equal => log_enc_add(db, &x_bin.xs, &y_bin.xs, cmp, &z_bin.xs),
-					LimitComp::LessEq => {
-						let xy = x.add(db, self, y, None, Some(z.ub()))?;
-						xy.consistent(db)?; // TODO can be removed if grounding is correct
-						self.encode(
-							db,
-							&TernLeConstraint::new(&xy, &IntVarEnc::Const(0), LimitComp::LessEq, z),
-						)
-					}
-				}
-			}
-			(IntVarEnc::Bin(_), IntVarEnc::Bin(_), _) => {
-				// y/y is bin but z is not bin ~ redundantly encode y + z_bin in 0..z # z and
-				// z_bin <= z TODO better coupling ;
-				let z_bin = x.add(db, self, y, None, Some(z.ub()))?;
-				z_bin.consistent(db)?;
-				self.encode(
-					db,
-					&TernLeConstraint::new(&z_bin, &IntVarEnc::Const(0), cmp.clone(), z),
-				)
-			}
-			(IntVarEnc::Bin(x_bin), IntVarEnc::Ord(y_ord), _)
-			| (IntVarEnc::Ord(y_ord), IntVarEnc::Bin(x_bin), _) => {
-				// y is order and z is bin or const ~ redundant y_bin = y_ord and x_bin + y_bin
-				// # z
-				let y_bin = IntVarBin::from_bounds(
-					db,
-					y_ord.lb(),
-					y_ord.ub(),
-					format!("{}{cmp}y:B", y_ord.lbl),
-				);
+		self.state.borrow_mut().ord = Some(ord.clone());
+		self.reconcile(db)?;
+		Ok(ord)
+	}
 
-				self.encode(
-					db,
-					&TernLeConstraint::new(
-						&y_ord.clone().into(),
-						&IntVarEnc::Const(0), // TODO maybe - lb
-						cmp.clone(),
-						&y_bin.clone().into(),
-					),
-				)
-				.unwrap();
-				y_bin.consistent(db)?;
-				self.encode(
-					db,
-					&TernLeConstraint::new(&x_bin.clone().into(), &y_bin.into(), cmp.clone(), z),
-				)
-			}
-			(IntVarEnc::Ord(_), IntVarEnc::Ord(_), IntVarEnc::Bin(_))
-				if ENCODE_REDUNDANT_X_O_Y_O_Z_B =>
-			{
-				// Avoid too many coupling clause
-				let xy_ord = x.add(db, self, y, None, None)?;
-				// TODO why necessary?
-				xy_ord.consistent(db)?;
+	/// Whether the variable has been given an order encoding.
+	#[cfg(test)]
+	pub(crate) fn has_ord(&self) -> bool {
+		self.state.borrow().ord.is_some()
+	}
 
-				// TODO `x:O.add(y:O)` does not add clauses yet
-				self.encode(db, &TernLeConstraint::new(x, y, cmp.clone(), &xy_ord))?;
+	/// The literals that decide the variable, through whichever encoding it was
+	/// given.
+	#[cfg(test)]
+	pub(crate) fn lits(&self) -> Vec<Lit> {
+		let state = self.state.borrow();
+		match (state.ord.as_ref(), state.bin.as_ref(), state.dir.as_ref()) {
+			(Some(ord), _, _) => ord.lits(),
+			(_, Some(bin), _) => bin
+				.to_vec()
+				.into_iter()
+				.filter_map(|b| match b {
+					BoolVal::Lit(l) => Some(l),
+					BoolVal::Const(_) => None,
+				})
+				.collect(),
+			(_, _, Some(dir)) => dir.lits(),
+			_ => Vec::new(),
+		}
+	}
 
-				self.encode(
-					db,
-					&TernLeConstraint::new(&xy_ord, &IntVarEnc::Const(0), cmp.clone(), z),
-				)
-			}
-			(IntVarEnc::Bin(x_bin), IntVarEnc::Const(c), IntVarEnc::Ord(_))
-			| (IntVarEnc::Const(c), IntVarEnc::Bin(x_bin), IntVarEnc::Ord(_)) => {
-				let z = z.add(db, self, &IntVarEnc::Const(-c), Some(z.lb()), Some(z.ub()))?;
+	/// The value the variable takes under an assignment, read through whichever
+	/// encoding it was given.
+	pub(crate) fn value<F: crate::Valuation + ?Sized>(&self, value: &F) -> Coeff {
+		let state = self.state.borrow();
+		match (state.ord.as_ref(), state.bin.as_ref(), state.dir.as_ref()) {
+			(Some(ord), _, _) => ord.value(value),
+			(_, Some(bin), _) => bin.value(value),
+			(_, _, Some(dir)) => dir.value(value),
+			// Nothing was ever asked of it, so it can only be its one value.
+			_ => *state.dom.min().unwrap(),
+		}
+	}
 
-				// x + c <= z == z-c >= x == /\ (z'<=a -> x<=a)
-				for (c_a, z_leq_c_a) in z.leqs() {
-					// TODO alt; just propagate by adding lex constraint
-					let c_a = if z_leq_c_a == Formula::Atom(BoolVal::Const(true)) {
-						x.ub() + 1
-					} else {
-						c_a
-					};
+	/// Create a variable held in the binary encoding it was found on, and
+	/// restrict it to `dom`.
+	pub(crate) fn with_bin<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		dom: RangeList<Coeff>,
+		lbl: String,
+		bin: BinEnc,
+	) -> Result<Rc<Self>, Unsatisfiable> {
+		bin.consistent(db, &dom)?;
+		let x = Self::new(dom, false, lbl);
+		x.state.borrow_mut().bin = Some(bin);
+		Ok(x)
+	}
 
-					let x_leq_c_a = x_bin.leq(c_a);
-					TseitinEncoder.encode(db, &Formula::Or(vec![!z_leq_c_a, x_leq_c_a]))?;
-				}
-				if cmp == &LimitComp::Equal {
-					for (c_a, z_geq_c_a) in z.geqs() {
-						let x_geq_c_a = x_bin.geq(c_a);
-						TseitinEncoder.encode(db, &Formula::Or(vec![!z_geq_c_a, x_geq_c_a]))?;
-					}
-				}
-				Ok(())
-			}
-			(x, y, z) => {
-				// couple or constrain x:E + y:E <= z:E
-				for (c_a, x_geq_c_a) in x.geqs() {
-					for (c_b, y_geq_c_b) in y.geqs() {
-						let z_geq_c_c = z.geq(c_a + c_b);
+	/// Create a variable whose order encoding will reuse the given literals.
+	pub(crate) fn with_ord_views(
+		dom: RangeList<Coeff>,
+		lbl: String,
+		ord_views: FxHashMap<Coeff, Lit>,
+	) -> Rc<Self> {
+		let x = Self::new(dom, false, lbl);
+		x.state.borrow_mut().ord_views = ord_views;
+		x
+	}
 
-						TseitinEncoder.encode(
-							db,
-							&Formula::Or(vec![!x_geq_c_a.clone(), !y_geq_c_b, z_geq_c_c]),
-						)?;
-					}
-				}
+	/// Take the literal for `x ≥ v` from `src`, which has the same values from
+	/// `src_val` upwards.
+	///
+	/// Two variables often agree above some point — a layer of a decision
+	/// diagram and the one after it reach the same totals once enough has been
+	/// decided — and where they do, one literal can serve both. The literal is
+	/// fetched when this variable is encoded rather than now, since `src` may
+	/// not have been encoded yet.
+	pub(crate) fn set_ord_view_of(&self, v: Coeff, src: Rc<IntVar>, src_val: Coeff) {
+		debug_assert!(
+			self.state.borrow().ord.is_none(),
+			"the order encoding of {} already exists",
+			self.lbl
+		);
+		let _ = self.state.borrow_mut().view_of.insert(v, (src, src_val));
+	}
 
-				// x<=a /\ y<=b -> z<=a+b
-				if cmp == &LimitComp::Equal {
-					for (c_a, x_leq_c_a) in x.leqs() {
-						for (c_b, y_leq_c_b) in y.leqs() {
-							let z_leq_c_c = z.leq(c_a + c_b);
+	/// Reuse `lit` as the literal for `x ≥ v`.
+	#[allow(
+		dead_code,
+		reason = "the decomposition pulls views through `set_ord_view_of` instead"
+	)]
+	pub(crate) fn set_ord_view(&self, v: Coeff, lit: Lit) {
+		debug_assert!(
+			self.state.borrow().ord.is_none(),
+			"the order encoding of {} already exists",
+			self.lbl
+		);
+		let _ = self.state.borrow_mut().ord_views.insert(v, lit);
+	}
 
-							TseitinEncoder.encode(
-								db,
-								&Formula::Or(vec![!x_leq_c_a.clone(), !y_leq_c_b, z_leq_c_c]),
-							)?;
-						}
-					}
-				}
-				Ok(())
+	/// The number of values in the domain.
+	pub(crate) fn size(&self) -> usize {
+		self.state.borrow().dom.card().unwrap()
+	}
+}
+
+impl OrdEnc {
+	/// Constrain consecutive literals, so that the encoding represents a single
+	/// value of the domain.
+	///
+	/// Unlike the bounds and holes of a binary encoding this is not optional:
+	/// without it there is no well defined value to speak of, and anything
+	/// reading the encoding, channelling included, would be meaningless.
+	pub(crate) fn consistent<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
+		for (prev, next) in self.x.iter().tuple_windows() {
+			if prev.var() != next.var() {
+				db.add_clause([!next, prev])?;
 			}
 		}
+		Ok(())
+	}
+
+	/// The encoding as a weighted sum of literals, plus what it is worth when
+	/// none of them hold.
+	///
+	/// Each literal is worth the step it takes from the value before it, so the
+	/// ones that hold add up to how far past the first value it has reached.
+	pub(crate) fn as_weighted(&self) -> (Vec<(Lit, Coeff)>, Coeff) {
+		let vals = self.dom.iter().flatten().collect_vec();
+		(
+			vals.iter()
+				.zip(vals.iter().skip(1))
+				.zip(self.x.iter())
+				.map(|((below, above), l)| (l, above - below))
+				.collect(),
+			vals[0],
+		)
+	}
+
+	/// Whether the variable is at least `v`.
+	pub(crate) fn geq_val(&self, v: Coeff) -> BoolVal {
+		if v <= *self.dom.min().unwrap() {
+			BoolVal::Const(true)
+		} else if v > *self.dom.max().unwrap() {
+			BoolVal::Const(false)
+		} else {
+			// The first domain value at or above `v`; the variable reaches `v`
+			// exactly when it reaches that value.
+			let pos = self
+				.dom
+				.first_position_bound(&Bound::Included(v))
+				.expect("value within the domain bounds has a position");
+			BoolVal::Lit(
+				self.x
+					.get(pos - 1)
+					.expect("a domain value has an order literal"),
+			)
+		}
+	}
+
+	/// Whether the variable is at most `v`.
+	pub(crate) fn leq_val(&self, v: Coeff) -> BoolVal {
+		!self.geq_val(v + 1)
+	}
+
+	/// Create the order literals for `dom`, reusing whatever literal `views`
+	/// already provides for a value.
+	pub(crate) fn new<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		dom: &RangeList<Coeff>,
+		views: &FxHashMap<Coeff, Lit>,
+		_lbl: &str,
+	) -> Self {
+		let vals = || dom.iter().flatten().skip(1);
+		let x = if views.is_empty() {
+			// Nothing to reuse, so the literals can be taken in one block.
+			Lits::Range(new_named_var_range!(db, vals().count(), |i| {
+				format!("{_lbl}≥{}", vals().nth(i).unwrap())
+			}))
+		} else {
+			Lits::Explicit(
+				vals()
+					.map(|v| {
+						views
+							.get(&v)
+							.copied()
+							.unwrap_or_else(|| new_named_lit!(db, format!("{_lbl}≥{v}")))
+					})
+					.collect(),
+			)
+		};
+		Self {
+			dom: dom.clone(),
+			x,
+		}
+	}
+
+	/// The steps of a sequential decomposition over this variable.
+	///
+	/// Each step is a domain value `d` paired with the clause that holds unless
+	/// the variable reaches `d` — from below when `geq`, from above otherwise.
+	/// Whatever the constraint demands once `d` is reached can therefore just
+	/// be disjoined onto that clause.
+	///
+	/// The step at the far end of the domain guards nothing, since the variable
+	/// always reaches it; its clause is `false` and drops out, leaving the
+	/// demand unconditional.
+	pub(crate) fn steps(&self, geq: bool) -> Vec<(Coeff, BoolVal)> {
+		let vals = self.dom.iter().flatten();
+		if geq {
+			vals.map(|d| (d, self.leq_val(d - 1))).collect()
+		} else {
+			vals.rev().map(|d| (d, self.geq_val(d + 1))).collect()
+		}
+	}
+
+	/// The single literal of a two-valued variable, which on its own already
+	/// distinguishes both of its values.
+	pub(crate) fn single_lit(&self) -> Option<Lit> {
+		(self.x.len() == 1).then(|| self.x.get(0).unwrap())
+	}
+
+	/// The literals of the encoding.
+	pub(crate) fn lits(&self) -> Vec<Lit> {
+		self.x.to_vec()
+	}
+
+	/// The value represented under an assignment.
+	pub(crate) fn value<F: crate::Valuation + ?Sized>(&self, value: &F) -> Coeff {
+		let reached = self.x.iter().filter(|&l| value.value(l)).count();
+		self.dom
+			.iter()
+			.flatten()
+			.nth(reached)
+			.expect("the order literals cannot reach past the domain")
 	}
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-	use std::num::NonZeroI32;
+	use std::rc::Rc;
 
 	use rangelist::RangeList;
 	use traced_test::test;
 
 	use crate::{
-		bool_linear::{BoolLinExp, LimitComp, PosCoeff},
-		helpers::tests::{
-			all_bin_solutions, assert_solutions, bin_lits, expect_file, make_valuation,
-		},
-		integer::{
-			lex_geq_const, lex_leq_const, IntVarBin, IntVarEnc, IntVarOrd, TernLeConstraint,
-			TernLeEncoder,
-		},
-		propositional_logic::Formula,
-		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Var, VarRange,
+		bool_linear::PosCoeff,
+		helpers::tests::{all_bin_solutions, bin_lits},
+		integer::{lex_geq_const, lex_leq_const, BinEnc, IntVar},
+		solver::{cadical::Cadical, SolveResult, Solver},
+		BoolVal, ClauseDatabaseTools, Cnf, Coeff, Valuation,
 	};
 
 	#[test]
@@ -1227,386 +1105,248 @@ pub(crate) mod tests {
 		assert_eq!(solutions, vec![4, 5]);
 	}
 
-	#[test]
-	fn bin_geq_2_test() {
-		let mut cnf = Cnf::default();
-		let x = IntVarBin::from_bounds(&mut cnf, 0, 12, "x".to_owned());
-		let vars = VarRange::new(
-			Var(NonZeroI32::new(1).unwrap()),
-			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
-		);
-		TernLeEncoder::default()
-			.encode(
-				&mut cnf,
-				&TernLeConstraint {
-					x: &IntVarEnc::Bin(x),
-					y: &IntVarEnc::Const(0),
-					cmp: LimitComp::LessEq,
-					z: &IntVarEnc::Const(6),
-				},
-			)
-			.unwrap();
-
-		assert_solutions(
-			&cnf,
-			vars,
-			&expect_file!["int/constrain/bin_geq_2_test.sol"],
-		);
+	/// A handful of domains covering the shapes an encoding has to survive: a
+	/// contiguous one, holes, negative values, a power-of-two span that fills
+	/// the bits exactly, and a two-valued one.
+	fn test_domains() -> Vec<RangeList<Coeff>> {
+		vec![
+			RangeList::from_iter([0..=3]),
+			RangeList::from_iter([0..=4]),
+			RangeList::from_elements([0, 1, 3]),
+			RangeList::from_elements([2, 5, 6, 7, 9]),
+			RangeList::from_elements([-3, -1, 0, 4]),
+			RangeList::from_elements([-7, -6]),
+			RangeList::from_elements([0, 5]),
+		]
 	}
 
-	#[test]
-	fn bin_le_bin_test() {
-		let mut cnf = Cnf::default();
-		let n = 5;
-		let lb = 0;
-		let ub = ((2_i32.pow(n)) - 1) as Coeff;
-
-		let (x, y, z) = (
-			get_bin_x(&mut cnf, lb, ub, true, "x".to_owned()),
-			IntVarEnc::Const(0),
-			// get_bin_x(&mut db, (2i32.pow(n)) - 1, true, "y".to_string()),
-			get_bin_x(&mut cnf, lb, ub, true, "z".to_owned()),
-		);
-		let vars = VarRange::new(
-			Var(NonZeroI32::new(1).unwrap()),
-			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
-		);
-		TernLeEncoder::default()
-			.encode(
-				&mut cnf,
-				&TernLeConstraint {
-					x: &x,
-					y: &y,
-					// cmp: LimitComp::Equal,
-					cmp: LimitComp::LessEq,
-					z: &z,
-				},
-			)
-			.unwrap();
-
-		assert_solutions(
-			&cnf,
-			vars,
-			&expect_file!["int/constrain/bin_le_bin_test.sol"],
-		);
-	}
-
-	#[test]
-	fn bin_le_test() {
-		let mut cnf = Cnf::default();
-		let n = 4;
-		let lb = 0;
-		let ub = ((2_i32.pow(n)) - 1) as Coeff;
-
-		let (x, y, z) = (
-			get_bin_x(&mut cnf, lb, ub, true, "x".to_owned()),
-			IntVarEnc::Const(0),
-			// get_bin_x(&mut db, (2i32.pow(n)) - 1, true, "y".to_string()),
-			IntVarEnc::Const(14),
-		);
-		let vars = VarRange::new(
-			Var(NonZeroI32::new(1).unwrap()),
-			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
-		);
-		TernLeEncoder::default()
-			.encode(
-				&mut cnf,
-				&TernLeConstraint {
-					x: &x,
-					y: &y,
-					// cmp: LimitComp::Equal,
-					cmp: LimitComp::LessEq,
-					z: &z,
-				},
-			)
-			.unwrap();
-
-		assert_solutions(&cnf, vars, &expect_file!["int/constrain/bin_le_test.sol"]);
-	}
-
-	#[test]
-	fn bin_plus_bin_eq_bin_test() {
-		let mut cnf = Cnf::default();
-		let (x, y, z) = (
-			get_bin_x(&mut cnf, 0, 2, true, "x".to_owned()),
-			get_bin_x(&mut cnf, 0, 3, true, "y".to_owned()),
-			get_bin_x(&mut cnf, 0, 5, true, "z".to_owned()),
-		);
-		let vars = VarRange::new(
-			Var(NonZeroI32::new(1).unwrap()),
-			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
-		);
-		TernLeEncoder::default()
-			.encode(
-				&mut cnf,
-				&TernLeConstraint {
-					x: &x,
-					y: &y,
-					cmp: LimitComp::Equal,
-					z: &z,
-				},
-			)
-			.unwrap();
-
-		assert_solutions(
-			&cnf,
-			vars,
-			&expect_file!["int/constrain/bin_plus_bin_eq_bin_test.sol"],
-		);
-	}
-
-	#[test]
-	fn bin_plus_bin_le_bin_test() {
-		let mut cnf = Cnf::default();
-		let n = 2;
-		let (x, y, z) = (
-			get_bin_x(
-				&mut cnf,
-				0,
-				((2_i32.pow(n)) - 1) as Coeff,
-				true,
-				"x".to_owned(),
-			),
-			get_bin_x(
-				&mut cnf,
-				0,
-				((2_i32.pow(n)) - 1) as Coeff,
-				true,
-				"y".to_owned(),
-			),
-			get_bin_x(
-				&mut cnf,
-				0,
-				((2_i32.pow(n + 1)) - 2) as Coeff,
-				true,
-				"z".to_owned(),
-			),
-		);
-		let vars = VarRange::new(
-			Var(NonZeroI32::new(1).unwrap()),
-			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
-		);
-		TernLeEncoder::default()
-			.encode(
-				&mut cnf,
-				&TernLeConstraint {
-					x: &x,
-					y: &y,
-					cmp: LimitComp::LessEq,
-					z: &z,
-				},
-			)
-			.unwrap();
-
-		assert_solutions(
-			&cnf,
-			vars,
-			&expect_file!["int/constrain/bin_plus_bin_le_bin_test.sol"],
-		);
-	}
-
-	#[test]
-	fn constant_test() {
-		let c = IntVarEnc::Const(42);
-		assert_eq!(c.lb(), 42);
-		assert_eq!(c.ub(), 42);
-		assert_eq!(c.geq(6), Formula::Atom(BoolVal::Const(true)));
-		assert_eq!(c.geq(45), Formula::Atom(BoolVal::Const(false)));
-	}
-
-	fn get_bin_x<Db>(db: &mut Db, lb: Coeff, ub: Coeff, consistent: bool, lbl: String) -> IntVarEnc
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		let x = IntVarBin::from_bounds(db, lb, ub, lbl);
-		if consistent {
-			x.consistent(db).unwrap();
+	/// Every model of `cnf`, as the values each of `read` extracts from it.
+	fn all_values(cnf: &Cnf, read: &dyn Fn(&dyn Valuation) -> Vec<Coeff>) -> Vec<Vec<Coeff>> {
+		let mut slv = Cadical::from(cnf);
+		let vars = cnf.get_variables();
+		let mut solutions = Vec::new();
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			solutions.push(read(&value));
+			let no_good: Vec<_> = vars
+				.map(|v| {
+					let l = v.into();
+					if value.value(l) {
+						!l
+					} else {
+						l
+					}
+				})
+				.collect();
+			if slv.add_clause(no_good).is_err() {
+				break;
+			}
 		}
-		IntVarEnc::Bin(x)
+		solutions.sort();
+		solutions
 	}
 
-	fn get_ord_x<Db>(db: &mut Db, dom: RangeList<Coeff>, consistent: bool, lbl: String) -> IntVarEnc
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		let x = IntVarOrd::from_dom(db, dom, lbl);
-		if consistent {
-			x.consistent(db).unwrap();
+	#[test]
+	fn all_three_encodings_agree_on_every_value() {
+		// Whichever order they are asked for in, and whichever two or three of
+		// them exist, every view of the variable must read the same value.
+		for dom in test_domains() {
+			for order in [[0, 1, 2], [2, 1, 0], [1, 2, 0], [2, 0, 1]] {
+				let mut cnf = Cnf::default();
+				let x = IntVar::new(dom.clone(), true, "x".to_owned());
+				let mut read: Vec<Box<dyn Fn(&dyn Valuation) -> Coeff>> = Vec::new();
+				for which in order {
+					match which {
+						0 => {
+							let e = x.ord(&mut cnf).unwrap();
+							read.push(Box::new(move |v| e.value(v)));
+						}
+						1 => {
+							let e = x.bin(&mut cnf).unwrap();
+							read.push(Box::new(move |v| e.value(v)));
+						}
+						_ => {
+							let e = x.dir(&mut cnf).unwrap();
+							read.push(Box::new(move |v| e.value(v)));
+						}
+					}
+				}
+				let solutions = all_values(&cnf, &|v| read.iter().map(|f| f(v)).collect());
+				let expected: Vec<Vec<Coeff>> = dom.iter().flatten().map(|d| vec![d; 3]).collect();
+				assert_eq!(solutions, expected, "dom {dom} asked in order {order:?}");
+			}
 		}
-		IntVarEnc::Ord(x)
 	}
 
 	#[test]
-	fn ord_geq_test() {
-		let mut cnf = Cnf::default();
-		let x = get_ord_x(
-			&mut cnf,
-			RangeList::from_iter([2..=2, 4..=4, 6..=6, 10..=10]),
-			true,
-			"x".to_owned(),
-		);
-		let vars = VarRange::new(
-			Var(NonZeroI32::new(1).unwrap()),
-			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
-		);
+	fn a_direct_encoding_represents_exactly_the_domain() {
+		for dom in test_domains() {
+			let mut cnf = Cnf::default();
+			let dir = IntVar::new(dom.clone(), true, "x".to_owned())
+				.dir(&mut cnf)
+				.unwrap();
+			assert_eq!(
+				all_values(&cnf, &|v| vec![dir.value(v)]),
+				dom.iter().flatten().map(|d| vec![d]).collect::<Vec<_>>(),
+				"direct encoding of {dom}"
+			);
+		}
+	}
 
-		assert_eq!(x.lits(), 3);
-		assert_eq!(x.lb(), 2);
-		assert_eq!(x.ub(), 10);
+	#[test]
+	fn a_width_and_the_values_it_holds_are_inverses() {
+		for bits in 0..=8 {
+			let largest = BinEnc::largest_in(bits);
+			assert_eq!(BinEnc::required_bits(largest), bits as usize);
+			if bits > 0 {
+				assert_eq!(BinEnc::required_bits(largest + 1), bits as usize + 1);
+			}
+		}
+		// The widest a coefficient goes lands exactly on its largest value,
+		// where computing it as a power of two would overflow.
+		assert_eq!(BinEnc::largest_in(Coeff::BITS - 1), Coeff::MAX);
+	}
+
+	#[test]
+	fn channelled_encodings_agree_on_every_value() {
+		for dom in test_domains() {
+			for bin_first in [false, true] {
+				let mut cnf = Cnf::default();
+				let x = IntVar::new(dom.clone(), true, "x".to_owned());
+				// The order the encodings are asked for must not matter: whichever
+				// arrives second is the one that triggers the channelling.
+				let (ord, bin) = if bin_first {
+					let bin = x.bin(&mut cnf).unwrap();
+					(x.ord(&mut cnf).unwrap(), bin)
+				} else {
+					let ord = x.ord(&mut cnf).unwrap();
+					(ord, x.bin(&mut cnf).unwrap())
+				};
+
+				let solutions = all_values(&cnf, &|v| vec![ord.value(v), bin.value(v)]);
+				let expected: Vec<Vec<Coeff>> = dom.iter().flatten().map(|d| vec![d, d]).collect();
+				// Exactly the domain, once each, with both views reading alike. A
+				// disagreement or a value outside the domain would show up as an
+				// extra row, a missing one, or a row whose two entries differ.
+				assert_eq!(
+					solutions,
+					expected,
+					"dom {dom} channelled with {} first",
+					if bin_first { "bin" } else { "ord" }
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn a_single_encoding_represents_exactly_the_domain() {
+		for dom in test_domains() {
+			let mut ord_cnf = Cnf::default();
+			let ord = IntVar::new(dom.clone(), true, "x".to_owned())
+				.ord(&mut ord_cnf)
+				.unwrap();
+			let mut bin_cnf = Cnf::default();
+			let bin = IntVar::new(dom.clone(), true, "x".to_owned())
+				.bin(&mut bin_cnf)
+				.unwrap();
+
+			let expected: Vec<Vec<Coeff>> = dom.iter().flatten().map(|d| vec![d]).collect();
+			assert_eq!(
+				all_values(&ord_cnf, &|v| vec![ord.value(v)]),
+				expected,
+				"order encoding of {dom}"
+			);
+			assert_eq!(
+				all_values(&bin_cnf, &|v| vec![bin.value(v)]),
+				expected,
+				"binary encoding of {dom}"
+			);
+		}
+	}
+
+	#[test]
+	fn encodings_are_created_once() {
+		let dom = RangeList::from_elements([0, 1, 3]);
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(dom, true, "x".to_owned());
+
+		let _ = x.ord(&mut cnf).unwrap();
+		let _ = x.bin(&mut cnf).unwrap();
+		let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
+
+		// Asking again hands back what is already there: no new literals, and in
+		// particular no second round of channelling clauses.
+		let _ = x.ord(&mut cnf).unwrap();
+		let _ = x.bin(&mut cnf).unwrap();
+		assert_eq!((cnf.num_vars(), cnf.num_clauses()), (vars, clauses));
+	}
+
+	#[test]
+	fn a_detected_variable_encodes_onto_the_literals_it_was_found_on() {
+		// An integer recovered from a constraint that already mentions its
+		// literals has to encode onto those rather than introduce its own, and
+		// must still channel like any other variable.
+		let mut cnf = Cnf::default();
+		let dom = RangeList::from_elements([0, 1, 3]);
+		let found: Vec<_> = (0..2).map(|_| cnf.new_lit()).collect();
+		let vars_before = cnf.num_vars();
+
+		let x = IntVar::new(dom.clone(), true, "x".to_owned());
+		x.set_ord_view(1, found[0]);
+		x.set_ord_view(3, found[1]);
+		let ord = x.ord(&mut cnf).unwrap();
 		assert_eq!(
-			x.geq(6),
-			Formula::Atom(BoolVal::Lit(Lit(NonZeroI32::new(2).unwrap())))
+			cnf.num_vars(),
+			vars_before,
+			"the order encoding should reuse the literals it was given"
 		);
+
+		let bin = x.bin(&mut cnf).unwrap();
+		let solutions = all_values(&cnf, &|v| vec![ord.value(v), bin.value(v)]);
 		assert_eq!(
-			x.geq(5),
-			Formula::Atom(BoolVal::Lit(Lit(NonZeroI32::new(2).unwrap())))
-		);
-
-		let x_lin = BoolLinExp::from(&x);
-		assert!(x_lin.value(&make_valuation(&[1, -2, 3])).is_err());
-		assert!(x_lin.value(&make_valuation(&[-1, 2, -3])).is_err());
-		assert_eq!(x_lin.value(&make_valuation(&[-1, -2, -3])), Ok(2));
-		assert_eq!(x_lin.value(&make_valuation(&[1, -2, -3])), Ok(4));
-		assert_eq!(x_lin.value(&make_valuation(&[1, 2, -3])), Ok(6));
-		assert_eq!(x_lin.value(&make_valuation(&[1, 2, 3])), Ok(10));
-
-		TernLeEncoder::default()
-			.encode(
-				&mut cnf,
-				&TernLeConstraint {
-					x: &x,
-					y: &IntVarEnc::Const(0),
-					cmp: LimitComp::LessEq,
-					z: &IntVarEnc::Const(6),
-				},
-			)
-			.unwrap();
-		assert_solutions(&cnf, vars, &expect_file!["int/constrain/ord_geq_test.sol"])
-	}
-
-	#[test]
-	fn ord_le_bin_test() {
-		let mut cnf = Cnf::default();
-		let (x, y, z) = (
-			get_ord_x(
-				&mut cnf,
-				RangeList::from_iter([0..=0, 1..=1, 6..=6]),
-				true,
-				"x".to_owned(),
-			),
-			// TODO 'gapped' in interval_set:
-			// get_ord_x(&mut db, interval_set!(1..2, 5..7), true, "x".to_string()),
-			IntVarEnc::Const(0),
-			get_bin_x(&mut cnf, 0, 7, true, "z".to_owned()),
-		);
-		let vars = VarRange::new(
-			Var(NonZeroI32::new(1).unwrap()),
-			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
-		);
-		TernLeEncoder::default()
-			.encode(
-				&mut cnf,
-				&TernLeConstraint {
-					x: &x,
-					y: &y,
-					cmp: LimitComp::LessEq,
-					z: &z,
-				},
-			)
-			.unwrap();
-
-		assert_solutions(
-			&cnf,
-			vars,
-			&expect_file!["int/constrain/ord_le_bin_test.sol"],
+			solutions,
+			dom.iter().flatten().map(|d| vec![d, d]).collect::<Vec<_>>()
 		);
 	}
 
 	#[test]
-	fn ord_plus_ord_le_bin_test() {
+	fn a_two_valued_variable_shares_its_literal() {
 		let mut cnf = Cnf::default();
-		let (x, y, z) = (
-			get_ord_x(
-				&mut cnf,
-				RangeList::from_iter([0..=0, 2..=2]),
-				true,
-				"x".to_owned(),
-			),
-			get_ord_x(
-				&mut cnf,
-				RangeList::from_iter([0..=0, 3..=3]),
-				true,
-				"y".to_owned(),
-			),
-			get_bin_x(&mut cnf, 0, 6, true, "z".to_owned()),
-		);
-		let vars = VarRange::new(
-			Var(NonZeroI32::new(1).unwrap()),
-			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
-		);
-		TernLeEncoder::default()
-			.encode(
-				&mut cnf,
-				&TernLeConstraint {
-					x: &x,
-					y: &y,
-					cmp: LimitComp::LessEq,
-					z: &z,
-				},
-			)
-			.unwrap();
+		let x = IntVar::new(RangeList::from_elements([0, 5]), true, "x".to_owned());
+		let _ = x.ord(&mut cnf).unwrap();
+		let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
 
-		assert_solutions(
-			&cnf,
-			vars,
-			&expect_file!["int/constrain/ord_plus_ord_le_bin_test.sol"],
+		// The order literal already tells the two values apart, so the binary
+		// encoding is a view onto it rather than fresh bits to channel against.
+		let _ = x.bin(&mut cnf).unwrap();
+		assert_eq!(
+			(cnf.num_vars(), cnf.num_clauses()),
+			(vars, clauses),
+			"a two-valued variable should not pay for a second encoding"
 		);
 	}
 
 	#[test]
-	fn ord_plus_ord_le_ord_test() {
+	fn a_variable_may_appear_twice_in_one_constraint() {
+		// Reading the same variable more than once, as `x + x` would, must not
+		// trip over the borrow the accessors take internally.
 		let mut cnf = Cnf::default();
-		let (x, y, z) = (
-			get_ord_x(
-				&mut cnf,
-				RangeList::from_iter([0..=0, 1..=1, 6..=6]),
-				true,
-				"x".to_owned(),
-			),
-			get_ord_x(
-				&mut cnf,
-				RangeList::from_iter([1..=1, 2..=2, 4..=4]),
-				true,
-				"y".to_owned(),
-			),
-			get_ord_x(
-				&mut cnf,
-				RangeList::from_iter([-1..=-1, 3..=3, 10..=10]),
-				true,
-				"z".to_owned(),
-			),
-		);
-		let vars = VarRange::new(
-			Var(NonZeroI32::new(1).unwrap()),
-			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
-		);
+		let x = IntVar::new(RangeList::from_iter([0..=3]), true, "x".to_owned());
+		let y = Rc::clone(&x);
+		let encs = [x.bin(&mut cnf).unwrap(), y.bin(&mut cnf).unwrap()];
+		let ords = [x.ord(&mut cnf).unwrap(), y.ord(&mut cnf).unwrap()];
 
-		TernLeEncoder::default()
-			.encode(
-				&mut cnf,
-				&TernLeConstraint {
-					x: &x,
-					y: &y,
-					cmp: LimitComp::LessEq,
-					z: &z,
-				},
-			)
-			.unwrap();
-
-		assert_solutions(
-			&cnf,
-			vars,
-			&expect_file!["int/constrain/ord_plus_ord_le_ord_test.sol"],
+		let solutions = all_values(&cnf, &|v| {
+			vec![
+				encs[0].value(v),
+				encs[1].value(v),
+				ords[0].value(v),
+				ords[1].value(v),
+			]
+		});
+		assert_eq!(
+			solutions,
+			(0..4).map(|d| vec![d; 4]).collect::<Vec<_>>(),
+			"both handles are the same variable and must read alike"
 		);
 	}
 }
