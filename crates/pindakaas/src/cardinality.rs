@@ -5,8 +5,6 @@
 //! [`SortingNetworkEncoder`] can then be used to encode the constraint into
 //! CNF, as well as [`Encoder`] implementations for [`NormalizedBoolLinear`].
 
-use rangelist::RangeList;
-
 use crate::{
 	bool_linear::{Comparator, LimitComp, LinMarker, NormalizedBoolLinear, PosCoeff},
 	cardinality_one::CardinalityOne,
@@ -133,7 +131,7 @@ where
 	)]
 	fn encode(&self, db: &mut Db, card: &Cardinality) -> Result {
 		let k: Coeff = card.k.into();
-		let y = IntVar::new(RangeList::from_iter([k..=k]), false, String::from("k"));
+		let y = IntVar::new(k..=k).with_label("k");
 		self.sorted_encoder
 			.encode(db, &Sorted::new(card.lits.as_slice(), card.cmp.clone(), &y))
 	}

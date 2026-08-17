@@ -11,7 +11,6 @@
 use std::{cmp::min, iter::once};
 
 use itertools::Itertools;
-use rangelist::RangeList;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
@@ -517,11 +516,12 @@ impl BoolLinAggregator {
 				if self.sort_same_coefficients >= 2 && lits.len() >= self.sort_same_coefficients {
 					let c = *k / *coef;
 
-					let y = IntVar::new(RangeList::from_iter([0..=c]), false, String::from("s"));
+					let y = IntVar::new(0..=c).with_label("s");
 					// The sorted variable counts how many hold, so each of its
 					// order literals is worth another `coef`. They are wanted
 					// either way, so there is nothing to gain by waiting.
-					let terms = y.ord(db)?.lits().into_iter().map(|l| (l, coef)).collect();
+					let order = y.order_encoding(db)?;
+					let terms = order.iter_lits().map(|l| (l, coef)).collect();
 					self.sorted_encoder
 						.encode(db, &Sorted::new(&lits, cmp.clone(), &y))
 						.unwrap();

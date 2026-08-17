@@ -26,7 +26,7 @@ use crate::{
 		scm::{ScmObjective, ScmOperation, ScmSolution},
 		shifted,
 	},
-	integer::{BinEnc, DirEnc, IntVar, OrdEnc},
+	integer::{BinaryEncoding, IntVar},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
 
@@ -66,13 +66,94 @@ pub struct IntLinear {
 	k: Coeff,
 }
 
+/// A linear constraint over three integer terms, `x + y ≷ z`.
+///
+/// This is what a decomposition breaks a longer constraint into. The strategies
+/// differ in the shape they give the intermediate sums — a chain, a balanced
+/// tree, the layers of a decision diagram — but every step of every one of them
+/// is the same thing: two terms, and where they come to together. Saying so in
+/// the type keeps a decomposition from having to express it as a constraint of
+/// any shape at all, which the encoder would then have to recognise again.
+///
+/// It is not a [`NormalizedIntLinear`]: `z` stands on the other side of the
+/// comparison, and moving it across would mean a view of it counting the other
+/// way rather than a constant.
+#[derive(Clone, Debug)]
+pub struct TernaryIntLinear {
+	x: Term,
+	y: Term,
+	cmp: Comparator,
+	z: Term,
+}
+
+impl TernaryIntLinear {
+	/// The constraint `x + y ≷ z`.
+	pub fn new(x: Term, y: Term, cmp: Comparator, z: Term) -> Self {
+		Self { x, y, cmp, z }
+	}
+
+	/// The comparator of the constraint.
+	pub fn cmp(&self) -> Comparator {
+		self.cmp
+	}
+
+	/// The two terms that are added together.
+	pub fn addends(&self) -> (&Term, &Term) {
+		(&self.x, &self.y)
+	}
+
+	/// The term they are compared against.
+	pub fn total(&self) -> &Term {
+		&self.z
+	}
+}
+
+impl From<&NormalizedIntLinear> for TernaryIntLinear {
+	/// A constraint of two terms or fewer is already an addition: what its
+	/// terms come to, against the constant it is compared with.
+	///
+	/// A term it does not have is zero, and the constant is a variable of one
+	/// value — neither of which any literal has to stand for.
+	fn from(con: &NormalizedIntLinear) -> Self {
+		debug_assert!(
+			con.terms().len() <= 2,
+			"a longer constraint is more than one addition"
+		);
+		let zero = || Term::new(1, IntVar::new(0..=0));
+		let mut terms = con.terms().iter().cloned();
+		let (x, y) = (
+			terms.next().unwrap_or_else(zero),
+			terms.next().unwrap_or_else(zero),
+		);
+		let k = con.k();
+		TernaryIntLinear::new(x, y, con.cmp().into(), Term::new(1, IntVar::new(k..=k)))
+	}
+}
+
+impl From<&TernaryIntLinear> for IntLinear {
+	/// A term over a variable of one value is what it is worth, so it belongs
+	/// with the constant rather than among the terms.
+	fn from(con: &TernaryIntLinear) -> Self {
+		let (mut terms, mut k) = (Vec::new(), 0);
+		for (term, adds) in [(&con.x, true), (&con.y, true), (&con.z, false)] {
+			if term.x.card() == 1 {
+				let worth = term.c * term.x.min();
+				k += if adds { -worth } else { worth };
+			} else {
+				terms.push(if adds { term.clone() } else { term.negated() });
+			}
+		}
+		Self::new(terms, con.cmp, k)
+	}
+}
+
 /// Encoder for [`IntLinear`] constraints.
 ///
 /// The encoder is kept between constraints so that what it learns about a
 /// variable while encoding one is available to the next: the encodings a
 /// variable has been given, and later the products built for its coefficients.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct IntLinEncoder {
+pub struct IntLinEncoder {
 	config: IntLinConfig,
 	/// The bits of `c·(x − lb)` for products already built, so that a
 	/// coefficient met again — in this constraint or a later one — costs
@@ -100,8 +181,16 @@ struct VarKey(Weak<IntVar>);
 /// rather than clauses keeps that difference in one place and leaves each step
 /// to be encoded on whichever view its variables have.
 pub(crate) trait Decompose {
-	/// Break `con` into constraints that together mean the same.
-	fn decompose(&self, con: &NormalizedIntLinear) -> Result<Vec<IntLinear>, Unsatisfiable>;
+	/// Break `con` into the additions that together mean the same.
+	///
+	/// The database is there for a strategy that wants a literal of a variable
+	/// it has already made — a layer of a decision diagram sharing one with the
+	/// layer after it, say. A strategy that shares nothing needs it for nothing.
+	fn decompose<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		con: &NormalizedIntLinear,
+	) -> Result<Vec<TernaryIntLinear>, Unsatisfiable>;
 }
 
 /// Encoder that takes an integer linear constraint as it is, without breaking
@@ -110,7 +199,7 @@ pub(crate) trait Decompose {
 /// The others give the intermediate sums a shape; this gives them none, which
 /// suits a constraint over few enough terms that a shape would only add to it.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct IntegerEncoder {
+pub struct IntegerEncoder {
 	config: IntLinConfig,
 }
 
@@ -131,7 +220,7 @@ impl LinMarker for IntegerEncoder {}
 
 /// Configuration for an [`IntLinEncoder`].
 #[derive(Clone, Debug)]
-pub(crate) struct IntLinConfig {
+pub struct IntLinConfig {
 	/// Whether to narrow the domains of the variables of a constraint before
 	/// encoding it.
 	pub propagate: bool,
@@ -148,20 +237,7 @@ pub(crate) struct IntLinConfig {
 #[derive(Clone, Copy, Debug)]
 struct Encoded<'a> {
 	c: Coeff,
-	view: &'a View,
-}
-
-/// A view of a variable that a step of the walk can be guarded on.
-///
-/// Either will do: an order literal says the variable has reached a value and a
-/// direct literal says it has taken one, and a step of the walk asks only what
-/// the variable is worth once the guard fails. Which one a variable is read
-/// through is whichever it already has, so a group of pseudo-Boolean terms is
-/// read on the literals it arrived on rather than on a view built to match.
-#[derive(Clone, Debug)]
-enum View {
-	Dir(DirEnc),
-	Ord(OrdEnc),
+	x: &'a Rc<IntVar>,
 }
 
 /// A sum of integer terms.
@@ -171,8 +247,13 @@ pub(crate) struct IntLinExp {
 }
 
 /// An integer variable scaled by a coefficient.
+///
+/// A coefficient other than one is not expanded into repeated addition: the
+/// encoder synthesises a chain of shifts and additions for it over the
+/// variable's bits, and shares that chain with every other term of the same
+/// coefficient over the same variable.
 #[derive(Clone, Debug)]
-pub(crate) struct Term {
+pub struct Term {
 	c: Coeff,
 	x: Rc<IntVar>,
 }
@@ -196,10 +277,11 @@ impl IntLinEncoder {
 	) -> Result {
 		// A decomposition that cannot be built is a constraint that cannot be
 		// met, which the database has to be told rather than only the caller.
-		let Ok(cons) = decompose.decompose(con) else {
+		let Ok(cons) = decompose.decompose(db, con) else {
 			return db.contradiction();
 		};
-		cons.iter().try_for_each(|con| self.encode(db, con))
+		cons.iter()
+			.try_for_each(|con| self.encode(db, &IntLinear::from(con)))
 	}
 
 	/// Encode `con`, adding the clauses to `db`.
@@ -210,11 +292,7 @@ impl IntLinEncoder {
 	/// is already encoded, which makes the result depend on the order the
 	/// constraints are given in. Every such result is correct; they differ only
 	/// in how much was pruned before the literals were committed.
-	pub(crate) fn encode<Db: ClauseDatabase + ?Sized>(
-		&mut self,
-		db: &mut Db,
-		con: &IntLinear,
-	) -> Result {
+	pub fn encode<Db: ClauseDatabase + ?Sized>(&mut self, db: &mut Db, con: &IntLinear) -> Result {
 		if self.config.propagate {
 			con.propagate()?;
 		}
@@ -249,37 +327,32 @@ impl IntLinEncoder {
 			if let Some(total) = self.binary_sum(db, &scaled)? {
 				// The sum reaches what its terms reach together.
 				let reach = |f: fn(&Term) -> Coeff| scaled.iter().map(f).sum::<Coeff>();
-				let dom = RangeList::from_iter([reach(Term::lb)..=reach(Term::ub)]);
+				let domain = RangeList::from(reach(Term::min)..=reach(Term::max));
 				return cmp
 					.split()
 					.into_iter()
-					.try_for_each(|cmp| total.encode_bound(db, cmp, k, &dom));
+					.try_for_each(|cmp| total.encode_bound(db, cmp, k, &domain));
 			}
 		}
 
 		// Otherwise walk the terms in order form. Any variable can produce an
 		// order encoding, channelling to one it already has if need be, so this
 		// is always available even where it is not the cheapest.
-		let views: Vec<View> = terms
-			.iter()
-			.map(|t| {
-				// A variable already read directly is read that way again,
-				// rather than gaining a second view to be tied to the first.
-				match t.x.dir_now() {
-					Some(dir) => Ok(View::Dir(dir)),
-					None => t.x.ord(db).map(View::Ord),
-				}
-			})
-			.collect::<Result<_, _>>()?;
-		let encoded: Vec<Encoded> = terms
-			.iter()
-			.zip(&views)
-			.map(|(t, view)| Encoded { c: t.c, view })
-			.collect();
+		// Every variable is given a view up front, even one the walk turns out
+		// not to ask anything of: a variable a constraint mentions is one whose
+		// value a solution has to be able to say. A variable already read
+		// directly is read that way again, rather than gaining a second view to
+		// be tied to the first.
+		for t in terms {
+			if !t.x.has_direct_encoding() {
+				let _ = t.x.order_encoding(db)?;
+			}
+		}
+		let encoded: Vec<Encoded> = terms.iter().map(|t| Encoded { c: t.c, x: &t.x }).collect();
 
 		// An equality holds exactly when both of its inequalities do.
 		for cmp in con.cmp.split() {
-			for clause in Encoded::walk(&encoded, cmp, con.k) {
+			for clause in Encoded::walk(db, &encoded, cmp, con.k)? {
 				db.add_clause(clause)?;
 			}
 		}
@@ -292,7 +365,7 @@ impl IntLinEncoder {
 		&mut self,
 		db: &mut Db,
 		terms: &[Term],
-	) -> Result<Option<BinEnc>, Unsatisfiable> {
+	) -> Result<Option<BinaryEncoding>, Unsatisfiable> {
 		let mut total: Option<Vec<BoolVal>> = None;
 		for t in terms {
 			let Some(bits) = self.scaled_bits(db, &t.x, t.c)? else {
@@ -305,9 +378,9 @@ impl IntLinEncoder {
 		}
 		// The bits of each term count from its own lower bound, so the sum
 		// counts from all of them together.
-		Ok(Some(BinEnc::from_bits(
+		Ok(Some(BinaryEncoding::from_bits(
 			total.unwrap_or_default(),
-			terms.iter().map(Term::lb).sum(),
+			terms.iter().map(Term::min).sum(),
 		)))
 	}
 
@@ -331,7 +404,7 @@ impl IntLinEncoder {
 		let Ok(c32) = u32::try_from(c) else {
 			return Ok(None);
 		};
-		let input = x.bin(db)?.to_vec();
+		let input = x.binary_encoding(db)?.to_vec();
 		let Some(width) = NonZero::new(input.len() as u32) else {
 			// A variable of one value contributes nothing to the sum.
 			return Ok(Some(Vec::new()));
@@ -394,7 +467,7 @@ impl IntLinEncoder {
 		width: &NonZero<u32>,
 	) -> Result<Vec<BoolVal>, Unsatisfiable> {
 		let span = factor * ((1 << width.get()) - 1);
-		let bits: Vec<BoolVal> = (0..BinEnc::required_bits(span))
+		let bits: Vec<BoolVal> = (0..BinaryEncoding::required_bits(span))
 			.map(|_| BoolVal::Lit(db.new_lit()))
 			.collect();
 		let _ = AdderEncoder::ripple_carry_adder(db, b, &bits, None, Some(a))?;
@@ -406,18 +479,8 @@ impl IntLinEncoder {
 		self.products[&(VarKey(Rc::downgrade(x)), Coeff::from(factor))].clone()
 	}
 
-	/// Create an integer variable over `dom`.
-	pub(crate) fn new_int_var(
-		&mut self,
-		dom: RangeList<Coeff>,
-		add_consistency: bool,
-		lbl: String,
-	) -> Rc<IntVar> {
-		IntVar::new(dom, add_consistency, lbl)
-	}
-
 	/// Create an encoder with the given configuration.
-	pub(crate) fn with_config(config: IntLinConfig) -> Self {
+	pub fn with_config(config: IntLinConfig) -> Self {
 		Self {
 			config,
 			..Self::default()
@@ -480,12 +543,12 @@ impl NormalizedIntLinear {
 	}
 
 	/// The constant the sum is compared against, which is not negative.
-	pub(crate) fn k(&self) -> Coeff {
+	pub fn k(&self) -> Coeff {
 		*self.k
 	}
 
 	/// The terms of the sum, each with a positive coefficient.
-	pub(crate) fn terms(&self) -> &[Term] {
+	pub fn terms(&self) -> &[Term] {
 		&self.exp.terms
 	}
 }
@@ -502,17 +565,17 @@ impl From<&NormalizedIntLinear> for IntLinear {
 
 impl IntLinear {
 	/// The comparator of the constraint.
-	pub(crate) fn cmp(&self) -> Comparator {
+	pub fn cmp(&self) -> Comparator {
 		self.cmp
 	}
 
 	/// The constant the sum is compared against.
-	pub(crate) fn k(&self) -> Coeff {
+	pub fn k(&self) -> Coeff {
 		self.k
 	}
 
 	/// The terms of the sum.
-	pub(crate) fn terms(&self) -> &[Term] {
+	pub fn terms(&self) -> &[Term] {
 		&self.exp.terms
 	}
 
@@ -594,11 +657,11 @@ impl IntLinear {
 		// ponytail: reconciling a mismatch would take a second adder for the
 		// offset. Nothing builds one today, since the result of an addition is
 		// given the bound its inputs imply.
-		(z.x.lb() == x.x.lb() + y.x.lb()).then_some((x, y, z))
+		(z.x.min() == x.x.min() + y.x.min()).then_some((x, y, z))
 	}
 
 	/// Create the constraint `Σ terms ≷ k`.
-	pub(crate) fn new(terms: Vec<Term>, cmp: Comparator, k: Coeff) -> Self {
+	pub fn new(terms: Vec<Term>, cmp: Comparator, k: Coeff) -> Self {
 		Self {
 			exp: IntLinExp { terms },
 			cmp,
@@ -625,8 +688,8 @@ impl IntLinear {
 						.enumerate()
 						.filter(|(j, _)| *j != i)
 						.map(|(_, t)| match cmp {
-							Comparator::LessEq => t.lb(),
-							_ => t.ub(),
+							Comparator::LessEq => t.min(),
+							_ => t.max(),
 						})
 						.sum();
 					let slack = self.k - others;
@@ -636,10 +699,10 @@ impl IntLinear {
 					// `c·x ≷ slack`, turned around when `c` is negative.
 					let cmp = if term.c >= 0 { cmp } else { cmp.reverse() };
 					changed |= match cmp {
-						Comparator::LessEq => term.x.set_ub(div_floor(slack, term.c)),
-						_ => term.x.set_lb(div_ceil(slack, term.c)),
+						Comparator::LessEq => term.x.set_max(div_floor(slack, term.c)),
+						_ => term.x.set_min(div_ceil(slack, term.c)),
 					};
-					if term.x.dom().is_empty() {
+					if term.x.domain().is_empty() {
 						return Err(Unsatisfiable);
 					}
 				}
@@ -652,16 +715,6 @@ impl IntLinear {
 	}
 }
 
-impl View {
-	/// The steps of a sequential decomposition over the variable.
-	fn steps(&self, geq: bool) -> Vec<(Coeff, BoolVal)> {
-		match self {
-			View::Dir(dir) => dir.steps(geq),
-			View::Ord(ord) => ord.steps(geq),
-		}
-	}
-}
-
 impl Encoded<'_> {
 	/// The clauses for `Σ terms ≷ k`, by taking the terms one at a time.
 	///
@@ -669,7 +722,12 @@ impl Encoded<'_> {
 	/// costs the sum a known amount, so what is left for the remaining terms
 	/// is a smaller constraint of the same shape, and the clauses for it need
 	/// only hold when that value is in fact reached.
-	fn walk(terms: &[Encoded], cmp: Comparator, k: Coeff) -> Vec<Vec<BoolVal>> {
+	fn walk<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		terms: &[Encoded],
+		cmp: Comparator,
+		k: Coeff,
+	) -> Result<Vec<Vec<BoolVal>>, Unsatisfiable> {
 		let Some((head, tail)) = terms.split_first() else {
 			// Nothing left to give, so the empty sum either satisfies what remains
 			// of the constraint or nothing can.
@@ -678,18 +736,25 @@ impl Encoded<'_> {
 				Comparator::GreaterEq => 0 >= k,
 				Comparator::Equal => unreachable!("an equality is split before it is encoded"),
 			};
-			return if holds { Vec::new() } else { vec![Vec::new()] };
+			return Ok(if holds { Vec::new() } else { vec![Vec::new()] });
 		};
 		if tail.is_empty() {
-			return head.bound(cmp, k);
+			return head.bound(db, cmp, k);
 		}
 		// Guard on the head reaching a value from whichever side pushes the sum
 		// towards breaking the constraint.
 		let geq = (head.c >= 0) == matches!(cmp, Comparator::LessEq);
 		let mut clauses = Vec::new();
 		let mut last: Option<Vec<Vec<BoolVal>>> = None;
-		for (d, guard) in head.view.steps(geq) {
-			let sub = Self::walk(tail, cmp, k - head.c * d);
+		// A variable a group of terms arrived on is read on the direct literals
+		// it came with; any other on its order encoding.
+		let steps = if head.x.has_direct_encoding() {
+			head.x.lit_direct_steps(db, geq)?
+		} else {
+			head.x.lit_order_steps(db, geq)?
+		};
+		for (d, guard) in steps {
+			let sub = Self::walk(db, tail, cmp, k - head.c * d)?;
 			// Advancing the walk only weakens the guard, so a step that asks of the
 			// remaining terms exactly what the step before it asked is already
 			// covered by that one. Consecutive steps land on the same demand often:
@@ -704,31 +769,42 @@ impl Encoded<'_> {
 			);
 			last = Some(sub);
 		}
-		clauses
+		Ok(clauses)
 	}
 
 	/// The clauses for `c·x ≷ k`, this term being the only one left.
-	fn bound(&self, cmp: Comparator, k: Coeff) -> Vec<Vec<BoolVal>> {
+	fn bound<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		cmp: Comparator,
+		k: Coeff,
+	) -> Result<Vec<Vec<BoolVal>>, Unsatisfiable> {
 		// Dividing by a negative coefficient turns the comparison around.
 		let cmp = if self.c >= 0 { cmp } else { cmp.reverse() };
-		match self.view {
-			// One literal says where the variable stands against the bound.
-			View::Ord(ord) => vec![vec![match cmp {
-				Comparator::LessEq => ord.leq_val(div_floor(k, self.c)),
-				Comparator::GreaterEq => ord.geq_val(div_ceil(k, self.c)),
-				Comparator::Equal => unreachable!("an equality is split before it is encoded"),
-			}]],
+		if self.x.has_direct_encoding() {
 			// Nothing says it in one literal, so rule out each value that would
 			// break the bound instead.
-			View::Dir(dir) => dir
-				.steps(true)
+			let breaks = self
+				.x
+				.lit_direct_steps(db, true)?
 				.into_iter()
 				.filter(|&(d, _)| match cmp {
 					Comparator::LessEq => self.c * d > k,
 					_ => self.c * d < k,
 				})
-				.map(|(d, _)| vec![!dir.eq_val(d)])
-				.collect(),
+				.map(|(d, _)| d)
+				.collect_vec();
+			breaks
+				.into_iter()
+				.map(|d| Ok(vec![!self.x.lit_equals(db, d)?]))
+				.collect()
+		} else {
+			// One literal says where the variable stands against the bound.
+			Ok(vec![vec![match cmp {
+				Comparator::LessEq => self.x.lit_at_most(db, div_floor(k, self.c))?,
+				Comparator::GreaterEq => self.x.lit_at_least(db, div_ceil(k, self.c))?,
+				Comparator::Equal => unreachable!("an equality is split before it is encoded"),
+			}]])
 		}
 	}
 }
@@ -741,7 +817,11 @@ impl Term {
 		y: &Term,
 		z: &Term,
 	) -> Result {
-		let (xs, ys, zs) = (x.x.bin(db)?, y.x.bin(db)?, z.x.bin(db)?);
+		let (xs, ys, zs) = (
+			x.x.binary_encoding(db)?,
+			y.x.binary_encoding(db)?,
+			z.x.binary_encoding(db)?,
+		);
 		let _ = AdderEncoder::ripple_carry_adder(
 			db,
 			&xs.to_vec(),
@@ -766,7 +846,7 @@ impl Term {
 	pub(crate) fn from_part<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		part: &Part,
-		lbl: &str,
+		label: &str,
 		exact: bool,
 	) -> Result<Vec<Self>, Unsatisfiable> {
 		match part {
@@ -780,9 +860,9 @@ impl Term {
 				for &(lit, coeff) in terms {
 					by_coeff.entry(*coeff).or_default().push(lit);
 				}
-				let dom: RangeList<Coeff> = once(0..=0)
-					.chain(by_coeff.keys().sorted().map(|&v| v..=v))
-					.collect();
+				// The group is worth nothing when no term is chosen, and one of
+				// the coefficients otherwise.
+				let domain = RangeList::from_elements(once(0).chain(by_coeff.keys().copied()));
 
 				let by_coeff = by_coeff
 					.into_iter()
@@ -796,7 +876,7 @@ impl Term {
 				let single = matches!(by_coeff.as_slice(), [(_, terms)] if terms.len() == 1);
 				let none = match by_coeff.as_slice() {
 					[(_, terms)] if terms.len() == 1 => !terms[0],
-					_ => new_named_lit!(db, format!("{lbl}=0")),
+					_ => new_named_lit!(db, format!("{label}=0")),
 				};
 				let mut lits = vec![none];
 				for (_coeff, terms) in by_coeff {
@@ -806,7 +886,7 @@ impl Term {
 						// Several are not one literal, so they need one, which
 						// each of them reaches.
 						_ => {
-							let d = new_named_lit!(db, format!("{lbl}={_coeff}"));
+							let d = new_named_lit!(db, format!("{label}={_coeff}"));
 							for &lit in &terms {
 								db.add_clause([!lit, d])?;
 							}
@@ -832,26 +912,33 @@ impl Term {
 				if !single {
 					db.add_clause(lits.iter().copied())?;
 				}
-				Ok(vec![Self::new(
-					1,
-					IntVar::with_dir(dom.clone(), lbl.to_owned(), DirEnc::from_lits(dom, lits)),
-				)])
+				// The group's own clauses above already give exactly one value,
+				// so the variable is told the literals rather than asked to
+				// constrain them.
+				let x = IntVar::new(domain)
+					.enforce_consistency(false)
+					.with_label(label);
+				x.with_direct_encoding(db, &lits, true)?;
+				Ok(vec![Self::new(1, x)])
 			}
 			Part::Ic(terms) => {
 				// Each term implies the one before it, so the group counts up
 				// through the running sums and a term's literal is already the
 				// order literal for its sum.
 				let mut acc = 0;
-				let (dom, views): (Vec<_>, FxHashMap<_, _>) = terms
+				let (totals, lits): (Vec<_>, Vec<_>) = terms
 					.iter()
 					.map(|&(lit, coeff)| {
 						acc += *coeff;
-						(acc..=acc, (acc, lit))
+						(acc, lit)
 					})
 					.unzip();
+				// Coefficients are positive, so the running sums climb and the
+				// domain has one value per term, plus the zero none reaches.
+				let domain = RangeList::from_elements(once(0).chain(totals));
 				Ok(vec![Self::new(
 					1,
-					IntVar::with_ord_views(once(0..=0).chain(dom).collect(), lbl.to_owned(), views),
+					IntVar::from_order_encoding(db, domain, &lits)?.with_label(label),
 				)])
 			}
 			Part::Dom(terms, lb, ub) => {
@@ -863,15 +950,14 @@ impl Term {
 				// that multiple and the multiple stays on the term.
 				let multiple = *terms[0].1;
 				let bits: Vec<BoolVal> = terms.iter().map(|&(lit, _)| BoolVal::Lit(lit)).collect();
-				let dom =
-					RangeList::from_iter([div_ceil(**lb, multiple)..=div_floor(**ub, multiple)]);
-				if dom.is_empty() {
+				let domain = RangeList::from(div_ceil(**lb, multiple)..=div_floor(**ub, multiple));
+				if domain.is_empty() {
 					db.contradiction()?;
 				}
 				Ok(vec![Self::new(
 					multiple,
 					// The bits count from zero, whatever the bounds say.
-					IntVar::with_bin(db, dom, lbl.to_owned(), BinEnc::from_bits(bits, 0))?,
+					IntVar::from_binary_encoding(db, domain, &bits, 0)?.with_label(label),
 				)])
 			}
 		}
@@ -879,7 +965,13 @@ impl Term {
 
 	/// The values the term can take.
 	pub(crate) fn values(&self) -> Vec<Coeff> {
-		let mut vs: Vec<Coeff> = self.x.dom().iter().flatten().map(|v| self.c * v).collect();
+		let mut vs: Vec<Coeff> = self
+			.x
+			.domain()
+			.iter()
+			.flatten()
+			.map(|v| self.c * v)
+			.collect();
 		// A negative coefficient turns the domain around.
 		vs.sort_unstable();
 		vs
@@ -891,25 +983,25 @@ impl Term {
 	}
 
 	/// The greatest value the term can take.
-	pub(crate) fn ub(&self) -> Coeff {
+	pub(crate) fn max(&self) -> Coeff {
 		if self.c >= 0 {
-			self.c * self.x.ub()
+			self.c * self.x.max()
 		} else {
-			self.c * self.x.lb()
+			self.c * self.x.min()
 		}
 	}
 
 	/// The least value the term can take.
-	pub(crate) fn lb(&self) -> Coeff {
+	pub(crate) fn min(&self) -> Coeff {
 		if self.c >= 0 {
-			self.c * self.x.lb()
+			self.c * self.x.min()
 		} else {
-			self.c * self.x.ub()
+			self.c * self.x.max()
 		}
 	}
 
 	/// Create the term `c·x`.
-	pub(crate) fn new(c: Coeff, x: Rc<IntVar>) -> Self {
+	pub fn new(c: Coeff, x: Rc<IntVar>) -> Self {
 		Self { c, x }
 	}
 }
@@ -957,7 +1049,7 @@ mod tests {
 		let xs = doms
 			.iter()
 			.enumerate()
-			.map(|(i, dom)| enc.new_int_var(dom.clone(), true, format!("x{i}")))
+			.map(|(i, domain)| IntVar::new(domain.clone()).with_label(format!("x{i}")))
 			.collect_vec();
 		let terms = coeffs
 			.iter()
@@ -969,24 +1061,32 @@ mod tests {
 		if enc.encode(&mut cnf, &con).is_err() {
 			return (Vec::new(), xs);
 		}
-		// Rule out each assignment by the literals that decide the variables,
-		// so that what is enumerated is integer solutions rather than models. A
-		// constraint whose variables were all narrowed to a single value has no
-		// literals at all, and the empty nogood correctly stops after one.
-		let lits = xs.iter().flat_map(|x| x.lits()).collect_vec();
+		// Every model is ruled out in turn and read for what the variables
+		// come to, so an assignment reachable more than one way is seen more
+		// than once. A constraint whose variables were all narrowed to a
+		// single value has no literals at all, and the empty nogood correctly
+		// stops after one.
+		let vars = cnf.get_variables();
 		let mut slv = Cadical::from(&cnf);
 		let mut solutions = Vec::new();
 		while let SolveResult::Satisfied(value) = slv.solve() {
 			solutions.push(xs.iter().map(|x| x.value(&value)).collect_vec());
-			let no_good = lits
-				.iter()
-				.map(|&l| if value.value(l) { !l } else { l })
+			let no_good = vars
+				.map(|v| {
+					let l = v.into();
+					if value.value(l) {
+						!l
+					} else {
+						l
+					}
+				})
 				.collect_vec();
 			if slv.add_clause(no_good).is_err() {
 				break;
 			}
 		}
 		solutions.sort();
+		solutions.dedup();
 		(solutions, xs)
 	}
 
@@ -1014,7 +1114,7 @@ mod tests {
 
 	#[test]
 	fn order_encoding_admits_exactly_the_solutions() {
-		let contiguous = RangeList::from_iter([0..=3]);
+		let contiguous = RangeList::from(0..=3);
 		let holey = RangeList::from_elements([0, 1, 3]);
 		let negative = RangeList::from_elements([-2, -1, 1]);
 		let cases: Vec<(Vec<Coeff>, Vec<RangeList<Coeff>>)> = vec![
@@ -1097,7 +1197,7 @@ mod tests {
 				panic!("a group of exclusive terms is one variable")
 			};
 			let x = &t.x;
-			let _ = x.ord(&mut cnf).unwrap();
+			let _ = x.order_encoding(&mut cnf).unwrap();
 
 			let solutions = group_solutions(&cnf, x, &lits);
 			let choices: Vec<_> = solutions
@@ -1147,7 +1247,7 @@ mod tests {
 		]);
 		let ts = Term::from_part(&mut cnf, &part, "x", true).unwrap();
 		let x = &ts[0].x;
-		let _ = x.ord(&mut cnf).unwrap();
+		let _ = x.order_encoding(&mut cnf).unwrap();
 
 		let solutions = group_solutions(&cnf, x, &lits);
 		// The chain admits four assignments, worth nothing, two, five and nine.
@@ -1256,7 +1356,7 @@ mod tests {
 		);
 		let ts = Term::from_part(&mut cnf, &part, "x", false).unwrap();
 		let x = &ts[0].x;
-		let _ = x.ord(&mut cnf).unwrap();
+		let _ = x.order_encoding(&mut cnf).unwrap();
 
 		let mut slv = Cadical::from(&cnf);
 		let mut reachable = Vec::new();
@@ -1313,7 +1413,10 @@ mod tests {
 				let ok = enc
 					.encode(&mut cnf, &IntLinear::new(ts.clone(), cmp, k))
 					.is_ok();
-				assert!(!ts[0].x.has_ord(), "read on the group's own literals");
+				assert!(
+					!ts[0].x.has_order_encoding(),
+					"read on the group's own literals"
+				);
 
 				let mut seen = Vec::new();
 				if ok {
@@ -1372,7 +1475,7 @@ mod tests {
 				.collect(),
 		);
 		let ts = Term::from_part(&mut cnf, &part, "x", true).unwrap();
-		let y = IntVar::new(RangeList::from_iter([0..=3]), true, "y".to_owned());
+		let y = IntVar::new(0..=3).enforce_consistency(true).with_label("y");
 
 		let mut enc = IntLinEncoder::default();
 		let con = IntLinear::new(
@@ -1383,14 +1486,14 @@ mod tests {
 		enc.encode(&mut cnf, &con).unwrap();
 
 		assert!(
-			!ts[0].x.has_ord(),
+			!ts[0].x.has_order_encoding(),
 			"the group came with a direct encoding and should be read on it"
 		);
 
 		// And it still encodes the constraint.
 		let mut slv = Cadical::from(&cnf);
 		let mut seen = Vec::new();
-		let watched: Vec<Lit> = lits.iter().copied().chain(y.lits()).collect();
+		let watched = cnf.get_variables();
 		while let SolveResult::Satisfied(value) = slv.solve() {
 			let group: Coeff = lits
 				.iter()
@@ -1399,8 +1502,14 @@ mod tests {
 				.map_or(0, |(_, c)| c);
 			seen.push((group, y.value(&value)));
 			let no_good: Vec<_> = watched
-				.iter()
-				.map(|&l| if value.value(l) { !l } else { l })
+				.map(|v| {
+					let l = v.into();
+					if value.value(l) {
+						!l
+					} else {
+						l
+					}
+				})
 				.collect();
 			if slv.add_clause(no_good).is_err() {
 				break;
@@ -1442,13 +1551,13 @@ mod tests {
 				panic!("a log encoding is one integer, not one per bit")
 			};
 			assert_eq!(t.c, multiple, "the multiple belongs on the term");
-			assert_eq!((t.x.lb(), t.x.ub()), (2, 5), "the declared bounds hold");
+			assert_eq!((t.x.min(), t.x.max()), (2, 5), "the declared bounds hold");
 			assert!(
-				!t.x.has_ord(),
+				!t.x.has_order_encoding(),
 				"the bits are already there, so nothing should be channelled"
 			);
 			let vars_before = cnf.num_vars();
-			let _ = t.x.bin(&mut cnf).unwrap();
+			let _ = t.x.binary_encoding(&mut cnf).unwrap();
 			assert_eq!(
 				cnf.num_vars(),
 				vars_before,
@@ -1509,13 +1618,13 @@ mod tests {
 
 	#[test]
 	fn a_single_term_is_bounded_directly() {
-		let dom = RangeList::from_elements([-2, 0, 3, 4]);
+		let domain = RangeList::from_elements([-2, 0, 3, 4]);
 		for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
 			for c in [-3, -1, 1, 2] {
 				for k in -8..=8 {
 					assert_eq!(
-						solutions_of(&[c], std::slice::from_ref(&dom), cmp, k, false),
-						brute_force(&[c], std::slice::from_ref(&dom), cmp, k),
+						solutions_of(&[c], std::slice::from_ref(&domain), cmp, k, false),
+						brute_force(&[c], std::slice::from_ref(&domain), cmp, k),
 						"{c}·x {cmp:?} {k}"
 					);
 				}
@@ -1527,9 +1636,9 @@ mod tests {
 	fn binary_variables_admit_exactly_the_solutions() {
 		// `Some(0)` puts every variable in binary, so the same constraints run
 		// through the binary bound and adder paths instead of the term walk.
-		let contiguous = RangeList::from_iter([0..=3]);
+		let contiguous = RangeList::from(0..=3);
 		let holey = RangeList::from_elements([0, 1, 3]);
-		let wide = RangeList::from_iter([2..=9]);
+		let wide = RangeList::from(2..=9);
 		let cases: Vec<(Vec<Coeff>, Vec<RangeList<Coeff>>)> = vec![
 			(vec![1], vec![contiguous.clone()]),
 			(vec![-2], vec![holey.clone()]),
@@ -1562,13 +1671,13 @@ mod tests {
 			(vec![1, 2, 4, 8], 4, 15, 40),
 			(vec![3, 3, 3], 9, 14, 30),
 		] {
-			let doms = vec![RangeList::from_iter([0..=span]); coeffs.len()];
+			let doms = vec![RangeList::from(0..=span); coeffs.len()];
 			let mut cnf = Cnf::default();
 			let mut enc = IntLinEncoder::default();
 			let xs = doms
 				.iter()
 				.enumerate()
-				.map(|(i, d)| enc.new_int_var(d.clone(), true, format!("x{i}")))
+				.map(|(i, d)| IntVar::new(d.clone()).with_label(format!("x{i}")))
 				.collect_vec();
 			let terms = coeffs
 				.iter()
@@ -1589,7 +1698,7 @@ mod tests {
 	fn coefficients_decompose_into_shifts_and_adders() {
 		// The database this replaces stopped at a hundred, so the point of
 		// synthesising a plan instead is that nothing here is out of reach.
-		let dom = RangeList::from_iter([0..=7]);
+		let domain = RangeList::from(0..=7);
 		for c in [
 			1, 2, 3, 5, 7, 9, 11, 15, 23, 45, 99, 101, 127, 255, 341, 569, 1023,
 		] {
@@ -1597,14 +1706,14 @@ mod tests {
 				// Around each value the product can take, and just off it.
 				for k in (0..=7).flat_map(|v: Coeff| [c * v - 1, c * v, c * v + 1]) {
 					let (solutions, xs) =
-						solutions_with(&[c], std::slice::from_ref(&dom), cmp, k, false, Some(0));
+						solutions_with(&[c], std::slice::from_ref(&domain), cmp, k, false, Some(0));
 					assert_eq!(
 						solutions,
-						brute_force(&[c], std::slice::from_ref(&dom), cmp, k),
+						brute_force(&[c], std::slice::from_ref(&domain), cmp, k),
 						"{c}·x {cmp:?} {k}"
 					);
 					assert!(
-						!xs.iter().any(|x| x.has_ord()),
+						!xs.iter().any(|x| x.has_order_encoding()),
 						"{c}·x {cmp:?} {k} fell back to the walk"
 					);
 				}
@@ -1614,10 +1723,7 @@ mod tests {
 
 	#[test]
 	fn a_sum_that_is_negative_throughout_reads_positive() {
-		let doms = [
-			RangeList::from_iter([0..=3]),
-			RangeList::from_elements([1, 2, 5]),
-		];
+		let doms = [RangeList::from(0..=3), RangeList::from_elements([1, 2, 5])];
 		for coeffs in [vec![-1, -1], vec![-3, -5], vec![-1, -45]] {
 			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
 				for k in (-14..=2).map(|v: Coeff| v * 7) {
@@ -1628,7 +1734,7 @@ mod tests {
 						"{coeffs:?} {cmp:?} {k}"
 					);
 					assert!(
-						!xs.iter().any(|x| x.has_ord()),
+						!xs.iter().any(|x| x.has_order_encoding()),
 						"{coeffs:?} {cmp:?} {k} fell back to the walk"
 					);
 				}
@@ -1639,9 +1745,9 @@ mod tests {
 	#[test]
 	fn products_combine_with_each_other() {
 		let doms = [
-			RangeList::from_iter([0..=3]),
+			RangeList::from(0..=3),
 			RangeList::from_elements([0, 1, 4]),
-			RangeList::from_iter([2..=5]),
+			RangeList::from(2..=5),
 		];
 		for coeffs in [
 			vec![3, 5, 7],
@@ -1665,13 +1771,13 @@ mod tests {
 	fn a_product_is_built_once() {
 		// The same coefficient over the same variable, in two constraints. The
 		// second should cost nothing beyond its own bound.
-		let dom = RangeList::from_iter([0..=15]);
+		let domain = RangeList::from(0..=15);
 		let mut cnf = Cnf::default();
 		let mut enc = IntLinEncoder::with_config(IntLinConfig {
 			propagate: false,
 			cutoff: Some(0),
 		});
-		let x = enc.new_int_var(dom, true, "x".to_owned());
+		let x = IntVar::new(domain).with_label("x");
 
 		let con = |k| IntLinear::new(vec![Term::new(45, Rc::clone(&x))], Comparator::LessEq, k);
 		enc.encode(&mut cnf, &con(300)).unwrap();
@@ -1695,16 +1801,16 @@ mod tests {
 		// Several binary variables added together go through a chain of adders
 		// and one bound, rather than the walk over terms.
 		let cases: Vec<Vec<RangeList<Coeff>>> = vec![
-			vec![RangeList::from_iter([0..=3]); 3],
-			vec![RangeList::from_iter([0..=1]); 4],
+			vec![RangeList::from(0..=3); 3],
+			vec![RangeList::from(0..=1); 4],
 			vec![
-				RangeList::from_iter([2..=5]),
+				RangeList::from(2..=5),
 				RangeList::from_elements([0, 1, 4]),
-				RangeList::from_iter([1..=3]),
+				RangeList::from(1..=3),
 			],
 			vec![
-				RangeList::from_iter([-3..=0]),
-				RangeList::from_iter([1..=2]),
+				RangeList::from(-3..=0),
+				RangeList::from(1..=2),
 				RangeList::from_elements([-1, 5]),
 			],
 		];
@@ -1721,7 +1827,7 @@ mod tests {
 					// Had the chain declined, the walk would have taken the
 					// constraint and channelled every variable to order form.
 					assert!(
-						!xs.iter().any(|x| x.has_ord()),
+						!xs.iter().any(|x| x.has_order_encoding()),
 						"sum of {doms:?} {cmp:?} {k} fell back to the walk"
 					);
 				}
@@ -1734,7 +1840,7 @@ mod tests {
 		// `x + y = z` is only handed to the adder when `z` starts where the sum
 		// of the other two does; otherwise the term walk has to take it, and
 		// either way the solutions are the same.
-		let from = |lb: Coeff| RangeList::from_iter([lb..=(lb + 3)]);
+		let from = |lb: Coeff| RangeList::from(lb..=(lb + 3));
 		for (lx, ly, lz) in [(0, 0, 0), (1, 2, 3), (1, 2, 0), (-2, 1, -1), (-2, 1, 5)] {
 			let doms = [from(lx), from(ly), from(lz)];
 			assert_eq!(
@@ -1751,9 +1857,9 @@ mod tests {
 		// top bits are only driven to zero if the adder is sized by the widest
 		// of the three rather than by its inputs.
 		let doms = [
-			RangeList::from_iter([0..=1]),
-			RangeList::from_iter([0..=1]),
-			RangeList::from_iter([0..=15]),
+			RangeList::from(0..=1),
+			RangeList::from(0..=1),
+			RangeList::from(0..=15),
 		];
 		assert_eq!(
 			solutions_with(&[1, 1, -1], &doms, Comparator::Equal, 0, false, Some(0)).0,
@@ -1765,10 +1871,10 @@ mod tests {
 	fn propagation_narrows_the_domains_it_can() {
 		// `3x + y ≤ 5` with `y ≥ 0` leaves `x` no room above one.
 		let mut enc = IntLinEncoder::default();
-		let dom = RangeList::from_iter([0..=3]);
+		let domain = RangeList::from(0..=3);
 		let (x, y) = (
-			enc.new_int_var(dom.clone(), true, "x".to_owned()),
-			enc.new_int_var(dom, true, "y".to_owned()),
+			IntVar::new(domain.clone()).with_label("x"),
+			IntVar::new(domain).with_label("y"),
 		);
 		let con = IntLinear::new(
 			vec![Term::new(3, Rc::clone(&x)), Term::new(1, Rc::clone(&y))],
@@ -1778,7 +1884,7 @@ mod tests {
 
 		let mut cnf = Cnf::default();
 		enc.encode(&mut cnf, &con).unwrap();
-		assert_eq!(x.ub(), 1, "3x ≤ 5 leaves x at most one");
-		assert_eq!(y.ub(), 3, "y is already tight");
+		assert_eq!(x.max(), 1, "3x ≤ 5 leaves x at most one");
+		assert_eq!(y.max(), 3, "y is already tight");
 	}
 }

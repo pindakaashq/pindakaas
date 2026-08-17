@@ -30,7 +30,7 @@ use crate::{
 	cardinality::Cardinality,
 	cardinality_one::CardinalityOne,
 	helpers::{as_binary, bit, new_named_lit},
-	int_linear::{Decompose, IntLinEncoder, IntLinear, NormalizedIntLinear, Term},
+	int_linear::{Decompose, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear},
 	integer::{lex_leq_const, Consistency},
 	propositional_logic::{Formula, TseitinEncoder},
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, IntEncoding, Lit,
@@ -110,10 +110,6 @@ pub enum Comparator {
 	GreaterEq,
 }
 
-#[allow(
-	dead_code,
-	reason = "used once the integer constraint encoding is reachable from the pseudo-Boolean entry point"
-)]
 impl Comparator {
 	/// The comparator that holds when the sides are swapped.
 	pub(crate) fn reverse(self) -> Self {
@@ -259,7 +255,7 @@ impl AdderEncoder {
 		db: &mut Db,
 		xs: &[BoolVal],
 		out: Option<BoolVal>,
-		_lbl: String,
+		_label: String,
 	) -> Result<BoolVal>
 	where
 		Db: ClauseDatabase + ?Sized,
@@ -286,7 +282,7 @@ impl AdderEncoder {
 			};
 		}
 
-		let carry = out.unwrap_or_else(|| BoolVal::Lit(new_named_lit!(db, _lbl)));
+		let carry = out.unwrap_or_else(|| BoolVal::Lit(new_named_lit!(db, _label)));
 		match lits[..] {
 			[x, y] if trues == 0 => {
 				// carry = x ∧ y
@@ -338,10 +334,6 @@ impl AdderEncoder {
 	/// When `zs` is given the sum is *constrained* to equal it; otherwise the
 	/// sum bits are created and returned, truncated to `bits` (defaulting to
 	/// the width needed to hold any sum, so that no overflow is possible).
-	#[allow(
-		dead_code,
-		reason = "consumed by the binary integer encoding, added in a later change"
-	)]
 	#[cfg_attr(any(feature = "tracing", test), tracing::instrument(name = "ripple_carry_adder", skip_all, fields(constraint = format!("{xs:?} + {ys:?} = {zs:?}"))))]
 	pub(crate) fn ripple_carry_adder<Db>(
 		db: &mut Db,
@@ -384,12 +376,12 @@ impl AdderEncoder {
 		db: &mut Db,
 		xs: &[BoolVal],
 		out: Option<BoolVal>,
-		_lbl: String,
+		_label: String,
 	) -> Result<BoolVal>
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		let out = out.unwrap_or_else(|| BoolVal::Lit(new_named_lit!(db, _lbl)));
+		let out = out.unwrap_or_else(|| BoolVal::Lit(new_named_lit!(db, _label)));
 		// `out = ⊕xs` is exactly `⊕xs ⊕ out = 0`, and each bit fixed to one
 		// flips the parity the remaining literals have to add up to.
 		let (lits, trues) = Self::filter_fixed_sum(&[xs, &[out]].concat());
@@ -704,7 +696,7 @@ impl BddEncoder {
 		let bounds = xs
 			.iter()
 			.scan((0, 0), |state, x| {
-				*state = (state.0 + x.lb(), state.1 + x.ub());
+				*state = (state.0 + x.min(), state.1 + x.max());
 				Some(*state)
 			})
 			.chain(once((0, k)))
@@ -714,12 +706,12 @@ impl BddEncoder {
 			.iter()
 			.rev()
 			.scan((k, k), |state, x| {
-				*state = (state.0 - x.ub(), state.1 - x.lb());
+				*state = (state.0 - x.max(), state.1 - x.min());
 				Some(*state)
 			})
 			.collect_vec();
 
-		let inf = xs.iter().fold(0, |a, x| a + x.ub()) + 1;
+		let inf = xs.iter().fold(0, |a, x| a + x.max()) + 1;
 
 		let mut ws: Vec<Vec<(Range<Coeff>, BddNode)>> = margins
 			.into_iter()
@@ -779,65 +771,87 @@ impl Decompose for BddEncoder {
 	/// stays narrow. Where a layer agrees with the next one from some total
 	/// upwards, its literal for that total is the next layer's, which is what
 	/// keeps the layers from each paying for their own.
-	fn decompose(&self, con: &NormalizedIntLinear) -> Result<Vec<IntLinear>, Unsatisfiable> {
-		// The widest terms first, so that the layers narrow early and the ones
-		// after them have less to tell apart.
+	fn decompose<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		con: &NormalizedIntLinear,
+	) -> Result<Vec<TernaryIntLinear>, Unsatisfiable> {
+		// The narrowest terms first, which is the order the diagram is reduced
+		// under in the literature. A layer then tends to agree with the one
+		// after it from some total upwards, and where it does it shares that
+		// literal rather than paying for one of its own. Taking the widest
+		// first narrows the layers sooner but leaves nothing to share.
 		let terms = con
 			.terms()
 			.iter()
 			.cloned()
-			.sorted_by(|a: &Term, b: &Term| b.ub().cmp(&a.ub()))
+			.sorted_by(|a: &Term, b: &Term| a.max().cmp(&b.max()))
 			.collect_vec();
 		let (cmp, k) = (Comparator::from(con.cmp()), con.k());
 
-		// A variable per layer, over the totals its nodes stand for.
-		let mut layers = Vec::with_capacity(terms.len() + 1);
-		let mut shared = Vec::with_capacity(terms.len() + 1);
-		for (i, nodes) in Self::construct_bdd(&terms, cmp, k).into_iter().enumerate() {
-			let mut vals = Vec::new();
-			let mut views = Vec::new();
-			for (interval, node) in nodes {
-				// A node stands for the largest total in its interval.
-				let val = interval.end - 1;
-				match node {
-					BddNode::Gap => {}
-					BddNode::Val => vals.push(val),
-					BddNode::View(of) => {
-						vals.push(val);
-						views.push((val, of));
-					}
-				}
-			}
-			if vals.is_empty() {
-				return Err(Unsatisfiable);
-			}
-			layers.push(crate::integer::IntVar::new(
-				vals.into_iter().map(|v| v..=v).collect(),
-				self.add_consistency,
-				format!("y{i}"),
-			));
-			shared.push(views);
+		// The nodes of every layer, before any of them is a variable: a total,
+		// and the total of the next layer it shares its literal with.
+		let nodes = Self::construct_bdd(&terms, cmp, k)
+			.into_iter()
+			.map(|layer| {
+				layer
+					.into_iter()
+					.filter_map(|(interval, node)| {
+						// A node stands for the largest total in its interval.
+						let val = interval.end - 1;
+						match node {
+							BddNode::Gap => None,
+							BddNode::Val => Some((val, None)),
+							BddNode::View(of) => Some((val, Some(of))),
+						}
+					})
+					.collect_vec()
+			})
+			.collect_vec();
+		if nodes.iter().any(Vec::is_empty) {
+			return Err(Unsatisfiable);
 		}
 
-		// Now that every layer exists, say which of their literals are shared.
-		for (i, views) in shared.into_iter().enumerate() {
-			for (val, of) in views {
-				layers[i].set_ord_view_of(val, Rc::clone(&layers[i + 1]), of);
-			}
+		// Back to front, so that a layer has the literals it shares with the
+		// next one by the time it is built. A total the next layer already
+		// tells apart is read on its literal; any other gets one of its own.
+		let mut layers: Vec<Rc<crate::integer::IntVar>> = Vec::with_capacity(nodes.len());
+		for (i, layer) in nodes.iter().enumerate().rev() {
+			let walk = layer
+				.iter()
+				.enumerate()
+				.map(|(j, &(val, of))| {
+					Ok((
+						val,
+						match (j, of) {
+							// The least total is always reached.
+							(0, _) => BoolVal::Const(true),
+							(_, Some(of)) => layers
+								.last()
+								.expect("only a layer with one after it shares")
+								.lit_at_least(db, of)?,
+							(_, None) => BoolVal::Lit(new_named_lit!(db, format!("y{i}≥{val}"))),
+						},
+					))
+				})
+				.collect::<Result<Vec<_>, Unsatisfiable>>()?;
+			layers.push(
+				crate::integer::IntVar::from_order_walk(db, walk)?
+					.enforce_consistency(self.add_consistency)
+					.with_label(format!("y{i}")),
+			);
 		}
+		layers.reverse();
 
 		Ok(terms
 			.into_iter()
 			.enumerate()
 			.map(|(i, x)| {
-				IntLinear::new(
-					vec![
-						Term::new(1, Rc::clone(&layers[i])),
-						x,
-						Term::new(-1, Rc::clone(&layers[i + 1])),
-					],
+				TernaryIntLinear::new(
+					Term::new(1, Rc::clone(&layers[i])),
+					x,
 					cmp,
-					0,
+					Term::new(1, Rc::clone(&layers[i + 1])),
 				)
 			})
 			.collect())
@@ -1547,7 +1561,11 @@ impl Decompose for SwcEncoder {
 	/// the totals telescope: adding the steps together leaves the first total
 	/// against the last, which is the constraint. Counting down from nothing to
 	/// minus the bound keeps every total within it.
-	fn decompose(&self, con: &NormalizedIntLinear) -> Result<Vec<IntLinear>, Unsatisfiable> {
+	fn decompose<Db: ClauseDatabase + ?Sized>(
+		&self,
+		_db: &mut Db,
+		con: &NormalizedIntLinear,
+	) -> Result<Vec<TernaryIntLinear>, Unsatisfiable> {
 		// Two terms or fewer are already as small as the chain would make them.
 		if con.terms().len() <= 2 {
 			return Ok(vec![con.into()]);
@@ -1557,16 +1575,14 @@ impl Decompose for SwcEncoder {
 			.map(|i| {
 				// The ends are fixed, so that what the chain proves between
 				// them is the constraint itself.
-				let dom = match i {
+				let domain = match i {
 					0 => 0..=0,
 					_ if i == n => -k..=-k,
 					_ => -k..=0,
 				};
-				crate::integer::IntVar::new(
-					RangeList::from_iter([dom]),
-					self.add_consistency,
-					format!("y{i}"),
-				)
+				crate::integer::IntVar::new(domain)
+					.enforce_consistency(self.add_consistency)
+					.with_label(format!("y{i}"))
 			})
 			.collect_vec();
 
@@ -1575,14 +1591,11 @@ impl Decompose for SwcEncoder {
 			.iter()
 			.zip(totals.iter().tuple_windows())
 			.map(|(x, (carried, left))| {
-				IntLinear::new(
-					vec![
-						x.clone(),
-						Term::new(1, Rc::clone(left)),
-						Term::new(-1, Rc::clone(carried)),
-					],
+				TernaryIntLinear::new(
+					x.clone(),
+					Term::new(1, Rc::clone(left)),
 					cmp,
-					0,
+					Term::new(1, Rc::clone(carried)),
 				)
 			})
 			.collect())
@@ -1631,7 +1644,11 @@ impl Decompose for TotalizerEncoder {
 	/// Sum the terms up a balanced binary tree, so that no intermediate holds
 	/// more than half of them and none is wider than the terms beneath it can
 	/// reach.
-	fn decompose(&self, con: &NormalizedIntLinear) -> Result<Vec<IntLinear>, Unsatisfiable> {
+	fn decompose<Db: ClauseDatabase + ?Sized>(
+		&self,
+		_db: &mut Db,
+		con: &NormalizedIntLinear,
+	) -> Result<Vec<TernaryIntLinear>, Unsatisfiable> {
 		// Two terms or fewer are already as small as the tree would make them.
 		if con.terms().len() <= 2 {
 			return Ok(vec![con.into()]);
@@ -1644,7 +1661,7 @@ impl Decompose for TotalizerEncoder {
 			.terms()
 			.iter()
 			.cloned()
-			.sorted_by_key(|t| t.ub() - t.lb())
+			.sorted_by_key(|t| t.max() - t.min())
 			.collect_vec();
 
 		while layer.len() > 1 {
@@ -1658,8 +1675,8 @@ impl Decompose for TotalizerEncoder {
 						// The root is what the constraint compares; below it an
 						// intermediate reaches what its two terms reach
 						// together, less anything already past the bound.
-						let dom: RangeList<Coeff> = if at_root {
-							RangeList::from_iter([k..=k])
+						let domain: RangeList<Coeff> = if at_root {
+							RangeList::from(k..=k)
 						} else {
 							left.values()
 								.into_iter()
@@ -1669,19 +1686,17 @@ impl Decompose for TotalizerEncoder {
 								.map(|d| d..=d)
 								.collect()
 						};
-						if dom.is_empty() {
+						if domain.is_empty() {
 							return Err(Unsatisfiable);
 						}
-						let parent =
-							crate::integer::IntVar::new(dom, self.add_consistency, format!("t{i}"));
-						cons.push(IntLinear::new(
-							vec![
-								left.clone(),
-								right.clone(),
-								Term::new(-1, Rc::clone(&parent)),
-							],
+						let parent = crate::integer::IntVar::new(domain)
+							.enforce_consistency(self.add_consistency)
+							.with_label(format!("t{i}"));
+						cons.push(TernaryIntLinear::new(
+							left.clone(),
+							right.clone(),
 							cmp,
-							0,
+							Term::new(1, Rc::clone(&parent)),
 						));
 						next.push(Term::new(1, parent));
 					}
@@ -2133,8 +2148,8 @@ mod tests {
 		cardinality::{tests::card_test_suite, Cardinality},
 		cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
 		helpers::tests::{
-			all_bin_solutions, assert_checker, assert_encoding, assert_solutions, bin_lits,
-			expect_file,
+			all_binary_solutions, assert_checker, assert_encoding, assert_solutions,
+			binary_literals, expect_file,
 		},
 		sorted::SortedEncoder,
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
@@ -2210,10 +2225,13 @@ mod tests {
 	fn ripple_carry_adder_computes_the_sum() {
 		for (x_bits, y_bits) in [(1, 1), (2, 2), (3, 1)] {
 			let mut cnf = Cnf::default();
-			let (x, y) = (bin_lits(&mut cnf, x_bits), bin_lits(&mut cnf, y_bits));
+			let (x, y) = (
+				binary_literals(&mut cnf, x_bits),
+				binary_literals(&mut cnf, y_bits),
+			);
 			let z = AdderEncoder::ripple_carry_adder(&mut cnf, &x, &y, None, None).unwrap();
 
-			let solutions = all_bin_solutions(&cnf, &[&x, &y, &z]);
+			let solutions = all_binary_solutions(&cnf, &[&x, &y, &z]);
 			// The sum is wide enough to never overflow, so every assignment of
 			// the inputs extends to exactly one model.
 			assert_eq!(solutions.len(), 1 << (x_bits + y_bits));
@@ -2237,7 +2255,7 @@ mod tests {
 		let y = vec![BoolVal::Const(true), BoolVal::Lit(cnf.new_lit())];
 		let z = AdderEncoder::ripple_carry_adder(&mut cnf, &x, &y, None, None).unwrap();
 
-		let solutions = all_bin_solutions(&cnf, &[&x, &y, &z]);
+		let solutions = all_binary_solutions(&cnf, &[&x, &y, &z]);
 		assert_eq!(solutions.len(), 4);
 		for s in &solutions {
 			assert_eq!(s[2], s[0] + s[1], "{} + {} != {}", s[0], s[1], s[2]);
@@ -2248,13 +2266,13 @@ mod tests {
 	fn ripple_carry_adder_constrains_a_given_sum() {
 		let mut cnf = Cnf::default();
 		let (x, y, z) = (
-			bin_lits(&mut cnf, 2),
-			bin_lits(&mut cnf, 2),
-			bin_lits(&mut cnf, 2),
+			binary_literals(&mut cnf, 2),
+			binary_literals(&mut cnf, 2),
+			binary_literals(&mut cnf, 2),
 		);
 		let _ = AdderEncoder::ripple_carry_adder(&mut cnf, &x, &y, None, Some(&z)).unwrap();
 
-		let solutions = all_bin_solutions(&cnf, &[&x, &y, &z]);
+		let solutions = all_binary_solutions(&cnf, &[&x, &y, &z]);
 		// `z` is only two bits wide, so sums that do not fit are ruled out.
 		let expected: Vec<Vec<Coeff>> = (0..4)
 			.flat_map(|a| (0..4).map(move |b| (a, b)))
@@ -3309,4 +3327,37 @@ mod tests {
 		crate::bool_linear::TotalizerEncoder::default()
 			.with_propagation(crate::integer::Consistency::Domain)
 	);
+
+	#[test]
+	fn bdd_layers_share_the_literals_they_agree_on() {
+		// Abió, Nieuwenhuis, Oliveras and Rodríguez-Carbonell, "BDDs for
+		// Pseudo-Boolean Constraints — Revisited" (SAT 2011), Examples 3 and 5.
+		// Reducing this diagram skips a level: at a running total of 2, whether
+		// the second term is taken makes no difference to what the third can
+		// do, so that node is the one below it and reads on its literal.
+		//
+		// Nothing else notices — the solutions are the same either way — so the
+		// saving is what has to be measured.
+		let mut cnf = Cnf::default();
+		let lits = cnf.new_var_range(3).iter_lits().collect_vec();
+		let con = BoolLinear::new(
+			BoolLinExp::from_slices(&[2, 3, 5], &lits),
+			Comparator::LessEq,
+			6,
+		);
+		let LinVariant::Linear(con) = BoolLinAggregator::default()
+			.aggregate(&mut cnf, &con)
+			.unwrap()
+		else {
+			panic!("three distinct coefficients aggregate to a linear constraint");
+		};
+		cnf.encode(&con, &crate::bool_linear::BddEncoder::default())
+			.unwrap();
+
+		assert_eq!(
+			cnf.num_vars(),
+			4,
+			"the three terms and the one total the layers still tell apart"
+		);
+	}
 }

@@ -35,7 +35,7 @@ as_dyn_trait!(AsDynClauseDatabase, ClauseDatabase);
 /// Helper marco to create a new named literal within the library independent of
 /// whether `tracing` is enabled.
 macro_rules! new_named_lit {
-	($db:expr, $lbl:expr) => {
+	($db:expr, $label:expr) => {
 		$crate::ClauseDatabaseTools::new_lit($db)
 	};
 }
@@ -44,8 +44,8 @@ macro_rules! new_named_lit {
 /// Helper marco to create a new named literal within the library independent of
 /// whether `tracing` is enabled.
 macro_rules! new_named_lit {
-	($db:expr, $lbl:expr) => {{
-		$crate::ClauseDatabaseTools::new_named_lit($db, &$lbl)
+	($db:expr, $label:expr) => {{
+		$crate::ClauseDatabaseTools::new_named_lit($db, &$label)
 	}};
 }
 
@@ -86,10 +86,12 @@ use itertools::Itertools;
 pub(crate) use new_named_lit;
 pub(crate) use new_named_var_range;
 
-use crate::{bool_linear::PosCoeff, integer::BinEnc, BoolVal, ClauseDatabase, Coeff, Valuation};
+use crate::{
+	bool_linear::PosCoeff, integer::BinaryEncoding, BoolVal, ClauseDatabase, Coeff, Valuation,
+};
 
 /// The value of a binary encoding under an assignment.
-pub(crate) fn bin_value<F: Valuation + ?Sized>(x: &[BoolVal], value: &F) -> Coeff {
+pub(crate) fn binary_value<F: Valuation + ?Sized>(x: &[BoolVal], value: &F) -> Coeff {
 	x.iter()
 		.enumerate()
 		.filter(|(_, b)| match b {
@@ -115,9 +117,9 @@ pub(crate) fn shifted(bits: &[BoolVal], shift: u32) -> Vec<BoolVal> {
 
 /// Convert `k` to unsigned binary in `bits`
 pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| BinEnc::required_bits(*k) as u32);
+	let bits = bits.unwrap_or_else(|| BinaryEncoding::required_bits(*k) as u32);
 	assert!(
-		*k <= BinEnc::largest_in(bits),
+		*k <= BinaryEncoding::largest_in(bits),
 		"{k} cannot be represented in {bits} bits"
 	);
 	(0..bits).map(|b| *k & (1 << b) != 0).collect()
@@ -125,10 +127,6 @@ pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
 
 /// Divide rounding towards positive infinity.
 // `Coeff::div_ceil` is still unstable for signed integers.
-#[allow(
-	dead_code,
-	reason = "used once the integer constraint encoding is reachable from the pseudo-Boolean entry point"
-)]
 pub(crate) const fn div_ceil(a: Coeff, b: Coeff) -> Coeff {
 	let (d, r) = (a / b, a % b);
 	if (r > 0) == (b > 0) && r != 0 {
@@ -140,10 +138,6 @@ pub(crate) const fn div_ceil(a: Coeff, b: Coeff) -> Coeff {
 
 /// Divide rounding towards negative infinity.
 // `Coeff::div_floor` is still unstable for signed integers.
-#[allow(
-	dead_code,
-	reason = "used once the integer constraint encoding is reachable from the pseudo-Boolean entry point"
-)]
 pub(crate) const fn div_floor(a: Coeff, b: Coeff) -> Coeff {
 	let (d, r) = (a / b, a % b);
 	if (r > 0) != (b > 0) && r != 0 {
@@ -195,19 +189,19 @@ pub(crate) mod tests {
 	use itertools::Itertools;
 
 	use crate::{
-		helpers::bin_value,
+		helpers::binary_value,
 		solver::{cadical::Cadical, SolveResult, Solver},
 		BoolVal, Checker, ClauseDatabaseTools, Cnf, Coeff, Lit, Unsatisfiable, Valuation,
 	};
 
 	/// Every model of `cnf`, each decoded into the values of the given binary
 	/// encodings.
-	pub(crate) fn all_bin_solutions(cnf: &Cnf, xs: &[&[BoolVal]]) -> Vec<Vec<Coeff>> {
+	pub(crate) fn all_binary_solutions(cnf: &Cnf, xs: &[&[BoolVal]]) -> Vec<Vec<Coeff>> {
 		let mut slv = Cadical::from(cnf);
 		let vars = cnf.get_variables();
 		let mut solutions = Vec::new();
 		while let SolveResult::Satisfied(value) = slv.solve() {
-			solutions.push(xs.iter().map(|x| bin_value(x, &value)).collect());
+			solutions.push(xs.iter().map(|x| binary_value(x, &value)).collect());
 			let no_good: Vec<Lit> = vars
 				.map(|v| {
 					let l = v.into();
@@ -227,7 +221,7 @@ pub(crate) mod tests {
 	}
 
 	/// A fresh binary encoding of `bits` free bits.
-	pub(crate) fn bin_lits(cnf: &mut Cnf, bits: usize) -> Vec<BoolVal> {
+	pub(crate) fn binary_literals(cnf: &mut Cnf, bits: usize) -> Vec<BoolVal> {
 		(0..bits).map(|_| BoolVal::Lit(cnf.new_lit())).collect()
 	}
 

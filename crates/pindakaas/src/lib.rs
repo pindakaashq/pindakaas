@@ -206,6 +206,57 @@
 //! assert_eq!(f.num_clauses(), 2); // (!x & !z) & !y
 //! ```
 //!
+//! ## Integer Linear Constraints
+//!
+//! A constraint can also be stated over integer variables directly. An
+//! [`IntVar`](integer::IntVar) is created with the domain it ranges over, and
+//! holds whichever Boolean encodings its constraints turn out to need — order
+//! literals for a sequential decomposition, bits for an adder, a one-hot view
+//! for an at-most-one group — channelling between them when more than one is
+//! called for. Nothing has to be chosen in advance, and a second variable is
+//! never needed to hold the other view.
+//!
+//! An [`IntLinear`](int_linear::IntLinear) constraint is a sum of
+//! [`Term`](int_linear::Term)s, each a variable scaled by a coefficient,
+//! compared against a constant. [`IntLinEncoder`](int_linear::IntLinEncoder)
+//! keeps what it learns between the constraints it encodes, so a variable that
+//! several of them mention is encoded once, and the shifts and additions built
+//! for one coefficient are reused by the next constraint that needs the same
+//! product. Put every constraint through the one encoder to get that.
+//!
+//! ```rust
+//! use std::rc::Rc;
+//!
+//! use pindakaas::{
+//!     bool_linear::Comparator,
+//!     int_linear::{IntLinEncoder, IntLinear, Term},
+//!     integer::IntVar,
+//!     solver::{cadical::Cadical, SolveResult, Solver},
+//!     Cnf, RangeList,
+//! };
+//!
+//! let mut f = Cnf::default();
+//! let x = IntVar::new(0..=5).with_label("x");
+//! let y = IntVar::new(0..=5).with_label("y");
+//!
+//! let mut enc = IntLinEncoder::default();
+//! enc.encode(
+//!     &mut f,
+//!     &IntLinear::new(
+//!         vec![Term::new(2, Rc::clone(&x)), Term::new(3, Rc::clone(&y))],
+//!         Comparator::LessEq,
+//!         10,
+//!     ),
+//! )
+//! .unwrap();
+//!
+//! let mut slv = Cadical::from(&f);
+//! let SolveResult::Satisfied(sol) = slv.solve() else {
+//!     panic!("the constraint has solutions");
+//! };
+//! assert!(2 * x.value(&sol) + 3 * y.value(&sol) <= 10);
+//! ```
+//!
 //! ## Citation
 //!
 //! If you want to cite Pindakaas please use our general software
@@ -236,12 +287,8 @@ pub mod bool_linear;
 pub mod cardinality;
 pub mod cardinality_one;
 pub(crate) mod helpers;
-#[allow(
-	dead_code,
-	reason = "used once the integer constraint encoding is reachable from the pseudo-Boolean entry point"
-)]
 pub mod int_linear;
-mod integer;
+pub mod integer;
 pub mod propositional_logic;
 pub mod solver;
 mod sorted;
@@ -264,6 +311,8 @@ use std::{
 };
 
 use itertools::{traits::HomogeneousTuple, Itertools};
+
+pub use rangelist::RangeList;
 
 pub use crate::helpers::AsDynClauseDatabase;
 use crate::{
@@ -892,10 +941,12 @@ impl Cnf {
 	/// Small helper method that gets all the created variables, used for
 	/// testing.
 	pub(crate) fn get_variables(&self) -> VarRange {
-		VarRange::new(
-			Var(NonZeroI32::new(1).unwrap()),
-			self.nvar.next_var.unwrap().prev_var().unwrap(),
-		)
+		let first = Var(NonZeroI32::new(1).unwrap());
+		match self.nvar.next_var.and_then(|v| v.prev_var()) {
+			Some(last) => VarRange::new(first, last),
+			// Nothing has been created, so there is nothing to range over.
+			None => VarRange::empty(),
+		}
 	}
 
 	/// Returns an iterator over the clauses in the formula.

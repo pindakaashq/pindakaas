@@ -55,9 +55,12 @@ pub(crate) struct ScmCoeff(u32);
 /// the same dynamic program; only the per-operation cost differs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ScmObjective {
-	#[allow(
-		dead_code,
-		reason = "the width-independent objective, kept for the paper's min-k figures and for reuse of a product across widths"
+	#[cfg_attr(
+		not(test),
+		expect(
+			dead_code,
+			reason = "the width-independent objective, kept for the paper's min-k figures and for reuse of a product across widths"
+		)
 	)]
 	/// Minimize the number of addition/subtraction operations (the paper's
 	/// min-k objective). Every operation counts as one and pure shifts are
