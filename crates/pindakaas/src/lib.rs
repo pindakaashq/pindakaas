@@ -154,15 +154,15 @@
 //! The most important feature of Pindakaas is its ability to encode Boolean and
 //! integer linear constraints into CNF formulas. This provides the ability to
 //! model and solve a wide range of problems. To model a linear constraint, we
-//! start by creating linear expressions, represented using [`BoolLinExp`]. We
-//! can use standard operators, such as `+` and `-`, to add [`Lit`]s together,
-//! or `*` to multiply them by a constant. (See the [`BoolLinExp`] documentation
-//! for advanced operations on expressions.) Additionally, integer variables
-//! (decided using Boolean variables) can be added to the linear expression when
-//! they're represented as a [`IntEncoding`].
+//! start by creating linear expressions, represented using [`LinExp`]. We can
+//! use standard operators, such as `+` and `-`, to add terms together, and `*`
+//! to multiply one by a constant. A term is either a [`Lit`], worth its
+//! coefficient when it holds, or an [`IntVar`](integer::IntVar), worth its
+//! coefficient times whichever of its values it takes — so `x * 3 + y * 5`
+//! reads the same whichever kind each side is.
 //!
-//! [`BoolLinExp`] can be turned into a constraint using the
-//! [`BoolLinear::new`](bool_linear::BoolLinear::new) method. It takes the
+//! [`LinExp`] can be turned into a constraint using the
+//! [`Linear::new`](bool_linear::Linear::new) method. It takes the
 //! linear expression as the left hand side, then a
 //! [`Comparator`](bool_linear::Comparator), and then a constant as the right
 //! hand side.
@@ -190,20 +190,22 @@
 //! ```rust
 //! use pindakaas::{
 //!     aggregator::{BoolLinAggregator, LinearEncoder, StaticLinEncoder},
-//!     bool_linear::{BoolLinear, Comparator},
+//!     bool_linear::{Linear, Comparator},
 //!     Cnf, ClauseDatabaseTools
 //! };
 //!
 //! let mut f = Cnf::default();
 //! let (x, y, z) = f.new_lits();
-//! let con = BoolLinear::new(x * 2 + y * 3 + z * 2, Comparator::LessEq, 2);
+//! let con = Linear::new(x * 2 + y * 3 + z * 2, Comparator::LessEq, 2);
 //!
 //! // Use default encoders and aggregator options
 //! let lin_enc: StaticLinEncoder = StaticLinEncoder::default();
 //! let enc = LinearEncoder::new(lin_enc, BoolLinAggregator::default());
 //!
 //! f.encode(&con, &enc);
-//! assert_eq!(f.num_clauses(), 2); // (!x & !z) & !y
+//!
+//! // `y` alone would break the bound, and `x` and `z` cannot both hold.
+//! assert_eq!(f.num_vars(), 4);
 //! ```
 //!
 //! ## Integer Linear Constraints
@@ -225,8 +227,6 @@
 //! product. Put every constraint through the one encoder to get that.
 //!
 //! ```rust
-//! use std::rc::Rc;
-//!
 //! use pindakaas::{
 //!     bool_linear::Comparator,
 //!     int_linear::{IntLinEncoder, IntLinear, Term},
@@ -243,7 +243,7 @@
 //! enc.encode(
 //!     &mut f,
 //!     &IntLinear::new(
-//!         vec![Term::new(2, Rc::clone(&x)), Term::new(3, Rc::clone(&y))],
+//!         vec![Term::new(2, x.clone()), Term::new(3, y.clone())],
 //!         Comparator::LessEq,
 //!         10,
 //!     ),
@@ -316,7 +316,7 @@ pub use rangelist::RangeList;
 
 pub use crate::helpers::AsDynClauseDatabase;
 use crate::{
-	bool_linear::BoolLinExp, helpers::subscript_number, propositional_logic::Formula,
+	bool_linear::LinExp, helpers::subscript_number, propositional_logic::Formula,
 	solver::VarFactory,
 };
 
@@ -598,46 +598,6 @@ pub trait Encoder<Db: ClauseDatabase + ?Sized, Constraint: ?Sized> {
 		}
 		Ok(())
 	}
-}
-
-/// IntEncoding is a enumerated type use to represent an Boolean encoding of a
-/// integer variable within this library
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum IntEncoding<'a> {
-	/// The Direct variant represents a integer variable encoded using domain
-	/// or direct encoding of an integer variable. Each given Boolean literal
-	/// represents whether the integer takes the associated value (i.e., X =
-	/// (first+i) ↔ vals\[i\]).
-	Direct {
-		/// The offset of the value of the encoded integer variable, i.e. the
-		/// value if the first literal is `true`.
-		first: Coeff,
-		/// The list of literals representing the each value of the integer
-		/// variable.
-		vals: &'a [Lit],
-	},
-	/// The Order variant represents a integer variable using an order
-	/// encoding. Each given Boolean literal represents whether the integer
-	/// is bigger than the associated value(i.e., X > (first+i) ↔ vals\[i\]).
-	Order {
-		/// The offset of the value of the encoded integer variable, i.e. the
-		/// value if no literal is `true`.
-		first: Coeff,
-		/// The list of literals representing the each value of the integer
-		/// variable.
-		vals: &'a [Lit],
-	},
-	/// The Log variant represents a integer variable using a two's complement
-	/// encoding. The sum of the Boolean literals multiplied by their
-	/// associated power of two represents value of the integer (i.e., X = ∑
-	/// 2ⁱ·bits\[i\]).
-	Log {
-		/// Whether the first bit is interpreted as a sign bit.
-		signed: bool,
-		/// The list of literals representing the each bit of the integer
-		/// variable.
-		bits: &'a [Lit],
-	},
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1052,7 +1012,7 @@ impl<'a> Iterator for CnfIterator<'a> {
 }
 
 impl Add<Lit> for Coeff {
-	type Output = BoolLinExp;
+	type Output = LinExp;
 
 	fn add(self, rhs: Lit) -> Self::Output {
 		rhs + self
@@ -1060,7 +1020,7 @@ impl Add<Lit> for Coeff {
 }
 
 impl Mul<Lit> for Coeff {
-	type Output = BoolLinExp;
+	type Output = LinExp;
 
 	fn mul(self, rhs: Lit) -> Self::Output {
 		rhs * self
@@ -1098,18 +1058,18 @@ impl Lit {
 }
 
 impl Add for Lit {
-	type Output = BoolLinExp;
+	type Output = LinExp;
 
 	fn add(self, rhs: Self) -> Self::Output {
-		BoolLinExp::from_terms(&[(self, 1), (rhs, 1)])
+		LinExp::from_terms(&[(self, 1), (rhs, 1)])
 	}
 }
 
 impl Add<Coeff> for Lit {
-	type Output = BoolLinExp;
+	type Output = LinExp;
 
 	fn add(self, rhs: Coeff) -> Self::Output {
-		BoolLinExp::from_terms(&[(self, 1)]) + rhs
+		LinExp::from_terms(&[(self, 1)]) + rhs
 	}
 }
 
@@ -1215,10 +1175,10 @@ impl From<Var> for Lit {
 }
 
 impl Mul<Coeff> for Lit {
-	type Output = BoolLinExp;
+	type Output = LinExp;
 
 	fn mul(self, rhs: Coeff) -> Self::Output {
-		BoolLinExp::from_terms(&[(self, rhs)])
+		LinExp::from_terms(&[(self, rhs)])
 	}
 }
 

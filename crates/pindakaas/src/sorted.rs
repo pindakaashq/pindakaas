@@ -1,10 +1,10 @@
-use std::{cmp::min, hash, mem, rc::Rc, sync::Mutex};
+use std::{cmp::min, hash, mem, sync::Mutex};
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	bool_linear::{BoolLinExp, LimitComp},
+	bool_linear::{LimitComp, LinExp},
 	int_linear::{IntLinEncoder, IntLinear, Term},
 	integer::IntVar,
 	Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
@@ -15,7 +15,7 @@ use crate::{
 pub struct Sorted<'a> {
 	pub(crate) xs: &'a [Lit],
 	pub(crate) cmp: LimitComp,
-	pub(crate) y: &'a Rc<IntVar>,
+	pub(crate) y: &'a IntVar,
 }
 
 type SortedCache = FxHashMap<(u128, u128, u128), (SortedStrategy, (u128, u128))>;
@@ -45,14 +45,14 @@ pub enum SortedStrategy {
 }
 
 impl<'a> Sorted<'a> {
-	pub(crate) fn new(xs: &'a [Lit], cmp: LimitComp, y: &'a Rc<IntVar>) -> Self {
+	pub(crate) fn new(xs: &'a [Lit], cmp: LimitComp, y: &'a IntVar) -> Self {
 		Self { xs, cmp, y }
 	}
 }
 
 impl Checker for Sorted<'_> {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
-		let lhs = BoolLinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
+		let lhs = LinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
 			.value(sol)?;
 		let rhs = self.y.value(sol);
 
@@ -70,10 +70,7 @@ impl Checker for Sorted<'_> {
 /// The variable `⌊x / 2⌋`, which reaches `w` exactly when `x` reaches `2·w`.
 ///
 /// Its literals are `x`'s, every other one, so halving costs nothing.
-fn halved<Db: ClauseDatabase + ?Sized>(
-	db: &mut Db,
-	x: &Rc<IntVar>,
-) -> Result<Rc<IntVar>, Unsatisfiable> {
+fn halved<Db: ClauseDatabase + ?Sized>(db: &mut Db, x: &IntVar) -> Result<IntVar, Unsatisfiable> {
 	let max = x.max() / 2;
 	let walk = (0..=max)
 		.map(|w| Ok((w, x.lit_at_least(db, 2 * w)?)))
@@ -86,9 +83,9 @@ fn halved<Db: ClauseDatabase + ?Sized>(
 /// Its literals are `x`'s, the domain having only moved along.
 fn shifted<Db: ClauseDatabase + ?Sized>(
 	db: &mut Db,
-	x: &Rc<IntVar>,
+	x: &IntVar,
 	k: Coeff,
-) -> Result<Rc<IntVar>, Unsatisfiable> {
+) -> Result<IntVar, Unsatisfiable> {
 	let walk = x
 		.domain()
 		.iter()
@@ -103,10 +100,10 @@ impl SortedEncoder {
 	fn comp<Db>(
 		&self,
 		db: &mut Db,
-		x: &Rc<IntVar>,
-		y: &Rc<IntVar>,
+		x: &IntVar,
+		y: &IntVar,
 		cmp: &LimitComp,
-		z: &Rc<IntVar>,
+		z: &IntVar,
 		c: Coeff,
 	) -> Result
 	where
@@ -144,10 +141,10 @@ impl SortedEncoder {
 	fn merge<Db>(
 		&self,
 		db: &mut Db,
-		x: &Rc<IntVar>,
-		y: &Rc<IntVar>,
+		x: &IntVar,
+		y: &IntVar,
 		cmp: &LimitComp,
-		z: &Rc<IntVar>,
+		z: &IntVar,
 		lvl: usize,
 	) -> Result
 	where
@@ -165,10 +162,10 @@ impl SortedEncoder {
 	fn merged<Db>(
 		&self,
 		db: &mut Db,
-		x: &Rc<IntVar>,
-		y: &Rc<IntVar>,
+		x: &IntVar,
+		y: &IntVar,
 		cmp: &LimitComp,
-		z: &Rc<IntVar>,
+		z: &IntVar,
 		lvl: usize,
 	) -> Result
 	where
@@ -215,21 +212,14 @@ impl SortedEncoder {
 
 	/// A variable over `0..=max`, or the constant zero where there is nothing to
 	/// count.
-	fn next_int_var(&self, max: Coeff, label: String) -> Rc<IntVar> {
+	fn next_int_var(&self, max: Coeff, label: String) -> IntVar {
 		IntVar::new(0..=max)
 			.enforce_consistency(self.add_consistency)
 			.with_label(label)
 	}
 
 	/// The base case, `x{0,1} + y{0,1} ≷ z{0,1,2}`.
-	fn smerge<Db>(
-		&self,
-		db: &mut Db,
-		x: &Rc<IntVar>,
-		y: &Rc<IntVar>,
-		cmp: &LimitComp,
-		z: &Rc<IntVar>,
-	) -> Result
+	fn smerge<Db>(&self, db: &mut Db, x: &IntVar, y: &IntVar, cmp: &LimitComp, z: &IntVar) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
@@ -243,18 +233,18 @@ impl SortedEncoder {
 	fn sort<Db>(
 		&self,
 		db: &mut Db,
-		xs: &[Rc<IntVar>],
+		xs: &[IntVar],
 		cmp: &LimitComp,
 		max: Coeff,
 		label: String,
 		lvl: usize,
-	) -> Result<Option<Rc<IntVar>>, Unsatisfiable>
+	) -> Result<Option<IntVar>, Unsatisfiable>
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
 		Ok(match xs {
 			[] => None,
-			[x] => Some(Rc::clone(x)),
+			[x] => Some(x.clone()),
 			xs => {
 				let y = self.next_int_var(max, label);
 				self.sorted(db, xs, cmp, &y, lvl)?;
@@ -267,9 +257,9 @@ impl SortedEncoder {
 	fn sorted<Db>(
 		&self,
 		db: &mut Db,
-		xs: &[Rc<IntVar>],
+		xs: &[IntVar],
 		cmp: &LimitComp,
-		y: &Rc<IntVar>,
+		y: &IntVar,
 		lvl: usize,
 	) -> Result
 	where
@@ -310,12 +300,7 @@ impl SortedEncoder {
 	}
 
 	/// A variable over what `x` and `y` can come to together.
-	fn sum_var<Db>(
-		&self,
-		_db: &mut Db,
-		x: &Rc<IntVar>,
-		y: &Rc<IntVar>,
-	) -> Result<Rc<IntVar>, Unsatisfiable>
+	fn sum_var<Db>(&self, _db: &mut Db, x: &IntVar, y: &IntVar) -> Result<IntVar, Unsatisfiable>
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
@@ -328,10 +313,10 @@ impl SortedEncoder {
 	fn ternary<Db>(
 		&self,
 		db: &mut Db,
-		x: &Rc<IntVar>,
-		y: &Rc<IntVar>,
+		x: &IntVar,
+		y: &IntVar,
 		cmp: &LimitComp,
-		z: &Rc<IntVar>,
+		z: &IntVar,
 	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
@@ -340,9 +325,9 @@ impl SortedEncoder {
 			db,
 			&IntLinear::new(
 				vec![
-					Term::new(1, Rc::clone(x)),
-					Term::new(1, Rc::clone(y)),
-					Term::new(-1, Rc::clone(z)),
+					Term::new(1, x.clone()),
+					Term::new(1, y.clone()),
+					Term::new(-1, z.clone()),
 				],
 				cmp.clone().into(),
 				0,

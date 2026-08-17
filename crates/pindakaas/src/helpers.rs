@@ -147,18 +147,6 @@ pub(crate) const fn div_floor(a: Coeff, b: Coeff) -> Coeff {
 	}
 }
 
-/// Given coefficients are powers of two multiplied by some value (1*c, 2*c,
-/// 4*c, 8*c, ..)
-pub(crate) fn is_powers_of_two<I: IntoIterator<Item = Coeff>>(coefs: I) -> bool {
-	let mut it = coefs.into_iter().enumerate();
-	if let Some((_, mult)) = it.next() {
-		const TWO: Coeff = 2;
-		it.all(|(i, c)| c == (TWO.pow(i as u32) * mult))
-	} else {
-		false
-	}
-}
-
 pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 	num.to_string()
 		.chars()

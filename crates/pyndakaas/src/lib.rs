@@ -71,7 +71,7 @@ mod pindakaas {
 	use pindakaas::{
 		aggregator::{BoolLinAggregator, LinVariant, LinearEncoder},
 		bool_linear::{
-			AdderEncoder, BoolLinExp as BaseBoolLinExp, BoolLinear as BaseBoolLinCon, Comparator,
+			AdderEncoder, LinExp as BaseBoolLinExp, Linear as BaseBoolLinCon, Comparator,
 			SwcEncoder, TotalizerEncoder,
 		},
 		cardinality::{Cardinality, SortingNetworkEncoder},
@@ -90,10 +90,10 @@ mod pindakaas {
 	use crate::Unsatisfiable;
 
 	#[derive(FromPyObject)]
-	/// Argument capture for types that can become :class:`BoolLinExp`.
+	/// Argument capture for types that can become :class:`LinExp`.
 	enum BoolLinArg {
 		Bool(bool),
-		BoolLin(BoolLinExp),
+		BoolLin(LinExp),
 		Int(i64),
 		Lit(Lit),
 	}
@@ -109,7 +109,7 @@ mod pindakaas {
 	///
 	/// Using operators `<`, `<=`, `==`, `>=`, and `>` with a `int` right hand
 	/// side, the expression can be turned into a :class:`BoolLinCon`.
-	struct BoolLinExp(BaseBoolLinExp);
+	struct LinExp(BaseBoolLinExp);
 
 	#[pyclass(skip_from_py_object)]
 	#[derive(Clone, Debug, Default)]
@@ -294,12 +294,12 @@ mod pindakaas {
 	}
 
 	impl BoolLinArg {
-		fn as_bool_lin_exp(&self) -> BoolLinExp {
+		fn as_bool_lin_exp(&self) -> LinExp {
 			match self {
-				&BoolLinArg::Bool(b) => BoolLinExp(b.into()),
+				&BoolLinArg::Bool(b) => LinExp(b.into()),
 				BoolLinArg::BoolLin(exp) => exp.clone(),
-				&BoolLinArg::Int(i) => BoolLinExp(i.into()),
-				&BoolLinArg::Lit(l) => BoolLinExp(l.0.into()),
+				&BoolLinArg::Int(i) => LinExp(i.into()),
+				&BoolLinArg::Lit(l) => LinExp(l.0.into()),
 			}
 		}
 	}
@@ -312,7 +312,7 @@ mod pindakaas {
 	}
 
 	#[pymethods]
-	impl BoolLinExp {
+	impl LinExp {
 		fn __add__(&self, other: BoolLinArg) -> Self {
 			let mut res = self.clone();
 			res.__iadd__(other);
@@ -597,7 +597,7 @@ mod pindakaas {
 				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
 				enc => {
-					self.set_err("BoolLinear", enc);
+					self.set_err("Linear", enc);
 					Ok(())
 				}
 			}
@@ -605,8 +605,8 @@ mod pindakaas {
 	}
 
 	impl Lit {
-		fn as_bool_lin_exp(&self) -> BoolLinExp {
-			BoolLinExp(self.0.into())
+		fn as_bool_lin_exp(&self) -> LinExp {
+			LinExp(self.0.into())
 		}
 
 		fn as_formula(&self) -> BaseFormula<BoolVal> {
@@ -616,7 +616,7 @@ mod pindakaas {
 
 	#[pymethods]
 	impl Lit {
-		fn __add__(&self, other: BoolLinArg) -> BoolLinExp {
+		fn __add__(&self, other: BoolLinArg) -> LinExp {
 			self.as_bool_lin_exp().__add__(other)
 		}
 
@@ -652,7 +652,7 @@ mod pindakaas {
 			Formula(self.as_formula()).__lt__(other)
 		}
 
-		fn __mul__(&self, other: i64) -> BoolLinExp {
+		fn __mul__(&self, other: i64) -> LinExp {
 			self.as_bool_lin_exp().__mul__(other)
 		}
 
@@ -664,7 +664,7 @@ mod pindakaas {
 			Formula(self.as_formula()).__or__(other)
 		}
 
-		fn __radd__(&self, other: BoolLinArg) -> BoolLinExp {
+		fn __radd__(&self, other: BoolLinArg) -> LinExp {
 			self.__add__(other)
 		}
 
@@ -672,7 +672,7 @@ mod pindakaas {
 			Formula(self.as_formula()).__and__(other)
 		}
 
-		fn __rmul__(&self, other: i64) -> BoolLinExp {
+		fn __rmul__(&self, other: i64) -> LinExp {
 			self.__mul__(other)
 		}
 
@@ -688,7 +688,7 @@ mod pindakaas {
 			self.0.to_string()
 		}
 
-		fn __sub__(&self, other: BoolLinArg) -> BoolLinExp {
+		fn __sub__(&self, other: BoolLinArg) -> LinExp {
 			self.as_bool_lin_exp().__sub__(other)
 		}
 

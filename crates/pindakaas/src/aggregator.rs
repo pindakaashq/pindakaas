@@ -8,23 +8,17 @@
 //! its own, or a sum of integers — each group being an integer already,
 //! encoded on the literals it was found on.
 
-use std::{cmp::min, iter::once};
-
 use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
-	bool_linear::{
-		AdderEncoder, BoolLinear, Comparator, Constraint, LimitComp, NormalizedBoolLinear, Part,
-		PosCoeff,
-	},
+	bool_linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
 	cardinality::Cardinality,
 	cardinality_one::{BitwiseEncoder, CardinalityOne},
-	helpers::is_powers_of_two,
-	int_linear::NormalizedIntLinear,
+	int_linear::{NormalizedIntLinear, Term},
 	integer::IntVar,
 	sorted::{Sorted, SortedEncoder},
-	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
+	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
 };
 
 #[derive(Debug)]
@@ -54,10 +48,10 @@ impl BoolLinAggregator {
 		any(feature = "tracing", test),
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	/// Normalise a [`BoolLinear`] constraint and work out which of the
+	/// Normalise a [`Linear`] constraint and work out which of the
 	/// specialised forms it is, with its terms grouped by whatever relates
 	/// them.
-	pub fn aggregate<Db>(&self, db: &mut Db, lin: &BoolLinear) -> Result<LinVariant>
+	pub fn aggregate<Db>(&self, db: &mut Db, lin: &Linear) -> Result<LinVariant>
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
@@ -65,11 +59,10 @@ impl BoolLinAggregator {
 		// Aggregate multiple occurrences of the same
 		// variable.
 		let mut agg = FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), FxBuildHasher);
-		for term in &lin.exp.terms {
-			let var = term.0.var();
-			let entry = agg.entry(var).or_insert(0);
-			let mut coef = term.1 * lin.exp.mult;
-			if term.0.is_negated() {
+		for (lit, coef) in lin.exp.terms() {
+			let entry = agg.entry(lit.var()).or_insert(0);
+			let mut coef = coef * lin.exp.mult;
+			if lit.is_negated() {
 				k -= coef;
 				coef = -coef;
 			}
@@ -82,186 +75,48 @@ impl BoolLinAggregator {
 			k = -k;
 		}
 
-		let mut partition: Vec<(Constraint, Vec<(Lit, Coeff)>)> =
-			Vec::with_capacity(lin.exp.constraints.len());
-		// Adjust side constraints when literals are combined (and currently transform
-		// to partition structure)
-		let mut iter = lin.exp.terms.iter().skip(lin.exp.num_free);
-		for con in &lin.exp.constraints {
-			let mut terms = Vec::with_capacity(con.1);
-			for _ in 0..con.1 {
-				let term = iter.next().unwrap();
-				if let Some((var, i)) = agg.remove_entry(&term.0.var()) {
-					terms.push((var.into(), i));
-				}
+		// A term that arrived as an integer is already what the grouping below
+		// is trying to recover from literals, so it only needs the same
+		// normalising: the pending multiplier, the turn from `≥`, and a
+		// coefficient made positive by counting the variable from the far end.
+		let mut int_terms = Vec::new();
+		for (x, c) in lin.exp.int_terms() {
+			let mut c = c * lin.exp.mult;
+			if lin.cmp == Comparator::GreaterEq {
+				c = -c;
 			}
-			if !terms.is_empty() {
-				match con.0 {
-					Constraint::Domain { lb, ub } => {
-						// Domain constraint can only be enforced when PB is coef*(x1 + 2x2 + 4x3 +
-						// ...), where l <= x1 + 2*x2 + 4*x3 + ... <= u
-						if terms.len() == con.1 && is_powers_of_two(terms.iter().map(|(_, c)| *c)) {
-							// Adjust the bounds to account for coef
-							let (lb, ub) = if lin.cmp == Comparator::GreaterEq {
-								// 0..range can be encoded by the bits multiplied by coef
-								let range = -terms.iter().fold(0, |acc, (_, coef)| acc + *coef);
-								// this range is inverted if we have flipped the comparator
-								(range - ub, range - lb)
-							} else {
-								// in both cases, l and u now represent the true constraint
-								(terms[0].1 * lb, terms[0].1 * ub)
-							};
-							partition.push((Constraint::Domain { lb, ub }, terms));
-						} else {
-							for term in terms {
-								partition.push((Constraint::AtMostOne, vec![term]));
-							}
-						}
-					}
-					_ => partition.push((con.0.clone(), terms)),
-				}
-			}
+			let x = if c < 0 {
+				k -= c * (x.min() + x.max());
+				c = -c;
+				IntVar::mirrored(db, x)?
+			} else {
+				x.clone()
+			};
+			int_terms.push((x, c));
 		}
 
-		// Add remaining (unconstrained) terms.
-		debug_assert!(agg.len() <= lin.exp.num_free);
-		for (var, coef) in agg.into_iter().sorted_by_key(|&(var, _)| var) {
-			partition.push((Constraint::AtMostOne, vec![(var.into(), coef)]));
-		}
-
-		k -= lin.exp.add;
+		// Every literal stands on its own: a group of them is an integer, and
+		// an integer is a term of the expression rather than an annotation on
+		// its literals. So normalising is just making each coefficient
+		// positive, by taking the literal the other way round.
+		let mut k = k - lin.exp.add;
 		let cmp = match lin.cmp {
 			Comparator::LessEq | Comparator::GreaterEq => LimitComp::LessEq,
 			Comparator::Equal => LimitComp::Equal,
 		};
-
-		let convert_term_if_negative = |term: (Lit, Coeff), k: &mut Coeff| -> (Lit, PosCoeff) {
-			let (mut lit, mut coef) = term;
-			if coef.is_negative() {
-				coef = -coef;
-				lit = !lit;
-				*k += coef;
-			};
-			(lit, PosCoeff::new(coef))
-		};
-
-		let partition: Vec<Part> = partition
+		let mut partition: Vec<(Lit, PosCoeff)> = agg
 			.into_iter()
-			.filter(|(_, t)| !t.is_empty()) // filter out empty groups
-			.flat_map(|part| -> Vec<Part> {
-				// convert terms with negative coefficients
-				match part {
-					(Constraint::AtMostOne, mut terms) => {
-						if terms.len() == 1 {
-							return vec![Part::Amo(
-								terms
-									.into_iter()
-									.map(|(lit, coef)| {
-										convert_term_if_negative((lit, coef), &mut k)
-									})
-									.collect(),
-							)];
-						}
-
-						// Find most negative coefficient
-						let (min_index, (_, min_coef)) = terms
-							.iter()
-							.enumerate()
-							.min_by(|(_, (_, a)), (_, (_, b))| a.cmp(b))
-							.expect("Partition should not contain constraint on zero terms");
-
-						// If negative, normalize without breaking AMO constraint
-						if min_coef.is_negative() {
-							let q = -*min_coef;
-
-							// add aux var y and constrain y <-> ( ~x1 /\ ~x2 /\ .. )
-							let y = db.new_lit();
-
-							// ~x1 /\ ~x2 /\ .. -> y == x1 \/ x2 \/ .. \/ y
-							db.add_clause(terms.iter().map(|(lit, _)| *lit).chain(once(y)))
-								.unwrap();
-
-							// y -> ( ~x1 /\ ~x2 /\ .. ) == ~y \/ ~x1, ~y \/ ~x2, ..
-							for lit in terms.iter().map(|tup| tup.0) {
-								db.add_clause([!y, !lit]).unwrap();
-							}
-
-							// this term will cancel out later when we add q*min_lit to the LHS
-							let _ = terms.remove(min_index);
-
-							// since y + x1 + x2 + ... = 1 (exactly-one), we have q*y + q*x1 + q*x2
-							// + ... = q after adding term 0*y, we can add q*y + q*x1 + q*x2
-							// + ... on the LHS, and q on the RHS
-							terms.push((y, 0)); // note: it's fine to add y into the same AMO group
-							terms = terms.iter().map(|(lit, coef)| (*lit, *coef + q)).collect();
-							k += q;
-						}
-
-						// all coefficients should be positive (since we subtracted the most
-						// negative coefficient)
-						vec![Part::Amo(
-							terms
-								.into_iter()
-								.map(|(lit, coef)| (lit, PosCoeff::new(coef)))
-								.collect(),
-						)]
-					}
-
-					(Constraint::ImplicationChain, terms) => {
-						// normalize by splitting up the chain into two chains by coef polarity,
-						// inverting the coefs of the neg
-						let (pos_chain, neg_chain): (_, Vec<_>) =
-							terms.into_iter().partition(|(_, coef)| coef.is_positive());
-						vec![
-							Part::Ic(
-								pos_chain
-									.into_iter()
-									.map(|(lit, coef)| (lit, PosCoeff::new(coef)))
-									.collect(),
-							),
-							Part::Ic(
-								neg_chain
-									.into_iter()
-									.map(|(lit, coef)| {
-										convert_term_if_negative((lit, coef), &mut k)
-									})
-									.rev() // x1 <- x2 <- x3 <- ... becomes ~x1 -> ~x2 -> ~x3 -> ...
-									.collect(),
-							),
-						]
-					}
-					(Constraint::Domain { lb: l, ub: u }, terms) => {
-						assert!(
-							terms.iter().all(|(_, coef)| coef.is_positive())
-								|| terms.iter().all(|(_, coef)| coef.is_negative()),
-							"Normalizing mixed positive/negative coefficients not yet \
-							 supported for Dom constraint on {terms:?}"
-						);
-						vec![Part::Dom(
-							terms
-								.into_iter()
-								.map(|(lit, coef)| convert_term_if_negative((lit, coef), &mut k))
-								.collect(),
-							PosCoeff::new(l),
-							PosCoeff::new(u),
-						)]
-					}
+			.sorted_by_key(|&(var, _)| var)
+			.map(|(var, coef)| {
+				let (lit, coef) = (Lit::from(var), coef);
+				if coef.is_negative() {
+					k += -coef;
+					(!lit, PosCoeff::new(-coef))
+				} else {
+					(lit, PosCoeff::new(coef))
 				}
 			})
-			.map(|part| {
-				// This step has to come *after* Amo normalization
-				let filter_zero_coefficients =
-					|terms: Vec<(Lit, PosCoeff)>| -> Vec<(Lit, PosCoeff)> {
-						terms.into_iter().filter(|&(_, coef)| *coef != 0).collect()
-					};
-
-				match part {
-					Part::Amo(terms) => Part::Amo(filter_zero_coefficients(terms)),
-					Part::Ic(terms) => Part::Ic(filter_zero_coefficients(terms)),
-					Part::Dom(terms, l, u) => Part::Dom(filter_zero_coefficients(terms), l, u),
-				}
-			})
-			.filter(|part| part.iter().next().is_some()) // filter out empty groups
+			.filter(|&(_, coef)| *coef != 0)
 			.collect();
 
 		// trivial case: constraint is unsatisfiable
@@ -270,81 +125,32 @@ impl BoolLinAggregator {
 			unreachable!();
 		}
 		// trivial case: no literals can be activated
-		if k == 0 {
-			for part in partition {
-				for (lit, _) in part.iter() {
-					db.add_clause([!*lit])?;
-				}
+		if k == 0 && int_terms.is_empty() {
+			for (lit, _) in &partition {
+				db.add_clause([!*lit])?;
 			}
 			return Ok(LinVariant::Trivial);
 		}
 		let mut k = PosCoeff::new(k);
 
-		// Remove terms with coefs higher than k
-		let mut partition = partition
-			.into_iter()
-			.map(|part| match part {
-				Part::Amo(terms) => Part::Amo(
-					terms
-						.into_iter()
-						.filter(|(lit, coef)| {
-							if coef > &k {
-								db.add_clause([!*lit]).unwrap();
-								false
-							} else {
-								true
-							}
-						})
-						.collect(),
-				),
-				Part::Ic(terms) => {
-					// for IC, we can compare the running sum to k
-					let mut acc = 0;
-					Part::Ic(
-						terms
-							.into_iter()
-							.filter(|&(lit, coef)| {
-								acc += *coef;
-								if acc > *k {
-									db.add_clause([!lit]).unwrap();
-									false
-								} else {
-									true
-								}
-							})
-							.collect(),
-					)
+		// A literal worth more than the bound can never hold.
+		if int_terms.is_empty() {
+			partition.retain(|&(lit, coef)| {
+				if coef > k {
+					db.add_clause([!lit]).unwrap();
+					false
+				} else {
+					true
 				}
-				Part::Dom(terms, l, u) => {
-					// remove terms exceeding k
-					let terms = terms
-						.into_iter()
-						.filter(|(lit, coef)| {
-							if coef > &k {
-								db.add_clause([!*lit]).unwrap();
-								false
-							} else {
-								true
-							}
-						})
-						.collect_vec();
-					// the one or more of the most significant bits have been removed, the upper
-					// bound could have dropped to a power of 2 (but not beyond)
-					let u = PosCoeff::new(min(*u, terms.iter().map(|&(_, coef)| *coef).sum()));
-					Part::Dom(terms, l, u)
-				}
-			})
-			.filter(|part| part.iter().next().is_some()) // filter out empty groups
-			.collect_vec();
+			});
+		}
 
-		// Normalize the constraint by the greatest common divisor of its
-		// coefficients, shrinking both the coefficients and `k` for every encoder
-		// downstream.
+		// The sum only lands on multiples of what divides every coefficient.
 		{
 			let mut iter = partition
 				.iter()
-				.flat_map(|part| part.iter())
-				.map(|&(_, coef)| coef.0);
+				.map(|&(_, coef)| *coef)
+				.chain(int_terms.iter().map(|&(_, c)| c));
 			if let Some(mut divisor) = iter.next() {
 				for coef in iter {
 					let mut other = coef;
@@ -356,14 +162,17 @@ impl BoolLinAggregator {
 					}
 				}
 				if divisor > 1 {
-					// The left hand side can only take on multiples of the divisor, so an
-					// equality that does not sit on one of those multiples is unsatisfiable.
+					// An equality that does not sit on one of those multiples
+					// is unsatisfiable.
 					if cmp == LimitComp::Equal && *k % divisor != 0 {
 						db.contradiction()?;
 						unreachable!();
 					}
-					for part in &mut partition {
-						part.div_assign(divisor);
+					for (_, coef) in &mut partition {
+						*coef = PosCoeff::new(**coef / divisor);
+					}
+					for (_, c) in &mut int_terms {
+						*c /= divisor;
 					}
 					// Rounding down is sound for `≤` for the same reason.
 					k = PosCoeff::new(*k / divisor);
@@ -371,184 +180,98 @@ impl BoolLinAggregator {
 			}
 		}
 
-		// Check whether some literals can violate / satisfy the constraint
-		let lhs_ub = PosCoeff::new(
-			partition
-				.iter()
-				.map(|part| match part {
-					// Only a single literal of the group can be true.
-					Part::Amo(terms) => terms.iter().map(|&(_, i)| *i).max().unwrap_or(0),
-					// Every literal of the chain can be true at the same time.
-					Part::Ic(terms) => terms.iter().map(|&(_, coef)| *coef).sum(),
-					// The group is known to stay within its declared bounds, which
-					// can be tighter than the sum of its coefficients.
-					Part::Dom(terms, _, u) => {
-						debug_assert!(
-							**u <= terms.iter().map(|&(_, coef)| *coef).sum(),
-							"upper bound {u:?} of a domain group exceeds the sum of \
-							 its coefficients, so it cannot be used as a bound here"
-						);
-						**u
+		// What follows reasons about a sum that runs from nothing up to its
+		// bound, which holds of literals but not of a variable whose least
+		// value is not zero, so a constraint with integer terms is left alone.
+		if int_terms.is_empty() {
+			let lhs_ub = PosCoeff::new(partition.iter().map(|&(_, coef)| *coef).sum());
+			match cmp {
+				LimitComp::LessEq => {
+					if lhs_ub <= k {
+						return Ok(LinVariant::Trivial);
 					}
-				})
-				.sum(),
-		);
-
-		match cmp {
-			LimitComp::LessEq => {
-				if lhs_ub <= k {
-					return Ok(LinVariant::Trivial);
 				}
-
-				// If we have only 2 (unassigned) lits, which together (but not individually)
-				// exceed k, then -x1\/-x2
-				if partition.iter().flat_map(|part| part.iter()).count() == 2 {
-					db.add_clause(
-						partition
-							.iter()
-							.flat_map(|part| part.iter())
-							.map(|(lit, _)| !*lit)
-							.collect_vec(),
-					)?;
-					return Ok(LinVariant::Trivial);
+				LimitComp::Equal => {
+					if lhs_ub < k {
+						db.contradiction()?;
+						unreachable!();
+					}
+					if lhs_ub == k {
+						for (lit, _) in &partition {
+							db.add_clause([*lit])?;
+						}
+						return Ok(LinVariant::Trivial);
+					}
 				}
 			}
-			LimitComp::Equal => {
-				if lhs_ub < k {
-					db.contradiction()?;
-					unreachable!();
+
+			// Every literal counts for the same, so this is a counting
+			// constraint rather than a weighted one.
+			if partition.iter().all(|&(_, coef)| *coef == 1) {
+				let lits = partition.iter().map(|&(lit, _)| lit).collect_vec();
+				if *k == 1 {
+					return Ok(LinVariant::CardinalityOne(CardinalityOne { lits, cmp }));
 				}
-				if lhs_ub == k {
-					for part in partition {
-						match part {
-							Part::Amo(terms) => {
-								db.add_clause([terms
-									.iter()
-									.max_by(|(_, a), (_, b)| a.cmp(b))
-									.unwrap()
-									.0])?;
-							}
-							Part::Ic(terms) | Part::Dom(terms, _, _) => {
-								for (lit, _) in terms {
-									db.add_clause([lit])?;
-								}
-							}
-						};
-					}
-					return Ok(LinVariant::Trivial);
+				// At most n-1 out of n is at least one of them being false.
+				if lits.len() == (*k + 1) as usize {
+					let neg = lits.iter().map(|&l| !l);
+					db.add_clause(neg.clone())?;
+					return Ok(if cmp == LimitComp::LessEq {
+						LinVariant::Trivial
+					} else {
+						LinVariant::CardinalityOne(CardinalityOne {
+							lits: neg.collect_vec(),
+							cmp: LimitComp::LessEq,
+						})
+					});
 				}
+				return Ok(LinVariant::Cardinality(Cardinality { lits, cmp, k }));
 			}
 		}
 
-		// debug_assert!(!partition.flat().is_empty());
-
-		// TODO any smart way to implement len() method?
-		// TODO assert all groups are non-empty / discard empty groups?
-		debug_assert!(partition
-			.iter()
-			.flat_map(|part| part.iter())
-			.next()
-			.is_some());
-
-		// special case: all coefficients are equal, which the normalization above
-		// will have reduced to one
-		if partition
-			.iter()
-			.flat_map(|part| part.iter())
-			.all(|&(_, coef)| *coef == 1)
-		{
-			let partition = partition
-				.iter()
-				.flat_map(|part| part.iter())
-				.map(|&(lit, _)| lit)
-				.collect_vec();
-			if *k == 1 {
-				// Cardinality One constraint
-				return Ok(LinVariant::CardinalityOne(CardinalityOne {
-					lits: partition,
-					cmp,
-				}));
-			}
-
-			// At most n-1 out of n is equivalent to at least *not* one
-			// Ex. at most 2 out of 3 true = at least 1 out of 3 false
-			if partition.len() == (*k + 1) as usize {
-				let neg = partition.iter().map(|&l| !l);
-				db.add_clause(neg.clone())?;
-
-				if cmp == LimitComp::LessEq {
-					return Ok(LinVariant::Trivial);
-				} else {
-					// we still need to constrain x1 + x2 .. >= n-1
-					//   == (1 - ~x1) + (1 - ~x2) + .. >= n-1
-					//   == - ~x1 - ~x2 - .. <= n-1-n ( == .. <= -1)
-					//   == ~x1 + ~x2 + .. <= 1
-					return Ok(LinVariant::CardinalityOne(CardinalityOne {
-						lits: neg.collect_vec(),
-						cmp: LimitComp::LessEq,
-					}));
-				}
-			}
-
-			// Encode count constraint
-			return Ok(LinVariant::Cardinality(Cardinality {
-				lits: partition,
-				cmp,
-				k,
-			}));
-		}
-
-		let partition = if self.sort_same_coefficients >= 2 {
-			let (free_lits, mut partition): (Vec<_>, Vec<_>) = partition.into_iter().partition(
-				|part| matches!(part, Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1),
-			);
-
-			for (coef, lits) in free_lits
+		// Literals that count for the same are worth sorting first, so that
+		// what they come to together is one integer rather than one each.
+		if self.sort_same_coefficients >= 2 {
+			let mut kept = Vec::new();
+			// Sorted, since a hash map hands its keys back in whatever order
+			// it likes and the encoding has to be the same every run.
+			for (coef, lits) in partition
 				.into_iter()
-				.map(|part| match part {
-					Part::Amo(x) | Part::Ic(x) | Part::Dom(x, _, _) if x.len() == 1 => x[0],
-					_ => unreachable!(),
-				})
 				.map(|(lit, coef)| (coef, lit))
 				.into_group_map()
 				.into_iter()
+				.sorted_by_key(|&(coef, _)| coef)
 			{
-				if self.sort_same_coefficients >= 2 && lits.len() >= self.sort_same_coefficients {
-					let c = *k / *coef;
-
-					let y = IntVar::new(0..=c).with_label("s");
-					// The sorted variable counts how many hold, so each of its
-					// order literals is worth another `coef`. They are wanted
-					// either way, so there is nothing to gain by waiting.
-					let order = y.order_encoding(db)?;
-					let terms = order.iter_lits().map(|l| (l, coef)).collect();
+				if lits.len() >= self.sort_same_coefficients {
+					let y = IntVar::new(0..=(*k / *coef)).with_label("s");
+					// Its literals are wanted either way, so there is nothing
+					// to gain by leaving them to the network below.
+					let _ = y.order_encoding(db)?;
 					self.sorted_encoder
 						.encode(db, &Sorted::new(&lits, cmp.clone(), &y))
 						.unwrap();
-					partition.push(Part::Ic(terms));
+					int_terms.push((y, *coef));
 				} else {
-					for x in lits {
-						partition.push(Part::Amo(vec![(x, coef)]));
-					}
+					kept.extend(lits.into_iter().map(|lit| (lit, coef)));
 				}
 			}
+			kept.sort_by_key(|&(lit, _)| lit);
+			partition = kept;
+		}
 
-			partition
-		} else {
-			partition
-		};
-
-		// The groups are what the constraint is made of, so hand them on as
-		// the integers they encode rather than as literals with the grouping
-		// noted alongside.
-		Ok(LinVariant::Linear(NormalizedIntLinear::from_normalized(
-			db,
-			&NormalizedBoolLinear {
-				terms: partition,
-				cmp,
-				k,
-			},
-		)?))
+		// A term is the integer it stands for: a literal is one worth its
+		// coefficient when it holds, and a variable is one already.
+		let mut terms = partition
+			.iter()
+			.enumerate()
+			.map(|(i, &(lit, coef))| {
+				Term::from_at_most_one(db, &[(lit, coef)], &format!("x{i}"), false)
+			})
+			.collect::<Result<Vec<_>, _>>()?;
+		terms.extend(int_terms.into_iter().map(|(x, c)| Term::new(c, x)));
+		Ok(LinVariant::Linear(NormalizedIntLinear::from_terms(
+			terms, cmp, k,
+		)))
 	}
 	/// For non-zero `n`, detect groups of minimum size `n` with free literals
 	/// and same coefficients, sort them (using provided SortedEncoder) and add
@@ -561,7 +284,7 @@ impl BoolLinAggregator {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-/// A transformation of a general [`BoolLinear`] constraint into a aggregated
+/// A transformation of a general [`Linear`] constraint into a aggregated
 /// and normalized variant.
 pub struct BoolLinAggregator {
 	sorted_encoder: SortedEncoder,
@@ -670,7 +393,7 @@ where
 	}
 }
 
-impl<Db, Enc> Encoder<Db, BoolLinear> for LinearEncoder<Enc>
+impl<Db, Enc> Encoder<Db, Linear> for LinearEncoder<Enc>
 where
 	Db: ClauseDatabase + ?Sized,
 	Enc: Encoder<Db, LinVariant>,
@@ -679,7 +402,7 @@ where
 		any(feature = "tracing", test),
 		tracing::instrument(name = "linear_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	fn encode(&self, db: &mut Db, lin: &BoolLinear) -> Result {
+	fn encode(&self, db: &mut Db, lin: &Linear) -> Result {
 		let variant = self.agg.aggregate(db, lin)?;
 		self.enc.encode(db, &variant)
 	}

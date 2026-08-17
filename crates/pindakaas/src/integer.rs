@@ -1,7 +1,12 @@
 //! Integer decision variables, their Boolean encodings, and the bit-level
 //! constraints shared between them.
 
-use std::{cell::RefCell, ops::Bound, rc::Rc};
+use std::{
+	cell::RefCell,
+	hash::{Hash, Hasher},
+	ops::Bound,
+	rc::{Rc, Weak},
+};
 
 use itertools::{Either, Itertools};
 use rangelist::{IntervalIterator, RangeList};
@@ -122,12 +127,31 @@ pub(crate) struct DirectEncoding {
 /// to hold the other.
 ///
 /// Variables are shared between the constraints that mention them, as
-/// `Rc<IntVar>`.
-// ponytail: `Rc` rather than `Arc`, since nothing needs integer constraints to
-// be `Send`; the interior `RefCell` would have to become an `RwLock` anyway.
-#[derive(Debug)]
-pub struct IntVar {
-	state: RefCell<IntVarState>,
+/// `IntVar`.
+#[derive(Clone, Debug)]
+pub struct IntVar(Rc<RefCell<IntVarState>>);
+
+/// A variable by identity rather than by hold, for keying what has been built
+/// for it.
+///
+/// A `Weak` keeps the allocation alive after the last handle is dropped, so its
+/// address cannot be handed to a later variable while a key to it still exists
+/// — which a raw pointer could not promise.
+#[derive(Clone, Debug)]
+pub(crate) struct IntVarKey(Weak<RefCell<IntVarState>>);
+
+impl Eq for IntVarKey {}
+
+impl Hash for IntVarKey {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		self.0.as_ptr().hash(state);
+	}
+}
+
+impl PartialEq for IntVarKey {
+	fn eq(&self, other: &Self) -> bool {
+		Weak::ptr_eq(&self.0, &other.0)
+	}
 }
 
 /// Everything about a variable that can change after it is created.
@@ -210,9 +234,6 @@ impl BinaryEncoding {
 		}
 		let span = *domain.max().unwrap() - self.min;
 		lex_leq_const(db, &self.x.to_vec(), PosCoeff::new(span), self.bits())?;
-		// ponytail: one clause per value in a gap, so a sparse domain over a
-		// wide range pays for every value it skips. Worth revisiting only if
-		// such domains show up; a range-aware exclusion would be the fix.
 		for (below, above) in domain.iter().tuple_windows() {
 			for v in (*below.end() + 1)..*above.start() {
 				self.encode_neq(db, v)?;
@@ -381,9 +402,6 @@ impl DirectEncoding {
 	/// Restrict the encoding to holding for exactly one value.
 	pub(crate) fn consistent<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		db.add_clause(self.x.iter())?;
-		// ponytail: pairwise, so quadratic in the domain. A variable that also
-		// has an order encoding gets exclusivity from the channel for nothing,
-		// which is the case that arises in practice.
 		for (i, a) in self.x.iter().enumerate() {
 			for b in self.x.iter().skip(i + 1) {
 				db.add_clause([!a, !b])?;
@@ -486,13 +504,13 @@ impl IntVar {
 		&self,
 		db: &mut Db,
 	) -> Result<BinaryEncoding> {
-		if let Some(bin) = self.state.borrow().binary.as_ref() {
+		if let Some(bin) = self.0.borrow().binary.as_ref() {
 			return Ok(bin.clone());
 		}
 		// Take what is needed out of the variable before touching the database,
 		// so that no borrow is held while clauses are emitted.
 		let (domain, view) = {
-			let state = self.state.borrow();
+			let state = self.0.borrow();
 			let view = state
 				.order
 				.as_ref()
@@ -508,7 +526,7 @@ impl IntVar {
 			Some(bin) => bin,
 			None => {
 				let bin = BinaryEncoding::new(db, &domain, &self.label());
-				if self.state.borrow().add_consistency {
+				if self.0.borrow().add_consistency {
 					bin.consistent(db, &domain)?;
 				}
 				bin
@@ -531,7 +549,7 @@ impl IntVar {
 	/// their bounds resolve to constants.
 	fn channel<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		let (domain, ord, bin) = {
-			let mut state = self.state.borrow_mut();
+			let mut state = self.0.borrow_mut();
 			match (state.order.as_ref(), state.binary.as_ref()) {
 				(Some(ord), Some(bin)) if !state.channelled[0] => {
 					let all = (state.domain.clone(), ord.clone(), bin.clone());
@@ -568,7 +586,7 @@ impl IntVar {
 	/// price of reading it two ways at once.
 	fn reconcile<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		let (has_order_encoding, others) = {
-			let state = self.state.borrow();
+			let state = self.0.borrow();
 			(
 				state.order.is_some(),
 				usize::from(state.binary.is_some()) + usize::from(state.direct.is_some()),
@@ -592,10 +610,10 @@ impl IntVar {
 		&self,
 		db: &mut Db,
 	) -> Result<DirectEncoding> {
-		if let Some(dir) = self.state.borrow().direct.as_ref() {
+		if let Some(dir) = self.0.borrow().direct.as_ref() {
 			return Ok(dir.clone());
 		}
-		let domain = self.state.borrow().domain.clone();
+		let domain = self.0.borrow().domain.clone();
 		let vals = || domain.iter().flatten();
 		debug_assert!(
 			vals().count() > 1,
@@ -622,7 +640,7 @@ impl IntVar {
 	/// clause each per value.
 	fn channel_direct<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		let (ord, dir, domain) = {
-			let mut state = self.state.borrow_mut();
+			let mut state = self.0.borrow_mut();
 			match (state.order.as_ref(), state.direct.as_ref()) {
 				(Some(ord), Some(dir)) if !state.channelled[1] => {
 					let all = (ord.clone(), dir.clone(), state.domain.clone());
@@ -651,20 +669,25 @@ impl IntVar {
 		Ok(())
 	}
 
+	/// The variable's identity, for keying what has been built for it.
+	pub(crate) fn key(&self) -> IntVarKey {
+		IntVarKey(Rc::downgrade(&self.0))
+	}
+
 	/// The domain of the variable.
 	pub fn domain(&self) -> RangeList<Coeff> {
-		self.state.borrow().domain.clone()
+		self.0.borrow().domain.clone()
 	}
 
 	/// Whether the variable is held in a direct encoding, which is the view a
 	/// constraint reads it through when it has one.
 	pub fn has_direct_encoding(&self) -> bool {
-		self.state.borrow().direct.is_some()
+		self.0.borrow().direct.is_some()
 	}
 
 	/// Whether the variable is held in a binary encoding.
 	pub fn has_binary_encoding(&self) -> bool {
-		self.state.borrow().binary.is_some()
+		self.0.borrow().binary.is_some()
 	}
 
 	/// Whether the variable is at least `v`.
@@ -678,7 +701,7 @@ impl IntVar {
 		v: Coeff,
 	) -> Result<BoolVal, Unsatisfiable> {
 		{
-			let state = self.state.borrow();
+			let state = self.0.borrow();
 			if v <= *state.domain.min().unwrap() {
 				return Ok(BoolVal::Const(true));
 			} else if v > *state.domain.max().unwrap() {
@@ -688,7 +711,7 @@ impl IntVar {
 			}
 		}
 		let order = self.order_encoding(db)?;
-		let state = self.state.borrow();
+		let state = self.0.borrow();
 		Ok(order.lit_at_least(&state.domain, v))
 	}
 
@@ -718,7 +741,7 @@ impl IntVar {
 		v: Coeff,
 	) -> Result<BoolVal, Unsatisfiable> {
 		{
-			let state = self.state.borrow();
+			let state = self.0.borrow();
 			if !state.domain.contains(&v) {
 				return Ok(BoolVal::Const(false));
 			} else if state.domain.card().unwrap() == 1 {
@@ -739,7 +762,7 @@ impl IntVar {
 			}
 		}
 		let direct = self.direct_encoding(db)?;
-		let state = self.state.borrow();
+		let state = self.0.borrow();
 		Ok(direct.lit_equals(&state.domain, v))
 	}
 
@@ -753,7 +776,7 @@ impl IntVar {
 		db: &mut Db,
 	) -> Result<impl Iterator<Item = (Coeff, BoolVal)>, Unsatisfiable> {
 		let order = self.order_encoding(db)?;
-		let state = self.state.borrow();
+		let state = self.0.borrow();
 		Ok(state
 			.domain
 			.iter()
@@ -764,7 +787,7 @@ impl IntVar {
 	}
 
 	/// Every value of the domain, paired with whether the variable takes it —
-	/// what [`IntVar::equals`] gives, without asking value by value.
+	/// what [`IntVar::lit_equals`] gives, without asking value by value.
 	pub fn lit_direct_walk<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -773,7 +796,7 @@ impl IntVar {
 			return Ok(vec![(self.min(), BoolVal::Const(true))].into_iter());
 		}
 		let direct = self.direct_encoding(db)?;
-		let state = self.state.borrow();
+		let state = self.0.borrow();
 		Ok(state
 			.domain
 			.iter()
@@ -807,7 +830,7 @@ impl IntVar {
 		geq: bool,
 	) -> Result<Vec<(Coeff, BoolVal)>, Unsatisfiable> {
 		let order = self.order_encoding(db)?;
-		let state = self.state.borrow();
+		let state = self.0.borrow();
 		// Collected rather than handed back lazily: the borrow cannot outlive
 		// this call, and holding one while the caller works through the steps
 		// is what would fail the moment a constraint mentioned this variable
@@ -823,7 +846,7 @@ impl IntVar {
 		geq: bool,
 	) -> Result<Vec<(Coeff, BoolVal)>, Unsatisfiable> {
 		let direct = self.direct_encoding(db)?;
-		let state = self.state.borrow();
+		let state = self.0.borrow();
 		// Collected, for the reason given on [`IntVar::lit_order_steps`].
 		Ok(direct.iter(&state.domain, geq).collect())
 	}
@@ -838,7 +861,7 @@ impl IntVar {
 		db: &mut Db,
 	) -> Result<(Vec<(Lit, Coeff)>, Coeff), Unsatisfiable> {
 		{
-			let state = self.state.borrow();
+			let state = self.0.borrow();
 			match (
 				state.direct.as_ref(),
 				state.order.as_ref(),
@@ -854,7 +877,7 @@ impl IntVar {
 		// costs least to make, and nothing at all where the literals for it are
 		// already there.
 		let ord = self.order_encoding(db)?;
-		Ok(ord.as_weighted(&self.state.borrow().domain))
+		Ok(ord.as_weighted(&self.0.borrow().domain))
 	}
 
 	/// Whether the variable's literals are settled, so that its domain can no
@@ -866,7 +889,7 @@ impl IntVar {
 	/// standing for it is out in the world regardless, and dropping the value
 	/// would leave nothing to say it cannot hold.
 	pub(crate) fn is_committed(&self) -> bool {
-		let state = self.state.borrow();
+		let state = self.0.borrow();
 		state.order.is_some()
 			|| state.binary.is_some()
 			|| state.direct.is_some()
@@ -880,7 +903,7 @@ impl IntVar {
 			"the domain of {} cannot move once it is encoded",
 			self.label()
 		);
-		let mut state = self.state.borrow_mut();
+		let mut state = self.0.borrow_mut();
 		if v <= *state.domain.min().unwrap() {
 			return false;
 		}
@@ -895,7 +918,7 @@ impl IntVar {
 			"the domain of {} cannot move once it is encoded",
 			self.label()
 		);
-		let mut state = self.state.borrow_mut();
+		let mut state = self.0.borrow_mut();
 		if v >= *state.domain.max().unwrap() {
 			return false;
 		}
@@ -905,18 +928,18 @@ impl IntVar {
 
 	/// The greatest value the variable can take.
 	pub fn max(&self) -> Coeff {
-		*self.state.borrow().domain.max().unwrap()
+		*self.0.borrow().domain.max().unwrap()
 	}
 
 	/// The least value the variable can take.
 	pub fn min(&self) -> Coeff {
-		*self.state.borrow().domain.min().unwrap()
+		*self.0.borrow().domain.min().unwrap()
 	}
 
 	/// The label of the variable, which is empty unless tracing is enabled.
 	pub fn label(&self) -> String {
 		#[cfg(any(feature = "tracing", test))]
-		return self.state.borrow().label.clone();
+		return self.0.borrow().label.clone();
 		#[cfg(not(any(feature = "tracing", test)))]
 		return String::new();
 	}
@@ -935,7 +958,7 @@ impl IntVar {
 		channel: bool,
 	) -> Result {
 		{
-			let mut state = self.state.borrow_mut();
+			let mut state = self.0.borrow_mut();
 			debug_assert!(
 				state.order.is_none(),
 				"{} is already order encoded",
@@ -961,7 +984,7 @@ impl IntVar {
 		channel: bool,
 	) -> Result {
 		{
-			let mut state = self.state.borrow_mut();
+			let mut state = self.0.borrow_mut();
 			debug_assert!(
 				state.binary.is_none(),
 				"{} is already binary encoded",
@@ -983,7 +1006,7 @@ impl IntVar {
 		channel: bool,
 	) -> Result {
 		{
-			let mut state = self.state.borrow_mut();
+			let mut state = self.0.borrow_mut();
 			debug_assert!(
 				state.direct.is_none(),
 				"{} is already directly encoded",
@@ -1008,10 +1031,10 @@ impl IntVar {
 		db: &mut Db,
 		domain: impl Into<RangeList<Coeff>>,
 		literals: &[Lit],
-	) -> Result<Rc<Self>, Unsatisfiable> {
+	) -> Result<Self, Unsatisfiable> {
 		let x = Self::new(domain).enforce_consistency(false);
 		let order = {
-			let state = x.state.borrow();
+			let state = x.0.borrow();
 			OrderEncoding::from_literals(&state.domain, literals.to_vec())
 		};
 		order.consistent(db)?;
@@ -1032,7 +1055,7 @@ impl IntVar {
 	pub fn from_order_walk<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		walk: impl IntoIterator<Item = (Coeff, BoolVal)>,
-	) -> Result<Rc<Self>, Unsatisfiable> {
+	) -> Result<Self, Unsatisfiable> {
 		let (mut values, mut literals) = (Vec::new(), Vec::new());
 		for (v, reaches) in walk {
 			match reaches {
@@ -1061,6 +1084,27 @@ impl IntVar {
 		Self::from_order_encoding(db, domain, &literals)
 	}
 
+	/// The variable `min + max − x`, which counts the same domain from the
+	/// other end.
+	///
+	/// Its literals are `x`'s: reaching a value from below is `x` failing to
+	/// reach past the value that mirrors it. A term with a negative coefficient
+	/// is turned around this way, since `c·x` is `c·(min + max) − c·x'`.
+	pub fn mirrored<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		x: &IntVar,
+	) -> Result<Self, Unsatisfiable> {
+		let (min, max) = (x.min(), x.max());
+		let walk = x
+			.domain()
+			.iter()
+			.flatten()
+			.rev()
+			.map(|v| Ok((min + max - v, x.lit_at_most(db, v)?)))
+			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
+		Self::from_order_walk(db, walk)
+	}
+
 	/// Create a variable from what its direct encoding says value by value,
 	/// which is what [`IntVar::lit_direct_walk`] gives.
 	///
@@ -1071,7 +1115,7 @@ impl IntVar {
 	pub fn from_direct_walk<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		walk: impl IntoIterator<Item = (Coeff, BoolVal)>,
-	) -> Result<Rc<Self>, Unsatisfiable> {
+	) -> Result<Self, Unsatisfiable> {
 		let (mut values, mut literals) = (Vec::new(), Vec::new());
 		for (v, takes) in walk {
 			match takes {
@@ -1106,9 +1150,9 @@ impl IntVar {
 		db: &mut Db,
 		domain: impl Into<RangeList<Coeff>>,
 		literals: &[Lit],
-	) -> Result<Rc<Self>, Unsatisfiable> {
+	) -> Result<Self, Unsatisfiable> {
 		let x = Self::new(domain).enforce_consistency(false);
-		let direct = DirectEncoding::from_literals(&x.state.borrow().domain, literals.to_vec());
+		let direct = DirectEncoding::from_literals(&x.0.borrow().domain, literals.to_vec());
 		direct.consistent(db)?;
 		x.install_direct(db, direct, true)?;
 		Ok(x)
@@ -1130,10 +1174,10 @@ impl IntVar {
 		domain: impl Into<RangeList<Coeff>>,
 		bits: &[BoolVal],
 		min: Coeff,
-	) -> Result<Rc<Self>, Unsatisfiable> {
+	) -> Result<Self, Unsatisfiable> {
 		let x = Self::new(domain).enforce_consistency(false);
 		let binary = BinaryEncoding::from_bits(bits.to_vec(), min);
-		binary.consistent(db, &x.state.borrow().domain.clone())?;
+		binary.consistent(db, &x.0.borrow().domain.clone())?;
 		x.install_binary(db, binary, true)?;
 		Ok(x)
 	}
@@ -1152,7 +1196,7 @@ impl IntVar {
 		channel: bool,
 	) -> Result {
 		let order = {
-			let state = self.state.borrow();
+			let state = self.0.borrow();
 			OrderEncoding::from_literals(&state.domain, literals.to_vec())
 		};
 		self.install_order(db, order, channel)
@@ -1173,7 +1217,7 @@ impl IntVar {
 		literals: &[Lit],
 		channel: bool,
 	) -> Result {
-		let direct = DirectEncoding::from_literals(&self.state.borrow().domain, literals.to_vec());
+		let direct = DirectEncoding::from_literals(&self.0.borrow().domain, literals.to_vec());
 		self.install_direct(db, direct, channel)
 	}
 
@@ -1205,10 +1249,10 @@ impl IntVar {
 	///
 	/// Nothing is kept and the name is never read unless tracing is enabled,
 	/// so this costs no more than building the name did.
-	pub fn with_label(self: Rc<Self>, label: impl Into<String>) -> Rc<Self> {
+	pub fn with_label(self, label: impl Into<String>) -> Self {
 		#[cfg(any(feature = "tracing", test))]
 		{
-			self.state.borrow_mut().label = label.into();
+			self.0.borrow_mut().label = label.into();
 		}
 		#[cfg(not(any(feature = "tracing", test)))]
 		let _ = label;
@@ -1221,13 +1265,13 @@ impl IntVar {
 	/// binary one: set it when the variable has to be within its domain in
 	/// every model, and leave it unset when the constraints it appears in
 	/// already say so and the extra clauses would only repeat them.
-	pub fn enforce_consistency(self: Rc<Self>, enforce: bool) -> Rc<Self> {
+	pub fn enforce_consistency(self, enforce: bool) -> Self {
 		debug_assert!(
 			!self.has_binary_encoding(),
 			"the binary encoding of {} is already made, so this would say nothing",
 			self.label()
 		);
-		self.state.borrow_mut().add_consistency = enforce;
+		self.0.borrow_mut().add_consistency = enforce;
 		self
 	}
 
@@ -1235,25 +1279,23 @@ impl IntVar {
 	///
 	/// Give it a name with [`IntVar::label`] and restrict its encodings to
 	/// `domain` with [`IntVar::enforce_consistency`].
-	pub fn new(domain: impl Into<RangeList<Coeff>>) -> Rc<Self> {
+	pub fn new(domain: impl Into<RangeList<Coeff>>) -> Self {
 		let domain = domain.into();
 		debug_assert!(!domain.is_empty(), "an integer variable needs a domain");
-		Rc::new(Self {
-			state: RefCell::new(IntVarState {
-				domain,
-				#[cfg(any(feature = "tracing", test))]
-				label: String::new(),
-				// A variable a caller made is expected to hold a value of its
-				// domain in every model, without anything else having to say
-				// so. Ones derived here set it as their construction requires.
-				add_consistency: true,
-				order: None,
-				binary: None,
-				direct: None,
-				channelled: [false; 2],
-				order_views: FxHashMap::default(),
-			}),
-		})
+		Self(Rc::new(RefCell::new(IntVarState {
+			domain,
+			#[cfg(any(feature = "tracing", test))]
+			label: String::new(),
+			// A variable a caller made is expected to hold a value of its
+			// domain in every model, without anything else having to say so.
+			// Ones derived here set it as their construction requires.
+			add_consistency: true,
+			order: None,
+			binary: None,
+			direct: None,
+			channelled: [false; 2],
+			order_views: FxHashMap::default(),
+		})))
 	}
 
 	/// Whether the variable is better held in binary than in order form.
@@ -1263,7 +1305,7 @@ impl IntVar {
 	/// held in binary once its domain grows past `cutoff`, and always in order
 	/// form when there is no cutoff.
 	pub(crate) fn prefers_binary(&self, cutoff: Option<Coeff>) -> bool {
-		let state = self.state.borrow();
+		let state = self.0.borrow();
 		match (state.binary.is_some(), state.order.is_some(), cutoff) {
 			(true, _, _) => true,
 			(_, true, _) => false,
@@ -1278,11 +1320,11 @@ impl IntVar {
 		&self,
 		db: &mut Db,
 	) -> Result<OrderEncoding> {
-		if let Some(ord) = self.state.borrow().order.as_ref() {
+		if let Some(ord) = self.0.borrow().order.as_ref() {
 			return Ok(ord.clone());
 		}
 		let (domain, views) = {
-			let state = self.state.borrow();
+			let state = self.0.borrow();
 			(state.domain.clone(), state.order_views.clone())
 		};
 
@@ -1296,13 +1338,13 @@ impl IntVar {
 	/// Whether the variable has been given an order encoding.
 	#[cfg(test)]
 	pub fn has_order_encoding(&self) -> bool {
-		self.state.borrow().order.is_some()
+		self.0.borrow().order.is_some()
 	}
 
 	/// The value the variable takes under an assignment, read through whichever
 	/// encoding it was given.
 	pub fn value<F: crate::Valuation + ?Sized>(&self, value: &F) -> Coeff {
-		let state = self.state.borrow();
+		let state = self.0.borrow();
 		match (
 			state.order.as_ref(),
 			state.binary.as_ref(),
@@ -1318,7 +1360,7 @@ impl IntVar {
 
 	/// The number of values in the domain.
 	pub fn card(&self) -> usize {
-		self.state.borrow().domain.card().unwrap()
+		self.0.borrow().domain.card().unwrap()
 	}
 }
 
@@ -1454,11 +1496,6 @@ impl OrderEncoding {
 		(self.x.len() == 1).then(|| self.x.get(0).unwrap())
 	}
 
-	/// The literals of the encoding, in order.
-	pub(crate) fn iter_lits(&self) -> impl Iterator<Item = Lit> + '_ {
-		self.x.iter()
-	}
-
 	/// The value represented under an assignment.
 	pub(crate) fn value<F: crate::Valuation + ?Sized>(
 		&self,
@@ -1476,8 +1513,6 @@ impl OrderEncoding {
 
 #[cfg(test)]
 pub(crate) mod tests {
-	use std::rc::Rc;
-
 	use itertools::Itertools;
 	use rangelist::RangeList;
 	use traced_test::test;
@@ -1790,7 +1825,7 @@ pub(crate) mod tests {
 		// trip over the borrow the accessors take internally.
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(0..=3).enforce_consistency(true).with_label("x");
-		let y = Rc::clone(&x);
+		let y = x.clone();
 		let encs = [
 			x.binary_encoding(&mut cnf).unwrap(),
 			y.binary_encoding(&mut cnf).unwrap(),
@@ -1876,7 +1911,7 @@ pub(crate) mod tests {
 			let read = {
 				let d = domain.clone();
 				let (ord, bin) = {
-					let state = x.state.borrow();
+					let state = x.0.borrow();
 					(state.order.clone().unwrap(), state.binary.clone().unwrap())
 				};
 				move |v: &dyn Valuation| vec![ord.value(&d, v), bin.value(v)]
@@ -1898,7 +1933,7 @@ pub(crate) mod tests {
 			let read = {
 				let d = domain.clone();
 				let (ord, dir) = {
-					let state = x.state.borrow();
+					let state = x.0.borrow();
 					(state.order.clone().unwrap(), state.direct.clone().unwrap())
 				};
 				move |v: &dyn Valuation| vec![ord.value(&d, v), dir.value(&d, v)]
