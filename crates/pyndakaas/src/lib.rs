@@ -71,15 +71,16 @@ mod pindakaas {
 	use pindakaas::{
 		aggregator::{BoolLinAggregator, LinVariant, LinearEncoder},
 		bool_linear::{
-			AdderEncoder, LinExp as BaseBoolLinExp, Linear as BaseBoolLinCon, Comparator,
+			AdderEncoder, Comparator, LinExp as BaseBoolLinExp, Linear as BaseBoolLinCon,
 			SwcEncoder, TotalizerEncoder,
 		},
 		cardinality::{Cardinality, SortingNetworkEncoder},
 		cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
 		int_linear::NormalizedIntLinear,
+		integer::IntVar as BaseIntVar,
 		propositional_logic::{Formula as BaseFormula, TseitinEncoder},
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as EncoderTrait, Lit as BaseLit,
-		VarRange as BaseVarRange, Wcnf,
+		RangeList, VarRange as BaseVarRange, Wcnf,
 	};
 	use pyo3::{exceptions::PyValueError, prelude::*, types::PyIterator};
 
@@ -95,15 +96,16 @@ mod pindakaas {
 		Bool(bool),
 		BoolLin(LinExp),
 		Int(i64),
+		IntVar(IntVar),
 		Lit(Lit),
 	}
 
-	#[pyclass(from_py_object)]
+	#[pyclass(from_py_object, unsendable)]
 	#[derive(Clone, Debug)]
 	/// A Boolean linear constraint, also known as a pseudo-Boolean constraint.
 	struct BoolLinCon(BaseBoolLinCon);
 
-	#[pyclass(from_py_object)]
+	#[pyclass(from_py_object, unsendable)]
 	#[derive(Clone, Debug)]
 	/// A Boolean linear expression, also known as a pseudo-Boolean expression.
 	///
@@ -185,6 +187,15 @@ mod pindakaas {
 		error_message: Mutex<Option<PyErr>>,
 	}
 
+	#[pyclass(from_py_object, unsendable)]
+	#[derive(Clone, Debug)]
+	/// An integer decision variable.
+	///
+	/// The variable holds whichever Boolean encodings the constraints it
+	/// appears in turn out to need, and channels between them where more than
+	/// one is called for. Nothing is encoded until it is used.
+	struct IntVar(BaseIntVar);
+
 	#[pyclass(from_py_object)]
 	#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 	/// A Boolean literal, representing a Boolean variable or its negation.
@@ -201,6 +212,42 @@ mod pindakaas {
 	/// associated weights.
 	struct WCNFInner(Wcnf);
 
+	struct PyDbWrapper<'a>(&'a Bound<'a, PyAny>);
+
+	impl ClauseDatabase for PyDbWrapper<'_> {
+		fn add_clause_from_slice(
+			&mut self,
+			clause: &[BaseLit],
+		) -> Result<(), pindakaas::Unsatisfiable> {
+			let clause_vec = clause.iter().map(|&l| Lit(l)).collect_vec();
+			let res = self.0.call_method1("add_clause", (clause_vec,));
+			match res {
+				Err(e) if e.is_instance_of::<Unsatisfiable>(self.0.py()) => {
+					Err(pindakaas::Unsatisfiable)
+				}
+				Err(e) => {
+					panic!("unexpected error in add_clause implementation: {}", e)
+				}
+				// We would have expected the user implementation to raise `Unsatisfiable`, but
+				// is did not. Since encodings depend on this behaviour, we return the error
+				// instead.
+				Ok(_) if clause.is_empty() => Err(pindakaas::Unsatisfiable),
+				Ok(_) => Ok(()),
+			}
+		}
+
+		fn new_var_range(&mut self, len: usize) -> BaseVarRange {
+			let tup = self
+				.0
+				.call_method1("new_var_range", (len,))
+				.expect("unexpected error in new_var_range implementation");
+			let (start, end): (Lit, Lit) = tup
+				.extract()
+				.expect("new_var_range did not return a tuple of two literals");
+			BaseVarRange::new(start.0.var(), end.0.var())
+		}
+	}
+
 	#[pyfunction]
 	fn _wrap_encode_constraint(
 		obj: &Bound<'_, PyAny>,
@@ -208,42 +255,63 @@ mod pindakaas {
 		enc: Option<Encoder>,
 		conditions: Vec<Lit>,
 	) -> Result {
-		struct PyDbWrapper<'a>(&'a Bound<'a, PyAny>);
-		impl ClauseDatabase for PyDbWrapper<'_> {
-			fn add_clause_from_slice(
-				&mut self,
-				clause: &[BaseLit],
-			) -> Result<(), pindakaas::Unsatisfiable> {
-				let clause_vec = clause.iter().map(|&l| Lit(l)).collect_vec();
-				let res = self.0.call_method1("add_clause", (clause_vec,));
-				match res {
-					Err(e) if e.is_instance_of::<Unsatisfiable>(self.0.py()) => {
-						Err(pindakaas::Unsatisfiable)
-					}
-					Err(e) => {
-						panic!("unexpected error in add_clause implementation: {}", e)
-					}
-					// We would have expected the user implementation to raise `Unsatisfiable`, but
-					// is did not. Since encodings depend on this behaviour, we return the error
-					// instead.
-					Ok(_) if clause.is_empty() => Err(pindakaas::Unsatisfiable),
-					Ok(_) => Ok(()),
-				}
-			}
-
-			fn new_var_range(&mut self, len: usize) -> BaseVarRange {
-				let tup = self
-					.0
-					.call_method1("new_var_range", (len,))
-					.expect("unexpected error in new_var_range implementation");
-				let (start, end): (Lit, Lit) = tup
-					.extract()
-					.expect("new_var_range did not return a tuple of two literals");
-				BaseVarRange::new(start.0.var(), end.0.var())
-			}
-		}
-
 		encode_constraint(&mut PyDbWrapper(obj), con, enc, conditions)
+	}
+
+	/// The domain of an integer variable, from the inclusive intervals Python
+	/// put it in.
+	fn int_var_domain(domain: Vec<(i64, i64)>) -> RangeList<i64> {
+		RangeList::from_iter(domain.into_iter().map(|(start, end)| start..=end))
+	}
+
+	#[pyfunction]
+	/// Create an integer variable held in the order encoding it was found on.
+	fn _wrap_int_var_from_order_literals(
+		obj: &Bound<'_, PyAny>,
+		domain: Vec<(i64, i64)>,
+		literals: Vec<Lit>,
+	) -> Result<IntVar> {
+		let literals = literals.into_iter().map(|l| l.0).collect_vec();
+		let x = BaseIntVar::from_order_encoding(
+			&mut PyDbWrapper(obj),
+			int_var_domain(domain),
+			&literals,
+		)?;
+		Ok(IntVar(x))
+	}
+
+	#[pyfunction]
+	/// Create an integer variable held in the direct encoding it was found on.
+	fn _wrap_int_var_from_direct_literals(
+		obj: &Bound<'_, PyAny>,
+		domain: Vec<(i64, i64)>,
+		literals: Vec<Lit>,
+	) -> Result<IntVar> {
+		let literals = literals.into_iter().map(|l| l.0).collect_vec();
+		let x = BaseIntVar::from_direct_encoding(
+			&mut PyDbWrapper(obj),
+			int_var_domain(domain),
+			&literals,
+		)?;
+		Ok(IntVar(x))
+	}
+
+	#[pyfunction]
+	/// Create an integer variable held in the binary encoding it was found on.
+	fn _wrap_int_var_from_binary_literals(
+		obj: &Bound<'_, PyAny>,
+		domain: Vec<(i64, i64)>,
+		bits: Vec<Lit>,
+		counts_from: i64,
+	) -> Result<IntVar> {
+		let bits = bits.into_iter().map(|l| BoolVal::Lit(l.0)).collect_vec();
+		let x = BaseIntVar::from_binary_encoding(
+			&mut PyDbWrapper(obj),
+			int_var_domain(domain),
+			&bits,
+			counts_from,
+		)?;
+		Ok(IntVar(x))
 	}
 
 	/// Internal function to help with the encoding of a constraint given an
@@ -299,6 +367,7 @@ mod pindakaas {
 				&BoolLinArg::Bool(b) => LinExp(b.into()),
 				BoolLinArg::BoolLin(exp) => exp.clone(),
 				&BoolLinArg::Int(i) => LinExp(i.into()),
+				BoolLinArg::IntVar(x) => LinExp(x.0.clone().into()),
 				&BoolLinArg::Lit(l) => LinExp(l.0.into()),
 			}
 		}
@@ -611,6 +680,124 @@ mod pindakaas {
 
 		fn as_formula(&self) -> BaseFormula<BoolVal> {
 			BaseFormula::Atom(self.0.into())
+		}
+	}
+
+	#[pymethods]
+	impl IntVar {
+		fn __add__(&self, other: BoolLinArg) -> LinExp {
+			self.as_bool_lin_exp().__add__(other)
+		}
+
+		fn __eq__(&self, other: i64) -> BoolLinCon {
+			self.as_bool_lin_exp().__eq__(other)
+		}
+
+		fn __ge__(&self, other: i64) -> BoolLinCon {
+			self.as_bool_lin_exp().__ge__(other)
+		}
+
+		fn __gt__(&self, other: i64) -> BoolLinCon {
+			self.as_bool_lin_exp().__gt__(other)
+		}
+
+		fn __le__(&self, other: i64) -> BoolLinCon {
+			self.as_bool_lin_exp().__le__(other)
+		}
+
+		fn __lt__(&self, other: i64) -> BoolLinCon {
+			self.as_bool_lin_exp().__lt__(other)
+		}
+
+		fn __mul__(&self, other: i64) -> LinExp {
+			LinExp(self.0.clone() * other)
+		}
+
+		#[new]
+		/// Create a variable over the values of `domain`, given as inclusive
+		/// intervals.
+		fn new(domain: Vec<(i64, i64)>) -> PyResult<Self> {
+			if domain.is_empty() {
+				return Err(PyValueError::new_err(
+					"an integer variable needs at least one value",
+				));
+			}
+			Ok(Self(BaseIntVar::new(int_var_domain(domain))))
+		}
+
+		fn __neg__(&self) -> LinExp {
+			self.__mul__(-1)
+		}
+
+		fn __radd__(&self, other: BoolLinArg) -> LinExp {
+			self.__add__(other)
+		}
+
+		fn __rmul__(&self, other: i64) -> LinExp {
+			self.__mul__(other)
+		}
+
+		fn __str__(&self) -> String {
+			format!("{}", self.0)
+		}
+
+		fn __sub__(&self, other: BoolLinArg) -> LinExp {
+			self.as_bool_lin_exp().__sub__(other)
+		}
+
+		/// The number of values the variable can take.
+		fn card(&self) -> usize {
+			self.0.card()
+		}
+
+		/// The greatest value the variable can take.
+		fn max(&self) -> i64 {
+			self.0.max()
+		}
+
+		/// The least value the variable can take.
+		fn min(&self) -> i64 {
+			self.0.min()
+		}
+
+		/// Constrain the encodings the variable has to say a value of its
+		/// domain.
+		///
+		/// The literals given to any of the `int_var_from_*` methods are taken
+		/// at their word, since they nearly always come from a structure that
+		/// has constrained them already. This is how to ask for the clauses
+		/// where that does not hold — where some of the literals were freshly
+		/// made, say, or where the values given are narrower than the literals
+		/// can reach.
+		///
+		/// :param db: The database to add the clauses to
+		/// :raises Unsatisfiable: If the formula has become unsatisfiable
+		fn constrain(&self, db: &Bound<'_, PyAny>) -> Result {
+			self.0.constrain(&mut PyDbWrapper(db))?;
+			Ok(())
+		}
+
+		/// The value the variable takes in a solution.
+		///
+		/// :param solution: A solved database, or anything else that can give a
+		///     value for a literal
+		/// :return: The value of the variable under that assignment
+		fn value(&self, solution: &Bound<'_, PyAny>) -> i64 {
+			let read = |lit: BaseLit| -> bool {
+				solution
+					.call_method1("value", (Lit(lit),))
+					.expect("unexpected error in value implementation")
+					.extract::<Option<bool>>()
+					.expect("value did not return an optional bool")
+					.unwrap_or(false)
+			};
+			self.0.value(&read)
+		}
+	}
+
+	impl IntVar {
+		fn as_bool_lin_exp(&self) -> LinExp {
+			LinExp(self.0.clone().into())
 		}
 	}
 

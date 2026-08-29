@@ -9,18 +9,18 @@ def test_bool_lin():
     assert str(x - 2) == "x₁ + -2", "__sub__ incorrect"
     assert str(2 * x) == "2*x₁", "__mul__ incorrect"
     assert str(x * 2) == "2*x₁", "__rmul__ incorrect"
-    assert str(x + y - z + 2) == "-x₃ + x₂ + x₁ + 2"
+    assert str(x + y - z + 2) == "x₁ + x₂ + -x₃ + 2"
     c = sum([x, y, z])
-    assert str(c) == "x₃ + x₂ + x₁"
+    assert str(c) == "x₁ + x₂ + x₃"
     c *= 2
-    assert str(c) == "2*x₃ + 2*x₂ + 2*x₁"
+    assert str(c) == "2*x₁ + 2*x₂ + 2*x₃"
     c = x + y + z
     d = c == 2
-    assert str(d) == "x₃ + x₂ + x₁ == 2"
+    assert str(d) == "x₁ + x₂ + x₃ == 2"
     d = c < 2
-    assert str(d) == "x₃ + x₂ + x₁ <= 1"
+    assert str(d) == "x₁ + x₂ + x₃ <= 1"
     d = c >= 2
-    assert str(d) == "x₃ + x₂ + x₁ >= 2"
+    assert str(d) == "x₁ + x₂ + x₃ >= 2"
 
 
 def test_bool_lin_ops():
@@ -28,11 +28,11 @@ def test_bool_lin_ops():
     x, y, z = f.new_vars(3)
     f = x + y
     g = x - z
-    assert str(f + 2) == "x₂ + x₁ + 2", "__add__ incorrect"
-    assert str(2 + f) == "x₂ + x₁ + 2", "__radd__ incorrect"
-    assert str(f + g) == "-x₃ + x₁ + x₂ + x₁", "__add__ incorrect"
-    assert str(f * 2) == "2*x₂ + 2*x₁", "__mul__ incorrect"
-    assert str(2 * f) == "2*x₂ + 2*x₁", "__rmul__ incorrect"
+    assert str(f + 2) == "x₁ + x₂ + 2", "__add__ incorrect"
+    assert str(2 + f) == "x₁ + x₂ + 2", "__radd__ incorrect"
+    assert str(f + g) == "x₁ + x₂ + x₁ + -x₃", "__add__ incorrect"
+    assert str(f * 2) == "2*x₁ + 2*x₂", "__mul__ incorrect"
+    assert str(2 * f) == "2*x₁ + 2*x₂", "__rmul__ incorrect"
 
 
 def test_formula_ops():

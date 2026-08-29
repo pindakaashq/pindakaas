@@ -311,7 +311,6 @@ use std::{
 };
 
 use itertools::{traits::HomogeneousTuple, Itertools};
-
 pub use rangelist::RangeList;
 
 pub use crate::helpers::AsDynClauseDatabase;

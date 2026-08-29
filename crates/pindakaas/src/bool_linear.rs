@@ -3,15 +3,19 @@
 //!
 //! Boolean linear constraints can be modelled using [`LinExp`] and
 //! subsequently [`Linear`]. These representations can then be normalized
-//! and simplified using [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator). Resulting
+//! and simplified using
+//! [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator). Resulting
 //! [`NormalizedBoolLinear`] can be encoded using a variety of [`Encoder`]s such
 //! as the [`AdderEncoder`], [`BddEncoder`], [`SwcEncoder`], and
 //! [`TotalizerEncoder`].
 //!
 //! This module contains some additional helper types that can be used to
-//! simplify this encoding process. [`StaticLinEncoder`](crate::aggregator::StaticLinEncoder) can help choose an
-//! encoder based on the [`LinVariant`](crate::aggregator::LinVariant) produced by [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator).
-//! [`LinearEncoder`](crate::aggregator::LinearEncoder) can be used to pipeline [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator) and a
+//! simplify this encoding process.
+//! [`StaticLinEncoder`](crate::aggregator::StaticLinEncoder) can help choose an
+//! encoder based on the [`LinVariant`](crate::aggregator::LinVariant) produced
+//! by [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator).
+//! [`LinearEncoder`](crate::aggregator::LinearEncoder) can be used to pipeline
+//! [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator) and a
 //! [`LinVariant`](crate::aggregator::LinVariant) [`Encoder`].
 
 use std::{
@@ -173,8 +177,9 @@ pub(crate) trait LinMarker {}
 /// The constraint captured by this struct contains only positive coefficients,
 /// contains at most one term with the same variable, and its comparator has
 /// been limited to `≤` or `=`. Objects of this type are generally the result of
-/// using the [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator), and are generally the required input type
-/// for encoders of boolean linear constraints.
+/// using the [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator), and
+/// are generally the required input type for encoders of boolean linear
+/// constraints.
 pub struct NormalizedBoolLinear {
 	pub(crate) terms: Vec<(Lit, PosCoeff)>,
 	pub(crate) cmp: LimitComp,
@@ -427,6 +432,13 @@ where
 		let rhs = con.k() - constant;
 		if rhs < 0 {
 			return db.contradiction();
+		}
+		if rhs == 0 {
+			// Every coefficient is positive, so a sum of zero is every literal
+			// being false, whichever way it is compared.
+			return weighed
+				.into_iter()
+				.try_for_each(|(lit, _)| db.add_clause([!lit]));
 		}
 		let rhs = PosCoeff::new(rhs);
 
@@ -800,11 +812,13 @@ impl Decompose for BddEncoder {
 					))
 				})
 				.collect::<Result<Vec<_>, Unsatisfiable>>()?;
-			layers.push(
-				IntVar::from_order_walk(db, walk)?
-					.enforce_consistency(self.add_consistency)
-					.with_label(format!("y{i}")),
-			);
+			let y = IntVar::from_order_walk(db, walk)?
+				.enforce_consistency(self.add_consistency)
+				.with_label(format!("y{i}"));
+			// A total that only this layer tells apart gets a literal of its
+			// own, which nothing else orders against the rest.
+			y.constrain(db)?;
+			layers.push(y);
 		}
 		layers.reverse();
 
@@ -977,8 +991,8 @@ impl Display for LinExp {
 			self.terms
 				.iter()
 				.map(|t| match t {
-					LinTerm::Bool(l, c) => (format!("{l:?}"), c * self.mult),
-					LinTerm::Int(x, c) => (x.label(), c * self.mult),
+					LinTerm::Bool(l, c) => (format!("{l}"), c * self.mult),
+					LinTerm::Int(x, c) => (format!("{x}"), c * self.mult),
 				})
 				.format_with(" + ", |(name, c), f| match c {
 					1 => f(&format_args!("{name}")),
@@ -1531,8 +1545,7 @@ mod tests {
 					bool_linear::{tests::construct_terms, LimitComp, PosCoeff},
 					cardinality_one::{CardinalityOne, PairwiseEncoder},
 					helpers::tests::{assert_solutions, expect_file},
-					int_linear::NormalizedIntLinear,
-					int_linear::Term,
+					int_linear::{NormalizedIntLinear, Term},
 					ClauseDatabaseTools, Cnf, Encoder, Lit,
 				};
 
@@ -2092,6 +2105,35 @@ mod tests {
 				LimitComp::LessEq
 			))
 		);
+	}
+
+	#[test]
+	fn a_bound_of_zero_leaves_no_term_standing() {
+		// Every coefficient is positive by the time an encoder sees it, so a
+		// sum that has to come to nothing is every literal being false. The
+		// adder has no bits to work with in that case, which is only reachable
+		// at all because a constraint with integer terms keeps its bound.
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let y = crate::integer::IntVar::new(0..=3).with_label("y");
+		let con = Linear::new(a * 2 + y.clone() * 3, Comparator::LessEq, 0);
+		let LinVariant::Linear(con) = BoolLinAggregator::default()
+			.aggregate(&mut cnf, &con)
+			.unwrap()
+		else {
+			panic!("a literal and an integer make a linear constraint");
+		};
+		cnf.encode(&con, &AdderEncoder::default()).unwrap();
+
+		use crate::{
+			solver::{cadical::Cadical, SolveResult, Solver},
+			Valuation,
+		};
+		let mut slv = Cadical::from(&cnf);
+		let SolveResult::Satisfied(value) = slv.solve() else {
+			panic!("nothing being chosen satisfies it");
+		};
+		assert!(!value.value(a) && y.value(&value) == 0);
 	}
 
 	#[test]

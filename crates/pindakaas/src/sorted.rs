@@ -210,8 +210,8 @@ impl SortedEncoder {
 		}
 	}
 
-	/// A variable over `0..=max`, or the constant zero where there is nothing to
-	/// count.
+	/// A variable over `0..=max`, or the constant zero where there is nothing
+	/// to count.
 	fn next_int_var(&self, max: Coeff, label: String) -> IntVar {
 		IntVar::new(0..=max)
 			.enforce_consistency(self.add_consistency)

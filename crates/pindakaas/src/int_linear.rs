@@ -156,7 +156,8 @@ pub(crate) trait Decompose {
 	///
 	/// The database is there for a strategy that wants a literal of a variable
 	/// it has already made — a layer of a decision diagram sharing one with the
-	/// layer after it, say. A strategy that shares nothing needs it for nothing.
+	/// layer after it, say. A strategy that shares nothing needs it for
+	/// nothing.
 	fn decompose<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -795,6 +796,10 @@ impl Term {
 	/// already are one: a literal here says the group *is* its coefficient,
 	/// which is what a direct literal says and not what an order literal says.
 	///
+	/// At most one of them holding is taken on trust — it is what makes the
+	/// group a group — but the literal standing for the group being worth
+	/// nothing is made here, along with the clauses tying it to the rest.
+	///
 	/// `exact` asks for the upper bound as well, which a group only needs when
 	/// the constraint it belongs to is an equality.
 	pub fn from_at_most_one<Db: ClauseDatabase + ?Sized>(
@@ -870,11 +875,15 @@ impl Term {
 		let x = IntVar::new(domain)
 			.enforce_consistency(false)
 			.with_label(label);
-		x.with_direct_encoding(db, &lits, true)?;
+		x.with_direct_encoding(db, &lits, None)?;
 		Ok(Self::new(1, x))
 	}
 
 	/// The integer a group of terms that each imply the one before stands for.
+	///
+	/// The implications are taken on trust: they are what makes the group a
+	/// chain, and the running sums it counts through are read straight off its
+	/// literals. See [`IntVar::constrain`] where they need saying.
 	pub fn from_implication_chain<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		terms: &[(Lit, PosCoeff)],
@@ -901,6 +910,11 @@ impl Term {
 	}
 
 	/// The integer a group of terms declared to be its bits stands for.
+	///
+	/// The bits staying within `lb..=ub` is taken on trust, as is the caller's
+	/// word that these literals are the bits of one integer at all. See
+	/// [`IntVar::constrain`] to make the bounds a restriction rather than a
+	/// claim.
 	pub fn from_binary_digits<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		terms: &[(Lit, PosCoeff)],
@@ -1510,6 +1524,9 @@ mod tests {
 			.unwrap();
 			assert_eq!(t.c, multiple, "the multiple belongs on the term");
 			assert_eq!((t.x.min(), t.x.max()), (2, 5), "the declared bounds hold");
+			// The caller declared the bits stay within those bounds; asking for
+			// them to be enforced is what makes that true of the encoding.
+			t.x.constrain(&mut cnf).unwrap();
 			assert!(
 				!t.x.has_order_encoding(),
 				"the bits are already there, so nothing should be channelled"
