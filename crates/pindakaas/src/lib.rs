@@ -232,14 +232,14 @@
 //!     int_linear::{IntLinEncoder, IntLinear, Term},
 //!     integer::IntVar,
 //!     solver::{cadical::Cadical, SolveResult, Solver},
-//!     Cnf, RangeList,
+//!     Cnf, Encoder, RangeList,
 //! };
 //!
 //! let mut f = Cnf::default();
 //! let x = IntVar::new(0..=5).with_label("x");
 //! let y = IntVar::new(0..=5).with_label("y");
 //!
-//! let mut enc = IntLinEncoder::default();
+//! let enc = IntLinEncoder::default();
 //! enc.encode(
 //!     &mut f,
 //!     &IntLinear::new(

@@ -6,7 +6,7 @@
 //! constraint produces one of these, its groups of related terms having become
 //! the integers they encode, so this is where every linear encoder starts.
 
-use std::{iter::once, num::NonZero};
+use std::{cell::RefCell, iter::once, num::NonZero};
 
 use itertools::Itertools;
 use rangelist::RangeList;
@@ -143,7 +143,11 @@ pub struct IntLinEncoder {
 	///
 	/// Only ever looked up, never iterated: the keys are addresses, and their
 	/// order would differ between runs.
-	products: FxHashMap<(IntVarKey, Coeff), Vec<BoolVal>>,
+	///
+	/// This uses `RefCell` so that encoding takes `&self` like every other
+	/// [`Encoder`]. The keys hold a [`Weak`](std::rc::Weak), so this encoder is
+	/// already neither `Send` nor `Sync` and the cell costs nothing.
+	products: RefCell<FxHashMap<(IntVarKey, Coeff), Vec<BoolVal>>>,
 }
 
 /// A way of breaking a linear constraint into smaller ones.
@@ -167,117 +171,14 @@ pub(crate) trait Decompose {
 	) -> Result<Vec<TernaryIntLinear>, Unsatisfiable>;
 }
 
-/// Encoder that takes an integer linear constraint as it is, without breaking
-/// it apart.
-///
-/// The others give the intermediate sums a shape; this gives them none, which
-/// suits a constraint over few enough terms that a shape would only add to it.
-#[derive(Clone, Debug, Default)]
-pub struct IntegerEncoder {
-	config: IntLinConfig,
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedIntLinear> for IntegerEncoder {
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "integer_encoder", skip_all, fields(constraint = format!("{con:?}")))
-	)]
-	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		// A constraint at a time, so nothing is shared between them yet. The
-		// encoder is built to keep what it learns, which is what a caller
-		// working in integers directly would get.
-		IntLinEncoder::with_config(self.config.clone()).encode(db, &con.into())
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for IntegerEncoder {
-	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
-		let con = con.as_linear(db)?;
-		self.encode(db, &con)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for IntegerEncoder {
-	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
-		self.encode(db, &Cardinality::from(con.clone()))
-	}
-}
-
-/// Configuration for an [`IntLinEncoder`].
-#[derive(Clone, Debug)]
-pub struct IntLinConfig {
-	/// Whether to narrow the domains of the variables of a constraint before
-	/// encoding it.
-	pub propagate: bool,
-	/// The domain size from which a variable is held in binary rather than in
-	/// order form. `None` keeps every variable in order form.
-	pub cutoff: Option<Coeff>,
-}
-
-/// A term of a constraint, together with the view of its variable the walk
-/// will guard on.
-///
-/// Materialising every encoding before the clauses are built keeps the walk
-/// over the terms a pure function of what is already there.
-#[derive(Clone, Copy, Debug)]
-struct Encoded<'a> {
-	c: Coeff,
-	x: &'a IntVar,
-}
-
-/// A sum of integer terms.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct IntLinExp {
-	terms: Vec<Term>,
-}
-
-/// An integer variable scaled by a coefficient.
-///
-/// A coefficient other than one is not expanded into repeated addition: the
-/// encoder synthesises a chain of shifts and additions for it over the
-/// variable's bits, and shares that chain with every other term of the same
-/// coefficient over the same variable.
-#[derive(Clone, Debug)]
-pub struct Term {
-	c: Coeff,
-	x: IntVar,
-}
-
-impl Default for IntLinConfig {
-	fn default() -> Self {
-		Self {
-			propagate: true,
-			cutoff: None,
-		}
-	}
-}
-
-impl IntLinEncoder {
-	/// Break `con` apart and encode each piece.
-	pub(crate) fn encode_decomposed<Db: ClauseDatabase + ?Sized>(
-		&mut self,
-		db: &mut Db,
-		con: &NormalizedIntLinear,
-		decompose: &impl Decompose,
-	) -> Result {
-		// A decomposition that cannot be built is a constraint that cannot be
-		// met, which the database has to be told rather than only the caller.
-		let Ok(cons) = decompose.decompose(db, con) else {
-			return db.contradiction();
-		};
-		cons.iter()
-			.try_for_each(|con| self.encode(db, &IntLinear::from(con)))
-	}
-
-	/// Encode `con`, adding the clauses to `db`.
-	///
-	/// Encoding a constraint fixes the literals of the variables it mentions,
-	/// and so also fixes their domains. A constraint encoded later can still
-	/// narrow a variable that no constraint has reached yet, but not one that
-	/// is already encoded, which makes the result depend on the order the
-	/// constraints are given in. Every such result is correct; they differ only
-	/// in how much was pruned before the literals were committed.
-	pub fn encode<Db: ClauseDatabase + ?Sized>(&mut self, db: &mut Db, con: &IntLinear) -> Result {
+/// Encoding a constraint fixes the literals of the variables it mentions, and
+/// so also fixes their domains. A constraint encoded later can still narrow a
+/// variable that no constraint has reached yet, but not one that is already
+/// encoded, which makes the result depend on the order the constraints are
+/// given in. Every such result is correct; they differ only in how much was
+/// pruned before the literals were committed.
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntLinear> for IntLinEncoder {
+	fn encode(&self, db: &mut Db, con: &IntLinear) -> Result {
 		if self.config.propagate {
 			con.propagate()?;
 		}
@@ -343,11 +244,101 @@ impl IntLinEncoder {
 		}
 		Ok(())
 	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedIntLinear> for IntLinEncoder {
+	#[cfg_attr(
+		any(feature = "tracing", test),
+		tracing::instrument(name = "int_lin_encoder", skip_all, fields(constraint = format!("{con:?}")))
+	)]
+	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
+		Encoder::encode(self, db, &IntLinear::from(con))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for IntLinEncoder {
+	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
+		let con = con.as_linear(db)?;
+		Encoder::encode(self, db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for IntLinEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		Encoder::encode(self, db, &Cardinality::from(con.clone()))
+	}
+}
+
+/// Configuration for an [`IntLinEncoder`].
+#[derive(Clone, Debug)]
+pub struct IntLinConfig {
+	/// Whether to narrow the domains of the variables of a constraint before
+	/// encoding it.
+	pub propagate: bool,
+	/// The domain size from which a variable is held in binary rather than in
+	/// order form. `None` keeps every variable in order form.
+	pub cutoff: Option<Coeff>,
+}
+
+/// A term of a constraint, together with the view of its variable the walk
+/// will guard on.
+///
+/// Materialising every encoding before the clauses are built keeps the walk
+/// over the terms a pure function of what is already there.
+#[derive(Clone, Copy, Debug)]
+struct Encoded<'a> {
+	c: Coeff,
+	x: &'a IntVar,
+}
+
+/// A sum of integer terms.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct IntLinExp {
+	terms: Vec<Term>,
+}
+
+/// An integer variable scaled by a coefficient.
+///
+/// A coefficient other than one is not expanded into repeated addition: the
+/// encoder synthesises a chain of shifts and additions for it over the
+/// variable's bits, and shares that chain with every other term of the same
+/// coefficient over the same variable.
+#[derive(Clone, Debug)]
+pub struct Term {
+	c: Coeff,
+	x: IntVar,
+}
+
+impl Default for IntLinConfig {
+	fn default() -> Self {
+		Self {
+			propagate: true,
+			cutoff: None,
+		}
+	}
+}
+
+impl IntLinEncoder {
+	/// Break `con` apart and encode each piece.
+	pub(crate) fn encode_decomposed<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		con: &NormalizedIntLinear,
+		decompose: &impl Decompose,
+	) -> Result {
+		// A decomposition that cannot be built is a constraint that cannot be
+		// met, which the database has to be told rather than only the caller.
+		let Ok(cons) = decompose.decompose(db, con) else {
+			return db.contradiction();
+		};
+		cons.iter()
+			.try_for_each(|con| Encoder::encode(self, db, &IntLinear::from(con)))
+	}
 
 	/// The encoding of `Σ cᵢ·xᵢ`, or `None` if some coefficient cannot be
 	/// decomposed into shifts and adders.
 	fn binary_sum<Db: ClauseDatabase + ?Sized>(
-		&mut self,
+		&self,
 		db: &mut Db,
 		terms: &[Term],
 	) -> Result<Option<BinaryEncoding>, Unsatisfiable> {
@@ -376,15 +367,16 @@ impl IntLinEncoder {
 	/// single-constant multiplication problem, and [`ScmSolution::synthesize`]
 	/// plans it.
 	fn scaled_bits<Db: ClauseDatabase + ?Sized>(
-		&mut self,
+		&self,
 		db: &mut Db,
 		x: &IntVar,
 		c: Coeff,
 	) -> Result<Option<Vec<BoolVal>>, Unsatisfiable> {
 		debug_assert!(c > 0, "a product is decomposed only for a positive factor");
 		let key = (x.key(), c);
-		if let Some(bits) = self.products.get(&key) {
-			return Ok(Some(bits.clone()));
+		let cached = self.products.borrow().get(&key).cloned();
+		if let Some(bits) = cached {
+			return Ok(Some(bits));
 		}
 		let Ok(c32) = u32::try_from(c) else {
 			return Ok(None);
@@ -399,10 +391,11 @@ impl IntLinEncoder {
 		// reaches, which is the same thing the cache is keyed on, so a step
 		// shared with an earlier synthesis is picked up rather than rebuilt.
 		let plan = ScmSolution::synthesize(c32, ScmObjective::MinAdders(width));
-		let _ = self.products.insert((x.key(), 1), input);
+		let _ = self.products.borrow_mut().insert((x.key(), 1), input);
 		for op in plan.operations {
 			let factor = Coeff::from(op.result().get());
-			if self.products.contains_key(&(x.key(), factor)) {
+			let known = self.products.borrow().contains_key(&(x.key(), factor));
+			if known {
 				continue;
 			}
 			let bits = match op {
@@ -429,7 +422,7 @@ impl IntLinEncoder {
 					self.difference(db, &left, &right, factor, &width)?
 				}
 			};
-			let _ = self.products.insert((x.key(), factor), bits);
+			let _ = self.products.borrow_mut().insert((x.key(), factor), bits);
 		}
 		Ok(Some(self.product(x, c32)))
 	}
@@ -439,7 +432,7 @@ impl IntLinEncoder {
 	/// Subtraction is addition read the other way round: the bits are created
 	/// and then constrained so that adding `b` back gives `a`.
 	fn difference<Db: ClauseDatabase + ?Sized>(
-		&mut self,
+		&self,
 		db: &mut Db,
 		a: &[BoolVal],
 		b: &[BoolVal],
@@ -456,7 +449,7 @@ impl IntLinEncoder {
 
 	/// The bits of a product already built.
 	fn product(&self, x: &IntVar, factor: u32) -> Vec<BoolVal> {
-		self.products[&(x.key(), Coeff::from(factor))].clone()
+		self.products.borrow()[&(x.key(), Coeff::from(factor))].clone()
 	}
 
 	/// Create an encoder with the given configuration.
@@ -620,10 +613,10 @@ impl IntLinear {
 			(-1, 1, 1) => (b, c, a),
 			_ => return None,
 		};
-		// Each encoding counts from its own lower bound, so an adder lines the sum
-		// up with the result only when the bound of the result is the sum of the
-		// other two. Anything else is left to the walk over the terms, which does
-		// not care where an encoding starts.
+		// Each encoding counts from its own lower bound, so an adder lines the
+		// sum up with the result only when the bound of the result is the sum
+		// of the other two. Anything else is left to the walk over the terms,
+		// which does not care where an encoding starts.
 		// ponytail: reconciling a mismatch would take a second adder for the
 		// offset. Nothing builds one today, since the result of an addition is
 		// given the bound its inputs imply.
@@ -699,8 +692,8 @@ impl Encoded<'_> {
 		k: Coeff,
 	) -> Result<Vec<Vec<BoolVal>>, Unsatisfiable> {
 		let Some((head, tail)) = terms.split_first() else {
-			// Nothing left to give, so the empty sum either satisfies what remains
-			// of the constraint or nothing can.
+			// Nothing left to give, so the empty sum either satisfies what
+			// remains of the constraint or nothing can.
 			let holds = match cmp {
 				Comparator::LessEq => 0 <= k,
 				Comparator::GreaterEq => 0 >= k,
@@ -725,11 +718,12 @@ impl Encoded<'_> {
 		};
 		for (d, guard) in steps {
 			let sub = Self::walk(db, tail, cmp, k - head.c * d)?;
-			// Advancing the walk only weakens the guard, so a step that asks of the
-			// remaining terms exactly what the step before it asked is already
-			// covered by that one. Consecutive steps land on the same demand often:
-			// dividing by a coefficient rounds to the same bound, and the order
-			// literals snap to the values the domain actually has.
+			// Advancing the walk only weakens the guard, so a step that asks of
+			// the remaining terms exactly what the step before it asked is
+			// already covered by that one. Consecutive steps land on the
+			// same demand often: dividing by a coefficient rounds to the
+			// same bound, and the order literals snap to the values the
+			// domain actually has.
 			if last.as_ref() == Some(&sub) {
 				continue;
 			}
@@ -1034,7 +1028,7 @@ mod tests {
 		cutoff: Option<Coeff>,
 	) -> (Vec<Vec<Coeff>>, Vec<IntVar>) {
 		let mut cnf = Cnf::default();
-		let mut enc = IntLinEncoder::with_config(IntLinConfig { propagate, cutoff });
+		let enc = IntLinEncoder::with_config(IntLinConfig { propagate, cutoff });
 		let xs = doms
 			.iter()
 			.enumerate()
@@ -1210,7 +1204,8 @@ mod tests {
 					.map(|(_, w)| w)
 					.sum();
 				if exact {
-					// With the upper bound the group is exactly its chosen term.
+					// With the upper bound the group is exactly its chosen
+					// term.
 					assert_eq!(value, worth, "chose {chosen:?}");
 				} else {
 					// Without it, choosing a term only forces the group up, so

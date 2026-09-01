@@ -162,7 +162,7 @@ where
 const _: () = {
 	use crate::{
 		bool_linear::{AdderEncoder, BddEncoder, SwcEncoder, TotalizerEncoder},
-		int_linear::IntegerEncoder,
+		int_linear::IntLinEncoder,
 		Cnf,
 	};
 
@@ -171,13 +171,13 @@ const _: () = {
 	takes::<Cnf, Cardinality, BddEncoder>();
 	takes::<Cnf, Cardinality, SwcEncoder>();
 	takes::<Cnf, Cardinality, TotalizerEncoder>();
-	takes::<Cnf, Cardinality, IntegerEncoder>();
+	takes::<Cnf, Cardinality, IntLinEncoder>();
 	takes::<Cnf, Cardinality, SortingNetworkEncoder>();
 	takes::<Cnf, CardinalityOne, AdderEncoder>();
 	takes::<Cnf, CardinalityOne, BddEncoder>();
 	takes::<Cnf, CardinalityOne, SwcEncoder>();
 	takes::<Cnf, CardinalityOne, TotalizerEncoder>();
-	takes::<Cnf, CardinalityOne, IntegerEncoder>();
+	takes::<Cnf, CardinalityOne, IntLinEncoder>();
 	takes::<Cnf, CardinalityOne, SortingNetworkEncoder>();
 };
 

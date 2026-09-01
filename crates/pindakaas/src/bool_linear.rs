@@ -33,7 +33,9 @@ use crate::{
 	cardinality::Cardinality,
 	cardinality_one::CardinalityOne,
 	helpers::{as_binary, bit, new_named_lit},
-	int_linear::{Decompose, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear},
+	int_linear::{
+		Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear,
+	},
 	integer::{lex_leq_const, Consistency, IntVar},
 	propositional_logic::{Formula, TseitinEncoder},
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
@@ -176,7 +178,7 @@ pub struct PosCoeff(pub(crate) Coeff);
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight
 /// Counter (SWC)
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SwcEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,
@@ -185,7 +187,7 @@ pub struct SwcEncoder {
 
 /// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized
 /// Totalizer (GT)
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TotalizerEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,
@@ -732,6 +734,16 @@ impl BddEncoder {
 	}
 }
 
+impl BddEncoder {
+	/// The encoder of the pieces this one decomposes a constraint into.
+	fn encoder(&self) -> IntLinEncoder {
+		IntLinEncoder::with_config(IntLinConfig {
+			cutoff: self.cutoff,
+			..IntLinConfig::default()
+		})
+	}
+}
+
 impl Decompose for BddEncoder {
 	/// Follow the terms one at a time, keeping a layer of the totals still
 	/// worth telling apart.
@@ -839,7 +851,7 @@ where
 		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		IntLinEncoder::default().encode_decomposed(db, con, self)
+		self.encoder().encode_decomposed(db, con, self)
 	}
 }
 
@@ -1225,7 +1237,28 @@ impl Display for PosCoeff {
 	}
 }
 
+impl Default for SwcEncoder {
+	/// Narrowing the domains before encoding is worth doing: it is what keeps
+	/// the intermediate sums of a decomposition small, and turning it off can
+	/// cost several times the clauses.
+	fn default() -> Self {
+		Self {
+			add_consistency: false,
+			add_propagation: Consistency::Bounds,
+			cutoff: None,
+		}
+	}
+}
+
 impl SwcEncoder {
+	/// The encoder of the pieces this one decomposes a constraint into.
+	fn encoder(&self) -> IntLinEncoder {
+		IntLinEncoder::with_config(IntLinConfig {
+			propagate: self.add_propagation != Consistency::None,
+			cutoff: self.cutoff,
+		})
+	}
+
 	/// Set whether to add consistency constraints on the intermediate integer
 	/// variables.
 	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
@@ -1305,7 +1338,7 @@ where
 		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		IntLinEncoder::default().encode_decomposed(db, con, self)
+		self.encoder().encode_decomposed(db, con, self)
 	}
 }
 
@@ -1322,7 +1355,28 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for SwcEncoder {
 	}
 }
 
+impl Default for TotalizerEncoder {
+	/// Narrowing the domains before encoding is worth doing: it is what keeps
+	/// the intermediate sums of a decomposition small, and turning it off can
+	/// cost several times the clauses.
+	fn default() -> Self {
+		Self {
+			add_consistency: false,
+			add_propagation: Consistency::Bounds,
+			cutoff: None,
+		}
+	}
+}
+
 impl TotalizerEncoder {
+	/// The encoder of the pieces this one decomposes a constraint into.
+	fn encoder(&self) -> IntLinEncoder {
+		IntLinEncoder::with_config(IntLinConfig {
+			propagate: self.add_propagation != Consistency::None,
+			cutoff: self.cutoff,
+		})
+	}
+
 	/// Set whether to add consistency constraints on the intermediate integer
 	/// variables.
 	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
@@ -1423,7 +1477,7 @@ where
 		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		IntLinEncoder::default().encode_decomposed(db, con, self)
+		self.encoder().encode_decomposed(db, con, self)
 	}
 }
 
@@ -2054,7 +2108,7 @@ pub(crate) mod tests {
 			panic!("a literal and an integer make a linear constraint");
 		};
 		assert_eq!(con.terms().len(), 2, "one term of each kind");
-		cnf.encode(&con, &crate::int_linear::IntegerEncoder::default())
+		cnf.encode(&con, &crate::int_linear::IntLinEncoder::default())
 			.unwrap();
 
 		use crate::{
@@ -2583,7 +2637,7 @@ pub(crate) mod tests {
 	}
 	linear_test_suite! {adder_encoder, crate::bool_linear::AdderEncoder::default()}
 
-	linear_test_suite! {integer_encoder, crate::int_linear::IntegerEncoder::default()}
+	linear_test_suite! {int_lin_encoder, crate::int_linear::IntLinEncoder::default()}
 
 	card1_test_suite! {
 		bdd_encoder_card1, crate::bool_linear::BddEncoder::default()
