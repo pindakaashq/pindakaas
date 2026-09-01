@@ -69,16 +69,18 @@ mod pindakaas {
 
 	use itertools::Itertools;
 	use pindakaas::{
-		constraint::linear::{BoolLinAggregator, LinVariant, LinearEncoder},
 		bool_linear::{
 			AdderEncoder, Comparator, LinExp as BaseBoolLinExp, Linear as BaseBoolLinCon,
 			SwcEncoder, TotalizerEncoder,
 		},
 		cardinality::{Cardinality, SortingNetworkEncoder},
 		cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
+		constraint::{
+			linear::{BoolLinAggregator, LinVariant, LinearEncoder},
+			propositional_logic::{Formula as BaseFormula, TseitinEncoder},
+		},
 		decision::integer::IntVar as BaseIntVar,
 		int_linear::NormalizedIntLinear,
-		propositional_logic::{Formula as BaseFormula, TseitinEncoder},
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as EncoderTrait, Lit as BaseLit,
 		RangeList, VarRange as BaseVarRange, Wcnf,
 	};
@@ -162,7 +164,7 @@ mod pindakaas {
 		/// Use :class:`pindakaas::bool_linear::TotalizerEncoder`, which is able
 		/// to encode all Boolean linear constraints.
 		TOTALIZER,
-		/// Use :class:`pindakaas::propositional_logic::TseitinEncoder`, which
+		/// Use :class:`pindakaas::constraint::propositional_logic::TseitinEncoder`, which
 		/// is able to encode propositional logic formulas.
 		TSEITIN,
 	}

@@ -5,3 +5,4 @@
 
 pub mod aggregate;
 pub mod sorted;
+pub mod tseitin;

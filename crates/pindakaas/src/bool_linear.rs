@@ -33,12 +33,12 @@ use rangelist::RangeList;
 use crate::{
 	cardinality::Cardinality,
 	cardinality_one::CardinalityOne,
+	constraint::propositional_logic::{Formula, TseitinEncoder},
 	decision::integer::{lex_leq_const, Consistency, IntVar},
 	helpers::{as_binary, bit, new_named_lit},
 	int_linear::{
 		Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear,
 	},
-	propositional_logic::{Formula, TseitinEncoder},
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
 	Unsatisfiable, Valuation,
 };

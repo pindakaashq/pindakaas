@@ -114,28 +114,30 @@
 //! The first abstraction that Pindakaas provides from modelling using CNF, is
 //! to allow the use of constraint based on propositional logic. This makes it
 //! easy to express most logic based constraints. In Pindakaas, propositional
-//! logic is represented using [`Formula`](propositional_logic::Formula). An
-//! easy way to create one is to use the `&`, `|`, and `^` operators, which
-//! create [`And`](propositional_logic::Formula::And),
-//! [`Or`](propositional_logic::Formula::Or) and
-//! [`Xor`](propositional_logic::Formula::Xor) instances,
+//! logic is represented using
+//! [`Formula`](constraint::propositional_logic::Formula). An easy way to create
+//! one is to use the `&`, `|`, and `^` operators, which
+//! create [`And`](constraint::propositional_logic::Formula::And),
+//! [`Or`](constraint::propositional_logic::Formula::Or) and
+//! [`Xor`](constraint::propositional_logic::Formula::Xor) instances,
 //! respectively. Other, more complex, propositional logic constructs, such as
-//! [`Formula::IfThenElse`](propositional_logic::Formula::IfThenElse) and
-//! [`Formula::Equiv`](propositional_logic::Formula::Equiv), must be constructed
-//! explicitly.
+//! [`Formula::IfThenElse`](constraint::propositional_logic::Formula::IfThenElse) and
+//! [`Formula::Equiv`](constraint::propositional_logic::Formula::Equiv), must be
+//! constructed explicitly.
 //!
-//! A [`Formula`](propositional_logic::Formula) can be used as a constraint, and
-//! as such it must be encoded into a CNF formula. In Pindakaas types implement
-//! the [`Encoder`] to translate constraint types into CNF formulas. For
-//! [`Formula`](propositional_logic::Formula), it is
-//! [`TseitinEncoder`](propositional_logic::TseitinEncoder) that implements the
-//! [`Encoder`] trait. The following fragment shows how we create two
-//! [`Formula`](propositional_logic::Formula) instances and encode them to CNF
-//! using the [`TseitinEncoder`](propositional_logic::TseitinEncoder).
+//! A [`Formula`](constraint::propositional_logic::Formula) can be used as a
+//! constraint, and as such it must be encoded into a CNF formula. In Pindakaas
+//! types implement the [`Encoder`] to translate constraint types into CNF
+//! formulas. For [`Formula`](constraint::propositional_logic::Formula), it is
+//! [`TseitinEncoder`](constraint::propositional_logic::TseitinEncoder) that
+//! implements the [`Encoder`] trait. The following fragment shows how we
+//! create two [`Formula`](constraint::propositional_logic::Formula) instances
+//! and encode them to CNF using the
+//! [`TseitinEncoder`](constraint::propositional_logic::TseitinEncoder).
 //!
 //! ```rust
 //! use pindakaas::{
-//!     propositional_logic::{Formula, TseitinEncoder},
+//!     constraint::propositional_logic::{Formula, TseitinEncoder},
 //!     ClauseDatabaseTools, Cnf,
 //! };
 //!
@@ -296,7 +298,6 @@ pub mod decision;
 pub mod encoder;
 pub(crate) mod helpers;
 pub mod int_linear;
-pub mod propositional_logic;
 pub mod solver;
 #[cfg(any(feature = "tracing", test))]
 pub mod trace;

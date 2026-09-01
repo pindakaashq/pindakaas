@@ -10,7 +10,9 @@ use std::{
 
 use itertools::Itertools;
 
-use crate::{bool_linear::LinExp, helpers::subscript_number, propositional_logic::Formula, Coeff};
+use crate::{
+	bool_linear::LinExp, constraint::propositional_logic::Formula, helpers::subscript_number, Coeff,
+};
 
 /// A helper type used to represent a Boolean value that can be either a literal
 /// for a Boolean decision variable, or a constant Boolean value.
