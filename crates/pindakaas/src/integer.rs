@@ -203,6 +203,13 @@ struct IntVarState {
 	/// what a channel is decides what a constraint on one end reaches at the
 	/// other, and which of them can be believed about the value.
 	channelled: [Option<Comparator>; 2],
+	/// Whether clauses here already say the variable holds a value of its
+	/// domain.
+	///
+	/// It has to be said once and only once. Saying it of any one encoding says
+	/// it of every other through the channels between them, so the encoding
+	/// that says it is whichever came first, and the rest are told nothing.
+	constrained: bool,
 	/// The encoding the variable's value is read from.
 	///
 	/// Every other encoding is somewhere between a bound and an equal, so only
@@ -561,8 +568,9 @@ impl IntVar {
 			Some(bin) => bin,
 			None => {
 				let bin = BinaryEncoding::new(db, &domain, &self.label());
-				if self.0.borrow().add_consistency {
+				if self.needs_constraining() {
 					bin.consistent(db, &domain)?;
+					self.0.borrow_mut().constrained = true;
 				}
 				bin
 			}
@@ -676,8 +684,12 @@ impl IntVar {
 			))),
 		};
 		// One value and no more, which the order encoding gets from its chain
-		// but the direct encoding has to be told.
-		dir.consistent(db)?;
+		// but the direct encoding has to be told — and an expensive thing to
+		// tell it, being quadratic in the size of the domain.
+		if self.needs_constraining() {
+			dir.consistent(db)?;
+			self.0.borrow_mut().constrained = true;
+		}
 		self.install_direct(db, dir.clone(), None)?;
 		Ok(dir)
 	}
@@ -742,7 +754,14 @@ impl IntVar {
 	/// a bound on it, and has no business holding one.
 	pub fn constrain<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		let (lead, order, direct, binary, domain) = {
-			let state = self.0.borrow();
+			let mut state = self.0.borrow_mut();
+			// Said once and only once. An encoding created for this variable
+			// was held to the domain as it was made, and everything else is
+			// tied to that one, so there is nothing left here to say.
+			if state.constrained {
+				return Ok(());
+			}
+			state.constrained = true;
 			(
 				state.lead,
 				state.order.clone(),
@@ -1410,8 +1429,24 @@ impl IntVar {
 			binary: None,
 			direct: None,
 			channelled: [None; 2],
+			constrained: false,
 			lead: None,
 		})))
+	}
+
+	/// Whether an encoding being created has to be held to the domain itself.
+	///
+	/// It does when it is the variable's first, and does not when it is not:
+	/// the channel [`Self::reconcile`] is about to build ties it to an encoding
+	/// that already holds a value of the domain, whether by clauses here or by
+	/// the promise a caller made about its literals.
+	fn needs_constraining(&self) -> bool {
+		let state = self.0.borrow();
+		state.add_consistency
+			&& !state.constrained
+			&& state.order.is_none()
+			&& state.binary.is_none()
+			&& state.direct.is_none()
 	}
 
 	/// Whether the variable is better held in binary than in order form.
@@ -1441,7 +1476,11 @@ impl IntVar {
 		}
 		let domain = self.0.borrow().domain.clone();
 		let ord = OrderEncoding::new(db, &domain, &self.label());
+		// Not optional the way the other two are: without the chain the
+		// literals do not describe a value, so there is nothing to channel. It
+		// also holds the encoding to the domain, the values being its own.
 		ord.consistent(db)?;
+		self.0.borrow_mut().constrained = true;
 
 		self.install_order(db, ord.clone(), None)?;
 		Ok(ord)
@@ -2349,6 +2388,34 @@ pub(crate) mod tests {
 			assert!(tied > 0, "{partial:?} leaves the two to be tied together");
 			assert_eq!(constrained, 1, "which is what carries the constraint");
 		}
+	}
+
+	#[test]
+	fn an_encoding_made_beside_another_is_told_nothing() {
+		// A created encoding is held to the domain only where it is the
+		// variable's first. Beside an existing one the channel carries that,
+		// whether the existing one was held there by clauses of its own or by
+		// the promise a caller made about its literals — so both cost the same,
+		// and neither pays twice for the hole at 2.
+		let domain = RangeList::from_elements([0, 1, 3]);
+		let cost = |trusted: bool| {
+			let mut cnf = Cnf::default();
+			let x = IntVar::new(domain.clone());
+			if trusted {
+				let lits = cnf.new_var_range(2).iter_lits().collect_vec();
+				x.with_order_encoding(&mut cnf, &lits, None).unwrap();
+			} else {
+				let _ = x.order_encoding(&mut cnf).unwrap();
+			}
+			let before = cnf.num_clauses();
+			let _ = x.binary_encoding(&mut cnf).unwrap();
+			cnf.num_clauses() - before
+		};
+		assert_eq!(
+			cost(true),
+			cost(false),
+			"a promised order encoding carries as much as a constrained one"
+		);
 	}
 
 	#[test]
