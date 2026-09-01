@@ -1,12 +1,5 @@
-//! Turning a linear constraint into the form an encoder takes.
-//!
-//! A constraint as written is a sum of literals with coefficients, sometimes
-//! with side constraints saying how some of them relate. Aggregation folds the
-//! duplicates together, makes every coefficient positive, divides through by
-//! what they have in common, and settles which terms belong with which. What
-//! it is left with is either a constraint about counting, which has encoders of
-//! its own, or a sum of integers — each group being an integer already,
-//! encoded on the literals it was found on.
+//! Reading a general Boolean linear constraint into the narrower one it is,
+//! and handing that to an encoder that takes it.
 
 use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
@@ -15,33 +8,14 @@ use crate::{
 	bool_linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
 	cardinality::Cardinality,
 	cardinality_one::{BitwiseEncoder, CardinalityOne},
-	constraint::sorted::{Sorted, SortedEncoder},
+	constraint::{
+		linear::LinVariant,
+		sorted::{Sorted, SortedEncoder},
+	},
 	decision::integer::IntVar,
 	int_linear::{NormalizedIntLinear, Term},
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
 };
-
-#[derive(Debug)]
-/// What a linear constraint turned out to be once aggregated.
-///
-/// Aggregation works out which terms belong together and what relates them,
-/// and hands the general case on as a constraint over the integers those
-/// groups encode. What it recognises as counting rather than weighing keeps a
-/// form of its own, there being encoders that do only that.
-pub enum LinVariant {
-	/// Most general form: a sum of integer terms that must be
-	/// (smaller-or-)equal to a constant. The groups the aggregator recognised
-	/// have each become an integer, encoded on the literals they were found on.
-	Linear(NormalizedIntLinear),
-	/// Cardinality constraint (also known as a counting constraint): a sum of
-	/// Boolean literals that must be (smaller-or-)equal to a positive constant.
-	Cardinality(Cardinality),
-	/// Cardinality constraint with the constant 1 (i.e. at-least or exactly 1
-	/// literal must be true).
-	CardinalityOne(CardinalityOne),
-	/// Constraint was trivially encoded into clauses.
-	Trivial,
-}
 
 impl BoolLinAggregator {
 	#[cfg_attr(

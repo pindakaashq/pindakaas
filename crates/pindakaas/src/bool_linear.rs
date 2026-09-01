@@ -4,20 +4,21 @@
 //! Boolean linear constraints can be modelled using [`LinExp`] and
 //! subsequently [`Linear`]. These representations can then be normalized
 //! and simplified using
-//! [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator), which reads the
-//! integers a group of literals stands for and yields a
+//! [`BoolLinAggregator`](crate::encoder::aggregate::BoolLinAggregator), which
+//! reads the integers a group of literals stands for and yields a
 //! [`NormalizedIntLinear`](crate::int_linear::NormalizedIntLinear). That is
 //! what the [`AdderEncoder`], [`BddEncoder`], [`SwcEncoder`] and
 //! [`TotalizerEncoder`] encode.
 //!
 //! This module contains some additional helper types that can be used to
 //! simplify this encoding process.
-//! [`StaticLinEncoder`](crate::aggregator::StaticLinEncoder) can help choose an
-//! encoder based on the [`LinVariant`](crate::aggregator::LinVariant) produced
-//! by [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator).
-//! [`LinearEncoder`](crate::aggregator::LinearEncoder) can be used to pipeline
-//! [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator) and a
-//! [`LinVariant`](crate::aggregator::LinVariant) [`Encoder`].
+//! [`StaticLinEncoder`](crate::encoder::aggregate::StaticLinEncoder) can help
+//! choose an encoder based on the
+//! [`LinVariant`](crate::constraint::linear::LinVariant) produced by
+//! [`BoolLinAggregator`](crate::encoder::aggregate::BoolLinAggregator).
+//! [`LinearEncoder`](crate::encoder::aggregate::LinearEncoder) can be used to
+//! pipeline [`BoolLinAggregator`](crate::encoder::aggregate::BoolLinAggregator)
+//! and a [`LinVariant`](crate::constraint::linear::LinVariant) [`Encoder`].
 
 use std::{
 	cmp::{max, min, Ordering},
@@ -1887,11 +1888,11 @@ pub(crate) mod tests {
 	use traced_test::test;
 
 	use crate::{
-		aggregator::{BoolLinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},
 		bool_linear::{
 			AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, Linear, PosCoeff, SwcEncoder,
 			TotalizerEncoder,
 		},
+		constraint::linear::{BoolLinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},
 		cardinality::tests::card_test_suite,
 		cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
 		helpers::tests::{

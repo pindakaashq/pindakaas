@@ -124,13 +124,14 @@
 //! [`Formula::Equiv`](propositional_logic::Formula::Equiv), must be constructed
 //! explicitly.
 //!
-//! A [`Formula`](propositional_logic::Formula) can be used as a constraint, and as such it must be encoded
-//! into a CNF formula. In Pindakaas types implement the [`Encoder`] to
-//! translate constraint types into CNF formulas. For [`Formula`](propositional_logic::Formula), it is
+//! A [`Formula`](propositional_logic::Formula) can be used as a constraint, and
+//! as such it must be encoded into a CNF formula. In Pindakaas types implement
+//! the [`Encoder`] to translate constraint types into CNF formulas. For
+//! [`Formula`](propositional_logic::Formula), it is
 //! [`TseitinEncoder`](propositional_logic::TseitinEncoder) that implements the
 //! [`Encoder`] trait. The following fragment shows how we create two
-//! [`Formula`](propositional_logic::Formula) instances and encode them to CNF using the
-//! [`TseitinEncoder`](propositional_logic::TseitinEncoder).
+//! [`Formula`](propositional_logic::Formula) instances and encode them to CNF
+//! using the [`TseitinEncoder`](propositional_logic::TseitinEncoder).
 //!
 //! ```rust
 //! use pindakaas::{
@@ -173,9 +174,9 @@
 //!
 //! Before the constraint is encoded, it is first simplified, normalized, and
 //! specialized by the
-//! [`BoolLinAggregator::aggregate`](aggregator::BoolLinAggregator::aggregate).
+//! [`BoolLinAggregator::aggregate`](encoder::aggregate::BoolLinAggregator::aggregate).
 //! The result of this is a constraint of the form
-//! [`LinVariant`](aggregator::LinVariant). Depending on the form of
+//! [`LinVariant`](constraint::linear::LinVariant). Depending on the form of
 //! the specialized constraint, the constraint can be encoded using different
 //! encoding methods. For example, if the constraint was found to be a “at most
 //! one” constraint, then it could use the
@@ -183,17 +184,18 @@
 //! use general pseudo-Boolean encoders, such as the
 //! [`TotalizerEncoder`](bool_linear::TotalizerEncoder). Making the choice of
 //! encoding can be streamlined by using the
-//! [`StaticLinEncoder`](aggregator::StaticLinEncoder), which makes a choice
-//! based on the constraint's variant.
+//! [`StaticLinEncoder`](encoder::aggregate::StaticLinEncoder), which makes a
+//! choice based on the constraint's variant.
 //!
-//! Additionally, the [`LinearEncoder`](aggregator::LinearEncoder) is meant to
+//! Additionally, the [`LinearEncoder`](encoder::aggregate::LinearEncoder) is
 //! help streamline the process of aggregating and encoding linear expressions.
 //! The following fragment shows the creation of a linear constraint and the
-//! usage of the [`LinearEncoder`](aggregator::LinearEncoder) to encode it.
+//! usage of the [`LinearEncoder`](encoder::aggregate::LinearEncoder) to encode
+//! it.
 //!
 //! ```rust
 //! use pindakaas::{
-//!     aggregator::{BoolLinAggregator, LinearEncoder, StaticLinEncoder},
+//!     constraint::linear::{BoolLinAggregator, LinearEncoder, StaticLinEncoder},
 //!     bool_linear::{Linear, Comparator},
 //!     Cnf, ClauseDatabaseTools
 //! };
@@ -286,7 +288,6 @@
 //! Optimisation Technologies, Integrated Methodologies, and Applications
 //! (OPTIMA), Project ID IC200100009.
 
-pub mod aggregator;
 pub mod bool_linear;
 pub mod cardinality;
 pub mod cardinality_one;

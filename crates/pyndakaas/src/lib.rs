@@ -69,7 +69,7 @@ mod pindakaas {
 
 	use itertools::Itertools;
 	use pindakaas::{
-		aggregator::{BoolLinAggregator, LinVariant, LinearEncoder},
+		constraint::linear::{BoolLinAggregator, LinVariant, LinearEncoder},
 		bool_linear::{
 			AdderEncoder, Comparator, LinExp as BaseBoolLinExp, Linear as BaseBoolLinCon,
 			SwcEncoder, TotalizerEncoder,
