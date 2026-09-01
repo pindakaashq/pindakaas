@@ -5,16 +5,18 @@ pub use crate::encoder::{
 	product::ProductEncoder,
 };
 use crate::{
-	cardinality::Cardinality,
-	constraint::bool_linear::{Comparator, LimitComp},
+	constraint::{
+		bool_linear::{Comparator, LimitComp},
+		cardinality::Cardinality,
+	},
 	Checker, ClauseDatabase, ClauseDatabaseTools, Lit, Result, Valuation,
 };
 
 #[derive(Debug, Clone)]
 /// Linear constraint that enforces that ∑ litᵢ ≷ 1.
 ///
-/// Compared to [`Cardinality`](crate::cardinality::Cardinality), the right hand
-/// side constant is always 1.
+/// Compared to [`Cardinality`](crate::constraint::cardinality::Cardinality),
+/// the right hand side constant is always 1.
 ///
 /// All literals in the constraint are guaranteed to be from distinct Boolean
 /// variables.

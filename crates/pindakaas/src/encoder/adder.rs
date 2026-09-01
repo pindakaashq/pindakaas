@@ -9,9 +9,9 @@ use std::cmp::max;
 use itertools::Itertools;
 
 use crate::{
-	cardinality::Cardinality,
 	constraint::{
 		bool_linear::{LimitComp, PosCoeff},
+		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		int_linear::NormalizedIntLinear,
 		propositional_logic::{Formula, TseitinEncoder},

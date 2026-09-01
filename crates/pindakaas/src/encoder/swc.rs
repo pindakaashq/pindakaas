@@ -6,9 +6,9 @@
 use itertools::Itertools;
 
 use crate::{
-	cardinality::Cardinality,
 	constraint::{
 		bool_linear::Comparator,
+		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		int_linear::{
 			Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear,

@@ -13,9 +13,9 @@ use rangelist::RangeList;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	cardinality::Cardinality,
 	constraint::{
 		bool_linear::Comparator,
+		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		int_linear::{Decompose, IntLinear, NormalizedIntLinear, Term},
 	},

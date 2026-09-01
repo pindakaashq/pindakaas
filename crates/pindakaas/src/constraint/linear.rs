@@ -6,11 +6,10 @@
 //! these it is, so that a narrower constraint can be given to an encoder that
 //! specialises in it.
 
-pub use crate::encoder::aggregate::{BoolLinAggregator, LinearEncoder, StaticLinEncoder};
-use crate::{
-	cardinality::Cardinality,
-	constraint::{cardinality_one::CardinalityOne, int_linear::NormalizedIntLinear},
+use crate::constraint::{
+	cardinality::Cardinality, cardinality_one::CardinalityOne, int_linear::NormalizedIntLinear,
 };
+pub use crate::encoder::aggregate::{BoolLinAggregator, LinearEncoder, StaticLinEncoder};
 
 #[derive(Debug)]
 /// What a linear constraint turned out to be once aggregated.

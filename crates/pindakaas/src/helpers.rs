@@ -596,12 +596,12 @@ pub(crate) mod tests {
 		pub(crate) use itertools::Itertools;
 
 		pub(crate) use crate::{
-			cardinality::{tests::card_test_suite, Cardinality, SortingNetworkEncoder},
 			constraint::{
 				bool_linear::{
 					AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, Linear, PosCoeff,
 					SwcEncoder, TotalizerEncoder,
 				},
+				cardinality::{tests::card_test_suite, Cardinality, SortingNetworkEncoder},
 				cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
 				int_linear::{NormalizedIntLinear, Term},
 				linear::{BoolLinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},

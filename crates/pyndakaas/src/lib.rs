@@ -69,12 +69,12 @@ mod pindakaas {
 
 	use itertools::Itertools;
 	use pindakaas::{
-		cardinality::{Cardinality, SortingNetworkEncoder},
 		constraint::{
 			bool_linear::{
 				AdderEncoder, Comparator, LinExp as BaseBoolLinExp, Linear as BaseBoolLinCon,
 				SwcEncoder, TotalizerEncoder,
 			},
+			cardinality::{Cardinality, SortingNetworkEncoder},
 			cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
 			int_linear::NormalizedIntLinear,
 			linear::{BoolLinAggregator, LinVariant, LinearEncoder},
@@ -159,8 +159,8 @@ mod pindakaas {
 		/// Use :class:`pindakaas::constraint::bool_linear::SwcEncoder`, which
 		/// is able to encode all Boolean linear constraints.
 		SORTED_WEIGHT_COUNTER,
-		/// Use :class:`pindakaas::cardinality::SwcEncoder`, which is able to
-		/// encode all Boolean cardinality constraints.
+		/// Use :class:`pindakaas::constraint::cardinality::SwcEncoder`, which
+		/// is able to encode all Boolean cardinality constraints.
 		SORTING_NETWORK,
 		/// Use :class:`pindakaas::constraint::bool_linear::TotalizerEncoder`,
 		/// which is able to encode all Boolean linear constraints.

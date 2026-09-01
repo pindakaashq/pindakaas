@@ -292,7 +292,6 @@
 //! Optimisation Technologies, Integrated Methodologies, and Applications
 //! (OPTIMA), Project ID IC200100009.
 
-pub mod cardinality;
 pub mod constraint;
 pub mod decision;
 pub mod encoder;

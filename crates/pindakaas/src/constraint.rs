@@ -4,6 +4,7 @@
 //! [`Encoder`](crate::Encoder)s that take it.
 
 pub mod bool_linear;
+pub mod cardinality;
 pub mod cardinality_one;
 pub mod int_linear;
 pub mod linear;

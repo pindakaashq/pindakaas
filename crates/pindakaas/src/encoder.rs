@@ -12,6 +12,7 @@ pub mod ladder;
 pub mod pairwise;
 pub mod product;
 pub mod sorted;
+pub mod sorting_network;
 pub mod swc;
 pub mod totalizer;
 pub mod tseitin;

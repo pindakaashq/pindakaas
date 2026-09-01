@@ -5,9 +5,9 @@ use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
-	cardinality::Cardinality,
 	constraint::{
 		bool_linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
+		cardinality::Cardinality,
 		cardinality_one::{BitwiseEncoder, CardinalityOne},
 		int_linear::{NormalizedIntLinear, Term},
 		linear::LinVariant,
