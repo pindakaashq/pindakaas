@@ -13,7 +13,9 @@ use rangelist::RangeList;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	bool_linear::{AdderEncoder, Comparator, LimitComp, LinMarker, PosCoeff},
+	bool_linear::{AdderEncoder, Comparator, LimitComp, PosCoeff},
+	cardinality::Cardinality,
+	cardinality_one::CardinalityOne,
 	helpers::{
 		div_ceil, div_floor, new_named_lit,
 		scm::{ScmObjective, ScmOperation, ScmSolution},
@@ -188,7 +190,18 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedIntLinear> for IntegerEn
 	}
 }
 
-impl LinMarker for IntegerEncoder {}
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for IntegerEncoder {
+	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
+		let con = con.as_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for IntegerEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
 
 /// Configuration for an [`IntLinEncoder`].
 #[derive(Clone, Debug)]

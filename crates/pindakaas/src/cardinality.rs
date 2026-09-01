@@ -6,16 +6,13 @@
 //! CNF, as well as any [`Encoder`] of a linear constraint.
 
 use crate::{
-	bool_linear::{Comparator, LimitComp, LinMarker, PosCoeff},
+	bool_linear::{Comparator, LimitComp, PosCoeff},
 	cardinality_one::CardinalityOne,
+	int_linear::{NormalizedIntLinear, Term},
 	integer::IntVar,
 	sorted::{Sorted, SortedEncoder},
 	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
 };
-
-// local marker trait, to ensure the previous definition only applies within
-// this crate
-pub(crate) trait CardMarker {}
 
 #[derive(Clone, Debug)]
 /// Linear constraint that enforces that ∑ litᵢ ≷ k.
@@ -39,6 +36,29 @@ pub struct SortingNetworkEncoder {
 }
 
 impl Cardinality {
+	/// Read the constraint as the linear constraint it is.
+	///
+	/// Its terms all count for one and none of them constrains another, so each
+	/// is an integer worth one or nothing.
+	pub(crate) fn as_linear<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result<NormalizedIntLinear, Unsatisfiable> {
+		let terms = self
+			.lits
+			.iter()
+			.enumerate()
+			.map(|(i, &l)| {
+				Term::from_at_most_one(db, &[(l, PosCoeff::new(1))], &format!("x{i}"), false)
+			})
+			.collect::<Result<Vec<_>, _>>()?;
+		Ok(NormalizedIntLinear::from_terms(
+			terms,
+			self.cmp.clone(),
+			self.k,
+		))
+	}
+
 	/// Get the comparator of the cardinality constraint.
 	pub fn comparator(&self) -> Comparator {
 		self.cmp.clone().into()
@@ -90,20 +110,6 @@ impl From<CardinalityOne> for Cardinality {
 	}
 }
 
-// Automatically implement AtMostOne encoding when you can encode Cardinality
-// constraints
-impl<Db, Enc> Encoder<Db, CardinalityOne> for Enc
-where
-	Db: ClauseDatabase + ?Sized,
-	Enc: Encoder<Db, Cardinality> + CardMarker,
-{
-	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
-		self.encode(db, &Cardinality::from(con.clone()))
-	}
-}
-
-impl<M: LinMarker> CardMarker for M {}
-
 impl SortingNetworkEncoder {
 	// TODO: Sorted is currently private.
 	/// Set the [`Encoder`] used to encode the `Sorted` constraints within the
@@ -114,7 +120,11 @@ impl SortingNetworkEncoder {
 	}
 }
 
-impl CardMarker for SortingNetworkEncoder {}
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for SortingNetworkEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
 
 impl Default for SortingNetworkEncoder {
 	fn default() -> Self {
@@ -141,6 +151,35 @@ where
 			.encode(db, &Sorted::new(card.lits.as_slice(), card.cmp.clone(), &y))
 	}
 }
+
+/// Every encoder that takes a cardinality or an at-most-one constraint.
+///
+/// These used to follow from a pair of blanket implementations over marker
+/// traits, which meant nothing said anywhere which encoder took which
+/// constraint. Naming them costs a line each and makes the set something that
+/// can be read, and lost by accident only if this stops compiling.
+#[cfg(test)]
+const _: () = {
+	use crate::{
+		bool_linear::{AdderEncoder, BddEncoder, SwcEncoder, TotalizerEncoder},
+		int_linear::IntegerEncoder,
+		Cnf,
+	};
+
+	const fn takes<Db: ClauseDatabase + ?Sized, C, E: Encoder<Db, C>>() {}
+	takes::<Cnf, Cardinality, AdderEncoder>();
+	takes::<Cnf, Cardinality, BddEncoder>();
+	takes::<Cnf, Cardinality, SwcEncoder>();
+	takes::<Cnf, Cardinality, TotalizerEncoder>();
+	takes::<Cnf, Cardinality, IntegerEncoder>();
+	takes::<Cnf, Cardinality, SortingNetworkEncoder>();
+	takes::<Cnf, CardinalityOne, AdderEncoder>();
+	takes::<Cnf, CardinalityOne, BddEncoder>();
+	takes::<Cnf, CardinalityOne, SwcEncoder>();
+	takes::<Cnf, CardinalityOne, TotalizerEncoder>();
+	takes::<Cnf, CardinalityOne, IntegerEncoder>();
+	takes::<Cnf, CardinalityOne, SortingNetworkEncoder>();
+};
 
 #[cfg(test)]
 pub(crate) mod tests {

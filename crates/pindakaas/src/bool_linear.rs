@@ -31,6 +31,7 @@ use rangelist::RangeList;
 
 use crate::{
 	cardinality::Cardinality,
+	cardinality_one::CardinalityOne,
 	helpers::{as_binary, bit, new_named_lit},
 	int_linear::{Decompose, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear},
 	integer::{lex_leq_const, Consistency, IntVar},
@@ -166,10 +167,6 @@ pub(crate) enum LimitComp {
 	Equal,
 	LessEq,
 }
-
-/// Internal marker trait to ensure the other trait implementations only applies
-/// to encoders implemented by this crate.
-pub(crate) trait LinMarker {}
 
 // TODO add EO, and probably something for Unconstrained
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -585,7 +582,18 @@ where
 	}
 }
 
-impl LinMarker for AdderEncoder {}
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for AdderEncoder {
+	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
+		let con = con.as_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for AdderEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
 
 impl BddEncoder {
 	fn bdd(
@@ -835,7 +843,18 @@ where
 	}
 }
 
-impl LinMarker for BddEncoder {}
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for BddEncoder {
+	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
+		let con = con.as_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for BddEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
 
 impl LinExp {
 	/// Add a constant to the linear expression
@@ -1168,30 +1187,6 @@ impl From<LimitComp> for Comparator {
 	}
 }
 
-// Automatically implement Cardinality encoding when you can encode Linear
-// constraints
-impl<Db, Enc> Encoder<Db, Cardinality> for Enc
-where
-	Db: ClauseDatabase + ?Sized,
-	Enc: Encoder<Db, NormalizedIntLinear> + LinMarker,
-{
-	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
-		// A cardinality constraint is a linear one whose terms all count for
-		// one and none of which constrains another, so it is read as an
-		// integer constraint the same way.
-		let terms = con
-			.lits
-			.iter()
-			.enumerate()
-			.map(|(i, &l)| {
-				Term::from_at_most_one(db, &[(l, PosCoeff::new(1))], &format!("x{i}"), false)
-			})
-			.collect::<Result<Vec<_>, _>>()?;
-		let con = NormalizedIntLinear::from_terms(terms, con.cmp.clone(), con.k);
-		self.encode(db, &con)
-	}
-}
-
 impl Display for LimitComp {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -1314,7 +1309,18 @@ where
 	}
 }
 
-impl LinMarker for SwcEncoder {}
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for SwcEncoder {
+	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
+		let con = con.as_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for SwcEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
 
 impl TotalizerEncoder {
 	/// Set whether to add consistency constraints on the intermediate integer
@@ -1421,7 +1427,18 @@ where
 	}
 }
 
-impl LinMarker for TotalizerEncoder {}
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for TotalizerEncoder {
+	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
+		let con = con.as_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for TotalizerEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
 
 #[cfg(test)]
 pub(crate) mod tests {
