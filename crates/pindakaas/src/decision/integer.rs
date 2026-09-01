@@ -1670,11 +1670,11 @@ pub(crate) mod tests {
 
 	use crate::{
 		bool_linear::{Comparator, PosCoeff},
+		decision::integer::{lex_geq_const, lex_leq_const, BinaryEncoding, IntVar, Lead},
 		helpers::{
 			binary_value,
 			tests::{all_binary_solutions, binary_literals, expect_file},
 		},
-		integer::{lex_geq_const, lex_leq_const, BinaryEncoding, IntVar, Lead},
 		solver::{cadical::Cadical, SolveResult, Solver},
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Lit, Valuation,
 	};

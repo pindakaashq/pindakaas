@@ -87,7 +87,8 @@ pub(crate) use new_named_lit;
 pub(crate) use new_named_var_range;
 
 use crate::{
-	bool_linear::PosCoeff, integer::BinaryEncoding, BoolVal, ClauseDatabase, Coeff, Valuation,
+	bool_linear::PosCoeff, decision::integer::BinaryEncoding, BoolVal, ClauseDatabase, Coeff,
+	Valuation,
 };
 
 /// The value of a binary encoding under an assignment.

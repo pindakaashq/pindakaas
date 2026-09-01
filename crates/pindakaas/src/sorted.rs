@@ -14,8 +14,8 @@ use rustc_hash::FxHashMap;
 
 use crate::{
 	bool_linear::{LimitComp, LinExp},
+	decision::integer::IntVar,
 	int_linear::{IntLinEncoder, IntLinear, Term},
-	integer::IntVar,
 	Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 	Valuation,
 };
@@ -546,8 +546,8 @@ mod tests {
 
 	use crate::{
 		bool_linear::LimitComp,
+		decision::integer::IntVar,
 		helpers::tests::{assert_solutions, expect_file},
-		integer::IntVar,
 		sorted::{Sorted, SortedEncoder, SortedStrategy},
 		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Var, VarRange,
 	};

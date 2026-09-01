@@ -32,11 +32,11 @@ use rangelist::RangeList;
 use crate::{
 	cardinality::Cardinality,
 	cardinality_one::CardinalityOne,
+	decision::integer::{lex_leq_const, Consistency, IntVar},
 	helpers::{as_binary, bit, new_named_lit},
 	int_linear::{
 		Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear,
 	},
-	integer::{lex_leq_const, Consistency, IntVar},
 	propositional_logic::{Formula, TseitinEncoder},
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
 	Unsatisfiable, Valuation,
@@ -2070,7 +2070,7 @@ pub(crate) mod tests {
 		// at all because a constraint with integer terms keeps its bound.
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
-		let y = crate::integer::IntVar::new(0..=3).with_label("y");
+		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
 		let con = Linear::new(a * 2 + y.clone() * 3, Comparator::LessEq, 0);
 		let LinVariant::Linear(con) = BoolLinAggregator::default()
 			.aggregate(&mut cnf, &con)
@@ -2098,7 +2098,7 @@ pub(crate) mod tests {
 		// integer it stands for, the integer passes through as it came.
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
-		let y = crate::integer::IntVar::new(0..=3).with_label("y");
+		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
 
 		let con = Linear::new(a * 3 + y.clone() * 5, Comparator::LessEq, 11);
 		let LinVariant::Linear(con) = BoolLinAggregator::default()
@@ -2661,13 +2661,13 @@ pub(crate) mod tests {
 	linear_test_suite!(
 		totalizer_encoder_prop_bounds,
 		crate::bool_linear::TotalizerEncoder::default()
-			.with_propagation(crate::integer::Consistency::Bounds)
+			.with_propagation(crate::decision::integer::Consistency::Bounds)
 	);
 
 	linear_test_suite!(
 		totalizer_encoder_prop_doms,
 		crate::bool_linear::TotalizerEncoder::default()
-			.with_propagation(crate::integer::Consistency::Domain)
+			.with_propagation(crate::decision::integer::Consistency::Domain)
 	);
 
 	#[test]

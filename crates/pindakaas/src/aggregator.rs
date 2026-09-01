@@ -15,8 +15,8 @@ use crate::{
 	bool_linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
 	cardinality::Cardinality,
 	cardinality_one::{BitwiseEncoder, CardinalityOne},
+	decision::integer::IntVar,
 	int_linear::{NormalizedIntLinear, Term},
-	integer::IntVar,
 	sorted::{Sorted, SortedEncoder},
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
 };

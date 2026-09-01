@@ -8,8 +8,8 @@
 use crate::{
 	bool_linear::{Comparator, LimitComp, PosCoeff},
 	cardinality_one::CardinalityOne,
+	decision::integer::IntVar,
 	int_linear::{NormalizedIntLinear, Term},
-	integer::IntVar,
 	sorted::{Sorted, SortedEncoder},
 	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
 };

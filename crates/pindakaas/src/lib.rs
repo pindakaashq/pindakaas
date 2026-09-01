@@ -114,19 +114,22 @@
 //! The first abstraction that Pindakaas provides from modelling using CNF, is
 //! to allow the use of constraint based on propositional logic. This makes it
 //! easy to express most logic based constraints. In Pindakaas, propositional
-//! logic is represented using [`Formula`]. An easy way to create [`Formula`]
-//! instances is to use the `&`, `|`, and `^` operators, which will
-//! create[`Formula::And`], [`Formula::Or`], and[`Formula::Xor`] instances,
+//! logic is represented using [`Formula`](propositional_logic::Formula). An
+//! easy way to create one is to use the `&`, `|`, and `^` operators, which
+//! create [`And`](propositional_logic::Formula::And),
+//! [`Or`](propositional_logic::Formula::Or) and
+//! [`Xor`](propositional_logic::Formula::Xor) instances,
 //! respectively. Other, more complex, propositional logic constructs, such as
-//! [`Formula::IfThenElse`] and [`Formula::Equiv`], must be constructed
+//! [`Formula::IfThenElse`](propositional_logic::Formula::IfThenElse) and
+//! [`Formula::Equiv`](propositional_logic::Formula::Equiv), must be constructed
 //! explicitly.
 //!
-//! A [`Formula`] can be used as a constraint, and as such it must be encoded
+//! A [`Formula`](propositional_logic::Formula) can be used as a constraint, and as such it must be encoded
 //! into a CNF formula. In Pindakaas types implement the [`Encoder`] to
-//! translate constraint types into CNF formulas. For [`Formula`], it is
+//! translate constraint types into CNF formulas. For [`Formula`](propositional_logic::Formula), it is
 //! [`TseitinEncoder`](propositional_logic::TseitinEncoder) that implements the
 //! [`Encoder`] trait. The following fragment shows how we create two
-//! [`Formula`] instances and encode them to CNF using the
+//! [`Formula`](propositional_logic::Formula) instances and encode them to CNF using the
 //! [`TseitinEncoder`](propositional_logic::TseitinEncoder).
 //!
 //! ```rust
@@ -154,14 +157,15 @@
 //! The most important feature of Pindakaas is its ability to encode Boolean and
 //! integer linear constraints into CNF formulas. This provides the ability to
 //! model and solve a wide range of problems. To model a linear constraint, we
-//! start by creating linear expressions, represented using [`LinExp`]. We can
-//! use standard operators, such as `+` and `-`, to add terms together, and `*`
-//! to multiply one by a constant. A term is either a [`Lit`], worth its
-//! coefficient when it holds, or an [`IntVar`](integer::IntVar), worth its
-//! coefficient times whichever of its values it takes — so `x * 3 + y * 5`
+//! start by creating linear expressions, represented using
+//! [`LinExp`](bool_linear::LinExp). We can use standard operators, such as `+`
+//! and `-`, to add terms together, and `*` to multiply one by a constant. A
+//! term is either a [`Lit`], worth its
+//! coefficient when it holds, or an [`IntVar`](decision::integer::IntVar),
+//! worth its coefficient times whichever value it takes — so `x * 3 + y * 5`
 //! reads the same whichever kind each side is.
 //!
-//! [`LinExp`] can be turned into a constraint using the
+//! [`LinExp`](bool_linear::LinExp) can be turned into a constraint using the
 //! [`Linear::new`](bool_linear::Linear::new) method. It takes the
 //! linear expression as the left hand side, then a
 //! [`Comparator`](bool_linear::Comparator), and then a constant as the right
@@ -211,8 +215,8 @@
 //! ## Integer Linear Constraints
 //!
 //! A constraint can also be stated over integer variables directly. An
-//! [`IntVar`](integer::IntVar) is created with the domain it ranges over, and
-//! holds whichever Boolean encodings its constraints turn out to need — order
+//! [`IntVar`](decision::integer::IntVar) is created with the domain it ranges
+//! over, and holds whichever Boolean encodings its constraints need — order
 //! literals for a sequential decomposition, bits for an adder, a one-hot view
 //! for an at-most-one group — channelling between them when more than one is
 //! called for. Nothing has to be chosen in advance, and a second variable is
@@ -230,7 +234,7 @@
 //! use pindakaas::{
 //!     bool_linear::Comparator,
 //!     int_linear::{IntLinEncoder, IntLinear, Term},
-//!     integer::IntVar,
+//!     decision::integer::IntVar,
 //!     solver::{cadical::Cadical, SolveResult, Solver},
 //!     Cnf, Encoder, RangeList,
 //! };
@@ -289,7 +293,6 @@ pub mod cardinality_one;
 pub mod decision;
 pub(crate) mod helpers;
 pub mod int_linear;
-pub mod integer;
 pub mod propositional_logic;
 pub mod solver;
 pub mod sorted;
@@ -311,11 +314,11 @@ use std::{
 use itertools::{traits::HomogeneousTuple, Itertools};
 pub use rangelist::RangeList;
 
+use crate::solver::VarFactory;
 pub use crate::{
 	decision::boolean::{BoolVal, Lit, Var, VarRange},
 	helpers::AsDynClauseDatabase,
 };
-use crate::solver::VarFactory;
 
 /// Checker is a trait implemented by types that represent constraints. The
 /// [`Checker::check`] methods checks whether an assignment (often referred to
