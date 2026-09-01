@@ -8,9 +8,12 @@ use std::{cmp::min, hash, mem, sync::Mutex};
 use rustc_hash::FxHashMap;
 
 use crate::{
-	constraint::{bool_linear::LimitComp, sorted::Sorted},
+	constraint::{
+		bool_linear::LimitComp,
+		int_linear::{IntLinEncoder, IntLinear, Term},
+		sorted::Sorted,
+	},
 	decision::integer::IntVar,
-	int_linear::{IntLinEncoder, IntLinear, Term},
 	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
 

@@ -6,8 +6,8 @@
 //! and simplified using
 //! [`BoolLinAggregator`](crate::encoder::aggregate::BoolLinAggregator), which
 //! reads the integers a group of literals stands for and yields a
-//! [`NormalizedIntLinear`](crate::int_linear::NormalizedIntLinear). That is
-//! what the [`AdderEncoder`], [`BddEncoder`], [`SwcEncoder`] and
+//! [`NormalizedIntLinear`](crate::constraint::int_linear::NormalizedIntLinear).
+//! That is what the [`AdderEncoder`], [`BddEncoder`], [`SwcEncoder`] and
 //! [`TotalizerEncoder`] encode.
 //!
 //! This module contains some additional helper types that can be used to
@@ -651,5 +651,5 @@ mod tests {
 		assert_checker(&db, &con);
 	}
 
-	linear_test_suite! {int_lin_encoder, crate::int_linear::IntLinEncoder::default()}
+	linear_test_suite! {int_lin_encoder, crate::constraint::int_linear::IntLinEncoder::default()}
 }

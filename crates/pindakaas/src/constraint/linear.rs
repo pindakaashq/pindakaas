@@ -8,8 +8,8 @@
 
 pub use crate::encoder::aggregate::{BoolLinAggregator, LinearEncoder, StaticLinEncoder};
 use crate::{
-	cardinality::Cardinality, constraint::cardinality_one::CardinalityOne,
-	int_linear::NormalizedIntLinear,
+	cardinality::Cardinality,
+	constraint::{cardinality_one::CardinalityOne, int_linear::NormalizedIntLinear},
 };
 
 #[derive(Debug)]

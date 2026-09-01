@@ -9,11 +9,11 @@ use crate::{
 	constraint::{
 		bool_linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
 		cardinality_one::{BitwiseEncoder, CardinalityOne},
+		int_linear::{NormalizedIntLinear, Term},
 		linear::LinVariant,
 		sorted::{Sorted, SortedEncoder},
 	},
 	decision::integer::IntVar,
-	int_linear::{NormalizedIntLinear, Term},
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
 };
 
@@ -534,8 +534,11 @@ mod tests {
 			panic!("a literal and an integer make a linear constraint");
 		};
 		assert_eq!(con.terms().len(), 2, "one term of each kind");
-		cnf.encode(&con, &crate::int_linear::IntLinEncoder::default())
-			.unwrap();
+		cnf.encode(
+			&con,
+			&crate::constraint::int_linear::IntLinEncoder::default(),
+		)
+		.unwrap();
 
 		use crate::{
 			solver::{cadical::Cadical, SolveResult, Solver},

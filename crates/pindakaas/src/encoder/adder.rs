@@ -13,11 +13,11 @@ use crate::{
 	constraint::{
 		bool_linear::{LimitComp, PosCoeff},
 		cardinality_one::CardinalityOne,
+		int_linear::NormalizedIntLinear,
 		propositional_logic::{Formula, TseitinEncoder},
 	},
 	decision::integer::lex_leq_const,
 	helpers::{as_binary, bit, new_named_lit},
-	int_linear::NormalizedIntLinear,
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
 

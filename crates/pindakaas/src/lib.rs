@@ -227,18 +227,19 @@
 //! called for. Nothing has to be chosen in advance, and a second variable is
 //! never needed to hold the other view.
 //!
-//! An [`IntLinear`](int_linear::IntLinear) constraint is a sum of
-//! [`Term`](int_linear::Term)s, each a variable scaled by a coefficient,
-//! compared against a constant. [`IntLinEncoder`](int_linear::IntLinEncoder)
-//! keeps what it learns between the constraints it encodes, so a variable that
-//! several of them mention is encoded once, and the shifts and additions built
+//! An [`IntLinear`](constraint::int_linear::IntLinear) constraint is a sum of
+//! [`Term`](constraint::int_linear::Term)s, each a variable scaled by a
+//! coefficient, compared against a constant.
+//! [`IntLinEncoder`](constraint::int_linear::IntLinEncoder) keeps what it
+//! learns between the constraints it encodes, so a variable that several of
+//! them mention is encoded once, and the shifts and additions built
 //! for one coefficient are reused by the next constraint that needs the same
 //! product. Put every constraint through the one encoder to get that.
 //!
 //! ```rust
 //! use pindakaas::{
 //!     constraint::bool_linear::Comparator,
-//!     int_linear::{IntLinEncoder, IntLinear, Term},
+//!     constraint::int_linear::{IntLinEncoder, IntLinear, Term},
 //!     decision::integer::IntVar,
 //!     solver::{cadical::Cadical, SolveResult, Solver},
 //!     Cnf, Encoder, RangeList,
@@ -296,7 +297,6 @@ pub mod constraint;
 pub mod decision;
 pub mod encoder;
 pub(crate) mod helpers;
-pub mod int_linear;
 pub mod solver;
 #[cfg(any(feature = "tracing", test))]
 pub mod trace;

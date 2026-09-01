@@ -5,6 +5,7 @@
 
 pub mod bool_linear;
 pub mod cardinality_one;
+pub mod int_linear;
 pub mod linear;
 pub mod propositional_logic;
 pub mod sorted;

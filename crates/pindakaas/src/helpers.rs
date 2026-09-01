@@ -178,9 +178,8 @@ pub(crate) mod tests {
 	use itertools::Itertools;
 
 	use crate::{
-		constraint::bool_linear::PosCoeff,
+		constraint::{bool_linear::PosCoeff, int_linear::Term},
 		helpers::binary_value,
-		int_linear::Term,
 		solver::{cadical::Cadical, SolveResult, Solver},
 		BoolVal, Checker, ClauseDatabaseTools, Cnf, Coeff, Lit, Unsatisfiable, Valuation,
 	};
@@ -604,6 +603,7 @@ pub(crate) mod tests {
 					SwcEncoder, TotalizerEncoder,
 				},
 				cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
+				int_linear::{NormalizedIntLinear, Term},
 				linear::{BoolLinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},
 				sorted::{SortedEncoder, SortedStrategy},
 			},
@@ -611,7 +611,6 @@ pub(crate) mod tests {
 				all_binary_solutions, assert_checker, assert_encoding, assert_solutions,
 				binary_literals, construct_terms, expect_file,
 			},
-			int_linear::{NormalizedIntLinear, Term},
 			BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 		};
 	}

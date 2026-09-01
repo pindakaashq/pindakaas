@@ -8,11 +8,14 @@ use rangelist::RangeList;
 
 use crate::{
 	cardinality::Cardinality,
-	constraint::{bool_linear::Comparator, cardinality_one::CardinalityOne},
-	decision::integer::{Consistency, IntVar},
-	int_linear::{
-		Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear,
+	constraint::{
+		bool_linear::Comparator,
+		cardinality_one::CardinalityOne,
+		int_linear::{
+			Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear,
+		},
 	},
+	decision::integer::{Consistency, IntVar},
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 

@@ -14,12 +14,15 @@ use itertools::Itertools;
 
 use crate::{
 	cardinality::Cardinality,
-	constraint::{bool_linear::Comparator, cardinality_one::CardinalityOne},
+	constraint::{
+		bool_linear::Comparator,
+		cardinality_one::CardinalityOne,
+		int_linear::{
+			Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear,
+		},
+	},
 	decision::integer::IntVar,
 	helpers::new_named_lit,
-	int_linear::{
-		Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear,
-	},
 	BoolVal, ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 

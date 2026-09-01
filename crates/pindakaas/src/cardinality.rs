@@ -9,10 +9,10 @@ use crate::{
 	constraint::{
 		bool_linear::{Comparator, LimitComp, PosCoeff},
 		cardinality_one::CardinalityOne,
+		int_linear::{NormalizedIntLinear, Term},
 		sorted::{Sorted, SortedEncoder},
 	},
 	decision::integer::IntVar,
-	int_linear::{NormalizedIntLinear, Term},
 	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
 };
 
@@ -170,8 +170,10 @@ where
 #[cfg(test)]
 const _: () = {
 	use crate::{
-		constraint::bool_linear::{AdderEncoder, BddEncoder, SwcEncoder, TotalizerEncoder},
-		int_linear::IntLinEncoder,
+		constraint::{
+			bool_linear::{AdderEncoder, BddEncoder, SwcEncoder, TotalizerEncoder},
+			int_linear::IntLinEncoder,
+		},
 		Cnf,
 	};
 

@@ -76,11 +76,11 @@ mod pindakaas {
 				SwcEncoder, TotalizerEncoder,
 			},
 			cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
+			int_linear::NormalizedIntLinear,
 			linear::{BoolLinAggregator, LinVariant, LinearEncoder},
 			propositional_logic::{Formula as BaseFormula, TseitinEncoder},
 		},
 		decision::integer::IntVar as BaseIntVar,
-		int_linear::NormalizedIntLinear,
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as EncoderTrait, Lit as BaseLit,
 		RangeList, VarRange as BaseVarRange, Wcnf,
 	};
