@@ -8,9 +8,9 @@
 use crate::{
 	bool_linear::{Comparator, LimitComp, PosCoeff},
 	cardinality_one::CardinalityOne,
+	constraint::sorted::{Sorted, SortedEncoder},
 	decision::integer::IntVar,
 	int_linear::{NormalizedIntLinear, Term},
-	sorted::{Sorted, SortedEncoder},
 	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
 };
 

@@ -1899,7 +1899,7 @@ pub(crate) mod tests {
 			binary_literals, expect_file,
 		},
 		int_linear::Term,
-		sorted::SortedEncoder,
+		constraint::sorted::SortedEncoder,
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 	};
 

@@ -1,35 +1,19 @@
-//! Sorting network constraints, `Σ xs ≷ y`, where `y` is an integer variable
-//! rather than a constant.
+//! The odd-even merge network that encodes a [`Sorted`] constraint.
 //!
-//! A [`Sorted`] constraint is a cardinality constraint whose right-hand side
-//! can itself be constrained, which is what lets one be counted into a variable
-//! that another constraint then reads. [`SortedEncoder`] encodes it as an
-//! odd-even merge network, deciding at each merge whether to state the result
-//! outright or to halve and recurse — see [`SortedStrategy`].
+//! Each merge is either stated outright or halved and recursed on — see
+//! [`SortedStrategy`] — and the leaves become ternary integer constraints.
 
 use std::{cmp::min, hash, mem, sync::Mutex};
 
-use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	bool_linear::{LimitComp, LinExp},
+	bool_linear::LimitComp,
+	constraint::sorted::Sorted,
 	decision::integer::IntVar,
 	int_linear::{IntLinEncoder, IntLinear, Term},
-	Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
-	Valuation,
+	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
-
-/// The constraint that the literals `xs` add up to the integer `y`.
-///
-/// A cardinality constraint with an integer on the right, so that what was
-/// counted is available to whatever else mentions `y`.
-#[derive(Debug, Clone)]
-pub struct Sorted<'a> {
-	pub(crate) xs: &'a [Lit],
-	pub(crate) cmp: LimitComp,
-	pub(crate) y: &'a IntVar,
-}
 
 type SortedCache = FxHashMap<(u128, u128, u128), (SortedStrategy, (u128, u128))>;
 
@@ -61,29 +45,6 @@ pub enum SortedStrategy {
 	/// that counts clauses and literals and weighs literals by the given
 	/// factor.
 	Mixed(u32),
-}
-
-impl<'a> Sorted<'a> {
-	pub(crate) fn new(xs: &'a [Lit], cmp: LimitComp, y: &'a IntVar) -> Self {
-		Self { xs, cmp, y }
-	}
-}
-
-impl Checker for Sorted<'_> {
-	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
-		let lhs = LinExp::from_terms(self.xs.iter().map(|x| (*x, 1)).collect_vec().as_slice())
-			.value(sol)?;
-		let rhs = self.y.value(sol);
-
-		if match self.cmp {
-			LimitComp::LessEq => lhs <= rhs,
-			LimitComp::Equal => lhs == rhs,
-		} {
-			Ok(())
-		} else {
-			Err(Unsatisfiable)
-		}
-	}
 }
 
 /// The variable `⌊x / 2⌋`, which reaches `w` exactly when `x` reaches `2·w`.
@@ -546,9 +507,9 @@ mod tests {
 
 	use crate::{
 		bool_linear::LimitComp,
+		constraint::sorted::{Sorted, SortedEncoder, SortedStrategy},
 		decision::integer::IntVar,
 		helpers::tests::{assert_solutions, expect_file},
-		sorted::{Sorted, SortedEncoder, SortedStrategy},
 		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Var, VarRange,
 	};
 

@@ -196,9 +196,9 @@ pub(crate) mod tests {
 			bool_linear::{tests::construct_terms, LimitComp, PosCoeff},
 			cardinality::{Cardinality, SortingNetworkEncoder},
 			cardinality_one::{CardinalityOne, PairwiseEncoder},
+			constraint::sorted::{SortedEncoder, SortedStrategy},
 			helpers::tests::{assert_checker, assert_solutions, expect_file},
 			int_linear::{NormalizedIntLinear, Term},
-			sorted::{SortedEncoder, SortedStrategy},
 			ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit,
 		};
 	}

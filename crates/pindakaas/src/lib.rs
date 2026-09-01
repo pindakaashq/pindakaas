@@ -290,12 +290,13 @@ pub mod aggregator;
 pub mod bool_linear;
 pub mod cardinality;
 pub mod cardinality_one;
+pub mod constraint;
 pub mod decision;
+pub mod encoder;
 pub(crate) mod helpers;
 pub mod int_linear;
 pub mod propositional_logic;
 pub mod solver;
-pub mod sorted;
 #[cfg(any(feature = "tracing", test))]
 pub mod trace;
 
