@@ -4,13 +4,13 @@
 use std::{
 	cell::RefCell,
 	fmt::{self, Display},
-	hash::{Hash, Hasher},
 	ops::Bound,
-	rc::{Rc, Weak},
+	rc::Rc,
 };
 
 use itertools::{Either, Itertools};
 use rangelist::{IntervalIterator, RangeList};
+use rustc_hash::FxHashMap;
 
 use crate::{
 	constraint::bool_linear::{Comparator, PosCoeff},
@@ -156,29 +156,6 @@ enum Lead {
 	Direct,
 }
 
-/// A variable by identity rather than by hold, for keying what has been built
-/// for it.
-///
-/// A `Weak` keeps the allocation alive after the last handle is dropped, so its
-/// address cannot be handed to a later variable while a key to it still exists
-/// — which a raw pointer could not promise.
-#[derive(Clone, Debug)]
-pub(crate) struct IntVarKey(Weak<RefCell<IntVarState>>);
-
-impl Eq for IntVarKey {}
-
-impl Hash for IntVarKey {
-	fn hash<H: Hasher>(&self, state: &mut H) {
-		self.0.as_ptr().hash(state);
-	}
-}
-
-impl PartialEq for IntVarKey {
-	fn eq(&self, other: &Self) -> bool {
-		Weak::ptr_eq(&self.0, &other.0)
-	}
-}
-
 /// Everything about a variable that can change after it is created.
 #[derive(Debug)]
 struct IntVarState {
@@ -210,6 +187,14 @@ struct IntVarState {
 	/// it of every other through the channels between them, so the encoding
 	/// that says it is whichever came first, and the rest are told nothing.
 	constrained: bool,
+	/// The bits of `c·(x − min)` for each coefficient a constraint has scaled
+	/// the variable by.
+	///
+	/// Building one takes a graph of shifts and adders, so it is worth keeping:
+	/// a coefficient met again — in this constraint or a later one, by this
+	/// encoder or another — costs nothing, and a synthesis shares the steps it
+	/// has in common with one already done.
+	products: FxHashMap<Coeff, Vec<BoolVal>>,
 	/// The encoding the variable's value is read from.
 	///
 	/// Every other encoding is somewhere between a bound and an equal, so only
@@ -779,9 +764,15 @@ impl IntVar {
 		}
 	}
 
-	/// The variable's identity, for keying what has been built for it.
-	pub(crate) fn key(&self) -> IntVarKey {
-		IntVarKey(Rc::downgrade(&self.0))
+	/// The bits of `c·(x − min)`, where they have already been built.
+	pub(crate) fn product(&self, c: Coeff) -> Option<Vec<BoolVal>> {
+		self.0.borrow().products.get(&c).cloned()
+	}
+
+	/// Remember the bits of `c·(x − min)`, so that the next constraint to scale
+	/// the variable by `c` finds them.
+	pub(crate) fn set_product(&self, c: Coeff, bits: Vec<BoolVal>) {
+		let _ = self.0.borrow_mut().products.insert(c, bits);
 	}
 
 	/// The domain of the variable.
@@ -1430,6 +1421,7 @@ impl IntVar {
 			direct: None,
 			channelled: [None; 2],
 			constrained: false,
+			products: FxHashMap::default(),
 			lead: None,
 		})))
 	}

@@ -6,11 +6,10 @@
 //! against a constant, built from shift-and-add products; and otherwise a walk
 //! over the terms in order form, which any variable can produce.
 
-use std::{cell::RefCell, iter::once, num::NonZero};
+use std::{iter::once, num::NonZero};
 
 use itertools::Itertools;
 use rangelist::RangeList;
-use rustc_hash::FxHashMap;
 
 use crate::{
 	constraint::{
@@ -19,7 +18,7 @@ use crate::{
 		cardinality_one::CardinalityOne,
 		int_linear::{Decompose, IntLinear, NormalizedIntLinear, Term},
 	},
-	decision::integer::{BinaryEncoding, IntVar, IntVarKey},
+	decision::integer::{BinaryEncoding, IntVar},
 	encoder::adder::AdderEncoder,
 	helpers::{
 		div_ceil, div_floor,
@@ -37,18 +36,6 @@ use crate::{
 #[derive(Clone, Debug, Default)]
 pub struct IntLinEncoder {
 	config: IntLinConfig,
-	/// The bits of `c·(x − lb)` for products already built, so that a
-	/// coefficient met again — in this constraint or a later one — costs
-	/// nothing, and so that a synthesis shares the steps it has in common with
-	/// one already done.
-	///
-	/// Only ever looked up, never iterated: the keys are addresses, and their
-	/// order would differ between runs.
-	///
-	/// This uses `RefCell` so that encoding takes `&self` like every other
-	/// [`Encoder`]. The keys hold a [`Weak`](std::rc::Weak), so this encoder is
-	/// already neither `Send` nor `Sync` and the cell costs nothing.
-	products: RefCell<FxHashMap<(IntVarKey, Coeff), Vec<BoolVal>>>,
 }
 
 /// Encoding a constraint fixes the literals of the variables it mentions, and
@@ -235,9 +222,7 @@ impl IntLinEncoder {
 		c: Coeff,
 	) -> Result<Option<Vec<BoolVal>>, Unsatisfiable> {
 		debug_assert!(c > 0, "a product is decomposed only for a positive factor");
-		let key = (x.key(), c);
-		let cached = self.products.borrow().get(&key).cloned();
-		if let Some(bits) = cached {
+		if let Some(bits) = x.product(c) {
 			return Ok(Some(bits));
 		}
 		let Ok(c32) = u32::try_from(c) else {
@@ -253,40 +238,39 @@ impl IntLinEncoder {
 		// reaches, which is the same thing the cache is keyed on, so a step
 		// shared with an earlier synthesis is picked up rather than rebuilt.
 		let plan = ScmSolution::synthesize(c32, ScmObjective::MinAdders(width));
-		let _ = self.products.borrow_mut().insert((x.key(), 1), input);
+		x.set_product(1, input);
 		for op in plan.operations {
 			let factor = Coeff::from(op.result().get());
-			let known = self.products.borrow().contains_key(&(x.key(), factor));
-			if known {
+			if x.product(factor).is_some() {
 				continue;
 			}
 			let bits = match op {
 				ScmOperation::ShiftLeft { source, shift } => {
-					shifted(&self.product(x, source.get()), shift)
+					shifted(&Self::product(x, source.get()), shift)
 				}
 				ScmOperation::ShiftAdd { left, right, shift } => {
-					let left = shifted(&self.product(x, left.get()), shift);
+					let left = shifted(&Self::product(x, left.get()), shift);
 					AdderEncoder::ripple_carry_adder(
 						db,
 						&left,
-						&self.product(x, right.get()),
+						&Self::product(x, right.get()),
 						None,
 						None,
 					)?
 				}
 				ScmOperation::ShiftSub { left, right, shift } => {
-					let left = shifted(&self.product(x, left.get()), shift);
-					self.difference(db, &left, &self.product(x, right.get()), factor, &width)?
+					let left = shifted(&Self::product(x, left.get()), shift);
+					self.difference(db, &left, &Self::product(x, right.get()), factor, &width)?
 				}
 				ScmOperation::SubShift { left, right, shift } => {
-					let right = shifted(&self.product(x, right.get()), shift);
-					let left = self.product(x, left.get());
+					let right = shifted(&Self::product(x, right.get()), shift);
+					let left = Self::product(x, left.get());
 					self.difference(db, &left, &right, factor, &width)?
 				}
 			};
-			let _ = self.products.borrow_mut().insert((x.key(), factor), bits);
+			x.set_product(factor, bits);
 		}
-		Ok(Some(self.product(x, c32)))
+		Ok(Some(Self::product(x, c32)))
 	}
 
 	/// The bits of a difference `a − b`, which is known to be positive.
@@ -310,16 +294,14 @@ impl IntLinEncoder {
 	}
 
 	/// The bits of a product already built.
-	fn product(&self, x: &IntVar, factor: u32) -> Vec<BoolVal> {
-		self.products.borrow()[&(x.key(), Coeff::from(factor))].clone()
+	fn product(x: &IntVar, factor: u32) -> Vec<BoolVal> {
+		x.product(Coeff::from(factor))
+			.expect("the plan builds every product before it is used")
 	}
 
 	/// Create an encoder with the given configuration.
 	pub fn with_config(config: IntLinConfig) -> Self {
-		Self {
-			config,
-			..Self::default()
-		}
+		Self { config }
 	}
 }
 
@@ -1177,6 +1159,35 @@ mod tests {
 				}
 			}
 		}
+	}
+
+	#[test]
+	fn a_product_is_shared_between_encoders() {
+		// The product belongs to the variable, not to whichever encoder
+		// happened to build it, so a second encoder — of any kind — finds it
+		// already there.
+		let domain = RangeList::from(0..=15);
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(domain).with_label("x");
+		let con = |k| IntLinear::new(vec![Term::new(45, x.clone())], Comparator::LessEq, k);
+		let config = || IntLinConfig {
+			propagate: false,
+			cutoff: Some(0),
+		};
+
+		IntLinEncoder::with_config(config())
+			.encode(&mut cnf, &con(300))
+			.unwrap();
+		let vars = cnf.num_vars();
+		// A different encoder entirely, with no memory of the first.
+		IntLinEncoder::with_config(config())
+			.encode(&mut cnf, &con(200))
+			.unwrap();
+		assert_eq!(
+			cnf.num_vars(),
+			vars,
+			"the second encoder should find the product on the variable"
+		);
 	}
 
 	#[test]
