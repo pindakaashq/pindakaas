@@ -1633,7 +1633,7 @@ pub(crate) mod tests {
 		bool_linear::{Comparator, PosCoeff},
 		helpers::{
 			binary_value,
-			tests::{all_binary_solutions, binary_literals},
+			tests::{all_binary_solutions, binary_literals, expect_file},
 		},
 		integer::{lex_geq_const, lex_leq_const, BinaryEncoding, IntVar, Lead},
 		solver::{cadical::Cadical, SolveResult, Solver},
@@ -2349,6 +2349,55 @@ pub(crate) mod tests {
 			assert!(tied > 0, "{partial:?} leaves the two to be tied together");
 			assert_eq!(constrained, 1, "which is what carries the constraint");
 		}
+	}
+
+	#[test]
+	fn what_the_encodings_cost() {
+		// The size of every combination of encodings a variable can be held
+		// in, against the size of its domain. Two things this is here to
+		// catch: that channelling stays one clause per value, and that the
+		// binary encoding of a large domain stays free until something asks
+		// for a second view of it — which is the cliff, not the channel.
+		let mut table = format!(
+			"{:>6} {:>14} {:>7} {:>8} {:>9}\n",
+			"card", "encodings", "vars", "clauses", "literals"
+		);
+		for card in [8usize, 64, 256, 1024] {
+			let domain = RangeList::from(0..=(card as Coeff - 1));
+			for (name, order, binary, direct) in [
+				("order", true, false, false),
+				("binary", false, true, false),
+				("direct", false, false, true),
+				("order+binary", true, true, false),
+				("order+direct", true, false, true),
+				("all three", true, true, true),
+			] {
+				// The direct encoding's exactly-one is quadratic, so it is only
+				// measured where the measurement is affordable.
+				if direct && card > 64 {
+					continue;
+				}
+				let mut cnf = Cnf::default();
+				let x = IntVar::new(domain.clone());
+				if order {
+					let _ = x.order_encoding(&mut cnf).unwrap();
+				}
+				if binary {
+					let _ = x.binary_encoding(&mut cnf).unwrap();
+				}
+				if direct {
+					let _ = x.direct_encoding(&mut cnf).unwrap();
+				}
+				x.constrain(&mut cnf).unwrap();
+				table += &format!(
+					"{card:>6} {name:>14} {:>7} {:>8} {:>9}\n",
+					cnf.num_vars(),
+					cnf.num_clauses(),
+					cnf.literals()
+				);
+			}
+		}
+		expect_file!("int/encodings.size").assert_eq(&table);
 	}
 
 	#[test]

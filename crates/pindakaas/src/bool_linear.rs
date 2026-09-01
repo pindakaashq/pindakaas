@@ -1935,7 +1935,8 @@ mod tests {
 	use crate::{
 		aggregator::{BoolLinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},
 		bool_linear::{
-			AdderEncoder, Comparator, LimitComp, LinExp, Linear, PosCoeff, TotalizerEncoder,
+			AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, Linear, PosCoeff, SwcEncoder,
+			TotalizerEncoder,
 		},
 		cardinality::{tests::card_test_suite, Cardinality},
 		cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
@@ -2583,6 +2584,61 @@ mod tests {
 			vec![a, b, c, d],
 			&expect_file!["linear/adder/test_encoders.sol"],
 		);
+	}
+
+	#[test]
+	fn what_the_decompositions_cost() {
+		// Clause counts for each way of decomposing a pseudo-Boolean
+		// constraint. The `.sol` goldens these encoders already have are blind
+		// to size, so this is the only thing standing between a decomposition
+		// getting quietly worse and nobody noticing.
+		let cases: [(&str, &[Coeff], Coeff); 5] = [
+			("card-10", &[1; 10], 5),
+			("pb-small", &[1, 2, 3, 4, 5], 8),
+			("pb-mid", &[2, 3, 5, 7, 11, 13], 20),
+			("pb-wide", &[1, 2, 4, 8, 16, 32, 64], 70),
+			("pb-coprime", &[3, 5, 7, 11, 13, 17], 40),
+		];
+		let mut table = format!(
+			"{:>11} {:>4} {:>6} {:>7} {:>8} {:>9}\n",
+			"case", "cmp", "enc", "vars", "clauses", "literals"
+		);
+		for (name, coeffs, k) in cases {
+			for cmp in [Comparator::LessEq, Comparator::Equal] {
+				for enc in ["adder", "bdd", "swc", "gt"] {
+					let mut cnf = Cnf::default();
+					let vars = cnf.new_var_range(coeffs.len()).iter_lits().collect_vec();
+					let con = Linear::new(LinExp::from_slices(coeffs, &vars), cmp.clone(), k);
+					let done = match enc {
+						"adder" => LinearEncoder::<StaticLinEncoder<AdderEncoder>>::default()
+							.encode(&mut cnf, &con),
+						"bdd" => LinearEncoder::<StaticLinEncoder<BddEncoder>>::default()
+							.encode(&mut cnf, &con),
+						"swc" => LinearEncoder::<StaticLinEncoder<SwcEncoder>>::default()
+							.encode(&mut cnf, &con),
+						_ => LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default()
+							.encode(&mut cnf, &con),
+					};
+					let cmp = if cmp == Comparator::LessEq {
+						"<="
+					} else {
+						"=="
+					};
+					table += &match done {
+						Err(Unsatisfiable) => {
+							format!("{name:>11} {cmp:>4} {enc:>6} {:>27}\n", "unsatisfiable")
+						}
+						Ok(()) => format!(
+							"{name:>11} {cmp:>4} {enc:>6} {:>7} {:>8} {:>9}\n",
+							cnf.num_vars(),
+							cnf.num_clauses(),
+							cnf.literals()
+						),
+					};
+				}
+			}
+		}
+		expect_file!("linear/decompositions.size").assert_eq(&table);
 	}
 
 	#[test]
