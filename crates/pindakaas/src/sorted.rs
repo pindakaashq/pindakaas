@@ -1,3 +1,12 @@
+//! Sorting network constraints, `Σ xs ≷ y`, where `y` is an integer variable
+//! rather than a constant.
+//!
+//! A [`Sorted`] constraint is a cardinality constraint whose right-hand side
+//! can itself be constrained, which is what lets one be counted into a variable
+//! that another constraint then reads. [`SortedEncoder`] encodes it as an
+//! odd-even merge network, deciding at each merge whether to state the result
+//! outright or to halve and recurse — see [`SortedStrategy`].
+
 use std::{cmp::min, hash, mem, sync::Mutex};
 
 use itertools::Itertools;
@@ -11,6 +20,10 @@ use crate::{
 	Valuation,
 };
 
+/// The constraint that the literals `xs` add up to the integer `y`.
+///
+/// A cardinality constraint with an integer on the right, so that what was
+/// counted is available to whatever else mentions `y`.
 #[derive(Debug, Clone)]
 pub struct Sorted<'a> {
 	pub(crate) xs: &'a [Lit],
@@ -37,10 +50,16 @@ pub struct SortedEncoder {
 	strategy_cost_cache: Mutex<SortedCache>,
 }
 
+/// How [`SortedEncoder`] merges two sorted halves.
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum SortedStrategy {
+	/// State the result of the merge outright, a clause per pair of values.
 	Direct,
+	/// Halve the inputs, merge each half, and comparator the results together.
 	Recursive,
+	/// Whichever of the two is cheaper for the merge at hand, by a cost model
+	/// that counts clauses and literals and weighs literals by the given
+	/// factor.
 	Mixed(u32),
 }
 

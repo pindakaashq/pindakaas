@@ -111,10 +111,17 @@ impl From<CardinalityOne> for Cardinality {
 }
 
 impl SortingNetworkEncoder {
-	// TODO: Sorted is currently private.
-	/// Set the [`Encoder`] used to encode the `Sorted` constraints within the
-	/// sorting network.
-	pub fn with_sorted_encoder(&mut self, sorted_encoder: SortedEncoder) -> &mut Self {
+	/// Set the [`Encoder`] used for the [`Sorted`] constraint the network
+	/// becomes.
+	///
+	/// Its comparator overrides are cleared. They let a merge state less than
+	/// it knows, which is a saving where only a bound on the sorted value is
+	/// wanted, but a cardinality constraint asks for the value itself and an
+	/// equality encoded that way would admit counts it forbids.
+	pub fn with_sorted_encoder(&mut self, mut sorted_encoder: SortedEncoder) -> &mut Self {
+		let _ = sorted_encoder
+			.with_overwrite_direct_cmp(None)
+			.with_overwrite_recursive_cmp(None);
 		self.sorted_encoder = sorted_encoder;
 		self
 	}
@@ -183,6 +190,30 @@ const _: () = {
 
 #[cfg(test)]
 pub(crate) mod tests {
+	use crate::helpers::tests::prelude::*;
+
+	#[test]
+	fn a_sorting_network_counts_exactly() {
+		// The sorted encoder's comparator overrides let a merge state less than
+		// it knows, which is a saving where a bound will do. A cardinality
+		// constraint is not such a case: an equality encoded that way admits
+		// counts it forbids. The network clears them, whether it made the
+		// encoder itself or was handed one.
+		let mut given = SortingNetworkEncoder::default();
+		let _ = given.with_sorted_encoder(SortedEncoder::default());
+		for enc in [SortingNetworkEncoder::default(), given] {
+			let mut cnf = Cnf::default();
+			let lits = cnf.new_var_range(4).iter_lits().collect_vec();
+			let con = Cardinality {
+				lits,
+				cmp: LimitComp::Equal,
+				k: PosCoeff::new(2),
+			};
+			enc.encode(&mut cnf, &con).unwrap();
+			assert_checker(&cnf, &con);
+		}
+	}
+
 	macro_rules! card_test_suite {
 		($encoder:expr) => {
 			mod cardinality {

@@ -291,7 +291,7 @@ pub mod int_linear;
 pub mod integer;
 pub mod propositional_logic;
 pub mod solver;
-mod sorted;
+pub mod sorted;
 #[cfg(any(feature = "tracing", test))]
 pub mod trace;
 
