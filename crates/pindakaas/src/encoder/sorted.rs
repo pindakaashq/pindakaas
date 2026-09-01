@@ -8,8 +8,7 @@ use std::{cmp::min, hash, mem, sync::Mutex};
 use rustc_hash::FxHashMap;
 
 use crate::{
-	bool_linear::LimitComp,
-	constraint::sorted::Sorted,
+	constraint::{bool_linear::LimitComp, sorted::Sorted},
 	decision::integer::IntVar,
 	int_linear::{IntLinEncoder, IntLinear, Term},
 	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
@@ -378,8 +377,8 @@ impl Eq for SortedEncoder {}
 
 impl PartialEq for SortedEncoder {
 	fn eq(&self, other: &Self) -> bool {
-		// Deconstruct the two structs to ensure no additional fields are ignored if
-		// they are ever added
+		// Deconstruct the two structs to ensure no additional fields are
+		// ignored if they are ever added
 		let &Self {
 			add_consistency: a1,
 			strategy: b1,
@@ -506,8 +505,10 @@ mod tests {
 	use traced_test::test;
 
 	use crate::{
-		bool_linear::LimitComp,
-		constraint::sorted::{Sorted, SortedEncoder, SortedStrategy},
+		constraint::{
+			bool_linear::LimitComp,
+			sorted::{Sorted, SortedEncoder, SortedStrategy},
+		},
 		decision::integer::IntVar,
 		helpers::tests::{assert_solutions, expect_file},
 		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Var, VarRange,

@@ -69,12 +69,12 @@ mod pindakaas {
 
 	use itertools::Itertools;
 	use pindakaas::{
-		bool_linear::{
-			AdderEncoder, Comparator, LinExp as BaseBoolLinExp, Linear as BaseBoolLinCon,
-			SwcEncoder, TotalizerEncoder,
-		},
 		cardinality::{Cardinality, SortingNetworkEncoder},
 		constraint::{
+			bool_linear::{
+				AdderEncoder, Comparator, LinExp as BaseBoolLinExp, Linear as BaseBoolLinCon,
+				SwcEncoder, TotalizerEncoder,
+			},
 			cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
 			linear::{BoolLinAggregator, LinVariant, LinearEncoder},
 			propositional_logic::{Formula as BaseFormula, TseitinEncoder},
@@ -140,14 +140,14 @@ mod pindakaas {
 	/// exception will be raised.
 	enum Encoder {
 		// TODO These doc-strings do not show up, upstream issue: https://github.com/PyO3/pyo3/issues/5197
-		/// Use :class:`pindakaas::bool_linear::AdderEncoder`, which is able to
-		/// encode all Boolean linear constraints.
+		/// Use :class:`pindakaas::constraint::bool_linear::AdderEncoder`, which
+		/// is able to encode all Boolean linear constraints.
 		ADDER,
 		/// Use :class:`pindakaas::constraint::cardinality_one::BitwiseEncoder`,
 		/// which is able to encode all Boolean cardinality one constraints.
 		BITWISE,
-		/// Use :class:`pindakaas::bool_linear::BddEncoder`, which is able to
-		/// encode all Boolean linear constraints.
+		/// Use :class:`pindakaas::constraint::bool_linear::BddEncoder`, which
+		/// is able to encode all Boolean linear constraints.
 		DECISION_DIAGRAM,
 		/// Use :class:`pindakaas::constraint::cardinality_one::LadderEncoder`,
 		/// which is able to encode all Boolean cardinality one constraints.
@@ -156,14 +156,14 @@ mod pindakaas {
 		/// :class:`pindakaas::constraint::cardinality_one::PairwiseEncoder`,
 		/// which is able to encode all Boolean cardinality one constraints.
 		PAIRWISE,
-		/// Use :class:`pindakaas::bool_linear::SwcEncoder`, which is able to
-		/// encode all Boolean linear constraints.
+		/// Use :class:`pindakaas::constraint::bool_linear::SwcEncoder`, which
+		/// is able to encode all Boolean linear constraints.
 		SORTED_WEIGHT_COUNTER,
 		/// Use :class:`pindakaas::cardinality::SwcEncoder`, which is able to
 		/// encode all Boolean cardinality constraints.
 		SORTING_NETWORK,
-		/// Use :class:`pindakaas::bool_linear::TotalizerEncoder`, which is able
-		/// to encode all Boolean linear constraints.
+		/// Use :class:`pindakaas::constraint::bool_linear::TotalizerEncoder`,
+		/// which is able to encode all Boolean linear constraints.
 		TOTALIZER,
 		/// Use
 		/// :class:`pindakaas::constraint::propositional_logic::TseitinEncoder`,

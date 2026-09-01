@@ -5,9 +5,9 @@ use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
-	bool_linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
 	cardinality::Cardinality,
 	constraint::{
+		bool_linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
 		cardinality_one::{BitwiseEncoder, CardinalityOne},
 		linear::LinVariant,
 		sorted::{Sorted, SortedEncoder},
@@ -379,5 +379,532 @@ where
 	fn encode(&self, db: &mut Db, lin: &Linear) -> Result {
 		let variant = self.agg.aggregate(db, lin)?;
 		self.enc.encode(db, &variant)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::num::NonZeroI32;
+
+	use traced_test::test;
+
+	use crate::helpers::tests::prelude::*;
+
+	/// An aggregated constraint as a test wants to read it: what each group of
+	/// terms is worth, and what the sum is compared against.
+	///
+	/// A group is an integer by the time aggregation is done, so what it is
+	/// worth is read back off whichever encoding it was given — which for every
+	/// kind of group gives the literals and coefficients it was made from.
+	#[derive(Debug, PartialEq)]
+	pub(crate) enum Aggregated {
+		Cardinality(Vec<Lit>, LimitComp, Coeff),
+		CardinalityOne(Vec<Lit>, LimitComp),
+		Linear(Vec<Vec<(Lit, Coeff)>>, LimitComp, Coeff),
+		Trivial,
+	}
+
+	/// Aggregate `con` and read the result back.
+	fn aggregated(
+		db: &mut Cnf,
+		agg: &BoolLinAggregator,
+		con: &Linear,
+	) -> Result<Aggregated, Unsatisfiable> {
+		Ok(match agg.aggregate(db, con)? {
+			LinVariant::Linear(lin) => {
+				let (cmp, k) = (lin.cmp(), lin.k());
+				Aggregated::Linear(sorted_weights(lin.grouped_weights(db)?), cmp, k)
+			}
+			LinVariant::Cardinality(card) => Aggregated::Cardinality(
+				card.iter_lits().collect(),
+				into_limit(card.comparator()),
+				card.rhs(),
+			),
+			LinVariant::CardinalityOne(amo) => {
+				Aggregated::CardinalityOne(amo.iter_lits().collect(), into_limit(amo.comparator()))
+			}
+			LinVariant::Trivial => Aggregated::Trivial,
+		})
+	}
+
+	/// A comparator as normalisation leaves it, which is never `≥`.
+	fn into_limit(cmp: Comparator) -> LimitComp {
+		match cmp {
+			Comparator::Equal => LimitComp::Equal,
+			_ => LimitComp::LessEq,
+		}
+	}
+
+	/// Groups in a settled order, neither the grouping nor what is in one
+	/// depending on which way round they came out.
+	fn sorted_weights(mut groups: Vec<Vec<(Lit, Coeff)>>) -> Vec<Vec<(Lit, Coeff)>> {
+		for group in &mut groups {
+			group.sort();
+		}
+		groups.sort();
+		groups
+	}
+
+	#[test]
+	fn aggregator_at_least_one_negated() {
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		// Correctly detect that all but one literal can be set to true
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[1, 1, 1, 1], &[a, b, c, d]),
+					Comparator::LessEq,
+					3
+				)
+			),
+			Ok(Aggregated::Trivial)
+		);
+		assert_encoding(
+			&cnf,
+			&expect_file!["linear/aggregator/test_at_least_one_negated.cnf"],
+		);
+
+		// Correctly detect equal k
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[1, 1, 1], &[a, b, c]),
+					Comparator::Equal,
+					2
+				)
+			),
+			// actually leaves over a CardinalityOne constraint
+			Ok(Aggregated::CardinalityOne(
+				vec![!a, !b, !c],
+				LimitComp::LessEq
+			))
+		);
+	}
+
+	#[test]
+	fn a_bound_of_zero_leaves_no_term_standing() {
+		// Every coefficient is positive by the time an encoder sees it, so a
+		// sum that has to come to nothing is every literal being false. The
+		// adder has no bits to work with in that case, which is only reachable
+		// at all because a constraint with integer terms keeps its bound.
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
+		let con = Linear::new(a * 2 + y.clone() * 3, Comparator::LessEq, 0);
+		let LinVariant::Linear(con) = BoolLinAggregator::default()
+			.aggregate(&mut cnf, &con)
+			.unwrap()
+		else {
+			panic!("a literal and an integer make a linear constraint");
+		};
+		cnf.encode(&con, &AdderEncoder::default()).unwrap();
+
+		use crate::{
+			solver::{cadical::Cadical, SolveResult, Solver},
+			Valuation,
+		};
+		let mut slv = Cadical::from(&cnf);
+		let SolveResult::Satisfied(value) = slv.solve() else {
+			panic!("nothing being chosen satisfies it");
+		};
+		assert!(!value.value(a) && y.value(&value) == 0);
+	}
+
+	#[test]
+	fn an_expression_may_mix_literals_and_integers() {
+		// `a * 3 + y * 5` reads the same whichever kind each side is, and the
+		// two come apart again in aggregation: the literal is grouped into the
+		// integer it stands for, the integer passes through as it came.
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
+
+		let con = Linear::new(a * 3 + y.clone() * 5, Comparator::LessEq, 11);
+		let LinVariant::Linear(con) = BoolLinAggregator::default()
+			.aggregate(&mut cnf, &con)
+			.unwrap()
+		else {
+			panic!("a literal and an integer make a linear constraint");
+		};
+		assert_eq!(con.terms().len(), 2, "one term of each kind");
+		cnf.encode(&con, &crate::int_linear::IntLinEncoder::default())
+			.unwrap();
+
+		use crate::{
+			solver::{cadical::Cadical, SolveResult, Solver},
+			Valuation,
+		};
+		let mut slv = Cadical::from(&cnf);
+		let vars = cnf.get_variables();
+		while let crate::solver::SolveResult::Satisfied(value) =
+			crate::solver::Solver::solve(&mut slv)
+		{
+			assert!(
+				Coeff::from(value.value(a)) * 3 + y.value(&value) * 5 <= 11,
+				"every model of the encoding satisfies the constraint"
+			);
+			let no_good: Vec<Lit> = vars
+				.map(|v| {
+					let l = v.into();
+					if value.value(l) {
+						!l
+					} else {
+						l
+					}
+				})
+				.collect();
+			if slv.add_clause(no_good).is_err() {
+				break;
+			}
+		}
+	}
+
+	#[test]
+	fn aggregator_zero_coefficient() {
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		// A term that cannot contribute to the sum is dropped entirely, rather
+		// than kept with a coefficient of zero
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[0, 2, 3, 4], &[a, b, c, d]),
+					Comparator::LessEq,
+					8
+				)
+			),
+			Ok(Aggregated::Linear(
+				sorted_weights(vec![vec![(b, 2)], vec![(c, 3)], vec![(d, 4)]]),
+				LimitComp::LessEq,
+				8
+			))
+		);
+	}
+
+	#[test]
+	fn aggregator_gcd() {
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		// 2a + 4b + 6c ≤ 7 is divided by 2, rounding the right hand side down
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[2, 4, 6], &[a, b, c]),
+					Comparator::LessEq,
+					7
+				)
+			),
+			Ok(Aggregated::Linear(
+				sorted_weights(vec![vec![(a, 1)], vec![(b, 2)], vec![(c, 3)]]),
+				LimitComp::LessEq,
+				3
+			))
+		);
+
+		// An equality that does not sit on a multiple of the divisor is
+		// unsatisfiable
+		let mut cnf = Cnf::default();
+		let (a, b) = cnf.new_lits();
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(LinExp::from_slices(&[2, 4], &[a, b]), Comparator::Equal, 5)
+			),
+			Err(Unsatisfiable)
+		);
+
+		// Dropping terms whose coefficient exceeds k can leave behind a set of
+		// coefficients with a larger common divisor than the constraint started
+		// with, which is why normalization runs after that step. Here
+		// gcd(3, 3, 3, 7) is 1, but once 7d is dropped the rest divides by 3,
+		// leaving `a + b + c ≤ 1`.
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[3, 3, 3, 7], &[a, b, c, d]),
+					Comparator::LessEq,
+					5
+				)
+			),
+			Ok(Aggregated::CardinalityOne(vec![a, b, c], LimitComp::LessEq))
+		);
+
+		// The same under `=`: once 7d is dropped the remaining sum can only
+		// reach multiples of 3, so it can never equal 5.
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[3, 3, 3, 7], &[a, b, c, d]),
+					Comparator::Equal,
+					5
+				)
+			),
+			Err(Unsatisfiable)
+		);
+
+		// Coprime coefficients are left untouched
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[2, 3, 4], &[a, b, c]),
+					Comparator::LessEq,
+					7
+				)
+			),
+			Ok(Aggregated::Linear(
+				sorted_weights(vec![vec![(a, 2)], vec![(b, 3)], vec![(c, 4)]]),
+				LimitComp::LessEq,
+				7
+			))
+		);
+	}
+
+	#[test]
+	fn aggregator_combine() {
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		// Simple aggregation of multiple occurrences of the same literal
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[1, 2, 1, 2], &[a, a, b, c]),
+					Comparator::LessEq,
+					3
+				)
+			),
+			Ok(Aggregated::Linear(
+				sorted_weights(vec![
+					vec![(1.into(), 3)],
+					vec![(2.into(), 1)],
+					vec![(3.into(), 2)]
+				]),
+				LimitComp::LessEq,
+				3
+			))
+		);
+
+		// Aggregation of positive and negative occurrences of the same literal
+		// x1 +2*~x1 + ... <= 3
+		// x1 +2 -2*x1 + ... <= 3
+		// x1 -2*x1 + ... <= 1
+		// -1*x1 + ... <= 1
+		// +1*~x1 + ... <= 2
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[1, 2, 1, 2], &[a, !a, b, c]),
+					Comparator::LessEq,
+					3
+				)
+			),
+			Ok(Aggregated::Linear(
+				sorted_weights(vec![vec![(!a, 1)], vec![(b, 1)], vec![(c, 2)]]),
+				LimitComp::LessEq,
+				2
+			))
+		);
+
+		// Aggregation of positive and negative coefficients of the same literal
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[1, -2, 1, 2], &[a, a, b, c]),
+					Comparator::LessEq,
+					2,
+				)
+			),
+			Ok(Aggregated::Linear(
+				sorted_weights(vec![vec![(!a, 1)], vec![(b, 1)], vec![(c, 2)]]),
+				LimitComp::LessEq,
+				3
+			))
+		);
+
+		assert_eq!(cnf.num_clauses(), 0);
+	}
+
+	#[test]
+	fn aggregator_equal_one() {
+		let mut cnf = Cnf::default();
+		let vars = cnf.new_var_range(3).iter_lits().collect_vec();
+		// An exactly one constraint adds an exactly one constraint
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(LinExp::from_slices(&[1, 1, 1], &vars), Comparator::Equal, 1)
+			),
+			Ok(Aggregated::CardinalityOne(vars, LimitComp::Equal))
+		);
+		assert_eq!(cnf.num_clauses(), 0);
+	}
+
+	#[test]
+	fn aggregator_false_trivial_unsat() {
+		let mut cnf = Cnf::default();
+		let (a, b, c, d, e, f, g) = cnf.new_lits();
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[1, 2, 1, 1, 4, 1, 1], &[a, !b, c, d, !e, f, !g]),
+					Comparator::GreaterEq,
+					7
+				)
+			),
+			Ok(Aggregated::Linear(
+				sorted_weights(vec![
+					vec![(e, 4)],
+					vec![(b, 2)],
+					vec![(g, 1)],
+					vec![(!d, 1)],
+					vec![(!a, 1)],
+					vec![(!f, 1)],
+					vec![(!c, 1)]
+				]),
+				LimitComp::LessEq,
+				4
+			))
+		);
+		assert_eq!(cnf.num_clauses(), 0);
+	}
+
+	#[test]
+	fn aggregator_sort_same_coefficients() {
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				BoolLinAggregator::default().sort_same_coefficients(SortedEncoder::default(), 2),
+				&Linear::new(
+					LinExp::from_slices(&[3, 3, 5, 3], &[a, b, d, c]),
+					Comparator::LessEq,
+					10
+				)
+			),
+			Ok(Aggregated::Linear(
+				sorted_weights(vec![
+					vec![
+						(Lit(NonZeroI32::new(5).unwrap()), 3),
+						(Lit(NonZeroI32::new(6).unwrap()), 3),
+						(Lit(NonZeroI32::new(7).unwrap()), 3)
+					],
+					vec![(d, 5)],
+				]),
+				LimitComp::LessEq,
+				10
+			))
+		);
+	}
+
+	#[test]
+	fn aggregator_sort_same_coefficients_using_minimal_chain() {
+		let mut cnf = Cnf::default();
+		let vars = cnf.new_var_range(5).iter_lits().collect_vec();
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				BoolLinAggregator::default().sort_same_coefficients(SortedEncoder::default(), 2),
+				&Linear::new(
+					LinExp::from_slices(&[5, 5, 5, 5, 4], &vars),
+					Comparator::LessEq,
+					12 // only need 2 to sort
+				)
+			),
+			Ok(Aggregated::Linear(
+				sorted_weights(vec![
+					vec![(*vars.last().unwrap(), 4)],
+					vec![
+						(Lit(NonZeroI32::new(6).unwrap()), 5),
+						(Lit(NonZeroI32::new(7).unwrap()), 5)
+					],
+				]),
+				LimitComp::LessEq,
+				12
+			))
+		);
+	}
+
+	#[test]
+	fn aggregator_unsat() {
+		let mut db = Cnf::default();
+		let vars = db.new_var_range(3).iter_lits().collect_vec();
+
+		// Constant cannot be reached
+		assert_eq!(
+			aggregated(
+				&mut db,
+				&BoolLinAggregator::default(),
+				&Linear::new(LinExp::from_slices(&[1, 2, 2], &vars), Comparator::Equal, 6)
+			),
+			Err(Unsatisfiable)
+		);
+		assert_eq!(
+			aggregated(
+				&mut db,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[1, 2, 2], &vars),
+					Comparator::GreaterEq,
+					6,
+				)
+			),
+			Err(Unsatisfiable)
+		);
+		assert_eq!(
+			aggregated(
+				&mut db,
+				&BoolLinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[1, 2, 2], &vars),
+					Comparator::LessEq,
+					-1
+				)
+			),
+			Err(Unsatisfiable)
+		);
+
+		// Scaled counting constraint with off-scaled Constant
+		assert_eq!(
+			aggregated(
+				&mut db,
+				&BoolLinAggregator::default(),
+				&Linear::new(LinExp::from_slices(&[4, 4, 4], &vars), Comparator::Equal, 6)
+			),
+			Err(Unsatisfiable)
+		);
 	}
 }

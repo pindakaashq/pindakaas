@@ -2,8 +2,8 @@
 //! without reaching the next.
 
 use crate::{
-	bool_linear::LimitComp, constraint::cardinality_one::CardinalityOne, BoolVal, ClauseDatabase,
-	ClauseDatabaseTools, Encoder, Result,
+	constraint::{bool_linear::LimitComp, cardinality_one::CardinalityOne},
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Encoder, Result,
 };
 
 /// An encoder for an At Most One constraints that TODO

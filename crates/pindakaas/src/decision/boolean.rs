@@ -11,7 +11,9 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-	bool_linear::LinExp, constraint::propositional_logic::Formula, helpers::subscript_number, Coeff,
+	constraint::{bool_linear::LinExp, propositional_logic::Formula},
+	helpers::subscript_number,
+	Coeff,
 };
 
 /// A helper type used to represent a Boolean value that can be either a literal

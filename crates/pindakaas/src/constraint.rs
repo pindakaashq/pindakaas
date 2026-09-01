@@ -3,6 +3,7 @@
 //! Each submodule holds one kind of constraint, and re-exports the
 //! [`Encoder`](crate::Encoder)s that take it.
 
+pub mod bool_linear;
 pub mod cardinality_one;
 pub mod linear;
 pub mod propositional_logic;

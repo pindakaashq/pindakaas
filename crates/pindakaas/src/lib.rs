@@ -161,18 +161,18 @@
 //! integer linear constraints into CNF formulas. This provides the ability to
 //! model and solve a wide range of problems. To model a linear constraint, we
 //! start by creating linear expressions, represented using
-//! [`LinExp`](bool_linear::LinExp). We can use standard operators, such as `+`
-//! and `-`, to add terms together, and `*` to multiply one by a constant. A
-//! term is either a [`Lit`], worth its
+//! [`LinExp`](constraint::bool_linear::LinExp). We can use standard operators,
+//! such as `+` and `-`, to add terms together, and `*` to multiply one by a
+//! constant. A term is either a [`Lit`], worth its
 //! coefficient when it holds, or an [`IntVar`](decision::integer::IntVar),
 //! worth its coefficient times whichever value it takes — so `x * 3 + y * 5`
 //! reads the same whichever kind each side is.
 //!
-//! [`LinExp`](bool_linear::LinExp) can be turned into a constraint using the
-//! [`Linear::new`](bool_linear::Linear::new) method. It takes the
-//! linear expression as the left hand side, then a
-//! [`Comparator`](bool_linear::Comparator), and then a constant as the right
-//! hand side.
+//! [`LinExp`](constraint::bool_linear::LinExp) can be turned into a constraint
+//! using the [`Linear::new`](constraint::bool_linear::Linear::new) method. It
+//! takes the linear expression as the left hand side, then a
+//! [`Comparator`](constraint::bool_linear::Comparator), and then a constant as
+//! the right hand side.
 //!
 //! Before the constraint is encoded, it is first simplified, normalized, and
 //! specialized by the
@@ -185,8 +185,8 @@
 //! [`BitwiseEncoder`](encoder::bitwise::BitwiseEncoder). However, we can
 //! always
 //! use general pseudo-Boolean encoders, such as the
-//! [`TotalizerEncoder`](bool_linear::TotalizerEncoder). Making the choice of
-//! encoding can be streamlined by using the
+//! [`TotalizerEncoder`](constraint::bool_linear::TotalizerEncoder). Making the
+//! choice of encoding can be streamlined by using the
 //! [`StaticLinEncoder`](encoder::aggregate::StaticLinEncoder), which makes a
 //! choice based on the constraint's variant.
 //!
@@ -199,7 +199,7 @@
 //! ```rust
 //! use pindakaas::{
 //!     constraint::linear::{BoolLinAggregator, LinearEncoder, StaticLinEncoder},
-//!     bool_linear::{Linear, Comparator},
+//!     constraint::bool_linear::{Linear, Comparator},
 //!     Cnf, ClauseDatabaseTools
 //! };
 //!
@@ -237,7 +237,7 @@
 //!
 //! ```rust
 //! use pindakaas::{
-//!     bool_linear::Comparator,
+//!     constraint::bool_linear::Comparator,
 //!     int_linear::{IntLinEncoder, IntLinear, Term},
 //!     decision::integer::IntVar,
 //!     solver::{cadical::Cadical, SolveResult, Solver},
@@ -291,7 +291,6 @@
 //! Optimisation Technologies, Integrated Methodologies, and Applications
 //! (OPTIMA), Project ID IC200100009.
 
-pub mod bool_linear;
 pub mod cardinality;
 pub mod constraint;
 pub mod decision;

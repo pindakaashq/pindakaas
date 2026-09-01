@@ -206,8 +206,8 @@ fn cadical_next_var_range(slv: *mut c_void, _: *mut c_void, len: usize) -> [i32;
 }
 
 impl Cadical {
-	// TODO: Hidden for now as it requires the user to set the proof tracer during
-	// CONFIGURATION. This should probably be a separate state/builder.
+	// TODO: Hidden for now as it requires the user to set the proof tracer
+	// during CONFIGURATION. This should probably be a separate state/builder.
 	#[doc(hidden)]
 	pub fn connect_proof_tracer<P: ProofTracerConfig + 'static>(&mut self, tracer: Rc<RefCell<P>>) {
 		let ptr = Rc::as_ptr(&tracer);
@@ -251,7 +251,8 @@ impl Cadical {
 		let dyn_rc: Rc<RefCell<dyn ProofTracer>> = tracer;
 		self.tracers.retain(|t| !Rc::ptr_eq(t, &dyn_rc));
 		if len != self.tracers.len() {
-			// SAFETY: Pointer known to be non-null, no other known safety concerns.
+			// SAFETY: Pointer known to be non-null, no other known safety
+			// concerns.
 			unsafe {
 				let removed = ccadical_disconnect_proof_tracer(
 					self.ipasir_store().solver_ptr(),
@@ -265,8 +266,8 @@ impl Cadical {
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
 	pub fn get_option(&self, name: &str) -> i32 {
 		let name = CString::new(name).unwrap();
-		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
-		// handles non-existing options gracefully.
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option
+		// API handles non-existing options gracefully.
 		unsafe { ccadical_get_option(self.ipasir_store().solver_ptr(), name.as_ptr()) }
 	}
 
@@ -281,16 +282,16 @@ impl Cadical {
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
 	pub fn set_limit(&mut self, name: &str, value: i32) {
 		let name = CString::new(name).unwrap();
-		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
-		// handles non-existing options gracefully.
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option
+		// API handles non-existing options gracefully.
 		unsafe { ccadical_limit(self.ipasir_store().solver_ptr(), name.as_ptr(), value) }
 	}
 
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
 	pub fn set_option(&mut self, name: &str, value: i32) {
 		let name = CString::new(name).unwrap();
-		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
-		// handles non-existing options gracefully.
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option
+		// API handles non-existing options gracefully.
 		unsafe { ccadical_set_option(self.ipasir_store().solver_ptr(), name.as_ptr(), value) }
 	}
 
@@ -304,9 +305,9 @@ impl Cadical {
 		let ptr = unsafe { ccadical_copy(self.ipasir_store().solver_ptr()) };
 
 		// `ccadical_copy` constructs a fresh backend wrapper and `Solver::copy`
-		// transfers only the options, permanent clauses, witnesses and flags — no
-		// learn/terminate callbacks or external propagator. The new store is thus
-		// initialised with none of those connected.
+		// transfers only the options, permanent clauses, witnesses and flags —
+		// no learn/terminate callbacks or external propagator. The new store
+		// is thus initialised with none of those connected.
 		Self {
 			store: IpasirStore {
 				store: Box::new(IpasirStoreInner {
@@ -339,14 +340,14 @@ impl Cadical {
 		&self,
 		propagator: Rc<RefCell<P>>,
 	) -> Self {
-		// Build the new store up front so the propagator's callback data pointer
-		// (which must reference this store) is valid before the backend connects
-		// it. The backend solver is created and returned by
-		// `ccadical_copy_with_propagator`, so `ptr` is filled in afterwards. This
-		// is sound because the only callback that can fire during the copy is
-		// `notify_assignment` (when re-observing an already-fixed variable), which
-		// reaches the propagator via the store's data pointer and never reads
-		// `ptr`.
+		// Build the new store up front so the propagator's callback data
+		// pointer (which must reference this store) is valid before the
+		// backend connects it. The backend solver is created and returned by
+		// `ccadical_copy_with_propagator`, so `ptr` is filled in afterwards.
+		// This is sound because the only callback that can fire during the
+		// copy is `notify_assignment` (when re-observing an already-fixed
+		// variable), which reaches the propagator via the store's data
+		// pointer and never reads `ptr`.
 		let mut slv = Self {
 			store: IpasirStore {
 				store: Box::new(IpasirStoreInner {
@@ -360,10 +361,11 @@ impl Cadical {
 			},
 			tracers: Vec::new(),
 		};
-		// Store the propagator in the new store and build its callback structure.
-		// The data pointer references the boxed store, whose address is stable
-		// across the move of `slv`. The propagator is connected to the backend
-		// inside `ccadical_copy_with_propagator`, not here.
+		// Store the propagator in the new store and build its callback
+		// structure. The data pointer references the boxed store, whose
+		// address is stable across the move of `slv`. The propagator is
+		// connected to the backend inside `ccadical_copy_with_propagator`,
+		// not here.
 		let c_prop = slv.ipasir_store_mut().set_propagator(propagator);
 		// Copy the clauses, connect the propagator, and re-observe `self`'s
 		// observed variables onto the new solver, all in a single backend call.
@@ -761,8 +763,10 @@ mod tests {
 	use traced_test::test;
 
 	use crate::{
-		bool_linear::LimitComp,
-		constraint::cardinality_one::{CardinalityOne, PairwiseEncoder},
+		constraint::{
+			bool_linear::LimitComp,
+			cardinality_one::{CardinalityOne, PairwiseEncoder},
+		},
 		helpers::tests::{assert_solutions, expect_file},
 		solver::{
 			cadical::Cadical, Assumptions, FailedAssumptions, SolveResult, Solver, TermSignal,
@@ -843,9 +847,10 @@ mod tests {
 			ClauseDatabase, Lit,
 		};
 
-		// A propagator that records every assignment notification it receives. A
-		// non-lazy propagator is only notified about *observed* variables, so a
-		// non-empty record on the clone proves the observed set was transferred.
+		// A propagator that records every assignment notification it receives.
+		// A non-lazy propagator is only notified about *observed* variables,
+		// so a non-empty record on the clone proves the observed set was
+		// transferred.
 		#[derive(Default)]
 		struct Recorder {
 			notified: Vec<Lit>,
@@ -1155,8 +1160,8 @@ mod tests {
 		}
 
 		// Clone the solver together with a fresh clone of the propagator. The
-		// clone must inherit the permanent clauses, the propagator connection, and
-		// the observed variable set.
+		// clone must inherit the permanent clauses, the propagator connection,
+		// and the observed variable set.
 		let cp_p = Rc::new(RefCell::new(Dist2 {
 			vars,
 			tmp: Vec::new(),
@@ -1169,8 +1174,9 @@ mod tests {
 		drop(slv);
 		assert_eq!(Rc::strong_count(&p), 1);
 
-		// Enumerating on the clone must reproduce the same constrained solutions,
-		// proving the clauses and the propagator were carried over.
+		// Enumerating on the clone must reproduce the same constrained
+		// solutions, proving the clauses and the propagator were carried
+		// over.
 		let mut solns: Vec<Vec<Lit>> = Vec::new();
 		while let SolveResult::Satisfied(sol) = cp.solve() {
 			let sol: Vec<Lit> = vars

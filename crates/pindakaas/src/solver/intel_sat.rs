@@ -92,8 +92,10 @@ mod tests {
 	use traced_test::test;
 
 	use crate::{
-		bool_linear::LimitComp,
-		constraint::cardinality_one::{CardinalityOne, PairwiseEncoder},
+		constraint::{
+			bool_linear::LimitComp,
+			cardinality_one::{CardinalityOne, PairwiseEncoder},
+		},
 		solver::{intel_sat::IntelSat, SolveResult, Solver},
 		ClauseDatabaseTools, Encoder, Valuation,
 	};

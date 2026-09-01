@@ -178,13 +178,15 @@ fn emit_operations(
 					.expect("all reached coefficients must be in memo");
 				let op = plan.operation.expect("operation exists for target > 1");
 
-				// Schedule the emission of this operation after its dependencies.
-				// Pushing 'Emit' first means it will be popped last (LIFO).
+				// Schedule the emission of this operation after its
+				// dependencies. Pushing 'Emit' first means it will be
+				// popped last (LIFO).
 				work_list.push(WorkItem::Emit(op));
 
 				let (first, second) = op.dependencies();
 				// Schedule dependencies for discovery.
-				// The order here ensures that the first dependency is processed first.
+				// The order here ensures that the first dependency is processed
+				// first.
 				if let Some(second) = second {
 					work_list.push(WorkItem::Discover(second));
 				}
@@ -192,8 +194,8 @@ fn emit_operations(
 			}
 			WorkItem::Emit(op) => {
 				let result = op.result();
-				// Shared sub-expressions might have been emitted while this 'Emit' was
-				// pending on the stack.
+				// Shared sub-expressions might have been emitted while this
+				// 'Emit' was pending on the stack.
 				if !emitted.contains(&result) {
 					output.push(op);
 					let _ = emitted.insert(result);
@@ -276,9 +278,9 @@ impl ScmCoeff {
 	/// reference algorithm and makes it easier to compare Rust behavior against
 	/// the paper and the Picat prototype.
 	fn candidate_operations(self) -> impl Iterator<Item = ScmOperation> {
-		// The three rules assume an odd coefficient: it makes C2 odd in SPLUS and
-		// SMINUS, and the SPLUS/MINUSS minuends odd, so the splits never need to
-		// guard or normalize for those cases.
+		// The three rules assume an odd coefficient: it makes C2 odd in SPLUS
+		// and SMINUS, and the SPLUS/MINUSS minuends odd, so the splits never
+		// need to guard or normalize for those cases.
 		debug_assert!(
 			self.get() % 2 == 1,
 			"decomposition rules assume an odd coefficient"
@@ -318,16 +320,16 @@ impl ScmCoeff {
 		let current = self.get();
 		let n = bit_length(current);
 		(1..n).filter_map(move |s| {
-			// C2 is the one's complement of the high part `C >> s` (in `n - s` bits).
-			// It is odd exactly when bit s of C is 0, which is the condition for a
-			// MINUSS cut at position s.
+			// C2 is the one's complement of the high part `C >> s` (in `n - s`
+			// bits). It is odd exactly when bit s of C is 0, which is the
+			// condition for a MINUSS cut at position s.
 			let c2 = ((1_u32 << (n - s)) - 1).wrapping_sub(current >> s);
 			if c2 % 2 != 1 {
 				return None;
 			}
 			let low_mask = (1_u32 << s) - 1;
-			// The minuend C1 = 2^n - 2^s + (low s bits) is larger than C and always
-			// odd, so it needs no trailing-zero normalization.
+			// The minuend C1 = 2^n - 2^s + (low s bits) is larger than C and
+			// always odd, so it needs no trailing-zero normalization.
 			let c1 = (1_u32 << n) - (1_u32 << s) + (current & low_mask);
 			Some((ScmCoeff::new(c1), ScmCoeff::new(c2), s))
 		})
@@ -363,9 +365,10 @@ impl ScmCoeff {
 		let current = self.get();
 		let n = bit_length(current);
 		(1..n).filter_map(move |s| {
-			// Split C into the high part C1 = C >> s and the low s bits C2. Take the
-			// cut only when bit s-1 is set, so that C2 really spans s bits; otherwise
-			// the same split is also produced at a smaller s. C2 is odd because C is.
+			// Split C into the high part C1 = C >> s and the low s bits C2.
+			// Take the cut only when bit s-1 is set, so that C2 really spans
+			// s bits; otherwise the same split is also produced at a smaller
+			// s. C2 is odd because C is.
 			if (current >> (s - 1)) & 1 == 0 {
 				return None;
 			}
@@ -421,8 +424,8 @@ impl ScmOperation {
 			} => {
 				let w1 = left.width() + x_bits;
 				let w2 = right.width() + x_bits;
-				// When the shift is at least the right operand's width the operands do
-				// not overlap, so the addition needs no adders.
+				// When the shift is at least the right operand's width the
+				// operands do not overlap, so the addition needs no adders.
 				if shift >= w2 {
 					0
 				} else {
@@ -545,12 +548,13 @@ impl ScmSolution {
 			};
 		}
 
-		// Reduce an even constant to its odd part plus a final shift; the shift is
-		// free, so only the odd part needs a plan.
+		// Reduce an even constant to its odd part plus a final shift; the shift
+		// is free, so only the odd part needs a plan.
 		let shift = constant.trailing_zeros();
 		let odd_constant = ScmCoeff::new(constant >> shift);
 
-		// The memoization map stores the best plan found so far for each coefficient.
+		// The memoization map stores the best plan found so far for each
+		// coefficient.
 		let mut memo: FxHashMap<ScmCoeff, InternalPlan> = FxHashMap::default();
 		let _ = memo.insert(
 			ScmCoeff::INPUT,
@@ -562,15 +566,16 @@ impl ScmSolution {
 			},
 		);
 
-		// Coefficients that have already been expanded. A coefficient may be pushed
-		// many times (each dependent re-pushes it) but is expanded and solved only
-		// once; this bounds the search even though MINUSS dependencies grow above
-		// `coeff`.
+		// Coefficients that have already been expanded. A coefficient may be
+		// pushed many times (each dependent re-pushes it) but is expanded and
+		// solved only once; this bounds the search even though MINUSS
+		// dependencies grow above `coeff`.
 		let mut discovered: FxHashSet<ScmCoeff> = FxHashSet::default();
 
-		// Iterative DP over a work list, avoiding deep recursion. Each coefficient is
-		// discovered once (scheduling its dependencies and then its own solve) and
-		// solved once, after those dependencies by LIFO order.
+		// Iterative DP over a work list, avoiding deep recursion. Each
+		// coefficient is discovered once (scheduling its dependencies and
+		// then its own solve) and solved once, after those dependencies by
+		// LIFO order.
 		#[derive(Clone, Copy, Debug)]
 		enum WorkItem {
 			Discover(ScmCoeff),
@@ -590,10 +595,11 @@ impl ScmSolution {
 						continue;
 					}
 
-					// Schedule the solve first so it is popped only after the dependencies
-					// pushed above it. Each dependent re-pushes its own dependencies, so a
-					// shared dependency is expanded (and solved) before the first dependent
-					// that needs it.
+					// Schedule the solve first so it is popped only after the
+					// dependencies pushed above it. Each dependent
+					// re-pushes its own dependencies, so a
+					// shared dependency is expanded (and solved) before the
+					// first dependent that needs it.
 					work_list.push(WorkItem::Solve(coeff));
 					for op in coeff.candidate_operations() {
 						let (first, second) = op.dependencies();
@@ -611,15 +617,18 @@ impl ScmSolution {
 						.filter_map(|op| {
 							let (first, second) = op.dependencies();
 
-							// Collect each dependency's full intermediate set: its own
-							// sub-intermediates plus the dependency itself. A dependency is
-							// absent from `memo` only if it sits on the current path (a
-							// back-edge); dropping the candidate then keeps the emitted
-							// operation graph acyclic.
+							// Collect each dependency's full intermediate set:
+							// its own sub-intermediates plus the
+							// dependency itself. A dependency is
+							// absent from `memo` only if it sits on the current
+							// path (a back-edge); dropping the candidate
+							// then keeps the emitted operation graph
+							// acyclic.
 							let p1 = memo.get(&first)?;
 							let i1 = intermediates_with(&p1.intermediates, first);
 
-							// The plan cost is the sum of every unique operation's cost.
+							// The plan cost is the sum of every unique
+							// operation's cost.
 							let op_cost = op.cost(objective);
 							let mut cost = op_cost;
 							let combined: Vec<ScmCoeff> = if let Some(second) = second {
@@ -779,7 +788,8 @@ mod tests {
 			for x in [-31_i64, -1, 0, 1, 123, 200] {
 				assert_eq!(solution.evaluate(x), c as i128 * x as i128, "c={c} x={x}");
 			}
-			// The min-k cost is by definition the number of non-shift operations.
+			// The min-k cost is by definition the number of non-shift
+			// operations.
 			let ops = solution
 				.operations
 				.iter()

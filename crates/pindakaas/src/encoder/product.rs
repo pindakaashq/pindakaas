@@ -90,8 +90,9 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for ProductEncoder
 				continue;
 			}
 
-			// Lay the literals out in a grid that is as square as possible, filling
-			// it row by row. The final row is allowed to be partially filled.
+			// Lay the literals out in a grid that is as square as possible,
+			// filling it row by row. The final row is allowed to be
+			// partially filled.
 			let cols = {
 				let root = lits.len().isqrt();
 				if root * root < lits.len() {
@@ -105,9 +106,9 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for ProductEncoder
 			let row_lits = (0..rows).map(|_| db.new_lit()).collect_vec();
 			let col_lits = (0..cols).map(|_| db.new_lit()).collect_vec();
 
-			// A literal implies the selection of both the row and the column it was
-			// placed in, and a selected row or column has to hold one of its
-			// literals.
+			// A literal implies the selection of both the row and the column it
+			// was placed in, and a selected row or column has to hold one of
+			// its literals.
 			for (i, &lit) in lits.iter().enumerate() {
 				db.add_clause([!lit, row_lits[i / cols]])?;
 				db.add_clause([!lit, col_lits[i % cols]])?;

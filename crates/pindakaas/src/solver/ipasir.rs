@@ -271,8 +271,8 @@ impl Iterator for ExplIter {
 
 	#[inline]
 	fn next(&mut self) -> Option<Self::Item> {
-		// SAFETY: ExplIter is assumed to be constructed using a valid pointer to an
-		// correctly aligned and null-terminated array of i32.
+		// SAFETY: ExplIter is assumed to be constructed using a valid pointer
+		// to an correctly aligned and null-terminated array of i32.
 		unsafe {
 			if *self.0 == 0 {
 				None
@@ -294,8 +294,8 @@ where
 		assumptions: I,
 	) -> SolveResult<impl Valuation + '_, impl FailedAssumptions + '_> {
 		for i in assumptions {
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_ASSUME function is expected to abide by the
+			// Safety: Pointer is a valid (non-null) pointer to the solver, and
+			// the IPASIR_ASSUME function is expected to abide by the
 			// IPASIR interface specification.
 			unsafe {
 				Self::IPASIR_ASSUME(self.ipasir_store().solver_ptr(), i.into());
@@ -311,9 +311,9 @@ where
 {
 	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
 		for &lit in clause {
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_ADD function is expected to abide by the IPASIR interface
-			// specification.
+			// Safety: Pointer is a valid (non-null) pointer to the solver, and
+			// the IPASIR_ADD function is expected to abide by the IPASIR
+			// interface specification.
 			unsafe { Self::IPASIR_ADD(self.ipasir_store().solver_ptr(), lit.into()) };
 		}
 		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
@@ -362,9 +362,9 @@ where
 			});
 			let (data_ptr, fn_ptr) = get_trampoline1(&mut wrapped_cb);
 			*self.ipasir_store_mut().learn_callback() = Some(wrapped_cb);
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_SET_LEARN_CALLBACK function is expected to abide by the IPASIR
-			// interface specification.
+			// Safety: Pointer is a valid (non-null) pointer to the solver, and
+			// the IPASIR_SET_LEARN_CALLBACK function is expected to abide by
+			// the IPASIR interface specification.
 			unsafe {
 				Self::IPASIR_SET_LEARN_CALLBACK(
 					self.ipasir_store().solver_ptr(),
@@ -375,9 +375,9 @@ where
 			}
 		} else {
 			*self.ipasir_store_mut().learn_callback() = None;
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_SET_LEARN_CALLBACK function is expected to abide by the IPASIR
-			// interface specification.
+			// Safety: Pointer is a valid (non-null) pointer to the solver, and
+			// the IPASIR_SET_LEARN_CALLBACK function is expected to abide by
+			// the IPASIR interface specification.
 			unsafe {
 				Self::IPASIR_SET_LEARN_CALLBACK(
 					self.ipasir_store().solver_ptr(),
@@ -442,9 +442,9 @@ where
 			});
 			let (data_ptr, fn_ptr) = get_trampoline0(&mut wrapped_cb);
 			*self.ipasir_store_mut().termination_callback() = Some(wrapped_cb);
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_SET_TERMINATE_CALLBACK function is expected to abide by the
-			// IPASIR interface specification.
+			// Safety: Pointer is a valid (non-null) pointer to the solver, and
+			// the IPASIR_SET_TERMINATE_CALLBACK function is expected to
+			// abide by the IPASIR interface specification.
 			unsafe {
 				Self::IPASIR_SET_TERMINATE_CALLBACK(
 					self.ipasir_store().solver_ptr(),
@@ -454,9 +454,9 @@ where
 			}
 		} else {
 			*self.ipasir_store_mut().termination_callback() = None;
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_SET_TERMINATE_CALLBACK function is expected to abide by the
-			// IPASIR interface specification.
+			// Safety: Pointer is a valid (non-null) pointer to the solver, and
+			// the IPASIR_SET_TERMINATE_CALLBACK function is expected to
+			// abide by the IPASIR interface specification.
 			unsafe {
 				Self::IPASIR_SET_TERMINATE_CALLBACK(
 					self.ipasir_store().solver_ptr(),

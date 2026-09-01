@@ -5,8 +5,8 @@ pub use crate::encoder::{
 	product::ProductEncoder,
 };
 use crate::{
-	bool_linear::{Comparator, LimitComp},
 	cardinality::Cardinality,
+	constraint::bool_linear::{Comparator, LimitComp},
 	Checker, ClauseDatabase, ClauseDatabaseTools, Lit, Result, Valuation,
 };
 
@@ -335,9 +335,11 @@ pub(crate) mod tests {
 	use itertools::Itertools;
 
 	use crate::{
-		bool_linear::LimitComp,
-		constraint::cardinality_one::{
-			BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder, ProductEncoder,
+		constraint::{
+			bool_linear::LimitComp,
+			cardinality_one::{
+				BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder, ProductEncoder,
+			},
 		},
 		helpers::tests::{assert_encoding, assert_solutions, expect_file},
 		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Unsatisfiable,

@@ -4,8 +4,10 @@
 use itertools::Itertools;
 
 use crate::{
-	bool_linear::LimitComp,
-	constraint::cardinality_one::{at_least_one_clause, CardinalityOne},
+	constraint::{
+		bool_linear::LimitComp,
+		cardinality_one::{at_least_one_clause, CardinalityOne},
+	},
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Result,
 };
 

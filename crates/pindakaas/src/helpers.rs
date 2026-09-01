@@ -87,8 +87,8 @@ pub(crate) use new_named_lit;
 pub(crate) use new_named_var_range;
 
 use crate::{
-	bool_linear::PosCoeff, decision::integer::BinaryEncoding, BoolVal, ClauseDatabase, Coeff,
-	Valuation,
+	constraint::bool_linear::PosCoeff, decision::integer::BinaryEncoding, BoolVal, ClauseDatabase,
+	Coeff, Valuation,
 };
 
 /// The value of a binary encoding under an assignment.
@@ -178,10 +178,414 @@ pub(crate) mod tests {
 	use itertools::Itertools;
 
 	use crate::{
+		constraint::bool_linear::PosCoeff,
 		helpers::binary_value,
+		int_linear::Term,
 		solver::{cadical::Cadical, SolveResult, Solver},
 		BoolVal, Checker, ClauseDatabaseTools, Cnf, Coeff, Lit, Unsatisfiable, Valuation,
 	};
+
+	macro_rules! linear_test_suite {
+		($module:ident, $encoder:expr) => {
+			mod $module {
+				use traced_test::test;
+
+				use crate::helpers::tests::prelude::*;
+
+				#[test]
+				fn small_le_1() {
+					let mut cnf = Cnf::default();
+					let a = cnf.new_lit();
+					let b = cnf.new_lit();
+					let c = cnf.new_lit();
+					let con = NormalizedIntLinear::from_terms(
+						construct_terms(&mut cnf, &[(a, 2), (b, 3), (c, 5)]),
+						LimitComp::LessEq,
+						PosCoeff::new(6),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c],
+						&expect_file!["linear/test_small_le_1.sol"],
+					);
+				}
+
+				#[test]
+				fn small_le_2() {
+					let mut cnf = Cnf::default();
+					let a = cnf.new_lit();
+					let b = cnf.new_lit();
+					let c = cnf.new_lit();
+					let d = cnf.new_lit();
+					let e = cnf.new_lit();
+					let f = cnf.new_lit();
+					let con = NormalizedIntLinear::from_terms(
+						construct_terms(
+							&mut cnf,
+							&[(!a, 3), (!b, 6), (!c, 1), (!d, 2), (!e, 3), (!f, 6)],
+						),
+						LimitComp::LessEq,
+						PosCoeff::new(19),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d, e, f],
+						&expect_file!["linear/test_small_le_2.sol"],
+					);
+				}
+
+				#[test]
+				fn small_le_3() {
+					let mut cnf = Cnf::default();
+					let a = cnf.new_lit();
+					let b = cnf.new_lit();
+					let c = cnf.new_lit();
+					let con = NormalizedIntLinear::from_terms(
+						construct_terms(&mut cnf, &[(a, 1), (b, 2), (c, 4)]),
+						LimitComp::LessEq,
+						PosCoeff::new(5),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c],
+						&expect_file!["linear/test_small_le_3.sol"],
+					);
+				}
+
+				#[test]
+				fn small_le_4() {
+					let mut cnf = Cnf::default();
+					let a = cnf.new_lit();
+					let b = cnf.new_lit();
+					let c = cnf.new_lit();
+					let con = NormalizedIntLinear::from_terms(
+						construct_terms(&mut cnf, &[(a, 4), (b, 6), (c, 7)]),
+						LimitComp::LessEq,
+						PosCoeff::new(10),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c],
+						&expect_file!["linear/test_small_le_4.sol"],
+					);
+				}
+
+				#[test]
+				fn small_eq_1() {
+					let mut cnf = Cnf::default();
+					let a = cnf.new_lit();
+					let b = cnf.new_lit();
+					let c = cnf.new_lit();
+					let con = NormalizedIntLinear::from_terms(
+						construct_terms(&mut cnf, &[(a, 1), (b, 2), (c, 4)]),
+						LimitComp::Equal,
+						PosCoeff::new(5),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c],
+						&expect_file!["linear/test_small_eq_1.sol"],
+					);
+				}
+
+				#[test]
+				fn small_eq_2() {
+					let mut cnf = Cnf::default();
+					let a = cnf.new_lit();
+					let b = cnf.new_lit();
+					let c = cnf.new_lit();
+					let con = NormalizedIntLinear::from_terms(
+						construct_terms(&mut cnf, &[(a, 1), (b, 2), (c, 3)]),
+						LimitComp::Equal,
+						PosCoeff::new(3),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c],
+						&expect_file!["linear/test_small_eq_2.sol"],
+					);
+				}
+
+				#[test]
+				fn small_eq_3() {
+					let mut cnf = Cnf::default();
+					let a = cnf.new_lit();
+					let b = cnf.new_lit();
+					let c = cnf.new_lit();
+					let d = cnf.new_lit();
+					let con = NormalizedIntLinear::from_terms(
+						construct_terms(&mut cnf, &[(a, 2), (b, 3), (c, 5), (d, 7)]),
+						LimitComp::Equal,
+						PosCoeff::new(10),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_small_eq_3.sol"],
+					);
+				}
+
+				#[test]
+				fn small_eq_4() {
+					let mut cnf = Cnf::default();
+					let a = cnf.new_lit();
+					let b = cnf.new_lit();
+					let c = cnf.new_lit();
+					let d = cnf.new_lit();
+					let con = NormalizedIntLinear::from_terms(
+						construct_terms(&mut cnf, &[(a, 2), (b, 1), (c, 2), (d, 2)]),
+						LimitComp::Equal,
+						PosCoeff::new(4),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_small_eq_4.sol"],
+					);
+				}
+
+				/// Encode the at-most-one constraint over each of the `groups`, so
+				/// that the solutions of the formula can be compared against those
+				/// of encoders that ignore the grouping of the terms.
+				fn amo(cnf: &mut Cnf, groups: &[&[Lit]]) {
+					for lits in groups {
+						PairwiseEncoder::default()
+							.encode(
+								cnf,
+								&CardinalityOne {
+									lits: lits.to_vec(),
+									cmp: LimitComp::LessEq,
+								},
+							)
+							.unwrap();
+					}
+				}
+
+				#[test]
+				fn choice_le() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					amo(&mut cnf, &[&[a, b], &[c, d]]);
+					let con = NormalizedIntLinear::from_terms(
+						vec![
+							Term::from_at_most_one(
+								&mut cnf,
+								&[(a, PosCoeff::new(3)), (b, PosCoeff::new(5))],
+								"x0",
+								false,
+							)
+							.unwrap(),
+							Term::from_at_most_one(
+								&mut cnf,
+								&[(c, PosCoeff::new(2)), (d, PosCoeff::new(4))],
+								"x1",
+								false,
+							)
+							.unwrap(),
+						],
+						LimitComp::LessEq,
+						PosCoeff::new(7),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_choice_le.sol"],
+					);
+				}
+
+				#[test]
+				fn choice_eq() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					amo(&mut cnf, &[&[a, b], &[c, d]]);
+					let con = NormalizedIntLinear::from_terms(
+						vec![
+							Term::from_at_most_one(
+								&mut cnf,
+								&[(a, PosCoeff::new(3)), (b, PosCoeff::new(5))],
+								"x0",
+								true,
+							)
+							.unwrap(),
+							Term::from_at_most_one(
+								&mut cnf,
+								&[(c, PosCoeff::new(2)), (d, PosCoeff::new(4))],
+								"x1",
+								true,
+							)
+							.unwrap(),
+						],
+						LimitComp::Equal,
+						PosCoeff::new(7),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_choice_eq.sol"],
+					);
+				}
+
+				#[test]
+				fn choice_shared_coefficient() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					amo(&mut cnf, &[&[a, b, c]]);
+					// Two of the mutually exclusive terms share a coefficient.
+					let con = NormalizedIntLinear::from_terms(
+						vec![
+							Term::from_at_most_one(
+								&mut cnf,
+								&[
+									(a, PosCoeff::new(3)),
+									(b, PosCoeff::new(3)),
+									(c, PosCoeff::new(5)),
+								],
+								"x0",
+								false,
+							)
+							.unwrap(),
+							Term::from_at_most_one(&mut cnf, &[(d, PosCoeff::new(4))], "x1", false)
+								.unwrap(),
+						],
+						LimitComp::LessEq,
+						PosCoeff::new(7),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_choice_shared_coefficient.sol"],
+					);
+				}
+
+				#[test]
+				fn choice_shared_coefficient_eq() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					amo(&mut cnf, &[&[a, b, c]]);
+					let con = NormalizedIntLinear::from_terms(
+						vec![
+							Term::from_at_most_one(
+								&mut cnf,
+								&[
+									(a, PosCoeff::new(3)),
+									(b, PosCoeff::new(3)),
+									(c, PosCoeff::new(5)),
+								],
+								"x0",
+								true,
+							)
+							.unwrap(),
+							Term::from_at_most_one(&mut cnf, &[(d, PosCoeff::new(4))], "x1", true)
+								.unwrap(),
+						],
+						LimitComp::Equal,
+						PosCoeff::new(7),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_choice_shared_coefficient_eq.sol"],
+					);
+				}
+
+				#[test]
+				fn chain_le() {
+					let mut cnf = Cnf::default();
+					let (a, b, c, d) = cnf.new_lits();
+					// The literal of each term is implied by the literal of the next.
+					for (x, y) in [(a, b), (b, c)] {
+						cnf.add_clause([!y, x]).unwrap();
+					}
+					let con = NormalizedIntLinear::from_terms(
+						vec![
+							Term::from_implication_chain(
+								&mut cnf,
+								&[
+									(a, PosCoeff::new(2)),
+									(b, PosCoeff::new(3)),
+									(c, PosCoeff::new(4)),
+								],
+								"x0",
+							)
+							.unwrap(),
+							Term::from_at_most_one(&mut cnf, &[(d, PosCoeff::new(5))], "x1", false)
+								.unwrap(),
+						],
+						LimitComp::LessEq,
+						PosCoeff::new(8),
+					);
+					$encoder.encode(&mut cnf, &con).unwrap();
+
+					assert_solutions(
+						&cnf,
+						vec![a, b, c, d],
+						&expect_file!["linear/test_chain_le.sol"],
+					);
+				}
+
+				#[test]
+				fn issue_177() {
+					let mut cnf = Cnf::default();
+					let a = cnf.new_lit();
+					let b = cnf.new_lit();
+					let con = NormalizedIntLinear::from_terms(
+						construct_terms(&mut cnf, &[(a, 3), (b, 9)]),
+						LimitComp::Equal,
+						PosCoeff::new(10),
+					);
+					let res = $encoder.encode(&mut cnf, &con);
+					if res.is_ok() {
+						assert_solutions(
+							&cnf,
+							vec![a, b],
+							&expect_file!["linear/test_issue_177.sol"],
+						);
+					}
+				}
+			}
+		};
+	}
+	pub(crate) use linear_test_suite;
+
+	/// A term that nothing else constrains is an integer worth its coefficient
+	/// when its literal holds, which is a group of one.
+	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(
+		db: &mut Cnf,
+		terms: &[(L, Coeff)],
+	) -> Vec<Term> {
+		terms
+			.iter()
+			.enumerate()
+			.map(|(i, (lit, coef))| {
+				let group = [(lit.clone().into(), PosCoeff::new(*coef))];
+				Term::from_at_most_one(db, &group, &format!("x{i}"), false).unwrap()
+			})
+			.collect()
+	}
 
 	/// Everything the test-suite macros need in scope where they expand.
 	///
@@ -193,15 +597,22 @@ pub(crate) mod tests {
 		pub(crate) use itertools::Itertools;
 
 		pub(crate) use crate::{
-			bool_linear::{tests::construct_terms, LimitComp, PosCoeff},
-			cardinality::{Cardinality, SortingNetworkEncoder},
+			cardinality::{tests::card_test_suite, Cardinality, SortingNetworkEncoder},
 			constraint::{
-				cardinality_one::{CardinalityOne, PairwiseEncoder},
+				bool_linear::{
+					AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, Linear, PosCoeff,
+					SwcEncoder, TotalizerEncoder,
+				},
+				cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
+				linear::{BoolLinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},
 				sorted::{SortedEncoder, SortedStrategy},
 			},
-			helpers::tests::{assert_checker, assert_solutions, expect_file},
+			helpers::tests::{
+				all_binary_solutions, assert_checker, assert_encoding, assert_solutions,
+				binary_literals, construct_terms, expect_file,
+			},
 			int_linear::{NormalizedIntLinear, Term},
-			ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit,
+			BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 		};
 	}
 

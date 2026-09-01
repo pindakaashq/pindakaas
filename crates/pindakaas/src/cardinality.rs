@@ -6,8 +6,8 @@
 //! CNF, as well as any [`Encoder`] of a linear constraint.
 
 use crate::{
-	bool_linear::{Comparator, LimitComp, PosCoeff},
 	constraint::{
+		bool_linear::{Comparator, LimitComp, PosCoeff},
 		cardinality_one::CardinalityOne,
 		sorted::{Sorted, SortedEncoder},
 	},
@@ -170,7 +170,7 @@ where
 #[cfg(test)]
 const _: () = {
 	use crate::{
-		bool_linear::{AdderEncoder, BddEncoder, SwcEncoder, TotalizerEncoder},
+		constraint::bool_linear::{AdderEncoder, BddEncoder, SwcEncoder, TotalizerEncoder},
 		int_linear::IntLinEncoder,
 		Cnf,
 	};

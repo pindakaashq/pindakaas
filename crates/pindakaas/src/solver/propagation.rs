@@ -348,8 +348,9 @@ impl<'a> Solution<'a> {
 		{
 			Ok(i) => self.model[i] == lit,
 			Err(_) => {
-				// A literal absent from the model belongs to a variable that is not
-				// observed by the propagator, which it should therefore not query.
+				// A literal absent from the model belongs to a variable that is
+				// not observed by the propagator, which it should therefore
+				// not query.
 				debug_assert!(false, "queried an unobserved variable");
 				false
 			}

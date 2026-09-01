@@ -13,7 +13,7 @@ use itertools::{Either, Itertools};
 use rangelist::{IntervalIterator, RangeList};
 
 use crate::{
-	bool_linear::{Comparator, PosCoeff},
+	constraint::bool_linear::{Comparator, PosCoeff},
 	helpers::{as_binary, bit, new_named_var_range},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable, Var, VarRange,
 };
@@ -1669,7 +1669,7 @@ pub(crate) mod tests {
 	use traced_test::test;
 
 	use crate::{
-		bool_linear::{Comparator, PosCoeff},
+		constraint::bool_linear::{Comparator, PosCoeff},
 		decision::integer::{lex_geq_const, lex_leq_const, BinaryEncoding, IntVar, Lead},
 		helpers::{
 			binary_value,
@@ -1844,8 +1844,9 @@ pub(crate) mod tests {
 				let x = IntVar::new(domain.clone())
 					.enforce_consistency(true)
 					.with_label("x");
-				// The order the encodings are asked for must not matter: whichever
-				// arrives second is the one that triggers the channelling.
+				// The order the encodings are asked for must not matter:
+				// whichever arrives second is the one that triggers the
+				// channelling.
 				let (ord, bin) = if bin_first {
 					let bin = x.binary_encoding(&mut cnf).unwrap();
 					(x.order_encoding(&mut cnf).unwrap(), bin)
@@ -1857,9 +1858,10 @@ pub(crate) mod tests {
 				let solutions = all_values(&cnf, &|v| vec![ord.value(&domain, v), bin.value(v)]);
 				let expected: Vec<Vec<Coeff>> =
 					domain.iter().flatten().map(|d| vec![d, d]).collect();
-				// Exactly the domain, once each, with both views reading alike. A
-				// disagreement or a value outside the domain would show up as an
-				// extra row, a missing one, or a row whose two entries differ.
+				// Exactly the domain, once each, with both views reading alike.
+				// A disagreement or a value outside the domain would show
+				// up as an extra row, a missing one, or a row whose two
+				// entries differ.
 				assert_eq!(
 					solutions,
 					expected,
@@ -1912,8 +1914,8 @@ pub(crate) mod tests {
 		let _ = x.binary_encoding(&mut cnf).unwrap();
 		let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
 
-		// Asking again hands back what is already there: no new literals, and in
-		// particular no second round of channelling clauses.
+		// Asking again hands back what is already there: no new literals, and
+		// in particular no second round of channelling clauses.
 		let _ = x.order_encoding(&mut cnf).unwrap();
 		let _ = x.binary_encoding(&mut cnf).unwrap();
 		assert_eq!((cnf.num_vars(), cnf.num_clauses()), (vars, clauses));

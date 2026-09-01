@@ -2,9 +2,9 @@
 //! have been read.
 //!
 //! [`BoolLinAggregator`](crate::encoder::aggregate::BoolLinAggregator) reads a
-//! [`Linear`](crate::bool_linear::Linear) and reports which of these it is, so
-//! that a narrower constraint can be given to an encoder that specialises in
-//! it.
+//! [`Linear`](crate::constraint::bool_linear::Linear) and reports which of
+//! these it is, so that a narrower constraint can be given to an encoder that
+//! specialises in it.
 
 pub use crate::encoder::aggregate::{BoolLinAggregator, LinearEncoder, StaticLinEncoder};
 use crate::{
