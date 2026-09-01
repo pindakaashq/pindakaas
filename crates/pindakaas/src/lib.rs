@@ -182,7 +182,8 @@
 //! the specialized constraint, the constraint can be encoded using different
 //! encoding methods. For example, if the constraint was found to be a “at most
 //! one” constraint, then it could use the
-//! [`BitwiseEncoder`](cardinality_one::BitwiseEncoder). However, we can always
+//! [`BitwiseEncoder`](encoder::bitwise::BitwiseEncoder). However, we can
+//! always
 //! use general pseudo-Boolean encoders, such as the
 //! [`TotalizerEncoder`](bool_linear::TotalizerEncoder). Making the choice of
 //! encoding can be streamlined by using the
@@ -292,7 +293,6 @@
 
 pub mod bool_linear;
 pub mod cardinality;
-pub mod cardinality_one;
 pub mod constraint;
 pub mod decision;
 pub mod encoder;

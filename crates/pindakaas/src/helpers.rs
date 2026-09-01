@@ -195,8 +195,10 @@ pub(crate) mod tests {
 		pub(crate) use crate::{
 			bool_linear::{tests::construct_terms, LimitComp, PosCoeff},
 			cardinality::{Cardinality, SortingNetworkEncoder},
-			cardinality_one::{CardinalityOne, PairwiseEncoder},
-			constraint::sorted::{SortedEncoder, SortedStrategy},
+			constraint::{
+				cardinality_one::{CardinalityOne, PairwiseEncoder},
+				sorted::{SortedEncoder, SortedStrategy},
+			},
 			helpers::tests::{assert_checker, assert_solutions, expect_file},
 			int_linear::{NormalizedIntLinear, Term},
 			ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit,

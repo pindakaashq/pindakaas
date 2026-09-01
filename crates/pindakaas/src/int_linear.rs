@@ -15,7 +15,7 @@ use rustc_hash::FxHashMap;
 use crate::{
 	bool_linear::{AdderEncoder, Comparator, LimitComp, PosCoeff},
 	cardinality::Cardinality,
-	cardinality_one::CardinalityOne,
+	constraint::cardinality_one::CardinalityOne,
 	decision::integer::{BinaryEncoding, IntVar, IntVarKey},
 	helpers::{
 		div_ceil, div_floor, new_named_lit,
@@ -999,7 +999,7 @@ mod tests {
 
 	use crate::{
 		bool_linear::{Comparator, LimitComp, PosCoeff},
-		cardinality_one::{CardinalityOne, PairwiseEncoder},
+		constraint::cardinality_one::{CardinalityOne, PairwiseEncoder},
 		decision::integer::IntVar,
 		int_linear::{IntLinConfig, IntLinEncoder, IntLinear, Term},
 		solver::{cadical::Cadical, SolveResult, Solver},

@@ -7,8 +7,8 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 use crate::{
 	bool_linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
 	cardinality::Cardinality,
-	cardinality_one::{BitwiseEncoder, CardinalityOne},
 	constraint::{
+		cardinality_one::{BitwiseEncoder, CardinalityOne},
 		linear::LinVariant,
 		sorted::{Sorted, SortedEncoder},
 	},

@@ -762,7 +762,7 @@ mod tests {
 
 	use crate::{
 		bool_linear::LimitComp,
-		cardinality_one::{CardinalityOne, PairwiseEncoder},
+		constraint::cardinality_one::{CardinalityOne, PairwiseEncoder},
 		helpers::tests::{assert_solutions, expect_file},
 		solver::{
 			cadical::Cadical, Assumptions, FailedAssumptions, SolveResult, Solver, TermSignal,

@@ -7,8 +7,10 @@
 
 use crate::{
 	bool_linear::{Comparator, LimitComp, PosCoeff},
-	cardinality_one::CardinalityOne,
-	constraint::sorted::{Sorted, SortedEncoder},
+	constraint::{
+		cardinality_one::CardinalityOne,
+		sorted::{Sorted, SortedEncoder},
+	},
 	decision::integer::IntVar,
 	int_linear::{NormalizedIntLinear, Term},
 	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,

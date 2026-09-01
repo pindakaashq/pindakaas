@@ -32,8 +32,10 @@ use rangelist::RangeList;
 
 use crate::{
 	cardinality::Cardinality,
-	cardinality_one::CardinalityOne,
-	constraint::propositional_logic::{Formula, TseitinEncoder},
+	constraint::{
+		cardinality_one::CardinalityOne,
+		propositional_logic::{Formula, TseitinEncoder},
+	},
 	decision::integer::{lex_leq_const, Consistency, IntVar},
 	helpers::{as_binary, bit, new_named_lit},
 	int_linear::{
@@ -1894,7 +1896,7 @@ pub(crate) mod tests {
 		},
 		constraint::linear::{BoolLinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},
 		cardinality::tests::card_test_suite,
-		cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
+		constraint::cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
 		helpers::tests::{
 			all_binary_solutions, assert_checker, assert_encoding, assert_solutions,
 			binary_literals, expect_file,

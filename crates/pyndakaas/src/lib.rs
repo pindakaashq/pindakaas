@@ -74,8 +74,8 @@ mod pindakaas {
 			SwcEncoder, TotalizerEncoder,
 		},
 		cardinality::{Cardinality, SortingNetworkEncoder},
-		cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
 		constraint::{
+			cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
 			linear::{BoolLinAggregator, LinVariant, LinearEncoder},
 			propositional_logic::{Formula as BaseFormula, TseitinEncoder},
 		},
@@ -143,17 +143,18 @@ mod pindakaas {
 		/// Use :class:`pindakaas::bool_linear::AdderEncoder`, which is able to
 		/// encode all Boolean linear constraints.
 		ADDER,
-		/// Use :class:`pindakaas::cardinality_one::BitwiseEncoder`, which is
-		/// able to encode all Boolean cardinality one constraints.
+		/// Use :class:`pindakaas::constraint::cardinality_one::BitwiseEncoder`,
+		/// which is able to encode all Boolean cardinality one constraints.
 		BITWISE,
 		/// Use :class:`pindakaas::bool_linear::BddEncoder`, which is able to
 		/// encode all Boolean linear constraints.
 		DECISION_DIAGRAM,
-		/// Use :class:`pindakaas::cardinality_one::LadderEncoder`, which is
-		/// able to encode all Boolean cardinality one constraints.
+		/// Use :class:`pindakaas::constraint::cardinality_one::LadderEncoder`,
+		/// which is able to encode all Boolean cardinality one constraints.
 		LADDER,
-		/// Use :class:`pindakaas::cardinality_one::PairwiseEncoder`, which is
-		/// able to encode all Boolean cardinality one constraints.
+		/// Use
+		/// :class:`pindakaas::constraint::cardinality_one::PairwiseEncoder`,
+		/// which is able to encode all Boolean cardinality one constraints.
 		PAIRWISE,
 		/// Use :class:`pindakaas::bool_linear::SwcEncoder`, which is able to
 		/// encode all Boolean linear constraints.
@@ -164,8 +165,9 @@ mod pindakaas {
 		/// Use :class:`pindakaas::bool_linear::TotalizerEncoder`, which is able
 		/// to encode all Boolean linear constraints.
 		TOTALIZER,
-		/// Use :class:`pindakaas::constraint::propositional_logic::TseitinEncoder`, which
-		/// is able to encode propositional logic formulas.
+		/// Use
+		/// :class:`pindakaas::constraint::propositional_logic::TseitinEncoder`,
+		/// which is able to encode propositional logic formulas.
 		TSEITIN,
 	}
 
