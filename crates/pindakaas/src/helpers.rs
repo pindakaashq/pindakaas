@@ -182,6 +182,26 @@ pub(crate) mod tests {
 		BoolVal, Checker, ClauseDatabaseTools, Cnf, Coeff, Lit, Unsatisfiable, Valuation,
 	};
 
+	/// Everything the test-suite macros need in scope where they expand.
+	///
+	/// The macros are invoked from other modules, so any path written inside
+	/// one has to resolve at the call site rather than where it was written.
+	/// Naming them here instead means a module can move without four macro
+	/// bodies having to hear about it.
+	pub(crate) mod prelude {
+		pub(crate) use itertools::Itertools;
+
+		pub(crate) use crate::{
+			bool_linear::{tests::construct_terms, LimitComp, PosCoeff},
+			cardinality::{Cardinality, SortingNetworkEncoder},
+			cardinality_one::{CardinalityOne, PairwiseEncoder},
+			helpers::tests::{assert_checker, assert_solutions, expect_file},
+			int_linear::{NormalizedIntLinear, Term},
+			sorted::{SortedEncoder, SortedStrategy},
+			ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit,
+		};
+	}
+
 	/// Every model of `cnf`, each decoded into the values of the given binary
 	/// encodings.
 	pub(crate) fn all_binary_solutions(cnf: &Cnf, xs: &[&[BoolVal]]) -> Vec<Vec<Coeff>> {

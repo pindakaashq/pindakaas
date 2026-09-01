@@ -3,14 +3,14 @@
 //!
 //! Cardinality constraints can be represented using the [`Cardinality`] type.
 //! [`SortingNetworkEncoder`] can then be used to encode the constraint into
-//! CNF, as well as [`Encoder`] implementations for [`NormalizedBoolLinear`].
+//! CNF, as well as any [`Encoder`] of a linear constraint.
 
 use crate::{
-	bool_linear::{Comparator, LimitComp, LinMarker, NormalizedBoolLinear, PosCoeff},
+	bool_linear::{Comparator, LimitComp, LinMarker, PosCoeff},
 	cardinality_one::CardinalityOne,
 	integer::IntVar,
 	sorted::{Sorted, SortedEncoder},
-	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Valuation,
+	Checker, ClauseDatabase, Coeff, Encoder, Lit, Result, Unsatisfiable, Valuation,
 };
 
 // local marker trait, to ensure the previous definition only applies within
@@ -20,8 +20,8 @@ pub(crate) trait CardMarker {}
 #[derive(Clone, Debug)]
 /// Linear constraint that enforces that ∑ litᵢ ≷ k.
 ///
-/// Compared to [`NormalizedBoolLinear`], this constraint does not multiply
-/// literals by coefficients.
+/// Compared to a general linear constraint, this one does not multiply literals
+/// by coefficients.
 ///
 /// All literals in the constraint are guaranteed to be from distinct Boolean
 /// variables.
@@ -71,7 +71,12 @@ impl Cardinality {
 
 impl Checker for Cardinality {
 	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result {
-		NormalizedBoolLinear::from(self.clone()).check(value)
+		let count = self.lits.iter().filter(|&&l| value.value(l)).count() as Coeff;
+		let holds = match self.cmp {
+			LimitComp::LessEq => count <= *self.k,
+			LimitComp::Equal => count == *self.k,
+		};
+		holds.then_some(()).ok_or(Unsatisfiable)
 	}
 }
 
@@ -141,130 +146,129 @@ where
 pub(crate) mod tests {
 	macro_rules! card_test_suite {
 		($encoder:expr) => {
-			#[test]
-			fn card_le_2_3() {
-				let mut cnf = Cnf::default();
-				let vars = cnf.new_var_range(3).iter_lits().collect_vec();
-				$encoder
-					.encode(
-						&mut cnf,
-						&Cardinality {
-							lits: vars.clone(),
-							cmp: LimitComp::LessEq,
-							k: PosCoeff::new(2),
-						},
+			mod cardinality {
+				use traced_test::test;
+
+				use crate::helpers::tests::prelude::*;
+
+				#[test]
+				fn card_le_2_3() {
+					let mut cnf = Cnf::default();
+					let vars = cnf.new_var_range(3).iter_lits().collect_vec();
+					$encoder
+						.encode(
+							&mut cnf,
+							&Cardinality {
+								lits: vars.clone(),
+								cmp: LimitComp::LessEq,
+								k: PosCoeff::new(2),
+							},
+						)
+						.unwrap();
+
+					assert_solutions(
+						&cnf,
+						vars,
+						&expect_file!["cardinality/test_card_le_2_3.sol"],
 					)
-					.unwrap();
+				}
 
-				assert_solutions(
-					&cnf,
-					vars,
-					&expect_file!["cardinality/test_card_le_2_3.sol"],
-				)
-			}
+				#[test]
+				fn card_eq_1_3() {
+					let mut cnf = Cnf::default();
+					let vars = cnf.new_var_range(3).iter_lits().collect_vec();
+					$encoder
+						.encode(
+							&mut cnf,
+							&Cardinality {
+								lits: vars.clone(),
+								cmp: LimitComp::Equal,
+								k: PosCoeff::new(1),
+							},
+						)
+						.unwrap();
 
-			#[test]
-			fn card_eq_1_3() {
-				let mut cnf = Cnf::default();
-				let vars = cnf.new_var_range(3).iter_lits().collect_vec();
-				$encoder
-					.encode(
-						&mut cnf,
-						&Cardinality {
-							lits: vars.clone(),
-							cmp: LimitComp::Equal,
-							k: PosCoeff::new(1),
-						},
+					assert_solutions(
+						&cnf,
+						vars,
+						&expect_file!["cardinality/test_card_eq_1_3.sol"],
 					)
-					.unwrap();
+				}
 
-				assert_solutions(
-					&cnf,
-					vars,
-					&expect_file!["cardinality/test_card_eq_1_3.sol"],
-				)
-			}
+				#[test]
+				fn card_eq_2_3() {
+					let mut cnf = Cnf::default();
+					let vars = cnf.new_var_range(3).iter_lits().collect_vec();
+					$encoder
+						.encode(
+							&mut cnf,
+							&Cardinality {
+								lits: vars.clone(),
+								cmp: LimitComp::Equal,
+								k: PosCoeff::new(2),
+							},
+						)
+						.unwrap();
 
-			#[test]
-			fn card_eq_2_3() {
-				let mut cnf = Cnf::default();
-				let vars = cnf.new_var_range(3).iter_lits().collect_vec();
-				$encoder
-					.encode(
-						&mut cnf,
-						&Cardinality {
-							lits: vars.clone(),
-							cmp: LimitComp::Equal,
-							k: PosCoeff::new(2),
-						},
+					assert_solutions(
+						&cnf,
+						vars,
+						&expect_file!["cardinality/test_card_eq_2_3.sol"],
 					)
-					.unwrap();
+				}
 
-				assert_solutions(
-					&cnf,
-					vars,
-					&expect_file!["cardinality/test_card_eq_2_3.sol"],
-				)
-			}
+				#[test]
+				fn card_eq_2_4() {
+					let mut cnf = Cnf::default();
+					let vars = cnf.new_var_range(4).iter_lits().collect_vec();
+					$encoder
+						.encode(
+							&mut cnf,
+							&Cardinality {
+								lits: vars.clone(),
+								cmp: LimitComp::Equal,
+								k: PosCoeff::new(2),
+							},
+						)
+						.unwrap();
 
-			#[test]
-			fn card_eq_2_4() {
-				let mut cnf = Cnf::default();
-				let vars = cnf.new_var_range(4).iter_lits().collect_vec();
-				$encoder
-					.encode(
-						&mut cnf,
-						&Cardinality {
-							lits: vars.clone(),
-							cmp: LimitComp::Equal,
-							k: PosCoeff::new(2),
-						},
-					)
-					.unwrap();
+					assert_solutions(
+						&cnf,
+						vars,
+						&expect_file!["cardinality/test_card_eq_2_4.sol"],
+					);
+				}
 
-				assert_solutions(
-					&cnf,
-					vars,
-					&expect_file!["cardinality/test_card_eq_2_4.sol"],
-				);
-			}
+				#[test]
+				fn card_eq_3_5() {
+					let mut cnf = Cnf::default();
+					let vars = cnf.new_var_range(5).iter_lits().collect_vec();
+					$encoder
+						.encode(
+							&mut cnf,
+							&Cardinality {
+								lits: vars.clone(),
+								cmp: LimitComp::Equal,
+								k: PosCoeff::new(3),
+							},
+						)
+						.unwrap();
 
-			#[test]
-			fn card_eq_3_5() {
-				let mut cnf = Cnf::default();
-				let vars = cnf.new_var_range(5).iter_lits().collect_vec();
-				$encoder
-					.encode(
-						&mut cnf,
-						&Cardinality {
-							lits: vars.clone(),
-							cmp: LimitComp::Equal,
-							k: PosCoeff::new(3),
-						},
-					)
-					.unwrap();
-
-				assert_solutions(
-					&cnf,
-					vars,
-					&expect_file!["cardinality/test_card_eq_3_5.sol"],
-				);
+					assert_solutions(
+						&cnf,
+						vars,
+						&expect_file!["cardinality/test_card_eq_3_5.sol"],
+					);
+				}
 			}
 		};
 	}
 
 	macro_rules! sorted_card_test_suite {
 		($encoder:expr,$cmp:expr) => {
-			use itertools::Itertools;
 			use traced_test::test;
 
-			use crate::{
-				bool_linear::{LimitComp, PosCoeff},
-				cardinality::{Cardinality, SortingNetworkEncoder},
-				helpers::tests::assert_solutions,
-				sorted::{SortedEncoder, SortedStrategy},
-				ClauseDatabase, Cnf, Encoder,
-			};
+			use crate::helpers::tests::prelude::*;
 
 			#[test]
 			fn card_2_1() {
@@ -338,7 +342,7 @@ pub(crate) mod tests {
 				)
 				.unwrap();
 
-			let expect = crate::helpers::tests::expect_file![format!(
+			let expect = expect_file![format!(
 				"cardinality/sorting_network/test_card_{}_{}_{}.sol",
 				$n,
 				$k,

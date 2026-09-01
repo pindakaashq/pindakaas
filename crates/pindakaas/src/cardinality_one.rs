@@ -5,16 +5,16 @@
 //! [`CardinalityOne`] type. In this module specialized [`Encoder`]
 //! implementations are available, such as [`BitwiseEncoder`],
 //! [`LadderEncoder`], [`PairwiseEncoder`], and [`ProductEncoder`]. However,
-//! other [`Encoder`] implementations for
-//! [`Cardinality`](crate::cardinality::Cardinality) and
-//! [`NormalizedBoolLinear`] can also be used.
+//! any [`Encoder`] of a [`Cardinality`](crate::cardinality::Cardinality) or of
+//! a linear constraint can also be used.
 
 use std::{borrow::Cow, cmp::max, iter::once};
 
 use itertools::Itertools;
 
 use crate::{
-	bool_linear::{Comparator, LimitComp, NormalizedBoolLinear},
+	bool_linear::{Comparator, LimitComp},
+	cardinality::Cardinality,
 	BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result, Valuation,
 };
 
@@ -129,7 +129,7 @@ impl CardinalityOne {
 
 impl Checker for CardinalityOne {
 	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<()> {
-		NormalizedBoolLinear::from(self.clone()).check(value)
+		Cardinality::from(self.clone()).check(value)
 	}
 }
 
@@ -301,12 +301,7 @@ pub(crate) mod tests {
 			mod $mod_name {
 				use itertools::Itertools;
 
-				use crate::{
-					bool_linear::LimitComp,
-					cardinality_one::CardinalityOne,
-					helpers::tests::{assert_checker, assert_solutions, expect_file},
-					ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder,
-				};
+				use crate::helpers::tests::prelude::*;
 
 				const LARGE_N: usize = 50;
 				// ------ At Most One testing ------
@@ -976,7 +971,7 @@ pub(crate) mod tests {
 	}
 	card1_test_suite! {
 			pairwise_encoder,
-			crate::cardinality_one::PairwiseEncoder::default()
+			PairwiseEncoder::default()
 	}
 	card1_test_suite! {
 			product_encoder,

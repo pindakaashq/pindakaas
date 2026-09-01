@@ -4,10 +4,11 @@
 //! Boolean linear constraints can be modelled using [`LinExp`] and
 //! subsequently [`Linear`]. These representations can then be normalized
 //! and simplified using
-//! [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator). Resulting
-//! [`NormalizedBoolLinear`] can be encoded using a variety of [`Encoder`]s such
-//! as the [`AdderEncoder`], [`BddEncoder`], [`SwcEncoder`], and
-//! [`TotalizerEncoder`].
+//! [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator), which reads the
+//! integers a group of literals stands for and yields a
+//! [`NormalizedIntLinear`](crate::int_linear::NormalizedIntLinear). That is
+//! what the [`AdderEncoder`], [`BddEncoder`], [`SwcEncoder`] and
+//! [`TotalizerEncoder`] encode.
 //!
 //! This module contains some additional helper types that can be used to
 //! simplify this encoding process.
@@ -30,7 +31,6 @@ use rangelist::RangeList;
 
 use crate::{
 	cardinality::Cardinality,
-	cardinality_one::CardinalityOne,
 	helpers::{as_binary, bit, new_named_lit},
 	int_linear::{Decompose, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear},
 	integer::{lex_leq_const, Consistency, IntVar},
@@ -159,9 +159,9 @@ impl Comparator {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 /// A comparator that has been limited to a either `Equal` or `LessEq`.
 ///
-/// This type is used to ensure that the comparator of [`NormalizedBoolLinear`],
-/// [`Cardinality`], and [`CardinalityOne`] constraints are limited to a
-/// specific set of values.
+/// This type is used to ensure that the comparator of [`Cardinality`] and
+/// [`CardinalityOne`] constraints, and of a normalized linear constraint, are
+/// limited to a specific set of values.
 pub(crate) enum LimitComp {
 	Equal,
 	LessEq,
@@ -170,21 +170,6 @@ pub(crate) enum LimitComp {
 /// Internal marker trait to ensure the other trait implementations only applies
 /// to encoders implemented by this crate.
 pub(crate) trait LinMarker {}
-
-#[derive(Debug, Clone)]
-/// An [`Linear`] expression that has been aggregated and normalized.
-///
-/// The constraint captured by this struct contains only positive coefficients,
-/// contains at most one term with the same variable, and its comparator has
-/// been limited to `≤` or `=`. Objects of this type are generally the result of
-/// using the [`BoolLinAggregator`](crate::aggregator::BoolLinAggregator), and
-/// are generally the required input type for encoders of boolean linear
-/// constraints.
-pub struct NormalizedBoolLinear {
-	pub(crate) terms: Vec<(Lit, PosCoeff)>,
-	pub(crate) cmp: LimitComp,
-	pub(crate) k: PosCoeff,
-}
 
 // TODO add EO, and probably something for Unconstrained
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1168,22 +1153,6 @@ impl Display for Linear {
 	}
 }
 
-impl From<NormalizedBoolLinear> for Linear {
-	fn from(lin: NormalizedBoolLinear) -> Self {
-		Linear {
-			exp: LinExp::from_terms(
-				lin.terms
-					.iter()
-					.map(|&(l, c)| (l, *c))
-					.collect_vec()
-					.as_slice(),
-			),
-			cmp: lin.cmp.into(),
-			k: *lin.k,
-		}
-	}
-}
-
 impl From<PosCoeff> for Coeff {
 	fn from(val: PosCoeff) -> Self {
 		val.0
@@ -1229,86 +1198,6 @@ impl Display for LimitComp {
 			LimitComp::Equal => write!(f, "=="),
 			LimitComp::LessEq => write!(f, "<="),
 		}
-	}
-}
-
-impl NormalizedBoolLinear {
-	/// Get the comparator of the linear constraint.
-	pub fn comparator(&self) -> Comparator {
-		self.cmp.clone().into()
-	}
-
-	/// Test whether the linear constraint has any terms.
-	pub fn is_empty(&self) -> bool {
-		self.terms.is_empty()
-	}
-
-	/// Iterate over the terms of the linear constraint, consisting of literals
-	/// and the coefficients by which they are multiplied.
-	pub fn iter_terms(&self) -> impl Iterator<Item = (Lit, Coeff)> + '_ {
-		self.terms.iter().map(|&(lit, coef)| (lit, coef.into()))
-	}
-
-	/// Get the number of terms in the linear constraint.
-	pub fn len(&self) -> usize {
-		self.terms.len()
-	}
-
-	/// Get the right-hand side constant against which the linear constraint
-	/// compares its left-hand side terms.
-	pub fn rhs(&self) -> Coeff {
-		self.k.into()
-	}
-
-	/// Set the right-hand side constant against which the linear constraint
-	/// compares its left-hand side terms.
-	pub fn set_rhs(&mut self, k: Coeff) {
-		self.k = PosCoeff::new(k);
-	}
-}
-
-impl Checker for NormalizedBoolLinear {
-	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
-		let sum: Coeff = self
-			.terms
-			.iter()
-			.copied()
-			.filter_map(|(l, c)| {
-				if sol.value(l) {
-					Some(Coeff::from(c))
-				} else {
-					None
-				}
-			})
-			.sum();
-		if match self.cmp {
-			LimitComp::LessEq => sum <= *self.k,
-			LimitComp::Equal => sum == *self.k,
-		} {
-			Ok(())
-		} else {
-			Err(Unsatisfiable)
-		}
-	}
-}
-
-impl From<Cardinality> for NormalizedBoolLinear {
-	fn from(card: Cardinality) -> Self {
-		Self {
-			terms: card
-				.lits
-				.into_iter()
-				.map(|l| (l, PosCoeff::new(1)))
-				.collect(),
-			cmp: card.cmp,
-			k: card.k,
-		}
-	}
-}
-
-impl From<CardinalityOne> for NormalizedBoolLinear {
-	fn from(amo: CardinalityOne) -> Self {
-		Self::from(Cardinality::from(amo))
 	}
 }
 
@@ -1535,19 +1424,13 @@ where
 impl LinMarker for TotalizerEncoder {}
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
 	macro_rules! linear_test_suite {
 		($module:ident, $encoder:expr) => {
 			mod $module {
 				use traced_test::test;
 
-				use crate::{
-					bool_linear::{tests::construct_terms, LimitComp, PosCoeff},
-					cardinality_one::{CardinalityOne, PairwiseEncoder},
-					helpers::tests::{assert_solutions, expect_file},
-					int_linear::{NormalizedIntLinear, Term},
-					ClauseDatabaseTools, Cnf, Encoder, Lit,
-				};
+				use crate::helpers::tests::prelude::*;
 
 				#[test]
 				fn small_le_1() {
@@ -1938,7 +1821,7 @@ mod tests {
 			AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, Linear, PosCoeff, SwcEncoder,
 			TotalizerEncoder,
 		},
-		cardinality::{tests::card_test_suite, Cardinality},
+		cardinality::tests::card_test_suite,
 		cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
 		helpers::tests::{
 			all_binary_solutions, assert_checker, assert_encoding, assert_solutions,
@@ -2677,7 +2560,7 @@ mod tests {
 		assert_checker(&db, &con);
 	}
 
-	card_test_suite!(AdderEncoder::default());
+	card_test_suite!(crate::bool_linear::AdderEncoder::default());
 	card1_test_suite! {
 		adder_encoder_card1, crate::bool_linear::AdderEncoder::default()
 	}
