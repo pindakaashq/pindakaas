@@ -129,19 +129,22 @@ impl Comparator {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-/// A comparator that has been limited to a either `Equal` or `LessEq`.
+/// A comparator limited to `=` or `≤`.
 ///
-/// This type is used to ensure that the comparator of [`Cardinality`] and
-/// [`CardinalityOne`] constraints, and of a normalized linear constraint, are
-/// limited to a specific set of values.
-pub(crate) enum LimitComp {
+/// A `≥` is the same constraint read the other way round, so a normalised
+/// constraint never carries one and an encoder never has to handle it.
+pub enum LimitComp {
+	/// The sum is exactly the constant.
 	Equal,
+	/// The sum is at most the constant.
 	LessEq,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// PosCoeff is a type for coefficients that are guaranteed by the programmer to
-/// be 0 or greater.
+/// A coefficient guaranteed to be zero or greater.
+///
+/// The type is a bound as often as it is a coefficient, and a bound of zero
+/// is a real constraint, so zero stays inside it.
 pub struct PosCoeff(pub(crate) Coeff);
 
 impl LinExp {
@@ -296,7 +299,7 @@ impl Display for LinExp {
 			if !self.terms.is_empty() {
 				write!(f, " + ")?;
 			}
-			write!(f, "{}", self.add)?;
+			write!(f, "{}", self.add * self.mult)?;
 		}
 		Ok(())
 	}
@@ -485,10 +488,13 @@ impl Display for LimitComp {
 }
 
 impl PosCoeff {
-	pub(crate) fn new(c: Coeff) -> Self {
-		if c < 0 {
-			panic!("cannot create a PosCoeff with a negative value")
-		}
+	/// Wrap a coefficient that is not negative.
+	///
+	/// # Panics
+	///
+	/// If `c` is negative.
+	pub fn new(c: Coeff) -> Self {
+		assert!(c >= 0, "a PosCoeff cannot be negative, and {c} is");
 		Self(c)
 	}
 }

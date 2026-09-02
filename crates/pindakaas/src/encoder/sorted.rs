@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 use crate::{
 	constraint::{
 		bool_linear::LimitComp,
-		int_linear::{IntLinEncoder, IntLinear, Term},
+		int_linear::{IntLinEncoder, IntLinear},
 		sorted::Sorted,
 	},
 	decision::integer::IntVar,
@@ -306,11 +306,7 @@ impl SortedEncoder {
 		IntLinEncoder::default().encode(
 			db,
 			&IntLinear::new(
-				vec![
-					Term::new(1, x.clone()),
-					Term::new(1, y.clone()),
-					Term::new(-1, z.clone()),
-				],
+				vec![(1, x.clone()), (1, y.clone()), (-1, z.clone())],
 				cmp.clone().into(),
 				0,
 			),

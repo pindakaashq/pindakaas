@@ -18,7 +18,8 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		int_linear::{
-			Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear,
+			term_max, term_min, term_values, Decompose, IntLinConfig, IntLinEncoder,
+			NormalizedIntLinear, Term, TernaryIntLinear,
 		},
 	},
 	decision::integer::IntVar,
@@ -63,8 +64,7 @@ impl BddEncoder {
 			return ws[i][pos].clone();
 		}
 
-		let views = xs[i]
-			.values()
+		let views = term_values(&xs[i])
 			.into_iter()
 			.map(|v| (v, Self::bdd(i + 1, xs, sum + v, ws)))
 			.collect_vec();
@@ -114,7 +114,7 @@ impl BddEncoder {
 		let bounds = xs
 			.iter()
 			.scan((0, 0), |state, x| {
-				*state = (state.0 + x.min(), state.1 + x.max());
+				*state = (state.0 + term_min(x), state.1 + term_max(x));
 				Some(*state)
 			})
 			.chain(once((0, k)))
@@ -124,12 +124,12 @@ impl BddEncoder {
 			.iter()
 			.rev()
 			.scan((k, k), |state, x| {
-				*state = (state.0 - x.max(), state.1 - x.min());
+				*state = (state.0 - term_max(x), state.1 - term_min(x));
 				Some(*state)
 			})
 			.collect_vec();
 
-		let inf = xs.iter().fold(0, |a, x| a + x.max()) + 1;
+		let inf = xs.iter().fold(0, |a, x| a + term_max(x)) + 1;
 
 		let mut ws: Vec<Vec<(Range<Coeff>, BddNode)>> = margins
 			.into_iter()
@@ -212,8 +212,8 @@ impl Decompose for BddEncoder {
 		let terms = con
 			.terms()
 			.iter()
-			.cloned()
-			.sorted_by(|a: &Term, b: &Term| a.max().cmp(&b.max()))
+			.map(|(c, x)| (**c, x.clone()))
+			.sorted_by(|a: &Term, b: &Term| term_max(a).cmp(&term_max(b)))
 			.collect_vec();
 		let (cmp, k) = (Comparator::from(con.cmp()), con.k());
 
@@ -277,12 +277,7 @@ impl Decompose for BddEncoder {
 			.into_iter()
 			.enumerate()
 			.map(|(i, x)| {
-				TernaryIntLinear::new(
-					Term::new(1, layers[i].clone()),
-					x,
-					cmp,
-					Term::new(1, layers[i + 1].clone()),
-				)
+				TernaryIntLinear::new((1, layers[i].clone()), x, cmp, (1, layers[i + 1].clone()))
 			})
 			.collect())
 	}

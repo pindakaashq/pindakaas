@@ -6,19 +6,15 @@
 //! constraint produces one of these, its groups of related terms having become
 //! the integers they encode, so this is where every linear encoder starts.
 
-use std::iter::once;
-
-use itertools::Itertools;
-use rangelist::RangeList;
-use rustc_hash::FxHashMap;
-
 pub use crate::encoder::int_lin::{IntLinConfig, IntLinEncoder};
+#[cfg(test)]
+use crate::Lit;
 use crate::{
 	constraint::bool_linear::{Comparator, LimitComp, PosCoeff},
 	decision::integer::IntVar,
 	encoder::adder::AdderEncoder,
-	helpers::{div_ceil, div_floor, new_named_lit},
-	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable,
+	helpers::{div_ceil, div_floor},
+	ClauseDatabase, Coeff, Result, Unsatisfiable,
 };
 
 /// A linear constraint over integer variables as aggregation leaves it.
@@ -28,9 +24,32 @@ use crate::{
 /// encoder that only ever sees aggregated constraints can rely on that instead
 /// of checking for it, which is most of them: only the constraints a
 /// decomposition makes for itself fall outside it, and those it encodes itself.
+///
+/// The usual way to reach one is to aggregate, which puts a constraint into
+/// this form whatever shape it was written in:
+///
+/// ```rust
+/// # use pindakaas::{
+/// #     constraint::{bool_linear::{Comparator, Linear}, linear::{BoolLinAggregator, LinVariant}},
+/// #     decision::integer::IntVar, encoder::bdd::BddEncoder,
+/// #     Cnf, Encoder, ClauseDatabaseTools,
+/// # };
+/// let mut f = Cnf::default();
+/// let x = IntVar::new(0..=5);
+/// let con = Linear::new(x.clone() * -2 + 7, Comparator::GreaterEq, 1);
+///
+/// let LinVariant::Linear(con) = BoolLinAggregator::default().aggregate(&mut f, &con)? else {
+///     panic!("a constraint over an integer aggregates to a linear one");
+/// };
+/// // Whatever it was written as, the types now say it is `≤` over positive
+/// // coefficients: `-2x + 7 ≥ 1` has become `2x ≤ 6`, counted in steps of two.
+/// assert_eq!(con.k(), 3);
+/// BddEncoder::default().encode(&mut f, &con)?;
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 #[derive(Clone, Debug)]
 pub struct NormalizedIntLinear {
-	pub(crate) exp: IntLinExp,
+	pub(crate) terms: Vec<(PosCoeff, IntVar)>,
 	pub(crate) cmp: LimitComp,
 	pub(crate) k: PosCoeff,
 }
@@ -38,7 +57,7 @@ pub struct NormalizedIntLinear {
 /// A linear constraint over integer variables, `Σ cᵢ·xᵢ ≷ k`.
 #[derive(Clone, Debug)]
 pub struct IntLinear {
-	pub(crate) exp: IntLinExp,
+	pub(crate) terms: Vec<Term>,
 	pub(crate) cmp: Comparator,
 	pub(crate) k: Coeff,
 }
@@ -85,39 +104,21 @@ impl TernaryIntLinear {
 	}
 }
 
-impl From<&NormalizedIntLinear> for TernaryIntLinear {
-	/// A constraint of two terms or fewer is already an addition: what its
-	/// terms come to, against the constant it is compared with.
-	///
-	/// A term it does not have is zero, and the constant is a variable of one
-	/// value — neither of which any literal has to stand for.
-	fn from(con: &NormalizedIntLinear) -> Self {
-		debug_assert!(
-			con.terms().len() <= 2,
-			"a longer constraint is more than one addition"
-		);
-		let zero = || Term::new(1, IntVar::new(0..=0));
-		let mut terms = con.terms().iter().cloned();
-		let (x, y) = (
-			terms.next().unwrap_or_else(zero),
-			terms.next().unwrap_or_else(zero),
-		);
-		let k = con.k();
-		TernaryIntLinear::new(x, y, con.cmp().into(), Term::new(1, IntVar::new(k..=k)))
-	}
-}
-
 impl From<&TernaryIntLinear> for IntLinear {
 	/// A term over a variable of one value is what it is worth, so it belongs
 	/// with the constant rather than among the terms.
 	fn from(con: &TernaryIntLinear) -> Self {
 		let (mut terms, mut k) = (Vec::new(), 0);
 		for (term, adds) in [(&con.x, true), (&con.y, true), (&con.z, false)] {
-			if term.x.card() == 1 {
-				let worth = term.c * term.x.min();
+			if term.1.card() == 1 {
+				let worth = term.0 * term.1.min();
 				k += if adds { -worth } else { worth };
 			} else {
-				terms.push(if adds { term.clone() } else { term.negated() });
+				terms.push(if adds {
+					term.clone()
+				} else {
+					term_negated(term)
+				});
 			}
 		}
 		Self::new(terms, con.cmp, k)
@@ -145,27 +146,40 @@ pub(crate) trait Decompose {
 	) -> Result<Vec<TernaryIntLinear>, Unsatisfiable>;
 }
 
-/// A sum of integer terms.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct IntLinExp {
-	pub(crate) terms: Vec<Term>,
-}
-
 /// An integer variable scaled by a coefficient.
 ///
 /// A coefficient other than one is not expanded into repeated addition: the
 /// encoder synthesises a chain of shifts and additions for it over the
 /// variable's bits, and shares that chain with every other term of the same
 /// coefficient over the same variable.
-#[derive(Clone, Debug)]
-pub struct Term {
-	pub(crate) c: Coeff,
-	pub(crate) x: IntVar,
-}
+pub(crate) type Term = (Coeff, IntVar);
 
 impl NormalizedIntLinear {
+	/// The constraint as a single addition, if it is short enough to be one.
+	///
+	/// A term it does not have is zero, and the constant it is compared with is
+	/// a variable of one value — neither of which any literal has to stand for.
+	pub(crate) fn as_ternary(&self) -> Option<TernaryIntLinear> {
+		if self.terms().len() > 2 {
+			return None;
+		}
+		let zero = || (1, IntVar::new(0..=0));
+		let mut terms = self.terms().iter().map(|(c, x)| (**c, x.clone()));
+		let (x, y) = (
+			terms.next().unwrap_or_else(zero),
+			terms.next().unwrap_or_else(zero),
+		);
+		let k = self.k();
+		Some(TernaryIntLinear::new(
+			x,
+			y,
+			self.cmp().into(),
+			(1, IntVar::new(k..=k)),
+		))
+	}
+
 	/// The comparator of the constraint, which is never `≥`.
-	pub(crate) fn cmp(&self) -> LimitComp {
+	pub fn cmp(&self) -> LimitComp {
 		self.cmp.clone()
 	}
 
@@ -176,13 +190,16 @@ impl NormalizedIntLinear {
 	/// each group as the integer it encodes, so that whichever encoder takes
 	/// the constraint from here works on integers rather than on the literals
 	/// they happen to be written in.
-	pub(crate) fn from_terms(terms: Vec<Term>, cmp: LimitComp, k: PosCoeff) -> Self {
-		debug_assert!(
-			terms.iter().all(|t| t.c > 0),
-			"aggregation leaves every coefficient positive"
-		);
+	///
+	/// Every guarantee the type makes is carried by the arguments: a
+	/// [`LimitComp`] cannot be `≥`, and a [`PosCoeff`] cannot be negative.
+	pub fn new(
+		terms: impl IntoIterator<Item = (PosCoeff, IntVar)>,
+		cmp: LimitComp,
+		k: PosCoeff,
+	) -> Self {
 		Self {
-			exp: IntLinExp { terms },
+			terms: terms.into_iter().collect(),
 			cmp,
 			k,
 		}
@@ -204,15 +221,15 @@ impl NormalizedIntLinear {
 	}
 
 	/// The terms of the sum, each with a positive coefficient.
-	pub fn terms(&self) -> &[Term] {
-		&self.exp.terms
+	pub fn terms(&self) -> &[(PosCoeff, IntVar)] {
+		&self.terms
 	}
 }
 
 impl From<&NormalizedIntLinear> for IntLinear {
 	fn from(con: &NormalizedIntLinear) -> Self {
 		Self {
-			exp: con.exp.clone(),
+			terms: con.terms.iter().map(|(c, x)| (**c, x.clone())).collect(),
 			cmp: con.cmp.clone().into(),
 			k: *con.k,
 		}
@@ -232,7 +249,7 @@ impl IntLinear {
 
 	/// The terms of the sum.
 	pub fn terms(&self) -> &[Term] {
-		&self.exp.terms
+		&self.terms
 	}
 
 	/// What each term is worth, as the literals standing for it and what each
@@ -249,10 +266,10 @@ impl IntLinear {
 		self.terms()
 			.iter()
 			.map(|t| {
-				let (lits, _) = t.x.as_weighted(db)?;
+				let (lits, _) = t.1.as_weighted(db)?;
 				Ok(lits
 					.into_iter()
-					.map(|(l, w)| (l, t.c * w))
+					.map(|(l, w)| (l, t.0 * w))
 					.filter(|&(_, w)| w != 0)
 					.collect())
 			})
@@ -271,10 +288,10 @@ impl IntLinear {
 		if !matches!(self.cmp, Comparator::Equal) || self.k != 0 {
 			return None;
 		}
-		let [a, b, c] = &self.exp.terms[..] else {
+		let [a, b, c] = &self.terms[..] else {
 			return None;
 		};
-		let (x, y, z) = match (a.c, b.c, c.c) {
+		let (x, y, z) = match (a.0, b.0, c.0) {
 			(1, 1, -1) => (a, b, c),
 			(1, -1, 1) => (a, c, b),
 			(-1, 1, 1) => (b, c, a),
@@ -284,16 +301,12 @@ impl IntLinear {
 		// sum up with the result only when the bound of the result is the sum
 		// of the other two. Anything else is left to the walk over the terms,
 		// which does not care where an encoding starts.
-		(z.x.min() == x.x.min() + y.x.min()).then_some((x, y, z))
+		(z.1.min() == x.1.min() + y.1.min()).then_some((x, y, z))
 	}
 
 	/// Create the constraint `Σ terms ≷ k`.
 	pub fn new(terms: Vec<Term>, cmp: Comparator, k: Coeff) -> Self {
-		Self {
-			exp: IntLinExp { terms },
-			cmp,
-			k,
-		}
+		Self { terms, cmp, k }
 	}
 
 	/// Narrow the domains of the variables of `con` to the values that can
@@ -305,31 +318,30 @@ impl IntLinear {
 		for cmp in self.cmp.split() {
 			loop {
 				let mut changed = false;
-				for (i, term) in self.exp.terms.iter().enumerate() {
+				for (i, term) in self.terms.iter().enumerate() {
 					// What the other terms contribute at their most favourable
 					// leaves the rest of the budget for this one.
 					let others: Coeff = self
-						.exp
 						.terms
 						.iter()
 						.enumerate()
 						.filter(|(j, _)| *j != i)
 						.map(|(_, t)| match cmp {
-							Comparator::LessEq => t.min(),
-							_ => t.max(),
+							Comparator::LessEq => term_min(t),
+							_ => term_max(t),
 						})
 						.sum();
 					let slack = self.k - others;
-					if term.x.is_committed() {
+					if term.1.is_committed() {
 						continue;
 					}
 					// `c·x ≷ slack`, turned around when `c` is negative.
-					let cmp = if term.c >= 0 { cmp } else { cmp.reverse() };
+					let cmp = if term.0 >= 0 { cmp } else { cmp.reverse() };
 					changed |= match cmp {
-						Comparator::LessEq => term.x.set_max(div_floor(slack, term.c)),
-						_ => term.x.set_min(div_ceil(slack, term.c)),
+						Comparator::LessEq => term.1.set_max(div_floor(slack, term.0)),
+						_ => term.1.set_min(div_ceil(slack, term.0)),
 					};
-					if term.x.domain().is_empty() {
+					if term.1.domain().is_empty() {
 						return Err(Unsatisfiable);
 					}
 				}
@@ -342,220 +354,50 @@ impl IntLinear {
 	}
 }
 
-impl Term {
-	/// Encode `x + y = z` with a ripple-carry adder over the binary encodings.
-	pub(crate) fn encode_addition<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		x: &Term,
-		y: &Term,
-		z: &Term,
-	) -> Result {
-		let (xs, ys, zs) = (
-			x.x.binary_encoding(db)?,
-			y.x.binary_encoding(db)?,
-			z.x.binary_encoding(db)?,
-		);
-		let _ = AdderEncoder::ripple_carry_adder(
-			db,
-			&xs.to_vec(),
-			&ys.to_vec(),
-			None,
-			Some(&zs.to_vec()),
-		)?;
-		Ok(())
+/// Encode `x + y = z` with a ripple-carry adder over the binary encodings.
+pub(crate) fn encode_addition<Db: ClauseDatabase + ?Sized>(
+	db: &mut Db,
+	x: &Term,
+	y: &Term,
+	z: &Term,
+) -> Result {
+	let (xs, ys, zs) = (
+		x.1.binary_encoding(db)?,
+		y.1.binary_encoding(db)?,
+		z.1.binary_encoding(db)?,
+	);
+	let _ =
+		AdderEncoder::ripple_carry_adder(db, &xs.to_vec(), &ys.to_vec(), None, Some(&zs.to_vec()))?;
+	Ok(())
+}
+
+/// The values the term can take.
+pub(crate) fn term_values(t: &Term) -> Vec<Coeff> {
+	let mut vs: Vec<Coeff> = t.1.domain().iter().flatten().map(|v| t.0 * v).collect();
+	// A negative coefficient turns the domain around.
+	vs.sort_unstable();
+	vs
+}
+
+/// The term with its coefficient negated.
+pub(crate) fn term_negated(t: &Term) -> Term {
+	(-t.0, t.1.clone())
+}
+
+/// The greatest value the term can take.
+pub(crate) fn term_max(t: &Term) -> Coeff {
+	if t.0 >= 0 {
+		t.0 * t.1.max()
+	} else {
+		t.0 * t.1.min()
 	}
+}
 
-	/// The integer a group of at-most-one terms stands for.
-	///
-	/// One term at most is chosen, so the group takes the value of whichever it
-	/// is and zero when none is. That is a direct encoding, and the terms
-	/// already are one: a literal here says the group *is* its coefficient,
-	/// which is what a direct literal says and not what an order literal says.
-	///
-	/// At most one of them holding is taken on trust — it is what makes the
-	/// group a group — but the literal standing for the group being worth
-	/// nothing is made here, along with the clauses tying it to the rest.
-	///
-	/// `exact` asks for the upper bound as well, which a group only needs when
-	/// the constraint it belongs to is an equality.
-	pub fn from_at_most_one<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		terms: &[(Lit, PosCoeff)],
-		label: &str,
-		exact: bool,
-	) -> Result<Self, Unsatisfiable> {
-		// At most one term is chosen, so the group takes the value of
-		// whichever it is, and zero when none is. That is a direct
-		// encoding, and the terms already are one: a literal here says
-		// the group *is* its coefficient, which is what a direct
-		// literal says and not what an order literal says.
-		let mut by_coeff: FxHashMap<Coeff, Vec<Lit>> = FxHashMap::default();
-		for &(lit, coeff) in terms {
-			by_coeff.entry(*coeff).or_default().push(lit);
-		}
-		// The group is worth nothing when no term is chosen, and one of
-		// the coefficients otherwise.
-		let domain = RangeList::from_elements(once(0).chain(by_coeff.keys().copied()));
-
-		let by_coeff = by_coeff
-			.into_iter()
-			.sorted_by_key(|(c, _)| *c)
-			.collect_vec();
-		// The group is worth nothing when no term is chosen, which is a
-		// value like any other. A group of one term says that already:
-		// it is worth nothing exactly when that term is not chosen. Any
-		// other group needs a literal of its own, and clauses tying it
-		// to the rest.
-		let single = matches!(by_coeff.as_slice(), [(_, terms)] if terms.len() == 1);
-		let none = match by_coeff.as_slice() {
-			[(_, terms)] if terms.len() == 1 => !terms[0],
-			_ => new_named_lit!(db, format!("{label}=0")),
-		};
-		let mut lits = vec![none];
-		for (_coeff, terms) in by_coeff {
-			let d = match terms.as_slice() {
-				// One term reaching a value is the literal for it.
-				&[lit] => lit,
-				// Several are not one literal, so they need one, which
-				// each of them reaches.
-				_ => {
-					let d = new_named_lit!(db, format!("{label}={_coeff}"));
-					for &lit in &terms {
-						db.add_clause([!lit, d])?;
-					}
-					d
-				}
-			};
-			// The group is worth this only if one of these terms is
-			// chosen. Without it the group may say it is worth more
-			// than it is, which a `≤` can live with and costs the
-			// solver nothing, since nothing forces it to. A value one
-			// term reaches says it already, that term being the literal
-			// for it.
-			if exact && terms.len() > 1 {
-				db.add_clause([!d].into_iter().chain(terms))?;
-			}
-			// Nothing is chosen only if this value is not taken.
-			if !single {
-				db.add_clause([!d, !none])?;
-			}
-			lits.push(d);
-		}
-		// Some value is taken.
-		if !single {
-			db.add_clause(lits.iter().copied())?;
-		}
-		// The group's own clauses above already give exactly one value,
-		// so the variable is told the literals rather than asked to
-		// constrain them.
-		let x = IntVar::new(domain)
-			.enforce_consistency(false)
-			.with_label(label);
-		x.with_direct_encoding(db, &lits, None)?;
-		Ok(Self::new(1, x))
-	}
-
-	/// The integer a group of terms that each imply the one before stands for.
-	///
-	/// The implications are taken on trust: they are what makes the group a
-	/// chain, and the running sums it counts through are read straight off its
-	/// literals. See [`IntVar::constrain`] where they need saying.
-	pub fn from_implication_chain<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		terms: &[(Lit, PosCoeff)],
-		label: &str,
-	) -> Result<Self, Unsatisfiable> {
-		// Each term implies the one before it, so the group counts up
-		// through the running sums and a term's literal is already the
-		// order literal for its sum.
-		let mut acc = 0;
-		let (totals, lits): (Vec<_>, Vec<_>) = terms
-			.iter()
-			.map(|&(lit, coeff)| {
-				acc += *coeff;
-				(acc, lit)
-			})
-			.unzip();
-		// Coefficients are positive, so the running sums climb and the
-		// domain has one value per term, plus the zero none reaches.
-		let domain = RangeList::from_elements(once(0).chain(totals));
-		Ok(Self::new(
-			1,
-			IntVar::from_order_encoding(db, domain, &lits)?.with_label(label),
-		))
-	}
-
-	/// The integer a group of terms declared to be its bits stands for.
-	///
-	/// The bits staying within `lb..=ub` is taken on trust, as is the caller's
-	/// word that these literals are the bits of one integer at all. See
-	/// [`IntVar::constrain`] to make the bounds a restriction rather than a
-	/// claim.
-	pub fn from_binary_digits<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		terms: &[(Lit, PosCoeff)],
-		lb: PosCoeff,
-		ub: PosCoeff,
-		label: &str,
-	) -> Result<Self, Unsatisfiable> {
-		// The caller has declared these literals to be the bits of an
-		// integer, so they are taken as exactly that rather than being
-		// split into a variable each. Their coefficients are a multiple
-		// of the powers of two, and the aggregator has already scaled
-		// the bounds to match, so what the bits hold is the value over
-		// that multiple and the multiple stays on the term.
-		let multiple = *terms[0].1;
-		let bits: Vec<BoolVal> = terms.iter().map(|&(lit, _)| BoolVal::Lit(lit)).collect();
-		let domain = RangeList::from(div_ceil(*lb, multiple)..=div_floor(*ub, multiple));
-		if domain.is_empty() {
-			db.contradiction()?;
-		}
-		Ok(Self::new(
-			multiple,
-			// The bits count from zero, whatever the bounds say.
-			IntVar::from_binary_encoding(db, domain, &bits, 0)?.with_label(label),
-		))
-	}
-
-	/// The values the term can take.
-	pub(crate) fn values(&self) -> Vec<Coeff> {
-		let mut vs: Vec<Coeff> = self
-			.x
-			.domain()
-			.iter()
-			.flatten()
-			.map(|v| self.c * v)
-			.collect();
-		// A negative coefficient turns the domain around.
-		vs.sort_unstable();
-		vs
-	}
-
-	/// The term with its coefficient negated.
-	pub(crate) fn negated(&self) -> Self {
-		Self::new(-self.c, self.x.clone())
-	}
-
-	/// The greatest value the term can take.
-	pub(crate) fn max(&self) -> Coeff {
-		if self.c >= 0 {
-			self.c * self.x.max()
-		} else {
-			self.c * self.x.min()
-		}
-	}
-
-	/// The least value the term can take.
-	pub(crate) fn min(&self) -> Coeff {
-		if self.c >= 0 {
-			self.c * self.x.min()
-		} else {
-			self.c * self.x.max()
-		}
-	}
-
-	/// Create the term `c·x`.
-	pub fn new(c: Coeff, x: IntVar) -> Self {
-		Self { c, x }
+/// The least value the term can take.
+pub(crate) fn term_min(t: &Term) -> Coeff {
+	if t.0 >= 0 {
+		t.0 * t.1.min()
+	} else {
+		t.0 * t.1.max()
 	}
 }

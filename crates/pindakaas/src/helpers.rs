@@ -170,19 +170,144 @@ pub(crate) mod tests {
 		};
 	}
 
-	use std::fmt::Display;
+	use std::{fmt::Display, iter::once};
 
 	#[cfg(test)]
 	pub(crate) use expect_file;
 	use expect_test::ExpectFile;
 	use itertools::Itertools;
+	use rangelist::RangeList;
+	use rustc_hash::FxHashMap;
 
 	use crate::{
-		constraint::{bool_linear::PosCoeff, int_linear::Term},
+		constraint::bool_linear::PosCoeff,
+		decision::integer::IntVar,
 		helpers::binary_value,
 		solver::{cadical::Cadical, SolveResult, Solver},
-		BoolVal, Checker, ClauseDatabaseTools, Cnf, Coeff, Lit, Unsatisfiable, Valuation,
+		BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Lit, Result,
+		Unsatisfiable, Valuation,
 	};
+
+	/// Build the integer an at-most-one group of literals stands for.
+	///
+	/// Only tests reach for this: the encoders are handed such variables
+	/// rather than the literals behind them.
+	/// The integer a group of at-most-one terms stands for.
+	///
+	/// One term at most is chosen, so the group takes the value of whichever it
+	/// is and zero when none is. That is a direct encoding, and the terms
+	/// already are one: a literal here says the group *is* its coefficient,
+	/// which is what a direct literal says and not what an order literal says.
+	///
+	/// At most one of them holding is taken on trust — it is what makes the
+	/// group a group — but the literal standing for the group being worth
+	/// nothing is made here, along with the clauses tying it to the rest.
+	///
+	/// `exact` asks for the upper bound as well, which a group only needs when
+	/// the constraint it belongs to is an equality.
+	pub(crate) fn at_most_one_var<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		terms: &[(Lit, PosCoeff)],
+		label: &str,
+		exact: bool,
+	) -> Result<IntVar, Unsatisfiable> {
+		// At most one term is chosen, so the group takes the value of
+		// whichever it is, and zero when none is. That is a direct
+		// encoding, and the terms already are one: a literal here says
+		// the group *is* its coefficient, which is what a direct
+		// literal says and not what an order literal says.
+		let mut by_coeff: FxHashMap<Coeff, Vec<Lit>> = FxHashMap::default();
+		for &(lit, coeff) in terms {
+			by_coeff.entry(*coeff).or_default().push(lit);
+		}
+		// The group is worth nothing when no term is chosen, and one of
+		// the coefficients otherwise.
+		let domain = RangeList::from_elements(once(0).chain(by_coeff.keys().copied()));
+
+		let by_coeff = by_coeff
+			.into_iter()
+			.sorted_by_key(|(c, _)| *c)
+			.collect_vec();
+		// The group is worth nothing when no term is chosen, which is a
+		// value like any other. A group of one term says that already:
+		// it is worth nothing exactly when that term is not chosen. Any
+		// other group needs a literal of its own, and clauses tying it
+		// to the rest.
+		let single = matches!(by_coeff.as_slice(), [(_, terms)] if terms.len() == 1);
+		let none = match by_coeff.as_slice() {
+			[(_, terms)] if terms.len() == 1 => !terms[0],
+			_ => new_named_lit!(db, format!("{label}=0")),
+		};
+		let mut lits = vec![none];
+		for (_coeff, terms) in by_coeff {
+			let d = match terms.as_slice() {
+				// One term reaching a value is the literal for it.
+				&[lit] => lit,
+				// Several are not one literal, so they need one, which
+				// each of them reaches.
+				_ => {
+					let d = new_named_lit!(db, format!("{label}={_coeff}"));
+					for &lit in &terms {
+						db.add_clause([!lit, d])?;
+					}
+					d
+				}
+			};
+			// The group is worth this only if one of these terms is
+			// chosen. Without it the group may say it is worth more
+			// than it is, which a `≤` can live with and costs the
+			// solver nothing, since nothing forces it to. A value one
+			// term reaches says it already, that term being the literal
+			// for it.
+			if exact && terms.len() > 1 {
+				db.add_clause([!d].into_iter().chain(terms))?;
+			}
+			// Nothing is chosen only if this value is not taken.
+			if !single {
+				db.add_clause([!d, !none])?;
+			}
+			lits.push(d);
+		}
+		// Some value is taken.
+		if !single {
+			db.add_clause(lits.iter().copied())?;
+		}
+		// The group's own clauses above already give exactly one value,
+		// so the variable is told the literals rather than asked to
+		// constrain them.
+		let x = IntVar::new(domain)
+			.enforce_consistency(false)
+			.with_label(label);
+		x.with_direct_encoding(db, &lits, None)?;
+		Ok(x)
+	}
+
+	/// The integer a group of terms that each imply the one before stands for.
+	///
+	/// The implications are taken on trust: they are what makes the group a
+	/// chain, and the running sums it counts through are read straight off its
+	/// literals. See [`IntVar::constrain`] where they need saying.
+	pub(crate) fn implication_chain_var<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		terms: &[(Lit, PosCoeff)],
+		label: &str,
+	) -> Result<IntVar, Unsatisfiable> {
+		// Each term implies the one before it, so the group counts up
+		// through the running sums and a term's literal is already the
+		// order literal for its sum.
+		let mut acc = 0;
+		let (totals, lits): (Vec<_>, Vec<_>) = terms
+			.iter()
+			.map(|&(lit, coeff)| {
+				acc += *coeff;
+				(acc, lit)
+			})
+			.unzip();
+		// Coefficients are positive, so the running sums climb and the
+		// domain has one value per term, plus the zero none reaches.
+		let domain = RangeList::from_elements(once(0).chain(totals));
+		Ok(IntVar::from_order_encoding(db, domain, &lits)?.with_label(label))
+	}
 
 	macro_rules! linear_test_suite {
 		($module:ident, $encoder:expr) => {
@@ -197,7 +322,7 @@ pub(crate) mod tests {
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						construct_terms(&mut cnf, &[(a, 2), (b, 3), (c, 5)]),
 						LimitComp::LessEq,
 						PosCoeff::new(6),
@@ -220,7 +345,7 @@ pub(crate) mod tests {
 					let d = cnf.new_lit();
 					let e = cnf.new_lit();
 					let f = cnf.new_lit();
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						construct_terms(
 							&mut cnf,
 							&[(!a, 3), (!b, 6), (!c, 1), (!d, 2), (!e, 3), (!f, 6)],
@@ -243,7 +368,7 @@ pub(crate) mod tests {
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						construct_terms(&mut cnf, &[(a, 1), (b, 2), (c, 4)]),
 						LimitComp::LessEq,
 						PosCoeff::new(5),
@@ -263,7 +388,7 @@ pub(crate) mod tests {
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						construct_terms(&mut cnf, &[(a, 4), (b, 6), (c, 7)]),
 						LimitComp::LessEq,
 						PosCoeff::new(10),
@@ -283,7 +408,7 @@ pub(crate) mod tests {
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						construct_terms(&mut cnf, &[(a, 1), (b, 2), (c, 4)]),
 						LimitComp::Equal,
 						PosCoeff::new(5),
@@ -303,7 +428,7 @@ pub(crate) mod tests {
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						construct_terms(&mut cnf, &[(a, 1), (b, 2), (c, 3)]),
 						LimitComp::Equal,
 						PosCoeff::new(3),
@@ -324,7 +449,7 @@ pub(crate) mod tests {
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
 					let d = cnf.new_lit();
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						construct_terms(&mut cnf, &[(a, 2), (b, 3), (c, 5), (d, 7)]),
 						LimitComp::Equal,
 						PosCoeff::new(10),
@@ -345,7 +470,7 @@ pub(crate) mod tests {
 					let b = cnf.new_lit();
 					let c = cnf.new_lit();
 					let d = cnf.new_lit();
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						construct_terms(&mut cnf, &[(a, 2), (b, 1), (c, 2), (d, 2)]),
 						LimitComp::Equal,
 						PosCoeff::new(4),
@@ -381,22 +506,28 @@ pub(crate) mod tests {
 					let mut cnf = Cnf::default();
 					let (a, b, c, d) = cnf.new_lits();
 					amo(&mut cnf, &[&[a, b], &[c, d]]);
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						vec![
-							Term::from_at_most_one(
-								&mut cnf,
-								&[(a, PosCoeff::new(3)), (b, PosCoeff::new(5))],
-								"x0",
-								false,
-							)
-							.unwrap(),
-							Term::from_at_most_one(
-								&mut cnf,
-								&[(c, PosCoeff::new(2)), (d, PosCoeff::new(4))],
-								"x1",
-								false,
-							)
-							.unwrap(),
+							(
+								PosCoeff::new(1),
+								at_most_one_var(
+									&mut cnf,
+									&[(a, PosCoeff::new(3)), (b, PosCoeff::new(5))],
+									"x0",
+									false,
+								)
+								.unwrap(),
+							),
+							(
+								PosCoeff::new(1),
+								at_most_one_var(
+									&mut cnf,
+									&[(c, PosCoeff::new(2)), (d, PosCoeff::new(4))],
+									"x1",
+									false,
+								)
+								.unwrap(),
+							),
 						],
 						LimitComp::LessEq,
 						PosCoeff::new(7),
@@ -415,22 +546,28 @@ pub(crate) mod tests {
 					let mut cnf = Cnf::default();
 					let (a, b, c, d) = cnf.new_lits();
 					amo(&mut cnf, &[&[a, b], &[c, d]]);
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						vec![
-							Term::from_at_most_one(
-								&mut cnf,
-								&[(a, PosCoeff::new(3)), (b, PosCoeff::new(5))],
-								"x0",
-								true,
-							)
-							.unwrap(),
-							Term::from_at_most_one(
-								&mut cnf,
-								&[(c, PosCoeff::new(2)), (d, PosCoeff::new(4))],
-								"x1",
-								true,
-							)
-							.unwrap(),
+							(
+								PosCoeff::new(1),
+								at_most_one_var(
+									&mut cnf,
+									&[(a, PosCoeff::new(3)), (b, PosCoeff::new(5))],
+									"x0",
+									true,
+								)
+								.unwrap(),
+							),
+							(
+								PosCoeff::new(1),
+								at_most_one_var(
+									&mut cnf,
+									&[(c, PosCoeff::new(2)), (d, PosCoeff::new(4))],
+									"x1",
+									true,
+								)
+								.unwrap(),
+							),
 						],
 						LimitComp::Equal,
 						PosCoeff::new(7),
@@ -450,21 +587,27 @@ pub(crate) mod tests {
 					let (a, b, c, d) = cnf.new_lits();
 					amo(&mut cnf, &[&[a, b, c]]);
 					// Two of the mutually exclusive terms share a coefficient.
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						vec![
-							Term::from_at_most_one(
-								&mut cnf,
-								&[
-									(a, PosCoeff::new(3)),
-									(b, PosCoeff::new(3)),
-									(c, PosCoeff::new(5)),
-								],
-								"x0",
-								false,
-							)
-							.unwrap(),
-							Term::from_at_most_one(&mut cnf, &[(d, PosCoeff::new(4))], "x1", false)
+							(
+								PosCoeff::new(1),
+								at_most_one_var(
+									&mut cnf,
+									&[
+										(a, PosCoeff::new(3)),
+										(b, PosCoeff::new(3)),
+										(c, PosCoeff::new(5)),
+									],
+									"x0",
+									false,
+								)
 								.unwrap(),
+							),
+							(
+								PosCoeff::new(1),
+								at_most_one_var(&mut cnf, &[(d, PosCoeff::new(4))], "x1", false)
+									.unwrap(),
+							),
 						],
 						LimitComp::LessEq,
 						PosCoeff::new(7),
@@ -483,21 +626,27 @@ pub(crate) mod tests {
 					let mut cnf = Cnf::default();
 					let (a, b, c, d) = cnf.new_lits();
 					amo(&mut cnf, &[&[a, b, c]]);
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						vec![
-							Term::from_at_most_one(
-								&mut cnf,
-								&[
-									(a, PosCoeff::new(3)),
-									(b, PosCoeff::new(3)),
-									(c, PosCoeff::new(5)),
-								],
-								"x0",
-								true,
-							)
-							.unwrap(),
-							Term::from_at_most_one(&mut cnf, &[(d, PosCoeff::new(4))], "x1", true)
+							(
+								PosCoeff::new(1),
+								at_most_one_var(
+									&mut cnf,
+									&[
+										(a, PosCoeff::new(3)),
+										(b, PosCoeff::new(3)),
+										(c, PosCoeff::new(5)),
+									],
+									"x0",
+									true,
+								)
 								.unwrap(),
+							),
+							(
+								PosCoeff::new(1),
+								at_most_one_var(&mut cnf, &[(d, PosCoeff::new(4))], "x1", true)
+									.unwrap(),
+							),
 						],
 						LimitComp::Equal,
 						PosCoeff::new(7),
@@ -519,20 +668,26 @@ pub(crate) mod tests {
 					for (x, y) in [(a, b), (b, c)] {
 						cnf.add_clause([!y, x]).unwrap();
 					}
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						vec![
-							Term::from_implication_chain(
-								&mut cnf,
-								&[
-									(a, PosCoeff::new(2)),
-									(b, PosCoeff::new(3)),
-									(c, PosCoeff::new(4)),
-								],
-								"x0",
-							)
-							.unwrap(),
-							Term::from_at_most_one(&mut cnf, &[(d, PosCoeff::new(5))], "x1", false)
+							(
+								PosCoeff::new(1),
+								implication_chain_var(
+									&mut cnf,
+									&[
+										(a, PosCoeff::new(2)),
+										(b, PosCoeff::new(3)),
+										(c, PosCoeff::new(4)),
+									],
+									"x0",
+								)
 								.unwrap(),
+							),
+							(
+								PosCoeff::new(1),
+								at_most_one_var(&mut cnf, &[(d, PosCoeff::new(5))], "x1", false)
+									.unwrap(),
+							),
 						],
 						LimitComp::LessEq,
 						PosCoeff::new(8),
@@ -551,7 +706,7 @@ pub(crate) mod tests {
 					let mut cnf = Cnf::default();
 					let a = cnf.new_lit();
 					let b = cnf.new_lit();
-					let con = NormalizedIntLinear::from_terms(
+					let con = NormalizedIntLinear::new(
 						construct_terms(&mut cnf, &[(a, 3), (b, 9)]),
 						LimitComp::Equal,
 						PosCoeff::new(10),
@@ -575,13 +730,16 @@ pub(crate) mod tests {
 	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(
 		db: &mut Cnf,
 		terms: &[(L, Coeff)],
-	) -> Vec<Term> {
+	) -> Vec<(PosCoeff, IntVar)> {
 		terms
 			.iter()
 			.enumerate()
 			.map(|(i, (lit, coef))| {
 				let group = [(lit.clone().into(), PosCoeff::new(*coef))];
-				Term::from_at_most_one(db, &group, &format!("x{i}"), false).unwrap()
+				(
+					PosCoeff::new(1),
+					at_most_one_var(db, &group, &format!("x{i}"), false).unwrap(),
+				)
 			})
 			.collect()
 	}
@@ -603,13 +761,14 @@ pub(crate) mod tests {
 				},
 				cardinality::{tests::card_test_suite, Cardinality, SortingNetworkEncoder},
 				cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
-				int_linear::{NormalizedIntLinear, Term},
+				int_linear::NormalizedIntLinear,
 				linear::{BoolLinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},
 				sorted::{SortedEncoder, SortedStrategy},
 			},
 			helpers::tests::{
 				all_binary_solutions, assert_checker, assert_encoding, assert_solutions,
-				binary_literals, construct_terms, expect_file,
+				at_most_one_var, binary_literals, construct_terms, expect_file,
+				implication_chain_var,
 			},
 			BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 		};

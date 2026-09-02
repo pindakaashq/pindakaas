@@ -11,7 +11,7 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		int_linear::{
-			Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear,
+			Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, TernaryIntLinear,
 		},
 	},
 	decision::integer::{Consistency, IntVar},
@@ -84,8 +84,8 @@ impl Decompose for SwcEncoder {
 		con: &NormalizedIntLinear,
 	) -> Result<Vec<TernaryIntLinear>, Unsatisfiable> {
 		// Two terms or fewer are already as small as the chain would make them.
-		if con.terms().len() <= 2 {
-			return Ok(vec![con.into()]);
+		if let Some(addition) = con.as_ternary() {
+			return Ok(vec![addition]);
 		}
 		let (cmp, k, n) = (Comparator::from(con.cmp()), con.k(), con.terms().len());
 		let totals = (0..=n)
@@ -106,14 +106,10 @@ impl Decompose for SwcEncoder {
 		Ok(con
 			.terms()
 			.iter()
+			.map(|(c, x)| (**c, x.clone()))
 			.zip(totals.iter().tuple_windows())
 			.map(|(x, (carried, left))| {
-				TernaryIntLinear::new(
-					x.clone(),
-					Term::new(1, left.clone()),
-					cmp,
-					Term::new(1, carried.clone()),
-				)
+				TernaryIntLinear::new(x, (1, left.clone()), cmp, (1, carried.clone()))
 			})
 			.collect())
 	}

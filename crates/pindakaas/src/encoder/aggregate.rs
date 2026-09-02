@@ -2,6 +2,7 @@
 //! and handing that to an encoder that takes it.
 
 use itertools::Itertools;
+use rangelist::RangeList;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
@@ -9,7 +10,7 @@ use crate::{
 		bool_linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
 		cardinality::Cardinality,
 		cardinality_one::{BitwiseEncoder, CardinalityOne},
-		int_linear::{NormalizedIntLinear, Term},
+		int_linear::NormalizedIntLinear,
 		linear::LinVariant,
 		sorted::{Sorted, SortedEncoder},
 	},
@@ -29,7 +30,7 @@ impl BoolLinAggregator {
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		let mut k = lin.k;
+		let mut k = lin.k - lin.exp.add * lin.exp.mult;
 		// Aggregate multiple occurrences of the same
 		// variable.
 		let mut agg = FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), FxBuildHasher);
@@ -73,7 +74,6 @@ impl BoolLinAggregator {
 		// an integer is a term of the expression rather than an annotation on
 		// its literals. So normalising is just making each coefficient
 		// positive, by taking the literal the other way round.
-		let mut k = k - lin.exp.add;
 		let cmp = match lin.cmp {
 			Comparator::LessEq | Comparator::GreaterEq => LimitComp::LessEq,
 			Comparator::Equal => LimitComp::Equal,
@@ -239,13 +239,16 @@ impl BoolLinAggregator {
 			.iter()
 			.enumerate()
 			.map(|(i, &(lit, coef))| {
-				Term::from_at_most_one(db, &[(lit, coef)], &format!("x{i}"), false)
+				// The literal says the term is worth its coefficient and its
+				// negation that the term is worth nothing, which is a direct
+				// encoding of the two values already.
+				let domain = RangeList::from_elements([0, *coef]);
+				IntVar::from_direct_encoding(db, domain, &[!lit, lit])
+					.map(|x| (PosCoeff::new(1), x.with_label(format!("x{i}"))))
 			})
 			.collect::<Result<Vec<_>, _>>()?;
-		terms.extend(int_terms.into_iter().map(|(x, c)| Term::new(c, x)));
-		Ok(LinVariant::Linear(NormalizedIntLinear::from_terms(
-			terms, cmp, k,
-		)))
+		terms.extend(int_terms.into_iter().map(|(x, c)| (PosCoeff::new(c), x)));
+		Ok(LinVariant::Linear(NormalizedIntLinear::new(terms, cmp, k)))
 	}
 	/// For non-zero `n`, detect groups of minimum size `n` with free literals
 	/// and same coefficients, sort them (using provided SortedEncoder) and add
@@ -909,5 +912,31 @@ mod tests {
 			),
 			Err(Unsatisfiable)
 		);
+	}
+
+	/// The constant of an expression is scaled by its multiplier and flips
+	/// sign with the comparator, so shifting it into `k` must do both.
+	#[test]
+	fn constant_matches_the_equivalent_shifted_constraint() {
+		use crate::decision::integer::IntVar;
+
+		let k_of = |exp, cmp, k| {
+			let mut db = Cnf::default();
+			match BoolLinAggregator::default().aggregate(&mut db, &Linear::new(exp, cmp, k)) {
+				Ok(LinVariant::Linear(lin)) => Some(lin.k()),
+				_ => None,
+			}
+		};
+		let x = IntVar::new(0..=5);
+		for (cmp, k) in [(Comparator::LessEq, 6), (Comparator::GreaterEq, -6)] {
+			let sign = if cmp == Comparator::LessEq { 1 } else { -1 };
+			let plain = k_of(x.clone() * (2 * sign), cmp, k);
+			assert!(plain.is_some());
+			assert_eq!(k_of(x.clone() * (2 * sign) + 7, cmp, k + 7), plain);
+			assert_eq!(
+				k_of((x.clone() * (2 * sign) + 7) * 3, cmp, (k + 7) * 3),
+				plain
+			);
+		}
 	}
 }

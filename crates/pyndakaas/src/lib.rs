@@ -486,8 +486,9 @@ mod pindakaas {
 		}
 
 		fn clauses(&self) -> Vec<Vec<Lit>> {
-			// TODO: It would be great if this could be converted to be lazy, but it
-			// seems a little tricky. This should probably be okay for now.
+			// TODO: It would be great if this could be converted to be lazy,
+			// but it seems a little tricky. This should probably be okay for
+			// now.
 			self.0
 				.iter()
 				.map(|c| c.iter().map(|&lit| Lit(lit)).collect())
@@ -977,8 +978,9 @@ mod pindakaas {
 		}
 
 		fn clauses(&self) -> Vec<Vec<Lit>> {
-			// TODO: It would be great if this could be converted to be lazy, but it
-			// seems a little tricky. This should probably be okay for now.
+			// TODO: It would be great if this could be converted to be lazy,
+			// but it seems a little tricky. This should probably be okay for
+			// now.
 			self.0
 				.iter()
 				.filter(|(_, w)| w.is_none())
@@ -1005,8 +1007,9 @@ mod pindakaas {
 		}
 
 		fn weighted_clauses(&self) -> Vec<(Option<i64>, Vec<Lit>)> {
-			// TODO: It would be great if this could be converted to be lazy, but it
-			// seems a little tricky. This should probably be okay for now.
+			// TODO: It would be great if this could be converted to be lazy,
+			// but it seems a little tricky. This should probably be okay for
+			// now.
 			self.0
 				.iter()
 				.map(|(c, &w)| (w, (c.iter().map(|&lit| Lit(lit)).collect())))
@@ -1330,9 +1333,9 @@ mod pindakaas {
 				py: Python<'_>,
 				slot: fn(&mut Owner) -> &mut SolverImpl<S>,
 			) -> PyResult<bool> {
-				// Must come first: `result` borrows from `solver`, so it has to be
-				// dropped before the solver is handed back. See the safety
-				// invariant on `SolverResultImpl`.
+				// Must come first: `result` borrows from `solver`, so it has to
+				// be dropped before the solver is handed back. See the
+				// safety invariant on `SolverResultImpl`.
 				self.result = None;
 				if let Some(solver) = self.solver.take() {
 					let mut owner = self.owner.bind(py).borrow_mut();
@@ -1351,8 +1354,9 @@ mod pindakaas {
 				let result = match solver.solve() {
 					SolveResult::Satisfied(sol) => {
 						let sol: Box<dyn Valuation + '_> = Box::new(sol);
-						// SAFETY: The returned valuation is tied to the checked-out
-						// solver and is dropped before solver access is restored.
+						// SAFETY: The returned valuation is tied to the
+						// checked-out solver and is dropped before solver
+						// access is restored.
 						let sol: Box<dyn Valuation + 'static> = unsafe { transmute(sol) };
 						SolverResultState::Satisfied(sol)
 					}
@@ -1374,17 +1378,18 @@ mod pindakaas {
 				let result = match solver.solve_assuming(assumptions.iter().map(|lit| lit.0)) {
 					SolveResult::Satisfied(sol) => {
 						let sol: Box<dyn Valuation + '_> = Box::new(sol);
-						// SAFETY: The returned valuation is only valid while the solver
-						// state remains alive and unchanged. The corresponding result
-						// object owns the checked-out solver and drops this boxed value
+						// SAFETY: The returned valuation is only valid while
+						// the solver state remains alive and unchanged.
+						// The corresponding result object owns the
+						// checked-out solver and drops this boxed value
 						// before restoring solver access.
 						let sol: Box<dyn Valuation + 'static> = unsafe { transmute(sol) };
 						SolverResultState::Satisfied(sol)
 					}
 					SolveResult::Unsatisfiable(fail) => {
 						let fail: Box<dyn FailedAssumptions + '_> = Box::new(fail);
-						// SAFETY: Same reasoning as above for the failed-assumptions
-						// object.
+						// SAFETY: Same reasoning as above for the
+						// failed-assumptions object.
 						let fail: Box<dyn FailedAssumptions + 'static> = unsafe { transmute(fail) };
 						let fail = move |lit: BaseLit| Some(fail.fail(lit));
 						SolverResultState::Unsatisfiable(Box::new(fail))

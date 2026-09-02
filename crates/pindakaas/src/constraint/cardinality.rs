@@ -8,8 +8,9 @@ use crate::{
 	constraint::{
 		bool_linear::{Comparator, LimitComp, PosCoeff},
 		cardinality_one::CardinalityOne,
-		int_linear::{NormalizedIntLinear, Term},
+		int_linear::NormalizedIntLinear,
 	},
+	decision::integer::IntVar,
 	Checker, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation,
 };
 
@@ -41,14 +42,13 @@ impl Cardinality {
 			.iter()
 			.enumerate()
 			.map(|(i, &l)| {
-				Term::from_at_most_one(db, &[(l, PosCoeff::new(1))], &format!("x{i}"), false)
+				// The literal is worth one when it holds and nothing when it
+				// does not, which is a direct encoding of `0..=1`.
+				IntVar::from_direct_encoding(db, 0..=1, &[!l, l])
+					.map(|x| (PosCoeff::new(1), x.with_label(format!("x{i}"))))
 			})
 			.collect::<Result<Vec<_>, _>>()?;
-		Ok(NormalizedIntLinear::from_terms(
-			terms,
-			self.cmp.clone(),
-			self.k,
-		))
+		Ok(NormalizedIntLinear::new(terms, self.cmp.clone(), self.k))
 	}
 
 	/// Get the comparator of the cardinality constraint.

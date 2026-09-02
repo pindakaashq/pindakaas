@@ -228,8 +228,8 @@
 //! never needed to hold the other view.
 //!
 //! An [`IntLinear`](constraint::int_linear::IntLinear) constraint is a sum of
-//! [`Term`](constraint::int_linear::Term)s, each a variable scaled by a
-//! coefficient, compared against a constant.
+//! terms, each a variable scaled by a coefficient, compared against a
+//! constant.
 //! [`IntLinEncoder`](constraint::int_linear::IntLinEncoder) keeps what it
 //! learns between the constraints it encodes, so a variable that several of
 //! them mention is encoded once, and the shifts and additions built
@@ -239,7 +239,7 @@
 //! ```rust
 //! use pindakaas::{
 //!     constraint::bool_linear::Comparator,
-//!     constraint::int_linear::{IntLinEncoder, IntLinear, Term},
+//!     constraint::int_linear::{IntLinEncoder, IntLinear},
 //!     decision::integer::IntVar,
 //!     solver::{cadical::Cadical, SolveResult, Solver},
 //!     Cnf, Encoder, RangeList,
@@ -253,7 +253,7 @@
 //! enc.encode(
 //!     &mut f,
 //!     &IntLinear::new(
-//!         vec![Term::new(2, x.clone()), Term::new(3, y.clone())],
+//!         vec![(2, x.clone()), (3, y.clone())],
 //!         Comparator::LessEq,
 //!         10,
 //!     ),

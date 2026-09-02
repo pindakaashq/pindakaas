@@ -47,10 +47,11 @@ impl AdderEncoder {
 	) -> Result<(Vec<(Lit, Coeff)>, Coeff), Unsatisfiable> {
 		let mut weighted = Vec::new();
 		let mut constant = 0;
-		for t in con.terms() {
-			if let Some(bits) = Self::product_bits(db, t)? {
+		for (c, x) in con.terms() {
+			let t = (**c, x.clone());
+			if let Some(bits) = Self::product_bits(db, &t)? {
 				// The product's bits count up from the variable's least value.
-				constant += t.c * t.x.min();
+				constant += t.0 * t.1.min();
 				for (i, b) in bits.into_iter().enumerate() {
 					match b {
 						BoolVal::Lit(l) => weighted.push((l, 1 << i)),
@@ -59,13 +60,13 @@ impl AdderEncoder {
 					}
 				}
 			} else {
-				let (lits, offset) = t.x.as_weighted(db)?;
+				let (lits, offset) = t.1.as_weighted(db)?;
 				weighted.extend(
 					lits.into_iter()
-						.map(|(l, w)| (l, t.c * w))
+						.map(|(l, w)| (l, t.0 * w))
 						.filter(|&(_, w)| w != 0),
 				);
-				constant += t.c * offset;
+				constant += t.0 * offset;
 			}
 		}
 		Ok((weighted, constant))
@@ -79,16 +80,16 @@ impl AdderEncoder {
 	) -> Result<Option<Vec<BoolVal>>, Unsatisfiable> {
 		// Reading it in binary is free where that view exists, and costs a
 		// channel where it does not.
-		if !t.x.has_binary_encoding() && (t.x.has_order_encoding() || t.x.has_direct_encoding()) {
+		if !t.1.has_binary_encoding() && (t.1.has_order_encoding() || t.1.has_direct_encoding()) {
 			return Ok(None);
 		}
-		if let Some(bits) = t.x.product(t.c) {
+		if let Some(bits) = t.1.product(t.0) {
 			return Ok(Some(bits));
 		}
-		let Ok(c) = u32::try_from(t.c) else {
+		let Ok(c) = u32::try_from(t.0) else {
 			return Ok(None);
 		};
-		let Some(width) = NonZero::new(BinaryEncoding::required_bits(t.x.max() - t.x.min()) as u32)
+		let Some(width) = NonZero::new(BinaryEncoding::required_bits(t.1.max() - t.1.min()) as u32)
 		else {
 			return Ok(None);
 		};
@@ -102,7 +103,7 @@ impl AdderEncoder {
 		if plan.cost >= columns {
 			return Ok(None);
 		}
-		Ok(Some(Self::scaled_bits(db, &t.x, t.c, plan)?))
+		Ok(Some(Self::scaled_bits(db, &t.1, t.0, plan)?))
 	}
 
 	/// The bits of `c·(x − lb)`, built from shifts and adders.
@@ -579,8 +580,8 @@ mod tests {
 			let mut cnf = Cnf::default();
 			let x = IntVar::new(RangeList::from(0..=15));
 			views(&mut cnf, &x);
-			let con = NormalizedIntLinear::from_terms(
-				vec![Term::new(dense, x.clone())],
+			let con = NormalizedIntLinear::new(
+				vec![(PosCoeff::new(dense), x.clone())],
 				LimitComp::LessEq,
 				PosCoeff::new(dense * 9),
 			);
@@ -621,8 +622,8 @@ mod tests {
 		for c in [3, 5, 15, 85, 127, 255] {
 			let mut cnf = Cnf::default();
 			let x = IntVar::new(RangeList::from(0..=15));
-			let con = NormalizedIntLinear::from_terms(
-				vec![Term::new(c, x.clone())],
+			let con = NormalizedIntLinear::new(
+				vec![(PosCoeff::new(c), x.clone())],
 				LimitComp::LessEq,
 				PosCoeff::new(c * 9),
 			);
@@ -651,10 +652,13 @@ mod tests {
 		let terms = lits
 			.iter()
 			.zip(coeffs)
-			.map(|(&l, c)| Term::from_at_most_one(&mut cnf, &[(l, PosCoeff::new(c))], "x", true))
+			.map(|(&l, c)| {
+				at_most_one_var(&mut cnf, &[(l, PosCoeff::new(c))], "x", true)
+					.map(|x| (PosCoeff::new(1), x))
+			})
 			.collect::<Result<Vec<_>, _>>()
 			.unwrap();
-		let con = NormalizedIntLinear::from_terms(terms, LimitComp::LessEq, PosCoeff::new(6));
+		let con = NormalizedIntLinear::new(terms, LimitComp::LessEq, PosCoeff::new(6));
 
 		let (terms, constant) = AdderEncoder::weighted_literals(&mut cnf, &con).unwrap();
 		assert_eq!(constant, 0);

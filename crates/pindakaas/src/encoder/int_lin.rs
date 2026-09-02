@@ -15,7 +15,7 @@ use crate::{
 		bool_linear::Comparator,
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
-		int_linear::{Decompose, IntLinear, NormalizedIntLinear, Term},
+		int_linear::{encode_addition, Decompose, IntLinear, NormalizedIntLinear, Term},
 	},
 	decision::integer::IntVar,
 	helpers::{div_ceil, div_floor},
@@ -43,15 +43,15 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntLinear> for IntLinEncoder {
 		if self.config.propagate {
 			con.propagate()?;
 		}
-		let terms = &con.exp.terms;
-		let binary = |t: &Term| t.x.prefers_binary(self.config.cutoff);
+		let terms = &con.terms;
+		let binary = |t: &Term| t.1.prefers_binary(self.config.cutoff);
 
 		// A sum of two binary variables against a third is what a ripple-carry
 		// adder does directly, and it is the shape a coefficient decomposes
 		// into, so it is worth recognising before anything else.
 		if let Some((x, y, z)) = con.as_addition() {
 			if [x, y, z].iter().all(|t| binary(t)) {
-				return Term::encode_addition(db, x, y, z);
+				return encode_addition(db, x, y, z);
 			}
 		}
 		// Otherwise walk the terms in order form. Any variable can produce an
@@ -63,11 +63,11 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntLinear> for IntLinEncoder {
 		// directly is read that way again, rather than gaining a second view to
 		// be tied to the first.
 		for t in terms {
-			if !t.x.has_direct_encoding() {
-				let _ = t.x.order_encoding(db)?;
+			if !t.1.has_direct_encoding() {
+				let _ = t.1.order_encoding(db)?;
 			}
 		}
-		let encoded: Vec<Encoded> = terms.iter().map(|t| Encoded { c: t.c, x: &t.x }).collect();
+		let encoded: Vec<Encoded> = terms.iter().map(|t| Encoded { c: t.0, x: &t.1 }).collect();
 
 		// An equality holds exactly when both of its inequalities do.
 		for cmp in con.cmp.split() {
@@ -261,9 +261,10 @@ mod tests {
 		constraint::{
 			bool_linear::{Comparator, LimitComp, PosCoeff},
 			cardinality_one::{CardinalityOne, PairwiseEncoder},
-			int_linear::{IntLinConfig, IntLinEncoder, IntLinear, Term},
+			int_linear::{IntLinConfig, IntLinEncoder, IntLinear},
 		},
 		decision::integer::IntVar,
+		helpers::tests::at_most_one_var,
 		solver::{cadical::Cadical, SolveResult, Solver},
 		ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Valuation,
 	};
@@ -299,7 +300,7 @@ mod tests {
 		let terms = coeffs
 			.iter()
 			.zip(&xs)
-			.map(|(&c, x)| Term::new(c, x.clone()))
+			.map(|(&c, x)| (c, x.clone()))
 			.collect_vec();
 
 		// Where every coefficient is positive the adder takes the constraint
@@ -390,224 +391,6 @@ mod tests {
 		}
 	}
 
-	/// Every model of `cnf`, as the value `x` takes together with which of
-	/// `lits` were chosen.
-	fn group_solutions(cnf: &Cnf, x: &IntVar, lits: &[Lit]) -> Vec<(Coeff, Vec<bool>)> {
-		let mut slv = Cadical::from(cnf);
-		let vars = cnf.get_variables();
-		let mut solutions = Vec::new();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			solutions.push((
-				x.value(&value),
-				lits.iter().map(|&l| value.value(l)).collect(),
-			));
-			let no_good: Vec<_> = vars
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect();
-			if slv.add_clause(no_good).is_err() {
-				break;
-			}
-		}
-		solutions.sort();
-		solutions
-	}
-
-	#[test]
-	fn a_group_of_exclusive_terms_becomes_its_largest_chosen_value() {
-		for exact in [false, true] {
-			let mut cnf = Cnf::default();
-			let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
-			// The terms are mutually exclusive, which is what lets the group be
-			// read as one integer.
-			PairwiseEncoder::default()
-				.encode(
-					&mut cnf,
-					&CardinalityOne {
-						lits: lits.clone(),
-						cmp: LimitComp::LessEq,
-					},
-				)
-				.unwrap();
-			let t = Term::from_at_most_one(
-				&mut cnf,
-				&[
-					(lits[0], PosCoeff::new(2)),
-					(lits[1], PosCoeff::new(5)),
-					(lits[2], PosCoeff::new(2)),
-				],
-				"x",
-				exact,
-			)
-			.unwrap();
-			let x = &t.x;
-			let _ = x.order_encoding(&mut cnf).unwrap();
-
-			let solutions = group_solutions(&cnf, x, &lits);
-			let choices: Vec<_> = solutions
-				.iter()
-				.map(|(_, chosen)| chosen.clone())
-				.sorted()
-				.dedup()
-				.collect();
-			assert_eq!(
-				choices.len(),
-				4,
-				"reading the group as an integer must not rule out a choice of terms"
-			);
-			for (value, chosen) in solutions {
-				let worth: Coeff = chosen
-					.iter()
-					.zip([2, 5, 2])
-					.filter(|(c, _)| **c)
-					.map(|(_, w)| w)
-					.sum();
-				if exact {
-					// With the upper bound the group is exactly its chosen
-					// term.
-					assert_eq!(value, worth, "chose {chosen:?}");
-				} else {
-					// Without it, choosing a term only forces the group up, so
-					// it may over-state and never under-states. That is sound
-					// for a `≤`, which is all a group without the bound is for,
-					// and costs no solutions: the terms are still free.
-					assert!(value >= worth, "{value} under {worth} for {chosen:?}");
-				}
-			}
-		}
-	}
-
-	#[test]
-	fn a_chain_of_terms_becomes_its_running_sum() {
-		let mut cnf = Cnf::default();
-		let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
-		// Each term implies the one before it, which is what the group means.
-		for (a, b) in lits.iter().zip(lits.iter().skip(1)) {
-			cnf.add_clause([!*b, *a]).unwrap();
-		}
-		let t = Term::from_implication_chain(
-			&mut cnf,
-			&[
-				(lits[0], PosCoeff::new(2)),
-				(lits[1], PosCoeff::new(3)),
-				(lits[2], PosCoeff::new(4)),
-			],
-			"x",
-		)
-		.unwrap();
-		let x = &t.x;
-		let _ = x.order_encoding(&mut cnf).unwrap();
-
-		let solutions = group_solutions(&cnf, x, &lits);
-		// The chain admits four assignments, worth nothing, two, five and nine.
-		assert_eq!(
-			solutions.iter().map(|(v, _)| *v).collect::<Vec<_>>(),
-			vec![0, 2, 5, 9]
-		);
-		for (value, chosen) in solutions {
-			let worth: Coeff = chosen
-				.iter()
-				.zip([2, 3, 4])
-				.filter(|(c, _)| **c)
-				.map(|(_, w)| w)
-				.sum();
-			assert_eq!(value, worth, "chose {chosen:?}");
-		}
-	}
-
-	#[test]
-	fn a_lone_term_is_a_group_that_costs_nothing() {
-		// Every term of a pseudo-Boolean constraint that nothing groups arrives
-		// as a group of one, so this is the common case rather than a corner:
-		// the term is worth its coefficient when chosen and nothing when not,
-		// which its own literal already says both ways.
-		for exact in [false, true] {
-			let mut cnf = Cnf::default();
-			let lit = cnf.new_lit();
-			let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
-
-			let t =
-				Term::from_at_most_one(&mut cnf, &[(lit, PosCoeff::new(5))], "x", exact).unwrap();
-			assert_eq!(
-				(cnf.num_vars(), cnf.num_clauses()),
-				(vars, clauses),
-				"a group of one term should need nothing of its own"
-			);
-
-			// And it still reads as the integer it stands for.
-			let x = &t.x;
-			let mut slv = Cadical::from(&cnf);
-			let mut seen = Vec::new();
-			while let SolveResult::Satisfied(value) = slv.solve() {
-				seen.push((value.value(lit), x.value(&value)));
-				if slv
-					.add_clause([if value.value(lit) { !lit } else { lit }])
-					.is_err()
-				{
-					break;
-				}
-			}
-			seen.sort();
-			assert_eq!(seen, vec![(false, 0), (true, 5)]);
-		}
-	}
-
-	#[test]
-	fn a_group_of_distinct_coefficients_can_still_take_them() {
-		// Every value is reached by exactly one term, so nothing forces a fresh
-		// literal to stand for it.
-		let mut cnf = Cnf::default();
-		let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
-		PairwiseEncoder::default()
-			.encode(
-				&mut cnf,
-				&CardinalityOne {
-					lits: lits.clone(),
-					cmp: LimitComp::LessEq,
-				},
-			)
-			.unwrap();
-		let group = lits
-			.iter()
-			.zip([2, 5, 7])
-			.map(|(&l, c)| (l, PosCoeff::new(c)))
-			.collect_vec();
-		let t = Term::from_at_most_one(&mut cnf, &group, "x", false).unwrap();
-		let x = &t.x;
-		let _ = x.order_encoding(&mut cnf).unwrap();
-
-		let mut slv = Cadical::from(&cnf);
-		let mut reachable = Vec::new();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			reachable.push(
-				lits.iter()
-					.zip([2, 5, 7])
-					.find(|(&l, _)| value.value(l))
-					.map_or(0, |(_, c)| c),
-			);
-			let no_good: Vec<_> = lits
-				.iter()
-				.map(|&l| if value.value(l) { !l } else { l })
-				.collect();
-			if slv.add_clause(no_good).is_err() {
-				break;
-			}
-		}
-		reachable.sort();
-		reachable.dedup();
-		assert_eq!(
-			reachable,
-			vec![0, 2, 5, 7],
-			"every term must still be choosable"
-		);
-	}
-
 	#[test]
 	fn a_group_on_its_own_is_bounded_on_its_own_literals() {
 		// One term left and read directly: no literal says where the group
@@ -631,15 +414,12 @@ mod tests {
 					.zip([2, 5, 7])
 					.map(|(&l, c)| (l, PosCoeff::new(c)))
 					.collect_vec();
-				let t = Term::from_at_most_one(&mut cnf, &group, "x", true).unwrap();
+				let x = at_most_one_var(&mut cnf, &group, "x", true).unwrap();
 				let mut enc = IntLinEncoder::default();
 				let ok = enc
-					.encode(&mut cnf, &IntLinear::new(vec![t.clone()], cmp, k))
+					.encode(&mut cnf, &IntLinear::new(vec![(1, x.clone())], cmp, k))
 					.is_ok();
-				assert!(
-					!t.x.has_order_encoding(),
-					"read on the group's own literals"
-				);
+				assert!(!x.has_order_encoding(), "read on the group's own literals");
 
 				let mut seen = Vec::new();
 				if ok {
@@ -696,19 +476,15 @@ mod tests {
 			.zip([2, 5, 7])
 			.map(|(&l, c)| (l, PosCoeff::new(c)))
 			.collect_vec();
-		let t = Term::from_at_most_one(&mut cnf, &group, "x", true).unwrap();
+		let x = at_most_one_var(&mut cnf, &group, "x", true).unwrap();
 		let y = IntVar::new(0..=3).enforce_consistency(true).with_label("y");
 
 		let mut enc = IntLinEncoder::default();
-		let con = IntLinear::new(
-			vec![t.clone(), Term::new(1, y.clone())],
-			Comparator::LessEq,
-			8,
-		);
+		let con = IntLinear::new(vec![(1, x.clone()), (1, y.clone())], Comparator::LessEq, 8);
 		enc.encode(&mut cnf, &con).unwrap();
 
 		assert!(
-			!t.x.has_order_encoding(),
+			!x.has_order_encoding(),
 			"the group came with a direct encoding and should be read on it"
 		);
 
@@ -745,72 +521,6 @@ mod tests {
 			.filter(|(g, v)| g + v <= 8)
 			.collect();
 		assert_eq!(seen, expected);
-	}
-
-	#[test]
-	fn a_log_encoded_group_keeps_its_bits() {
-		// The caller declared these literals to be the bits of an integer, so
-		// the group is that integer: the bits are its encoding and the multiple
-		// its coefficients are built from stays on the term.
-		for multiple in [1, 3] {
-			let mut cnf = Cnf::default();
-			let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
-			let terms = lits
-				.iter()
-				.enumerate()
-				.map(|(i, &l)| (l, PosCoeff::new(multiple << i)))
-				.collect_vec();
-			// Bounds come already scaled by the multiple, as the aggregator
-			// leaves them.
-			let t = Term::from_binary_digits(
-				&mut cnf,
-				&terms,
-				PosCoeff::new(2 * multiple),
-				PosCoeff::new(5 * multiple),
-				"x",
-			)
-			.unwrap();
-			assert_eq!(t.c, multiple, "the multiple belongs on the term");
-			assert_eq!((t.x.min(), t.x.max()), (2, 5), "the declared bounds hold");
-			// The caller declared the bits stay within those bounds; asking for
-			// them to be enforced is what makes that true of the encoding.
-			t.x.constrain(&mut cnf).unwrap();
-			assert!(
-				!t.x.has_order_encoding(),
-				"the bits are already there, so nothing should be channelled"
-			);
-			let vars_before = cnf.num_vars();
-			let _ = t.x.binary_encoding(&mut cnf).unwrap();
-			assert_eq!(
-				cnf.num_vars(),
-				vars_before,
-				"the encoding should be the literals it was given"
-			);
-
-			// The group takes exactly the declared values, and the bits say
-			// which.
-			let mut slv = Cadical::from(&cnf);
-			let mut seen = Vec::new();
-			while let SolveResult::Satisfied(value) = slv.solve() {
-				let bits: Coeff = lits
-					.iter()
-					.enumerate()
-					.filter(|(_, &l)| value.value(l))
-					.map(|(i, _)| 1 << i)
-					.sum();
-				assert_eq!(t.x.value(&value), bits, "the value is what the bits say");
-				seen.push(bits);
-				let no_good: Vec<_> = lits
-					.iter()
-					.map(|&l| if value.value(l) { !l } else { l })
-					.collect();
-				if slv.add_clause(no_good).is_err() {
-					break;
-				}
-			}
-			seen.sort();
-			assert_eq!(seen, vec![2, 3, 4, 5], "multiple {multiple}");
-		}
 	}
 
 	#[test]
@@ -905,7 +615,7 @@ mod tests {
 			let terms = coeffs
 				.iter()
 				.zip(&xs)
-				.map(|(&c, x)| Term::new(c, x.clone()))
+				.map(|(&c, x)| (c, x.clone()))
 				.collect_vec();
 			enc.encode(&mut cnf, &IntLinear::new(terms, Comparator::LessEq, k))
 				.unwrap();
@@ -990,7 +700,7 @@ mod tests {
 		let domain = RangeList::from(0..=15);
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(domain).with_label("x");
-		let con = |k| IntLinear::new(vec![Term::new(45, x.clone())], Comparator::LessEq, k);
+		let con = |k| IntLinear::new(vec![(45, x.clone())], Comparator::LessEq, k);
 		let config = || IntLinConfig {
 			propagate: false,
 			cutoff: Some(0),
@@ -1023,7 +733,7 @@ mod tests {
 		});
 		let x = IntVar::new(domain).with_label("x");
 
-		let con = |k| IntLinear::new(vec![Term::new(45, x.clone())], Comparator::LessEq, k);
+		let con = |k| IntLinear::new(vec![(45, x.clone())], Comparator::LessEq, k);
 		enc.encode(&mut cnf, &con(300)).unwrap();
 		let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
 		enc.encode(&mut cnf, &con(200)).unwrap();
@@ -1116,11 +826,7 @@ mod tests {
 			IntVar::new(domain.clone()).with_label("x"),
 			IntVar::new(domain).with_label("y"),
 		);
-		let con = IntLinear::new(
-			vec![Term::new(3, x.clone()), Term::new(1, y.clone())],
-			Comparator::LessEq,
-			5,
-		);
+		let con = IntLinear::new(vec![(3, x.clone()), (1, y.clone())], Comparator::LessEq, 5);
 
 		let mut cnf = Cnf::default();
 		enc.encode(&mut cnf, &con).unwrap();

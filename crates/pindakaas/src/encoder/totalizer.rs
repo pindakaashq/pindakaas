@@ -12,7 +12,8 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		int_linear::{
-			Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, Term, TernaryIntLinear,
+			term_max, term_min, term_values, Decompose, IntLinConfig, IntLinEncoder,
+			NormalizedIntLinear, TernaryIntLinear,
 		},
 	},
 	decision::integer::{Consistency, IntVar},
@@ -82,8 +83,8 @@ impl Decompose for TotalizerEncoder {
 		con: &NormalizedIntLinear,
 	) -> Result<Vec<TernaryIntLinear>, Unsatisfiable> {
 		// Two terms or fewer are already as small as the tree would make them.
-		if con.terms().len() <= 2 {
-			return Ok(vec![con.into()]);
+		if let Some(addition) = con.as_ternary() {
+			return Ok(vec![addition]);
 		}
 		let (cmp, k) = (Comparator::from(con.cmp()), con.k());
 		let mut cons = Vec::new();
@@ -92,8 +93,8 @@ impl Decompose for TotalizerEncoder {
 		let mut layer = con
 			.terms()
 			.iter()
-			.cloned()
-			.sorted_by_key(|t| t.max() - t.min())
+			.map(|(c, x)| (**c, x.clone()))
+			.sorted_by_key(|t| term_max(t) - term_min(t))
 			.collect_vec();
 
 		while layer.len() > 1 {
@@ -110,9 +111,9 @@ impl Decompose for TotalizerEncoder {
 						let domain: RangeList<Coeff> = if at_root {
 							RangeList::from(k..=k)
 						} else {
-							left.values()
+							term_values(left)
 								.into_iter()
-								.cartesian_product(right.values())
+								.cartesian_product(term_values(right))
 								.map(|(a, b)| a + b)
 								.filter(|&d| d <= k)
 								.map(|d| d..=d)
@@ -128,9 +129,9 @@ impl Decompose for TotalizerEncoder {
 							left.clone(),
 							right.clone(),
 							cmp,
-							Term::new(1, parent.clone()),
+							(1, parent.clone()),
 						));
-						next.push(Term::new(1, parent));
+						next.push((1, parent));
 					}
 					_ => unreachable!("terms are taken two at a time"),
 				}

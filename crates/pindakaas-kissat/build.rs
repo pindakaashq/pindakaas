@@ -119,10 +119,10 @@ fn main() {
 	let mut builder = cc::Build::new();
 
 	let compiler = builder.try_get_compiler().unwrap();
-	// The `ID`/`BUILD` defines below only feed Kissat's informational banner, so
-	// these commands are best-effort: they are unavailable when building from a
-	// packaged crate (no `.git`), without `git` installed, or on Windows (no
-	// `date`/`uname`). Never fail the build over them.
+	// The `ID`/`BUILD` defines below only feed Kissat's informational banner,
+	// so these commands are best-effort: they are unavailable when building
+	// from a packaged crate (no `.git`), without `git` installed, or on
+	// Windows (no `date`/`uname`). Never fail the build over them.
 	let git_id = run_command(
 		Command::new("git")
 			.current_dir("vendor/kissat")
