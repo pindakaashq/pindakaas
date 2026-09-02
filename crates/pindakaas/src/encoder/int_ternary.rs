@@ -1,10 +1,10 @@
-//! Encoding an integer linear constraint, on whichever view of its variables
-//! costs least.
+//! Encoding `x + y ≷ z`, on whichever view of the three variables costs least.
 //!
-//! Three shapes are recognised: a sum of two binary variables against a third,
-//! which a ripple-carry adder states directly; a sum of binary variables
-//! against a constant, built from shift-and-add products; and otherwise a walk
-//! over the terms in order form, which any variable can produce.
+//! Two shapes are recognised: three binary variables, which a ripple-carry
+//! adder states directly, and otherwise a walk over the terms in order form,
+//! which any variable can produce. Longer constraints reach this through a
+//! decomposition strategy, which is what makes three terms the only case
+//! worth encoding directly.
 
 use std::iter::once;
 
@@ -13,23 +13,22 @@ use itertools::Itertools;
 use crate::{
 	constraint::{
 		bool_linear::Comparator,
-		cardinality::Cardinality,
-		cardinality_one::CardinalityOne,
-		int_linear::{encode_addition, Decompose, IntLinear, NormalizedIntLinear, Term},
+		int_linear::{Decompose, IntLinear, NormalizedIntLinear, Term, encode_addition},
+		int_ternary::IntTernary,
 	},
 	decision::integer::IntVar,
 	helpers::{div_ceil, div_floor},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
 
-/// Encoder for [`IntLinear`] constraints.
+/// Encoder for [`IntTernary`] constraints.
 ///
-/// The encoder is kept between constraints so that what it learns about a
-/// variable while encoding one is available to the next: the encodings a
-/// variable has been given, and later the products built for its coefficients.
+/// Every decomposition strategy breaks a longer constraint into these, so this
+/// is where all of them end up. An n-ary constraint is aggregated into a
+/// [`NormalizedIntLinear`] and handed to one of those strategies instead.
 #[derive(Clone, Debug, Default)]
-pub struct IntLinEncoder {
-	config: IntLinConfig,
+pub struct IntTernaryEncoder {
+	config: IntTernaryConfig,
 }
 
 /// Encoding a constraint fixes the literals of the variables it mentions, and
@@ -38,8 +37,15 @@ pub struct IntLinEncoder {
 /// encoded, which makes the result depend on the order the constraints are
 /// given in. Every such result is correct; they differ only in how much was
 /// pruned before the literals were committed.
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntLinear> for IntLinEncoder {
-	fn encode(&self, db: &mut Db, con: &IntLinear) -> Result {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder {
+	#[cfg_attr(
+		any(feature = "tracing", test),
+		tracing::instrument(name = "int_ternary_encoder", skip_all, fields(constraint = format!("{con:?}")))
+	)]
+	fn encode(&self, db: &mut Db, con: &IntTernary) -> Result {
+		// `z` crosses the comparison and a term of one value joins the
+		// constant, which is the form both arms below want.
+		let con = &IntLinear::from(con);
 		if self.config.propagate {
 			con.propagate()?;
 		}
@@ -79,32 +85,9 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntLinear> for IntLinEncoder {
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedIntLinear> for IntLinEncoder {
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "int_lin_encoder", skip_all, fields(constraint = format!("{con:?}")))
-	)]
-	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		Encoder::encode(self, db, &IntLinear::from(con))
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for IntLinEncoder {
-	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
-		let con = con.as_linear(db)?;
-		Encoder::encode(self, db, &con)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for IntLinEncoder {
-	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
-		Encoder::encode(self, db, &Cardinality::from(con.clone()))
-	}
-}
-
-/// Configuration for an [`IntLinEncoder`].
+/// Configuration for a [`IntTernaryEncoder`].
 #[derive(Clone, Debug)]
-pub struct IntLinConfig {
+pub struct IntTernaryConfig {
 	/// Whether to narrow the domains of the variables of a constraint before
 	/// encoding it.
 	pub propagate: bool,
@@ -124,7 +107,7 @@ struct Encoded<'a> {
 	x: &'a IntVar,
 }
 
-impl Default for IntLinConfig {
+impl Default for IntTernaryConfig {
 	fn default() -> Self {
 		Self {
 			propagate: true,
@@ -133,7 +116,7 @@ impl Default for IntLinConfig {
 	}
 }
 
-impl IntLinEncoder {
+impl IntTernaryEncoder {
 	/// Break `con` apart and encode each piece.
 	pub(crate) fn encode_decomposed<Db: ClauseDatabase + ?Sized>(
 		&self,
@@ -146,12 +129,11 @@ impl IntLinEncoder {
 		let Ok(cons) = decompose.decompose(db, con) else {
 			return db.contradiction();
 		};
-		cons.iter()
-			.try_for_each(|con| Encoder::encode(self, db, &IntLinear::from(con)))
+		cons.iter().try_for_each(|con| Encoder::encode(self, db, con))
 	}
 
 	/// Create an encoder with the given configuration.
-	pub fn with_config(config: IntLinConfig) -> Self {
+	pub fn with_config(config: IntTernaryConfig) -> Self {
 		Self { config }
 	}
 }
@@ -261,13 +243,36 @@ mod tests {
 		constraint::{
 			bool_linear::{Comparator, LimitComp, PosCoeff},
 			cardinality_one::{CardinalityOne, PairwiseEncoder},
-			int_linear::{IntLinConfig, IntLinEncoder, IntLinear},
+			int_linear::Term,
+			int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 		},
 		decision::integer::IntVar,
 		helpers::tests::at_most_one_var,
 		solver::{cadical::Cadical, SolveResult, Solver},
 		ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Valuation,
 	};
+
+	/// `Σ cᵢ·xᵢ ≷ k` as the ternary constraint the encoder takes.
+	///
+	/// Either two terms against a constant, or three where the last is what the
+	/// other two are compared against — between them every shape a
+	/// decomposition produces.
+	fn ternary(terms: Vec<Term>, cmp: Comparator, k: Coeff) -> IntTernary {
+		if terms.len() == 3 {
+			assert_eq!(k, 0, "three terms are compared against the third of them");
+			let (c, x) = terms[2].clone();
+			assert!(c < 0, "the third term stands on the other side");
+			return IntTernary::new(terms[0].clone(), terms[1].clone(), cmp, (-c, x));
+		}
+		assert!(terms.len() < 3, "more terms than that is a decomposition");
+		let zero = || (1, IntVar::new(0..=0));
+		let mut terms = terms.into_iter();
+		let (x, y) = (
+			terms.next().unwrap_or_else(zero),
+			terms.next().unwrap_or_else(zero),
+		);
+		IntTernary::new(x, y, cmp, (1, IntVar::new(k..=k)))
+	}
 
 	/// Encode `Σ cᵢ·xᵢ ≷ k` over the given domains and return the assignments
 	/// its models stand for, in order.
@@ -291,7 +296,7 @@ mod tests {
 		cutoff: Option<Coeff>,
 	) -> (Vec<Vec<Coeff>>, Vec<IntVar>) {
 		let mut cnf = Cnf::default();
-		let enc = IntLinEncoder::with_config(IntLinConfig { propagate, cutoff });
+		let enc = IntTernaryEncoder::with_config(IntTernaryConfig { propagate, cutoff });
 		let xs = doms
 			.iter()
 			.enumerate()
@@ -303,10 +308,7 @@ mod tests {
 			.map(|(&c, x)| (c, x.clone()))
 			.collect_vec();
 
-		// Where every coefficient is positive the adder takes the constraint
-		// directly, which is what a whole binary sum is encoded by; anything
-		// else goes through the integer encoder.
-		let con = IntLinear::new(terms, cmp, k);
+		let con = ternary(terms, cmp, k);
 		if enc.encode(&mut cnf, &con).is_err() {
 			return (Vec::new(), xs);
 		}
@@ -369,13 +371,16 @@ mod tests {
 		let cases: Vec<(Vec<Coeff>, Vec<RangeList<Coeff>>)> = vec![
 			(vec![1, 1], vec![contiguous.clone(), contiguous.clone()]),
 			(vec![2, -3], vec![contiguous.clone(), holey.clone()]),
-			(vec![1, 1, 1], vec![holey.clone(); 3]),
-			(vec![3, -1, 2], vec![negative.clone(), contiguous, holey]),
+			(vec![1, 1, -1], vec![holey.clone(); 3]),
+			(vec![3, -1, -2], vec![negative.clone(), contiguous, holey]),
 			(vec![-2, -5], vec![negative.clone(), negative]),
 		];
 		for (coeffs, doms) in cases {
+			// Three terms are compared against the third of them, so there is
+			// no constant left to vary.
+			let ks: Vec<Coeff> = if coeffs.len() == 3 { vec![0] } else { (-6..=6).collect() };
 			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
-				for k in -6..=6 {
+				for k in ks.iter().copied() {
 					// Propagation must not change which assignments survive,
 					// only how much of the domain is left when the literals are
 					// made, so both settings are checked against brute force.
@@ -415,9 +420,9 @@ mod tests {
 					.map(|(&l, c)| (l, PosCoeff::new(c)))
 					.collect_vec();
 				let x = at_most_one_var(&mut cnf, &group, "x", true).unwrap();
-				let mut enc = IntLinEncoder::default();
+				let mut enc = IntTernaryEncoder::default();
 				let ok = enc
-					.encode(&mut cnf, &IntLinear::new(vec![(1, x.clone())], cmp, k))
+					.encode(&mut cnf, &ternary(vec![(1, x.clone())], cmp, k))
 					.is_ok();
 				assert!(!x.has_order_encoding(), "read on the group's own literals");
 
@@ -479,8 +484,8 @@ mod tests {
 		let x = at_most_one_var(&mut cnf, &group, "x", true).unwrap();
 		let y = IntVar::new(0..=3).enforce_consistency(true).with_label("y");
 
-		let mut enc = IntLinEncoder::default();
-		let con = IntLinear::new(vec![(1, x.clone()), (1, y.clone())], Comparator::LessEq, 8);
+		let mut enc = IntTernaryEncoder::default();
+		let con = ternary(vec![(1, x.clone()), (1, y.clone())], Comparator::LessEq, 8);
 		enc.encode(&mut cnf, &con).unwrap();
 
 		assert!(
@@ -539,8 +544,8 @@ mod tests {
 			(Comparator::Equal, 2, false),
 		] {
 			let mut cnf = Cnf::default();
-			let mut enc = IntLinEncoder::default();
-			let con = IntLinear::new(Vec::new(), cmp, k);
+			let mut enc = IntTernaryEncoder::default();
+			let con = ternary(Vec::new(), cmp, k);
 			assert_eq!(
 				enc.encode(&mut cnf, &con).is_ok(),
 				holds,
@@ -581,8 +586,11 @@ mod tests {
 			(vec![1, 1, -1], vec![holey.clone(), holey.clone(), holey]),
 		];
 		for (coeffs, doms) in cases {
+			// Three terms are compared against the third of them, so there is
+			// no constant left to vary.
+			let ks: Vec<Coeff> = if coeffs.len() == 3 { vec![0] } else { (-4..=8).collect() };
 			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
-				for k in -4..=8 {
+				for k in ks.iter().copied() {
 					assert_eq!(
 						solutions_with(&coeffs, &doms, cmp, k, false, Some(0)).0,
 						brute_force(&coeffs, &doms, cmp, k),
@@ -595,18 +603,17 @@ mod tests {
 
 	#[test]
 	fn the_walk_drops_the_steps_it_repeats() {
-		// Clause counts for these, with the repeated steps kept, are 42, 42, 86
-		// and 33. The bounds below sit between the two, so they catch the walk
-		// emitting every step again without pinning an exact encoding.
+		// Measured at 37, 59 and 87 clauses, and at 47, 81 and 123 with the
+		// repeated steps kept. The budgets sit between the two, so they catch
+		// the walk emitting every step again without pinning an exact encoding.
 		for (coeffs, span, k, budget) in [
-			(vec![1, 1, 1], 5, 7, 40),
-			(vec![2, 3, 5], 7, 12, 30),
-			(vec![1, 2, 4, 8], 4, 15, 40),
-			(vec![3, 3, 3], 9, 14, 30),
+			(vec![1, 1, -1], 5, 0, 42),
+			(vec![2, 3, -5], 7, 0, 70),
+			(vec![3, 3, -3], 9, 0, 105),
 		] {
 			let doms = vec![RangeList::from(0..=span); coeffs.len()];
 			let mut cnf = Cnf::default();
-			let mut enc = IntLinEncoder::default();
+			let mut enc = IntTernaryEncoder::default();
 			let xs = doms
 				.iter()
 				.enumerate()
@@ -617,7 +624,7 @@ mod tests {
 				.zip(&xs)
 				.map(|(&c, x)| (c, x.clone()))
 				.collect_vec();
-			enc.encode(&mut cnf, &IntLinear::new(terms, Comparator::LessEq, k))
+			enc.encode(&mut cnf, &ternary(terms, Comparator::LessEq, k))
 				.unwrap();
 			assert!(
 				cnf.num_clauses() <= budget,
@@ -674,14 +681,16 @@ mod tests {
 			RangeList::from_elements([0, 1, 4]),
 			RangeList::from(2..=5),
 		];
+		// Each product meets the others across the comparison rather than under
+		// a constant, which is the shape a decomposition hands over.
 		for coeffs in [
-			vec![3, 5, 7],
-			vec![1, 45, 2],
-			vec![11, 11, 11],
-			vec![101, 1, 23],
+			vec![3, 5, -7],
+			vec![1, 45, -2],
+			vec![11, 11, -11],
+			vec![101, 1, -23],
 		] {
 			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
-				for k in (0..=12).map(|v: Coeff| v * 13) {
+				for k in [0] {
 					assert_eq!(
 						solutions_with(&coeffs, &doms, cmp, k, false, Some(0)).0,
 						brute_force(&coeffs, &doms, cmp, k),
@@ -700,18 +709,18 @@ mod tests {
 		let domain = RangeList::from(0..=15);
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(domain).with_label("x");
-		let con = |k| IntLinear::new(vec![(45, x.clone())], Comparator::LessEq, k);
-		let config = || IntLinConfig {
+		let con = |k| ternary(vec![(45, x.clone())], Comparator::LessEq, k);
+		let config = || IntTernaryConfig {
 			propagate: false,
 			cutoff: Some(0),
 		};
 
-		IntLinEncoder::with_config(config())
+		IntTernaryEncoder::with_config(config())
 			.encode(&mut cnf, &con(300))
 			.unwrap();
 		let vars = cnf.num_vars();
 		// A different encoder entirely, with no memory of the first.
-		IntLinEncoder::with_config(config())
+		IntTernaryEncoder::with_config(config())
 			.encode(&mut cnf, &con(200))
 			.unwrap();
 		assert_eq!(
@@ -727,13 +736,13 @@ mod tests {
 		// second should cost nothing beyond its own bound.
 		let domain = RangeList::from(0..=15);
 		let mut cnf = Cnf::default();
-		let mut enc = IntLinEncoder::with_config(IntLinConfig {
+		let mut enc = IntTernaryEncoder::with_config(IntTernaryConfig {
 			propagate: false,
 			cutoff: Some(0),
 		});
 		let x = IntVar::new(domain).with_label("x");
 
-		let con = |k| IntLinear::new(vec![(45, x.clone())], Comparator::LessEq, k);
+		let con = |k| ternary(vec![(45, x.clone())], Comparator::LessEq, k);
 		enc.encode(&mut cnf, &con(300)).unwrap();
 		let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
 		enc.encode(&mut cnf, &con(200)).unwrap();
@@ -752,11 +761,11 @@ mod tests {
 
 	#[test]
 	fn binary_sums_chain_into_adders() {
-		// Several binary variables added together go through a chain of adders
-		// and one bound, rather than the walk over terms.
+		// Two binary variables against a third go straight to the ripple-carry
+		// adder rather than the walk over terms.
 		let cases: Vec<Vec<RangeList<Coeff>>> = vec![
 			vec![RangeList::from(0..=3); 3],
-			vec![RangeList::from(0..=1); 4],
+			vec![RangeList::from(0..=1); 3],
 			vec![
 				RangeList::from(2..=5),
 				RangeList::from_elements([0, 1, 4]),
@@ -769,9 +778,9 @@ mod tests {
 			],
 		];
 		for doms in cases {
-			let coeffs = vec![1; doms.len()];
+			let coeffs = vec![1, 1, -1];
 			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
-				for k in -4..=10 {
+				for k in [0] {
 					let (solutions, xs) = solutions_with(&coeffs, &doms, cmp, k, false, Some(0));
 					assert_eq!(
 						solutions,
@@ -820,13 +829,13 @@ mod tests {
 	#[test]
 	fn propagation_narrows_the_domains_it_can() {
 		// `3x + y ≤ 5` with `y ≥ 0` leaves `x` no room above one.
-		let mut enc = IntLinEncoder::default();
+		let mut enc = IntTernaryEncoder::default();
 		let domain = RangeList::from(0..=3);
 		let (x, y) = (
 			IntVar::new(domain.clone()).with_label("x"),
 			IntVar::new(domain).with_label("y"),
 		);
-		let con = IntLinear::new(vec![(3, x.clone()), (1, y.clone())], Comparator::LessEq, 5);
+		let con = ternary(vec![(3, x.clone()), (1, y.clone())], Comparator::LessEq, 5);
 
 		let mut cnf = Cnf::default();
 		enc.encode(&mut cnf, &con).unwrap();

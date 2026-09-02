@@ -6,11 +6,18 @@
 //! constraint produces one of these, its groups of related terms having become
 //! the integers they encode, so this is where every linear encoder starts.
 
-pub use crate::encoder::int_lin::{IntLinConfig, IntLinEncoder};
+pub use crate::encoder::{
+	bdd::BddEncoder,
+	swc::SwcEncoder,
+	totalizer::TotalizerEncoder,
+};
 #[cfg(test)]
 use crate::Lit;
 use crate::{
-	constraint::bool_linear::{Comparator, LimitComp, PosCoeff},
+	constraint::{
+		bool_linear::{Comparator, LimitComp, PosCoeff},
+		int_ternary::IntTernary,
+	},
 	decision::integer::IntVar,
 	encoder::adder::AdderEncoder,
 	helpers::{div_ceil, div_floor},
@@ -62,69 +69,6 @@ pub struct IntLinear {
 	pub(crate) k: Coeff,
 }
 
-/// A linear constraint over three integer terms, `x + y ≷ z`.
-///
-/// This is what a decomposition breaks a longer constraint into. The strategies
-/// differ in the shape they give the intermediate sums — a chain, a balanced
-/// tree, the layers of a decision diagram — but every step of every one of them
-/// is the same thing: two terms, and where they come to together. Saying so in
-/// the type keeps a decomposition from having to express it as a constraint of
-/// any shape at all, which the encoder would then have to recognise again.
-///
-/// It is not a [`NormalizedIntLinear`]: `z` stands on the other side of the
-/// comparison, and moving it across would mean a view of it counting the other
-/// way rather than a constant.
-#[derive(Clone, Debug)]
-pub struct TernaryIntLinear {
-	pub(crate) x: Term,
-	pub(crate) y: Term,
-	pub(crate) cmp: Comparator,
-	pub(crate) z: Term,
-}
-
-impl TernaryIntLinear {
-	/// The constraint `x + y ≷ z`.
-	pub fn new(x: Term, y: Term, cmp: Comparator, z: Term) -> Self {
-		Self { x, y, cmp, z }
-	}
-
-	/// The comparator of the constraint.
-	pub fn cmp(&self) -> Comparator {
-		self.cmp
-	}
-
-	/// The two terms that are added together.
-	pub fn addends(&self) -> (&Term, &Term) {
-		(&self.x, &self.y)
-	}
-
-	/// The term they are compared against.
-	pub fn total(&self) -> &Term {
-		&self.z
-	}
-}
-
-impl From<&TernaryIntLinear> for IntLinear {
-	/// A term over a variable of one value is what it is worth, so it belongs
-	/// with the constant rather than among the terms.
-	fn from(con: &TernaryIntLinear) -> Self {
-		let (mut terms, mut k) = (Vec::new(), 0);
-		for (term, adds) in [(&con.x, true), (&con.y, true), (&con.z, false)] {
-			if term.1.card() == 1 {
-				let worth = term.0 * term.1.min();
-				k += if adds { -worth } else { worth };
-			} else {
-				terms.push(if adds {
-					term.clone()
-				} else {
-					term_negated(term)
-				});
-			}
-		}
-		Self::new(terms, con.cmp, k)
-	}
-}
-
 /// A way of breaking a linear constraint into smaller ones.
 ///
 /// What the encodings in the literature differ in is mostly the shape they give
@@ -143,7 +87,7 @@ pub(crate) trait Decompose {
 		&self,
 		db: &mut Db,
 		con: &NormalizedIntLinear,
-	) -> Result<Vec<TernaryIntLinear>, Unsatisfiable>;
+	) -> Result<Vec<IntTernary>, Unsatisfiable>;
 }
 
 /// An integer variable scaled by a coefficient.
@@ -159,7 +103,7 @@ impl NormalizedIntLinear {
 	///
 	/// A term it does not have is zero, and the constant it is compared with is
 	/// a variable of one value — neither of which any literal has to stand for.
-	pub(crate) fn as_ternary(&self) -> Option<TernaryIntLinear> {
+	pub(crate) fn as_ternary(&self) -> Option<IntTernary> {
 		if self.terms().len() > 2 {
 			return None;
 		}
@@ -170,7 +114,7 @@ impl NormalizedIntLinear {
 			terms.next().unwrap_or_else(zero),
 		);
 		let k = self.k();
-		Some(TernaryIntLinear::new(
+		Some(IntTernary::new(
 			x,
 			y,
 			self.cmp().into(),

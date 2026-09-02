@@ -11,10 +11,8 @@ use crate::{
 		bool_linear::Comparator,
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
-		int_linear::{
-			term_max, term_min, term_values, Decompose, IntLinConfig, IntLinEncoder,
-			NormalizedIntLinear, TernaryIntLinear,
-		},
+		int_linear::{Decompose, NormalizedIntLinear, term_max, term_min, term_values},
+		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 	},
 	decision::integer::{Consistency, IntVar},
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
@@ -44,8 +42,8 @@ impl Default for TotalizerEncoder {
 
 impl TotalizerEncoder {
 	/// The encoder of the pieces this one decomposes a constraint into.
-	fn encoder(&self) -> IntLinEncoder {
-		IntLinEncoder::with_config(IntLinConfig {
+	fn encoder(&self) -> IntTernaryEncoder {
+		IntTernaryEncoder::with_config(IntTernaryConfig {
 			propagate: self.add_propagation != Consistency::None,
 			cutoff: self.cutoff,
 		})
@@ -81,7 +79,7 @@ impl Decompose for TotalizerEncoder {
 		&self,
 		_db: &mut Db,
 		con: &NormalizedIntLinear,
-	) -> Result<Vec<TernaryIntLinear>, Unsatisfiable> {
+	) -> Result<Vec<IntTernary>, Unsatisfiable> {
 		// Two terms or fewer are already as small as the tree would make them.
 		if let Some(addition) = con.as_ternary() {
 			return Ok(vec![addition]);
@@ -125,7 +123,7 @@ impl Decompose for TotalizerEncoder {
 						let parent = IntVar::new(domain)
 							.enforce_consistency(self.add_consistency)
 							.with_label(format!("t{i}"));
-						cons.push(TernaryIntLinear::new(
+						cons.push(IntTernary::new(
 							left.clone(),
 							right.clone(),
 							cmp,

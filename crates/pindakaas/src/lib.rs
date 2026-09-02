@@ -227,38 +227,36 @@
 //! called for. Nothing has to be chosen in advance, and a second variable is
 //! never needed to hold the other view.
 //!
-//! An [`IntLinear`](constraint::int_linear::IntLinear) constraint is a sum of
-//! terms, each a variable scaled by a coefficient, compared against a
-//! constant.
-//! [`IntLinEncoder`](constraint::int_linear::IntLinEncoder) keeps what it
-//! learns between the constraints it encodes, so a variable that several of
-//! them mention is encoded once, and the shifts and additions built
-//! for one coefficient are reused by the next constraint that needs the same
-//! product. Put every constraint through the one encoder to get that.
+//! A linear constraint over those variables is written as a
+//! [`Linear`](constraint::bool_linear::Linear) and
+//! aggregated, which puts it into the one form every encoder takes: a
+//! [`NormalizedIntLinear`](constraint::int_linear::NormalizedIntLinear), a sum
+//! of terms with positive coefficients against a bound. Choosing an encoder is
+//! then choosing how the sum is broken up — a decision diagram, a chain of
+//! partial sums, or a balanced tree — each of which reaches the same
+//! [`IntTernaryEncoder`](constraint::int_ternary::IntTernaryEncoder) for
+//! the two-terms-against-a-third steps it produces.
 //!
 //! ```rust
 //! use pindakaas::{
-//!     constraint::bool_linear::Comparator,
-//!     constraint::int_linear::{IntLinEncoder, IntLinear},
+//!     constraint::bool_linear::{Comparator, Linear},
+//!     constraint::int_linear::BddEncoder,
+//!     constraint::linear::{BoolLinAggregator, LinVariant},
 //!     decision::integer::IntVar,
 //!     solver::{cadical::Cadical, SolveResult, Solver},
-//!     Cnf, Encoder, RangeList,
+//!     Cnf, Encoder,
 //! };
 //!
 //! let mut f = Cnf::default();
 //! let x = IntVar::new(0..=5).with_label("x");
 //! let y = IntVar::new(0..=5).with_label("y");
 //!
-//! let enc = IntLinEncoder::default();
-//! enc.encode(
-//!     &mut f,
-//!     &IntLinear::new(
-//!         vec![(2, x.clone()), (3, y.clone())],
-//!         Comparator::LessEq,
-//!         10,
-//!     ),
-//! )
-//! .unwrap();
+//! let con = Linear::new(x.clone() * 2 + y.clone() * 3, Comparator::LessEq, 10);
+//! let LinVariant::Linear(con) = BoolLinAggregator::default().aggregate(&mut f, &con).unwrap()
+//! else {
+//!     panic!("a sum of integer terms is a linear constraint");
+//! };
+//! BddEncoder::default().encode(&mut f, &con).unwrap();
 //!
 //! let mut slv = Cadical::from(&f);
 //! let SolveResult::Satisfied(sol) = slv.solve() else {

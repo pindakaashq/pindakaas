@@ -539,7 +539,7 @@ mod tests {
 		assert_eq!(con.terms().len(), 2, "one term of each kind");
 		cnf.encode(
 			&con,
-			&crate::constraint::int_linear::IntLinEncoder::default(),
+			&crate::constraint::bool_linear::BddEncoder::default(),
 		)
 		.unwrap();
 

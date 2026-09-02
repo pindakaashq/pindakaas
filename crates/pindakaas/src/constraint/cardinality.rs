@@ -1,7 +1,7 @@
 //! The constraint that at most, or exactly, `k` of a set of literals hold.
 
 pub use crate::encoder::{
-	adder::AdderEncoder, bdd::BddEncoder, int_lin::IntLinEncoder,
+	adder::AdderEncoder, bdd::BddEncoder,
 	sorting_network::SortingNetworkEncoder, swc::SwcEncoder, totalizer::TotalizerEncoder,
 };
 use crate::{
@@ -113,7 +113,6 @@ const _: () = {
 	use crate::{
 		constraint::{
 			bool_linear::{AdderEncoder, BddEncoder, SwcEncoder, TotalizerEncoder},
-			int_linear::IntLinEncoder,
 		},
 		Cnf, Encoder,
 	};
@@ -123,13 +122,11 @@ const _: () = {
 	takes::<Cnf, Cardinality, BddEncoder>();
 	takes::<Cnf, Cardinality, SwcEncoder>();
 	takes::<Cnf, Cardinality, TotalizerEncoder>();
-	takes::<Cnf, Cardinality, IntLinEncoder>();
 	takes::<Cnf, Cardinality, SortingNetworkEncoder>();
 	takes::<Cnf, CardinalityOne, AdderEncoder>();
 	takes::<Cnf, CardinalityOne, BddEncoder>();
 	takes::<Cnf, CardinalityOne, SwcEncoder>();
 	takes::<Cnf, CardinalityOne, TotalizerEncoder>();
-	takes::<Cnf, CardinalityOne, IntLinEncoder>();
 	takes::<Cnf, CardinalityOne, SortingNetworkEncoder>();
 };
 

@@ -10,9 +10,8 @@ use crate::{
 		bool_linear::Comparator,
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
-		int_linear::{
-			Decompose, IntLinConfig, IntLinEncoder, NormalizedIntLinear, TernaryIntLinear,
-		},
+		int_linear::{Decompose, NormalizedIntLinear},
+		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 	},
 	decision::integer::{Consistency, IntVar},
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
@@ -42,8 +41,8 @@ impl Default for SwcEncoder {
 
 impl SwcEncoder {
 	/// The encoder of the pieces this one decomposes a constraint into.
-	fn encoder(&self) -> IntLinEncoder {
-		IntLinEncoder::with_config(IntLinConfig {
+	fn encoder(&self) -> IntTernaryEncoder {
+		IntTernaryEncoder::with_config(IntTernaryConfig {
 			propagate: self.add_propagation != Consistency::None,
 			cutoff: self.cutoff,
 		})
@@ -82,7 +81,7 @@ impl Decompose for SwcEncoder {
 		&self,
 		_db: &mut Db,
 		con: &NormalizedIntLinear,
-	) -> Result<Vec<TernaryIntLinear>, Unsatisfiable> {
+	) -> Result<Vec<IntTernary>, Unsatisfiable> {
 		// Two terms or fewer are already as small as the chain would make them.
 		if let Some(addition) = con.as_ternary() {
 			return Ok(vec![addition]);
@@ -109,7 +108,7 @@ impl Decompose for SwcEncoder {
 			.map(|(c, x)| (**c, x.clone()))
 			.zip(totals.iter().tuple_windows())
 			.map(|(x, (carried, left))| {
-				TernaryIntLinear::new(x, (1, left.clone()), cmp, (1, carried.clone()))
+				IntTernary::new(x, (1, left.clone()), cmp, (1, carried.clone()))
 			})
 			.collect())
 	}

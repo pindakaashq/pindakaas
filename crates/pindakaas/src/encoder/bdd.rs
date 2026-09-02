@@ -17,10 +17,8 @@ use crate::{
 		bool_linear::Comparator,
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
-		int_linear::{
-			term_max, term_min, term_values, Decompose, IntLinConfig, IntLinEncoder,
-			NormalizedIntLinear, Term, TernaryIntLinear,
-		},
+		int_linear::{Decompose, NormalizedIntLinear, Term, term_max, term_min, term_values},
+		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 	},
 	decision::integer::IntVar,
 	helpers::new_named_lit,
@@ -182,10 +180,10 @@ impl BddEncoder {
 
 impl BddEncoder {
 	/// The encoder of the pieces this one decomposes a constraint into.
-	fn encoder(&self) -> IntLinEncoder {
-		IntLinEncoder::with_config(IntLinConfig {
+	fn encoder(&self) -> IntTernaryEncoder {
+		IntTernaryEncoder::with_config(IntTernaryConfig {
 			cutoff: self.cutoff,
-			..IntLinConfig::default()
+			..IntTernaryConfig::default()
 		})
 	}
 }
@@ -203,7 +201,7 @@ impl Decompose for BddEncoder {
 		&self,
 		db: &mut Db,
 		con: &NormalizedIntLinear,
-	) -> Result<Vec<TernaryIntLinear>, Unsatisfiable> {
+	) -> Result<Vec<IntTernary>, Unsatisfiable> {
 		// The narrowest terms first, which is the order the diagram is reduced
 		// under in the literature. A layer then tends to agree with the one
 		// after it from some total upwards, and where it does it shares that
@@ -277,7 +275,7 @@ impl Decompose for BddEncoder {
 			.into_iter()
 			.enumerate()
 			.map(|(i, x)| {
-				TernaryIntLinear::new((1, layers[i].clone()), x, cmp, (1, layers[i + 1].clone()))
+				IntTernary::new((1, layers[i].clone()), x, cmp, (1, layers[i + 1].clone()))
 			})
 			.collect())
 	}

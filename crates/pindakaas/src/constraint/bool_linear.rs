@@ -522,7 +522,7 @@ impl Display for PosCoeff {
 mod tests {
 	use traced_test::test;
 
-	use crate::helpers::tests::{linear_test_suite, prelude::*};
+	use crate::helpers::tests::prelude::*;
 
 	#[test]
 	fn encoders() {
@@ -657,5 +657,4 @@ mod tests {
 		assert_checker(&db, &con);
 	}
 
-	linear_test_suite! {int_lin_encoder, crate::constraint::int_linear::IntLinEncoder::default()}
 }

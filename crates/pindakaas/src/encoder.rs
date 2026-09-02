@@ -7,7 +7,7 @@ pub mod adder;
 pub mod aggregate;
 pub mod bdd;
 pub mod bitwise;
-pub mod int_lin;
+pub mod int_ternary;
 pub mod ladder;
 pub mod pairwise;
 pub mod product;
