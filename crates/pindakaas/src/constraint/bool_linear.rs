@@ -589,15 +589,26 @@ mod tests {
 					let mut cnf = Cnf::default();
 					let vars = cnf.new_var_range(coeffs.len()).iter_lits().collect_vec();
 					let con = Linear::new(LinExp::from_slices(coeffs, &vars), cmp.clone(), k);
+					// Both the linear and the cardinality encoder, so that a
+					// case aggregating to a cardinality constraint measures the
+					// encoder this row names rather than the default.
 					let done = match enc {
-						"adder" => LinearEncoder::<StaticLinEncoder<AdderEncoder>>::default()
-							.encode(&mut cnf, &con),
-						"bdd" => LinearEncoder::<StaticLinEncoder<BddEncoder>>::default()
-							.encode(&mut cnf, &con),
-						"swc" => LinearEncoder::<StaticLinEncoder<SwcEncoder>>::default()
-							.encode(&mut cnf, &con),
-						_ => LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default()
-							.encode(&mut cnf, &con),
+						"adder" => {
+							LinearEncoder::<StaticLinEncoder<AdderEncoder, AdderEncoder>>::default()
+								.encode(&mut cnf, &con)
+						}
+						"bdd" => {
+							LinearEncoder::<StaticLinEncoder<BddEncoder, BddEncoder>>::default()
+								.encode(&mut cnf, &con)
+						}
+						"swc" => {
+							LinearEncoder::<StaticLinEncoder<SwcEncoder, SwcEncoder>>::default()
+								.encode(&mut cnf, &con)
+						}
+						_ => LinearEncoder::<
+							StaticLinEncoder<TotalizerEncoder, TotalizerEncoder>,
+						>::default()
+						.encode(&mut cnf, &con),
 					};
 					let cmp = if cmp == Comparator::LessEq {
 						"<="
