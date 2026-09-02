@@ -235,14 +235,23 @@ mod pindakaas {
 		}
 
 		fn new_var_range(&mut self, len: usize) -> BaseVarRange {
-			let tup = self
+			let range = self
 				.0
 				.call_method1("new_var_range", (len,))
 				.expect("unexpected error in new_var_range implementation");
-			let (start, end): (Lit, Lit) = tup
-				.extract()
-				.expect("new_var_range did not return a tuple of two literals");
-			BaseVarRange::new(start.0.var(), end.0.var())
+			// Read the ends rather than the type, so that an implementation of
+			// the database written in Python is taken on the same terms.
+			let ends: Vec<Lit> = ["start", "end"]
+				.iter()
+				.map(|m| {
+					let v = range
+						.call_method0(m)
+						.expect("new_var_range did not return a range of variables");
+					v.extract()
+						.expect("a range of variables is bounded by two literals")
+				})
+				.collect();
+			BaseVarRange::new(ends[0].0.var(), ends[1].0.var())
 		}
 	}
 
