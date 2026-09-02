@@ -11,15 +11,37 @@ use crate::{
 		bool_linear::Comparator,
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
-		int_linear::{Decompose, NormalizedIntLinear, term_max, term_min, term_values},
+		int_linear::{term_max, term_min, term_values, Decompose, NormalizedIntLinear},
 		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 	},
 	decision::integer::{Consistency, IntVar},
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 
-/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Generalized
-/// Totalizer (GT)
+/// Encoder for a linear constraint, decomposing it into a balanced tree of
+/// partial sums (a generalized totalizer, GT).
+///
+/// Each node holds what its two children reach between them, with anything
+/// past the bound dropped. The tree keeps the intermediates narrower than the
+/// chain does, at the cost of more of them.
+///
+/// # Examples
+///
+/// ```rust
+/// # use pindakaas::{
+/// #     constraint::{bool_linear::{Comparator, Linear}, int_linear::TotalizerEncoder,
+/// #                  linear::{BoolLinAggregator, LinVariant}},
+/// #     decision::integer::IntVar, Cnf, Encoder,
+/// # };
+/// # let mut f = Cnf::default();
+/// # let (x, y) = (IntVar::new(0..=5), IntVar::new(0..=5));
+/// let con = Linear::new(x * 2 + y * 3, Comparator::LessEq, 10);
+/// let LinVariant::Linear(con) = BoolLinAggregator::default().aggregate(&mut f, &con)? else {
+///     panic!("a sum of integer terms is a linear constraint");
+/// };
+/// TotalizerEncoder::default().encode(&mut f, &con)?;
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TotalizerEncoder {
 	add_consistency: bool,

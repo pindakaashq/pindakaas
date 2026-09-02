@@ -17,7 +17,7 @@ use crate::{
 		bool_linear::Comparator,
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
-		int_linear::{Decompose, NormalizedIntLinear, Term, term_max, term_min, term_values},
+		int_linear::{term_max, term_min, term_values, Decompose, NormalizedIntLinear, Term},
 		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 	},
 	decision::integer::IntVar,
@@ -26,8 +26,30 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-/// Encode the constraint that ∑ coeffᵢ·litᵢ ≦ k using a Binary
-/// Decision Diagram (BDD)
+/// Encoder for a linear constraint, decomposing it through the layers of a
+/// binary decision diagram (BDD).
+///
+/// One layer per term, holding the partial sums still reachable. Layers that
+/// cannot be told apart are shared, so a constraint whose terms interfere
+/// little decomposes into fewer pieces than the chain or the tree would give.
+///
+/// # Examples
+///
+/// ```rust
+/// # use pindakaas::{
+/// #     constraint::{bool_linear::{Comparator, Linear}, int_linear::BddEncoder,
+/// #                  linear::{BoolLinAggregator, LinVariant}},
+/// #     decision::integer::IntVar, Cnf, Encoder,
+/// # };
+/// # let mut f = Cnf::default();
+/// # let (x, y) = (IntVar::new(0..=5), IntVar::new(0..=5));
+/// let con = Linear::new(x * 2 + y * 3, Comparator::LessEq, 10);
+/// let LinVariant::Linear(con) = BoolLinAggregator::default().aggregate(&mut f, &con)? else {
+///     panic!("a sum of integer terms is a linear constraint");
+/// };
+/// BddEncoder::default().encode(&mut f, &con)?;
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 pub struct BddEncoder {
 	add_consistency: bool,
 	cutoff: Option<Coeff>,
@@ -69,9 +91,9 @@ impl BddEncoder {
 
 		// TODO could we check whether a domain value of x always leads to gaps?
 		let is_gap = views.iter().all(|(_, (_, v))| v == &BddNode::Gap);
-		// TODO without checking actual Val identity, could we miss when the
-		// next layer has two adjacent nodes that are both views on the same
-		// node at the layer below?
+		// A layer is a partition into disjoint intervals, so equal intervals
+		// are the same node: children that share a literal some other way
+		// would already have been merged into one interval.
 		let view = (views.iter().map(|(_, (iv, _))| iv).all_equal())
 			.then(|| views.first().unwrap().1 .0.end - 1);
 

@@ -140,34 +140,28 @@ mod pindakaas {
 	/// exception will be raised.
 	enum Encoder {
 		// TODO These doc-strings do not show up, upstream issue: https://github.com/PyO3/pyo3/issues/5197
-		/// Use :class:`pindakaas::constraint::bool_linear::AdderEncoder`, which
-		/// is able to encode all Boolean linear constraints.
+		/// A binary adder circuit. Encodes any Boolean linear constraint.
 		ADDER,
-		/// Use :class:`pindakaas::constraint::cardinality_one::BitwiseEncoder`,
-		/// which is able to encode all Boolean cardinality one constraints.
+		/// A bitwise (binary) at-most-one encoding, which numbers the literals
+		/// and rules out each bit pattern but one.
 		BITWISE,
-		/// Use :class:`pindakaas::constraint::bool_linear::BddEncoder`, which
-		/// is able to encode all Boolean linear constraints.
+		/// The layers of a binary decision diagram. Encodes any Boolean linear
+		/// constraint.
 		DECISION_DIAGRAM,
-		/// Use :class:`pindakaas::constraint::cardinality_one::LadderEncoder`,
-		/// which is able to encode all Boolean cardinality one constraints.
+		/// A ladder of commander literals. Encodes at-most-one constraints.
 		LADDER,
-		/// Use
-		/// :class:`pindakaas::constraint::cardinality_one::PairwiseEncoder`,
-		/// which is able to encode all Boolean cardinality one constraints.
+		/// One clause per pair of literals. Encodes at-most-one constraints,
+		/// and is the cheapest for a handful of them.
 		PAIRWISE,
-		/// Use :class:`pindakaas::constraint::bool_linear::SwcEncoder`, which
-		/// is able to encode all Boolean linear constraints.
+		/// A chain of running totals, the sequential weight counter. Encodes
+		/// any Boolean linear constraint.
 		SORTED_WEIGHT_COUNTER,
-		/// Use :class:`pindakaas::constraint::cardinality::SwcEncoder`, which
-		/// is able to encode all Boolean cardinality constraints.
+		/// A sorting network. Encodes cardinality constraints.
 		SORTING_NETWORK,
-		/// Use :class:`pindakaas::constraint::bool_linear::TotalizerEncoder`,
-		/// which is able to encode all Boolean linear constraints.
+		/// A balanced tree of partial sums, the generalized totalizer. Encodes
+		/// any Boolean linear constraint.
 		TOTALIZER,
-		/// Use
-		/// :class:`pindakaas::constraint::propositional_logic::TseitinEncoder`,
-		/// which is able to encode propositional logic formulas.
+		/// The Tseitin transformation. Encodes propositional logic formulas.
 		TSEITIN,
 	}
 

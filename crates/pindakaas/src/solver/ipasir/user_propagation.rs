@@ -1,3 +1,9 @@
+//! Propagating from outside the solver, over the IPASIR extension for it.
+//!
+//! The solver calls back as it assigns the variables it has been told to
+//! watch, and the propagator answers with clauses. Both sides hold the same
+//! state, so the callbacks hand out a borrow of it rather than a copy.
+
 use std::{
 	cell::{RefCell, RefMut},
 	ffi::c_void,

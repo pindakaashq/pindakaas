@@ -263,6 +263,16 @@ impl Cadical {
 		}
 	}
 
+	/// The value of a CaDiCaL option.
+	///
+	/// `name` is one of the options CaDiCaL itself lists — the names accepted
+	/// by its `--<name>=<value>` flags, without the dashes, as printed by
+	/// `cadical --help`. An unknown name reads back as zero rather than
+	/// failing.
+	///
+	/// # Panics
+	///
+	/// If `name` contains an interior nul byte.
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
 	pub fn get_option(&self, name: &str) -> i32 {
 		let name = CString::new(name).unwrap();
@@ -279,6 +289,13 @@ impl Cadical {
 		unsafe { ccadical_phase(self.ipasir_store().solver_ptr(), lit.0.get()) }
 	}
 
+	/// Set one of CaDiCaL's search limits, such as `conflicts` or `decisions`.
+	///
+	/// Named as for [`Cadical::get_option`]. An unknown name is ignored.
+	///
+	/// # Panics
+	///
+	/// If `name` contains an interior nul byte.
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
 	pub fn set_limit(&mut self, name: &str, value: i32) {
 		let name = CString::new(name).unwrap();
@@ -287,6 +304,14 @@ impl Cadical {
 		unsafe { ccadical_limit(self.ipasir_store().solver_ptr(), name.as_ptr(), value) }
 	}
 
+	/// Set a CaDiCaL option.
+	///
+	/// Named as for [`Cadical::get_option`]. An unknown name is ignored, so a
+	/// misspelt option is silently no change.
+	///
+	/// # Panics
+	///
+	/// If `name` contains an interior nul byte.
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
 	pub fn set_option(&mut self, name: &str, value: i32) {
 		let name = CString::new(name).unwrap();

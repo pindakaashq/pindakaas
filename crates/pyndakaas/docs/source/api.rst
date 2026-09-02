@@ -7,6 +7,10 @@ The specification of the Pindakaas API
    :members:
    :undoc-members:
 
+.. automodule:: pindakaas.encoding
+   :members:
+   :undoc-members:
+
 .. automodule:: pindakaas.solver
    :members:
    :undoc-members:

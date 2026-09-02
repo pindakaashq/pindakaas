@@ -1,3 +1,8 @@
+//! Internals shared across the crate: bit-level helpers, the tracing-aware
+//! variable-naming macros, and the test scaffolding.
+//!
+//! Nothing here is part of the public API.
+
 macro_rules! as_dyn_trait {
 	($as_dyn_name:ident, $trait_name:ident) => {
 		/// Helper trait that allows the creation of a dynamic reference to a trait

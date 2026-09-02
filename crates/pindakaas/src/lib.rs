@@ -1,33 +1,21 @@
-//! Pindakaas is an encoding library that helps translate higher abstraction
-//! level constraints into conjunctive normal form (CNF), so that it can be used
-//! by Boolean satisfiability (SAT) solvers. Pindakaas supports constraints such
-//! as propositional logic, Boolean linear constraints (i.e. pseudo-Boolean (PB)
-//! constraints), and integer linear constraint. Importantly, Pindakaas
-//! normalizes and specializes the constraints to be able to use specialized
-//! encoding methods to an efficient solvable encoding. For example, making the
-//! distinction between “at most one”, cardinality, and general pseudo-Boolean
-//! constraints.
+//! Pindakaas translates constraints stated at a higher level — propositional
+//! logic, Boolean linear (pseudo-Boolean) constraints, integer linear
+//! constraints — into conjunctive normal form, for a SAT solver to solve.
 //!
-//! ## Installation
-//!
-//! You can add the pindakaas crate to your project using Cargo:
+//! Constraints are normalised and specialised on the way down, so that an
+//! at-most-one group, a cardinality constraint and a general pseudo-Boolean
+//! sum each reach an encoding built for its shape rather than a generic one.
 //!
 //! ```bash
 //! cargo add pindakaas
 //! ```
 //!
-//! _Note that Pindakaas is also available for Python. For more information,
-//! visit the [Python
-//! documentation](https://pindakaas.readthedocs.io/en/latest/)._
+//! Pindakaas is also available for Python; see the [Python
+//! documentation](https://pindakaas.readthedocs.io/en/latest/).
 //!
-//! ## CNF Modelling
+//! ## CNF
 //!
-//! Like other SAT modelling libraries, Pindakaas includes the functionality to
-//! model at CNF level. For example, the following code snippet shows how to
-//! create an empty CNF formula, then create three variables, and add some
-//! circular clauses, and then print the formula in
-//! [DIMACS](https://web.archive.org/web/20190325181937/https://www.satcompetition.org/2009/format-benchmarks2009.html)
-//! format.
+//! [`Cnf`] collects clauses over [`Lit`]s and displays as DIMACS.
 //!
 //! ```rust
 //! use pindakaas::{ClauseDatabaseTools, Cnf};
@@ -41,22 +29,12 @@
 //! assert_eq!(f.to_string(), "p cnf 3 3\n-1 2 0\n-2 3 0\n-3 1 0\n");
 //! ```
 //!
-//! Note that the `!` operator is used to negate a literal.
+//! ## Solving
 //!
-//! It is also possible to load a CNF formula for a DIMACS formatted file using
-//! the [`Cnf::from_file`] method, and to write it to a DIMACS file using the
-//! [`Cnf::to_file`] method.
-//!
-//! ## Using SAT solvers
-//!
-//! In the [`solver`] module, we provide access to several competitive SAT
-//! solvers, such as [CaDiCaL](https://github.com/arminbiere/cadical) and
-//! [Kissat](https://github.com/arminbiere/kissat). We also provide several
-//! common solver traits, such as [`solver::Solver`], such that solvers can be
-//! easily switched.
-//!
-//! To, for example, show that only two solutions exists for the formula in the
-//! previous section using CaDiCaL, we can use the following fragment.
+//! Both [`Cnf`] and [`Solver`](solver::Solver) implement [`ClauseDatabase`],
+//! so anything that can be encoded into one can be encoded straight into the
+//! other. Swapping [`Cadical`](solver::cadical::Cadical) for
+//! [`Kissat`](solver::kissat::Kissat) is a change of `use` statement.
 //!
 //! ```rust
 //! # use pindakaas::{ClauseDatabaseTools, Cnf};
@@ -81,58 +59,25 @@
 //! assert_eq!(solns, 2);
 //! ```
 //!
-//! If we had wanted to use Kissat instead of CaDiCaL, we would have only had to
-//! add a the `use` statement for [`solver::kissat::Kissat`], and use
-//! `Kissat::from(&f)`.
+//! Solvers sit behind feature flags, so that a dependency is only built where
+//! it is wanted:
 //!
-//! In either case, it is also not required to start from a [`Cnf`] instance.
-//! Both [`Cnf`] and [`Solver`](solver::Solver) instances implement the
-//! [`ClauseDatabase`] trait, and can often be used interchangeably.
+//! - `cadical` (default) — [CaDiCaL](https://github.com/arminbiere/cadical),
+//!   as [`Cadical`](solver::cadical::Cadical).
+//! - `intel_sat` — [Intel SAT](https://github.com/alexander-nadel/intel_sat_solver),
+//!   as [`IntelSat`](solver::intel_sat::IntelSat).
+//! - `kissat` — [Kissat](https://github.com/arminbiere/kissat), as
+//!   [`Kissat`](solver::kissat::Kissat).
+//! - `libloading` — [`solver::libloading`], for loading an IPASIR library at
+//!   runtime.
+//! - `splr` — the common solver traits for [SPLR](https://github.com/shnarazk/splr).
 //!
-//! _Note that not all solvers are available by default. To minimize upstream
-//! dependencies, each solver has its own feature flag. So enable any of the
-//! following features if you want to enable additional solvers._
+//! ## Propositional logic
 //!
-//! - `cadical` (enabled by default) - enables the use of the [CaDiCaL](https://github.com/arminbiere/cadical)
-//!   solver, available as [`Cadical`](solver::cadical::Cadical) in the
-//!   [`solver::cadical`] module.
-//! - `intel_sat` - enables the use of the [Intel SAT](https://github.com/alexander-nadel/intel_sat_solver)
-//!   solver, available as [`IntelSat`](solver::intel_sat::IntelSat) in the
-//!   [`solver::intel_sat`] module.
-//! - `kissat` - enables the use of the [Kissat](https://github.com/arminbiere/kissat)
-//!   solver, available as [`Kissat`](solver::kissat::Kissat) in the
-//!   [`solver::kissat`] module.
-//! - `libloading` - enables the [`solver::libloading`] module, which allows
-//!   runtime loading of dynamically loaded libraries (DLLs) that implement the
-//!   IPASIR interface.
-//! - `splr` - enables implementation of the pindakaas common solver traits for
-//!   the [SPLR](https://github.com/shnarazk/splr) solver, available in its own
-//!   crate: [`splr::Solver`].
-//!
-//! ## Proposition Logic and [`Encoder`]s
-//!
-//! The first abstraction that Pindakaas provides from modelling using CNF, is
-//! to allow the use of constraint based on propositional logic. This makes it
-//! easy to express most logic based constraints. In Pindakaas, propositional
-//! logic is represented using
-//! [`Formula`](constraint::propositional_logic::Formula). An easy way to create
-//! one is to use the `&`, `|`, and `^` operators, which
-//! create [`And`](constraint::propositional_logic::Formula::And),
-//! [`Or`](constraint::propositional_logic::Formula::Or) and
-//! [`Xor`](constraint::propositional_logic::Formula::Xor) instances,
-//! respectively. Other, more complex, propositional logic constructs, such as
-//! [`Formula::IfThenElse`](constraint::propositional_logic::Formula::IfThenElse) and
-//! [`Formula::Equiv`](constraint::propositional_logic::Formula::Equiv), must be
-//! constructed explicitly.
-//!
-//! A [`Formula`](constraint::propositional_logic::Formula) can be used as a
-//! constraint, and as such it must be encoded into a CNF formula. In Pindakaas
-//! types implement the [`Encoder`] to translate constraint types into CNF
-//! formulas. For [`Formula`](constraint::propositional_logic::Formula), it is
-//! [`TseitinEncoder`](constraint::propositional_logic::TseitinEncoder) that
-//! implements the [`Encoder`] trait. The following fragment shows how we
-//! create two [`Formula`](constraint::propositional_logic::Formula) instances
-//! and encode them to CNF using the
+//! A [`Formula`](constraint::propositional_logic::Formula) is built from the
+//! `&`, `|` and `^` operators; the rest of its variants — implication,
+//! equivalence, if-then-else — are named explicitly. Encoding one is the job
+//! of an [`Encoder`], here
 //! [`TseitinEncoder`](constraint::propositional_logic::TseitinEncoder).
 //!
 //! ```rust
@@ -155,46 +100,21 @@
 //! assert_eq!(f.num_clauses(), 7);
 //! ```
 //!
-//! ## Boolean and Integer Linear Constraints
+//! ## Linear constraints
 //!
-//! The most important feature of Pindakaas is its ability to encode Boolean and
-//! integer linear constraints into CNF formulas. This provides the ability to
-//! model and solve a wide range of problems. To model a linear constraint, we
-//! start by creating linear expressions, represented using
-//! [`LinExp`](constraint::bool_linear::LinExp). We can use standard operators,
-//! such as `+` and `-`, to add terms together, and `*` to multiply one by a
-//! constant. A term is either a [`Lit`], worth its
-//! coefficient when it holds, or an [`IntVar`](decision::integer::IntVar),
-//! worth its coefficient times whichever value it takes — so `x * 3 + y * 5`
-//! reads the same whichever kind each side is.
+//! A [`LinExp`](constraint::bool_linear::LinExp) is a sum of terms built with
+//! `+`, `-` and `*`. A term is either a [`Lit`], worth its coefficient when it
+//! holds, or an [`IntVar`](decision::integer::IntVar), worth its coefficient
+//! times whichever value it takes, so `x * 3 + y * 5` reads the same whichever
+//! kind each side is. [`Linear::new`](constraint::bool_linear::Linear::new)
+//! compares one against a constant.
 //!
-//! [`LinExp`](constraint::bool_linear::LinExp) can be turned into a constraint
-//! using the [`Linear::new`](constraint::bool_linear::Linear::new) method. It
-//! takes the linear expression as the left hand side, then a
-//! [`Comparator`](constraint::bool_linear::Comparator), and then a constant as
-//! the right hand side.
-//!
-//! Before the constraint is encoded, it is first simplified, normalized, and
-//! specialized by the
-//! [`BoolLinAggregator::aggregate`](encoder::aggregate::BoolLinAggregator::aggregate).
-//! The result of this is a constraint of the form
-//! [`LinVariant`](constraint::linear::LinVariant). Depending on the form of
-//! the specialized constraint, the constraint can be encoded using different
-//! encoding methods. For example, if the constraint was found to be a “at most
-//! one” constraint, then it could use the
-//! [`BitwiseEncoder`](encoder::bitwise::BitwiseEncoder). However, we can
-//! always
-//! use general pseudo-Boolean encoders, such as the
-//! [`TotalizerEncoder`](constraint::bool_linear::TotalizerEncoder). Making the
-//! choice of encoding can be streamlined by using the
-//! [`StaticLinEncoder`](encoder::aggregate::StaticLinEncoder), which makes a
-//! choice based on the constraint's variant.
-//!
-//! Additionally, the [`LinearEncoder`](encoder::aggregate::LinearEncoder) is
-//! help streamline the process of aggregating and encoding linear expressions.
-//! The following fragment shows the creation of a linear constraint and the
-//! usage of the [`LinearEncoder`](encoder::aggregate::LinearEncoder) to encode
-//! it.
+//! Encoding starts by aggregating, which normalises the constraint and
+//! recognises what it actually is — a
+//! [`LinVariant`](constraint::linear::LinVariant). That is what makes the
+//! specialised encoders reachable; [`StaticLinEncoder`](encoder::aggregate::StaticLinEncoder)
+//! picks one per variant, and [`LinearEncoder`](encoder::aggregate::LinearEncoder)
+//! does both steps at once.
 //!
 //! ```rust
 //! use pindakaas::{
@@ -217,25 +137,22 @@
 //! assert_eq!(f.num_vars(), 4);
 //! ```
 //!
-//! ## Integer Linear Constraints
+//! ## Integer variables
 //!
-//! A constraint can also be stated over integer variables directly. An
-//! [`IntVar`](decision::integer::IntVar) is created with the domain it ranges
-//! over, and holds whichever Boolean encodings its constraints need — order
-//! literals for a sequential decomposition, bits for an adder, a one-hot view
-//! for an at-most-one group — channelling between them when more than one is
-//! called for. Nothing has to be chosen in advance, and a second variable is
-//! never needed to hold the other view.
+//! An [`IntVar`](decision::integer::IntVar) is created with the domain it
+//! ranges over, and holds whichever Boolean encodings its constraints ask for
+//! — order literals for a sequential decomposition, bits for an adder, a
+//! one-hot view for an at-most-one group — channelling between them where more
+//! than one is called for. Nothing is chosen in advance, and a second variable
+//! is never needed to hold the other view.
 //!
-//! A linear constraint over those variables is written as a
-//! [`Linear`](constraint::bool_linear::Linear) and
-//! aggregated, which puts it into the one form every encoder takes: a
-//! [`NormalizedIntLinear`](constraint::int_linear::NormalizedIntLinear), a sum
-//! of terms with positive coefficients against a bound. Choosing an encoder is
-//! then choosing how the sum is broken up — a decision diagram, a chain of
-//! partial sums, or a balanced tree — each of which reaches the same
-//! [`IntTernaryEncoder`](constraint::int_ternary::IntTernaryEncoder) for
-//! the two-terms-against-a-third steps it produces.
+//! Aggregating a constraint over them gives a
+//! [`NormalizedIntLinear`](constraint::int_linear::NormalizedIntLinear): a sum
+//! of positive coefficients against a bound. Choosing an encoder is then
+//! choosing how that sum is broken up — a decision diagram, a chain of partial
+//! sums, a balanced tree — each reaching the same
+//! [`IntTernaryEncoder`](constraint::int_ternary::IntTernaryEncoder) for the
+//! `x + y ≷ z` steps it leaves behind.
 //!
 //! ```rust
 //! use pindakaas::{
@@ -511,9 +428,19 @@ enum Dimacs {
 	Wcnf(Wcnf),
 }
 
-/// Encoder is the central trait implemented for all the encoding algorithms
+/// The central trait, implemented by every encoding algorithm.
+///
+/// A type implements it once per constraint it can encode, so which encoders
+/// apply to a constraint is what its "Implementors" list shows.
 pub trait Encoder<Db: ClauseDatabase + ?Sized, Constraint: ?Sized> {
 	/// Encode the constraint into the given clausal database.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] where the constraint cannot hold — because it is
+	/// unsatisfiable in itself, or because it is unsatisfiable together with
+	/// what `db` already holds. Clauses may already have been emitted, so a
+	/// database that returns this is no longer usable for anything else.
 	fn encode(&self, db: &mut Db, con: &Constraint) -> Result;
 
 	/// Encode the implied constraint `conditions -> constraint`.

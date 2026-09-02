@@ -1,9 +1,15 @@
 //! The constraint that at most, or exactly, `k` of a set of literals hold.
+//!
+//! Every term counts for one, which is what separates it from a general
+//! [`Linear`](super::bool_linear::Linear) and what lets the encoders below
+//! count rather than add.
 
 pub use crate::encoder::{
 	adder::AdderEncoder, bdd::BddEncoder,
 	sorting_network::SortingNetworkEncoder, swc::SwcEncoder, totalizer::TotalizerEncoder,
 };
+use rustc_hash::FxHashSet;
+
 use crate::{
 	constraint::{
 		bool_linear::{Comparator, LimitComp, PosCoeff},
@@ -29,6 +35,41 @@ pub struct Cardinality {
 }
 
 impl Cardinality {
+	/// The constraint that `k` of `lits` hold, or at most `k` of them.
+	///
+	/// # Panics
+	///
+	/// If `k` is negative, or if two of `lits` are over the same variable —
+	/// counting a variable twice is a linear constraint rather than a
+	/// cardinality one.
+	///
+	/// # Examples
+	///
+	/// ```rust
+	/// # use pindakaas::{
+	/// #     constraint::{bool_linear::{AdderEncoder, LimitComp}, cardinality::Cardinality},
+	/// #     ClauseDatabaseTools, Cnf, Encoder,
+	/// # };
+	/// let mut f = Cnf::default();
+	/// let (a, b, c) = f.new_lits();
+	///
+	/// // At most two of the three.
+	/// let con = Cardinality::new(vec![a, b, c], LimitComp::LessEq, 2);
+	/// AdderEncoder::default().encode(&mut f, &con)?;
+	/// # Ok::<(), pindakaas::Unsatisfiable>(())
+	/// ```
+	pub fn new(lits: Vec<Lit>, cmp: LimitComp, k: Coeff) -> Self {
+		assert!(
+			lits.iter().map(|l| l.var()).collect::<FxHashSet<_>>().len() == lits.len(),
+			"a cardinality constraint counts distinct variables"
+		);
+		Self {
+			lits,
+			cmp,
+			k: PosCoeff::new(k),
+		}
+	}
+
 	/// Read the constraint as the linear constraint it is.
 	///
 	/// Its terms all count for one and none of them constrains another, so each
@@ -132,6 +173,18 @@ const _: () = {
 
 #[cfg(test)]
 pub(crate) mod tests {
+	#[test]
+	#[should_panic = "distinct variables"]
+	fn a_repeated_variable_is_not_a_cardinality_constraint() {
+		use crate::{
+			constraint::{bool_linear::LimitComp, cardinality::Cardinality},
+			ClauseDatabaseTools, Cnf,
+		};
+		let mut f = Cnf::default();
+		let a = f.new_lit();
+		let _ = Cardinality::new(vec![a, !a], LimitComp::LessEq, 1);
+	}
+
 	macro_rules! card_test_suite {
 		($encoder:expr) => {
 			mod cardinality {

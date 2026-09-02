@@ -1,3 +1,11 @@
+//! The IPASIR interface, and the glue that makes a C solver implement the
+//! traits in [`solver`](crate::solver).
+//!
+//! Every bundled solver speaks IPASIR, so what differs between them is the set
+//! of extensions each offers. The generic parameters below say which of the
+//! optional callbacks a solver was built with, so that a solver pays neither
+//! the storage nor the indirection for one it does not have.
+
 #[cfg(feature = "external-propagation")]
 pub(crate) mod user_propagation;
 

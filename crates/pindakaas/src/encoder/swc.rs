@@ -17,8 +17,29 @@ use crate::{
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 
-/// Encode the constraint that ∑ coeffᵢ·litsᵢ ≦ k using a Sorted Weight
-/// Counter (SWC)
+/// Encoder for a linear constraint, decomposing it into a chain of running
+/// totals (a sequential weight counter, SWC).
+///
+/// One intermediate per term, each the sum so far, so the pieces are a line
+/// rather than a tree: the last intermediate is as wide as the whole sum.
+///
+/// # Examples
+///
+/// ```rust
+/// # use pindakaas::{
+/// #     constraint::{bool_linear::{Comparator, Linear}, int_linear::SwcEncoder,
+/// #                  linear::{BoolLinAggregator, LinVariant}},
+/// #     decision::integer::IntVar, Cnf, Encoder,
+/// # };
+/// # let mut f = Cnf::default();
+/// # let (x, y) = (IntVar::new(0..=5), IntVar::new(0..=5));
+/// let con = Linear::new(x * 2 + y * 3, Comparator::LessEq, 10);
+/// let LinVariant::Linear(con) = BoolLinAggregator::default().aggregate(&mut f, &con)? else {
+///     panic!("a sum of integer terms is a linear constraint");
+/// };
+/// SwcEncoder::default().encode(&mut f, &con)?;
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SwcEncoder {
 	add_consistency: bool,

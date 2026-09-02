@@ -61,9 +61,15 @@ pub struct NormalizedIntLinear {
 	pub(crate) k: PosCoeff,
 }
 
-/// A linear constraint over integer variables, `Σ cᵢ·xᵢ ≷ k`.
+/// A linear constraint over integer variables, `Σ cᵢ·xᵢ ≷ k`, with the signs
+/// and comparator it was written with.
+///
+/// The working form behind aggregation and the encoders: an [`IntTernary`] is
+/// read as one to be walked, and a [`NormalizedIntLinear`] is one whose
+/// coefficients have been made positive. Callers state constraints as a
+/// [`Linear`](super::bool_linear::Linear) and aggregate.
 #[derive(Clone, Debug)]
-pub struct IntLinear {
+pub(crate) struct IntLinear {
 	pub(crate) terms: Vec<Term>,
 	pub(crate) cmp: Comparator,
 	pub(crate) k: Coeff,
@@ -181,21 +187,6 @@ impl From<&NormalizedIntLinear> for IntLinear {
 }
 
 impl IntLinear {
-	/// The comparator of the constraint.
-	pub fn cmp(&self) -> Comparator {
-		self.cmp
-	}
-
-	/// The constant the sum is compared against.
-	pub fn k(&self) -> Coeff {
-		self.k
-	}
-
-	/// The terms of the sum.
-	pub fn terms(&self) -> &[Term] {
-		&self.terms
-	}
-
 	/// What each term is worth, as the literals standing for it and what each
 	/// of them adds.
 	///
@@ -207,7 +198,7 @@ impl IntLinear {
 		&self,
 		db: &mut Db,
 	) -> Result<Vec<Vec<(Lit, Coeff)>>, Unsatisfiable> {
-		self.terms()
+		self.terms
 			.iter()
 			.map(|t| {
 				let (lits, _) = t.1.as_weighted(db)?;
@@ -241,15 +232,14 @@ impl IntLinear {
 			(-1, 1, 1) => (b, c, a),
 			_ => return None,
 		};
-		// Each encoding counts from its own lower bound, so an adder lines the
-		// sum up with the result only when the bound of the result is the sum
-		// of the other two. Anything else is left to the walk over the terms,
-		// which does not care where an encoding starts.
+		// An adder lines the sum up with the result only where the
+		// result's lower bound is the sum of the other two; the walk
+		// takes the rest.
 		(z.1.min() == x.1.min() + y.1.min()).then_some((x, y, z))
 	}
 
 	/// Create the constraint `Σ terms ≷ k`.
-	pub fn new(terms: Vec<Term>, cmp: Comparator, k: Coeff) -> Self {
+	pub(crate) fn new(terms: Vec<Term>, cmp: Comparator, k: Coeff) -> Self {
 		Self { terms, cmp, k }
 	}
 

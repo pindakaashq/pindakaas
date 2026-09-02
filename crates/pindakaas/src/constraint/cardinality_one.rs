@@ -1,9 +1,15 @@
 //! The constraint that exactly one, or at most one, of a set of literals holds.
+//!
+//! The commonest constraint there is, and the one with the most encodings: the
+//! four below trade clauses against variables differently, so which suits
+//! depends on how many literals there are.
 
 pub use crate::encoder::{
 	bitwise::BitwiseEncoder, ladder::LadderEncoder, pairwise::PairwiseEncoder,
 	product::ProductEncoder,
 };
+use rustc_hash::FxHashSet;
+
 use crate::{
 	constraint::{
 		bool_linear::{Comparator, LimitComp},
@@ -15,7 +21,7 @@ use crate::{
 #[derive(Debug, Clone)]
 /// Linear constraint that enforces that ∑ litᵢ ≷ 1.
 ///
-/// Compared to [`Cardinality`](crate::constraint::cardinality::Cardinality),
+/// Compared to [`Cardinality`](super::cardinality::Cardinality),
 /// the right hand side constant is always 1.
 ///
 /// All literals in the constraint are guaranteed to be from distinct Boolean
@@ -34,6 +40,37 @@ where
 }
 
 impl CardinalityOne {
+	/// The constraint that one of `lits` holds, or at most one of them.
+	///
+	/// # Panics
+	///
+	/// If two of `lits` are over the same variable, which no encoding here
+	/// expects.
+	///
+	/// # Examples
+	///
+	/// ```rust
+	/// # use pindakaas::{
+	/// #     constraint::{bool_linear::LimitComp,
+	/// #                  cardinality_one::{CardinalityOne, PairwiseEncoder}},
+	/// #     ClauseDatabaseTools, Cnf, Encoder,
+	/// # };
+	/// let mut f = Cnf::default();
+	/// let (a, b, c) = f.new_lits();
+	///
+	/// // Exactly one of the three.
+	/// let con = CardinalityOne::new(vec![a, b, c], LimitComp::Equal);
+	/// PairwiseEncoder::default().encode(&mut f, &con)?;
+	/// # Ok::<(), pindakaas::Unsatisfiable>(())
+	/// ```
+	pub fn new(lits: Vec<Lit>, cmp: LimitComp) -> Self {
+		assert!(
+			lits.iter().map(|l| l.var()).collect::<FxHashSet<_>>().len() == lits.len(),
+			"an at-most-one constraint is over distinct variables"
+		);
+		Self { lits, cmp }
+	}
+
 	/// Get the comparator of the cardinality constraint.
 	pub fn comparator(&self) -> Comparator {
 		self.cmp.clone().into()
@@ -66,6 +103,18 @@ impl Checker for CardinalityOne {
 
 #[cfg(test)]
 pub(crate) mod tests {
+	#[test]
+	#[should_panic = "distinct variables"]
+	fn a_repeated_variable_is_not_an_at_most_one_constraint() {
+		use crate::{
+			constraint::{bool_linear::LimitComp, cardinality_one::CardinalityOne},
+			ClauseDatabaseTools, Cnf,
+		};
+		let mut f = Cnf::default();
+		let a = f.new_lit();
+		let _ = CardinalityOne::new(vec![a, !a], LimitComp::Equal);
+	}
+
 	macro_rules! card1_test_suite {
 		($mod_name:ident, $encoder:expr) => {
 			mod $mod_name {

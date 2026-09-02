@@ -26,6 +26,23 @@ use crate::{
 /// Every decomposition strategy breaks a longer constraint into these, so this
 /// is where all of them end up. An n-ary constraint is aggregated into a
 /// [`NormalizedIntLinear`] and handed to one of those strategies instead.
+///
+/// # Examples
+///
+/// ```rust
+/// # use pindakaas::{
+/// #     constraint::{bool_linear::Comparator, int_ternary::{IntTernary, IntTernaryEncoder}},
+/// #     decision::integer::IntVar, Cnf, Encoder,
+/// # };
+/// let mut f = Cnf::default();
+/// let (x, y) = (IntVar::new(0..=3), IntVar::new(0..=3));
+/// let z = IntVar::new(0..=6);
+///
+/// // `x + y <= z`, over whichever views of the three cost least.
+/// let con = IntTernary::new((1, x), (1, y), Comparator::LessEq, (1, z));
+/// IntTernaryEncoder::default().encode(&mut f, &con)?;
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct IntTernaryEncoder {
 	config: IntTernaryConfig,
@@ -52,22 +69,17 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder 
 		let terms = &con.terms;
 		let binary = |t: &Term| t.1.prefers_binary(self.config.cutoff);
 
-		// A sum of two binary variables against a third is what a ripple-carry
-		// adder does directly, and it is the shape a coefficient decomposes
-		// into, so it is worth recognising before anything else.
+		// A ripple-carry adder states this shape directly, and it is
+		// what a coefficient decomposes into, so it is recognised
+		// first.
 		if let Some((x, y, z)) = con.as_addition() {
 			if [x, y, z].iter().all(|t| binary(t)) {
 				return encode_addition(db, x, y, z);
 			}
 		}
-		// Otherwise walk the terms in order form. Any variable can produce an
-		// order encoding, channelling to one it already has if need be, so this
-		// is always available even where it is not the cheapest.
-		// Every variable is given a view up front, even one the walk turns out
-		// not to ask anything of: a variable a constraint mentions is one whose
-		// value a solution has to be able to say. A variable already read
-		// directly is read that way again, rather than gaining a second view to
-		// be tied to the first.
+		// Otherwise walk the terms in order form, which any variable
+		// can produce. Every variable gets a view, since a solution has
+		// to say its value.
 		for t in terms {
 			if !t.1.has_direct_encoding() {
 				let _ = t.1.order_encoding(db)?;
@@ -178,12 +190,9 @@ impl Encoded<'_> {
 		};
 		for (d, guard) in steps {
 			let sub = Self::walk(db, tail, cmp, k - head.c * d)?;
-			// Advancing the walk only weakens the guard, so a step that asks of
-			// the remaining terms exactly what the step before it asked is
-			// already covered by that one. Consecutive steps land on the
-			// same demand often: dividing by a coefficient rounds to the
-			// same bound, and the order literals snap to the values the
-			// domain actually has.
+			// A step asking of the remaining terms exactly what the
+			// one before it asked is already covered by that one,
+			// which happens often.
 			if last.as_ref() == Some(&sub) {
 				continue;
 			}
@@ -312,11 +321,8 @@ mod tests {
 		if enc.encode(&mut cnf, &con).is_err() {
 			return (Vec::new(), xs);
 		}
-		// Every model is ruled out in turn and read for what the variables
-		// come to, so an assignment reachable more than one way is seen more
-		// than once. A constraint whose variables were all narrowed to a
-		// single value has no literals at all, and the empty nogood correctly
-		// stops after one.
+		// Each model is ruled out in turn, so an assignment reachable
+		// more than one way is seen more than once.
 		let vars = cnf.get_variables();
 		let mut slv = Cadical::from(&cnf);
 		let mut solutions = Vec::new();
@@ -381,9 +387,9 @@ mod tests {
 			let ks: Vec<Coeff> = if coeffs.len() == 3 { vec![0] } else { (-6..=6).collect() };
 			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
 				for k in ks.iter().copied() {
-					// Propagation must not change which assignments survive,
-					// only how much of the domain is left when the literals are
-					// made, so both settings are checked against brute force.
+					// Propagation must not change which
+					// assignments survive, only how much
+					// domain is left.
 					for propagate in [false, true] {
 						assert_eq!(
 							solutions_of(&coeffs, &doms, cmp, k, propagate),
@@ -398,8 +404,8 @@ mod tests {
 
 	#[test]
 	fn a_group_on_its_own_is_bounded_on_its_own_literals() {
-		// One term left and read directly: no literal says where the group
-		// stands against the bound, so the values that break it are ruled out
+		// One term read directly: no literal says where it stands
+		// against the bound, so the values that break it are ruled out
 		// one by one.
 		for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
 			for k in -1..=9 {
@@ -462,9 +468,9 @@ mod tests {
 
 	#[test]
 	fn a_group_is_encoded_on_the_literals_it_arrived_on() {
-		// The whole point of reading a group as an integer: the walk guards on
-		// whichever view the group came with, so no second view is built and
-		// nothing has to be channelled.
+		// The point of reading a group as an integer: the walk guards
+		// on the view it came with, so nothing is built and nothing
+		// channelled.
 		let mut cnf = Cnf::default();
 		let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
 		PairwiseEncoder::default()
@@ -530,9 +536,8 @@ mod tests {
 
 	#[test]
 	fn a_constraint_without_terms_compares_zero() {
-		// The empty sum is zero, so whether it holds is decided outright. It is
-		// reached by construction rather than through the walk over the terms,
-		// which is why it is worth checking on its own.
+		// The empty sum is decided outright rather than through the
+		// walk, which is why it is worth checking on its own.
 		for (cmp, k, holds) in [
 			(Comparator::LessEq, 0, true),
 			(Comparator::LessEq, -1, false),
@@ -603,9 +608,9 @@ mod tests {
 
 	#[test]
 	fn the_walk_drops_the_steps_it_repeats() {
-		// Measured at 37, 59 and 87 clauses, and at 47, 81 and 123 with the
-		// repeated steps kept. The budgets sit between the two, so they catch
-		// the walk emitting every step again without pinning an exact encoding.
+		// Measured at 37, 59 and 87 clauses, against 47, 81 and 123
+		// with the repeated steps kept; the budgets sit between the
+		// two.
 		for (coeffs, span, k, budget) in [
 			(vec![1, 1, -1], 5, 0, 42),
 			(vec![2, 3, -5], 7, 0, 70),
@@ -703,9 +708,9 @@ mod tests {
 
 	#[test]
 	fn a_product_is_shared_between_encoders() {
-		// The product belongs to the variable, not to whichever encoder
-		// happened to build it, so a second encoder — of any kind — finds it
-		// already there.
+		// The product belongs to the variable rather than the encoder
+		// that built it, so a second encoder of any kind finds it
+		// there.
 		let domain = RangeList::from(0..=15);
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(domain).with_label("x");
@@ -796,9 +801,9 @@ mod tests {
 
 	#[test]
 	fn an_addition_lines_up_with_the_bound_of_its_result() {
-		// `x + y = z` is only handed to the adder when `z` starts where the sum
-		// of the other two does; otherwise the term walk has to take it, and
-		// either way the solutions are the same.
+		// The adder only takes `x + y = z` where `z` starts at the sum
+		// of the other two; otherwise the walk does, to the same
+		// solutions.
 		let from = |lb: Coeff| RangeList::from(lb..=(lb + 3));
 		for (lx, ly, lz) in [(0, 0, 0), (1, 2, 3), (1, 2, 0), (-2, 1, -1), (-2, 1, 5)] {
 			let doms = [from(lx), from(ly), from(lz)];
@@ -812,9 +817,8 @@ mod tests {
 
 	#[test]
 	fn an_addition_bounds_a_result_wider_than_its_inputs() {
-		// The result has room for far more than the inputs can reach, so its
-		// top bits are only driven to zero if the adder is sized by the widest
-		// of the three rather than by its inputs.
+		// The result reaches far past its inputs, so its top bits go to
+		// zero only if the adder is sized by the widest of the three.
 		let doms = [
 			RangeList::from(0..=1),
 			RangeList::from(0..=1),
