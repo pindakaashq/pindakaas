@@ -224,11 +224,8 @@ impl Decompose for BddEncoder {
 		db: &mut Db,
 		con: &NormalizedIntLinear,
 	) -> Result<Vec<IntTernary>, Unsatisfiable> {
-		// The narrowest terms first, which is the order the diagram is reduced
-		// under in the literature. A layer then tends to agree with the one
-		// after it from some total upwards, and where it does it shares that
-		// literal rather than paying for one of its own. Taking the widest
-		// first narrows the layers sooner but leaves nothing to share.
+		// Heuristic: narrowest first, so a layer tends to agree with the next
+		// from some total upwards and can share its literal.
 		let terms = con
 			.terms()
 			.iter()

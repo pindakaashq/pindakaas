@@ -1400,6 +1400,7 @@ impl IntVar {
 			(true, _, _) => true,
 			(_, true, _) => false,
 			(_, _, None) => false,
+			// Heuristic: past the cutoff the order literals outnumber the bits.
 			(_, _, Some(cutoff)) => state.domain.card().unwrap() as Coeff >= cutoff,
 		}
 	}

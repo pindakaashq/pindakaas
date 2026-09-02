@@ -20,8 +20,8 @@ use crate::{
 	},
 	decision::integer::IntVar,
 	encoder::adder::AdderEncoder,
-	helpers::{div_ceil, div_floor},
-	ClauseDatabase, Coeff, Result, Unsatisfiable,
+	helpers::{div_ceil, div_floor, new_named_lit},
+	BoolVal, ClauseDatabase, Coeff, Result, Unsatisfiable,
 };
 
 /// A linear constraint over integer variables as aggregation leaves it.
@@ -220,7 +220,7 @@ impl IntLinear {
 	/// they happen to be written in.
 	/// Read `con` as `x + y = z`, the shape a ripple-carry adder encodes.
 	pub(crate) fn as_addition(&self) -> Option<(&Term, &Term, &Term)> {
-		if !matches!(self.cmp, Comparator::Equal) || self.k != 0 {
+		if self.k != 0 {
 			return None;
 		}
 		let [a, b, c] = &self.terms[..] else {
@@ -293,15 +293,29 @@ pub(crate) fn encode_addition<Db: ClauseDatabase + ?Sized>(
 	db: &mut Db,
 	x: &Term,
 	y: &Term,
+	cmp: Comparator,
 	z: &Term,
 ) -> Result {
 	let (xs, ys, zs) = (
-		x.1.binary_encoding(db)?,
-		y.1.binary_encoding(db)?,
-		z.1.binary_encoding(db)?,
+		x.1.binary_encoding(db)?.to_vec(),
+		y.1.binary_encoding(db)?.to_vec(),
+		z.1.binary_encoding(db)?.to_vec(),
 	);
-	let _ =
-		AdderEncoder::ripple_carry_adder(db, &xs.to_vec(), &ys.to_vec(), None, Some(&zs.to_vec()))?;
+	if cmp == Comparator::Equal {
+		let _ = AdderEncoder::ripple_carry_adder(db, &xs, &ys, None, Some(&zs))?;
+		return Ok(());
+	}
+	// `x + y ≤ z` is `x + y + s = z` for a free slack, and the adder driving
+	// the bits above `z` to zero is what rules out an overflow.
+	let sum = AdderEncoder::ripple_carry_adder(db, &xs, &ys, None, None)?;
+	let slack: Vec<BoolVal> = (0..zs.len().max(sum.len()))
+		.map(|_| BoolVal::Lit(new_named_lit!(db, "s")))
+		.collect();
+	let (lhs, total) = match cmp {
+		Comparator::LessEq => (&sum, &zs),
+		_ => (&zs, &sum),
+	};
+	let _ = AdderEncoder::ripple_carry_adder(db, lhs, &slack, None, Some(total))?;
 	Ok(())
 }
 

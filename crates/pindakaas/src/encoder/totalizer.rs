@@ -108,8 +108,8 @@ impl Decompose for TotalizerEncoder {
 		}
 		let (cmp, k) = (Comparator::from(con.cmp()), con.k());
 		let mut cons = Vec::new();
-		// Start from the narrowest, so that the wide terms meet late and the
-		// intermediates below them stay small.
+		// Heuristic: start from the narrowest, so the wide terms meet late and
+		// the intermediates below them stay small.
 		let mut layer = con
 			.terms()
 			.iter()

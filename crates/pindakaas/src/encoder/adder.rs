@@ -114,11 +114,13 @@ impl AdderEncoder {
 		else {
 			return Ok(None);
 		};
-		// Heuristic (1): with very few set bits, SCM scaling does not pay off.
+		// Heuristic: below four set bits the partial products barely overlap,
+		// so the columns carry them for almost nothing.
 		if c.count_ones() < 4 {
 			return Ok(None);
 		}
-		// Heuristic (2): compare the number of columns to the SCM cost.
+		// Heuristic: one clause per column, against the adders SCM would need;
+		// form the product only where it comes out ahead.
 		let columns = (c.count_ones() * width.get()).saturating_sub(c.ilog2() + 1);
 		let plan = ScmSolution::synthesize(c, ScmObjective::MinAdders(width));
 		if plan.cost >= columns {
@@ -360,8 +362,8 @@ impl AdderEncoder {
 			)?;
 			return Ok(out);
 		}
-		// Forbid every assignment of the wrong parity. That is `2ⁿ⁻¹` clauses
-		// and no auxiliary variables, which beats Tseitin at adder widths.
+		// Heuristic: `2ⁿ⁻¹` parity clauses and no auxiliary variables, which
+		// beats Tseitin at the widths an adder uses.
 		for assign in 0..(1_u32 << lits.len()) {
 			if assign.count_ones() % 2 != target {
 				db.add_clause(lits.iter().enumerate().map(|(i, &x)| {

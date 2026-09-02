@@ -73,8 +73,8 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder 
 		// what a coefficient decomposes into, so it is recognised
 		// first.
 		if let Some((x, y, z)) = con.as_addition() {
-			if [x, y, z].iter().all(|t| binary(t)) {
-				return encode_addition(db, x, y, z);
+			if [x, y, z].iter().all(|t| binary(t)) && Self::worth_adding(con.cmp, x, y) {
+				return encode_addition(db, x, y, con.cmp, z);
 			}
 		}
 		// Otherwise walk the terms in order form, which any variable
@@ -129,6 +129,16 @@ impl Default for IntTernaryConfig {
 }
 
 impl IntTernaryEncoder {
+	/// Whether the adder beats the walk over the terms for this shape.
+	///
+	/// Decided on encoding size. The walk also propagates where the adder
+	/// searches, so a search-heavy instance wants the walk sooner than this.
+	fn worth_adding(cmp: Comparator, x: &Term, y: &Term) -> bool {
+		// Heuristic: an inequality costs the adder a slack and a second adder,
+		// which the walk beats until its step per pair of values outgrows them.
+		cmp == Comparator::Equal || x.1.card() * y.1.card() > 80
+	}
+
 	/// Break `con` apart and encode each piece.
 	pub(crate) fn encode_decomposed<Db: ClauseDatabase + ?Sized>(
 		&self,
@@ -845,5 +855,31 @@ mod tests {
 		enc.encode(&mut cnf, &con).unwrap();
 		assert_eq!(x.max(), 1, "3x ≤ 5 leaves x at most one");
 		assert_eq!(y.max(), 3, "y is already tight");
+	}
+
+	#[test]
+	fn a_wide_inequality_goes_to_the_adder() {
+		// Over 0..=15 the walk takes 312 clauses and the adder with its slack
+		// 116; at 0..=3 it is 24 against 60, which is why the crossover exists.
+		for (span, budget) in [(15, 150), (3, 30)] {
+			let mut cnf = Cnf::default();
+			let con = IntTernary::new(
+				(1, IntVar::new(0..=span)),
+				(1, IntVar::new(0..=span)),
+				Comparator::LessEq,
+				(1, IntVar::new(0..=(2 * span))),
+			);
+			IntTernaryEncoder::with_config(IntTernaryConfig {
+				propagate: false,
+				cutoff: Some(0),
+			})
+			.encode(&mut cnf, &con)
+			.unwrap();
+			assert!(
+				cnf.num_clauses() <= budget,
+				"0..={span} took {} clauses, over the {budget} expected",
+				cnf.num_clauses()
+			);
+		}
 	}
 }

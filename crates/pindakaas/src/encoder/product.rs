@@ -79,6 +79,8 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for ProductEncoder
 	fn encode(&self, db: &mut Db, card1: &CardinalityOne) -> Result {
 		let mut to_constain: Vec<Cow<[Lit]>> = vec![(&card1.lits).into()];
 		while let Some(lits) = to_constain.pop() {
+			// Heuristic: pairwise is `n·(n-1)/2` clauses and no new literals,
+			// which wins up to about seven of them.
 			if lits.len() <= self.pairwise_cutoff {
 				PairwiseEncoder::default().encode(
 					db,
