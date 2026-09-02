@@ -188,15 +188,6 @@ impl NormalizedIntLinear {
 		}
 	}
 
-	/// The constraint as a weighted sum of literals against a constant, for
-	/// encoders that work on literals rather than on integers.
-	pub(crate) fn as_weighted<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-	) -> Result<(Vec<(Lit, Coeff)>, Coeff), Unsatisfiable> {
-		IntLinear::from(self).as_weighted(db)
-	}
-
 	/// What each term is worth, as the literals standing for it and what each
 	/// of them adds.
 	#[cfg(test)]
@@ -242,32 +233,6 @@ impl IntLinear {
 	/// The terms of the sum.
 	pub fn terms(&self) -> &[Term] {
 		&self.exp.terms
-	}
-
-	/// The constraint as a weighted sum of literals against a constant, for
-	/// encoders that work on literals rather than on integers.
-	///
-	/// A term of a pseudo-Boolean constraint that nothing groups comes back out
-	/// as the literal it went in as, since a group of one is encoded on it.
-	/// Only where a group had to introduce a literal of its own does the sum
-	/// differ from the one it was read from.
-	pub(crate) fn as_weighted<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-	) -> Result<(Vec<(Lit, Coeff)>, Coeff), Unsatisfiable> {
-		let mut terms = Vec::new();
-		let mut constant = 0;
-		for t in self.terms() {
-			let (lits, offset) = t.x.as_weighted(db)?;
-			terms.extend(
-				lits.into_iter()
-					.map(|(l, w)| (l, t.c * w))
-					// A literal worth nothing is not worth mentioning.
-					.filter(|&(_, w)| w != 0),
-			);
-			constant += t.c * offset;
-		}
-		Ok((terms, constant))
 	}
 
 	/// What each term is worth, as the literals standing for it and what each
@@ -319,9 +284,6 @@ impl IntLinear {
 		// sum up with the result only when the bound of the result is the sum
 		// of the other two. Anything else is left to the walk over the terms,
 		// which does not care where an encoding starts.
-		// ponytail: reconciling a mismatch would take a second adder for the
-		// offset. Nothing builds one today, since the result of an addition is
-		// given the bound its inputs imply.
 		(z.x.min() == x.x.min() + y.x.min()).then_some((x, y, z))
 	}
 

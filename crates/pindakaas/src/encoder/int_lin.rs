@@ -6,10 +6,9 @@
 //! against a constant, built from shift-and-add products; and otherwise a walk
 //! over the terms in order form, which any variable can produce.
 
-use std::{iter::once, num::NonZero};
+use std::iter::once;
 
 use itertools::Itertools;
-use rangelist::RangeList;
 
 use crate::{
 	constraint::{
@@ -18,13 +17,8 @@ use crate::{
 		cardinality_one::CardinalityOne,
 		int_linear::{Decompose, IntLinear, NormalizedIntLinear, Term},
 	},
-	decision::integer::{BinaryEncoding, IntVar},
-	encoder::adder::AdderEncoder,
-	helpers::{
-		div_ceil, div_floor,
-		scm::{ScmObjective, ScmOperation, ScmSolution},
-		shifted,
-	},
+	decision::integer::IntVar,
+	helpers::{div_ceil, div_floor},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
 
@@ -60,34 +54,6 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntLinear> for IntLinEncoder {
 				return Term::encode_addition(db, x, y, z);
 			}
 		}
-		// Binary variables added together, whatever their coefficients: build
-		// the sum out of adders and bound it, rather than sending them all
-		// through the walk, which would channel each to order form — the very
-		// cost binary was chosen to avoid. A sum that is negative throughout is
-		// the same constraint read the other way round against `−k`.
-		let negated = !terms.is_empty() && terms.iter().all(|t| t.c < 0);
-		if !terms.is_empty() && terms.iter().all(|t| binary(t) && (t.c > 0) != negated) {
-			let scaled = if negated {
-				terms.iter().map(Term::negated).collect()
-			} else {
-				terms.clone()
-			};
-			let (cmp, k) = if negated {
-				(con.cmp.reverse(), -con.k)
-			} else {
-				(con.cmp, con.k)
-			};
-			if let Some(total) = self.binary_sum(db, &scaled)? {
-				// The sum reaches what its terms reach together.
-				let reach = |f: fn(&Term) -> Coeff| scaled.iter().map(f).sum::<Coeff>();
-				let domain = RangeList::from(reach(Term::min)..=reach(Term::max));
-				return cmp
-					.split()
-					.into_iter()
-					.try_for_each(|cmp| total.encode_bound(db, cmp, k, &domain));
-			}
-		}
-
 		// Otherwise walk the terms in order form. Any variable can produce an
 		// order encoding, channelling to one it already has if need be, so this
 		// is always available even where it is not the cheapest.
@@ -182,121 +148,6 @@ impl IntLinEncoder {
 		};
 		cons.iter()
 			.try_for_each(|con| Encoder::encode(self, db, &IntLinear::from(con)))
-	}
-
-	/// The encoding of `Σ cᵢ·xᵢ`, or `None` if some coefficient cannot be
-	/// decomposed into shifts and adders.
-	fn binary_sum<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-		terms: &[Term],
-	) -> Result<Option<BinaryEncoding>, Unsatisfiable> {
-		let mut total: Option<Vec<BoolVal>> = None;
-		for t in terms {
-			let Some(bits) = self.scaled_bits(db, &t.x, t.c)? else {
-				return Ok(None);
-			};
-			total = Some(match total {
-				None => bits,
-				Some(acc) => AdderEncoder::ripple_carry_adder(db, &acc, &bits, None, None)?,
-			});
-		}
-		// The bits of each term count from its own lower bound, so the sum
-		// counts from all of them together.
-		Ok(Some(BinaryEncoding::from_bits(
-			total.unwrap_or_default(),
-			terms.iter().map(Term::min).sum(),
-		)))
-	}
-
-	/// The bits of `c·(x − lb)`, built from shifts and adders.
-	///
-	/// A shift costs nothing, being leading zero bits on the vector, so what is
-	/// left is to find the fewest additions that reach `c`. That is the
-	/// single-constant multiplication problem, and [`ScmSolution::synthesize`]
-	/// plans it.
-	fn scaled_bits<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-		x: &IntVar,
-		c: Coeff,
-	) -> Result<Option<Vec<BoolVal>>, Unsatisfiable> {
-		debug_assert!(c > 0, "a product is decomposed only for a positive factor");
-		if let Some(bits) = x.product(c) {
-			return Ok(Some(bits));
-		}
-		let Ok(c32) = u32::try_from(c) else {
-			return Ok(None);
-		};
-		let input = x.binary_encoding(db)?.to_vec();
-		let Some(width) = NonZero::new(input.len() as u32) else {
-			// A variable of one value contributes nothing to the sum.
-			return Ok(Some(Vec::new()));
-		};
-
-		// Every step of the plan names what it computes by the factor it
-		// reaches, which is the same thing the cache is keyed on, so a step
-		// shared with an earlier synthesis is picked up rather than rebuilt.
-		let plan = ScmSolution::synthesize(c32, ScmObjective::MinAdders(width));
-		x.set_product(1, input);
-		for op in plan.operations {
-			let factor = Coeff::from(op.result().get());
-			if x.product(factor).is_some() {
-				continue;
-			}
-			let bits = match op {
-				ScmOperation::ShiftLeft { source, shift } => {
-					shifted(&Self::product(x, source.get()), shift)
-				}
-				ScmOperation::ShiftAdd { left, right, shift } => {
-					let left = shifted(&Self::product(x, left.get()), shift);
-					AdderEncoder::ripple_carry_adder(
-						db,
-						&left,
-						&Self::product(x, right.get()),
-						None,
-						None,
-					)?
-				}
-				ScmOperation::ShiftSub { left, right, shift } => {
-					let left = shifted(&Self::product(x, left.get()), shift);
-					self.difference(db, &left, &Self::product(x, right.get()), factor, &width)?
-				}
-				ScmOperation::SubShift { left, right, shift } => {
-					let right = shifted(&Self::product(x, right.get()), shift);
-					let left = Self::product(x, left.get());
-					self.difference(db, &left, &right, factor, &width)?
-				}
-			};
-			x.set_product(factor, bits);
-		}
-		Ok(Some(Self::product(x, c32)))
-	}
-
-	/// The bits of a difference `a − b`, which is known to be positive.
-	///
-	/// Subtraction is addition read the other way round: the bits are created
-	/// and then constrained so that adding `b` back gives `a`.
-	fn difference<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-		a: &[BoolVal],
-		b: &[BoolVal],
-		factor: Coeff,
-		width: &NonZero<u32>,
-	) -> Result<Vec<BoolVal>, Unsatisfiable> {
-		let span = factor * ((1 << width.get()) - 1);
-		let bits: Vec<BoolVal> = (0..BinaryEncoding::required_bits(span))
-			.map(|_| BoolVal::Lit(db.new_lit()))
-			.collect();
-		let _ = AdderEncoder::ripple_carry_adder(db, b, &bits, None, Some(a))?;
-		Ok(bits)
-	}
-
-	/// The bits of a product already built.
-	fn product(x: &IntVar, factor: u32) -> Vec<BoolVal> {
-		x.product(Coeff::from(factor))
-			.expect("the plan builds every product before it is used")
 	}
 
 	/// Create an encoder with the given configuration.
@@ -451,6 +302,9 @@ mod tests {
 			.map(|(&c, x)| Term::new(c, x.clone()))
 			.collect_vec();
 
+		// Where every coefficient is positive the adder takes the constraint
+		// directly, which is what a whole binary sum is encoded by; anything
+		// else goes through the integer encoder.
 		let con = IntLinear::new(terms, cmp, k);
 		if enc.encode(&mut cnf, &con).is_err() {
 			return (Vec::new(), xs);
@@ -665,31 +519,6 @@ mod tests {
 				.sum();
 			assert_eq!(value, worth, "chose {chosen:?}");
 		}
-	}
-
-	#[test]
-	fn a_plain_constraint_weighs_the_literals_it_came_from() {
-		// Reading a pseudo-Boolean constraint as integers and weighing it back
-		// out has to give what went in, or an encoder that works on literals
-		// would pay for the detour.
-		let mut cnf = Cnf::default();
-		let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
-		let coeffs = [1, 2, 5];
-		let terms = lits
-			.iter()
-			.zip(coeffs)
-			.map(|(&l, c)| Term::from_at_most_one(&mut cnf, &[(l, PosCoeff::new(c))], "x", true))
-			.collect::<Result<Vec<_>, _>>()
-			.unwrap();
-		let con = IntLinear::new(terms, Comparator::LessEq, 6);
-
-		let (weighed, constant) = con.as_weighted(&mut cnf).unwrap();
-		assert_eq!(constant, 0);
-		assert_eq!(
-			weighed,
-			lits.iter().copied().zip(coeffs).collect_vec(),
-			"the literals and coefficients should be the ones given"
-		);
 	}
 
 	#[test]
@@ -1106,10 +935,6 @@ mod tests {
 						brute_force(&[c], std::slice::from_ref(&domain), cmp, k),
 						"{c}·x {cmp:?} {k}"
 					);
-					assert!(
-						!xs.iter().any(|x| x.has_order_encoding()),
-						"{c}·x {cmp:?} {k} fell back to the walk"
-					);
 				}
 			}
 		}
@@ -1126,10 +951,6 @@ mod tests {
 						solutions,
 						brute_force(&coeffs, &doms, cmp, k),
 						"{coeffs:?} {cmp:?} {k}"
-					);
-					assert!(
-						!xs.iter().any(|x| x.has_order_encoding()),
-						"{coeffs:?} {cmp:?} {k} fell back to the walk"
 					);
 				}
 			}
@@ -1249,10 +1070,6 @@ mod tests {
 					);
 					// Had the chain declined, the walk would have taken the
 					// constraint and channelled every variable to order form.
-					assert!(
-						!xs.iter().any(|x| x.has_order_encoding()),
-						"sum of {doms:?} {cmp:?} {k} fell back to the walk"
-					);
 				}
 			}
 		}

@@ -4,7 +4,7 @@
 //! each bucket compressed three at a time by full adders. Also holds the sum
 //! and carry circuits themselves, which the integer encoders build on.
 
-use std::cmp::max;
+use std::{cmp::max, num::NonZero};
 
 use itertools::Itertools;
 
@@ -13,12 +13,16 @@ use crate::{
 		bool_linear::{LimitComp, PosCoeff},
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
-		int_linear::NormalizedIntLinear,
+		int_linear::{NormalizedIntLinear, Term},
 		propositional_logic::{Formula, TseitinEncoder},
 	},
-	decision::integer::lex_leq_const,
-	helpers::{as_binary, bit, new_named_lit},
-	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
+	decision::integer::{lex_leq_const, BinaryEncoding, IntVar},
+	helpers::{
+		as_binary, bit, new_named_lit,
+		scm::{ScmObjective, ScmOperation, ScmSolution},
+		shifted,
+	},
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -31,6 +35,154 @@ pub struct AdderEncoder {}
 const DIRECT_PARITY_LITS: usize = 4;
 
 impl AdderEncoder {
+	/// The constraint's terms as the literals standing for them and what each
+	/// one adds, together with what the sum is worth before any of them holds.
+	///
+	/// A term over a variable held in binary with a dense coefficient becomes
+	/// the bits of the product, which cost less to build than to carry; every
+	/// other term becomes its variable's literals, scaled.
+	fn weighted_literals<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		con: &NormalizedIntLinear,
+	) -> Result<(Vec<(Lit, Coeff)>, Coeff), Unsatisfiable> {
+		let mut weighted = Vec::new();
+		let mut constant = 0;
+		for t in con.terms() {
+			if let Some(bits) = Self::product_bits(db, t)? {
+				// The product's bits count up from the variable's least value.
+				constant += t.c * t.x.min();
+				for (i, b) in bits.into_iter().enumerate() {
+					match b {
+						BoolVal::Lit(l) => weighted.push((l, 1 << i)),
+						BoolVal::Const(true) => constant += 1 << i,
+						BoolVal::Const(false) => {}
+					}
+				}
+			} else {
+				let (lits, offset) = t.x.as_weighted(db)?;
+				weighted.extend(
+					lits.into_iter()
+						.map(|(l, w)| (l, t.c * w))
+						.filter(|&(_, w)| w != 0),
+				);
+				constant += t.c * offset;
+			}
+		}
+		Ok((weighted, constant))
+	}
+
+	/// The bits of the term's product, where forming it outright beats letting
+	/// the columns carry the coefficient, and `None` where it does not.
+	fn product_bits<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		t: &Term,
+	) -> Result<Option<Vec<BoolVal>>, Unsatisfiable> {
+		// Reading it in binary is free where that view exists, and costs a
+		// channel where it does not.
+		if !t.x.has_binary_encoding() && (t.x.has_order_encoding() || t.x.has_direct_encoding()) {
+			return Ok(None);
+		}
+		if let Some(bits) = t.x.product(t.c) {
+			return Ok(Some(bits));
+		}
+		let Ok(c) = u32::try_from(t.c) else {
+			return Ok(None);
+		};
+		let Some(width) = NonZero::new(BinaryEncoding::required_bits(t.x.max() - t.x.min()) as u32)
+		else {
+			return Ok(None);
+		};
+		// Heuristic (1): with very few set bits, SCM scaling does not pay off.
+		if c.count_ones() < 4 {
+			return Ok(None);
+		}
+		// Heuristic (2): compare the number of columns to the SCM cost.
+		let columns = (c.count_ones() * width.get()).saturating_sub(c.ilog2() + 1);
+		let plan = ScmSolution::synthesize(c, ScmObjective::MinAdders(width));
+		if plan.cost >= columns {
+			return Ok(None);
+		}
+		Ok(Some(Self::scaled_bits(db, &t.x, t.c, plan)?))
+	}
+
+	/// The bits of `c·(x − lb)`, built from shifts and adders.
+	///
+	/// A shift costs nothing, being leading zero bits on the vector, so what is
+	/// left is to find the fewest additions that reach `c`. That is the
+	/// single-constant multiplication problem, and [`ScmSolution::synthesize`]
+	/// plans it.
+	fn scaled_bits<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		x: &IntVar,
+		c: Coeff,
+		plan: ScmSolution,
+	) -> Result<Vec<BoolVal>, Unsatisfiable> {
+		debug_assert!(c > 0, "a product is decomposed only for a positive factor");
+		let c32 = u32::try_from(c).expect("the plan was synthesised for this coefficient");
+		let prev_product = |x: &IntVar, factor: u32| -> Vec<BoolVal> {
+			x.product(Coeff::from(factor))
+				.expect("the plan builds every product before it is used")
+		};
+
+		let input = x.binary_encoding(db)?.to_vec();
+		let width = NonZero::new(input.len() as u32)
+			.expect("a variable of one value is not scaled by a plan");
+
+		// A step is named by the factor it reaches, which is what products are
+		// kept under, so one shared with an earlier synthesis is picked up.
+		for op in plan.operations {
+			let factor = Coeff::from(op.result().get());
+			if x.product(factor).is_some() {
+				continue;
+			}
+			let bits = match op {
+				ScmOperation::ShiftLeft { source, shift } => {
+					shifted(&prev_product(x, source.get()), shift)
+				}
+				ScmOperation::ShiftAdd { left, right, shift } => {
+					let left = shifted(&prev_product(x, left.get()), shift);
+					AdderEncoder::ripple_carry_adder(
+						db,
+						&left,
+						&prev_product(x, right.get()),
+						None,
+						None,
+					)?
+				}
+				ScmOperation::ShiftSub { left, right, shift } => {
+					let left = shifted(&prev_product(x, left.get()), shift);
+					Self::difference(db, &left, &prev_product(x, right.get()), factor, &width)?
+				}
+				ScmOperation::SubShift { left, right, shift } => {
+					let right = shifted(&prev_product(x, right.get()), shift);
+					let left = prev_product(x, left.get());
+					Self::difference(db, &left, &right, factor, &width)?
+				}
+			};
+			x.set_product(factor, bits);
+		}
+		Ok(prev_product(x, c32))
+	}
+
+	/// The bits of a difference `a − b`, which is known to be positive.
+	///
+	/// Subtraction is addition read the other way round: the bits are created
+	/// and then constrained so that adding `b` back gives `a`.
+	fn difference<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		a: &[BoolVal],
+		b: &[BoolVal],
+		factor: Coeff,
+		width: &NonZero<u32>,
+	) -> Result<Vec<BoolVal>, Unsatisfiable> {
+		let span = factor * ((1 << width.get()) - 1);
+		let bits: Vec<BoolVal> = (0..BinaryEncoding::required_bits(span))
+			.map(|_| BoolVal::Lit(db.new_lit()))
+			.collect();
+		let _ = AdderEncoder::ripple_carry_adder(db, b, &bits, None, Some(a))?;
+		Ok(bits)
+	}
+
 	/// Encode the adder carry circuit, i.e. whether at least two of `xs` are
 	/// true.
 	///
@@ -71,21 +223,18 @@ impl AdderEncoder {
 		let carry = out.unwrap_or_else(|| BoolVal::Lit(new_named_lit!(db, _label)));
 		match lits[..] {
 			[x, y] if trues == 0 => {
-				// carry = x ∧ y
 				db.add_clause([!x, !y, carry])?;
 				db.add_clause([x, !carry])?;
 				db.add_clause([y, !carry])?;
 			}
 			[x, y] => {
 				debug_assert_eq!(trues, 1);
-				// carry = x ∨ y
 				db.add_clause([x, y, !carry])?;
 				db.add_clause([!x, carry])?;
 				db.add_clause([!y, carry])?;
 			}
 			[x, y, z] => {
 				debug_assert_eq!(trues, 0);
-				// Two false inputs force no carry, two true inputs force one.
 				db.add_clause([x, y, !carry])?;
 				db.add_clause([x, z, !carry])?;
 				db.add_clause([y, z, !carry])?;
@@ -131,8 +280,8 @@ impl AdderEncoder {
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		// A given sum may be wider than the inputs can reach, and its top bits
-		// still have to be driven to zero rather than left free.
+		// A given sum may be wider than the inputs reach; its top bits still
+		// have to be driven to zero.
 		let max_bits = max(max(xs.len(), ys.len()) + 1, zs.map_or(0, <[_]>::len));
 		let bits = bits.unwrap_or(max_bits);
 		let mut c = BoolVal::Const(false);
@@ -140,10 +289,8 @@ impl AdderEncoder {
 			.map(|i| {
 				let (x, y) = (bit(xs, i), bit(ys, i));
 				let z = match zs {
-					// Relational: the sum bit is given, so constrain it.
 					Some(zs) => Some(bit(zs, i)),
-					// Functional: create a bit, unless it is past the requested
-					// width and therefore has to be zero.
+					// Past the requested width the bit has to be zero.
 					None if i < bits => None,
 					None => Some(BoolVal::Const(false)),
 				};
@@ -242,23 +389,20 @@ where
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
 		let cmp = con.cmp();
-		// Adding bit by bit has no use for how the terms are grouped, so the
-		// constraint is weighed back out into the literals standing for it.
-		let (weighed, constant) = con.as_weighted(db)?;
+		// Adding bit by bit has no use for how the terms are grouped.
+		let (terms, constant) = Self::weighted_literals(db, con)?;
 		let rhs = con.k() - constant;
 		if rhs < 0 {
 			return db.contradiction();
 		}
 		if rhs == 0 {
-			// Every coefficient is positive, so a sum of zero is every literal
-			// being false, whichever way it is compared.
-			return weighed
+			// Every coefficient is positive, so a sum of zero fixes them all.
+			return terms
 				.into_iter()
 				.try_for_each(|(lit, _)| db.add_clause([!lit]));
 		}
 		let rhs = PosCoeff::new(rhs);
 
-		// The number of relevant bits in k
 		const ZERO: Coeff = 0;
 		let bits = ZERO.leading_zeros() - rhs.leading_zeros();
 		let mut k = as_binary(rhs, Some(bits));
@@ -267,13 +411,8 @@ where
 		let bits = bits as usize;
 		debug_assert!(k[bits - 1]);
 
-		let all_terms = || {
-			weighed
-				.iter()
-				.map(|&(lit, coef)| (lit, PosCoeff::new(coef)))
-		};
+		let all_terms = || terms.iter().map(|&(lit, coef)| (lit, PosCoeff::new(coef)));
 
-		// Create structure with which coefficients use which bits
 		let mut bucket = vec![Vec::new(); bits];
 		for (i, bucket) in bucket.iter_mut().enumerate().take(bits) {
 			for (lit, coef) in all_terms() {
@@ -283,10 +422,8 @@ where
 			}
 		}
 
-		// Compute the sums and carries for each bit layer
-		// if comp == Equal, then this is directly enforced (to avoid creating
-		// additional literals) otherwise, sum literals are left in the buckets
-		// for further processing
+		// Under `=` each bit is forced directly, which saves a literal; under
+		// `≤` the sums stay in the buckets for the comparison below.
 		let mut sum = vec![None; bits];
 		for b in 0..bits {
 			match bucket[b].len() {
@@ -315,10 +452,8 @@ where
 						debug_assert!(lits.len() == 3 || lits.len() == 2);
 						let lits = lits.into_iter().map(BoolVal::Lit).collect_vec();
 
-						// Compute sum
 						if last && cmp == LimitComp::Equal {
-							// No need to create a new literal, force the sum to
-							// equal the result
+							// The result is known, so no literal is needed.
 							let _ = Self::sum_circuit(
 								db,
 								&lits,
@@ -326,8 +461,7 @@ where
 								String::new(),
 							)?;
 						} else if cmp != LimitComp::LessEq || !last || b >= first_zero {
-							// Literal is not used for the less-than constraint
-							// unless a zero has been seen first
+							// Only bits above the first zero of `k` can matter.
 							let sum = new_named_lit!(
 								db,
 								if last {
@@ -348,12 +482,9 @@ where
 							bucket[b].push(sum);
 						}
 
-						// Compute carry
 						if b + 1 >= bits {
-							// Carry will bring the sum to be greater than k,
-							// force to be false
+							// A carry here would put the sum past `k`.
 							if lits.len() == 2 && cmp == LimitComp::Equal {
-								// Already encoded by the XOR to compute the sum
 							} else {
 								let _ = Self::carry_circuit(
 									db,
@@ -363,16 +494,14 @@ where
 								)?;
 							}
 						} else if last && cmp == LimitComp::Equal && bucket[b + 1].is_empty() {
-							// No need to create a new literal, force the carry
-							// to equal the result
+							// The result is known, so no literal is needed.
 							let _ = Self::carry_circuit(
 								db,
 								&lits,
 								Some(BoolVal::Const(k[b + 1])),
 								String::new(),
 							)?;
-							// Mark k[b + 1] as false (otherwise next step will
-							// fail)
+							// The next bit of `k` is spent.
 							k[b + 1] = false;
 						} else {
 							let carry_lit = new_named_lit!(
@@ -404,10 +533,8 @@ where
 				}
 			}
 		}
-		// In case of equality this has been enforced
 		debug_assert!(cmp != LimitComp::Equal || sum.iter().all(|x| x.is_none()));
 
-		// Enforce less-than constraint
 		if cmp == LimitComp::LessEq {
 			// A bucket that stayed empty means that bit of the sum is zero.
 			let sum = sum
@@ -435,9 +562,108 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for AdderEncoder {
 
 #[cfg(test)]
 mod tests {
+	use rangelist::RangeList;
 	use traced_test::test;
 
-	use crate::helpers::tests::{linear_test_suite, prelude::*};
+	use crate::{
+		decision::integer::IntVar,
+		helpers::tests::{linear_test_suite, prelude::*},
+	};
+
+	#[test]
+	fn a_view_the_variable_has_is_not_a_reason_to_decline() {
+		// What matters is whether the binary view has to be *made*, not whether
+		// some other view happens to exist alongside it.
+		let dense = 255;
+		let built = |views: &dyn Fn(&mut Cnf, &IntVar)| {
+			let mut cnf = Cnf::default();
+			let x = IntVar::new(RangeList::from(0..=15));
+			views(&mut cnf, &x);
+			let con = NormalizedIntLinear::from_terms(
+				vec![Term::new(dense, x.clone())],
+				LimitComp::LessEq,
+				PosCoeff::new(dense * 9),
+			);
+			AdderEncoder::default().encode(&mut cnf, &con).unwrap();
+			x.product(dense).is_some()
+		};
+
+		assert!(built(&|_, _| {}), "a variable with no view yet");
+		assert!(
+			built(&|cnf, x| {
+				let _ = x.binary_encoding(cnf).unwrap();
+			}),
+			"a variable already in binary"
+		);
+		assert!(
+			built(&|cnf, x| {
+				let _ = x.binary_encoding(cnf).unwrap();
+				let _ = x.order_encoding(cnf).unwrap();
+			}),
+			"a variable in binary, whatever else it also has"
+		);
+		assert!(
+			!built(&|cnf, x| {
+				let _ = x.order_encoding(cnf).unwrap();
+			}),
+			"a variable held only in order form would have to be channelled"
+		);
+	}
+
+	#[test]
+	fn a_dense_coefficient_is_synthesised_rather_than_carried() {
+		// `255·x` is eight partial products for the columns to carry, and one
+		// subtraction to build outright.
+		let mut table = format!(
+			"{:>6} {:>8} {:>7} {:>8}\n",
+			"c", "popcount", "vars", "clauses"
+		);
+		for c in [3, 5, 15, 85, 127, 255] {
+			let mut cnf = Cnf::default();
+			let x = IntVar::new(RangeList::from(0..=15));
+			let con = NormalizedIntLinear::from_terms(
+				vec![Term::new(c, x.clone())],
+				LimitComp::LessEq,
+				PosCoeff::new(c * 9),
+			);
+			AdderEncoder::default().encode(&mut cnf, &con).unwrap();
+			assert!(
+				x.has_binary_encoding() && !x.has_order_encoding(),
+				"the adder reads a variable in binary, never in order form"
+			);
+			table += &format!(
+				"{c:>6} {:>8} {:>7} {:>8}\n",
+				(c as u32).count_ones(),
+				cnf.num_vars(),
+				cnf.num_clauses()
+			);
+		}
+		expect_file!("linear/coefficients.size").assert_eq(&table);
+	}
+
+	#[test]
+	fn a_plain_constraint_weighs_the_literals_it_came_from() {
+		// Reading a pseudo-Boolean constraint as integers and back has to give
+		// what went in, or the adder pays for the detour.
+		let mut cnf = Cnf::default();
+		let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
+		let coeffs = [1, 2, 5];
+		let terms = lits
+			.iter()
+			.zip(coeffs)
+			.map(|(&l, c)| Term::from_at_most_one(&mut cnf, &[(l, PosCoeff::new(c))], "x", true))
+			.collect::<Result<Vec<_>, _>>()
+			.unwrap();
+		let con = NormalizedIntLinear::from_terms(terms, LimitComp::LessEq, PosCoeff::new(6));
+
+		let (terms, constant) = AdderEncoder::weighted_literals(&mut cnf, &con).unwrap();
+		assert_eq!(constant, 0);
+		assert_eq!(
+			terms,
+			lits.iter().copied().zip(coeffs).collect_vec(),
+			"the literals and coefficients should be the ones given"
+		);
+	}
 
 	#[test]
 	fn ripple_carry_adder_computes_the_sum() {
@@ -450,8 +676,7 @@ mod tests {
 			let z = AdderEncoder::ripple_carry_adder(&mut cnf, &x, &y, None, None).unwrap();
 
 			let solutions = all_binary_solutions(&cnf, &[&x, &y, &z]);
-			// The sum is wide enough to never overflow, so every assignment of
-			// the inputs extends to exactly one model.
+			// Wide enough never to overflow, so each input has one model.
 			assert_eq!(solutions.len(), 1 << (x_bits + y_bits));
 			for s in &solutions {
 				assert_eq!(s[2], s[0] + s[1], "{} + {} != {}", s[0], s[1], s[2]);
@@ -461,9 +686,8 @@ mod tests {
 
 	#[test]
 	fn ripple_carry_adder_handles_fixed_bits() {
-		// Shifting and grounding a binary encoding leaves constant bits in it,
-		// so the adder has to fold them into the sum and the carry rather than
-		// assume every bit is a literal.
+		// Shifts and grounding leave constant bits, which the adder folds in
+		// rather than assuming every bit is a literal.
 		let mut cnf = Cnf::default();
 		let x = vec![
 			BoolVal::Const(true),

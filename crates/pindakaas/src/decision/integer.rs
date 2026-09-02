@@ -269,36 +269,6 @@ impl BinaryEncoding {
 		Ok(())
 	}
 
-	/// Restrict the encoding to the values on one side of `v`.
-	pub(crate) fn encode_bound<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-		cmp: Comparator,
-		v: Coeff,
-		domain: &RangeList<Coeff>,
-	) -> Result {
-		let (lb, ub) = (*domain.min().unwrap(), *domain.max().unwrap());
-		match cmp {
-			Comparator::LessEq if v >= ub => Ok(()),
-			Comparator::LessEq if v < lb => db.contradiction(),
-			Comparator::LessEq => lex_leq_const(
-				db,
-				&self.x.to_vec(),
-				PosCoeff::new(v - self.min),
-				self.bits(),
-			),
-			Comparator::GreaterEq if v <= lb => Ok(()),
-			Comparator::GreaterEq if v > ub => db.contradiction(),
-			Comparator::GreaterEq => lex_geq_const(
-				db,
-				&self.x.to_vec(),
-				PosCoeff::new(v - self.min),
-				self.bits(),
-			),
-			Comparator::Equal => unreachable!("an equality is split before it is encoded"),
-		}
-	}
-
 	/// Forbid the encoding from taking the value `v`.
 	pub(crate) fn encode_neq<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db, v: Coeff) -> Result {
 		let k = as_binary(PosCoeff::new(v - self.min), Some(self.bits() as u32));
@@ -766,12 +736,18 @@ impl IntVar {
 
 	/// The bits of `c·(x − min)`, where they have already been built.
 	pub(crate) fn product(&self, c: Coeff) -> Option<Vec<BoolVal>> {
+		// The bits of `1·x` are the binary encoding itself, so there is nothing
+		// to remember separately.
+		if c == 1 {
+			return self.0.borrow().binary.as_ref().map(BinaryEncoding::to_vec);
+		}
 		self.0.borrow().products.get(&c).cloned()
 	}
 
 	/// Remember the bits of `c·(x − min)`, so that the next constraint to scale
 	/// the variable by `c` finds them.
 	pub(crate) fn set_product(&self, c: Coeff, bits: Vec<BoolVal>) {
+		debug_assert_ne!(c, 1);
 		let _ = self.0.borrow_mut().products.insert(c, bits);
 	}
 
@@ -1478,8 +1454,7 @@ impl IntVar {
 		Ok(ord)
 	}
 
-	/// Whether the variable has been given an order encoding.
-	#[cfg(test)]
+	/// Whether the variable is held in an order encoding.
 	pub fn has_order_encoding(&self) -> bool {
 		self.0.borrow().order.is_some()
 	}
