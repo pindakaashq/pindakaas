@@ -15,7 +15,7 @@ use crate::{
 };
 
 /// Encoder for the linear constraints that ∑ litᵢ ≷ k using a sorting network
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct SortingNetworkEncoder {
 	/// Encoder used to encode the [`Count`](crate::constraint::count::Count) constraints.
 	sorted_encoder: SortedEncoder,
@@ -25,10 +25,8 @@ impl SortingNetworkEncoder {
 	/// Set the [`Encoder`] used for the [`Count`] constraint the network
 	/// becomes.
 	///
-	/// Its comparator overrides are cleared. They let a merge state less than
-	/// it knows, which is a saving where only a bound on the sorted value is
-	/// wanted, but a cardinality constraint asks for the value itself and an
-	/// equality encoded that way would admit counts it forbids.
+	/// Its comparator overrides are cleared, since a cardinality constraint
+	/// asks for the sorted value itself rather than a bound on it.
 	pub fn with_sorted_encoder(&mut self, mut sorted_encoder: SortedEncoder) -> &mut Self {
 		let _ = sorted_encoder
 			.with_overwrite_direct_cmp(None)
@@ -44,15 +42,6 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for SortingNetwork
 	}
 }
 
-impl Default for SortingNetworkEncoder {
-	fn default() -> Self {
-		let mut sorted_encoder = SortedEncoder::default();
-		let _ = sorted_encoder
-			.with_overwrite_direct_cmp(None)
-			.with_overwrite_recursive_cmp(None);
-		Self { sorted_encoder }
-	}
-}
 
 impl<Db> Encoder<Db, Cardinality> for SortingNetworkEncoder
 where

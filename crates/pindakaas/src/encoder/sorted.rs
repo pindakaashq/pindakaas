@@ -349,8 +349,11 @@ impl Default for SortedEncoder {
 		Self {
 			strategy: SortedStrategy::Mixed(10),
 			add_consistency: false,
-			overwrite_direct_cmp: Some(LimitComp::LessEq),
-			overwrite_recursive_cmp: Some(LimitComp::Equal),
+			// Left alone by default: overriding lets a merge state less than
+			// it knows, which is a saving for a bound but admits counts an
+			// equality forbids.
+			overwrite_direct_cmp: None,
+			overwrite_recursive_cmp: None,
 			strategy_cost_cache: Mutex::default(),
 		}
 	}
