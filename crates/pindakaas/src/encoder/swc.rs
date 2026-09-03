@@ -8,6 +8,7 @@ use itertools::Itertools;
 use crate::{
 	constraint::{
 		linear::Comparator,
+		bool_linear::NormalizedBoolLinear,
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		int_linear::{Decompose, NormalizedIntLinear},
@@ -132,6 +133,17 @@ impl Decompose for SwcEncoder {
 				IntTernary::new(x, (1, left.clone()), cmp, (1, carried.clone()))
 			})
 			.collect())
+	}
+}
+
+impl<Db> Encoder<Db, NormalizedBoolLinear> for SwcEncoder
+where
+	Db: ClauseDatabase + ?Sized,
+{
+	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
+		// Decomposing works in integers, so the literals become them first.
+		let con = con.as_int_linear(db)?;
+		self.encode(db, &con)
 	}
 }
 

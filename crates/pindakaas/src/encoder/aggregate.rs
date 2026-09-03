@@ -61,14 +61,7 @@ impl LinAggregator {
 			if lin.cmp == Comparator::GreaterEq {
 				c = -c;
 			}
-			let x = if c < 0 {
-				k -= c * (x.min() + x.max());
-				c = -c;
-				IntVar::mirrored(db, x)?
-			} else {
-				x.clone()
-			};
-			int_terms.push((x, c));
+			int_terms.push((x.clone(), c));
 		}
 
 		// Every literal stands on its own: a group of them is an integer, and
@@ -93,6 +86,26 @@ impl LinAggregator {
 			})
 			.filter(|&(_, coef)| *coef != 0)
 			.collect();
+
+		// Counting literals into an integer, which a sorting network states
+		// outright where the general case would count into intermediates
+		// first. Read before the mirror below, which would hide the variable.
+		if let [(y, -1)] = &int_terms[..] {
+			if k == 0 && partition.iter().all(|&(_, coef)| *coef == 1) {
+				let lits = partition.iter().map(|&(lit, _)| lit).collect();
+				return Ok(LinVariant::Count(Count::new(lits, cmp, y.clone())));
+			}
+		}
+
+		// A coefficient is made positive by counting the variable from the far
+		// end, which is a view on it rather than a variable of its own.
+		for (x, c) in &mut int_terms {
+			if *c < 0 {
+				k -= *c * (x.min() + x.max());
+				*c = -*c;
+				*x = IntVar::mirrored(db, x)?;
+			}
+		}
 
 		// trivial case: constraint is unsatisfiable
 		if k < 0 {
@@ -322,15 +335,21 @@ impl<Enc, Agg> LinearEncoder<Enc, Agg> {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct StaticLinEncoder<
 	LinEnc = AdderEncoder,
+	BoolLinEnc = AdderEncoder,
 	CardEnc = AdderEncoder, // TODO: Actual Cardinality encoding
 	Card1Enc = BitwiseEncoder,
+	CountEnc = SortedEncoder,
 > {
 	lin_enc: LinEnc,
+	bool_lin_enc: BoolLinEnc,
 	card_enc: CardEnc,
 	amo_enc: Card1Enc,
+	count_enc: CountEnc,
 }
 
-impl<LinEnc, CardEnc, AmoEnc> StaticLinEncoder<LinEnc, CardEnc, AmoEnc> {
+impl<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+	StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+{
 	/// Get mutable access to the encoder that is used to encode
 	/// [`LinVariant::CardinalityOne`] variants.
 	pub fn amo_encoder(&mut self) -> &mut AmoEnc {
@@ -352,33 +371,52 @@ impl<LinEnc, CardEnc, AmoEnc> StaticLinEncoder<LinEnc, CardEnc, AmoEnc> {
 	/// Create a new [`StaticLinEncoder`] with the given encoders to encode
 	/// [`LinVariant::Linear`], [`LinVariant::Cardinality`], and
 	/// [`LinVariant::CardinalityOne`] variants respectively.
-	pub fn new(lin_enc: LinEnc, card_enc: CardEnc, amo_enc: AmoEnc) -> Self {
+	pub fn new(
+		lin_enc: LinEnc,
+		bool_lin_enc: BoolLinEnc,
+		card_enc: CardEnc,
+		amo_enc: AmoEnc,
+		count_enc: CountEnc,
+	) -> Self {
 		Self {
 			lin_enc,
+			bool_lin_enc,
 			card_enc,
 			amo_enc,
+			count_enc,
 		}
+	}
+
+	/// Get mutable access to the encoder that is used to encode
+	/// [`LinVariant::BoolLinear`] variants.
+	pub fn bool_lin_encoder(&mut self) -> &mut BoolLinEnc {
+		&mut self.bool_lin_enc
+	}
+
+	/// Get mutable access to the encoder that is used to encode
+	/// [`LinVariant::Count`] variants.
+	pub fn count_encoder(&mut self) -> &mut CountEnc {
+		&mut self.count_enc
 	}
 }
 
-impl<Db, LinEnc, CardEnc, AmoEnc> Encoder<Db, LinVariant>
-	for StaticLinEncoder<LinEnc, CardEnc, AmoEnc>
+impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc> Encoder<Db, LinVariant>
+	for StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
 where
 	Db: ClauseDatabase + ?Sized,
 	LinEnc: Encoder<Db, NormalizedIntLinear>,
+	BoolLinEnc: Encoder<Db, NormalizedBoolLinear>,
 	CardEnc: Encoder<Db, Cardinality>,
 	AmoEnc: Encoder<Db, CardinalityOne>,
+	CountEnc: Encoder<Db, Count>,
 {
 	fn encode(&self, db: &mut Db, lin: &LinVariant) -> Result {
 		match &lin {
-			// The encoder works in integers, so the literals become them here.
-			LinVariant::BoolLinear(lin) => {
-				let lin = lin.as_int_linear(db)?;
-				self.lin_enc.encode(db, &lin)
-			}
+			LinVariant::BoolLinear(lin) => self.bool_lin_enc.encode(db, lin),
 			LinVariant::Linear(lin) => self.lin_enc.encode(db, lin),
 			LinVariant::Cardinality(card) => self.card_enc.encode(db, card),
 			LinVariant::CardinalityOne(amo) => self.amo_enc.encode(db, amo),
+			LinVariant::Count(count) => self.count_enc.encode(db, count),
 			LinVariant::Trivial => Ok(()),
 		}
 	}
@@ -416,6 +454,7 @@ mod tests {
 	#[derive(Debug, PartialEq)]
 	pub(crate) enum Aggregated {
 		Cardinality(Vec<Lit>, LimitComp, Coeff),
+		Count(Vec<Lit>, LimitComp, Vec<Coeff>),
 		CardinalityOne(Vec<Lit>, LimitComp),
 		Linear(Vec<Vec<(Lit, Coeff)>>, LimitComp, Coeff),
 		Trivial,
@@ -446,6 +485,11 @@ mod tests {
 			LinVariant::CardinalityOne(amo) => {
 				Aggregated::CardinalityOne(amo.iter_lits().collect(), into_limit(amo.comparator()))
 			}
+			LinVariant::Count(count) => Aggregated::Count(
+				count.lits.clone(),
+				count.cmp.clone(),
+				count.y.domain().iter().flatten().collect(),
+			),
 			LinVariant::Trivial => Aggregated::Trivial,
 		})
 	}
@@ -957,6 +1001,81 @@ mod tests {
 				k_of((x.clone() * (2 * sign) + 7) * 3, cmp, (k + 7) * 3),
 				plain
 			);
+		}
+	}
+
+	#[test]
+	fn literals_against_an_integer_are_a_count() {
+		use crate::decision::integer::IntVar;
+
+		let mut cnf = Cnf::default();
+		let (a, b, c) = (cnf.new_lit(), cnf.new_lit(), cnf.new_lit());
+		let y = IntVar::new(0..=3).with_label("y");
+
+		// Both spellings of `a + b + c ≤ y` reach the same constraint.
+		for con in [
+			Linear::new(
+				LinExp::from_slices(&[1, 1, 1], &[a, b, c]) - LinExp::from(y.clone()),
+				Comparator::LessEq,
+				0,
+			),
+			Linear::new(
+				LinExp::from(y.clone()) - LinExp::from_slices(&[1, 1, 1], &[a, b, c]),
+				Comparator::GreaterEq,
+				0,
+			),
+		] {
+			let LinVariant::Count(count) =
+				LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
+			else {
+				panic!("literals against an integer are a count");
+			};
+			assert_eq!(count.lits, vec![a, b, c]);
+			assert_eq!(count.cmp, LimitComp::LessEq);
+			assert_eq!(count.y.min(), 0);
+			assert_eq!(count.y.max(), 3);
+		}
+	}
+
+	#[test]
+	fn a_count_admits_exactly_the_assignments_it_should() {
+		use crate::{
+			constraint::count::SortedEncoder,
+			decision::integer::IntVar,
+			solver::{cadical::Cadical, SolveResult, Solver},
+			Valuation,
+		};
+
+		for cmp in [Comparator::LessEq, Comparator::Equal] {
+			let mut cnf = Cnf::default();
+			let lits = (0..3).map(|_| cnf.new_lit()).collect_vec();
+			let y = IntVar::new(0..=2).with_label("y");
+			let exp = LinExp::from_slices(&[1; 3], &lits) - LinExp::from(y.clone());
+			let con = Linear::new(exp, cmp, 0);
+			let LinVariant::Count(count) =
+				LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
+			else {
+				panic!("literals against an integer are a count");
+			};
+			SortedEncoder::default().encode(&mut cnf, &count).unwrap();
+
+			let mut seen = Vec::new();
+			let mut slv = Cadical::from(&cnf);
+			while let SolveResult::Satisfied(sol) = slv.solve() {
+				let count: Coeff = lits.iter().filter(|&&l| sol.value(l)).count() as Coeff;
+				seen.push((count, y.value(&sol)));
+				let no_good = lits.iter().map(|&l| if sol.value(l) { !l } else { l });
+				if slv.add_clause(no_good).is_err() {
+					break;
+				}
+			}
+			assert!(!seen.is_empty(), "{cmp:?} has solutions");
+			for &(n, v) in &seen {
+				match cmp {
+					Comparator::Equal => assert_eq!(n, v, "{cmp:?}: {n} counted, y = {v}"),
+					_ => assert!(n <= v, "{cmp:?}: {n} counted, y = {v}"),
+				}
+			}
 		}
 	}
 }

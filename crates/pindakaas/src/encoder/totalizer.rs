@@ -9,6 +9,7 @@ use rangelist::RangeList;
 use crate::{
 	constraint::{
 		linear::Comparator,
+		bool_linear::NormalizedBoolLinear,
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		int_linear::{term_max, term_min, term_values, Decompose, NormalizedIntLinear},
@@ -159,6 +160,17 @@ impl Decompose for TotalizerEncoder {
 			layer = next;
 		}
 		Ok(cons)
+	}
+}
+
+impl<Db> Encoder<Db, NormalizedBoolLinear> for TotalizerEncoder
+where
+	Db: ClauseDatabase + ?Sized,
+{
+	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
+		// Decomposing works in integers, so the literals become them first.
+		let con = con.as_int_linear(db)?;
+		self.encode(db, &con)
 	}
 }
 

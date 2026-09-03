@@ -22,6 +22,7 @@ use crate::{
 	constraint::{
 		cardinality::Cardinality, cardinality_one::CardinalityOne,
 		bool_linear::NormalizedBoolLinear,
+		count::Count,
 		int_linear::NormalizedIntLinear,
 	},
 	decision::integer::IntVar,
@@ -578,24 +579,24 @@ mod tests {
 					let mut cnf = Cnf::default();
 					let vars = cnf.new_var_range(coeffs.len()).iter_lits().collect_vec();
 					let con = Linear::new(LinExp::from_slices(coeffs, &vars), cmp.clone(), k);
-					// Both the linear and the cardinality encoder, so that a
-					// case aggregating to a cardinality constraint measures the
-					// encoder this row names rather than the default.
+					// Every slot the cases reach — integer linear, Boolean
+					// linear and cardinality — so that a row measures the
+					// encoder it names rather than whichever is the default.
 					let done = match enc {
-						"adder" => {
-							LinearEncoder::<StaticLinEncoder<AdderEncoder, AdderEncoder>>::default()
-								.encode(&mut cnf, &con)
-						}
-						"bdd" => {
-							LinearEncoder::<StaticLinEncoder<BddEncoder, BddEncoder>>::default()
-								.encode(&mut cnf, &con)
-						}
-						"swc" => {
-							LinearEncoder::<StaticLinEncoder<SwcEncoder, SwcEncoder>>::default()
-								.encode(&mut cnf, &con)
-						}
+						"adder" => LinearEncoder::<
+							StaticLinEncoder<AdderEncoder, AdderEncoder, AdderEncoder>,
+						>::default()
+						.encode(&mut cnf, &con),
+						"bdd" => LinearEncoder::<
+							StaticLinEncoder<BddEncoder, BddEncoder, BddEncoder>,
+						>::default()
+						.encode(&mut cnf, &con),
+						"swc" => LinearEncoder::<
+							StaticLinEncoder<SwcEncoder, SwcEncoder, SwcEncoder>,
+						>::default()
+						.encode(&mut cnf, &con),
 						_ => LinearEncoder::<
-							StaticLinEncoder<TotalizerEncoder, TotalizerEncoder>,
+							StaticLinEncoder<TotalizerEncoder, TotalizerEncoder, TotalizerEncoder>,
 						>::default()
 						.encode(&mut cnf, &con),
 					};
@@ -670,6 +671,9 @@ pub enum LinVariant {
 	/// A sum of weighted literals against a constant, mentioning no integer
 	/// variable, which the encoders that work in literals take directly.
 	BoolLinear(NormalizedBoolLinear),
+	/// Literals counted into an integer, which a sorting network states
+	/// outright rather than counting into intermediates first.
+	Count(Count),
 	/// Most general form: a sum of integer terms that must be
 	/// (smaller-or-)equal to a constant. The groups the aggregator recognised
 	/// have each become an integer, encoded on the literals they were found on.

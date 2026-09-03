@@ -15,6 +15,7 @@ use itertools::Itertools;
 use crate::{
 	constraint::{
 		linear::Comparator,
+		bool_linear::NormalizedBoolLinear,
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		int_linear::{term_max, term_min, term_values, Decompose, NormalizedIntLinear, Term},
@@ -297,6 +298,17 @@ impl Decompose for BddEncoder {
 				IntTernary::new((1, layers[i].clone()), x, cmp, (1, layers[i + 1].clone()))
 			})
 			.collect())
+	}
+}
+
+impl<Db> Encoder<Db, NormalizedBoolLinear> for BddEncoder
+where
+	Db: ClauseDatabase + ?Sized,
+{
+	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
+		// Decomposing works in integers, so the literals become them first.
+		let con = con.as_int_linear(db)?;
+		self.encode(db, &con)
 	}
 }
 
