@@ -7,6 +7,7 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
 	constraint::{
+		bool_linear::NormalizedBoolLinear,
 		linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
 		cardinality::Cardinality,
 		cardinality_one::{BitwiseEncoder, CardinalityOne},
@@ -235,6 +236,14 @@ impl LinAggregator {
 
 		// A term is the integer it stands for: a literal is one worth its
 		// coefficient when it holds, and a variable is one already.
+		// Weighted, but over literals alone, so it stays in them rather than
+		// becoming an integer per literal for an encoder to take apart again.
+		if int_terms.is_empty() {
+			return Ok(LinVariant::BoolLinear(NormalizedBoolLinear::new(
+				partition, cmp, k,
+			)));
+		}
+
 		let mut terms = partition
 			.iter()
 			.enumerate()
@@ -362,6 +371,11 @@ where
 {
 	fn encode(&self, db: &mut Db, lin: &LinVariant) -> Result {
 		match &lin {
+			// The encoder works in integers, so the literals become them here.
+			LinVariant::BoolLinear(lin) => {
+				let lin = lin.as_int_linear(db)?;
+				self.lin_enc.encode(db, &lin)
+			}
 			LinVariant::Linear(lin) => self.lin_enc.encode(db, lin),
 			LinVariant::Cardinality(card) => self.card_enc.encode(db, card),
 			LinVariant::CardinalityOne(amo) => self.amo_enc.encode(db, amo),
@@ -417,6 +431,12 @@ mod tests {
 			LinVariant::Linear(lin) => {
 				let (cmp, k) = (lin.cmp(), lin.k());
 				Aggregated::Linear(sorted_weights(lin.grouped_weights(db)?), cmp, k)
+			}
+			// A literal is a group of its own, which is what it would have
+			// become had it been read as an integer.
+			LinVariant::BoolLinear(lin) => {
+				let groups = lin.terms().iter().map(|&(l, c)| vec![(l, *c)]).collect();
+				Aggregated::Linear(sorted_weights(groups), lin.cmp(), lin.k())
 			}
 			LinVariant::Cardinality(card) => Aggregated::Cardinality(
 				card.iter_lits().collect(),

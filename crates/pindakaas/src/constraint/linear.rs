@@ -21,6 +21,7 @@ pub use crate::encoder::{
 use crate::{
 	constraint::{
 		cardinality::Cardinality, cardinality_one::CardinalityOne,
+		bool_linear::NormalizedBoolLinear,
 		int_linear::NormalizedIntLinear,
 	},
 	decision::integer::IntVar,
@@ -666,6 +667,9 @@ mod tests {
 /// groups encode. What it recognises as counting rather than weighing keeps a
 /// form of its own, there being encoders that do only that.
 pub enum LinVariant {
+	/// A sum of weighted literals against a constant, mentioning no integer
+	/// variable, which the encoders that work in literals take directly.
+	BoolLinear(NormalizedBoolLinear),
 	/// Most general form: a sum of integer terms that must be
 	/// (smaller-or-)equal to a constant. The groups the aggregator recognised
 	/// have each become an integer, encoded on the literals they were found on.

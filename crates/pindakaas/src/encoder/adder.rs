@@ -10,6 +10,7 @@ use itertools::Itertools;
 
 use crate::{
 	constraint::{
+		bool_linear::NormalizedBoolLinear,
 		linear::{LimitComp, PosCoeff},
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
@@ -412,10 +413,38 @@ where
 		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		let cmp = con.cmp();
 		// Adding bit by bit has no use for how the terms are grouped.
 		let (terms, constant) = Self::weighted_literals(db, con)?;
-		let rhs = con.k() - constant;
+		Self::encode_weighted(db, terms, constant, con.cmp(), con.k())
+	}
+}
+
+impl<Db> Encoder<Db, NormalizedBoolLinear> for AdderEncoder
+where
+	Db: ClauseDatabase + ?Sized,
+{
+	#[cfg_attr(
+		any(feature = "tracing", test),
+		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = format!("{con:?}")))
+	)]
+	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
+		// Already the weighted literals the sum is built from, so there is no
+		// integer to read them back out of.
+		let terms = con.terms().iter().map(|&(lit, c)| (lit, *c)).collect_vec();
+		Self::encode_weighted(db, terms, 0, con.cmp(), con.k())
+	}
+}
+
+impl AdderEncoder {
+	/// Encode `Σ cᵢ·litᵢ + constant ≷ k` over the literals themselves.
+	fn encode_weighted<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		terms: Vec<(Lit, Coeff)>,
+		constant: Coeff,
+		cmp: LimitComp,
+		k: Coeff,
+	) -> Result {
+		let rhs = k - constant;
 		if rhs < 0 {
 			return db.contradiction();
 		}

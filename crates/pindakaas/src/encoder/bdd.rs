@@ -349,12 +349,14 @@ mod tests {
 			Comparator::LessEq,
 			6,
 		);
-		let LinVariant::Linear(con) = LinAggregator::default()
+		let LinVariant::BoolLinear(con) = LinAggregator::default()
 			.aggregate(&mut cnf, &con)
 			.unwrap()
 		else {
-			panic!("three distinct coefficients aggregate to a linear constraint");
+			panic!("weighted literals aggregate to a Boolean linear constraint");
 		};
+		// The diagram is built over integers, so the literals become them here.
+		let con = con.as_int_linear(&mut cnf).unwrap();
 		cnf.encode(&con, &crate::constraint::linear::BddEncoder::default())
 			.unwrap();
 
