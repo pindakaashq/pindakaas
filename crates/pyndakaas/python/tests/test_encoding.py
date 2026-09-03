@@ -164,15 +164,14 @@ def test_a_settled_question_gives_a_constant():
     f = CNF()
     x = f.new_int_var(range(0, 3))
 
-    assert bool(x.equals(f, 9)) is False
+    assert x.equals(f, 9).value() is False
     assert x.equals(f, 9).lit() is None
-    assert bool(x.at_least(f, 0)) is True
-    assert bool(x.at_most(f, 9)) is True
+    assert x.at_least(f, 0).value() is True
+    assert x.at_most(f, 9).value() is True
 
     reachable = x.at_least(f, 2)
     assert reachable.lit() is not None
-    with pytest.raises(ValueError):
-        bool(reachable)
+    assert reachable.value() is None
 
 
 def test_asking_without_building_an_encoding():
@@ -183,12 +182,12 @@ def test_asking_without_building_an_encoding():
     x = f.new_int_var([0, 1, 3, 4])
 
     # The domain settles these, so they cost nothing.
-    assert bool(x.at_least(f, 0, create=False)) is True
-    assert bool(x.at_least(f, 5, create=False)) is False
-    assert bool(x.at_most(f, 4, create=False)) is True
-    assert bool(x.at_most(f, -1, create=False)) is False
-    assert bool(x.equals(f, 9, create=False)) is False
-    assert bool(x.equals(f, 2, create=False)) is False  # the hole
+    assert x.at_least(f, 0, create=False).value() is True
+    assert x.at_least(f, 5, create=False).value() is False
+    assert x.at_most(f, 4, create=False).value() is True
+    assert x.at_most(f, -1, create=False).value() is False
+    assert x.equals(f, 9, create=False).value() is False
+    assert x.equals(f, 2, create=False).value() is False  # the hole
 
     # These need an encoding, and there is none.
     assert x.at_least(f, 3, create=False) is None
@@ -213,5 +212,5 @@ def test_a_single_value_domain_settles_equality():
 
     f = CNF()
     x = f.new_int_var(range(5, 6))
-    assert bool(x.equals(f, 5, create=False)) is True
+    assert x.equals(f, 5, create=False).value() is True
     assert f.clauses() == []

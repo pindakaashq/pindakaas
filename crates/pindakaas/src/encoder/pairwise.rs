@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use crate::{
 	constraint::{
-		bool_linear::LimitComp,
+		linear::LimitComp,
 		cardinality_one::{at_least_one_clause, CardinalityOne},
 	},
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Result,

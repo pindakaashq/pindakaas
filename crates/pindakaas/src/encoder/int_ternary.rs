@@ -12,7 +12,7 @@ use itertools::Itertools;
 
 use crate::{
 	constraint::{
-		bool_linear::Comparator,
+		linear::Comparator,
 		int_linear::{Decompose, IntLinear, NormalizedIntLinear, Term, encode_addition},
 		int_ternary::IntTernary,
 	},
@@ -31,7 +31,7 @@ use crate::{
 ///
 /// ```rust
 /// # use pindakaas::{
-/// #     constraint::{bool_linear::Comparator, int_ternary::{IntTernary, IntTernaryEncoder}},
+/// #     constraint::{linear::Comparator, int_ternary::{IntTernary, IntTernaryEncoder}},
 /// #     decision::integer::IntVar, Cnf, Encoder,
 /// # };
 /// let mut f = Cnf::default();
@@ -260,7 +260,7 @@ mod tests {
 
 	use crate::{
 		constraint::{
-			bool_linear::{Comparator, LimitComp, PosCoeff},
+			linear::{Comparator, LimitComp, PosCoeff},
 			cardinality_one::{CardinalityOne, PairwiseEncoder},
 			int_linear::Term,
 			int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},

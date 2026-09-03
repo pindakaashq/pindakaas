@@ -7,7 +7,7 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
 	constraint::{
-		bool_linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
+		linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
 		cardinality::Cardinality,
 		cardinality_one::{BitwiseEncoder, CardinalityOne},
 		int_linear::NormalizedIntLinear,
@@ -18,7 +18,7 @@ use crate::{
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
 };
 
-impl BoolLinAggregator {
+impl LinAggregator {
 	#[cfg_attr(
 		any(feature = "tracing", test),
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
@@ -263,28 +263,28 @@ impl BoolLinAggregator {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 /// A transformation of a general [`Linear`] constraint into a aggregated
 /// and normalized variant.
-pub struct BoolLinAggregator {
+pub struct LinAggregator {
 	sorted_encoder: SortedEncoder,
 	sort_same_coefficients: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 /// An encoder for Boolean linear constraints that performs aggregation using a
-/// [`BoolLinAggregator`] and then encodes the aggregated constraints using a
+/// [`LinAggregator`] and then encodes the aggregated constraints using a
 /// [`Encoder`] for [`LinVariant`].
-pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = BoolLinAggregator> {
+pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = LinAggregator> {
 	enc: Enc,
 	agg: Agg,
 }
 
 impl<Enc, Agg> LinearEncoder<Enc, Agg> {
-	/// Access the [`BoolLinAggregator`] used by this encoder.
+	/// Access the [`LinAggregator`] used by this encoder.
 	pub fn linear_aggregator(&self) -> &Agg {
 		&self.agg
 	}
 
 	/// Create a new [`LinearEncoder`] with the given [`Encoder`] for
-	/// [`LinVariant`]s and [`BoolLinAggregator`].
+	/// [`LinVariant`]s and [`LinAggregator`].
 	pub fn new(enc: Enc, agg: Agg) -> Self {
 		Self { enc, agg }
 	}
@@ -294,7 +294,7 @@ impl<Enc, Agg> LinearEncoder<Enc, Agg> {
 		&self.enc
 	}
 
-	/// Change the [`BoolLinAggregator`] used by this encoder.
+	/// Change the [`LinAggregator`] used by this encoder.
 	pub fn with_linear_aggregator(&mut self, agg: Agg) -> &mut Self {
 		self.agg = agg;
 		self
@@ -410,7 +410,7 @@ mod tests {
 	/// Aggregate `con` and read the result back.
 	fn aggregated(
 		db: &mut Cnf,
-		agg: &BoolLinAggregator,
+		agg: &LinAggregator,
 		con: &Linear,
 	) -> Result<Aggregated, Unsatisfiable> {
 		Ok(match agg.aggregate(db, con)? {
@@ -456,7 +456,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[1, 1, 1, 1], &[a, b, c, d]),
 					Comparator::LessEq,
@@ -476,7 +476,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[1, 1, 1], &[a, b, c]),
 					Comparator::Equal,
@@ -501,7 +501,7 @@ mod tests {
 		let a = cnf.new_lit();
 		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
 		let con = Linear::new(a * 2 + y.clone() * 3, Comparator::LessEq, 0);
-		let LinVariant::Linear(con) = BoolLinAggregator::default()
+		let LinVariant::Linear(con) = LinAggregator::default()
 			.aggregate(&mut cnf, &con)
 			.unwrap()
 		else {
@@ -530,7 +530,7 @@ mod tests {
 		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
 
 		let con = Linear::new(a * 3 + y.clone() * 5, Comparator::LessEq, 11);
-		let LinVariant::Linear(con) = BoolLinAggregator::default()
+		let LinVariant::Linear(con) = LinAggregator::default()
 			.aggregate(&mut cnf, &con)
 			.unwrap()
 		else {
@@ -539,7 +539,7 @@ mod tests {
 		assert_eq!(con.terms().len(), 2, "one term of each kind");
 		cnf.encode(
 			&con,
-			&crate::constraint::bool_linear::BddEncoder::default(),
+			&crate::constraint::linear::BddEncoder::default(),
 		)
 		.unwrap();
 
@@ -581,7 +581,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[0, 2, 3, 4], &[a, b, c, d]),
 					Comparator::LessEq,
@@ -604,7 +604,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[2, 4, 6], &[a, b, c]),
 					Comparator::LessEq,
@@ -625,7 +625,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(LinExp::from_slices(&[2, 4], &[a, b]), Comparator::Equal, 5)
 			),
 			Err(Unsatisfiable)
@@ -641,7 +641,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[3, 3, 3, 7], &[a, b, c, d]),
 					Comparator::LessEq,
@@ -658,7 +658,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[3, 3, 3, 7], &[a, b, c, d]),
 					Comparator::Equal,
@@ -674,7 +674,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[2, 3, 4], &[a, b, c]),
 					Comparator::LessEq,
@@ -697,7 +697,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[1, 2, 1, 2], &[a, a, b, c]),
 					Comparator::LessEq,
@@ -724,7 +724,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[1, 2, 1, 2], &[a, !a, b, c]),
 					Comparator::LessEq,
@@ -742,7 +742,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[1, -2, 1, 2], &[a, a, b, c]),
 					Comparator::LessEq,
@@ -767,7 +767,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(LinExp::from_slices(&[1, 1, 1], &vars), Comparator::Equal, 1)
 			),
 			Ok(Aggregated::CardinalityOne(vars, LimitComp::Equal))
@@ -782,7 +782,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[1, 2, 1, 1, 4, 1, 1], &[a, !b, c, d, !e, f, !g]),
 					Comparator::GreaterEq,
@@ -814,7 +814,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				BoolLinAggregator::default().sort_same_coefficients(SortedEncoder::default(), 2),
+				LinAggregator::default().sort_same_coefficients(SortedEncoder::default(), 2),
 				&Linear::new(
 					LinExp::from_slices(&[3, 3, 5, 3], &[a, b, d, c]),
 					Comparator::LessEq,
@@ -843,7 +843,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				BoolLinAggregator::default().sort_same_coefficients(SortedEncoder::default(), 2),
+				LinAggregator::default().sort_same_coefficients(SortedEncoder::default(), 2),
 				&Linear::new(
 					LinExp::from_slices(&[5, 5, 5, 5, 4], &vars),
 					Comparator::LessEq,
@@ -873,7 +873,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut db,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(LinExp::from_slices(&[1, 2, 2], &vars), Comparator::Equal, 6)
 			),
 			Err(Unsatisfiable)
@@ -881,7 +881,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut db,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[1, 2, 2], &vars),
 					Comparator::GreaterEq,
@@ -893,7 +893,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut db,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(
 					LinExp::from_slices(&[1, 2, 2], &vars),
 					Comparator::LessEq,
@@ -907,7 +907,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut db,
-				&BoolLinAggregator::default(),
+				&LinAggregator::default(),
 				&Linear::new(LinExp::from_slices(&[4, 4, 4], &vars), Comparator::Equal, 6)
 			),
 			Err(Unsatisfiable)
@@ -922,7 +922,7 @@ mod tests {
 
 		let k_of = |exp, cmp, k| {
 			let mut db = Cnf::default();
-			match BoolLinAggregator::default().aggregate(&mut db, &Linear::new(exp, cmp, k)) {
+			match LinAggregator::default().aggregate(&mut db, &Linear::new(exp, cmp, k)) {
 				Ok(LinVariant::Linear(lin)) => Some(lin.k()),
 				_ => None,
 			}

@@ -76,7 +76,7 @@ mod tests {
 
 	use crate::{
 		constraint::{
-			bool_linear::LimitComp,
+			linear::LimitComp,
 			cardinality_one::{CardinalityOne, PairwiseEncoder},
 		},
 		solver::{kissat::Kissat, SolveResult, Solver},

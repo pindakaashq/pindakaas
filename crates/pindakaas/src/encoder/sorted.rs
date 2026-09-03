@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
 	constraint::{
-		bool_linear::LimitComp,
+		linear::LimitComp,
 		int_ternary::{IntTernary, IntTernaryEncoder},
 		sorted::Sorted,
 	},
@@ -506,7 +506,7 @@ mod tests {
 
 	use crate::{
 		constraint::{
-			bool_linear::LimitComp,
+			linear::LimitComp,
 			sorted::{Sorted, SortedEncoder, SortedStrategy},
 		},
 		decision::integer::IntVar,

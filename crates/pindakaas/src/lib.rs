@@ -102,11 +102,11 @@
 //!
 //! ## Linear constraints
 //!
-//! A [`LinExp`](constraint::bool_linear::LinExp) is a sum of terms built with
+//! A [`LinExp`](constraint::linear::LinExp) is a sum of terms built with
 //! `+`, `-` and `*`. A term is either a [`Lit`], worth its coefficient when it
 //! holds, or an [`IntVar`](decision::integer::IntVar), worth its coefficient
 //! times whichever value it takes, so `x * 3 + y * 5` reads the same whichever
-//! kind each side is. [`Linear::new`](constraint::bool_linear::Linear::new)
+//! kind each side is. [`Linear::new`](constraint::linear::Linear::new)
 //! compares one against a constant.
 //!
 //! Encoding starts by aggregating, which normalises the constraint and
@@ -118,8 +118,8 @@
 //!
 //! ```rust
 //! use pindakaas::{
-//!     constraint::linear::{BoolLinAggregator, LinearEncoder, StaticLinEncoder},
-//!     constraint::bool_linear::{Linear, Comparator},
+//!     constraint::linear::{LinAggregator, LinearEncoder, StaticLinEncoder},
+//!     constraint::linear::{Linear, Comparator},
 //!     Cnf, ClauseDatabaseTools
 //! };
 //!
@@ -129,7 +129,7 @@
 //!
 //! // Use default encoders and aggregator options
 //! let lin_enc: StaticLinEncoder = StaticLinEncoder::default();
-//! let enc = LinearEncoder::new(lin_enc, BoolLinAggregator::default());
+//! let enc = LinearEncoder::new(lin_enc, LinAggregator::default());
 //!
 //! f.encode(&con, &enc);
 //!
@@ -156,9 +156,9 @@
 //!
 //! ```rust
 //! use pindakaas::{
-//!     constraint::bool_linear::{Comparator, Linear},
+//!     constraint::linear::{Comparator, Linear},
 //!     constraint::int_linear::BddEncoder,
-//!     constraint::linear::{BoolLinAggregator, LinVariant},
+//!     constraint::linear::{LinAggregator, LinVariant},
 //!     decision::integer::IntVar,
 //!     solver::{cadical::Cadical, SolveResult, Solver},
 //!     Cnf, Encoder,
@@ -169,7 +169,7 @@
 //! let y = IntVar::new(0..=5).with_label("y");
 //!
 //! let con = Linear::new(x.clone() * 2 + y.clone() * 3, Comparator::LessEq, 10);
-//! let LinVariant::Linear(con) = BoolLinAggregator::default().aggregate(&mut f, &con).unwrap()
+//! let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut f, &con).unwrap()
 //! else {
 //!     panic!("a sum of integer terms is a linear constraint");
 //! };

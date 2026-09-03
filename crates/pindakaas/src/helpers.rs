@@ -92,7 +92,7 @@ pub(crate) use new_named_lit;
 pub(crate) use new_named_var_range;
 
 use crate::{
-	constraint::bool_linear::PosCoeff, decision::integer::BinaryEncoding, BoolVal, ClauseDatabase,
+	constraint::linear::PosCoeff, decision::integer::BinaryEncoding, BoolVal, ClauseDatabase,
 	Coeff, Valuation,
 };
 
@@ -185,7 +185,7 @@ pub(crate) mod tests {
 	use rustc_hash::FxHashMap;
 
 	use crate::{
-		constraint::bool_linear::PosCoeff,
+		constraint::linear::PosCoeff,
 		decision::integer::IntVar,
 		helpers::binary_value,
 		solver::{cadical::Cadical, SolveResult, Solver},
@@ -760,14 +760,14 @@ pub(crate) mod tests {
 
 		pub(crate) use crate::{
 			constraint::{
-				bool_linear::{
+				linear::{
 					AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, Linear, PosCoeff,
 					SwcEncoder, TotalizerEncoder,
 				},
 				cardinality::{tests::card_test_suite, Cardinality, SortingNetworkEncoder},
 				cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
 				int_linear::NormalizedIntLinear,
-				linear::{BoolLinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},
+				linear::{LinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},
 				sorted::{SortedEncoder, SortedStrategy},
 			},
 			helpers::tests::{

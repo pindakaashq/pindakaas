@@ -1,7 +1,7 @@
 //! The constraint that at most, or exactly, `k` of a set of literals hold.
 //!
 //! Every term counts for one, which is what separates it from a general
-//! [`Linear`](super::bool_linear::Linear) and what lets the encoders below
+//! [`Linear`](super::linear::Linear) and what lets the encoders below
 //! count rather than add.
 
 pub use crate::encoder::{
@@ -12,7 +12,7 @@ use rustc_hash::FxHashSet;
 
 use crate::{
 	constraint::{
-		bool_linear::{Comparator, LimitComp, PosCoeff},
+		linear::{Comparator, LimitComp, PosCoeff},
 		cardinality_one::CardinalityOne,
 		int_linear::NormalizedIntLinear,
 	},
@@ -47,7 +47,7 @@ impl Cardinality {
 	///
 	/// ```rust
 	/// # use pindakaas::{
-	/// #     constraint::{bool_linear::{AdderEncoder, LimitComp}, cardinality::Cardinality},
+	/// #     constraint::{linear::{AdderEncoder, LimitComp}, cardinality::Cardinality},
 	/// #     ClauseDatabaseTools, Cnf, Encoder,
 	/// # };
 	/// let mut f = Cnf::default();
@@ -153,7 +153,7 @@ impl From<CardinalityOne> for Cardinality {
 const _: () = {
 	use crate::{
 		constraint::{
-			bool_linear::{AdderEncoder, BddEncoder, SwcEncoder, TotalizerEncoder},
+			linear::{AdderEncoder, BddEncoder, SwcEncoder, TotalizerEncoder},
 		},
 		Cnf, Encoder,
 	};
@@ -177,7 +177,7 @@ pub(crate) mod tests {
 	#[should_panic = "distinct variables"]
 	fn a_repeated_variable_is_not_a_cardinality_constraint() {
 		use crate::{
-			constraint::{bool_linear::LimitComp, cardinality::Cardinality},
+			constraint::{linear::LimitComp, cardinality::Cardinality},
 			ClauseDatabaseTools, Cnf,
 		};
 		let mut f = Cnf::default();

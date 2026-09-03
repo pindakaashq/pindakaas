@@ -2,7 +2,7 @@
 //! without reaching the next.
 
 use crate::{
-	constraint::{bool_linear::LimitComp, cardinality_one::CardinalityOne},
+	constraint::{linear::LimitComp, cardinality_one::CardinalityOne},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Encoder, Result,
 };
 

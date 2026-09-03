@@ -70,14 +70,14 @@ mod pindakaas {
 	use itertools::Itertools;
 	use pindakaas::{
 		constraint::{
-			bool_linear::{
+			linear::{
 				AdderEncoder, Comparator, LinExp as BaseBoolLinExp, Linear as BaseBoolLinCon,
 				SwcEncoder, TotalizerEncoder,
 			},
 			cardinality::{Cardinality, SortingNetworkEncoder},
 			cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
 			int_linear::NormalizedIntLinear,
-			linear::{BoolLinAggregator, LinVariant, LinearEncoder},
+			linear::{LinAggregator, LinVariant, LinearEncoder},
 			propositional_logic::{Formula as BaseFormula, TseitinEncoder},
 		},
 		decision::integer::IntVar as BaseIntVar,
@@ -377,7 +377,7 @@ mod pindakaas {
 		match con {
 			ConstraintArg::BoolLin(lin) => {
 				let encoder = LinEncoderWrapper::new(enc);
-				let encoder = LinearEncoder::new(encoder, BoolLinAggregator::default());
+				let encoder = LinearEncoder::new(encoder, LinAggregator::default());
 				encoder.encode_implied(db, &conditions, &lin.0)?;
 				let err = encoder
 					.variant_encoder()
@@ -789,11 +789,11 @@ mod pindakaas {
 		///
 		/// :param db: The database any encoding is created in
 		/// :param value: The value to compare against
-		/// :param create: Whether to build the order encoding where the
-		/// variable     does not have one
+		/// :param create: Whether to build the order encoding where the variable
+		///     does not have one
 		/// :return: The literal, a constant where the domain settles it, or
-		///     `None` where the variable has no order encoding and `create`
-		/// said     not to build one, unless the domain settles it
+		///     `None` where answering would have meant building the order
+		///     encoding and `create` said not to
 		/// :raises Unsatisfiable: If the formula has become unsatisfiable
 		#[pyo3(signature = (db, value, create = true))]
 		fn at_least(
@@ -817,11 +817,11 @@ mod pindakaas {
 		///
 		/// :param db: The database any encoding is created in
 		/// :param value: The value to compare against
-		/// :param create: Whether to build the order encoding where the
-		/// variable     does not have one
+		/// :param create: Whether to build the order encoding where the variable
+		///     does not have one
 		/// :return: The literal, a constant where the domain settles it, or
-		///     `None` where the variable has no order encoding and `create`
-		/// said     not to build one, unless the domain settles it
+		///     `None` where answering would have meant building the order
+		///     encoding and `create` said not to
 		/// :raises Unsatisfiable: If the formula has become unsatisfiable
 		#[pyo3(signature = (db, value, create = true))]
 		fn at_most(
@@ -843,11 +843,11 @@ mod pindakaas {
 		///
 		/// :param db: The database any encoding is created in
 		/// :param value: The value to compare against
-		/// :param create: Whether to build the direct encoding where the
-		/// variable     does not have one
+		/// :param create: Whether to build the direct encoding where the variable
+		///     does not have one
 		/// :return: The literal, a constant where the domain settles it, or
-		///     `None` where the variable has no direct encoding and `create`
-		/// said     not to build one, unless the domain settles it
+		///     `None` where answering would have meant building the direct
+		///     encoding and `create` said not to
 		/// :raises Unsatisfiable: If the formula has become unsatisfiable
 		#[pyo3(signature = (db, value, create = true))]
 		fn equals(

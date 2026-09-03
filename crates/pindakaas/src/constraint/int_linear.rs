@@ -15,7 +15,7 @@ pub use crate::encoder::{
 use crate::Lit;
 use crate::{
 	constraint::{
-		bool_linear::{Comparator, LimitComp, PosCoeff},
+		linear::{Comparator, LimitComp, PosCoeff},
 		int_ternary::IntTernary,
 	},
 	decision::integer::IntVar,
@@ -37,7 +37,7 @@ use crate::{
 ///
 /// ```rust
 /// # use pindakaas::{
-/// #     constraint::{bool_linear::{Comparator, Linear}, linear::{BoolLinAggregator, LinVariant}},
+/// #     constraint::{linear::{Comparator, Linear}, linear::{LinAggregator, LinVariant}},
 /// #     decision::integer::IntVar, encoder::bdd::BddEncoder,
 /// #     Cnf, Encoder, ClauseDatabaseTools,
 /// # };
@@ -45,7 +45,7 @@ use crate::{
 /// let x = IntVar::new(0..=5);
 /// let con = Linear::new(x.clone() * -2 + 7, Comparator::GreaterEq, 1);
 ///
-/// let LinVariant::Linear(con) = BoolLinAggregator::default().aggregate(&mut f, &con)? else {
+/// let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut f, &con)? else {
 ///     panic!("a constraint over an integer aggregates to a linear one");
 /// };
 /// // Whatever it was written as, the types now say it is `≤` over positive
@@ -67,7 +67,7 @@ pub struct NormalizedIntLinear {
 /// The working form behind aggregation and the encoders: an [`IntTernary`] is
 /// read as one to be walked, and a [`NormalizedIntLinear`] is one whose
 /// coefficients have been made positive. Callers state constraints as a
-/// [`Linear`](super::bool_linear::Linear) and aggregate.
+/// [`Linear`](super::linear::Linear) and aggregate.
 #[derive(Clone, Debug)]
 pub(crate) struct IntLinear {
 	pub(crate) terms: Vec<Term>,

@@ -9,7 +9,7 @@ use itertools::Itertools;
 
 pub use crate::encoder::sorted::{SortedEncoder, SortedStrategy};
 use crate::{
-	constraint::bool_linear::{LimitComp, LinExp},
+	constraint::linear::{LimitComp, LinExp},
 	decision::integer::IntVar,
 	Checker, Lit, Result, Unsatisfiable, Valuation,
 };

@@ -7,7 +7,7 @@ use itertools::Itertools;
 
 use crate::{
 	constraint::{
-		bool_linear::Comparator,
+		linear::Comparator,
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		int_linear::{Decompose, NormalizedIntLinear},
@@ -27,14 +27,14 @@ use crate::{
 ///
 /// ```rust
 /// # use pindakaas::{
-/// #     constraint::{bool_linear::{Comparator, Linear}, int_linear::SwcEncoder,
-/// #                  linear::{BoolLinAggregator, LinVariant}},
+/// #     constraint::{linear::{Comparator, Linear}, int_linear::SwcEncoder,
+/// #                  linear::{LinAggregator, LinVariant}},
 /// #     decision::integer::IntVar, Cnf, Encoder,
 /// # };
 /// # let mut f = Cnf::default();
 /// # let (x, y) = (IntVar::new(0..=5), IntVar::new(0..=5));
 /// let con = Linear::new(x * 2 + y * 3, Comparator::LessEq, 10);
-/// let LinVariant::Linear(con) = BoolLinAggregator::default().aggregate(&mut f, &con)? else {
+/// let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut f, &con)? else {
 ///     panic!("a sum of integer terms is a linear constraint");
 /// };
 /// SwcEncoder::default().encode(&mut f, &con)?;

@@ -12,7 +12,7 @@ use rustc_hash::FxHashSet;
 
 use crate::{
 	constraint::{
-		bool_linear::{Comparator, LimitComp},
+		linear::{Comparator, LimitComp},
 		cardinality::Cardinality,
 	},
 	Checker, ClauseDatabase, ClauseDatabaseTools, Lit, Result, Valuation,
@@ -51,7 +51,7 @@ impl CardinalityOne {
 	///
 	/// ```rust
 	/// # use pindakaas::{
-	/// #     constraint::{bool_linear::LimitComp,
+	/// #     constraint::{linear::LimitComp,
 	/// #                  cardinality_one::{CardinalityOne, PairwiseEncoder}},
 	/// #     ClauseDatabaseTools, Cnf, Encoder,
 	/// # };
@@ -107,7 +107,7 @@ pub(crate) mod tests {
 	#[should_panic = "distinct variables"]
 	fn a_repeated_variable_is_not_an_at_most_one_constraint() {
 		use crate::{
-			constraint::{bool_linear::LimitComp, cardinality_one::CardinalityOne},
+			constraint::{linear::LimitComp, cardinality_one::CardinalityOne},
 			ClauseDatabaseTools, Cnf,
 		};
 		let mut f = Cnf::default();
@@ -387,7 +387,7 @@ pub(crate) mod tests {
 
 	use crate::{
 		constraint::{
-			bool_linear::LimitComp,
+			linear::LimitComp,
 			cardinality_one::{
 				BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder, ProductEncoder,
 			},

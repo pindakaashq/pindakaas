@@ -10,7 +10,7 @@ use itertools::Itertools;
 
 use crate::{
 	constraint::{
-		bool_linear::{LimitComp, PosCoeff},
+		linear::{LimitComp, PosCoeff},
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		int_linear::{NormalizedIntLinear, Term},
@@ -36,14 +36,14 @@ use crate::{
 ///
 /// ```rust
 /// # use pindakaas::{
-/// #     constraint::{bool_linear::{Comparator, Linear}, bool_linear::AdderEncoder,
-/// #                  linear::{BoolLinAggregator, LinVariant}},
+/// #     constraint::{linear::{Comparator, Linear}, linear::AdderEncoder,
+/// #                  linear::{LinAggregator, LinVariant}},
 /// #     decision::integer::IntVar, Cnf, Encoder,
 /// # };
 /// # let mut f = Cnf::default();
 /// # let (x, y) = (IntVar::new(0..=5), IntVar::new(0..=5));
 /// let con = Linear::new(x * 2 + y * 3, Comparator::LessEq, 10);
-/// let LinVariant::Linear(con) = BoolLinAggregator::default().aggregate(&mut f, &con)? else {
+/// let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut f, &con)? else {
 ///     panic!("a sum of integer terms is a linear constraint");
 /// };
 /// AdderEncoder::default().encode(&mut f, &con)?;

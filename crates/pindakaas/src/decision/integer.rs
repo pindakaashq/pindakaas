@@ -40,7 +40,7 @@ use rangelist::{IntervalIterator, RangeList};
 use rustc_hash::FxHashMap;
 
 use crate::{
-	constraint::bool_linear::{Comparator, PosCoeff},
+	constraint::linear::{Comparator, PosCoeff},
 	helpers::{as_binary, bit, new_named_var_range},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable, Var, VarRange,
 };
@@ -1607,7 +1607,7 @@ pub(crate) mod tests {
 	use traced_test::test;
 
 	use crate::{
-		constraint::bool_linear::{Comparator, PosCoeff},
+		constraint::linear::{Comparator, PosCoeff},
 		decision::integer::{lex_geq_const, lex_leq_const, BinaryEncoding, IntVar, Lead},
 		helpers::{
 			binary_value,

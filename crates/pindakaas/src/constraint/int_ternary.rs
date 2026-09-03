@@ -6,7 +6,7 @@
 
 pub use crate::encoder::int_ternary::{IntTernaryConfig, IntTernaryEncoder};
 use crate::constraint::{
-	bool_linear::Comparator,
+	linear::Comparator,
 	int_linear::{term_negated, IntLinear, Term},
 };
 

@@ -11,7 +11,7 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-	constraint::{bool_linear::LinExp, propositional_logic::Formula},
+	constraint::{linear::LinExp, propositional_logic::Formula},
 	helpers::subscript_number,
 	Coeff,
 };
