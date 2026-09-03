@@ -135,3 +135,83 @@ def test_custom_db():
         [-4, 2, 3],
         [-4, -2, -3],
     ]
+
+
+def test_literals_from_an_int_var_make_a_nogood():
+    """A clause over the literals of integers rules an assignment out."""
+    from pindakaas.solver import CaDiCaL, Status
+
+    slv = CaDiCaL()
+    x = slv.new_int_var(range(0, 4))
+    y = slv.new_int_var([0, 1, 3])
+
+    seen = []
+    while True:
+        with slv.solve() as result:
+            if result.status != Status.SATISFIED:
+                break
+            assignment = (x.value(result), y.value(result))
+        seen.append(assignment)
+        slv.add_clause([~x.equals(slv, assignment[0]), ~y.equals(slv, assignment[1])])
+
+    assert sorted(seen) == [(a, b) for a in range(4) for b in [0, 1, 3]]
+
+
+def test_a_settled_question_gives_a_constant():
+    """Where the domain decides, there is no literal to ask for."""
+    from pindakaas.encoding import CNF
+
+    f = CNF()
+    x = f.new_int_var(range(0, 3))
+
+    assert bool(x.equals(f, 9)) is False
+    assert x.equals(f, 9).lit() is None
+    assert bool(x.at_least(f, 0)) is True
+    assert bool(x.at_most(f, 9)) is True
+
+    reachable = x.at_least(f, 2)
+    assert reachable.lit() is not None
+    with pytest.raises(ValueError):
+        bool(reachable)
+
+
+def test_asking_without_building_an_encoding():
+    """`create=False` answers what the domain or an existing encoding can."""
+    from pindakaas.encoding import CNF
+
+    f = CNF()
+    x = f.new_int_var([0, 1, 3, 4])
+
+    # The domain settles these, so they cost nothing.
+    assert bool(x.at_least(f, 0, create=False)) is True
+    assert bool(x.at_least(f, 5, create=False)) is False
+    assert bool(x.at_most(f, 4, create=False)) is True
+    assert bool(x.at_most(f, -1, create=False)) is False
+    assert bool(x.equals(f, 9, create=False)) is False
+    assert bool(x.equals(f, 2, create=False)) is False  # the hole
+
+    # These need an encoding, and there is none.
+    assert x.at_least(f, 3, create=False) is None
+    assert x.at_most(f, 1, create=False) is None
+    assert x.equals(f, 3, create=False) is None
+    assert f.clauses() == []
+
+    # Asking for it builds the order encoding, which then answers.
+    assert x.at_least(f, 3).lit() is not None
+    assert f.clauses() != []
+    assert x.at_least(f, 3, create=False).lit() is not None
+
+    # Equality wants the direct encoding, which is still not there.
+    assert x.equals(f, 3, create=False) is None
+    assert x.equals(f, 3).lit() is not None
+    assert x.equals(f, 3, create=False).lit() is not None
+
+
+def test_a_single_value_domain_settles_equality():
+    """One value and no other, so no encoding is needed to say which."""
+    from pindakaas.encoding import CNF
+
+    f = CNF()
+    x = f.new_int_var(range(5, 6))
+    assert bool(x.equals(f, 5, create=False)) is True
+    assert f.clauses() == []

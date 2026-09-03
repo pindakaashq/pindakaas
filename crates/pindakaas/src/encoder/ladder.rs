@@ -6,7 +6,11 @@ use crate::{
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Encoder, Result,
 };
 
-/// An encoder for an At Most One constraints that TODO
+/// Encoder for an at-most-one constraint, as a ladder of commander literals.
+///
+/// One literal per position saying whether the chain has come down by there,
+/// so a literal taking its value is that step and no other. Linear in the
+/// number of literals, where the pairwise encoding is quadratic.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct LadderEncoder {}
 

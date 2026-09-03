@@ -81,8 +81,8 @@ mod pindakaas {
 			propositional_logic::{Formula as BaseFormula, TseitinEncoder},
 		},
 		decision::integer::IntVar as BaseIntVar,
-		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as EncoderTrait, Lit as BaseLit,
-		RangeList, VarRange as BaseVarRange, Wcnf,
+		BoolVal as BaseBoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as EncoderTrait,
+		IntervalIterator, Lit as BaseLit, RangeList, VarRange as BaseVarRange, Wcnf,
 	};
 	use pyo3::{exceptions::PyValueError, prelude::*, types::PyIterator};
 
@@ -168,7 +168,25 @@ mod pindakaas {
 	#[pyclass(from_py_object)]
 	#[derive(Clone, Debug)]
 	/// A propositional logic formula.
-	struct Formula(BaseFormula<BoolVal>);
+	struct Formula(BaseFormula<BaseBoolVal>);
+
+	#[derive(FromPyObject)]
+	/// Argument capture for what a clause can be written over.
+	enum ClauseArg {
+		Bool(bool),
+		BoolVal(BoolVal),
+		Lit(Lit),
+	}
+
+	impl From<ClauseArg> for BaseBoolVal {
+		fn from(arg: ClauseArg) -> Self {
+			match arg {
+				ClauseArg::Bool(b) => BaseBoolVal::Const(b),
+				ClauseArg::BoolVal(v) => v.0,
+				ClauseArg::Lit(l) => BaseBoolVal::Lit(l.0),
+			}
+		}
+	}
 
 	#[derive(FromPyObject)]
 	/// Argument capture for types that can become :class:`Formula`.
@@ -198,6 +216,16 @@ mod pindakaas {
 	#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 	/// A Boolean literal, representing a Boolean variable or its negation.
 	struct Lit(BaseLit);
+
+	#[pyclass(from_py_object)]
+	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+	/// A Boolean literal, or a constant where the answer is already settled.
+	///
+	/// Asking an integer variable about a value gives one of these: the literal
+	/// that says it, or `True`/`False` where the domain already decides. It is
+	/// accepted anywhere a :class:`Lit` is, so a clause can be written without
+	/// checking which it is.
+	struct BoolVal(BaseBoolVal);
 
 	#[pyclass(skip_from_py_object)]
 	#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -311,7 +339,10 @@ mod pindakaas {
 		bits: Vec<Lit>,
 		counts_from: i64,
 	) -> Result<IntVar> {
-		let bits = bits.into_iter().map(|l| BoolVal::Lit(l.0)).collect_vec();
+		let bits = bits
+			.into_iter()
+			.map(|l| BaseBoolVal::Lit(l.0))
+			.collect_vec();
 		let x = BaseIntVar::from_binary_encoding(
 			&mut PyDbWrapper(obj),
 			int_var_domain(domain),
@@ -471,11 +502,12 @@ mod pindakaas {
 	#[pymethods]
 	impl CNFInner {
 		fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
-			let clause: Vec<Lit> = clause
+			let clause: Vec<ClauseArg> = clause
 				.into_iter()
-				.map(|any| any.and_then(|lit| lit.extract::<Lit>().map_err(PyErr::from)))
+				.map(|any| any.and_then(|lit| lit.extract::<ClauseArg>()))
 				.try_collect()?;
-			self.0.add_clause(clause.into_iter().map(|lit| lit.0))?;
+			self.0
+				.add_clause(clause.into_iter().map(BaseBoolVal::from))?;
 			Ok(())
 		}
 
@@ -584,12 +616,12 @@ mod pindakaas {
 
 	impl FormulaArg {
 		/// Internal method used to convert the :class:`FormulaArg` into a
-		/// :class:`BaseFormula<BoolVal>`.
-		fn as_formula(&self) -> BaseFormula<BoolVal> {
+		/// :class:`BaseFormula<BaseBoolVal>`.
+		fn as_formula(&self) -> BaseFormula<BaseBoolVal> {
 			use BaseFormula::*;
 
 			match self {
-				FormulaArg::Const(b) => Atom(BoolVal::Const(*b)),
+				FormulaArg::Const(b) => Atom(BaseBoolVal::Const(*b)),
 				FormulaArg::Formula(formula) => formula.0.clone(),
 				FormulaArg::Lit(lit) => lit.as_formula(),
 			}
@@ -686,7 +718,7 @@ mod pindakaas {
 			LinExp(self.0.into())
 		}
 
-		fn as_formula(&self) -> BaseFormula<BoolVal> {
+		fn as_formula(&self) -> BaseFormula<BaseBoolVal> {
 			BaseFormula::Atom(self.0.into())
 		}
 	}
@@ -753,6 +785,88 @@ mod pindakaas {
 			self.as_bool_lin_exp().__sub__(other)
 		}
 
+		/// The literal for the variable reaching at least `value`.
+		///
+		/// :param db: The database any encoding is created in
+		/// :param value: The value to compare against
+		/// :param create: Whether to build the order encoding where the
+		/// variable     does not have one
+		/// :return: The literal, a constant where the domain settles it, or
+		///     `None` where the variable has no order encoding and `create`
+		/// said     not to build one, unless the domain settles it
+		/// :raises Unsatisfiable: If the formula has become unsatisfiable
+		#[pyo3(signature = (db, value, create = true))]
+		fn at_least(
+			&self,
+			db: &Bound<'_, PyAny>,
+			value: i64,
+			create: bool,
+		) -> Result<Option<BoolVal>> {
+			// Below the bottom of the domain or above its top the answer is a
+			// constant, and only what lies between needs the encoding.
+			let settled = value <= self.0.min() || value > self.0.max();
+			if !create && !settled && !self.0.has_order_encoding() {
+				return Ok(None);
+			}
+			Ok(Some(BoolVal(
+				self.0.lit_at_least(&mut PyDbWrapper(db), value)?,
+			)))
+		}
+
+		/// The literal for the variable reaching at most `value`.
+		///
+		/// :param db: The database any encoding is created in
+		/// :param value: The value to compare against
+		/// :param create: Whether to build the order encoding where the
+		/// variable     does not have one
+		/// :return: The literal, a constant where the domain settles it, or
+		///     `None` where the variable has no order encoding and `create`
+		/// said     not to build one, unless the domain settles it
+		/// :raises Unsatisfiable: If the formula has become unsatisfiable
+		#[pyo3(signature = (db, value, create = true))]
+		fn at_most(
+			&self,
+			db: &Bound<'_, PyAny>,
+			value: i64,
+			create: bool,
+		) -> Result<Option<BoolVal>> {
+			let settled = value < self.0.min() || value >= self.0.max();
+			if !create && !settled && !self.0.has_order_encoding() {
+				return Ok(None);
+			}
+			Ok(Some(BoolVal(
+				self.0.lit_at_most(&mut PyDbWrapper(db), value)?,
+			)))
+		}
+
+		/// The literal for the variable taking `value`.
+		///
+		/// :param db: The database any encoding is created in
+		/// :param value: The value to compare against
+		/// :param create: Whether to build the direct encoding where the
+		/// variable     does not have one
+		/// :return: The literal, a constant where the domain settles it, or
+		///     `None` where the variable has no direct encoding and `create`
+		/// said     not to build one, unless the domain settles it
+		/// :raises Unsatisfiable: If the formula has become unsatisfiable
+		#[pyo3(signature = (db, value, create = true))]
+		fn equals(
+			&self,
+			db: &Bound<'_, PyAny>,
+			value: i64,
+			create: bool,
+		) -> Result<Option<BoolVal>> {
+			// A value the variable cannot take, or the only one it can, is
+			// settled by the domain rather than by any encoding.
+			let settled = !self.0.domain().contains(&value) || self.0.card() == 1;
+			if !create && !settled && !self.0.has_direct_encoding() {
+				return Ok(None);
+			}
+			Ok(Some(BoolVal(
+				self.0.lit_equals(&mut PyDbWrapper(db), value)?,
+			)))
+		}
+
 		/// The number of values the variable can take.
 		fn card(&self) -> usize {
 			self.0.card()
@@ -806,6 +920,36 @@ mod pindakaas {
 	impl IntVar {
 		fn as_bool_lin_exp(&self) -> LinExp {
 			LinExp(self.0.clone().into())
+		}
+	}
+
+	#[pymethods]
+	impl BoolVal {
+		fn __invert__(&self) -> Self {
+			Self(!self.0)
+		}
+
+		fn __repr__(&self) -> String {
+			match self.0 {
+				BaseBoolVal::Const(b) => format!("{b}"),
+				BaseBoolVal::Lit(l) => format!("{l}"),
+			}
+		}
+
+		/// The literal, or `None` where the value is already settled.
+		fn lit(&self) -> Option<Lit> {
+			match self.0 {
+				BaseBoolVal::Lit(l) => Some(Lit(l)),
+				BaseBoolVal::Const(_) => None,
+			}
+		}
+
+		/// The constant value, or `None` if the value is not yet settled.
+		fn value(&self) -> Option<bool> {
+			match self.0 {
+				BaseBoolVal::Const(b) => Some(b),
+				BaseBoolVal::Lit(_) => None,
+			}
 		}
 	}
 
@@ -953,11 +1097,12 @@ mod pindakaas {
 	#[pymethods]
 	impl WCNFInner {
 		fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
-			let clause: Vec<Lit> = clause
+			let clause: Vec<ClauseArg> = clause
 				.into_iter()
-				.map(|any| any.and_then(|lit| lit.extract::<Lit>().map_err(PyErr::from)))
+				.map(|any| any.and_then(|lit| lit.extract::<ClauseArg>()))
 				.try_collect()?;
-			self.0.add_clause(clause.into_iter().map(|lit| lit.0))?;
+			self.0
+				.add_clause(clause.into_iter().map(BaseBoolVal::from))?;
 			Ok(())
 		}
 
@@ -1067,7 +1212,7 @@ mod pindakaas {
 				cadical::Cadical, kissat::Kissat, Assumptions, FailedAssumptions, SolveResult,
 				Solver, TermSignal, TerminateCallback,
 			},
-			ClauseDatabase, ClauseDatabaseTools, Lit as BaseLit, Valuation,
+			BoolVal as BaseBoolVal, ClauseDatabase, ClauseDatabaseTools, Lit as BaseLit, Valuation,
 		};
 		use pyo3::{
 			exceptions::{PyNotImplementedError, PyRuntimeError},
@@ -1283,12 +1428,12 @@ mod pindakaas {
 
 		impl<S: ClauseDatabase> SolverImpl<S> {
 			fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
-				let clause: Vec<Lit> = clause
+				let clause: Vec<super::ClauseArg> = clause
 					.into_iter()
-					.map(|any| any.and_then(|lit| lit.extract::<Lit>().map_err(PyErr::from)))
+					.map(|any| any.and_then(|lit| lit.extract::<super::ClauseArg>()))
 					.try_collect()?;
 				self.solver_mut()?
-					.add_clause(clause.into_iter().map(|lit| lit.0))?;
+					.add_clause(clause.into_iter().map(BaseBoolVal::from))?;
 				Ok(())
 			}
 

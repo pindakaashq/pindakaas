@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Iterable, Optional, Union
 
 from .pindakaas import (
+    BoolVal,
     CNFInner,
     Encoder,
     Formula,
@@ -81,10 +82,11 @@ class ClauseDatabase(ABC):
         return self
 
     @abstractmethod
-    def add_clause(self, clause: Iterable[Lit]):
+    def add_clause(self, clause: Iterable[Union[Lit, BoolVal, bool]]):
         """Add a clause to the database.
 
-        :param clause: An iterable of literals representing the clause to add
+        :param clause: The literals of the clause, as given by :class:`Lit`,
+            :class:`BoolVal` or a plain :class:`bool`
         :raises Unsatisfiable: If the formula has become unsatisfiable
         """
         ...
@@ -236,7 +238,7 @@ class CNF(ClauseDatabase):
     def __init__(self):
         self._inner = CNFInner()
 
-    def add_clause(self, clause: Iterable[Lit]):
+    def add_clause(self, clause: Iterable[Union[Lit, BoolVal, bool]]):
         return self._inner.add_clause(iter(clause))
 
     def add_encoding(

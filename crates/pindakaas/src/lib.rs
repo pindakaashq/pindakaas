@@ -228,7 +228,7 @@ use std::{
 };
 
 use itertools::{traits::HomogeneousTuple, Itertools};
-pub use rangelist::RangeList;
+pub use rangelist::{IntervalIterator, RangeList};
 
 use crate::solver::VarFactory;
 pub use crate::{
