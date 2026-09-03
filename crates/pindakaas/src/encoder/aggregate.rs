@@ -12,7 +12,7 @@ use crate::{
 		cardinality_one::{BitwiseEncoder, CardinalityOne},
 		int_linear::NormalizedIntLinear,
 		linear::LinVariant,
-		sorted::{Sorted, SortedEncoder},
+		count::{Count, SortedEncoder},
 	},
 	decision::integer::IntVar,
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
@@ -222,7 +222,7 @@ impl LinAggregator {
 					// to gain by leaving them to the network below.
 					let _ = y.order_encoding(db)?;
 					self.sorted_encoder
-						.encode(db, &Sorted::new(&lits, cmp.clone(), &y))
+						.encode(db, &Count::new(lits.clone(), cmp.clone(), y.clone()))
 						.unwrap();
 					int_terms.push((y, *coef));
 				} else {

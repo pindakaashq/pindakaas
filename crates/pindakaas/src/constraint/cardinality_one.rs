@@ -21,7 +21,7 @@ use crate::{
 #[derive(Debug, Clone)]
 /// Linear constraint that enforces that ∑ litᵢ ≷ 1.
 ///
-/// Compared to [`Cardinality`](super::cardinality::Cardinality),
+/// Compared to a [`Cardinality`](super::cardinality::Cardinality) constraint,
 /// the right hand side constant is always 1.
 ///
 /// All literals in the constraint are guaranteed to be from distinct Boolean

@@ -1,4 +1,4 @@
-//! The odd-even merge network that encodes a [`Sorted`] constraint.
+//! The odd-even merge network that encodes a [`Count`] constraint.
 //!
 //! Each merge is either stated outright or halved and recursed on — see
 //! [`SortedStrategy`] — and the leaves become ternary integer constraints.
@@ -11,7 +11,7 @@ use crate::{
 	constraint::{
 		linear::LimitComp,
 		int_ternary::{IntTernary, IntTernaryEncoder},
-		sorted::Sorted,
+		count::Count,
 	},
 	decision::integer::IntVar,
 	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
@@ -20,7 +20,7 @@ use crate::{
 type SortedCache = FxHashMap<(u128, u128, u128), (SortedStrategy, (u128, u128))>;
 
 #[derive(Debug)]
-/// Encoder for [`Sorted`] employing a Merge Sort strategy.
+/// Encoder for a [`Count`] constraint, as an odd-even merge network.
 ///
 /// # Warning
 /// The encoder structure contains a cache for computing node costs that is
@@ -356,11 +356,11 @@ impl Default for SortedEncoder {
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Sorted<'_>> for SortedEncoder {
-	fn encode(&self, db: &mut Db, sorted: &Sorted) -> Result {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SortedEncoder {
+	fn encode(&self, db: &mut Db, count: &Count) -> Result {
 		// Each literal is an integer worth one when it holds.
-		let xs = sorted
-			.xs
+		let xs = count
+			.lits
 			.iter()
 			.enumerate()
 			.map(|(i, &x)| {
@@ -369,7 +369,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Sorted<'_>> for SortedEncoder {
 			})
 			.collect::<Result<Vec<_>, _>>()?;
 
-		self.sorted(db, &xs, &sorted.cmp, sorted.y, 0)
+		self.sorted(db, &xs, &count.cmp, &count.y, 0)
 	}
 }
 
@@ -507,7 +507,7 @@ mod tests {
 	use crate::{
 		constraint::{
 			linear::LimitComp,
-			sorted::{Sorted, SortedEncoder, SortedStrategy},
+			count::{Count, SortedEncoder, SortedStrategy},
 		},
 		decision::integer::IntVar,
 		helpers::tests::{assert_solutions, expect_file},
@@ -561,7 +561,7 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortedStrategy::Recursive)
-			.encode(&mut cnf, &Sorted::new(&[a], LimitComp::Equal, &y))
+			.encode(&mut cnf, &Count::new(vec![a], LimitComp::Equal, y.clone()))
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_1_sorted_eq.sol"]);
@@ -583,7 +583,7 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortedStrategy::Recursive)
-			.encode(&mut cnf, &Sorted::new(&[a, b], LimitComp::Equal, &y))
+			.encode(&mut cnf, &Count::new(vec![a, b], LimitComp::Equal, y.clone()))
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_2_sorted_eq.sol"]);
@@ -606,7 +606,7 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortedStrategy::Recursive)
-			.encode(&mut cnf, &Sorted::new(&[a, b, c], LimitComp::Equal, &y))
+			.encode(&mut cnf, &Count::new(vec![a, b, c], LimitComp::Equal, y.clone()))
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_3_2_sorted_eq.sol"]);
@@ -629,7 +629,7 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortedStrategy::Recursive)
-			.encode(&mut cnf, &Sorted::new(&[a, b, c], LimitComp::Equal, &y))
+			.encode(&mut cnf, &Count::new(vec![a, b, c], LimitComp::Equal, y.clone()))
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_3_sorted_eq.sol"]);
@@ -650,7 +650,7 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortedStrategy::Recursive)
-			.encode(&mut cnf, &Sorted::new(&lits, LimitComp::Equal, &y))
+			.encode(&mut cnf, &Count::new(lits.clone(), LimitComp::Equal, y.clone()))
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_4_2_sorted_eq.sol"]);
@@ -671,7 +671,7 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortedStrategy::Recursive)
-			.encode(&mut cnf, &Sorted::new(&lits, LimitComp::Equal, &y))
+			.encode(&mut cnf, &Count::new(lits.clone(), LimitComp::Equal, y.clone()))
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_4_3_sorted_eq.sol"]);
@@ -692,7 +692,7 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortedStrategy::Recursive)
-			.encode(&mut cnf, &Sorted::new(&lits, LimitComp::Equal, &y))
+			.encode(&mut cnf, &Count::new(lits.clone(), LimitComp::Equal, y.clone()))
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_4_sorted_eq.sol"]);
@@ -713,7 +713,7 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortedStrategy::Recursive)
-			.encode(&mut cnf, &Sorted::new(&lits, LimitComp::Equal, &y))
+			.encode(&mut cnf, &Count::new(lits.clone(), LimitComp::Equal, y.clone()))
 			.unwrap();
 
 		assert_solutions(
@@ -738,7 +738,7 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortedStrategy::Recursive)
-			.encode(&mut cnf, &Sorted::new(&lits, LimitComp::Equal, &y))
+			.encode(&mut cnf, &Count::new(lits.clone(), LimitComp::Equal, y.clone()))
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_5_3_sorted_eq.sol"]);
@@ -759,7 +759,7 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortedStrategy::Recursive)
-			.encode(&mut cnf, &Sorted::new(&lits, LimitComp::Equal, &y))
+			.encode(&mut cnf, &Count::new(lits.clone(), LimitComp::Equal, y.clone()))
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_5_sorted_eq.sol"]);

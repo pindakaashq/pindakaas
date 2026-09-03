@@ -1,14 +1,14 @@
 //! Encoding a cardinality constraint as a sorting network.
 //!
 //! The literals are counted into an integer pinned to `k`, which is a
-//! [`Sorted`](crate::constraint::sorted::Sorted) constraint, so the network
+//! [`Count`] constraint, so the network
 //! that encodes one encodes this too.
 
 use crate::{
 	constraint::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
-		sorted::{Sorted, SortedEncoder},
+		count::{Count, SortedEncoder},
 	},
 	decision::integer::IntVar,
 	ClauseDatabase, Coeff, Encoder, Result,
@@ -17,12 +17,12 @@ use crate::{
 /// Encoder for the linear constraints that ∑ litᵢ ≷ k using a sorting network
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SortingNetworkEncoder {
-	/// Encoder used to encode the [`Sorted`] constraints.
+	/// Encoder used to encode the [`Count`](crate::constraint::count::Count) constraints.
 	sorted_encoder: SortedEncoder,
 }
 
 impl SortingNetworkEncoder {
-	/// Set the [`Encoder`] used for the [`Sorted`] constraint the network
+	/// Set the [`Encoder`] used for the [`Count`] constraint the network
 	/// becomes.
 	///
 	/// Its comparator overrides are cleared. They let a merge state less than
@@ -66,7 +66,7 @@ where
 		let k: Coeff = card.k.into();
 		let y = IntVar::new(k..=k).with_label("k");
 		self.sorted_encoder
-			.encode(db, &Sorted::new(card.lits.as_slice(), card.cmp.clone(), &y))
+			.encode(db, &Count::new(card.lits.clone(), card.cmp.clone(), y))
 	}
 }
 

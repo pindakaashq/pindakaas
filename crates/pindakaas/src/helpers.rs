@@ -768,7 +768,7 @@ pub(crate) mod tests {
 				cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
 				int_linear::NormalizedIntLinear,
 				linear::{LinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},
-				sorted::{SortedEncoder, SortedStrategy},
+				count::{SortedEncoder, SortedStrategy},
 			},
 			helpers::tests::{
 				all_binary_solutions, assert_checker, assert_encoding, assert_solutions,

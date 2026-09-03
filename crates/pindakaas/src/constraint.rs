@@ -9,4 +9,4 @@ pub mod cardinality_one;
 pub mod int_linear;
 pub mod int_ternary;
 pub mod propositional_logic;
-pub mod sorted;
+pub mod count;
