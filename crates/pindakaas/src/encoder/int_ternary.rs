@@ -222,11 +222,11 @@ impl Encoded<'_> {
 		cmp: Comparator,
 		k: Coeff,
 	) -> Result<Vec<Vec<BoolVal>>, Unsatisfiable> {
-		// Dividing by a negative coefficient turns the comparison around.
-		let cmp = if self.c >= 0 { cmp } else { cmp.reverse() };
 		if self.x.has_direct_encoding() {
 			// Nothing says it in one literal, so rule out each value that would
-			// break the bound instead.
+			// break the bound instead. What the value is worth already carries
+			// the sign of the coefficient, so the comparison is the one asked
+			// for rather than the turned-around one below.
 			let breaks = self
 				.x
 				.lit_direct_steps(db, true)?
@@ -242,6 +242,8 @@ impl Encoded<'_> {
 				.map(|d| Ok(vec![!self.x.lit_equals(db, d)?]))
 				.collect()
 		} else {
+			// Dividing by a negative coefficient turns the comparison around.
+			let cmp = if self.c >= 0 { cmp } else { cmp.reverse() };
 			// One literal says where the variable stands against the bound.
 			Ok(vec![vec![match cmp {
 				Comparator::LessEq => self.x.lit_at_most(db, div_floor(k, self.c))?,
