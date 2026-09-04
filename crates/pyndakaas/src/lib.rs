@@ -70,14 +70,15 @@ mod pindakaas {
 	use itertools::Itertools;
 	use pindakaas::{
 		constraint::{
-			linear::{
-				AdderEncoder, Comparator, LinExp as BaseBoolLinExp, Linear as BaseBoolLinCon,
-				SwcEncoder, TotalizerEncoder,
-			},
+			bool_linear::NormalizedBoolLinear,
 			cardinality::{Cardinality, SortingNetworkEncoder},
 			cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
+			count::{Count, SortedEncoder},
 			int_linear::NormalizedIntLinear,
-			linear::{LinAggregator, LinVariant, LinearEncoder},
+			linear::{
+				AdderEncoder, BddEncoder, Comparator, LinAggregator, LinExp as BaseBoolLinExp,
+				LinVariant, Linear as BaseBoolLinCon, LinearEncoder, SwcEncoder, TotalizerEncoder,
+			},
 			propositional_logic::{Formula as BaseFormula, TseitinEncoder},
 		},
 		decision::integer::IntVar as BaseIntVar,
@@ -651,9 +652,48 @@ mod pindakaas {
 		fn encode(&self, db: &mut Db, con: &LinVariant) -> Result<(), pindakaas::Unsatisfiable> {
 			match con {
 				LinVariant::Linear(lin) => self.encode(db, lin),
+				LinVariant::BoolLinear(lin) => self.encode(db, lin),
+				LinVariant::Count(count) => self.encode(db, count),
 				LinVariant::Cardinality(card) => self.encode(db, card),
 				LinVariant::CardinalityOne(card1) => self.encode(db, card1),
 				LinVariant::Trivial => Ok(()),
+			}
+		}
+	}
+
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, NormalizedBoolLinear> for LinEncoderWrapper {
+		fn encode(
+			&self,
+			db: &mut Db,
+			con: &NormalizedBoolLinear,
+		) -> Result<(), pindakaas::Unsatisfiable> {
+			match self.method.unwrap_or(Encoder::ADDER) {
+				Encoder::ADDER => AdderEncoder::default().encode(db, con),
+				Encoder::DECISION_DIAGRAM => BddEncoder::default().encode(db, con),
+				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
+				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
+				enc => {
+					self.set_err("BoolLinear", enc);
+					Ok(())
+				}
+			}
+		}
+	}
+
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, Count> for LinEncoderWrapper {
+		fn encode(&self, db: &mut Db, con: &Count) -> Result<(), pindakaas::Unsatisfiable> {
+			match self.method.unwrap_or(Encoder::SORTING_NETWORK) {
+				// A sorting network states a count directly; the linear
+				// encoders read it as the linear constraint it is.
+				Encoder::SORTING_NETWORK => SortedEncoder::default().encode(db, con),
+				Encoder::ADDER => AdderEncoder::default().encode(db, con),
+				Encoder::DECISION_DIAGRAM => BddEncoder::default().encode(db, con),
+				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
+				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
+				enc => {
+					self.set_err("Count", enc);
+					Ok(())
+				}
 			}
 		}
 	}

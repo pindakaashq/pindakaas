@@ -11,6 +11,7 @@ use crate::{
 		linear::Comparator,
 		bool_linear::NormalizedBoolLinear,
 		cardinality::Cardinality,
+		count::Count,
 		cardinality_one::CardinalityOne,
 		int_linear::{term_max, term_min, term_values, Decompose, NormalizedIntLinear},
 		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
@@ -190,6 +191,15 @@ where
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for TotalizerEncoder {
 	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
 		let con = con.as_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for TotalizerEncoder {
+	fn encode(&self, db: &mut Db, con: &Count) -> Result {
+		// Counting into a variable is a linear constraint whose bound is not a
+		// constant, which this encoder takes once the bound is a term.
+		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}
 }

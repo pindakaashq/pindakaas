@@ -9,9 +9,12 @@ use itertools::Itertools;
 
 pub use crate::encoder::sorted::{SortedEncoder, SortedStrategy};
 use crate::{
-	constraint::linear::{LimitComp, LinExp},
+	constraint::{
+		int_linear::NormalizedIntLinear,
+		linear::{LimitComp, LinExp, PosCoeff},
+	},
 	decision::integer::IntVar,
-	Checker, Lit, Result, Unsatisfiable, Valuation,
+	Checker, ClauseDatabase, Lit, Result, Unsatisfiable, Valuation,
 };
 
 /// The constraint that `lits` add up to the integer `y`.
@@ -26,6 +29,36 @@ impl Count {
 	/// The constraint that `lits` add up to `y`, or to at most `y`.
 	pub fn new(lits: Vec<Lit>, cmp: LimitComp, y: IntVar) -> Self {
 		Self { lits, cmp, y }
+	}
+
+	/// Read the constraint as the integer linear constraint it is.
+	///
+	/// A literal is an integer worth one when it holds, and the bound counts
+	/// the other way, which is a view on it rather than a variable of its own.
+	/// Only for an encoder that works in integer terms; a sorting network
+	/// states the constraint as it stands.
+	pub(crate) fn as_int_linear<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result<NormalizedIntLinear, Unsatisfiable> {
+		let mut terms = self
+			.lits
+			.iter()
+			.enumerate()
+			.map(|(i, &lit)| {
+				IntVar::from_direct_encoding(db, 0..=1, &[!lit, lit])
+					.map(|x| (PosCoeff::new(1), x.with_label(format!("x{i}"))))
+			})
+			.collect::<Result<Vec<_>, _>>()?;
+		// Counting the bound from its far end turns its coefficient positive,
+		// and moves what it was worth into the constant.
+		let k = self.y.min() + self.y.max();
+		terms.push((PosCoeff::new(1), IntVar::mirrored(db, &self.y)?));
+		Ok(NormalizedIntLinear::new(
+			terms,
+			self.cmp.clone(),
+			PosCoeff::new(k),
+		))
 	}
 }
 
@@ -45,3 +78,93 @@ impl Checker for Count {
 		}
 	}
 }
+
+/// Which encoders take a [`Count`], which rustdoc lists on the trait but the
+/// compiler only checks if something names them.
+#[cfg(test)]
+const _: () = {
+	use crate::{
+		constraint::linear::{AdderEncoder, BddEncoder, SwcEncoder, TotalizerEncoder},
+		Cnf, Encoder,
+	};
+
+	const fn takes<Db: ClauseDatabase + ?Sized, C, E: Encoder<Db, C>>() {}
+	takes::<Cnf, Count, AdderEncoder>();
+	takes::<Cnf, Count, BddEncoder>();
+	takes::<Cnf, Count, SortedEncoder>();
+	takes::<Cnf, Count, SwcEncoder>();
+	takes::<Cnf, Count, TotalizerEncoder>();
+};
+
+#[cfg(test)]
+mod tests {
+	use itertools::Itertools;
+	use traced_test::test;
+
+	use super::{Count, SortedEncoder};
+	use crate::{
+		constraint::linear::{AdderEncoder, BddEncoder, LimitComp, SwcEncoder, TotalizerEncoder},
+		decision::integer::IntVar,
+		solver::{cadical::Cadical, SolveResult, Solver},
+		ClauseDatabaseTools, Cnf, Encoder, Valuation,
+	};
+
+	/// Every encoder of a count admits the same assignments, whether it states
+	/// the constraint outright or reads it as a linear one.
+	#[test]
+	fn every_encoder_admits_the_same_counts() {
+		for cmp in [LimitComp::LessEq, LimitComp::Equal] {
+			let mut want: Option<Vec<(usize, i64)>> = None;
+			for name in ["sorted", "adder", "bdd", "swc", "gt"] {
+				let mut cnf = Cnf::default();
+				let lits = (0..3).map(|_| cnf.new_lit()).collect_vec();
+				let y = IntVar::new(0..=2).with_label("y");
+				let con = Count::new(lits.clone(), cmp.clone(), y.clone());
+				match name {
+					"sorted" => SortedEncoder::default().encode(&mut cnf, &con),
+					"adder" => AdderEncoder::default().encode(&mut cnf, &con),
+					"bdd" => BddEncoder::default().encode(&mut cnf, &con),
+					"swc" => SwcEncoder::default().encode(&mut cnf, &con),
+					_ => TotalizerEncoder::default().encode(&mut cnf, &con),
+				}
+				.unwrap();
+
+				let mut seen = Vec::new();
+				let mut slv = Cadical::from(&cnf);
+				loop {
+					let read = match slv.solve() {
+						SolveResult::Satisfied(sol) => {
+							let n = lits.iter().filter(|&&l| sol.value(l)).count();
+							let vals = lits
+								.iter()
+								.map(|&l| if sol.value(l) { l } else { !l })
+								.collect_vec();
+							(n, y.value(&sol), vals)
+						}
+						_ => break,
+					};
+					seen.push((read.0, read.1));
+					if slv.add_clause(read.2.into_iter().map(|l| !l)).is_err() {
+						break;
+					}
+				}
+				seen.sort_unstable();
+				seen.dedup();
+				match &want {
+					None => {
+						assert!(!seen.is_empty(), "{name} {cmp:?} admits something");
+						for &(n, v) in &seen {
+							match cmp {
+								LimitComp::Equal => assert_eq!(n as i64, v, "{name}: {n} vs {v}"),
+								LimitComp::LessEq => assert!(n as i64 <= v, "{name}: {n} vs {v}"),
+							}
+						}
+						want = Some(seen);
+					}
+					Some(want) => assert_eq!(&seen, want, "{name} {cmp:?} differs from the network"),
+				}
+			}
+		}
+	}
+}
+

@@ -13,6 +13,7 @@ use crate::{
 		bool_linear::NormalizedBoolLinear,
 		linear::{LimitComp, PosCoeff},
 		cardinality::Cardinality,
+		count::Count,
 		cardinality_one::CardinalityOne,
 		int_linear::{NormalizedIntLinear, Term},
 		propositional_logic::{Formula, TseitinEncoder},
@@ -603,6 +604,15 @@ impl AdderEncoder {
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for AdderEncoder {
 	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
 		let con = con.as_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for AdderEncoder {
+	fn encode(&self, db: &mut Db, con: &Count) -> Result {
+		// Counting into a variable is a linear constraint whose bound is not a
+		// constant, which this encoder takes once the bound is a term.
+		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}
 }
