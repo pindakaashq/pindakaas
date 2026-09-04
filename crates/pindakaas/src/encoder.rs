@@ -9,6 +9,7 @@ pub mod bdd;
 pub mod bitwise;
 pub mod int_ternary;
 pub mod ladder;
+pub mod modulo_totalizer;
 pub mod pairwise;
 pub mod product;
 pub mod sorted;

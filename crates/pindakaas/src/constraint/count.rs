@@ -84,13 +84,16 @@ impl Checker for Count {
 #[cfg(test)]
 const _: () = {
 	use crate::{
-		constraint::linear::{AdderEncoder, BddEncoder, SwcEncoder, TotalizerEncoder},
+		constraint::linear::{
+			AdderEncoder, BddEncoder, ModuloTotalizerEncoder, SwcEncoder, TotalizerEncoder,
+		},
 		Cnf, Encoder,
 	};
 
 	const fn takes<Db: ClauseDatabase + ?Sized, C, E: Encoder<Db, C>>() {}
 	takes::<Cnf, Count, AdderEncoder>();
 	takes::<Cnf, Count, BddEncoder>();
+	takes::<Cnf, Count, ModuloTotalizerEncoder>();
 	takes::<Cnf, Count, SortedEncoder>();
 	takes::<Cnf, Count, SwcEncoder>();
 	takes::<Cnf, Count, TotalizerEncoder>();
@@ -103,7 +106,10 @@ mod tests {
 
 	use super::{Count, SortedEncoder};
 	use crate::{
-		constraint::linear::{AdderEncoder, BddEncoder, LimitComp, SwcEncoder, TotalizerEncoder},
+		constraint::linear::{
+			AdderEncoder, BddEncoder, LimitComp, ModuloTotalizerEncoder, SwcEncoder,
+			TotalizerEncoder,
+		},
 		decision::integer::IntVar,
 		solver::{cadical::Cadical, SolveResult, Solver},
 		ClauseDatabaseTools, Cnf, Encoder, Valuation,
@@ -115,7 +121,7 @@ mod tests {
 	fn every_encoder_admits_the_same_counts() {
 		for cmp in [LimitComp::LessEq, LimitComp::Equal] {
 			let mut want: Option<Vec<(usize, i64)>> = None;
-			for name in ["sorted", "adder", "bdd", "swc", "gt"] {
+			for name in ["sorted", "adder", "bdd", "swc", "gt", "mgto"] {
 				let mut cnf = Cnf::default();
 				let lits = (0..3).map(|_| cnf.new_lit()).collect_vec();
 				let y = IntVar::new(0..=2).with_label("y");
@@ -125,7 +131,8 @@ mod tests {
 					"adder" => AdderEncoder::default().encode(&mut cnf, &con),
 					"bdd" => BddEncoder::default().encode(&mut cnf, &con),
 					"swc" => SwcEncoder::default().encode(&mut cnf, &con),
-					_ => TotalizerEncoder::default().encode(&mut cnf, &con),
+					"gt" => TotalizerEncoder::default().encode(&mut cnf, &con),
+					_ => ModuloTotalizerEncoder::default().encode(&mut cnf, &con),
 				}
 				.unwrap();
 

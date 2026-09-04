@@ -14,16 +14,18 @@ use std::{
 
 use itertools::Itertools;
 
-pub use crate::encoder::aggregate::{LinAggregator, LinearEncoder, StaticLinEncoder};
 pub use crate::encoder::{
-	adder::AdderEncoder, bdd::BddEncoder, swc::SwcEncoder, totalizer::TotalizerEncoder,
+	adder::AdderEncoder,
+	aggregate::{LinAggregator, LinearEncoder, StaticLinEncoder},
+	bdd::BddEncoder,
+	modulo_totalizer::ModuloTotalizerEncoder,
+	swc::SwcEncoder,
+	totalizer::TotalizerEncoder,
 };
 use crate::{
 	constraint::{
-		cardinality::Cardinality, cardinality_one::CardinalityOne,
-		bool_linear::NormalizedBoolLinear,
-		count::Count,
-		int_linear::NormalizedIntLinear,
+		bool_linear::NormalizedBoolLinear, cardinality::Cardinality,
+		cardinality_one::CardinalityOne, count::Count, int_linear::NormalizedIntLinear,
 	},
 	decision::integer::IntVar,
 	Checker, Coeff, Lit, Result, Unsatisfiable, Valuation,
@@ -518,7 +520,6 @@ mod tests {
 	fn encoders() {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
-		// TODO encode this if encoder does not support constraint
 		PairwiseEncoder::default()
 			.encode(
 				&mut cnf,
@@ -575,7 +576,7 @@ mod tests {
 		);
 		for (name, coeffs, k) in cases {
 			for cmp in [Comparator::LessEq, Comparator::Equal] {
-				for enc in ["adder", "bdd", "swc", "gt"] {
+				for enc in ["adder", "bdd", "swc", "gt", "mgto"] {
 					let mut cnf = Cnf::default();
 					let vars = cnf.new_var_range(coeffs.len()).iter_lits().collect_vec();
 					let con = Linear::new(LinExp::from_slices(coeffs, &vars), cmp.clone(), k);
@@ -595,8 +596,16 @@ mod tests {
 							StaticLinEncoder<SwcEncoder, SwcEncoder, SwcEncoder>,
 						>::default()
 						.encode(&mut cnf, &con),
-						_ => LinearEncoder::<
+						"gt" => LinearEncoder::<
 							StaticLinEncoder<TotalizerEncoder, TotalizerEncoder, TotalizerEncoder>,
+						>::default()
+						.encode(&mut cnf, &con),
+						_ => LinearEncoder::<
+							StaticLinEncoder<
+								ModuloTotalizerEncoder,
+								ModuloTotalizerEncoder,
+								ModuloTotalizerEncoder,
+							>,
 						>::default()
 						.encode(&mut cnf, &con),
 					};
@@ -657,7 +666,6 @@ mod tests {
 		encoder.encode(&mut db, &con).unwrap();
 		assert_checker(&db, &con);
 	}
-
 }
 
 #[derive(Debug)]

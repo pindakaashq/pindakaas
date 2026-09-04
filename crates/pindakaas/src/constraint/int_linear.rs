@@ -8,6 +8,7 @@
 
 pub use crate::encoder::{
 	bdd::BddEncoder,
+	modulo_totalizer::ModuloTotalizerEncoder,
 	swc::SwcEncoder,
 	totalizer::TotalizerEncoder,
 };

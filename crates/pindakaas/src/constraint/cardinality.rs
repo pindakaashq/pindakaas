@@ -5,7 +5,7 @@
 //! count rather than add.
 
 pub use crate::encoder::{
-	adder::AdderEncoder, bdd::BddEncoder,
+	adder::AdderEncoder, bdd::BddEncoder, modulo_totalizer::ModuloTotalizerEncoder,
 	sorting_network::SortingNetworkEncoder, swc::SwcEncoder, totalizer::TotalizerEncoder,
 };
 use rustc_hash::FxHashSet;
@@ -163,11 +163,13 @@ const _: () = {
 	takes::<Cnf, Cardinality, BddEncoder>();
 	takes::<Cnf, Cardinality, SwcEncoder>();
 	takes::<Cnf, Cardinality, TotalizerEncoder>();
+	takes::<Cnf, Cardinality, ModuloTotalizerEncoder>();
 	takes::<Cnf, Cardinality, SortingNetworkEncoder>();
 	takes::<Cnf, CardinalityOne, AdderEncoder>();
 	takes::<Cnf, CardinalityOne, BddEncoder>();
 	takes::<Cnf, CardinalityOne, SwcEncoder>();
 	takes::<Cnf, CardinalityOne, TotalizerEncoder>();
+	takes::<Cnf, CardinalityOne, ModuloTotalizerEncoder>();
 	takes::<Cnf, CardinalityOne, SortingNetworkEncoder>();
 };
 

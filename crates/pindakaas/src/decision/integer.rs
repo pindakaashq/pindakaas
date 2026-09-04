@@ -31,6 +31,7 @@
 use std::{
 	cell::RefCell,
 	fmt::{self, Display},
+	iter::once,
 	ops::Bound,
 	rc::Rc,
 };
@@ -74,6 +75,29 @@ where
 		if k[i] {
 			db.add_clause((i..bits).filter(|&j| j == i || !k[j]).map(|j| bit(x, j)))?;
 		}
+	}
+	Ok(())
+}
+
+/// Constrain a number held as digits in a mixed radix base to be at most a
+/// constant.
+///
+/// The digits are least significant first, each given as the pair of conditions
+/// that it is at least, and that it exceeds, the digit of the constant. The
+/// number exceeds the constant exactly where some digit does while every more
+/// significant one is at least the constant's.
+#[cfg_attr(
+	any(feature = "tracing", test),
+	tracing::instrument(name = "lex_lesseq", skip_all)
+)]
+pub(crate) fn lex_leq<Db>(db: &mut Db, digits: &[(BoolVal, BoolVal)]) -> Result
+where
+	Db: ClauseDatabase + ?Sized,
+{
+	for (i, &(_, greater)) in digits.iter().enumerate() {
+		db.add_clause(
+			once(!greater).chain(digits[i + 1..].iter().map(|&(at_least, _)| !at_least)),
+		)?;
 	}
 	Ok(())
 }

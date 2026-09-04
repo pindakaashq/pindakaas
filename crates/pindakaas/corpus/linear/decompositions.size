@@ -3,39 +3,49 @@
     card-10   <=    bdd      35       66       152
     card-10   <=    swc      55      126       284
     card-10   <=     gt      33       69       161
+    card-10   <=   mgto      73      209       472
     card-10   ==  adder      22       87       295
     card-10   ==    bdd      35      116       272
     card-10   ==    swc      45      159       373
     card-10   ==     gt      33      118       284
+    card-10   ==   mgto      73      211       473
    pb-small   <=  adder      11       45       156
    pb-small   <=    bdd      10       13        29
    pb-small   <=    swc      37       75       165
    pb-small   <=     gt      19       33        75
+   pb-small   <=   mgto      43      123       273
    pb-small   ==  adder       7       27        78
    pb-small   ==    bdd      10       21        45
    pb-small   ==    swc      23       62       141
    pb-small   ==     gt      19       55       130
+   pb-small   ==   mgto      43      124       271
      pb-mid   <=  adder      27      134       460
      pb-mid   <=    bdd      15       27        61
      pb-mid   <=    swc     106      239       532
      pb-mid   <=     gt      25       41        93
+     pb-mid   <=   mgto     111      335       759
      pb-mid   ==  adder      22      116       386
      pb-mid   ==    bdd      12       25        53
      pb-mid   ==    swc      60      183       425
      pb-mid   ==     gt      25       67       155
+     pb-mid   ==   mgto     111      337       756
     pb-wide   <=  adder       7        4        10
     pb-wide   <=    bdd      10       10        22
     pb-wide   <=    swc     427     1064      2416
     pb-wide   <=     gt      35       55       122
+    pb-wide   <=   mgto      29       56       116
     pb-wide   ==  adder       7        7         7
     pb-wide   ==    bdd       7        7         7
     pb-wide   ==    swc     127      357       826
     pb-wide   ==     gt      35       85       195
+    pb-wide   ==   mgto      29       59       113
  pb-coprime   <=  adder      30      151       518
  pb-coprime   <=    bdd      12       15        35
  pb-coprime   <=    swc     206      489      1102
  pb-coprime   <=     gt      30       46       104
+ pb-coprime   <=   mgto     122      364       824
  pb-coprime   ==  adder      24      130       431
  pb-coprime   ==    bdd      10       17        33
  pb-coprime   ==    swc      97      307       716
  pb-coprime   ==     gt      30       73       168
+ pb-coprime   ==   mgto     122      366       819

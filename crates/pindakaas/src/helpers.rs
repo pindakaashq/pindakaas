@@ -761,8 +761,8 @@ pub(crate) mod tests {
 		pub(crate) use crate::{
 			constraint::{
 				linear::{
-					AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, Linear, PosCoeff,
-					SwcEncoder, TotalizerEncoder,
+					AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, Linear,
+					ModuloTotalizerEncoder, PosCoeff, SwcEncoder, TotalizerEncoder,
 				},
 				cardinality::{tests::card_test_suite, Cardinality, SortingNetworkEncoder},
 				cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},

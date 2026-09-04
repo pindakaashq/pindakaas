@@ -150,7 +150,9 @@
 //! [`NormalizedIntLinear`](constraint::int_linear::NormalizedIntLinear): a sum
 //! of positive coefficients against a bound. Choosing an encoder is then
 //! choosing how that sum is broken up — a decision diagram, a chain of partial
-//! sums, a balanced tree — each reaching the same
+//! sums, a balanced tree, or one whose nodes are digits in a mixed radix base
+//! ([`ModuloTotalizerEncoder`](constraint::int_linear::ModuloTotalizerEncoder))
+//! — each reaching the same
 //! [`IntTernaryEncoder`](constraint::int_ternary::IntTernaryEncoder) for the
 //! `x + y ≷ z` steps it leaves behind.
 //!
