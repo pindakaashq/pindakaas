@@ -3,12 +3,12 @@
     card-10   <=    bdd      35       66       152
     card-10   <=    swc      55      126       284
     card-10   <=     gt      33       69       161
-    card-10   <=   mgto      73      209       472
+    card-10   <=   mgto      51      163       383
     card-10   ==  adder      22       87       295
     card-10   ==    bdd      35      116       272
     card-10   ==    swc      45      159       373
     card-10   ==     gt      33      118       284
-    card-10   ==   mgto      73      211       473
+    card-10   ==   mgto      51      165       385
    pb-small   <=  adder      11       45       156
    pb-small   <=    bdd      10       13        29
    pb-small   <=    swc      37       75       165

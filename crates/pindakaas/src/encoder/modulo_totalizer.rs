@@ -18,7 +18,7 @@ use crate::{
 		cardinality::Cardinality,
 		count::Count,
 		cardinality_one::CardinalityOne,
-		int_linear::{term_max, NormalizedIntLinear},
+		int_linear::{term_max, term_values, NormalizedIntLinear},
 		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 		linear::{Comparator, LimitComp},
 	},
@@ -202,14 +202,24 @@ impl ModuloTotalizerEncoder {
 		})
 	}
 
-	/// Build a mixed radix base from the coefficients of the constraint.
+	/// Build a mixed radix base from the coefficients of the constraint,
+	/// given how many terms it has.
 	///
-	/// Follows the heuristic of Zha et al. [^1] as the generalized n-level
-	/// modulo totalizer of Bofill et al. [^2] uses it: values are added to the
-	/// base until it spans every value up to `k`, each the one dividing the
-	/// most coefficients and the largest of those where several tie. The
-	/// coefficients are divided by it afterwards, so the next value suits the
-	/// next digit.
+	/// Starts from the heuristic of Zha et al. [^1] as the generalized
+	/// n-level modulo totalizer of Bofill et al. [^2] uses it: values are
+	/// added to the base until it spans every value up to `k`, each the one
+	/// dividing the most coefficients, and the coefficients are divided by it
+	/// afterwards so the next value suits the next digit.
+	///
+	/// Measured against CaDiCaL conflicts and wall time, not just clause
+	/// counts, that rule loses to plain `⌊√n⌋` on constraints whose
+	/// coefficients share no real structure — a shared divisor there is
+	/// coincidence, not structure, and trusting it costs more digits than it
+	/// saves. So a divisor is only trusted where it covers at least half the
+	/// (remaining) coefficients; short of that every further digit falls back
+	/// to `⌊√n⌋` straight away. A tie takes the smallest divisor rather than
+	/// the largest, for the same reason: a digit costs `O(β²)` clauses here,
+	/// so a larger radix only pays where it divides strictly more.
 	///
 	/// [^1]: A. Zha, M. Koshimura, H. Fujita, "N-level modulo-based CNF
 	/// encodings of pseudo-Boolean constraints for MaxSAT", Constraints 24(2)
@@ -218,23 +228,27 @@ impl ModuloTotalizerEncoder {
 	/// [^2]: M. Bofill, J. Coll, P. Nightingale, J. Suy, F. Ulrich-Oltean, M.
 	/// Villaret, "SAT encodings for pseudo-Boolean constraints together with
 	/// at-most-one constraints", Artificial Intelligence 302 (2022) 103604.
-	fn greedy_base(coefs: impl IntoIterator<Item = Coeff>, k: Coeff) -> Vec<Coeff> {
+	fn greedy_base(coefs: impl IntoIterator<Item = Coeff>, n: usize, k: Coeff) -> Vec<Coeff> {
 		// Heuristic: divisors are tried up to a bound rather than the
 		// coefficients being factorised, which no constraint seen so far pays
 		// for.
 		const MAX_DIVISOR: Coeff = 1 << 10;
+		// Heuristic: a divisor below this share of the coefficients is
+		// coincidence rather than structure; fall back instead of trusting
+		// it. Best on every case measured, close behind at every other.
+		const DIVISOR_SHARE_PCT: usize = 50;
 
+		let fallback = ((n as f64).sqrt() as Coeff).max(2);
 		let mut coefs = coefs.into_iter().collect_vec();
 		let mut base = Vec::new();
 		let mut product: Coeff = 1;
 		while product <= k {
-			// Lexicographic on `(count, divisor)`, so a tie takes the largest.
-			// Falls back to a binary digit where nothing divides.
+			let min_share = coefs.len() * DIVISOR_SHARE_PCT / 100;
 			let b = (2..=min(MAX_DIVISOR, coefs.iter().copied().max().unwrap_or_default()))
-				.map(|d| (coefs.iter().filter(|&&q| q > 0 && q % d == 0).count(), d))
+				.map(|d| (coefs.iter().filter(|&&q| q > 0 && q % d == 0).count(), -d))
 				.max()
-				.filter(|&(count, _)| count > 0)
-				.map_or(2, |(_, d)| d);
+				.filter(|&(count, _)| count >= min_share.max(1))
+				.map_or(fallback, |(_, d)| -d);
 			base.push(b);
 			product = product.saturating_mul(b);
 			for q in &mut coefs {
@@ -242,7 +256,7 @@ impl ModuloTotalizerEncoder {
 			}
 		}
 		if base.is_empty() {
-			base.push(2);
+			base.push(fallback);
 		}
 		base
 	}
@@ -433,7 +447,17 @@ where
 		let k = con.k();
 		let base = match &self.base {
 			Some(base) => base.clone(),
-			None => Self::greedy_base(con.terms().iter().map(|&(coef, _)| *coef), k),
+			// What a term is worth is the values it can take, not the
+			// coefficient in front of it: aggregation leaves that at one and
+			// puts the weight in the variable's domain.
+			None => Self::greedy_base(
+				con.terms()
+					.iter()
+					.flat_map(|(c, x)| term_values(&(**c, x.clone())))
+					.filter(|&v| v > 0),
+				con.terms().len(),
+				k,
+			),
 		};
 		debug_assert!(base.iter().all(|&b| b > 1));
 
@@ -551,16 +575,20 @@ mod tests {
 
 	#[test]
 	fn greedy_base_divides_the_coefficients() {
-		let base = |coefs: &[Coeff], k| ModuloTotalizerEncoder::greedy_base(coefs.to_vec(), k);
-		// Three divides every coefficient, so the first digit of each of them
-		// is zero. Afterwards they share no divisor.
+		let base = |coefs: &[Coeff], k| ModuloTotalizerEncoder::greedy_base(coefs.to_vec(), coefs.len(), k);
+		// Three divides every coefficient, meeting the 50% share, so the
+		// first digit is zero for all of them. Two clears the share once
+		// more; past that nothing does, and every remaining digit is the
+		// `⌊√4⌋` fallback.
 		assert_eq!(base(&[3, 6, 9, 12], 30), vec![3, 2, 2, 2, 2]);
-		// Without a divisor to exploit the base is binary.
+		// Without a divisor to exploit every digit is the fallback.
 		assert_eq!(base(&[1, 1, 1], 7), vec![2, 2, 2]);
-		// Dividing one coefficient still beats dividing none, and a tie takes
-		// the largest, so seven is preferred over five.
-		assert_eq!(base(&[5, 7], 12), vec![7, 2]);
-		assert_eq!(base(&[6, 6], 5), vec![6]);
+		// Dividing one of two coefficients is only a 50% share, which still
+		// clears the bar, and a tie takes the smallest, so five is preferred
+		// over seven.
+		assert_eq!(base(&[5, 7], 12), vec![5, 2, 2]);
+		// Six ties with its own divisors, so it comes apart into them.
+		assert_eq!(base(&[6, 6], 5), vec![2, 3]);
 		// The base has to be usable even for a degenerate bound.
 		assert_eq!(base(&[1], 0), vec![2]);
 	}
