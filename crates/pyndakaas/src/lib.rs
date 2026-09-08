@@ -12,7 +12,7 @@ use pyo3::{create_exception, exceptions::PyException, prelude::*};
 // Avoid orphan rule preventing impl PyErr on pindakaas::Unsatisfiable
 struct ErrWrapper(PyErr);
 
-// Use Result i/o PyResult to use `?` to easily return Rust errors as Python
+// The wrapper lets `?` convert Rust errors into Python exceptions.
 // exceptions
 type Result<R = (), E = ErrWrapper> = std::result::Result<R, E>;
 
@@ -805,8 +805,16 @@ mod pindakaas {
 		}
 
 		#[new]
-		/// Create a variable over the values of `domain`, given as inclusive
-		/// intervals.
+		/// Creates an integer variable over inclusive `(start, end)` intervals.
+		///
+		/// Args:
+		///     domain: Non-empty inclusive intervals containing the allowed values.
+		///
+		/// Returns:
+		///     An integer variable whose Boolean views are created on demand.
+		///
+		/// Raises:
+		///     ValueError: `domain` is empty.
 		fn new(domain: Vec<(i64, i64)>) -> PyResult<Self> {
 			if domain.is_empty() {
 				return Err(PyValueError::new_err(
@@ -836,16 +844,18 @@ mod pindakaas {
 			self.as_bool_lin_exp().__sub__(other)
 		}
 
-		/// The literal for the variable reaching at least `value`.
+		/// Returns the literal for the variable reaching at least `value`.
 		///
-		/// :param db: The database any encoding is created in
-		/// :param value: The value to compare against
-		/// :param create: Whether to build the order encoding where the variable
-		///     does not have one
-		/// :return: The literal, a constant where the domain settles it, or
-		///     `None` where answering would have meant building the order
-		///     encoding and `create` said not to
-		/// :raises Unsatisfiable: If the formula has become unsatisfiable
+		/// Args:
+		///     db: Database in which a required encoding is created.
+		///     value: Lower bound to test.
+		///     create: Whether to create a missing order encoding.
+		///
+		/// Returns:
+		///     The literal, a settled Boolean, or `None` when creation was disabled.
+		///
+		/// Raises:
+		///     Unsatisfiable: Creating or channelling the view causes a contradiction.
 		#[pyo3(signature = (db, value, create = true))]
 		fn at_least(
 			&self,
@@ -864,16 +874,18 @@ mod pindakaas {
 			)))
 		}
 
-		/// The literal for the variable reaching at most `value`.
+		/// Returns the literal for the variable reaching at most `value`.
 		///
-		/// :param db: The database any encoding is created in
-		/// :param value: The value to compare against
-		/// :param create: Whether to build the order encoding where the variable
-		///     does not have one
-		/// :return: The literal, a constant where the domain settles it, or
-		///     `None` where answering would have meant building the order
-		///     encoding and `create` said not to
-		/// :raises Unsatisfiable: If the formula has become unsatisfiable
+		/// Args:
+		///     db: Database in which a required encoding is created.
+		///     value: Upper bound to test.
+		///     create: Whether to create a missing order encoding.
+		///
+		/// Returns:
+		///     The literal, a settled Boolean, or `None` when creation was disabled.
+		///
+		/// Raises:
+		///     Unsatisfiable: Creating or channelling the view causes a contradiction.
 		#[pyo3(signature = (db, value, create = true))]
 		fn at_most(
 			&self,
@@ -890,16 +902,18 @@ mod pindakaas {
 			)))
 		}
 
-		/// The literal for the variable taking `value`.
+		/// Returns the literal for the variable taking `value`.
 		///
-		/// :param db: The database any encoding is created in
-		/// :param value: The value to compare against
-		/// :param create: Whether to build the direct encoding where the variable
-		///     does not have one
-		/// :return: The literal, a constant where the domain settles it, or
-		///     `None` where answering would have meant building the direct
-		///     encoding and `create` said not to
-		/// :raises Unsatisfiable: If the formula has become unsatisfiable
+		/// Args:
+		///     db: Database in which a required encoding is created.
+		///     value: Value to test.
+		///     create: Whether to create a missing direct encoding.
+		///
+		/// Returns:
+		///     The literal, a settled Boolean, or `None` when creation was disabled.
+		///
+		/// Raises:
+		///     Unsatisfiable: Creating or channelling the view causes a contradiction.
 		#[pyo3(signature = (db, value, create = true))]
 		fn equals(
 			&self,
@@ -918,17 +932,17 @@ mod pindakaas {
 			)))
 		}
 
-		/// The number of values the variable can take.
+		/// Returns the number of values the variable can take.
 		fn card(&self) -> usize {
 			self.0.card()
 		}
 
-		/// The greatest value the variable can take.
+		/// Returns the greatest value the variable can take.
 		fn max(&self) -> i64 {
 			self.0.max()
 		}
 
-		/// The least value the variable can take.
+		/// Returns the least value the variable can take.
 		fn min(&self) -> i64 {
 			self.0.min()
 		}
@@ -943,18 +957,23 @@ mod pindakaas {
 		/// made, say, or where the values given are narrower than the literals
 		/// can reach.
 		///
-		/// :param db: The database to add the clauses to
-		/// :raises Unsatisfiable: If the formula has become unsatisfiable
+		/// Args:
+		///     db: Database receiving the consistency clauses.
+		///
+		/// Raises:
+		///     Unsatisfiable: The consistency clauses cause a contradiction.
 		fn constrain(&self, db: &Bound<'_, PyAny>) -> Result {
 			self.0.constrain(&mut PyDbWrapper(db))?;
 			Ok(())
 		}
 
-		/// The value the variable takes in a solution.
+		/// Returns the value the variable takes in a solution.
 		///
-		/// :param solution: A solved database, or anything else that can give a
-		///     value for a literal
-		/// :return: The value of the variable under that assignment
+		/// Args:
+		///     solution: Object whose `value(Lit)` method supplies model values.
+		///
+		/// Returns:
+		///     The integer represented by the supplied literal values.
 		fn value(&self, solution: &Bound<'_, PyAny>) -> i64 {
 			let read = |lit: BaseLit| -> bool {
 				solution
@@ -987,7 +1006,7 @@ mod pindakaas {
 			}
 		}
 
-		/// The literal, or `None` where the value is already settled.
+		/// Returns the literal, or `None` where the value is already settled.
 		fn lit(&self) -> Option<Lit> {
 			match self.0 {
 				BaseBoolVal::Lit(l) => Some(Lit(l)),
@@ -995,7 +1014,7 @@ mod pindakaas {
 			}
 		}
 
-		/// The constant value, or `None` if the value is not yet settled.
+		/// Returns the constant value, or `None` if the value is not yet settled.
 		fn value(&self) -> Option<bool> {
 			match self.0 {
 				BaseBoolVal::Const(b) => Some(b),
@@ -1091,12 +1110,12 @@ mod pindakaas {
 			Self(BaseLit::from_raw(value))
 		}
 
-		/// Return whether the variable is negated
+		/// Reports whether this literal is the negative polarity of its variable.
 		fn is_negated(&self) -> bool {
 			self.0.is_negated()
 		}
 
-		/// Return the literal's variable
+		/// Returns the same variable as a positive literal.
 		fn var(&self) -> Self {
 			Self(self.0.var().into())
 		}
@@ -1122,14 +1141,20 @@ mod pindakaas {
 			slf.0.next().map(|lit| Lit(lit.into()))
 		}
 
-		/// Returns the final variable included in the range.
+		/// Returns the inclusive final variable.
 		fn end(&self) -> Lit {
 			Lit(self.0.end().into())
 		}
 
 		#[new]
-		/// Create a new variable range that includes all variables between
-		/// `start` and `end` (inclusive).
+		/// Creates an inclusive range between two positive literals.
+		///
+		/// Args:
+		///     start: First variable as a positive literal.
+		///     end: Final variable as a positive literal.
+		///
+		/// Raises:
+		///     ValueError: Either endpoint is negated.
 		fn new(start: Lit, end: Lit) -> PyResult<Self> {
 			if start.is_negated() || end.is_negated() {
 				return Err(PyValueError::new_err(
@@ -1139,7 +1164,7 @@ mod pindakaas {
 			Ok(Self(BaseVarRange::new(start.0.var(), end.0.var())))
 		}
 
-		/// Returns the first variable included in the range.
+		/// Returns the inclusive first variable.
 		fn start(&self) -> Lit {
 			Lit(self.0.start().into())
 		}

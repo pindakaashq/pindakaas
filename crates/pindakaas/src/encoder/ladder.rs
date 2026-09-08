@@ -11,6 +11,20 @@ use crate::{
 /// One literal per position saying whether the chain has come down by there,
 /// so a literal taking its value is that step and no other. Linear in the
 /// number of literals, where the pairwise encoding is quadratic.
+///
+/// # Examples
+///
+/// ```rust
+/// use pindakaas::{
+///     constraint::{cardinality_one::CardinalityOne, linear::LimitComp},
+///     encoder::ladder::LadderEncoder, ClauseDatabase, Cnf, Encoder,
+/// };
+/// let mut cnf = Cnf::default();
+/// let lits = cnf.new_var_range(4).map(Into::into).collect();
+/// let constraint = CardinalityOne::new(lits, LimitComp::LessEq);
+/// LadderEncoder::default().encode(&mut cnf, &constraint)?;
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct LadderEncoder {}
 

@@ -12,16 +12,11 @@ use crate::constraint::{
 
 /// A linear constraint over three integer terms, `x + y ≷ z`.
 ///
-/// This is what a decomposition breaks a longer constraint into. The strategies
-/// differ in the shape they give the intermediate sums — a chain, a balanced
-/// tree, the layers of a decision diagram — but every step of every one of them
-/// is the same thing: two terms, and where they come to together. Saying so in
-/// the type keeps a decomposition from having to express it as a constraint of
-/// any shape at all, which the encoder would then have to recognise again.
-///
-/// It is not a [`NormalizedIntLinear`](super::int_linear::NormalizedIntLinear):
-/// `z` stands on the other side of the comparison, and moving it across would
-/// mean a view of it counting the other way rather than a constant.
+/// Decompositions differ in the shape of their intermediate sums, but all emit
+/// this same step. Unlike
+/// [`NormalizedIntLinear`](super::int_linear::NormalizedIntLinear), `z` remains
+/// on the other side of the comparison; moving it would require a reversed view
+/// of the variable.
 #[derive(Clone, Debug)]
 pub struct IntTernary {
 	pub(crate) x: Term,
@@ -32,6 +27,22 @@ pub struct IntTernary {
 
 impl IntTernary {
 	/// The constraint `x + y ≷ z`.
+	///
+	/// # Examples
+	///
+	/// ```rust
+	/// use pindakaas::{
+	///     constraint::{int_ternary::{IntTernary, IntTernaryEncoder}, linear::Comparator},
+	///     decision::integer::IntVar, Cnf, Encoder,
+	/// };
+	///
+	/// let (x, y, z) = (
+	///     IntVar::new(0..=5), IntVar::new(0..=5), IntVar::new(0..=10),
+	/// );
+	/// let constraint = IntTernary::new((1, x), (1, y), Comparator::Equal, (1, z));
+	/// IntTernaryEncoder::default().encode(&mut Cnf::default(), &constraint)?;
+	/// # Ok::<(), pindakaas::Unsatisfiable>(())
+	/// ```
 	pub fn new(x: Term, y: Term, cmp: Comparator, z: Term) -> Self {
 		Self { x, y, cmp, z }
 	}

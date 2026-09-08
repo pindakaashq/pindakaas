@@ -1,9 +1,9 @@
-//! This module contains representations and encoding algorithms for
-//! propositional logic formulas.
+//! Building and encoding propositional formulas.
 //!
-//! These formulas can be represented using the [`Formula`] type, which
-//! implementation is specialized for both [`Lit`] and [`BoolVal`]. The
-//! [`TseitinEncoder`] is can be used to encode formulas into CNF.
+//! [`Formula<Lit>`] contains only literals. [`Formula<BoolVal>`] additionally
+//! carries constant truth values, which [`Formula::resolve`] folds away before
+//! encoding. [`TseitinEncoder`] introduces literals for compound sub-formulas
+//! rather than distributing the formula into clauses.
 
 use std::{
 	fmt::{self, Display, Formatter},
@@ -16,44 +16,44 @@ use rustc_hash::FxHashSet;
 pub use crate::encoder::tseitin::TseitinEncoder;
 use crate::{BoolVal, ClauseDatabaseTools, Cnf, Lit, Result};
 
-/// A propositional logic formula
+/// A propositional formula over an arbitrary atom type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Formula<Base> {
-	/// A conjunction of two or more sub-formulas
+	/// A conjunction; an empty conjunction is true.
 	And(Vec<Formula<Base>>),
-	///A atomic formula (a literal)
+	/// An indivisible proposition.
 	Atom(Base),
-	/// The equivalence of two or more sub-formulas
+	/// Sub-formulas constrained to share one truth value.
 	Equiv(Vec<Formula<Base>>),
-	/// A choice between two sub-formulas
+	/// A conditional choice between two sub-formulas.
 	IfThenElse {
-		/// The expression that determines which sub-formula is chosen:
-		/// - If it evaluates to `true`, the `then` branch is chosen.
-		/// - If it evaluates to `false`, the `els` branch is chosen.
+		/// The branch selector.
 		cond: Box<Formula<Base>>,
 		/// The expression that is chosen when `cond` evaluates to `true`.
 		then: Box<Formula<Base>>,
 		/// The expression that is chosen when `cond` evaluates to `false`.
 		els: Box<Formula<Base>>,
 	},
-	/// An implication of two sub-formulas
+	/// An implication from the first sub-formula to the second.
 	Implies(Box<Formula<Base>>, Box<Formula<Base>>),
-	/// The negation of a sub-formula
+	/// A negated sub-formula.
 	Not(Box<Formula<Base>>),
-	/// A disjunction of two or more sub-formulas
+	/// A disjunction; an empty disjunction is false.
 	Or(Vec<Formula<Base>>),
-	/// An exclusive or of two or more sub-formulas
+	/// Odd parity over the sub-formulas.
 	Xor(Vec<Formula<Base>>),
 }
 
 impl<Base> Formula<Base> {
-	/// Simplify the formula using a given resolver function.
+	/// Constant folding driven by an atom resolver.
 	///
-	/// The resolver function is called for each [`Self::Atom`] in the formula.
-	/// The resolver function should return `Err(true)` if the atom is known to
-	/// be true and `Err(false)` if the atom is known to be false. Otherwise,
-	/// the resolver function should return the value of the atom for the
+	/// `Err(value)` marks an atom as known; `Ok(atom)` replaces it in the
 	/// simplified formula.
+	///
+	/// # Errors
+	///
+	/// The formula's constant truth value when simplification eliminates every
+	/// unresolved atom.
 	pub fn simplify_with<Res>(
 		self,
 		resolver: &mut impl FnMut(Base) -> Result<Res, bool>,
@@ -246,19 +246,22 @@ impl<Base: Display> Formula<Base> {
 }
 
 impl Formula<BoolVal> {
-	/// Resolve the constant values in the formula.
+	/// Folding of embedded constants into a literal-only formula.
 	///
-	/// If the formula is known to be unsatisfiable, then `Err(false)` is
-	/// returned. If the formula is already satisfied, then `Err(true)` is
-	/// returned. Otherwise, a simplified formula without any constant values is
-	/// returned.
+	/// # Errors
+	///
+	/// `true` or `false` when the entire formula reduces to that constant.
 	pub fn resolve(self) -> Result<Formula<Lit>, bool> {
 		self.simplify_with(&mut |l| match l {
 			BoolVal::Const(b) => Err(b),
 			BoolVal::Lit(l) => Ok(l),
 		})
 	}
-	/// Simplify the formula using the given literals as proven facts.
+	/// Constant folding under literals known to hold.
+	///
+	/// # Errors
+	///
+	/// `true` or `false` when the facts determine the entire formula.
 	pub fn simplify<Iter>(self, facts: Iter) -> Result<Formula<Lit>, bool>
 	where
 		Iter: IntoIterator,
@@ -275,14 +278,22 @@ impl Formula<BoolVal> {
 }
 
 impl Formula<Lit> {
-	/// Convert propositional logic formula to CNF
+	/// An equisatisfiable CNF produced by Tseitin encoding.
+	///
+	/// # Errors
+	///
+	/// [`crate::Unsatisfiable`] when the formula is identically false.
 	pub fn clausify(&self) -> Result<Cnf> {
 		let mut cnf = Cnf::default();
 		cnf.encode(self, &TseitinEncoder)?;
 		Ok(cnf)
 	}
 
-	/// Simplify the formula using the given literals as proven facts.
+	/// Constant folding under literals known to hold.
+	///
+	/// # Errors
+	///
+	/// `true` or `false` when the facts determine the entire formula.
 	pub fn simplify<Iter>(self, facts: Iter) -> Result<Formula<Lit>, bool>
 	where
 		Iter: IntoIterator,

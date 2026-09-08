@@ -1,8 +1,7 @@
 //! Encoding a cardinality constraint as a sorting network.
 //!
 //! The literals are counted into an integer pinned to `k`, which is a
-//! [`Count`] constraint, so the network
-//! that encodes one encodes this too.
+//! [`Count`] constraint, so the network that encodes one encodes this too.
 
 use crate::{
 	constraint::{
@@ -14,10 +13,25 @@ use crate::{
 	ClauseDatabase, Coeff, Encoder, Result,
 };
 
-/// Encoder for the linear constraints that ∑ litᵢ ≷ k using a sorting network
+/// Cardinality encoding through a fixed-bound [`Count`] constraint.
+///
+/// # Examples
+///
+/// ```rust
+/// use pindakaas::{
+///     constraint::{cardinality::Cardinality, linear::LimitComp},
+///     encoder::sorting_network::SortingNetworkEncoder,
+///     ClauseDatabase, Cnf, Encoder,
+/// };
+/// let mut cnf = Cnf::default();
+/// let lits = cnf.new_var_range(8).map(Into::into).collect();
+/// let constraint = Cardinality::new(lits, LimitComp::LessEq, 3);
+/// SortingNetworkEncoder::default().encode(&mut cnf, &constraint)?;
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct SortingNetworkEncoder {
-	/// Encoder used to encode the [`Count`](crate::constraint::count::Count) constraints.
+	/// Network implementation used for the derived [`Count`] constraint.
 	sorted_encoder: SortedEncoder,
 }
 

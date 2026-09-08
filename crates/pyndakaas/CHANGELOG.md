@@ -19,8 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Use custom `Result` object, implemented in Rust, for solver implementations originating from the Rust Pindakaas library.
 
-### Added
-
 - Fix a `solver.CaDiCaL` error that was caused by `MapResult` creation accessing literals that are meant to only be accessed by CaDiCaL itself.
 
 ### Removed

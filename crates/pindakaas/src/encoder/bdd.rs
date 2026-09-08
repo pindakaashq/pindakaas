@@ -187,15 +187,15 @@ impl BddEncoder {
 		ws
 	}
 
-	/// Set whether to add consistency constraints on the intermediate integer
-	/// variables.
+	/// Configures whether intermediate variables are constrained independently of their use.
 	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
 
-	/// Set the largest domain size for which the intermediate integer variables
-	/// are encoded using order encoding.
+	/// Sets the largest intermediate domain forced into order encoding.
+	///
+	/// `None`, the default, leaves the choice to [`IntTernaryEncoder`].
 	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self

@@ -129,7 +129,7 @@ impl NormalizedIntLinear {
 		))
 	}
 
-	/// The comparator of the constraint, which is never `≥`.
+	/// Returns the constraint's comparator, which is never `≥`.
 	pub fn cmp(&self) -> LimitComp {
 		self.cmp.clone()
 	}
@@ -166,12 +166,12 @@ impl NormalizedIntLinear {
 		IntLinear::from(self).grouped_weights(db)
 	}
 
-	/// The constant the sum is compared against, which is not negative.
+	/// Returns the non-negative constant the sum is compared against.
 	pub fn k(&self) -> Coeff {
 		*self.k
 	}
 
-	/// The terms of the sum, each with a positive coefficient.
+	/// Returns the sum's terms, each with a positive coefficient.
 	pub fn terms(&self) -> &[(PosCoeff, IntVar)] {
 		&self.terms
 	}

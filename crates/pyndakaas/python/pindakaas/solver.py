@@ -1,4 +1,4 @@
-"""A module containing solvers and solving related classes."""
+"""SAT solvers, models, and failed assumptions."""
 
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -11,46 +11,44 @@ from .pindakaas.solver import CaDiCaLInner, KissatInner, Status
 
 
 class Result(ABC):
-    """The Result object returned after calling `solve()`.
-
-    It gives access to e.g. solver status and the values of variables.
-    """
+    """A solve result valid inside the ``solve()`` context manager."""
 
     @property
     @abstractmethod
     def status(self) -> Status:
-        """Return result from solving the database."""
+        """Reports whether the search found a model, proved inconsistency, or stopped."""
         ...
 
     @abstractmethod
     def value(self, lit: Lit) -> Optional[bool]:
-        """Return value for literal `lit`, or `None` if `lit` is assigned.
+        """Returns the literal's value in a satisfying model, if assigned.
 
-        :param lit: the literal for which to return the value
+        Args:
+            lit: Literal to inspect.
 
-        :return: the value of `lit` if assigned
-
+        Returns:
+            Its truth value, or ``None`` if the solver left it unassigned.
         """
         ...
 
     @abstractmethod
     def failed(self, lit: Lit) -> Optional[bool]:
-        """Check if the given assumption literal was used to prove the unsatisfiability.
+        """Reports whether an assumption contributed to the unsatisfiable result.
 
-        The unsatisfiability of the formula is under the assumptions used for the last
-        SAT search. Note also that for literals `lit` which are not assumption literals,
-        the behavior of is not specified.
+        The result is ``None`` unless the search was unsatisfiable. For a literal
+        that was not an assumption of that search, the Boolean result is unspecified.
 
-        :param lit: the assumption literal for which to return whether it contributed to
-            the unsatisfiable result
+        Args:
+            lit: Assumption literal to inspect.
 
-        :return: whether `lit` contributed to the unsatisfiable result
+        Returns:
+            Whether it belongs to the failed core, or ``None`` for other statuses.
         """
         ...
 
 
 class Solver(ClauseDatabase):
-    """An abstract class which extends a `ClauseDatabase` with solving capabilities."""
+    """A clause database that can search for a satisfying assignment."""
 
     def _set_time_limit(self, limit: Optional[timedelta]):
         if limit is not None:
@@ -65,12 +63,20 @@ class Solver(ClauseDatabase):
         assumptions: Optional[Iterable[Lit]] = None,
         time_limit: Optional[timedelta] = None,
     ) -> Iterator[Result]:
-        """Solve the current `ClauseDatabase`.
+        """Search the current clauses under temporary assumptions.
 
-        :param assumptions: an optional iterable of assumptions literals which must hold
-            for this solve call
-        :param time_limit: an optional time limit before which the solver is terminated
-            and the result is Unknown
+        The yielded result borrows solver state and is valid only inside the
+        context manager.
+
+        Args:
+            assumptions: Literals required to hold for this search only.
+            time_limit: Wall-clock limit, or no limit when omitted.
+
+        Yields:
+            The search result.
+
+        Raises:
+            NotImplementedError: This backend does not support time limits.
         """
         self._set_time_limit(time_limit)
         assumptions = assumptions if assumptions is not None else []
@@ -87,7 +93,7 @@ class CaDiCaL(Solver):
     _inner: CaDiCaLInner
 
     def __init__(self):
-        """Initialize solver."""
+        """A fresh solver with no clauses."""
         self._inner = CaDiCaLInner()
 
     def _set_time_limit(self, limit: Optional[timedelta]):

@@ -314,7 +314,7 @@ impl ScmCoeff {
 	/// Generate the `minuss` split `C = C1 - (C2 << S)`.
 	///
 	/// This rule captures cases where subtracting a shifted value from a larger
-	/// constant is efficient. For example, 13 = 15 - (1 << 1).
+	/// constant uses fewer additions. For example, `13 = 15 - (1 << 1)`.
 	/// The formulas find a C1 > C such that C1 - (C2 << s) = C.
 	fn split_np(self) -> impl Iterator<Item = (ScmCoeff, ScmCoeff, u32)> {
 		let current = self.get();

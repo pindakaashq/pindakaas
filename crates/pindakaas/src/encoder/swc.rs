@@ -71,22 +71,21 @@ impl SwcEncoder {
 		})
 	}
 
-	/// Set whether to add consistency constraints on the intermediate integer
-	/// variables.
+	/// Configures whether intermediate variables are constrained independently of their use.
 	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
 
-	/// Set the largest domain size for which the intermediate integer variables
-	/// are encoded using order encoding.
+	/// Sets the largest intermediate domain forced into order encoding.
+	///
+	/// `None`, the default, leaves the choice to [`IntTernaryEncoder`].
 	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
 
-	/// Set whether to perform additional propagation of the linear constraint
-	/// before encoding the constraint into CNF.
+	/// Selects domain consistency applied before decomposition; bounds is the default.
 	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
 		self.add_propagation = c;
 		self

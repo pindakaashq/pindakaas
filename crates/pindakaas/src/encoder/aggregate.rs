@@ -27,6 +27,15 @@ impl LinAggregator {
 	/// Normalise a [`Linear`] constraint and work out which of the
 	/// specialised forms it is, with its terms grouped by whatever relates
 	/// them.
+	///
+	/// Coefficients here are post-aggregation values: repeated variables,
+	/// negated literals, constants, and the expression multiplier have already
+	/// been combined.
+	///
+	/// # Errors
+	///
+	/// [`crate::Unsatisfiable`] when normalisation proves the constraint
+	/// inconsistent or emitting a simplifying clause fails.
 	pub fn aggregate<Db>(&self, db: &mut Db, lin: &Linear) -> Result<LinVariant>
 	where
 		Db: ClauseDatabase + ?Sized,
@@ -66,7 +75,7 @@ impl LinAggregator {
 
 		// Every literal stands on its own: a group of them is an integer, and
 		// an integer is a term of the expression rather than an annotation on
-		// its literals. So normalising is just making each coefficient
+		// its literals. Normalising therefore makes each coefficient
 		// positive, by taking the literal the other way round.
 		let cmp = match lin.cmp {
 			Comparator::LessEq | Comparator::GreaterEq => LimitComp::LessEq,
@@ -272,9 +281,9 @@ impl LinAggregator {
 		terms.extend(int_terms.into_iter().map(|(x, c)| (PosCoeff::new(c), x)));
 		Ok(LinVariant::Linear(NormalizedIntLinear::new(terms, cmp, k)))
 	}
-	/// For non-zero `n`, detect groups of minimum size `n` with free literals
-	/// and same coefficients, sort them (using provided SortedEncoder) and add
-	/// them as a single implication chain group
+	/// Pre-aggregation of at least `n` equal-coefficient literals by `sorted_encoder`.
+	///
+	/// Zero disables the transformation, as in the default configuration.
 	pub fn sort_same_coefficients(&mut self, sorted_encoder: SortedEncoder, n: usize) -> &mut Self {
 		self.sorted_encoder = sorted_encoder;
 		self.sort_same_coefficients = n;
@@ -283,55 +292,49 @@ impl LinAggregator {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-/// A transformation of a general [`Linear`] constraint into a aggregated
-/// and normalized variant.
+/// Normalisation and specialisation of a general [`Linear`] constraint.
 pub struct LinAggregator {
 	sorted_encoder: SortedEncoder,
 	sort_same_coefficients: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-/// An encoder for Boolean linear constraints that performs aggregation using a
-/// [`LinAggregator`] and then encodes the aggregated constraints using a
-/// [`Encoder`] for [`LinVariant`].
+/// Aggregation followed by encoding of the resulting [`LinVariant`].
 pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = LinAggregator> {
 	enc: Enc,
 	agg: Agg,
 }
 
 impl<Enc, Agg> LinearEncoder<Enc, Agg> {
-	/// Access the [`LinAggregator`] used by this encoder.
+	/// Returns the aggregation stage used by this encoder.
 	pub fn linear_aggregator(&self) -> &Agg {
 		&self.agg
 	}
 
-	/// Create a new [`LinearEncoder`] with the given [`Encoder`] for
-	/// [`LinVariant`]s and [`LinAggregator`].
+	/// Creates an encoder with independently selected aggregation and dispatch stages.
 	pub fn new(enc: Enc, agg: Agg) -> Self {
 		Self { enc, agg }
 	}
 
-	/// Access the [`Encoder`] for [`LinVariant`]s used by this encoder.
+	/// Returns the post-aggregation encoder.
 	pub fn variant_encoder(&self) -> &Enc {
 		&self.enc
 	}
 
-	/// Change the [`LinAggregator`] used by this encoder.
+	/// Replaces the [`LinAggregator`] used by this encoder.
 	pub fn with_linear_aggregator(&mut self, agg: Agg) -> &mut Self {
 		self.agg = agg;
 		self
 	}
 
-	/// Change the [`Encoder`] for [`LinVariant`]s used by this encoder.
+	/// Replaces the [`Encoder`] for [`LinVariant`]s used by this encoder.
 	pub fn with_variant_encoder(&mut self, enc: Enc) -> &mut Self {
 		self.enc = enc;
 		self
 	}
 }
 
-/// An encoder for general boolean linear constraints that dispatches to a
-/// different choice of sub-encoder for cardinality and cardinality-one
-/// constraints.
+/// Static dispatch from each aggregated constraint shape to its encoder.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct StaticLinEncoder<
 	LinEnc = AdderEncoder,
@@ -350,27 +353,22 @@ pub struct StaticLinEncoder<
 impl<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
 	StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
 {
-	/// Get mutable access to the encoder that is used to encode
-	/// [`LinVariant::CardinalityOne`] variants.
+	/// Returns mutable access to the cardinality-one encoder.
 	pub fn amo_encoder(&mut self) -> &mut AmoEnc {
 		&mut self.amo_enc
 	}
 
-	/// Get mutable access to the encoder that is used to encode
-	/// [`LinVariant::Cardinality`] variants.
+	/// Returns mutable access to the cardinality encoder.
 	pub fn card_encoder(&mut self) -> &mut CardEnc {
 		&mut self.card_enc
 	}
 
-	/// Get mutable access to the encoder that is used to encode
-	/// [`LinVariant::Linear`] variants.
+	/// Returns mutable access to the integer-linear encoder.
 	pub fn lin_encoder(&mut self) -> &mut LinEnc {
 		&mut self.lin_enc
 	}
 
-	/// Create a new [`StaticLinEncoder`] with the given encoders to encode
-	/// [`LinVariant::Linear`], [`LinVariant::Cardinality`], and
-	/// [`LinVariant::CardinalityOne`] variants respectively.
+	/// Creates a dispatcher with one encoder for every [`LinVariant`] carrying data.
 	pub fn new(
 		lin_enc: LinEnc,
 		bool_lin_enc: BoolLinEnc,
@@ -387,14 +385,12 @@ impl<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
 		}
 	}
 
-	/// Get mutable access to the encoder that is used to encode
-	/// [`LinVariant::BoolLinear`] variants.
+	/// Returns mutable access to the Boolean-linear encoder.
 	pub fn bool_lin_encoder(&mut self) -> &mut BoolLinEnc {
 		&mut self.bool_lin_enc
 	}
 
-	/// Get mutable access to the encoder that is used to encode
-	/// [`LinVariant::Count`] variants.
+	/// Returns mutable access to the variable-bound count encoder.
 	pub fn count_encoder(&mut self) -> &mut CountEnc {
 		&mut self.count_enc
 	}

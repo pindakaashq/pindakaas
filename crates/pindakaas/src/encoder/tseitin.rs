@@ -11,8 +11,21 @@ use crate::{
 };
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
-/// An encoder for propositional logic formulas, based on the standard Tseitin
-/// transformations.
+/// Tseitin encoding with one representative literal per compound sub-formula.
+///
+/// # Examples
+///
+/// ```rust
+/// use pindakaas::{
+///     constraint::propositional_logic::{Formula, TseitinEncoder},
+///     ClauseDatabaseTools, Cnf,
+/// };
+/// let mut cnf = Cnf::default();
+/// let (x, y, z) = cnf.new_lits();
+/// let formula = (Formula::Atom(x) & y) | z;
+/// cnf.encode(&formula, &TseitinEncoder)?;
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 pub struct TseitinEncoder;
 
 impl<Db> Encoder<Db, Formula<BoolVal>> for TseitinEncoder

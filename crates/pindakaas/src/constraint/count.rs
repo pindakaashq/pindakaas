@@ -27,6 +27,22 @@ pub struct Count {
 
 impl Count {
 	/// The constraint that `lits` add up to `y`, or to at most `y`.
+	///
+	/// # Examples
+	///
+	/// ```rust
+	/// use pindakaas::{
+	///     constraint::{count::{Count, SortedEncoder}, linear::LimitComp},
+	///     decision::integer::IntVar, ClauseDatabase, Cnf, Encoder,
+	/// };
+	///
+	/// let mut cnf = Cnf::default();
+	/// let lits = cnf.new_var_range(4).map(Into::into).collect();
+	/// let count = IntVar::new(0..=4);
+	/// let constraint = Count::new(lits, LimitComp::Equal, count);
+	/// SortedEncoder::default().encode(&mut cnf, &constraint)?;
+	/// # Ok::<(), pindakaas::Unsatisfiable>(())
+	/// ```
 	pub fn new(lits: Vec<Lit>, cmp: LimitComp, y: IntVar) -> Self {
 		Self { lits, cmp, y }
 	}
@@ -174,4 +190,3 @@ mod tests {
 		}
 	}
 }
-

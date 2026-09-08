@@ -28,6 +28,20 @@ type SortedCache = FxHashMap<(u128, u128, u128), (SortedStrategy, (u128, u128))>
 /// comparing two encoders for equality, when hashing, or when cloning. This
 /// could, for example, mean that a cloned encoder might lead to a degradation
 /// in performance.
+///
+/// # Examples
+///
+/// ```rust
+/// use pindakaas::{
+///     constraint::{count::Count, linear::LimitComp}, decision::integer::IntVar,
+///     encoder::sorted::SortedEncoder, ClauseDatabase, Cnf, Encoder,
+/// };
+/// let mut cnf = Cnf::default();
+/// let lits = cnf.new_var_range(8).map(Into::into).collect();
+/// let constraint = Count::new(lits, LimitComp::Equal, IntVar::new(0..=8));
+/// SortedEncoder::default().encode(&mut cnf, &constraint)?;
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 pub struct SortedEncoder {
 	add_consistency: bool,
 	strategy: SortedStrategy,
@@ -106,8 +120,7 @@ impl SortedEncoder {
 		Ok(())
 	}
 
-	/// Set whether to add consistency constraints to the intermediate integer
-	/// variables.
+	/// Configures whether intermediate variables are constrained independently of the merge.
 	pub fn enable_intermediate_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
@@ -116,7 +129,7 @@ impl SortedEncoder {
 	/// Constrain `z` to be what `x` and `y` come to together.
 	///
 	/// A variable with a single value has nothing to merge, and merging it
-	/// anyway would not converge, since halving it leaves it just as large. So
+	/// anyway would not converge, since halving leaves it unchanged. So
 	/// once any of the three is fixed, the constraint is stated outright. The
 	/// two inputs are checked alike even though the corpus only exercises the
 	/// first: the alternative to a redundant check here is a hang.
@@ -324,8 +337,7 @@ impl SortedEncoder {
 		self
 	}
 
-	/// Set whether the encoder should use the direct or recursive strategy, or
-	/// a mix of both.
+	/// Selects the merge strategy; the default is [`SortedStrategy::Mixed`] with weight 10.
 	pub fn with_strategy(&mut self, strategy: SortedStrategy) -> &mut Self {
 		self.strategy = strategy;
 		self

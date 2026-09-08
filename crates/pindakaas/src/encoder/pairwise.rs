@@ -11,8 +11,21 @@ use crate::{
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Result,
 };
 
-/// An encoder for an At Most One constraints that for every pair of literals
-/// states that one of the literals has to be `false`.
+/// At-most-one encoding with one binary clause per pair and no auxiliaries.
+///
+/// # Examples
+///
+/// ```rust
+/// use pindakaas::{
+///     constraint::{cardinality_one::CardinalityOne, linear::LimitComp},
+///     encoder::pairwise::PairwiseEncoder, ClauseDatabase, Cnf, Encoder,
+/// };
+/// let mut cnf = Cnf::default();
+/// let lits = cnf.new_var_range(4).map(Into::into).collect();
+/// let constraint = CardinalityOne::new(lits, LimitComp::LessEq);
+/// PairwiseEncoder::default().encode(&mut cnf, &constraint)?;
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PairwiseEncoder {}
 

@@ -20,7 +20,7 @@ pub enum ClausePersistence {
 	/// can be re-derived if needed.
 	Forgettable,
 	/// The clause is to be considered irredundant. It contains information that
-	/// can not (easily) be re-derived.
+	/// cannot be re-derived cheaply.
 	Irredundant,
 }
 
@@ -318,7 +318,7 @@ impl Extend<Lit> for ClauseBuilder<'_> {
 }
 
 impl<'a> Solution<'a> {
-	/// The assigned literals of the observed variables, in order of their
+	/// Returns the assigned literals of the observed variables, in order of their
 	/// variable.
 	pub fn literals(&self) -> &'a [Lit] {
 		self.model

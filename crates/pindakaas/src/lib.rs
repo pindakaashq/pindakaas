@@ -1,84 +1,52 @@
-//! Pindakaas translates constraints stated at a higher level — propositional
-//! logic, Boolean linear (pseudo-Boolean) constraints, integer linear
-//! constraints — into conjunctive normal form, for a SAT solver to solve.
+//! Encoding propositional, pseudo-Boolean, and integer constraints into CNF.
 //!
-//! Constraints are normalised and specialised on the way down, so that an
-//! at-most-one group, a cardinality constraint and a general pseudo-Boolean
-//! sum each reach an encoding built for its shape rather than a generic one.
+//! Pindakaas lets a model use the representation that matches the problem and
+//! lets each encoder choose the Boolean representation that matches its
+//! algorithm. Constraints are normalised and specialised before encoding, so
+//! an at-most-one group, a cardinality constraint, and a weighted sum do not
+//! all pay for the same general-purpose encoding.
 //!
-//! ```bash
-//! cargo add pindakaas
-//! ```
+//! Encoders write to [`ClauseDatabase`]. [`Cnf`] stores their clauses for
+//! inspection or DIMACS output; enabled SAT solvers implement the same trait
+//! and accept the clauses directly.
 //!
-//! Pindakaas is also available for Python; see the [Python
-//! documentation](https://pindakaas.readthedocs.io/en/latest/).
+//! # Clauses and solving
 //!
-//! ## CNF
-//!
-//! [`Cnf`] collects clauses over [`Lit`]s and displays as DIMACS.
+//! [`ClauseDatabaseTools`] allocates variables, adds clauses containing
+//! literals or constant Boolean values, and dispatches encoders.
 //!
 //! ```rust
-//! use pindakaas::{ClauseDatabaseTools, Cnf};
-//!
-//! let mut f = Cnf::default();
-//! let (x, y, z) = f.new_lits();
-//! f.add_clause([!x, y]);
-//! f.add_clause([!y, z]);
-//! f.add_clause([!z, x]);
-//!
-//! assert_eq!(f.to_string(), "p cnf 3 3\n-1 2 0\n-2 3 0\n-3 1 0\n");
-//! ```
-//!
-//! ## Solving
-//!
-//! Both [`Cnf`] and [`Solver`](solver::Solver) implement [`ClauseDatabase`],
-//! so anything that can be encoded into one can be encoded straight into the
-//! other. Swapping [`Cadical`](solver::cadical::Cadical) for
-//! [`Kissat`](solver::kissat::Kissat) is a change of `use` statement.
-//!
-//! ```rust
-//! # use pindakaas::{ClauseDatabaseTools, Cnf};
 //! use pindakaas::{
 //!     solver::{cadical::Cadical, SolveResult, Solver},
-//!     Valuation,
+//!     ClauseDatabaseTools, Cnf, Valuation,
 //! };
 //!
-//! # let mut f = Cnf::default();
-//! # let (x, y, z) = f.new_lits();
-//! # f.add_clause([!x, y]);
-//! # f.add_clause([!y, z]);
-//! # f.add_clause([!z, x]);
+//! let mut cnf = Cnf::default();
+//! let (x, y, z) = cnf.new_lits();
+//! cnf.add_clause([!x, y])?;
+//! cnf.add_clause([!y, z])?;
+//! cnf.add_clause([!z, x])?;
 //!
-//! let mut slv = Cadical::from(&f);
-//! let mut solns = 0;
-//! while let SolveResult::Satisfied(sol) = slv.solve() {
-//!     solns += 1;
-//!     slv.add_clause([x,y,z].map(|l| if sol.value(l) { !l } else { l }));
-//! }
-//!
-//! assert_eq!(solns, 2);
+//! let mut solver = Cadical::from(&cnf);
+//! let SolveResult::Satisfied(model) = solver.solve() else {
+//!     unreachable!("the three implications have a model");
+//! };
+//! assert_eq!(model.value(x), model.value(y));
+//! assert_eq!(model.value(y), model.value(z));
+//! # Ok::<(), pindakaas::Unsatisfiable>(())
 //! ```
 //!
-//! Solvers sit behind feature flags, so that a dependency is only built where
-//! it is wanted:
+//! Solver backends are feature-gated. CaDiCaL is enabled by default; Kissat,
+//! Intel SAT, SPLR integration, and runtime-loaded IPASIR libraries are
+//! available through their corresponding features.
 //!
-//! - `cadical` (default) — [CaDiCaL](https://github.com/arminbiere/cadical),
-//!   as [`Cadical`](solver::cadical::Cadical).
-//! - `intel_sat` — [Intel SAT](https://github.com/alexander-nadel/intel_sat_solver),
-//!   as [`IntelSat`](solver::intel_sat::IntelSat).
-//! - `kissat` — [Kissat](https://github.com/arminbiere/kissat), as
-//!   [`Kissat`](solver::kissat::Kissat).
-//! - `libloading` — [`solver::libloading`], for loading an IPASIR library at
-//!   runtime.
-//! - `splr` — the common solver traits for [SPLR](https://github.com/shnarazk/splr).
+//! # Propositional formulas
 //!
-//! ## Propositional logic
-//!
-//! A [`Formula`](constraint::propositional_logic::Formula) is built from the
-//! `&`, `|` and `^` operators; the rest of its variants — implication,
-//! equivalence, if-then-else — are named explicitly. Encoding one is the job
-//! of an [`Encoder`], here
-//! [`TseitinEncoder`](constraint::propositional_logic::TseitinEncoder).
+//! [`Formula`](constraint::propositional_logic::Formula) supports conjunction,
+//! disjunction, exclusive-or, implication, equivalence, negation, and
+//! if-then-else. [`TseitinEncoder`](encoder::tseitin::TseitinEncoder) names
+//! compound sub-formulas instead of distributing them into exponentially many
+//! clauses.
 //!
 //! ```rust
 //! use pindakaas::{
@@ -86,108 +54,86 @@
 //!     ClauseDatabaseTools, Cnf,
 //! };
 //!
-//! let mut f = Cnf::default();
-//! let (x, y, z) = f.new_lits();
+//! let mut cnf = Cnf::default();
+//! let (x, y, z) = cnf.new_lits();
 //! let p = (x ^ y) | z;
-//! let q = Formula::IfThenElse {
-//!     cond: Formula::Atom(z).into(),
-//!     then: Formula::Atom(x).into(),
-//!     els: Formula::Atom(y).into(),
-//! };
+//! cnf.encode(&p, &TseitinEncoder)?;
 //!
-//! f.encode(&p, &TseitinEncoder);
-//! f.encode(&q, &TseitinEncoder);
-//! assert_eq!(f.num_clauses(), 7);
+//! // Named variants cover the forms without operator syntax.
+//! let choose = Formula::IfThenElse {
+//!     cond: Formula::Atom(x),
+//!     then: Formula::Atom(y),
+//!     els: Formula::Atom(z),
+//! };
+//! cnf.encode(&choose, &TseitinEncoder)?;
+//! # Ok::<(), pindakaas::Unsatisfiable>(())
 //! ```
 //!
-//! ## Linear constraints
+//! # Linear constraints
 //!
-//! A [`LinExp`](constraint::linear::LinExp) is a sum of terms built with
-//! `+`, `-` and `*`. A term is either a [`Lit`], worth its coefficient when it
-//! holds, or an [`IntVar`](decision::integer::IntVar), worth its coefficient
-//! times whichever value it takes, so `x * 3 + y * 5` reads the same whichever
-//! kind each side is. [`Linear::new`](constraint::linear::Linear::new)
-//! compares one against a constant.
-//!
-//! Encoding starts by aggregating, which normalises the constraint and
-//! recognises what it actually is — a
-//! [`LinVariant`](constraint::linear::LinVariant). That is what makes the
-//! specialised encoders reachable; [`StaticLinEncoder`](encoder::aggregate::StaticLinEncoder)
-//! picks one per variant, and [`LinearEncoder`](encoder::aggregate::LinearEncoder)
-//! does both steps at once.
+//! [`Linear`](constraint::linear::Linear) compares a sum of weighted literals
+//! and integer variables with a constant. The usual arithmetic operators build
+//! the expression. [`LinearEncoder`](encoder::aggregate::LinearEncoder) first
+//! aggregates repeated variables and constants, recognises narrower constraint
+//! classes, and dispatches the configured encoder for the resulting shape.
 //!
 //! ```rust
 //! use pindakaas::{
-//!     constraint::linear::{LinAggregator, LinearEncoder, StaticLinEncoder},
-//!     constraint::linear::{Linear, Comparator},
-//!     Cnf, ClauseDatabaseTools
+//!     constraint::{cardinality_one::BitwiseEncoder,
+//!         linear::{AdderEncoder, Comparator, Linear, LinearEncoder,
+//!             StaticLinEncoder}},
+//!     encoder::sorted::SortedEncoder,
+//!     ClauseDatabaseTools, Cnf,
 //! };
 //!
-//! let mut f = Cnf::default();
-//! let (x, y, z) = f.new_lits();
-//! let con = Linear::new(x * 2 + y * 3 + z * 2, Comparator::LessEq, 2);
-//!
-//! // Use default encoders and aggregator options
-//! let lin_enc: StaticLinEncoder = StaticLinEncoder::default();
-//! let enc = LinearEncoder::new(lin_enc, LinAggregator::default());
-//!
-//! f.encode(&con, &enc);
-//!
-//! // `y` alone would break the bound, and `x` and `z` cannot both hold.
-//! assert_eq!(f.num_vars(), 4);
+//! let mut cnf = Cnf::default();
+//! let (x, y, z) = cnf.new_lits();
+//! let capacity = Linear::new(2 * x + 3 * y + 2 * z, Comparator::LessEq, 4);
+//! let encoder = LinearEncoder::<StaticLinEncoder<AdderEncoder, AdderEncoder,
+//!     AdderEncoder, BitwiseEncoder, SortedEncoder>>::default();
+//! cnf.encode(&capacity, &encoder)?;
+//! # Ok::<(), pindakaas::Unsatisfiable>(())
 //! ```
 //!
-//! ## Integer variables
+//! The encoder modules include pairwise, ladder, bitwise, and product
+//! at-most-one encodings; sorting networks for cardinality and variable-bound
+//! counts; and adder, BDD, sequential weight counter, totalizer, and modulo
+//! totalizer encodings for weighted constraints.
 //!
-//! An [`IntVar`](decision::integer::IntVar) is created with the domain it
-//! ranges over, and holds whichever Boolean encodings its constraints ask for
-//! — order literals for a sequential decomposition, bits for an adder, a
-//! one-hot view for an at-most-one group — channelling between them where more
-//! than one is called for. Nothing is chosen in advance, and a second variable
-//! is never needed to hold the other view.
+//! # Integer variables
 //!
-//! Aggregating a constraint over them gives a
-//! [`NormalizedIntLinear`](constraint::int_linear::NormalizedIntLinear): a sum
-//! of positive coefficients against a bound. Choosing an encoder is then
-//! choosing how that sum is broken up — a decision diagram, a chain of partial
-//! sums, a balanced tree, or one whose nodes are digits in a mixed radix base
-//! ([`ModuloTotalizerEncoder`](constraint::int_linear::ModuloTotalizerEncoder))
-//! — each reaching the same
-//! [`IntTernaryEncoder`](constraint::int_ternary::IntTernaryEncoder) for the
-//! `x + y ≷ z` steps it leaves behind.
+//! [`IntVar`](decision::integer::IntVar) can represent contiguous or sparse
+//! domains. It creates order, direct, or binary views when a constraint first
+//! asks for them, then channels later views to the same value. A model can
+//! therefore mix algorithms without declaring one representation up front.
 //!
 //! ```rust
 //! use pindakaas::{
-//!     constraint::linear::{Comparator, Linear},
-//!     constraint::int_linear::BddEncoder,
-//!     constraint::linear::{LinAggregator, LinVariant},
-//!     decision::integer::IntVar,
-//!     solver::{cadical::Cadical, SolveResult, Solver},
-//!     Cnf, Encoder,
+//!     constraint::{cardinality_one::BitwiseEncoder,
+//!         linear::{AdderEncoder, Comparator, Linear, LinearEncoder,
+//!             StaticLinEncoder}},
+//!     decision::integer::IntVar, ClauseDatabaseTools, Cnf,
+//!     encoder::sorted::SortedEncoder,
 //! };
 //!
-//! let mut f = Cnf::default();
-//! let x = IntVar::new(0..=5).with_label("x");
-//! let y = IntVar::new(0..=5).with_label("y");
+//! let mut cnf = Cnf::default();
+//! let x = IntVar::new(0..=8).with_label("x");
+//! let y = IntVar::new(0..=7).with_label("y");
+//! let budget = Linear::new(x.clone() * 3 + y.clone() * 2, Comparator::LessEq, 20);
+//! let encoder = LinearEncoder::<StaticLinEncoder<AdderEncoder, AdderEncoder,
+//!     AdderEncoder, BitwiseEncoder, SortedEncoder>>::default();
+//! cnf.encode(&budget, &encoder)?;
 //!
-//! let con = Linear::new(x.clone() * 2 + y.clone() * 3, Comparator::LessEq, 10);
-//! let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut f, &con).unwrap()
-//! else {
-//!     panic!("a sum of integer terms is a linear constraint");
-//! };
-//! BddEncoder::default().encode(&mut f, &con).unwrap();
-//!
-//! let mut slv = Cadical::from(&f);
-//! let SolveResult::Satisfied(sol) = slv.solve() else {
-//!     panic!("the constraint has solutions");
-//! };
-//! assert!(2 * x.value(&sol) + 3 * y.value(&sol) <= 10);
+//! // Querying a bound creates or reuses the order view of `x`.
+//! let x_at_least_four = x.lit_at_least(&mut cnf, 4)?;
+//! cnf.add_clause([x_at_least_four])?;
+//! # Ok::<(), pindakaas::Unsatisfiable>(())
 //! ```
 //!
-//! ## Citation
+//! # Citation
 //!
-//! If you want to cite Pindakaas please use our general software
-//! citation, in addition to any citation to a specific version or paper:
+//! If you cite Pindakaas, use this general software citation alongside any
+//! citation for a particular version or encoding paper:
 //!
 //! ```biblatex
 //! @software{Pindakaas,
@@ -199,15 +145,18 @@
 //! }
 //! ```
 //!
-//! Note that you might have to use `misc` instead of `software`, if your system
-//! does not support `software` as a type.
+//! Use `misc` instead of `software` when the bibliography system does not
+//! support the `software` entry type.
 //!
-//! ## Acknowledgements
+//! # Acknowledgements
 //!
 //! This research was partially funded by the Australian Government through the
 //! Australian Research Council Industrial Transformation Training Centre in
 //! Optimisation Technologies, Integrated Methodologies, and Applications
 //! (OPTIMA), Project ID IC200100009.
+//!
+//! The Python bindings expose the same modelling concepts through
+//! [pyndakaas](https://pindakaas.readthedocs.io/en/latest/).
 
 pub mod constraint;
 pub mod decision;
@@ -238,44 +187,41 @@ pub use crate::{
 	helpers::AsDynClauseDatabase,
 };
 
-/// Checker is a trait implemented by types that represent constraints. The
-/// [`Checker::check`] methods checks whether an assignment (often referred to
-/// as a model) satisfies the constraint.
+/// Testing a constraint against a complete assignment.
 pub trait Checker {
-	/// Check whether the constraint represented by the object is violated.
+	/// Checks whether the assignment satisfies the constraint.
 	///
-	/// - The method returns [`Result::Ok`] when the assignment satisfies the
-	///   constraint,
-	/// - it returns [`Unsatisfiable`] when the assignment violates the
-	///   constraint
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when the assignment violates the constraint.
 	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<(), Unsatisfiable>;
 }
 
-/// The `ClauseDatabase` trait is the common trait implemented by types that are
-/// used to manage the CNF encoding of constraints and contain their output.
-/// This trait can be used for all encoding methods in this library.
-///
-/// To satisfy the trait, the type must implement a
-/// [`Self::add_clause_from_slice`] method and a [`Self::new_var_range`] method.
+/// Destination for clauses and fresh variables emitted by an encoder.
 pub trait ClauseDatabase {
-	/// Add a clause to the `ClauseDatabase`. The database is allowed to return
-	/// [`Unsatisfiable`] when the collection of clauses has been *proven* to be
-	/// unsatisfiable. This is used as a signal to the encoder that any
-	/// subsequent encoding effort can be abandoned.
+	/// Adds one clause, including the empty clause.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when adding the clause proves the database
+	/// inconsistent.
 	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result;
-	/// Method to be used to receive a new Boolean variable that can be used in
-	/// the encoding of a problem or constraint.
+
+	/// Allocates a contiguous range unused by every earlier call.
 	fn new_var_range(&mut self, len: usize) -> VarRange;
 }
 
-/// A trait automatically implemented for types that implement
-/// [`ClauseDatabase`] providing a variety of utility methods that make it
-/// easier to write common clause encoding patterns.
+/// Clause and variable conveniences available to every [`ClauseDatabase`].
 pub trait ClauseDatabaseTools: ClauseDatabase {
-	/// Add a clause, given as any to the `ClauseDatabase`. The database is
-	/// allowed to return [`Unsatisfiable`] when the collection of clauses has
-	/// been *proven* to be unsatisfiable. This is used as a signal to the
-	/// encoder that any subsequent encoding effort can be abandoned.
+	/// Adds a clause after folding away constant Boolean values.
+	///
+	/// A true value satisfies the clause without changing the database; false
+	/// values are omitted.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when the reduced clause proves the database
+	/// inconsistent.
 	fn add_clause<Iter>(&mut self, clause: Iter) -> Result
 	where
 		Iter: IntoIterator,
@@ -303,17 +249,24 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		}
 	}
 
-	/// Encoder helper that signals a contradiction has been detected in the
-	/// constraint being encoded.
+	/// Records an already-detected contradiction as an empty clause.
 	///
-	/// This will add an empty clause to the clause database.
+	/// # Errors
+	///
+	/// Always returns [`Unsatisfiable`] after offering the empty clause to the
+	/// database.
 	fn contradiction(&mut self) -> Result {
 		let err = self.add_clause_from_slice(&[]);
 		debug_assert_eq!(err, Err(Unsatisfiable));
 		err
 	}
 
-	/// Encode a constraint using the provided encoder.
+	/// Encodes a constraint into this database with the selected encoder.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] under the conditions documented by
+	/// [`Encoder::encode`].
 	fn encode<C, E>(&mut self, constraint: &C, encoder: &E) -> Result
 	where
 		C: ?Sized,
@@ -322,10 +275,15 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		encoder.encode(self, constraint)
 	}
 
-	/// Encode an implied constraint of the form `conditions -> constraint`.
+	/// Encodes `conditions -> constraint` by guarding every emitted clause.
 	///
 	/// This is a thin convenience wrapper around
 	/// [`Encoder::encode_implied`].
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when the guarded clauses make the database
+	/// inconsistent.
 	fn encode_implied<C, E>(&mut self, conditions: &[Lit], constraint: &C, encoder: &E) -> Result
 	where
 		C: ?Sized,
@@ -334,12 +292,12 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		encoder.encode_implied(self, conditions, constraint)
 	}
 
-	/// Create a new Boolean variable in the form of a positive literal.
+	/// Allocates a fresh Boolean variable as a positive literal.
 	fn new_lit(&mut self) -> Lit {
 		self.new_var().into()
 	}
 
-	/// Create multiple new Boolean literals and capture them in a tuple.
+	/// Allocates fresh Boolean literals and returns them in a tuple.
 	///
 	/// # Example
 	/// ```
@@ -357,7 +315,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 
 	#[cfg(any(feature = "tracing", test))]
 	#[inline]
-	/// Create a new Boolean variable in the form of a positive literal. The
+	/// Allocates a fresh Boolean variable as a positive literal. The
 	/// given name is used when the variable is output by the tracer.
 	fn new_named_lit(&mut self, name: &str) -> Lit {
 		self.new_named_var(name).into()
@@ -365,7 +323,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 
 	#[cfg(any(feature = "tracing", test))]
 	#[inline]
-	/// Create a new Boolean variable that can be used in the encoding of a
+	/// Allocates a fresh Boolean variable that can be used in the encoding of a
 	/// problem. The given name is used when the variable is output by the
 	/// tracer.
 	fn new_named_var(&mut self, name: &str) -> Var {
@@ -374,7 +332,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		var
 	}
 
-	/// Create a new Boolean variable that can be used in the encoding of a
+	/// Allocates a fresh Boolean variable that can be used in the encoding of a
 	/// problem or constraint.
 	fn new_var(&mut self) -> Var {
 		let mut range = self.new_var_range(1);
@@ -382,7 +340,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		range.next().unwrap()
 	}
 
-	/// Create multiple new Boolean variables and capture them in a tuple.
+	/// Allocates fresh Boolean variables and returns them in a tuple.
 	///
 	/// # Example
 	/// ```
@@ -399,10 +357,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 	}
 }
 
-/// A representation for Boolean formulas in conjunctive normal form.
-///
-/// It can be used to create formulas manually, to store the results from
-/// encoders, read formulas from a file, and write them to a file
+/// In-memory conjunctive normal form with DIMACS input and output.
 #[derive(Clone, Debug, Default)]
 pub struct Cnf {
 	/// The variable factory used by [`new_var`]
@@ -421,8 +376,7 @@ struct CnfIterator<'a> {
 	index: usize,
 }
 
-/// Coeff is a type alias used for the number type used to represent the
-/// coefficients in constraints and expression.
+/// Coefficient representation shared by constraints and expressions.
 pub(crate) type Coeff = i64;
 
 enum Dimacs {
@@ -514,26 +468,20 @@ pub trait Encoder<Db: ClauseDatabase + ?Sized, Constraint: ?Sized> {
 	}
 }
 
-/// Result is a type alias for [`std::result::Result`] that by default returns
-/// an empty value, or the [`Unsatisfiable`] error type.
+/// Encoding result with [`Unsatisfiable`] as its default error.
 type Result<T = (), E = Unsatisfiable> = std::result::Result<T, E>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
-/// Unsatisfiable is an error type returned when the problem being encoded is
-/// found to be inconsistent.
+/// Claim that the clauses or constraint cannot be satisfied.
 pub struct Unsatisfiable;
 
-/// A trait implemented by types that can be used to represent a solution/model
+/// Truth values supplied by a complete solver model.
 pub trait Valuation {
-	/// Returns the valuation/truth-value for a given literal in the
-	/// current solution/model.
+	/// Returns the literal's truth value.
 	fn value(&self, lit: Lit) -> bool;
 }
 
-/// A representation for a weighted CNF formula
-///
-/// Same as CNF, but every clause has an optional weight. Otherwise, it is a
-/// hard clause.
+/// Weighted CNF whose unweighted clauses are hard.
 #[derive(Clone, Debug, Default)]
 pub struct Wcnf {
 	/// The CNF formula
@@ -640,7 +588,15 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 }
 
 impl Cnf {
-	/// Read a CNF formula from a file formatted in the DIMACS CNF format
+	/// Parses a CNF formula from DIMACS input.
+	///
+	/// # Errors
+	///
+	/// An I/O error for unreadable input or a malformed header.
+	///
+	/// # Panics
+	///
+	/// Malformed clause data may currently panic instead of returning an error.
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
 		match parse_dimacs_file::<false>(path)? {
 			Dimacs::Cnf(cnf) => Ok(cnf),
@@ -660,7 +616,7 @@ impl Cnf {
 		}
 	}
 
-	/// Returns an iterator over the clauses in the formula.
+	/// Iterates over the clauses in insertion order.
 	pub fn iter(&self) -> impl ExactSizeIterator<Item = &[Lit]> + '_ {
 		CnfIterator {
 			lits: &self.lits,
@@ -669,7 +625,7 @@ impl Cnf {
 		}
 	}
 
-	/// Returns the number of literals in the formula.
+	/// Counts the literals in the formula.
 	pub fn literals(&self) -> usize {
 		self.size.iter().sum()
 	}
@@ -683,9 +639,13 @@ impl Cnf {
 		self.nvar.num_emitted_vars()
 	}
 
-	/// Store CNF formula at given path in DIMACS format
+	/// Writes the formula to `path` in DIMACS format.
 	///
-	/// File will optionally be prefaced by a given comment
+	/// Each line of `comment` is prefixed with the DIMACS comment marker.
+	///
+	/// # Errors
+	///
+	/// An I/O error when the file cannot be created or fully written.
 	pub fn to_file(&self, path: &Path, comment: Option<&str>) -> Result<(), io::Error> {
 		let mut file = File::create(path)?;
 		if let Some(comment) = comment {
@@ -696,7 +656,7 @@ impl Cnf {
 		write!(file, "{self}")
 	}
 
-	/// Returns the range of variables emitted to be used by this formula.
+	/// Returns the range of variables emitted for this formula.
 	pub fn variables(&self) -> VarRange {
 		self.nvar.emitted_vars()
 	}
@@ -779,7 +739,13 @@ impl Display for Unsatisfiable {
 impl Error for Unsatisfiable {}
 
 impl Wcnf {
-	/// Add a weighted clause to the formula.
+	/// Adds a weighted clause to the formula.
+	///
+	/// Constant values are folded as for [`ClauseDatabaseTools::add_clause`].
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when the reduced clause is empty.
 	pub fn add_weighted_clause<I>(&mut self, clause: I, weight: Coeff) -> Result
 	where
 		I: IntoIterator,
@@ -793,7 +759,16 @@ impl Wcnf {
 		Ok(())
 	}
 
-	/// Read a WCNF formula from a file formatted in the (W)DIMACS WCNF format
+	/// Parses a weighted CNF formula from WCNF input.
+	///
+	/// # Errors
+	///
+	/// An I/O error for unreadable input or a malformed header.
+	///
+	/// # Panics
+	///
+	/// WCNF header and clause parsing currently contain unchecked assumptions;
+	/// syntactically plausible input can panic.
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
 		match parse_dimacs_file::<true>(path)? {
 			Dimacs::Wcnf(wcnf) => Ok(wcnf),
@@ -801,29 +776,33 @@ impl Wcnf {
 		}
 	}
 
-	/// Returns an iterator over the clauses and their weights.
+	/// Iterates over clauses and their weights in insertion order.
 	pub fn iter(&self) -> impl ExactSizeIterator<Item = (&[Lit], &Option<Coeff>)> {
 		self.cnf.iter().zip(self.weights.iter())
 	}
 
-	/// Returns the number of literals in the formula.
+	/// Counts the literals in the formula.
 	pub fn literals(&self) -> usize {
 		self.cnf.literals()
 	}
 
-	/// Returns the number of clauses in the formula.
+	/// Counts the clauses in the formula.
 	pub fn num_clauses(&self) -> usize {
 		self.cnf.num_clauses()
 	}
 
-	/// Returns the number of variables in the formula.
+	/// Counts the variables in the formula.
 	pub fn num_vars(&self) -> usize {
 		self.cnf.num_vars()
 	}
 
-	/// Store WCNF formula at given path in WDIMACS format
+	/// Writes the formula to `path` in WCNF format.
 	///
-	/// File will optionally be prefaced by a given comment
+	/// Each line of `comment` is prefixed with the DIMACS comment marker.
+	///
+	/// # Errors
+	///
+	/// An I/O error when the file cannot be created or fully written.
 	pub fn to_file(&self, path: &Path, comment: Option<&str>) -> Result<(), io::Error> {
 		let mut file = File::create(path)?;
 		if let Some(comment) = comment {
@@ -834,7 +813,7 @@ impl Wcnf {
 		write!(file, "{self}")
 	}
 
-	/// Returns the range of variables emitted to be used by this formula.
+	/// Returns the range of variables emitted for this formula.
 	pub fn variables(&self) -> VarRange {
 		self.cnf.variables()
 	}

@@ -211,8 +211,8 @@ impl ModuloTotalizerEncoder {
 	/// dividing the most coefficients, and the coefficients are divided by it
 	/// afterwards so the next value suits the next digit.
 	///
-	/// Measured against CaDiCaL conflicts and wall time, not just clause
-	/// counts, that rule loses to plain `⌊√n⌋` on constraints whose
+	/// Measured against CaDiCaL conflicts and wall time rather than clause
+	/// counts alone, that rule loses to plain `⌊√n⌋` on constraints whose
 	/// coefficients share no real structure — a shared divisor there is
 	/// coincidence, not structure, and trusting it costs more digits than it
 	/// saves. So a divisor is only trusted where it covers at least half the

@@ -37,7 +37,8 @@ A :class:`range` is half open, as everywhere else in Python, so its `stop` is
 def _int_var_domain(domain: Domain) -> list:
     """`domain` as the inclusive, disjoint, ascending intervals Rust wants.
 
-    :raises ValueError: If the domain has no values at all
+    Raises:
+        ValueError: The domain has no values.
     """
     if isinstance(domain, range):
         domain = [domain]
@@ -71,10 +72,9 @@ def _domain_card(intervals: list) -> int:
 
 
 class ClauseDatabase(ABC):
-    """The abstract class to represent objects to which we can add clauses.
+    """Destination for clauses and fresh variables emitted by an encoder.
 
-    Examples of such classes include `CNF`, `WCNF`, and the various `Solver`
-        implementations.
+    Implemented by ``CNF``, ``WCNF``, and the solver classes.
     """
 
     def __iadd__(self, constraint: Constraint):
@@ -83,11 +83,13 @@ class ClauseDatabase(ABC):
 
     @abstractmethod
     def add_clause(self, clause: Iterable[Union[Lit, BoolVal, bool]]):
-        """Add a clause to the database.
+        """Adds a clause after folding constant Boolean values.
 
-        :param clause: The literals of the clause, as given by :class:`Lit`,
-            :class:`BoolVal` or a plain :class:`bool`
-        :raises Unsatisfiable: If the formula has become unsatisfiable
+        Args:
+            clause: Literals or constant Boolean values in the disjunction.
+
+        Raises:
+            Unsatisfiable: The reduced clause makes the database inconsistent.
         """
         ...
 
@@ -97,40 +99,50 @@ class ClauseDatabase(ABC):
         encoder: Optional[Encoder] = None,
         conditions: Optional[Iterable[Lit]] = None,
     ):
-        """Add an encoding of a `constraint` to the database.
+        """Clauses encoding a constraint, optionally under conditions.
 
-        Optionally, the constraint is implied by the given `conditions` (i.e. every
-            clause is extended by the `conditions`), and the given `encoder` is used
-            for the encoding.
+        Args:
+            constraint: Formula or constraint to encode.
+            encoder: Encoding algorithm, or its default when omitted.
+            conditions: Literals whose conjunction implies the constraint.
 
-        :param constraint: The constraint or formula to encode and add to the database
-        :raises Unsatisfiable: If the formula has become unsatisfiable
+        Raises:
+            InvalidEncoder: The encoder does not accept this constraint type.
+            Unsatisfiable: The encoding makes the database inconsistent.
         """
         _wrap_encode_constraint(self, constraint, encoder, conditions)
 
     def new_var(self):
-        """Add a new variable to the database."""
+        """Allocates one previously unused positive literal."""
         r = self.new_var_range(1)
         assert r.start() == r.end()
         return r.start()
 
     def new_vars(self, n: int) -> Iterable[Lit]:
-        """Add `n` new variables to the database.
+        """Allocates a consecutive range of previously unused variables.
 
-        :param n: The number of new variables
-        :return: The new variables returned as literals
+        Args:
+            n: Number of variables.
+
+        Returns:
+            The variables as positive literals.
         """
         return self.new_var_range(n)
 
     def new_int_var(self, domain: Domain) -> IntVar:
-        """Create an integer variable over the values of `domain`.
+        """An integer variable whose Boolean encoding is created on demand.
 
         Nothing is encoded until the variable is used in a constraint, at which
             point it is given whichever Boolean encodings that constraint needs.
 
-        :param domain: The values the variable can take, as a :data:`Domain`
-        :return: The new integer variable
-        :raises ValueError: If the domain has no values at all
+        Args:
+            domain: Values the variable may take.
+
+        Returns:
+            The unencoded integer variable.
+
+        Raises:
+            ValueError: The domain has no values.
         """
         return IntVar(_int_var_domain(domain))
 
@@ -146,11 +158,16 @@ class ClauseDatabase(ABC):
         The literals are taken at their word: nothing is added to make them mean
             this. Where they do not, call :meth:`IntVar.constrain` on the result.
 
-        :param domain: The values the variable can take, as a :data:`Domain`
-        :param literals: The literal for reaching each value beyond the first
-        :return: The new integer variable
-        :raises ValueError: If there is not one literal per value beyond the first
-        :raises Unsatisfiable: If the formula has become unsatisfiable
+        Args:
+            domain: Values the variable may take.
+            literals: Literal for reaching each value beyond the first.
+
+        Returns:
+            The integer variable backed by those literals.
+
+        Raises:
+            ValueError: There is not one literal per value beyond the first.
+            Unsatisfiable: Channelling to an existing view causes a contradiction.
         """
         domain, literals = _int_var_domain(domain), list(literals)
         card = _domain_card(domain)
@@ -173,11 +190,16 @@ class ClauseDatabase(ABC):
         The literals are taken at their word: nothing is added to make them mean
             this. Where they do not, call :meth:`IntVar.constrain` on the result.
 
-        :param domain: The values the variable can take, as a :data:`Domain`
-        :param literals: The literal for taking each value
-        :return: The new integer variable
-        :raises ValueError: If there is not one literal per value
-        :raises Unsatisfiable: If the formula has become unsatisfiable
+        Args:
+            domain: Values the variable may take.
+            literals: Literal for taking each value.
+
+        Returns:
+            The integer variable backed by those literals.
+
+        Raises:
+            ValueError: There is not one literal per value.
+            Unsatisfiable: Channelling to an existing view causes a contradiction.
         """
         domain, literals = _int_var_domain(domain), list(literals)
         card = _domain_card(domain)
@@ -199,13 +221,17 @@ class ClauseDatabase(ABC):
         The literals are taken at their word: nothing is added to make them mean
             this. Where they do not, call :meth:`IntVar.constrain` on the result.
 
-        :param domain: The values the variable can take, as a :data:`Domain`
-        :param bits: The bits of the variable, least significant first
-        :param counts_from: What all the bits being zero stands for
-        :return: The new integer variable
-        :raises ValueError: If `counts_from` is above the least value, or there
-            are not as many bits as reaching the greatest one takes
-        :raises Unsatisfiable: If the formula has become unsatisfiable
+        Args:
+            domain: Values the variable may take.
+            bits: Value bits, least significant first.
+            counts_from: Value represented by all bits being false.
+
+        Returns:
+            The integer variable backed by those bits.
+
+        Raises:
+            ValueError: The offset is above the least value or the bit count is wrong.
+            Unsatisfiable: Channelling to an existing view causes a contradiction.
         """
         domain, bits = _int_var_domain(domain), list(bits)
         least, greatest = domain[0][0], domain[-1][1]
@@ -221,17 +247,19 @@ class ClauseDatabase(ABC):
 
     @abstractmethod
     def new_var_range(self, n: int) -> VarRange:
-        """Add a continuous range of `n` new variables to the database.
+        """A consecutive range of previously unused variables.
 
-        :param n: The number of new variables
-        :return: The start and end of the range of the new variables (inclusive), given
-            as literals.
+        Args:
+            n: Number of variables.
+
+        Returns:
+            Inclusive range represented by positive literals.
         """
         ...
 
 
 class CNF(ClauseDatabase):
-    """A representation for Boolean formulas in conjunctive normal form."""
+    """In-memory conjunctive normal form."""
 
     _inner: CNFInner
 
@@ -251,9 +279,10 @@ class CNF(ClauseDatabase):
         return self._inner.add_encoding(constraint, encoder, conditions)
 
     def clauses(self) -> Iterable[list[Lit]]:
-        """Returns an iterator of the clauses currently included in the CNF.
+        """Returns clauses currently stored in insertion order.
 
-        :return: An iterable of lists of literals representing the clauses.
+        Returns:
+            Copies of the clauses as lists of literals.
         """
         return self._inner.clauses()
 
@@ -261,16 +290,18 @@ class CNF(ClauseDatabase):
         return self._inner.new_var_range(n)
 
     def to_dimacs(self) -> str:
-        """Return a textual representation in the DIMACS format.
+        """DIMACS serialization of the current formula.
 
-        :return: The CNF as a DIMACS string
+        Returns:
+            A complete DIMACS CNF string.
         """
         return self._inner.to_dimacs()
 
     def variables(self) -> Iterable[Lit]:
-        """Returns an iterator of the variables currently included in the CNF.
+        """Returns variables allocated by this database.
 
-        :return: An iterable of literals representing the variables.
+        Returns:
+            Positive literals in allocation order.
         """
         return self._inner.variables()
 
@@ -288,16 +319,21 @@ class WCNF(CNF):
         self._inner = WCNFInner()
 
     def add_weighted_clause(self, clause: Iterable[Lit], weight: int):
-        """Add a weighted clause to the database.
+        """Adds a soft clause with the given cost when violated.
 
-        :param clause: An iterable of literals representing the clause to add
-        :param weight: the weight of the clause
+        Args:
+            clause: Literals in the disjunction.
+            weight: Cost of violating the clause.
+
+        Raises:
+            Unsatisfiable: The reduced clause is empty.
         """
         return self._inner.add_weighted_clause(iter(clause), weight)
 
     def weighted_clauses(self) -> Iterable[tuple[Optional[int], list[Lit]]]:
-        """Returns an iterator of the weighted clauses currently included in the WCNF.
+        """Returns hard and soft clauses in insertion order.
 
-        :return: An iterable of lists of literals representing the clauses.
+        Returns:
+            ``(weight, clause)`` pairs; a ``None`` weight marks a hard clause.
         """
         return self._inner.weighted_clauses()

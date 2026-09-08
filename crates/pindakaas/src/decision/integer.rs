@@ -721,6 +721,11 @@ impl IntVar {
 	/// worth what their channels to it make them worth. An encoding tied
 	/// one-directionally is a bound rather than the value, and so has no value
 	/// to constrain.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when the required consistency clauses contradict the
+	/// database.
 	pub fn constrain<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		let (lead, order, direct, binary, domain) = {
 			let mut state = self.0.borrow_mut();
@@ -765,27 +770,32 @@ impl IntVar {
 		let _ = self.0.borrow_mut().products.insert(c, bits);
 	}
 
-	/// The domain of the variable.
+	/// Returns the variable's domain.
 	pub fn domain(&self) -> RangeList<Coeff> {
 		self.0.borrow().domain.clone()
 	}
 
-	/// Whether the variable is held in a direct encoding, which is the view a
+	/// Reports whether the variable has a direct encoding, which is the view a
 	/// constraint reads it through when it has one.
 	pub fn has_direct_encoding(&self) -> bool {
 		self.0.borrow().direct.is_some()
 	}
 
-	/// Whether the variable is held in a binary encoding.
+	/// Reports whether the variable has a binary encoding.
 	pub fn has_binary_encoding(&self) -> bool {
 		self.0.borrow().binary.is_some()
 	}
 
-	/// Whether the variable is at least `v`.
+	/// Returns a [`BoolVal`] indicating whether the variable is at least `v`.
 	///
 	/// The answer is a constant where the domain settles it, and otherwise one
 	/// literal of the order encoding, which is created if the variable has not
 	/// been asked for one before.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when creating or channelling the order encoding
+	/// contradicts the database.
 	pub fn lit_at_least<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -806,8 +816,13 @@ impl IntVar {
 		Ok(order.lit_at_least(&state.domain, v))
 	}
 
-	/// Whether the variable is at most `v`, which is whether it fails to reach
-	/// the value after it.
+	/// Returns a [`BoolVal`] indicating whether the variable is at most `v`,
+	/// which is whether it fails to reach the value after it.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] under the conditions documented by
+	/// [`IntVar::lit_at_least`].
 	pub fn lit_at_most<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -816,7 +831,7 @@ impl IntVar {
 		Ok(!self.lit_at_least(db, v + 1)?)
 	}
 
-	/// Whether the variable takes exactly `v`.
+	/// Returns a [`BoolVal`] indicating whether the variable takes exactly `v`.
 	///
 	/// The answer is a constant where the domain settles it, and one literal of
 	/// the order encoding where `v` is at either end of the domain, since
@@ -826,6 +841,11 @@ impl IntVar {
 	/// costs clauses in proportion to the size of the domain, so it is worth
 	/// giving a variable its direct encoding up front where every value will be
 	/// asked about.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when creating or channelling the required encoding
+	/// contradicts the database.
 	pub fn lit_equals<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -857,11 +877,16 @@ impl IntVar {
 		Ok(direct.lit_equals(&state.domain, v))
 	}
 
-	/// The order encoding walked: every value of the domain, paired with
-	/// whether the variable is at least it.
+	/// Walks the order encoding, pairing every value of the domain with
+	/// the [`BoolVal`] indicating whether the variable is at least it.
 	///
 	/// This is [`IntVar::lit_at_least`] over the whole domain, and creates the
 	/// order encoding for the same reason.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when creating or channelling the order encoding
+	/// contradicts the database.
 	pub fn lit_order_walk<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -877,8 +902,13 @@ impl IntVar {
 			.into_iter())
 	}
 
-	/// Every value of the domain, paired with whether the variable takes it —
-	/// what [`IntVar::lit_equals`] gives, without asking value by value.
+	/// Walks the direct encoding, pairing every value of the domain with a
+	/// [`BoolVal`] indicating whether the variable takes it.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when creating or channelling the direct encoding
+	/// contradicts the database.
 	pub fn lit_direct_walk<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -897,11 +927,16 @@ impl IntVar {
 			.into_iter())
 	}
 
-	/// The bits of the variable, least significant first, together with the
-	/// value all of them being zero stands for.
+	/// Returns [`BoolVal`]s representing the variable's bits, least significant
+	/// first, together with the minimum value when all bits are zero.
 	///
 	/// A bit is a constant where the domain leaves it no choice. The binary
 	/// encoding is created if the variable has not been asked for one before.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when creating, constraining, or channelling the binary
+	/// encoding contradicts the database.
 	pub fn lit_binary_bits<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -1009,12 +1044,12 @@ impl IntVar {
 		true
 	}
 
-	/// The greatest value the variable can take.
+	/// Returns the greatest value the variable can take.
 	pub fn max(&self) -> Coeff {
 		*self.0.borrow().domain.max().unwrap()
 	}
 
-	/// The least value the variable can take.
+	/// Returns the least value the variable can take.
 	pub fn min(&self) -> Coeff {
 		*self.0.borrow().domain.min().unwrap()
 	}
@@ -1102,7 +1137,7 @@ impl IntVar {
 		self.reconcile(db)
 	}
 
-	/// Create a variable held in an order encoding on literals that already
+	/// Creates a variable held in an order encoding on literals that already
 	/// exist.
 	///
 	/// There is one literal per value of `domain` beyond the first, in order,
@@ -1110,6 +1145,11 @@ impl IntVar {
 	/// `i + 1`'th of them — which means each of them implying the one before.
 	/// That chain is taken on trust and not emitted; see [`IntVar::constrain`]
 	/// where it needs saying.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when channelling this view to an existing encoding
+	/// contradicts the database.
 	pub fn from_order_encoding<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		domain: impl Into<RangeList<Coeff>>,
@@ -1124,7 +1164,7 @@ impl IntVar {
 		Ok(x)
 	}
 
-	/// Create a variable from what its order encoding says value by value,
+	/// Creates a variable from what its order encoding says value by value,
 	/// which is what [`IntVar::lit_order_walk`] gives.
 	///
 	/// Each pair is a value and whether the variable reaches it, least value
@@ -1132,6 +1172,11 @@ impl IntVar {
 	/// holds puts every value below it out of reach, one that never holds does
 	/// the same for it and everything above. A view onto another variable's
 	/// literals can therefore be taken as it comes, untrimmed.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when the walk contains no reachable value or its
+	/// literals cannot be channelled to an existing encoding.
 	pub fn from_order_walk<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		walk: impl IntoIterator<Item = (Coeff, BoolVal)>,
@@ -1164,12 +1209,17 @@ impl IntVar {
 		Self::from_order_encoding(db, domain, &literals)
 	}
 
-	/// The variable `min + max − x`, which counts the same domain from the
-	/// other end.
+	/// Creates the variable `min + max − x`, which counts the same domain from
+	/// the other end.
 	///
 	/// Its literals are `x`'s: reaching a value from below is `x` failing to
 	/// reach past the value that mirrors it. A term with a negative coefficient
 	/// is turned around this way, since `c·x` is `c·(min + max) − c·x'`.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when creating or channelling the required order view
+	/// contradicts the database.
 	pub fn mirrored<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		x: &IntVar,
@@ -1185,7 +1235,7 @@ impl IntVar {
 		Self::from_order_walk(db, walk)
 	}
 
-	/// Create a variable from what its direct encoding says value by value,
+	/// Creates a variable from what its direct encoding says value by value,
 	/// which is what [`IntVar::lit_direct_walk`] gives.
 	///
 	/// Each pair is a value and whether the variable takes it. A pair that is
@@ -1195,6 +1245,11 @@ impl IntVar {
 	///
 	/// The literals are taken on trust, as they are by
 	/// [`IntVar::from_direct_encoding`], which this builds on.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when the walk contains no possible value or its
+	/// literals cannot be channelled to an existing encoding.
 	pub fn from_direct_walk<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		walk: impl IntoIterator<Item = (Coeff, BoolVal)>,
@@ -1220,7 +1275,7 @@ impl IntVar {
 		Self::from_direct_encoding(db, domain, &literals)
 	}
 
-	/// Create a variable held in a direct encoding on literals that already
+	/// Creates a variable held in a direct encoding on literals that already
 	/// exist.
 	///
 	/// There is one literal per value of `domain`, in order, and `literals[i]`
@@ -1228,6 +1283,11 @@ impl IntVar {
 	/// means exactly one of them holding. That is taken on trust and not
 	/// emitted; see [`IntVar::constrain`] where it needs saying, though it is
 	/// worth avoiding, the clauses for it being quadratic in the domain.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when channelling this view to an existing encoding
+	/// contradicts the database.
 	pub fn from_direct_encoding<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		domain: impl Into<RangeList<Coeff>>,
@@ -1239,7 +1299,7 @@ impl IntVar {
 		Ok(x)
 	}
 
-	/// Create a variable held in a binary encoding on bits that already exist.
+	/// Creates a variable held in a binary encoding on bits that already exist.
 	///
 	/// The bits are those of `value - min`, least significant first, so `min`
 	/// is what all of them being zero stands for: the lower bound of `domain`
@@ -1249,6 +1309,11 @@ impl IntVar {
 	/// The bits must already stay within `domain`, bounds and holes both, so a
 	/// `domain` narrower than they can reach is a claim rather than a
 	/// restriction; see [`IntVar::constrain`] to make it one.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when channelling this view to an existing encoding
+	/// contradicts the database.
 	pub fn from_binary_encoding<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		domain: impl Into<RangeList<Coeff>>,
@@ -1262,7 +1327,8 @@ impl IntVar {
 		Ok(x)
 	}
 
-	/// Give the variable an order encoding on literals that already exist.
+	/// Adds an order encoding for the variable using literals that already
+	/// exist.
 	///
 	/// The literals mean what they do for [`IntVar::from_order_encoding`], and
 	/// are taken on trust in the same way. Where the variable has another
@@ -1270,6 +1336,11 @@ impl IntVar {
 	/// these; where it has none, see [`IntVar::constrain`].
 	///
 	/// See [`IntVar::with_binary_encoding`] for `already_channelled`.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when the missing channel to an existing view
+	/// contradicts the database.
 	pub fn with_order_encoding<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -1283,7 +1354,8 @@ impl IntVar {
 		self.install_order(db, order, already_channelled)
 	}
 
-	/// Give the variable a direct encoding on literals that already exist.
+	/// Adds a direct encoding for the variable using literals that already
+	/// exist.
 	///
 	/// The literals mean what they do for [`IntVar::from_direct_encoding`], and
 	/// are taken on trust in the same way — a group of at-most-one
@@ -1293,6 +1365,11 @@ impl IntVar {
 	/// none, see [`IntVar::constrain`].
 	///
 	/// See [`IntVar::with_binary_encoding`] for `already_channelled`.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when the missing channel to an existing view
+	/// contradicts the database.
 	pub fn with_direct_encoding<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -1303,7 +1380,7 @@ impl IntVar {
 		self.install_direct(db, direct, already_channelled)
 	}
 
-	/// Give the variable a binary encoding on bits that already exist.
+	/// Adds a binary encoding for the variable using bits that already exist.
 	///
 	/// The bits mean what they do for [`IntVar::from_binary_encoding`], and are
 	/// taken on trust in the same way. Another encoding channels what it says
@@ -1315,6 +1392,11 @@ impl IntVar {
 	/// only that this encoding bounds the rest, which is less, so it is still
 	/// constrained in its own right. `None` ties whatever is missing, here and
 	/// for encodings added later.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when the missing channel or binary consistency clauses
+	/// contradict the database.
 	pub fn with_binary_encoding<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -1376,6 +1458,22 @@ impl IntVar {
 	///
 	/// Give it a name with [`IntVar::label`] and restrict its encodings to
 	/// `domain` with [`IntVar::enforce_consistency`].
+	///
+	/// # Examples
+	///
+	/// ```rust
+	/// use pindakaas::decision::integer::IntVar;
+	///
+	/// let x = IntVar::new(-2..=7).with_label("x");
+	/// assert_eq!(x.min(), -2);
+	/// assert_eq!(x.max(), 7);
+	/// # Ok::<(), pindakaas::Unsatisfiable>(())
+	/// ```
+	///
+	/// # Panics
+	///
+	/// Debug builds reject an empty domain. An empty domain is invalid in every
+	/// build and causes later domain queries to panic.
 	pub fn new(domain: impl Into<RangeList<Coeff>>) -> Self {
 		let domain = domain.into();
 		debug_assert!(!domain.is_empty(), "an integer variable needs a domain");
@@ -1449,13 +1547,13 @@ impl IntVar {
 		Ok(ord)
 	}
 
-	/// Whether the variable is held in an order encoding.
+	/// Reports whether the variable has an order encoding.
 	pub fn has_order_encoding(&self) -> bool {
 		self.0.borrow().order.is_some()
 	}
 
-	/// The value the variable takes under an assignment, read through whichever
-	/// encoding it was given.
+	/// Returns the value the variable takes under an assignment, read through
+	/// whichever encoding it was given.
 	pub fn value<F: crate::Valuation + ?Sized>(&self, value: &F) -> Coeff {
 		let state = self.0.borrow();
 		// Only the leading encoding is known to say what the variable is worth.
@@ -1469,7 +1567,7 @@ impl IntVar {
 		}
 	}
 
-	/// The number of values in the domain.
+	/// Returns the number of values in the domain.
 	pub fn card(&self) -> usize {
 		self.0.borrow().domain.card().unwrap()
 	}
@@ -1581,8 +1679,8 @@ impl OrderEncoding {
 	///
 	/// Each step is a domain value `d` paired with the clause that holds unless
 	/// the variable reaches `d` — from below when `geq`, from above otherwise.
-	/// Whatever the constraint demands once `d` is reached can therefore just
-	/// be disjoined onto that clause.
+	/// Whatever the constraint demands once `d` is reached can therefore be
+	/// disjoined onto that clause.
 	///
 	/// The step at the far end of the domain guards nothing, since the variable
 	/// always reaches it; its clause is `false` and drops out, leaving the

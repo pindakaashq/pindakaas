@@ -2,7 +2,7 @@
 //!
 //! What a [`Linear`](super::linear::Linear) mentioning no integer variable
 //! aggregates to. The same shape as a
-//! [`NormalizedIntLinear`](super::int_linear::NormalizedIntLinear), but left in
+//! [`NormalizedIntLinear`], but left in
 //! the literals it was written in, so that an encoder working in them is not
 //! handed integers to take apart again.
 
@@ -32,12 +32,12 @@ pub struct NormalizedBoolLinear {
 }
 
 impl NormalizedBoolLinear {
-	/// The comparator of the constraint, which is never `≥`.
+	/// Returns the constraint's comparator, which is never `≥`.
 	pub fn cmp(&self) -> LimitComp {
 		self.cmp.clone()
 	}
 
-	/// The constant the sum is compared against, which is not negative.
+	/// Returns the non-negative constant the sum is compared against.
 	pub fn k(&self) -> Coeff {
 		*self.k
 	}

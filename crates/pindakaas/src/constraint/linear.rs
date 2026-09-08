@@ -35,11 +35,11 @@ use crate::{
 /// A sum of terms, each a literal or an integer variable scaled by a
 /// coefficient.
 pub struct LinExp {
-	/// The terms of the expression, in the order they were written.
+	/// Terms in insertion order; aggregation performs canonicalisation later.
 	pub(crate) terms: Vec<LinTerm>,
-	/// Additive constant
+	/// Constant applied before the outer multiplier.
 	pub(crate) add: Coeff,
-	/// Multiplicative contant
+	/// Multiplier shared by every term and the additive constant.
 	pub(crate) mult: Coeff,
 }
 
@@ -79,26 +79,22 @@ impl LinTerm {
 /// Where every term is a literal this is what the literature calls a
 /// pseudo-Boolean constraint; the terms may equally be integer variables.
 pub struct Linear {
-	/// Expression being constrained
+	/// Left-hand expression.
 	pub(crate) exp: LinExp,
-	/// Comparator when exp is on the left hand side and k is on the right hand
-	/// side
+	/// Relation between `exp` and `k`.
 	pub(crate) cmp: Comparator,
-	/// Coefficient providing the upper bound or lower bound to exp, or both
+	/// Right-hand constant.
 	pub(crate) k: Coeff,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// A comparator type used in linear and cardinality constraints.
+/// Relation between the left- and right-hand sides of a constraint.
 pub enum Comparator {
-	/// Force the left hand side of the constraint to be less than or equal to
-	/// the right hand side, i.e. `exp ≤ k`.
+	/// `exp ≤ k`.
 	LessEq,
-	/// Force the left hand side of the constraint to be equal to the right hand
-	/// side, i.e. `exp = k`.
+	/// `exp = k`.
 	Equal,
-	/// Force the left hand side of the constraint to be greater than or equal
-	/// to the right hand side, i.e. `exp ≥ k`.
+	/// `exp ≥ k`.
 	GreaterEq,
 }
 
@@ -141,28 +137,23 @@ pub enum LimitComp {
 pub struct PosCoeff(pub(crate) Coeff);
 
 impl LinExp {
-	/// Add a constant to the linear expression
-	///
-	/// Note that this is a more explicit version of the `+` or `+=` operator.
+	/// The expression with `k` added before any outer scaling.
 	pub fn add_constant(mut self, k: Coeff) -> Self {
 		self.add += k;
 		self
 	}
 
-	/// Add a literal to the linear expression, taking the value `0` if `false`
-	/// and `1` if `true`.
-	///
-	/// Note that this is a more explicit version of the `+` or `+=` operator.
+	/// The expression with an unweighted literal appended.
 	pub fn add_lit(mut self, lit: Lit) -> Self {
 		self.terms.push(LinTerm::Bool(lit, 1));
 		self
 	}
 
-	/// Create a linear expression from a slice of coefficients and literals,
-	/// where each literal is multiplied by the coefficient in the
-	/// corresponding position.
+	/// A pseudo-Boolean sum from parallel coefficient and literal slices.
 	///
-	/// Note that the number of coefficients and literals must be equal.
+	/// # Panics
+	///
+	/// The slices have different lengths.
 	pub fn from_slices(coeffs: &[Coeff], lits: &[Lit]) -> Self {
 		assert_eq!(
 			coeffs.len(),
@@ -179,9 +170,7 @@ impl LinExp {
 		}
 	}
 
-	/// Create a linear expression from a slice of terms, where each term
-	/// consist of a literal and coefficient and the former will be multiplied
-	/// by the latter.
+	/// A pseudo-Boolean sum from `(literal, coefficient)` pairs.
 	pub fn from_terms(terms: &[(Lit, Coeff)]) -> Self {
 		Self {
 			terms: terms.iter().map(|&(l, c)| LinTerm::Bool(l, c)).collect(),
@@ -189,8 +178,7 @@ impl LinExp {
 		}
 	}
 
-	/// Iterate over the terms of the linear expression, consisting of a literal
-	/// and the coefficient by which it is multiplied.
+	/// Boolean terms only, excluding the additive constant and outer multiplier.
 	pub fn terms(&self) -> impl Iterator<Item = (Lit, Coeff)> + '_ {
 		self.terms.iter().filter_map(|t| match t {
 			LinTerm::Bool(l, c) => Some((*l, *c)),
@@ -198,8 +186,7 @@ impl LinExp {
 		})
 	}
 
-	/// Iterate over the terms of the expression that are integer variables,
-	/// each with the coefficient by which it is multiplied.
+	/// Integer terms only, excluding the additive constant and outer multiplier.
 	pub fn int_terms(&self) -> impl Iterator<Item = (&IntVar, Coeff)> + '_ {
 		self.terms.iter().filter_map(|t| match t {
 			LinTerm::Int(x, c) => Some((x, *c)),
@@ -394,7 +381,21 @@ impl SubAssign for LinExp {
 }
 
 impl Linear {
-	/// Create the constraint `exp ≷ k`.
+	/// The constraint `exp ≷ k`, without normalisation or aggregation.
+	///
+	/// # Examples
+	///
+	/// ```rust
+	/// use pindakaas::{
+	///     constraint::linear::{Comparator, Linear}, ClauseDatabaseTools, Cnf,
+	/// };
+	///
+	/// let mut cnf = Cnf::default();
+	/// let (x, y) = cnf.new_lits();
+	/// let constraint = Linear::new(2 * x + 3 * y, Comparator::LessEq, 3);
+	/// # let _ = constraint;
+	/// # Ok::<(), pindakaas::Unsatisfiable>(())
+	/// ```
 	pub fn new(exp: LinExp, cmp: Comparator, k: Coeff) -> Self {
 		Self { exp, cmp, k }
 	}

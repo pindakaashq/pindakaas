@@ -11,9 +11,24 @@ use crate::{
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Result,
 };
 
-/// An encoder for [`CardinalityOne`] constraints that uses a logarithm
-/// encoded selector variable to ensure the selection of at most one of
-/// the given literals
+/// At-most-one encoding using the binary representation of each literal's index.
+///
+/// Exact-one adds the original literals as one clause; the index bits still
+/// encode only the at-most-one part.
+///
+/// # Examples
+///
+/// ```rust
+/// use pindakaas::{
+///     constraint::{cardinality_one::CardinalityOne, linear::LimitComp},
+///     encoder::bitwise::BitwiseEncoder, ClauseDatabase, Cnf, Encoder,
+/// };
+/// let mut cnf = Cnf::default();
+/// let lits = cnf.new_var_range(4).map(Into::into).collect();
+/// let constraint = CardinalityOne::new(lits, LimitComp::LessEq);
+/// BitwiseEncoder::default().encode(&mut cnf, &constraint)?;
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct BitwiseEncoder {}
 

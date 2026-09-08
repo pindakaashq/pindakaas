@@ -21,7 +21,7 @@ use crate::{
 #[derive(Debug, Clone)]
 /// Linear constraint that enforces that ∑ litᵢ ≷ 1.
 ///
-/// Compared to a [`Cardinality`](super::cardinality::Cardinality) constraint,
+/// Compared to a [`Cardinality`] constraint,
 /// the right hand side constant is always 1.
 ///
 /// All literals in the constraint are guaranteed to be from distinct Boolean
@@ -511,7 +511,7 @@ pub(crate) mod tests {
 	}
 
 	/// A pair of literals is laid out as a single row of two columns, so a
-	/// cutoff below two would hand the column dimension a group just as large
+	/// cutoff below two would hand the column dimension an equally large group
 	/// as the one it came from, and the encoder would never finish. A release
 	/// build raises the cutoff rather than looping.
 	#[test]
@@ -567,7 +567,7 @@ pub(crate) mod tests {
 	}
 
 	/// The "at least one" half is expressed per row, so a grid whose final row
-	/// is only partly filled has to pair each row selector with just the
+	/// is only partly filled has to pair each row selector with only the
 	/// literals actually placed in it. Here the last row holds two of the ten.
 	#[test]
 	fn eo_product_partial_row() {

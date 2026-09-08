@@ -320,8 +320,7 @@ impl Cadical {
 		unsafe { ccadical_set_option(self.ipasir_store().solver_ptr(), name.as_ptr(), value) }
 	}
 
-	/// Make a shallow clone of the [`Cadical`] solver using an efficient
-	/// internal method.
+	/// Creates a shallow clone using CaDiCaL's internal copy operation.
 	///
 	/// The shallow copy includes the permanent clauses, but will not include
 	/// learned clauses, connected callbacks, or external propagator.

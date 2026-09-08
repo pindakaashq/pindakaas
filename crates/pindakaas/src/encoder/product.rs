@@ -10,17 +10,25 @@ use crate::{
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
 };
 
-/// An encoder for an At Most One constraint that arranges the literals in a
-/// grid, giving every row and every column a selector literal.
+/// At-most-one encoding over a recursively constrained selector grid.
 ///
-/// Since a literal can only be `true` when both its row and its column are
-/// selected, two `true` literals would always select two rows or two columns.
-/// The constraint is therefore reduced to an At Most One constraint over the
-/// row selectors and one over the column selectors, which are encoded the same
-/// way. This uses roughly `2·√n` additional literals, sitting between the
-/// quadratic number of clauses of the [`PairwiseEncoder`] and the weaker
-/// propagation of the
-/// [`BitwiseEncoder`](crate::encoder::bitwise::BitwiseEncoder).
+/// A true literal selects its row and column, reducing the constraint to two
+/// smaller at-most-one constraints. This uses roughly `2·√n` auxiliary
+/// literals per level; small groups fall back to [`PairwiseEncoder`].
+///
+/// # Examples
+///
+/// ```rust
+/// use pindakaas::{
+///     constraint::{cardinality_one::CardinalityOne, linear::LimitComp},
+///     encoder::product::ProductEncoder, ClauseDatabase, Cnf, Encoder,
+/// };
+/// let mut cnf = Cnf::default();
+/// let lits = cnf.new_var_range(20).map(Into::into).collect();
+/// let constraint = CardinalityOne::new(lits, LimitComp::LessEq);
+/// ProductEncoder::default().encode(&mut cnf, &constraint)?;
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ProductEncoder {
 	pairwise_cutoff: usize,
@@ -38,7 +46,7 @@ impl ProductEncoder {
 	/// The smallest cutoff at which the encoder still makes progress.
 	///
 	/// Two literals are laid out as a single row of two columns, so the column
-	/// dimension would be just as large as the group it came from. The pairwise
+	/// dimension would be as large as the group it came from. The pairwise
 	/// encoding has to take over at or below that size.
 	const MINIMUM_PAIRWISE_CUTOFF: usize = 2;
 
@@ -50,8 +58,11 @@ impl ProductEncoder {
 	///
 	/// The cutoff must be at least two, since a group of two literals is laid
 	/// out as a single row of two columns and would not get any smaller. Lower
-	/// values are a mistake on the part of the caller, and are raised to two so
-	/// that the encoder still terminates.
+	/// values cannot make recursive progress and are rejected.
+	///
+	/// # Panics
+	///
+	/// `cutoff` is less than two.
 	pub fn with_pairwise_cutoff(&mut self, cutoff: usize) -> &mut Self {
 		assert!(
 			cutoff >= Self::MINIMUM_PAIRWISE_CUTOFF,

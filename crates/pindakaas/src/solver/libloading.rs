@@ -1,5 +1,8 @@
-//! This module contains pindakaas interface for (at runtime) dynamically loaded
-//! libraries implementing the IPASIR interface.
+//! Loading an IPASIR solver from a shared library at runtime.
+//!
+//! Conversion from [`Library`] validates the required symbols before a solver
+//! is created. Their signatures and runtime behaviour remain promises made by
+//! the loaded library and cannot be checked here.
 use std::{
 	ffi::{c_char, c_int, c_void, CStr},
 	fmt,
@@ -164,8 +167,7 @@ impl IpasirLibrary {
 		unsafe { self.lib.get(b"ipasir_val") }
 	}
 
-	/// Create a new solver instance that uses the IPASIR methods included in
-	/// the [`IpasirLibrary`].
+	/// Creates a fresh solver owned by this library handle.
 	pub fn new_solver(&self) -> IpasirSolver<'_> {
 		IpasirSolver {
 			slv: (self.ipasir_init_sym().unwrap())(),
@@ -184,7 +186,11 @@ impl IpasirLibrary {
 		}
 	}
 
-	/// Wrapper for the `ipasir_signature` function.
+	/// Returns the implementation signature reported by `ipasir_signature`.
+	///
+	/// # Panics
+	///
+	/// The library returns a signature that is not UTF-8.
 	pub fn signature(&self) -> &str {
 		// SAFETY: We assume that the signature function as part of the IPASIR
 		// interface returns a valid C string.
@@ -236,7 +242,11 @@ impl IpasirSolver<'_> {
 		}
 	}
 
-	/// Wrapper for the `ipasir_signature` function.
+	/// Returns the implementation signature reported by `ipasir_signature`.
+	///
+	/// # Panics
+	///
+	/// The library returns a signature that is not UTF-8.
 	pub fn signature(&self) -> &str {
 		// SAFETY: We assume that the signature function as part of the IPASIR
 		// interface returns a valid C string.

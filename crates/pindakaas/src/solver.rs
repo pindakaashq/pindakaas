@@ -1,6 +1,8 @@
-//! This module contains common traits for Boolean satisfiability (SAT) solvers
-//! as well as direct interfaces for different SAT solvers, which implement
-//! these traits.
+//! Solving clause databases and inspecting their models or failed assumptions.
+//!
+//! [`Solver`] is the common search interface. Optional traits expose
+//! assumptions, learned-clause callbacks, and termination callbacks without
+//! requiring every backend to implement those extensions.
 
 #[cfg(any(feature = "cadical", test))]
 pub mod cadical;
@@ -20,30 +22,24 @@ use std::num::NonZeroI32;
 
 use crate::{ClauseDatabase, Lit, Valuation, Var, VarRange};
 
-/// Trait implemented by solver that support assumptions, a list of literals
-/// that are assumed to be true during the solving call. The resulting
-/// [`SolveResult`] will allow inspection of which assumptions failed if the
-/// formula is unsatisfiable under the assumptions.
+/// Solving under temporary literals without adding them permanently.
 pub trait Assumptions: Solver {
-	/// Solve the formula with specified clauses under the given assumptions.
+	/// Search under assumptions that hold for this call only.
 	///
 	/// If the search is interrupted (see
 	/// [`TerminateCallback::set_terminate_callback`]) the function returns
-	/// unknown
+	/// [`SolveResult::Unknown`].
 	fn solve_assuming<I: IntoIterator<Item = Lit>>(
 		&mut self,
 		assumptions: I,
 	) -> SolveResult<impl Valuation + '_, impl FailedAssumptions + '_>;
 }
 
-/// Trait implemented by the object given to the callback on detecting failure
+/// Membership queries on an unsatisfiable assumption core.
 pub trait FailedAssumptions {
-	/// Check if the given assumption literal was used to prove the
-	/// unsatisfiability of the formula under the assumptions used for the last
-	/// SAT search.
+	/// Reports whether the assumption contributed to the last unsatisfiable result.
 	///
-	/// Note that for literals 'lit' which are not assumption literals, the
-	/// behavior of is not specified.
+	/// The result is unspecified when `lit` was not an assumption of that search.
 	fn fail(&self, lit: Lit) -> bool;
 }
 
@@ -79,14 +75,13 @@ pub enum SolveResult<Sol: Valuation, Fail = ()> {
 	Unknown,
 }
 
-/// General trait for SAT solvers, extending the general [`ClauseDatabase`]
-/// capabilities with being able to look for satisfying assignments.
+/// SAT search over the clauses accumulated in a [`ClauseDatabase`].
 pub trait Solver: ClauseDatabase {
-	/// Solve the formula with specified clauses.
+	/// Search the current permanent clauses.
 	///
 	/// If the search is interrupted (see
 	/// [`TerminateCallback::set_terminate_callback`]) the function returns
-	/// unknown
+	/// [`SolveResult::Unknown`].
 	fn solve(&mut self) -> SolveResult<impl Valuation + '_, impl Sized>;
 }
 
@@ -121,14 +116,13 @@ pub trait TerminateCallback: Solver {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// Type that helps create [`Var`]s in a consecutive manner.
+/// Allocation of consecutive [`Var`] identifiers.
 pub struct VarFactory {
 	pub(crate) next_var: Option<Var>,
 }
 
 impl VarFactory {
-	/// Get the [`VarRange`] of all variables that have been created using this
-	/// factory.
+	/// Returns the range allocated so far, empty before the first allocation.
 	pub fn emitted_vars(&self) -> VarRange {
 		let mut start = Var(NonZeroI32::new(1).unwrap());
 		let end = if let Some(v) = self.next_var {
@@ -175,7 +169,7 @@ impl VarFactory {
 		}
 	}
 
-	/// Get the number of variables that have been created using this factory.
+	/// Number of identifiers allocated so far.
 	pub fn num_emitted_vars(&self) -> usize {
 		if let Some(x) = self.next_var {
 			x.0.get() as usize - 1

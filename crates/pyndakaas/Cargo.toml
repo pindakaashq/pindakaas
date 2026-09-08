@@ -1,6 +1,6 @@
 [package]
 name = "pyndakaas"
-description = "Python bindings for the pindakaas crate"
+description = "Python bindings for Pindakaas constraint encodings"
 version = "0.5.1"
 edition = "2021"
 

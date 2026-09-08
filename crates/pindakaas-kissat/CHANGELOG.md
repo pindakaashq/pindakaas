@@ -29,7 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ensure MSVC compatibility
 
-
 ## [0.1.0](https://github.com/pindakaashq/pindakaas/releases/tag/pindakaas-kissat-v0.1.0) - 2025-07-09
 
 ### Added
