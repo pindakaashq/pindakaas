@@ -33,10 +33,15 @@ pindakaas-kissat = { version = "0.2.2", path = "../pindakaas-kissat", optional =
 splr = { version = "0.17", optional = true }
 
 [dev-dependencies]
+divan = "0.1.21"
 expect-test = "1.5.0"
 pindakaas-cadical = { path = "../pindakaas-cadical" }
 traced_test = { path = "../traced_test" }
 tracing = { workspace = true }
+
+[[bench]]
+name = "encoding"
+harness = false
 
 [features]
 cadical = ["pindakaas-cadical"]

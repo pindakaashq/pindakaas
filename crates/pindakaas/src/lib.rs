@@ -304,6 +304,9 @@ use std::{
 	slice,
 };
 
+// The benchmarks are the only target that uses it, and the lint is per-target.
+#[cfg(test)]
+use divan as _;
 use itertools::{traits::HomogeneousTuple, Itertools};
 pub use rangelist::{IntervalIterator, RangeList};
 
