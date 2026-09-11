@@ -122,15 +122,10 @@ where
 	Ok(())
 }
 
-/// The binary encoding of an integer variable.
+/// Bits of `value - min`, least significant first.
 ///
-/// The bits are those of `value - min`, least significant first. Where the
-/// count starts belongs to the encoding rather than the library: the lower
-/// bound, so that it costs nothing to enforce, or zero where the bits came from
-/// a caller and already count from there. Both turn up within one constraint.
-///
-/// A bit may be fixed rather than free, which is what expresses a shifted or
-/// complemented encoding without introducing literals for it.
+/// The offset belongs to this view. Constant bits allow shifts and complements
+/// without fresh literals.
 #[derive(Clone, Debug)]
 pub(crate) struct BinaryEncoding {
 	x: Literals<BoolVal>,
@@ -139,11 +134,8 @@ pub(crate) struct BinaryEncoding {
 
 /// The literals of an encoding.
 ///
-/// Literals created for an encoding are allocated in one block and so are
-/// consecutive, which a range holds in a couple of words however wide the
-/// encoding is — worth having, since an encoding is handed out by value every
-/// time a constraint asks for it. Literals recovered from a constraint that
-/// already mentions them, or bits fixed by a shift, are kept as given.
+/// Fresh literals use a compact range; supplied literals and fixed bits retain
+/// their explicit representation.
 #[derive(Clone, Debug)]
 pub(crate) enum Literals<T> {
 	Explicit(Vec<T>),
@@ -152,24 +144,17 @@ pub(crate) enum Literals<T> {
 
 /// The direct encoding of an integer variable.
 ///
-/// There is one literal per domain value except the first, holding when the
-/// variable takes exactly that value; none of them holding means it takes the
-/// first. At most one may hold, which for a group of mutually exclusive
-/// pseudo-Boolean terms is what the caller has already asserted.
+/// One literal per domain value, with exactly one holding. Supplied literals
+/// are trusted; newly allocated views are constrained when requested.
 #[derive(Clone, Debug)]
 pub(crate) struct DirectEncoding {
 	x: Literals<Lit>,
 }
 
-/// An integer decision variable, together with whichever Boolean encodings of
-/// it have been asked for so far.
+/// An integer decision variable with Boolean views created on demand.
 ///
-/// Variables are shared between the constraints that mention them: cloning a
-/// handle is a new reference to the same variable, not a copy of it.
-///
-/// See the [module documentation](self) for how encodings are created and
-/// channelled, and for what a variable built on existing literals does and does
-/// not emit.
+/// Cloning shares the variable; it does not copy it. See the [module
+/// documentation](self) for channelling and existing-literal contracts.
 #[derive(Clone, Debug)]
 pub struct IntVar(Rc<RefCell<IntVarState>>);
 
@@ -470,16 +455,10 @@ impl DirectEncoding {
 		)
 	}
 
-	/// The steps of a sequential decomposition over this variable.
+	/// Values paired with guards for a sequential decomposition.
 	///
-	/// Each step is a value paired with the clause that holds unless the
-	/// variable takes it, so that what the constraint then demands can be
-	/// disjoined onto it — the same shape the order encoding gives, except that
-	/// a step here pins the value exactly rather than bounding it.
-	///
-	/// The value at the far end contributes the least of any, so what it
-	/// demands holds whatever the variable turns out to be; its clause is
-	/// `false` and drops out, leaving that demand unconditional.
+	/// Each guard holds unless the variable takes that value. The least
+	/// contribution has a false guard because its demand is unconditional.
 	pub(crate) fn iter<'a>(
 		&'a self,
 		domain: &'a RangeList<Coeff>,
@@ -626,9 +605,8 @@ impl IntVar {
 		}
 		self.channel(db)?;
 		self.channel_direct(db)?;
-		// The binary encoding is cheapest to read from, so it leads
-		// where it can: where it and the current lead agree through the
-		// order encoding.
+		// Binary is cheapest to read, but can lead only when channelled
+		// equally.
 		let mut state = self.0.borrow_mut();
 		let equal = [
 			state.channelled[0] == Some(Comparator::Equal),
@@ -662,9 +640,6 @@ impl IntVar {
 				vals().nth(i).unwrap()
 			))),
 		};
-		// One value and no more, which the chain gives the order
-		// encoding for free but the direct encoding has to be told,
-		// quadratically.
 		if self.needs_constraining() {
 			dir.consistent(db)?;
 			self.0.borrow_mut().constrained = true;
@@ -692,12 +667,9 @@ impl IntVar {
 		};
 		let vals: Vec<Coeff> = domain.iter().flatten().collect();
 		for (i, &v) in vals.iter().enumerate() {
-			// Beyond the last value there is nothing to reach.
 			let beyond = vals
 				.get(i + 1)
 				.map_or(BoolVal::Const(false), |&n| ord.lit_at_least(&domain, n));
-			// Taking a value is reaching it and going no further, and reaching
-			// it and going no further is taking it.
 			db.add_clause([!dir.lit_equals(&domain, v), ord.lit_at_least(&domain, v)])?;
 			db.add_clause([!dir.lit_equals(&domain, v), !beyond])?;
 			db.add_clause([
@@ -709,18 +681,11 @@ impl IntVar {
 		Ok(())
 	}
 
-	/// Constrain the encodings the variable has to say a value of its domain.
+	/// Add consistency clauses restricting the lead encoding to the domain.
 	///
-	/// Emits the implication chain of an order encoding, one value and no more
-	/// of a direct one, and the bounds and holes of a binary one, for whichever
-	/// the variable has. This is what a variable built on literals that are not
-	/// already constrained needs — see the [module documentation](self) — and
-	/// it is how a declared bound becomes a restriction rather than a claim.
-	///
-	/// Only the encoding the value is read from is constrained; the rest are
-	/// worth what their channels to it make them worth. An encoding tied
-	/// one-directionally is a bound rather than the value, and so has no value
-	/// to constrain.
+	/// Order uses an implication chain, direct uses quadratic exactly-one
+	/// clauses, and binary excludes bounds and holes. Other views inherit this
+	/// through equality channels. With no view, no clauses are emitted.
 	///
 	/// # Errors
 	///
@@ -729,9 +694,6 @@ impl IntVar {
 	pub fn constrain<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		let (lead, order, direct, binary, domain) = {
 			let mut state = self.0.borrow_mut();
-			// An encoding made for this variable was held to the
-			// domain as it was made, and everything else is tied to
-			// that one.
 			if state.constrained {
 				return Ok(());
 			}
@@ -748,7 +710,6 @@ impl IntVar {
 			Some(Lead::Order) => order.unwrap().consistent(db),
 			Some(Lead::Direct) => direct.unwrap().consistent(db),
 			Some(Lead::Binary) => binary.unwrap().consistent(db, &domain),
-			// Nothing was ever asked of it, so it is its one value already.
 			None => Ok(()),
 		}
 	}
@@ -775,8 +736,7 @@ impl IntVar {
 		self.0.borrow().domain.clone()
 	}
 
-	/// Reports whether the variable has a direct encoding, which is the view a
-	/// constraint reads it through when it has one.
+	/// Whether a direct encoding exists.
 	pub fn has_direct_encoding(&self) -> bool {
 		self.0.borrow().direct.is_some()
 	}
@@ -831,16 +791,11 @@ impl IntVar {
 		Ok(!self.lit_at_least(db, v + 1)?)
 	}
 
-	/// Returns a [`BoolVal`] indicating whether the variable takes exactly `v`.
+	/// Whether the variable takes `v`, as a literal or settled constant.
 	///
-	/// The answer is a constant where the domain settles it, and one literal of
-	/// the order encoding where `v` is at either end of the domain, since
-	/// reaching the last value or failing to reach the second is the same as
-	/// taking it. Anywhere else it takes the direct encoding, which is created
-	/// if the variable has none — and tying that to an encoding it already has
-	/// costs clauses in proportion to the size of the domain, so it is worth
-	/// giving a variable its direct encoding up front where every value will be
-	/// asked about.
+	/// An existing order view answers at domain endpoints. Otherwise a direct
+	/// view is created if needed; channelling costs clauses proportional to the
+	/// domain size.
 	///
 	/// # Errors
 	///
@@ -957,9 +912,8 @@ impl IntVar {
 	) -> Result<Vec<(Coeff, BoolVal)>, Unsatisfiable> {
 		let order = self.order_encoding(db)?;
 		let state = self.0.borrow();
-		// Collected rather than lazy: holding the borrow across the
-		// caller's work fails as soon as a constraint mentions the
-		// variable twice.
+		// Collect before returning: a live borrow would prevent a constraint
+		// from mentioning the same variable twice.
 		Ok(order.iter(&state.domain, geq).collect())
 	}
 
@@ -1184,13 +1138,11 @@ impl IntVar {
 		let (mut values, mut literals) = (Vec::new(), Vec::new());
 		for (v, reaches) in walk {
 			match reaches {
-				// Reached whatever happens, so nothing below it is in reach.
 				BoolVal::Const(true) => {
 					values.clear();
 					literals.clear();
 					values.push(v);
 				}
-				// Never reached, so neither is anything above it.
 				BoolVal::Const(false) => break,
 				BoolVal::Lit(l) => {
 					debug_assert!(
@@ -1235,16 +1187,10 @@ impl IntVar {
 		Self::from_order_walk(db, walk)
 	}
 
-	/// Creates a variable from what its direct encoding says value by value,
-	/// which is what [`IntVar::lit_direct_walk`] gives.
+	/// Construct a variable from `(value, takes_value)` pairs.
 	///
-	/// Each pair is a value and whether the variable takes it. A pair that is
-	/// already settled is domain rather than encoding: one that always holds
-	/// leaves the variable that value and no other, and one that never holds
-	/// drops it from the domain.
-	///
-	/// The literals are taken on trust, as they are by
-	/// [`IntVar::from_direct_encoding`], which this builds on.
+	/// A constant true fixes the domain; constant false entries are dropped.
+	/// Literals are trusted as in [`Self::from_direct_encoding`].
 	///
 	/// # Errors
 	///
@@ -1257,10 +1203,7 @@ impl IntVar {
 		let (mut values, mut literals) = (Vec::new(), Vec::new());
 		for (v, takes) in walk {
 			match takes {
-				// Taken whatever happens, so there is nothing else it can be
-				// and no literal has to say so.
 				BoolVal::Const(true) => return Ok(Self::new(v..=v)),
-				// Never taken, so not a value of the variable at all.
 				BoolVal::Const(false) => {}
 				BoolVal::Lit(l) => {
 					values.push(v);
@@ -1299,16 +1242,11 @@ impl IntVar {
 		Ok(x)
 	}
 
-	/// Creates a variable held in a binary encoding on bits that already exist.
+	/// A variable on existing bits of `value - min`, least significant first.
 	///
-	/// The bits are those of `value - min`, least significant first, so `min`
-	/// is what all of them being zero stands for: the lower bound of `domain`
-	/// where the bits were made for it, or zero where they count from there. A
-	/// bit may be a constant rather than a literal.
-	///
-	/// The bits must already stay within `domain`, bounds and holes both, so a
-	/// `domain` narrower than they can reach is a claim rather than a
-	/// restriction; see [`IntVar::constrain`] to make it one.
+	/// `min` must not exceed the domain minimum; use exactly enough bits to
+	/// represent `domain.max() - min`. Bits may be constants and must already
+	/// respect domain bounds and holes. Use [`Self::constrain`] to enforce them.
 	///
 	/// # Errors
 	///
@@ -1327,15 +1265,11 @@ impl IntVar {
 		Ok(x)
 	}
 
-	/// Adds an order encoding for the variable using literals that already
-	/// exist.
+	/// An additional order view on existing literals.
 	///
-	/// The literals mean what they do for [`IntVar::from_order_encoding`], and
-	/// are taken on trust in the same way. Where the variable has another
-	/// encoding, the channel between the two carries what that one says over to
-	/// these; where it has none, see [`IntVar::constrain`].
-	///
-	/// See [`IntVar::with_binary_encoding`] for `already_channelled`.
+	/// The variable must not already have this view. Literal semantics and
+	/// trust requirements match [`Self::from_order_encoding`]. See
+	/// [`Self::with_binary_encoding`] for `already_channelled`.
 	///
 	/// # Errors
 	///
@@ -1354,17 +1288,11 @@ impl IntVar {
 		self.install_order(db, order, already_channelled)
 	}
 
-	/// Adds a direct encoding for the variable using literals that already
-	/// exist.
+	/// An additional direct view on existing literals.
 	///
-	/// The literals mean what they do for [`IntVar::from_direct_encoding`], and
-	/// are taken on trust in the same way — a group of at-most-one
-	/// pseudo-Boolean terms is the case this is for, its exclusivity being what
-	/// the group is. Where the variable has another encoding, the channel
-	/// between the two carries what that one says over to these; where it has
-	/// none, see [`IntVar::constrain`].
-	///
-	/// See [`IntVar::with_binary_encoding`] for `already_channelled`.
+	/// The variable must not already have this view. Literal semantics and
+	/// trust requirements match [`Self::from_direct_encoding`]. See
+	/// [`Self::with_binary_encoding`] for `already_channelled`.
 	///
 	/// # Errors
 	///
@@ -1380,18 +1308,13 @@ impl IntVar {
 		self.install_direct(db, direct, already_channelled)
 	}
 
-	/// Adds a binary encoding for the variable using bits that already exist.
+	/// An additional binary view on existing bits.
 	///
-	/// The bits mean what they do for [`IntVar::from_binary_encoding`], and are
-	/// taken on trust in the same way. Another encoding channels what it says
-	/// over to these; where there is none, see [`IntVar::constrain`].
-	///
-	/// `already_channelled` says how these literals already stand to the other
-	/// encodings — sharing literals, say, or tied by the caller's own clauses.
-	/// [`Comparator::Equal`] says they hold the same value; the other two say
-	/// only that this encoding bounds the rest, which is less, so it is still
-	/// constrained in its own right. `None` ties whatever is missing, here and
-	/// for encodings added later.
+	/// The binary view must not exist yet; bits and offset follow
+	/// [`Self::from_binary_encoding`]. `already_channelled`
+	/// records a caller-established relation to the order view: `Equal` skips
+	/// that channel; inequalities do not replace equality and are strengthened.
+	/// `None` adds missing channels, including an order view if needed.
 	///
 	/// # Errors
 	///
@@ -1438,12 +1361,13 @@ impl IntVar {
 		self
 	}
 
-	/// Restrict the variable's encodings to its domain.
+	/// Automatic domain constraints for newly created views.
 	///
-	/// The order encoding is exact by construction, so this only concerns a
-	/// binary one: set it when the variable has to be within its domain in
-	/// every model, and leave it unset when the constraints it appears in
-	/// already say so and the extra clauses would only repeat them.
+	/// Enabled by [`Self::new`]. Disabling it skips standalone binary and direct
+	/// consistency clauses; order chains remain mandatory. Set this before
+	/// requesting a view: it does not retrofit existing views. Use
+	/// [`Self::constrain`] to constrain supplied literals. The `from_*` constructors
+	/// disable it because their literals are assumed to be constrained already.
 	pub fn enforce_consistency(self, enforce: bool) -> Self {
 		debug_assert!(
 			!self.has_binary_encoding(),
@@ -1454,10 +1378,11 @@ impl IntVar {
 		self
 	}
 
-	/// Create a variable over `domain`.
+	/// An integer variable with Boolean views created on demand.
 	///
-	/// Give it a name with [`IntVar::label`] and restrict its encodings to
-	/// `domain` with [`IntVar::enforce_consistency`].
+	/// New views are constrained to the domain by default; construction emits
+	/// no clauses. Encoding may prune the domain before the first view commits
+	/// it, so encoding order can affect size and propagation, not solutions.
 	///
 	/// # Examples
 	///
@@ -1481,9 +1406,6 @@ impl IntVar {
 			domain,
 			#[cfg(any(feature = "tracing", test))]
 			label: String::new(),
-			// A variable a caller made holds a value of its domain
-			// in every model; ones derived here set this as their
-			// construction requires.
 			add_consistency: true,
 			order: None,
 			binary: None,
@@ -1552,8 +1474,11 @@ impl IntVar {
 		self.0.borrow().order.is_some()
 	}
 
-	/// Returns the value the variable takes under an assignment, read through
-	/// whichever encoding it was given.
+	/// The value read from the variable's leading encoding.
+	///
+	/// Without an encoding, the domain minimum is returned without consulting
+	/// the assignment. The variable and its views must belong to the model's
+	/// database; querying a value does not create an encoding.
 	pub fn value<F: crate::Valuation + ?Sized>(&self, value: &F) -> Coeff {
 		let state = self.0.borrow();
 		// Only the leading encoding is known to say what the variable is worth.
@@ -1562,7 +1487,6 @@ impl IntVar {
 			Some(Lead::Binary) => state.binary.as_ref().unwrap().value(value),
 			Some(Lead::Order) => state.order.as_ref().unwrap().value(&state.domain, value),
 			Some(Lead::Direct) => state.direct.as_ref().unwrap().value(&state.domain, value),
-			// Nothing was ever asked of it, so it can only be its one value.
 			None => *state.domain.min().unwrap(),
 		}
 	}
@@ -1574,13 +1498,9 @@ impl IntVar {
 }
 
 impl Display for IntVar {
-	/// The label of the variable, or where it is held where it has none — which
-	/// is every variable at all, unless tracing is enabled to store labels.
+	/// The tracing label, or an address-based identifier when unlabelled.
 	///
-	/// The address is what tells one variable from another, which its domain
-	/// would not: two variables over the same values are still two variables.
-	/// It says nothing across runs, so nothing should be read into it beyond
-	/// which occurrences are the same variable.
+	/// The fallback distinguishes shared handles only within a run.
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self.label() {
 			label if label.is_empty() => write!(f, "y@{:p}", Rc::as_ptr(&self.0)),
@@ -1642,8 +1562,6 @@ impl OrderEncoding {
 		} else if v > *domain.max().unwrap() {
 			BoolVal::Const(false)
 		} else {
-			// The first domain value at or above `v`; the variable reaches `v`
-			// exactly when it reaches that value.
 			let pos = domain
 				.first_position_bound(&Bound::Included(v))
 				.expect("value within the domain bounds has a position");
@@ -1675,16 +1593,10 @@ impl OrderEncoding {
 		}
 	}
 
-	/// The steps of a sequential decomposition over this variable.
+	/// Domain thresholds paired with guards for a sequential decomposition.
 	///
-	/// Each step is a domain value `d` paired with the clause that holds unless
-	/// the variable reaches `d` — from below when `geq`, from above otherwise.
-	/// Whatever the constraint demands once `d` is reached can therefore be
-	/// disjoined onto that clause.
-	///
-	/// The step at the far end of the domain guards nothing, since the variable
-	/// always reaches it; its clause is `false` and drops out, leaving the
-	/// demand unconditional.
+	/// Each guard holds unless `d` is reached, from below when `geq`, from
+	/// above otherwise. The always-reached endpoint has a false guard.
 	pub(crate) fn iter<'a>(
 		&'a self,
 		domain: &'a RangeList<Coeff>,
@@ -1903,9 +1815,6 @@ pub(crate) mod tests {
 				let x = IntVar::new(domain.clone())
 					.enforce_consistency(true)
 					.with_label("x");
-				// Whichever encoding is asked for second is the
-				// one that channels, so the order they are
-				// asked in must not matter.
 				let (ord, bin) = if bin_first {
 					let bin = x.binary_encoding(&mut cnf).unwrap();
 					(x.order_encoding(&mut cnf).unwrap(), bin)
@@ -1917,9 +1826,6 @@ pub(crate) mod tests {
 				let solutions = all_values(&cnf, &|v| vec![ord.value(&domain, v), bin.value(v)]);
 				let expected: Vec<Vec<Coeff>> =
 					domain.iter().flatten().map(|d| vec![d, d]).collect();
-				// Exactly the domain, once each and read alike:
-				// a disagreement shows up as an extra row, a
-				// missing one, or one whose entries differ.
 				assert_eq!(
 					solutions,
 					expected,
@@ -1972,8 +1878,6 @@ pub(crate) mod tests {
 		let _ = x.binary_encoding(&mut cnf).unwrap();
 		let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
 
-		// Asking again hands back what is already there: no new literals, and
-		// in particular no second round of channelling clauses.
 		let _ = x.order_encoding(&mut cnf).unwrap();
 		let _ = x.binary_encoding(&mut cnf).unwrap();
 		assert_eq!((cnf.num_vars(), cnf.num_clauses()), (vars, clauses));
@@ -1981,8 +1885,6 @@ pub(crate) mod tests {
 
 	#[test]
 	fn a_detected_variable_encodes_onto_the_literals_it_was_found_on() {
-		// An integer recovered from a constraint encodes onto the
-		// literals already there, and still channels like any other.
 		let mut cnf = Cnf::default();
 		let domain = RangeList::from_elements([0, 1, 3]);
 		let found: Vec<_> = (0..2).map(|_| cnf.new_lit()).collect();
@@ -2063,9 +1965,6 @@ pub(crate) mod tests {
 
 	#[test]
 	fn a_variable_built_on_given_literals_takes_exactly_its_domain() {
-		// Each constructor must make its literals stand for a value:
-		// one order literal per step, one direct per value, bits enough
-		// to reach the top.
 		for domain in test_domains() {
 			let values: Vec<Coeff> = domain.iter().flatten().collect();
 
@@ -2202,8 +2101,6 @@ pub(crate) mod tests {
 			let mut cnf = Cnf::default();
 			let x = IntVar::new(domain.clone());
 
-			// Asking all three ways ties them together, which is what makes
-			// them agree in the first place.
 			let reaches = x.lit_order_walk(&mut cnf).unwrap().collect_vec();
 			let takes = x.lit_direct_walk(&mut cnf).unwrap().collect_vec();
 			let (bits, min) = x.lit_binary_bits(&mut cnf).unwrap();
@@ -2236,9 +2133,6 @@ pub(crate) mod tests {
 
 	#[test]
 	fn an_end_of_the_domain_is_taken_by_reaching_it() {
-		// Taking the highest value is reaching it and taking the lowest
-		// is failing to reach the next, so an order encoding answers
-		// both alone.
 		let holds = |b: BoolVal, v: &dyn Valuation| match b {
 			BoolVal::Const(c) => c,
 			BoolVal::Lit(l) => v.value(l),
@@ -2279,8 +2173,6 @@ pub(crate) mod tests {
 
 	#[test]
 	fn a_variable_with_one_value_costs_nothing() {
-		// A constant reaches its one value, takes it, and has no bits to say
-		// so with — none of which any literal has to stand for.
 		for k in [-3, 0, 7] {
 			let mut cnf = Cnf::default();
 			let x = IntVar::new(k..=k).enforce_consistency(true);
@@ -2309,9 +2201,6 @@ pub(crate) mod tests {
 
 	#[test]
 	fn a_walk_wider_than_the_variable_is_trimmed_to_it() {
-		// Values outside the domain give settled answers, and a walk
-		// built from them has to come back to the domain rather than
-		// keep them.
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(0..=3).with_label("x");
 		let walk = (-2..=6)
@@ -2344,8 +2233,6 @@ pub(crate) mod tests {
 
 	#[test]
 	fn a_direct_walk_settles_into_the_domain_too() {
-		// A value never taken is not a value, and one always taken leaves no
-		// others — so a walk over them says what the variable is.
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(0..=3).with_label("x");
 		let walk = (-2..=6)
@@ -2370,7 +2257,6 @@ pub(crate) mod tests {
 			"a view reads as the variable it was taken from"
 		);
 
-		// A value that always holds is the whole of the variable.
 		let mut cnf = Cnf::default();
 		let k = IntVar::from_direct_walk(
 			&mut cnf,
@@ -2383,9 +2269,8 @@ pub(crate) mod tests {
 
 	#[test]
 	fn a_tied_encoding_is_constrained_through_its_channel() {
-		// A channel is a biconditional, so constraining the lead says
-		// it of everything tied to it; saying it again would be
-		// quadratic.
+		// Constraining every view would repeat what the biconditional channels
+		// say.
 		let domain = RangeList::from_elements([0, 1, 3]);
 		let mut cnf = Cnf::default();
 		let order_lits = cnf.new_var_range(2).iter_lits().collect_vec();
@@ -2402,8 +2287,6 @@ pub(crate) mod tests {
 			"the chain of the order encoding, and nothing for the direct one"
 		);
 
-		// And it really is enough: both views read the same value, and only
-		// values of the domain.
 		let read = {
 			let (d, state) = (domain.clone(), x.0.borrow());
 			let (order, direct) = (state.order.clone().unwrap(), state.direct.clone().unwrap());
@@ -2418,9 +2301,7 @@ pub(crate) mod tests {
 
 	#[test]
 	fn only_an_equal_channel_spares_the_encoding_it_reaches() {
-		// Clauses making two encodings equal stand in for the channel;
-		// ones that only bound one by the other do not, so it is built
-		// anyway.
+		// One-way bounds do not replace an equality channel.
 		let domain = RangeList::from(0..=2);
 		let build = |already_channelled| {
 			let mut cnf = Cnf::default();
@@ -2448,9 +2329,6 @@ pub(crate) mod tests {
 
 	#[test]
 	fn an_encoding_made_beside_another_is_told_nothing() {
-		// A created encoding is held to the domain only where it is the
-		// first; beside an existing one the channel carries that, at
-		// the same cost.
 		let domain = RangeList::from_elements([0, 1, 3]);
 		let cost = |trusted: bool| {
 			let mut cnf = Cnf::default();
@@ -2474,9 +2352,8 @@ pub(crate) mod tests {
 
 	#[test]
 	fn what_the_encodings_cost() {
-		// Sizes over every combination of encodings, to catch
-		// channelling growing past a clause per value and the binary
-		// cliff at the second view.
+		// Size checks catch linear channelling growth and the second-view
+		// cliff.
 		let mut table = format!(
 			"{:>6} {:>14} {:>7} {:>8} {:>9}\n",
 			"card", "encodings", "vars", "clauses", "literals"
@@ -2521,9 +2398,6 @@ pub(crate) mod tests {
 
 	#[test]
 	fn constraining_the_lead_holds_the_variable_to_its_domain() {
-		// The lead is what the value is read from, so it is what gets
-		// constrained: past the bounds and the holes both, whichever of
-		// the three leads.
 		let domain = RangeList::from_elements([0, 1, 3]);
 		let expected = || domain.iter().flatten().map(|d| vec![d]).collect_vec();
 
@@ -2608,9 +2482,6 @@ pub(crate) mod tests {
 
 	#[test]
 	fn the_value_is_read_from_the_encoding_that_leads() {
-		// Every encoding but the lead is somewhere between a bound and
-		// an equal, and the binary one leads where it can, being
-		// cheapest to read.
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(0..=3);
 		assert_eq!(x.0.borrow().lead, None, "nothing has been asked of it yet");

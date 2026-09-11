@@ -33,14 +33,10 @@ use crate::{
 
 /// A linear constraint over integer variables as aggregation leaves it.
 ///
-/// Every coefficient is positive, the sum is compared with `≤` or `=` rather
-/// than `≥`, and the constant it is compared against is not negative. An
-/// encoder that only ever sees aggregated constraints can rely on that instead
-/// of checking for it, which is most of them: only the constraints a
-/// decomposition makes for itself fall outside it, and those it encodes itself.
+/// Coefficients are positive, the comparator is `≤` or `=`, and the bound is
+/// nonnegative.
 ///
-/// The usual way to reach one is to aggregate, which puts a constraint into
-/// this form whatever shape it was written in:
+/// # Examples
 ///
 /// ```rust
 /// # use pindakaas::{
@@ -82,20 +78,13 @@ pub(crate) struct IntLinear {
 	pub(crate) k: Coeff,
 }
 
-/// A way of breaking a linear constraint into smaller ones.
-///
-/// What the encodings in the literature differ in is mostly the shape they give
-/// the intermediate sums — a chain, a balanced tree, the layers of a decision
-/// diagram — rather than how any one step is encoded. Producing constraints
-/// rather than clauses keeps that difference in one place and leaves each step
-/// to be encoded on whichever view its variables have.
+/// A decomposition into ternary constraints, leaving Boolean views to the
+/// encoder.
 pub(crate) trait Decompose {
-	/// Break `con` into the additions that together mean the same.
+	/// Additions equivalent to `con`.
 	///
-	/// The database is there for a strategy that wants a literal of a variable
-	/// it has already made — a layer of a decision diagram sharing one with the
-	/// layer after it, say. A strategy that shares nothing needs it for
-	/// nothing.
+	/// The database allows a decomposition to share literals between
+	/// intermediates.
 	fn decompose<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -104,11 +93,6 @@ pub(crate) trait Decompose {
 }
 
 /// An integer variable scaled by a coefficient.
-///
-/// A coefficient other than one is not expanded into repeated addition: the
-/// encoder synthesises a chain of shifts and additions for it over the
-/// variable's bits, and shares that chain with every other term of the same
-/// coefficient over the same variable.
 pub(crate) type Term = (Coeff, IntVar);
 
 impl NormalizedIntLinear {
@@ -140,16 +124,7 @@ impl NormalizedIntLinear {
 		self.cmp.clone()
 	}
 
-	/// The integer linear constraint a normalised pseudo-Boolean one stands
-	/// for.
-	///
-	/// Aggregation has already found what structure the terms have; this reads
-	/// each group as the integer it encodes, so that whichever encoder takes
-	/// the constraint from here works on integers rather than on the literals
-	/// they happen to be written in.
-	///
-	/// Every guarantee the type makes is carried by the arguments: a
-	/// [`LimitComp`] cannot be `≥`, and a [`PosCoeff`] cannot be negative.
+	/// Construct a normalised integer linear constraint.
 	pub fn new(
 		terms: impl IntoIterator<Item = (PosCoeff, IntVar)>,
 		cmp: LimitComp,
@@ -218,14 +193,8 @@ impl IntLinear {
 			.collect()
 	}
 
-	/// The integer linear constraint a normalised pseudo-Boolean one stands
-	/// for.
-	///
-	/// Aggregation has already found what structure the terms have; this reads
-	/// each group as the integer it encodes, so that whichever encoder takes
-	/// the constraint from here works on integers rather than on the literals
-	/// they happen to be written in.
-	/// Read `con` as `x + y = z`, the shape a ripple-carry adder encodes.
+	/// The constraint as `x + y = z`, when compatible with a ripple-carry
+	/// adder.
 	pub(crate) fn as_addition(&self) -> Option<(&Term, &Term, &Term)> {
 		if self.k != 0 {
 			return None;
@@ -239,9 +208,8 @@ impl IntLinear {
 			(-1, 1, 1) => (b, c, a),
 			_ => return None,
 		};
-		// An adder lines the sum up with the result only where the
-		// result's lower bound is the sum of the other two; the walk
-		// takes the rest.
+		// The adder requires the result offset to equal the sum of input
+		// offsets.
 		(z.1.min() == x.1.min() + y.1.min()).then_some((x, y, z))
 	}
 

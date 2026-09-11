@@ -1,13 +1,12 @@
-//! Internals shared across the crate: bit-level helpers, the tracing-aware
-//! variable-naming macros, and the test scaffolding.
+//! Internals shared across the crate.
 //!
-//! Nothing here is part of the public API.
+//! Bit-level helpers and tracing-aware variable names support the encoders.
+//! Test scaffolding builds integer views of at-most-one groups and implication
+//! chains, trusting their exclusivity and implications.
 
 macro_rules! as_dyn_trait {
 	($as_dyn_name:ident, $trait_name:ident) => {
-		/// Helper trait that allows the creation of a dynamic reference to a trait
-		/// object. This trait is automatically implemented for all sized types that
-		/// implement the trait, and for the trait object itself.
+		/// Object-safe access for sized implementors and the trait object.
 		pub trait $as_dyn_name {
 			/// Cast the object reference to a dynamic trait object reference.
 			fn as_dyn(&self) -> &dyn $trait_name;
@@ -193,51 +192,27 @@ pub(crate) mod tests {
 		Unsatisfiable, Valuation,
 	};
 
-	/// Build the integer an at-most-one group of literals stands for.
+	/// The integer represented by an at-most-one group.
 	///
-	/// Only tests reach for this: the encoders are handed such variables
-	/// rather than the literals behind them.
-	/// The integer a group of at-most-one terms stands for.
-	///
-	/// One term at most is chosen, so the group takes the value of whichever it
-	/// is and zero when none is. That is a direct encoding, and the terms
-	/// already are one: a literal here says the group *is* its coefficient,
-	/// which is what a direct literal says and not what an order literal says.
-	///
-	/// At most one of them holding is taken on trust — it is what makes the
-	/// group a group — but the literal standing for the group being worth
-	/// nothing is made here, along with the clauses tying it to the rest.
-	///
-	/// `exact` asks for the upper bound as well, which a group only needs when
-	/// the constraint it belongs to is an equality.
+	/// Exclusivity is assumed. Clauses for the zero value are added here;
+	/// `exact` also excludes overestimates when several terms share a
+	/// coefficient.
 	pub(crate) fn at_most_one_var<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		terms: &[(Lit, PosCoeff)],
 		label: &str,
 		exact: bool,
 	) -> Result<IntVar, Unsatisfiable> {
-		// At most one term is chosen, so the group takes the value of
-		// whichever it is, and zero when none is. That is a direct
-		// encoding, and the terms already are one: a literal here says
-		// the group *is* its coefficient, which is what a direct
-		// literal says and not what an order literal says.
 		let mut by_coeff: FxHashMap<Coeff, Vec<Lit>> = FxHashMap::default();
 		for &(lit, coeff) in terms {
 			by_coeff.entry(*coeff).or_default().push(lit);
 		}
-		// The group is worth nothing when no term is chosen, and one of
-		// the coefficients otherwise.
 		let domain = RangeList::from_elements(once(0).chain(by_coeff.keys().copied()));
 
 		let by_coeff = by_coeff
 			.into_iter()
 			.sorted_by_key(|(c, _)| *c)
 			.collect_vec();
-		// The group is worth nothing when no term is chosen, which is a
-		// value like any other. A group of one term says that already:
-		// it is worth nothing exactly when that term is not chosen. Any
-		// other group needs a literal of its own, and clauses tying it
-		// to the rest.
 		let single = matches!(by_coeff.as_slice(), [(_, terms)] if terms.len() == 1);
 		let none = match by_coeff.as_slice() {
 			[(_, terms)] if terms.len() == 1 => !terms[0],
@@ -246,10 +221,7 @@ pub(crate) mod tests {
 		let mut lits = vec![none];
 		for (_coeff, terms) in by_coeff {
 			let d = match terms.as_slice() {
-				// One term reaching a value is the literal for it.
 				&[lit] => lit,
-				// Several are not one literal, so they need one, which
-				// each of them reaches.
 				_ => {
 					let d = new_named_lit!(db, format!("{label}={_coeff}"));
 					for &lit in &terms {
@@ -258,28 +230,19 @@ pub(crate) mod tests {
 					d
 				}
 			};
-			// The group is worth this only if one of these terms is
-			// chosen. Without it the group may say it is worth more
-			// than it is, which a `≤` can live with and costs the
-			// solver nothing, since nothing forces it to. A value one
-			// term reaches says it already, that term being the literal
-			// for it.
+			// Without the reverse implication, `≤` may overestimate a group;
+			// equality must exclude that slack.
 			if exact && terms.len() > 1 {
 				db.add_clause([!d].into_iter().chain(terms))?;
 			}
-			// Nothing is chosen only if this value is not taken.
 			if !single {
 				db.add_clause([!d, !none])?;
 			}
 			lits.push(d);
 		}
-		// Some value is taken.
 		if !single {
 			db.add_clause(lits.iter().copied())?;
 		}
-		// The group's own clauses above already give exactly one value,
-		// so the variable is told the literals rather than asked to
-		// constrain them.
 		let x = IntVar::new(domain)
 			.enforce_consistency(false)
 			.with_label(label);
@@ -297,9 +260,6 @@ pub(crate) mod tests {
 		terms: &[(Lit, PosCoeff)],
 		label: &str,
 	) -> Result<IntVar, Unsatisfiable> {
-		// Each term implies the one before it, so the group counts up
-		// through the running sums and a term's literal is already the
-		// order literal for its sum.
 		let mut acc = 0;
 		let (totals, lits): (Vec<_>, Vec<_>) = terms
 			.iter()

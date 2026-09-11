@@ -47,16 +47,9 @@ pub trait FailedAssumptions {
 /// clause. In CDCL solvers, this generally happens when a clause is learned on
 /// conflict.
 pub trait LearnCallback: Solver {
-	/// Set a callback function used to extract learned clauses up to a given
-	/// length from the solver.
+	/// Set the learned-clause callback, replacing the previous one.
 	///
-	/// # Warning
-	///
-	/// Subsequent calls to this method override the previously set
-	/// callback function.
-	///
-	/// The callback must be [`Send`], since solvers can be moved to another
-	/// thread and will invoke the callback from whichever thread is solving.
+	/// The callback runs on whichever thread is solving.
 	fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Lit>) + Send + 'static>(
 		&mut self,
 		cb: Option<F>,
@@ -98,20 +91,9 @@ pub enum TermSignal {
 /// Trait implemented by solvers that will make a call to the given callback
 /// function to determine whether to continue or terminate the search.
 pub trait TerminateCallback: Solver {
-	/// Set a callback function used to indicate a termination requirement to
-	/// the solver.
+	/// Set the periodically polled termination callback, replacing the previous one.
 	///
-	/// The solver will periodically call this function and check its return
-	/// value during the search. Subsequent calls to this method override the
-	/// previously set callback function.
-	///
-	/// # Warning
-	///
-	/// Subsequent calls to this method override the previously set
-	/// callback function.
-	///
-	/// The callback must be [`Send`], since solvers can be moved to another
-	/// thread and will invoke the callback from whichever thread is solving.
+	/// The callback runs on whichever thread is solving.
 	fn set_terminate_callback<F: FnMut() -> TermSignal + Send + 'static>(&mut self, cb: Option<F>);
 }
 
@@ -158,11 +140,9 @@ impl VarFactory {
 				// Size is reduced by 1 since it includes self.next_var
 				let size = NonZeroI32::new((size - 1) as i32).unwrap();
 				if let Some(end) = start.checked_add(size) {
-					// Set self.next_var to one after end
 					self.next_var = end.next_var();
 					VarRange::new(start, end)
 				} else {
-					// If end is None, then the range is too large
 					panic!("unable to create more than `Var::MAX_VARS` variables")
 				}
 			}

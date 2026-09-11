@@ -26,7 +26,7 @@ pub struct IntTernary {
 }
 
 impl IntTernary {
-	/// The constraint `x + y ≷ z`.
+	/// Construct the constraint `x + y ≷ z`.
 	///
 	/// # Examples
 	///

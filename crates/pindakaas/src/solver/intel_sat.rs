@@ -1,5 +1,8 @@
-//! This module contains the pindakaas interface to the
-//! [Intel SAT](https://github.com/alexander-nadel/intel_sat_solver) solver.
+//! Interface to the [Intel
+//! SAT](https://github.com/alexander-nadel/intel_sat_solver) solver.
+//!
+//! The `intel-sat` feature enables this backend. Its IPASIR adapter supports
+//! assumptions, learned-clause callbacks, and termination callbacks.
 
 use std::ffi::{c_int, c_void};
 

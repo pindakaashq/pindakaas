@@ -1,5 +1,9 @@
-//! Reading a general Boolean linear constraint into the narrower one it is,
-//! and handing that to an encoder that takes it.
+//! Normalising linear expressions and selecting specialised constraints.
+//!
+//! Repeated terms, constants, and multipliers are combined before dispatch.
+//! Counting constraints are recognised before mirroring hides their bound
+//! variable. Integer terms bypass simplifications that assume zero is
+//! reachable.
 
 use itertools::Itertools;
 use rangelist::RangeList;
@@ -41,8 +45,6 @@ impl LinAggregator {
 		Db: ClauseDatabase + ?Sized,
 	{
 		let mut k = lin.k - lin.exp.add * lin.exp.mult;
-		// Aggregate multiple occurrences of the same
-		// variable.
 		let mut agg = FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), FxBuildHasher);
 		for (lit, coef) in lin.exp.terms() {
 			let entry = agg.entry(lit.var()).or_insert(0);
@@ -54,16 +56,11 @@ impl LinAggregator {
 			*entry += coef;
 		}
 
-		// Convert ≥ to ≤
 		if lin.cmp == Comparator::GreaterEq {
 			agg = agg.into_iter().map(|(var, coef)| (var, -coef)).collect();
 			k = -k;
 		}
 
-		// A term that arrived as an integer is already what the grouping below
-		// is trying to recover from literals, so it only needs the same
-		// normalising: the pending multiplier, the turn from `≥`, and a
-		// coefficient made positive by counting the variable from the far end.
 		let mut int_terms = Vec::new();
 		for (x, c) in lin.exp.int_terms() {
 			let mut c = c * lin.exp.mult;
@@ -73,10 +70,6 @@ impl LinAggregator {
 			int_terms.push((x.clone(), c));
 		}
 
-		// Every literal stands on its own: a group of them is an integer, and
-		// an integer is a term of the expression rather than an annotation on
-		// its literals. Normalising therefore makes each coefficient
-		// positive, by taking the literal the other way round.
 		let cmp = match lin.cmp {
 			Comparator::LessEq | Comparator::GreaterEq => LimitComp::LessEq,
 			Comparator::Equal => LimitComp::Equal,
@@ -96,9 +89,7 @@ impl LinAggregator {
 			.filter(|&(_, coef)| *coef != 0)
 			.collect();
 
-		// Counting literals into an integer, which a sorting network states
-		// outright where the general case would count into intermediates
-		// first. Read before the mirror below, which would hide the variable.
+		// Recognise counts before mirroring hides the bound variable.
 		if let [(y, -1)] = &int_terms[..] {
 			if k == 0 && partition.iter().all(|&(_, coef)| *coef == 1) {
 				let lits = partition.iter().map(|&(lit, _)| lit).collect();
@@ -116,12 +107,10 @@ impl LinAggregator {
 			}
 		}
 
-		// trivial case: constraint is unsatisfiable
 		if k < 0 {
 			db.contradiction()?;
 			unreachable!();
 		}
-		// trivial case: no literals can be activated
 		if k == 0 && int_terms.is_empty() {
 			for (lit, _) in &partition {
 				db.add_clause([!*lit])?;
@@ -177,9 +166,8 @@ impl LinAggregator {
 			}
 		}
 
-		// What follows reasons about a sum that runs from nothing up to its
-		// bound, which holds of literals but not of a variable whose least
-		// value is not zero, so a constraint with integer terms is left alone.
+		// The simplifications below assume each term can reach zero, which
+		// integer domains need not contain.
 		if int_terms.is_empty() {
 			let lhs_ub = PosCoeff::new(partition.iter().map(|&(_, coef)| *coef).sum());
 			match cmp {
@@ -256,10 +244,8 @@ impl LinAggregator {
 			partition = kept;
 		}
 
-		// A term is the integer it stands for: a literal is one worth its
-		// coefficient when it holds, and a variable is one already.
-		// Weighted, but over literals alone, so it stays in them rather than
-		// becoming an integer per literal for an encoder to take apart again.
+		// Keep Boolean terms as literals to avoid creating and unpacking
+		// integers.
 		if int_terms.is_empty() {
 			return Ok(LinVariant::BoolLinear(NormalizedBoolLinear::new(
 				partition, cmp, k,
@@ -270,9 +256,6 @@ impl LinAggregator {
 			.iter()
 			.enumerate()
 			.map(|(i, &(lit, coef))| {
-				// The literal says the term is worth its coefficient and its
-				// negation that the term is worth nothing, which is a direct
-				// encoding of the two values already.
 				let domain = RangeList::from_elements([0, *coef]);
 				IntVar::from_direct_encoding(db, domain, &[!lit, lit])
 					.map(|x| (PosCoeff::new(1), x.with_label(format!("x{i}"))))
@@ -512,7 +495,6 @@ mod tests {
 	fn aggregator_at_least_one_negated() {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
-		// Correctly detect that all but one literal can be set to true
 		assert_eq!(
 			aggregated(
 				&mut cnf,
@@ -530,7 +512,6 @@ mod tests {
 			&expect_file!["linear/aggregator/test_at_least_one_negated.cnf"],
 		);
 
-		// Correctly detect equal k
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		assert_eq!(
@@ -543,7 +524,6 @@ mod tests {
 					2
 				)
 			),
-			// actually leaves over a CardinalityOne constraint
 			Ok(Aggregated::CardinalityOne(
 				vec![!a, !b, !c],
 				LimitComp::LessEq
@@ -553,10 +533,7 @@ mod tests {
 
 	#[test]
 	fn a_bound_of_zero_leaves_no_term_standing() {
-		// Every coefficient is positive by the time an encoder sees it, so a
-		// sum that has to come to nothing is every literal being false. The
-		// adder has no bits to work with in that case, which is only reachable
-		// at all because a constraint with integer terms keeps its bound.
+		// The zero bound leaves the adder no bits to work with.
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
@@ -582,9 +559,6 @@ mod tests {
 
 	#[test]
 	fn an_expression_may_mix_literals_and_integers() {
-		// `a * 3 + y * 5` reads the same whichever kind each side is, and the
-		// two come apart again in aggregation: the literal is grouped into the
-		// integer it stands for, the integer passes through as it came.
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
@@ -691,11 +665,8 @@ mod tests {
 			Err(Unsatisfiable)
 		);
 
-		// Dropping terms whose coefficient exceeds k can leave behind a set of
-		// coefficients with a larger common divisor than the constraint started
-		// with, which is why normalization runs after that step. Here
-		// gcd(3, 3, 3, 7) is 1, but once 7d is dropped the rest divides by 3,
-		// leaving `a + b + c ≤ 1`.
+		// Dropping oversized coefficients can increase the GCD, so division
+		// must follow that step.
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		assert_eq!(
@@ -728,7 +699,6 @@ mod tests {
 			Err(Unsatisfiable)
 		);
 
-		// Coprime coefficients are left untouched
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		assert_eq!(
@@ -753,7 +723,6 @@ mod tests {
 	fn aggregator_combine() {
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
-		// Simple aggregation of multiple occurrences of the same literal
 		assert_eq!(
 			aggregated(
 				&mut cnf,
@@ -775,12 +744,6 @@ mod tests {
 			))
 		);
 
-		// Aggregation of positive and negative occurrences of the same literal
-		// x1 +2*~x1 + ... <= 3
-		// x1 +2 -2*x1 + ... <= 3
-		// x1 -2*x1 + ... <= 1
-		// -1*x1 + ... <= 1
-		// +1*~x1 + ... <= 2
 		assert_eq!(
 			aggregated(
 				&mut cnf,
@@ -798,7 +761,6 @@ mod tests {
 			))
 		);
 
-		// Aggregation of positive and negative coefficients of the same literal
 		assert_eq!(
 			aggregated(
 				&mut cnf,
@@ -823,7 +785,6 @@ mod tests {
 	fn aggregator_equal_one() {
 		let mut cnf = Cnf::default();
 		let vars = cnf.new_var_range(3).iter_lits().collect_vec();
-		// An exactly one constraint adds an exactly one constraint
 		assert_eq!(
 			aggregated(
 				&mut cnf,
@@ -929,7 +890,6 @@ mod tests {
 		let mut db = Cnf::default();
 		let vars = db.new_var_range(3).iter_lits().collect_vec();
 
-		// Constant cannot be reached
 		assert_eq!(
 			aggregated(
 				&mut db,
@@ -963,7 +923,6 @@ mod tests {
 			Err(Unsatisfiable)
 		);
 
-		// Scaled counting constraint with off-scaled Constant
 		assert_eq!(
 			aggregated(
 				&mut db,

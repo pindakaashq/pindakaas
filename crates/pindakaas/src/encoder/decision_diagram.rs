@@ -41,14 +41,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-/// Encoder for a linear constraint, decomposing it through the layers of a
-/// decision diagram; also known as the MDD encoding, or the BDD encoding where
-/// every term is a single literal.
-///
-/// One layer per term, holding the partial sums still reachable. Layers that
-/// cannot be told apart are shared, so a constraint whose terms interfere
-/// little decomposes into fewer pieces than the chain or the tree would give.
-/// Domain consistent, whatever reaches it.
+/// A decision diagram over integer terms (MDD, or BDD for single literals).
 ///
 /// # Examples
 ///
@@ -88,7 +81,6 @@ impl DecisionDiagramEncoder {
 		sum: Coeff,
 		ws: &mut Vec<Vec<(Range<Coeff>, DiagramNode)>>,
 	) -> (Range<Coeff>, DiagramNode) {
-		// See if the node for `sum` is already available
 		if let Ok(pos) = ws[i].binary_search_by(|(r, _)| {
 			if r.contains(&sum) {
 				Ordering::Equal
@@ -108,9 +100,8 @@ impl DecisionDiagramEncoder {
 
 		// TODO could we check whether a domain value of x always leads to gaps?
 		let is_gap = views.iter().all(|(_, (_, v))| v == &DiagramNode::Gap);
-		// A layer is a partition into disjoint intervals, so equal intervals
-		// are the same node: children that share a literal some other way
-		// would already have been merged into one interval.
+		// Equal intervals identify the same node because each layer is a
+		// partition.
 		let view = (views.iter().map(|(_, (iv, _))| iv).all_equal())
 			.then(|| views.first().unwrap().1 .0.end - 1);
 
@@ -202,15 +193,20 @@ impl DecisionDiagramEncoder {
 		ws
 	}
 
-	/// Configures whether intermediate variables are constrained independently of their use.
+	/// Enable independent domain constraints for newly created intermediate views.
+	///
+	/// Disabled by default. Enables standalone binary and direct consistency
+	/// clauses; order-encoding implication chains remain mandatory.
 	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
 
-	/// Sets the largest intermediate domain forced into order encoding.
+	/// Set the domain size at which an unencoded variable prefers binary.
 	///
-	/// `None`, the default, leaves the choice to [`IntTernaryEncoder`].
+	/// `None` (the default) prefers order; existing binary or order views take
+	/// precedence. The threshold is inclusive. Binary arithmetic can weaken
+	/// unit propagation; see the [encoding overview](crate::encoder).
 	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
@@ -274,9 +270,8 @@ impl Decompose for DecisionDiagramEncoder {
 			return Err(Unsatisfiable);
 		}
 
-		// Back to front, so that a layer has the literals it shares with the
-		// next one by the time it is built. A total the next layer already
-		// tells apart is read on its literal; any other gets one of its own.
+		// Back-to-front construction makes shared literals available before
+		// use.
 		let mut layers: Vec<IntVar> = Vec::with_capacity(nodes.len());
 		for (i, layer) in nodes.iter().enumerate().rev() {
 			let walk = layer
@@ -322,7 +317,6 @@ where
 	Db: ClauseDatabase + ?Sized,
 {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
-		// Decomposing works in integers, so the literals become them first.
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}
@@ -350,8 +344,6 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for DecisionDiagramEn
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for DecisionDiagramEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		// Counting into a variable is a linear constraint whose bound is not a
-		// constant, which this encoder takes once the bound is a term.
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}
@@ -371,14 +363,8 @@ mod tests {
 
 	#[test]
 	fn diagram_layers_share_the_literals_they_agree_on() {
-		// Abió, Nieuwenhuis, Oliveras and Rodríguez-Carbonell, "BDDs for
-		// Pseudo-Boolean Constraints — Revisited" (SAT 2011), Examples 3 and 5.
-		// Reducing this diagram skips a level: at a running total of 2, whether
-		// the second term is taken makes no difference to what the third can
-		// do, so that node is the one below it and reads on its literal.
-		//
-		// Nothing else notices — the solutions are the same either way — so the
-		// saving is what has to be measured.
+		// These skipped-level cases need size checks: solution counts alone
+		// cannot detect lost sharing.
 		let mut cnf = Cnf::default();
 		let lits = cnf.new_var_range(3).iter_lits().collect_vec();
 		let con = Linear::new(
@@ -392,7 +378,6 @@ mod tests {
 		else {
 			panic!("weighted literals aggregate to a Boolean linear constraint");
 		};
-		// The diagram is built over integers, so the literals become them here.
 		let con = con.as_int_linear(&mut cnf).unwrap();
 		cnf.encode(&con, &crate::constraint::linear::DecisionDiagramEncoder::default())
 			.unwrap();

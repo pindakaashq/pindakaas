@@ -67,17 +67,12 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder 
 		let terms = &con.terms;
 		let binary = |t: &Term| t.1.prefers_binary(self.config.cutoff);
 
-		// A ripple-carry adder states this shape directly, and it is
-		// what a coefficient decomposes into, so it is recognised
-		// first.
 		if let Some((x, y, z)) = con.as_addition() {
 			if [x, y, z].iter().all(|t| binary(t)) && Self::worth_adding(con.cmp, x, y) {
 				return encode_addition(db, x, y, con.cmp, z);
 			}
 		}
-		// Otherwise walk the terms in order form, which any variable
-		// can produce. Every variable gets a view, since a solution has
-		// to say its value.
+		// Every variable needs a view so a solution can report its value.
 		for t in terms {
 			if !t.1.has_direct_encoding() {
 				let _ = t.1.order_encoding(db)?;
@@ -89,7 +84,6 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder 
 		let (bounded, inner, outer) = (encoded.next(), encoded.next(), encoded.next());
 		debug_assert!(encoded.next().is_none());
 
-		// An equality holds exactly when both of its inequalities do.
 		for cmp in con.cmp.split() {
 			Encoded::emit(db, bounded, inner, outer, cmp, con.k)?;
 		}
@@ -103,8 +97,10 @@ pub struct IntTernaryConfig {
 	/// Whether to narrow the domains of the variables of a constraint before
 	/// encoding it.
 	pub propagate: bool,
-	/// The domain size from which a variable is held in binary rather than in
-	/// order form. `None` keeps every variable in order form.
+	/// Inclusive domain-size threshold for preferring binary arithmetic.
+	///
+	/// `None` (the default) prefers order. Existing views take precedence;
+	/// unsupported adder shapes still use the literal walk.
 	pub cutoff: Option<Coeff>,
 }
 
@@ -202,8 +198,6 @@ impl Encoded<'_> {
 		} else {
 			Vec::new()
 		};
-		// Each loop keeps what it built at the step before, to compare the
-		// next one against.
 		let (mut units, mut last_units) = (Vec::new(), Vec::new());
 		let (mut clauses, mut last_clauses, mut have_clauses) = (Vec::new(), Vec::new(), false);
 
@@ -273,10 +267,8 @@ impl Encoded<'_> {
 		out: &mut Vec<BoolVal>,
 	) -> Result {
 		if self.x.has_direct_encoding() {
-			// Nothing says it in one literal, so rule out each value that
-			// would break the bound instead. What the value is worth already
-			// carries the sign of the coefficient, so the comparison is the
-			// one asked for rather than the turned-around one below.
+			// The value already includes the coefficient sign, so the
+			// comparison does not need reversing.
 			for &(d, _) in pins {
 				let breaks = match cmp {
 					Comparator::LessEq => self.c * d > k,
@@ -290,7 +282,6 @@ impl Encoded<'_> {
 		}
 		// Dividing by a negative coefficient turns the comparison around.
 		let cmp = if self.c >= 0 { cmp } else { cmp.reverse() };
-		// One literal says where the variable stands against the bound.
 		out.push(match cmp {
 			Comparator::LessEq => self.x.lit_at_most(db, div_floor(k, self.c))?,
 			Comparator::GreaterEq => self.x.lit_at_least(db, div_ceil(k, self.c))?,
@@ -449,9 +440,7 @@ mod tests {
 			};
 			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
 				for k in ks.iter().copied() {
-					// Propagation must not change which
-					// assignments survive, only how much
-					// domain is left.
+					// Propagation must preserve the set of solutions.
 					for propagate in [false, true] {
 						assert_eq!(
 							solutions_of(&coeffs, &doms, cmp, k, propagate),
@@ -466,9 +455,6 @@ mod tests {
 
 	#[test]
 	fn a_group_on_its_own_is_bounded_on_its_own_literals() {
-		// One term read directly: no literal says where it stands
-		// against the bound, so the values that break it are ruled out
-		// one by one.
 		for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
 			for k in -1..=9 {
 				let mut cnf = Cnf::default();
@@ -530,9 +516,8 @@ mod tests {
 
 	#[test]
 	fn a_group_is_encoded_on_the_literals_it_arrived_on() {
-		// The point of reading a group as an integer: the walk guards
-		// on the view it came with, so nothing is built and nothing
-		// channelled.
+		// Reusing the supplied direct view should allocate no literals or
+		// channels.
 		let mut cnf = Cnf::default();
 		let lits: Vec<Lit> = (0..3).map(|_| cnf.new_lit()).collect();
 		PairwiseEncoder::default()
@@ -561,7 +546,6 @@ mod tests {
 			"the group came with a direct encoding and should be read on it"
 		);
 
-		// And it still encodes the constraint.
 		let mut slv = Cadical::from(&cnf);
 		let mut seen = Vec::new();
 		let watched = cnf.get_variables();
@@ -674,9 +658,6 @@ mod tests {
 
 	#[test]
 	fn the_walk_drops_the_steps_it_repeats() {
-		// Measured at 37, 59 and 87 clauses, against 47, 81 and 123
-		// with the repeated steps kept; the budgets sit between the
-		// two.
 		for (coeffs, span, k, budget) in [
 			(vec![1, 1, -1], 5, 0, 42),
 			(vec![2, 3, -5], 7, 0, 70),
@@ -707,8 +688,6 @@ mod tests {
 
 	#[test]
 	fn coefficients_decompose_into_shifts_and_adders() {
-		// The database this replaces stopped at a hundred, so the point of
-		// synthesising a plan instead is that nothing here is out of reach.
 		let domain = RangeList::from(0..=7);
 		for c in [
 			1, 2, 3, 5, 7, 9, 11, 15, 23, 45, 99, 101, 127, 255, 341, 569, 1023,
@@ -774,9 +753,6 @@ mod tests {
 
 	#[test]
 	fn a_product_is_shared_between_encoders() {
-		// The product belongs to the variable rather than the encoder
-		// that built it, so a second encoder of any kind finds it
-		// there.
 		let domain = RangeList::from(0..=15);
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(domain).with_label("x");
@@ -790,7 +766,6 @@ mod tests {
 			.encode(&mut cnf, &con(300))
 			.unwrap();
 		let vars = cnf.num_vars();
-		// A different encoder entirely, with no memory of the first.
 		IntTernaryEncoder::with_config(config())
 			.encode(&mut cnf, &con(200))
 			.unwrap();
@@ -867,9 +842,6 @@ mod tests {
 
 	#[test]
 	fn an_addition_lines_up_with_the_bound_of_its_result() {
-		// The adder only takes `x + y = z` where `z` starts at the sum
-		// of the other two; otherwise the walk does, to the same
-		// solutions.
 		let from = |lb: Coeff| RangeList::from(lb..=(lb + 3));
 		for (lx, ly, lz) in [(0, 0, 0), (1, 2, 3), (1, 2, 0), (-2, 1, -1), (-2, 1, 5)] {
 			let doms = [from(lx), from(ly), from(lz)];

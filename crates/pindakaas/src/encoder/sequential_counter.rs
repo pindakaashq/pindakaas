@@ -33,11 +33,7 @@ use crate::{
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 
-/// Encoder for a linear constraint, decomposing it into a chain of running
-/// totals; also known as the sequential weight counter, SWC.
-///
-/// One intermediate per term, each the sum so far, so the pieces are a line
-/// rather than a tree: the last intermediate is as wide as the whole sum.
+/// A chain of running totals (sequential counter, SWC, or GSWC).
 ///
 /// # Examples
 ///
@@ -85,21 +81,26 @@ impl SequentialCounterEncoder {
 		})
 	}
 
-	/// Configures whether intermediate variables are constrained independently of their use.
+	/// Enable independent domain constraints for newly created intermediate views.
+	///
+	/// Disabled by default. Enables standalone binary and direct consistency
+	/// clauses; order-encoding implication chains remain mandatory.
 	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
 
-	/// Sets the largest intermediate domain forced into order encoding.
+	/// Set the domain size at which an unencoded variable prefers binary.
 	///
-	/// `None`, the default, leaves the choice to [`IntTernaryEncoder`].
+	/// `None` (the default) prefers order; existing binary or order views take
+	/// precedence. The threshold is inclusive. Binary arithmetic can weaken
+	/// unit propagation; see the [encoding overview](crate::encoder).
 	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
 
-	/// Selects domain consistency applied before decomposition; bounds is the default.
+	/// Select the domain consistency applied before decomposition; bounds is the default.
 	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
 		self.add_propagation = c;
 		self
@@ -155,7 +156,6 @@ where
 	Db: ClauseDatabase + ?Sized,
 {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
-		// Decomposing works in integers, so the literals become them first.
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}
@@ -183,8 +183,6 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for SequentialCounter
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SequentialCounterEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		// Counting into a variable is a linear constraint whose bound is not a
-		// constant, which this encoder takes once the bound is a term.
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}

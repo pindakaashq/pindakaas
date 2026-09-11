@@ -19,13 +19,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-/// Linear constraint that enforces that ∑ litᵢ ≷ 1.
-///
-/// Compared to a [`Cardinality`] constraint,
-/// the right hand side constant is always 1.
-///
-/// All literals in the constraint are guaranteed to be from distinct Boolean
-/// variables.
+/// The constraint `Σ litᵢ ≷ 1` over distinct Boolean variables.
 pub struct CardinalityOne {
 	pub(crate) lits: Vec<Lit>,
 	pub(crate) cmp: LimitComp,
@@ -123,7 +117,6 @@ pub(crate) mod tests {
 				use crate::helpers::tests::prelude::*;
 
 				const LARGE_N: usize = 50;
-				// ------ At Most One testing ------
 				#[test]
 				fn amo_pair() {
 					let mut cnf = Cnf::default();
@@ -251,7 +244,6 @@ pub(crate) mod tests {
 
 					assert_checker(&cnf, &con);
 				}
-				// ------ Exactly One testing ------
 				#[test]
 				fn eo_pair() {
 					let mut cnf = Cnf::default();
@@ -615,7 +607,6 @@ pub(crate) mod tests {
 
 	#[test]
 	fn amo_pairwise() {
-		// AMO on two literals
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		let b = cnf.new_lit();
@@ -638,7 +629,6 @@ pub(crate) mod tests {
 			vec![a, b],
 			&expect_file!["cardinality_one/pairwise/test_amo_pairwise1.sol"],
 		);
-		// AMO on a negated literals
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		let b = cnf.new_lit();
@@ -661,7 +651,6 @@ pub(crate) mod tests {
 			vec![a, b],
 			&expect_file!["cardinality_one/pairwise/test_amo_pairwise2.sol"],
 		);
-		// AMO on three literals
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		let b = cnf.new_lit();

@@ -1,5 +1,8 @@
-//! This module contains the pindakaas interface to the
-//! [Kissat](https://github.com/arminbiere/kissat) SAT solver.
+//! Interface to the [Kissat](https://github.com/arminbiere/kissat) SAT solver.
+//!
+//! The `kissat` feature enables this backend. The IPASIR adapter supports
+//! termination callbacks; assumption solving and learned-clause callbacks are
+//! not exposed by this wrapper.
 
 use std::ffi::{c_int, c_void};
 

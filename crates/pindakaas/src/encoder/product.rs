@@ -1,5 +1,11 @@
-//! At-most-one over a two-dimensional grid, so that a literal is picked out
-//! by its row and its column, each of which is an at-most-one in turn.
+//! At-most-one over a two-dimensional selector grid [^1].
+//!
+//! Rows and columns are recursively constrained, using roughly `2·√n` auxiliary
+//! literals per level. Groups of at most six use pairwise clauses; the cutoff
+//! cannot be below two, where a split would stop shrinking.
+//!
+//! [^1]: J. Chen, "A New SAT Encoding of the At-Most-One Constraint", ModRef
+//! 2010.
 
 use std::{borrow::Cow, cmp::max, iter::once};
 
@@ -10,11 +16,7 @@ use crate::{
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
 };
 
-/// At-most-one encoding over a recursively constrained selector grid.
-///
-/// A true literal selects its row and column, reducing the constraint to two
-/// smaller at-most-one constraints. This uses roughly `2·√n` auxiliary
-/// literals per level; small groups fall back to [`PairwiseEncoder`].
+/// Recursive product at-most-one encoding.
 ///
 /// # Examples
 ///
@@ -35,30 +37,15 @@ pub struct ProductEncoder {
 }
 
 impl ProductEncoder {
-	/// The number of literals up to which the pairwise encoding is used when no
-	/// other cutoff is set.
-	///
-	/// The pairwise encoding takes `n·(n-1)/2` clauses and no additional
-	/// literals, which remains the cheaper of the two until around seven
-	/// literals.
+	/// The default pairwise cutoff.
 	const DEFAULT_PAIRWISE_CUTOFF: usize = 6;
 
-	/// The smallest cutoff at which the encoder still makes progress.
-	///
-	/// Two literals are laid out as a single row of two columns, so the column
-	/// dimension would be as large as the group it came from. The pairwise
-	/// encoding has to take over at or below that size.
+	/// The minimum cutoff for recursive progress.
 	const MINIMUM_PAIRWISE_CUTOFF: usize = 2;
 
-	/// Set the number of literals up to which the pairwise encoding is used
-	/// instead of splitting the literals over a grid.
+	/// Set the largest group encoded pairwise.
 	///
-	/// Raising the cutoff trades additional clauses for fewer additional
-	/// literals.
-	///
-	/// The cutoff must be at least two, since a group of two literals is laid
-	/// out as a single row of two columns and would not get any smaller. Lower
-	/// values cannot make recursive progress and are rejected.
+	/// Raising the cutoff trades more clauses for fewer auxiliary literals.
 	///
 	/// # Panics
 	///
@@ -103,9 +90,6 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for ProductEncoder
 				continue;
 			}
 
-			// Lay the literals out in a grid that is as square as possible,
-			// filling it row by row. The final row is allowed to be
-			// partially filled.
 			let cols = {
 				let root = lits.len().isqrt();
 				if root * root < lits.len() {
@@ -119,9 +103,6 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for ProductEncoder
 			let row_lits = (0..rows).map(|_| db.new_lit()).collect_vec();
 			let col_lits = (0..cols).map(|_| db.new_lit()).collect_vec();
 
-			// A literal implies the selection of both the row and the column it
-			// was placed in, and a selected row or column has to hold one of
-			// its literals.
 			for (i, &lit) in lits.iter().enumerate() {
 				db.add_clause([!lit, row_lits[i / cols]])?;
 				db.add_clause([!lit, col_lits[i % cols]])?;

@@ -11,38 +11,42 @@ from .pindakaas.solver import CaDiCaLInner, KissatInner, Status
 
 
 class Result(ABC):
-    """A solve result valid inside the ``solve()`` context manager."""
+    """A solve result valid inside the ``solve()`` context manager.
+
+    Access after leaving the context raises ``RuntimeError``.
+    """
 
     @property
     @abstractmethod
     def status(self) -> Status:
-        """Reports whether the search found a model, proved inconsistency, or stopped."""
+        """Search status."""
         ...
 
     @abstractmethod
     def value(self, lit: Lit) -> Optional[bool]:
-        """Returns the literal's value in a satisfying model, if assigned.
+        """The literal's value in a satisfying model.
 
         Args:
             lit: Literal to inspect.
 
         Returns:
-            Its truth value, or ``None`` if the solver left it unassigned.
+            Its truth value for a satisfied result, or ``None`` otherwise.
+            Bundled backends report unassigned literals as ``False``.
         """
         ...
 
     @abstractmethod
     def failed(self, lit: Lit) -> Optional[bool]:
-        """Reports whether an assumption contributed to the unsatisfiable result.
+        """Membership in the failed-assumption core.
 
-        The result is ``None`` unless the search was unsatisfiable. For a literal
-        that was not an assumption of that search, the Boolean result is unspecified.
+        For literals not assumed in this search, the Boolean result is unspecified.
 
         Args:
             lit: Assumption literal to inspect.
 
         Returns:
-            Whether it belongs to the failed core, or ``None`` for other statuses.
+            Whether it belongs to the failed core, or ``None`` unless the
+            result is unsatisfiable and the backend supports assumptions.
         """
         ...
 
@@ -65,8 +69,9 @@ class Solver(ClauseDatabase):
     ) -> Iterator[Result]:
         """Search the current clauses under temporary assumptions.
 
-        The yielded result borrows solver state and is valid only inside the
-        context manager.
+        The result is valid only inside the context. Adding clauses, allocating
+        variables, or starting another solve on this solver during that context
+        raises ``RuntimeError``.
 
         Args:
             assumptions: Literals required to hold for this search only.
@@ -76,7 +81,8 @@ class Solver(ClauseDatabase):
             The search result.
 
         Raises:
-            NotImplementedError: This backend does not support time limits.
+            NotImplementedError: The backend rejects time limits or assumptions.
+            RuntimeError: A result already has exclusive access to this solver.
         """
         self._set_time_limit(time_limit)
         assumptions = assumptions if assumptions is not None else []
@@ -124,7 +130,10 @@ class CaDiCaL(Solver):
 
 
 class Kissat(Solver):
-    """The `Kissat <https://github.com/arminbiere/kissat>`_ SAT solver."""
+    """The `Kissat <https://github.com/arminbiere/kissat>`_ SAT solver.
+
+    Nonempty assumptions raise ``NotImplementedError``.
+    """
 
     _inner: KissatInner
 

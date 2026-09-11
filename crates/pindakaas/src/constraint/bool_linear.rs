@@ -20,10 +20,7 @@ use crate::{
 
 /// A linear constraint over literals alone, as aggregation leaves it.
 ///
-/// Every coefficient is positive and the comparison is never `≥`, as for a
-/// [`NormalizedIntLinear`], but the terms are still literals. Aggregation keeps
-/// them that way where a constraint mentions no integer variable, so that an
-/// encoder working in literals is not handed integers to take apart again.
+/// Terms remain literals so Boolean encoders need not unpack integer views.
 #[derive(Clone, Debug)]
 pub struct NormalizedBoolLinear {
 	pub(crate) terms: Vec<(Lit, PosCoeff)>,
@@ -42,10 +39,7 @@ impl NormalizedBoolLinear {
 		*self.k
 	}
 
-	/// The constraint `Σ cᵢ·litᵢ ≷ k`.
-	///
-	/// Every guarantee the type makes is carried by the arguments: a
-	/// [`LimitComp`] cannot be `≥`, and a [`PosCoeff`] cannot be negative.
+	/// Construct the constraint `Σ cᵢ·litᵢ ≷ k`.
 	pub fn new(
 		terms: impl IntoIterator<Item = (Lit, PosCoeff)>,
 		cmp: LimitComp,

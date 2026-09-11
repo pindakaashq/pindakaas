@@ -1,28 +1,22 @@
-//! Encoding a linear constraint over partial sums held as digits in a mixed
-//! radix base.
+//! Encoding partial sums as digits in a mixed radix base.
 //!
-//! What this encoding is, is the representation. Every other encoder here
-//! holds an intermediate sum as one order-encoded integer, which costs `O(d)`
-//! literals and `O(d²)` clauses over `d` values; a sequence of order-encoded
-//! digits in a base β costs `O(β·log d)` and `O(β²·log d)` instead, and two of
-//! them are added by rippling a carry along the digits rather than in one
-//! step. How the sums are then combined is a separate question, and the
-//! balanced tree below is one answer among several.
+//! Order-encoded digits cost `O(β·log d)` literals and `O(β²·log d)` clauses
+//! for `d` values, joined by ripple carries in a balanced tree. This is the
+//! modulo totalizer [^1], extended to n levels [^2] and mutually exclusive
+//! terms (GMTO) [^3]. It is not consistency-checking ([^3], Theorem 3).
 //!
-//! Published as the modulo totalizer of Ogawa et al. [^1] and, at n levels,
-//! Zha et al. [^2] — hence MTO, and GMTO where a term stands for a group of
-//! mutually exclusive literals [^3]. Those names fix the tree as well as the
-//! digits; only the digits are what makes the encoding different. Not even
-//! consistency-checking: the digits of a sum say less about its value than a
-//! single order encoding would ([^3], Theorem 3).
+//! A node represents `∑ⱼ digitⱼ·(β₀·…·βⱼ₋₁)`, with `digitⱼ < βⱼ`.
+//! The base heuristic considers positive weighted term values. Unlike Zha et
+//! al., it requires a divisor to cover half the remaining values; otherwise
+//! further digits use `max(2, ⌊√n⌋)` for `n` terms. Ties prefer smaller divisors
+//! because a digit costs `O(β²)` clauses.
 //!
 //! [^1]: T. Ogawa, Y. Liu, R. Hasegawa, M. Koshimura, H. Fujita, "Modulo Based
 //! CNF Encoding of Cardinality Constraints and Its Application to MaxSAT
 //! Solvers", ICTAI 2013, 9–17.
 //!
 //! [^2]: A. Zha, M. Koshimura, H. Fujita, "N-level modulo-based CNF encodings
-//! of pseudo-Boolean constraints for MaxSAT", Constraints 24(2) (2019)
-//! 133–161.
+//! of pseudo-Boolean constraints for MaxSAT", Constraints 24(2) (2019) 133–161.
 //!
 //! [^3]: M. Bofill, J. Coll, P. Nightingale, J. Suy, F. Ulrich-Oltean, M.
 //! Villaret, "SAT encodings for pseudo-Boolean constraints together with
@@ -47,23 +41,9 @@ use crate::{
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
 
-/// Encoder for a linear constraint, holding each partial sum as digits in a
-/// mixed radix base; also known as the (generalized) n-level modulo totalizer,
-/// MTO or GMTO.
+/// A tree of partial sums in mixed radix (MTO or GMTO).
 ///
-/// Like the [`TotalizerEncoder`](super::totalizer::TotalizerEncoder) the
-/// constraint becomes a binary tree of additions, but the value of a node is
-/// not one order-encoded integer: it is a sequence of order-encoded digits in a
-/// mixed radix base β, so the node stands for `∑ⱼ digitⱼ·(β₀·…·βⱼ₋₁)`. Adding
-/// two nodes is then a ripple-carry addition over their digits. A node over `d`
-/// values costs `O(β·log d)` literals and `O(β²·log d)` clauses where the
-/// totalizer costs `O(d)` and `O(d²)`.
-///
-/// The tree is what the published encoding pairs the digits with; nothing in
-/// the representation asks for it.
-///
-/// The base suits the coefficients of the constraint; see
-/// [`MixedRadixEncoder::with_base`].
+/// The default base is chosen from the coefficients; see [`Self::with_base`].
 ///
 /// # Examples
 ///
@@ -219,40 +199,12 @@ impl MixedRadixEncoder {
 		})
 	}
 
-	/// Build a mixed radix base from the coefficients of the constraint,
-	/// given how many terms it has.
-	///
-	/// Starts from the heuristic of Zha et al. [^1] as the generalized
-	/// n-level modulo totalizer of Bofill et al. [^2] uses it: values are
-	/// added to the base until it spans every value up to `k`, each the one
-	/// dividing the most coefficients, and the coefficients are divided by it
-	/// afterwards so the next value suits the next digit.
-	///
-	/// Measured against CaDiCaL conflicts and wall time rather than clause
-	/// counts alone, that rule loses to plain `⌊√n⌋` on constraints whose
-	/// coefficients share no real structure — a shared divisor there is
-	/// coincidence, not structure, and trusting it costs more digits than it
-	/// saves. So a divisor is only trusted where it covers at least half the
-	/// (remaining) coefficients; short of that every further digit falls back
-	/// to `⌊√n⌋` straight away. A tie takes the smallest divisor rather than
-	/// the largest, for the same reason: a digit costs `O(β²)` clauses here,
-	/// so a larger radix only pays where it divides strictly more.
-	///
-	/// [^1]: A. Zha, M. Koshimura, H. Fujita, "N-level modulo-based CNF
-	/// encodings of pseudo-Boolean constraints for MaxSAT", Constraints 24(2)
-	/// (2019) 133–161.
-	///
-	/// [^2]: M. Bofill, J. Coll, P. Nightingale, J. Suy, F. Ulrich-Oltean, M.
-	/// Villaret, "SAT encodings for pseudo-Boolean constraints together with
-	/// at-most-one constraints", Artificial Intelligence 302 (2022) 103604.
+	/// A coefficient-based radix heuristic; see the module documentation.
 	fn greedy_base(coefs: impl IntoIterator<Item = Coeff>, n: usize, k: Coeff) -> Vec<Coeff> {
-		// Heuristic: divisors are tried up to a bound rather than the
-		// coefficients being factorised, which no constraint seen so far pays
-		// for.
+		// Heuristic: bounding trial divisors avoids full factorisation.
 		const MAX_DIVISOR: Coeff = 1 << 10;
-		// Heuristic: a divisor below this share of the coefficients is
-		// coincidence rather than structure; fall back instead of trusting
-		// it. Best on every case measured, close behind at every other.
+		// Heuristic: require a shared divisor to cover half the coefficients
+		// before treating it as structure.
 		const DIVISOR_SHARE_PCT: usize = 50;
 
 		let fallback = ((n as f64).sqrt() as Coeff).max(2);
@@ -380,32 +332,32 @@ impl MixedRadixEncoder {
 		Ok((digit, carry))
 	}
 
-	/// Set the mixed radix base the value of a node is held in.
+	/// The mixed radix base, chosen automatically when `None` (the default).
 	///
-	/// A node stands for `∑ⱼ digitⱼ·(β₀·…·βⱼ₋₁)`, where `digitⱼ < βⱼ`. The last
-	/// value given stands for every further digit, so `vec![2]` holds the nodes
-	/// in binary and any base past `k` gives each of them a single digit, as
-	/// the [`TotalizerEncoder`](super::totalizer::TotalizerEncoder) does.
-	/// Neither extreme reproduces that encoder or the
-	/// [`AdderEncoder`](super::adder::AdderEncoder): only the way a node is
-	/// held coincides, not the way two of them are added.
-	///
-	/// `None`, the default, chooses the base from the coefficients of the
-	/// constraint.
+	/// A supplied base must be nonempty with every radix at least two; invalid
+	/// bases can fail during encoding. The last radix repeats. `vec![2]` gives
+	/// binary digits; a radix above the bound gives one order-encoded digit.
+	/// Neither reproduces the adder or totalizer algorithm. Automatic selection
+	/// considers positive weighted domain values, not just coefficient fields.
 	pub fn with_base(&mut self, base: Option<Vec<Coeff>>) -> &mut Self {
 		self.base = base;
 		self
 	}
 
-	/// Set whether to add consistency constraints on the intermediate integer
-	/// variables.
+	/// Independent domain constraints for newly created intermediate views.
+	///
+	/// Disabled by default. Enables standalone binary and direct consistency
+	/// clauses; order-encoding implication chains remain mandatory.
 	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
 
-	/// Set the largest domain size for which the intermediate integer variables
-	/// are encoded using order encoding.
+	/// The domain size at which an unencoded variable prefers binary.
+	///
+	/// `None` (the default) prefers order; existing binary or order views take
+	/// precedence. The threshold is inclusive. Binary arithmetic can weaken
+	/// unit propagation; see the [encoding overview](crate::encoder).
 	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
@@ -428,8 +380,6 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for MixedRadixEncoder
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for MixedRadixEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		// Counting into a variable is a linear constraint whose bound is not a
-		// constant, which this encoder takes once the bound is a term.
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}
@@ -446,7 +396,6 @@ where
 	Db: ClauseDatabase + ?Sized,
 {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
-		// The tree is built over integers, so the literals become them first.
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}
@@ -464,9 +413,6 @@ where
 		let k = con.k();
 		let base = match &self.base {
 			Some(base) => base.clone(),
-			// What a term is worth is the values it can take, not the
-			// coefficient in front of it: aggregation leaves that at one and
-			// puts the weight in the variable's domain.
 			None => Self::greedy_base(
 				con.terms()
 					.iter()
@@ -487,13 +433,10 @@ where
 			.sorted_by_key(term_max)
 			.collect_vec();
 
-		// Every node is its digits, together with what it may come to. Every
-		// coefficient is positive, so a partial sum past `k` already breaks the
-		// constraint.
+		// Positive coefficients make any partial sum past `k` infeasible.
 		let mut layer = Vec::with_capacity(xs.len());
 		for x in &xs {
 			let ub = min(term_max(x), k);
-			// The coefficient scales the leaf, which the digits below count in.
 			let leaf = self.scaled(db, x, ub)?;
 			let digits = self.digits(db, &leaf, &base)?;
 			self.lex_leq(db, &digits, &base, k)?;
@@ -593,16 +536,9 @@ mod tests {
 	#[test]
 	fn greedy_base_divides_the_coefficients() {
 		let base = |coefs: &[Coeff], k| MixedRadixEncoder::greedy_base(coefs.to_vec(), coefs.len(), k);
-		// Three divides every coefficient, meeting the 50% share, so the
-		// first digit is zero for all of them. Two clears the share once
-		// more; past that nothing does, and every remaining digit is the
-		// `⌊√4⌋` fallback.
 		assert_eq!(base(&[3, 6, 9, 12], 30), vec![3, 2, 2, 2, 2]);
 		// Without a divisor to exploit every digit is the fallback.
 		assert_eq!(base(&[1, 1, 1], 7), vec![2, 2, 2]);
-		// Dividing one of two coefficients is only a 50% share, which still
-		// clears the bar, and a tie takes the smallest, so five is preferred
-		// over seven.
 		assert_eq!(base(&[5, 7], 12), vec![5, 2, 2]);
 		// Six ties with its own divisors, so it comes apart into them.
 		assert_eq!(base(&[6, 6], 5), vec![2, 3]);

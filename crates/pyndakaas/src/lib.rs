@@ -1,5 +1,8 @@
-//! This crate implements the the internal `pindakaas.pindakaas` Python module,
-//! which provides bindings for the `pindakaas` Rust crate.
+//! Internal `pindakaas.pindakaas` Python bindings.
+//!
+//! The Python package wraps these types with modelling and solver interfaces.
+//! Solver results borrow backend state; their context managers keep the solver
+//! checked out until the borrowed result has been dropped.
 #![expect(
 	clippy::upper_case_acronyms,
 	reason = "Python naming for exposed types"
@@ -13,10 +16,8 @@ use pyo3::{create_exception, exceptions::PyException, prelude::*};
 struct ErrWrapper(PyErr);
 
 // The wrapper lets `?` convert Rust errors into Python exceptions.
-// exceptions
 type Result<R = (), E = ErrWrapper> = std::result::Result<R, E>;
 
-// Allow `pindakaas::Unsatisfiable` to become a wrapped Unsatisfiable exception
 impl From<::pindakaas::Unsatisfiable> for ErrWrapper {
 	fn from(_: ::pindakaas::Unsatisfiable) -> Self {
 		Self(Unsatisfiable::new_err(
@@ -25,21 +26,18 @@ impl From<::pindakaas::Unsatisfiable> for ErrWrapper {
 	}
 }
 
-// Allow `pindakaas::Unsatisfiable` to become a wrapped Unsatisfiable exception
 impl<T> From<PoisonError<T>> for ErrWrapper {
 	fn from(e: PoisonError<T>) -> Self {
 		Self(PyException::new_err(e.to_string()))
 	}
 }
 
-// Allow other `PyErr`s to become a wrapped exception
 impl From<PyErr> for ErrWrapper {
 	fn from(err: PyErr) -> Self {
 		ErrWrapper(err)
 	}
 }
 
-// Allow ErrWrapper to become PyErr
 impl From<ErrWrapper> for PyErr {
 	fn from(err: ErrWrapper) -> Self {
 		err.0
@@ -135,46 +133,32 @@ mod pindakaas {
 	#[expect(non_camel_case_types, reason = "match python naming convention")]
 	#[pyclass(eq, eq_int, from_py_object)]
 	#[derive(Clone, Copy, Debug, PartialEq)]
-	/// Method used to encode a constraint.
+	/// Encoding algorithm.
 	///
-	/// Warning: Not all encoders can be used to encode each type of constraint.
-	/// If an invalid encoder is selected, then an :class:`InvalidEncoder`
-	/// exception will be raised.
+	/// Selecting an incompatible constraint type raises :class:`InvalidEncoder`.
 	enum Encoder {
 		// TODO These doc-strings do not show up, upstream issue: https://github.com/PyO3/pyo3/issues/5197
-		/// A binary adder circuit. Encodes any Boolean linear constraint.
+		/// A binary adder circuit for Boolean linear constraints.
 		ADDER,
-		/// A bitwise (binary) at-most-one encoding, which numbers the literals
-		/// and rules out each bit pattern but one.
+		/// Binary-index at-most-one encoding.
 		BITWISE,
-		/// The layers of a decision diagram, one per term, sharing the layers
-		/// that cannot be told apart. Encodes any Boolean linear constraint.
+		/// A decision diagram for Boolean linear constraints.
 		DECISION_DIAGRAM,
-		/// A ladder of commander literals. Encodes at-most-one constraints.
+		/// Ladder at-most-one encoding.
 		LADDER,
-		/// Partial sums held as digits in a mixed radix base chosen to divide
-		/// the coefficients, rather than as one counter each. Encodes any
-		/// Boolean linear constraint, and beats the totalizer where the
-		/// coefficients share divisors and the bound is large.
+		/// Mixed-radix partial sums for Boolean linear constraints.
 		MIXED_RADIX,
-		/// One clause per pair of literals. Encodes at-most-one constraints,
-		/// and is the cheapest for a handful of them.
+		/// Pairwise at-most-one clauses, without auxiliary variables.
 		PAIRWISE,
-		/// A chain of running totals, one per term. Encodes any Boolean linear
-		/// constraint.
+		/// Running totals for Boolean linear constraints.
 		SEQUENTIAL_COUNTER,
-		/// A network of comparators. Encodes cardinality and at-most-one
-		/// constraints.
+		/// A comparator network for cardinality and at-most-one constraints.
 		SORTING_NETWORK,
-		/// A balanced tree of partial sums. Encodes any Boolean linear
-		/// constraint.
+		/// A balanced tree of partial sums for Boolean linear constraints.
 		TOTALIZER,
-		/// The Tseitin transformation. Encodes propositional logic formulas.
+		/// The Tseitin transformation for propositional formulas.
 		TSEITIN,
-		/// A watchdog over the binary digits of the coefficients. Encodes any
-		/// Boolean linear constraint, and is the only encoding here whose size
-		/// does not grow with the size of the coefficients — at the cost of
-		/// weaker propagation than the rest.
+		/// A polynomial watchdog for Boolean linear constraints.
 		WATCHDOG,
 	}
 
@@ -267,9 +251,8 @@ mod pindakaas {
 				Err(e) => {
 					panic!("unexpected error in add_clause implementation: {}", e)
 				}
-				// We would have expected the user implementation to raise `Unsatisfiable`, but
-				// is did not. Since encodings depend on this behaviour, we return the error
-				// instead.
+				// Encoders rely on an empty clause reporting `Unsatisfiable`,
+				// even when the Python database fails to raise it.
 				Ok(_) if clause.is_empty() => Err(pindakaas::Unsatisfiable),
 				Ok(_) => Ok(()),
 			}
@@ -534,9 +517,6 @@ mod pindakaas {
 		}
 
 		fn clauses(&self) -> Vec<Vec<Lit>> {
-			// TODO: It would be great if this could be converted to be lazy,
-			// but it seems a little tricky. This should probably be okay for
-			// now.
 			self.0
 				.iter()
 				.map(|c| c.iter().map(|&lit| Lit(lit)).collect())
@@ -961,15 +941,10 @@ mod pindakaas {
 			self.0.min()
 		}
 
-		/// Constrain the encodings the variable has to say a value of its
-		/// domain.
+		/// Consistency clauses restricting the variable to its domain.
 		///
-		/// The literals given to any of the `int_var_from_*` methods are taken
-		/// at their word, since they nearly always come from a structure that
-		/// has constrained them already. This is how to ask for the clauses
-		/// where that does not hold — where some of the literals were freshly
-		/// made, say, or where the values given are narrower than the literals
-		/// can reach.
+		/// Use after `int_var_from_*` when the supplied literals do not already
+		/// enforce the domain.
 		///
 		/// Args:
 		///     db: Database receiving the consistency clauses.
@@ -981,7 +956,11 @@ mod pindakaas {
 			Ok(())
 		}
 
-		/// Returns the value the variable takes in a solution.
+		/// The integer value represented in a solution.
+		///
+		/// Without a Boolean view, the domain minimum is returned. Otherwise the
+		/// supplied model must belong to this variable's database; unassigned
+		/// literal values (`None`) are read as false.
 		///
 		/// Args:
 		///     solution: Object whose `value(Lit)` method supplies model values.
@@ -1216,9 +1195,6 @@ mod pindakaas {
 		}
 
 		fn clauses(&self) -> Vec<Vec<Lit>> {
-			// TODO: It would be great if this could be converted to be lazy,
-			// but it seems a little tricky. This should probably be okay for
-			// now.
 			self.0
 				.iter()
 				.filter(|(_, w)| w.is_none())
@@ -1245,9 +1221,6 @@ mod pindakaas {
 		}
 
 		fn weighted_clauses(&self) -> Vec<(Option<i64>, Vec<Lit>)> {
-			// TODO: It would be great if this could be converted to be lazy,
-			// but it seems a little tricky. This should probably be okay for
-			// now.
 			self.0
 				.iter()
 				.map(|(c, &w)| (w, (c.iter().map(|&lit| Lit(lit)).collect())))
@@ -1340,24 +1313,11 @@ mod pindakaas {
 			solver: Option<S>,
 		}
 
-		/// A solve call that has "checked out" the solver from its owner.
+		/// A solve call holding exclusive ownership of its solver.
 		///
-		/// # Safety invariant
-		///
-		/// `result` borrows from `solver`: the boxed values in
-		/// [`SolverResultState`] are produced by `S::solve`, so they are only
-		/// valid while `solver` is alive and unmutated. Their lifetimes are
-		/// laundered to `'static` (see `from_solver` /
-		/// `from_assumptions_solver`), which means the compiler no longer
-		/// enforces that relation — this code must.
-		///
-		/// Two rules keep that sound, and any change here must preserve both:
-		/// 1. `solver` is owned by this struct for as long as `result` exists.
-		///    It is taken out of the owner on entry and only handed back in
-		///    `exit`.
-		/// 2. `result` is cleared *before* `solver` is moved back to the owner
-		///    (`exit` sets `self.result = None` first). Reordering those two
-		///    statements reintroduces a use-after-free.
+		/// The boxed result borrows the solver despite its erased `'static` lifetime.
+		/// Keep the solver alive and unmutated until the result is cleared; `exit`
+		/// must drop the result before returning the solver to its owner.
 		struct SolverResultImpl<Owner, S> {
 			owner: Py<Owner>,
 			/// The laundered borrow of `solver`; see the type-level invariant.
@@ -1571,9 +1531,8 @@ mod pindakaas {
 				py: Python<'_>,
 				slot: fn(&mut Owner) -> &mut SolverImpl<S>,
 			) -> PyResult<bool> {
-				// Must come first: `result` borrows from `solver`, so it has to
-				// be dropped before the solver is handed back. See the
-				// safety invariant on `SolverResultImpl`.
+				// Drop the borrowed result before restoring access to its
+				// solver.
 				self.result = None;
 				if let Some(solver) = self.solver.take() {
 					let mut owner = self.owner.bind(py).borrow_mut();
@@ -1592,9 +1551,8 @@ mod pindakaas {
 				let result = match solver.solve() {
 					SolveResult::Satisfied(sol) => {
 						let sol: Box<dyn Valuation + '_> = Box::new(sol);
-						// SAFETY: The returned valuation is tied to the
-						// checked-out solver and is dropped before solver
-						// access is restored.
+						// SAFETY: The result owns the solver and drops the
+						// valuation before restoring solver access.
 						let sol: Box<dyn Valuation + 'static> = unsafe { transmute(sol) };
 						SolverResultState::Satisfied(sol)
 					}
@@ -1616,11 +1574,8 @@ mod pindakaas {
 				let result = match solver.solve_assuming(assumptions.iter().map(|lit| lit.0)) {
 					SolveResult::Satisfied(sol) => {
 						let sol: Box<dyn Valuation + '_> = Box::new(sol);
-						// SAFETY: The returned valuation is only valid while
-						// the solver state remains alive and unchanged.
-						// The corresponding result object owns the
-						// checked-out solver and drops this boxed value
-						// before restoring solver access.
+						// SAFETY: The solver stays alive and unchanged until
+						// the valuation is dropped.
 						let sol: Box<dyn Valuation + 'static> = unsafe { transmute(sol) };
 						SolverResultState::Satisfied(sol)
 					}

@@ -31,20 +31,14 @@ use crate::{
 type StrategyCache = FxHashMap<(u128, u128, u128), (SortingNetworkStrategy, (u128, u128))>;
 
 #[derive(Debug)]
-/// Encoder for a [`Count`], [`Cardinality`] or [`CardinalityOne`] constraint,
-/// as a network of comparators.
-///
-/// A cardinality constraint is a count into a variable of one value, so the
-/// same network states both. Sizing each sub-sorter by the bound rather than by
-/// its input is what makes this a cardinality network rather than a full
-/// sorting network.
+/// A cardinality network sized by the bound rather than the input.
 ///
 /// # Warning
-/// The encoder structure contains a cache for computing node costs that is
-/// used when using a mixed strategy. This cache is not considered when
-/// comparing two encoders for equality, when hashing, or when cloning. This
-/// could, for example, mean that a cloned encoder might lead to a degradation
-/// in performance.
+/// The encoder structure contains a cache for computing node costs that is used
+/// when using a mixed strategy. This cache is not considered when comparing two
+/// encoders for equality, when hashing, or when cloning. This could, for
+/// example, mean that a cloned encoder might lead to a degradation in
+/// performance.
 ///
 /// # Examples
 ///
@@ -196,9 +190,6 @@ impl SortingNetworkEncoder {
 				} else if a == 1 && b == 1 && c <= 2 {
 					self.smerge(db, x, y, cmp, z)
 				} else {
-					// Split each side into the halves that round down and up,
-					// merge those separately, and let the comparators put the
-					// two results back together.
 					let (x_floor, y_floor) = (halved(db, x)?, halved(db, y)?);
 					let (x_up, y_up) = (shifted(db, x, 1)?, shifted(db, y, 1)?);
 					let (x_ceil, y_ceil) = (halved(db, &x_up)?, halved(db, &y_up)?);
@@ -379,7 +370,6 @@ impl Default for SortingNetworkEncoder {
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SortingNetworkEncoder {
 	fn encode(&self, db: &mut Db, count: &Count) -> Result {
-		// Each literal is an integer worth one when it holds.
 		let xs = count
 			.lits
 			.iter()
@@ -403,7 +393,6 @@ where
 		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))
 	)]
 	fn encode(&self, db: &mut Db, card: &Cardinality) -> Result {
-		// A bound that is a constant is a count into a variable of one value.
 		let k: Coeff = card.rhs();
 		let y = IntVar::new(k..=k).with_label("k");
 		self.encode(db, &Count::new(card.lits.clone(), card.cmp.clone(), y))

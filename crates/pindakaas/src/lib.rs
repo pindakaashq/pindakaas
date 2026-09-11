@@ -6,30 +6,27 @@
 //! an at-most-one group, a cardinality constraint, and a weighted sum do not
 //! all pay for the same general-purpose encoding.
 //!
-//! Encoders write to [`ClauseDatabase`]. [`Cnf`] stores their clauses for
-//! inspection or DIMACS output; enabled SAT solvers implement the same trait
-//! and accept the clauses directly.
+//! Encoders write to [`ClauseDatabase`]. [`Cnf`] stores clauses for inspection
+//! or DIMACS output; enabled SAT solvers accept them directly. The
+//! [`ClauseDatabaseTools`] extension allocates variables, folds constant
+//! Boolean values out of clauses, and dispatches encoders.
 //!
 //! # Clauses and solving
 //!
-//! [`ClauseDatabaseTools`] allocates variables, adds clauses containing
-//! literals or constant Boolean values, and dispatches encoders.
+//! A formula can be built directly as clauses, then passed to a solver:
 //!
 //! ```rust
-//! use pindakaas::{
-//!     solver::{cadical::Cadical, SolveResult, Solver},
-//!     ClauseDatabaseTools, Cnf, Valuation,
-//! };
+//! use pindakaas::{solver::{cadical::Cadical, SolveResult, Solver},
+//!     ClauseDatabaseTools, Cnf, Valuation};
 //!
 //! let mut cnf = Cnf::default();
 //! let (x, y, z) = cnf.new_lits();
 //! cnf.add_clause([!x, y])?;
 //! cnf.add_clause([!y, z])?;
 //! cnf.add_clause([!z, x])?;
-//!
 //! let mut solver = Cadical::from(&cnf);
 //! let SolveResult::Satisfied(model) = solver.solve() else {
-//!     unreachable!("the three implications have a model");
+//!     unreachable!("the implications have a model");
 //! };
 //! assert_eq!(model.value(x), model.value(y));
 //! assert_eq!(model.value(y), model.value(z));
@@ -37,155 +34,112 @@
 //! ```
 //!
 //! Solver backends are feature-gated. CaDiCaL is enabled by default; Kissat,
-//! Intel SAT, SPLR integration, and runtime-loaded IPASIR libraries are
-//! available through their corresponding features.
+//! Intel SAT, SPLR, and runtime-loaded IPASIR libraries are available through
+//! their corresponding features.
 //!
 //! # Propositional formulas
 //!
 //! [`Formula`](constraint::propositional_logic::Formula) supports conjunction,
 //! disjunction, exclusive-or, implication, equivalence, negation, and
-//! if-then-else. [`TseitinEncoder`](encoder::tseitin::TseitinEncoder) names
-//! compound sub-formulas instead of distributing them into exponentially many
-//! clauses.
+//! if-then-else. [`TseitinEncoder`](encoder::tseitin::TseitinEncoder) gives
+//! compound sub-formulas representative literals instead of distributing them
+//! into exponentially many clauses.
 //!
 //! ```rust
-//! use pindakaas::{
-//!     constraint::propositional_logic::{Formula, TseitinEncoder},
-//!     ClauseDatabaseTools, Cnf,
-//! };
-//!
+//! use pindakaas::{constraint::propositional_logic::{Formula, TseitinEncoder},
+//!     ClauseDatabaseTools, Cnf};
 //! let mut cnf = Cnf::default();
 //! let (x, y, z) = cnf.new_lits();
-//! let p = (x ^ y) | z;
-//! cnf.encode(&p, &TseitinEncoder)?;
-//!
-//! // Named variants cover the forms without operator syntax.
-//! let choose = Formula::IfThenElse {
-//!     cond: Box::new(Formula::Atom(x)),
-//!     then: Box::new(Formula::Atom(y)),
-//!     els: Box::new(Formula::Atom(z)),
-//! };
+//! cnf.encode(&((x ^ y) | z), &TseitinEncoder)?;
+//! let choose = Formula::IfThenElse { cond: Box::new(Formula::Atom(x)),
+//!     then: Box::new(Formula::Atom(y)), els: Box::new(Formula::Atom(z)) };
 //! cnf.encode(&choose, &TseitinEncoder)?;
 //! # Ok::<(), pindakaas::Unsatisfiable>(())
 //! ```
 //!
-//! # Linear constraints
-//!
-//! [`Linear`](constraint::linear::Linear) compares a sum of weighted literals
-//! and integer variables with a constant. The usual arithmetic operators build
-//! the expression. [`LinearEncoder`](encoder::aggregate::LinearEncoder) first
-//! aggregates repeated variables and constants, recognises narrower constraint
-//! classes, and dispatches the configured encoder for the resulting shape.
+//! [`Linear`](constraint::linear::Linear) expressions are normalised and
+//! specialised by [`LinearEncoder`](encoder::aggregate::LinearEncoder) before
+//! encoding. The usual arithmetic operators build weighted sums. At-most-one
+//! groups must be supplied by the caller; aggregation does not discover them.
 //!
 //! ```rust
-//! use pindakaas::{
-//!     constraint::{cardinality_one::BitwiseEncoder,
-//!         linear::{AdderEncoder, Comparator, Linear, LinearEncoder,
-//!             StaticLinEncoder}},
+//! use pindakaas::{constraint::{cardinality_one::BitwiseEncoder,
+//!     linear::{AdderEncoder, Comparator, Linear, LinearEncoder, StaticLinEncoder}},
 //!     encoder::sorting_network::SortingNetworkEncoder,
-//!     ClauseDatabaseTools, Cnf,
-//! };
-//!
+//!     ClauseDatabaseTools, Cnf};
 //! let mut cnf = Cnf::default();
 //! let (x, y, z) = cnf.new_lits();
-//! let capacity = Linear::new(2 * x + 3 * y + 2 * z, Comparator::LessEq, 4);
+//! let budget = Linear::new(2 * x + 3 * y + 2 * z, Comparator::LessEq, 4);
 //! let encoder = LinearEncoder::<StaticLinEncoder<AdderEncoder, AdderEncoder,
 //!     AdderEncoder, BitwiseEncoder, SortingNetworkEncoder>>::default();
-//! cnf.encode(&capacity, &encoder)?;
+//! cnf.encode(&budget, &encoder)?;
 //! # Ok::<(), pindakaas::Unsatisfiable>(())
 //! ```
 //!
-//! Which encoder to reach for, and what each of them is called in the
-//! literature, is under [Encodings](#encodings) below.
-//!
-//! # Integer variables
-//!
-//! [`IntVar`](decision::integer::IntVar) can represent contiguous or sparse
-//! domains. It creates order, direct, or binary views when a constraint first
-//! asks for them, then channels later views to the same value. A model can
-//! therefore mix algorithms without declaring one representation up front.
+//! [`IntVar`](decision::integer::IntVar) creates order, direct, and binary
+//! views on demand and channels them to the same value. Mixing views costs
+//! clauses proportional to the domain size.
 //!
 //! ```rust
-//! use pindakaas::{
-//!     constraint::{cardinality_one::BitwiseEncoder,
-//!         linear::{AdderEncoder, Comparator, Linear, LinearEncoder,
-//!             StaticLinEncoder}},
-//!     decision::integer::IntVar, ClauseDatabaseTools, Cnf,
-//!     encoder::sorting_network::SortingNetworkEncoder,
-//! };
-//!
+//! use pindakaas::{constraint::linear::{Comparator, Linear},
+//!     decision::integer::IntVar, ClauseDatabaseTools, Cnf};
 //! let mut cnf = Cnf::default();
 //! let x = IntVar::new(0..=8).with_label("x");
 //! let y = IntVar::new(0..=7).with_label("y");
 //! let budget = Linear::new(x.clone() * 3 + y.clone() * 2, Comparator::LessEq, 20);
-//! let encoder = LinearEncoder::<StaticLinEncoder<AdderEncoder, AdderEncoder,
-//!     AdderEncoder, BitwiseEncoder, SortingNetworkEncoder>>::default();
-//! cnf.encode(&budget, &encoder)?;
-//!
-//! // Querying a bound creates or reuses the order view of `x`.
+//! cnf.encode(
+//!     &budget,
+//!     &pindakaas::encoder::aggregate::LinearEncoder::<
+//!         pindakaas::encoder::aggregate::StaticLinEncoder,
+//!     >::default(),
+//! )?;
 //! let x_at_least_four = x.lit_at_least(&mut cnf, 4)?;
 //! cnf.add_clause([x_at_least_four])?;
 //! # Ok::<(), pindakaas::Unsatisfiable>(())
 //! ```
 //!
-//! # Encodings
+//! # Choosing an encoder
 //!
-//! A constraint is aggregated into a sum of terms — each an integer variable
-//! scaled by a coefficient — before any encoder sees it. A term may stand for
-//! one literal, for a group of literals only one of which may hold, or for an
-//! integer variable in its own right, so a single type here covers several
-//! named encodings at once. The table says which, and under what condition.
+//! Aggregation turns a constraint into a specialised form before encoding.
+//! `int` means [`NormalizedIntLinear`](constraint::int_linear::NormalizedIntLinear),
+//! `bool` means [`NormalizedBoolLinear`](constraint::bool_linear::NormalizedBoolLinear),
+//! `card` means [`Cardinality`](constraint::cardinality::Cardinality), `amo`
+//! means [`CardinalityOne`](constraint::cardinality_one::CardinalityOne), and
+//! `count` means [`Count`](constraint::count::Count). A supplied at-most-one
+//! group is represented by an integer term, which is how the generalised
+//! encodings below become available.
 //!
-//! *Takes* names the constraints an [`Encoder`] impl exists for: `int` for
-//! [`NormalizedIntLinear`](constraint::int_linear::NormalizedIntLinear),
-//! `bool` for
-//! [`NormalizedBoolLinear`](constraint::bool_linear::NormalizedBoolLinear),
-//! `card` for [`Cardinality`](constraint::cardinality::Cardinality), `amo` for
-//! [`CardinalityOne`](constraint::cardinality_one::CardinalityOne), and
-//! `count` for [`Count`](constraint::count::Count).
+//! The table uses **GAC** for domain consistency (unit propagation removes
+//! every value that cannot occur in a solution) and **CC** for consistency
+//! checking (unit propagation detects assignments that cannot be extended).
+//! These are the default strengths; a cutoff may trade propagation for a
+//! smaller encoding.
 //!
-//! *Propagation* is **GAC** — domain consistent, so unit propagation rules out
-//! every value no solution can use — or **CC** — consistency-checking, so unit
-//! propagation falsifies a clause exactly when the assignment cannot be
-//! extended — or neither. It is the published strength of the encoding at the
-//! default configuration: `with_cutoff(Some(..))` holds the intermediates in
-//! binary and adds them with a ripple-carry adder, which does not maintain it.
-//!
-//! | Encoder | Takes | Encodings from the literature | Propagation |
+//! | Encoder | Takes | Also known as; references | Default strength |
 //! |---|---|---|---|
-//! | [`AdderEncoder`](encoder::adder::AdderEncoder) | int, bool, card, amo, count | Adder networks[^warners][^een] | neither |
-//! | [`DecisionDiagramEncoder`](encoder::decision_diagram::DecisionDiagramEncoder) | int, bool, card, amo, count | The MDD encoding over integer terms or at-most-one groups[^abio2012]; the BDD encoding where every term is one literal[^abio2011], with the long edges of the reduced ordered diagram | GAC |
-//! | [`TotalizerEncoder`](encoder::totalizer::TotalizerEncoder) | int, bool, card, amo, count | Totalizer, unit coefficients[^bailleux2003]; generalized totalizer, GTE, weighted[^joshi]; GGT over at-most-one groups[^bofill]. **Not** RGT or RGGT: values a parent cannot tell apart are not merged, and the tree is balanced rather than minRatio | GAC |
-//! | [`SequentialCounterEncoder`](encoder::sequential_counter::SequentialCounterEncoder) | int, bool, card, amo, count | Sequential counter, unit coefficients[^sinz]; sequential weight counter, SWC, weighted[^holldobler]; GSWC over at-most-one groups[^bofill] | GAC |
-//! | [`MixedRadixEncoder`](encoder::mixed_radix::MixedRadixEncoder) | int, bool, card, amo, count | n-level modulo totalizer, MTO[^ogawa][^zha]; GMTO over at-most-one groups[^bofill]. [`with_base`](encoder::mixed_radix::MixedRadixEncoder::with_base) documents two deliberate departures from Zha et al.'s base heuristic | neither[^bofill] |
-//! | [`WatchdogEncoder`](encoder::watchdog::WatchdogEncoder) | int, bool, card, amo, count | Global polynomial watchdog, GPW, the default; local, LPW, under [`with_local`](encoder::watchdog::WatchdogEncoder::with_local)[^bailleux2009]; GGPW and GLPW over at-most-one groups[^bofill] | CC globally, GAC locally |
-//! | [`SortingNetworkEncoder`](encoder::sorting_network::SortingNetworkEncoder) | card, amo, count | Cardinality networks — each sub-sorter is built only as wide as the bound above it can use[^asin] — over odd-even merges[^batcher] | GAC |
-//! | [`PairwiseEncoder`](encoder::pairwise::PairwiseEncoder) | amo | Pairwise (binomial) at-most-one, no auxiliary variables | GAC, since every pair is a binary clause |
-//! | [`BitwiseEncoder`](encoder::bitwise::BitwiseEncoder) | amo | Bitwise (binary) at-most-one[^frisch] | not classified |
-//! | [`LadderEncoder`](encoder::ladder::LadderEncoder) | amo | Ladder (regular) at-most-one[^gent][^ansotegui] | not classified |
-//! | [`ProductEncoder`](encoder::product::ProductEncoder) | amo | Product at-most-one, roughly `2·√n` auxiliary variables[^chen] | not classified |
-//! | [`TseitinEncoder`](encoder::tseitin::TseitinEncoder) | formulas | Tseitin transformation[^tseitin] | — |
+//! | [`AdderEncoder`](encoder::adder::AdderEncoder) | int, bool, card, amo, count | Adder network [^warners][^een] | neither GAC nor CC |
+//! | [`DecisionDiagramEncoder`](encoder::decision_diagram::DecisionDiagramEncoder) | int, bool, card, amo, count | MDD/BDD [^abio2012][^abio2011] | GAC |
+//! | [`TotalizerEncoder`](encoder::totalizer::TotalizerEncoder) | int, bool, card, amo, count | Totalizer, GTE, GGT [^bailleux2003][^joshi][^bofill] | GAC |
+//! | [`SequentialCounterEncoder`](encoder::sequential_counter::SequentialCounterEncoder) | int, bool, card, amo, count | Sequential counter, SWC, GSWC [^sinz][^holldobler][^bofill] | GAC |
+//! | [`MixedRadixEncoder`](encoder::mixed_radix::MixedRadixEncoder) | int, bool, card, amo, count | MTO, GMTO [^ogawa][^zha][^bofill] | neither GAC nor CC |
+//! | [`WatchdogEncoder`](encoder::watchdog::WatchdogEncoder) | int, bool, card, amo, count | GPW/GGPW (global), LPW/GLPW (local) [^bailleux2009][^bofill] | CC / GAC |
+//! | [`SortingNetworkEncoder`](encoder::sorting_network::SortingNetworkEncoder) | card, amo, count | Cardinality network [^asin][^batcher] | GAC |
+//! | [`PairwiseEncoder`](encoder::pairwise::PairwiseEncoder) | amo | Pairwise/binomial | GAC |
+//! | [`BitwiseEncoder`](encoder::bitwise::BitwiseEncoder) | amo | Bitwise/binary [^frisch] | weak propagation |
+//! | [`LadderEncoder`](encoder::ladder::LadderEncoder) | amo | Ladder/regular [^gent][^ansotegui] | not classified |
+//! | [`ProductEncoder`](encoder::product::ProductEncoder) | amo | Product [^chen] | not classified |
+//! | [`TseitinEncoder`](encoder::tseitin::TseitinEncoder) | formulas | Tseitin transformation [^tseitin] | — |
 //!
-//! "Not classified" means what it says: the sources cited here classify the
-//! linear and cardinality encodings, not the at-most-one ones, and no claim
-//! about those is made. [`BitwiseEncoder`](encoder::bitwise::BitwiseEncoder)
-//! is the weakest of the four.
+//! The linear and cardinality encoders are domain consistent at their default
+//! configuration where documented. Setting `with_cutoff(Some(..))` selects
+//! binary intermediate views and ripple-carry arithmetic, which can weaken
+//! propagation while preserving the same solutions. `with_local(true)` is
+//! the watchdog's domain-consistent form. `with_base` records the deliberate
+//! radix choices for mixed-radix encoding.
 //!
-//! A term stands for a group of mutually exclusive literals only where the
-//! caller built one — with
-//! [`IntVar::from_direct_encoding`](decision::integer::IntVar::from_direct_encoding),
-//! say. [`LinAggregator`](constraint::linear::LinAggregator) does not look for
-//! at-most-one constraints of its own accord, so the generalized encodings in
-//! the table are available *to a caller who supplies the partition*, not by
-//! default.
-//!
-//! Encoders are named for the mechanism rather than for the acronym of
-//! whichever published variant is best known, so `BddEncoder`,
-//! `SwcEncoder`, `ModuloTotalizerEncoder` and `SortedEncoder` are now
-//! [`DecisionDiagramEncoder`](encoder::decision_diagram::DecisionDiagramEncoder),
-//! [`SequentialCounterEncoder`](encoder::sequential_counter::SequentialCounterEncoder),
-//! [`MixedRadixEncoder`](encoder::mixed_radix::MixedRadixEncoder) and
-//! [`SortingNetworkEncoder`](encoder::sorting_network::SortingNetworkEncoder).
+//! The [`encoder`] modules document algorithm choices and configuration. Their
+//! item docs contain usage examples. CaDiCaL is enabled by default; other
+//! solver backends are feature-gated.
 //!
 //! [^abio2011]: I. Abío, R. Nieuwenhuis, A. Oliveras, E. Rodríguez-Carbonell,
 //! "BDDs for Pseudo-Boolean Constraints — Revisited", SAT 2011, LNCS 6695,
@@ -213,9 +167,7 @@
 //!
 //! [^bofill]: M. Bofill, J. Coll, P. Nightingale, J. Suy, F. Ulrich-Oltean, M.
 //! Villaret, "SAT encodings for pseudo-Boolean constraints together with
-//! at-most-one constraints", Artificial Intelligence 302 (2022) 103604. Table
-//! 1 classifies the encodings above; Theorem 3 is that the modulo totalizer is
-//! not consistency-checking.
+//! at-most-one constraints", Artificial Intelligence 302 (2022) 103604.
 //!
 //! [^chen]: J. Chen, "A New SAT Encoding of the At-Most-One Constraint",
 //! ModRef 2010.
@@ -242,47 +194,29 @@
 //! Solvers", ICTAI 2013, 9–17.
 //!
 //! [^sinz]: C. Sinz, "Towards an Optimal CNF Encoding of Boolean Cardinality
-//! Constraints", CP 2005, LNCS 3709, 827–831.
+//! Constraints", CP 2005, LNCS 3709, 827–832.
 //!
-//! [^tseitin]: G. S. Tseitin, "On the complexity of derivation in
-//! propositional calculus", Studies in Constructive Mathematics and
-//! Mathematical Logic, Part II (1968) 115–125.
+//! [^tseitin]: G. S. Tseitin, "On the complexity of derivation in propositional
+//! calculus", Studies in Constructive Mathematics and Mathematical Logic II
+//! (1968) 115–125.
 //!
 //! [^warners]: J. P. Warners, "A linear-time transformation of linear
 //! inequalities into conjunctive normal form", Information Processing Letters
-//! 68(2) (1998) 63–69.
+//! 68 (1998) 63–69.
 //!
-//! [^zha]: A. Zha, M. Koshimura, H. Fujita, "N-level modulo-based CNF
-//! encodings of pseudo-Boolean constraints for MaxSAT", Constraints 24(2)
-//! (2019) 133–161.
+//! [^zha]: A. Zha, M. Koshimura, H. Fujita, "N-level modulo-based CNF encodings
+//! of cardinality constraints", ICTAI 2014, 428–435.
 //!
-//! # Citation
+//! The Python bindings expose the same modelling concepts through
+//! [pyndakaas](https://pindakaas.readthedocs.io/en/latest/).
 //!
-//! If you cite Pindakaas, use this general software citation alongside any
-//! citation for a particular version or encoding paper:
-//!
-//! ```biblatex
-//! @software{Pindakaas,
-//! author = {Bierlee, Hendrik and Dekker, Jip J.},
-//! license = {MPL-2.0},
-//! title = {{Pindakaas}},
-//! url = {https://doi.org/10.5281/zenodo.10851855},
-//! doi = {10.5281/zenodo.10851855},
-//! }
-//! ```
-//!
-//! Use `misc` instead of `software` when the bibliography system does not
-//! support the `software` entry type.
-//!
-//! # Acknowledgements
+//! Software citation:
+//! [doi:10.5281/zenodo.10851855](https://doi.org/10.5281/zenodo.10851855).
 //!
 //! This research was partially funded by the Australian Government through the
 //! Australian Research Council Industrial Transformation Training Centre in
 //! Optimisation Technologies, Integrated Methodologies, and Applications
 //! (OPTIMA), Project ID IC200100009.
-//!
-//! The Python bindings expose the same modelling concepts through
-//! [pyndakaas](https://pindakaas.readthedocs.io/en/latest/).
 
 pub mod constraint;
 pub mod decision;
@@ -407,9 +341,7 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		let mut satisfied = false;
 		for v in clause {
 			match v.into() {
-				// Irrelevant literal.
 				BoolVal::Const(false) => {}
-				// Clause is already satisfied.
 				BoolVal::Const(true) => {
 					satisfied = true;
 					break;
@@ -455,9 +387,6 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 	}
 
 	/// Encodes `conditions -> constraint` by guarding every emitted clause.
-	///
-	/// This is a thin convenience wrapper around
-	/// [`Encoder::encode_implied`].
 	///
 	/// # Errors
 	///
@@ -714,7 +643,6 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 			// {num_clauses} {top}"
 			Ok(line) => {
 				let vec: Vec<&str> = line.split_whitespace().collect();
-				// check "p" and "cnf" keyword
 				if !WEIGHTED && (vec.len() != 4 || vec[0..2] != ["p", "cnf"]) {
 					return Err(io::Error::new(
 						io::ErrorKind::InvalidInput,
@@ -726,7 +654,6 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 						"expected DIMACS WCNF header formatted \"p wcnf {variables} {clauses} {top}\"",
 					));
 				}
-				// parse number of variables
 				wcnf.cnf.nvar = VarFactory {
 					next_var: Some(Var(vec[2].parse::<NonZeroI32>().map_err(|_| {
 						io::Error::new(
@@ -735,7 +662,6 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 						)
 					})?)),
 				};
-				// parse number of clauses
 				let num_clauses: usize = vec[3].parse().map_err(|_| {
 					io::Error::new(
 						io::ErrorKind::InvalidInput,
@@ -752,7 +678,6 @@ fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Er
 					})?);
 				}
 
-				// parsing header complete
 				had_header = true;
 			}
 			Err(e) => return Err(e),
@@ -790,7 +715,6 @@ impl Cnf {
 		let first = Var(NonZeroI32::new(1).unwrap());
 		match self.nvar.next_var.and_then(|v| v.prev_var()) {
 			Some(last) => VarRange::new(first, last),
-			// Nothing has been created, so there is nothing to range over.
 			None => VarRange::empty(),
 		}
 	}

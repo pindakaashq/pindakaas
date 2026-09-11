@@ -1,8 +1,6 @@
 Getting started
 ===============
 
-This section describes how to get started with Pindakaas.
-
 Installation
 ------------
 

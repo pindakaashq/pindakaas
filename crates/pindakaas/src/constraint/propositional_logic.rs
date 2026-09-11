@@ -45,7 +45,7 @@ pub enum Formula<Base> {
 }
 
 impl<Base> Formula<Base> {
-	/// Constant folding driven by an atom resolver.
+	/// Simplify the formula by constant-folding atoms with an atom resolver.
 	///
 	/// `Err(value)` marks an atom as known; `Ok(atom)` replaces it in the
 	/// simplified formula.
@@ -246,7 +246,7 @@ impl<Base: Display> Formula<Base> {
 }
 
 impl Formula<BoolVal> {
-	/// Folding of embedded constants into a literal-only formula.
+	/// Resolve embedded constants into a literal-only formula.
 	///
 	/// # Errors
 	///
@@ -257,7 +257,7 @@ impl Formula<BoolVal> {
 			BoolVal::Lit(l) => Ok(l),
 		})
 	}
-	/// Constant folding under literals known to hold.
+	/// Simplify the formula using literals known to hold.
 	///
 	/// # Errors
 	///
@@ -562,7 +562,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_and() {
-		// Simple conjunction
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder.encode(&mut cnf, &(a & b & c)).unwrap();
@@ -577,7 +576,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_and.sol"],
 		);
 
-		// Reified conjunction
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
@@ -594,7 +592,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_and_reif.sol"],
 		);
 
-		// Regression test: empty and
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		TseitinEncoder
@@ -617,7 +614,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_equiv() {
-		// Simple equivalence
 		let mut cnf = Cnf::default();
 		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
 		TseitinEncoder
@@ -637,7 +633,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_equiv.sol"],
 		);
 
-		// Reified equivalence
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
@@ -663,7 +658,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_implies() {
-		// Simple implication
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		let b = cnf.new_lit();
@@ -684,7 +678,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_implies.sol"],
 		);
 
-		// Reified implication
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
@@ -710,7 +703,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_ite() {
-		// Simple if-then-else
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
@@ -734,7 +726,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_ite.sol"],
 		);
 
-		// Reified if-then-else
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		TseitinEncoder
@@ -764,7 +755,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_neg_equiv() {
-		// Regression test
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		let b = cnf.new_lit();
@@ -791,7 +781,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_or() {
-		// Simple disjunction
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder.encode(&mut cnf, &(a | b | c)).unwrap();
@@ -806,7 +795,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_or.sol"],
 		);
 
-		// Reified disjunction
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
@@ -823,7 +811,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_or_reif.sol"],
 		);
 
-		// Regression test: empty or
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		TseitinEncoder
@@ -846,7 +833,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_xor() {
-		// Simple XOR
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder.encode(&mut cnf, &(a ^ b ^ c)).unwrap();
@@ -861,7 +847,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_xor.sol"],
 		);
 
-		// Reified XOR
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		TseitinEncoder
@@ -877,7 +862,6 @@ mod tests {
 			vec![a, b, c, d],
 			&expect_file!["propositional_logic/encode_prop_xor_reif.sol"],
 		);
-		// Regression test: negated XOR (into equiv)
 		let mut cnf = Cnf::default();
 		let (a, b) = cnf.new_lits();
 		TseitinEncoder.encode(&mut cnf, &(!(a ^ b))).unwrap();
@@ -891,7 +875,6 @@ mod tests {
 			vec![a, b],
 			&expect_file!["propositional_logic/encode_prop_xor_neg1.sol"],
 		);
-		// Regression test: negated XOR (negated args)
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder.encode(&mut cnf, &(!(a ^ b ^ c))).unwrap();
@@ -901,7 +884,6 @@ mod tests {
 			[a, b, c],
 			&expect_file!["propositional_logic/encode_prop_xor_neg2.sol"],
 		);
-		// Regression test: negated XOR (negated binding)
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		TseitinEncoder

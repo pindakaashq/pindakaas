@@ -26,7 +26,7 @@ pub struct Count {
 }
 
 impl Count {
-	/// The constraint that `lits` add up to `y`, or to at most `y`.
+	/// Construct a constraint that `lits` add up to `y`, or to at most `y`.
 	///
 	/// # Examples
 	///

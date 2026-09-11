@@ -22,13 +22,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-/// Linear constraint that enforces that ∑ litᵢ ≷ k.
-///
-/// Compared to a general linear constraint, this one does not multiply literals
-/// by coefficients.
-///
-/// All literals in the constraint are guaranteed to be from distinct Boolean
-/// variables.
+/// The constraint `Σ litᵢ ≷ k` over distinct Boolean variables.
 pub struct Cardinality {
 	pub(crate) lits: Vec<Lit>,
 	pub(crate) cmp: LimitComp,
@@ -36,7 +30,7 @@ pub struct Cardinality {
 }
 
 impl Cardinality {
-	/// The constraint that `k` of `lits` hold, or at most `k` of them.
+	/// Construct a constraint that `k` of `lits` hold, or at most `k` of them.
 	///
 	/// # Panics
 	///
@@ -84,8 +78,6 @@ impl Cardinality {
 			.iter()
 			.enumerate()
 			.map(|(i, &l)| {
-				// The literal is worth one when it holds and nothing when it
-				// does not, which is a direct encoding of `0..=1`.
 				IntVar::from_direct_encoding(db, 0..=1, &[!l, l])
 					.map(|x| (PosCoeff::new(1), x.with_label(format!("x{i}"))))
 			})

@@ -138,19 +138,19 @@ pub enum LimitComp {
 pub struct PosCoeff(pub(crate) Coeff);
 
 impl LinExp {
-	/// The expression with `k` added before any outer scaling.
+	/// Add `k` to the expression before any outer scaling.
 	pub fn add_constant(mut self, k: Coeff) -> Self {
 		self.add += k;
 		self
 	}
 
-	/// The expression with an unweighted literal appended.
+	/// Append an unweighted literal to the expression.
 	pub fn add_lit(mut self, lit: Lit) -> Self {
 		self.terms.push(LinTerm::Bool(lit, 1));
 		self
 	}
 
-	/// A pseudo-Boolean sum from parallel coefficient and literal slices.
+	/// Construct a pseudo-Boolean sum from parallel coefficient and literal slices.
 	///
 	/// # Panics
 	///
@@ -171,7 +171,7 @@ impl LinExp {
 		}
 	}
 
-	/// A pseudo-Boolean sum from `(literal, coefficient)` pairs.
+	/// Construct a pseudo-Boolean sum from `(literal, coefficient)` pairs.
 	pub fn from_terms(terms: &[(Lit, Coeff)]) -> Self {
 		Self {
 			terms: terms.iter().map(|&(l, c)| LinTerm::Bool(l, c)).collect(),
@@ -382,7 +382,7 @@ impl SubAssign for LinExp {
 }
 
 impl Linear {
-	/// The constraint `exp ≷ k`, without normalisation or aggregation.
+	/// Construct the constraint `exp ≷ k`, without normalisation or aggregation.
 	///
 	/// # Examples
 	///
@@ -540,7 +540,6 @@ mod tests {
 				},
 			)
 			.unwrap();
-		// +7*x1 +10*x2 +4*x3 +4*x4 <= 9
 		LinearEncoder::<StaticLinEncoder<AdderEncoder>>::default()
 			.encode(
 				&mut cnf,
@@ -561,10 +560,7 @@ mod tests {
 
 	#[test]
 	fn what_the_decompositions_cost() {
-		// Clause counts for each way of decomposing a pseudo-Boolean
-		// constraint. The `.sol` goldens these encoders already have are blind
-		// to size, so this is the only thing standing between a decomposition
-		// getting quietly worse and nobody noticing.
+		// Solution goldens cannot detect increases in encoding size.
 		let cases: [(&str, &[Coeff], Coeff); 5] = [
 			("card-10", &[1; 10], 5),
 			("pb-small", &[1, 2, 3, 4, 5], 8),
@@ -582,9 +578,8 @@ mod tests {
 					let mut cnf = Cnf::default();
 					let vars = cnf.new_var_range(coeffs.len()).iter_lits().collect_vec();
 					let con = Linear::new(LinExp::from_slices(coeffs, &vars), cmp.clone(), k);
-					// Every slot the cases reach — integer linear, Boolean
-					// linear and cardinality — so that a row measures the
-					// encoder it names rather than whichever is the default.
+					// Configure every reachable slot so the row measures the
+					// named encoder.
 					let done = match enc {
 						"adder" => LinearEncoder::<
 							StaticLinEncoder<AdderEncoder, AdderEncoder, AdderEncoder>,
@@ -611,8 +606,6 @@ mod tests {
 						>::default()
 						.encode(&mut cnf, &con),
 						"wdog-l" => {
-							// The local form is the same encoder, so it is
-							// configured rather than named separately.
 							let mut enc = StaticLinEncoder::<
 								WatchdogEncoder,
 								WatchdogEncoder,

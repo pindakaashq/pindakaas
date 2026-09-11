@@ -82,7 +82,6 @@ pub struct IpasirSolver<'lib> {
 /// functions.
 type SymResult<'a, S, E = libloading::Error> = std::result::Result<Symbol<'a, S>, E>;
 
-// --- Helpers for C interface ---
 impl FailedAssumptions for IpasirFailed<'_> {
 	fn fail(&self, lit: Lit) -> bool {
 		let lit: i32 = lit.into();
@@ -299,7 +298,6 @@ impl ClauseDatabase for IpasirSolver<'_> {
 
 impl Drop for IpasirSolver<'_> {
 	fn drop(&mut self) {
-		// Release the solver.
 		(self.release_fn)(self.slv);
 	}
 }

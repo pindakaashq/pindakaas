@@ -1,5 +1,11 @@
-//! The Tseitin transformation: naming each subformula with a literal, and
-//! stating what makes that literal hold.
+//! The Tseitin transformation: naming compound subformulas with literals [^1].
+//!
+//! Clauses state what makes each representative hold, avoiding the exponential
+//! expansion of distributing formulas into CNF.
+//!
+//! [^1]: G. S. Tseitin, "On the complexity of derivation in propositional
+//! calculus", Studies in Constructive Mathematics and Mathematical Logic, Part
+//! II (1968) 115–125.
 
 use std::iter::once;
 
@@ -184,10 +190,8 @@ fn bind<Db: ClauseDatabase + ?Sized>(
 				_ => {
 					let name = name.unwrap_or_else(|| db.new_var().into());
 					let lits: Vec<_> = sub.iter().map(|f| bind(f, db, None)).try_collect()?;
-					// not name -> (not lits[0] or not lits[1] or ...)
 					db.add_clause(once(name).chain(lits.iter().map(|&l| !l)))?;
 					for lit in lits {
-						// name -> lit
 						db.add_clause([!name, lit])?;
 					}
 					name
@@ -206,10 +210,8 @@ fn bind<Db: ClauseDatabase + ?Sized>(
 					let name = name.unwrap_or_else(|| db.new_var().into());
 					let lits: Vec<_> = sub.iter().map(|f| bind(f, db, None)).try_collect()?;
 					for &lit in &lits {
-						// not name -> not lit
 						db.add_clause([name, !lit])?;
 					}
-					// name -> (lit[0] or lit[1] or ...)
 					db.add_clause(once(!name).chain(lits))?;
 					name
 				}
@@ -219,10 +221,7 @@ fn bind<Db: ClauseDatabase + ?Sized>(
 			let name = name.unwrap_or_else(|| db.new_var().into());
 			let left = bind(left, db, None)?;
 			let right = bind(right, db, None)?;
-			// name -> (left -> right)
 			db.add_clause([!name, !left, right])?;
-			// !name -> !(left -> right)
-			// i.e, (!name -> left) and (!name -> !right)
 			db.add_clause([name, left])?;
 			db.add_clause([name, !right])?;
 			name
@@ -238,7 +237,6 @@ fn bind<Db: ClauseDatabase + ?Sized>(
 				.map(|f| bind(f, db, None))
 				.collect::<Result<Vec<_>>>()?;
 			for (x, y) in lits.iter().copied().tuple_windows() {
-				// name -> (x <-> y)
 				db.add_clause([!name, !x, y])?;
 				db.add_clause([!name, x, !y])?;
 			}
@@ -264,16 +262,13 @@ fn bind<Db: ClauseDatabase + ?Sized>(
 				} else {
 					db.new_var().into()
 				};
-				// new_name -> (left xor right)
 				db.add_clause([!new_name, !left, !right])?;
 				db.add_clause([!new_name, left, right])?;
-				// !new_name -> !(left xor right)
 				db.add_clause([new_name, !left, right])?;
 				db.add_clause([new_name, left, !right])?;
 
 				left = new_name;
 			}
-			// let mut
 			name
 		}
 		Formula::IfThenElse { cond, then, els } => {
@@ -281,12 +276,9 @@ fn bind<Db: ClauseDatabase + ?Sized>(
 			let cond = bind(cond, db, None)?;
 			let then = bind(then, db, None)?;
 			let els = bind(els, db, None)?;
-			// name -> (cond -> then)
 			db.add_clause([!name, !cond, then])?;
-			// name -> (not cond -> els)
 			db.add_clause([!name, cond, els])?;
 
-			// inverse implications
 			db.add_clause([name, !cond, !then])?;
 			db.add_clause([name, cond, !els])?;
 			db.add_clause([name, !then, !els])?;

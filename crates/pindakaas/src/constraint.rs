@@ -1,7 +1,8 @@
 //! The constraints this library can encode.
 //!
-//! Each submodule holds one kind of constraint, and re-exports the
-//! [`Encoder`](crate::Encoder)s that take it.
+//! Each submodule holds a constraint and re-exports its encoders.
+//! [`linear::Linear`] accepts general expressions; aggregation selects a
+//! narrower constraint before encoding.
 
 pub mod bool_linear;
 pub mod cardinality;

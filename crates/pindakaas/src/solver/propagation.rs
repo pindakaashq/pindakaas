@@ -1,5 +1,8 @@
-//! This module contains interfaces for extending SAT solvers with external
-//! propagation functionality.
+//! External propagation for SAT solvers.
+//!
+//! Propagators receive assignments to observed variables and may supply
+//! clauses, propagations, and backtracks. The connected propagator's `RefCell`
+//! must not be borrowed while calling the solver.
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -348,9 +351,8 @@ impl<'a> Solution<'a> {
 		{
 			Ok(i) => self.model[i] == lit,
 			Err(_) => {
-				// A literal absent from the model belongs to a variable that is
-				// not observed by the propagator, which it should therefore
-				// not query.
+				// Unobserved variables are absent from the model and cannot be
+				// queried.
 				debug_assert!(false, "queried an unobserved variable");
 				false
 			}

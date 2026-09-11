@@ -4,9 +4,8 @@
 //! Each term contributes a bit per binary digit of what it is worth. Counting
 //! the terms that set a given digit, and carrying half of each count into the
 //! digit above, leaves one number whose top digit says whether the bound was
-//! passed — the watchdog. Nothing here grows with the size of the
-//! coefficients, only with their bit width, which is what separates this from
-//! the tree and the chain.
+//! passed — the watchdog. The global form uses `O(n·log n·log qₘₐₓ)` variables
+//! and `O(n²·log n·log qₘₐₓ)` clauses [^1].
 //!
 //! A carry drops the low bit of the count below it, so one watchdog over the
 //! whole constraint is consistency-checking rather than domain consistent
@@ -22,8 +21,8 @@
 //! the literals under it is the generalized watchdog of Bofill et al. [^2], so
 //! GGPW and GLPW are what the general case already does.
 //!
-//! [^1]: O. Bailleux, Y. Boufkhad, O. Roussel, "New Encodings of
-//! Pseudo-Boolean Constraints into CNF", SAT 2009, LNCS 5584, 181–194.
+//! [^1]: O. Bailleux, Y. Boufkhad, O. Roussel, "New Encodings of Pseudo-Boolean
+//! Constraints into CNF", SAT 2009, LNCS 5584, 181–194.
 //!
 //! [^2]: M. Bofill, J. Coll, P. Nightingale, J. Suy, F. Ulrich-Oltean, M.
 //! Villaret, "SAT encodings for pseudo-Boolean constraints together with
@@ -48,25 +47,11 @@ use crate::{
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
 
-/// Encoder for a linear constraint, as a watchdog over the digits of its
-/// coefficients; also known as the polynomial watchdog, GPW globally and LPW
-/// locally.
+/// A polynomial watchdog (GPW globally, LPW locally).
 ///
-/// The terms are bucketed by the binary digits of what they are worth, each
-/// bucket counted, and half of each count carried into the bucket above. The
-/// top count says whether the bound was passed. A coefficient therefore costs
-/// its bit width rather than its magnitude, which is what the tree and the
-/// chain cannot do.
-///
-/// The global form, which is the default, is one watchdog held to the bound:
-/// `O(n·log n·log qₘₐₓ)` variables and `O(n²·log n·log qₘₐₓ)` clauses,
-/// consistency-checking but not domain consistent [^1]. The local form is
-/// domain consistent, at `n` times the size; see
-/// [`Self::with_local`].
-///
-/// A term over a group of mutually exclusive literals is bucketed on the
-/// values of the group rather than on the literals, which is the generalized
-/// watchdog: GGPW globally, GLPW locally [^2].
+/// The default global form is consistency-checking; [`Self::with_local`]
+/// enables domain consistency with a watchdog per term value. Binary
+/// cutoffs can weaken this guarantee; see [`Self::with_cutoff`].
 ///
 /// # Examples
 ///
@@ -86,13 +71,6 @@ use crate::{
 /// WatchdogEncoder::default().encode(&mut f, &con)?;
 /// # Ok::<(), pindakaas::Unsatisfiable>(())
 /// ```
-///
-/// [^1]: O. Bailleux, Y. Boufkhad, O. Roussel, "New Encodings of
-/// Pseudo-Boolean Constraints into CNF", SAT 2009, LNCS 5584, 181–194.
-///
-/// [^2]: M. Bofill, J. Coll, P. Nightingale, J. Suy, F. Ulrich-Oltean, M.
-/// Villaret, "SAT encodings for pseudo-Boolean constraints together with
-/// at-most-one constraints", Artificial Intelligence 302 (2022) 103604.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WatchdogEncoder {
 	add_consistency: bool,
@@ -121,28 +99,31 @@ impl WatchdogEncoder {
 		})
 	}
 
-	/// Configures whether intermediate variables are constrained independently of their use.
+	/// Independent domain constraints for newly created intermediate views.
+	///
+	/// Disabled by default. Enables standalone binary and direct consistency
+	/// clauses; order-encoding implication chains remain mandatory.
 	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
 
-	/// Sets the largest intermediate domain forced into order encoding.
+	/// The domain size at which an unencoded variable prefers binary.
 	///
-	/// `None`, the default, leaves the choice to [`IntTernaryEncoder`].
+	/// `None` (the default) prefers order; existing binary or order views take
+	/// precedence. The threshold is inclusive. Binary arithmetic can weaken
+	/// unit propagation; see the [encoding overview](crate::encoder).
 	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
 
-	/// Selects the local form, which is domain consistent; global is the
-	/// default.
+	/// Local watchdogs for domain consistency; global is the default.
 	///
-	/// One watchdog per value a term can take, over the terms that remain once
-	/// it does, ending in a clause that rules that value out rather than an
-	/// assertion. Unit propagation then rules out every value no solution can
-	/// use, which one watchdog over the whole constraint cannot do. The cost is
-	/// a watchdog per value rather than one for the constraint.
+	/// One watchdog per term value rules it out when the remaining terms exceed
+	/// the residual bound. The global form uses one watchdog for the constraint.
+	/// The propagation guarantee assumes order arithmetic; binary cutoffs can
+	/// weaken it.
 	pub fn with_local(&mut self, b: bool) -> &mut Self {
 		self.local = b;
 		self
@@ -284,10 +265,8 @@ impl WatchdogEncoder {
 
 		let mut carried: Option<IntVar> = None;
 		for r in 0..=p {
-			// Anything at or above this at digit `r` is worth `total` or more
-			// on its own, so the sum has already passed the bound. Under a
-			// guard that is a clause rather than a fact, and only the last of
-			// them is worth stating.
+			// A digit reaching this threshold already exceeds the bound; under
+			// a guard only the last such threshold needs a clause.
 			let cap = if guard.is_some() {
 				Coeff::MAX
 			} else {
@@ -351,9 +330,6 @@ impl WatchdogEncoder {
 		if !self.local {
 			return self.watchdog(db, terms, k, None, cons);
 		}
-		// A value a term can take is ruled out by the terms that are left
-		// passing what the bound leaves them, so each gets a watchdog of its
-		// own over those terms.
 		for (i, term) in terms.iter().enumerate() {
 			let rest = terms
 				.iter()
@@ -424,7 +400,6 @@ where
 	Db: ClauseDatabase + ?Sized,
 {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
-		// Decomposing works in integers, so the literals become them first.
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}
@@ -452,8 +427,6 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for WatchdogEncoder {
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for WatchdogEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		// Counting into a variable is a linear constraint whose bound is not a
-		// constant, which this encoder takes once the bound is a term.
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}
@@ -483,10 +456,6 @@ mod tests {
 		WatchdogEncoder::default()
 	);
 
-	// The counts and the carries between them are what the configuration
-	// moves, so each is run over the same constraints: the local form, then
-	// narrowing the domains beforehand or not, bounding the intermediates
-	// independently, and holding them in binary rather than order form.
 	linear_test_suite!(
 		watchdog_encoder_local,
 		WatchdogEncoder::default().with_local(true)
@@ -516,10 +485,6 @@ mod tests {
 	#[test]
 	fn smaller_than_the_totalizer() {
 		const N: usize = 20;
-		// Coefficients spread over twenty bits, which is where the totalizer's
-		// nodes have to hold every partial sum they can reach. Measured at 449
-		// variables and 1490 clauses against the totalizer's 885 and 9588; the
-		// two cross over at eighteen terms.
 		let coeffs = (0..N as Coeff).map(|i| 1 + i * 65_537).collect_vec();
 		let k = coeffs.iter().sum::<Coeff>() / 2;
 		let con =

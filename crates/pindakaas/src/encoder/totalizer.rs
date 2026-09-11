@@ -37,13 +37,7 @@ use crate::{
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 
-/// Encoder for a linear constraint, decomposing it into a balanced tree of
-/// partial sums; also known as the totalizer, and as the generalized totalizer
-/// or GTE once the terms are weighted.
-///
-/// Each node holds what its two children reach between them, with anything
-/// past the bound dropped. The tree keeps the intermediates narrower than the
-/// chain does, at the cost of more of them.
+/// A balanced tree of partial sums (totalizer, GTE, or GGT).
 ///
 /// # Examples
 ///
@@ -91,21 +85,26 @@ impl TotalizerEncoder {
 		})
 	}
 
-	/// Configures whether intermediate variables are constrained independently of their use.
+	/// Enable independent domain constraints for newly created intermediate views.
+	///
+	/// Disabled by default. Enables standalone binary and direct consistency
+	/// clauses; order-encoding implication chains remain mandatory.
 	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
 	}
 
-	/// Sets the largest intermediate domain forced into order encoding.
+	/// Set the domain size at which an unencoded variable prefers binary.
 	///
-	/// `None`, the default, leaves the choice to [`IntTernaryEncoder`].
+	/// `None` (the default) prefers order; existing binary or order views take
+	/// precedence. The threshold is inclusive. Binary arithmetic can weaken
+	/// unit propagation; see the [encoding overview](crate::encoder).
 	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
 		self.cutoff = c;
 		self
 	}
 
-	/// Selects domain consistency applied before decomposition; bounds is the default.
+	/// Select the domain consistency applied before decomposition; bounds is the default.
 	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
 		self.add_propagation = c;
 		self
@@ -141,12 +140,8 @@ impl Decompose for TotalizerEncoder {
 			let mut next = Vec::with_capacity(layer.len().div_ceil(2));
 			for (i, pair) in layer.chunks(2).enumerate() {
 				match pair {
-					// An odd one out waits for the next layer.
 					[t] => next.push(t.clone()),
 					[left, right] => {
-						// The root is what the constraint compares; below it an
-						// intermediate reaches what its two terms reach
-						// together, less anything already past the bound.
 						let domain: RangeList<Coeff> = if at_root {
 							RangeList::from(k..=k)
 						} else {
@@ -180,7 +175,6 @@ where
 	Db: ClauseDatabase + ?Sized,
 {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
-		// Decomposing works in integers, so the literals become them first.
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}
@@ -208,8 +202,6 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for TotalizerEncoder 
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for TotalizerEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		// Counting into a variable is a linear constraint whose bound is not a
-		// constant, which this encoder takes once the bound is a term.
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}
@@ -230,7 +222,6 @@ mod tests {
 	}
 	linear_test_suite!(totalizer_encoder, TotalizerEncoder::default());
 
-	// Test propagation feature
 	linear_test_suite!(
 		totalizer_encoder_prop_bounds,
 		TotalizerEncoder::default().with_propagation(crate::decision::integer::Consistency::Bounds)

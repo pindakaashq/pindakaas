@@ -1,4 +1,8 @@
-//! Boolean decision variables: the literals a formula is written over.
+//! Boolean decision variables and their literals.
+//!
+//! [`Var`] identifies a variable independently of its polarity; [`Lit`] adds
+//! negation. [`BoolVal`] also admits constants, which clause construction folds
+//! away. [`VarRange`] stores consecutive variables without allocating a list.
 
 use std::{
 	cmp::Ordering,
@@ -16,8 +20,7 @@ use crate::{
 	Coeff,
 };
 
-/// A helper type used to represent a Boolean value that can be either a literal
-/// for a Boolean decision variable, or a constant Boolean value.
+/// A literal or constant Boolean value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[expect(
 	variant_size_differences,
@@ -32,20 +35,15 @@ pub enum BoolVal {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-/// Literal is type that can be use to represent Boolean decision variables and
-/// their negations
+/// A Boolean variable with polarity.
 pub struct Lit(pub(crate) NonZeroI32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// A canonical implementation of a Boolean decision variable, independent of
-/// negation.
+/// A Boolean variable independent of polarity.
 pub struct Var(pub(crate) NonZeroI32);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-/// A continuous range of Boolean variables.
-///
-/// This is a representation that is used to represent a range of variables in a
-/// more compact way.
+/// A compact, inclusive range of consecutive variables.
 pub struct VarRange {
 	pub(crate) start: Var,
 	pub(crate) end: Var,

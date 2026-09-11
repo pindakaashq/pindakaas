@@ -41,11 +41,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-/// Encoder for a linear constraint, as the circuit that adds its terms up.
-///
-/// Alone among the linear encoders it does not decompose: the terms are
-/// summed by adders and the result compared against the bound, so the cost
-/// follows the width of the coefficients rather than the number of terms.
+/// An adder network for a linear constraint.
 ///
 /// # Examples
 ///
@@ -568,7 +564,6 @@ impl AdderEncoder {
 								Some(BoolVal::Const(k[b + 1])),
 								String::new(),
 							)?;
-							// The next bit of `k` is spent.
 							k[b + 1] = false;
 						} else {
 							let carry_lit = new_named_lit!(
@@ -623,8 +618,6 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for AdderEncoder {
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for AdderEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		// Counting into a variable is a linear constraint whose bound is not a
-		// constant, which this encoder takes once the bound is a term.
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
 	}

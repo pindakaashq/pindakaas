@@ -1,5 +1,11 @@
-//! At-most-one by giving each literal the bit pattern of its index, which
-//! needs `⌈log₂ n⌉` new literals and propagates weakly.
+//! At-most-one by giving each literal the bit pattern of its index [^1].
+//!
+//! This needs `⌈log₂ n⌉` new literals and propagates weakly. Exactly-one adds
+//! one clause over the original literals.
+//!
+//! [^1]: A. M. Frisch, T. J. Peugniez, A. J. Doggett, P. W. Nightingale,
+//! "Solving Non-Boolean Satisfiability Problems with Stochastic Local Search",
+//! Journal of Automated Reasoning 35 (2005) 143–179.
 
 use itertools::Itertools;
 
@@ -11,10 +17,7 @@ use crate::{
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Result,
 };
 
-/// At-most-one encoding using the binary representation of each literal's index.
-///
-/// Exact-one adds the original literals as one clause; the index bits still
-/// encode only the at-most-one part.
+/// Binary-index at-most-one encoding.
 ///
 /// # Examples
 ///
@@ -41,15 +44,12 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for BitwiseEncoder
 		let size = card1.lits.len();
 		let bits = (usize::BITS - (size - 1).leading_zeros()) as usize;
 
-		// Add clause to ensure "at least one" literal holds
 		if card1.cmp == LimitComp::Equal {
 			at_least_one_clause(db, card1)?;
 		}
 
-		// Create a log encoded selection variable
 		let signals = (0..bits).map(|_| db.new_lit()).collect_vec();
 
-		// Enforce that literal can only be true when selected
 		for (i, &lit) in card1.lits.iter().enumerate() {
 			for (j, &sig) in signals.iter().enumerate() {
 				if i & (1 << j) != 0 {

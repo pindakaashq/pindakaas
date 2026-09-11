@@ -1,5 +1,8 @@
-//! At-most-one by forbidding every pair, which needs no new literals and
-//! `n(n-1)/2` clauses.
+//! At-most-one by forbidding every pair.
+//!
+//! The encoding uses no auxiliary literals and `n(n-1)/2` binary clauses.
+//! Exactly-one adds a clause over the original literals; the at-most-one part
+//! is unchanged.
 
 use itertools::Itertools;
 
@@ -35,11 +38,9 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for PairwiseEncode
 		tracing::instrument(name = "pairwise_encoder", skip_all, fields(constraint = card1.trace_print()))
 	)]
 	fn encode(&self, db: &mut Db, card1: &CardinalityOne) -> Result {
-		// Add clause to ensure "at least one" literal holds
 		if card1.cmp == LimitComp::Equal {
 			at_least_one_clause(db, card1)?;
 		}
-		// For every pair of literals (i, j) add "¬i ∨ ¬j"
 		for [a, b] in card1.lits.iter().copied().array_combinations() {
 			db.add_clause([!a, !b])?;
 		}

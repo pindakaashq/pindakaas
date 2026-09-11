@@ -1,16 +1,15 @@
-//! Compile time optional field implementation.
+//! Compile-time optional fields.
+//!
+//! [`OptField`] stores a value when its constant is one and occupies no space
+//! when it is zero. The constant uses `usize` for implementation reasons; other
+//! values are unsupported.
 
 use std::hash::{Hash, Hasher};
 
 #[derive(Debug)]
-/// Compile time optional field.
+/// A field present only when `B` is one.
 ///
-/// This is used to represent fields that may or may not be present in a struct,
-/// based on a compile time constant.
-///
-/// Note that `B` is a `usize` constant because of implementation limitations in
-/// Rust. It should, however, be a `bool` and only the values `0` and `1` should
-/// be used.
+/// `B` uses `usize` for implementation reasons; only zero and one are valid.
 pub(crate) struct OptField<const B: usize, T> {
 	/// Content of the field, if any.
 	value: [T; B],
