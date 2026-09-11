@@ -6,15 +6,13 @@
 //! decomposition strategy, which is what makes three terms the only case
 //! worth encoding directly.
 
-use std::iter::once;
-
-use itertools::Itertools;
+use std::{iter::empty, mem};
 
 use crate::{
 	constraint::{
-		linear::Comparator,
-		int_linear::{Decompose, IntLinear, NormalizedIntLinear, Term, encode_addition},
+		int_linear::{encode_addition, Decompose, IntLinear, NormalizedIntLinear, Term},
 		int_ternary::IntTernary,
+		linear::Comparator,
 	},
 	decision::integer::IntVar,
 	helpers::{div_ceil, div_floor},
@@ -85,13 +83,15 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder 
 				let _ = t.1.order_encoding(db)?;
 			}
 		}
-		let encoded: Vec<Encoded> = terms.iter().map(|t| Encoded { c: t.0, x: &t.1 }).collect();
+		// The clauses end in the last term and are guarded by the ones before
+		// it, so the terms are read from the back.
+		let mut encoded = terms.iter().rev().map(|t| Encoded { c: t.0, x: &t.1 });
+		let (bounded, inner, outer) = (encoded.next(), encoded.next(), encoded.next());
+		debug_assert!(encoded.next().is_none());
 
 		// An equality holds exactly when both of its inequalities do.
 		for cmp in con.cmp.split() {
-			for clause in Encoded::walk(db, &encoded, cmp, con.k)? {
-				db.add_clause(clause)?;
-			}
+			Encoded::emit(db, bounded, inner, outer, cmp, con.k)?;
 		}
 		Ok(())
 	}
@@ -151,7 +151,8 @@ impl IntTernaryEncoder {
 		let Ok(cons) = decompose.decompose(db, con) else {
 			return db.contradiction();
 		};
-		cons.iter().try_for_each(|con| Encoder::encode(self, db, con))
+		cons.iter()
+			.try_for_each(|con| Encoder::encode(self, db, con))
 	}
 
 	/// Create an encoder with the given configuration.
@@ -161,19 +162,24 @@ impl IntTernaryEncoder {
 }
 
 impl Encoded<'_> {
-	/// The clauses for `Σ terms ≷ k`, by taking the terms one at a time.
+	/// Add the clauses for `outer + inner + bounded ≷ k` to `db`.
 	///
-	/// The head term is walked over the values it can take. Reaching a value
-	/// costs the sum a known amount, so what is left for the remaining terms
-	/// is a smaller constraint of the same shape, and the clauses for it need
-	/// only hold when that value is in fact reached.
-	fn walk<Db: ClauseDatabase + ?Sized>(
+	/// `bounded` is the term every clause ends in; `inner` and `outer` are the
+	/// terms whose values guard it, `outer` outermost. A loop per guard rather
+	/// than a recursion: an [`IntTernary`] has three terms and folds any
+	/// constant among them into `k`, so there are never more than two guards,
+	/// and `bounded` always yields unit clauses. A clause is therefore one
+	/// guard per loop and one literal, which lets each loop reuse its buffers
+	/// across its steps where a recursion allocates a clause list per step.
+	fn emit<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
-		terms: &[Encoded],
+		bounded: Option<Encoded>,
+		inner: Option<Encoded>,
+		outer: Option<Encoded>,
 		cmp: Comparator,
 		k: Coeff,
-	) -> Result<Vec<Vec<BoolVal>>, Unsatisfiable> {
-		let Some((head, tail)) = terms.split_first() else {
+	) -> Result {
+		let Some(bounded) = bounded else {
 			// Nothing left to give, so the empty sum either satisfies what
 			// remains of the constraint or nothing can.
 			let holds = match cmp {
@@ -181,76 +187,116 @@ impl Encoded<'_> {
 				Comparator::GreaterEq => 0 >= k,
 				Comparator::Equal => unreachable!("an equality is split before it is encoded"),
 			};
-			return Ok(if holds { Vec::new() } else { vec![Vec::new()] });
+			return if holds {
+				Ok(())
+			} else {
+				db.add_clause(empty::<BoolVal>())
+			};
 		};
-		if tail.is_empty() {
-			return head.bound(db, cmp, k);
-		}
-		// Guard on the head reaching a value from whichever side pushes the sum
-		// towards breaking the constraint.
-		let geq = (head.c >= 0) == matches!(cmp, Comparator::LessEq);
-		let mut clauses = Vec::new();
-		let mut last: Option<Vec<Vec<BoolVal>>> = None;
-		// A variable a group of terms arrived on is read on the direct literals
-		// it came with; any other on its order encoding.
-		let steps = if head.x.has_direct_encoding() {
-			head.x.lit_direct_steps(db, geq)?
+		let (outer_c, outer_steps) = Self::guards(db, outer, cmp)?;
+		let (inner_c, inner_steps) = Self::guards(db, inner, cmp)?;
+		// What a direct encoding pins `bounded` to does not depend on what is
+		// left of the bound, so it is read once rather than once per step.
+		let pins = if bounded.x.has_direct_encoding() {
+			bounded.x.lit_direct_steps(db, true)?
 		} else {
-			head.x.lit_order_steps(db, geq)?
+			Vec::new()
 		};
-		for (d, guard) in steps {
-			let sub = Self::walk(db, tail, cmp, k - head.c * d)?;
-			// A step asking of the remaining terms exactly what the
-			// one before it asked is already covered by that one,
-			// which happens often.
-			if last.as_ref() == Some(&sub) {
+		// Each loop keeps what it built at the step before, to compare the
+		// next one against.
+		let (mut units, mut last_units) = (Vec::new(), Vec::new());
+		let (mut clauses, mut last_clauses, mut have_clauses) = (Vec::new(), Vec::new(), false);
+
+		for &(v, outer_guard) in &outer_steps {
+			let left = k - outer_c * v;
+			clauses.clear();
+			let mut have_units = false;
+			for &(w, inner_guard) in &inner_steps {
+				units.clear();
+				bounded.bound_into(db, cmp, left - inner_c * w, &pins, &mut units)?;
+				// A step asking of the terms below exactly what the one before
+				// it asked is already covered by that one, which happens often.
+				if have_units && units == last_units {
+					continue;
+				}
+				clauses.extend(units.iter().map(|&lit| (inner_guard, lit)));
+				mem::swap(&mut units, &mut last_units);
+				have_units = true;
+			}
+			if have_clauses && clauses == last_clauses {
 				continue;
 			}
-			clauses.extend(
-				sub.iter()
-					.map(|clause| once(guard).chain(clause.iter().copied()).collect()),
-			);
-			last = Some(sub);
+			for &(inner_guard, lit) in &clauses {
+				db.add_clause([outer_guard, inner_guard, lit])?;
+			}
+			mem::swap(&mut clauses, &mut last_clauses);
+			have_clauses = true;
 		}
-		Ok(clauses)
+		Ok(())
 	}
 
-	/// The clauses for `c·x ≷ k`, this term being the only one left.
-	fn bound<Db: ClauseDatabase + ?Sized>(
+	/// The values a guard term is walked over, with its coefficient, taken
+	/// from whichever side pushes the sum towards breaking the constraint.
+	///
+	/// A loop with no term to guard on gets one step: a false literal against
+	/// a coefficient of zero. `add_clause` drops a false literal, so that
+	/// leaves the clause as it was and the bound where it was.
+	fn guards<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		term: Option<Encoded>,
+		cmp: Comparator,
+	) -> Result<(Coeff, Vec<(Coeff, BoolVal)>), Unsatisfiable> {
+		let Some(term) = term else {
+			return Ok((0, vec![(0, BoolVal::Const(false))]));
+		};
+		let geq = (term.c >= 0) == matches!(cmp, Comparator::LessEq);
+		// A variable a group of terms arrived on is read on the direct
+		// literals it came with; any other on its order encoding.
+		Ok((
+			term.c,
+			if term.x.has_direct_encoding() {
+				term.x.lit_direct_steps(db, geq)?
+			} else {
+				term.x.lit_order_steps(db, geq)?
+			},
+		))
+	}
+
+	/// The literals of the unit clauses for `c·x ≷ k`, nothing below this term
+	/// being left to give.
+	fn bound_into<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
 		cmp: Comparator,
 		k: Coeff,
-	) -> Result<Vec<Vec<BoolVal>>, Unsatisfiable> {
+		pins: &[(Coeff, BoolVal)],
+		out: &mut Vec<BoolVal>,
+	) -> Result {
 		if self.x.has_direct_encoding() {
-			// Nothing says it in one literal, so rule out each value that would
-			// break the bound instead. What the value is worth already carries
-			// the sign of the coefficient, so the comparison is the one asked
-			// for rather than the turned-around one below.
-			let breaks = self
-				.x
-				.lit_direct_steps(db, true)?
-				.into_iter()
-				.filter(|&(d, _)| match cmp {
+			// Nothing says it in one literal, so rule out each value that
+			// would break the bound instead. What the value is worth already
+			// carries the sign of the coefficient, so the comparison is the
+			// one asked for rather than the turned-around one below.
+			for &(d, _) in pins {
+				let breaks = match cmp {
 					Comparator::LessEq => self.c * d > k,
 					_ => self.c * d < k,
-				})
-				.map(|(d, _)| d)
-				.collect_vec();
-			breaks
-				.into_iter()
-				.map(|d| Ok(vec![!self.x.lit_equals(db, d)?]))
-				.collect()
-		} else {
-			// Dividing by a negative coefficient turns the comparison around.
-			let cmp = if self.c >= 0 { cmp } else { cmp.reverse() };
-			// One literal says where the variable stands against the bound.
-			Ok(vec![vec![match cmp {
-				Comparator::LessEq => self.x.lit_at_most(db, div_floor(k, self.c))?,
-				Comparator::GreaterEq => self.x.lit_at_least(db, div_ceil(k, self.c))?,
-				Comparator::Equal => unreachable!("an equality is split before it is encoded"),
-			}]])
+				};
+				if breaks {
+					out.push(!self.x.lit_equals(db, d)?);
+				}
+			}
+			return Ok(());
 		}
+		// Dividing by a negative coefficient turns the comparison around.
+		let cmp = if self.c >= 0 { cmp } else { cmp.reverse() };
+		// One literal says where the variable stands against the bound.
+		out.push(match cmp {
+			Comparator::LessEq => self.x.lit_at_most(db, div_floor(k, self.c))?,
+			Comparator::GreaterEq => self.x.lit_at_least(db, div_ceil(k, self.c))?,
+			Comparator::Equal => unreachable!("an equality is split before it is encoded"),
+		});
+		Ok(())
 	}
 }
 
@@ -262,10 +308,10 @@ mod tests {
 
 	use crate::{
 		constraint::{
-			linear::{Comparator, LimitComp, PosCoeff},
 			cardinality_one::{CardinalityOne, PairwiseEncoder},
 			int_linear::Term,
 			int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
+			linear::{Comparator, LimitComp, PosCoeff},
 		},
 		decision::integer::IntVar,
 		helpers::tests::at_most_one_var,
@@ -396,7 +442,11 @@ mod tests {
 		for (coeffs, doms) in cases {
 			// Three terms are compared against the third of them, so there is
 			// no constant left to vary.
-			let ks: Vec<Coeff> = if coeffs.len() == 3 { vec![0] } else { (-6..=6).collect() };
+			let ks: Vec<Coeff> = if coeffs.len() == 3 {
+				vec![0]
+			} else {
+				(-6..=6).collect()
+			};
 			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
 				for k in ks.iter().copied() {
 					// Propagation must not change which
@@ -605,7 +655,11 @@ mod tests {
 		for (coeffs, doms) in cases {
 			// Three terms are compared against the third of them, so there is
 			// no constant left to vary.
-			let ks: Vec<Coeff> = if coeffs.len() == 3 { vec![0] } else { (-4..=8).collect() };
+			let ks: Vec<Coeff> = if coeffs.len() == 3 {
+				vec![0]
+			} else {
+				(-4..=8).collect()
+			};
 			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
 				for k in ks.iter().copied() {
 					assert_eq!(
