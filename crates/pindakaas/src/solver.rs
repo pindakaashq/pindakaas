@@ -37,9 +37,11 @@ pub trait Assumptions: Solver {
 
 /// Membership queries on an unsatisfiable assumption core.
 pub trait FailedAssumptions {
-	/// Reports whether the assumption contributed to the last unsatisfiable result.
+	/// Reports whether the assumption contributed to the last unsatisfiable
+	/// result.
 	///
-	/// The result is unspecified when `lit` was not an assumption of that search.
+	/// The result is unspecified when `lit` was not an assumption of that
+	/// search.
 	fn fail(&self, lit: Lit) -> bool;
 }
 
@@ -91,7 +93,8 @@ pub enum TermSignal {
 /// Trait implemented by solvers that will make a call to the given callback
 /// function to determine whether to continue or terminate the search.
 pub trait TerminateCallback: Solver {
-	/// Set the periodically polled termination callback, replacing the previous one.
+	/// Set the periodically polled termination callback, replacing the previous
+	/// one.
 	///
 	/// The callback runs on whichever thread is solving.
 	fn set_terminate_callback<F: FnMut() -> TermSignal + Send + 'static>(&mut self, cb: Option<F>);

@@ -12,12 +12,11 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 use crate::{
 	constraint::{
 		bool_linear::NormalizedBoolLinear,
-		linear::{AdderEncoder, Comparator, LimitComp, Linear, PosCoeff},
 		cardinality::Cardinality,
 		cardinality_one::{BitwiseEncoder, CardinalityOne},
-		int_linear::NormalizedIntLinear,
-		linear::LinVariant,
 		count::{Count, SortingNetworkEncoder},
+		int_linear::NormalizedIntLinear,
+		linear::{AdderEncoder, Comparator, LimitComp, LinVariant, Linear, PosCoeff},
 	},
 	decision::integer::IntVar,
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
@@ -264,10 +263,15 @@ impl LinAggregator {
 		terms.extend(int_terms.into_iter().map(|(x, c)| (PosCoeff::new(c), x)));
 		Ok(LinVariant::Linear(NormalizedIntLinear::new(terms, cmp, k)))
 	}
-	/// Pre-aggregation of at least `n` equal-coefficient literals by `sorted_encoder`.
+	/// Pre-aggregation of at least `n` equal-coefficient literals by
+	/// `sorted_encoder`.
 	///
 	/// Zero disables the transformation, as in the default configuration.
-	pub fn sort_same_coefficients(&mut self, sorted_encoder: SortingNetworkEncoder, n: usize) -> &mut Self {
+	pub fn sort_same_coefficients(
+		&mut self,
+		sorted_encoder: SortingNetworkEncoder,
+		n: usize,
+	) -> &mut Self {
 		self.sorted_encoder = sorted_encoder;
 		self.sort_same_coefficients = n;
 		self
@@ -294,7 +298,8 @@ impl<Enc, Agg> LinearEncoder<Enc, Agg> {
 		&self.agg
 	}
 
-	/// Creates an encoder with independently selected aggregation and dispatch stages.
+	/// Creates an encoder with independently selected aggregation and dispatch
+	/// stages.
 	pub fn new(enc: Enc, agg: Agg) -> Self {
 		Self { enc, agg }
 	}
@@ -351,7 +356,8 @@ impl<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
 		&mut self.lin_enc
 	}
 
-	/// Creates a dispatcher with one encoder for every [`LinVariant`] carrying data.
+	/// Creates a dispatcher with one encoder for every [`LinVariant`] carrying
+	/// data.
 	pub fn new(
 		lin_enc: LinEnc,
 		bool_lin_enc: BoolLinEnc,
@@ -538,9 +544,7 @@ mod tests {
 		let a = cnf.new_lit();
 		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
 		let con = Linear::new(a * 2 + y.clone() * 3, Comparator::LessEq, 0);
-		let LinVariant::Linear(con) = LinAggregator::default()
-			.aggregate(&mut cnf, &con)
-			.unwrap()
+		let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
 		else {
 			panic!("a literal and an integer make a linear constraint");
 		};
@@ -564,9 +568,7 @@ mod tests {
 		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
 
 		let con = Linear::new(a * 3 + y.clone() * 5, Comparator::LessEq, 11);
-		let LinVariant::Linear(con) = LinAggregator::default()
-			.aggregate(&mut cnf, &con)
-			.unwrap()
+		let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
 		else {
 			panic!("a literal and an integer make a linear constraint");
 		};
@@ -835,7 +837,8 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				LinAggregator::default().sort_same_coefficients(SortingNetworkEncoder::default(), 2),
+				LinAggregator::default()
+					.sort_same_coefficients(SortingNetworkEncoder::default(), 2),
 				&Linear::new(
 					LinExp::from_slices(&[3, 3, 5, 3], &[a, b, d, c]),
 					Comparator::LessEq,
@@ -864,7 +867,8 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				LinAggregator::default().sort_same_coefficients(SortingNetworkEncoder::default(), 2),
+				LinAggregator::default()
+					.sort_same_coefficients(SortingNetworkEncoder::default(), 2),
 				&Linear::new(
 					LinExp::from_slices(&[5, 5, 5, 5, 4], &vars),
 					Comparator::LessEq,
@@ -1012,7 +1016,9 @@ mod tests {
 			else {
 				panic!("literals against an integer are a count");
 			};
-			SortingNetworkEncoder::default().encode(&mut cnf, &count).unwrap();
+			SortingNetworkEncoder::default()
+				.encode(&mut cnf, &count)
+				.unwrap();
 
 			let mut seen = Vec::new();
 			let mut slv = Cadical::from(&cnf);

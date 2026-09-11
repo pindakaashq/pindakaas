@@ -11,8 +11,8 @@ use itertools::Itertools;
 
 use crate::{
 	constraint::{
-		linear::LimitComp,
 		cardinality_one::{at_least_one_clause, CardinalityOne},
+		linear::LimitComp,
 	},
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Result,
 };

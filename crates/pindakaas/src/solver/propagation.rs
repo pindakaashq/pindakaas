@@ -321,8 +321,8 @@ impl Extend<Lit> for ClauseBuilder<'_> {
 }
 
 impl<'a> Solution<'a> {
-	/// Returns the assigned literals of the observed variables, in order of their
-	/// variable.
+	/// Returns the assigned literals of the observed variables, in order of
+	/// their variable.
 	pub fn literals(&self) -> &'a [Lit] {
 		self.model
 	}

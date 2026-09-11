@@ -384,18 +384,14 @@ where
 		// SAFETY: Valid solver pointer; backend honours IPASIR.
 		let res = unsafe { Self::IPASIR_SOLVE(self.ipasir_store().solver_ptr()) };
 		match res {
-			10 => {
-				SolveResult::Satisfied(IpasirValuation::<Impl> {
-					ptr: self.ipasir_store().solver_ptr(),
-					_methods: PhantomData,
-				})
-			}
-			20 => {
-				SolveResult::Unsatisfiable(IpasirFailedAssumptions::<Impl> {
-					ptr: self.ipasir_store().solver_ptr(),
-					_methods: PhantomData,
-				})
-			}
+			10 => SolveResult::Satisfied(IpasirValuation::<Impl> {
+				ptr: self.ipasir_store().solver_ptr(),
+				_methods: PhantomData,
+			}),
+			20 => SolveResult::Unsatisfiable(IpasirFailedAssumptions::<Impl> {
+				ptr: self.ipasir_store().solver_ptr(),
+				_methods: PhantomData,
+			}),
 			_ => {
 				debug_assert_eq!(res, 0); // According to spec should be 0, unknown
 				SolveResult::Unknown

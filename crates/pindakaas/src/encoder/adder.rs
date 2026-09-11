@@ -24,11 +24,11 @@ use itertools::Itertools;
 use crate::{
 	constraint::{
 		bool_linear::NormalizedBoolLinear,
-		linear::{LimitComp, PosCoeff},
 		cardinality::Cardinality,
-		count::Count,
 		cardinality_one::CardinalityOne,
+		count::Count,
 		int_linear::{NormalizedIntLinear, Term},
+		linear::{LimitComp, PosCoeff},
 		propositional_logic::{Formula, TseitinEncoder},
 	},
 	decision::integer::{lex_leq_const, BinaryEncoding, IntVar},

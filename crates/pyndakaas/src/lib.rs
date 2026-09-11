@@ -74,9 +74,9 @@ mod pindakaas {
 			count::{Count, SortingNetworkEncoder},
 			int_linear::NormalizedIntLinear,
 			linear::{
-				AdderEncoder, Comparator, LinAggregator, LinExp as BaseBoolLinExp, LinVariant,
-				Linear as BaseBoolLinCon, LinearEncoder, DecisionDiagramEncoder, MixedRadixEncoder,
-				WatchdogEncoder, SequentialCounterEncoder, TotalizerEncoder,
+				AdderEncoder, Comparator, DecisionDiagramEncoder, LinAggregator,
+				LinExp as BaseBoolLinExp, LinVariant, Linear as BaseBoolLinCon, LinearEncoder,
+				MixedRadixEncoder, SequentialCounterEncoder, TotalizerEncoder, WatchdogEncoder,
 			},
 			propositional_logic::{Formula as BaseFormula, TseitinEncoder},
 		},
@@ -135,7 +135,8 @@ mod pindakaas {
 	#[derive(Clone, Copy, Debug, PartialEq)]
 	/// Encoding algorithm.
 	///
-	/// Selecting an incompatible constraint type raises :class:`InvalidEncoder`.
+	/// Selecting an incompatible constraint type raises
+	/// :class:`InvalidEncoder`.
 	enum Encoder {
 		// TODO These doc-strings do not show up, upstream issue: https://github.com/PyO3/pyo3/issues/5197
 		/// A binary adder circuit for Boolean linear constraints.
@@ -802,7 +803,8 @@ mod pindakaas {
 		/// Creates an integer variable over inclusive `(start, end)` intervals.
 		///
 		/// Args:
-		///     domain: Non-empty inclusive intervals containing the allowed values.
+		///     domain: Non-empty inclusive intervals containing the allowed
+		/// values.
 		///
 		/// Returns:
 		///     An integer variable whose Boolean views are created on demand.
@@ -846,10 +848,12 @@ mod pindakaas {
 		///     create: Whether to create a missing order encoding.
 		///
 		/// Returns:
-		///     The literal, a settled Boolean, or `None` when creation was disabled.
+		///     The literal, a settled Boolean, or `None` when creation was
+		/// disabled.
 		///
 		/// Raises:
-		///     Unsatisfiable: Creating or channelling the view causes a contradiction.
+		///     Unsatisfiable: Creating or channelling the view causes a
+		/// contradiction.
 		#[pyo3(signature = (db, value, create = true))]
 		fn at_least(
 			&self,
@@ -876,10 +880,12 @@ mod pindakaas {
 		///     create: Whether to create a missing order encoding.
 		///
 		/// Returns:
-		///     The literal, a settled Boolean, or `None` when creation was disabled.
+		///     The literal, a settled Boolean, or `None` when creation was
+		/// disabled.
 		///
 		/// Raises:
-		///     Unsatisfiable: Creating or channelling the view causes a contradiction.
+		///     Unsatisfiable: Creating or channelling the view causes a
+		/// contradiction.
 		#[pyo3(signature = (db, value, create = true))]
 		fn at_most(
 			&self,
@@ -904,10 +910,12 @@ mod pindakaas {
 		///     create: Whether to create a missing direct encoding.
 		///
 		/// Returns:
-		///     The literal, a settled Boolean, or `None` when creation was disabled.
+		///     The literal, a settled Boolean, or `None` when creation was
+		/// disabled.
 		///
 		/// Raises:
-		///     Unsatisfiable: Creating or channelling the view causes a contradiction.
+		///     Unsatisfiable: Creating or channelling the view causes a
+		/// contradiction.
 		#[pyo3(signature = (db, value, create = true))]
 		fn equals(
 			&self,
@@ -958,12 +966,13 @@ mod pindakaas {
 
 		/// The integer value represented in a solution.
 		///
-		/// Without a Boolean view, the domain minimum is returned. Otherwise the
-		/// supplied model must belong to this variable's database; unassigned
-		/// literal values (`None`) are read as false.
+		/// Without a Boolean view, the domain minimum is returned. Otherwise
+		/// the supplied model must belong to this variable's database;
+		/// unassigned literal values (`None`) are read as false.
 		///
 		/// Args:
-		///     solution: Object whose `value(Lit)` method supplies model values.
+		///     solution: Object whose `value(Lit)` method supplies model
+		/// values.
 		///
 		/// Returns:
 		///     The integer represented by the supplied literal values.
@@ -1007,7 +1016,8 @@ mod pindakaas {
 			}
 		}
 
-		/// Returns the constant value, or `None` if the value is not yet settled.
+		/// Returns the constant value, or `None` if the value is not yet
+		/// settled.
 		fn value(&self) -> Option<bool> {
 			match self.0 {
 				BaseBoolVal::Const(b) => Some(b),
@@ -1103,7 +1113,8 @@ mod pindakaas {
 			Self(BaseLit::from_raw(value))
 		}
 
-		/// Reports whether this literal is the negative polarity of its variable.
+		/// Reports whether this literal is the negative polarity of its
+		/// variable.
 		fn is_negated(&self) -> bool {
 			self.0.is_negated()
 		}
@@ -1315,9 +1326,10 @@ mod pindakaas {
 
 		/// A solve call holding exclusive ownership of its solver.
 		///
-		/// The boxed result borrows the solver despite its erased `'static` lifetime.
-		/// Keep the solver alive and unmutated until the result is cleared; `exit`
-		/// must drop the result before returning the solver to its owner.
+		/// The boxed result borrows the solver despite its erased `'static`
+		/// lifetime. Keep the solver alive and unmutated until the result is
+		/// cleared; `exit` must drop the result before returning the solver
+		/// to its owner.
 		struct SolverResultImpl<Owner, S> {
 			owner: Py<Owner>,
 			/// The laundered borrow of `solver`; see the type-level invariant.

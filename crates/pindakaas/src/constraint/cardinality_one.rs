@@ -4,16 +4,16 @@
 //! four below trade clauses against variables differently, so which suits
 //! depends on how many literals there are.
 
+use rustc_hash::FxHashSet;
+
 pub use crate::encoder::{
 	bitwise::BitwiseEncoder, ladder::LadderEncoder, pairwise::PairwiseEncoder,
 	product::ProductEncoder,
 };
-use rustc_hash::FxHashSet;
-
 use crate::{
 	constraint::{
-		linear::{Comparator, LimitComp},
 		cardinality::Cardinality,
+		linear::{Comparator, LimitComp},
 	},
 	Checker, ClauseDatabase, ClauseDatabaseTools, Lit, Result, Valuation,
 };
@@ -101,7 +101,7 @@ pub(crate) mod tests {
 	#[should_panic = "distinct variables"]
 	fn a_repeated_variable_is_not_an_at_most_one_constraint() {
 		use crate::{
-			constraint::{linear::LimitComp, cardinality_one::CardinalityOne},
+			constraint::{cardinality_one::CardinalityOne, linear::LimitComp},
 			ClauseDatabaseTools, Cnf,
 		};
 		let mut f = Cnf::default();
@@ -379,10 +379,10 @@ pub(crate) mod tests {
 
 	use crate::{
 		constraint::{
-			linear::LimitComp,
 			cardinality_one::{
 				BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder, ProductEncoder,
 			},
+			linear::LimitComp,
 		},
 		helpers::tests::{assert_encoding, assert_solutions, expect_file},
 		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Unsatisfiable,

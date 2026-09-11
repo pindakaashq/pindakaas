@@ -101,8 +101,8 @@ impl Checker for Count {
 const _: () = {
 	use crate::{
 		constraint::linear::{
-			AdderEncoder, DecisionDiagramEncoder, WatchdogEncoder, MixedRadixEncoder,
-			SequentialCounterEncoder, TotalizerEncoder,
+			AdderEncoder, DecisionDiagramEncoder, MixedRadixEncoder, SequentialCounterEncoder,
+			TotalizerEncoder, WatchdogEncoder,
 		},
 		Cnf, Encoder,
 	};
@@ -125,8 +125,8 @@ mod tests {
 	use super::{Count, SortingNetworkEncoder};
 	use crate::{
 		constraint::linear::{
-			AdderEncoder, DecisionDiagramEncoder, LimitComp, MixedRadixEncoder, SequentialCounterEncoder,
-			TotalizerEncoder,
+			AdderEncoder, DecisionDiagramEncoder, LimitComp, MixedRadixEncoder,
+			SequentialCounterEncoder, TotalizerEncoder,
 		},
 		decision::integer::IntVar,
 		solver::{cadical::Cadical, SolveResult, Solver},
@@ -186,7 +186,9 @@ mod tests {
 						}
 						want = Some(seen);
 					}
-					Some(want) => assert_eq!(&seen, want, "{name} {cmp:?} differs from the network"),
+					Some(want) => {
+						assert_eq!(&seen, want, "{name} {cmp:?} differs from the network")
+					}
 				}
 			}
 		}

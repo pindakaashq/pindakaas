@@ -15,7 +15,10 @@
 //! ```
 
 // Only some of the crate's dev-dependencies are used by any one test target.
-#![allow(unused_crate_dependencies, reason = "shared across the crate's test targets")]
+#![allow(
+	unused_crate_dependencies,
+	reason = "shared across the crate's test targets"
+)]
 
 use std::{
 	io::{self, Write},
@@ -64,8 +67,10 @@ fn pigeonhole(enc: &str) -> Result<Cnf, Unsatisfiable> {
 		.map(|_| cnf.new_var_range(HOLES).iter_lits().collect())
 		.collect();
 	for row in &grid {
-		PairwiseEncoder::default()
-			.encode(&mut cnf, &CardinalityOne::new(row.clone(), LimitComp::Equal))?;
+		PairwiseEncoder::default().encode(
+			&mut cnf,
+			&CardinalityOne::new(row.clone(), LimitComp::Equal),
+		)?;
 	}
 	for h in 0..HOLES {
 		let column: Vec<Lit> = grid.iter().map(|row| row[h]).collect();
@@ -95,11 +100,7 @@ fn market_split(enc: &str) -> Result<Cnf, Unsatisfiable> {
 		// Every second weight is a subset sum, so neither equality is out of
 		// reach by itself.
 		let k = weights.iter().skip(seed).step_by(2).sum();
-		let con = Linear::new(
-			LinExp::from_slices(&weights, &lits),
-			Comparator::Equal,
-			k,
-		);
+		let con = Linear::new(LinExp::from_slices(&weights, &lits), Comparator::Equal, k);
 		encode(enc, &mut cnf, &con)?;
 	}
 	Ok(cnf)
@@ -115,17 +116,17 @@ fn knapsack(enc: &str) -> Result<Cnf, Unsatisfiable> {
 	let (mut budget, mut floor) = (0, 0);
 	for g in 0..GROUPS {
 		let lits: Vec<Lit> = cnf.new_var_range(CHOICES).iter_lits().collect();
-		PairwiseEncoder::default()
-			.encode(&mut cnf, &CardinalityOne::new(lits.clone(), LimitComp::Equal))?;
+		PairwiseEncoder::default().encode(
+			&mut cnf,
+			&CardinalityOne::new(lits.clone(), LimitComp::Equal),
+		)?;
 		let ws = coefficients(CHOICES, 60, 20 + g as u64);
 		// Heuristic: profit tracks weight, so cheap items are also poor ones
 		// and the choice is a real trade-off rather than a dominated one.
 		let ps: Vec<Coeff> = ws.iter().map(|w| w * 3 / 2 + 1).collect();
 		let bools = || lits.iter().map(|&l| BoolVal::Lit(l));
-		weight = weight
-			+ IntVar::from_direct_walk(&mut cnf, ws.iter().copied().zip(bools()))?;
-		profit = profit
-			+ IntVar::from_direct_walk(&mut cnf, ps.iter().copied().zip(bools()))?;
+		weight = weight + IntVar::from_direct_walk(&mut cnf, ws.iter().copied().zip(bools()))?;
+		profit = profit + IntVar::from_direct_walk(&mut cnf, ps.iter().copied().zip(bools()))?;
 		// Halfway between the cheapest and the dearest choice of each group,
 		// so that neither constraint is slack.
 		budget += (ws.iter().min().unwrap() + ws.iter().max().unwrap()) / 2;
@@ -318,7 +319,13 @@ fn main() {
 				String::from("t/o")
 			} else {
 				conflicts(&cnf).map_or_else(
-					|why| if why == "over" { format!(">{CAP}") } else { why.to_owned() },
+					|why| {
+						if why == "over" {
+							format!(">{CAP}")
+						} else {
+							why.to_owned()
+						}
+					},
 					|c| c.to_string(),
 				)
 			};

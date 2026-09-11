@@ -12,18 +12,16 @@ use itertools::Itertools;
 use rangelist::RangeList;
 
 pub use crate::encoder::{
-	decision_diagram::DecisionDiagramEncoder,
-	mixed_radix::MixedRadixEncoder,
+	decision_diagram::DecisionDiagramEncoder, mixed_radix::MixedRadixEncoder,
+	sequential_counter::SequentialCounterEncoder, totalizer::TotalizerEncoder,
 	watchdog::WatchdogEncoder,
-	sequential_counter::SequentialCounterEncoder,
-	totalizer::TotalizerEncoder,
 };
 #[cfg(test)]
 use crate::Lit;
 use crate::{
 	constraint::{
-		linear::{Comparator, LimitComp, PosCoeff},
 		int_ternary::IntTernary,
+		linear::{Comparator, LimitComp, PosCoeff},
 	},
 	decision::integer::IntVar,
 	encoder::adder::AdderEncoder,

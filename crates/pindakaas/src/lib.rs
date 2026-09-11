@@ -101,8 +101,9 @@
 //! # Choosing an encoder
 //!
 //! Aggregation turns a constraint into a specialised form before encoding.
-//! `int` means [`NormalizedIntLinear`](constraint::int_linear::NormalizedIntLinear),
-//! `bool` means [`NormalizedBoolLinear`](constraint::bool_linear::NormalizedBoolLinear),
+//! `int` means
+//! [`NormalizedIntLinear`](constraint::int_linear::NormalizedIntLinear), `bool`
+//! means [`NormalizedBoolLinear`](constraint::bool_linear::NormalizedBoolLinear),
 //! `card` means [`Cardinality`](constraint::cardinality::Cardinality), `amo`
 //! means [`CardinalityOne`](constraint::cardinality_one::CardinalityOne), and
 //! `count` means [`Count`](constraint::count::Count). A supplied at-most-one

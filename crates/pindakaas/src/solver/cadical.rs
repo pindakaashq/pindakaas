@@ -72,7 +72,6 @@ pub enum ProofConclusionType {
 /// aborts the process rather than unwinding) and must not re-enter the solver,
 /// which would panic on the tracer's already mutably borrowed [`RefCell`].
 pub trait ProofTracer {
-
 	/// An original clause is added.
 	fn add_original_clause(&mut self, id: i64, redundant: bool, clause: &[Lit], restored: bool) {
 		let _ = (id, redundant, clause, restored);
@@ -118,7 +117,6 @@ pub trait ProofTracer {
 		let _ = (status, id);
 	}
 
-
 	/// Finalizes a clause.
 	///
 	/// - `id`: Clause ID.
@@ -134,7 +132,6 @@ pub trait ProofTracer {
 	fn begin_proof(&mut self, first_derived_id: i64) {
 		let _ = first_derived_id;
 	}
-
 
 	/// Notification that an assumption has been added.
 	fn solve_query(&mut self) {}
@@ -759,8 +756,8 @@ mod tests {
 
 	use crate::{
 		constraint::{
-			linear::LimitComp,
 			cardinality_one::{CardinalityOne, PairwiseEncoder},
+			linear::LimitComp,
 		},
 		helpers::tests::{assert_solutions, expect_file},
 		solver::{

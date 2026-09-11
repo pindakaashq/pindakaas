@@ -11,7 +11,10 @@
 //! ```
 
 // Only some of the crate's dev-dependencies are used by any one test target.
-#![allow(unused_crate_dependencies, reason = "shared across the crate's test targets")]
+#![allow(
+	unused_crate_dependencies,
+	reason = "shared across the crate's test targets"
+)]
 
 use std::fmt::{self, Display};
 
@@ -138,7 +141,10 @@ impl Case {
 				for weights in groups {
 					let lits: Vec<Lit> = cnf.new_var_range(weights.len()).iter_lits().collect();
 					PairwiseEncoder::default()
-						.encode(&mut cnf, &CardinalityOne::new(lits.clone(), LimitComp::Equal))
+						.encode(
+							&mut cnf,
+							&CardinalityOne::new(lits.clone(), LimitComp::Equal),
+						)
 						.expect("an exactly-one over fresh literals is satisfiable");
 					let walk = weights
 						.iter()

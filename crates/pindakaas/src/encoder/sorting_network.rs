@@ -128,7 +128,8 @@ impl SortingNetworkEncoder {
 		Ok(())
 	}
 
-	/// Configures whether intermediate variables are constrained independently of the merge.
+	/// Configures whether intermediate variables are constrained independently
+	/// of the merge.
 	pub fn enable_intermediate_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
@@ -177,7 +178,8 @@ impl SortingNetworkEncoder {
 		let (a, b, c) = (x.max(), y.max(), z.max());
 		let strat = if let SortingNetworkStrategy::Mixed(lambda) = &self.strategy {
 			let mut cache = self.strategy_cost_cache.lock().unwrap();
-			SortingNetworkStrategy::mixed_cost(&mut cache, a as u128, b as u128, c as u128, *lambda).0
+			SortingNetworkStrategy::mixed_cost(&mut cache, a as u128, b as u128, c as u128, *lambda)
+				.0
 		} else {
 			self.strategy.clone()
 		};
@@ -203,7 +205,9 @@ impl SortingNetworkEncoder {
 					(0..=c).try_for_each(|c| self.comp(db, &z_floor, &z_ceil, cmp, z, c))
 				}
 			}
-			SortingNetworkStrategy::Mixed(_) => unreachable!("a strategy is settled before it is used"),
+			SortingNetworkStrategy::Mixed(_) => {
+				unreachable!("a strategy is settled before it is used")
+			}
 		}
 	}
 
@@ -313,9 +317,11 @@ impl SortingNetworkEncoder {
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		Ok(IntVar::new((x.min() + y.min())..=min(x.max() + y.max(), ub))
-			.enforce_consistency(self.add_consistency)
-			.with_label(format!("{}+{}", x.label(), y.label())))
+		Ok(
+			IntVar::new((x.min() + y.min())..=min(x.max() + y.max(), ub))
+				.enforce_consistency(self.add_consistency)
+				.with_label(format!("{}+{}", x.label(), y.label())),
+		)
 	}
 
 	/// Encode `x + y ≷ z` as the linear constraint it is.
@@ -341,7 +347,8 @@ impl SortingNetworkEncoder {
 		)
 	}
 
-	/// Selects the merge strategy; the default is [`SortingNetworkStrategy::Mixed`] with weight 10.
+	/// Selects the merge strategy; the default is
+	/// [`SortingNetworkStrategy::Mixed`] with weight 10.
 	pub fn with_strategy(&mut self, strategy: SortingNetworkStrategy) -> &mut Self {
 		self.strategy = strategy;
 		self
@@ -531,8 +538,8 @@ mod tests {
 	use crate::{
 		constraint::{
 			cardinality::Cardinality,
-			linear::{LimitComp, PosCoeff},
 			count::{Count, SortingNetworkEncoder, SortingNetworkStrategy},
+			linear::{LimitComp, PosCoeff},
 		},
 		decision::integer::IntVar,
 		helpers::tests::{assert_solutions, expect_file},
@@ -662,7 +669,10 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortingNetworkStrategy::Recursive)
-			.encode(&mut cnf, &Count::new(vec![a, b], LimitComp::Equal, y.clone()))
+			.encode(
+				&mut cnf,
+				&Count::new(vec![a, b], LimitComp::Equal, y.clone()),
+			)
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_2_sorted_eq.sol"]);
@@ -685,7 +695,10 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortingNetworkStrategy::Recursive)
-			.encode(&mut cnf, &Count::new(vec![a, b, c], LimitComp::Equal, y.clone()))
+			.encode(
+				&mut cnf,
+				&Count::new(vec![a, b, c], LimitComp::Equal, y.clone()),
+			)
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_3_2_sorted_eq.sol"]);
@@ -708,7 +721,10 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortingNetworkStrategy::Recursive)
-			.encode(&mut cnf, &Count::new(vec![a, b, c], LimitComp::Equal, y.clone()))
+			.encode(
+				&mut cnf,
+				&Count::new(vec![a, b, c], LimitComp::Equal, y.clone()),
+			)
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_3_sorted_eq.sol"]);
@@ -729,7 +745,10 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortingNetworkStrategy::Recursive)
-			.encode(&mut cnf, &Count::new(lits.clone(), LimitComp::Equal, y.clone()))
+			.encode(
+				&mut cnf,
+				&Count::new(lits.clone(), LimitComp::Equal, y.clone()),
+			)
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_4_2_sorted_eq.sol"]);
@@ -750,7 +769,10 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortingNetworkStrategy::Recursive)
-			.encode(&mut cnf, &Count::new(lits.clone(), LimitComp::Equal, y.clone()))
+			.encode(
+				&mut cnf,
+				&Count::new(lits.clone(), LimitComp::Equal, y.clone()),
+			)
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_4_3_sorted_eq.sol"]);
@@ -771,7 +793,10 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortingNetworkStrategy::Recursive)
-			.encode(&mut cnf, &Count::new(lits.clone(), LimitComp::Equal, y.clone()))
+			.encode(
+				&mut cnf,
+				&Count::new(lits.clone(), LimitComp::Equal, y.clone()),
+			)
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_4_sorted_eq.sol"]);
@@ -792,7 +817,10 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortingNetworkStrategy::Recursive)
-			.encode(&mut cnf, &Count::new(lits.clone(), LimitComp::Equal, y.clone()))
+			.encode(
+				&mut cnf,
+				&Count::new(lits.clone(), LimitComp::Equal, y.clone()),
+			)
 			.unwrap();
 
 		assert_solutions(
@@ -817,7 +845,10 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortingNetworkStrategy::Recursive)
-			.encode(&mut cnf, &Count::new(lits.clone(), LimitComp::Equal, y.clone()))
+			.encode(
+				&mut cnf,
+				&Count::new(lits.clone(), LimitComp::Equal, y.clone()),
+			)
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_5_3_sorted_eq.sol"]);
@@ -838,7 +869,10 @@ mod tests {
 		.collect_vec();
 
 		get_sorted_encoder(SortingNetworkStrategy::Recursive)
-			.encode(&mut cnf, &Count::new(lits.clone(), LimitComp::Equal, y.clone()))
+			.encode(
+				&mut cnf,
+				&Count::new(lits.clone(), LimitComp::Equal, y.clone()),
+			)
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_5_sorted_eq.sol"]);

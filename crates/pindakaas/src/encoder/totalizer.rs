@@ -25,13 +25,13 @@ use rangelist::RangeList;
 
 use crate::{
 	constraint::{
-		linear::Comparator,
 		bool_linear::NormalizedBoolLinear,
 		cardinality::Cardinality,
-		count::Count,
 		cardinality_one::CardinalityOne,
+		count::Count,
 		int_linear::{sum_values, term_max, term_min, Decompose, NormalizedIntLinear},
 		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
+		linear::Comparator,
 	},
 	decision::integer::{Consistency, IntVar},
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
@@ -85,7 +85,8 @@ impl TotalizerEncoder {
 		})
 	}
 
-	/// Enable independent domain constraints for newly created intermediate views.
+	/// Enable independent domain constraints for newly created intermediate
+	/// views.
 	///
 	/// Disabled by default. Enables standalone binary and direct consistency
 	/// clauses; order-encoding implication chains remain mandatory.
@@ -104,7 +105,8 @@ impl TotalizerEncoder {
 		self
 	}
 
-	/// Select the domain consistency applied before decomposition; bounds is the default.
+	/// Select the domain consistency applied before decomposition; bounds is
+	/// the default.
 	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
 		self.add_propagation = c;
 		self

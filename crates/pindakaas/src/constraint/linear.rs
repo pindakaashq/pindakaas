@@ -19,9 +19,9 @@ pub use crate::encoder::{
 	aggregate::{LinAggregator, LinearEncoder, StaticLinEncoder},
 	decision_diagram::DecisionDiagramEncoder,
 	mixed_radix::MixedRadixEncoder,
-	watchdog::WatchdogEncoder,
 	sequential_counter::SequentialCounterEncoder,
 	totalizer::TotalizerEncoder,
+	watchdog::WatchdogEncoder,
 };
 use crate::{
 	constraint::{
@@ -150,7 +150,8 @@ impl LinExp {
 		self
 	}
 
-	/// Construct a pseudo-Boolean sum from parallel coefficient and literal slices.
+	/// Construct a pseudo-Boolean sum from parallel coefficient and literal
+	/// slices.
 	///
 	/// # Panics
 	///
@@ -179,7 +180,8 @@ impl LinExp {
 		}
 	}
 
-	/// Boolean terms only, excluding the additive constant and outer multiplier.
+	/// Boolean terms only, excluding the additive constant and outer
+	/// multiplier.
 	pub fn terms(&self) -> impl Iterator<Item = (Lit, Coeff)> + '_ {
 		self.terms.iter().filter_map(|t| match t {
 			LinTerm::Bool(l, c) => Some((*l, *c)),
@@ -187,7 +189,8 @@ impl LinExp {
 		})
 	}
 
-	/// Integer terms only, excluding the additive constant and outer multiplier.
+	/// Integer terms only, excluding the additive constant and outer
+	/// multiplier.
 	pub fn int_terms(&self) -> impl Iterator<Item = (&IntVar, Coeff)> + '_ {
 		self.terms.iter().filter_map(|t| match t {
 			LinTerm::Int(x, c) => Some((x, *c)),
@@ -382,7 +385,8 @@ impl SubAssign for LinExp {
 }
 
 impl Linear {
-	/// Construct the constraint `exp ≷ k`, without normalisation or aggregation.
+	/// Construct the constraint `exp ≷ k`, without normalisation or
+	/// aggregation.
 	///
 	/// # Examples
 	///
@@ -586,11 +590,19 @@ mod tests {
 						>::default()
 						.encode(&mut cnf, &con),
 						"diagram" => LinearEncoder::<
-							StaticLinEncoder<DecisionDiagramEncoder, DecisionDiagramEncoder, DecisionDiagramEncoder>,
+							StaticLinEncoder<
+								DecisionDiagramEncoder,
+								DecisionDiagramEncoder,
+								DecisionDiagramEncoder,
+							>,
 						>::default()
 						.encode(&mut cnf, &con),
 						"seq" => LinearEncoder::<
-							StaticLinEncoder<SequentialCounterEncoder, SequentialCounterEncoder, SequentialCounterEncoder>,
+							StaticLinEncoder<
+								SequentialCounterEncoder,
+								SequentialCounterEncoder,
+								SequentialCounterEncoder,
+							>,
 						>::default()
 						.encode(&mut cnf, &con),
 						"tree" => LinearEncoder::<
@@ -598,11 +610,7 @@ mod tests {
 						>::default()
 						.encode(&mut cnf, &con),
 						"wdog" => LinearEncoder::<
-							StaticLinEncoder<
-								WatchdogEncoder,
-								WatchdogEncoder,
-								WatchdogEncoder,
-							>,
+							StaticLinEncoder<WatchdogEncoder, WatchdogEncoder, WatchdogEncoder>,
 						>::default()
 						.encode(&mut cnf, &con),
 						"wdog-l" => {
@@ -614,8 +622,7 @@ mod tests {
 							let _ = enc.lin_encoder().with_local(true);
 							let _ = enc.bool_lin_encoder().with_local(true);
 							let _ = enc.card_encoder().with_local(true);
-							LinearEncoder::new(enc, LinAggregator::default())
-								.encode(&mut cnf, &con)
+							LinearEncoder::new(enc, LinAggregator::default()).encode(&mut cnf, &con)
 						}
 						_ => LinearEncoder::<
 							StaticLinEncoder<

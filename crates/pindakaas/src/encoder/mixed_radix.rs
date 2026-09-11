@@ -8,8 +8,8 @@
 //! A node represents `∑ⱼ digitⱼ·(β₀·…·βⱼ₋₁)`, with `digitⱼ < βⱼ`.
 //! The base heuristic considers positive weighted term values. Unlike Zha et
 //! al., it requires a divisor to cover half the remaining values; otherwise
-//! further digits use `max(2, ⌊√n⌋)` for `n` terms. Ties prefer smaller divisors
-//! because a digit costs `O(β²)` clauses.
+//! further digits use `max(2, ⌊√n⌋)` for `n` terms. Ties prefer smaller
+//! divisors because a digit costs `O(β²)` clauses.
 //!
 //! [^1]: T. Ogawa, Y. Liu, R. Hasegawa, M. Koshimura, H. Fujita, "Modulo Based
 //! CNF Encoding of Cardinality Constraints and Its Application to MaxSAT
@@ -31,8 +31,8 @@ use crate::{
 	constraint::{
 		bool_linear::NormalizedBoolLinear,
 		cardinality::Cardinality,
-		count::Count,
 		cardinality_one::CardinalityOne,
+		count::Count,
 		int_linear::{sum_values, term_max, term_values, NormalizedIntLinear},
 		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 		linear::{Comparator, LimitComp},
@@ -311,12 +311,20 @@ impl MixedRadixEncoder {
 		let domain = x.domain();
 		let digit = self.new_int_var(
 			db,
-			domain.iter().flatten().map(|v| v % base..=v % base).collect(),
+			domain
+				.iter()
+				.flatten()
+				.map(|v| v % base..=v % base)
+				.collect(),
 			"r",
 		)?;
 		let carry = self.new_int_var(
 			db,
-			domain.iter().flatten().map(|v| v / base..=v / base).collect(),
+			domain
+				.iter()
+				.flatten()
+				.map(|v| v / base..=v / base)
+				.collect(),
 			"q",
 		)?;
 		// The radix is the carry's coefficient, so nothing has to be scaled.
@@ -535,7 +543,8 @@ mod tests {
 
 	#[test]
 	fn greedy_base_divides_the_coefficients() {
-		let base = |coefs: &[Coeff], k| MixedRadixEncoder::greedy_base(coefs.to_vec(), coefs.len(), k);
+		let base =
+			|coefs: &[Coeff], k| MixedRadixEncoder::greedy_base(coefs.to_vec(), coefs.len(), k);
 		assert_eq!(base(&[3, 6, 9, 12], 30), vec![3, 2, 2, 2, 2]);
 		// Without a divisor to exploit every digit is the fallback.
 		assert_eq!(base(&[1, 1, 1], 7), vec![2, 2, 2]);

@@ -96,8 +96,8 @@ mod tests {
 
 	use crate::{
 		constraint::{
-			linear::LimitComp,
 			cardinality_one::{CardinalityOne, PairwiseEncoder},
+			linear::LimitComp,
 		},
 		solver::{intel_sat::IntelSat, SolveResult, Solver},
 		ClauseDatabaseTools, Encoder, Valuation,

@@ -4,11 +4,11 @@
 //! longer constraint into these, so this is the one shape that is encoded
 //! directly rather than broken up further.
 
-pub use crate::encoder::int_ternary::{IntTernaryConfig, IntTernaryEncoder};
 use crate::constraint::{
-	linear::Comparator,
 	int_linear::{term_negated, IntLinear, Term},
+	linear::Comparator,
 };
+pub use crate::encoder::int_ternary::{IntTernaryConfig, IntTernaryEncoder};
 
 /// A linear constraint over three integer terms, `x + y ≷ z`.
 ///

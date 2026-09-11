@@ -4,18 +4,18 @@
 //! [`Linear`](super::linear::Linear) and what lets the encoders below
 //! count rather than add.
 
-pub use crate::encoder::{
-	adder::AdderEncoder, decision_diagram::DecisionDiagramEncoder, mixed_radix::MixedRadixEncoder,
-	watchdog::WatchdogEncoder,
-	sorting_network::SortingNetworkEncoder, sequential_counter::SequentialCounterEncoder, totalizer::TotalizerEncoder,
-};
 use rustc_hash::FxHashSet;
 
+pub use crate::encoder::{
+	adder::AdderEncoder, decision_diagram::DecisionDiagramEncoder, mixed_radix::MixedRadixEncoder,
+	sequential_counter::SequentialCounterEncoder, sorting_network::SortingNetworkEncoder,
+	totalizer::TotalizerEncoder, watchdog::WatchdogEncoder,
+};
 use crate::{
 	constraint::{
-		linear::{Comparator, LimitComp, PosCoeff},
 		cardinality_one::CardinalityOne,
 		int_linear::NormalizedIntLinear,
+		linear::{Comparator, LimitComp, PosCoeff},
 	},
 	decision::integer::IntVar,
 	Checker, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation,
@@ -145,8 +145,8 @@ impl From<CardinalityOne> for Cardinality {
 #[cfg(test)]
 const _: () = {
 	use crate::{
-		constraint::{
-			linear::{AdderEncoder, DecisionDiagramEncoder, SequentialCounterEncoder, TotalizerEncoder},
+		constraint::linear::{
+			AdderEncoder, DecisionDiagramEncoder, SequentialCounterEncoder, TotalizerEncoder,
 		},
 		Cnf, Encoder,
 	};
@@ -174,7 +174,7 @@ pub(crate) mod tests {
 	#[should_panic = "distinct variables"]
 	fn a_repeated_variable_is_not_a_cardinality_constraint() {
 		use crate::{
-			constraint::{linear::LimitComp, cardinality::Cardinality},
+			constraint::{cardinality::Cardinality, linear::LimitComp},
 			ClauseDatabaseTools, Cnf,
 		};
 		let mut f = Cnf::default();

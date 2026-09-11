@@ -121,15 +121,16 @@ impl WatchdogEncoder {
 	/// Local watchdogs for domain consistency; global is the default.
 	///
 	/// One watchdog per term value rules it out when the remaining terms exceed
-	/// the residual bound. The global form uses one watchdog for the constraint.
-	/// The propagation guarantee assumes order arithmetic; binary cutoffs can
-	/// weaken it.
+	/// the residual bound. The global form uses one watchdog for the
+	/// constraint. The propagation guarantee assumes order arithmetic; binary
+	/// cutoffs can weaken it.
 	pub fn with_local(&mut self, b: bool) -> &mut Self {
 		self.local = b;
 		self
 	}
 
-	/// Selects domain consistency applied before decomposition; bounds is the default.
+	/// Selects domain consistency applied before decomposition; bounds is the
+	/// default.
 	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
 		self.add_propagation = c;
 		self
@@ -288,10 +289,7 @@ impl WatchdogEncoder {
 					// Half of the count below, which is a view on its literals
 					// rather than a variable of its own.
 					let half = halved(db, &below)?;
-					let (lb, ub) = (
-						count.min() + half.min(),
-						min(count.max() + half.max(), cap),
-					);
+					let (lb, ub) = (count.min() + half.min(), min(count.max() + half.max(), cap));
 					if lb > ub {
 						return Err(Unsatisfiable);
 					}
@@ -451,10 +449,7 @@ mod tests {
 	card1_test_suite! {
 		watchdog_encoder_card1, WatchdogEncoder::default()
 	}
-	linear_test_suite!(
-		watchdog_encoder,
-		WatchdogEncoder::default()
-	);
+	linear_test_suite!(watchdog_encoder, WatchdogEncoder::default());
 
 	linear_test_suite!(
 		watchdog_encoder_local,
@@ -462,13 +457,11 @@ mod tests {
 	);
 	linear_test_suite!(
 		watchdog_encoder_no_prop,
-		WatchdogEncoder::default()
-			.with_propagation(crate::decision::integer::Consistency::None)
+		WatchdogEncoder::default().with_propagation(crate::decision::integer::Consistency::None)
 	);
 	linear_test_suite!(
 		watchdog_encoder_prop_doms,
-		WatchdogEncoder::default()
-			.with_propagation(crate::decision::integer::Consistency::Domain)
+		WatchdogEncoder::default().with_propagation(crate::decision::integer::Consistency::Domain)
 	);
 	linear_test_suite!(
 		watchdog_encoder_consistency,
@@ -498,11 +491,9 @@ mod tests {
 
 		let mut gpw = Cnf::default();
 		let vars = gpw.new_var_range(N).iter_lits().collect_vec();
-		LinearEncoder::<
-			StaticLinEncoder<WatchdogEncoder, WatchdogEncoder>,
-		>::default()
-		.encode(&mut gpw, &con(&vars))
-		.unwrap();
+		LinearEncoder::<StaticLinEncoder<WatchdogEncoder, WatchdogEncoder>>::default()
+			.encode(&mut gpw, &con(&vars))
+			.unwrap();
 
 		assert!(
 			gpw.num_vars() < gt.num_vars(),
@@ -580,9 +571,7 @@ mod tests {
 			LimitComp::LessEq,
 			PosCoeff::new(7),
 		);
-		WatchdogEncoder::default()
-			.encode(&mut cnf, &con)
-			.unwrap();
+		WatchdogEncoder::default().encode(&mut cnf, &con).unwrap();
 
 		let mut seen = Vec::new();
 		let mut slv = Cadical::from(&cnf);

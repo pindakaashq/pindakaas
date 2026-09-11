@@ -7,7 +7,7 @@
 //! ModRef 2004.
 
 use crate::{
-	constraint::{linear::LimitComp, cardinality_one::CardinalityOne},
+	constraint::{cardinality_one::CardinalityOne, linear::LimitComp},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Encoder, Result,
 };
 

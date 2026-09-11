@@ -1246,7 +1246,8 @@ impl IntVar {
 	///
 	/// `min` must not exceed the domain minimum; use exactly enough bits to
 	/// represent `domain.max() - min`. Bits may be constants and must already
-	/// respect domain bounds and holes. Use [`Self::constrain`] to enforce them.
+	/// respect domain bounds and holes. Use [`Self::constrain`] to enforce
+	/// them.
 	///
 	/// # Errors
 	///
@@ -1363,11 +1364,12 @@ impl IntVar {
 
 	/// Automatic domain constraints for newly created views.
 	///
-	/// Enabled by [`Self::new`]. Disabling it skips standalone binary and direct
-	/// consistency clauses; order chains remain mandatory. Set this before
-	/// requesting a view: it does not retrofit existing views. Use
-	/// [`Self::constrain`] to constrain supplied literals. The `from_*` constructors
-	/// disable it because their literals are assumed to be constrained already.
+	/// Enabled by [`Self::new`]. Disabling it skips standalone binary and
+	/// direct consistency clauses; order chains remain mandatory. Set this
+	/// before requesting a view: it does not retrofit existing views. Use
+	/// [`Self::constrain`] to constrain supplied literals. The `from_*`
+	/// constructors disable it because their literals are assumed to be
+	/// constrained already.
 	pub fn enforce_consistency(self, enforce: bool) -> Self {
 		debug_assert!(
 			!self.has_binary_encoding(),

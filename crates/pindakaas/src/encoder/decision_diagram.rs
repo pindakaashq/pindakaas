@@ -27,13 +27,13 @@ use itertools::Itertools;
 
 use crate::{
 	constraint::{
-		linear::Comparator,
 		bool_linear::NormalizedBoolLinear,
 		cardinality::Cardinality,
-		count::Count,
 		cardinality_one::CardinalityOne,
+		count::Count,
 		int_linear::{term_max, term_min, term_values, Decompose, NormalizedIntLinear, Term},
 		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
+		linear::Comparator,
 	},
 	decision::integer::IntVar,
 	helpers::new_named_lit,
@@ -138,7 +138,11 @@ impl DecisionDiagramEncoder {
 		(interval, node)
 	}
 
-	fn construct_diagram(xs: &[Term], cmp: Comparator, k: Coeff) -> Vec<Vec<(Range<Coeff>, DiagramNode)>> {
+	fn construct_diagram(
+		xs: &[Term],
+		cmp: Comparator,
+		k: Coeff,
+	) -> Vec<Vec<(Range<Coeff>, DiagramNode)>> {
 		let bounds = xs
 			.iter()
 			.scan((0, 0), |state, x| {
@@ -193,7 +197,8 @@ impl DecisionDiagramEncoder {
 		ws
 	}
 
-	/// Enable independent domain constraints for newly created intermediate views.
+	/// Enable independent domain constraints for newly created intermediate
+	/// views.
 	///
 	/// Disabled by default. Enables standalone binary and direct consistency
 	/// clauses; order-encoding implication chains remain mandatory.
@@ -372,15 +377,17 @@ mod tests {
 			Comparator::LessEq,
 			6,
 		);
-		let LinVariant::BoolLinear(con) = LinAggregator::default()
-			.aggregate(&mut cnf, &con)
-			.unwrap()
+		let LinVariant::BoolLinear(con) =
+			LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
 		else {
 			panic!("weighted literals aggregate to a Boolean linear constraint");
 		};
 		let con = con.as_int_linear(&mut cnf).unwrap();
-		cnf.encode(&con, &crate::constraint::linear::DecisionDiagramEncoder::default())
-			.unwrap();
+		cnf.encode(
+			&con,
+			&crate::constraint::linear::DecisionDiagramEncoder::default(),
+		)
+		.unwrap();
 
 		assert_eq!(
 			cnf.num_vars(),

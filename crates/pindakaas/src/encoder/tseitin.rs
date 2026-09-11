@@ -179,44 +179,40 @@ fn bind<Db: ClauseDatabase + ?Sized>(
 			}
 		}
 		Formula::Not(f) => !(bind(f, db, name.map(|lit| !lit))?),
-		Formula::And(sub) => {
-			match sub.len() {
-				0 => {
-					let name = name.unwrap_or_else(|| db.new_var().into());
-					db.add_clause([name])?;
-					name
-				}
-				1 => return bind(&sub[0], db, name),
-				_ => {
-					let name = name.unwrap_or_else(|| db.new_var().into());
-					let lits: Vec<_> = sub.iter().map(|f| bind(f, db, None)).try_collect()?;
-					db.add_clause(once(name).chain(lits.iter().map(|&l| !l)))?;
-					for lit in lits {
-						db.add_clause([!name, lit])?;
-					}
-					name
-				}
+		Formula::And(sub) => match sub.len() {
+			0 => {
+				let name = name.unwrap_or_else(|| db.new_var().into());
+				db.add_clause([name])?;
+				name
 			}
-		}
-		Formula::Or(sub) => {
-			match sub.len() {
-				0 => {
-					let name = name.unwrap_or_else(|| db.new_var().into());
-					db.add_clause([!name])?;
-					name
+			1 => return bind(&sub[0], db, name),
+			_ => {
+				let name = name.unwrap_or_else(|| db.new_var().into());
+				let lits: Vec<_> = sub.iter().map(|f| bind(f, db, None)).try_collect()?;
+				db.add_clause(once(name).chain(lits.iter().map(|&l| !l)))?;
+				for lit in lits {
+					db.add_clause([!name, lit])?;
 				}
-				1 => return bind(&sub[0], db, name),
-				_ => {
-					let name = name.unwrap_or_else(|| db.new_var().into());
-					let lits: Vec<_> = sub.iter().map(|f| bind(f, db, None)).try_collect()?;
-					for &lit in &lits {
-						db.add_clause([name, !lit])?;
-					}
-					db.add_clause(once(!name).chain(lits))?;
-					name
-				}
+				name
 			}
-		}
+		},
+		Formula::Or(sub) => match sub.len() {
+			0 => {
+				let name = name.unwrap_or_else(|| db.new_var().into());
+				db.add_clause([!name])?;
+				name
+			}
+			1 => return bind(&sub[0], db, name),
+			_ => {
+				let name = name.unwrap_or_else(|| db.new_var().into());
+				let lits: Vec<_> = sub.iter().map(|f| bind(f, db, None)).try_collect()?;
+				for &lit in &lits {
+					db.add_clause([name, !lit])?;
+				}
+				db.add_clause(once(!name).chain(lits))?;
+				name
+			}
+		},
 		Formula::Implies(left, right) => {
 			let name = name.unwrap_or_else(|| db.new_var().into());
 			let left = bind(left, db, None)?;
