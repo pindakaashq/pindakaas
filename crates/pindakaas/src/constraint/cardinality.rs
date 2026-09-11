@@ -5,8 +5,9 @@
 //! count rather than add.
 
 pub use crate::encoder::{
-	adder::AdderEncoder, bdd::BddEncoder, modulo_totalizer::ModuloTotalizerEncoder,
-	sorting_network::SortingNetworkEncoder, swc::SwcEncoder, totalizer::TotalizerEncoder,
+	adder::AdderEncoder, decision_diagram::DecisionDiagramEncoder, mixed_radix::MixedRadixEncoder,
+	watchdog::WatchdogEncoder,
+	sorting_network::SortingNetworkEncoder, sequential_counter::SequentialCounterEncoder, totalizer::TotalizerEncoder,
 };
 use rustc_hash::FxHashSet;
 
@@ -153,24 +154,26 @@ impl From<CardinalityOne> for Cardinality {
 const _: () = {
 	use crate::{
 		constraint::{
-			linear::{AdderEncoder, BddEncoder, SwcEncoder, TotalizerEncoder},
+			linear::{AdderEncoder, DecisionDiagramEncoder, SequentialCounterEncoder, TotalizerEncoder},
 		},
 		Cnf, Encoder,
 	};
 
 	const fn takes<Db: ClauseDatabase + ?Sized, C, E: Encoder<Db, C>>() {}
 	takes::<Cnf, Cardinality, AdderEncoder>();
-	takes::<Cnf, Cardinality, BddEncoder>();
-	takes::<Cnf, Cardinality, SwcEncoder>();
+	takes::<Cnf, Cardinality, DecisionDiagramEncoder>();
+	takes::<Cnf, Cardinality, SequentialCounterEncoder>();
 	takes::<Cnf, Cardinality, TotalizerEncoder>();
-	takes::<Cnf, Cardinality, ModuloTotalizerEncoder>();
+	takes::<Cnf, Cardinality, MixedRadixEncoder>();
 	takes::<Cnf, Cardinality, SortingNetworkEncoder>();
+	takes::<Cnf, Cardinality, WatchdogEncoder>();
 	takes::<Cnf, CardinalityOne, AdderEncoder>();
-	takes::<Cnf, CardinalityOne, BddEncoder>();
-	takes::<Cnf, CardinalityOne, SwcEncoder>();
+	takes::<Cnf, CardinalityOne, DecisionDiagramEncoder>();
+	takes::<Cnf, CardinalityOne, SequentialCounterEncoder>();
 	takes::<Cnf, CardinalityOne, TotalizerEncoder>();
-	takes::<Cnf, CardinalityOne, ModuloTotalizerEncoder>();
+	takes::<Cnf, CardinalityOne, MixedRadixEncoder>();
 	takes::<Cnf, CardinalityOne, SortingNetworkEncoder>();
+	takes::<Cnf, CardinalityOne, WatchdogEncoder>();
 };
 
 #[cfg(test)]

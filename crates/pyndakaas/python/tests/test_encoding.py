@@ -62,6 +62,42 @@ def test_invalid_encoder():
         f.add_encoding(x * 3 + y * 2 + z >= 3, encoder=Encoder.PAIRWISE)
 
 
+# Which encoder takes which constraint. An encoder is dispatched separately for
+# each shape a constraint can aggregate to, so one of those arms going missing
+# shows up as `InvalidEncoder` for that shape alone and nowhere else.
+LINEAR = [
+    Encoder.ADDER,
+    Encoder.DECISION_DIAGRAM,
+    Encoder.MIXED_RADIX,
+    Encoder.SEQUENTIAL_COUNTER,
+    Encoder.TOTALIZER,
+    Encoder.WATCHDOG,
+]
+COUNTING = LINEAR + [Encoder.SORTING_NETWORK]
+AT_MOST_ONE = COUNTING + [Encoder.BITWISE, Encoder.LADDER, Encoder.PAIRWISE]
+
+
+@pytest.mark.parametrize("encoder", LINEAR)
+def test_every_linear_encoder_takes_a_weighted_sum(encoder):
+    f = CNF()
+    x, y, z = f.new_vars(3)
+    f.add_encoding(x * 2 + y * 3 + z * 4 <= 5, encoder=encoder)
+
+
+@pytest.mark.parametrize("encoder", COUNTING)
+def test_every_counting_encoder_takes_a_cardinality_constraint(encoder):
+    f = CNF()
+    x, y, z = f.new_vars(3)
+    f.add_encoding(x + y + z <= 2, encoder=encoder)
+
+
+@pytest.mark.parametrize("encoder", AT_MOST_ONE)
+def test_every_at_most_one_encoder_takes_an_at_most_one_constraint(encoder):
+    f = CNF()
+    x, y, z = f.new_vars(3)
+    f.add_encoding(x + y + z <= 1, encoder=encoder)
+
+
 def test_encode_bool_lin_default():
     f = CNF()
     x, y, z = f.new_vars(3)

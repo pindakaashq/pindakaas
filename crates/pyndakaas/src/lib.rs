@@ -71,14 +71,14 @@ mod pindakaas {
 	use pindakaas::{
 		constraint::{
 			bool_linear::NormalizedBoolLinear,
-			cardinality::{Cardinality, SortingNetworkEncoder},
+			cardinality::Cardinality,
 			cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
-			count::{Count, SortedEncoder},
+			count::{Count, SortingNetworkEncoder},
 			int_linear::NormalizedIntLinear,
 			linear::{
-				AdderEncoder, BddEncoder, Comparator, LinAggregator, LinExp as BaseBoolLinExp,
-				LinVariant, Linear as BaseBoolLinCon, LinearEncoder, ModuloTotalizerEncoder,
-				SwcEncoder, TotalizerEncoder,
+				AdderEncoder, Comparator, LinAggregator, LinExp as BaseBoolLinExp, LinVariant,
+				Linear as BaseBoolLinCon, LinearEncoder, DecisionDiagramEncoder, MixedRadixEncoder,
+				WatchdogEncoder, SequentialCounterEncoder, TotalizerEncoder,
 			},
 			propositional_logic::{Formula as BaseFormula, TseitinEncoder},
 		},
@@ -147,29 +147,35 @@ mod pindakaas {
 		/// A bitwise (binary) at-most-one encoding, which numbers the literals
 		/// and rules out each bit pattern but one.
 		BITWISE,
-		/// The layers of a binary decision diagram. Encodes any Boolean linear
-		/// constraint.
+		/// The layers of a decision diagram, one per term, sharing the layers
+		/// that cannot be told apart. Encodes any Boolean linear constraint.
 		DECISION_DIAGRAM,
 		/// A ladder of commander literals. Encodes at-most-one constraints.
 		LADDER,
-		/// A tree of partial sums, each held as digits in a mixed radix base
-		/// chosen to divide the coefficients. Encodes any Boolean linear
-		/// constraint, and beats the totalizer where the coefficients share
-		/// divisors and the bound is large.
-		MODULO_TOTALIZER,
+		/// Partial sums held as digits in a mixed radix base chosen to divide
+		/// the coefficients, rather than as one counter each. Encodes any
+		/// Boolean linear constraint, and beats the totalizer where the
+		/// coefficients share divisors and the bound is large.
+		MIXED_RADIX,
 		/// One clause per pair of literals. Encodes at-most-one constraints,
 		/// and is the cheapest for a handful of them.
 		PAIRWISE,
-		/// A chain of running totals, the sequential weight counter. Encodes
-		/// any Boolean linear constraint.
-		SORTED_WEIGHT_COUNTER,
-		/// A sorting network. Encodes cardinality constraints.
+		/// A chain of running totals, one per term. Encodes any Boolean linear
+		/// constraint.
+		SEQUENTIAL_COUNTER,
+		/// A network of comparators. Encodes cardinality and at-most-one
+		/// constraints.
 		SORTING_NETWORK,
-		/// A balanced tree of partial sums, the generalized totalizer. Encodes
-		/// any Boolean linear constraint.
+		/// A balanced tree of partial sums. Encodes any Boolean linear
+		/// constraint.
 		TOTALIZER,
 		/// The Tseitin transformation. Encodes propositional logic formulas.
 		TSEITIN,
+		/// A watchdog over the binary digits of the coefficients. Encodes any
+		/// Boolean linear constraint, and is the only encoding here whose size
+		/// does not grow with the size of the coefficients — at the cost of
+		/// weaker propagation than the rest.
+		WATCHDOG,
 	}
 
 	#[pyclass(from_py_object)]
@@ -675,9 +681,10 @@ mod pindakaas {
 		) -> Result<(), pindakaas::Unsatisfiable> {
 			match self.method.unwrap_or(Encoder::ADDER) {
 				Encoder::ADDER => AdderEncoder::default().encode(db, con),
-				Encoder::DECISION_DIAGRAM => BddEncoder::default().encode(db, con),
-				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
-				Encoder::MODULO_TOTALIZER => ModuloTotalizerEncoder::default().encode(db, con),
+				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
+				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
+				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
+				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
 				enc => {
 					self.set_err("BoolLinear", enc);
@@ -692,11 +699,12 @@ mod pindakaas {
 			match self.method.unwrap_or(Encoder::SORTING_NETWORK) {
 				// A sorting network states a count directly; the linear
 				// encoders read it as the linear constraint it is.
-				Encoder::SORTING_NETWORK => SortedEncoder::default().encode(db, con),
+				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
 				Encoder::ADDER => AdderEncoder::default().encode(db, con),
-				Encoder::DECISION_DIAGRAM => BddEncoder::default().encode(db, con),
-				Encoder::MODULO_TOTALIZER => ModuloTotalizerEncoder::default().encode(db, con),
-				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
+				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
+				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
+				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
+				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
 				enc => {
 					self.set_err("Count", enc);
@@ -711,8 +719,10 @@ mod pindakaas {
 			match self.method.unwrap_or(Encoder::ADDER) {
 				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
 				Encoder::ADDER => AdderEncoder::default().encode(db, con),
-				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
-				Encoder::MODULO_TOTALIZER => ModuloTotalizerEncoder::default().encode(db, con),
+				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
+				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
+				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
+				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
 				enc => {
 					self.set_err("Cardinality", enc);
@@ -731,11 +741,13 @@ mod pindakaas {
 			match self.method.unwrap_or(Encoder::BITWISE) {
 				Encoder::BITWISE => BitwiseEncoder::default().encode(db, con),
 				Encoder::ADDER => AdderEncoder::default().encode(db, con),
+				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
 				Encoder::LADDER => LadderEncoder::default().encode(db, con),
 				Encoder::PAIRWISE => PairwiseEncoder::default().encode(db, con),
-				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
+				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
+				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
 				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
-				Encoder::MODULO_TOTALIZER => ModuloTotalizerEncoder::default().encode(db, con),
+				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
 				enc => {
 					self.set_err("CardinalityOne", enc);
@@ -753,8 +765,10 @@ mod pindakaas {
 		) -> Result<(), pindakaas::Unsatisfiable> {
 			match self.method.unwrap_or(Encoder::ADDER) {
 				Encoder::ADDER => AdderEncoder::default().encode(db, con),
-				Encoder::SORTED_WEIGHT_COUNTER => SwcEncoder::default().encode(db, con),
-				Encoder::MODULO_TOTALIZER => ModuloTotalizerEncoder::default().encode(db, con),
+				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
+				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
+				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
+				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
 				enc => {
 					self.set_err("Linear", enc);

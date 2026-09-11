@@ -17,9 +17,10 @@ use itertools::Itertools;
 pub use crate::encoder::{
 	adder::AdderEncoder,
 	aggregate::{LinAggregator, LinearEncoder, StaticLinEncoder},
-	bdd::BddEncoder,
-	modulo_totalizer::ModuloTotalizerEncoder,
-	swc::SwcEncoder,
+	decision_diagram::DecisionDiagramEncoder,
+	mixed_radix::MixedRadixEncoder,
+	watchdog::WatchdogEncoder,
+	sequential_counter::SequentialCounterEncoder,
 	totalizer::TotalizerEncoder,
 };
 use crate::{
@@ -572,12 +573,12 @@ mod tests {
 			("pb-coprime", &[3, 5, 7, 11, 13, 17], 40),
 		];
 		let mut table = format!(
-			"{:>11} {:>4} {:>6} {:>7} {:>8} {:>9}\n",
+			"{:>11} {:>4} {:>7} {:>7} {:>8} {:>9}\n",
 			"case", "cmp", "enc", "vars", "clauses", "literals"
 		);
 		for (name, coeffs, k) in cases {
 			for cmp in [Comparator::LessEq, Comparator::Equal] {
-				for enc in ["adder", "bdd", "swc", "gt", "mgto"] {
+				for enc in ["adder", "diagram", "seq", "tree", "radix", "wdog", "wdog-l"] {
 					let mut cnf = Cnf::default();
 					let vars = cnf.new_var_range(coeffs.len()).iter_lits().collect_vec();
 					let con = Linear::new(LinExp::from_slices(coeffs, &vars), cmp.clone(), k);
@@ -589,23 +590,45 @@ mod tests {
 							StaticLinEncoder<AdderEncoder, AdderEncoder, AdderEncoder>,
 						>::default()
 						.encode(&mut cnf, &con),
-						"bdd" => LinearEncoder::<
-							StaticLinEncoder<BddEncoder, BddEncoder, BddEncoder>,
+						"diagram" => LinearEncoder::<
+							StaticLinEncoder<DecisionDiagramEncoder, DecisionDiagramEncoder, DecisionDiagramEncoder>,
 						>::default()
 						.encode(&mut cnf, &con),
-						"swc" => LinearEncoder::<
-							StaticLinEncoder<SwcEncoder, SwcEncoder, SwcEncoder>,
+						"seq" => LinearEncoder::<
+							StaticLinEncoder<SequentialCounterEncoder, SequentialCounterEncoder, SequentialCounterEncoder>,
 						>::default()
 						.encode(&mut cnf, &con),
-						"gt" => LinearEncoder::<
+						"tree" => LinearEncoder::<
 							StaticLinEncoder<TotalizerEncoder, TotalizerEncoder, TotalizerEncoder>,
 						>::default()
 						.encode(&mut cnf, &con),
+						"wdog" => LinearEncoder::<
+							StaticLinEncoder<
+								WatchdogEncoder,
+								WatchdogEncoder,
+								WatchdogEncoder,
+							>,
+						>::default()
+						.encode(&mut cnf, &con),
+						"wdog-l" => {
+							// The local form is the same encoder, so it is
+							// configured rather than named separately.
+							let mut enc = StaticLinEncoder::<
+								WatchdogEncoder,
+								WatchdogEncoder,
+								WatchdogEncoder,
+							>::default();
+							let _ = enc.lin_encoder().with_local(true);
+							let _ = enc.bool_lin_encoder().with_local(true);
+							let _ = enc.card_encoder().with_local(true);
+							LinearEncoder::new(enc, LinAggregator::default())
+								.encode(&mut cnf, &con)
+						}
 						_ => LinearEncoder::<
 							StaticLinEncoder<
-								ModuloTotalizerEncoder,
-								ModuloTotalizerEncoder,
-								ModuloTotalizerEncoder,
+								MixedRadixEncoder,
+								MixedRadixEncoder,
+								MixedRadixEncoder,
 							>,
 						>::default()
 						.encode(&mut cnf, &con),
@@ -617,10 +640,10 @@ mod tests {
 					};
 					table += &match done {
 						Err(Unsatisfiable) => {
-							format!("{name:>11} {cmp:>4} {enc:>6} {:>27}\n", "unsatisfiable")
+							format!("{name:>11} {cmp:>4} {enc:>7} {:>27}\n", "unsatisfiable")
 						}
 						Ok(()) => format!(
-							"{name:>11} {cmp:>4} {enc:>6} {:>7} {:>8} {:>9}\n",
+							"{name:>11} {cmp:>4} {enc:>7} {:>7} {:>8} {:>9}\n",
 							cnf.num_vars(),
 							cnf.num_clauses(),
 							cnf.literals()
@@ -656,7 +679,7 @@ mod tests {
 		let mut db = Cnf::default();
 		let vars = db.new_var_range(5).iter_lits().collect_vec();
 		let mut agg = LinAggregator::default();
-		let _ = agg.sort_same_coefficients(SortedEncoder::default(), 3);
+		let _ = agg.sort_same_coefficients(SortingNetworkEncoder::default(), 3);
 		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default();
 		let _ = encoder.with_linear_aggregator(agg);
 		let con = Linear::new(

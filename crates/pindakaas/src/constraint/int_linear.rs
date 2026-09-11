@@ -7,9 +7,10 @@
 //! the integers they encode, so this is where every linear encoder starts.
 
 pub use crate::encoder::{
-	bdd::BddEncoder,
-	modulo_totalizer::ModuloTotalizerEncoder,
-	swc::SwcEncoder,
+	decision_diagram::DecisionDiagramEncoder,
+	mixed_radix::MixedRadixEncoder,
+	watchdog::WatchdogEncoder,
+	sequential_counter::SequentialCounterEncoder,
 	totalizer::TotalizerEncoder,
 };
 #[cfg(test)]
@@ -39,7 +40,7 @@ use crate::{
 /// ```rust
 /// # use pindakaas::{
 /// #     constraint::{linear::{Comparator, Linear}, linear::{LinAggregator, LinVariant}},
-/// #     decision::integer::IntVar, encoder::bdd::BddEncoder,
+/// #     decision::integer::IntVar, encoder::decision_diagram::DecisionDiagramEncoder,
 /// #     Cnf, Encoder, ClauseDatabaseTools,
 /// # };
 /// let mut f = Cnf::default();
@@ -52,7 +53,7 @@ use crate::{
 /// // Whatever it was written as, the types now say it is `≤` over positive
 /// // coefficients: `-2x + 7 ≥ 1` has become `2x ≤ 6`, counted in steps of two.
 /// assert_eq!(con.k(), 3);
-/// BddEncoder::default().encode(&mut f, &con)?;
+/// DecisionDiagramEncoder::default().encode(&mut f, &con)?;
 /// # Ok::<(), pindakaas::Unsatisfiable>(())
 /// ```
 #[derive(Clone, Debug)]

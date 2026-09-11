@@ -13,7 +13,7 @@ use crate::{
 		cardinality_one::{BitwiseEncoder, CardinalityOne},
 		int_linear::NormalizedIntLinear,
 		linear::LinVariant,
-		count::{Count, SortedEncoder},
+		count::{Count, SortingNetworkEncoder},
 	},
 	decision::integer::IntVar,
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
@@ -284,7 +284,7 @@ impl LinAggregator {
 	/// Pre-aggregation of at least `n` equal-coefficient literals by `sorted_encoder`.
 	///
 	/// Zero disables the transformation, as in the default configuration.
-	pub fn sort_same_coefficients(&mut self, sorted_encoder: SortedEncoder, n: usize) -> &mut Self {
+	pub fn sort_same_coefficients(&mut self, sorted_encoder: SortingNetworkEncoder, n: usize) -> &mut Self {
 		self.sorted_encoder = sorted_encoder;
 		self.sort_same_coefficients = n;
 		self
@@ -294,7 +294,7 @@ impl LinAggregator {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 /// Normalisation and specialisation of a general [`Linear`] constraint.
 pub struct LinAggregator {
-	sorted_encoder: SortedEncoder,
+	sorted_encoder: SortingNetworkEncoder,
 	sort_same_coefficients: usize,
 }
 
@@ -341,7 +341,7 @@ pub struct StaticLinEncoder<
 	BoolLinEnc = AdderEncoder,
 	CardEnc = AdderEncoder, // TODO: Actual Cardinality encoding
 	Card1Enc = BitwiseEncoder,
-	CountEnc = SortedEncoder,
+	CountEnc = SortingNetworkEncoder,
 > {
 	lin_enc: LinEnc,
 	bool_lin_enc: BoolLinEnc,
@@ -599,7 +599,7 @@ mod tests {
 		assert_eq!(con.terms().len(), 2, "one term of each kind");
 		cnf.encode(
 			&con,
-			&crate::constraint::linear::BddEncoder::default(),
+			&crate::constraint::linear::DecisionDiagramEncoder::default(),
 		)
 		.unwrap();
 
@@ -874,7 +874,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				LinAggregator::default().sort_same_coefficients(SortedEncoder::default(), 2),
+				LinAggregator::default().sort_same_coefficients(SortingNetworkEncoder::default(), 2),
 				&Linear::new(
 					LinExp::from_slices(&[3, 3, 5, 3], &[a, b, d, c]),
 					Comparator::LessEq,
@@ -903,7 +903,7 @@ mod tests {
 		assert_eq!(
 			aggregated(
 				&mut cnf,
-				LinAggregator::default().sort_same_coefficients(SortedEncoder::default(), 2),
+				LinAggregator::default().sort_same_coefficients(SortingNetworkEncoder::default(), 2),
 				&Linear::new(
 					LinExp::from_slices(&[5, 5, 5, 5, 4], &vars),
 					Comparator::LessEq,
@@ -1036,7 +1036,7 @@ mod tests {
 	#[test]
 	fn a_count_admits_exactly_the_assignments_it_should() {
 		use crate::{
-			constraint::count::SortedEncoder,
+			constraint::count::SortingNetworkEncoder,
 			decision::integer::IntVar,
 			solver::{cadical::Cadical, SolveResult, Solver},
 			Valuation,
@@ -1053,7 +1053,7 @@ mod tests {
 			else {
 				panic!("literals against an integer are a count");
 			};
-			SortedEncoder::default().encode(&mut cnf, &count).unwrap();
+			SortingNetworkEncoder::default().encode(&mut cnf, &count).unwrap();
 
 			let mut seen = Vec::new();
 			let mut slv = Cadical::from(&cnf);

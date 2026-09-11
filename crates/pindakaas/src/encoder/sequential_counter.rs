@@ -2,6 +2,20 @@
 //!
 //! One intermediate per term, each the sum so far, so the shape is a line
 //! rather than a tree.
+//!
+//! With unit coefficients this is Sinz's sequential counter [^2]; weighted, it
+//! is the sequential weight counter, SWC [^1]; and where a term stands for a
+//! group of mutually exclusive literals, GSWC [^3]. Domain consistent [^3].
+//!
+//! [^1]: S. Hölldobler, N. Manthey, P. Steinke, "A Compact Encoding of
+//! Pseudo-Boolean Constraints into SAT", KI 2012, LNCS 7526, 107–118.
+//!
+//! [^2]: C. Sinz, "Towards an Optimal CNF Encoding of Boolean Cardinality
+//! Constraints", CP 2005, LNCS 3709, 827–831.
+//!
+//! [^3]: M. Bofill, J. Coll, P. Nightingale, J. Suy, F. Ulrich-Oltean, M.
+//! Villaret, "SAT encodings for pseudo-Boolean constraints together with
+//! at-most-one constraints", Artificial Intelligence 302 (2022) 103604.
 
 use itertools::Itertools;
 
@@ -20,7 +34,7 @@ use crate::{
 };
 
 /// Encoder for a linear constraint, decomposing it into a chain of running
-/// totals (a sequential weight counter, SWC).
+/// totals; also known as the sequential weight counter, SWC.
 ///
 /// One intermediate per term, each the sum so far, so the pieces are a line
 /// rather than a tree: the last intermediate is as wide as the whole sum.
@@ -29,7 +43,7 @@ use crate::{
 ///
 /// ```rust
 /// # use pindakaas::{
-/// #     constraint::{linear::{Comparator, Linear}, int_linear::SwcEncoder,
+/// #     constraint::{linear::{Comparator, Linear}, int_linear::SequentialCounterEncoder,
 /// #                  linear::{LinAggregator, LinVariant}},
 /// #     decision::integer::IntVar, Cnf, Encoder,
 /// # };
@@ -39,17 +53,17 @@ use crate::{
 /// let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut f, &con)? else {
 ///     panic!("a sum of integer terms is a linear constraint");
 /// };
-/// SwcEncoder::default().encode(&mut f, &con)?;
+/// SequentialCounterEncoder::default().encode(&mut f, &con)?;
 /// # Ok::<(), pindakaas::Unsatisfiable>(())
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct SwcEncoder {
+pub struct SequentialCounterEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,
 	cutoff: Option<Coeff>,
 }
 
-impl Default for SwcEncoder {
+impl Default for SequentialCounterEncoder {
 	/// Narrowing the domains before encoding is worth doing: it is what keeps
 	/// the intermediate sums of a decomposition small, and turning it off can
 	/// cost several times the clauses.
@@ -62,7 +76,7 @@ impl Default for SwcEncoder {
 	}
 }
 
-impl SwcEncoder {
+impl SequentialCounterEncoder {
 	/// The encoder of the pieces this one decomposes a constraint into.
 	fn encoder(&self) -> IntTernaryEncoder {
 		IntTernaryEncoder::with_config(IntTernaryConfig {
@@ -92,7 +106,7 @@ impl SwcEncoder {
 	}
 }
 
-impl Decompose for SwcEncoder {
+impl Decompose for SequentialCounterEncoder {
 	/// Carry a running total along the terms, one at a time.
 	///
 	/// Each step passes on what is left of the bound after the term it sees, so
@@ -136,7 +150,7 @@ impl Decompose for SwcEncoder {
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedBoolLinear> for SwcEncoder
+impl<Db> Encoder<Db, NormalizedBoolLinear> for SequentialCounterEncoder
 where
 	Db: ClauseDatabase + ?Sized,
 {
@@ -147,27 +161,27 @@ where
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedIntLinear> for SwcEncoder
+impl<Db> Encoder<Db, NormalizedIntLinear> for SequentialCounterEncoder
 where
 	Db: ClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
-		tracing::instrument(name = "swc_encoder", skip_all, fields(constraint = format!("{con:?}")))
+		tracing::instrument(name = "sequential_counter_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
 		self.encoder().encode_decomposed(db, con, self)
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for SwcEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for SequentialCounterEncoder {
 	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
 		let con = con.as_linear(db)?;
 		self.encode(db, &con)
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SwcEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SequentialCounterEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
 		// Counting into a variable is a linear constraint whose bound is not a
 		// constant, which this encoder takes once the bound is a term.
@@ -176,7 +190,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SwcEncoder {
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for SwcEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for SequentialCounterEncoder {
 	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
 		self.encode(db, &Cardinality::from(con.clone()))
 	}
@@ -187,7 +201,7 @@ mod tests {
 	use crate::helpers::tests::{linear_test_suite, prelude::*};
 
 	card1_test_suite! {
-		swc_encoder_card1, SwcEncoder::default()
+		sequential_counter_encoder_card1, SequentialCounterEncoder::default()
 	}
-	linear_test_suite! {swc_encoder, SwcEncoder::default()}
+	linear_test_suite! {sequential_counter_encoder, SequentialCounterEncoder::default()}
 }

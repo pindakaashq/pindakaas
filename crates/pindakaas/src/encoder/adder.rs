@@ -3,6 +3,19 @@
 //! The literals are bucketed by which bit of their coefficient they set, and
 //! each bucket compressed three at a time by full adders. Also holds the sum
 //! and carry circuits themselves, which the integer encoders build on.
+//!
+//! The adder network of Warners [^1], as Eén and Sörensson give it [^2].
+//! Smallest of the encodings here and the weakest: a carry says nothing until
+//! its inputs are settled, so unit propagation cannot tell that a partial
+//! assignment has already broken the bound.
+//!
+//! [^1]: J. P. Warners, "A linear-time transformation of linear inequalities
+//! into conjunctive normal form", Information Processing Letters 68(2) (1998)
+//! 63–69.
+//!
+//! [^2]: N. Eén, N. Sörensson, "Translating Pseudo-Boolean Constraints into
+//! SAT", Journal on Satisfiability, Boolean Modeling and Computation 2 (2006)
+//! 1–26.
 
 use std::{cmp::max, num::NonZero};
 

@@ -1,11 +1,32 @@
-//! Encoding a linear constraint as a tree of partial sums held in a mixed
+//! Encoding a linear constraint over partial sums held as digits in a mixed
 //! radix base.
 //!
-//! The totalizer holds each node as one order-encoded integer, which costs
-//! `O(d)` literals and `O(d²)` clauses for a node over `d` values. Holding it
-//! as a sequence of order-encoded digits instead costs `O(β·log d)` literals
-//! and `O(β²·log d)` clauses, at the price of a ripple-carry addition between
-//! nodes rather than a single one.
+//! What this encoding is, is the representation. Every other encoder here
+//! holds an intermediate sum as one order-encoded integer, which costs `O(d)`
+//! literals and `O(d²)` clauses over `d` values; a sequence of order-encoded
+//! digits in a base β costs `O(β·log d)` and `O(β²·log d)` instead, and two of
+//! them are added by rippling a carry along the digits rather than in one
+//! step. How the sums are then combined is a separate question, and the
+//! balanced tree below is one answer among several.
+//!
+//! Published as the modulo totalizer of Ogawa et al. [^1] and, at n levels,
+//! Zha et al. [^2] — hence MTO, and GMTO where a term stands for a group of
+//! mutually exclusive literals [^3]. Those names fix the tree as well as the
+//! digits; only the digits are what makes the encoding different. Not even
+//! consistency-checking: the digits of a sum say less about its value than a
+//! single order encoding would ([^3], Theorem 3).
+//!
+//! [^1]: T. Ogawa, Y. Liu, R. Hasegawa, M. Koshimura, H. Fujita, "Modulo Based
+//! CNF Encoding of Cardinality Constraints and Its Application to MaxSAT
+//! Solvers", ICTAI 2013, 9–17.
+//!
+//! [^2]: A. Zha, M. Koshimura, H. Fujita, "N-level modulo-based CNF encodings
+//! of pseudo-Boolean constraints for MaxSAT", Constraints 24(2) (2019)
+//! 133–161.
+//!
+//! [^3]: M. Bofill, J. Coll, P. Nightingale, J. Suy, F. Ulrich-Oltean, M.
+//! Villaret, "SAT encodings for pseudo-Boolean constraints together with
+//! at-most-one constraints", Artificial Intelligence 302 (2022) 103604.
 
 use std::cmp::min;
 
@@ -26,8 +47,9 @@ use crate::{
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
 
-/// Encoder for a linear constraint, as a generalized n-level modulo totalizer
-/// (GMTO).
+/// Encoder for a linear constraint, holding each partial sum as digits in a
+/// mixed radix base; also known as the (generalized) n-level modulo totalizer,
+/// MTO or GMTO.
 ///
 /// Like the [`TotalizerEncoder`](super::totalizer::TotalizerEncoder) the
 /// constraint becomes a binary tree of additions, but the value of a node is
@@ -37,14 +59,17 @@ use crate::{
 /// values costs `O(β·log d)` literals and `O(β²·log d)` clauses where the
 /// totalizer costs `O(d)` and `O(d²)`.
 ///
+/// The tree is what the published encoding pairs the digits with; nothing in
+/// the representation asks for it.
+///
 /// The base suits the coefficients of the constraint; see
-/// [`ModuloTotalizerEncoder::with_base`].
+/// [`MixedRadixEncoder::with_base`].
 ///
 /// # Examples
 ///
 /// ```rust
 /// # use pindakaas::{
-/// #     constraint::{linear::{Comparator, Linear}, int_linear::ModuloTotalizerEncoder,
+/// #     constraint::{linear::{Comparator, Linear}, int_linear::MixedRadixEncoder,
 /// #                  linear::{LinAggregator, LinVariant}},
 /// #     decision::integer::IntVar, Cnf, Encoder,
 /// # };
@@ -54,18 +79,18 @@ use crate::{
 /// let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut f, &con)? else {
 ///     panic!("a sum of integer terms is a linear constraint");
 /// };
-/// ModuloTotalizerEncoder::default().encode(&mut f, &con)?;
+/// MixedRadixEncoder::default().encode(&mut f, &con)?;
 /// # Ok::<(), pindakaas::Unsatisfiable>(())
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ModuloTotalizerEncoder {
+pub struct MixedRadixEncoder {
 	add_consistency: bool,
 	add_propagation: Consistency,
 	base: Option<Vec<Coeff>>,
 	cutoff: Option<Coeff>,
 }
 
-impl Default for ModuloTotalizerEncoder {
+impl Default for MixedRadixEncoder {
 	fn default() -> Self {
 		Self {
 			add_consistency: false,
@@ -76,7 +101,7 @@ impl Default for ModuloTotalizerEncoder {
 	}
 }
 
-impl ModuloTotalizerEncoder {
+impl MixedRadixEncoder {
 	/// Encode `x + y = z`, giving back `z` over the values it can still take
 	/// without passing `ub`.
 	fn add_eq<Db: ClauseDatabase + ?Sized>(
@@ -402,14 +427,14 @@ impl ModuloTotalizerEncoder {
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for ModuloTotalizerEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for MixedRadixEncoder {
 	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
 		let con = con.as_linear(db)?;
 		self.encode(db, &con)
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for ModuloTotalizerEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for MixedRadixEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
 		// Counting into a variable is a linear constraint whose bound is not a
 		// constant, which this encoder takes once the bound is a term.
@@ -418,13 +443,13 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for ModuloTotalizerEncoder 
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for ModuloTotalizerEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for MixedRadixEncoder {
 	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
 		self.encode(db, &Cardinality::from(con.clone()))
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedBoolLinear> for ModuloTotalizerEncoder
+impl<Db> Encoder<Db, NormalizedBoolLinear> for MixedRadixEncoder
 where
 	Db: ClauseDatabase + ?Sized,
 {
@@ -435,13 +460,13 @@ where
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedIntLinear> for ModuloTotalizerEncoder
+impl<Db> Encoder<Db, NormalizedIntLinear> for MixedRadixEncoder
 where
 	Db: ClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
-		tracing::instrument(name = "modulo_totalizer_encoder", skip_all, fields(constraint = format!("{con:?}")))
+		tracing::instrument(name = "mixed_radix_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
 		let k = con.k();
@@ -508,7 +533,7 @@ where
 	}
 }
 
-impl ModuloTotalizerEncoder {
+impl MixedRadixEncoder {
 	/// The leaf a term comes to, its coefficient counted in.
 	///
 	/// A unit coefficient is the variable itself; anything else is the variable
@@ -550,32 +575,32 @@ mod tests {
 	use crate::helpers::tests::{linear_test_suite, prelude::*};
 
 	card1_test_suite! {
-		modulo_totalizer_encoder_card1, ModuloTotalizerEncoder::default()
+		mixed_radix_encoder_card1, MixedRadixEncoder::default()
 	}
-	linear_test_suite!(modulo_totalizer_encoder, ModuloTotalizerEncoder::default());
+	linear_test_suite!(mixed_radix_encoder, MixedRadixEncoder::default());
 
 	// The radix is what sets the number of levels: two holds a node in binary,
 	// and anything past `k` gives it a single digit.
 	linear_test_suite!(
-		modulo_totalizer_encoder_base_2,
-		ModuloTotalizerEncoder::default().with_base(Some(vec![2]))
+		mixed_radix_encoder_base_2,
+		MixedRadixEncoder::default().with_base(Some(vec![2]))
 	);
 	linear_test_suite!(
-		modulo_totalizer_encoder_base_3,
-		ModuloTotalizerEncoder::default().with_base(Some(vec![3]))
+		mixed_radix_encoder_base_3,
+		MixedRadixEncoder::default().with_base(Some(vec![3]))
 	);
 	linear_test_suite!(
-		modulo_totalizer_encoder_base_100,
-		ModuloTotalizerEncoder::default().with_base(Some(vec![100]))
+		mixed_radix_encoder_base_100,
+		MixedRadixEncoder::default().with_base(Some(vec![100]))
 	);
 	linear_test_suite!(
-		modulo_totalizer_encoder_base_3_2,
-		ModuloTotalizerEncoder::default().with_base(Some(vec![3, 2]))
+		mixed_radix_encoder_base_3_2,
+		MixedRadixEncoder::default().with_base(Some(vec![3, 2]))
 	);
 
 	#[test]
 	fn greedy_base_divides_the_coefficients() {
-		let base = |coefs: &[Coeff], k| ModuloTotalizerEncoder::greedy_base(coefs.to_vec(), coefs.len(), k);
+		let base = |coefs: &[Coeff], k| MixedRadixEncoder::greedy_base(coefs.to_vec(), coefs.len(), k);
 		// Three divides every coefficient, meeting the 50% share, so the
 		// first digit is zero for all of them. Two clears the share once
 		// more; past that nothing does, and every remaining digit is the
@@ -614,7 +639,7 @@ mod tests {
 
 		let mut gmto = Cnf::default();
 		let vars = gmto.new_var_range(N).iter_lits().collect_vec();
-		LinearEncoder::<StaticLinEncoder<ModuloTotalizerEncoder, ModuloTotalizerEncoder>>::default()
+		LinearEncoder::<StaticLinEncoder<MixedRadixEncoder, MixedRadixEncoder>>::default()
 			.encode(&mut gmto, &con(&vars))
 			.unwrap();
 

@@ -3,6 +3,19 @@
 //! One layer per term, holding the partial sums still reachable, merged where
 //! they cannot be told apart. Each layer becomes an integer variable and each
 //! step between two of them a ternary constraint.
+//!
+//! A term is an integer variable rather than a literal, so a layer has an edge
+//! per value it can take: the diagram is multi-valued, an MDD [^1], and the
+//! BDD encoding of the pseudo-Boolean literature [^2] is the case where every
+//! term has two values. Both are domain consistent [^1]. A search for "the BDD
+//! encoding" or "the MDD encoding" belongs here.
+//!
+//! [^1]: I. Abío, R. Nieuwenhuis, A. Oliveras, E. Rodríguez-Carbonell, V.
+//! Mayer-Eichberger, "A New Look at BDDs for Pseudo-Boolean Constraints",
+//! Journal of Artificial Intelligence Research 45 (2012) 443–480.
+//!
+//! [^2]: I. Abío, R. Nieuwenhuis, A. Oliveras, E. Rodríguez-Carbonell, "BDDs
+//! for Pseudo-Boolean Constraints — Revisited", SAT 2011, LNCS 6695, 61–75.
 
 use std::{
 	cmp::{max, min, Ordering},
@@ -29,17 +42,19 @@ use crate::{
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 /// Encoder for a linear constraint, decomposing it through the layers of a
-/// binary decision diagram (BDD).
+/// decision diagram; also known as the MDD encoding, or the BDD encoding where
+/// every term is a single literal.
 ///
 /// One layer per term, holding the partial sums still reachable. Layers that
 /// cannot be told apart are shared, so a constraint whose terms interfere
 /// little decomposes into fewer pieces than the chain or the tree would give.
+/// Domain consistent, whatever reaches it.
 ///
 /// # Examples
 ///
 /// ```rust
 /// # use pindakaas::{
-/// #     constraint::{linear::{Comparator, Linear}, int_linear::BddEncoder,
+/// #     constraint::{linear::{Comparator, Linear}, int_linear::DecisionDiagramEncoder,
 /// #                  linear::{LinAggregator, LinVariant}},
 /// #     decision::integer::IntVar, Cnf, Encoder,
 /// # };
@@ -49,30 +64,30 @@ use crate::{
 /// let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut f, &con)? else {
 ///     panic!("a sum of integer terms is a linear constraint");
 /// };
-/// BddEncoder::default().encode(&mut f, &con)?;
+/// DecisionDiagramEncoder::default().encode(&mut f, &con)?;
 /// # Ok::<(), pindakaas::Unsatisfiable>(())
 /// ```
-pub struct BddEncoder {
+pub struct DecisionDiagramEncoder {
 	add_consistency: bool,
 	cutoff: Option<Coeff>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-/// The representation of a Binary Decision Diagram (BDD) node for the
-/// [`BddEncoder`].
-enum BddNode {
+/// What a layer holds at one interval of partial sums: a node of its own, a
+/// sum no solution passes through, or a read on the layer after it.
+enum DiagramNode {
 	Val,
 	Gap,
 	View(Coeff),
 }
 
-impl BddEncoder {
-	fn bdd(
+impl DecisionDiagramEncoder {
+	fn diagram(
 		i: usize,
 		xs: &[Term],
 		sum: Coeff,
-		ws: &mut Vec<Vec<(Range<Coeff>, BddNode)>>,
-	) -> (Range<Coeff>, BddNode) {
+		ws: &mut Vec<Vec<(Range<Coeff>, DiagramNode)>>,
+	) -> (Range<Coeff>, DiagramNode) {
 		// See if the node for `sum` is already available
 		if let Ok(pos) = ws[i].binary_search_by(|(r, _)| {
 			if r.contains(&sum) {
@@ -88,11 +103,11 @@ impl BddEncoder {
 
 		let views = term_values(&xs[i])
 			.into_iter()
-			.map(|v| (v, Self::bdd(i + 1, xs, sum + v, ws)))
+			.map(|v| (v, Self::diagram(i + 1, xs, sum + v, ws)))
 			.collect_vec();
 
 		// TODO could we check whether a domain value of x always leads to gaps?
-		let is_gap = views.iter().all(|(_, (_, v))| v == &BddNode::Gap);
+		let is_gap = views.iter().all(|(_, (_, v))| v == &DiagramNode::Gap);
 		// A layer is a partition into disjoint intervals, so equal intervals
 		// are the same node: children that share a literal some other way
 		// would already have been merged into one interval.
@@ -106,11 +121,11 @@ impl BddEncoder {
 			.unwrap();
 
 		let node = if is_gap {
-			BddNode::Gap
+			DiagramNode::Gap
 		} else if let Some(view) = view {
-			BddNode::View(view)
+			DiagramNode::View(view)
 		} else {
-			BddNode::Val
+			DiagramNode::Val
 		};
 
 		let pos = match ws[i].binary_search_by_key(&interval.start, |(r, _)| r.start) {
@@ -132,7 +147,7 @@ impl BddEncoder {
 		(interval, node)
 	}
 
-	fn construct_bdd(xs: &[Term], cmp: Comparator, k: Coeff) -> Vec<Vec<(Range<Coeff>, BddNode)>> {
+	fn construct_diagram(xs: &[Term], cmp: Comparator, k: Coeff) -> Vec<Vec<(Range<Coeff>, DiagramNode)>> {
 		let bounds = xs
 			.iter()
 			.scan((0, 0), |state, x| {
@@ -153,7 +168,7 @@ impl BddEncoder {
 
 		let inf = xs.iter().fold(0, |a, x| a + term_max(x)) + 1;
 
-		let mut ws: Vec<Vec<(Range<Coeff>, BddNode)>> = margins
+		let mut ws: Vec<Vec<(Range<Coeff>, DiagramNode)>> = margins
 			.into_iter()
 			.rev()
 			.chain(once((k, k)))
@@ -161,13 +176,13 @@ impl BddEncoder {
 			.map(|((lb_margin, ub_margin), (lb, ub))| {
 				match cmp {
 					Comparator::LessEq => vec![
-						(lb_margin > lb).then_some((0..(lb_margin + 1), BddNode::Val)),
-						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, BddNode::Gap)),
+						(lb_margin > lb).then_some((0..(lb_margin + 1), DiagramNode::Val)),
+						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, DiagramNode::Gap)),
 					],
 					_ => vec![
-						(lb_margin > lb).then_some((0..lb_margin, BddNode::Gap)),
-						(lb_margin == ub_margin).then_some((k..(k + 1), BddNode::Val)),
-						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, BddNode::Gap)),
+						(lb_margin > lb).then_some((0..lb_margin, DiagramNode::Gap)),
+						(lb_margin == ub_margin).then_some((k..(k + 1), DiagramNode::Val)),
+						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, DiagramNode::Gap)),
 					],
 				}
 				.into_iter()
@@ -183,7 +198,7 @@ impl BddEncoder {
 			"layers must be sorted and non-overlapping"
 		);
 
-		let _ = Self::bdd(0, xs, 0, &mut ws);
+		let _ = Self::diagram(0, xs, 0, &mut ws);
 		ws
 	}
 
@@ -202,7 +217,7 @@ impl BddEncoder {
 	}
 }
 
-impl BddEncoder {
+impl DecisionDiagramEncoder {
 	/// The encoder of the pieces this one decomposes a constraint into.
 	fn encoder(&self) -> IntTernaryEncoder {
 		IntTernaryEncoder::with_config(IntTernaryConfig {
@@ -212,7 +227,7 @@ impl BddEncoder {
 	}
 }
 
-impl Decompose for BddEncoder {
+impl Decompose for DecisionDiagramEncoder {
 	/// Follow the terms one at a time, keeping a layer of the totals still
 	/// worth telling apart.
 	///
@@ -238,7 +253,7 @@ impl Decompose for BddEncoder {
 
 		// The nodes of every layer, before any of them is a variable: a total,
 		// and the total of the next layer it shares its literal with.
-		let nodes = Self::construct_bdd(&terms, cmp, k)
+		let nodes = Self::construct_diagram(&terms, cmp, k)
 			.into_iter()
 			.map(|layer| {
 				layer
@@ -247,9 +262,9 @@ impl Decompose for BddEncoder {
 						// A node stands for the largest total in its interval.
 						let val = interval.end - 1;
 						match node {
-							BddNode::Gap => None,
-							BddNode::Val => Some((val, None)),
-							BddNode::View(of) => Some((val, Some(of))),
+							DiagramNode::Gap => None,
+							DiagramNode::Val => Some((val, None)),
+							DiagramNode::View(of) => Some((val, Some(of))),
 						}
 					})
 					.collect_vec()
@@ -302,7 +317,7 @@ impl Decompose for BddEncoder {
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedBoolLinear> for BddEncoder
+impl<Db> Encoder<Db, NormalizedBoolLinear> for DecisionDiagramEncoder
 where
 	Db: ClauseDatabase + ?Sized,
 {
@@ -313,27 +328,27 @@ where
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedIntLinear> for BddEncoder
+impl<Db> Encoder<Db, NormalizedIntLinear> for DecisionDiagramEncoder
 where
 	Db: ClauseDatabase + ?Sized,
 {
 	#[cfg_attr(
 		any(feature = "tracing", test),
-		tracing::instrument(name = "bdd_encoder", skip_all, fields(constraint = format!("{con:?}")))
+		tracing::instrument(name = "decision_diagram_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
 		self.encoder().encode_decomposed(db, con, self)
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for BddEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for DecisionDiagramEncoder {
 	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
 		let con = con.as_linear(db)?;
 		self.encode(db, &con)
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for BddEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for DecisionDiagramEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
 		// Counting into a variable is a linear constraint whose bound is not a
 		// constant, which this encoder takes once the bound is a term.
@@ -342,7 +357,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for BddEncoder {
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for BddEncoder {
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for DecisionDiagramEncoder {
 	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
 		self.encode(db, &Cardinality::from(con.clone()))
 	}
@@ -355,7 +370,7 @@ mod tests {
 	use crate::helpers::tests::{linear_test_suite, prelude::*};
 
 	#[test]
-	fn bdd_layers_share_the_literals_they_agree_on() {
+	fn diagram_layers_share_the_literals_they_agree_on() {
 		// Abió, Nieuwenhuis, Oliveras and Rodríguez-Carbonell, "BDDs for
 		// Pseudo-Boolean Constraints — Revisited" (SAT 2011), Examples 3 and 5.
 		// Reducing this diagram skips a level: at a running total of 2, whether
@@ -379,7 +394,7 @@ mod tests {
 		};
 		// The diagram is built over integers, so the literals become them here.
 		let con = con.as_int_linear(&mut cnf).unwrap();
-		cnf.encode(&con, &crate::constraint::linear::BddEncoder::default())
+		cnf.encode(&con, &crate::constraint::linear::DecisionDiagramEncoder::default())
 			.unwrap();
 
 		assert_eq!(
@@ -390,7 +405,7 @@ mod tests {
 	}
 
 	card1_test_suite! {
-		bdd_encoder_card1, BddEncoder::default()
+		decision_diagram_encoder_card1, DecisionDiagramEncoder::default()
 	}
-	linear_test_suite! {bdd_encoder, BddEncoder::default()}
+	linear_test_suite! {decision_diagram_encoder, DecisionDiagramEncoder::default()}
 }

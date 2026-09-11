@@ -61,9 +61,9 @@
 //!
 //! // Named variants cover the forms without operator syntax.
 //! let choose = Formula::IfThenElse {
-//!     cond: Formula::Atom(x),
-//!     then: Formula::Atom(y),
-//!     els: Formula::Atom(z),
+//!     cond: Box::new(Formula::Atom(x)),
+//!     then: Box::new(Formula::Atom(y)),
+//!     els: Box::new(Formula::Atom(z)),
 //! };
 //! cnf.encode(&choose, &TseitinEncoder)?;
 //! # Ok::<(), pindakaas::Unsatisfiable>(())
@@ -82,7 +82,7 @@
 //!     constraint::{cardinality_one::BitwiseEncoder,
 //!         linear::{AdderEncoder, Comparator, Linear, LinearEncoder,
 //!             StaticLinEncoder}},
-//!     encoder::sorted::SortedEncoder,
+//!     encoder::sorting_network::SortingNetworkEncoder,
 //!     ClauseDatabaseTools, Cnf,
 //! };
 //!
@@ -90,15 +90,13 @@
 //! let (x, y, z) = cnf.new_lits();
 //! let capacity = Linear::new(2 * x + 3 * y + 2 * z, Comparator::LessEq, 4);
 //! let encoder = LinearEncoder::<StaticLinEncoder<AdderEncoder, AdderEncoder,
-//!     AdderEncoder, BitwiseEncoder, SortedEncoder>>::default();
+//!     AdderEncoder, BitwiseEncoder, SortingNetworkEncoder>>::default();
 //! cnf.encode(&capacity, &encoder)?;
 //! # Ok::<(), pindakaas::Unsatisfiable>(())
 //! ```
 //!
-//! The encoder modules include pairwise, ladder, bitwise, and product
-//! at-most-one encodings; sorting networks for cardinality and variable-bound
-//! counts; and adder, BDD, sequential weight counter, totalizer, and modulo
-//! totalizer encodings for weighted constraints.
+//! Which encoder to reach for, and what each of them is called in the
+//! literature, is under [Encodings](#encodings) below.
 //!
 //! # Integer variables
 //!
@@ -113,7 +111,7 @@
 //!         linear::{AdderEncoder, Comparator, Linear, LinearEncoder,
 //!             StaticLinEncoder}},
 //!     decision::integer::IntVar, ClauseDatabaseTools, Cnf,
-//!     encoder::sorted::SortedEncoder,
+//!     encoder::sorting_network::SortingNetworkEncoder,
 //! };
 //!
 //! let mut cnf = Cnf::default();
@@ -121,7 +119,7 @@
 //! let y = IntVar::new(0..=7).with_label("y");
 //! let budget = Linear::new(x.clone() * 3 + y.clone() * 2, Comparator::LessEq, 20);
 //! let encoder = LinearEncoder::<StaticLinEncoder<AdderEncoder, AdderEncoder,
-//!     AdderEncoder, BitwiseEncoder, SortedEncoder>>::default();
+//!     AdderEncoder, BitwiseEncoder, SortingNetworkEncoder>>::default();
 //! cnf.encode(&budget, &encoder)?;
 //!
 //! // Querying a bound creates or reuses the order view of `x`.
@@ -129,6 +127,134 @@
 //! cnf.add_clause([x_at_least_four])?;
 //! # Ok::<(), pindakaas::Unsatisfiable>(())
 //! ```
+//!
+//! # Encodings
+//!
+//! A constraint is aggregated into a sum of terms — each an integer variable
+//! scaled by a coefficient — before any encoder sees it. A term may stand for
+//! one literal, for a group of literals only one of which may hold, or for an
+//! integer variable in its own right, so a single type here covers several
+//! named encodings at once. The table says which, and under what condition.
+//!
+//! *Takes* names the constraints an [`Encoder`] impl exists for: `int` for
+//! [`NormalizedIntLinear`](constraint::int_linear::NormalizedIntLinear),
+//! `bool` for
+//! [`NormalizedBoolLinear`](constraint::bool_linear::NormalizedBoolLinear),
+//! `card` for [`Cardinality`](constraint::cardinality::Cardinality), `amo` for
+//! [`CardinalityOne`](constraint::cardinality_one::CardinalityOne), and
+//! `count` for [`Count`](constraint::count::Count).
+//!
+//! *Propagation* is **GAC** — domain consistent, so unit propagation rules out
+//! every value no solution can use — or **CC** — consistency-checking, so unit
+//! propagation falsifies a clause exactly when the assignment cannot be
+//! extended — or neither. It is the published strength of the encoding at the
+//! default configuration: `with_cutoff(Some(..))` holds the intermediates in
+//! binary and adds them with a ripple-carry adder, which does not maintain it.
+//!
+//! | Encoder | Takes | Encodings from the literature | Propagation |
+//! |---|---|---|---|
+//! | [`AdderEncoder`](encoder::adder::AdderEncoder) | int, bool, card, amo, count | Adder networks[^warners][^een] | neither |
+//! | [`DecisionDiagramEncoder`](encoder::decision_diagram::DecisionDiagramEncoder) | int, bool, card, amo, count | The MDD encoding over integer terms or at-most-one groups[^abio2012]; the BDD encoding where every term is one literal[^abio2011], with the long edges of the reduced ordered diagram | GAC |
+//! | [`TotalizerEncoder`](encoder::totalizer::TotalizerEncoder) | int, bool, card, amo, count | Totalizer, unit coefficients[^bailleux2003]; generalized totalizer, GTE, weighted[^joshi]; GGT over at-most-one groups[^bofill]. **Not** RGT or RGGT: values a parent cannot tell apart are not merged, and the tree is balanced rather than minRatio | GAC |
+//! | [`SequentialCounterEncoder`](encoder::sequential_counter::SequentialCounterEncoder) | int, bool, card, amo, count | Sequential counter, unit coefficients[^sinz]; sequential weight counter, SWC, weighted[^holldobler]; GSWC over at-most-one groups[^bofill] | GAC |
+//! | [`MixedRadixEncoder`](encoder::mixed_radix::MixedRadixEncoder) | int, bool, card, amo, count | n-level modulo totalizer, MTO[^ogawa][^zha]; GMTO over at-most-one groups[^bofill]. [`with_base`](encoder::mixed_radix::MixedRadixEncoder::with_base) documents two deliberate departures from Zha et al.'s base heuristic | neither[^bofill] |
+//! | [`WatchdogEncoder`](encoder::watchdog::WatchdogEncoder) | int, bool, card, amo, count | Global polynomial watchdog, GPW, the default; local, LPW, under [`with_local`](encoder::watchdog::WatchdogEncoder::with_local)[^bailleux2009]; GGPW and GLPW over at-most-one groups[^bofill] | CC globally, GAC locally |
+//! | [`SortingNetworkEncoder`](encoder::sorting_network::SortingNetworkEncoder) | card, amo, count | Cardinality networks — each sub-sorter is built only as wide as the bound above it can use[^asin] — over odd-even merges[^batcher] | GAC |
+//! | [`PairwiseEncoder`](encoder::pairwise::PairwiseEncoder) | amo | Pairwise (binomial) at-most-one, no auxiliary variables | GAC, since every pair is a binary clause |
+//! | [`BitwiseEncoder`](encoder::bitwise::BitwiseEncoder) | amo | Bitwise (binary) at-most-one[^frisch] | not classified |
+//! | [`LadderEncoder`](encoder::ladder::LadderEncoder) | amo | Ladder (regular) at-most-one[^gent][^ansotegui] | not classified |
+//! | [`ProductEncoder`](encoder::product::ProductEncoder) | amo | Product at-most-one, roughly `2·√n` auxiliary variables[^chen] | not classified |
+//! | [`TseitinEncoder`](encoder::tseitin::TseitinEncoder) | formulas | Tseitin transformation[^tseitin] | — |
+//!
+//! "Not classified" means what it says: the sources cited here classify the
+//! linear and cardinality encodings, not the at-most-one ones, and no claim
+//! about those is made. [`BitwiseEncoder`](encoder::bitwise::BitwiseEncoder)
+//! is the weakest of the four.
+//!
+//! A term stands for a group of mutually exclusive literals only where the
+//! caller built one — with
+//! [`IntVar::from_direct_encoding`](decision::integer::IntVar::from_direct_encoding),
+//! say. [`LinAggregator`](constraint::linear::LinAggregator) does not look for
+//! at-most-one constraints of its own accord, so the generalized encodings in
+//! the table are available *to a caller who supplies the partition*, not by
+//! default.
+//!
+//! Encoders are named for the mechanism rather than for the acronym of
+//! whichever published variant is best known, so `BddEncoder`,
+//! `SwcEncoder`, `ModuloTotalizerEncoder` and `SortedEncoder` are now
+//! [`DecisionDiagramEncoder`](encoder::decision_diagram::DecisionDiagramEncoder),
+//! [`SequentialCounterEncoder`](encoder::sequential_counter::SequentialCounterEncoder),
+//! [`MixedRadixEncoder`](encoder::mixed_radix::MixedRadixEncoder) and
+//! [`SortingNetworkEncoder`](encoder::sorting_network::SortingNetworkEncoder).
+//!
+//! [^abio2011]: I. Abío, R. Nieuwenhuis, A. Oliveras, E. Rodríguez-Carbonell,
+//! "BDDs for Pseudo-Boolean Constraints — Revisited", SAT 2011, LNCS 6695,
+//! 61–75.
+//!
+//! [^abio2012]: I. Abío, R. Nieuwenhuis, A. Oliveras, E. Rodríguez-Carbonell,
+//! V. Mayer-Eichberger, "A New Look at BDDs for Pseudo-Boolean Constraints",
+//! Journal of Artificial Intelligence Research 45 (2012) 443–480.
+//!
+//! [^ansotegui]: C. Ansótegui, F. Manyà, "Mapping Problems with Finite-Domain
+//! Variables into Problems with Boolean Variables", SAT 2004, LNCS 3542, 1–15.
+//!
+//! [^asin]: R. Asín, R. Nieuwenhuis, A. Oliveras, E. Rodríguez-Carbonell,
+//! "Cardinality Networks: a theoretical and empirical study", Constraints
+//! 16(2) (2011) 195–221.
+//!
+//! [^bailleux2003]: O. Bailleux, Y. Boufkhad, "Efficient CNF Encoding of
+//! Boolean Cardinality Constraints", CP 2003, LNCS 2833, 108–122.
+//!
+//! [^bailleux2009]: O. Bailleux, Y. Boufkhad, O. Roussel, "New Encodings of
+//! Pseudo-Boolean Constraints into CNF", SAT 2009, LNCS 5584, 181–194.
+//!
+//! [^batcher]: K. E. Batcher, "Sorting networks and their applications", AFIPS
+//! Spring Joint Computing Conference 1968, 307–314.
+//!
+//! [^bofill]: M. Bofill, J. Coll, P. Nightingale, J. Suy, F. Ulrich-Oltean, M.
+//! Villaret, "SAT encodings for pseudo-Boolean constraints together with
+//! at-most-one constraints", Artificial Intelligence 302 (2022) 103604. Table
+//! 1 classifies the encodings above; Theorem 3 is that the modulo totalizer is
+//! not consistency-checking.
+//!
+//! [^chen]: J. Chen, "A New SAT Encoding of the At-Most-One Constraint",
+//! ModRef 2010.
+//!
+//! [^een]: N. Eén, N. Sörensson, "Translating Pseudo-Boolean Constraints into
+//! SAT", Journal on Satisfiability, Boolean Modeling and Computation 2 (2006)
+//! 1–26.
+//!
+//! [^frisch]: A. M. Frisch, T. J. Peugniez, A. J. Doggett, P. W. Nightingale,
+//! "Solving Non-Boolean Satisfiability Problems with Stochastic Local Search",
+//! Journal of Automated Reasoning 35 (2005) 143–179.
+//!
+//! [^gent]: I. P. Gent, P. Nightingale, "A New Encoding of AllDifferent into
+//! SAT", ModRef 2004.
+//!
+//! [^holldobler]: S. Hölldobler, N. Manthey, P. Steinke, "A Compact Encoding
+//! of Pseudo-Boolean Constraints into SAT", KI 2012, LNCS 7526, 107–118.
+//!
+//! [^joshi]: S. Joshi, R. Martins, V. Manquinho, "Generalized Totalizer
+//! Encoding for Pseudo-Boolean Constraints", CP 2015, LNCS 9255, 200–209.
+//!
+//! [^ogawa]: T. Ogawa, Y. Liu, R. Hasegawa, M. Koshimura, H. Fujita, "Modulo
+//! Based CNF Encoding of Cardinality Constraints and Its Application to MaxSAT
+//! Solvers", ICTAI 2013, 9–17.
+//!
+//! [^sinz]: C. Sinz, "Towards an Optimal CNF Encoding of Boolean Cardinality
+//! Constraints", CP 2005, LNCS 3709, 827–831.
+//!
+//! [^tseitin]: G. S. Tseitin, "On the complexity of derivation in
+//! propositional calculus", Studies in Constructive Mathematics and
+//! Mathematical Logic, Part II (1968) 115–125.
+//!
+//! [^warners]: J. P. Warners, "A linear-time transformation of linear
+//! inequalities into conjunctive normal form", Information Processing Letters
+//! 68(2) (1998) 63–69.
+//!
+//! [^zha]: A. Zha, M. Koshimura, H. Fujita, "N-level modulo-based CNF
+//! encodings of pseudo-Boolean constraints for MaxSAT", Constraints 24(2)
+//! (2019) 133–161.
 //!
 //! # Citation
 //!

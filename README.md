@@ -16,19 +16,25 @@
 
 ## Encodings
 
-- At most one (AMO)
-  - Bitwise encoding
-  - Ladder encoding
-  - Pairwise encoding
-  - Product encoding
-- Cardinality constraints
-  - Sorting Network encoding
-- Pseudo-Boolean and integer linear constraints
-  - Adder encoding
-  - BDD encoding
-  - Sequential Weight Counter encoding
-  - Totalizer encoding
-  - Modulo Totalizer encoding
+A constraint is aggregated into a sum of terms, each an integer variable scaled
+by a coefficient, before any encoder sees it. A term may stand for a single
+literal, for a group of literals only one of which may hold, or for an integer
+variable — so each encoder below covers several named encodings from the
+literature at once. Which, and under what condition — with propagation
+strength and a reference for each — is tabulated in the
+[encodings reference](https://docs.rs/pindakaas/latest/pindakaas/#encodings).
+
+| Encoder | Takes | Propagation |
+|---|---|---|
+| `AdderEncoder` | linear, cardinality, at-most-one, count | neither |
+| `DecisionDiagramEncoder` | linear, cardinality, at-most-one, count | domain consistent |
+| `TotalizerEncoder` | linear, cardinality, at-most-one, count | domain consistent |
+| `SequentialCounterEncoder` | linear, cardinality, at-most-one, count | domain consistent |
+| `MixedRadixEncoder` | linear, cardinality, at-most-one, count | neither |
+| `WatchdogEncoder` | linear, cardinality, at-most-one, count | consistency-checking, or domain consistent in its local form |
+| `SortingNetworkEncoder` | cardinality, at-most-one, count | domain consistent |
+| `PairwiseEncoder`, `LadderEncoder`, `BitwiseEncoder`, `ProductEncoder` | at-most-one | see the reference |
+| `TseitinEncoder` | propositional formulas | — |
 
 Integer variables acquire direct, order, or binary views when an encoder needs
 them and channel between views when more than one is used.

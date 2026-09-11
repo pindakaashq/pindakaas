@@ -761,14 +761,15 @@ pub(crate) mod tests {
 		pub(crate) use crate::{
 			constraint::{
 				linear::{
-					AdderEncoder, BddEncoder, Comparator, LimitComp, LinExp, Linear,
-					ModuloTotalizerEncoder, PosCoeff, SwcEncoder, TotalizerEncoder,
+					AdderEncoder, DecisionDiagramEncoder, Comparator, WatchdogEncoder,
+					LimitComp, LinExp, Linear, MixedRadixEncoder, PosCoeff, SequentialCounterEncoder,
+					TotalizerEncoder,
 				},
 				cardinality::{tests::card_test_suite, Cardinality, SortingNetworkEncoder},
 				cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
 				int_linear::NormalizedIntLinear,
 				linear::{LinAggregator, LinVariant, LinearEncoder, StaticLinEncoder},
-				count::{SortedEncoder, SortedStrategy},
+				count::SortingNetworkStrategy,
 			},
 			helpers::tests::{
 				all_binary_solutions, assert_checker, assert_encoding, assert_solutions,

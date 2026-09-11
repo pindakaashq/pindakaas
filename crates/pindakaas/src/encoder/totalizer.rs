@@ -2,6 +2,23 @@
 //!
 //! Each internal node holds the sums its two children can reach between them,
 //! with anything past the bound dropped.
+//!
+//! With unit coefficients this is the totalizer of Bailleux and Boufkhad [^1];
+//! weighted, it is the generalized totalizer, GTE [^2]; and where a term
+//! stands for a group of mutually exclusive literals rather than one literal,
+//! it is GGT [^3]. It is *not* RGT or RGGT: the reduction that merges values a
+//! parent cannot tell apart is not performed, and the tree is built by a
+//! balanced heuristic rather than by minRatio. Domain consistent [^3].
+//!
+//! [^1]: O. Bailleux, Y. Boufkhad, "Efficient CNF Encoding of Boolean
+//! Cardinality Constraints", CP 2003, LNCS 2833, 108–122.
+//!
+//! [^2]: S. Joshi, R. Martins, V. Manquinho, "Generalized Totalizer Encoding
+//! for Pseudo-Boolean Constraints", CP 2015, LNCS 9255, 200–209.
+//!
+//! [^3]: M. Bofill, J. Coll, P. Nightingale, J. Suy, F. Ulrich-Oltean, M.
+//! Villaret, "SAT encodings for pseudo-Boolean constraints together with
+//! at-most-one constraints", Artificial Intelligence 302 (2022) 103604.
 
 use itertools::Itertools;
 use rangelist::RangeList;
@@ -21,7 +38,8 @@ use crate::{
 };
 
 /// Encoder for a linear constraint, decomposing it into a balanced tree of
-/// partial sums (a generalized totalizer, GT).
+/// partial sums; also known as the totalizer, and as the generalized totalizer
+/// or GTE once the terms are weighted.
 ///
 /// Each node holds what its two children reach between them, with anything
 /// past the bound dropped. The tree keeps the intermediates narrower than the

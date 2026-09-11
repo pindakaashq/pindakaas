@@ -7,7 +7,7 @@
 
 use itertools::Itertools;
 
-pub use crate::encoder::sorted::{SortedEncoder, SortedStrategy};
+pub use crate::encoder::sorting_network::{SortingNetworkEncoder, SortingNetworkStrategy};
 use crate::{
 	constraint::{
 		int_linear::NormalizedIntLinear,
@@ -32,7 +32,7 @@ impl Count {
 	///
 	/// ```rust
 	/// use pindakaas::{
-	///     constraint::{count::{Count, SortedEncoder}, linear::LimitComp},
+	///     constraint::{count::{Count, SortingNetworkEncoder}, linear::LimitComp},
 	///     decision::integer::IntVar, ClauseDatabase, Cnf, Encoder,
 	/// };
 	///
@@ -40,7 +40,7 @@ impl Count {
 	/// let lits = cnf.new_var_range(4).map(Into::into).collect();
 	/// let count = IntVar::new(0..=4);
 	/// let constraint = Count::new(lits, LimitComp::Equal, count);
-	/// SortedEncoder::default().encode(&mut cnf, &constraint)?;
+	/// SortingNetworkEncoder::default().encode(&mut cnf, &constraint)?;
 	/// # Ok::<(), pindakaas::Unsatisfiable>(())
 	/// ```
 	pub fn new(lits: Vec<Lit>, cmp: LimitComp, y: IntVar) -> Self {
@@ -101,17 +101,19 @@ impl Checker for Count {
 const _: () = {
 	use crate::{
 		constraint::linear::{
-			AdderEncoder, BddEncoder, ModuloTotalizerEncoder, SwcEncoder, TotalizerEncoder,
+			AdderEncoder, DecisionDiagramEncoder, WatchdogEncoder, MixedRadixEncoder,
+			SequentialCounterEncoder, TotalizerEncoder,
 		},
 		Cnf, Encoder,
 	};
 
 	const fn takes<Db: ClauseDatabase + ?Sized, C, E: Encoder<Db, C>>() {}
 	takes::<Cnf, Count, AdderEncoder>();
-	takes::<Cnf, Count, BddEncoder>();
-	takes::<Cnf, Count, ModuloTotalizerEncoder>();
-	takes::<Cnf, Count, SortedEncoder>();
-	takes::<Cnf, Count, SwcEncoder>();
+	takes::<Cnf, Count, DecisionDiagramEncoder>();
+	takes::<Cnf, Count, MixedRadixEncoder>();
+	takes::<Cnf, Count, SortingNetworkEncoder>();
+	takes::<Cnf, Count, WatchdogEncoder>();
+	takes::<Cnf, Count, SequentialCounterEncoder>();
 	takes::<Cnf, Count, TotalizerEncoder>();
 };
 
@@ -120,10 +122,10 @@ mod tests {
 	use itertools::Itertools;
 	use traced_test::test;
 
-	use super::{Count, SortedEncoder};
+	use super::{Count, SortingNetworkEncoder};
 	use crate::{
 		constraint::linear::{
-			AdderEncoder, BddEncoder, LimitComp, ModuloTotalizerEncoder, SwcEncoder,
+			AdderEncoder, DecisionDiagramEncoder, LimitComp, MixedRadixEncoder, SequentialCounterEncoder,
 			TotalizerEncoder,
 		},
 		decision::integer::IntVar,
@@ -143,12 +145,12 @@ mod tests {
 				let y = IntVar::new(0..=2).with_label("y");
 				let con = Count::new(lits.clone(), cmp.clone(), y.clone());
 				match name {
-					"sorted" => SortedEncoder::default().encode(&mut cnf, &con),
+					"sorted" => SortingNetworkEncoder::default().encode(&mut cnf, &con),
 					"adder" => AdderEncoder::default().encode(&mut cnf, &con),
-					"bdd" => BddEncoder::default().encode(&mut cnf, &con),
-					"swc" => SwcEncoder::default().encode(&mut cnf, &con),
+					"bdd" => DecisionDiagramEncoder::default().encode(&mut cnf, &con),
+					"swc" => SequentialCounterEncoder::default().encode(&mut cnf, &con),
 					"gt" => TotalizerEncoder::default().encode(&mut cnf, &con),
-					_ => ModuloTotalizerEncoder::default().encode(&mut cnf, &con),
+					_ => MixedRadixEncoder::default().encode(&mut cnf, &con),
 				}
 				.unwrap();
 
