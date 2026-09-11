@@ -30,7 +30,7 @@ use crate::{
 		cardinality::Cardinality,
 		count::Count,
 		cardinality_one::CardinalityOne,
-		int_linear::{term_max, term_min, term_values, Decompose, NormalizedIntLinear},
+		int_linear::{sum_values, term_max, term_min, Decompose, NormalizedIntLinear},
 		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 	},
 	decision::integer::{Consistency, IntVar},
@@ -150,13 +150,7 @@ impl Decompose for TotalizerEncoder {
 						let domain: RangeList<Coeff> = if at_root {
 							RangeList::from(k..=k)
 						} else {
-							term_values(left)
-								.into_iter()
-								.cartesian_product(term_values(right))
-								.map(|(a, b)| a + b)
-								.filter(|&d| d <= k)
-								.map(|d| d..=d)
-								.collect()
+							sum_values(left, right, k)
 						};
 						if domain.is_empty() {
 							return Err(Unsatisfiable);

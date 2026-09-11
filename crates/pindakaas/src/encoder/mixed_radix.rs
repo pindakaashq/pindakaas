@@ -39,7 +39,7 @@ use crate::{
 		cardinality::Cardinality,
 		count::Count,
 		cardinality_one::CardinalityOne,
-		int_linear::{term_max, term_values, NormalizedIntLinear},
+		int_linear::{sum_values, term_max, term_values, NormalizedIntLinear},
 		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 		linear::{Comparator, LimitComp},
 	},
@@ -117,15 +117,7 @@ impl MixedRadixEncoder {
 		} else if Self::is_zero(y) && x.max() <= ub {
 			return Ok(x.clone());
 		}
-		let domain = x
-			.domain()
-			.iter()
-			.flatten()
-			.cartesian_product(y.domain().iter().flatten().collect_vec())
-			.map(|(a, b)| a + b)
-			.filter(|&v| v <= ub)
-			.map(|v| v..=v)
-			.collect();
+		let domain = sum_values(&(1, x.clone()), &(1, y.clone()), ub);
 		let z = self.new_int_var(db, domain, "s")?;
 		self.encoder().encode(
 			db,

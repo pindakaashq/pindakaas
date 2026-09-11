@@ -6,6 +6,11 @@
 //! constraint produces one of these, its groups of related terms having become
 //! the integers they encode, so this is where every linear encoder starts.
 
+use std::cmp::min;
+
+use itertools::Itertools;
+use rangelist::RangeList;
+
 pub use crate::encoder::{
 	decision_diagram::DecisionDiagramEncoder,
 	mixed_radix::MixedRadixEncoder,
@@ -319,6 +324,49 @@ pub(crate) fn encode_addition<Db: ClauseDatabase + ?Sized>(
 	};
 	let _ = AdderEncoder::ripple_carry_adder(db, lhs, &slack, None, Some(total))?;
 	Ok(())
+}
+
+/// The values `x + y` can take, with anything past `ub` dropped.
+///
+/// The sum of two intervals is an interval, so where neither term's
+/// coefficient stretches a contiguous domain into gaps there is nothing to
+/// enumerate. That is the common case — every intermediate of a decomposition
+/// has a coefficient of one — and enumerating it costs `O(|dom x|·|dom y|)`
+/// values and a sort, before the bound drops most of them again.
+pub(crate) fn sum_values(x: &Term, y: &Term, ub: Coeff) -> RangeList<Coeff> {
+	if let (Some((x0, x1)), Some((y0, y1))) = (term_interval(x), term_interval(y)) {
+		let (lo, hi) = (x0 + y0, min(x1 + y1, ub));
+		return if lo > hi {
+			RangeList::default()
+		} else {
+			RangeList::from(lo..=hi)
+		};
+	}
+	term_values(x)
+		.into_iter()
+		.cartesian_product(term_values(y))
+		.map(|(a, b)| a + b)
+		.filter(|&d| d <= ub)
+		.map(|d| d..=d)
+		.collect()
+}
+
+/// The term's values as the one range they run over, where they do.
+///
+/// A coefficient other than ±1 leaves gaps between them, and a domain with a
+/// hole in it has them already.
+fn term_interval(t: &Term) -> Option<(Coeff, Coeff)> {
+	if t.0.abs() != 1 {
+		return None;
+	}
+	let domain = t.1.domain();
+	let mut ranges = domain.iter();
+	let range = ranges.next()?;
+	if ranges.next().is_some() {
+		return None;
+	}
+	let (a, b) = (t.0 * *range.start(), t.0 * *range.end());
+	Some((min(a, b), a.max(b)))
 }
 
 /// The values the term can take.
