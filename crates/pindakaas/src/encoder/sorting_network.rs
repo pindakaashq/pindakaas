@@ -203,10 +203,10 @@ impl SortingNetworkEncoder {
 					let (x_up, y_up) = (shifted(db, x, 1)?, shifted(db, y, 1)?);
 					let (x_ceil, y_ceil) = (halved(db, &x_up)?, halved(db, &y_up)?);
 
-					let z_floor = self.sum_var(db, &x_floor, &y_floor)?;
+					let z_floor = self.sum_var(db, &x_floor, &y_floor, c)?;
 					self.merge(db, &x_floor, &y_floor, cmp, &z_floor, lvl + 1)?;
 
-					let z_ceil = self.sum_var(db, &x_ceil, &y_ceil)?;
+					let z_ceil = self.sum_var(db, &x_ceil, &y_ceil, c)?;
 					self.merge(db, &x_ceil, &y_ceil, cmp, &z_ceil, lvl + 1)?;
 
 					(0..=c).try_for_each(|c| self.comp(db, &z_floor, &z_ceil, cmp, z, c))
@@ -305,12 +305,24 @@ impl SortingNetworkEncoder {
 		}
 	}
 
-	/// A variable over what `x` and `y` can come to together.
-	fn sum_var<Db>(&self, _db: &mut Db, x: &IntVar, y: &IntVar) -> Result<IntVar, Unsatisfiable>
+	/// A variable over what `x` and `y` can come to together, up to `ub`.
+	///
+	/// The halves a merge is split into are capped at the bound above them,
+	/// but halving rounds up on one side, so what the two ceilings come to can
+	/// be one past the bound — whenever both inputs and the bound are the same
+	/// odd number. Nothing below reads that value, so dropping it costs
+	/// nothing and saves a few percent of the merge.
+	fn sum_var<Db>(
+		&self,
+		_db: &mut Db,
+		x: &IntVar,
+		y: &IntVar,
+		ub: Coeff,
+	) -> Result<IntVar, Unsatisfiable>
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		Ok(IntVar::new((x.min() + y.min())..=(x.max() + y.max()))
+		Ok(IntVar::new((x.min() + y.min())..=min(x.max() + y.max(), ub))
 			.enforce_consistency(self.add_consistency)
 			.with_label(format!("{}+{}", x.label(), y.label())))
 	}
@@ -529,13 +541,70 @@ mod tests {
 
 	use crate::{
 		constraint::{
-			linear::LimitComp,
+			cardinality::Cardinality,
+			linear::{LimitComp, PosCoeff},
 			count::{Count, SortingNetworkEncoder, SortingNetworkStrategy},
 		},
 		decision::integer::IntVar,
 		helpers::tests::{assert_solutions, expect_file},
-		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Var, VarRange,
+		solver::{cadical::Cadical, SolveResult, Solver},
+		ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Valuation, Var, VarRange,
 	};
+
+	/// The smallest case where a merge intermediate reaches one past the
+	/// bound, and so the only one that tells the cap in [`sum_var`] from its
+	/// absence: both halves and the bound have to be the same odd number,
+	/// which needs seven literals at a bound of three.
+	///
+	/// The cap can only lose assignments, never admit extra ones, so the
+	/// assertion is that every assignment the constraint allows is still a
+	/// model — checking the models satisfy the constraint would not see it.
+	#[test]
+	fn a_merge_intermediate_is_capped_without_losing_assignments() {
+		const N: usize = 7;
+		const K: Coeff = 3;
+		let mut cnf = Cnf::default();
+		let lits = cnf.new_var_range(N).iter_lits().collect_vec();
+		get_sorted_encoder(SortingNetworkStrategy::Recursive)
+			.encode(
+				&mut cnf,
+				&Cardinality {
+					lits: lits.clone(),
+					cmp: LimitComp::LessEq,
+					k: PosCoeff::new(K),
+				},
+			)
+			.unwrap();
+
+		let vars = cnf.get_variables();
+		let mut slv = Cadical::from(&cnf);
+		let mut seen = Vec::new();
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			seen.push(lits.iter().map(|&l| value.value(l)).collect_vec());
+			let no_good = vars
+				.map(|v| {
+					let l = v.into();
+					if value.value(l) {
+						!l
+					} else {
+						l
+					}
+				})
+				.collect_vec();
+			if slv.add_clause(no_good).is_err() {
+				break;
+			}
+		}
+		seen.sort_unstable();
+		seen.dedup();
+
+		let allowed = (0..(1 << N))
+			.map(|m: u32| (0..N).map(|i| m >> i & 1 == 1).collect_vec())
+			.filter(|a| a.iter().filter(|holds| **holds).count() as Coeff <= K)
+			.sorted()
+			.collect_vec();
+		assert_eq!(seen, allowed);
+	}
 
 	fn get_sorted_encoder(strategy: SortingNetworkStrategy) -> SortingNetworkEncoder {
 		SortingNetworkEncoder {
