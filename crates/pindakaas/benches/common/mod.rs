@@ -11,18 +11,18 @@ use pindakaas::{
 	Cnf, Encoder, Unsatisfiable,
 };
 
-/// Coefficient type of the library, which does not export the alias it uses.
-pub(crate) type Coeff = i64;
-
-/// Encoders that take a linear constraint whatever its coefficients are.
-pub(crate) const ENCODERS: &[&str] =
-	&["adder", "diagram", "seq", "tree", "radix", "wdog", "wdog-l"];
-
 /// [`SortingNetworkEncoder`] only takes a cardinality constraint, so it joins
 /// the others on the shapes that aggregate to one.
 pub(crate) const CARD_ENCODERS: &[&str] = &[
 	"adder", "diagram", "seq", "tree", "radix", "wdog", "wdog-l", "sort",
 ];
+
+/// Encoders that take a linear constraint whatever its coefficients are.
+pub(crate) const ENCODERS: &[&str] =
+	&["adder", "diagram", "seq", "tree", "radix", "wdog", "wdog-l"];
+
+/// Coefficient type of the library, which does not export the alias it uses.
+pub(crate) type Coeff = i64;
 
 /// Deterministic pseudo-random coefficients in `1..=max`, so that a case is
 /// the same one from run to run without a dependency saying so.

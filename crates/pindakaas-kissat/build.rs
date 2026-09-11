@@ -4,17 +4,6 @@
 
 use std::{path::Path, process::Command};
 
-/// Run a command purely for its stdout, yielding an empty string if it cannot
-/// be spawned or exits unsuccessfully.
-///
-/// Used only for informational build metadata, which must never fail the build.
-fn run_command(cmd: &mut Command) -> String {
-	match cmd.output() {
-		Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
-		_ => String::new(),
-	}
-}
-
 fn main() {
 	let version = include_str!("vendor/kissat/VERSION").trim();
 	assert_eq!(version, "4.0.4", "unexpected version of Kissat detected");
@@ -165,4 +154,15 @@ fn main() {
 	let _ = build.files(src);
 
 	build.compile("kissat");
+}
+
+/// Run a command purely for its stdout, yielding an empty string if it cannot
+/// be spawned or exits unsuccessfully.
+///
+/// Used only for informational build metadata, which must never fail the build.
+fn run_command(cmd: &mut Command) -> String {
+	match cmd.output() {
+		Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
+		_ => String::new(),
+	}
 }

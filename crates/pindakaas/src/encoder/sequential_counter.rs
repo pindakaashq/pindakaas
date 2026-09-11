@@ -59,19 +59,6 @@ pub struct SequentialCounterEncoder {
 	cutoff: Option<Coeff>,
 }
 
-impl Default for SequentialCounterEncoder {
-	/// Narrowing the domains before encoding is worth doing: it is what keeps
-	/// the intermediate sums of a decomposition small, and turning it off can
-	/// cost several times the clauses.
-	fn default() -> Self {
-		Self {
-			add_consistency: false,
-			add_propagation: Consistency::Bounds,
-			cutoff: None,
-		}
-	}
-}
-
 impl SequentialCounterEncoder {
 	/// The encoder of the pieces this one decomposes a constraint into.
 	fn encoder(&self) -> IntTernaryEncoder {
@@ -153,6 +140,39 @@ impl Decompose for SequentialCounterEncoder {
 	}
 }
 
+impl Default for SequentialCounterEncoder {
+	/// Narrowing the domains before encoding is worth doing: it is what keeps
+	/// the intermediate sums of a decomposition small, and turning it off can
+	/// cost several times the clauses.
+	fn default() -> Self {
+		Self {
+			add_consistency: false,
+			add_propagation: Consistency::Bounds,
+			cutoff: None,
+		}
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for SequentialCounterEncoder {
+	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
+		let con = con.as_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for SequentialCounterEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SequentialCounterEncoder {
+	fn encode(&self, db: &mut Db, con: &Count) -> Result {
+		let con = con.as_int_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
 impl<Db> Encoder<Db, NormalizedBoolLinear> for SequentialCounterEncoder
 where
 	Db: ClauseDatabase + ?Sized,
@@ -173,26 +193,6 @@ where
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
 		self.encoder().encode_decomposed(db, con, self)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for SequentialCounterEncoder {
-	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
-		let con = con.as_linear(db)?;
-		self.encode(db, &con)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SequentialCounterEncoder {
-	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		let con = con.as_int_linear(db)?;
-		self.encode(db, &con)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for SequentialCounterEncoder {
-	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
-		self.encode(db, &Cardinality::from(con.clone()))
 	}
 }
 

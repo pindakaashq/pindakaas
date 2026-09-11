@@ -34,6 +34,129 @@ use crate::{
 /// ```
 pub struct TseitinEncoder;
 
+fn bind<Db: ClauseDatabase + ?Sized>(
+	formula: &Formula<Lit>,
+	db: &mut Db,
+	name: Option<Lit>,
+) -> Result<Lit> {
+	Ok(match formula {
+		Formula::Atom(lit) => {
+			if let Some(name) = name {
+				if *lit != name {
+					db.add_clause([!name, *lit])?;
+					db.add_clause([name, !*lit])?;
+				}
+				name
+			} else {
+				*lit
+			}
+		}
+		Formula::Not(f) => !(bind(f, db, name.map(|lit| !lit))?),
+		Formula::And(sub) => match sub.len() {
+			0 => {
+				let name = name.unwrap_or_else(|| db.new_var().into());
+				db.add_clause([name])?;
+				name
+			}
+			1 => return bind(&sub[0], db, name),
+			_ => {
+				let name = name.unwrap_or_else(|| db.new_var().into());
+				let lits: Vec<_> = sub.iter().map(|f| bind(f, db, None)).try_collect()?;
+				db.add_clause(once(name).chain(lits.iter().map(|&l| !l)))?;
+				for lit in lits {
+					db.add_clause([!name, lit])?;
+				}
+				name
+			}
+		},
+		Formula::Or(sub) => match sub.len() {
+			0 => {
+				let name = name.unwrap_or_else(|| db.new_var().into());
+				db.add_clause([!name])?;
+				name
+			}
+			1 => return bind(&sub[0], db, name),
+			_ => {
+				let name = name.unwrap_or_else(|| db.new_var().into());
+				let lits: Vec<_> = sub.iter().map(|f| bind(f, db, None)).try_collect()?;
+				for &lit in &lits {
+					db.add_clause([name, !lit])?;
+				}
+				db.add_clause(once(!name).chain(lits))?;
+				name
+			}
+		},
+		Formula::Implies(left, right) => {
+			let name = name.unwrap_or_else(|| db.new_var().into());
+			let left = bind(left, db, None)?;
+			let right = bind(right, db, None)?;
+			db.add_clause([!name, !left, right])?;
+			db.add_clause([name, left])?;
+			db.add_clause([name, !right])?;
+			name
+		}
+		Formula::Equiv(sub) => {
+			assert!(
+				sub.len() >= 2,
+				"unable to bind the equivalence of less than 2 formulas"
+			);
+			let name = name.unwrap_or_else(|| db.new_var().into());
+			let lits = sub
+				.iter()
+				.map(|f| bind(f, db, None))
+				.collect::<Result<Vec<_>>>()?;
+			for (x, y) in lits.iter().copied().tuple_windows() {
+				db.add_clause([!name, !x, y])?;
+				db.add_clause([!name, x, !y])?;
+			}
+			db.add_clause(once(name).chain(lits.iter().map(|&l| !l)))?;
+			db.add_clause(once(name).chain(lits))?;
+			name
+		}
+		Formula::Xor(sub) => {
+			assert_ne!(sub.len(), 0, "unable to bind empty xor formula");
+			if sub.len() == 1 {
+				return bind(&sub[0], db, name);
+			}
+			let name = name.unwrap_or_else(|| db.new_var().into());
+			let mut lits = sub
+				.iter()
+				.map(|f| bind(f, db, None))
+				.collect::<Result<Vec<_>>>()?;
+
+			let mut left = lits.pop().unwrap();
+			for (pos, right) in lits.into_iter().with_position() {
+				let new_name = if pos.is_last() {
+					name
+				} else {
+					db.new_var().into()
+				};
+				db.add_clause([!new_name, !left, !right])?;
+				db.add_clause([!new_name, left, right])?;
+				db.add_clause([new_name, !left, right])?;
+				db.add_clause([new_name, left, !right])?;
+
+				left = new_name;
+			}
+			name
+		}
+		Formula::IfThenElse { cond, then, els } => {
+			let name = name.unwrap_or_else(|| db.new_var().into());
+			let cond = bind(cond, db, None)?;
+			let then = bind(then, db, None)?;
+			let els = bind(els, db, None)?;
+			db.add_clause([!name, !cond, then])?;
+			db.add_clause([!name, cond, els])?;
+
+			db.add_clause([name, !cond, !then])?;
+			db.add_clause([name, cond, !els])?;
+			db.add_clause([name, !then, !els])?;
+
+			name
+		}
+	})
+}
+
 impl<Db> Encoder<Db, Formula<BoolVal>> for TseitinEncoder
 where
 	Db: ClauseDatabase + ?Sized,
@@ -159,127 +282,4 @@ where
 			}
 		}
 	}
-}
-
-fn bind<Db: ClauseDatabase + ?Sized>(
-	formula: &Formula<Lit>,
-	db: &mut Db,
-	name: Option<Lit>,
-) -> Result<Lit> {
-	Ok(match formula {
-		Formula::Atom(lit) => {
-			if let Some(name) = name {
-				if *lit != name {
-					db.add_clause([!name, *lit])?;
-					db.add_clause([name, !*lit])?;
-				}
-				name
-			} else {
-				*lit
-			}
-		}
-		Formula::Not(f) => !(bind(f, db, name.map(|lit| !lit))?),
-		Formula::And(sub) => match sub.len() {
-			0 => {
-				let name = name.unwrap_or_else(|| db.new_var().into());
-				db.add_clause([name])?;
-				name
-			}
-			1 => return bind(&sub[0], db, name),
-			_ => {
-				let name = name.unwrap_or_else(|| db.new_var().into());
-				let lits: Vec<_> = sub.iter().map(|f| bind(f, db, None)).try_collect()?;
-				db.add_clause(once(name).chain(lits.iter().map(|&l| !l)))?;
-				for lit in lits {
-					db.add_clause([!name, lit])?;
-				}
-				name
-			}
-		},
-		Formula::Or(sub) => match sub.len() {
-			0 => {
-				let name = name.unwrap_or_else(|| db.new_var().into());
-				db.add_clause([!name])?;
-				name
-			}
-			1 => return bind(&sub[0], db, name),
-			_ => {
-				let name = name.unwrap_or_else(|| db.new_var().into());
-				let lits: Vec<_> = sub.iter().map(|f| bind(f, db, None)).try_collect()?;
-				for &lit in &lits {
-					db.add_clause([name, !lit])?;
-				}
-				db.add_clause(once(!name).chain(lits))?;
-				name
-			}
-		},
-		Formula::Implies(left, right) => {
-			let name = name.unwrap_or_else(|| db.new_var().into());
-			let left = bind(left, db, None)?;
-			let right = bind(right, db, None)?;
-			db.add_clause([!name, !left, right])?;
-			db.add_clause([name, left])?;
-			db.add_clause([name, !right])?;
-			name
-		}
-		Formula::Equiv(sub) => {
-			assert!(
-				sub.len() >= 2,
-				"unable to bind the equivalence of less than 2 formulas"
-			);
-			let name = name.unwrap_or_else(|| db.new_var().into());
-			let lits = sub
-				.iter()
-				.map(|f| bind(f, db, None))
-				.collect::<Result<Vec<_>>>()?;
-			for (x, y) in lits.iter().copied().tuple_windows() {
-				db.add_clause([!name, !x, y])?;
-				db.add_clause([!name, x, !y])?;
-			}
-			db.add_clause(once(name).chain(lits.iter().map(|&l| !l)))?;
-			db.add_clause(once(name).chain(lits))?;
-			name
-		}
-		Formula::Xor(sub) => {
-			assert_ne!(sub.len(), 0, "unable to bind empty xor formula");
-			if sub.len() == 1 {
-				return bind(&sub[0], db, name);
-			}
-			let name = name.unwrap_or_else(|| db.new_var().into());
-			let mut lits = sub
-				.iter()
-				.map(|f| bind(f, db, None))
-				.collect::<Result<Vec<_>>>()?;
-
-			let mut left = lits.pop().unwrap();
-			for (pos, right) in lits.into_iter().with_position() {
-				let new_name = if pos.is_last() {
-					name
-				} else {
-					db.new_var().into()
-				};
-				db.add_clause([!new_name, !left, !right])?;
-				db.add_clause([!new_name, left, right])?;
-				db.add_clause([new_name, !left, right])?;
-				db.add_clause([new_name, left, !right])?;
-
-				left = new_name;
-			}
-			name
-		}
-		Formula::IfThenElse { cond, then, els } => {
-			let name = name.unwrap_or_else(|| db.new_var().into());
-			let cond = bind(cond, db, None)?;
-			let then = bind(then, db, None)?;
-			let els = bind(els, db, None)?;
-			db.add_clause([!name, !cond, then])?;
-			db.add_clause([!name, cond, els])?;
-
-			db.add_clause([name, !cond, !then])?;
-			db.add_clause([name, cond, !els])?;
-			db.add_clause([name, !then, !els])?;
-
-			name
-		}
-	})
 }

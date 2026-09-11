@@ -20,11 +20,15 @@
 	reason = "shared across the crate's test targets"
 )]
 
+#[path = "../benches/common/mod.rs"]
+mod common;
+
 use std::{
 	io::{self, Write},
 	time::{Duration, Instant},
 };
 
+use common::{coefficients, encode, Coeff, CARD_ENCODERS, ENCODERS};
 use pindakaas::{
 	constraint::{
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
@@ -35,10 +39,9 @@ use pindakaas::{
 	BoolVal, ClauseDatabase, Cnf, Encoder, Lit, Unsatisfiable,
 };
 
-#[path = "../benches/common/mod.rs"]
-mod common;
-
-use common::{coefficients, encode, Coeff, CARD_ENCODERS, ENCODERS};
+/// How long one solve is given before the clock ends it, whatever its
+/// conflict limit says.
+const BUDGET: Duration = Duration::from_secs(90);
 
 /// Conflict budget past which an instance is reported as unmeasured rather
 /// than waited for.
@@ -53,57 +56,83 @@ struct Family {
 	build: fn(&str) -> Result<Cnf, Unsatisfiable>,
 }
 
-/// `2n+1` pigeons into `n` holes of capacity two.
+/// How a solve ended.
+#[derive(PartialEq)]
+enum Probe {
+	/// Satisfiable or unsatisfiable, within both limits.
+	Decided(&'static str),
+	/// The conflict limit was reached.
+	OutOfConflicts,
+	/// The clock was reached, which says nothing about the conflict limit.
+	OutOfTime,
+}
+
+/// A combinatorial auction: bids over overlapping item sets, with a revenue
+/// floor.
 ///
-/// Capacity two rather than one keeps the hole constraint a cardinality
-/// constraint: at one, aggregation reports it as at-most-one and it reaches
-/// the at-most-one encoder instead of the one under test.
-fn pigeonhole(enc: &str) -> Result<Cnf, Unsatisfiable> {
-	const HOLES: usize = 7;
-	const CAPACITY: Coeff = 2;
-	let pigeons = HOLES * CAPACITY as usize + 1;
+/// The item constraints are at-most-one whatever the encoder, so what is
+/// measured here is the encoder on the revenue constraint — a wide sum with
+/// large coefficients — against a background it shares with every other run.
+fn auction(enc: &str) -> Result<Cnf, Unsatisfiable> {
+	const ITEMS: usize = 14;
+	const BIDS: usize = 40;
 	let mut cnf = Cnf::default();
-	let grid: Vec<Vec<Lit>> = (0..pigeons)
-		.map(|_| cnf.new_var_range(HOLES).iter_lits().collect())
-		.collect();
-	for row in &grid {
-		PairwiseEncoder::default().encode(
-			&mut cnf,
-			&CardinalityOne::new(row.clone(), LimitComp::Equal),
-		)?;
+	let bids: Vec<Lit> = cnf.new_var_range(BIDS).iter_lits().collect();
+	let prices = coefficients(BIDS, 400, 30);
+	let mut covers: Vec<Vec<Lit>> = vec![Vec::new(); ITEMS];
+	for (b, &bid) in bids.iter().enumerate() {
+		// Three items per bid, spread so that the bids overlap.
+		for j in 0..3 {
+			covers[(b * 5 + j * 3) % ITEMS].push(bid);
+		}
 	}
-	for h in 0..HOLES {
-		let column: Vec<Lit> = grid.iter().map(|row| row[h]).collect();
-		let con = Linear::new(
-			LinExp::from_slices(&vec![1; pigeons], &column),
-			Comparator::LessEq,
-			CAPACITY,
-		);
-		encode(enc, &mut cnf, &con)?;
+	for lits in covers {
+		PairwiseEncoder::default()
+			.encode(&mut cnf, &CardinalityOne::new(lits, LimitComp::LessEq))?;
 	}
+	// Heuristic: a floor near what a third of the bids are worth is past what
+	// the item constraints leave room for, without being obviously so.
+	let floor = prices.iter().sum::<Coeff>() / 3;
+	let con = Linear::new(
+		LinExp::from_slices(&prices, &bids),
+		Comparator::GreaterEq,
+		floor,
+	);
+	encode(enc, &mut cnf, &con)?;
 	Ok(cnf)
 }
 
-/// Two weighted equalities over the same literals, each reachable on its own.
+/// The least conflict budget that decides `cnf`.
 ///
-/// A single subset-sum whose target is out of reach is settled by propagation
-/// on any domain consistent encoding and measures nothing; two of them force
-/// the search to reconcile them.
-fn market_split(enc: &str) -> Result<Cnf, Unsatisfiable> {
-	const N: usize = 20;
-	let mut cnf = Cnf::default();
-	let lits: Vec<Lit> = cnf.new_var_range(N).iter_lits().collect();
-	for (seed, weights) in [coefficients(N, 40, 7), coefficients(N, 40, 8)]
-		.into_iter()
-		.enumerate()
-	{
-		// Every second weight is a subset sum, so neither equality is out of
-		// reach by itself.
-		let k = weights.iter().skip(seed).step_by(2).sum();
-		let con = Linear::new(LinExp::from_slices(&weights, &lits), Comparator::Equal, k);
-		encode(enc, &mut cnf, &con)?;
+/// Doubling first, then bisecting: the budget spans several orders of
+/// magnitude across the encoders, so a linear walk up to it would be the
+/// expensive part of this program.
+fn conflicts(cnf: &Cnf) -> Result<i32, &'static str> {
+	let decided = |limit| match probe(cnf, Some(limit)).0 {
+		Probe::Decided(_) => Ok(true),
+		Probe::OutOfConflicts => Ok(false),
+		Probe::OutOfTime => Err("t/o"),
+	};
+	if decided(1)? {
+		return Ok(1);
 	}
-	Ok(cnf)
+	let mut hi = 2;
+	while hi <= CAP && !decided(hi)? {
+		hi *= 2;
+	}
+	if hi > CAP {
+		return Err("over");
+	}
+	let mut lo = hi / 2;
+	while lo + 1 < hi {
+		let mid = lo + (hi - lo) / 2;
+		if decided(mid)? {
+			hi = mid;
+		} else {
+			lo = mid;
+		}
+	}
+	Ok(hi)
 }
 
 /// A multiple-choice knapsack: one item taken from each group, under a weight
@@ -143,135 +172,6 @@ fn knapsack(enc: &str) -> Result<Cnf, Unsatisfiable> {
 		&Linear::new(profit, Comparator::GreaterEq, floor + 1),
 	)?;
 	Ok(cnf)
-}
-
-/// A combinatorial auction: bids over overlapping item sets, with a revenue
-/// floor.
-///
-/// The item constraints are at-most-one whatever the encoder, so what is
-/// measured here is the encoder on the revenue constraint — a wide sum with
-/// large coefficients — against a background it shares with every other run.
-fn auction(enc: &str) -> Result<Cnf, Unsatisfiable> {
-	const ITEMS: usize = 14;
-	const BIDS: usize = 40;
-	let mut cnf = Cnf::default();
-	let bids: Vec<Lit> = cnf.new_var_range(BIDS).iter_lits().collect();
-	let prices = coefficients(BIDS, 400, 30);
-	let mut covers: Vec<Vec<Lit>> = vec![Vec::new(); ITEMS];
-	for (b, &bid) in bids.iter().enumerate() {
-		// Three items per bid, spread so that the bids overlap.
-		for j in 0..3 {
-			covers[(b * 5 + j * 3) % ITEMS].push(bid);
-		}
-	}
-	for lits in covers {
-		PairwiseEncoder::default()
-			.encode(&mut cnf, &CardinalityOne::new(lits, LimitComp::LessEq))?;
-	}
-	// Heuristic: a floor near what a third of the bids are worth is past what
-	// the item constraints leave room for, without being obviously so.
-	let floor = prices.iter().sum::<Coeff>() / 3;
-	let con = Linear::new(
-		LinExp::from_slices(&prices, &bids),
-		Comparator::GreaterEq,
-		floor,
-	);
-	encode(enc, &mut cnf, &con)?;
-	Ok(cnf)
-}
-
-/// How long one solve is given before the clock ends it, whatever its
-/// conflict limit says.
-const BUDGET: Duration = Duration::from_secs(90);
-
-/// How a solve ended.
-#[derive(PartialEq)]
-enum Probe {
-	/// Satisfiable or unsatisfiable, within both limits.
-	Decided(&'static str),
-	/// The conflict limit was reached.
-	OutOfConflicts,
-	/// The clock was reached, which says nothing about the conflict limit.
-	OutOfTime,
-}
-
-/// Solve `cnf` under `limit` conflicts, or without one.
-fn probe(cnf: &Cnf, limit: Option<i32>) -> (Probe, Duration) {
-	let mut slv = Cadical::from(cnf);
-	if let Some(limit) = limit {
-		slv.set_limit("conflicts", limit);
-	}
-	let start = Instant::now();
-	slv.set_terminate_callback(Some(move || {
-		if start.elapsed() > BUDGET {
-			TermSignal::Terminate
-		} else {
-			TermSignal::Continue
-		}
-	}));
-	let outcome = match slv.solve() {
-		SolveResult::Satisfied(_) => Probe::Decided("sat"),
-		SolveResult::Unsatisfiable(_) => Probe::Decided("unsat"),
-		// A solve that ran out the clock is not one that ran out of
-		// conflicts, and the two must not be read as the same answer.
-		SolveResult::Unknown if start.elapsed() > BUDGET => Probe::OutOfTime,
-		SolveResult::Unknown => Probe::OutOfConflicts,
-	};
-	(outcome, start.elapsed())
-}
-
-/// The least conflict budget that decides `cnf`.
-///
-/// Doubling first, then bisecting: the budget spans several orders of
-/// magnitude across the encoders, so a linear walk up to it would be the
-/// expensive part of this program.
-fn conflicts(cnf: &Cnf) -> Result<i32, &'static str> {
-	let decided = |limit| match probe(cnf, Some(limit)).0 {
-		Probe::Decided(_) => Ok(true),
-		Probe::OutOfConflicts => Ok(false),
-		Probe::OutOfTime => Err("t/o"),
-	};
-	if decided(1)? {
-		return Ok(1);
-	}
-	let mut hi = 2;
-	while hi <= CAP && !decided(hi)? {
-		hi *= 2;
-	}
-	if hi > CAP {
-		return Err("over");
-	}
-	let mut lo = hi / 2;
-	while lo + 1 < hi {
-		let mid = lo + (hi - lo) / 2;
-		if decided(mid)? {
-			hi = mid;
-		} else {
-			lo = mid;
-		}
-	}
-	Ok(hi)
-}
-
-/// Best of three unlimited solves, and what the instance turned out to be.
-///
-/// Three runs of an instance that takes a minute say no more than one does, so
-/// the repeats stop once they have cost enough to have settled the spread.
-fn wall_time(cnf: &Cnf) -> (Duration, &'static str) {
-	let mut best = Duration::MAX;
-	let mut verdict = "t/o";
-	let spent = Instant::now();
-	for _ in 0..3 {
-		let (outcome, took) = probe(cnf, None);
-		let Probe::Decided(said) = outcome else {
-			return (took, "t/o");
-		};
-		(best, verdict) = (best.min(took), said);
-		if spent.elapsed() > Duration::from_secs(20) {
-			break;
-		}
-	}
-	(best, verdict)
 }
 
 fn main() {
@@ -340,4 +240,103 @@ fn main() {
 			let _ = io::stdout().flush();
 		}
 	}
+}
+
+/// Two weighted equalities over the same literals, each reachable on its own.
+///
+/// A single subset-sum whose target is out of reach is settled by propagation
+/// on any domain consistent encoding and measures nothing; two of them force
+/// the search to reconcile them.
+fn market_split(enc: &str) -> Result<Cnf, Unsatisfiable> {
+	const N: usize = 20;
+	let mut cnf = Cnf::default();
+	let lits: Vec<Lit> = cnf.new_var_range(N).iter_lits().collect();
+	for (seed, weights) in [coefficients(N, 40, 7), coefficients(N, 40, 8)]
+		.into_iter()
+		.enumerate()
+	{
+		// Every second weight is a subset sum, so neither equality is out of
+		// reach by itself.
+		let k = weights.iter().skip(seed).step_by(2).sum();
+		let con = Linear::new(LinExp::from_slices(&weights, &lits), Comparator::Equal, k);
+		encode(enc, &mut cnf, &con)?;
+	}
+	Ok(cnf)
+}
+
+/// `2n+1` pigeons into `n` holes of capacity two.
+///
+/// Capacity two rather than one keeps the hole constraint a cardinality
+/// constraint: at one, aggregation reports it as at-most-one and it reaches
+/// the at-most-one encoder instead of the one under test.
+fn pigeonhole(enc: &str) -> Result<Cnf, Unsatisfiable> {
+	const HOLES: usize = 7;
+	const CAPACITY: Coeff = 2;
+	let pigeons = HOLES * CAPACITY as usize + 1;
+	let mut cnf = Cnf::default();
+	let grid: Vec<Vec<Lit>> = (0..pigeons)
+		.map(|_| cnf.new_var_range(HOLES).iter_lits().collect())
+		.collect();
+	for row in &grid {
+		PairwiseEncoder::default().encode(
+			&mut cnf,
+			&CardinalityOne::new(row.clone(), LimitComp::Equal),
+		)?;
+	}
+	for h in 0..HOLES {
+		let column: Vec<Lit> = grid.iter().map(|row| row[h]).collect();
+		let con = Linear::new(
+			LinExp::from_slices(&vec![1; pigeons], &column),
+			Comparator::LessEq,
+			CAPACITY,
+		);
+		encode(enc, &mut cnf, &con)?;
+	}
+	Ok(cnf)
+}
+
+/// Solve `cnf` under `limit` conflicts, or without one.
+fn probe(cnf: &Cnf, limit: Option<i32>) -> (Probe, Duration) {
+	let mut slv = Cadical::from(cnf);
+	if let Some(limit) = limit {
+		slv.set_limit("conflicts", limit);
+	}
+	let start = Instant::now();
+	slv.set_terminate_callback(Some(move || {
+		if start.elapsed() > BUDGET {
+			TermSignal::Terminate
+		} else {
+			TermSignal::Continue
+		}
+	}));
+	let outcome = match slv.solve() {
+		SolveResult::Satisfied(_) => Probe::Decided("sat"),
+		SolveResult::Unsatisfiable(_) => Probe::Decided("unsat"),
+		// A solve that ran out the clock is not one that ran out of
+		// conflicts, and the two must not be read as the same answer.
+		SolveResult::Unknown if start.elapsed() > BUDGET => Probe::OutOfTime,
+		SolveResult::Unknown => Probe::OutOfConflicts,
+	};
+	(outcome, start.elapsed())
+}
+
+/// Best of three unlimited solves, and what the instance turned out to be.
+///
+/// Three runs of an instance that takes a minute say no more than one does, so
+/// the repeats stop once they have cost enough to have settled the spread.
+fn wall_time(cnf: &Cnf) -> (Duration, &'static str) {
+	let mut best = Duration::MAX;
+	let mut verdict = "t/o";
+	let spent = Instant::now();
+	for _ in 0..3 {
+		let (outcome, took) = probe(cnf, None);
+		let Probe::Decided(said) = outcome else {
+			return (took, "t/o");
+		};
+		(best, verdict) = (best.min(took), said);
+		if spent.elapsed() > Duration::from_secs(20) {
+			break;
+		}
+	}
+	(best, verdict)
 }

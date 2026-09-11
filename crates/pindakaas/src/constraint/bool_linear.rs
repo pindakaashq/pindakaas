@@ -29,29 +29,6 @@ pub struct NormalizedBoolLinear {
 }
 
 impl NormalizedBoolLinear {
-	/// Returns the constraint's comparator, which is never `≥`.
-	pub fn cmp(&self) -> LimitComp {
-		self.cmp.clone()
-	}
-
-	/// Returns the non-negative constant the sum is compared against.
-	pub fn k(&self) -> Coeff {
-		*self.k
-	}
-
-	/// Construct the constraint `Σ cᵢ·litᵢ ≷ k`.
-	pub fn new(
-		terms: impl IntoIterator<Item = (Lit, PosCoeff)>,
-		cmp: LimitComp,
-		k: PosCoeff,
-	) -> Self {
-		Self {
-			terms: terms.into_iter().collect(),
-			cmp,
-			k,
-		}
-	}
-
 	/// Read the constraint as the integer linear constraint it is.
 	///
 	/// A literal is an integer worth its coefficient when it holds and nothing
@@ -73,6 +50,29 @@ impl NormalizedBoolLinear {
 			})
 			.collect::<Result<Vec<_>, _>>()?;
 		Ok(NormalizedIntLinear::new(terms, self.cmp(), self.k))
+	}
+
+	/// Returns the constraint's comparator, which is never `≥`.
+	pub fn cmp(&self) -> LimitComp {
+		self.cmp.clone()
+	}
+
+	/// Returns the non-negative constant the sum is compared against.
+	pub fn k(&self) -> Coeff {
+		*self.k
+	}
+
+	/// Construct the constraint `Σ cᵢ·litᵢ ≷ k`.
+	pub fn new(
+		terms: impl IntoIterator<Item = (Lit, PosCoeff)>,
+		cmp: LimitComp,
+		k: PosCoeff,
+	) -> Self {
+		Self {
+			terms: terms.into_iter().collect(),
+			cmp,
+			k,
+		}
 	}
 
 	/// The terms of the sum, each with a positive coefficient.

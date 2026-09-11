@@ -25,7 +25,38 @@ pub struct IntTernary {
 	pub(crate) z: Term,
 }
 
+impl From<&IntTernary> for IntLinear {
+	/// A term over a variable of one value is what it is worth, so it belongs
+	/// with the constant rather than among the terms.
+	fn from(con: &IntTernary) -> Self {
+		let (mut terms, mut k) = (Vec::new(), 0);
+		for (term, adds) in [(&con.x, true), (&con.y, true), (&con.z, false)] {
+			if term.1.card() == 1 {
+				let worth = term.0 * term.1.min();
+				k += if adds { -worth } else { worth };
+			} else {
+				terms.push(if adds {
+					term.clone()
+				} else {
+					term_negated(term)
+				});
+			}
+		}
+		Self::new(terms, con.cmp, k)
+	}
+}
+
 impl IntTernary {
+	/// The two terms that are added together.
+	pub fn addends(&self) -> (&Term, &Term) {
+		(&self.x, &self.y)
+	}
+
+	/// The comparator of the constraint.
+	pub fn cmp(&self) -> Comparator {
+		self.cmp
+	}
+
 	/// Construct the constraint `x + y ≷ z`.
 	///
 	/// # Examples
@@ -47,39 +78,8 @@ impl IntTernary {
 		Self { x, y, cmp, z }
 	}
 
-	/// The comparator of the constraint.
-	pub fn cmp(&self) -> Comparator {
-		self.cmp
-	}
-
-	/// The two terms that are added together.
-	pub fn addends(&self) -> (&Term, &Term) {
-		(&self.x, &self.y)
-	}
-
 	/// The term they are compared against.
 	pub fn total(&self) -> &Term {
 		&self.z
-	}
-}
-
-impl From<&IntTernary> for IntLinear {
-	/// A term over a variable of one value is what it is worth, so it belongs
-	/// with the constant rather than among the terms.
-	fn from(con: &IntTernary) -> Self {
-		let (mut terms, mut k) = (Vec::new(), 0);
-		for (term, adds) in [(&con.x, true), (&con.y, true), (&con.z, false)] {
-			if term.1.card() == 1 {
-				let worth = term.0 * term.1.min();
-				k += if adds { -worth } else { worth };
-			} else {
-				terms.push(if adds {
-					term.clone()
-				} else {
-					term_negated(term)
-				});
-			}
-		}
-		Self::new(terms, con.cmp, k)
 	}
 }

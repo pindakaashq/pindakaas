@@ -138,106 +138,22 @@ pub struct CTracer {
 }
 
 extern "C" {
-	// IPASIR definitions
-	/// CaDiCaL implementation of `ipasir_signature`.
-	pub fn ccadical_signature() -> *const c_char;
-	/// CaDiCaL implementation of `ipasir_init`.
-	pub fn ccadical_init() -> *mut CCaDiCaL;
-	/// CaDiCaL implementation of `ipasir_release`.
-	pub fn ccadical_release(slv: *mut CCaDiCaL);
+	// Additional C-API functions in CaDiCaL
+	/// C binding for the `active` function.
+	pub fn ccadical_active(slv: *mut CCaDiCaL) -> i64;
 	/// CaDiCaL implementation of `ipasir_add`.
 	pub fn ccadical_add(slv: *mut CCaDiCaL, lit: i32);
+	/// C binding to the IPASIR-UP `add_observed_var` function.
+	pub fn ccadical_add_observed_var(slv: *mut CCaDiCaL, var: i32);
 	/// CaDiCaL implementation of `ipasir_assume`.
 	pub fn ccadical_assume(slv: *mut CCaDiCaL, lit: i32);
-	/// CaDiCaL implementation of `ipasir_solve`.
-	pub fn ccadical_solve(slv: *mut CCaDiCaL) -> c_int;
-	/// CaDiCaL implementation of `ipasir_val`.
-	pub fn ccadical_val(slv: *mut CCaDiCaL, lit: i32) -> i32;
-	/// CaDiCaL implementation of `ipasir_failed`.
-	pub fn ccadical_failed(slv: *mut CCaDiCaL, lit: i32) -> c_int;
-	/// CaDiCaL implementation of `ipasir_set_terminate`.
-	pub fn ccadical_set_terminate(
-		slv: *mut CCaDiCaL,
-		data: *mut c_void,
-		cb: Option<unsafe extern "C" fn(*mut c_void) -> c_int>,
-	);
-	/// CaDiCaL implementation of `ipasir_set_learn`.
-	pub fn ccadical_set_learn(
-		slv: *mut CCaDiCaL,
-		data: *mut c_void,
-		max_len: c_int,
-		cb: Option<unsafe extern "C" fn(*mut c_void, *const i32)>,
-	);
 
 	// IPASIR-UP definitions
 	/// C binding to the IPASIR-UP `connect_external_propagator` function.
 	pub fn ccadical_connect_external_propagator(slv: *mut CCaDiCaL, prop: CExternalPropagator);
-	/// C binding to the IPASIR-UP `disconnect_external_propagator` function.
-	pub fn ccadical_disconnect_external_propagator(slv: *mut CCaDiCaL);
-	/// C binding to the IPASIR-UP `add_observed_var` function.
-	pub fn ccadical_add_observed_var(slv: *mut CCaDiCaL, var: i32);
-	/// C binding to copy `src` into a fresh solver, connecting `prop` to the
-	/// copy and re-observing on it every variable observed by `src`. Returns
-	/// the newly created solver (like [`ccadical_copy`]).
-	pub fn ccadical_copy_with_propagator(
-		src: *const CCaDiCaL,
-		prop: CExternalPropagator,
-	) -> *mut c_void;
-	/// C binding to the IPASIR-UP `remove_observed_var` function.
-	pub fn ccadical_remove_observed_var(slv: *mut CCaDiCaL, var: i32);
-	/// C binding to the IPASIR-UP `reset_observed_vars` function.
-	pub fn ccadical_reset_observed_vars(slv: *mut CCaDiCaL);
-	/// C binding to the IPASIR-UP `is_decision` function.
-	pub fn ccadical_is_decision(slv: *mut CCaDiCaL, lit: i32) -> bool;
-	/// C binding to the IPASIR-UP `force_backtrack` function.
-	pub fn ccadical_force_backtrack(slv: *mut CCaDiCaL, new_level: usize);
 
 	/// C binding to the IPASIR-UP `connect_fixed_listener` function.
 	pub fn ccadical_connect_fixed_listener(slv: *mut CCaDiCaL, listener: CFixedAssignmentListener);
-	/// C binding to the IPASIR-UP `disconnect_fixed_listener` function.
-	pub fn ccadical_disconnect_fixed_listener(slv: *mut CCaDiCaL);
-
-	// Additional C-API functions in CaDiCaL
-	/// C binding for the `active` function.
-	pub fn ccadical_active(slv: *mut CCaDiCaL) -> i64;
-	/// C binding for the `constrain` function.
-	pub fn ccadical_constrain(slv: *mut CCaDiCaL, lit: i32);
-	/// C binding for the `constraint_failed` function.
-	pub fn ccadical_constraint_failed(slv: *mut CCaDiCaL) -> c_int;
-	/// C binding for the `copy` function.
-	pub fn ccadical_copy(slv: *const CCaDiCaL) -> *mut c_void;
-	/// C binding for the `fixed` function.
-	pub fn ccadical_fixed(slv: *mut CCaDiCaL, lit: i32) -> c_int;
-	/// C binding for the `freeze` function.
-	pub fn ccadical_freeze(slv: *mut CCaDiCaL, lit: i32);
-	/// C binding for the `frozen` function.
-	pub fn ccadical_frozen(slv: *mut CCaDiCaL, lit: i32) -> c_int;
-	/// C binding for the `get_option` function.
-	pub fn ccadical_get_option(slv: *mut CCaDiCaL, name: *const c_char) -> c_int;
-	/// C binding for the `irredundant` function.
-	pub fn ccadical_irredundant(slv: *mut CCaDiCaL) -> i64;
-	/// C binding for the `limit` function.
-	pub fn ccadical_limit(slv: *mut CCaDiCaL, name: *const c_char, limit: c_int);
-	/// C binding for the `melt` function.
-	pub fn ccadical_melt(slv: *mut CCaDiCaL, lit: i32);
-	/// C binding for the `phase` function.
-	pub fn ccadical_phase(slv: *mut CCaDiCaL, lit: i32);
-	/// C binding for the `print_statistics` function.
-	pub fn ccadical_print_statistics(slv: *mut CCaDiCaL);
-	/// C binding for the `set_option` function.
-	pub fn ccadical_set_option(slv: *mut CCaDiCaL, name: *const c_char, val: c_int);
-	/// C binding for the `simplify` function.
-	pub fn ccadical_simplify(slv: *mut CCaDiCaL) -> c_int;
-	/// C binding for the `terminate` function.
-	pub fn ccadical_terminate(slv: *mut CCaDiCaL);
-	/// C binding for the `unphase` function.
-	pub fn ccadical_unphase(slv: *mut CCaDiCaL, lit: i32);
-	/// C binding for the `declare_one_more_variable` function.
-	pub fn ccadical_declare_more_variables(slv: *mut CCaDiCaL, num_vars: i32) -> i32;
-	/// C binding for the `declare_more_variables` function.
-	pub fn ccadical_declare_one_more_variable(slv: *mut CCaDiCaL) -> i32;
-	/// C bindings for the `vars` function.
-	pub fn ccadical_vars(slv: *mut CCaDiCaL) -> i32;
 
 	// Proof Tracer API
 	/// C binding for the `connect_proof_tracer` function.
@@ -247,6 +163,90 @@ extern "C" {
 		antecedents: bool,
 		finalize_clauses: bool,
 	);
+	/// C binding for the `constrain` function.
+	pub fn ccadical_constrain(slv: *mut CCaDiCaL, lit: i32);
+	/// C binding for the `constraint_failed` function.
+	pub fn ccadical_constraint_failed(slv: *mut CCaDiCaL) -> c_int;
+	/// C binding for the `copy` function.
+	pub fn ccadical_copy(slv: *const CCaDiCaL) -> *mut c_void;
+	/// C binding to copy `src` into a fresh solver, connecting `prop` to the
+	/// copy and re-observing on it every variable observed by `src`. Returns
+	/// the newly created solver (like [`ccadical_copy`]).
+	pub fn ccadical_copy_with_propagator(
+		src: *const CCaDiCaL,
+		prop: CExternalPropagator,
+	) -> *mut c_void;
+	/// C binding for the `declare_one_more_variable` function.
+	pub fn ccadical_declare_more_variables(slv: *mut CCaDiCaL, num_vars: i32) -> i32;
+	/// C binding for the `declare_more_variables` function.
+	pub fn ccadical_declare_one_more_variable(slv: *mut CCaDiCaL) -> i32;
+	/// C binding to the IPASIR-UP `disconnect_external_propagator` function.
+	pub fn ccadical_disconnect_external_propagator(slv: *mut CCaDiCaL);
+	/// C binding to the IPASIR-UP `disconnect_fixed_listener` function.
+	pub fn ccadical_disconnect_fixed_listener(slv: *mut CCaDiCaL);
 	/// C binding for the `disconnect_proof_tracer` function.
 	pub fn ccadical_disconnect_proof_tracer(slv: *mut CCaDiCaL, tracer_data: *mut c_void) -> bool;
+	/// CaDiCaL implementation of `ipasir_failed`.
+	pub fn ccadical_failed(slv: *mut CCaDiCaL, lit: i32) -> c_int;
+	/// C binding for the `fixed` function.
+	pub fn ccadical_fixed(slv: *mut CCaDiCaL, lit: i32) -> c_int;
+	/// C binding to the IPASIR-UP `force_backtrack` function.
+	pub fn ccadical_force_backtrack(slv: *mut CCaDiCaL, new_level: usize);
+	/// C binding for the `freeze` function.
+	pub fn ccadical_freeze(slv: *mut CCaDiCaL, lit: i32);
+	/// C binding for the `frozen` function.
+	pub fn ccadical_frozen(slv: *mut CCaDiCaL, lit: i32) -> c_int;
+	/// C binding for the `get_option` function.
+	pub fn ccadical_get_option(slv: *mut CCaDiCaL, name: *const c_char) -> c_int;
+	/// CaDiCaL implementation of `ipasir_init`.
+	pub fn ccadical_init() -> *mut CCaDiCaL;
+	/// C binding for the `irredundant` function.
+	pub fn ccadical_irredundant(slv: *mut CCaDiCaL) -> i64;
+	/// C binding to the IPASIR-UP `is_decision` function.
+	pub fn ccadical_is_decision(slv: *mut CCaDiCaL, lit: i32) -> bool;
+	/// C binding for the `limit` function.
+	pub fn ccadical_limit(slv: *mut CCaDiCaL, name: *const c_char, limit: c_int);
+	/// C binding for the `melt` function.
+	pub fn ccadical_melt(slv: *mut CCaDiCaL, lit: i32);
+	/// C binding for the `phase` function.
+	pub fn ccadical_phase(slv: *mut CCaDiCaL, lit: i32);
+	/// C binding for the `print_statistics` function.
+	pub fn ccadical_print_statistics(slv: *mut CCaDiCaL);
+	/// CaDiCaL implementation of `ipasir_release`.
+	pub fn ccadical_release(slv: *mut CCaDiCaL);
+	/// C binding to the IPASIR-UP `remove_observed_var` function.
+	pub fn ccadical_remove_observed_var(slv: *mut CCaDiCaL, var: i32);
+	/// C binding to the IPASIR-UP `reset_observed_vars` function.
+	pub fn ccadical_reset_observed_vars(slv: *mut CCaDiCaL);
+	/// CaDiCaL implementation of `ipasir_set_learn`.
+	pub fn ccadical_set_learn(
+		slv: *mut CCaDiCaL,
+		data: *mut c_void,
+		max_len: c_int,
+		cb: Option<unsafe extern "C" fn(*mut c_void, *const i32)>,
+	);
+	/// C binding for the `set_option` function.
+	pub fn ccadical_set_option(slv: *mut CCaDiCaL, name: *const c_char, val: c_int);
+	/// CaDiCaL implementation of `ipasir_set_terminate`.
+	pub fn ccadical_set_terminate(
+		slv: *mut CCaDiCaL,
+		data: *mut c_void,
+		cb: Option<unsafe extern "C" fn(*mut c_void) -> c_int>,
+	);
+
+	// IPASIR definitions
+	/// CaDiCaL implementation of `ipasir_signature`.
+	pub fn ccadical_signature() -> *const c_char;
+	/// C binding for the `simplify` function.
+	pub fn ccadical_simplify(slv: *mut CCaDiCaL) -> c_int;
+	/// CaDiCaL implementation of `ipasir_solve`.
+	pub fn ccadical_solve(slv: *mut CCaDiCaL) -> c_int;
+	/// C binding for the `terminate` function.
+	pub fn ccadical_terminate(slv: *mut CCaDiCaL);
+	/// C binding for the `unphase` function.
+	pub fn ccadical_unphase(slv: *mut CCaDiCaL, lit: i32);
+	/// CaDiCaL implementation of `ipasir_val`.
+	pub fn ccadical_val(slv: *mut CCaDiCaL, lit: i32) -> i32;
+	/// C bindings for the `vars` function.
+	pub fn ccadical_vars(slv: *mut CCaDiCaL) -> i32;
 }

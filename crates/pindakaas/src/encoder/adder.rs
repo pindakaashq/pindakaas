@@ -40,6 +40,10 @@ use crate::{
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
 
+/// Above this many literals, enumerating the assignments of the wrong parity
+/// costs more clauses than a Tseitin transformation costs auxiliary variables.
+const DIRECT_PARITY_LITS: usize = 4;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 /// An adder network for a linear constraint.
 ///
@@ -62,162 +66,7 @@ use crate::{
 /// ```
 pub struct AdderEncoder {}
 
-/// Above this many literals, enumerating the assignments of the wrong parity
-/// costs more clauses than a Tseitin transformation costs auxiliary variables.
-const DIRECT_PARITY_LITS: usize = 4;
-
 impl AdderEncoder {
-	/// The constraint's terms as the literals standing for them and what each
-	/// one adds, together with what the sum is worth before any of them holds.
-	///
-	/// A term over a variable held in binary with a dense coefficient becomes
-	/// the bits of the product, which cost less to build than to carry; every
-	/// other term becomes its variable's literals, scaled.
-	fn weighted_literals<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		con: &NormalizedIntLinear,
-	) -> Result<(Vec<(Lit, Coeff)>, Coeff), Unsatisfiable> {
-		let mut weighted = Vec::new();
-		let mut constant = 0;
-		for (c, x) in con.terms() {
-			let t = (**c, x.clone());
-			if let Some(bits) = Self::product_bits(db, &t)? {
-				// The product's bits count up from the variable's least value.
-				constant += t.0 * t.1.min();
-				for (i, b) in bits.into_iter().enumerate() {
-					match b {
-						BoolVal::Lit(l) => weighted.push((l, 1 << i)),
-						BoolVal::Const(true) => constant += 1 << i,
-						BoolVal::Const(false) => {}
-					}
-				}
-			} else {
-				let (lits, offset) = t.1.as_weighted(db)?;
-				weighted.extend(
-					lits.into_iter()
-						.map(|(l, w)| (l, t.0 * w))
-						.filter(|&(_, w)| w != 0),
-				);
-				constant += t.0 * offset;
-			}
-		}
-		Ok((weighted, constant))
-	}
-
-	/// The bits of the term's product, where forming it outright beats letting
-	/// the columns carry the coefficient, and `None` where it does not.
-	fn product_bits<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		t: &Term,
-	) -> Result<Option<Vec<BoolVal>>, Unsatisfiable> {
-		// Reading it in binary is free where that view exists, and costs a
-		// channel where it does not.
-		if !t.1.has_binary_encoding() && (t.1.has_order_encoding() || t.1.has_direct_encoding()) {
-			return Ok(None);
-		}
-		if let Some(bits) = t.1.product(t.0) {
-			return Ok(Some(bits));
-		}
-		let Ok(c) = u32::try_from(t.0) else {
-			return Ok(None);
-		};
-		let Some(width) = NonZero::new(BinaryEncoding::required_bits(t.1.max() - t.1.min()) as u32)
-		else {
-			return Ok(None);
-		};
-		// Heuristic: below four set bits the partial products barely overlap,
-		// so the columns carry them for almost nothing.
-		if c.count_ones() < 4 {
-			return Ok(None);
-		}
-		// Heuristic: one clause per column, against the adders SCM would need;
-		// form the product only where it comes out ahead.
-		let columns = (c.count_ones() * width.get()).saturating_sub(c.ilog2() + 1);
-		let plan = ScmSolution::synthesize(c, ScmObjective::MinAdders(width));
-		if plan.cost >= columns {
-			return Ok(None);
-		}
-		Ok(Some(Self::scaled_bits(db, &t.1, t.0, plan)?))
-	}
-
-	/// The bits of `c·(x − lb)`, built from shifts and adders.
-	///
-	/// A shift costs nothing, being leading zero bits on the vector, so what is
-	/// left is to find the fewest additions that reach `c`. That is the
-	/// single-constant multiplication problem, and [`ScmSolution::synthesize`]
-	/// plans it.
-	fn scaled_bits<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		x: &IntVar,
-		c: Coeff,
-		plan: ScmSolution,
-	) -> Result<Vec<BoolVal>, Unsatisfiable> {
-		debug_assert!(c > 0, "a product is decomposed only for a positive factor");
-		let c32 = u32::try_from(c).expect("the plan was synthesised for this coefficient");
-		let prev_product = |x: &IntVar, factor: u32| -> Vec<BoolVal> {
-			x.product(Coeff::from(factor))
-				.expect("the plan builds every product before it is used")
-		};
-
-		let input = x.binary_encoding(db)?.to_vec();
-		let width = NonZero::new(input.len() as u32)
-			.expect("a variable of one value is not scaled by a plan");
-
-		// A step is named by the factor it reaches, which is what products are
-		// kept under, so one shared with an earlier synthesis is picked up.
-		for op in plan.operations {
-			let factor = Coeff::from(op.result().get());
-			if x.product(factor).is_some() {
-				continue;
-			}
-			let bits = match op {
-				ScmOperation::ShiftLeft { source, shift } => {
-					shifted(&prev_product(x, source.get()), shift)
-				}
-				ScmOperation::ShiftAdd { left, right, shift } => {
-					let left = shifted(&prev_product(x, left.get()), shift);
-					AdderEncoder::ripple_carry_adder(
-						db,
-						&left,
-						&prev_product(x, right.get()),
-						None,
-						None,
-					)?
-				}
-				ScmOperation::ShiftSub { left, right, shift } => {
-					let left = shifted(&prev_product(x, left.get()), shift);
-					Self::difference(db, &left, &prev_product(x, right.get()), factor, &width)?
-				}
-				ScmOperation::SubShift { left, right, shift } => {
-					let right = shifted(&prev_product(x, right.get()), shift);
-					let left = prev_product(x, left.get());
-					Self::difference(db, &left, &right, factor, &width)?
-				}
-			};
-			x.set_product(factor, bits);
-		}
-		Ok(prev_product(x, c32))
-	}
-
-	/// The bits of a difference `a − b`, which is known to be positive.
-	///
-	/// Subtraction is addition read the other way round: the bits are created
-	/// and then constrained so that adding `b` back gives `a`.
-	fn difference<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		a: &[BoolVal],
-		b: &[BoolVal],
-		factor: Coeff,
-		width: &NonZero<u32>,
-	) -> Result<Vec<BoolVal>, Unsatisfiable> {
-		let span = factor * ((1 << width.get()) - 1);
-		let bits: Vec<BoolVal> = (0..BinaryEncoding::required_bits(span))
-			.map(|_| BoolVal::Lit(db.new_lit()))
-			.collect();
-		let _ = AdderEncoder::ripple_carry_adder(db, b, &bits, None, Some(a))?;
-		Ok(bits)
-	}
-
 	/// Encode the adder carry circuit, i.e. whether at least two of `xs` are
 	/// true.
 	///
@@ -282,6 +131,25 @@ impl AdderEncoder {
 		Ok(carry)
 	}
 
+	/// The bits of a difference `a − b`, which is known to be positive.
+	///
+	/// Subtraction is addition read the other way round: the bits are created
+	/// and then constrained so that adding `b` back gives `a`.
+	fn difference<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		a: &[BoolVal],
+		b: &[BoolVal],
+		factor: Coeff,
+		width: &NonZero<u32>,
+	) -> Result<Vec<BoolVal>, Unsatisfiable> {
+		let span = factor * ((1 << width.get()) - 1);
+		let bits: Vec<BoolVal> = (0..BinaryEncoding::required_bits(span))
+			.map(|_| BoolVal::Lit(db.new_lit()))
+			.collect();
+		let _ = AdderEncoder::ripple_carry_adder(db, b, &bits, None, Some(a))?;
+		Ok(bits)
+	}
+
 	/// Split `xs` into its literals and the number of its bits fixed to one.
 	fn filter_fixed_sum(xs: &[BoolVal]) -> (Vec<BoolVal>, usize) {
 		let mut trues = 0;
@@ -297,6 +165,42 @@ impl AdderEncoder {
 			.copied()
 			.collect();
 		(lits, trues)
+	}
+
+	/// The bits of the term's product, where forming it outright beats letting
+	/// the columns carry the coefficient, and `None` where it does not.
+	fn product_bits<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		t: &Term,
+	) -> Result<Option<Vec<BoolVal>>, Unsatisfiable> {
+		// Reading it in binary is free where that view exists, and costs a
+		// channel where it does not.
+		if !t.1.has_binary_encoding() && (t.1.has_order_encoding() || t.1.has_direct_encoding()) {
+			return Ok(None);
+		}
+		if let Some(bits) = t.1.product(t.0) {
+			return Ok(Some(bits));
+		}
+		let Ok(c) = u32::try_from(t.0) else {
+			return Ok(None);
+		};
+		let Some(width) = NonZero::new(BinaryEncoding::required_bits(t.1.max() - t.1.min()) as u32)
+		else {
+			return Ok(None);
+		};
+		// Heuristic: below four set bits the partial products barely overlap,
+		// so the columns carry them for almost nothing.
+		if c.count_ones() < 4 {
+			return Ok(None);
+		}
+		// Heuristic: one clause per column, against the adders SCM would need;
+		// form the product only where it comes out ahead.
+		let columns = (c.count_ones() * width.get()).saturating_sub(c.ilog2() + 1);
+		let plan = ScmSolution::synthesize(c, ScmObjective::MinAdders(width));
+		if plan.cost >= columns {
+			return Ok(None);
+		}
+		Ok(Some(Self::scaled_bits(db, &t.1, t.0, plan)?))
 	}
 
 	/// Ripple-carry adder over the binary encodings `xs` and `ys`.
@@ -334,6 +238,65 @@ impl AdderEncoder {
 				Ok(z)
 			})
 			.collect()
+	}
+
+	/// The bits of `c·(x − lb)`, built from shifts and adders.
+	///
+	/// A shift costs nothing, being leading zero bits on the vector, so what is
+	/// left is to find the fewest additions that reach `c`. That is the
+	/// single-constant multiplication problem, and [`ScmSolution::synthesize`]
+	/// plans it.
+	fn scaled_bits<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		x: &IntVar,
+		c: Coeff,
+		plan: ScmSolution,
+	) -> Result<Vec<BoolVal>, Unsatisfiable> {
+		debug_assert!(c > 0, "a product is decomposed only for a positive factor");
+		let c32 = u32::try_from(c).expect("the plan was synthesised for this coefficient");
+		let prev_product = |x: &IntVar, factor: u32| -> Vec<BoolVal> {
+			x.product(Coeff::from(factor))
+				.expect("the plan builds every product before it is used")
+		};
+
+		let input = x.binary_encoding(db)?.to_vec();
+		let width = NonZero::new(input.len() as u32)
+			.expect("a variable of one value is not scaled by a plan");
+
+		// A step is named by the factor it reaches, which is what products are
+		// kept under, so one shared with an earlier synthesis is picked up.
+		for op in plan.operations {
+			let factor = Coeff::from(op.result().get());
+			if x.product(factor).is_some() {
+				continue;
+			}
+			let bits = match op {
+				ScmOperation::ShiftLeft { source, shift } => {
+					shifted(&prev_product(x, source.get()), shift)
+				}
+				ScmOperation::ShiftAdd { left, right, shift } => {
+					let left = shifted(&prev_product(x, left.get()), shift);
+					AdderEncoder::ripple_carry_adder(
+						db,
+						&left,
+						&prev_product(x, right.get()),
+						None,
+						None,
+					)?
+				}
+				ScmOperation::ShiftSub { left, right, shift } => {
+					let left = shifted(&prev_product(x, left.get()), shift);
+					Self::difference(db, &left, &prev_product(x, right.get()), factor, &width)?
+				}
+				ScmOperation::SubShift { left, right, shift } => {
+					let right = shifted(&prev_product(x, right.get()), shift);
+					let left = prev_product(x, left.get());
+					Self::difference(db, &left, &right, factor, &width)?
+				}
+			};
+			x.set_product(factor, bits);
+		}
+		Ok(prev_product(x, c32))
 	}
 
 	/// Encode the adder sum circuit, i.e. `out ≡ xs[0] ⊕ .. ⊕ xs[n]`.
@@ -412,36 +375,42 @@ impl AdderEncoder {
 			Some(BoolVal::Const(false)) => format!("¬({inner})"),
 		}
 	}
-}
 
-impl<Db> Encoder<Db, NormalizedIntLinear> for AdderEncoder
-where
-	Db: ClauseDatabase + ?Sized,
-{
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = format!("{con:?}")))
-	)]
-	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		// Adding bit by bit has no use for how the terms are grouped.
-		let (terms, constant) = Self::weighted_literals(db, con)?;
-		Self::encode_weighted(db, terms, constant, con.cmp(), con.k())
-	}
-}
-
-impl<Db> Encoder<Db, NormalizedBoolLinear> for AdderEncoder
-where
-	Db: ClauseDatabase + ?Sized,
-{
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = format!("{con:?}")))
-	)]
-	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
-		// Already the weighted literals the sum is built from, so there is no
-		// integer to read them back out of.
-		let terms = con.terms().iter().map(|&(lit, c)| (lit, *c)).collect_vec();
-		Self::encode_weighted(db, terms, 0, con.cmp(), con.k())
+	/// The constraint's terms as the literals standing for them and what each
+	/// one adds, together with what the sum is worth before any of them holds.
+	///
+	/// A term over a variable held in binary with a dense coefficient becomes
+	/// the bits of the product, which cost less to build than to carry; every
+	/// other term becomes its variable's literals, scaled.
+	fn weighted_literals<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		con: &NormalizedIntLinear,
+	) -> Result<(Vec<(Lit, Coeff)>, Coeff), Unsatisfiable> {
+		let mut weighted = Vec::new();
+		let mut constant = 0;
+		for (c, x) in con.terms() {
+			let t = (**c, x.clone());
+			if let Some(bits) = Self::product_bits(db, &t)? {
+				// The product's bits count up from the variable's least value.
+				constant += t.0 * t.1.min();
+				for (i, b) in bits.into_iter().enumerate() {
+					match b {
+						BoolVal::Lit(l) => weighted.push((l, 1 << i)),
+						BoolVal::Const(true) => constant += 1 << i,
+						BoolVal::Const(false) => {}
+					}
+				}
+			} else {
+				let (lits, offset) = t.1.as_weighted(db)?;
+				weighted.extend(
+					lits.into_iter()
+						.map(|(l, w)| (l, t.0 * w))
+						.filter(|&(_, w)| w != 0),
+				);
+				constant += t.0 * offset;
+			}
+		}
+		Ok((weighted, constant))
 	}
 }
 
@@ -616,6 +585,12 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for AdderEncoder {
 	}
 }
 
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for AdderEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
+
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for AdderEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
 		let con = con.as_int_linear(db)?;
@@ -623,9 +598,34 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for AdderEncoder {
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for AdderEncoder {
-	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
-		self.encode(db, &Cardinality::from(con.clone()))
+impl<Db> Encoder<Db, NormalizedBoolLinear> for AdderEncoder
+where
+	Db: ClauseDatabase + ?Sized,
+{
+	#[cfg_attr(
+		any(feature = "tracing", test),
+		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = format!("{con:?}")))
+	)]
+	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
+		// Already the weighted literals the sum is built from, so there is no
+		// integer to read them back out of.
+		let terms = con.terms().iter().map(|&(lit, c)| (lit, *c)).collect_vec();
+		Self::encode_weighted(db, terms, 0, con.cmp(), con.k())
+	}
+}
+
+impl<Db> Encoder<Db, NormalizedIntLinear> for AdderEncoder
+where
+	Db: ClauseDatabase + ?Sized,
+{
+	#[cfg_attr(
+		any(feature = "tracing", test),
+		tracing::instrument(name = "adder_encoder", skip_all, fields(constraint = format!("{con:?}")))
+	)]
+	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
+		// Adding bit by bit has no use for how the terms are grouped.
+		let (terms, constant) = Self::weighted_literals(db, con)?;
+		Self::encode_weighted(db, terms, constant, con.cmp(), con.k())
 	}
 }
 
@@ -638,46 +638,6 @@ mod tests {
 		decision::integer::IntVar,
 		helpers::tests::{linear_test_suite, prelude::*},
 	};
-
-	#[test]
-	fn a_view_the_variable_has_is_not_a_reason_to_decline() {
-		// What matters is whether the binary view has to be *made*, not whether
-		// some other view happens to exist alongside it.
-		let dense = 255;
-		let built = |views: &dyn Fn(&mut Cnf, &IntVar)| {
-			let mut cnf = Cnf::default();
-			let x = IntVar::new(RangeList::from(0..=15));
-			views(&mut cnf, &x);
-			let con = NormalizedIntLinear::new(
-				vec![(PosCoeff::new(dense), x.clone())],
-				LimitComp::LessEq,
-				PosCoeff::new(dense * 9),
-			);
-			AdderEncoder::default().encode(&mut cnf, &con).unwrap();
-			x.product(dense).is_some()
-		};
-
-		assert!(built(&|_, _| {}), "a variable with no view yet");
-		assert!(
-			built(&|cnf, x| {
-				let _ = x.binary_encoding(cnf).unwrap();
-			}),
-			"a variable already in binary"
-		);
-		assert!(
-			built(&|cnf, x| {
-				let _ = x.binary_encoding(cnf).unwrap();
-				let _ = x.order_encoding(cnf).unwrap();
-			}),
-			"a variable in binary, whatever else it also has"
-		);
-		assert!(
-			!built(&|cnf, x| {
-				let _ = x.order_encoding(cnf).unwrap();
-			}),
-			"a variable held only in order form would have to be channelled"
-		);
-	}
 
 	#[test]
 	fn a_dense_coefficient_is_synthesised_rather_than_carried() {
@@ -738,6 +698,46 @@ mod tests {
 	}
 
 	#[test]
+	fn a_view_the_variable_has_is_not_a_reason_to_decline() {
+		// What matters is whether the binary view has to be *made*, not whether
+		// some other view happens to exist alongside it.
+		let dense = 255;
+		let built = |views: &dyn Fn(&mut Cnf, &IntVar)| {
+			let mut cnf = Cnf::default();
+			let x = IntVar::new(RangeList::from(0..=15));
+			views(&mut cnf, &x);
+			let con = NormalizedIntLinear::new(
+				vec![(PosCoeff::new(dense), x.clone())],
+				LimitComp::LessEq,
+				PosCoeff::new(dense * 9),
+			);
+			AdderEncoder::default().encode(&mut cnf, &con).unwrap();
+			x.product(dense).is_some()
+		};
+
+		assert!(built(&|_, _| {}), "a variable with no view yet");
+		assert!(
+			built(&|cnf, x| {
+				let _ = x.binary_encoding(cnf).unwrap();
+			}),
+			"a variable already in binary"
+		);
+		assert!(
+			built(&|cnf, x| {
+				let _ = x.binary_encoding(cnf).unwrap();
+				let _ = x.order_encoding(cnf).unwrap();
+			}),
+			"a variable in binary, whatever else it also has"
+		);
+		assert!(
+			!built(&|cnf, x| {
+				let _ = x.order_encoding(cnf).unwrap();
+			}),
+			"a variable held only in order form would have to be channelled"
+		);
+	}
+
+	#[test]
 	fn ripple_carry_adder_computes_the_sum() {
 		for (x_bits, y_bits) in [(1, 1), (2, 2), (3, 1)] {
 			let mut cnf = Cnf::default();
@@ -753,26 +753,6 @@ mod tests {
 			for s in &solutions {
 				assert_eq!(s[2], s[0] + s[1], "{} + {} != {}", s[0], s[1], s[2]);
 			}
-		}
-	}
-
-	#[test]
-	fn ripple_carry_adder_handles_fixed_bits() {
-		// Shifts and grounding leave constant bits, which the adder folds in
-		// rather than assuming every bit is a literal.
-		let mut cnf = Cnf::default();
-		let x = vec![
-			BoolVal::Const(true),
-			BoolVal::Lit(cnf.new_lit()),
-			BoolVal::Const(false),
-		];
-		let y = vec![BoolVal::Const(true), BoolVal::Lit(cnf.new_lit())];
-		let z = AdderEncoder::ripple_carry_adder(&mut cnf, &x, &y, None, None).unwrap();
-
-		let solutions = all_binary_solutions(&cnf, &[&x, &y, &z]);
-		assert_eq!(solutions.len(), 4);
-		for s in &solutions {
-			assert_eq!(s[2], s[0] + s[1], "{} + {} != {}", s[0], s[1], s[2]);
 		}
 	}
 
@@ -794,6 +774,26 @@ mod tests {
 			.map(|(a, b)| vec![a, b, a + b])
 			.collect();
 		assert_eq!(solutions, expected);
+	}
+
+	#[test]
+	fn ripple_carry_adder_handles_fixed_bits() {
+		// Shifts and grounding leave constant bits, which the adder folds in
+		// rather than assuming every bit is a literal.
+		let mut cnf = Cnf::default();
+		let x = vec![
+			BoolVal::Const(true),
+			BoolVal::Lit(cnf.new_lit()),
+			BoolVal::Const(false),
+		];
+		let y = vec![BoolVal::Const(true), BoolVal::Lit(cnf.new_lit())];
+		let z = AdderEncoder::ripple_carry_adder(&mut cnf, &x, &y, None, None).unwrap();
+
+		let solutions = all_binary_solutions(&cnf, &[&x, &y, &z]);
+		assert_eq!(solutions.len(), 4);
+		for s in &solutions {
+			assert_eq!(s[2], s[0] + s[1], "{} + {} != {}", s[0], s[1], s[2]);
+		}
 	}
 
 	card_test_suite!(AdderEncoder::default());

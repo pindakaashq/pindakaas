@@ -21,6 +21,38 @@ use crate::{
 	Checker, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation,
 };
 
+/// Every encoder that takes a cardinality or an at-most-one constraint.
+///
+/// These used to follow from a pair of blanket implementations over marker
+/// traits, which meant nothing said anywhere which encoder took which
+/// constraint. Naming them costs a line each and makes the set something that
+/// can be read, and lost by accident only if this stops compiling.
+#[cfg(test)]
+const _: () = {
+	use crate::{
+		constraint::linear::{
+			AdderEncoder, DecisionDiagramEncoder, SequentialCounterEncoder, TotalizerEncoder,
+		},
+		Cnf, Encoder,
+	};
+
+	const fn takes<Db: ClauseDatabase + ?Sized, C, E: Encoder<Db, C>>() {}
+	takes::<Cnf, Cardinality, AdderEncoder>();
+	takes::<Cnf, Cardinality, DecisionDiagramEncoder>();
+	takes::<Cnf, Cardinality, SequentialCounterEncoder>();
+	takes::<Cnf, Cardinality, TotalizerEncoder>();
+	takes::<Cnf, Cardinality, MixedRadixEncoder>();
+	takes::<Cnf, Cardinality, SortingNetworkEncoder>();
+	takes::<Cnf, Cardinality, WatchdogEncoder>();
+	takes::<Cnf, CardinalityOne, AdderEncoder>();
+	takes::<Cnf, CardinalityOne, DecisionDiagramEncoder>();
+	takes::<Cnf, CardinalityOne, SequentialCounterEncoder>();
+	takes::<Cnf, CardinalityOne, TotalizerEncoder>();
+	takes::<Cnf, CardinalityOne, MixedRadixEncoder>();
+	takes::<Cnf, CardinalityOne, SortingNetworkEncoder>();
+	takes::<Cnf, CardinalityOne, WatchdogEncoder>();
+};
+
 #[derive(Clone, Debug)]
 /// The constraint `Σ litᵢ ≷ k` over distinct Boolean variables.
 pub struct Cardinality {
@@ -30,6 +62,36 @@ pub struct Cardinality {
 }
 
 impl Cardinality {
+	/// Read the constraint as the linear constraint it is.
+	///
+	/// Its terms all count for one and none of them constrains another, so each
+	/// is an integer worth one or nothing.
+	pub(crate) fn as_linear<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result<NormalizedIntLinear, Unsatisfiable> {
+		let terms = self
+			.lits
+			.iter()
+			.enumerate()
+			.map(|(i, &l)| {
+				IntVar::from_direct_encoding(db, 0..=1, &[!l, l])
+					.map(|x| (PosCoeff::new(1), x.with_label(format!("x{i}"))))
+			})
+			.collect::<Result<Vec<_>, _>>()?;
+		Ok(NormalizedIntLinear::new(terms, self.cmp.clone(), self.k))
+	}
+
+	/// Get the comparator of the cardinality constraint.
+	pub fn comparator(&self) -> Comparator {
+		self.cmp.clone().into()
+	}
+
+	/// Iterate over the literals of the cardinality constraint.
+	pub fn iter_lits(&self) -> impl Iterator<Item = Lit> + '_ {
+		self.lits.iter().copied()
+	}
+
 	/// Construct a constraint that `k` of `lits` hold, or at most `k` of them.
 	///
 	/// # Panics
@@ -63,36 +125,6 @@ impl Cardinality {
 			cmp,
 			k: PosCoeff::new(k),
 		}
-	}
-
-	/// Read the constraint as the linear constraint it is.
-	///
-	/// Its terms all count for one and none of them constrains another, so each
-	/// is an integer worth one or nothing.
-	pub(crate) fn as_linear<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-	) -> Result<NormalizedIntLinear, Unsatisfiable> {
-		let terms = self
-			.lits
-			.iter()
-			.enumerate()
-			.map(|(i, &l)| {
-				IntVar::from_direct_encoding(db, 0..=1, &[!l, l])
-					.map(|x| (PosCoeff::new(1), x.with_label(format!("x{i}"))))
-			})
-			.collect::<Result<Vec<_>, _>>()?;
-		Ok(NormalizedIntLinear::new(terms, self.cmp.clone(), self.k))
-	}
-
-	/// Get the comparator of the cardinality constraint.
-	pub fn comparator(&self) -> Comparator {
-		self.cmp.clone().into()
-	}
-
-	/// Iterate over the literals of the cardinality constraint.
-	pub fn iter_lits(&self) -> impl Iterator<Item = Lit> + '_ {
-		self.lits.iter().copied()
 	}
 
 	/// Get the right-hand side constant against which the cardinality
@@ -136,52 +168,8 @@ impl From<CardinalityOne> for Cardinality {
 	}
 }
 
-/// Every encoder that takes a cardinality or an at-most-one constraint.
-///
-/// These used to follow from a pair of blanket implementations over marker
-/// traits, which meant nothing said anywhere which encoder took which
-/// constraint. Naming them costs a line each and makes the set something that
-/// can be read, and lost by accident only if this stops compiling.
-#[cfg(test)]
-const _: () = {
-	use crate::{
-		constraint::linear::{
-			AdderEncoder, DecisionDiagramEncoder, SequentialCounterEncoder, TotalizerEncoder,
-		},
-		Cnf, Encoder,
-	};
-
-	const fn takes<Db: ClauseDatabase + ?Sized, C, E: Encoder<Db, C>>() {}
-	takes::<Cnf, Cardinality, AdderEncoder>();
-	takes::<Cnf, Cardinality, DecisionDiagramEncoder>();
-	takes::<Cnf, Cardinality, SequentialCounterEncoder>();
-	takes::<Cnf, Cardinality, TotalizerEncoder>();
-	takes::<Cnf, Cardinality, MixedRadixEncoder>();
-	takes::<Cnf, Cardinality, SortingNetworkEncoder>();
-	takes::<Cnf, Cardinality, WatchdogEncoder>();
-	takes::<Cnf, CardinalityOne, AdderEncoder>();
-	takes::<Cnf, CardinalityOne, DecisionDiagramEncoder>();
-	takes::<Cnf, CardinalityOne, SequentialCounterEncoder>();
-	takes::<Cnf, CardinalityOne, TotalizerEncoder>();
-	takes::<Cnf, CardinalityOne, MixedRadixEncoder>();
-	takes::<Cnf, CardinalityOne, SortingNetworkEncoder>();
-	takes::<Cnf, CardinalityOne, WatchdogEncoder>();
-};
-
 #[cfg(test)]
 pub(crate) mod tests {
-	#[test]
-	#[should_panic = "distinct variables"]
-	fn a_repeated_variable_is_not_a_cardinality_constraint() {
-		use crate::{
-			constraint::{cardinality::Cardinality, linear::LimitComp},
-			ClauseDatabaseTools, Cnf,
-		};
-		let mut f = Cnf::default();
-		let a = f.new_lit();
-		let _ = Cardinality::new(vec![a, !a], LimitComp::LessEq, 1);
-	}
-
 	macro_rules! card_test_suite {
 		($encoder:expr) => {
 			mod cardinality {
@@ -303,4 +291,16 @@ pub(crate) mod tests {
 	}
 
 	pub(crate) use card_test_suite;
+
+	#[test]
+	#[should_panic = "distinct variables"]
+	fn a_repeated_variable_is_not_a_cardinality_constraint() {
+		use crate::{
+			constraint::{cardinality::Cardinality, linear::LimitComp},
+			ClauseDatabaseTools, Cnf,
+		};
+		let mut f = Cnf::default();
+		let a = f.new_lit();
+		let _ = Cardinality::new(vec![a, !a], LimitComp::LessEq, 1);
+	}
 }

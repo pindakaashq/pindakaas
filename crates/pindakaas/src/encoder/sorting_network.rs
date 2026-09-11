@@ -28,8 +28,6 @@ use crate::{
 	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
 
-type StrategyCache = FxHashMap<(u128, u128, u128), (SortingNetworkStrategy, (u128, u128))>;
-
 #[derive(Debug)]
 /// A cardinality network sized by the bound rather than the input.
 ///
@@ -71,6 +69,8 @@ pub enum SortingNetworkStrategy {
 	/// factor.
 	Mixed(u32),
 }
+
+type StrategyCache = FxHashMap<(u128, u128, u128), (SortingNetworkStrategy, (u128, u128))>;
 
 /// The variable `⌊x / 2⌋`, which reaches `w` exactly when `x` reaches `2·w`.
 ///
@@ -375,22 +375,6 @@ impl Default for SortingNetworkEncoder {
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SortingNetworkEncoder {
-	fn encode(&self, db: &mut Db, count: &Count) -> Result {
-		let xs = count
-			.lits
-			.iter()
-			.enumerate()
-			.map(|(i, &x)| {
-				IntVar::from_order_encoding(db, 0..=1, &[x])
-					.map(|v| v.with_label(format!("x_{}", i + 1)))
-			})
-			.collect::<Result<Vec<_>, _>>()?;
-
-		self.sorted(db, &xs, &count.cmp, &count.y, 0)
-	}
-}
-
 impl<Db> Encoder<Db, Cardinality> for SortingNetworkEncoder
 where
 	Db: ClauseDatabase + ?Sized,
@@ -409,6 +393,22 @@ where
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for SortingNetworkEncoder {
 	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
 		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SortingNetworkEncoder {
+	fn encode(&self, db: &mut Db, count: &Count) -> Result {
+		let xs = count
+			.lits
+			.iter()
+			.enumerate()
+			.map(|(i, &x)| {
+				IntVar::from_order_encoding(db, 0..=1, &[x])
+					.map(|v| v.with_label(format!("x_{}", i + 1)))
+			})
+			.collect::<Result<Vec<_>, _>>()?;
+
+		self.sorted(db, &xs, &count.cmp, &count.y, 0)
 	}
 }
 
@@ -530,6 +530,97 @@ impl SortingNetworkStrategy {
 
 #[cfg(test)]
 mod tests {
+	macro_rules! sorted_card_test_suite {
+		($encoder:expr,$cmp:expr) => {
+			use traced_test::test;
+
+			use crate::helpers::tests::prelude::*;
+
+			#[test]
+			fn card_2_1() {
+				test_card!($encoder, 2, $cmp, 1);
+			}
+
+			#[test]
+			fn card_2_2() {
+				test_card!($encoder, 2, $cmp, 2);
+			}
+
+			#[test]
+			fn card_3_1() {
+				test_card!($encoder, 3, $cmp, 1);
+			}
+
+			#[test]
+			fn card_3_2() {
+				test_card!($encoder, 3, $cmp, 2);
+			}
+
+			#[test]
+			fn card_3_3() {
+				test_card!($encoder, 3, $cmp, 3);
+			}
+
+			#[test]
+			fn card_4_2() {
+				test_card!($encoder, 4, $cmp, 2);
+			}
+
+			#[test]
+			fn card_4_3() {
+				test_card!($encoder, 4, $cmp, 3);
+			}
+
+			#[test]
+			fn card_4_4() {
+				test_card!($encoder, 4, $cmp, 4);
+			}
+
+			#[test]
+			fn card_5_3() {
+				test_card!($encoder, 5, $cmp, 3);
+			}
+
+			#[test]
+			fn card_6_1() {
+				test_card!($encoder, 6, $cmp, 1);
+			}
+
+			#[test]
+			fn card_5_2() {
+				test_card!($encoder, 5, $cmp, 1);
+			}
+		};
+	}
+
+	macro_rules! test_card {
+		($encoder:expr,$n:expr,$cmp:expr,$k:expr) => {
+			let mut cnf = Cnf::default();
+			let vars = cnf.new_var_range($n).iter_lits().collect_vec();
+			$encoder
+				.encode(
+					&mut cnf,
+					&Cardinality {
+						lits: vars.clone(),
+						cmp: $cmp,
+						k: PosCoeff::new($k),
+					},
+				)
+				.unwrap();
+
+			let expect = expect_file![format!(
+				"cardinality/sorting_network/test_card_{}_{}_{}.sol",
+				$n,
+				$k,
+				match $cmp {
+					LimitComp::LessEq => "le",
+					LimitComp::Equal => "eq",
+				}
+			)];
+			assert_solutions(&cnf, vars, &expect);
+		};
+	}
+
 	use std::num::NonZeroI32;
 
 	use itertools::Itertools;
@@ -876,97 +967,6 @@ mod tests {
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_5_sorted_eq.sol"]);
-	}
-
-	macro_rules! sorted_card_test_suite {
-		($encoder:expr,$cmp:expr) => {
-			use traced_test::test;
-
-			use crate::helpers::tests::prelude::*;
-
-			#[test]
-			fn card_2_1() {
-				test_card!($encoder, 2, $cmp, 1);
-			}
-
-			#[test]
-			fn card_2_2() {
-				test_card!($encoder, 2, $cmp, 2);
-			}
-
-			#[test]
-			fn card_3_1() {
-				test_card!($encoder, 3, $cmp, 1);
-			}
-
-			#[test]
-			fn card_3_2() {
-				test_card!($encoder, 3, $cmp, 2);
-			}
-
-			#[test]
-			fn card_3_3() {
-				test_card!($encoder, 3, $cmp, 3);
-			}
-
-			#[test]
-			fn card_4_2() {
-				test_card!($encoder, 4, $cmp, 2);
-			}
-
-			#[test]
-			fn card_4_3() {
-				test_card!($encoder, 4, $cmp, 3);
-			}
-
-			#[test]
-			fn card_4_4() {
-				test_card!($encoder, 4, $cmp, 4);
-			}
-
-			#[test]
-			fn card_5_3() {
-				test_card!($encoder, 5, $cmp, 3);
-			}
-
-			#[test]
-			fn card_6_1() {
-				test_card!($encoder, 6, $cmp, 1);
-			}
-
-			#[test]
-			fn card_5_2() {
-				test_card!($encoder, 5, $cmp, 1);
-			}
-		};
-	}
-
-	macro_rules! test_card {
-		($encoder:expr,$n:expr,$cmp:expr,$k:expr) => {
-			let mut cnf = Cnf::default();
-			let vars = cnf.new_var_range($n).iter_lits().collect_vec();
-			$encoder
-				.encode(
-					&mut cnf,
-					&Cardinality {
-						lits: vars.clone(),
-						cmp: $cmp,
-						k: PosCoeff::new($k),
-					},
-				)
-				.unwrap();
-
-			let expect = expect_file![format!(
-				"cardinality/sorting_network/test_card_{}_{}_{}.sol",
-				$n,
-				$k,
-				match $cmp {
-					LimitComp::LessEq => "le",
-					LimitComp::Equal => "eq",
-				}
-			)];
-			assert_solutions(&cnf, vars, &expect);
-		};
 	}
 
 	mod eq_direct {

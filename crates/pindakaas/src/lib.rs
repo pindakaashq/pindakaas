@@ -277,49 +277,6 @@ pub trait ClauseDatabase {
 	fn new_var_range(&mut self, len: usize) -> VarRange;
 }
 
-thread_local! {
-	/// Scratch space for the literals of one clause.
-	static CLAUSE: RefCell<Vec<Lit>> = const { RefCell::new(Vec::new()) };
-}
-
-/// Borrow the scratch space for one clause, empty.
-///
-/// Taken out of the thread-local rather than borrowed from it, so that a
-/// database whose [`ClauseDatabase::add_clause_from_slice`] emits a clause of
-/// its own does not find the buffer already in use; that nested call allocates
-/// a buffer of its own instead.
-fn clause_buffer() -> impl DerefMut<Target = Vec<Lit>> {
-	/// The buffer, put back where it came from once the clause is written.
-	struct Borrowed(Vec<Lit>);
-	impl Deref for Borrowed {
-		type Target = Vec<Lit>;
-		fn deref(&self) -> &Vec<Lit> {
-			&self.0
-		}
-	}
-	impl DerefMut for Borrowed {
-		fn deref_mut(&mut self) -> &mut Vec<Lit> {
-			&mut self.0
-		}
-	}
-	impl Drop for Borrowed {
-		fn drop(&mut self) {
-			let mut buffer = std::mem::take(&mut self.0);
-			buffer.clear();
-			CLAUSE.with(|c| {
-				if let Ok(mut slot) = c.try_borrow_mut() {
-					*slot = buffer;
-				}
-			});
-		}
-	}
-	Borrowed(CLAUSE.with(|c| {
-		c.try_borrow_mut()
-			.map(|mut slot| std::mem::take(&mut *slot))
-			.unwrap_or_default()
-	}))
-}
-
 /// Clause and variable conveniences available to every [`ClauseDatabase`].
 pub trait ClauseDatabaseTools: ClauseDatabase {
 	/// Adds a clause after folding away constant Boolean values.
@@ -598,6 +555,44 @@ pub struct Wcnf {
 	/// The weight for every clause
 	weights: Vec<Option<Coeff>>,
 	// TODO this can be optimised, for example by having all weighted clauses at the start/end
+}
+
+/// Borrow the scratch space for one clause, empty.
+///
+/// Taken out of the thread-local rather than borrowed from it, so that a
+/// database whose [`ClauseDatabase::add_clause_from_slice`] emits a clause of
+/// its own does not find the buffer already in use; that nested call allocates
+/// a buffer of its own instead.
+fn clause_buffer() -> impl DerefMut<Target = Vec<Lit>> {
+	/// The buffer, put back where it came from once the clause is written.
+	struct Borrowed(Vec<Lit>);
+	impl Deref for Borrowed {
+		type Target = Vec<Lit>;
+		fn deref(&self) -> &Vec<Lit> {
+			&self.0
+		}
+	}
+	impl DerefMut for Borrowed {
+		fn deref_mut(&mut self) -> &mut Vec<Lit> {
+			&mut self.0
+		}
+	}
+	impl Drop for Borrowed {
+		fn drop(&mut self) {
+			let mut buffer = std::mem::take(&mut self.0);
+			buffer.clear();
+			CLAUSE.with(|c| {
+				if let Ok(mut slot) = c.try_borrow_mut() {
+					*slot = buffer;
+				}
+			});
+		}
+	}
+	Borrowed(CLAUSE.with(|c| {
+		c.try_borrow_mut()
+			.map(|mut slot| std::mem::take(&mut *slot))
+			.unwrap_or_default()
+	}))
 }
 
 /// Internal function used to parse a file in the (weighted) DIMACS format.
@@ -964,6 +959,11 @@ impl From<Cnf> for Wcnf {
 		let weights = repeat_n(None, cnf.num_clauses()).collect();
 		Wcnf { cnf, weights }
 	}
+}
+
+thread_local! {
+	/// Scratch space for the literals of one clause.
+	static CLAUSE: RefCell<Vec<Lit>> = const { RefCell::new(Vec::new()) };
 }
 
 #[cfg(test)]

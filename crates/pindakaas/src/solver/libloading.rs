@@ -3,6 +3,7 @@
 //! Conversion from [`Library`] validates the required symbols before a solver
 //! is created. Their signatures and runtime behaviour remain promises made by
 //! the loaded library and cannot be checked here.
+
 use std::{
 	ffi::{c_char, c_int, c_void, CStr},
 	fmt,

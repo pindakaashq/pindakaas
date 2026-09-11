@@ -33,8 +33,6 @@ macro_rules! as_dyn_trait {
 	};
 }
 
-as_dyn_trait!(AsDynClauseDatabase, ClauseDatabase);
-
 #[cfg(not(any(feature = "tracing", test)))]
 /// Helper marco to create a new named literal within the library independent of
 /// whether `tracing` is enabled.
@@ -95,6 +93,16 @@ use crate::{
 	Coeff, Valuation,
 };
 
+/// Convert `k` to unsigned binary in `bits`
+pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
+	let bits = bits.unwrap_or_else(|| BinaryEncoding::required_bits(*k) as u32);
+	assert!(
+		*k <= BinaryEncoding::largest_in(bits),
+		"{k} cannot be represented in {bits} bits"
+	);
+	(0..bits).map(|b| *k & (1 << b) != 0).collect()
+}
+
 /// The value of a binary encoding under an assignment.
 pub(crate) fn binary_value<F: Valuation + ?Sized>(x: &[BoolVal], value: &F) -> Coeff {
 	x.iter()
@@ -111,23 +119,6 @@ pub(crate) fn binary_value<F: Valuation + ?Sized>(x: &[BoolVal], value: &F) -> C
 /// are zero.
 pub(crate) fn bit(x: &[BoolVal], i: usize) -> BoolVal {
 	x.get(i).copied().unwrap_or(BoolVal::Const(false))
-}
-
-/// A bit vector multiplied by a power of two, which only moves its bits up.
-pub(crate) fn shifted(bits: &[BoolVal], shift: u32) -> Vec<BoolVal> {
-	std::iter::repeat_n(BoolVal::Const(false), shift as usize)
-		.chain(bits.iter().copied())
-		.collect()
-}
-
-/// Convert `k` to unsigned binary in `bits`
-pub(crate) fn as_binary(k: PosCoeff, bits: Option<u32>) -> Vec<bool> {
-	let bits = bits.unwrap_or_else(|| BinaryEncoding::required_bits(*k) as u32);
-	assert!(
-		*k <= BinaryEncoding::largest_in(bits),
-		"{k} cannot be represented in {bits} bits"
-	);
-	(0..bits).map(|b| *k & (1 << b) != 0).collect()
 }
 
 /// Divide rounding towards positive infinity.
@@ -152,6 +143,13 @@ pub(crate) const fn div_floor(a: Coeff, b: Coeff) -> Coeff {
 	}
 }
 
+/// A bit vector multiplied by a power of two, which only moves its bits up.
+pub(crate) fn shifted(bits: &[BoolVal], shift: u32) -> Vec<BoolVal> {
+	std::iter::repeat_n(BoolVal::Const(false), shift as usize)
+		.chain(bits.iter().copied())
+		.collect()
+}
+
 pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 	num.to_string()
 		.chars()
@@ -160,6 +158,8 @@ pub(crate) fn subscript_number(num: usize) -> impl Iterator<Item = char> {
 		.collect_vec()
 		.into_iter()
 }
+
+as_dyn_trait!(AsDynClauseDatabase, ClauseDatabase);
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -172,106 +172,6 @@ pub(crate) mod tests {
 				$rel_path
 			))
 		};
-	}
-
-	use std::{fmt::Display, iter::once};
-
-	#[cfg(test)]
-	pub(crate) use expect_file;
-	use expect_test::ExpectFile;
-	use itertools::Itertools;
-	use rangelist::RangeList;
-	use rustc_hash::FxHashMap;
-
-	use crate::{
-		constraint::linear::PosCoeff,
-		decision::integer::IntVar,
-		helpers::binary_value,
-		solver::{cadical::Cadical, SolveResult, Solver},
-		BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Lit, Result,
-		Unsatisfiable, Valuation,
-	};
-
-	/// The integer represented by an at-most-one group.
-	///
-	/// Exclusivity is assumed. Clauses for the zero value are added here;
-	/// `exact` also excludes overestimates when several terms share a
-	/// coefficient.
-	pub(crate) fn at_most_one_var<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		terms: &[(Lit, PosCoeff)],
-		label: &str,
-		exact: bool,
-	) -> Result<IntVar, Unsatisfiable> {
-		let mut by_coeff: FxHashMap<Coeff, Vec<Lit>> = FxHashMap::default();
-		for &(lit, coeff) in terms {
-			by_coeff.entry(*coeff).or_default().push(lit);
-		}
-		let domain = RangeList::from_elements(once(0).chain(by_coeff.keys().copied()));
-
-		let by_coeff = by_coeff
-			.into_iter()
-			.sorted_by_key(|(c, _)| *c)
-			.collect_vec();
-		let single = matches!(by_coeff.as_slice(), [(_, terms)] if terms.len() == 1);
-		let none = match by_coeff.as_slice() {
-			[(_, terms)] if terms.len() == 1 => !terms[0],
-			_ => new_named_lit!(db, format!("{label}=0")),
-		};
-		let mut lits = vec![none];
-		for (_coeff, terms) in by_coeff {
-			let d = match terms.as_slice() {
-				&[lit] => lit,
-				_ => {
-					let d = new_named_lit!(db, format!("{label}={_coeff}"));
-					for &lit in &terms {
-						db.add_clause([!lit, d])?;
-					}
-					d
-				}
-			};
-			// Without the reverse implication, `≤` may overestimate a group;
-			// equality must exclude that slack.
-			if exact && terms.len() > 1 {
-				db.add_clause([!d].into_iter().chain(terms))?;
-			}
-			if !single {
-				db.add_clause([!d, !none])?;
-			}
-			lits.push(d);
-		}
-		if !single {
-			db.add_clause(lits.iter().copied())?;
-		}
-		let x = IntVar::new(domain)
-			.enforce_consistency(false)
-			.with_label(label);
-		x.with_direct_encoding(db, &lits, None)?;
-		Ok(x)
-	}
-
-	/// The integer a group of terms that each imply the one before stands for.
-	///
-	/// The implications are taken on trust: they are what makes the group a
-	/// chain, and the running sums it counts through are read straight off its
-	/// literals. See [`IntVar::constrain`] where they need saying.
-	pub(crate) fn implication_chain_var<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		terms: &[(Lit, PosCoeff)],
-		label: &str,
-	) -> Result<IntVar, Unsatisfiable> {
-		let mut acc = 0;
-		let (totals, lits): (Vec<_>, Vec<_>) = terms
-			.iter()
-			.map(|&(lit, coeff)| {
-				acc += *coeff;
-				(acc, lit)
-			})
-			.unzip();
-		// Coefficients are positive, so the running sums climb and the
-		// domain has one value per term, plus the zero none reaches.
-		let domain = RangeList::from_elements(once(0).chain(totals));
-		Ok(IntVar::from_order_encoding(db, domain, &lits)?.with_label(label))
 	}
 
 	macro_rules! linear_test_suite {
@@ -688,56 +588,25 @@ pub(crate) mod tests {
 			}
 		};
 	}
+
+	use std::{fmt::Display, iter::once};
+
+	#[cfg(test)]
+	pub(crate) use expect_file;
+	use expect_test::ExpectFile;
+	use itertools::Itertools;
 	pub(crate) use linear_test_suite;
+	use rangelist::RangeList;
+	use rustc_hash::FxHashMap;
 
-	/// A term that nothing else constrains is an integer worth its coefficient
-	/// when its literal holds, which is a group of one.
-	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(
-		db: &mut Cnf,
-		terms: &[(L, Coeff)],
-	) -> Vec<(PosCoeff, IntVar)> {
-		terms
-			.iter()
-			.enumerate()
-			.map(|(i, (lit, coef))| {
-				let group = [(lit.clone().into(), PosCoeff::new(*coef))];
-				(
-					PosCoeff::new(1),
-					at_most_one_var(db, &group, &format!("x{i}"), false).unwrap(),
-				)
-			})
-			.collect()
-	}
-
-	/// Everything the test-suite macros need in scope where they expand.
-	///
-	/// The macros are invoked from other modules, so any path written inside
-	/// one has to resolve at the call site rather than where it was written.
-	/// Naming them here instead means a module can move without four macro
-	/// bodies having to hear about it.
-	pub(crate) mod prelude {
-		pub(crate) use itertools::Itertools;
-
-		pub(crate) use crate::{
-			constraint::{
-				cardinality::{tests::card_test_suite, Cardinality, SortingNetworkEncoder},
-				cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
-				count::SortingNetworkStrategy,
-				int_linear::NormalizedIntLinear,
-				linear::{
-					AdderEncoder, Comparator, DecisionDiagramEncoder, LimitComp, LinAggregator,
-					LinExp, LinVariant, Linear, LinearEncoder, MixedRadixEncoder, PosCoeff,
-					SequentialCounterEncoder, StaticLinEncoder, TotalizerEncoder, WatchdogEncoder,
-				},
-			},
-			helpers::tests::{
-				all_binary_solutions, assert_checker, assert_encoding, assert_solutions,
-				at_most_one_var, binary_literals, construct_terms, expect_file,
-				implication_chain_var,
-			},
-			BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
-		};
-	}
+	use crate::{
+		constraint::linear::PosCoeff,
+		decision::integer::IntVar,
+		helpers::binary_value,
+		solver::{cadical::Cadical, SolveResult, Solver},
+		BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Lit, Result,
+		Unsatisfiable, Valuation,
+	};
 
 	/// Every model of `cnf`, each decoded into the values of the given binary
 	/// encodings.
@@ -763,11 +632,6 @@ pub(crate) mod tests {
 		}
 		solutions.sort();
 		solutions
-	}
-
-	/// A fresh binary encoding of `bits` free bits.
-	pub(crate) fn binary_literals(cnf: &mut Cnf, bits: usize) -> Vec<BoolVal> {
-		(0..bits).map(|_| BoolVal::Lit(cnf.new_lit())).collect()
 	}
 
 	/// Helper functions to ensure that the possible solutions of a formula
@@ -836,5 +700,141 @@ pub(crate) mod tests {
 				.format("\n")
 		);
 		expect.assert_eq(&sol_str);
+	}
+
+	/// The integer represented by an at-most-one group.
+	///
+	/// Exclusivity is assumed. Clauses for the zero value are added here;
+	/// `exact` also excludes overestimates when several terms share a
+	/// coefficient.
+	pub(crate) fn at_most_one_var<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		terms: &[(Lit, PosCoeff)],
+		label: &str,
+		exact: bool,
+	) -> Result<IntVar, Unsatisfiable> {
+		let mut by_coeff: FxHashMap<Coeff, Vec<Lit>> = FxHashMap::default();
+		for &(lit, coeff) in terms {
+			by_coeff.entry(*coeff).or_default().push(lit);
+		}
+		let domain = RangeList::from_elements(once(0).chain(by_coeff.keys().copied()));
+
+		let by_coeff = by_coeff
+			.into_iter()
+			.sorted_by_key(|(c, _)| *c)
+			.collect_vec();
+		let single = matches!(by_coeff.as_slice(), [(_, terms)] if terms.len() == 1);
+		let none = match by_coeff.as_slice() {
+			[(_, terms)] if terms.len() == 1 => !terms[0],
+			_ => new_named_lit!(db, format!("{label}=0")),
+		};
+		let mut lits = vec![none];
+		for (_coeff, terms) in by_coeff {
+			let d = match terms.as_slice() {
+				&[lit] => lit,
+				_ => {
+					let d = new_named_lit!(db, format!("{label}={_coeff}"));
+					for &lit in &terms {
+						db.add_clause([!lit, d])?;
+					}
+					d
+				}
+			};
+			// Without the reverse implication, `≤` may overestimate a group;
+			// equality must exclude that slack.
+			if exact && terms.len() > 1 {
+				db.add_clause([!d].into_iter().chain(terms))?;
+			}
+			if !single {
+				db.add_clause([!d, !none])?;
+			}
+			lits.push(d);
+		}
+		if !single {
+			db.add_clause(lits.iter().copied())?;
+		}
+		let x = IntVar::new(domain)
+			.enforce_consistency(false)
+			.with_label(label);
+		x.with_direct_encoding(db, &lits, None)?;
+		Ok(x)
+	}
+
+	/// A fresh binary encoding of `bits` free bits.
+	pub(crate) fn binary_literals(cnf: &mut Cnf, bits: usize) -> Vec<BoolVal> {
+		(0..bits).map(|_| BoolVal::Lit(cnf.new_lit())).collect()
+	}
+
+	/// A term that nothing else constrains is an integer worth its coefficient
+	/// when its literal holds, which is a group of one.
+	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(
+		db: &mut Cnf,
+		terms: &[(L, Coeff)],
+	) -> Vec<(PosCoeff, IntVar)> {
+		terms
+			.iter()
+			.enumerate()
+			.map(|(i, (lit, coef))| {
+				let group = [(lit.clone().into(), PosCoeff::new(*coef))];
+				(
+					PosCoeff::new(1),
+					at_most_one_var(db, &group, &format!("x{i}"), false).unwrap(),
+				)
+			})
+			.collect()
+	}
+
+	/// The integer a group of terms that each imply the one before stands for.
+	///
+	/// The implications are taken on trust: they are what makes the group a
+	/// chain, and the running sums it counts through are read straight off its
+	/// literals. See [`IntVar::constrain`] where they need saying.
+	pub(crate) fn implication_chain_var<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		terms: &[(Lit, PosCoeff)],
+		label: &str,
+	) -> Result<IntVar, Unsatisfiable> {
+		let mut acc = 0;
+		let (totals, lits): (Vec<_>, Vec<_>) = terms
+			.iter()
+			.map(|&(lit, coeff)| {
+				acc += *coeff;
+				(acc, lit)
+			})
+			.unzip();
+		// Coefficients are positive, so the running sums climb and the
+		// domain has one value per term, plus the zero none reaches.
+		let domain = RangeList::from_elements(once(0).chain(totals));
+		Ok(IntVar::from_order_encoding(db, domain, &lits)?.with_label(label))
+	}
+
+	/// Everything the test-suite macros need in scope where they expand.
+	///
+	/// The macros are invoked from other modules, so any path written inside
+	/// one has to resolve at the call site rather than where it was written.
+	/// Naming them here instead means a module can move without four macro
+	/// bodies having to hear about it.
+	pub(crate) mod prelude {
+		pub(crate) use itertools::Itertools;
+
+		pub(crate) use crate::{
+			constraint::{
+				cardinality::{tests::card_test_suite, Cardinality, SortingNetworkEncoder},
+				cardinality_one::{tests::card1_test_suite, CardinalityOne, PairwiseEncoder},
+				count::SortingNetworkStrategy,
+				int_linear::NormalizedIntLinear,
+				linear::{
+					AdderEncoder, Comparator, DecisionDiagramEncoder, LimitComp, LinAggregator,
+					LinExp, LinVariant, Linear, LinearEncoder, MixedRadixEncoder, PosCoeff,
+					SequentialCounterEncoder, StaticLinEncoder, TotalizerEncoder, WatchdogEncoder,
+				},
+			},
+			helpers::tests::{
+				all_binary_solutions, assert_checker, assert_encoding, assert_solutions,
+				at_most_one_var, binary_literals, construct_terms, expect_file,
+				implication_chain_var,
+			},
+			BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
+		};
 	}
 }

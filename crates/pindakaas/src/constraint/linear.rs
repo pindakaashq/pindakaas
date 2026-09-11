@@ -32,6 +32,29 @@ use crate::{
 	Checker, Coeff, Lit, Result, Unsatisfiable, Valuation,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Relation between the left- and right-hand sides of a constraint.
+pub enum Comparator {
+	/// `exp ≤ k`.
+	LessEq,
+	/// `exp = k`.
+	Equal,
+	/// `exp ≥ k`.
+	GreaterEq,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+/// A comparator limited to `=` or `≤`.
+///
+/// A `≥` is the same constraint read the other way round, so a normalised
+/// constraint never carries one and an encoder never has to handle it.
+pub enum LimitComp {
+	/// The sum is exactly the constant.
+	Equal,
+	/// The sum is at most the constant.
+	LessEq,
+}
+
 #[derive(Clone, Debug)]
 /// A sum of terms, each a literal or an integer variable scaled by a
 /// coefficient.
@@ -57,21 +80,32 @@ pub enum LinTerm {
 	Int(IntVar, Coeff),
 }
 
-impl LinTerm {
-	/// What the term is multiplied by.
-	pub fn coefficient(&self) -> Coeff {
-		match self {
-			LinTerm::Bool(_, c) | LinTerm::Int(_, c) => *c,
-		}
-	}
-
-	/// The term with its coefficient multiplied by `c`.
-	fn scaled(self, c: Coeff) -> Self {
-		match self {
-			LinTerm::Bool(l, w) => LinTerm::Bool(l, w * c),
-			LinTerm::Int(x, w) => LinTerm::Int(x, w * c),
-		}
-	}
+#[derive(Debug)]
+/// What a linear constraint turned out to be once aggregated.
+///
+/// Aggregation works out which terms belong together and what relates them,
+/// and hands the general case on as a constraint over the integers those
+/// groups encode. What it recognises as counting rather than weighing keeps a
+/// form of its own, there being encoders that do only that.
+pub enum LinVariant {
+	/// A sum of weighted literals against a constant, mentioning no integer
+	/// variable, which the encoders that work in literals take directly.
+	BoolLinear(NormalizedBoolLinear),
+	/// Literals counted into an integer, which a sorting network states
+	/// outright rather than counting into intermediates first.
+	Count(Count),
+	/// Most general form: a sum of integer terms that must be
+	/// (smaller-or-)equal to a constant. The groups the aggregator recognised
+	/// have each become an integer, encoded on the literals they were found on.
+	Linear(NormalizedIntLinear),
+	/// Cardinality constraint (also known as a counting constraint): a sum of
+	/// Boolean literals that must be (smaller-or-)equal to a positive constant.
+	Cardinality(Cardinality),
+	/// Cardinality constraint with the constant 1 (i.e. at-least or exactly 1
+	/// literal must be true).
+	CardinalityOne(CardinalityOne),
+	/// Constraint was trivially encoded into clauses.
+	Trivial,
 }
 
 #[derive(Debug, Clone)]
@@ -88,15 +122,17 @@ pub struct Linear {
 	pub(crate) k: Coeff,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Relation between the left- and right-hand sides of a constraint.
-pub enum Comparator {
-	/// `exp ≤ k`.
-	LessEq,
-	/// `exp = k`.
-	Equal,
-	/// `exp ≥ k`.
-	GreaterEq,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// A coefficient guaranteed to be zero or greater.
+///
+/// The type is a bound as often as it is a coefficient, and a bound of zero
+/// is a real constraint, so zero stays inside it.
+pub struct PosCoeff(pub(crate) Coeff);
+
+impl From<PosCoeff> for Coeff {
+	fn from(val: PosCoeff) -> Self {
+		val.0
+	}
 }
 
 impl Comparator {
@@ -118,24 +154,34 @@ impl Comparator {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-/// A comparator limited to `=` or `≤`.
-///
-/// A `≥` is the same constraint read the other way round, so a normalised
-/// constraint never carries one and an encoder never has to handle it.
-pub enum LimitComp {
-	/// The sum is exactly the constant.
-	Equal,
-	/// The sum is at most the constant.
-	LessEq,
+impl From<LimitComp> for Comparator {
+	fn from(value: LimitComp) -> Self {
+		match value {
+			LimitComp::Equal => Comparator::Equal,
+			LimitComp::LessEq => Comparator::LessEq,
+		}
+	}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// A coefficient guaranteed to be zero or greater.
-///
-/// The type is a bound as often as it is a coefficient, and a bound of zero
-/// is a real constraint, so zero stays inside it.
-pub struct PosCoeff(pub(crate) Coeff);
+impl Mul<Coeff> for IntVar {
+	type Output = LinExp;
+
+	fn mul(self, rhs: Coeff) -> Self::Output {
+		LinExp {
+			terms: vec![LinTerm::Int(self, rhs)],
+			..Default::default()
+		}
+	}
+}
+
+impl Display for LimitComp {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			LimitComp::Equal => write!(f, "=="),
+			LimitComp::LessEq => write!(f, "<="),
+		}
+	}
+}
 
 impl LinExp {
 	/// Add `k` to the expression before any outer scaling.
@@ -180,21 +226,21 @@ impl LinExp {
 		}
 	}
 
-	/// Boolean terms only, excluding the additive constant and outer
-	/// multiplier.
-	pub fn terms(&self) -> impl Iterator<Item = (Lit, Coeff)> + '_ {
-		self.terms.iter().filter_map(|t| match t {
-			LinTerm::Bool(l, c) => Some((*l, *c)),
-			LinTerm::Int(..) => None,
-		})
-	}
-
 	/// Integer terms only, excluding the additive constant and outer
 	/// multiplier.
 	pub fn int_terms(&self) -> impl Iterator<Item = (&IntVar, Coeff)> + '_ {
 		self.terms.iter().filter_map(|t| match t {
 			LinTerm::Int(x, c) => Some((x, *c)),
 			LinTerm::Bool(..) => None,
+		})
+	}
+
+	/// Boolean terms only, excluding the additive constant and outer
+	/// multiplier.
+	pub fn terms(&self) -> impl Iterator<Item = (Lit, Coeff)> + '_ {
+		self.terms.iter().filter_map(|t| match t {
+			LinTerm::Bool(l, c) => Some((*l, *c)),
+			LinTerm::Int(..) => None,
 		})
 	}
 
@@ -226,6 +272,14 @@ impl Add<Coeff> for LinExp {
 	fn add(mut self, rhs: Coeff) -> Self::Output {
 		self += rhs;
 		self
+	}
+}
+
+impl Add<IntVar> for LinExp {
+	type Output = LinExp;
+
+	fn add(self, rhs: IntVar) -> Self::Output {
+		self + LinExp::from(rhs)
 	}
 }
 
@@ -307,25 +361,6 @@ impl From<IntVar> for LinExp {
 	}
 }
 
-impl Mul<Coeff> for IntVar {
-	type Output = LinExp;
-
-	fn mul(self, rhs: Coeff) -> Self::Output {
-		LinExp {
-			terms: vec![LinTerm::Int(self, rhs)],
-			..Default::default()
-		}
-	}
-}
-
-impl Add<IntVar> for LinExp {
-	type Output = LinExp;
-
-	fn add(self, rhs: IntVar) -> Self::Output {
-		self + LinExp::from(rhs)
-	}
-}
-
 impl From<Lit> for LinExp {
 	fn from(lit: Lit) -> Self {
 		Self {
@@ -381,6 +416,23 @@ impl Sub for LinExp {
 impl SubAssign for LinExp {
 	fn sub_assign(&mut self, rhs: Self) {
 		self.add_assign(-rhs);
+	}
+}
+
+impl LinTerm {
+	/// What the term is multiplied by.
+	pub fn coefficient(&self) -> Coeff {
+		match self {
+			LinTerm::Bool(_, c) | LinTerm::Int(_, c) => *c,
+		}
+	}
+
+	/// The term with its coefficient multiplied by `c`.
+	fn scaled(self, c: Coeff) -> Self {
+		match self {
+			LinTerm::Bool(l, w) => LinTerm::Bool(l, w * c),
+			LinTerm::Int(x, w) => LinTerm::Int(x, w * c),
+		}
 	}
 }
 
@@ -461,30 +513,6 @@ impl Display for Linear {
 	}
 }
 
-impl From<PosCoeff> for Coeff {
-	fn from(val: PosCoeff) -> Self {
-		val.0
-	}
-}
-
-impl From<LimitComp> for Comparator {
-	fn from(value: LimitComp) -> Self {
-		match value {
-			LimitComp::Equal => Comparator::Equal,
-			LimitComp::LessEq => Comparator::LessEq,
-		}
-	}
-}
-
-impl Display for LimitComp {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			LimitComp::Equal => write!(f, "=="),
-			LimitComp::LessEq => write!(f, "<="),
-		}
-	}
-}
-
 impl PosCoeff {
 	/// Wrap a coefficient that is not negative.
 	///
@@ -516,6 +544,7 @@ impl Display for PosCoeff {
 		write!(f, "{}", self.0)
 	}
 }
+
 #[cfg(test)]
 mod tests {
 	use traced_test::test;
@@ -560,6 +589,42 @@ mod tests {
 			vec![a, b, c, d],
 			&expect_file!["linear/adder/test_encoders.sol"],
 		);
+	}
+
+	#[test]
+	fn pb_encode() {
+		let mut cnf = Cnf::default();
+		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
+		LinearEncoder::<StaticLinEncoder>::default()
+			.encode(
+				&mut cnf,
+				&Linear::new(
+					LinExp::from_slices(&[1, 1, 1, 2], &vars),
+					Comparator::LessEq,
+					1,
+				),
+			)
+			.unwrap();
+
+		assert_encoding(&cnf, &expect_file!["linear/adder/test_pb_encode.cnf"]);
+		assert_solutions(&cnf, vars, &expect_file!["linear/adder/test_pb_encode.sol"]);
+	}
+
+	#[test]
+	fn sort_same_coefficients_2() {
+		let mut db = Cnf::default();
+		let vars = db.new_var_range(5).iter_lits().collect_vec();
+		let mut agg = LinAggregator::default();
+		let _ = agg.sort_same_coefficients(SortingNetworkEncoder::default(), 3);
+		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default();
+		let _ = encoder.with_linear_aggregator(agg);
+		let con = Linear::new(
+			LinExp::from_slices(&[3, 3, 1, 1, 3], &vars),
+			Comparator::GreaterEq,
+			2,
+		);
+		encoder.encode(&mut db, &con).unwrap();
+		assert_checker(&db, &con);
 	}
 
 	#[test]
@@ -654,68 +719,4 @@ mod tests {
 		}
 		expect_file!("linear/decompositions.size").assert_eq(&table);
 	}
-
-	#[test]
-	fn pb_encode() {
-		let mut cnf = Cnf::default();
-		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
-		LinearEncoder::<StaticLinEncoder>::default()
-			.encode(
-				&mut cnf,
-				&Linear::new(
-					LinExp::from_slices(&[1, 1, 1, 2], &vars),
-					Comparator::LessEq,
-					1,
-				),
-			)
-			.unwrap();
-
-		assert_encoding(&cnf, &expect_file!["linear/adder/test_pb_encode.cnf"]);
-		assert_solutions(&cnf, vars, &expect_file!["linear/adder/test_pb_encode.sol"]);
-	}
-
-	#[test]
-	fn sort_same_coefficients_2() {
-		let mut db = Cnf::default();
-		let vars = db.new_var_range(5).iter_lits().collect_vec();
-		let mut agg = LinAggregator::default();
-		let _ = agg.sort_same_coefficients(SortingNetworkEncoder::default(), 3);
-		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default();
-		let _ = encoder.with_linear_aggregator(agg);
-		let con = Linear::new(
-			LinExp::from_slices(&[3, 3, 1, 1, 3], &vars),
-			Comparator::GreaterEq,
-			2,
-		);
-		encoder.encode(&mut db, &con).unwrap();
-		assert_checker(&db, &con);
-	}
-}
-
-#[derive(Debug)]
-/// What a linear constraint turned out to be once aggregated.
-///
-/// Aggregation works out which terms belong together and what relates them,
-/// and hands the general case on as a constraint over the integers those
-/// groups encode. What it recognises as counting rather than weighing keeps a
-/// form of its own, there being encoders that do only that.
-pub enum LinVariant {
-	/// A sum of weighted literals against a constant, mentioning no integer
-	/// variable, which the encoders that work in literals take directly.
-	BoolLinear(NormalizedBoolLinear),
-	/// Literals counted into an integer, which a sorting network states
-	/// outright rather than counting into intermediates first.
-	Count(Count),
-	/// Most general form: a sum of integer terms that must be
-	/// (smaller-or-)equal to a constant. The groups the aggregator recognised
-	/// have each become an integer, encoded on the literals they were found on.
-	Linear(NormalizedIntLinear),
-	/// Cardinality constraint (also known as a counting constraint): a sum of
-	/// Boolean literals that must be (smaller-or-)equal to a positive constant.
-	Cardinality(Cardinality),
-	/// Cardinality constraint with the constant 1 (i.e. at-least or exactly 1
-	/// literal must be true).
-	CardinalityOne(CardinalityOne),
-	/// Constraint was trivially encoded into clauses.
-	Trivial,
 }

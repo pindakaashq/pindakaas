@@ -101,6 +101,11 @@ pub(crate) trait IpasirLearnCallbackMethod {
 /// be moved to another thread and invoked there.
 pub(crate) type IpasirLearnCb = Box<dyn FnMut(*const i32) + Send>;
 
+pub trait IpasirLiteralMethods {
+	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2];
+	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32;
+}
+
 /// Trait that must be implemented by all IPASIR solvers, providing basic
 /// functionality of initilization, instantiation, and solving.
 ///
@@ -112,11 +117,6 @@ pub trait IpasirSolverMethods {
 	const IPASIR_RELEASE: unsafe extern "C" fn(slv: *mut c_void);
 	const IPASIR_SOLVE: unsafe extern "C" fn(slv: *mut c_void) -> c_int;
 	const IPASIR_VAL: unsafe extern "C" fn(slv: *mut c_void, lit: i32) -> i32;
-}
-
-pub trait IpasirLiteralMethods {
-	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2];
-	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32;
 }
 
 /// Storage for an IPASIR solver and its optional callbacks.

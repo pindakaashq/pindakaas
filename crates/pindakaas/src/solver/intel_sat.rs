@@ -59,12 +59,6 @@ impl IpasirAssumptionMethods for IntelSat {
 		intel_sat_failed;
 }
 
-impl IpasirLiteralMethods for IntelSat {
-	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2] =
-		var_factory_next_var_range;
-	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32 = var_factory_next_var;
-}
-
 impl IpasirLearnCallbackMethod for IntelSat {
 	const IPASIR_SET_LEARN_CALLBACK: unsafe extern "C" fn(
 		*mut c_void,
@@ -72,6 +66,12 @@ impl IpasirLearnCallbackMethod for IntelSat {
 		c_int,
 		Option<unsafe extern "C" fn(*mut c_void, *const i32)>,
 	) = intel_sat_set_learn;
+}
+
+impl IpasirLiteralMethods for IntelSat {
+	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2] =
+		var_factory_next_var_range;
+	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32 = var_factory_next_var;
 }
 
 impl IpasirSolverMethods for IntelSat {

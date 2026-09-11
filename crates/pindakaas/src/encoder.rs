@@ -11,6 +11,7 @@
 //! performed while building an encoding. Published propagation guarantees
 //! assume the documented representation: selecting binary views through a
 //! cutoff can weaken them without changing the solutions.
+
 pub mod adder;
 pub mod aggregate;
 pub mod bitwise;

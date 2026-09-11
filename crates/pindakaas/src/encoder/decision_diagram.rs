@@ -75,6 +75,65 @@ enum DiagramNode {
 }
 
 impl DecisionDiagramEncoder {
+	fn construct_diagram(
+		xs: &[Term],
+		cmp: Comparator,
+		k: Coeff,
+	) -> Vec<Vec<(Range<Coeff>, DiagramNode)>> {
+		let bounds = xs
+			.iter()
+			.scan((0, 0), |state, x| {
+				*state = (state.0 + term_min(x), state.1 + term_max(x));
+				Some(*state)
+			})
+			.chain(once((0, k)))
+			.collect_vec();
+
+		let margins = xs
+			.iter()
+			.rev()
+			.scan((k, k), |state, x| {
+				*state = (state.0 - term_max(x), state.1 - term_min(x));
+				Some(*state)
+			})
+			.collect_vec();
+
+		let inf = xs.iter().fold(0, |a, x| a + term_max(x)) + 1;
+
+		let mut ws: Vec<Vec<(Range<Coeff>, DiagramNode)>> = margins
+			.into_iter()
+			.rev()
+			.chain(once((k, k)))
+			.zip(bounds)
+			.map(|((lb_margin, ub_margin), (lb, ub))| {
+				match cmp {
+					Comparator::LessEq => vec![
+						(lb_margin > lb).then_some((0..(lb_margin + 1), DiagramNode::Val)),
+						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, DiagramNode::Gap)),
+					],
+					_ => vec![
+						(lb_margin > lb).then_some((0..lb_margin, DiagramNode::Gap)),
+						(lb_margin == ub_margin).then_some((k..(k + 1), DiagramNode::Val)),
+						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, DiagramNode::Gap)),
+					],
+				}
+				.into_iter()
+				.flatten()
+				.collect()
+			})
+			.collect();
+		debug_assert!(
+			ws.iter().all(|layer| layer
+				.iter()
+				.tuple_windows()
+				.all(|((a, _), (b, _))| a.end <= b.end)),
+			"layers must be sorted and non-overlapping"
+		);
+
+		let _ = Self::diagram(0, xs, 0, &mut ws);
+		ws
+	}
+
 	fn diagram(
 		i: usize,
 		xs: &[Term],
@@ -136,65 +195,6 @@ impl DecisionDiagramEncoder {
 			ws[i]
 		);
 		(interval, node)
-	}
-
-	fn construct_diagram(
-		xs: &[Term],
-		cmp: Comparator,
-		k: Coeff,
-	) -> Vec<Vec<(Range<Coeff>, DiagramNode)>> {
-		let bounds = xs
-			.iter()
-			.scan((0, 0), |state, x| {
-				*state = (state.0 + term_min(x), state.1 + term_max(x));
-				Some(*state)
-			})
-			.chain(once((0, k)))
-			.collect_vec();
-
-		let margins = xs
-			.iter()
-			.rev()
-			.scan((k, k), |state, x| {
-				*state = (state.0 - term_max(x), state.1 - term_min(x));
-				Some(*state)
-			})
-			.collect_vec();
-
-		let inf = xs.iter().fold(0, |a, x| a + term_max(x)) + 1;
-
-		let mut ws: Vec<Vec<(Range<Coeff>, DiagramNode)>> = margins
-			.into_iter()
-			.rev()
-			.chain(once((k, k)))
-			.zip(bounds)
-			.map(|((lb_margin, ub_margin), (lb, ub))| {
-				match cmp {
-					Comparator::LessEq => vec![
-						(lb_margin > lb).then_some((0..(lb_margin + 1), DiagramNode::Val)),
-						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, DiagramNode::Gap)),
-					],
-					_ => vec![
-						(lb_margin > lb).then_some((0..lb_margin, DiagramNode::Gap)),
-						(lb_margin == ub_margin).then_some((k..(k + 1), DiagramNode::Val)),
-						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, DiagramNode::Gap)),
-					],
-				}
-				.into_iter()
-				.flatten()
-				.collect()
-			})
-			.collect();
-		debug_assert!(
-			ws.iter().all(|layer| layer
-				.iter()
-				.tuple_windows()
-				.all(|((a, _), (b, _))| a.end <= b.end)),
-			"layers must be sorted and non-overlapping"
-		);
-
-		let _ = Self::diagram(0, xs, 0, &mut ws);
-		ws
 	}
 
 	/// Enable independent domain constraints for newly created intermediate
@@ -317,6 +317,26 @@ impl Decompose for DecisionDiagramEncoder {
 	}
 }
 
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for DecisionDiagramEncoder {
+	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
+		let con = con.as_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for DecisionDiagramEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for DecisionDiagramEncoder {
+	fn encode(&self, db: &mut Db, con: &Count) -> Result {
+		let con = con.as_int_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
 impl<Db> Encoder<Db, NormalizedBoolLinear> for DecisionDiagramEncoder
 where
 	Db: ClauseDatabase + ?Sized,
@@ -337,26 +357,6 @@ where
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
 		self.encoder().encode_decomposed(db, con, self)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for DecisionDiagramEncoder {
-	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
-		let con = con.as_linear(db)?;
-		self.encode(db, &con)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for DecisionDiagramEncoder {
-	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		let con = con.as_int_linear(db)?;
-		self.encode(db, &con)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for DecisionDiagramEncoder {
-	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
-		self.encode(db, &Cardinality::from(con.clone()))
 	}
 }
 

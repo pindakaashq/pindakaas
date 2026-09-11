@@ -72,9 +72,21 @@ pub enum ProofConclusionType {
 /// aborts the process rather than unwinding) and must not re-enter the solver,
 /// which would panic on the tracer's already mutably borrowed [`RefCell`].
 pub trait ProofTracer {
-	/// An original clause is added.
-	fn add_original_clause(&mut self, id: i64, redundant: bool, clause: &[Lit], restored: bool) {
-		let _ = (id, redundant, clause, restored);
+	/// Adds an assumption literal.
+	fn add_assumption(&mut self, lit: Lit) {
+		let _ = lit;
+	}
+
+	/// This clause could be derived, which is the negation of a core of failing
+	/// assumptions/constraints. If antecedents are derived they will be
+	/// included here.
+	fn add_assumption_clause(&mut self, id: i64, clause: &[Lit], antecedents: &[i64]) {
+		let _ = (id, clause, antecedents);
+	}
+
+	/// Adds constraint clause has been added.
+	fn add_constraint(&mut self, clause: &[Lit]) {
+		let _ = clause;
 	}
 
 	/// A derived clause is added.
@@ -89,40 +101,9 @@ pub trait ProofTracer {
 		let _ = (id, redundant, witness, clause, antecedents);
 	}
 
-	/// A clause is deleted.
-	fn delete_clause(&mut self, id: i64, redundant: bool, clause: &[Lit]) {
-		let _ = (id, redundant, clause);
-	}
-
-	/// A clause is demoted.
-	fn demote_clause(&mut self, id: i64, clause: &[Lit]) {
-		let _ = (id, clause);
-	}
-
-	/// Mark a clause as potentially restorable later.
-	fn weaken_minus(&mut self, id: i64, clause: &[Lit]) {
-		let _ = (id, clause);
-	}
-
-	/// A clause was strengthened.
-	fn strengthen(&mut self, id: i64) {
-		let _ = id;
-	}
-
-	/// Reports the result of the solver.
-	///
-	/// - `status`: Status code.
-	/// - `id`: Clause ID of the conflict clause.
-	fn report_status(&mut self, status: i32, id: i64) {
-		let _ = (status, id);
-	}
-
-	/// Finalizes a clause.
-	///
-	/// - `id`: Clause ID.
-	/// - `clause`: Clause literals.
-	fn finalize_clause(&mut self, id: i64, clause: &[Lit]) {
-		let _ = (id, clause);
+	/// An original clause is added.
+	fn add_original_clause(&mut self, id: i64, redundant: bool, clause: &[Lit], restored: bool) {
+		let _ = (id, redundant, clause, restored);
 	}
 
 	/// Notification that the proof begins with a set of reserved ids for
@@ -133,27 +114,14 @@ pub trait ProofTracer {
 		let _ = first_derived_id;
 	}
 
-	/// Notification that an assumption has been added.
-	fn solve_query(&mut self) {}
-
-	/// Adds an assumption literal.
-	fn add_assumption(&mut self, lit: Lit) {
-		let _ = lit;
+	/// SAT has been concluded, and the satisfying assignment provided
+	fn conclude_sat(&mut self, assignment: &[Lit]) {
+		let _ = assignment;
 	}
 
-	/// Adds constraint clause has been added.
-	fn add_constraint(&mut self, clause: &[Lit]) {
-		let _ = clause;
-	}
-
-	/// All assumptions and constraints have been reset.
-	fn reset_assumptions(&mut self) {}
-
-	/// This clause could be derived, which is the negation of a core of failing
-	/// assumptions/constraints. If antecedents are derived they will be
-	/// included here.
-	fn add_assumption_clause(&mut self, id: i64, clause: &[Lit], antecedents: &[i64]) {
-		let _ = (id, clause, antecedents);
+	/// Reports that the result is unknown, providing the current trail.
+	fn conclude_unknown(&mut self, trail: &[Lit]) {
+		let _ = trail;
 	}
 
 	/// Conclude unsat was requested. It will give either the id of the empty
@@ -163,14 +131,46 @@ pub trait ProofTracer {
 		let _ = (conclusion_type, clause_ids);
 	}
 
-	/// SAT has been concluded, and the satisfying assignment provided
-	fn conclude_sat(&mut self, assignment: &[Lit]) {
-		let _ = assignment;
+	/// A clause is deleted.
+	fn delete_clause(&mut self, id: i64, redundant: bool, clause: &[Lit]) {
+		let _ = (id, redundant, clause);
 	}
 
-	/// Reports that the result is unknown, providing the current trail.
-	fn conclude_unknown(&mut self, trail: &[Lit]) {
-		let _ = trail;
+	/// A clause is demoted.
+	fn demote_clause(&mut self, id: i64, clause: &[Lit]) {
+		let _ = (id, clause);
+	}
+
+	/// Finalizes a clause.
+	///
+	/// - `id`: Clause ID.
+	/// - `clause`: Clause literals.
+	fn finalize_clause(&mut self, id: i64, clause: &[Lit]) {
+		let _ = (id, clause);
+	}
+
+	/// Reports the result of the solver.
+	///
+	/// - `status`: Status code.
+	/// - `id`: Clause ID of the conflict clause.
+	fn report_status(&mut self, status: i32, id: i64) {
+		let _ = (status, id);
+	}
+
+	/// All assumptions and constraints have been reset.
+	fn reset_assumptions(&mut self) {}
+
+	/// Notification that an assumption has been added.
+	fn solve_query(&mut self) {}
+
+	/// A clause was strengthened.
+	fn strengthen(&mut self, id: i64) {
+		let _ = id;
+	}
+
+	/// Mark a clause as potentially restorable later.
+	fn weaken_minus(&mut self, id: i64, clause: &[Lit]) {
+		let _ = (id, clause);
 	}
 }
 

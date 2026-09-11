@@ -17,6 +17,28 @@ use crate::{
 	Checker, ClauseDatabase, Lit, Result, Unsatisfiable, Valuation,
 };
 
+/// Which encoders take a [`Count`], which rustdoc lists on the trait but the
+/// compiler only checks if something names them.
+#[cfg(test)]
+const _: () = {
+	use crate::{
+		constraint::linear::{
+			AdderEncoder, DecisionDiagramEncoder, MixedRadixEncoder, SequentialCounterEncoder,
+			TotalizerEncoder, WatchdogEncoder,
+		},
+		Cnf, Encoder,
+	};
+
+	const fn takes<Db: ClauseDatabase + ?Sized, C, E: Encoder<Db, C>>() {}
+	takes::<Cnf, Count, AdderEncoder>();
+	takes::<Cnf, Count, DecisionDiagramEncoder>();
+	takes::<Cnf, Count, MixedRadixEncoder>();
+	takes::<Cnf, Count, SortingNetworkEncoder>();
+	takes::<Cnf, Count, WatchdogEncoder>();
+	takes::<Cnf, Count, SequentialCounterEncoder>();
+	takes::<Cnf, Count, TotalizerEncoder>();
+};
+
 /// The constraint that `lits` add up to the integer `y`.
 #[derive(Debug, Clone)]
 pub struct Count {
@@ -26,27 +48,6 @@ pub struct Count {
 }
 
 impl Count {
-	/// Construct a constraint that `lits` add up to `y`, or to at most `y`.
-	///
-	/// # Examples
-	///
-	/// ```rust
-	/// use pindakaas::{
-	///     constraint::{count::{Count, SortingNetworkEncoder}, linear::LimitComp},
-	///     decision::integer::IntVar, ClauseDatabase, Cnf, Encoder,
-	/// };
-	///
-	/// let mut cnf = Cnf::default();
-	/// let lits = cnf.new_var_range(4).map(Into::into).collect();
-	/// let count = IntVar::new(0..=4);
-	/// let constraint = Count::new(lits, LimitComp::Equal, count);
-	/// SortingNetworkEncoder::default().encode(&mut cnf, &constraint)?;
-	/// # Ok::<(), pindakaas::Unsatisfiable>(())
-	/// ```
-	pub fn new(lits: Vec<Lit>, cmp: LimitComp, y: IntVar) -> Self {
-		Self { lits, cmp, y }
-	}
-
 	/// Read the constraint as the integer linear constraint it is.
 	///
 	/// A literal is an integer worth one when it holds, and the bound counts
@@ -76,6 +77,27 @@ impl Count {
 			PosCoeff::new(k),
 		))
 	}
+
+	/// Construct a constraint that `lits` add up to `y`, or to at most `y`.
+	///
+	/// # Examples
+	///
+	/// ```rust
+	/// use pindakaas::{
+	///     constraint::{count::{Count, SortingNetworkEncoder}, linear::LimitComp},
+	///     decision::integer::IntVar, ClauseDatabase, Cnf, Encoder,
+	/// };
+	///
+	/// let mut cnf = Cnf::default();
+	/// let lits = cnf.new_var_range(4).map(Into::into).collect();
+	/// let count = IntVar::new(0..=4);
+	/// let constraint = Count::new(lits, LimitComp::Equal, count);
+	/// SortingNetworkEncoder::default().encode(&mut cnf, &constraint)?;
+	/// # Ok::<(), pindakaas::Unsatisfiable>(())
+	/// ```
+	pub fn new(lits: Vec<Lit>, cmp: LimitComp, y: IntVar) -> Self {
+		Self { lits, cmp, y }
+	}
 }
 
 impl Checker for Count {
@@ -94,28 +116,6 @@ impl Checker for Count {
 		}
 	}
 }
-
-/// Which encoders take a [`Count`], which rustdoc lists on the trait but the
-/// compiler only checks if something names them.
-#[cfg(test)]
-const _: () = {
-	use crate::{
-		constraint::linear::{
-			AdderEncoder, DecisionDiagramEncoder, MixedRadixEncoder, SequentialCounterEncoder,
-			TotalizerEncoder, WatchdogEncoder,
-		},
-		Cnf, Encoder,
-	};
-
-	const fn takes<Db: ClauseDatabase + ?Sized, C, E: Encoder<Db, C>>() {}
-	takes::<Cnf, Count, AdderEncoder>();
-	takes::<Cnf, Count, DecisionDiagramEncoder>();
-	takes::<Cnf, Count, MixedRadixEncoder>();
-	takes::<Cnf, Count, SortingNetworkEncoder>();
-	takes::<Cnf, Count, WatchdogEncoder>();
-	takes::<Cnf, Count, SequentialCounterEncoder>();
-	takes::<Cnf, Count, TotalizerEncoder>();
-};
 
 #[cfg(test)]
 mod tests {

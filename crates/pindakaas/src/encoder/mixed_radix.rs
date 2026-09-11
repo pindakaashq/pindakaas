@@ -70,17 +70,6 @@ pub struct MixedRadixEncoder {
 	cutoff: Option<Coeff>,
 }
 
-impl Default for MixedRadixEncoder {
-	fn default() -> Self {
-		Self {
-			add_consistency: false,
-			add_propagation: Consistency::Bounds,
-			base: None,
-			cutoff: None,
-		}
-	}
-}
-
 impl MixedRadixEncoder {
 	/// Encode `x + y = z`, giving back `z` over the values it can still take
 	/// without passing `ub`.
@@ -379,6 +368,54 @@ impl MixedRadixEncoder {
 	}
 }
 
+impl MixedRadixEncoder {
+	/// The leaf a term comes to, its coefficient counted in.
+	///
+	/// A unit coefficient is the variable itself; anything else is the variable
+	/// scaled, which is a view on its values rather than a constraint on them.
+	fn scaled<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		term: &(Coeff, IntVar),
+		ub: Coeff,
+	) -> Result<IntVar, Unsatisfiable> {
+		let (c, x) = term;
+		if *c == 1 {
+			return Ok(x.clone());
+		}
+		let domain = x
+			.domain()
+			.iter()
+			.flatten()
+			.map(|v| v * c)
+			.filter(|&v| v <= ub)
+			.map(|v| v..=v)
+			.collect();
+		let scaled = self.new_int_var(db, domain, "c")?;
+		self.encoder().encode(
+			db,
+			&IntTernary::new(
+				(*c, x.clone()),
+				(1, IntVar::new(0..=0)),
+				Comparator::Equal,
+				(1, scaled.clone()),
+			),
+		)?;
+		Ok(scaled)
+	}
+}
+
+impl Default for MixedRadixEncoder {
+	fn default() -> Self {
+		Self {
+			add_consistency: false,
+			add_propagation: Consistency::Bounds,
+			base: None,
+			cutoff: None,
+		}
+	}
+}
+
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for MixedRadixEncoder {
 	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
 		let con = con.as_linear(db)?;
@@ -386,16 +423,16 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for MixedRadixEncoder
 	}
 }
 
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for MixedRadixEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
+
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for MixedRadixEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for MixedRadixEncoder {
-	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
-		self.encode(db, &Cardinality::from(con.clone()))
 	}
 }
 
@@ -476,70 +513,9 @@ where
 	}
 }
 
-impl MixedRadixEncoder {
-	/// The leaf a term comes to, its coefficient counted in.
-	///
-	/// A unit coefficient is the variable itself; anything else is the variable
-	/// scaled, which is a view on its values rather than a constraint on them.
-	fn scaled<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-		term: &(Coeff, IntVar),
-		ub: Coeff,
-	) -> Result<IntVar, Unsatisfiable> {
-		let (c, x) = term;
-		if *c == 1 {
-			return Ok(x.clone());
-		}
-		let domain = x
-			.domain()
-			.iter()
-			.flatten()
-			.map(|v| v * c)
-			.filter(|&v| v <= ub)
-			.map(|v| v..=v)
-			.collect();
-		let scaled = self.new_int_var(db, domain, "c")?;
-		self.encoder().encode(
-			db,
-			&IntTernary::new(
-				(*c, x.clone()),
-				(1, IntVar::new(0..=0)),
-				Comparator::Equal,
-				(1, scaled.clone()),
-			),
-		)?;
-		Ok(scaled)
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use crate::helpers::tests::{linear_test_suite, prelude::*};
-
-	card1_test_suite! {
-		mixed_radix_encoder_card1, MixedRadixEncoder::default()
-	}
-	linear_test_suite!(mixed_radix_encoder, MixedRadixEncoder::default());
-
-	// The radix is what sets the number of levels: two holds a node in binary,
-	// and anything past `k` gives it a single digit.
-	linear_test_suite!(
-		mixed_radix_encoder_base_2,
-		MixedRadixEncoder::default().with_base(Some(vec![2]))
-	);
-	linear_test_suite!(
-		mixed_radix_encoder_base_3,
-		MixedRadixEncoder::default().with_base(Some(vec![3]))
-	);
-	linear_test_suite!(
-		mixed_radix_encoder_base_100,
-		MixedRadixEncoder::default().with_base(Some(vec![100]))
-	);
-	linear_test_suite!(
-		mixed_radix_encoder_base_3_2,
-		MixedRadixEncoder::default().with_base(Some(vec![3, 2]))
-	);
 
 	#[test]
 	fn greedy_base_divides_the_coefficients() {
@@ -593,4 +569,28 @@ mod tests {
 			gt.num_clauses()
 		);
 	}
+
+	card1_test_suite! {
+		mixed_radix_encoder_card1, MixedRadixEncoder::default()
+	}
+	linear_test_suite!(mixed_radix_encoder, MixedRadixEncoder::default());
+
+	// The radix is what sets the number of levels: two holds a node in binary,
+	// and anything past `k` gives it a single digit.
+	linear_test_suite!(
+		mixed_radix_encoder_base_2,
+		MixedRadixEncoder::default().with_base(Some(vec![2]))
+	);
+	linear_test_suite!(
+		mixed_radix_encoder_base_3,
+		MixedRadixEncoder::default().with_base(Some(vec![3]))
+	);
+	linear_test_suite!(
+		mixed_radix_encoder_base_100,
+		MixedRadixEncoder::default().with_base(Some(vec![100]))
+	);
+	linear_test_suite!(
+		mixed_radix_encoder_base_3_2,
+		MixedRadixEncoder::default().with_base(Some(vec![3, 2]))
+	);
 }

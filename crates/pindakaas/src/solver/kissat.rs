@@ -51,18 +51,18 @@ impl From<&Cnf> for Kissat {
 	}
 }
 
+impl IpasirLiteralMethods for Kissat {
+	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2] =
+		var_factory_next_var_range;
+	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32 = var_factory_next_var;
+}
+
 impl IpasirSolverMethods for Kissat {
 	const IPASIR_ADD: unsafe extern "C" fn(*mut c_void, i32) = kissat_add;
 	const IPASIR_INIT: unsafe extern "C" fn() -> *mut c_void = kissat_init;
 	const IPASIR_RELEASE: unsafe extern "C" fn(*mut c_void) = kissat_release;
 	const IPASIR_SOLVE: unsafe extern "C" fn(*mut c_void) -> c_int = kissat_solve;
 	const IPASIR_VAL: unsafe extern "C" fn(*mut c_void, i32) -> c_int = kissat_value;
-}
-
-impl IpasirLiteralMethods for Kissat {
-	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2] =
-		var_factory_next_var_range;
-	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32 = var_factory_next_var;
 }
 
 impl IpasirTermCallbackMethod for Kissat {

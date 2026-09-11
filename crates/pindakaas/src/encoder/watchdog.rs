@@ -79,63 +79,17 @@ pub struct WatchdogEncoder {
 	local: bool,
 }
 
-impl Default for WatchdogEncoder {
-	fn default() -> Self {
-		Self {
-			add_consistency: false,
-			add_propagation: Consistency::Bounds,
-			cutoff: None,
-			local: false,
-		}
-	}
+/// The variable `⌊x / 2⌋`, which reaches `w` exactly when `x` reaches `2·w`.
+///
+/// Its literals are `x`'s, every other one, so halving costs nothing.
+fn halved<Db: ClauseDatabase + ?Sized>(db: &mut Db, x: &IntVar) -> Result<IntVar, Unsatisfiable> {
+	let walk = (0..=(x.max() / 2))
+		.map(|w| Ok((w, x.lit_at_least(db, 2 * w)?)))
+		.collect::<Result<Vec<_>, Unsatisfiable>>()?;
+	IntVar::from_order_walk(db, walk).map(|h| h.with_label(format!("{}/2", x.label())))
 }
 
 impl WatchdogEncoder {
-	/// The encoder of the pieces this one decomposes a constraint into.
-	fn encoder(&self) -> IntTernaryEncoder {
-		IntTernaryEncoder::with_config(IntTernaryConfig {
-			propagate: self.add_propagation != Consistency::None,
-			cutoff: self.cutoff,
-		})
-	}
-
-	/// Independent domain constraints for newly created intermediate views.
-	///
-	/// Disabled by default. Enables standalone binary and direct consistency
-	/// clauses; order-encoding implication chains remain mandatory.
-	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_consistency = b;
-		self
-	}
-
-	/// The domain size at which an unencoded variable prefers binary.
-	///
-	/// `None` (the default) prefers order; existing binary or order views take
-	/// precedence. The threshold is inclusive. Binary arithmetic can weaken
-	/// unit propagation; see the [encoding overview](crate::encoder).
-	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
-		self.cutoff = c;
-		self
-	}
-
-	/// Local watchdogs for domain consistency; global is the default.
-	///
-	/// One watchdog per term value rules it out when the remaining terms exceed
-	/// the residual bound. The global form uses one watchdog for the
-	/// constraint. The propagation guarantee assumes order arithmetic; binary
-	/// cutoffs can weaken it.
-	pub fn with_local(&mut self, b: bool) -> &mut Self {
-		self.local = b;
-		self
-	}
-
-	/// Selects domain consistency applied before decomposition; bounds is the
-	/// default.
-	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
-		self.add_propagation = c;
-		self
-	}
-
 	/// A variable over `0..=1` saying whether `2ʳ` is part of what the term is
 	/// worth.
 	///
@@ -173,6 +127,14 @@ impl WatchdogEncoder {
 			db,
 			[(0, BoolVal::Const(true)), (1, digit)],
 		)?))
+	}
+
+	/// The encoder of the pieces this one decomposes a constraint into.
+	fn encoder(&self) -> IntTernaryEncoder {
+		IntTernaryEncoder::with_config(IntTernaryConfig {
+			propagate: self.add_propagation != Consistency::None,
+			cutoff: self.cutoff,
+		})
 	}
 
 	/// Count `leaves` into one variable, held to `cap`.
@@ -345,16 +307,43 @@ impl WatchdogEncoder {
 		}
 		Ok(())
 	}
-}
 
-/// The variable `⌊x / 2⌋`, which reaches `w` exactly when `x` reaches `2·w`.
-///
-/// Its literals are `x`'s, every other one, so halving costs nothing.
-fn halved<Db: ClauseDatabase + ?Sized>(db: &mut Db, x: &IntVar) -> Result<IntVar, Unsatisfiable> {
-	let walk = (0..=(x.max() / 2))
-		.map(|w| Ok((w, x.lit_at_least(db, 2 * w)?)))
-		.collect::<Result<Vec<_>, Unsatisfiable>>()?;
-	IntVar::from_order_walk(db, walk).map(|h| h.with_label(format!("{}/2", x.label())))
+	/// Independent domain constraints for newly created intermediate views.
+	///
+	/// Disabled by default. Enables standalone binary and direct consistency
+	/// clauses; order-encoding implication chains remain mandatory.
+	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
+		self.add_consistency = b;
+		self
+	}
+
+	/// The domain size at which an unencoded variable prefers binary.
+	///
+	/// `None` (the default) prefers order; existing binary or order views take
+	/// precedence. The threshold is inclusive. Binary arithmetic can weaken
+	/// unit propagation; see the [encoding overview](crate::encoder).
+	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
+		self.cutoff = c;
+		self
+	}
+
+	/// Local watchdogs for domain consistency; global is the default.
+	///
+	/// One watchdog per term value rules it out when the remaining terms exceed
+	/// the residual bound. The global form uses one watchdog for the
+	/// constraint. The propagation guarantee assumes order arithmetic; binary
+	/// cutoffs can weaken it.
+	pub fn with_local(&mut self, b: bool) -> &mut Self {
+		self.local = b;
+		self
+	}
+
+	/// Selects domain consistency applied before decomposition; bounds is the
+	/// default.
+	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
+		self.add_propagation = c;
+		self
+	}
 }
 
 impl Decompose for WatchdogEncoder {
@@ -393,6 +382,37 @@ impl Decompose for WatchdogEncoder {
 	}
 }
 
+impl Default for WatchdogEncoder {
+	fn default() -> Self {
+		Self {
+			add_consistency: false,
+			add_propagation: Consistency::Bounds,
+			cutoff: None,
+			local: false,
+		}
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for WatchdogEncoder {
+	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
+		let con = con.as_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for WatchdogEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for WatchdogEncoder {
+	fn encode(&self, db: &mut Db, con: &Count) -> Result {
+		let con = con.as_int_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
 impl<Db> Encoder<Db, NormalizedBoolLinear> for WatchdogEncoder
 where
 	Db: ClauseDatabase + ?Sized,
@@ -416,26 +436,6 @@ where
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for WatchdogEncoder {
-	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
-		let con = con.as_linear(db)?;
-		self.encode(db, &con)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for WatchdogEncoder {
-	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		let con = con.as_int_linear(db)?;
-		self.encode(db, &con)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for WatchdogEncoder {
-	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
-		self.encode(db, &Cardinality::from(con.clone()))
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use traced_test::test;
@@ -445,92 +445,6 @@ mod tests {
 		solver::{cadical::Cadical, SolveResult, Solver},
 		Valuation,
 	};
-
-	card1_test_suite! {
-		watchdog_encoder_card1, WatchdogEncoder::default()
-	}
-	linear_test_suite!(watchdog_encoder, WatchdogEncoder::default());
-
-	linear_test_suite!(
-		watchdog_encoder_local,
-		WatchdogEncoder::default().with_local(true)
-	);
-	linear_test_suite!(
-		watchdog_encoder_no_prop,
-		WatchdogEncoder::default().with_propagation(crate::decision::integer::Consistency::None)
-	);
-	linear_test_suite!(
-		watchdog_encoder_prop_doms,
-		WatchdogEncoder::default().with_propagation(crate::decision::integer::Consistency::Domain)
-	);
-	linear_test_suite!(
-		watchdog_encoder_consistency,
-		WatchdogEncoder::default().with_consistency(true)
-	);
-	linear_test_suite!(
-		watchdog_encoder_binary,
-		WatchdogEncoder::default().with_cutoff(Some(0))
-	);
-
-	/// The point of the watchdog is that a coefficient costs its bit width
-	/// rather than its magnitude, so guard against a change that would make it
-	/// pointless.
-	#[test]
-	fn smaller_than_the_totalizer() {
-		const N: usize = 20;
-		let coeffs = (0..N as Coeff).map(|i| 1 + i * 65_537).collect_vec();
-		let k = coeffs.iter().sum::<Coeff>() / 2;
-		let con =
-			|vars: &[Lit]| Linear::new(LinExp::from_slices(&coeffs, vars), Comparator::LessEq, k);
-
-		let mut gt = Cnf::default();
-		let vars = gt.new_var_range(N).iter_lits().collect_vec();
-		LinearEncoder::<StaticLinEncoder<TotalizerEncoder, TotalizerEncoder>>::default()
-			.encode(&mut gt, &con(&vars))
-			.unwrap();
-
-		let mut gpw = Cnf::default();
-		let vars = gpw.new_var_range(N).iter_lits().collect_vec();
-		LinearEncoder::<StaticLinEncoder<WatchdogEncoder, WatchdogEncoder>>::default()
-			.encode(&mut gpw, &con(&vars))
-			.unwrap();
-
-		assert!(
-			gpw.num_vars() < gt.num_vars(),
-			"expected fewer variables than the totalizer, got {} instead of {}",
-			gpw.num_vars(),
-			gt.num_vars()
-		);
-		assert!(
-			gpw.num_clauses() < gt.num_clauses(),
-			"expected fewer clauses than the totalizer, got {} instead of {}",
-			gpw.num_clauses(),
-			gt.num_clauses()
-		);
-	}
-
-	/// A sum that cannot reach its bound is not worth a watchdog, and the
-	/// local form asks for one per value, so the saving is per value too.
-	#[test]
-	fn a_sum_that_cannot_pass_its_bound_costs_nothing() {
-		for local in [false, true] {
-			let mut cnf = Cnf::default();
-			let (a, b, c) = cnf.new_lits();
-			// Three, five and four come to twelve at most, which the bound
-			// already allows.
-			let con = NormalizedIntLinear::new(
-				construct_terms(&mut cnf, &[(a, 3), (b, 5), (c, 4)]),
-				LimitComp::LessEq,
-				PosCoeff::new(12),
-			);
-			let vars = cnf.num_vars();
-			let mut enc = WatchdogEncoder::default();
-			let _ = enc.with_local(local);
-			enc.encode(&mut cnf, &con).unwrap();
-			assert_eq!(cnf.num_clauses(), 0, "local: {local}");
-			assert_eq!(cnf.num_vars(), vars, "local: {local}");
-		}
-	}
 
 	/// Two values of one term setting the same digit need a literal standing
 	/// for the digit, implied by each of them. Only the implication is stated,
@@ -607,4 +521,90 @@ mod tests {
 			]
 		);
 	}
+
+	/// A sum that cannot reach its bound is not worth a watchdog, and the
+	/// local form asks for one per value, so the saving is per value too.
+	#[test]
+	fn a_sum_that_cannot_pass_its_bound_costs_nothing() {
+		for local in [false, true] {
+			let mut cnf = Cnf::default();
+			let (a, b, c) = cnf.new_lits();
+			// Three, five and four come to twelve at most, which the bound
+			// already allows.
+			let con = NormalizedIntLinear::new(
+				construct_terms(&mut cnf, &[(a, 3), (b, 5), (c, 4)]),
+				LimitComp::LessEq,
+				PosCoeff::new(12),
+			);
+			let vars = cnf.num_vars();
+			let mut enc = WatchdogEncoder::default();
+			let _ = enc.with_local(local);
+			enc.encode(&mut cnf, &con).unwrap();
+			assert_eq!(cnf.num_clauses(), 0, "local: {local}");
+			assert_eq!(cnf.num_vars(), vars, "local: {local}");
+		}
+	}
+
+	/// The point of the watchdog is that a coefficient costs its bit width
+	/// rather than its magnitude, so guard against a change that would make it
+	/// pointless.
+	#[test]
+	fn smaller_than_the_totalizer() {
+		const N: usize = 20;
+		let coeffs = (0..N as Coeff).map(|i| 1 + i * 65_537).collect_vec();
+		let k = coeffs.iter().sum::<Coeff>() / 2;
+		let con =
+			|vars: &[Lit]| Linear::new(LinExp::from_slices(&coeffs, vars), Comparator::LessEq, k);
+
+		let mut gt = Cnf::default();
+		let vars = gt.new_var_range(N).iter_lits().collect_vec();
+		LinearEncoder::<StaticLinEncoder<TotalizerEncoder, TotalizerEncoder>>::default()
+			.encode(&mut gt, &con(&vars))
+			.unwrap();
+
+		let mut gpw = Cnf::default();
+		let vars = gpw.new_var_range(N).iter_lits().collect_vec();
+		LinearEncoder::<StaticLinEncoder<WatchdogEncoder, WatchdogEncoder>>::default()
+			.encode(&mut gpw, &con(&vars))
+			.unwrap();
+
+		assert!(
+			gpw.num_vars() < gt.num_vars(),
+			"expected fewer variables than the totalizer, got {} instead of {}",
+			gpw.num_vars(),
+			gt.num_vars()
+		);
+		assert!(
+			gpw.num_clauses() < gt.num_clauses(),
+			"expected fewer clauses than the totalizer, got {} instead of {}",
+			gpw.num_clauses(),
+			gt.num_clauses()
+		);
+	}
+
+	card1_test_suite! {
+		watchdog_encoder_card1, WatchdogEncoder::default()
+	}
+	linear_test_suite!(watchdog_encoder, WatchdogEncoder::default());
+
+	linear_test_suite!(
+		watchdog_encoder_local,
+		WatchdogEncoder::default().with_local(true)
+	);
+	linear_test_suite!(
+		watchdog_encoder_no_prop,
+		WatchdogEncoder::default().with_propagation(crate::decision::integer::Consistency::None)
+	);
+	linear_test_suite!(
+		watchdog_encoder_prop_doms,
+		WatchdogEncoder::default().with_propagation(crate::decision::integer::Consistency::Domain)
+	);
+	linear_test_suite!(
+		watchdog_encoder_consistency,
+		WatchdogEncoder::default().with_consistency(true)
+	);
+	linear_test_suite!(
+		watchdog_encoder_binary,
+		WatchdogEncoder::default().with_cutoff(Some(0))
+	);
 }

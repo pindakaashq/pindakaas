@@ -22,6 +22,36 @@ use crate::{
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
 };
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Normalisation and specialisation of a general [`Linear`] constraint.
+pub struct LinAggregator {
+	sorted_encoder: SortingNetworkEncoder,
+	sort_same_coefficients: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+/// Aggregation followed by encoding of the resulting [`LinVariant`].
+pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = LinAggregator> {
+	enc: Enc,
+	agg: Agg,
+}
+
+/// Static dispatch from each aggregated constraint shape to its encoder.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct StaticLinEncoder<
+	LinEnc = AdderEncoder,
+	BoolLinEnc = AdderEncoder,
+	CardEnc = AdderEncoder, // TODO: Actual Cardinality encoding
+	Card1Enc = BitwiseEncoder,
+	CountEnc = SortingNetworkEncoder,
+> {
+	lin_enc: LinEnc,
+	bool_lin_enc: BoolLinEnc,
+	card_enc: CardEnc,
+	amo_enc: Card1Enc,
+	count_enc: CountEnc,
+}
+
 impl LinAggregator {
 	#[cfg_attr(
 		any(feature = "tracing", test),
@@ -278,20 +308,6 @@ impl LinAggregator {
 	}
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-/// Normalisation and specialisation of a general [`Linear`] constraint.
-pub struct LinAggregator {
-	sorted_encoder: SortingNetworkEncoder,
-	sort_same_coefficients: usize,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-/// Aggregation followed by encoding of the resulting [`LinVariant`].
-pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = LinAggregator> {
-	enc: Enc,
-	agg: Agg,
-}
-
 impl<Enc, Agg> LinearEncoder<Enc, Agg> {
 	/// Returns the aggregation stage used by this encoder.
 	pub fn linear_aggregator(&self) -> &Agg {
@@ -322,20 +338,19 @@ impl<Enc, Agg> LinearEncoder<Enc, Agg> {
 	}
 }
 
-/// Static dispatch from each aggregated constraint shape to its encoder.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct StaticLinEncoder<
-	LinEnc = AdderEncoder,
-	BoolLinEnc = AdderEncoder,
-	CardEnc = AdderEncoder, // TODO: Actual Cardinality encoding
-	Card1Enc = BitwiseEncoder,
-	CountEnc = SortingNetworkEncoder,
-> {
-	lin_enc: LinEnc,
-	bool_lin_enc: BoolLinEnc,
-	card_enc: CardEnc,
-	amo_enc: Card1Enc,
-	count_enc: CountEnc,
+impl<Db, Enc> Encoder<Db, Linear> for LinearEncoder<Enc>
+where
+	Db: ClauseDatabase + ?Sized,
+	Enc: Encoder<Db, LinVariant>,
+{
+	#[cfg_attr(
+		any(feature = "tracing", test),
+		tracing::instrument(name = "linear_encoder", skip_all, fields(constraint = lin.trace_print()))
+	)]
+	fn encode(&self, db: &mut Db, lin: &Linear) -> Result {
+		let variant = self.agg.aggregate(db, lin)?;
+		self.enc.encode(db, &variant)
+	}
 }
 
 impl<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
@@ -346,9 +361,19 @@ impl<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
 		&mut self.amo_enc
 	}
 
+	/// Returns mutable access to the Boolean-linear encoder.
+	pub fn bool_lin_encoder(&mut self) -> &mut BoolLinEnc {
+		&mut self.bool_lin_enc
+	}
+
 	/// Returns mutable access to the cardinality encoder.
 	pub fn card_encoder(&mut self) -> &mut CardEnc {
 		&mut self.card_enc
+	}
+
+	/// Returns mutable access to the variable-bound count encoder.
+	pub fn count_encoder(&mut self) -> &mut CountEnc {
+		&mut self.count_enc
 	}
 
 	/// Returns mutable access to the integer-linear encoder.
@@ -372,16 +397,6 @@ impl<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
 			amo_enc,
 			count_enc,
 		}
-	}
-
-	/// Returns mutable access to the Boolean-linear encoder.
-	pub fn bool_lin_encoder(&mut self) -> &mut BoolLinEnc {
-		&mut self.bool_lin_enc
-	}
-
-	/// Returns mutable access to the variable-bound count encoder.
-	pub fn count_encoder(&mut self) -> &mut CountEnc {
-		&mut self.count_enc
 	}
 }
 
@@ -407,21 +422,6 @@ where
 	}
 }
 
-impl<Db, Enc> Encoder<Db, Linear> for LinearEncoder<Enc>
-where
-	Db: ClauseDatabase + ?Sized,
-	Enc: Encoder<Db, LinVariant>,
-{
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "linear_encoder", skip_all, fields(constraint = lin.trace_print()))
-	)]
-	fn encode(&self, db: &mut Db, lin: &Linear) -> Result {
-		let variant = self.agg.aggregate(db, lin)?;
-		self.enc.encode(db, &variant)
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use std::num::NonZeroI32;
@@ -443,6 +443,74 @@ mod tests {
 		CardinalityOne(Vec<Lit>, LimitComp),
 		Linear(Vec<Vec<(Lit, Coeff)>>, LimitComp, Coeff),
 		Trivial,
+	}
+
+	#[test]
+	fn a_bound_of_zero_leaves_no_term_standing() {
+		// The zero bound leaves the adder no bits to work with.
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
+		let con = Linear::new(a * 2 + y.clone() * 3, Comparator::LessEq, 0);
+		let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
+		else {
+			panic!("a literal and an integer make a linear constraint");
+		};
+		cnf.encode(&con, &AdderEncoder::default()).unwrap();
+
+		use crate::{
+			solver::{cadical::Cadical, SolveResult, Solver},
+			Valuation,
+		};
+		let mut slv = Cadical::from(&cnf);
+		let SolveResult::Satisfied(value) = slv.solve() else {
+			panic!("nothing being chosen satisfies it");
+		};
+		assert!(!value.value(a) && y.value(&value) == 0);
+	}
+
+	#[test]
+	fn a_count_admits_exactly_the_assignments_it_should() {
+		use crate::{
+			constraint::count::SortingNetworkEncoder,
+			decision::integer::IntVar,
+			solver::{cadical::Cadical, SolveResult, Solver},
+			Valuation,
+		};
+
+		for cmp in [Comparator::LessEq, Comparator::Equal] {
+			let mut cnf = Cnf::default();
+			let lits = (0..3).map(|_| cnf.new_lit()).collect_vec();
+			let y = IntVar::new(0..=2).with_label("y");
+			let exp = LinExp::from_slices(&[1; 3], &lits) - LinExp::from(y.clone());
+			let con = Linear::new(exp, cmp, 0);
+			let LinVariant::Count(count) =
+				LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
+			else {
+				panic!("literals against an integer are a count");
+			};
+			SortingNetworkEncoder::default()
+				.encode(&mut cnf, &count)
+				.unwrap();
+
+			let mut seen = Vec::new();
+			let mut slv = Cadical::from(&cnf);
+			while let SolveResult::Satisfied(sol) = slv.solve() {
+				let count: Coeff = lits.iter().filter(|&&l| sol.value(l)).count() as Coeff;
+				seen.push((count, y.value(&sol)));
+				let no_good = lits.iter().map(|&l| if sol.value(l) { !l } else { l });
+				if slv.add_clause(no_good).is_err() {
+					break;
+				}
+			}
+			assert!(!seen.is_empty(), "{cmp:?} has solutions");
+			for &(n, v) in &seen {
+				match cmp {
+					Comparator::Equal => assert_eq!(n, v, "{cmp:?}: {n} counted, y = {v}"),
+					_ => assert!(n <= v, "{cmp:?}: {n} counted, y = {v}"),
+				}
+			}
+		}
 	}
 
 	/// Aggregate `con` and read the result back.
@@ -477,24 +545,6 @@ mod tests {
 			),
 			LinVariant::Trivial => Aggregated::Trivial,
 		})
-	}
-
-	/// A comparator as normalisation leaves it, which is never `≥`.
-	fn into_limit(cmp: Comparator) -> LimitComp {
-		match cmp {
-			Comparator::Equal => LimitComp::Equal,
-			_ => LimitComp::LessEq,
-		}
-	}
-
-	/// Groups in a settled order, neither the grouping nor what is in one
-	/// depending on which way round they came out.
-	fn sorted_weights(mut groups: Vec<Vec<(Lit, Coeff)>>) -> Vec<Vec<(Lit, Coeff)>> {
-		for group in &mut groups {
-			group.sort();
-		}
-		groups.sort();
-		groups
 	}
 
 	#[test]
@@ -533,190 +583,6 @@ mod tests {
 			Ok(Aggregated::CardinalityOne(
 				vec![!a, !b, !c],
 				LimitComp::LessEq
-			))
-		);
-	}
-
-	#[test]
-	fn a_bound_of_zero_leaves_no_term_standing() {
-		// The zero bound leaves the adder no bits to work with.
-		let mut cnf = Cnf::default();
-		let a = cnf.new_lit();
-		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
-		let con = Linear::new(a * 2 + y.clone() * 3, Comparator::LessEq, 0);
-		let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
-		else {
-			panic!("a literal and an integer make a linear constraint");
-		};
-		cnf.encode(&con, &AdderEncoder::default()).unwrap();
-
-		use crate::{
-			solver::{cadical::Cadical, SolveResult, Solver},
-			Valuation,
-		};
-		let mut slv = Cadical::from(&cnf);
-		let SolveResult::Satisfied(value) = slv.solve() else {
-			panic!("nothing being chosen satisfies it");
-		};
-		assert!(!value.value(a) && y.value(&value) == 0);
-	}
-
-	#[test]
-	fn an_expression_may_mix_literals_and_integers() {
-		let mut cnf = Cnf::default();
-		let a = cnf.new_lit();
-		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
-
-		let con = Linear::new(a * 3 + y.clone() * 5, Comparator::LessEq, 11);
-		let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
-		else {
-			panic!("a literal and an integer make a linear constraint");
-		};
-		assert_eq!(con.terms().len(), 2, "one term of each kind");
-		cnf.encode(
-			&con,
-			&crate::constraint::linear::DecisionDiagramEncoder::default(),
-		)
-		.unwrap();
-
-		use crate::{
-			solver::{cadical::Cadical, SolveResult, Solver},
-			Valuation,
-		};
-		let mut slv = Cadical::from(&cnf);
-		let vars = cnf.get_variables();
-		while let crate::solver::SolveResult::Satisfied(value) =
-			crate::solver::Solver::solve(&mut slv)
-		{
-			assert!(
-				Coeff::from(value.value(a)) * 3 + y.value(&value) * 5 <= 11,
-				"every model of the encoding satisfies the constraint"
-			);
-			let no_good: Vec<Lit> = vars
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect();
-			if slv.add_clause(no_good).is_err() {
-				break;
-			}
-		}
-	}
-
-	#[test]
-	fn aggregator_zero_coefficient() {
-		let mut cnf = Cnf::default();
-		let (a, b, c, d) = cnf.new_lits();
-		// A term that cannot contribute to the sum is dropped entirely, rather
-		// than kept with a coefficient of zero
-		assert_eq!(
-			aggregated(
-				&mut cnf,
-				&LinAggregator::default(),
-				&Linear::new(
-					LinExp::from_slices(&[0, 2, 3, 4], &[a, b, c, d]),
-					Comparator::LessEq,
-					8
-				)
-			),
-			Ok(Aggregated::Linear(
-				sorted_weights(vec![vec![(b, 2)], vec![(c, 3)], vec![(d, 4)]]),
-				LimitComp::LessEq,
-				8
-			))
-		);
-	}
-
-	#[test]
-	fn aggregator_gcd() {
-		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf.new_lits();
-		// 2a + 4b + 6c ≤ 7 is divided by 2, rounding the right hand side down
-		assert_eq!(
-			aggregated(
-				&mut cnf,
-				&LinAggregator::default(),
-				&Linear::new(
-					LinExp::from_slices(&[2, 4, 6], &[a, b, c]),
-					Comparator::LessEq,
-					7
-				)
-			),
-			Ok(Aggregated::Linear(
-				sorted_weights(vec![vec![(a, 1)], vec![(b, 2)], vec![(c, 3)]]),
-				LimitComp::LessEq,
-				3
-			))
-		);
-
-		// An equality that does not sit on a multiple of the divisor is
-		// unsatisfiable
-		let mut cnf = Cnf::default();
-		let (a, b) = cnf.new_lits();
-		assert_eq!(
-			aggregated(
-				&mut cnf,
-				&LinAggregator::default(),
-				&Linear::new(LinExp::from_slices(&[2, 4], &[a, b]), Comparator::Equal, 5)
-			),
-			Err(Unsatisfiable)
-		);
-
-		// Dropping oversized coefficients can increase the GCD, so division
-		// must follow that step.
-		let mut cnf = Cnf::default();
-		let (a, b, c, d) = cnf.new_lits();
-		assert_eq!(
-			aggregated(
-				&mut cnf,
-				&LinAggregator::default(),
-				&Linear::new(
-					LinExp::from_slices(&[3, 3, 3, 7], &[a, b, c, d]),
-					Comparator::LessEq,
-					5
-				)
-			),
-			Ok(Aggregated::CardinalityOne(vec![a, b, c], LimitComp::LessEq))
-		);
-
-		// The same under `=`: once 7d is dropped the remaining sum can only
-		// reach multiples of 3, so it can never equal 5.
-		let mut cnf = Cnf::default();
-		let (a, b, c, d) = cnf.new_lits();
-		assert_eq!(
-			aggregated(
-				&mut cnf,
-				&LinAggregator::default(),
-				&Linear::new(
-					LinExp::from_slices(&[3, 3, 3, 7], &[a, b, c, d]),
-					Comparator::Equal,
-					5
-				)
-			),
-			Err(Unsatisfiable)
-		);
-
-		let mut cnf = Cnf::default();
-		let (a, b, c) = cnf.new_lits();
-		assert_eq!(
-			aggregated(
-				&mut cnf,
-				&LinAggregator::default(),
-				&Linear::new(
-					LinExp::from_slices(&[2, 3, 4], &[a, b, c]),
-					Comparator::LessEq,
-					7
-				)
-			),
-			Ok(Aggregated::Linear(
-				sorted_weights(vec![vec![(a, 2)], vec![(b, 3)], vec![(c, 4)]]),
-				LimitComp::LessEq,
-				7
 			))
 		);
 	}
@@ -830,6 +696,95 @@ mod tests {
 	}
 
 	#[test]
+	fn aggregator_gcd() {
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		// 2a + 4b + 6c ≤ 7 is divided by 2, rounding the right hand side down
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&LinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[2, 4, 6], &[a, b, c]),
+					Comparator::LessEq,
+					7
+				)
+			),
+			Ok(Aggregated::Linear(
+				sorted_weights(vec![vec![(a, 1)], vec![(b, 2)], vec![(c, 3)]]),
+				LimitComp::LessEq,
+				3
+			))
+		);
+
+		// An equality that does not sit on a multiple of the divisor is
+		// unsatisfiable
+		let mut cnf = Cnf::default();
+		let (a, b) = cnf.new_lits();
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&LinAggregator::default(),
+				&Linear::new(LinExp::from_slices(&[2, 4], &[a, b]), Comparator::Equal, 5)
+			),
+			Err(Unsatisfiable)
+		);
+
+		// Dropping oversized coefficients can increase the GCD, so division
+		// must follow that step.
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&LinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[3, 3, 3, 7], &[a, b, c, d]),
+					Comparator::LessEq,
+					5
+				)
+			),
+			Ok(Aggregated::CardinalityOne(vec![a, b, c], LimitComp::LessEq))
+		);
+
+		// The same under `=`: once 7d is dropped the remaining sum can only
+		// reach multiples of 3, so it can never equal 5.
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&LinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[3, 3, 3, 7], &[a, b, c, d]),
+					Comparator::Equal,
+					5
+				)
+			),
+			Err(Unsatisfiable)
+		);
+
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&LinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[2, 3, 4], &[a, b, c]),
+					Comparator::LessEq,
+					7
+				)
+			),
+			Ok(Aggregated::Linear(
+				sorted_weights(vec![vec![(a, 2)], vec![(b, 3)], vec![(c, 4)]]),
+				LimitComp::LessEq,
+				7
+			))
+		);
+	}
+
+	#[test]
 	fn aggregator_sort_same_coefficients() {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
@@ -937,6 +892,77 @@ mod tests {
 		);
 	}
 
+	#[test]
+	fn aggregator_zero_coefficient() {
+		let mut cnf = Cnf::default();
+		let (a, b, c, d) = cnf.new_lits();
+		// A term that cannot contribute to the sum is dropped entirely, rather
+		// than kept with a coefficient of zero
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&LinAggregator::default(),
+				&Linear::new(
+					LinExp::from_slices(&[0, 2, 3, 4], &[a, b, c, d]),
+					Comparator::LessEq,
+					8
+				)
+			),
+			Ok(Aggregated::Linear(
+				sorted_weights(vec![vec![(b, 2)], vec![(c, 3)], vec![(d, 4)]]),
+				LimitComp::LessEq,
+				8
+			))
+		);
+	}
+
+	#[test]
+	fn an_expression_may_mix_literals_and_integers() {
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
+
+		let con = Linear::new(a * 3 + y.clone() * 5, Comparator::LessEq, 11);
+		let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
+		else {
+			panic!("a literal and an integer make a linear constraint");
+		};
+		assert_eq!(con.terms().len(), 2, "one term of each kind");
+		cnf.encode(
+			&con,
+			&crate::constraint::linear::DecisionDiagramEncoder::default(),
+		)
+		.unwrap();
+
+		use crate::{
+			solver::{cadical::Cadical, SolveResult, Solver},
+			Valuation,
+		};
+		let mut slv = Cadical::from(&cnf);
+		let vars = cnf.get_variables();
+		while let crate::solver::SolveResult::Satisfied(value) =
+			crate::solver::Solver::solve(&mut slv)
+		{
+			assert!(
+				Coeff::from(value.value(a)) * 3 + y.value(&value) * 5 <= 11,
+				"every model of the encoding satisfies the constraint"
+			);
+			let no_good: Vec<Lit> = vars
+				.map(|v| {
+					let l = v.into();
+					if value.value(l) {
+						!l
+					} else {
+						l
+					}
+				})
+				.collect();
+			if slv.add_clause(no_good).is_err() {
+				break;
+			}
+		}
+	}
+
 	/// The constant of an expression is scaled by its multiplier and flips
 	/// sign with the comparator, so shifting it into `k` must do both.
 	#[test]
@@ -960,6 +986,14 @@ mod tests {
 				k_of((x.clone() * (2 * sign) + 7) * 3, cmp, (k + 7) * 3),
 				plain
 			);
+		}
+	}
+
+	/// A comparator as normalisation leaves it, which is never `≥`.
+	fn into_limit(cmp: Comparator) -> LimitComp {
+		match cmp {
+			Comparator::Equal => LimitComp::Equal,
+			_ => LimitComp::LessEq,
 		}
 	}
 
@@ -996,47 +1030,13 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn a_count_admits_exactly_the_assignments_it_should() {
-		use crate::{
-			constraint::count::SortingNetworkEncoder,
-			decision::integer::IntVar,
-			solver::{cadical::Cadical, SolveResult, Solver},
-			Valuation,
-		};
-
-		for cmp in [Comparator::LessEq, Comparator::Equal] {
-			let mut cnf = Cnf::default();
-			let lits = (0..3).map(|_| cnf.new_lit()).collect_vec();
-			let y = IntVar::new(0..=2).with_label("y");
-			let exp = LinExp::from_slices(&[1; 3], &lits) - LinExp::from(y.clone());
-			let con = Linear::new(exp, cmp, 0);
-			let LinVariant::Count(count) =
-				LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
-			else {
-				panic!("literals against an integer are a count");
-			};
-			SortingNetworkEncoder::default()
-				.encode(&mut cnf, &count)
-				.unwrap();
-
-			let mut seen = Vec::new();
-			let mut slv = Cadical::from(&cnf);
-			while let SolveResult::Satisfied(sol) = slv.solve() {
-				let count: Coeff = lits.iter().filter(|&&l| sol.value(l)).count() as Coeff;
-				seen.push((count, y.value(&sol)));
-				let no_good = lits.iter().map(|&l| if sol.value(l) { !l } else { l });
-				if slv.add_clause(no_good).is_err() {
-					break;
-				}
-			}
-			assert!(!seen.is_empty(), "{cmp:?} has solutions");
-			for &(n, v) in &seen {
-				match cmp {
-					Comparator::Equal => assert_eq!(n, v, "{cmp:?}: {n} counted, y = {v}"),
-					_ => assert!(n <= v, "{cmp:?}: {n} counted, y = {v}"),
-				}
-			}
+	/// Groups in a settled order, neither the grouping nor what is in one
+	/// depending on which way round they came out.
+	fn sorted_weights(mut groups: Vec<Vec<(Lit, Coeff)>>) -> Vec<Vec<(Lit, Coeff)>> {
+		for group in &mut groups {
+			group.sort();
 		}
+		groups.sort();
+		groups
 	}
 }

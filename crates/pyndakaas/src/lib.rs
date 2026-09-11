@@ -107,18 +107,28 @@ mod pindakaas {
 	/// A Boolean linear constraint, also known as a pseudo-Boolean constraint.
 	struct BoolLinCon(BaseBoolLinCon);
 
-	#[pyclass(from_py_object, unsendable)]
-	#[derive(Clone, Debug)]
-	/// A Boolean linear expression, also known as a pseudo-Boolean expression.
+	#[pyclass(from_py_object)]
+	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+	/// A Boolean literal, or a constant where the answer is already settled.
 	///
-	/// Using operators `<`, `<=`, `==`, `>=`, and `>` with a `int` right hand
-	/// side, the expression can be turned into a :class:`BoolLinCon`.
-	struct LinExp(BaseBoolLinExp);
+	/// Asking an integer variable about a value gives one of these: the literal
+	/// that says it, or `True`/`False` where the domain already decides. It is
+	/// accepted anywhere a :class:`Lit` is, so a clause can be written without
+	/// checking which it is.
+	struct BoolVal(BaseBoolVal);
 
 	#[pyclass(skip_from_py_object)]
 	#[derive(Clone, Debug, Default)]
 	/// The internal representation of a CNF formula.
 	struct CNFInner(Cnf);
+
+	#[derive(FromPyObject)]
+	/// Argument capture for what a clause can be written over.
+	enum ClauseArg {
+		Bool(bool),
+		BoolVal(BoolVal),
+		Lit(Lit),
+	}
 
 	#[derive(FromPyObject)]
 	/// Argument capture for types that represent constraint that can be encoded
@@ -169,36 +179,11 @@ mod pindakaas {
 	struct Formula(BaseFormula<BaseBoolVal>);
 
 	#[derive(FromPyObject)]
-	/// Argument capture for what a clause can be written over.
-	enum ClauseArg {
-		Bool(bool),
-		BoolVal(BoolVal),
-		Lit(Lit),
-	}
-
-	impl From<ClauseArg> for BaseBoolVal {
-		fn from(arg: ClauseArg) -> Self {
-			match arg {
-				ClauseArg::Bool(b) => BaseBoolVal::Const(b),
-				ClauseArg::BoolVal(v) => v.0,
-				ClauseArg::Lit(l) => BaseBoolVal::Lit(l.0),
-			}
-		}
-	}
-
-	#[derive(FromPyObject)]
 	/// Argument capture for types that can become :class:`Formula`.
 	enum FormulaArg {
 		Const(bool),
 		Formula(Formula),
 		Lit(Lit),
-	}
-
-	struct LinEncoderWrapper {
-		/// Method chosen by the user.
-		method: Option<Encoder>,
-		/// Error message for an invalid choice.
-		error_message: Mutex<Option<PyErr>>,
 	}
 
 	#[pyclass(from_py_object, unsendable)]
@@ -210,20 +195,27 @@ mod pindakaas {
 	/// one is called for. Nothing is encoded until it is used.
 	struct IntVar(BaseIntVar);
 
+	struct LinEncoderWrapper {
+		/// Method chosen by the user.
+		method: Option<Encoder>,
+		/// Error message for an invalid choice.
+		error_message: Mutex<Option<PyErr>>,
+	}
+
+	#[pyclass(from_py_object, unsendable)]
+	#[derive(Clone, Debug)]
+	/// A Boolean linear expression, also known as a pseudo-Boolean expression.
+	///
+	/// Using operators `<`, `<=`, `==`, `>=`, and `>` with a `int` right hand
+	/// side, the expression can be turned into a :class:`BoolLinCon`.
+	struct LinExp(BaseBoolLinExp);
+
 	#[pyclass(from_py_object)]
 	#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 	/// A Boolean literal, representing a Boolean variable or its negation.
 	struct Lit(BaseLit);
 
-	#[pyclass(from_py_object)]
-	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-	/// A Boolean literal, or a constant where the answer is already settled.
-	///
-	/// Asking an integer variable about a value gives one of these: the literal
-	/// that says it, or `True`/`False` where the domain already decides. It is
-	/// accepted anywhere a :class:`Lit` is, so a clause can be written without
-	/// checking which it is.
-	struct BoolVal(BaseBoolVal);
+	struct PyDbWrapper<'a>(&'a Bound<'a, PyAny>);
 
 	#[pyclass(skip_from_py_object)]
 	#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -236,50 +228,6 @@ mod pindakaas {
 	/// associated weights.
 	struct WCNFInner(Wcnf);
 
-	struct PyDbWrapper<'a>(&'a Bound<'a, PyAny>);
-
-	impl ClauseDatabase for PyDbWrapper<'_> {
-		fn add_clause_from_slice(
-			&mut self,
-			clause: &[BaseLit],
-		) -> Result<(), pindakaas::Unsatisfiable> {
-			let clause_vec = clause.iter().map(|&l| Lit(l)).collect_vec();
-			let res = self.0.call_method1("add_clause", (clause_vec,));
-			match res {
-				Err(e) if e.is_instance_of::<Unsatisfiable>(self.0.py()) => {
-					Err(pindakaas::Unsatisfiable)
-				}
-				Err(e) => {
-					panic!("unexpected error in add_clause implementation: {}", e)
-				}
-				// Encoders rely on an empty clause reporting `Unsatisfiable`,
-				// even when the Python database fails to raise it.
-				Ok(_) if clause.is_empty() => Err(pindakaas::Unsatisfiable),
-				Ok(_) => Ok(()),
-			}
-		}
-
-		fn new_var_range(&mut self, len: usize) -> BaseVarRange {
-			let range = self
-				.0
-				.call_method1("new_var_range", (len,))
-				.expect("unexpected error in new_var_range implementation");
-			// Read the ends rather than the type, so that an implementation of
-			// the database written in Python is taken on the same terms.
-			let ends: Vec<Lit> = ["start", "end"]
-				.iter()
-				.map(|m| {
-					let v = range
-						.call_method0(m)
-						.expect("new_var_range did not return a range of variables");
-					v.extract()
-						.expect("a range of variables is bounded by two literals")
-				})
-				.collect();
-			BaseVarRange::new(ends[0].0.var(), ends[1].0.var())
-		}
-	}
-
 	#[pyfunction]
 	fn _wrap_encode_constraint(
 		obj: &Bound<'_, PyAny>,
@@ -290,24 +238,23 @@ mod pindakaas {
 		encode_constraint(&mut PyDbWrapper(obj), con, enc, conditions)
 	}
 
-	/// The domain of an integer variable, from the inclusive intervals Python
-	/// put it in.
-	fn int_var_domain(domain: Vec<(i64, i64)>) -> RangeList<i64> {
-		RangeList::from_iter(domain.into_iter().map(|(start, end)| start..=end))
-	}
-
 	#[pyfunction]
-	/// Create an integer variable held in the order encoding it was found on.
-	fn _wrap_int_var_from_order_literals(
+	/// Create an integer variable held in the binary encoding it was found on.
+	fn _wrap_int_var_from_binary_literals(
 		obj: &Bound<'_, PyAny>,
 		domain: Vec<(i64, i64)>,
-		literals: Vec<Lit>,
+		bits: Vec<Lit>,
+		counts_from: i64,
 	) -> Result<IntVar> {
-		let literals = literals.into_iter().map(|l| l.0).collect_vec();
-		let x = BaseIntVar::from_order_encoding(
+		let bits = bits
+			.into_iter()
+			.map(|l| BaseBoolVal::Lit(l.0))
+			.collect_vec();
+		let x = BaseIntVar::from_binary_encoding(
 			&mut PyDbWrapper(obj),
 			int_var_domain(domain),
-			&literals,
+			&bits,
+			counts_from,
 		)?;
 		Ok(IntVar(x))
 	}
@@ -329,22 +276,17 @@ mod pindakaas {
 	}
 
 	#[pyfunction]
-	/// Create an integer variable held in the binary encoding it was found on.
-	fn _wrap_int_var_from_binary_literals(
+	/// Create an integer variable held in the order encoding it was found on.
+	fn _wrap_int_var_from_order_literals(
 		obj: &Bound<'_, PyAny>,
 		domain: Vec<(i64, i64)>,
-		bits: Vec<Lit>,
-		counts_from: i64,
+		literals: Vec<Lit>,
 	) -> Result<IntVar> {
-		let bits = bits
-			.into_iter()
-			.map(|l| BaseBoolVal::Lit(l.0))
-			.collect_vec();
-		let x = BaseIntVar::from_binary_encoding(
+		let literals = literals.into_iter().map(|l| l.0).collect_vec();
+		let x = BaseIntVar::from_order_encoding(
 			&mut PyDbWrapper(obj),
 			int_var_domain(domain),
-			&bits,
-			counts_from,
+			&literals,
 		)?;
 		Ok(IntVar(x))
 	}
@@ -396,6 +338,22 @@ mod pindakaas {
 		Ok(())
 	}
 
+	/// The domain of an integer variable, from the inclusive intervals Python
+	/// put it in.
+	fn int_var_domain(domain: Vec<(i64, i64)>) -> RangeList<i64> {
+		RangeList::from_iter(domain.into_iter().map(|(start, end)| start..=end))
+	}
+
+	impl From<ClauseArg> for BaseBoolVal {
+		fn from(arg: ClauseArg) -> Self {
+			match arg {
+				ClauseArg::Bool(b) => BaseBoolVal::Const(b),
+				ClauseArg::BoolVal(v) => v.0,
+				ClauseArg::Lit(l) => BaseBoolVal::Lit(l.0),
+			}
+		}
+	}
+
 	impl BoolLinArg {
 		fn as_bool_lin_exp(&self) -> LinExp {
 			match self {
@@ -416,83 +374,33 @@ mod pindakaas {
 	}
 
 	#[pymethods]
-	impl LinExp {
-		fn __add__(&self, other: BoolLinArg) -> Self {
-			let mut res = self.clone();
-			res.__iadd__(other);
-			res
+	impl BoolVal {
+		fn __invert__(&self) -> Self {
+			Self(!self.0)
 		}
 
-		fn __eq__(&self, other: i64) -> BoolLinCon {
-			BoolLinCon(BaseBoolLinCon::new(
-				self.0.clone(),
-				Comparator::Equal,
-				other,
-			))
+		fn __repr__(&self) -> String {
+			match self.0 {
+				BaseBoolVal::Const(b) => format!("{b}"),
+				BaseBoolVal::Lit(l) => format!("{l}"),
+			}
 		}
 
-		fn __ge__(&self, other: i64) -> BoolLinCon {
-			BoolLinCon(BaseBoolLinCon::new(
-				self.0.clone(),
-				Comparator::GreaterEq,
-				other,
-			))
+		/// Returns the literal, or `None` where the value is already settled.
+		fn lit(&self) -> Option<Lit> {
+			match self.0 {
+				BaseBoolVal::Lit(l) => Some(Lit(l)),
+				BaseBoolVal::Const(_) => None,
+			}
 		}
 
-		fn __gt__(&self, other: i64) -> BoolLinCon {
-			self.__ge__(other + 1)
-		}
-
-		fn __iadd__(&mut self, other: BoolLinArg) {
-			self.0 += other.as_bool_lin_exp().0;
-		}
-
-		fn __imul__(&mut self, other: i64) {
-			self.0 *= other;
-		}
-
-		fn __isub__(&mut self, other: BoolLinArg) {
-			self.0 -= other.as_bool_lin_exp().0;
-		}
-
-		fn __le__(&self, other: i64) -> BoolLinCon {
-			BoolLinCon(BaseBoolLinCon::new(
-				self.0.clone(),
-				Comparator::LessEq,
-				other,
-			))
-		}
-
-		fn __lt__(&self, other: i64) -> BoolLinCon {
-			self.__le__(other - 1)
-		}
-
-		fn __mul__(&self, other: i64) -> Self {
-			let mut res = self.clone();
-			res.__imul__(other);
-			res
-		}
-
-		fn __neg__(&self) -> Self {
-			Self(-self.0.clone())
-		}
-
-		fn __radd__(&self, other: BoolLinArg) -> Self {
-			self.__add__(other)
-		}
-
-		fn __rmul__(&self, other: i64) -> Self {
-			self.__mul__(other)
-		}
-
-		fn __str__(&self) -> String {
-			self.0.to_string()
-		}
-
-		fn __sub__(&self, other: BoolLinArg) -> Self {
-			let mut res = self.clone();
-			res.__isub__(other);
-			res
+		/// Returns the constant value, or `None` if the value is not yet
+		/// settled.
+		fn value(&self) -> Option<bool> {
+			match self.0 {
+				BaseBoolVal::Const(b) => Some(b),
+				BaseBoolVal::Lit(_) => None,
+			}
 		}
 	}
 
@@ -622,153 +530,6 @@ mod pindakaas {
 		}
 	}
 
-	impl LinEncoderWrapper {
-		fn new(method: Option<Encoder>) -> Self {
-			Self {
-				method,
-				error_message: Mutex::new(None),
-			}
-		}
-
-		fn set_err(&self, con_ty: &str, enc: Encoder) {
-			let _ = self
-				.error_message
-				.lock()
-				.unwrap()
-				.replace(InvalidEncoder::new_err(format!(
-					"Unable to encode object of type `{con_ty}' using {enc:?}"
-				)));
-		}
-	}
-
-	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, LinVariant> for LinEncoderWrapper {
-		fn encode(&self, db: &mut Db, con: &LinVariant) -> Result<(), pindakaas::Unsatisfiable> {
-			match con {
-				LinVariant::Linear(lin) => self.encode(db, lin),
-				LinVariant::BoolLinear(lin) => self.encode(db, lin),
-				LinVariant::Count(count) => self.encode(db, count),
-				LinVariant::Cardinality(card) => self.encode(db, card),
-				LinVariant::CardinalityOne(card1) => self.encode(db, card1),
-				LinVariant::Trivial => Ok(()),
-			}
-		}
-	}
-
-	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, NormalizedBoolLinear> for LinEncoderWrapper {
-		fn encode(
-			&self,
-			db: &mut Db,
-			con: &NormalizedBoolLinear,
-		) -> Result<(), pindakaas::Unsatisfiable> {
-			match self.method.unwrap_or(Encoder::ADDER) {
-				Encoder::ADDER => AdderEncoder::default().encode(db, con),
-				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
-				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
-				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
-				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
-				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
-				enc => {
-					self.set_err("BoolLinear", enc);
-					Ok(())
-				}
-			}
-		}
-	}
-
-	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, Count> for LinEncoderWrapper {
-		fn encode(&self, db: &mut Db, con: &Count) -> Result<(), pindakaas::Unsatisfiable> {
-			match self.method.unwrap_or(Encoder::SORTING_NETWORK) {
-				// A sorting network states a count directly; the linear
-				// encoders read it as the linear constraint it is.
-				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
-				Encoder::ADDER => AdderEncoder::default().encode(db, con),
-				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
-				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
-				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
-				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
-				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
-				enc => {
-					self.set_err("Count", enc);
-					Ok(())
-				}
-			}
-		}
-	}
-
-	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, Cardinality> for LinEncoderWrapper {
-		fn encode(&self, db: &mut Db, con: &Cardinality) -> Result<(), pindakaas::Unsatisfiable> {
-			match self.method.unwrap_or(Encoder::ADDER) {
-				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
-				Encoder::ADDER => AdderEncoder::default().encode(db, con),
-				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
-				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
-				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
-				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
-				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
-				enc => {
-					self.set_err("Cardinality", enc);
-					Ok(())
-				}
-			}
-		}
-	}
-
-	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, CardinalityOne> for LinEncoderWrapper {
-		fn encode(
-			&self,
-			db: &mut Db,
-			con: &CardinalityOne,
-		) -> Result<(), pindakaas::Unsatisfiable> {
-			match self.method.unwrap_or(Encoder::BITWISE) {
-				Encoder::BITWISE => BitwiseEncoder::default().encode(db, con),
-				Encoder::ADDER => AdderEncoder::default().encode(db, con),
-				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
-				Encoder::LADDER => LadderEncoder::default().encode(db, con),
-				Encoder::PAIRWISE => PairwiseEncoder::default().encode(db, con),
-				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
-				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
-				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
-				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
-				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
-				enc => {
-					self.set_err("CardinalityOne", enc);
-					Ok(())
-				}
-			}
-		}
-	}
-
-	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, NormalizedIntLinear> for LinEncoderWrapper {
-		fn encode(
-			&self,
-			db: &mut Db,
-			con: &NormalizedIntLinear,
-		) -> Result<(), pindakaas::Unsatisfiable> {
-			match self.method.unwrap_or(Encoder::ADDER) {
-				Encoder::ADDER => AdderEncoder::default().encode(db, con),
-				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
-				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
-				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
-				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
-				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
-				enc => {
-					self.set_err("Linear", enc);
-					Ok(())
-				}
-			}
-		}
-	}
-
-	impl Lit {
-		fn as_bool_lin_exp(&self) -> LinExp {
-			LinExp(self.0.into())
-		}
-
-		fn as_formula(&self) -> BaseFormula<BaseBoolVal> {
-			BaseFormula::Atom(self.0.into())
-		}
-	}
-
 	#[pymethods]
 	impl IntVar {
 		fn __add__(&self, other: BoolLinArg) -> LinExp {
@@ -797,27 +558,6 @@ mod pindakaas {
 
 		fn __mul__(&self, other: i64) -> LinExp {
 			LinExp(self.0.clone() * other)
-		}
-
-		#[new]
-		/// Creates an integer variable over inclusive `(start, end)` intervals.
-		///
-		/// Args:
-		///     domain: Non-empty inclusive intervals containing the allowed
-		/// values.
-		///
-		/// Returns:
-		///     An integer variable whose Boolean views are created on demand.
-		///
-		/// Raises:
-		///     ValueError: `domain` is empty.
-		fn new(domain: Vec<(i64, i64)>) -> PyResult<Self> {
-			if domain.is_empty() {
-				return Err(PyValueError::new_err(
-					"an integer variable needs at least one value",
-				));
-			}
-			Ok(Self(BaseIntVar::new(int_var_domain(domain))))
 		}
 
 		fn __neg__(&self) -> LinExp {
@@ -902,6 +642,26 @@ mod pindakaas {
 			)))
 		}
 
+		/// Returns the number of values the variable can take.
+		fn card(&self) -> usize {
+			self.0.card()
+		}
+
+		/// Consistency clauses restricting the variable to its domain.
+		///
+		/// Use after `int_var_from_*` when the supplied literals do not already
+		/// enforce the domain.
+		///
+		/// Args:
+		///     db: Database receiving the consistency clauses.
+		///
+		/// Raises:
+		///     Unsatisfiable: The consistency clauses cause a contradiction.
+		fn constrain(&self, db: &Bound<'_, PyAny>) -> Result {
+			self.0.constrain(&mut PyDbWrapper(db))?;
+			Ok(())
+		}
+
 		/// Returns the literal for the variable taking `value`.
 		///
 		/// Args:
@@ -934,11 +694,6 @@ mod pindakaas {
 			)))
 		}
 
-		/// Returns the number of values the variable can take.
-		fn card(&self) -> usize {
-			self.0.card()
-		}
-
 		/// Returns the greatest value the variable can take.
 		fn max(&self) -> i64 {
 			self.0.max()
@@ -949,19 +704,25 @@ mod pindakaas {
 			self.0.min()
 		}
 
-		/// Consistency clauses restricting the variable to its domain.
-		///
-		/// Use after `int_var_from_*` when the supplied literals do not already
-		/// enforce the domain.
+		#[new]
+		/// Creates an integer variable over inclusive `(start, end)` intervals.
 		///
 		/// Args:
-		///     db: Database receiving the consistency clauses.
+		///     domain: Non-empty inclusive intervals containing the allowed
+		/// values.
+		///
+		/// Returns:
+		///     An integer variable whose Boolean views are created on demand.
 		///
 		/// Raises:
-		///     Unsatisfiable: The consistency clauses cause a contradiction.
-		fn constrain(&self, db: &Bound<'_, PyAny>) -> Result {
-			self.0.constrain(&mut PyDbWrapper(db))?;
-			Ok(())
+		///     ValueError: `domain` is empty.
+		fn new(domain: Vec<(i64, i64)>) -> PyResult<Self> {
+			if domain.is_empty() {
+				return Err(PyValueError::new_err(
+					"an integer variable needs at least one value",
+				));
+			}
+			Ok(Self(BaseIntVar::new(int_var_domain(domain))))
 		}
 
 		/// The integer value represented in a solution.
@@ -995,34 +756,231 @@ mod pindakaas {
 		}
 	}
 
+	impl LinEncoderWrapper {
+		fn new(method: Option<Encoder>) -> Self {
+			Self {
+				method,
+				error_message: Mutex::new(None),
+			}
+		}
+
+		fn set_err(&self, con_ty: &str, enc: Encoder) {
+			let _ = self
+				.error_message
+				.lock()
+				.unwrap()
+				.replace(InvalidEncoder::new_err(format!(
+					"Unable to encode object of type `{con_ty}' using {enc:?}"
+				)));
+		}
+	}
+
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, Cardinality> for LinEncoderWrapper {
+		fn encode(&self, db: &mut Db, con: &Cardinality) -> Result<(), pindakaas::Unsatisfiable> {
+			match self.method.unwrap_or(Encoder::ADDER) {
+				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
+				Encoder::ADDER => AdderEncoder::default().encode(db, con),
+				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
+				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
+				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
+				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
+				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
+				enc => {
+					self.set_err("Cardinality", enc);
+					Ok(())
+				}
+			}
+		}
+	}
+
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, CardinalityOne> for LinEncoderWrapper {
+		fn encode(
+			&self,
+			db: &mut Db,
+			con: &CardinalityOne,
+		) -> Result<(), pindakaas::Unsatisfiable> {
+			match self.method.unwrap_or(Encoder::BITWISE) {
+				Encoder::BITWISE => BitwiseEncoder::default().encode(db, con),
+				Encoder::ADDER => AdderEncoder::default().encode(db, con),
+				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
+				Encoder::LADDER => LadderEncoder::default().encode(db, con),
+				Encoder::PAIRWISE => PairwiseEncoder::default().encode(db, con),
+				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
+				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
+				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
+				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
+				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
+				enc => {
+					self.set_err("CardinalityOne", enc);
+					Ok(())
+				}
+			}
+		}
+	}
+
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, Count> for LinEncoderWrapper {
+		fn encode(&self, db: &mut Db, con: &Count) -> Result<(), pindakaas::Unsatisfiable> {
+			match self.method.unwrap_or(Encoder::SORTING_NETWORK) {
+				// A sorting network states a count directly; the linear
+				// encoders read it as the linear constraint it is.
+				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
+				Encoder::ADDER => AdderEncoder::default().encode(db, con),
+				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
+				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
+				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
+				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
+				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
+				enc => {
+					self.set_err("Count", enc);
+					Ok(())
+				}
+			}
+		}
+	}
+
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, LinVariant> for LinEncoderWrapper {
+		fn encode(&self, db: &mut Db, con: &LinVariant) -> Result<(), pindakaas::Unsatisfiable> {
+			match con {
+				LinVariant::Linear(lin) => self.encode(db, lin),
+				LinVariant::BoolLinear(lin) => self.encode(db, lin),
+				LinVariant::Count(count) => self.encode(db, count),
+				LinVariant::Cardinality(card) => self.encode(db, card),
+				LinVariant::CardinalityOne(card1) => self.encode(db, card1),
+				LinVariant::Trivial => Ok(()),
+			}
+		}
+	}
+
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, NormalizedBoolLinear> for LinEncoderWrapper {
+		fn encode(
+			&self,
+			db: &mut Db,
+			con: &NormalizedBoolLinear,
+		) -> Result<(), pindakaas::Unsatisfiable> {
+			match self.method.unwrap_or(Encoder::ADDER) {
+				Encoder::ADDER => AdderEncoder::default().encode(db, con),
+				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
+				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
+				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
+				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
+				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
+				enc => {
+					self.set_err("BoolLinear", enc);
+					Ok(())
+				}
+			}
+		}
+	}
+
+	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, NormalizedIntLinear> for LinEncoderWrapper {
+		fn encode(
+			&self,
+			db: &mut Db,
+			con: &NormalizedIntLinear,
+		) -> Result<(), pindakaas::Unsatisfiable> {
+			match self.method.unwrap_or(Encoder::ADDER) {
+				Encoder::ADDER => AdderEncoder::default().encode(db, con),
+				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
+				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
+				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
+				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
+				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
+				enc => {
+					self.set_err("Linear", enc);
+					Ok(())
+				}
+			}
+		}
+	}
+
 	#[pymethods]
-	impl BoolVal {
-		fn __invert__(&self) -> Self {
-			Self(!self.0)
+	impl LinExp {
+		fn __add__(&self, other: BoolLinArg) -> Self {
+			let mut res = self.clone();
+			res.__iadd__(other);
+			res
 		}
 
-		fn __repr__(&self) -> String {
-			match self.0 {
-				BaseBoolVal::Const(b) => format!("{b}"),
-				BaseBoolVal::Lit(l) => format!("{l}"),
-			}
+		fn __eq__(&self, other: i64) -> BoolLinCon {
+			BoolLinCon(BaseBoolLinCon::new(
+				self.0.clone(),
+				Comparator::Equal,
+				other,
+			))
 		}
 
-		/// Returns the literal, or `None` where the value is already settled.
-		fn lit(&self) -> Option<Lit> {
-			match self.0 {
-				BaseBoolVal::Lit(l) => Some(Lit(l)),
-				BaseBoolVal::Const(_) => None,
-			}
+		fn __ge__(&self, other: i64) -> BoolLinCon {
+			BoolLinCon(BaseBoolLinCon::new(
+				self.0.clone(),
+				Comparator::GreaterEq,
+				other,
+			))
 		}
 
-		/// Returns the constant value, or `None` if the value is not yet
-		/// settled.
-		fn value(&self) -> Option<bool> {
-			match self.0 {
-				BaseBoolVal::Const(b) => Some(b),
-				BaseBoolVal::Lit(_) => None,
-			}
+		fn __gt__(&self, other: i64) -> BoolLinCon {
+			self.__ge__(other + 1)
+		}
+
+		fn __iadd__(&mut self, other: BoolLinArg) {
+			self.0 += other.as_bool_lin_exp().0;
+		}
+
+		fn __imul__(&mut self, other: i64) {
+			self.0 *= other;
+		}
+
+		fn __isub__(&mut self, other: BoolLinArg) {
+			self.0 -= other.as_bool_lin_exp().0;
+		}
+
+		fn __le__(&self, other: i64) -> BoolLinCon {
+			BoolLinCon(BaseBoolLinCon::new(
+				self.0.clone(),
+				Comparator::LessEq,
+				other,
+			))
+		}
+
+		fn __lt__(&self, other: i64) -> BoolLinCon {
+			self.__le__(other - 1)
+		}
+
+		fn __mul__(&self, other: i64) -> Self {
+			let mut res = self.clone();
+			res.__imul__(other);
+			res
+		}
+
+		fn __neg__(&self) -> Self {
+			Self(-self.0.clone())
+		}
+
+		fn __radd__(&self, other: BoolLinArg) -> Self {
+			self.__add__(other)
+		}
+
+		fn __rmul__(&self, other: i64) -> Self {
+			self.__mul__(other)
+		}
+
+		fn __str__(&self) -> String {
+			self.0.to_string()
+		}
+
+		fn __sub__(&self, other: BoolLinArg) -> Self {
+			let mut res = self.clone();
+			res.__isub__(other);
+			res
+		}
+	}
+
+	impl Lit {
+		fn as_bool_lin_exp(&self) -> LinExp {
+			LinExp(self.0.into())
+		}
+
+		fn as_formula(&self) -> BaseFormula<BaseBoolVal> {
+			BaseFormula::Atom(self.0.into())
 		}
 	}
 
@@ -1128,6 +1086,48 @@ mod pindakaas {
 	impl Display for Lit {
 		fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 			self.0.fmt(f)
+		}
+	}
+
+	impl ClauseDatabase for PyDbWrapper<'_> {
+		fn add_clause_from_slice(
+			&mut self,
+			clause: &[BaseLit],
+		) -> Result<(), pindakaas::Unsatisfiable> {
+			let clause_vec = clause.iter().map(|&l| Lit(l)).collect_vec();
+			let res = self.0.call_method1("add_clause", (clause_vec,));
+			match res {
+				Err(e) if e.is_instance_of::<Unsatisfiable>(self.0.py()) => {
+					Err(pindakaas::Unsatisfiable)
+				}
+				Err(e) => {
+					panic!("unexpected error in add_clause implementation: {}", e)
+				}
+				// Encoders rely on an empty clause reporting `Unsatisfiable`,
+				// even when the Python database fails to raise it.
+				Ok(_) if clause.is_empty() => Err(pindakaas::Unsatisfiable),
+				Ok(_) => Ok(()),
+			}
+		}
+
+		fn new_var_range(&mut self, len: usize) -> BaseVarRange {
+			let range = self
+				.0
+				.call_method1("new_var_range", (len,))
+				.expect("unexpected error in new_var_range implementation");
+			// Read the ends rather than the type, so that an implementation of
+			// the database written in Python is taken on the same terms.
+			let ends: Vec<Lit> = ["start", "end"]
+				.iter()
+				.map(|m| {
+					let v = range
+						.call_method0(m)
+						.expect("new_var_range did not return a range of variables");
+					v.extract()
+						.expect("a range of variables is bounded by two literals")
+				})
+				.collect();
+			BaseVarRange::new(ends[0].0.var(), ends[1].0.var())
 		}
 	}
 
