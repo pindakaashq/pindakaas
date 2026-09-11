@@ -1,5 +1,8 @@
-//! This module contains the pindakaas interface to the
-//! [Intel SAT](https://github.com/alexander-nadel/intel_sat_solver) solver.
+//! Interface to the [Intel
+//! SAT](https://github.com/alexander-nadel/intel_sat_solver) solver.
+//!
+//! The `intel-sat` feature enables this backend. Its IPASIR adapter supports
+//! assumptions, learned-clause callbacks, and termination callbacks.
 
 use std::ffi::{c_int, c_void};
 
@@ -56,12 +59,6 @@ impl IpasirAssumptionMethods for IntelSat {
 		intel_sat_failed;
 }
 
-impl IpasirLiteralMethods for IntelSat {
-	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2] =
-		var_factory_next_var_range;
-	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32 = var_factory_next_var;
-}
-
 impl IpasirLearnCallbackMethod for IntelSat {
 	const IPASIR_SET_LEARN_CALLBACK: unsafe extern "C" fn(
 		*mut c_void,
@@ -69,6 +66,12 @@ impl IpasirLearnCallbackMethod for IntelSat {
 		c_int,
 		Option<unsafe extern "C" fn(*mut c_void, *const i32)>,
 	) = intel_sat_set_learn;
+}
+
+impl IpasirLiteralMethods for IntelSat {
+	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2] =
+		var_factory_next_var_range;
+	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32 = var_factory_next_var;
 }
 
 impl IpasirSolverMethods for IntelSat {
@@ -92,8 +95,10 @@ mod tests {
 	use traced_test::test;
 
 	use crate::{
-		bool_linear::LimitComp,
-		cardinality_one::{CardinalityOne, PairwiseEncoder},
+		constraint::{
+			cardinality_one::{CardinalityOne, PairwiseEncoder},
+			linear::LimitComp,
+		},
 		solver::{intel_sat::IntelSat, SolveResult, Solver},
 		ClauseDatabaseTools, Encoder, Valuation,
 	};

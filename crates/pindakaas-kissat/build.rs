@@ -4,17 +4,6 @@
 
 use std::{path::Path, process::Command};
 
-/// Run a command purely for its stdout, yielding an empty string if it cannot
-/// be spawned or exits unsuccessfully.
-///
-/// Used only for informational build metadata, which must never fail the build.
-fn run_command(cmd: &mut Command) -> String {
-	match cmd.output() {
-		Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
-		_ => String::new(),
-	}
-}
-
 fn main() {
 	let version = include_str!("vendor/kissat/VERSION").trim();
 	assert_eq!(version, "4.0.4", "unexpected version of Kissat detected");
@@ -119,10 +108,10 @@ fn main() {
 	let mut builder = cc::Build::new();
 
 	let compiler = builder.try_get_compiler().unwrap();
-	// The `ID`/`BUILD` defines below only feed Kissat's informational banner, so
-	// these commands are best-effort: they are unavailable when building from a
-	// packaged crate (no `.git`), without `git` installed, or on Windows (no
-	// `date`/`uname`). Never fail the build over them.
+	// The `ID`/`BUILD` defines below only feed Kissat's informational banner,
+	// so these commands are best-effort: they are unavailable when building
+	// from a packaged crate (no `.git`), without `git` installed, or on
+	// Windows (no `date`/`uname`). Never fail the build over them.
 	let git_id = run_command(
 		Command::new("git")
 			.current_dir("vendor/kissat")
@@ -165,4 +154,15 @@ fn main() {
 	let _ = build.files(src);
 
 	build.compile("kissat");
+}
+
+/// Run a command purely for its stdout, yielding an empty string if it cannot
+/// be spawned or exits unsuccessfully.
+///
+/// Used only for informational build metadata, which must never fail the build.
+fn run_command(cmd: &mut Command) -> String {
+	match cmd.output() {
+		Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
+		_ => String::new(),
+	}
 }

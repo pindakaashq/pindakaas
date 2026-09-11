@@ -1,5 +1,10 @@
-//! This module contains the pindakaas interface to the
-//! [CaDiCaL](https://github.com/arminbiere/cadical) SAT solver.
+//! Interface to the [CaDiCaL](https://github.com/arminbiere/cadical) SAT
+//! solver.
+//!
+//! Copying with a propagator allocates the callback store before the backend
+//! solver exists. Re-observing fixed variables can call `notify_assignment`
+//! during the copy; that callback uses the store's data, never its solver
+//! pointer. The pointer is filled in after the backend returns.
 
 use std::{
 	cell::RefCell,
@@ -67,13 +72,21 @@ pub enum ProofConclusionType {
 /// aborts the process rather than unwinding) and must not re-enter the solver,
 /// which would panic on the tracer's already mutably borrowed [`RefCell`].
 pub trait ProofTracer {
-	// -----------------------------
-	// Basic Events
-	// -----------------------------
+	/// Adds an assumption literal.
+	fn add_assumption(&mut self, lit: Lit) {
+		let _ = lit;
+	}
 
-	/// An original clause is added.
-	fn add_original_clause(&mut self, id: i64, redundant: bool, clause: &[Lit], restored: bool) {
-		let _ = (id, redundant, clause, restored);
+	/// This clause could be derived, which is the negation of a core of failing
+	/// assumptions/constraints. If antecedents are derived they will be
+	/// included here.
+	fn add_assumption_clause(&mut self, id: i64, clause: &[Lit], antecedents: &[i64]) {
+		let _ = (id, clause, antecedents);
+	}
+
+	/// Adds constraint clause has been added.
+	fn add_constraint(&mut self, clause: &[Lit]) {
+		let _ = clause;
 	}
 
 	/// A derived clause is added.
@@ -88,44 +101,9 @@ pub trait ProofTracer {
 		let _ = (id, redundant, witness, clause, antecedents);
 	}
 
-	/// A clause is deleted.
-	fn delete_clause(&mut self, id: i64, redundant: bool, clause: &[Lit]) {
-		let _ = (id, redundant, clause);
-	}
-
-	/// A clause is demoted.
-	fn demote_clause(&mut self, id: i64, clause: &[Lit]) {
-		let _ = (id, clause);
-	}
-
-	/// Mark a clause as potentially restorable later.
-	fn weaken_minus(&mut self, id: i64, clause: &[Lit]) {
-		let _ = (id, clause);
-	}
-
-	/// A clause was strengthened.
-	fn strengthen(&mut self, id: i64) {
-		let _ = id;
-	}
-
-	/// Reports the result of the solver.
-	///
-	/// - `status`: Status code.
-	/// - `id`: Clause ID of the conflict clause.
-	fn report_status(&mut self, status: i32, id: i64) {
-		let _ = (status, id);
-	}
-
-	// -----------------------------
-	// Non-Incremental Features
-	// -----------------------------
-
-	/// Finalizes a clause.
-	///
-	/// - `id`: Clause ID.
-	/// - `clause`: Clause literals.
-	fn finalize_clause(&mut self, id: i64, clause: &[Lit]) {
-		let _ = (id, clause);
+	/// An original clause is added.
+	fn add_original_clause(&mut self, id: i64, redundant: bool, clause: &[Lit], restored: bool) {
+		let _ = (id, redundant, clause, restored);
 	}
 
 	/// Notification that the proof begins with a set of reserved ids for
@@ -136,31 +114,14 @@ pub trait ProofTracer {
 		let _ = first_derived_id;
 	}
 
-	// -----------------------------
-	// Incremental Features
-	// -----------------------------
-
-	/// Notification that an assumption has been added.
-	fn solve_query(&mut self) {}
-
-	/// Adds an assumption literal.
-	fn add_assumption(&mut self, lit: Lit) {
-		let _ = lit;
+	/// SAT has been concluded, and the satisfying assignment provided
+	fn conclude_sat(&mut self, assignment: &[Lit]) {
+		let _ = assignment;
 	}
 
-	/// Adds constraint clause has been added.
-	fn add_constraint(&mut self, clause: &[Lit]) {
-		let _ = clause;
-	}
-
-	/// All assumptions and constraints have been reset.
-	fn reset_assumptions(&mut self) {}
-
-	/// This clause could be derived, which is the negation of a core of failing
-	/// assumptions/constraints. If antecedents are derived they will be
-	/// included here.
-	fn add_assumption_clause(&mut self, id: i64, clause: &[Lit], antecedents: &[i64]) {
-		let _ = (id, clause, antecedents);
+	/// Reports that the result is unknown, providing the current trail.
+	fn conclude_unknown(&mut self, trail: &[Lit]) {
+		let _ = trail;
 	}
 
 	/// Conclude unsat was requested. It will give either the id of the empty
@@ -170,14 +131,46 @@ pub trait ProofTracer {
 		let _ = (conclusion_type, clause_ids);
 	}
 
-	/// SAT has been concluded, and the satisfying assignment provided
-	fn conclude_sat(&mut self, assignment: &[Lit]) {
-		let _ = assignment;
+	/// A clause is deleted.
+	fn delete_clause(&mut self, id: i64, redundant: bool, clause: &[Lit]) {
+		let _ = (id, redundant, clause);
 	}
 
-	/// Reports that the result is unknown, providing the current trail.
-	fn conclude_unknown(&mut self, trail: &[Lit]) {
-		let _ = trail;
+	/// A clause is demoted.
+	fn demote_clause(&mut self, id: i64, clause: &[Lit]) {
+		let _ = (id, clause);
+	}
+
+	/// Finalizes a clause.
+	///
+	/// - `id`: Clause ID.
+	/// - `clause`: Clause literals.
+	fn finalize_clause(&mut self, id: i64, clause: &[Lit]) {
+		let _ = (id, clause);
+	}
+
+	/// Reports the result of the solver.
+	///
+	/// - `status`: Status code.
+	/// - `id`: Clause ID of the conflict clause.
+	fn report_status(&mut self, status: i32, id: i64) {
+		let _ = (status, id);
+	}
+
+	/// All assumptions and constraints have been reset.
+	fn reset_assumptions(&mut self) {}
+
+	/// Notification that an assumption has been added.
+	fn solve_query(&mut self) {}
+
+	/// A clause was strengthened.
+	fn strengthen(&mut self, id: i64) {
+		let _ = id;
+	}
+
+	/// Mark a clause as potentially restorable later.
+	fn weaken_minus(&mut self, id: i64, clause: &[Lit]) {
+		let _ = (id, clause);
 	}
 }
 
@@ -206,8 +199,8 @@ fn cadical_next_var_range(slv: *mut c_void, _: *mut c_void, len: usize) -> [i32;
 }
 
 impl Cadical {
-	// TODO: Hidden for now as it requires the user to set the proof tracer during
-	// CONFIGURATION. This should probably be a separate state/builder.
+	// TODO: Hidden for now as it requires the user to set the proof tracer
+	// during CONFIGURATION. This should probably be a separate state/builder.
 	#[doc(hidden)]
 	pub fn connect_proof_tracer<P: ProofTracerConfig + 'static>(&mut self, tracer: Rc<RefCell<P>>) {
 		let ptr = Rc::as_ptr(&tracer);
@@ -251,7 +244,8 @@ impl Cadical {
 		let dyn_rc: Rc<RefCell<dyn ProofTracer>> = tracer;
 		self.tracers.retain(|t| !Rc::ptr_eq(t, &dyn_rc));
 		if len != self.tracers.len() {
-			// SAFETY: Pointer known to be non-null, no other known safety concerns.
+			// SAFETY: Pointer known to be non-null, no other known safety
+			// concerns.
 			unsafe {
 				let removed = ccadical_disconnect_proof_tracer(
 					self.ipasir_store().solver_ptr(),
@@ -262,11 +256,21 @@ impl Cadical {
 		}
 	}
 
+	/// The value of a CaDiCaL option.
+	///
+	/// `name` is one of the options CaDiCaL itself lists — the names accepted
+	/// by its `--<name>=<value>` flags, without the dashes, as printed by
+	/// `cadical --help`. An unknown name reads back as zero rather than
+	/// failing.
+	///
+	/// # Panics
+	///
+	/// If `name` contains an interior nul byte.
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
 	pub fn get_option(&self, name: &str) -> i32 {
 		let name = CString::new(name).unwrap();
-		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
-		// handles non-existing options gracefully.
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option
+		// API handles non-existing options gracefully.
 		unsafe { ccadical_get_option(self.ipasir_store().solver_ptr(), name.as_ptr()) }
 	}
 
@@ -278,24 +282,38 @@ impl Cadical {
 		unsafe { ccadical_phase(self.ipasir_store().solver_ptr(), lit.0.get()) }
 	}
 
+	/// Set one of CaDiCaL's search limits, such as `conflicts` or `decisions`.
+	///
+	/// Named as for [`Cadical::get_option`]. An unknown name is ignored.
+	///
+	/// # Panics
+	///
+	/// If `name` contains an interior nul byte.
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
 	pub fn set_limit(&mut self, name: &str, value: i32) {
 		let name = CString::new(name).unwrap();
-		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
-		// handles non-existing options gracefully.
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option
+		// API handles non-existing options gracefully.
 		unsafe { ccadical_limit(self.ipasir_store().solver_ptr(), name.as_ptr(), value) }
 	}
 
+	/// Set a CaDiCaL option.
+	///
+	/// Named as for [`Cadical::get_option`]. An unknown name is ignored, so a
+	/// misspelt option is silently no change.
+	///
+	/// # Panics
+	///
+	/// If `name` contains an interior nul byte.
 	#[doc(hidden)] // TODO: Add a better interface for options in Cadical
 	pub fn set_option(&mut self, name: &str, value: i32) {
 		let name = CString::new(name).unwrap();
-		// SAFETY: Pointer known to be non-null, we assume that Cadical Option API
-		// handles non-existing options gracefully.
+		// SAFETY: Pointer known to be non-null, we assume that Cadical Option
+		// API handles non-existing options gracefully.
 		unsafe { ccadical_set_option(self.ipasir_store().solver_ptr(), name.as_ptr(), value) }
 	}
 
-	/// Make a shallow clone of the [`Cadical`] solver using an efficient
-	/// internal method.
+	/// Creates a shallow clone using CaDiCaL's internal copy operation.
 	///
 	/// The shallow copy includes the permanent clauses, but will not include
 	/// learned clauses, connected callbacks, or external propagator.
@@ -303,10 +321,8 @@ impl Cadical {
 		// SAFETY: Pointer known to be non-null, no other known safety concerns.
 		let ptr = unsafe { ccadical_copy(self.ipasir_store().solver_ptr()) };
 
-		// `ccadical_copy` constructs a fresh backend wrapper and `Solver::copy`
-		// transfers only the options, permanent clauses, witnesses and flags — no
-		// learn/terminate callbacks or external propagator. The new store is thus
-		// initialised with none of those connected.
+		// The backend copy omits callbacks and propagators, so the new store
+		// starts disconnected.
 		Self {
 			store: IpasirStore {
 				store: Box::new(IpasirStoreInner {
@@ -339,14 +355,8 @@ impl Cadical {
 		&self,
 		propagator: Rc<RefCell<P>>,
 	) -> Self {
-		// Build the new store up front so the propagator's callback data pointer
-		// (which must reference this store) is valid before the backend connects
-		// it. The backend solver is created and returned by
-		// `ccadical_copy_with_propagator`, so `ptr` is filled in afterwards. This
-		// is sound because the only callback that can fire during the copy is
-		// `notify_assignment` (when re-observing an already-fixed variable), which
-		// reaches the propagator via the store's data pointer and never reads
-		// `ptr`.
+		// The store must exist before callbacks can fire; see the module
+		// invariant.
 		let mut slv = Self {
 			store: IpasirStore {
 				store: Box::new(IpasirStoreInner {
@@ -360,15 +370,10 @@ impl Cadical {
 			},
 			tracers: Vec::new(),
 		};
-		// Store the propagator in the new store and build its callback structure.
-		// The data pointer references the boxed store, whose address is stable
-		// across the move of `slv`. The propagator is connected to the backend
-		// inside `ccadical_copy_with_propagator`, not here.
+		// The boxed store keeps the callback data pointer stable across moves.
 		let c_prop = slv.ipasir_store_mut().set_propagator(propagator);
-		// Copy the clauses, connect the propagator, and re-observe `self`'s
-		// observed variables onto the new solver, all in a single backend call.
-		// SAFETY: `self` is a valid (non-null) solver pointer and `c_prop`
-		// references the store owned by `slv`.
+		// SAFETY: `self` is a valid solver pointer; `c_prop` references the
+		// store owned by `slv`.
 		let ptr =
 			unsafe { ccadical_copy_with_propagator(self.ipasir_store().solver_ptr(), c_prop) };
 		slv.store.store.ptr = ptr;
@@ -480,28 +485,17 @@ impl fmt::Debug for Cadical {
 	}
 }
 
-/// Trampolines through which CaDiCaL reports proof events to a [`ProofTracer`].
-///
-/// Every function in this module is called by CaDiCaL through the [`CTracer`]
-/// vtable built in [`Cadical::connect_proof_tracer`], and they all share the
-/// same safety contract:
-///
-/// - `data` is the pointer taken with `Rc::as_ptr` from the `Rc<RefCell<P>>`
-///   registered for this exact `P`. The [`Cadical`] keeps that `Rc` alive in
-///   its `tracers` field for as long as the tracer is connected, so the pointer
-///   is valid and the concrete type matches the `P` each function is
-///   monomorphised with.
-/// - Literal arrays are passed as a `(*const c_int, usize)` pair that is valid
-///   for the duration of the call. They are reinterpreted as `&[Lit]`, which is
-///   sound because [`Lit`] is `#[repr(transparent)]` over `NonZeroI32` (hence
-///   over `i32`) — **provided the solver never puts a `0` in them**. A `0`
-///   would produce an invalid `NonZeroI32` and is immediate undefined
-///   behaviour, so this relies on CaDiCaL honouring its own API contract.
-/// - Panicking out of these functions aborts the process (they are `extern
-///   "C"`). Tracer implementations should therefore avoid panicking; note that
-///   re-entering a tracer that is already mutably borrowed will panic in
-///   `RefCell::borrow_mut`.
 mod ffi {
+	//! Proof-event trampolines for [`super::ProofTracer`].
+	//!
+	//! `data` must come from `Rc::as_ptr` for the registered `Rc<RefCell<P>>`;
+	//! the solver keeps it alive while connected. The concrete `P` must match
+	//! the callback. Literal arrays must remain valid during the call and
+	//! contain no zeros: `Lit` is transparent over `NonZeroI32`.
+	//!
+	//! Panics abort across `extern "C"`. Tracers must avoid panicking,
+	//! including re-entering a mutably borrowed tracer.
+
 	use std::{
 		cell::RefCell,
 		ffi::{c_int, c_void},
@@ -761,8 +755,10 @@ mod tests {
 	use traced_test::test;
 
 	use crate::{
-		bool_linear::LimitComp,
-		cardinality_one::{CardinalityOne, PairwiseEncoder},
+		constraint::{
+			cardinality_one::{CardinalityOne, PairwiseEncoder},
+			linear::LimitComp,
+		},
 		helpers::tests::{assert_solutions, expect_file},
 		solver::{
 			cadical::Cadical, Assumptions, FailedAssumptions, SolveResult, Solver, TermSignal,
@@ -843,9 +839,8 @@ mod tests {
 			ClauseDatabase, Lit,
 		};
 
-		// A propagator that records every assignment notification it receives. A
-		// non-lazy propagator is only notified about *observed* variables, so a
-		// non-empty record on the clone proves the observed set was transferred.
+		// Non-lazy propagators only receive observed variables, so
+		// notifications on the clone prove the observed set was transferred.
 		#[derive(Default)]
 		struct Recorder {
 			notified: Vec<Lit>,
@@ -870,7 +865,6 @@ mod tests {
 			slv.add_observed_var(v);
 		}
 
-		// Clone with a fresh recorder; the clone must re-observe `vars`.
 		let cp_p = Rc::new(RefCell::new(Recorder::default()));
 		let mut cp = slv.shallow_clone_with_propagator(Rc::clone(&cp_p));
 
@@ -932,7 +926,6 @@ mod tests {
 				slv.add_clause([!a_lit, !b_lit]).unwrap();
 			}
 		}
-		// Set termination callback that stops immediately
 		slv.set_terminate_callback(Some(|| TermSignal::Terminate));
 		assert!(matches!(slv.solve(), SolveResult::Unknown));
 	}
@@ -1076,12 +1069,10 @@ mod tests {
 		);
 		assert!(p.borrow().tmp.is_empty());
 
-		// Test disconnecting propagator
 		slv.disconnect_propagator();
 		assert_eq!(Rc::strong_count(&p), 1);
 		slv.connect_propagator(Rc::clone(&p));
 		assert_eq!(Rc::strong_count(&p), 2);
-		// Test correct release of propagator on drop
 		drop(slv);
 		assert_eq!(Rc::strong_count(&p), 1);
 	}
@@ -1154,9 +1145,6 @@ mod tests {
 			slv.add_observed_var(v)
 		}
 
-		// Clone the solver together with a fresh clone of the propagator. The
-		// clone must inherit the permanent clauses, the propagator connection, and
-		// the observed variable set.
 		let cp_p = Rc::new(RefCell::new(Dist2 {
 			vars,
 			tmp: Vec::new(),
@@ -1169,8 +1157,6 @@ mod tests {
 		drop(slv);
 		assert_eq!(Rc::strong_count(&p), 1);
 
-		// Enumerating on the clone must reproduce the same constrained solutions,
-		// proving the clauses and the propagator were carried over.
 		let mut solns: Vec<Vec<Lit>> = Vec::new();
 		while let SolveResult::Satisfied(sol) = cp.solve() {
 			let sol: Vec<Lit> = vars
@@ -1199,7 +1185,6 @@ mod tests {
 		);
 		assert!(cp_p.borrow().tmp.is_empty());
 
-		// Test correct release of the cloned propagator on drop.
 		drop(cp);
 		assert_eq!(Rc::strong_count(&cp_p), 1);
 	}

@@ -1,5 +1,8 @@
-//! Module containing a specialized [`Subscriber`] for tracing encoding methods
-//! in the Pindakaas library, named [`Tracer`] .
+//! Tracing CNF encodings with [`Tracer`].
+//!
+//! The subscriber tracks literal names and displays recursive encoder calls.
+//! Output is buffered on stderr; [`FlushGuard`] flushes it on drop. Available
+//! with the `tracing` feature or in tests.
 
 use std::{
 	fmt,
@@ -38,7 +41,7 @@ struct EventVisitor {
 }
 
 #[derive(Debug)]
-/// Guarding type that will ensure a [`BufWriter`] is flushed when dropped.
+/// A guard that flushes buffered trace output on drop.
 pub struct FlushGuard {
 	out: Arc<Mutex<BufWriter<Stderr>>>,
 }
@@ -59,11 +62,7 @@ struct SpanVisitor {
 }
 
 #[derive(Debug)]
-/// Specialized [`Subscriber`] implementation that will trace CNF encoding
-/// methods in pindakaas library.
-///
-/// Tracer will track literal names, and will visualize the recursive calls to
-/// different encoders.
+/// A subscriber for named literals and recursive encoder calls.
 pub struct Tracer {
 	lit_names: Mutex<rustc_hash::FxHashMap<String, String>>,
 	next_span_id: AtomicU64,

@@ -1,3 +1,9 @@
+//! Propagating from outside the solver, over the IPASIR extension for it.
+//!
+//! The solver calls back as it assigns the variables it has been told to
+//! watch, and the propagator answers with clauses. Both sides hold the same
+//! state, so the callbacks hand out a borrow of it rather than a copy.
+
 use std::{
 	cell::{RefCell, RefMut},
 	ffi::c_void,
@@ -134,26 +140,18 @@ where
 	Impl::Store: BasicIpasirStorage + IpasirPropagatorStorage,
 {
 	fn add_observed_var(&mut self, var: Var) {
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_ADD_OBSERVED_VAR function is expected to abide by the IPASIR-UP
-		// interface specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 		unsafe {
 			Self::IPASIR_ADD_OBSERVED_VAR(self.ipasir_store_mut().solver_ptr(), var.into());
 		}
 	}
 
 	fn connect_propagator<P: PropagatorConfig + 'static>(&mut self, propagator: Rc<RefCell<P>>) {
-		// Disconnect previous propagator (if any)
 		self.disconnect_propagator();
 
-		// Store the propagator and receive the data pointer and callback pointers
 		let c_prop = self.ipasir_store_mut().set_propagator(propagator);
 
-		// Connect the wrapped propagator to the solver
-		//
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_CONNECT_EXTERNAL_PROPAGATOR function is expected to abide by the
-		// IPASIR-UP interface specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 		unsafe {
 			Self::IPASIR_CONNECT_EXTERNAL_PROPAGATOR(self.ipasir_store().solver_ptr(), c_prop);
 		}
@@ -161,45 +159,35 @@ where
 
 	fn disconnect_propagator(&mut self) {
 		if self.ipasir_store().has_propagator() {
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_DISCONNECT_EXTERNAL_PROPAGATOR function is expected to abide by
-			// the IPASIR-UP interface specification.
+			// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 			unsafe { Self::IPASIR_DISCONNECT_EXTERNAL_PROPAGATOR(self.ipasir_store().solver_ptr()) }
 			self.ipasir_store_mut().reset_propagator();
 		}
 	}
 
 	fn phase(&mut self, lit: Lit) {
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_PHASE function is expected to abide by the IPASIR-UP
-		// interface specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 		unsafe {
 			Self::IPASIR_PHASE(self.ipasir_store_mut().solver_ptr(), lit.into());
 		}
 	}
 
 	fn remove_observed_var(&mut self, var: Var) {
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_REMOVE_OBSERVED_VAR function is expected to abide by the IPASIR-UP
-		// interface specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 		unsafe {
 			Self::IPASIR_REMOVE_OBSERVED_VAR(self.ipasir_store_mut().solver_ptr(), var.into());
 		}
 	}
 
 	fn reset_observed_vars(&mut self) {
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_RESET_OBSERVED_VARS function is expected to abide by the IPASIR-UP
-		// interface specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 		unsafe {
 			Self::IPASIR_RESET_OBSERVED_VARS(self.ipasir_store_mut().solver_ptr());
 		}
 	}
 
 	fn unphase(&mut self, lit: Lit) {
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_UNPHASE function is expected to abide by the IPASIR-UP
-		// interface specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 		unsafe {
 			Self::IPASIR_UNPHASE(self.ipasir_store_mut().solver_ptr(), lit.into());
 		}
@@ -219,15 +207,11 @@ where
 		&mut self,
 		listener: Rc<RefCell<L>>,
 	) {
-		// Disconnect previous listener (if any)
 		self.disconnect_persistent_assignment_listener();
 
-		// Store the propagator and receive the data pointer and callback pointers
 		let c_listener = self.ipasir_store_mut().set_persistent_listener(listener);
 
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_CONNECT_FIXED_ASSIGNMENT_LISTENER function is expected to abide by
-		// the IPASIR-UP interface specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 		unsafe {
 			Self::IPASIR_CONNECT_FIXED_ASSIGNMENT_LISTENER(
 				self.ipasir_store_mut().solver_ptr(),
@@ -238,9 +222,7 @@ where
 
 	fn disconnect_persistent_assignment_listener(&mut self) {
 		if self.ipasir_store().has_persistent_assignment_listener() {
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_DISCONNECT_FIXED_ASSIGNMENT_LISTENER function is expected to
-			// abide by the IPASIR-UP interface specification.
+			// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 			unsafe {
 				Self::IPASIR_DISCONNECT_FIXED_ASSIGNMENT_LISTENER(self.ipasir_store().solver_ptr());
 			}
@@ -269,16 +251,13 @@ impl IpasirPropagator {
 		Self::borrow_cell(self.external_propagator.as_ref().unwrap())
 	}
 
-	/// Call `f` with the propagator (as a specific type `P`) and a mutable
-	/// reference to the reusable `clause` buffer.
+	/// Scoped access to the propagator and reusable clause buffer.
 	///
-	/// Building a reason or external clause needs both at once: the propagator
-	/// writes its literals into the buffer through the builder. Scoping the
-	/// borrows to `f` keeps the pointer handling of [`Self::borrow_cell`] in a
-	/// single place (rather than inlined at each call site) and releases the
-	/// propagator borrow before the caller touches `self` again.
+	/// The borrow ends before the caller can access `self` again.
 	///
-	/// See [`Self::borrow_cell`] for the safety requirements.
+	/// # Safety
+	///
+	/// The requirements of [`Self::borrow_cell`] apply.
 	unsafe fn with_propagator_and_clause<P, R>(
 		&mut self,
 		f: impl FnOnce(&mut P, &mut Vec<Lit>) -> R,
@@ -309,34 +288,26 @@ impl<Impl: IpasirUserPropagationMethods + IpasirLiteralMethods> SolvingActions
 	for IpasirSolvingActions<Impl>
 {
 	fn is_decision(&mut self, lit: Lit) -> bool {
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_IS_DECISION function is expected to abide by the IPASIR-UP
-		// interface specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 		unsafe { Impl::IPASIR_IS_DECISION(self.ptr, lit.into()) }
 	}
 
 	fn new_observed_var(&mut self) -> Var {
 		let var = Impl::IPASIR_NEW_VAR(self.ptr, self.vars);
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_ADD_OBSERVED_VAR function is expected to abide by the IPASIR-UP
-		// interface specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 		unsafe { Impl::IPASIR_ADD_OBSERVED_VAR(self.ptr, var) };
 		Var(NonZeroI32::new(var).unwrap())
 	}
 
 	fn phase(&mut self, lit: Lit) {
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_PHASE function is expected to abide by the IPASIR-UP
-		// interface specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 		unsafe {
 			Impl::IPASIR_PHASE(self.ptr, lit.into());
 		}
 	}
 
 	fn unphase(&mut self, lit: Lit) {
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_UNPHASE function is expected to abide by the IPASIR-UP
-		// interface specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 		unsafe {
 			Impl::IPASIR_UNPHASE(self.ptr, lit.into());
 		}
@@ -377,8 +348,6 @@ impl<
 		// simultaneously.
 		debug_assert!(!prop.clause_active);
 
-		// If we are not already yielding `lit`'s reason, make the propagator
-		// construct the reason clause.
 		if prop.explaining != Some(lit) {
 			prop.clause.clear();
 			prop.with_propagator_and_clause::<P, _>(|propagator, clause| {
@@ -391,7 +360,6 @@ impl<
 			prop.explaining = Some(lit);
 		}
 
-		// Yield the members of the constructed clause, then the end-of-clause `0`.
 		match prop.clause.pop() {
 			Some(lit) => lit.0.get(),
 			None => {
@@ -408,10 +376,8 @@ impl<
 	) -> bool {
 		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
 		let model: &[Lit] = if len > 0 {
-			// SAFETY: `model` points to `len` model literals provided by the solver,
-			// each a non-zero `i32`. `Lit` is `#[repr(transparent)]` over
-			// `NonZeroI32` (and thus over `i32`), so reinterpreting the non-zero
-			// literals as `Lit` is sound.
+			// SAFETY: `model` points to `len` nonzero i32s supplied by the
+			// solver; `Lit` is transparent over NonZeroI32.
 			unsafe { slice::from_raw_parts(model as *const Lit, len) }
 		} else {
 			&[]
@@ -447,9 +413,7 @@ impl<
 		{
 			SearchDecision::Assign(lit) => lit.0.into(),
 			SearchDecision::Backtrack(level) => {
-				// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-				// IPASIR_FORCE_BACKTRACK function is expected to abide by the IPASIR-UP
-				// interface specification.
+				// SAFETY: Valid solver pointer; backend honours IPASIR-UP.
 				unsafe { Impl::IPASIR_FORCE_BACKTRACK(store.ptr, level) }
 				0
 			}
@@ -495,11 +459,8 @@ impl<
 	) {
 		let store = &mut *(store as *mut IpasirStoreInner<VarStore, LRN, TRM, 1>);
 		if len > 0 {
-			// SAFETY: `lits` points to `len` assigned literals provided by the
-			// solver, each a non-zero `i32`. `Lit` is `#[repr(transparent)]` over
-			// `NonZeroI32` (and thus over `i32`), so reinterpreting the non-zero
-			// literals as `Lit` is sound. A `0` from the solver would make an
-			// invalid `NonZeroI32` and is undefined behaviour.
+			// SAFETY: `lits` points to `len` nonzero i32s supplied by the
+			// solver; `Lit` is transparent over NonZeroI32.
 			let lits = unsafe { slice::from_raw_parts(lits as *mut Lit, len) };
 			store
 				.propagator
@@ -603,13 +564,10 @@ where
 		&mut self,
 		listener: Rc<RefCell<L>>,
 	) -> CFixedAssignmentListener {
-		// Track the memory of the listener
 		self.store
 			.propagator
 			.some_mut()
 			.persistent_assignment_listener = Some(listener);
-		// Create the data pointer that the IPASIR UP solver will use for the
-		// listener callbacks.
 		let listener_ptr: *const RefCell<_> = Rc::as_ptr(
 			self.store
 				.propagator
@@ -619,7 +577,6 @@ where
 				.unwrap(),
 		);
 
-		// Construct the object with the listener callbacks
 		CFixedAssignmentListener {
 			data: listener_ptr as *mut c_void,
 			notify_fixed_assignment: Self::notify_persistent_assignment::<L>,
@@ -630,13 +587,8 @@ where
 		&mut self,
 		propagator: Rc<RefCell<P>>,
 	) -> CExternalPropagator {
-		// Track the memory of the listener
 		self.store.propagator.some_mut().external_propagator = Some(propagator);
-		// Create the data pointer that the IPASIR UP solver will use for all
-		// propagator callbacks.
 		let store_ptr: *mut _ = &mut *self.store;
-		// Construct the object will all callbacks (specific) to the propagator and
-		// the specific [`IpasirSolver`] instance.
 		CExternalPropagator {
 			data: store_ptr as *mut c_void,
 			is_lazy: P::CHECK_ONLY,

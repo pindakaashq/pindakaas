@@ -13,7 +13,7 @@ test = ["pytest>=8.3.5"]
 
 [project]
 name = "pindakaas"
-description	= "Boolean satisfiability (SAT) library with efficient encoding of complex constraints and solver interaction"
+description	= "Encode integer and pseudo-Boolean constraints into CNF from Python"
 authors = [
 	{name = "Jip J. Dekker", email = "jip@dekker.one"},
 	{name = "Hendrik 'Henk' Bierlee", email = "henk.bierlee@kuleuven.be"},

@@ -1,5 +1,8 @@
-//! This module implements common Pindakaas [`Solver`] interfaces for the
-//! [SPLR](https://github.com/shnarazk/splr) SAT solver.
+//! Interface to the [SPLR](https://github.com/shnarazk/splr) SAT solver.
+//!
+//! The `splr` feature implements the clause database and solver traits directly
+//! on [`Splr`]. Timeouts and memory exhaustion produce
+//! [`SolveResult::Unknown`]; other backend failures may panic.
 
 use std::num::NonZeroI32;
 
@@ -112,8 +115,8 @@ impl Solver for Splr {
 mod tests {
 	use traced_test::test;
 
-	// use crate::{linear::LimitComp, solver::SolveResult, CardinalityOne, Encoder,
-	// PairwiseEncoder};
+	// use crate::{linear::LimitComp, solver::SolveResult, CardinalityOne,
+	// Encoder, PairwiseEncoder};
 
 	#[test]
 	fn splr() {

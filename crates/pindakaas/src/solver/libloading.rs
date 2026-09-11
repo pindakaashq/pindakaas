@@ -1,5 +1,9 @@
-//! This module contains pindakaas interface for (at runtime) dynamically loaded
-//! libraries implementing the IPASIR interface.
+//! Loading an IPASIR solver from a shared library at runtime.
+//!
+//! Conversion from [`Library`] validates the required symbols before a solver
+//! is created. Their signatures and runtime behaviour remain promises made by
+//! the loaded library and cannot be checked here.
+
 use std::{
 	ffi::{c_char, c_int, c_void, CStr},
 	fmt,
@@ -79,7 +83,6 @@ pub struct IpasirSolver<'lib> {
 /// functions.
 type SymResult<'a, S, E = libloading::Error> = std::result::Result<Symbol<'a, S>, E>;
 
-// --- Helpers for C interface ---
 impl FailedAssumptions for IpasirFailed<'_> {
 	fn fail(&self, lit: Lit) -> bool {
 		let lit: i32 = lit.into();
@@ -90,32 +93,32 @@ impl FailedAssumptions for IpasirFailed<'_> {
 
 impl IpasirLibrary {
 	fn ipasir_add_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void, i32)> {
-		// SAFETY: We assume that if this symbol is present, then it is part of a
-		// valid implementation of the IPASIR interface.
+		// SAFETY: We assume that if this symbol is present, then it is part of
+		// a valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_add") }
 	}
 
 	fn ipasir_assume_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void, i32)> {
-		// SAFETY: We assume that if this symbol is present, then it is part of a
-		// valid implementation of the IPASIR interface.
+		// SAFETY: We assume that if this symbol is present, then it is part of
+		// a valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_assume") }
 	}
 
 	fn ipasir_failed_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void, i32) -> c_int> {
-		// SAFETY: We assume that if this symbol is present, then it is part of a
-		// valid implementation of the IPASIR interface.
+		// SAFETY: We assume that if this symbol is present, then it is part of
+		// a valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_failed") }
 	}
 
 	fn ipasir_init_sym(&self) -> SymResult<'_, extern "C" fn() -> *mut c_void> {
-		// SAFETY: We assume that if this symbol is present, then it is part of a
-		// valid implementation of the IPASIR interface.
+		// SAFETY: We assume that if this symbol is present, then it is part of
+		// a valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_init") }
 	}
 
 	fn ipasir_release_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void)> {
-		// SAFETY: We assume that if this symbol is present, then it is part of a
-		// valid implementation of the IPASIR interface.
+		// SAFETY: We assume that if this symbol is present, then it is part of
+		// a valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_release") }
 	}
 
@@ -130,8 +133,8 @@ impl IpasirLibrary {
 			Option<unsafe extern "C" fn(*mut c_void, *const i32)>,
 		),
 	> {
-		// SAFETY: We assume that if this symbol is present, then it is part of a
-		// valid implementation of the IPASIR interface.
+		// SAFETY: We assume that if this symbol is present, then it is part of
+		// a valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_set_learn") }
 	}
 
@@ -141,31 +144,30 @@ impl IpasirLibrary {
 		'_,
 		extern "C" fn(*mut c_void, *mut c_void, Option<unsafe extern "C" fn(*mut c_void) -> c_int>),
 	> {
-		// SAFETY: We assume that if this symbol is present, then it is part of a
-		// valid implementation of the IPASIR interface.
+		// SAFETY: We assume that if this symbol is present, then it is part of
+		// a valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_set_terminate") }
 	}
 
 	fn ipasir_signature_sym(&self) -> SymResult<'_, extern "C" fn() -> *const c_char> {
-		// SAFETY: We assume that if this symbol is present, then it is part of a
-		// valid implementation of the IPASIR interface.
+		// SAFETY: We assume that if this symbol is present, then it is part of
+		// a valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_signature") }
 	}
 
 	fn ipasir_solve_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void) -> c_int> {
-		// SAFETY: We assume that if this symbol is present, then it is part of a
-		// valid implementation of the IPASIR interface.
+		// SAFETY: We assume that if this symbol is present, then it is part of
+		// a valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_solve") }
 	}
 
 	fn ipasir_value_sym(&self) -> SymResult<'_, extern "C" fn(*mut c_void, i32) -> i32> {
-		// SAFETY: We assume that if this symbol is present, then it is part of a
-		// valid implementation of the IPASIR interface.
+		// SAFETY: We assume that if this symbol is present, then it is part of
+		// a valid implementation of the IPASIR interface.
 		unsafe { self.lib.get(b"ipasir_val") }
 	}
 
-	/// Create a new solver instance that uses the IPASIR methods included in
-	/// the [`IpasirLibrary`].
+	/// Creates a fresh solver owned by this library handle.
 	pub fn new_solver(&self) -> IpasirSolver<'_> {
 		IpasirSolver {
 			slv: (self.ipasir_init_sym().unwrap())(),
@@ -184,7 +186,11 @@ impl IpasirLibrary {
 		}
 	}
 
-	/// Wrapper for the `ipasir_signature` function.
+	/// Returns the implementation signature reported by `ipasir_signature`.
+	///
+	/// # Panics
+	///
+	/// The library returns a signature that is not UTF-8.
 	pub fn signature(&self) -> &str {
 		// SAFETY: We assume that the signature function as part of the IPASIR
 		// interface returns a valid C string.
@@ -236,7 +242,11 @@ impl IpasirSolver<'_> {
 		}
 	}
 
-	/// Wrapper for the `ipasir_signature` function.
+	/// Returns the implementation signature reported by `ipasir_signature`.
+	///
+	/// # Panics
+	///
+	/// The library returns a signature that is not UTF-8.
 	pub fn signature(&self) -> &str {
 		// SAFETY: We assume that the signature function as part of the IPASIR
 		// interface returns a valid C string.
@@ -289,7 +299,6 @@ impl ClauseDatabase for IpasirSolver<'_> {
 
 impl Drop for IpasirSolver<'_> {
 	fn drop(&mut self) {
-		// Release the solver.
 		(self.release_fn)(self.slv);
 	}
 }

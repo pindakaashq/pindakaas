@@ -1,3 +1,11 @@
+//! The IPASIR interface, and the glue that makes a C solver implement the
+//! traits in [`solver`](crate::solver).
+//!
+//! Every bundled solver speaks IPASIR, so what differs between them is the set
+//! of extensions each offers. The generic parameters below say which of the
+//! optional callbacks a solver was built with, so that a solver pays neither
+//! the storage nor the indirection for one it does not have.
+
 #[cfg(feature = "external-propagation")]
 pub(crate) mod user_propagation;
 
@@ -93,6 +101,11 @@ pub(crate) trait IpasirLearnCallbackMethod {
 /// be moved to another thread and invoked there.
 pub(crate) type IpasirLearnCb = Box<dyn FnMut(*const i32) + Send>;
 
+pub trait IpasirLiteralMethods {
+	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2];
+	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32;
+}
+
 /// Trait that must be implemented by all IPASIR solvers, providing basic
 /// functionality of initilization, instantiation, and solving.
 ///
@@ -106,23 +119,10 @@ pub trait IpasirSolverMethods {
 	const IPASIR_VAL: unsafe extern "C" fn(slv: *mut c_void, lit: i32) -> i32;
 }
 
-pub trait IpasirLiteralMethods {
-	const IPASIR_NEW_RANGE: fn(slv: *mut c_void, vars: *mut c_void, len: usize) -> [i32; 2];
-	const IPASIR_NEW_VAR: fn(slv: *mut c_void, vars: *mut c_void) -> i32;
-}
-
-/// Internal structure used to capture all necessary data for an IPASIR solver.
+/// Storage for an IPASIR solver and its optional callbacks.
 ///
-/// Depending on the capabilities of the solver, the following generics can be
-/// used:
-/// - `LRN`: Set to 1 if the solver supports a callback for learned clauses and
-///   implement [`IpasirLearnCallbackMethod`]. Set to 0 otherwise.
-/// - `TRM`: Set to 1 if the solver supports a callback to check whether to
-///   terminate the solving process, and implement
-///   [`IpasirTerminateCallbackMethod`]. Set to 0 otherwise.
-/// - `UP`: Set to 1 if the solver supports the IPASIR-UP interface for external
-///   propagation, and implement [`IpasirUserPropagationMethods`]. Set to 0
-///   otherwise.
+/// `LRN`, `TRM`, and `UP` are one when learned-clause, termination, and
+/// external-propagation callbacks are supported, respectively; zero otherwise.
 pub(crate) struct IpasirStore<
 	Impl: IpasirSolverMethods + IpasirLiteralMethods,
 	Var,
@@ -206,19 +206,11 @@ trait TerminationCallbackIpasirStorage {
 	fn termination_callback(&mut self) -> &mut Option<IpasirTerminationCb>;
 }
 
-/// Function used to split a closure with no arguments into a thin data pointer
-/// and a thin function pointer.
+/// Thin data and function pointers into a boxed closure.
 ///
-/// The closure must be boxed, and the returned data pointer references the
-/// closure *inside* the box rather than the box handle itself. The caller is
-/// therefore free to move the handle (e.g. into the solver store) afterwards
-/// without invalidating the pointer, which is what keeps it valid for as long
-/// as the box is alive.
-///
-/// Taking `&mut Box<F>` (instead of `&mut F`) is deliberate: `Box<F>` itself
-/// implements `FnMut`, so a plain `&mut F` parameter would also accept a
-/// `&mut Box<F>` pointing at a soon-to-be-moved stack handle, silently
-/// producing a dangling data pointer.
+/// The data pointer stays valid while the box lives, even if its handle moves.
+/// Accepting `&mut F` would also accept a box handle as `F`, leaving a dangling
+/// pointer when that handle moves.
 pub(crate) fn get_trampoline0<R, F: FnMut() -> R>(closure: &mut Box<F>) -> (*mut c_void, CB0<R>) {
 	let ptr: *mut F = closure.as_mut();
 	(ptr as *mut c_void, trampoline0::<R, F>)
@@ -271,8 +263,8 @@ impl Iterator for ExplIter {
 
 	#[inline]
 	fn next(&mut self) -> Option<Self::Item> {
-		// SAFETY: ExplIter is assumed to be constructed using a valid pointer to an
-		// correctly aligned and null-terminated array of i32.
+		// SAFETY: ExplIter is assumed to be constructed using a valid pointer
+		// to an correctly aligned and null-terminated array of i32.
 		unsafe {
 			if *self.0 == 0 {
 				None
@@ -294,9 +286,7 @@ where
 		assumptions: I,
 	) -> SolveResult<impl Valuation + '_, impl FailedAssumptions + '_> {
 		for i in assumptions {
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_ASSUME function is expected to abide by the
-			// IPASIR interface specification.
+			// SAFETY: Valid solver pointer; backend honours IPASIR.
 			unsafe {
 				Self::IPASIR_ASSUME(self.ipasir_store().solver_ptr(), i.into());
 			}
@@ -311,14 +301,10 @@ where
 {
 	fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
 		for &lit in clause {
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_ADD function is expected to abide by the IPASIR interface
-			// specification.
+			// SAFETY: Valid solver pointer; backend honours IPASIR.
 			unsafe { Self::IPASIR_ADD(self.ipasir_store().solver_ptr(), lit.into()) };
 		}
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_ADD function is expected to abide by the IPASIR interface
-		// specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR.
 		unsafe { Self::IPASIR_ADD(self.ipasir_store().solver_ptr(), 0) };
 		if clause.is_empty() {
 			Err(Unsatisfiable)
@@ -362,9 +348,7 @@ where
 			});
 			let (data_ptr, fn_ptr) = get_trampoline1(&mut wrapped_cb);
 			*self.ipasir_store_mut().learn_callback() = Some(wrapped_cb);
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_SET_LEARN_CALLBACK function is expected to abide by the IPASIR
-			// interface specification.
+			// SAFETY: Valid solver pointer; backend honours IPASIR.
 			unsafe {
 				Self::IPASIR_SET_LEARN_CALLBACK(
 					self.ipasir_store().solver_ptr(),
@@ -375,9 +359,7 @@ where
 			}
 		} else {
 			*self.ipasir_store_mut().learn_callback() = None;
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_SET_LEARN_CALLBACK function is expected to abide by the IPASIR
-			// interface specification.
+			// SAFETY: Valid solver pointer; backend honours IPASIR.
 			unsafe {
 				Self::IPASIR_SET_LEARN_CALLBACK(
 					self.ipasir_store().solver_ptr(),
@@ -399,25 +381,17 @@ where
 		reason = "more specific type used by solve_assuming when assumptions are possible"
 	)]
 	fn solve(&mut self) -> SolveResult<IpasirValuation<Impl>, IpasirFailedAssumptions<Impl>> {
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_SOLVE function is expected to abide by the
-		// IPASIR interface specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR.
 		let res = unsafe { Self::IPASIR_SOLVE(self.ipasir_store().solver_ptr()) };
 		match res {
-			10 => {
-				// 10 -> Sat
-				SolveResult::Satisfied(IpasirValuation::<Impl> {
-					ptr: self.ipasir_store().solver_ptr(),
-					_methods: PhantomData,
-				})
-			}
-			20 => {
-				// 20 -> Unsat
-				SolveResult::Unsatisfiable(IpasirFailedAssumptions::<Impl> {
-					ptr: self.ipasir_store().solver_ptr(),
-					_methods: PhantomData,
-				})
-			}
+			10 => SolveResult::Satisfied(IpasirValuation::<Impl> {
+				ptr: self.ipasir_store().solver_ptr(),
+				_methods: PhantomData,
+			}),
+			20 => SolveResult::Unsatisfiable(IpasirFailedAssumptions::<Impl> {
+				ptr: self.ipasir_store().solver_ptr(),
+				_methods: PhantomData,
+			}),
 			_ => {
 				debug_assert_eq!(res, 0); // According to spec should be 0, unknown
 				SolveResult::Unknown
@@ -442,9 +416,7 @@ where
 			});
 			let (data_ptr, fn_ptr) = get_trampoline0(&mut wrapped_cb);
 			*self.ipasir_store_mut().termination_callback() = Some(wrapped_cb);
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_SET_TERMINATE_CALLBACK function is expected to abide by the
-			// IPASIR interface specification.
+			// SAFETY: Valid solver pointer; backend honours IPASIR.
 			unsafe {
 				Self::IPASIR_SET_TERMINATE_CALLBACK(
 					self.ipasir_store().solver_ptr(),
@@ -454,9 +426,7 @@ where
 			}
 		} else {
 			*self.ipasir_store_mut().termination_callback() = None;
-			// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-			// IPASIR_SET_TERMINATE_CALLBACK function is expected to abide by the
-			// IPASIR interface specification.
+			// SAFETY: Valid solver pointer; backend honours IPASIR.
 			unsafe {
 				Self::IPASIR_SET_TERMINATE_CALLBACK(
 					self.ipasir_store().solver_ptr(),
@@ -471,9 +441,7 @@ where
 impl<Impl: IpasirAssumptionMethods> FailedAssumptions for IpasirFailedAssumptions<Impl> {
 	fn fail(&self, lit: Lit) -> bool {
 		let lit: i32 = lit.into();
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_FAILED function is expected to abide by the IPASIR interface
-		// specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR.
 		let failed = unsafe { Impl::IPASIR_FAILED(self.ptr, lit) };
 		failed != 0
 	}
@@ -506,9 +474,7 @@ impl<
 	> Default for IpasirStore<Impl, Var, LRN, TRM, UP>
 {
 	fn default() -> Self {
-		// Safety: The IPASIR_INIT function is expected to abide by the IPASIR
-		// interface specification and return a valid (non-null) pointer to the
-		// solver.
+		// SAFETY: IPASIR_INIT must return a valid, non-null solver pointer.
 		let p = unsafe { Impl::IPASIR_INIT() };
 		debug_assert_ne!(p, ptr::null_mut());
 		Self {
@@ -536,9 +502,7 @@ impl<
 	> Drop for IpasirStore<Impl, Var, LRN, TRM, UP>
 {
 	fn drop(&mut self) {
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_RELEASE function is expected to abide by the IPASIR interface
-		// specification.
+		// SAFETY: Valid solver pointer; backend honours IPASIR.
 		unsafe { Impl::IPASIR_RELEASE(self.store.ptr) };
 	}
 }
@@ -616,12 +580,8 @@ unsafe impl<Var: Send, const LRN: usize, const TRM: usize> Send
 impl<Impl: IpasirSolverMethods> Valuation for IpasirValuation<Impl> {
 	fn value(&self, lit: Lit) -> bool {
 		let var: i32 = lit.var().into();
-		// WARN: Always ask about variable (positive) literal, otherwise solvers
-		// sometimes seem incorrect
-		//
-		// Safety: Pointer is a valid (non-null) pointer to the solver, and the
-		// IPASIR_VAL function is expected to abide by the IPASIR interface
-		// specification.
+		// SAFETY: Valid solver pointer and IPASIR backend. Query the positive
+		// literal because some backends mishandle negative ones.
 		let ret = unsafe { Impl::IPASIR_VAL(self.ptr, var) };
 		match ret {
 			_ if ret == var => !lit.is_negated(),

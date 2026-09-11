@@ -1,64 +1,59 @@
-//! This module contains representations and encoding algorithms for
-//! propositional logic formulas.
+//! Building and encoding propositional formulas.
 //!
-//! These formulas can be represented using the [`Formula`] type, which
-//! implementation is specialized for both [`Lit`] and [`BoolVal`]. The
-//! [`TseitinEncoder`] is can be used to encode formulas into CNF.
+//! [`Formula<Lit>`] contains only literals. [`Formula<BoolVal>`] additionally
+//! carries constant truth values, which [`Formula::resolve`] folds away before
+//! encoding. [`TseitinEncoder`] introduces literals for compound sub-formulas
+//! rather than distributing the formula into clauses.
 
 use std::{
 	fmt::{self, Display, Formatter},
-	iter::once,
 	ops::{BitAnd, BitOr, BitXor, Not},
 };
 
 use itertools::Itertools;
 use rustc_hash::FxHashSet;
 
-use crate::{BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Result};
+pub use crate::encoder::tseitin::TseitinEncoder;
+use crate::{BoolVal, ClauseDatabaseTools, Cnf, Lit, Result};
 
-/// A propositional logic formula
+/// A propositional formula over an arbitrary atom type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Formula<Base> {
-	/// A conjunction of two or more sub-formulas
+	/// A conjunction; an empty conjunction is true.
 	And(Vec<Formula<Base>>),
-	///A atomic formula (a literal)
+	/// An indivisible proposition.
 	Atom(Base),
-	/// The equivalence of two or more sub-formulas
+	/// Sub-formulas constrained to share one truth value.
 	Equiv(Vec<Formula<Base>>),
-	/// A choice between two sub-formulas
+	/// A conditional choice between two sub-formulas.
 	IfThenElse {
-		/// The expression that determines which sub-formula is chosen:
-		/// - If it evaluates to `true`, the `then` branch is chosen.
-		/// - If it evaluates to `false`, the `els` branch is chosen.
+		/// The branch selector.
 		cond: Box<Formula<Base>>,
 		/// The expression that is chosen when `cond` evaluates to `true`.
 		then: Box<Formula<Base>>,
 		/// The expression that is chosen when `cond` evaluates to `false`.
 		els: Box<Formula<Base>>,
 	},
-	/// An implication of two sub-formulas
+	/// An implication from the first sub-formula to the second.
 	Implies(Box<Formula<Base>>, Box<Formula<Base>>),
-	/// The negation of a sub-formula
+	/// A negated sub-formula.
 	Not(Box<Formula<Base>>),
-	/// A disjunction of two or more sub-formulas
+	/// A disjunction; an empty disjunction is false.
 	Or(Vec<Formula<Base>>),
-	/// An exclusive or of two or more sub-formulas
+	/// Odd parity over the sub-formulas.
 	Xor(Vec<Formula<Base>>),
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
-/// An encoder for propositional logic formulas, based on the standard Tseitin
-/// transformations.
-pub struct TseitinEncoder;
-
 impl<Base> Formula<Base> {
-	/// Simplify the formula using a given resolver function.
+	/// Simplify the formula by constant-folding atoms with an atom resolver.
 	///
-	/// The resolver function is called for each [`Self::Atom`] in the formula.
-	/// The resolver function should return `Err(true)` if the atom is known to
-	/// be true and `Err(false)` if the atom is known to be false. Otherwise,
-	/// the resolver function should return the value of the atom for the
+	/// `Err(value)` marks an atom as known; `Ok(atom)` replaces it in the
 	/// simplified formula.
+	///
+	/// # Errors
+	///
+	/// The formula's constant truth value when simplification eliminates every
+	/// unresolved atom.
 	pub fn simplify_with<Res>(
 		self,
 		resolver: &mut impl FnMut(Base) -> Result<Res, bool>,
@@ -251,19 +246,22 @@ impl<Base: Display> Formula<Base> {
 }
 
 impl Formula<BoolVal> {
-	/// Resolve the constant values in the formula.
+	/// Resolve embedded constants into a literal-only formula.
 	///
-	/// If the formula is known to be unsatisfiable, then `Err(false)` is
-	/// returned. If the formula is already satisfied, then `Err(true)` is
-	/// returned. Otherwise, a simplified formula without any constant values is
-	/// returned.
+	/// # Errors
+	///
+	/// `true` or `false` when the entire formula reduces to that constant.
 	pub fn resolve(self) -> Result<Formula<Lit>, bool> {
 		self.simplify_with(&mut |l| match l {
 			BoolVal::Const(b) => Err(b),
 			BoolVal::Lit(l) => Ok(l),
 		})
 	}
-	/// Simplify the formula using the given literals as proven facts.
+	/// Simplify the formula using literals known to hold.
+	///
+	/// # Errors
+	///
+	/// `true` or `false` when the facts determine the entire formula.
 	pub fn simplify<Iter>(self, facts: Iter) -> Result<Formula<Lit>, bool>
 	where
 		Iter: IntoIterator,
@@ -280,153 +278,22 @@ impl Formula<BoolVal> {
 }
 
 impl Formula<Lit> {
-	/// Helper function to bind the (sub) formula to a name (literal) for the
-	/// tseitin encoding.
-	fn bind<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db, name: Option<Lit>) -> Result<Lit> {
-		Ok(match self {
-			Formula::Atom(lit) => {
-				if let Some(name) = name {
-					if *lit != name {
-						db.add_clause([!name, *lit])?;
-						db.add_clause([name, !*lit])?;
-					}
-					name
-				} else {
-					*lit
-				}
-			}
-			Formula::Not(f) => !(f.bind(db, name.map(|lit| !lit))?),
-			Formula::And(sub) => {
-				match sub.len() {
-					0 => {
-						let name = name.unwrap_or_else(|| db.new_var().into());
-						db.add_clause([name])?;
-						name
-					}
-					1 => return sub[0].bind(db, name),
-					_ => {
-						let name = name.unwrap_or_else(|| db.new_var().into());
-						let lits: Vec<_> = sub.iter().map(|f| f.bind(db, None)).try_collect()?;
-						// not name -> (not lits[0] or not lits[1] or ...)
-						db.add_clause(once(name).chain(lits.iter().map(|&l| !l)))?;
-						for lit in lits {
-							// name -> lit
-							db.add_clause([!name, lit])?;
-						}
-						name
-					}
-				}
-			}
-			Formula::Or(sub) => {
-				match sub.len() {
-					0 => {
-						let name = name.unwrap_or_else(|| db.new_var().into());
-						db.add_clause([!name])?;
-						name
-					}
-					1 => return sub[0].bind(db, name),
-					_ => {
-						let name = name.unwrap_or_else(|| db.new_var().into());
-						let lits: Vec<_> = sub.iter().map(|f| f.bind(db, None)).try_collect()?;
-						for &lit in &lits {
-							// not name -> not lit
-							db.add_clause([name, !lit])?;
-						}
-						// name -> (lit[0] or lit[1] or ...)
-						db.add_clause(once(!name).chain(lits))?;
-						name
-					}
-				}
-			}
-			Formula::Implies(left, right) => {
-				let name = name.unwrap_or_else(|| db.new_var().into());
-				let left = left.bind(db, None)?;
-				let right = right.bind(db, None)?;
-				// name -> (left -> right)
-				db.add_clause([!name, !left, right])?;
-				// !name -> !(left -> right)
-				// i.e, (!name -> left) and (!name -> !right)
-				db.add_clause([name, left])?;
-				db.add_clause([name, !right])?;
-				name
-			}
-			Formula::Equiv(sub) => {
-				assert!(
-					sub.len() >= 2,
-					"unable to bind the equivalence of less than 2 formulas"
-				);
-				let name = name.unwrap_or_else(|| db.new_var().into());
-				let lits = sub
-					.iter()
-					.map(|f| f.bind(db, None))
-					.collect::<Result<Vec<_>>>()?;
-				for (x, y) in lits.iter().copied().tuple_windows() {
-					// name -> (x <-> y)
-					db.add_clause([!name, !x, y])?;
-					db.add_clause([!name, x, !y])?;
-				}
-				db.add_clause(once(name).chain(lits.iter().map(|&l| !l)))?;
-				db.add_clause(once(name).chain(lits))?;
-				name
-			}
-			Formula::Xor(sub) => {
-				assert_ne!(sub.len(), 0, "unable to bind empty xor formula");
-				if sub.len() == 1 {
-					return sub[0].bind(db, name);
-				}
-				let name = name.unwrap_or_else(|| db.new_var().into());
-				let mut lits = sub
-					.iter()
-					.map(|f| f.bind(db, None))
-					.collect::<Result<Vec<_>>>()?;
-
-				let mut left = lits.pop().unwrap();
-				for (pos, right) in lits.into_iter().with_position() {
-					let new_name = if pos.is_last() {
-						name
-					} else {
-						db.new_var().into()
-					};
-					// new_name -> (left xor right)
-					db.add_clause([!new_name, !left, !right])?;
-					db.add_clause([!new_name, left, right])?;
-					// !new_name -> !(left xor right)
-					db.add_clause([new_name, !left, right])?;
-					db.add_clause([new_name, left, !right])?;
-
-					left = new_name;
-				}
-				// let mut
-				name
-			}
-			Formula::IfThenElse { cond, then, els } => {
-				let name = name.unwrap_or_else(|| db.new_var().into());
-				let cond = cond.bind(db, None)?;
-				let then = then.bind(db, None)?;
-				let els = els.bind(db, None)?;
-				// name -> (cond -> then)
-				db.add_clause([!name, !cond, then])?;
-				// name -> (not cond -> els)
-				db.add_clause([!name, cond, els])?;
-
-				// inverse implications
-				db.add_clause([name, !cond, !then])?;
-				db.add_clause([name, cond, !els])?;
-				db.add_clause([name, !then, !els])?;
-
-				name
-			}
-		})
-	}
-
-	/// Convert propositional logic formula to CNF
+	/// An equisatisfiable CNF produced by Tseitin encoding.
+	///
+	/// # Errors
+	///
+	/// [`crate::Unsatisfiable`] when the formula is identically false.
 	pub fn clausify(&self) -> Result<Cnf> {
 		let mut cnf = Cnf::default();
 		cnf.encode(self, &TseitinEncoder)?;
 		Ok(cnf)
 	}
 
-	/// Simplify the formula using the given literals as proven facts.
+	/// Constant folding under literals known to hold.
+	///
+	/// # Errors
+	///
+	/// `true` or `false` when the facts determine the entire formula.
 	pub fn simplify<Iter>(self, facts: Iter) -> Result<Formula<Lit>, bool>
 	where
 		Iter: IntoIterator,
@@ -682,147 +549,19 @@ impl<Base> Not for Formula<Base> {
 	}
 }
 
-impl<Db> Encoder<Db, Formula<BoolVal>> for TseitinEncoder
-where
-	Db: ClauseDatabase + ?Sized,
-{
-	fn encode(&self, db: &mut Db, con: &Formula<BoolVal>) -> Result {
-		match con.clone().resolve() {
-			Err(false) => {
-				db.contradiction()?;
-				unreachable!();
-			}
-			Err(true) => Ok(()),
-			Ok(con) => self.encode(db, &con),
-		}
-	}
-}
-
-impl<Db> Encoder<Db, Formula<Lit>> for TseitinEncoder
-where
-	Db: ClauseDatabase + ?Sized,
-{
-	fn encode(&self, db: &mut Db, f: &Formula<Lit>) -> Result {
-		match f {
-			Formula::Atom(l) => db.add_clause([*l]),
-			Formula::Not(f) => match f.as_ref() {
-				&Formula::Atom(l) => db.add_clause([!l]),
-				Formula::Not(f) => self.encode(db, f.as_ref()),
-				Formula::And(sub) => {
-					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
-					self.encode(db, &Formula::Or(neg_sub))
-				}
-				Formula::Or(sub) => {
-					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
-					self.encode(db, &Formula::And(neg_sub))
-				}
-				Formula::Implies(x, y) => {
-					self.encode(db, x.as_ref())?;
-					self.encode(db, &!y.as_ref().clone())
-				}
-				Formula::IfThenElse { cond, then, els } => {
-					let name = cond.bind(db, None)?;
-					let neg_then: Formula<Lit> = !*then.clone();
-					db.encode_implied(&[name], &neg_then, self)?;
-					let neg_els: Formula<Lit> = !*els.clone();
-					db.encode_implied(&[!name], &neg_els, self)
-				}
-				Formula::Equiv(sub) if sub.len() == 2 => {
-					self.encode(db, &Formula::Xor(sub.clone()))
-				}
-				Formula::Xor(sub) if sub.len() == 2 => {
-					self.encode(db, &Formula::Equiv(sub.clone()))
-				}
-				Formula::Xor(sub) if sub.len() % 2 != 0 => {
-					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
-					self.encode(db, &Formula::Xor(neg_sub))
-				}
-				_ => {
-					let l = f.bind(db, None)?;
-					db.add_clause([!l])
-				}
-			},
-			Formula::And(sub) => {
-				for f in sub {
-					self.encode(db, f)?;
-				}
-				Ok(())
-			}
-			Formula::Or(sub) => {
-				if sub.is_empty() {
-					db.contradiction()?;
-					unreachable!();
-				}
-				let lits = sub
-					.iter()
-					.map(|f| f.bind(db, None))
-					.collect::<Result<Vec<_>, _>>()?;
-				db.add_clause(lits)
-			}
-			Formula::Implies(left, right) => {
-				let x = left.bind(db, None)?;
-				db.encode_implied(&[x], right.as_ref(), self)
-			}
-			Formula::Equiv(sub) => {
-				match sub.len() {
-					0 => return Ok(()),
-					1 => return self.encode(db, &sub[0]),
-					_ => {
-						let mut name = sub.iter().find_map(|f| {
-							if let Formula::Atom(l) = f {
-								Some(*l)
-							} else {
-								None
-							}
-						});
-						for f in sub.iter() {
-							name = Some(f.bind(db, name)?);
-						}
-					}
-				}
-				Ok(())
-			}
-			Formula::Xor(sub) => match sub.len() {
-				0 => {
-					db.contradiction()?;
-					unreachable!()
-				}
-				1 => self.encode(db, &sub[0]),
-				_ => {
-					let mut sub = sub.clone();
-					let b = sub.pop().map(|f| f.bind(db, None)).unwrap()?;
-					let a = if sub.len() > 1 {
-						Formula::Xor(sub).bind(db, None)
-					} else {
-						sub.pop().map(|f| f.bind(db, None)).unwrap()
-					}?;
-					db.add_clause([a, b])?;
-					db.add_clause([!a, !b])
-				}
-			},
-			Formula::IfThenElse { cond, then, els } => {
-				let name = cond.bind(db, None)?;
-				db.encode_implied(&[name], then.as_ref(), self)?;
-				db.encode_implied(&[!name], els.as_ref(), self)
-			}
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use itertools::Itertools;
 
 	use crate::{
+		constraint::propositional_logic::{Formula, TseitinEncoder},
 		helpers::tests::{assert_encoding, assert_solutions, expect_file},
-		propositional_logic::{Formula, TseitinEncoder},
 		solver::{cadical::Cadical, SolveResult, Solver},
 		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Valuation,
 	};
 
 	#[test]
 	fn encode_prop_and() {
-		// Simple conjunction
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder.encode(&mut cnf, &(a & b & c)).unwrap();
@@ -837,7 +576,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_and.sol"],
 		);
 
-		// Reified conjunction
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
@@ -854,7 +592,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_and_reif.sol"],
 		);
 
-		// Regression test: empty and
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		TseitinEncoder
@@ -877,7 +614,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_equiv() {
-		// Simple equivalence
 		let mut cnf = Cnf::default();
 		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
 		TseitinEncoder
@@ -897,7 +633,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_equiv.sol"],
 		);
 
-		// Reified equivalence
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
@@ -923,7 +658,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_implies() {
-		// Simple implication
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		let b = cnf.new_lit();
@@ -944,7 +678,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_implies.sol"],
 		);
 
-		// Reified implication
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
@@ -970,7 +703,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_ite() {
-		// Simple if-then-else
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
@@ -994,7 +726,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_ite.sol"],
 		);
 
-		// Reified if-then-else
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		TseitinEncoder
@@ -1024,7 +755,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_neg_equiv() {
-		// Regression test
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		let b = cnf.new_lit();
@@ -1051,7 +781,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_or() {
-		// Simple disjunction
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder.encode(&mut cnf, &(a | b | c)).unwrap();
@@ -1066,7 +795,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_or.sol"],
 		);
 
-		// Reified disjunction
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder
@@ -1083,7 +811,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_or_reif.sol"],
 		);
 
-		// Regression test: empty or
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		TseitinEncoder
@@ -1106,7 +833,6 @@ mod tests {
 
 	#[test]
 	fn encode_prop_xor() {
-		// Simple XOR
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder.encode(&mut cnf, &(a ^ b ^ c)).unwrap();
@@ -1121,7 +847,6 @@ mod tests {
 			&expect_file!["propositional_logic/encode_prop_xor.sol"],
 		);
 
-		// Reified XOR
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		TseitinEncoder
@@ -1137,7 +862,6 @@ mod tests {
 			vec![a, b, c, d],
 			&expect_file!["propositional_logic/encode_prop_xor_reif.sol"],
 		);
-		// Regression test: negated XOR (into equiv)
 		let mut cnf = Cnf::default();
 		let (a, b) = cnf.new_lits();
 		TseitinEncoder.encode(&mut cnf, &(!(a ^ b))).unwrap();
@@ -1151,7 +875,6 @@ mod tests {
 			vec![a, b],
 			&expect_file!["propositional_logic/encode_prop_xor_neg1.sol"],
 		);
-		// Regression test: negated XOR (negated args)
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
 		TseitinEncoder.encode(&mut cnf, &(!(a ^ b ^ c))).unwrap();
@@ -1161,7 +884,6 @@ mod tests {
 			[a, b, c],
 			&expect_file!["propositional_logic/encode_prop_xor_neg2.sol"],
 		);
-		// Regression test: negated XOR (negated binding)
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
 		TseitinEncoder

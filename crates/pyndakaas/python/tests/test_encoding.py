@@ -62,6 +62,42 @@ def test_invalid_encoder():
         f.add_encoding(x * 3 + y * 2 + z >= 3, encoder=Encoder.PAIRWISE)
 
 
+# Which encoder takes which constraint. An encoder is dispatched separately for
+# each shape a constraint can aggregate to, so one of those arms going missing
+# shows up as `InvalidEncoder` for that shape alone and nowhere else.
+LINEAR = [
+    Encoder.ADDER,
+    Encoder.DECISION_DIAGRAM,
+    Encoder.MIXED_RADIX,
+    Encoder.SEQUENTIAL_COUNTER,
+    Encoder.TOTALIZER,
+    Encoder.WATCHDOG,
+]
+COUNTING = LINEAR + [Encoder.SORTING_NETWORK]
+AT_MOST_ONE = COUNTING + [Encoder.BITWISE, Encoder.LADDER, Encoder.PAIRWISE]
+
+
+@pytest.mark.parametrize("encoder", LINEAR)
+def test_every_linear_encoder_takes_a_weighted_sum(encoder):
+    f = CNF()
+    x, y, z = f.new_vars(3)
+    f.add_encoding(x * 2 + y * 3 + z * 4 <= 5, encoder=encoder)
+
+
+@pytest.mark.parametrize("encoder", COUNTING)
+def test_every_counting_encoder_takes_a_cardinality_constraint(encoder):
+    f = CNF()
+    x, y, z = f.new_vars(3)
+    f.add_encoding(x + y + z <= 2, encoder=encoder)
+
+
+@pytest.mark.parametrize("encoder", AT_MOST_ONE)
+def test_every_at_most_one_encoder_takes_an_at_most_one_constraint(encoder):
+    f = CNF()
+    x, y, z = f.new_vars(3)
+    f.add_encoding(x + y + z <= 1, encoder=encoder)
+
+
 def test_encode_bool_lin_default():
     f = CNF()
     x, y, z = f.new_vars(3)
@@ -135,3 +171,82 @@ def test_custom_db():
         [-4, 2, 3],
         [-4, -2, -3],
     ]
+
+
+def test_literals_from_an_int_var_make_a_nogood():
+    """A clause over the literals of integers rules an assignment out."""
+    from pindakaas.solver import CaDiCaL, Status
+
+    slv = CaDiCaL()
+    x = slv.new_int_var(range(0, 4))
+    y = slv.new_int_var([0, 1, 3])
+
+    seen = []
+    while True:
+        with slv.solve() as result:
+            if result.status != Status.SATISFIED:
+                break
+            assignment = (x.value(result), y.value(result))
+        seen.append(assignment)
+        slv.add_clause([~x.equals(slv, assignment[0]), ~y.equals(slv, assignment[1])])
+
+    assert sorted(seen) == [(a, b) for a in range(4) for b in [0, 1, 3]]
+
+
+def test_a_settled_question_gives_a_constant():
+    """Where the domain decides, there is no literal to ask for."""
+    from pindakaas.encoding import CNF
+
+    f = CNF()
+    x = f.new_int_var(range(0, 3))
+
+    assert x.equals(f, 9).value() is False
+    assert x.equals(f, 9).lit() is None
+    assert x.at_least(f, 0).value() is True
+    assert x.at_most(f, 9).value() is True
+
+    reachable = x.at_least(f, 2)
+    assert reachable.lit() is not None
+    assert reachable.value() is None
+
+
+def test_asking_without_building_an_encoding():
+    """`create=False` answers what the domain or an existing encoding can."""
+    from pindakaas.encoding import CNF
+
+    f = CNF()
+    x = f.new_int_var([0, 1, 3, 4])
+
+    # The domain settles these, so they cost nothing.
+    assert x.at_least(f, 0, create=False).value() is True
+    assert x.at_least(f, 5, create=False).value() is False
+    assert x.at_most(f, 4, create=False).value() is True
+    assert x.at_most(f, -1, create=False).value() is False
+    assert x.equals(f, 9, create=False).value() is False
+    assert x.equals(f, 2, create=False).value() is False  # the hole
+
+    # These need an encoding, and there is none.
+    assert x.at_least(f, 3, create=False) is None
+    assert x.at_most(f, 1, create=False) is None
+    assert x.equals(f, 3, create=False) is None
+    assert f.clauses() == []
+
+    # Asking for it builds the order encoding, which then answers.
+    assert x.at_least(f, 3).lit() is not None
+    assert f.clauses() != []
+    assert x.at_least(f, 3, create=False).lit() is not None
+
+    # Equality wants the direct encoding, which is still not there.
+    assert x.equals(f, 3, create=False) is None
+    assert x.equals(f, 3).lit() is not None
+    assert x.equals(f, 3, create=False).lit() is not None
+
+
+def test_a_single_value_domain_settles_equality():
+    """One value and no other, so no encoding is needed to say which."""
+    from pindakaas.encoding import CNF
+
+    f = CNF()
+    x = f.new_int_var(range(5, 6))
+    assert x.equals(f, 5, create=False).value() is True
+    assert f.clauses() == []

@@ -1,0 +1,19 @@
+  card      encodings    vars  clauses  literals
+     8          order       7        6        12
+     8         binary       3        0         0
+     8         direct       8       29        64
+     8   order+binary      10       20        48
+     8   order+direct      15       28        62
+     8      all three      18       42        98
+    64          order      63       62       124
+    64         binary       6        0         0
+    64         direct      64     2017      4096
+    64   order+binary      69      188       490
+    64   order+direct     127      252       566
+    64      all three     133      378       932
+   256          order     255      254       508
+   256         binary       8        0         0
+   256   order+binary     263      764      2022
+  1024          order    1023     1022      2044
+  1024         binary      10        0         0
+  1024   order+binary    1033     3068      8162

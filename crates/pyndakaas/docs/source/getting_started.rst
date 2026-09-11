@@ -1,8 +1,6 @@
 Getting started
 ===============
 
-This section describes how to get started with Pindakaas.
-
 Installation
 ------------
 
@@ -26,5 +24,5 @@ Model and encode Boolean formulae and pseudo-Boolean constraints:
 
 Solve incrementally using assumptions:
 
-.. literalinclude:: ../../examples/example_modelling.py
+.. literalinclude:: ../../examples/example_assumptions.py
    :language: python
