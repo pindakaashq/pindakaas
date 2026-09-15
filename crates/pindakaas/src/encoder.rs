@@ -3,7 +3,6 @@
 //! Each submodule holds one encoding. The constraint types under
 //! [`constraint`](crate::constraint) re-export their encoders. Algorithm
 //! rationale and references live in the encoding modules.
-
 //!
 //! Domain consistency means unit propagation removes every unsupported value;
 //! consistency-checking detects infeasibility but may leave unsupported values.

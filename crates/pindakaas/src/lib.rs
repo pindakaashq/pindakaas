@@ -195,7 +195,7 @@
 //! Solvers", ICTAI 2013, 9–17.
 //!
 //! [^sinz]: C. Sinz, "Towards an Optimal CNF Encoding of Boolean Cardinality
-//! Constraints", CP 2005, LNCS 3709, 827–832.
+//! Constraints", CP 2005, LNCS 3709, 827–831.
 //!
 //! [^tseitin]: G. S. Tseitin, "On the complexity of derivation in propositional
 //! calculus", Studies in Constructive Mathematics and Mathematical Logic II
