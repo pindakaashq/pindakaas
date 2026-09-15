@@ -84,13 +84,13 @@ impl Encoded<'_> {
 		if self.x.has_direct_encoding() {
 			// The value already includes the coefficient sign, so the
 			// comparison does not need reversing.
-			for &(d, _) in pins {
+			for &(d, takes) in pins {
 				let breaks = match cmp {
 					Comparator::LessEq => self.c * d > k,
 					_ => self.c * d < k,
 				};
 				if breaks {
-					out.push(!self.x.lit_equals(db, d)?);
+					out.push(!takes);
 				}
 			}
 			return Ok(());
@@ -141,7 +141,7 @@ impl Encoded<'_> {
 		// What a direct encoding pins `bounded` to does not depend on what is
 		// left of the bound, so it is read once rather than once per step.
 		let pins = if bounded.x.has_direct_encoding() {
-			bounded.x.lit_direct_steps(db, true)?
+			bounded.x.lit_direct_walk(db)?.collect()
 		} else {
 			Vec::new()
 		};

@@ -266,12 +266,13 @@ impl BinaryEncoding {
 		db: &mut Db,
 		domain: &RangeList<Coeff>,
 	) -> Result {
+		let bits = self.x.to_vec();
 		let floor = *domain.min().unwrap() - self.min;
 		if floor > 0 {
-			lex_geq_const(db, &self.x.to_vec(), PosCoeff::new(floor), self.bits())?;
+			lex_geq_const(db, &bits, PosCoeff::new(floor), self.bits())?;
 		}
 		let span = *domain.max().unwrap() - self.min;
-		lex_leq_const(db, &self.x.to_vec(), PosCoeff::new(span), self.bits())?;
+		lex_leq_const(db, &bits, PosCoeff::new(span), self.bits())?;
 		for (below, above) in domain.iter().tuple_windows() {
 			for v in (*below.end() + 1)..*above.start() {
 				self.encode_neq(db, v)?;
@@ -425,21 +426,21 @@ impl DirectEncoding {
 		domain: &'a RangeList<Coeff>,
 		geq: bool,
 	) -> impl Iterator<Item = (Coeff, BoolVal)> + 'a {
-		let vals = domain.iter().flatten();
-		let step = move |(i, d): (usize, Coeff)| {
+		let step = |(i, (d, l)): (usize, (Coeff, Lit))| {
 			(
 				d,
 				if i == 0 {
 					BoolVal::Const(false)
 				} else {
-					!self.lit_equals(domain, d)
+					BoolVal::Lit(!l)
 				},
 			)
 		};
 		if geq {
-			Either::Left(vals.enumerate().map(step))
+			Either::Left(self.walk(domain).enumerate().map(step))
 		} else {
-			Either::Right(vals.rev().enumerate().map(step))
+			let walk = self.walk(domain).collect_vec();
+			Either::Right(walk.into_iter().rev().enumerate().map(step))
 		}
 	}
 
@@ -464,6 +465,14 @@ impl DirectEncoding {
 			.find(|(_, l)| value.value(*l))
 			.expect("a direct encoding holds for one of its values")
 			.0
+	}
+
+	/// Every value of `domain` paired with the literal for taking it.
+	pub(crate) fn walk<'a>(
+		&'a self,
+		domain: &'a RangeList<Coeff>,
+	) -> impl Iterator<Item = (Coeff, Lit)> + 'a {
+		domain.iter().flatten().zip(self.x.iter())
 	}
 }
 
@@ -599,18 +608,15 @@ impl IntVar {
 				_ => return Ok(()),
 			}
 		};
-		let vals: Vec<Coeff> = domain.iter().flatten().collect();
-		for (i, &v) in vals.iter().enumerate() {
-			let beyond = vals
-				.get(i + 1)
-				.map_or(BoolVal::Const(false), |&n| ord.lit_at_least(&domain, n));
-			db.add_clause([!dir.lit_equals(&domain, v), ord.lit_at_least(&domain, v)])?;
-			db.add_clause([!dir.lit_equals(&domain, v), !beyond])?;
-			db.add_clause([
-				!ord.lit_at_least(&domain, v),
-				beyond,
-				dir.lit_equals(&domain, v),
-			])?;
+		let mut walk = dir.walk(&domain).peekable();
+		while let Some((v, takes)) = walk.next() {
+			let (takes, reaches) = (BoolVal::Lit(takes), ord.lit_at_least(&domain, v));
+			let beyond = walk.peek().map_or(BoolVal::Const(false), |&(n, _)| {
+				ord.lit_at_least(&domain, n)
+			});
+			db.add_clause([!takes, reaches])?;
+			db.add_clause([!takes, !beyond])?;
+			db.add_clause([!reaches, beyond, takes])?;
 		}
 		Ok(())
 	}
@@ -1064,11 +1070,9 @@ impl IntVar {
 		}
 		let direct = self.direct_encoding(db)?;
 		let state = self.0.borrow();
-		Ok(state
-			.domain
-			.iter()
-			.flatten()
-			.map(|v| (v, direct.lit_equals(&state.domain, v)))
+		Ok(direct
+			.walk(&state.domain)
+			.map(|(v, l)| (v, BoolVal::Lit(l)))
 			.collect_vec()
 			.into_iter())
 	}
