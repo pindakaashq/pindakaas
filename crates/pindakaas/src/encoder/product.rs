@@ -7,7 +7,7 @@
 //! [^1]: J. Chen, "A New SAT Encoding of the At-Most-One Constraint", ModRef
 //! 2010.
 
-use std::{borrow::Cow, cmp::max, iter::once};
+use std::{borrow::Cow, iter::once};
 
 use itertools::Itertools;
 
@@ -56,7 +56,7 @@ impl ProductEncoder {
 			"a pairwise cutoff of {cutoff} would leave the encoder unable to \
 			 make progress on a group of two literals"
 		);
-		self.pairwise_cutoff = max(cutoff, Self::MINIMUM_PAIRWISE_CUTOFF);
+		self.pairwise_cutoff = cutoff;
 		self
 	}
 }

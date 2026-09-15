@@ -14,7 +14,8 @@ use crate::{
 		cardinality_one::{at_least_one_clause, CardinalityOne},
 		linear::LimitComp,
 	},
-	ClauseDatabase, ClauseDatabaseTools, Encoder, Result,
+	decision::integer::BinaryEncoding,
+	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result,
 };
 
 /// Binary-index at-most-one encoding.
@@ -42,13 +43,13 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for BitwiseEncoder
 	)]
 	fn encode(&self, db: &mut Db, card1: &CardinalityOne) -> Result {
 		let size = card1.lits.len();
-		let bits = (usize::BITS - (size - 1).leading_zeros()) as usize;
+		let bits = BinaryEncoding::required_bits((size - 1) as Coeff);
 
 		if card1.cmp == LimitComp::Equal {
 			at_least_one_clause(db, card1)?;
 		}
 
-		let signals = (0..bits).map(|_| db.new_lit()).collect_vec();
+		let signals = db.new_var_range(bits).iter_lits().collect_vec();
 
 		for (i, &lit) in card1.lits.iter().enumerate() {
 			for (j, &sig) in signals.iter().enumerate() {

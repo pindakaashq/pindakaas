@@ -392,14 +392,9 @@ impl AdderEncoder {
 			let t = (**c, x.clone());
 			if let Some(bits) = Self::product_bits(db, &t)? {
 				// The product's bits count up from the variable's least value.
-				constant += t.0 * t.1.min();
-				for (i, b) in bits.into_iter().enumerate() {
-					match b {
-						BoolVal::Lit(l) => weighted.push((l, 1 << i)),
-						BoolVal::Const(true) => constant += 1 << i,
-						BoolVal::Const(false) => {}
-					}
-				}
+				let (lits, offset) = BinaryEncoding::from_bits(bits, t.0 * t.1.min()).as_weighted();
+				weighted.extend(lits);
+				constant += offset;
 			} else {
 				let (lits, offset) = t.1.as_weighted(db)?;
 				weighted.extend(
@@ -435,12 +430,9 @@ impl AdderEncoder {
 		}
 		let rhs = PosCoeff::new(rhs);
 
-		const ZERO: Coeff = 0;
-		let bits = ZERO.leading_zeros() - rhs.leading_zeros();
-		let mut k = as_binary(rhs, Some(bits));
-
+		let mut k = as_binary(rhs, None);
+		let bits = k.len();
 		let first_zero = rhs.trailing_ones() as usize;
-		let bits = bits as usize;
 		debug_assert!(k[bits - 1]);
 
 		let all_terms = || terms.iter().map(|&(lit, coef)| (lit, PosCoeff::new(coef)));

@@ -86,7 +86,7 @@ impl LinAggregator {
 		}
 
 		if lin.cmp == Comparator::GreaterEq {
-			agg = agg.into_iter().map(|(var, coef)| (var, -coef)).collect();
+			agg.values_mut().for_each(|coef| *coef = -*coef);
 			k = -k;
 		}
 
