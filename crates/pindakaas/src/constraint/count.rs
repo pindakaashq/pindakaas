@@ -62,7 +62,7 @@ impl Count {
 			.enumerate()
 			.map(|(i, &lit)| {
 				IntVar::from_direct_encoding(db, 0..=1, &[!lit, lit])
-					.map(|x| (PosCoeff::new(1), x.with_label(format!("x{i}"))))
+					.map(|x| (PosCoeff::new(1), x.with_label(format_args!("x{i}"))))
 			})
 			.collect::<Result<Vec<_>, _>>()?;
 		// Counting the bound from its far end turns its coefficient positive,

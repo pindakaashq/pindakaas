@@ -1437,11 +1437,11 @@ impl IntVar {
 	/// after it.
 	///
 	/// Nothing is kept and the name is never read unless tracing is enabled,
-	/// so this costs no more than building the name did.
-	pub fn with_label(self, label: impl Into<String>) -> Self {
+	/// so a name passed as `format_args!` is never even formatted.
+	pub fn with_label(self, label: impl Display) -> Self {
 		#[cfg(any(feature = "tracing", test))]
 		{
-			self.0.borrow_mut().label = label.into();
+			self.0.borrow_mut().label = label.to_string();
 		}
 		#[cfg(not(any(feature = "tracing", test)))]
 		let _ = label;

@@ -124,7 +124,7 @@ impl Decompose for SequentialCounterEncoder {
 				};
 				IntVar::new(domain)
 					.enforce_consistency(self.add_consistency)
-					.with_label(format!("y{i}"))
+					.with_label(format_args!("y{i}"))
 			})
 			.collect_vec();
 

@@ -86,7 +86,7 @@ fn halved<Db: ClauseDatabase + ?Sized>(db: &mut Db, x: &IntVar) -> Result<IntVar
 	let walk = (0..=(x.max() / 2))
 		.map(|w| Ok((w, x.lit_at_least(db, 2 * w)?)))
 		.collect::<Result<Vec<_>, Unsatisfiable>>()?;
-	IntVar::from_order_walk(db, walk).map(|h| h.with_label(format!("{}/2", x.label())))
+	IntVar::from_order_walk(db, walk).map(|h| h.with_label(format_args!("{}/2", x.label())))
 }
 
 impl WatchdogEncoder {
@@ -169,7 +169,7 @@ impl WatchdogEncoder {
 				}
 				let z = IntVar::new(lb..=ub)
 					.enforce_consistency(self.add_consistency)
-					.with_label(format!("{_label}_{i}"));
+					.with_label(format_args!("{_label}_{i}"));
 				cons.push(IntTernary::new(
 					(1, x),
 					(1, y),
@@ -257,7 +257,7 @@ impl WatchdogEncoder {
 					}
 					let sum = IntVar::new(lb..=ub)
 						.enforce_consistency(self.add_consistency)
-						.with_label(format!("s{r}"));
+						.with_label(format_args!("s{r}"));
 					cons.push(IntTernary::new(
 						(1, count),
 						(1, half),

@@ -141,7 +141,7 @@ impl Decompose for TotalizerEncoder {
 						}
 						let parent = IntVar::new(domain)
 							.enforce_consistency(self.add_consistency)
-							.with_label(format!("t{i}"));
+							.with_label(format_args!("t{i}"));
 						cons.push(IntTernary::new(
 							left.clone(),
 							right.clone(),

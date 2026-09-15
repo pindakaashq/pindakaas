@@ -287,7 +287,7 @@ impl LinAggregator {
 			.map(|(i, &(lit, coef))| {
 				let domain = RangeList::from_elements([0, *coef]);
 				IntVar::from_direct_encoding(db, domain, &[!lit, lit])
-					.map(|x| (PosCoeff::new(1), x.with_label(format!("x{i}"))))
+					.map(|x| (PosCoeff::new(1), x.with_label(format_args!("x{i}"))))
 			})
 			.collect::<Result<Vec<_>, _>>()?;
 		terms.extend(int_terms.into_iter().map(|(x, c)| (PosCoeff::new(c), x)));

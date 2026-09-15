@@ -80,7 +80,7 @@ fn halved<Db: ClauseDatabase + ?Sized>(db: &mut Db, x: &IntVar) -> Result<IntVar
 	let walk = (0..=max)
 		.map(|w| Ok((w, x.lit_at_least(db, 2 * w)?)))
 		.collect::<Result<Vec<_>, Unsatisfiable>>()?;
-	Ok(IntVar::from_order_walk(db, walk)?.with_label(format!("{}/2", x.label())))
+	Ok(IntVar::from_order_walk(db, walk)?.with_label(format_args!("{}/2", x.label())))
 }
 
 /// The variable `x + k`, which reaches `v` exactly when `x` reaches `v - k`.
@@ -97,7 +97,7 @@ fn shifted<Db: ClauseDatabase + ?Sized>(
 		.flatten()
 		.map(|v| Ok((v + k, x.lit_at_least(db, v)?)))
 		.collect::<Result<Vec<_>, Unsatisfiable>>()?;
-	Ok(IntVar::from_order_walk(db, walk)?.with_label(format!("{}+{k}", x.label())))
+	Ok(IntVar::from_order_walk(db, walk)?.with_label(format_args!("{}+{k}", x.label())))
 }
 
 impl SortingNetworkEncoder {
@@ -320,7 +320,7 @@ impl SortingNetworkEncoder {
 		Ok(
 			IntVar::new((x.min() + y.min())..=min(x.max() + y.max(), ub))
 				.enforce_consistency(self.add_consistency)
-				.with_label(format!("{}+{}", x.label(), y.label())),
+				.with_label(format_args!("{}+{}", x.label(), y.label())),
 		)
 	}
 
@@ -404,7 +404,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SortingNetworkEncoder {
 			.enumerate()
 			.map(|(i, &x)| {
 				IntVar::from_order_encoding(db, 0..=1, &[x])
-					.map(|v| v.with_label(format!("x_{}", i + 1)))
+					.map(|v| v.with_label(format_args!("x_{}", i + 1)))
 			})
 			.collect::<Result<Vec<_>, _>>()?;
 

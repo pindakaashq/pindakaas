@@ -299,7 +299,7 @@ impl Decompose for DecisionDiagramEncoder {
 				.collect::<Result<Vec<_>, Unsatisfiable>>()?;
 			let y = IntVar::from_order_walk(db, walk)?
 				.enforce_consistency(self.add_consistency)
-				.with_label(format!("y{i}"));
+				.with_label(format_args!("y{i}"));
 			// A total that only this layer tells apart gets a literal of its
 			// own, which nothing else orders against the rest.
 			y.constrain(db)?;

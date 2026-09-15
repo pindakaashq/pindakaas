@@ -821,7 +821,7 @@ mod tests {
 		let xs = doms
 			.iter()
 			.enumerate()
-			.map(|(i, domain)| IntVar::new(domain.clone()).with_label(format!("x{i}")))
+			.map(|(i, domain)| IntVar::new(domain.clone()).with_label(format_args!("x{i}")))
 			.collect_vec();
 		let terms = coeffs
 			.iter()
@@ -894,7 +894,7 @@ mod tests {
 			let xs = doms
 				.iter()
 				.enumerate()
-				.map(|(i, d)| IntVar::new(d.clone()).with_label(format!("x{i}")))
+				.map(|(i, d)| IntVar::new(d.clone()).with_label(format_args!("x{i}")))
 				.collect_vec();
 			let terms = coeffs
 				.iter()

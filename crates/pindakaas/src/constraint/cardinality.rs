@@ -76,7 +76,7 @@ impl Cardinality {
 			.enumerate()
 			.map(|(i, &l)| {
 				IntVar::from_direct_encoding(db, 0..=1, &[!l, l])
-					.map(|x| (PosCoeff::new(1), x.with_label(format!("x{i}"))))
+					.map(|x| (PosCoeff::new(1), x.with_label(format_args!("x{i}"))))
 			})
 			.collect::<Result<Vec<_>, _>>()?;
 		Ok(NormalizedIntLinear::new(terms, self.cmp.clone(), self.k))
