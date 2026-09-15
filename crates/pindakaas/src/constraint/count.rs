@@ -5,16 +5,14 @@
 //! sorting network states it directly, where going through a general linear
 //! constraint would count into intermediate integers first.
 
-use itertools::Itertools;
-
 pub use crate::encoder::sorting_network::{SortingNetworkEncoder, SortingNetworkStrategy};
 use crate::{
 	constraint::{
 		int_linear::NormalizedIntLinear,
-		linear::{LimitComp, LinExp, PosCoeff},
+		linear::{LimitComp, PosCoeff},
 	},
 	decision::integer::IntVar,
-	Checker, ClauseDatabase, Lit, Result, Unsatisfiable, Valuation,
+	Checker, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation,
 };
 
 /// Which encoders take a [`Count`], which rustdoc lists on the trait but the
@@ -102,8 +100,7 @@ impl Count {
 
 impl Checker for Count {
 	fn check<F: Valuation + ?Sized>(&self, sol: &F) -> Result<()> {
-		let lhs = LinExp::from_terms(self.lits.iter().map(|x| (*x, 1)).collect_vec().as_slice())
-			.value(sol)?;
+		let lhs = self.lits.iter().filter(|&&l| sol.value(l)).count() as Coeff;
 		let rhs = self.y.value(sol);
 
 		if match self.cmp {

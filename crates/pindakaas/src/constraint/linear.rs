@@ -289,8 +289,8 @@ impl AddAssign for LinExp {
 		// anything is added beside it.
 		if self.mult != 1 {
 			self.add *= self.mult;
-			for term in self.terms.drain(..).collect_vec() {
-				self.terms.push(term.scaled(self.mult));
+			for term in &mut self.terms {
+				term.scale(self.mult);
 			}
 		}
 		self.mult = 1;
@@ -406,10 +406,9 @@ impl Neg for LinExp {
 impl Sub for LinExp {
 	type Output = Self;
 
-	fn sub(self, rhs: Self) -> Self::Output {
-		let mut res = self.clone();
-		res -= rhs;
-		res
+	fn sub(mut self, rhs: Self) -> Self::Output {
+		self -= rhs;
+		self
 	}
 }
 
@@ -427,12 +426,17 @@ impl LinTerm {
 		}
 	}
 
-	/// The term with its coefficient multiplied by `c`.
-	fn scaled(self, c: Coeff) -> Self {
+	/// Multiply the term's coefficient by `c`.
+	fn scale(&mut self, c: Coeff) {
 		match self {
-			LinTerm::Bool(l, w) => LinTerm::Bool(l, w * c),
-			LinTerm::Int(x, w) => LinTerm::Int(x, w * c),
+			LinTerm::Bool(_, w) | LinTerm::Int(_, w) => *w *= c,
 		}
+	}
+
+	/// The term with its coefficient multiplied by `c`.
+	fn scaled(mut self, c: Coeff) -> Self {
+		self.scale(c);
+		self
 	}
 }
 
