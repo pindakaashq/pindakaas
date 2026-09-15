@@ -3,9 +3,8 @@
 
 use pindakaas::{
 	constraint::linear::{
-		AdderEncoder, DecisionDiagramEncoder, LinAggregator, Linear, LinearEncoder,
-		MixedRadixEncoder, SequentialCounterEncoder, StaticLinEncoder, TotalizerEncoder,
-		WatchdogEncoder,
+		AdderEncoder, DecisionDiagramEncoder, Linear, LinearEncoder, MixedRadixEncoder,
+		SequentialCounterEncoder, StaticLinEncoder, TotalizerEncoder, WatchdogEncoder,
 	},
 	encoder::sorting_network::SortingNetworkEncoder,
 	Cnf, Encoder, Unsatisfiable,
@@ -38,54 +37,21 @@ pub(crate) fn coefficients(n: usize, max: Coeff, seed: u64) -> Vec<Coeff> {
 		.collect()
 }
 
-/// Encode `con` with the encoder named, in every slot aggregation may reach.
-///
-/// Naming an encoder only for the integer-linear slot would leave a
-/// cardinality or Boolean-linear constraint on [`StaticLinEncoder`]'s default,
-/// which is the adder whatever was asked for.
+/// Encode `con` with the encoder named, whichever shape aggregation leaves.
 pub(crate) fn encode(name: &str, cnf: &mut Cnf, con: &Linear) -> Result<(), Unsatisfiable> {
 	match name {
-		"adder" => {
-			LinearEncoder::<StaticLinEncoder<AdderEncoder, AdderEncoder, AdderEncoder>>::default()
-				.encode(cnf, con)
-		}
-		"diagram" => LinearEncoder::<
-			StaticLinEncoder<
-				DecisionDiagramEncoder,
-				DecisionDiagramEncoder,
-				DecisionDiagramEncoder,
-			>,
-		>::default()
-		.encode(cnf, con),
-		"seq" => LinearEncoder::<
-			StaticLinEncoder<
-				SequentialCounterEncoder,
-				SequentialCounterEncoder,
-				SequentialCounterEncoder,
-			>,
-		>::default()
-		.encode(cnf, con),
-		"tree" => LinearEncoder::<
-			StaticLinEncoder<TotalizerEncoder, TotalizerEncoder, TotalizerEncoder>,
-		>::default()
-		.encode(cnf, con),
-		"radix" => LinearEncoder::<
-			StaticLinEncoder<MixedRadixEncoder, MixedRadixEncoder, MixedRadixEncoder>,
-		>::default()
-		.encode(cnf, con),
-		"wdog" => LinearEncoder::<
-			StaticLinEncoder<WatchdogEncoder, WatchdogEncoder, WatchdogEncoder>,
-		>::default()
-		.encode(cnf, con),
+		"adder" => LinearEncoder::<AdderEncoder>::default().encode(cnf, con),
+		"diagram" => LinearEncoder::<DecisionDiagramEncoder>::default().encode(cnf, con),
+		"seq" => LinearEncoder::<SequentialCounterEncoder>::default().encode(cnf, con),
+		"tree" => LinearEncoder::<TotalizerEncoder>::default().encode(cnf, con),
+		"radix" => LinearEncoder::<MixedRadixEncoder>::default().encode(cnf, con),
+		"wdog" => LinearEncoder::<WatchdogEncoder>::default().encode(cnf, con),
 		"wdog-l" => {
 			// The local form is the same encoder, so it is configured rather
 			// than named separately.
-			let mut enc =
-				StaticLinEncoder::<WatchdogEncoder, WatchdogEncoder, WatchdogEncoder>::default();
-			let _ = enc.lin_encoder().with_local(true);
-			let _ = enc.bool_lin_encoder().with_local(true);
-			let _ = enc.card_encoder().with_local(true);
-			LinearEncoder::new(enc, LinAggregator::default()).encode(cnf, con)
+			let mut enc = WatchdogEncoder::default();
+			let _ = enc.with_local(true);
+			LinearEncoder::new(enc).encode(cnf, con)
 		}
 		"sort" => LinearEncoder::<
 			StaticLinEncoder<AdderEncoder, AdderEncoder, SortingNetworkEncoder>,

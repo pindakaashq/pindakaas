@@ -9,7 +9,7 @@
 
 use std::{
 	fmt::{self, Display},
-	ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign, Neg, Sub, SubAssign},
+	ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
 use itertools::Itertools;
@@ -184,18 +184,6 @@ impl Display for LimitComp {
 }
 
 impl LinExp {
-	/// Add `k` to the expression before any outer scaling.
-	pub fn add_constant(mut self, k: Coeff) -> Self {
-		self.add += k;
-		self
-	}
-
-	/// Append an unweighted literal to the expression.
-	pub fn add_lit(mut self, lit: Lit) -> Self {
-		self.terms.push(LinTerm::Bool(lit, 1));
-		self
-	}
-
 	/// Construct a pseudo-Boolean sum from parallel coefficient and literal
 	/// slices.
 	///
@@ -461,11 +449,6 @@ impl Linear {
 		Self { exp, cmp, k }
 	}
 
-	/// Change the comparator of the constraint.
-	pub fn set_cmp(&mut self, cmp: Comparator) {
-		self.cmp = cmp;
-	}
-
 	#[cfg(any(feature = "tracing", test))]
 	pub(crate) fn trace_print(&self) -> String {
 		use crate::trace::trace_print_lit;
@@ -534,12 +517,6 @@ impl Deref for PosCoeff {
 
 	fn deref(&self) -> &Self::Target {
 		&self.0
-	}
-}
-
-impl DerefMut for PosCoeff {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.0
 	}
 }
 
@@ -654,53 +631,23 @@ mod tests {
 					// Configure every reachable slot so the row measures the
 					// named encoder.
 					let done = match enc {
-						"adder" => LinearEncoder::<
-							StaticLinEncoder<AdderEncoder, AdderEncoder, AdderEncoder>,
-						>::default()
-						.encode(&mut cnf, &con),
-						"diagram" => LinearEncoder::<
-							StaticLinEncoder<
-								DecisionDiagramEncoder,
-								DecisionDiagramEncoder,
-								DecisionDiagramEncoder,
-							>,
-						>::default()
-						.encode(&mut cnf, &con),
-						"seq" => LinearEncoder::<
-							StaticLinEncoder<
-								SequentialCounterEncoder,
-								SequentialCounterEncoder,
-								SequentialCounterEncoder,
-							>,
-						>::default()
-						.encode(&mut cnf, &con),
-						"tree" => LinearEncoder::<
-							StaticLinEncoder<TotalizerEncoder, TotalizerEncoder, TotalizerEncoder>,
-						>::default()
-						.encode(&mut cnf, &con),
-						"wdog" => LinearEncoder::<
-							StaticLinEncoder<WatchdogEncoder, WatchdogEncoder, WatchdogEncoder>,
-						>::default()
-						.encode(&mut cnf, &con),
-						"wdog-l" => {
-							let mut enc = StaticLinEncoder::<
-								WatchdogEncoder,
-								WatchdogEncoder,
-								WatchdogEncoder,
-							>::default();
-							let _ = enc.lin_encoder().with_local(true);
-							let _ = enc.bool_lin_encoder().with_local(true);
-							let _ = enc.card_encoder().with_local(true);
-							LinearEncoder::new(enc, LinAggregator::default()).encode(&mut cnf, &con)
+						"adder" => LinearEncoder::<AdderEncoder>::default().encode(&mut cnf, &con),
+						"diagram" => LinearEncoder::<DecisionDiagramEncoder>::default()
+							.encode(&mut cnf, &con),
+						"seq" => LinearEncoder::<SequentialCounterEncoder>::default()
+							.encode(&mut cnf, &con),
+						"tree" => {
+							LinearEncoder::<TotalizerEncoder>::default().encode(&mut cnf, &con)
 						}
-						_ => LinearEncoder::<
-							StaticLinEncoder<
-								MixedRadixEncoder,
-								MixedRadixEncoder,
-								MixedRadixEncoder,
-							>,
-						>::default()
-						.encode(&mut cnf, &con),
+						"wdog" => {
+							LinearEncoder::<WatchdogEncoder>::default().encode(&mut cnf, &con)
+						}
+						"wdog-l" => {
+							let mut enc = WatchdogEncoder::default();
+							let _ = enc.with_local(true);
+							LinearEncoder::new(enc).encode(&mut cnf, &con)
+						}
+						_ => LinearEncoder::<MixedRadixEncoder>::default().encode(&mut cnf, &con),
 					};
 					let cmp = if cmp == Comparator::LessEq {
 						"<="

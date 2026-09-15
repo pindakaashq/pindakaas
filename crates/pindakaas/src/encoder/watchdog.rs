@@ -503,13 +503,13 @@ mod tests {
 
 		let mut gt = Cnf::default();
 		let vars = gt.new_var_range(N).iter_lits().collect_vec();
-		LinearEncoder::<StaticLinEncoder<TotalizerEncoder, TotalizerEncoder>>::default()
+		LinearEncoder::<TotalizerEncoder>::default()
 			.encode(&mut gt, &con(&vars))
 			.unwrap();
 
 		let mut gpw = Cnf::default();
 		let vars = gpw.new_var_range(N).iter_lits().collect_vec();
-		LinearEncoder::<StaticLinEncoder<WatchdogEncoder, WatchdogEncoder>>::default()
+		LinearEncoder::<WatchdogEncoder>::default()
 			.encode(&mut gpw, &con(&vars))
 			.unwrap();
 
@@ -538,11 +538,7 @@ mod tests {
 	);
 	linear_test_suite!(
 		watchdog_encoder_no_prop,
-		WatchdogEncoder::default().with_propagation(crate::decision::integer::Consistency::None)
-	);
-	linear_test_suite!(
-		watchdog_encoder_prop_doms,
-		WatchdogEncoder::default().with_propagation(crate::decision::integer::Consistency::Domain)
+		WatchdogEncoder::default().with_propagation(false)
 	);
 	linear_test_suite!(
 		watchdog_encoder_consistency,

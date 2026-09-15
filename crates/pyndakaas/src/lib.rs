@@ -74,9 +74,9 @@ mod pindakaas {
 			count::{Count, SortingNetworkEncoder},
 			int_linear::NormalizedIntLinear,
 			linear::{
-				AdderEncoder, Comparator, DecisionDiagramEncoder, LinAggregator,
-				LinExp as BaseBoolLinExp, LinVariant, Linear as BaseBoolLinCon, LinearEncoder,
-				MixedRadixEncoder, SequentialCounterEncoder, TotalizerEncoder, WatchdogEncoder,
+				AdderEncoder, Comparator, DecisionDiagramEncoder, LinExp as BaseBoolLinExp,
+				Linear as BaseBoolLinCon, LinearEncoder, MixedRadixEncoder,
+				SequentialCounterEncoder, TotalizerEncoder, WatchdogEncoder,
 			},
 			propositional_logic::{Formula as BaseFormula, TseitinEncoder},
 		},
@@ -316,7 +316,7 @@ mod pindakaas {
 		match con {
 			ConstraintArg::BoolLin(lin) => {
 				let encoder = LinEncoderWrapper::new(enc);
-				let encoder = LinearEncoder::new(encoder, LinAggregator::default());
+				let encoder = LinearEncoder::new(encoder);
 				encoder.encode_implied(db, &conditions, &lin.0)?;
 				let err = encoder
 					.variant_encoder()
@@ -834,19 +834,6 @@ mod pindakaas {
 					self.set_err("Count", enc);
 					Ok(())
 				}
-			}
-		}
-	}
-
-	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, LinVariant> for LinEncoderWrapper {
-		fn encode(&self, db: &mut Db, con: &LinVariant) -> Result<(), pindakaas::Unsatisfiable> {
-			match con {
-				LinVariant::Linear(lin) => self.encode(db, lin),
-				LinVariant::BoolLinear(lin) => self.encode(db, lin),
-				LinVariant::Count(count) => self.encode(db, count),
-				LinVariant::Cardinality(card) => self.encode(db, card),
-				LinVariant::CardinalityOne(card1) => self.encode(db, card1),
-				LinVariant::Trivial => Ok(()),
 			}
 		}
 	}

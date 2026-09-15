@@ -484,13 +484,13 @@ mod tests {
 
 		let mut gt = Cnf::default();
 		let vars = gt.new_var_range(N).iter_lits().collect_vec();
-		LinearEncoder::<StaticLinEncoder<TotalizerEncoder, TotalizerEncoder>>::default()
+		LinearEncoder::<TotalizerEncoder>::default()
 			.encode(&mut gt, &con(&vars))
 			.unwrap();
 
 		let mut gmto = Cnf::default();
 		let vars = gmto.new_var_range(N).iter_lits().collect_vec();
-		LinearEncoder::<StaticLinEncoder<MixedRadixEncoder, MixedRadixEncoder>>::default()
+		LinearEncoder::<MixedRadixEncoder>::default()
 			.encode(&mut gmto, &con(&vars))
 			.unwrap();
 

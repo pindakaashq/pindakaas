@@ -63,15 +63,29 @@
 //! groups must be supplied by the caller; aggregation does not discover them.
 //!
 //! ```rust
+//! use pindakaas::{constraint::linear::{Comparator, Linear, LinearEncoder,
+//!     TotalizerEncoder}, ClauseDatabaseTools, Cnf};
+//! let mut cnf = Cnf::default();
+//! let (x, y, z) = cnf.new_lits();
+//! let budget = Linear::new(2 * x + 3 * y + 2 * z, Comparator::LessEq, 4);
+//! cnf.encode(&budget, &LinearEncoder::<TotalizerEncoder>::default())?;
+//! # Ok::<(), pindakaas::Unsatisfiable>(())
+//! ```
+//!
+//! An encoder that takes every aggregated shape can be named on its own, as
+//! above. To send each shape to an encoder of its own, name a
+//! [`StaticLinEncoder`](encoder::aggregate::StaticLinEncoder) instead:
+//!
+//! ```rust
 //! use pindakaas::{constraint::{cardinality_one::BitwiseEncoder,
 //!     linear::{AdderEncoder, Comparator, Linear, LinearEncoder, StaticLinEncoder}},
 //!     encoder::sorting_network::SortingNetworkEncoder,
 //!     ClauseDatabaseTools, Cnf};
-//! let mut cnf = Cnf::default();
-//! let (x, y, z) = cnf.new_lits();
-//! let budget = Linear::new(2 * x + 3 * y + 2 * z, Comparator::LessEq, 4);
+//! # let mut cnf = Cnf::default();
+//! # let (x, y, z) = cnf.new_lits();
+//! # let budget = Linear::new(2 * x + 3 * y + 2 * z, Comparator::LessEq, 4);
 //! let encoder = LinearEncoder::<StaticLinEncoder<AdderEncoder, AdderEncoder,
-//!     AdderEncoder, BitwiseEncoder, SortingNetworkEncoder>>::default();
+//!     SortingNetworkEncoder, BitwiseEncoder, SortingNetworkEncoder>>::default();
 //! cnf.encode(&budget, &encoder)?;
 //! # Ok::<(), pindakaas::Unsatisfiable>(())
 //! ```
@@ -89,8 +103,8 @@
 //! let budget = Linear::new(x.clone() * 3 + y.clone() * 2, Comparator::LessEq, 20);
 //! cnf.encode(
 //!     &budget,
-//!     &pindakaas::encoder::aggregate::LinearEncoder::<
-//!         pindakaas::encoder::aggregate::StaticLinEncoder,
+//!     &pindakaas::constraint::linear::LinearEncoder::<
+//!         pindakaas::constraint::linear::TotalizerEncoder,
 //!     >::default(),
 //! )?;
 //! let x_at_least_four = x.lit_at_least(&mut cnf, 4)?;

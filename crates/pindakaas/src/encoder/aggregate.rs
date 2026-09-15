@@ -21,7 +21,7 @@ use crate::{
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
 };
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 /// Normalisation and specialisation of a general [`Linear`] constraint.
 pub struct LinAggregator {
 	sorted_encoder: SortingNetworkEncoder,
@@ -30,17 +30,24 @@ pub struct LinAggregator {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 /// Aggregation followed by encoding of the resulting [`LinVariant`].
-pub struct LinearEncoder<Enc = StaticLinEncoder, Agg = LinAggregator> {
+///
+/// `Enc` is usually one encoder, which then encodes whichever shape
+/// aggregation produces. Use a [`StaticLinEncoder`] to send each shape to an
+/// encoder of its own.
+pub struct LinearEncoder<Enc = StaticLinEncoder> {
 	enc: Enc,
-	agg: Agg,
+	agg: LinAggregator,
 }
 
 /// Static dispatch from each aggregated constraint shape to its encoder.
+///
+/// Only needed to mix encoders: an encoder that takes every shape can be given
+/// to [`LinearEncoder`] directly.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct StaticLinEncoder<
 	LinEnc = AdderEncoder,
 	BoolLinEnc = AdderEncoder,
-	CardEnc = AdderEncoder, // TODO: Actual Cardinality encoding
+	CardEnc = SortingNetworkEncoder,
 	Card1Enc = BitwiseEncoder,
 	CountEnc = SortingNetworkEncoder,
 > {
@@ -49,6 +56,29 @@ pub struct StaticLinEncoder<
 	card_enc: CardEnc,
 	amo_enc: Card1Enc,
 	count_enc: CountEnc,
+}
+
+/// Anything that encodes every shape aggregation produces encodes the
+/// aggregated constraint itself, which is what [`LinearEncoder`] asks for.
+impl<Db, Enc> Encoder<Db, LinVariant> for Enc
+where
+	Db: ClauseDatabase + ?Sized,
+	Enc: Encoder<Db, NormalizedIntLinear>
+		+ Encoder<Db, NormalizedBoolLinear>
+		+ Encoder<Db, Cardinality>
+		+ Encoder<Db, CardinalityOne>
+		+ Encoder<Db, Count>,
+{
+	fn encode(&self, db: &mut Db, lin: &LinVariant) -> Result {
+		match lin {
+			LinVariant::BoolLinear(lin) => self.encode(db, lin),
+			LinVariant::Linear(lin) => self.encode(db, lin),
+			LinVariant::Cardinality(card) => self.encode(db, card),
+			LinVariant::CardinalityOne(amo) => self.encode(db, amo),
+			LinVariant::Count(count) => self.encode(db, count),
+			LinVariant::Trivial => Ok(()),
+		}
+	}
 }
 
 impl LinAggregator {
@@ -299,16 +329,13 @@ impl LinAggregator {
 	}
 }
 
-impl<Enc, Agg> LinearEncoder<Enc, Agg> {
-	/// Returns the aggregation stage used by this encoder.
-	pub fn linear_aggregator(&self) -> &Agg {
-		&self.agg
-	}
-
-	/// Creates an encoder with independently selected aggregation and dispatch
-	/// stages.
-	pub fn new(enc: Enc, agg: Agg) -> Self {
-		Self { enc, agg }
+impl<Enc> LinearEncoder<Enc> {
+	/// Creates an encoder that aggregates a constraint and hands it to `enc`.
+	pub fn new(enc: Enc) -> Self {
+		Self {
+			enc,
+			agg: LinAggregator::default(),
+		}
 	}
 
 	/// Returns the post-aggregation encoder.
@@ -317,14 +344,8 @@ impl<Enc, Agg> LinearEncoder<Enc, Agg> {
 	}
 
 	/// Replaces the [`LinAggregator`] used by this encoder.
-	pub fn with_linear_aggregator(&mut self, agg: Agg) -> &mut Self {
+	pub fn with_linear_aggregator(&mut self, agg: LinAggregator) -> &mut Self {
 		self.agg = agg;
-		self
-	}
-
-	/// Replaces the [`Encoder`] for [`LinVariant`]s used by this encoder.
-	pub fn with_variant_encoder(&mut self, enc: Enc) -> &mut Self {
-		self.enc = enc;
 		self
 	}
 }
@@ -391,25 +412,58 @@ impl<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
 	}
 }
 
-impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc> Encoder<Db, LinVariant>
+impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc> Encoder<Db, Cardinality>
+	for StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+where
+	Db: ClauseDatabase + ?Sized,
+	CardEnc: Encoder<Db, Cardinality>,
+{
+	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
+		self.card_enc.encode(db, con)
+	}
+}
+
+impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc> Encoder<Db, CardinalityOne>
+	for StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+where
+	Db: ClauseDatabase + ?Sized,
+	AmoEnc: Encoder<Db, CardinalityOne>,
+{
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.amo_enc.encode(db, con)
+	}
+}
+
+impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc> Encoder<Db, Count>
+	for StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+where
+	Db: ClauseDatabase + ?Sized,
+	CountEnc: Encoder<Db, Count>,
+{
+	fn encode(&self, db: &mut Db, con: &Count) -> Result {
+		self.count_enc.encode(db, con)
+	}
+}
+
+impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc> Encoder<Db, NormalizedBoolLinear>
+	for StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+where
+	Db: ClauseDatabase + ?Sized,
+	BoolLinEnc: Encoder<Db, NormalizedBoolLinear>,
+{
+	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
+		self.bool_lin_enc.encode(db, con)
+	}
+}
+
+impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc> Encoder<Db, NormalizedIntLinear>
 	for StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
 where
 	Db: ClauseDatabase + ?Sized,
 	LinEnc: Encoder<Db, NormalizedIntLinear>,
-	BoolLinEnc: Encoder<Db, NormalizedBoolLinear>,
-	CardEnc: Encoder<Db, Cardinality>,
-	AmoEnc: Encoder<Db, CardinalityOne>,
-	CountEnc: Encoder<Db, Count>,
 {
-	fn encode(&self, db: &mut Db, lin: &LinVariant) -> Result {
-		match &lin {
-			LinVariant::BoolLinear(lin) => self.bool_lin_enc.encode(db, lin),
-			LinVariant::Linear(lin) => self.lin_enc.encode(db, lin),
-			LinVariant::Cardinality(card) => self.card_enc.encode(db, card),
-			LinVariant::CardinalityOne(amo) => self.amo_enc.encode(db, amo),
-			LinVariant::Count(count) => self.count_enc.encode(db, count),
-			LinVariant::Trivial => Ok(()),
-		}
+	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
+		self.lin_enc.encode(db, con)
 	}
 }
 

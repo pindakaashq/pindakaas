@@ -56,19 +56,6 @@ pub(crate) struct BinaryEncoding {
 	min: Coeff,
 }
 
-/// How far a decomposition should narrow the domains of the variables it
-/// makes, before the constraints between them are encoded.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Consistency {
-	/// Leave the domains as they are.
-	#[default]
-	None,
-	/// Narrow each domain to the bounds its constraints imply.
-	Bounds,
-	/// Narrow each domain to the values its constraints imply, holes and all.
-	Domain,
-}
-
 /// The direct encoding of an integer variable.
 ///
 /// One literal per domain value, with exactly one holding. Supplied literals
@@ -407,7 +394,7 @@ impl DirectEncoding {
 	/// Create a direct encoding from the literals it is already on, one for
 	/// each value of `domain` in order.
 	pub(crate) fn from_literals(domain: &RangeList<Coeff>, x: Vec<Lit>) -> Self {
-		debug_assert_eq!(
+		assert_eq!(
 			x.len(),
 			domain.card().unwrap(),
 			"a direct encoding has a literal for every value"
@@ -624,11 +611,11 @@ impl IntVar {
 	/// Check that bits given for this variable can hold its domain and no more.
 	fn check_bits(&self, bits: &[BoolVal], min: Coeff) {
 		let domain = &self.0.borrow().domain;
-		debug_assert!(
+		assert!(
 			min <= *domain.min().unwrap(),
 			"a binary encoding counts up from {min}, which is past the domain it is for"
 		);
-		debug_assert_eq!(
+		assert_eq!(
 			bits.len(),
 			BinaryEncoding::required_bits(*domain.max().unwrap() - min),
 			"a binary encoding has the bits its domain needs and no more"
@@ -1583,7 +1570,7 @@ impl OrderEncoding {
 	/// An encoding on literals already created, one for each value of `domain`
 	/// beyond the first, in order.
 	pub(crate) fn from_literals(domain: &RangeList<Coeff>, x: Vec<Lit>) -> Self {
-		debug_assert_eq!(
+		assert_eq!(
 			x.len() + 1,
 			domain.card().unwrap(),
 			"an order encoding has a literal for every value but the first"

@@ -47,11 +47,6 @@ impl From<&IntTernary> for IntLinear {
 }
 
 impl IntTernary {
-	/// The two terms that are added together.
-	pub fn addends(&self) -> (&Term, &Term) {
-		(&self.x, &self.y)
-	}
-
 	/// The comparator of the constraint.
 	pub fn cmp(&self) -> Comparator {
 		self.cmp
@@ -76,10 +71,5 @@ impl IntTernary {
 	/// ```
 	pub fn new(x: Term, y: Term, cmp: Comparator, z: Term) -> Self {
 		Self { x, y, cmp, z }
-	}
-
-	/// The term they are compared against.
-	pub fn total(&self) -> &Term {
-		&self.z
 	}
 }

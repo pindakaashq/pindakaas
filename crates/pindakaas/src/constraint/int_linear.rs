@@ -30,14 +30,13 @@ macro_rules! decompose_setters {
 			self
 		}
 
-		/// Select the domain consistency applied before decomposition; bounds is
-		/// the default.
+		/// Narrow the domains to the bounds the constraint implies before
+		/// decomposing it; enabled by default.
 		///
-		/// Narrowing the domains is what keeps the intermediate sums of a
-		/// decomposition small, and turning it off can cost several times the
-		/// clauses.
-		pub fn with_propagation(&mut self, c: $crate::decision::integer::Consistency) -> &mut Self {
-			self.config.propagation = c;
+		/// Narrowing is what keeps the intermediate sums of a decomposition
+		/// small, and turning it off can cost several times the clauses.
+		pub fn with_propagation(&mut self, b: bool) -> &mut Self {
+			self.config.propagation = b;
 			self
 		}
 	};
@@ -59,7 +58,7 @@ use crate::{
 		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 		linear::{Comparator, LimitComp, PosCoeff},
 	},
-	decision::integer::{Consistency, IntVar},
+	decision::integer::IntVar,
 	encoder::adder::AdderEncoder,
 	helpers::{div_ceil, div_floor, new_named_lit},
 	BoolVal, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable,
@@ -84,7 +83,7 @@ pub(crate) trait Decompose {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct DecomposeConfig {
 	pub(crate) consistency: bool,
-	pub(crate) propagation: Consistency,
+	pub(crate) propagation: bool,
 	pub(crate) cutoff: Option<Coeff>,
 }
 
@@ -263,7 +262,7 @@ impl DecomposeConfig {
 	/// The encoder of the pieces a constraint is decomposed into.
 	pub(crate) fn encoder(&self) -> IntTernaryEncoder {
 		IntTernaryEncoder::with_config(IntTernaryConfig {
-			propagate: self.propagation != Consistency::None,
+			propagate: self.propagation,
 			cutoff: self.cutoff,
 		})
 	}
@@ -278,7 +277,7 @@ impl Default for DecomposeConfig {
 	fn default() -> Self {
 		Self {
 			consistency: false,
-			propagation: Consistency::Bounds,
+			propagation: true,
 			cutoff: None,
 		}
 	}

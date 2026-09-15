@@ -160,7 +160,7 @@ mod tests {
 	linear_test_suite!(totalizer_encoder, TotalizerEncoder::default());
 
 	linear_test_suite!(
-		totalizer_encoder_prop_doms,
-		TotalizerEncoder::default().with_propagation(crate::decision::integer::Consistency::Domain)
+		totalizer_encoder_no_prop,
+		TotalizerEncoder::default().with_propagation(false)
 	);
 }
