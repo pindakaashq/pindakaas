@@ -29,11 +29,14 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
-		int_linear::{sum_values, term_max, term_min, Decompose, NormalizedIntLinear},
-		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
+		int_linear::{
+			decompose_setters, sum_values, term_max, term_min, Decompose, DecomposeConfig,
+			NormalizedIntLinear,
+		},
+		int_ternary::IntTernary,
 		linear::Comparator,
 	},
-	decision::integer::{Consistency, IntVar},
+	helpers::fold_pairwise,
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 
@@ -56,48 +59,13 @@ use crate::{
 /// TotalizerEncoder::default().encode(&mut f, &con)?;
 /// # Ok::<(), pindakaas::Unsatisfiable>(())
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct TotalizerEncoder {
-	add_consistency: bool,
-	add_propagation: Consistency,
-	cutoff: Option<Coeff>,
+	config: DecomposeConfig,
 }
 
 impl TotalizerEncoder {
-	/// The encoder of the pieces this one decomposes a constraint into.
-	fn encoder(&self) -> IntTernaryEncoder {
-		IntTernaryEncoder::with_config(IntTernaryConfig {
-			propagate: self.add_propagation != Consistency::None,
-			cutoff: self.cutoff,
-		})
-	}
-
-	/// Enable independent domain constraints for newly created intermediate
-	/// views.
-	///
-	/// Disabled by default. Enables standalone binary and direct consistency
-	/// clauses; order-encoding implication chains remain mandatory.
-	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_consistency = b;
-		self
-	}
-
-	/// Set the domain size at which an unencoded variable prefers binary.
-	///
-	/// `None` (the default) prefers order; existing binary or order views take
-	/// precedence. The threshold is inclusive. Binary arithmetic can weaken
-	/// unit propagation; see the [encoding overview](crate::encoder).
-	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
-		self.cutoff = c;
-		self
-	}
-
-	/// Select the domain consistency applied before decomposition; bounds is
-	/// the default.
-	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
-		self.add_propagation = c;
-		self
-	}
+	decompose_setters!();
 }
 
 impl Decompose for TotalizerEncoder {
@@ -117,58 +85,28 @@ impl Decompose for TotalizerEncoder {
 		let mut cons = Vec::new();
 		// Heuristic: start from the narrowest, so the wide terms meet late and
 		// the intermediates below them stay small.
-		let mut layer = con
-			.terms()
-			.iter()
-			.map(|(c, x)| (**c, x.clone()))
+		let leaves = con
+			.signed_terms()
 			.sorted_by_key(|t| term_max(t) - term_min(t))
 			.collect_vec();
 
-		while layer.len() > 1 {
-			let at_root = layer.len() == 2;
-			let mut next = Vec::with_capacity(layer.len().div_ceil(2));
-			for (i, pair) in layer.chunks(2).enumerate() {
-				match pair {
-					[t] => next.push(t.clone()),
-					[left, right] => {
-						let domain: RangeList<Coeff> = if at_root {
-							RangeList::from(k..=k)
-						} else {
-							sum_values(left, right, k)
-						};
-						if domain.is_empty() {
-							return Err(Unsatisfiable);
-						}
-						let parent = IntVar::new(domain)
-							.enforce_consistency(self.add_consistency)
-							.with_label(format_args!("t{i}"));
-						cons.push(IntTernary::new(
-							left.clone(),
-							right.clone(),
-							cmp,
-							(1, parent.clone()),
-						));
-						next.push((1, parent));
-					}
-					_ => unreachable!("terms are taken two at a time"),
-				}
+		let _ = fold_pairwise(leaves, |i, at_root, left, right| {
+			let domain: RangeList<Coeff> = if at_root {
+				RangeList::from(k..=k)
+			} else {
+				sum_values(&left, &right, k)
+			};
+			if domain.is_empty() {
+				return Err(Unsatisfiable);
 			}
-			layer = next;
-		}
+			let parent = self
+				.config
+				.intermediate(domain)
+				.with_label(format_args!("t{i}"));
+			cons.push(IntTernary::new(left, right, cmp, (1, parent.clone())));
+			Ok((1, parent))
+		})?;
 		Ok(cons)
-	}
-}
-
-impl Default for TotalizerEncoder {
-	/// Narrowing the domains before encoding is worth doing: it is what keeps
-	/// the intermediate sums of a decomposition small, and turning it off can
-	/// cost several times the clauses.
-	fn default() -> Self {
-		Self {
-			add_consistency: false,
-			add_propagation: Consistency::Bounds,
-			cutoff: None,
-		}
 	}
 }
 
@@ -192,10 +130,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for TotalizerEncoder {
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedBoolLinear> for TotalizerEncoder
-where
-	Db: ClauseDatabase + ?Sized,
-{
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for TotalizerEncoder {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
@@ -211,7 +146,7 @@ where
 		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		self.encoder().encode_decomposed(db, con, self)
+		self.config.encoder().encode_decomposed(db, con, self)
 	}
 }
 
@@ -223,11 +158,6 @@ mod tests {
 		totalizer_encoder_card1, TotalizerEncoder::default()
 	}
 	linear_test_suite!(totalizer_encoder, TotalizerEncoder::default());
-
-	linear_test_suite!(
-		totalizer_encoder_prop_bounds,
-		TotalizerEncoder::default().with_propagation(crate::decision::integer::Consistency::Bounds)
-	);
 
 	linear_test_suite!(
 		totalizer_encoder_prop_doms,

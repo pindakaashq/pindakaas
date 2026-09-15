@@ -38,11 +38,14 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
-		int_linear::{term_max, term_values, Decompose, NormalizedIntLinear, Term},
-		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
+		int_linear::{
+			decompose_setters, term_max, term_values, Decompose, DecomposeConfig,
+			NormalizedIntLinear, Term,
+		},
+		int_ternary::IntTernary,
 		linear::{Comparator, LimitComp},
 	},
-	decision::integer::{Consistency, IntVar},
+	decision::integer::IntVar,
 	helpers::new_named_lit,
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
@@ -71,27 +74,15 @@ use crate::{
 /// WatchdogEncoder::default().encode(&mut f, &con)?;
 /// # Ok::<(), pindakaas::Unsatisfiable>(())
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct WatchdogEncoder {
-	add_consistency: bool,
-	add_propagation: Consistency,
-	cutoff: Option<Coeff>,
+	config: DecomposeConfig,
 	local: bool,
-}
-
-/// The variable `⌊x / 2⌋`, which reaches `w` exactly when `x` reaches `2·w`.
-///
-/// Its literals are `x`'s, every other one, so halving costs nothing.
-fn halved<Db: ClauseDatabase + ?Sized>(db: &mut Db, x: &IntVar) -> Result<IntVar, Unsatisfiable> {
-	let walk = (0..=(x.max() / 2))
-		.map(|w| Ok((w, x.lit_at_least(db, 2 * w)?)))
-		.collect::<Result<Vec<_>, Unsatisfiable>>()?;
-	IntVar::from_order_walk(db, walk).map(|h| h.with_label(format_args!("{}/2", x.label())))
 }
 
 impl WatchdogEncoder {
 	/// A variable over `0..=1` saying whether `2ʳ` is part of what the term is
-	/// worth.
+	/// worth, given the values the term can take.
 	///
 	/// One value of the term setting that digit is a literal already; several
 	/// need one of their own, implied by each of them. Only the implication is
@@ -100,11 +91,13 @@ impl WatchdogEncoder {
 	fn digit_of<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		term: &Term,
+		values: &[Coeff],
 		r: u32,
 		_label: &str,
 	) -> Result<Option<IntVar>, Unsatisfiable> {
-		let set = term_values(term)
-			.into_iter()
+		let set = values
+			.iter()
+			.copied()
 			.filter(|&v| v > 0 && (v >> r) & 1 == 1)
 			.collect_vec();
 		let Some((&first, rest)) = set.split_first() else {
@@ -127,14 +120,6 @@ impl WatchdogEncoder {
 			db,
 			[(0, BoolVal::Const(true)), (1, digit)],
 		)?))
-	}
-
-	/// The encoder of the pieces this one decomposes a constraint into.
-	fn encoder(&self) -> IntTernaryEncoder {
-		IntTernaryEncoder::with_config(IntTernaryConfig {
-			propagate: self.add_propagation != Consistency::None,
-			cutoff: self.cutoff,
-		})
 	}
 
 	/// Count `leaves` into one variable, held to `cap`.
@@ -167,8 +152,9 @@ impl WatchdogEncoder {
 				if lb > ub {
 					return Err(Unsatisfiable);
 				}
-				let z = IntVar::new(lb..=ub)
-					.enforce_consistency(self.add_consistency)
+				let z = self
+					.config
+					.intermediate(lb..=ub)
 					.with_label(format_args!("{_label}_{i}"));
 				cons.push(IntTernary::new(
 					(1, x),
@@ -193,10 +179,10 @@ impl WatchdogEncoder {
 	/// the bound leaves them, since a count past that is a sum that has already
 	/// broken it; under one they are left alone and only the top count is
 	/// spoken about, in a clause the guard can satisfy instead.
-	fn watchdog<Db: ClauseDatabase + ?Sized>(
+	fn watchdog<'a, Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
-		terms: &[Term],
+		terms: impl Iterator<Item = &'a Term>,
 		k: Coeff,
 		guard: Option<BoolVal>,
 		cons: &mut Vec<IntTernary>,
@@ -209,7 +195,7 @@ impl WatchdogEncoder {
 				None => Err(Unsatisfiable),
 			};
 		}
-		let terms = terms.iter().filter(|t| term_max(t) > 0).collect_vec();
+		let terms = terms.filter(|t| term_max(t) > 0).collect_vec();
 		let sum: Coeff = terms.iter().map(|t| term_max(t)).sum();
 		if sum <= k {
 			// The bound cannot be passed however the terms fall.
@@ -225,6 +211,7 @@ impl WatchdogEncoder {
 		// the watchdog is read on.
 		let pad = ((1 << p) - ((k + 1) % (1 << p))) % (1 << p);
 		let total = k + 1 + pad;
+		let values = terms.iter().map(|t| term_values(t)).collect_vec();
 
 		let mut carried: Option<IntVar> = None;
 		for r in 0..=p {
@@ -239,8 +226,8 @@ impl WatchdogEncoder {
 			if (pad >> r) & 1 == 1 {
 				leaves.push(IntVar::new(1..=1));
 			}
-			for (i, term) in terms.iter().enumerate() {
-				if let Some(digit) = Self::digit_of(db, term, r, &format!("d{i}"))? {
+			for (i, (term, values)) in terms.iter().zip(&values).enumerate() {
+				if let Some(digit) = Self::digit_of(db, term, values, r, &format!("d{i}"))? {
 					leaves.push(digit);
 				}
 			}
@@ -250,13 +237,14 @@ impl WatchdogEncoder {
 				Some(below) => {
 					// Half of the count below, which is a view on its literals
 					// rather than a variable of its own.
-					let half = halved(db, &below)?;
+					let half = IntVar::halved(db, &below)?;
 					let (lb, ub) = (count.min() + half.min(), min(count.max() + half.max(), cap));
 					if lb > ub {
 						return Err(Unsatisfiable);
 					}
-					let sum = IntVar::new(lb..=ub)
-						.enforce_consistency(self.add_consistency)
+					let sum = self
+						.config
+						.intermediate(lb..=ub)
 						.with_label(format_args!("s{r}"));
 					cons.push(IntTernary::new(
 						(1, count),
@@ -288,43 +276,23 @@ impl WatchdogEncoder {
 		cons: &mut Vec<IntTernary>,
 	) -> Result<(), Unsatisfiable> {
 		if !self.local {
-			return self.watchdog(db, terms, k, None, cons);
+			return self.watchdog(db, terms.iter(), k, None, cons);
 		}
 		for (i, term) in terms.iter().enumerate() {
-			let rest = terms
-				.iter()
-				.enumerate()
-				.filter(|&(j, _)| j != i)
-				.map(|(_, t)| t.clone())
-				.collect_vec();
 			for v in term_values(term) {
 				if v <= 0 {
 					continue;
 				}
 				let guard = !term.1.lit_equals(db, v / term.0)?;
-				self.watchdog(db, &rest, k - v, Some(guard), cons)?;
+				let rest = terms
+					.iter()
+					.enumerate()
+					.filter(|&(j, _)| j != i)
+					.map(|(_, t)| t);
+				self.watchdog(db, rest, k - v, Some(guard), cons)?;
 			}
 		}
 		Ok(())
-	}
-
-	/// Independent domain constraints for newly created intermediate views.
-	///
-	/// Disabled by default. Enables standalone binary and direct consistency
-	/// clauses; order-encoding implication chains remain mandatory.
-	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_consistency = b;
-		self
-	}
-
-	/// The domain size at which an unencoded variable prefers binary.
-	///
-	/// `None` (the default) prefers order; existing binary or order views take
-	/// precedence. The threshold is inclusive. Binary arithmetic can weaken
-	/// unit propagation; see the [encoding overview](crate::encoder).
-	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
-		self.cutoff = c;
-		self
 	}
 
 	/// Local watchdogs for domain consistency; global is the default.
@@ -338,12 +306,7 @@ impl WatchdogEncoder {
 		self
 	}
 
-	/// Selects domain consistency applied before decomposition; bounds is the
-	/// default.
-	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
-		self.add_propagation = c;
-		self
-	}
+	decompose_setters!();
 }
 
 impl Decompose for WatchdogEncoder {
@@ -357,11 +320,7 @@ impl Decompose for WatchdogEncoder {
 		db: &mut Db,
 		con: &NormalizedIntLinear,
 	) -> Result<Vec<IntTernary>, Unsatisfiable> {
-		let terms = con
-			.terms()
-			.iter()
-			.map(|(c, x)| (**c, x.clone()))
-			.collect_vec();
+		let terms = con.signed_terms().collect_vec();
 		let mut cons = Vec::new();
 		self.watchdogs(db, &terms, con.k(), &mut cons)?;
 		if con.cmp() == LimitComp::Equal {
@@ -379,17 +338,6 @@ impl Decompose for WatchdogEncoder {
 			self.watchdogs(db, &mirrored, k, &mut cons)?;
 		}
 		Ok(cons)
-	}
-}
-
-impl Default for WatchdogEncoder {
-	fn default() -> Self {
-		Self {
-			add_consistency: false,
-			add_propagation: Consistency::Bounds,
-			cutoff: None,
-			local: false,
-		}
 	}
 }
 
@@ -413,10 +361,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for WatchdogEncoder {
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedBoolLinear> for WatchdogEncoder
-where
-	Db: ClauseDatabase + ?Sized,
-{
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for WatchdogEncoder {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
@@ -432,7 +377,7 @@ where
 		tracing::instrument(name = "watchdog_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		self.encoder().encode_decomposed(db, con, self)
+		self.config.encoder().encode_decomposed(db, con, self)
 	}
 }
 

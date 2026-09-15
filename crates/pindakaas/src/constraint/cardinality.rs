@@ -14,19 +14,16 @@ pub use crate::encoder::{
 use crate::{
 	constraint::{
 		cardinality_one::CardinalityOne,
-		int_linear::NormalizedIntLinear,
+		int_linear::{lit_terms, NormalizedIntLinear},
 		linear::{Comparator, LimitComp, PosCoeff},
 	},
-	decision::integer::IntVar,
 	Checker, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation,
 };
 
 /// Every encoder that takes a cardinality or an at-most-one constraint.
 ///
-/// These used to follow from a pair of blanket implementations over marker
-/// traits, which meant nothing said anywhere which encoder took which
-/// constraint. Naming them costs a line each and makes the set something that
-/// can be read, and lost by accident only if this stops compiling.
+/// Listed so that the set can be read in one place, and so that an encoder
+/// losing one of them stops this compiling.
 #[cfg(test)]
 const _: () = {
 	use crate::{
@@ -70,21 +67,13 @@ impl Cardinality {
 		&self,
 		db: &mut Db,
 	) -> Result<NormalizedIntLinear, Unsatisfiable> {
-		let terms = self
-			.lits
-			.iter()
-			.enumerate()
-			.map(|(i, &l)| {
-				IntVar::from_direct_encoding(db, 0..=1, &[!l, l])
-					.map(|x| (PosCoeff::new(1), x.with_label(format_args!("x{i}"))))
-			})
-			.collect::<Result<Vec<_>, _>>()?;
-		Ok(NormalizedIntLinear::new(terms, self.cmp.clone(), self.k))
+		let terms = lit_terms(db, self.lits.iter().map(|&l| (l, PosCoeff::new(1))))?;
+		Ok(NormalizedIntLinear::new(terms, self.cmp, self.k))
 	}
 
 	/// Get the comparator of the cardinality constraint.
 	pub fn comparator(&self) -> Comparator {
-		self.cmp.clone().into()
+		self.cmp.into()
 	}
 
 	/// Iterate over the literals of the cardinality constraint.

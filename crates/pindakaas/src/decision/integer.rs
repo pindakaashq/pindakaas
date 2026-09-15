@@ -870,6 +870,20 @@ impl IntVar {
 		Self::from_order_encoding(db, domain, &literals)
 	}
 
+	/// The variable `⌊x / 2⌋`, which reaches `w` exactly when `x` reaches
+	/// `2·w`.
+	///
+	/// Its literals are `x`'s, every other one, so halving costs nothing.
+	pub(crate) fn halved<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		x: &IntVar,
+	) -> Result<Self, Unsatisfiable> {
+		let walk = (0..=(x.max() / 2))
+			.map(|w| Ok((w, x.lit_at_least(db, 2 * w)?)))
+			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
+		Ok(Self::from_order_walk(db, walk)?.with_label(format_args!("{}/2", x.label())))
+	}
+
 	/// Reports whether the variable has a binary encoding.
 	pub fn has_binary_encoding(&self) -> bool {
 		self.0.borrow().binary.is_some()
@@ -1370,6 +1384,24 @@ impl IntVar {
 	pub(crate) fn set_product(&self, c: Coeff, bits: Vec<BoolVal>) {
 		debug_assert_ne!(c, 1);
 		let _ = self.0.borrow_mut().products.insert(c, bits);
+	}
+
+	/// The variable `x + k`, which reaches `v` exactly when `x` reaches
+	/// `v - k`.
+	///
+	/// Its literals are `x`'s, the domain having only moved along.
+	pub(crate) fn shifted<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		x: &IntVar,
+		k: Coeff,
+	) -> Result<Self, Unsatisfiable> {
+		let walk = x
+			.domain()
+			.iter()
+			.flatten()
+			.map(|v| Ok((v + k, x.lit_at_least(db, v)?)))
+			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
+		Ok(Self::from_order_walk(db, walk)?.with_label(format_args!("{}+{k}", x.label())))
 	}
 
 	/// The value read from the variable's leading encoding.

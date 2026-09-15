@@ -31,8 +31,11 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
-		int_linear::{term_max, term_min, term_values, Decompose, NormalizedIntLinear, Term},
-		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
+		int_linear::{
+			decompose_setters, term_max, term_min, term_values, Decompose, DecomposeConfig,
+			NormalizedIntLinear, Term,
+		},
+		int_ternary::IntTernary,
 		linear::Comparator,
 	},
 	decision::integer::IntVar,
@@ -61,8 +64,7 @@ use crate::{
 /// # Ok::<(), pindakaas::Unsatisfiable>(())
 /// ```
 pub struct DecisionDiagramEncoder {
-	add_consistency: bool,
-	cutoff: Option<Coeff>,
+	config: DecomposeConfig,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,13 +132,16 @@ impl DecisionDiagramEncoder {
 			"layers must be sorted and non-overlapping"
 		);
 
-		let _ = Self::diagram(0, xs, 0, &mut ws);
+		let values = xs.iter().map(term_values).collect_vec();
+		let _ = Self::diagram(0, &values, 0, &mut ws);
 		ws
 	}
 
+	/// The node of layer `i` reached with partial sum `sum`, given the values
+	/// each term can take.
 	fn diagram(
 		i: usize,
-		xs: &[Term],
+		values: &[Vec<Coeff>],
 		sum: Coeff,
 		ws: &mut Vec<Vec<(Range<Coeff>, DiagramNode)>>,
 	) -> (Range<Coeff>, DiagramNode) {
@@ -152,9 +157,9 @@ impl DecisionDiagramEncoder {
 			return ws[i][pos].clone();
 		}
 
-		let views = term_values(&xs[i])
-			.into_iter()
-			.map(|v| (v, Self::diagram(i + 1, xs, sum + v, ws)))
+		let views = values[i]
+			.iter()
+			.map(|&v| (v, Self::diagram(i + 1, values, sum + v, ws)))
 			.collect_vec();
 
 		// TODO could we check whether a domain value of x always leads to gaps?
@@ -197,35 +202,7 @@ impl DecisionDiagramEncoder {
 		(interval, node)
 	}
 
-	/// Enable independent domain constraints for newly created intermediate
-	/// views.
-	///
-	/// Disabled by default. Enables standalone binary and direct consistency
-	/// clauses; order-encoding implication chains remain mandatory.
-	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_consistency = b;
-		self
-	}
-
-	/// Set the domain size at which an unencoded variable prefers binary.
-	///
-	/// `None` (the default) prefers order; existing binary or order views take
-	/// precedence. The threshold is inclusive. Binary arithmetic can weaken
-	/// unit propagation; see the [encoding overview](crate::encoder).
-	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
-		self.cutoff = c;
-		self
-	}
-}
-
-impl DecisionDiagramEncoder {
-	/// The encoder of the pieces this one decomposes a constraint into.
-	fn encoder(&self) -> IntTernaryEncoder {
-		IntTernaryEncoder::with_config(IntTernaryConfig {
-			cutoff: self.cutoff,
-			..IntTernaryConfig::default()
-		})
-	}
+	decompose_setters!();
 }
 
 impl Decompose for DecisionDiagramEncoder {
@@ -244,12 +221,7 @@ impl Decompose for DecisionDiagramEncoder {
 	) -> Result<Vec<IntTernary>, Unsatisfiable> {
 		// Heuristic: narrowest first, so a layer tends to agree with the next
 		// from some total upwards and can share its literal.
-		let terms = con
-			.terms()
-			.iter()
-			.map(|(c, x)| (**c, x.clone()))
-			.sorted_by(|a: &Term, b: &Term| term_max(a).cmp(&term_max(b)))
-			.collect_vec();
+		let terms = con.signed_terms().sorted_by_key(term_max).collect_vec();
 		let (cmp, k) = (Comparator::from(con.cmp()), con.k());
 
 		// The nodes of every layer, before any of them is a variable: a total,
@@ -298,7 +270,7 @@ impl Decompose for DecisionDiagramEncoder {
 				})
 				.collect::<Result<Vec<_>, Unsatisfiable>>()?;
 			let y = IntVar::from_order_walk(db, walk)?
-				.enforce_consistency(self.add_consistency)
+				.enforce_consistency(self.config.consistency)
 				.with_label(format_args!("y{i}"));
 			// A total that only this layer tells apart gets a literal of its
 			// own, which nothing else orders against the rest.
@@ -337,10 +309,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for DecisionDiagramEncoder 
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedBoolLinear> for DecisionDiagramEncoder
-where
-	Db: ClauseDatabase + ?Sized,
-{
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for DecisionDiagramEncoder {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
@@ -356,7 +325,7 @@ where
 		tracing::instrument(name = "decision_diagram_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		self.encoder().encode_decomposed(db, con, self)
+		self.config.encoder().encode_decomposed(db, con, self)
 	}
 }
 

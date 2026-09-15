@@ -8,7 +8,7 @@
 pub use crate::encoder::sorting_network::{SortingNetworkEncoder, SortingNetworkStrategy};
 use crate::{
 	constraint::{
-		int_linear::NormalizedIntLinear,
+		int_linear::{lit_terms, NormalizedIntLinear},
 		linear::{LimitComp, PosCoeff},
 	},
 	decision::integer::IntVar,
@@ -56,24 +56,12 @@ impl Count {
 		&self,
 		db: &mut Db,
 	) -> Result<NormalizedIntLinear, Unsatisfiable> {
-		let mut terms = self
-			.lits
-			.iter()
-			.enumerate()
-			.map(|(i, &lit)| {
-				IntVar::from_direct_encoding(db, 0..=1, &[!lit, lit])
-					.map(|x| (PosCoeff::new(1), x.with_label(format_args!("x{i}"))))
-			})
-			.collect::<Result<Vec<_>, _>>()?;
+		let mut terms = lit_terms(db, self.lits.iter().map(|&l| (l, PosCoeff::new(1))))?;
 		// Counting the bound from its far end turns its coefficient positive,
 		// and moves what it was worth into the constant.
 		let k = self.y.min() + self.y.max();
 		terms.push((PosCoeff::new(1), IntVar::mirrored(db, &self.y)?));
-		Ok(NormalizedIntLinear::new(
-			terms,
-			self.cmp.clone(),
-			PosCoeff::new(k),
-		))
+		Ok(NormalizedIntLinear::new(terms, self.cmp, PosCoeff::new(k)))
 	}
 
 	/// Construct a constraint that `lits` add up to `y`, or to at most `y`.

@@ -6,7 +6,6 @@
 //! reachable.
 
 use itertools::Itertools;
-use rangelist::RangeList;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::{
@@ -15,7 +14,7 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::{BitwiseEncoder, CardinalityOne},
 		count::{Count, SortingNetworkEncoder},
-		int_linear::NormalizedIntLinear,
+		int_linear::{lit_terms, NormalizedIntLinear},
 		linear::{AdderEncoder, Comparator, LimitComp, LinVariant, Linear, PosCoeff},
 	},
 	decision::integer::IntVar,
@@ -262,7 +261,7 @@ impl LinAggregator {
 					// to gain by leaving them to the network below.
 					let _ = y.order_encoding(db)?;
 					self.sorted_encoder
-						.encode(db, &Count::new(lits.clone(), cmp.clone(), y.clone()))
+						.encode(db, &Count::new(lits, cmp, y.clone()))
 						.unwrap();
 					int_terms.push((y, *coef));
 				} else {
@@ -281,15 +280,7 @@ impl LinAggregator {
 			)));
 		}
 
-		let mut terms = partition
-			.iter()
-			.enumerate()
-			.map(|(i, &(lit, coef))| {
-				let domain = RangeList::from_elements([0, *coef]);
-				IntVar::from_direct_encoding(db, domain, &[!lit, lit])
-					.map(|x| (PosCoeff::new(1), x.with_label(format_args!("x{i}"))))
-			})
-			.collect::<Result<Vec<_>, _>>()?;
+		let mut terms = lit_terms(db, partition)?;
 		terms.extend(int_terms.into_iter().map(|(x, c)| (PosCoeff::new(c), x)));
 		Ok(LinVariant::Linear(NormalizedIntLinear::new(terms, cmp, k)))
 	}
@@ -540,7 +531,7 @@ mod tests {
 			}
 			LinVariant::Count(count) => Aggregated::Count(
 				count.lits.clone(),
-				count.cmp.clone(),
+				count.cmp,
 				count.y.domain().iter().flatten().collect(),
 			),
 			LinVariant::Trivial => Aggregated::Trivial,

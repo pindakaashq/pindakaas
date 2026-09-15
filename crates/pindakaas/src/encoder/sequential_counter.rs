@@ -25,11 +25,10 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
-		int_linear::{Decompose, NormalizedIntLinear},
-		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
+		int_linear::{decompose_setters, Decompose, DecomposeConfig, NormalizedIntLinear},
+		int_ternary::IntTernary,
 		linear::Comparator,
 	},
-	decision::integer::{Consistency, IntVar},
 	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
 };
 
@@ -52,48 +51,13 @@ use crate::{
 /// SequentialCounterEncoder::default().encode(&mut f, &con)?;
 /// # Ok::<(), pindakaas::Unsatisfiable>(())
 /// ```
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct SequentialCounterEncoder {
-	add_consistency: bool,
-	add_propagation: Consistency,
-	cutoff: Option<Coeff>,
+	config: DecomposeConfig,
 }
 
 impl SequentialCounterEncoder {
-	/// The encoder of the pieces this one decomposes a constraint into.
-	fn encoder(&self) -> IntTernaryEncoder {
-		IntTernaryEncoder::with_config(IntTernaryConfig {
-			propagate: self.add_propagation != Consistency::None,
-			cutoff: self.cutoff,
-		})
-	}
-
-	/// Enable independent domain constraints for newly created intermediate
-	/// views.
-	///
-	/// Disabled by default. Enables standalone binary and direct consistency
-	/// clauses; order-encoding implication chains remain mandatory.
-	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_consistency = b;
-		self
-	}
-
-	/// Set the domain size at which an unencoded variable prefers binary.
-	///
-	/// `None` (the default) prefers order; existing binary or order views take
-	/// precedence. The threshold is inclusive. Binary arithmetic can weaken
-	/// unit propagation; see the [encoding overview](crate::encoder).
-	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
-		self.cutoff = c;
-		self
-	}
-
-	/// Select the domain consistency applied before decomposition; bounds is
-	/// the default.
-	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
-		self.add_propagation = c;
-		self
-	}
+	decompose_setters!();
 }
 
 impl Decompose for SequentialCounterEncoder {
@@ -122,34 +86,19 @@ impl Decompose for SequentialCounterEncoder {
 					_ if i == n => -k..=-k,
 					_ => -k..=0,
 				};
-				IntVar::new(domain)
-					.enforce_consistency(self.add_consistency)
+				self.config
+					.intermediate(domain)
 					.with_label(format_args!("y{i}"))
 			})
 			.collect_vec();
 
 		Ok(con
-			.terms()
-			.iter()
-			.map(|(c, x)| (**c, x.clone()))
+			.signed_terms()
 			.zip(totals.iter().tuple_windows())
 			.map(|(x, (carried, left))| {
 				IntTernary::new(x, (1, left.clone()), cmp, (1, carried.clone()))
 			})
 			.collect())
-	}
-}
-
-impl Default for SequentialCounterEncoder {
-	/// Narrowing the domains before encoding is worth doing: it is what keeps
-	/// the intermediate sums of a decomposition small, and turning it off can
-	/// cost several times the clauses.
-	fn default() -> Self {
-		Self {
-			add_consistency: false,
-			add_propagation: Consistency::Bounds,
-			cutoff: None,
-		}
 	}
 }
 
@@ -173,10 +122,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SequentialCounterEncode
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedBoolLinear> for SequentialCounterEncoder
-where
-	Db: ClauseDatabase + ?Sized,
-{
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for SequentialCounterEncoder {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
@@ -192,7 +138,7 @@ where
 		tracing::instrument(name = "sequential_counter_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		self.encoder().encode_decomposed(db, con, self)
+		self.config.encoder().encode_decomposed(db, con, self)
 	}
 }
 

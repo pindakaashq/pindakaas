@@ -36,7 +36,7 @@ where
 impl CardinalityOne {
 	/// Get the comparator of the cardinality constraint.
 	pub fn comparator(&self) -> Comparator {
-		self.cmp.clone().into()
+		self.cmp.into()
 	}
 
 	/// Iterate over the literals of the cardinality constraint.

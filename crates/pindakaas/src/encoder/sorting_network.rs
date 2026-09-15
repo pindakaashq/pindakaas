@@ -72,34 +72,6 @@ pub enum SortingNetworkStrategy {
 
 type StrategyCache = FxHashMap<(u128, u128, u128), (SortingNetworkStrategy, (u128, u128))>;
 
-/// The variable `⌊x / 2⌋`, which reaches `w` exactly when `x` reaches `2·w`.
-///
-/// Its literals are `x`'s, every other one, so halving costs nothing.
-fn halved<Db: ClauseDatabase + ?Sized>(db: &mut Db, x: &IntVar) -> Result<IntVar, Unsatisfiable> {
-	let max = x.max() / 2;
-	let walk = (0..=max)
-		.map(|w| Ok((w, x.lit_at_least(db, 2 * w)?)))
-		.collect::<Result<Vec<_>, Unsatisfiable>>()?;
-	Ok(IntVar::from_order_walk(db, walk)?.with_label(format_args!("{}/2", x.label())))
-}
-
-/// The variable `x + k`, which reaches `v` exactly when `x` reaches `v - k`.
-///
-/// Its literals are `x`'s, the domain having only moved along.
-fn shifted<Db: ClauseDatabase + ?Sized>(
-	db: &mut Db,
-	x: &IntVar,
-	k: Coeff,
-) -> Result<IntVar, Unsatisfiable> {
-	let walk = x
-		.domain()
-		.iter()
-		.flatten()
-		.map(|v| Ok((v + k, x.lit_at_least(db, v)?)))
-		.collect::<Result<Vec<_>, Unsatisfiable>>()?;
-	Ok(IntVar::from_order_walk(db, walk)?.with_label(format_args!("{}+{k}", x.label())))
-}
-
 impl SortingNetworkEncoder {
 	/// One step of a merge: what `x` and `y` reach between them, `z` reaches.
 	fn comp<Db>(
@@ -128,13 +100,6 @@ impl SortingNetworkEncoder {
 		Ok(())
 	}
 
-	/// Configures whether intermediate variables are constrained independently
-	/// of the merge.
-	pub fn enable_intermediate_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_consistency = b;
-		self
-	}
-
 	/// Constrain `z` to be what `x` and `y` come to together.
 	///
 	/// A variable with a single value has nothing to merge, and merging it
@@ -142,36 +107,20 @@ impl SortingNetworkEncoder {
 	/// once any of the three is fixed, the constraint is stated outright. The
 	/// two inputs are checked alike even though the corpus only exercises the
 	/// first: the alternative to a redundant check here is a hang.
-	fn merge<Db>(
-		&self,
-		db: &mut Db,
-		x: &IntVar,
-		y: &IntVar,
-		cmp: &LimitComp,
-		z: &IntVar,
-		lvl: usize,
-	) -> Result
+	fn merge<Db>(&self, db: &mut Db, x: &IntVar, y: &IntVar, cmp: &LimitComp, z: &IntVar) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
 		if x.card() == 1 || y.card() == 1 || z.card() == 1 {
 			self.ternary(db, x, y, cmp, z)
 		} else {
-			self.merged(db, x, y, cmp, z, lvl)
+			self.merged(db, x, y, cmp, z)
 		}
 	}
 
 	/// Merge `x` and `y` into `z` a bit at a time, or state the addition
 	/// outright where that is cheaper.
-	fn merged<Db>(
-		&self,
-		db: &mut Db,
-		x: &IntVar,
-		y: &IntVar,
-		cmp: &LimitComp,
-		z: &IntVar,
-		lvl: usize,
-	) -> Result
+	fn merged<Db>(&self, db: &mut Db, x: &IntVar, y: &IntVar, cmp: &LimitComp, z: &IntVar) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
@@ -192,15 +141,15 @@ impl SortingNetworkEncoder {
 				} else if a == 1 && b == 1 && c <= 2 {
 					self.smerge(db, x, y, cmp, z)
 				} else {
-					let (x_floor, y_floor) = (halved(db, x)?, halved(db, y)?);
-					let (x_up, y_up) = (shifted(db, x, 1)?, shifted(db, y, 1)?);
-					let (x_ceil, y_ceil) = (halved(db, &x_up)?, halved(db, &y_up)?);
+					let (x_floor, y_floor) = (IntVar::halved(db, x)?, IntVar::halved(db, y)?);
+					let (x_up, y_up) = (IntVar::shifted(db, x, 1)?, IntVar::shifted(db, y, 1)?);
+					let (x_ceil, y_ceil) = (IntVar::halved(db, &x_up)?, IntVar::halved(db, &y_up)?);
 
-					let z_floor = self.sum_var(db, &x_floor, &y_floor, c)?;
-					self.merge(db, &x_floor, &y_floor, cmp, &z_floor, lvl + 1)?;
+					let z_floor = self.sum_var(&x_floor, &y_floor, c);
+					self.merge(db, &x_floor, &y_floor, cmp, &z_floor)?;
 
-					let z_ceil = self.sum_var(db, &x_ceil, &y_ceil, c)?;
-					self.merge(db, &x_ceil, &y_ceil, cmp, &z_ceil, lvl + 1)?;
+					let z_ceil = self.sum_var(&x_ceil, &y_ceil, c);
+					self.merge(db, &x_ceil, &y_ceil, cmp, &z_ceil)?;
 
 					(0..=c).try_for_each(|c| self.comp(db, &z_floor, &z_ceil, cmp, z, c))
 				}
@@ -211,8 +160,7 @@ impl SortingNetworkEncoder {
 		}
 	}
 
-	/// A variable over `0..=max`, or the constant zero where there is nothing
-	/// to count.
+	/// A variable over `0..=max`.
 	fn next_int_var(&self, max: Coeff, label: String) -> IntVar {
 		IntVar::new(0..=max)
 			.enforce_consistency(self.add_consistency)
@@ -226,7 +174,7 @@ impl SortingNetworkEncoder {
 	{
 		// `y` stands in for the half that rounds up, so both sides move along
 		// by one to meet it.
-		let (y, z) = (shifted(db, y, 1)?, shifted(db, z, 1)?);
+		let (y, z) = (IntVar::shifted(db, y, 1)?, IntVar::shifted(db, z, 1)?);
 		self.comp(db, x, &y, cmp, &z, 1)
 	}
 
@@ -238,7 +186,6 @@ impl SortingNetworkEncoder {
 		cmp: &LimitComp,
 		max: Coeff,
 		label: String,
-		lvl: usize,
 	) -> Result<Option<IntVar>, Unsatisfiable>
 	where
 		Db: ClauseDatabase + ?Sized,
@@ -248,21 +195,14 @@ impl SortingNetworkEncoder {
 			[x] => Some(x.clone()),
 			xs => {
 				let y = self.next_int_var(max, label);
-				self.sorted(db, xs, cmp, &y, lvl)?;
+				self.sorted(db, xs, cmp, &y)?;
 				Some(y)
 			}
 		})
 	}
 
 	/// Constrain `y` to count how many of `xs` hold.
-	fn sorted<Db>(
-		&self,
-		db: &mut Db,
-		xs: &[IntVar],
-		cmp: &LimitComp,
-		y: &IntVar,
-		lvl: usize,
-	) -> Result
+	fn sorted<Db>(&self, db: &mut Db, xs: &[IntVar], cmp: &LimitComp, y: &IntVar) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
@@ -282,7 +222,6 @@ impl SortingNetworkEncoder {
 					cmp,
 					min(n as Coeff, y.max()),
 					String::from("y1"),
-					lvl,
 				)?;
 				let y2 = self.sort(
 					db,
@@ -290,10 +229,9 @@ impl SortingNetworkEncoder {
 					cmp,
 					min((xs.len() - n) as Coeff, y.max()),
 					String::from("y2"),
-					lvl,
 				)?;
 				match (y1, y2) {
-					(Some(y1), Some(y2)) => self.merged(db, &y1, &y2, cmp, y, lvl + 1),
+					(Some(y1), Some(y2)) => self.merged(db, &y1, &y2, cmp, y),
 					_ => Ok(()),
 				}
 			}
@@ -307,21 +245,10 @@ impl SortingNetworkEncoder {
 	/// be one past the bound — whenever both inputs and the bound are the same
 	/// odd number. Nothing below reads that value, so dropping it costs
 	/// nothing and saves a few percent of the merge.
-	fn sum_var<Db>(
-		&self,
-		_db: &mut Db,
-		x: &IntVar,
-		y: &IntVar,
-		ub: Coeff,
-	) -> Result<IntVar, Unsatisfiable>
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
-		Ok(
-			IntVar::new((x.min() + y.min())..=min(x.max() + y.max(), ub))
-				.enforce_consistency(self.add_consistency)
-				.with_label(format_args!("{}+{}", x.label(), y.label())),
-		)
+	fn sum_var(&self, x: &IntVar, y: &IntVar, ub: Coeff) -> IntVar {
+		IntVar::new((x.min() + y.min())..=min(x.max() + y.max(), ub))
+			.enforce_consistency(self.add_consistency)
+			.with_label(format_args!("{}+{}", x.label(), y.label()))
 	}
 
 	/// Encode `x + y ≷ z` as the linear constraint it is.
@@ -341,10 +268,17 @@ impl SortingNetworkEncoder {
 			&IntTernary::new(
 				(1, x.clone()),
 				(1, y.clone()),
-				cmp.clone().into(),
+				(*cmp).into(),
 				(1, z.clone()),
 			),
 		)
+	}
+
+	/// Configures whether intermediate variables are constrained independently
+	/// of the merge.
+	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
+		self.add_consistency = b;
+		self
 	}
 
 	/// Selects the merge strategy; the default is
@@ -386,7 +320,7 @@ where
 	fn encode(&self, db: &mut Db, card: &Cardinality) -> Result {
 		let k: Coeff = card.rhs();
 		let y = IntVar::new(k..=k).with_label("k");
-		self.encode(db, &Count::new(card.lits.clone(), card.cmp.clone(), y))
+		self.encode(db, &Count::new(card.lits.clone(), card.cmp, y))
 	}
 }
 
@@ -408,7 +342,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SortingNetworkEncoder {
 			})
 			.collect::<Result<Vec<_>, _>>()?;
 
-		self.sorted(db, &xs, &count.cmp, &count.y, 0)
+		self.sorted(db, &xs, &count.cmp, &count.y)
 	}
 }
 
@@ -473,8 +407,8 @@ impl SortingNetworkStrategy {
 			mem::swap(&mut a, &mut b);
 		}
 		let key = (a, b, c);
-		if cache.contains_key(&key) {
-			return cache[&key].clone();
+		if let Some(cached) = cache.get(&key) {
+			return cached.clone();
 		}
 
 		// TODO safely use floating point for lambda
@@ -501,8 +435,6 @@ impl SortingNetworkStrategy {
 		c: u128,
 		lambda: u32,
 	) -> (u128, u128) {
-		let div_ceil = |a: u128, b: u128| (a - 1 + b) / b;
-
 		match (a, b, c) {
 			(0, 0, _) => (0, 0),
 			(1, 0, _) => unreachable!(),
@@ -511,7 +443,7 @@ impl SortingNetworkStrategy {
 			(1, 1, 2) => (2, 3),
 			(a, b, c) => {
 				let ((_, (v1, c1)), (_, (v2, c2)), (v3, c3)) = (
-					Self::mixed_cost(cache, div_ceil(a, 2), div_ceil(b, 2), c / 2 + 1, lambda),
+					Self::mixed_cost(cache, a.div_ceil(2), b.div_ceil(2), c / 2 + 1, lambda),
 					Self::mixed_cost(cache, a / 2, b / 2, c / 2, lambda),
 					(
 						c - 1,
@@ -717,7 +649,7 @@ mod tests {
 		.iter_lits()
 		.collect_vec();
 		get_sorted_encoder(SortingNetworkStrategy::Recursive)
-			.merge(&mut cnf, &x, &y, &LimitComp::Equal, &z, 0)
+			.merge(&mut cnf, &x, &y, &LimitComp::Equal, &z)
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_2_merged_eq.sol"]);

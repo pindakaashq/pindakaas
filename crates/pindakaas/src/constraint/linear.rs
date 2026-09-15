@@ -43,7 +43,7 @@ pub enum Comparator {
 	GreaterEq,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 /// A comparator limited to `=` or `≤`.
 ///
 /// A `≥` is the same constraint read the other way round, so a normalised

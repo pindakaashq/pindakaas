@@ -143,6 +143,32 @@ pub(crate) const fn div_floor(a: Coeff, b: Coeff) -> Coeff {
 	}
 }
 
+/// Combine `layer` pairwise, a level at a time, until one element is left.
+///
+/// `combine` gets the index of the pair within its level, whether the level is
+/// the root, and the two elements. An element without a partner moves up a
+/// level unchanged. An empty layer gives `None`.
+pub(crate) fn fold_pairwise<T, E>(
+	mut layer: Vec<T>,
+	mut combine: impl FnMut(usize, bool, T, T) -> Result<T, E>,
+) -> Result<Option<T>, E> {
+	while layer.len() > 1 {
+		let at_root = layer.len() == 2;
+		let mut next = Vec::with_capacity(layer.len().div_ceil(2));
+		let mut elems = layer.into_iter();
+		let mut i = 0;
+		while let Some(left) = elems.next() {
+			next.push(match elems.next() {
+				Some(right) => combine(i, at_root, left, right)?,
+				None => left,
+			});
+			i += 1;
+		}
+		layer = next;
+	}
+	Ok(layer.pop())
+}
+
 /// A bit vector multiplied by a power of two, which only moves its bits up.
 pub(crate) fn shifted(bits: &[BoolVal], shift: u32) -> Vec<BoolVal> {
 	std::iter::repeat_n(BoolVal::Const(false), shift as usize)

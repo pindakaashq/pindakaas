@@ -6,8 +6,46 @@
 //! constraint produces one of these, its groups of related terms having become
 //! the integers they encode, so this is where every linear encoder starts.
 
+/// The `with_consistency`, `with_cutoff`, and `with_propagation` setters of an
+/// encoder holding a [`DecomposeConfig`] in its `config` field.
+macro_rules! decompose_setters {
+	() => {
+		/// Enable independent domain constraints for newly created intermediate
+		/// views.
+		///
+		/// Disabled by default. Enables standalone binary and direct consistency
+		/// clauses; order-encoding implication chains remain mandatory.
+		pub fn with_consistency(&mut self, b: bool) -> &mut Self {
+			self.config.consistency = b;
+			self
+		}
+
+		/// Set the domain size at which an unencoded variable prefers binary.
+		///
+		/// `None` (the default) prefers order; existing binary or order views
+		/// take precedence. The threshold is inclusive. Binary arithmetic can
+		/// weaken unit propagation; see the [encoding overview](crate::encoder).
+		pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
+			self.config.cutoff = c;
+			self
+		}
+
+		/// Select the domain consistency applied before decomposition; bounds is
+		/// the default.
+		///
+		/// Narrowing the domains is what keeps the intermediate sums of a
+		/// decomposition small, and turning it off can cost several times the
+		/// clauses.
+		pub fn with_propagation(&mut self, c: $crate::decision::integer::Consistency) -> &mut Self {
+			self.config.propagation = c;
+			self
+		}
+	};
+}
+
 use std::cmp::min;
 
+pub(crate) use decompose_setters;
 use itertools::Itertools;
 use rangelist::RangeList;
 
@@ -16,17 +54,15 @@ pub use crate::encoder::{
 	sequential_counter::SequentialCounterEncoder, totalizer::TotalizerEncoder,
 	watchdog::WatchdogEncoder,
 };
-#[cfg(test)]
-use crate::Lit;
 use crate::{
 	constraint::{
-		int_ternary::IntTernary,
+		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 		linear::{Comparator, LimitComp, PosCoeff},
 	},
-	decision::integer::IntVar,
+	decision::integer::{Consistency, IntVar},
 	encoder::adder::AdderEncoder,
 	helpers::{div_ceil, div_floor, new_named_lit},
-	BoolVal, ClauseDatabase, Coeff, Result, Unsatisfiable,
+	BoolVal, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable,
 };
 
 /// A decomposition into ternary constraints, leaving Boolean views to the
@@ -41,6 +77,15 @@ pub(crate) trait Decompose {
 		db: &mut Db,
 		con: &NormalizedIntLinear,
 	) -> Result<Vec<IntTernary>, Unsatisfiable>;
+}
+
+/// The settings every decomposing encoder shares: how its intermediates are
+/// made, and how the ternary pieces it breaks a constraint into are encoded.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct DecomposeConfig {
+	pub(crate) consistency: bool,
+	pub(crate) propagation: Consistency,
+	pub(crate) cutoff: Option<Coeff>,
 }
 
 /// A linear constraint over integer variables, `Σ cᵢ·xᵢ ≷ k`, with the signs
@@ -124,6 +169,22 @@ pub(crate) fn encode_addition<Db: ClauseDatabase + ?Sized>(
 	Ok(())
 }
 
+/// Each literal as a term worth its coefficient when it holds and nothing
+/// when it does not, which is a direct encoding of the two values already.
+pub(crate) fn lit_terms<Db: ClauseDatabase + ?Sized>(
+	db: &mut Db,
+	lits: impl IntoIterator<Item = (Lit, PosCoeff)>,
+) -> Result<Vec<(PosCoeff, IntVar)>, Unsatisfiable> {
+	lits.into_iter()
+		.enumerate()
+		.map(|(i, (lit, coef))| {
+			let domain = RangeList::from_elements([0, *coef]);
+			IntVar::from_direct_encoding(db, domain, &[!lit, lit])
+				.map(|x| (PosCoeff::new(1), x.with_label(format_args!("x{i}"))))
+		})
+		.collect()
+}
+
 /// The values `x + y` can take, with anything past `ub` dropped.
 ///
 /// The sum of two intervals is an interval, so where neither term's
@@ -196,6 +257,31 @@ pub(crate) fn term_values(t: &Term) -> Vec<Coeff> {
 	// A negative coefficient turns the domain around.
 	vs.sort_unstable();
 	vs
+}
+
+impl DecomposeConfig {
+	/// The encoder of the pieces a constraint is decomposed into.
+	pub(crate) fn encoder(&self) -> IntTernaryEncoder {
+		IntTernaryEncoder::with_config(IntTernaryConfig {
+			propagate: self.propagation != Consistency::None,
+			cutoff: self.cutoff,
+		})
+	}
+
+	/// A variable over `domain` for an intermediate of the decomposition.
+	pub(crate) fn intermediate(&self, domain: impl Into<RangeList<Coeff>>) -> IntVar {
+		IntVar::new(domain).enforce_consistency(self.consistency)
+	}
+}
+
+impl Default for DecomposeConfig {
+	fn default() -> Self {
+		Self {
+			consistency: false,
+			propagation: Consistency::Bounds,
+			cutoff: None,
+		}
+	}
 }
 
 impl IntLinear {
@@ -296,8 +382,8 @@ impl IntLinear {
 impl From<&NormalizedIntLinear> for IntLinear {
 	fn from(con: &NormalizedIntLinear) -> Self {
 		Self {
-			terms: con.terms.iter().map(|(c, x)| (**c, x.clone())).collect(),
-			cmp: con.cmp.clone().into(),
+			terms: con.signed_terms().collect(),
+			cmp: con.cmp.into(),
 			k: *con.k,
 		}
 	}
@@ -313,7 +399,7 @@ impl NormalizedIntLinear {
 			return None;
 		}
 		let zero = || (1, IntVar::new(0..=0));
-		let mut terms = self.terms().iter().map(|(c, x)| (**c, x.clone()));
+		let mut terms = self.signed_terms();
 		let (x, y) = (
 			terms.next().unwrap_or_else(zero),
 			terms.next().unwrap_or_else(zero),
@@ -329,7 +415,7 @@ impl NormalizedIntLinear {
 
 	/// Returns the constraint's comparator, which is never `≥`.
 	pub fn cmp(&self) -> LimitComp {
-		self.cmp.clone()
+		self.cmp
 	}
 
 	/// What each term is worth, as the literals standing for it and what each
@@ -358,6 +444,11 @@ impl NormalizedIntLinear {
 			cmp,
 			k,
 		}
+	}
+
+	/// The terms as the plain [`Term`]s a decomposition works with.
+	pub(crate) fn signed_terms(&self) -> impl Iterator<Item = Term> + '_ {
+		self.terms.iter().map(|(c, x)| (**c, x.clone()))
 	}
 
 	/// Returns the sum's terms, each with a positive coefficient.

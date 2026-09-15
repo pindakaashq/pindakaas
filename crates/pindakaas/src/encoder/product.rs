@@ -84,7 +84,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for ProductEncoder
 					db,
 					&CardinalityOne {
 						lits: lits.to_vec(),
-						cmp: card1.cmp.clone(),
+						cmp: card1.cmp,
 					},
 				)?;
 				continue;

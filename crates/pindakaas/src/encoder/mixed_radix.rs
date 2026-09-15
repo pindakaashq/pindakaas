@@ -33,11 +33,15 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
-		int_linear::{sum_values, term_max, term_values, NormalizedIntLinear},
-		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
+		int_linear::{
+			decompose_setters, sum_values, term_max, term_values, DecomposeConfig,
+			NormalizedIntLinear,
+		},
+		int_ternary::IntTernary,
 		linear::{Comparator, LimitComp},
 	},
-	decision::integer::{lex_leq, Consistency, IntVar},
+	decision::integer::{lex_leq, IntVar},
+	helpers::fold_pairwise,
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
 
@@ -62,12 +66,10 @@ use crate::{
 /// MixedRadixEncoder::default().encode(&mut f, &con)?;
 /// # Ok::<(), pindakaas::Unsatisfiable>(())
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct MixedRadixEncoder {
-	add_consistency: bool,
-	add_propagation: Consistency,
+	config: DecomposeConfig,
 	base: Option<Vec<Coeff>>,
-	cutoff: Option<Coeff>,
 }
 
 impl MixedRadixEncoder {
@@ -88,7 +90,7 @@ impl MixedRadixEncoder {
 		}
 		let domain = sum_values(&(1, x.clone()), &(1, y.clone()), ub);
 		let z = self.new_int_var(db, domain, "s")?;
-		self.encoder().encode(
+		self.config.encoder().encode(
 			db,
 			&IntTernary::new(
 				(1, x.clone()),
@@ -180,14 +182,6 @@ impl MixedRadixEncoder {
 		Ok(digits)
 	}
 
-	/// The encoder of the additions this one breaks a constraint into.
-	fn encoder(&self) -> IntTernaryEncoder {
-		IntTernaryEncoder::with_config(IntTernaryConfig {
-			propagate: self.add_propagation != Consistency::None,
-			cutoff: self.cutoff,
-		})
-	}
-
 	/// A coefficient-based radix heuristic; see the module documentation.
 	fn greedy_base(coefs: impl IntoIterator<Item = Coeff>, n: usize, k: Coeff) -> Vec<Coeff> {
 		// Heuristic: bounding trial divisors avoids full factorisation.
@@ -250,7 +244,7 @@ impl MixedRadixEncoder {
 		lex_leq(db, &pairs)
 	}
 
-	/// A variable over `domain`, or a constant where that leaves one value.
+	/// An intermediate over `domain`, which has to hold a value.
 	fn new_int_var<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -261,9 +255,7 @@ impl MixedRadixEncoder {
 			db.contradiction()?;
 			unreachable!()
 		}
-		Ok(IntVar::new(domain)
-			.enforce_consistency(self.add_consistency)
-			.with_label(label))
+		Ok(self.config.intermediate(domain).with_label(label))
 	}
 
 	/// Constrain the value `digits` stands for to be exactly `k`.
@@ -317,7 +309,7 @@ impl MixedRadixEncoder {
 			"q",
 		)?;
 		// The radix is the carry's coefficient, so nothing has to be scaled.
-		self.encoder().encode(
+		self.config.encoder().encode(
 			db,
 			&IntTernary::new(
 				(1, digit.clone()),
@@ -341,31 +333,7 @@ impl MixedRadixEncoder {
 		self
 	}
 
-	/// Independent domain constraints for newly created intermediate views.
-	///
-	/// Disabled by default. Enables standalone binary and direct consistency
-	/// clauses; order-encoding implication chains remain mandatory.
-	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
-		self.add_consistency = b;
-		self
-	}
-
-	/// The domain size at which an unencoded variable prefers binary.
-	///
-	/// `None` (the default) prefers order; existing binary or order views take
-	/// precedence. The threshold is inclusive. Binary arithmetic can weaken
-	/// unit propagation; see the [encoding overview](crate::encoder).
-	pub fn with_cutoff(&mut self, c: Option<Coeff>) -> &mut Self {
-		self.cutoff = c;
-		self
-	}
-
-	/// Set whether to perform additional propagation of the linear constraint
-	/// before encoding the constraint into CNF.
-	pub fn with_propagation(&mut self, c: Consistency) -> &mut Self {
-		self.add_propagation = c;
-		self
-	}
+	decompose_setters!();
 }
 
 impl MixedRadixEncoder {
@@ -392,7 +360,7 @@ impl MixedRadixEncoder {
 			.map(|v| v..=v)
 			.collect();
 		let scaled = self.new_int_var(db, domain, "c")?;
-		self.encoder().encode(
+		self.config.encoder().encode(
 			db,
 			&IntTernary::new(
 				(*c, x.clone()),
@@ -402,17 +370,6 @@ impl MixedRadixEncoder {
 			),
 		)?;
 		Ok(scaled)
-	}
-}
-
-impl Default for MixedRadixEncoder {
-	fn default() -> Self {
-		Self {
-			add_consistency: false,
-			add_propagation: Consistency::Bounds,
-			base: None,
-			cutoff: None,
-		}
 	}
 }
 
@@ -436,10 +393,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for MixedRadixEncoder {
 	}
 }
 
-impl<Db> Encoder<Db, NormalizedBoolLinear> for MixedRadixEncoder
-where
-	Db: ClauseDatabase + ?Sized,
-{
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for MixedRadixEncoder {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
 		let con = con.as_int_linear(db)?;
 		self.encode(db, &con)
@@ -459,9 +413,8 @@ where
 		let base = match &self.base {
 			Some(base) => base.clone(),
 			None => Self::greedy_base(
-				con.terms()
-					.iter()
-					.flat_map(|(c, x)| term_values(&(**c, x.clone())))
+				con.signed_terms()
+					.flat_map(|t| term_values(&t))
 					.filter(|&v| v > 0),
 				con.terms().len(),
 				k,
@@ -471,41 +424,26 @@ where
 
 		// A term is already the one leaf its group comes to, so the widest are
 		// left to meet late.
-		let xs = con
-			.terms()
-			.iter()
-			.map(|(c, x)| (**c, x.clone()))
-			.sorted_by_key(term_max)
-			.collect_vec();
+		let xs = con.signed_terms().sorted_by_key(term_max);
 
 		// Positive coefficients make any partial sum past `k` infeasible.
-		let mut layer = Vec::with_capacity(xs.len());
-		for x in &xs {
-			let ub = min(term_max(x), k);
-			let leaf = self.scaled(db, x, ub)?;
+		let mut layer = Vec::with_capacity(con.terms().len());
+		for x in xs {
+			let ub = min(term_max(&x), k);
+			let leaf = self.scaled(db, &x, ub)?;
 			let digits = self.digits(db, &leaf, &base)?;
 			self.lex_leq(db, &digits, &base, k)?;
 			layer.push((digits, ub));
 		}
 
-		while layer.len() > 1 {
-			let mut next = Vec::with_capacity(layer.len().div_ceil(2));
-			for children in layer.chunks(2) {
-				match children {
-					[x] => next.push(x.clone()),
-					[x, y] => {
-						let ub = min(x.1 + y.1, k);
-						let digits = self.add_nodes(db, &x.0, &y.0, &base, ub)?;
-						self.lex_leq(db, &digits, &base, k)?;
-						next.push((digits, ub));
-					}
-					_ => unreachable!("nodes are taken two at a time"),
-				}
-			}
-			layer = next;
-		}
-
-		let root = layer.pop().map(|(digits, _)| digits).unwrap_or_default();
+		let root = fold_pairwise(layer, |_, _, x, y| {
+			let ub = min(x.1 + y.1, k);
+			let digits = self.add_nodes(db, &x.0, &y.0, &base, ub)?;
+			self.lex_leq(db, &digits, &base, k)?;
+			Ok::<_, Unsatisfiable>((digits, ub))
+		})?
+		.map(|(digits, _)| digits)
+		.unwrap_or_default();
 		match con.cmp() {
 			LimitComp::LessEq => self.lex_leq(db, &root, &base, k),
 			LimitComp::Equal => self.pin(db, &root, &base, k),
