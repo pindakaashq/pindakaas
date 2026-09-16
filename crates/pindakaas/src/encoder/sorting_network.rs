@@ -565,9 +565,8 @@ mod tests {
 			linear::{LimitComp, PosCoeff},
 		},
 		decision::integer::IntVar,
-		helpers::tests::{assert_solutions, expect_file},
-		solver::{cadical::Cadical, SolveResult, Solver},
-		ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Valuation, Var, VarRange,
+		helpers::tests::{assert_solutions, expect_file, models},
+		ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Var, VarRange,
 	};
 
 	/// The smallest case where a merge intermediate reaches one past the
@@ -595,25 +594,9 @@ mod tests {
 			)
 			.unwrap();
 
-		let vars = cnf.get_variables();
-		let mut slv = Cadical::from(&cnf);
-		let mut seen = Vec::new();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			seen.push(lits.iter().map(|&l| value.value(l)).collect_vec());
-			let no_good = vars
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect_vec();
-			if slv.add_clause(no_good).is_err() {
-				break;
-			}
-		}
+		let mut seen = models(&cnf, |value| {
+			lits.iter().map(|&l| value.value(l)).collect_vec()
+		});
 		seen.sort_unstable();
 		seen.dedup();
 

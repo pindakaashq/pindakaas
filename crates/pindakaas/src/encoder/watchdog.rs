@@ -387,11 +387,7 @@ where
 mod tests {
 	use traced_test::test;
 
-	use crate::{
-		helpers::tests::{linear_test_suite, prelude::*},
-		solver::{cadical::Cadical, SolveResult, Solver},
-		Valuation,
-	};
+	use crate::helpers::tests::{linear_test_suite, prelude::*};
 
 	/// Two values of one term setting the same digit need a literal standing
 	/// for the digit, implied by each of them. Only the implication is stated,
@@ -434,25 +430,9 @@ mod tests {
 		);
 		WatchdogEncoder::default().encode(&mut cnf, &con).unwrap();
 
-		let mut seen = Vec::new();
-		let mut slv = Cadical::from(&cnf);
-		let watched = cnf.get_variables();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			seen.push((value.value(a), value.value(b), value.value(c)));
-			let no_good = watched
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect_vec();
-			if slv.add_clause(no_good).is_err() {
-				break;
-			}
-		}
+		let mut seen = models(&cnf, |value| {
+			(value.value(a), value.value(b), value.value(c))
+		});
 		seen.sort();
 		seen.dedup();
 		// Three fits beside the four and five does not, which is only visible

@@ -1730,9 +1730,8 @@ pub(crate) mod tests {
 		decision::integer::{lex_geq_const, lex_leq_const, BinaryEncoding, IntVar, Lead},
 		helpers::{
 			binary_value,
-			tests::{all_binary_solutions, binary_literals, expect_file},
+			tests::{all_binary_solutions, binary_literals, expect_file, models},
 		},
-		solver::{cadical::Cadical, SolveResult, Solver},
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Lit, Valuation,
 	};
 
@@ -2157,27 +2156,9 @@ pub(crate) mod tests {
 		}
 	}
 
-	/// Every model of `cnf`, as the values each of `read` extracts from it.
+	/// Every model of `cnf`, as the values `read` takes from it, in order.
 	fn all_values(cnf: &Cnf, read: &dyn Fn(&dyn Valuation) -> Vec<Coeff>) -> Vec<Vec<Coeff>> {
-		let mut slv = Cadical::from(cnf);
-		let vars = cnf.get_variables();
-		let mut solutions = Vec::new();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			solutions.push(read(&value));
-			let no_good: Vec<_> = vars
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect();
-			if slv.add_clause(no_good).is_err() {
-				break;
-			}
-		}
+		let mut solutions = models(cnf, read);
 		solutions.sort();
 		solutions
 	}

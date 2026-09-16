@@ -324,9 +324,8 @@ mod tests {
 			linear::{Comparator, LimitComp, PosCoeff},
 		},
 		decision::integer::IntVar,
-		helpers::tests::at_most_one_var,
-		solver::{cadical::Cadical, SolveResult, Solver},
-		ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Valuation,
+		helpers::tests::{at_most_one_var, models, models_over},
+		ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit,
 	};
 
 	/// A constraint of two terms is the addition the decomposers would have to
@@ -449,30 +448,14 @@ mod tests {
 			"the group came with a direct encoding and should be read on it"
 		);
 
-		let mut slv = Cadical::from(&cnf);
-		let mut seen = Vec::new();
-		let watched = cnf.get_variables();
-		while let SolveResult::Satisfied(value) = slv.solve() {
+		let mut seen = models(&cnf, |value| {
 			let group: Coeff = lits
 				.iter()
 				.zip([2, 5, 7])
 				.find(|(&l, _)| value.value(l))
 				.map_or(0, |(_, c)| c);
-			seen.push((group, y.value(&value)));
-			let no_good: Vec<_> = watched
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect();
-			if slv.add_clause(no_good).is_err() {
-				break;
-			}
-		}
+			(group, y.value(value))
+		});
 		seen.sort();
 		seen.dedup();
 		let expected: Vec<(Coeff, Coeff)> = [0, 2, 5, 7]
@@ -510,25 +493,16 @@ mod tests {
 					.is_ok();
 				assert!(!x.has_order_encoding(), "read on the group's own literals");
 
-				let mut seen = Vec::new();
-				if ok {
-					let mut slv = Cadical::from(&cnf);
-					while let SolveResult::Satisfied(value) = slv.solve() {
-						seen.push(
-							lits.iter()
-								.zip([2, 5, 7])
-								.find(|(&l, _)| value.value(l))
-								.map_or(0, |(_, c)| c),
-						);
-						let no_good: Vec<_> = lits
-							.iter()
-							.map(|&l| if value.value(l) { !l } else { l })
-							.collect();
-						if slv.add_clause(no_good).is_err() {
-							break;
-						}
-					}
-				}
+				let mut seen = if ok {
+					models_over(&cnf, &lits, |value| {
+						lits.iter()
+							.zip([2, 5, 7])
+							.find(|(&l, _)| value.value(l))
+							.map_or(0, |(_, c)| c)
+					})
+				} else {
+					Vec::new()
+				};
 				seen.sort();
 				seen.dedup();
 				let expected: Vec<Coeff> = [0, 2, 5, 7]
@@ -917,25 +891,9 @@ mod tests {
 		}
 		// Each model is ruled out in turn, so an assignment reachable
 		// more than one way is seen more than once.
-		let vars = cnf.get_variables();
-		let mut slv = Cadical::from(&cnf);
-		let mut solutions = Vec::new();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			solutions.push(xs.iter().map(|x| x.value(&value)).collect_vec());
-			let no_good = vars
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect_vec();
-			if slv.add_clause(no_good).is_err() {
-				break;
-			}
-		}
+		let mut solutions = models(&cnf, |value| {
+			xs.iter().map(|x| x.value(value)).collect_vec()
+		});
 		solutions.sort();
 		solutions.dedup();
 		(solutions, xs)

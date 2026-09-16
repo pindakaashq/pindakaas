@@ -121,8 +121,8 @@ mod tests {
 			SequentialCounterEncoder, TotalizerEncoder,
 		},
 		decision::integer::IntVar,
-		solver::{cadical::Cadical, SolveResult, Solver},
-		ClauseDatabaseTools, Cnf, Encoder, Valuation,
+		helpers::tests::{models, models_over},
+		ClauseDatabaseTools, Cnf, Encoder,
 	};
 
 	/// A bound that can go negative is still counted from zero when the count
@@ -136,26 +136,10 @@ mod tests {
 			let con = Count::new(lits.clone(), cmp.clone(), y.clone());
 			TotalizerEncoder::default().encode(&mut cnf, &con).unwrap();
 
-			let mut seen = Vec::new();
-			let mut slv = Cadical::from(&cnf);
-			let vars = cnf.get_variables();
-			while let SolveResult::Satisfied(sol) = slv.solve() {
+			let mut seen = models(&cnf, |sol| {
 				let n = lits.iter().filter(|&&l| sol.value(l)).count() as i64;
-				seen.push((n, y.value(&sol)));
-				let no_good = vars
-					.map(|v| {
-						let l = v.into();
-						if sol.value(l) {
-							!l
-						} else {
-							l
-						}
-					})
-					.collect_vec();
-				if slv.add_clause(no_good).is_err() {
-					break;
-				}
-			}
+				(n, y.value(sol))
+			});
 			seen.sort_unstable();
 			seen.dedup();
 			let want = (0..=2)
@@ -190,25 +174,10 @@ mod tests {
 				}
 				.unwrap();
 
-				let mut seen = Vec::new();
-				let mut slv = Cadical::from(&cnf);
-				loop {
-					let read = match slv.solve() {
-						SolveResult::Satisfied(sol) => {
-							let n = lits.iter().filter(|&&l| sol.value(l)).count();
-							let vals = lits
-								.iter()
-								.map(|&l| if sol.value(l) { l } else { !l })
-								.collect_vec();
-							(n, y.value(&sol), vals)
-						}
-						_ => break,
-					};
-					seen.push((read.0, read.1));
-					if slv.add_clause(read.2.into_iter().map(|l| !l)).is_err() {
-						break;
-					}
-				}
+				let mut seen = models_over(&cnf, &lits, |sol| {
+					let n = lits.iter().filter(|&&l| sol.value(l)).count();
+					(n, y.value(sol))
+				});
 				seen.sort_unstable();
 				seen.dedup();
 				match &want {

@@ -553,16 +553,10 @@ mod tests {
 				.encode(&mut cnf, &count)
 				.unwrap();
 
-			let mut seen = Vec::new();
-			let mut slv = Cadical::from(&cnf);
-			while let SolveResult::Satisfied(sol) = slv.solve() {
-				let count: Coeff = lits.iter().filter(|&&l| sol.value(l)).count() as Coeff;
-				seen.push((count, y.value(&sol)));
-				let no_good = lits.iter().map(|&l| if sol.value(l) { !l } else { l });
-				if slv.add_clause(no_good).is_err() {
-					break;
-				}
-			}
+			let seen = models_over(&cnf, &lits, |sol| {
+				let count = lits.iter().filter(|&&l| sol.value(l)).count() as Coeff;
+				(count, y.value(sol))
+			});
 			assert!(!seen.is_empty(), "{cmp:?} has solutions");
 			for &(n, v) in &seen {
 				match cmp {
@@ -593,27 +587,7 @@ mod tests {
 		)
 		.unwrap();
 
-		let mut seen = Vec::new();
-		let mut slv = crate::solver::cadical::Cadical::from(&cnf);
-		let vars = cnf.get_variables();
-		while let crate::solver::SolveResult::Satisfied(value) =
-			crate::solver::Solver::solve(&mut slv)
-		{
-			seen.push(x.value(&value));
-			let no_good: Vec<Lit> = vars
-				.map(|v| {
-					let l = v.into();
-					if crate::Valuation::value(&value, l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect();
-			if crate::ClauseDatabaseTools::add_clause(&mut slv, no_good).is_err() {
-				break;
-			}
-		}
+		let mut seen = models(&cnf, |value| x.value(value));
 		seen.sort_unstable();
 		seen.dedup();
 		assert_eq!(seen, (-10..=-5).collect_vec());
@@ -1039,33 +1013,12 @@ mod tests {
 		)
 		.unwrap();
 
-		use crate::{
-			solver::{cadical::Cadical, SolveResult, Solver},
-			Valuation,
-		};
-		let mut slv = Cadical::from(&cnf);
-		let vars = cnf.get_variables();
-		while let crate::solver::SolveResult::Satisfied(value) =
-			crate::solver::Solver::solve(&mut slv)
-		{
+		let _ = models(&cnf, |value| {
 			assert!(
-				Coeff::from(value.value(a)) * 3 + y.value(&value) * 5 <= 11,
+				Coeff::from(value.value(a)) * 3 + y.value(value) * 5 <= 11,
 				"every model of the encoding satisfies the constraint"
 			);
-			let no_good: Vec<Lit> = vars
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect();
-			if slv.add_clause(no_good).is_err() {
-				break;
-			}
-		}
+		});
 	}
 
 	/// The constant of an expression is scaled by its multiplier and flips

@@ -637,25 +637,9 @@ pub(crate) mod tests {
 	/// Every model of `cnf`, each decoded into the values of the given binary
 	/// encodings.
 	pub(crate) fn all_binary_solutions(cnf: &Cnf, xs: &[&[BoolVal]]) -> Vec<Vec<Coeff>> {
-		let mut slv = Cadical::from(cnf);
-		let vars = cnf.get_variables();
-		let mut solutions = Vec::new();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			solutions.push(xs.iter().map(|x| binary_value(x, &value)).collect());
-			let no_good: Vec<Lit> = vars
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect();
-			if slv.add_clause(no_good).is_err() {
-				break;
-			}
-		}
+		let mut solutions = models(cnf, |value| {
+			xs.iter().map(|x| binary_value(x, value)).collect()
+		});
 		solutions.sort();
 		solutions
 	}
@@ -663,22 +647,9 @@ pub(crate) mod tests {
 	/// Helper functions to ensure that the possible solutions of a formula
 	/// abide by the given checker.
 	pub(crate) fn assert_checker(formula: &Cnf, checker: &impl Checker) {
-		let mut slv = Cadical::from(formula);
-		let vars = formula.get_variables();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			assert_eq!(checker.check(&value), Ok(()));
-			let no_good: Vec<Lit> = vars
-				.map(|v| {
-					let l = v.into();
-					if value.value(l) {
-						!l
-					} else {
-						l
-					}
-				})
-				.collect();
-			slv.add_clause(no_good).unwrap();
-		}
+		let _ = models(formula, |value| {
+			assert_eq!(checker.check(value), Ok(()));
+		});
 	}
 
 	/// Simple helper function to assert the generated formula against an expect
@@ -693,30 +664,14 @@ pub(crate) mod tests {
 	pub(crate) fn assert_solutions<V, I>(formula: &Cnf, vars: I, expect: &ExpectFile)
 	where
 		V: Into<Lit>,
-		I: IntoIterator<Item = V> + Clone,
+		I: IntoIterator<Item = V>,
 	{
-		let mut slv = Cadical::from(formula);
-		let mut solutions: Vec<Vec<Lit>> = Vec::new();
-		while let SolveResult::Satisfied(value) = slv.solve() {
-			solutions.push(
-				vars.clone()
-					.into_iter()
-					.map(|v| {
-						let l = v.into();
-						if value.value(l) {
-							l
-						} else {
-							!l
-						}
-					})
-					.collect(),
-			);
-			if let Err(Unsatisfiable) =
-				slv.add_clause(solutions.last().unwrap().iter().map(|&l| !l))
-			{
-				break;
-			};
-		}
+		let lits = vars.into_iter().map(Into::into).collect_vec();
+		let mut solutions = models_over(formula, &lits, |value| {
+			lits.iter()
+				.map(|&l| if value.value(l) { l } else { !l })
+				.collect_vec()
+		});
 		solutions.sort();
 		let sol_str = format!(
 			"{}",
@@ -834,6 +789,40 @@ pub(crate) mod tests {
 		Ok(IntVar::from_order_encoding(db, domain, &lits)?.with_label(label))
 	}
 
+	/// Every model of `cnf`, as what `read` takes from each.
+	///
+	/// A model is ruled out by a no-good over every variable the formula holds,
+	/// so an assignment two encodings reach in different ways is read twice.
+	pub(crate) fn models<T>(cnf: &Cnf, read: impl FnMut(&dyn Valuation) -> T) -> Vec<T> {
+		let lits = cnf.get_variables().map(Lit::from).collect_vec();
+		models_over(cnf, &lits, read)
+	}
+
+	/// Every assignment of `lits` that a model of `cnf` gives, as what `read`
+	/// takes from each.
+	///
+	/// The no-good rules out the assignment of `lits` rather than the whole
+	/// model, so each of them is read once however many models it has.
+	pub(crate) fn models_over<T>(
+		cnf: &Cnf,
+		lits: &[Lit],
+		mut read: impl FnMut(&dyn Valuation) -> T,
+	) -> Vec<T> {
+		let mut slv = Cadical::from(cnf);
+		let mut models = Vec::new();
+		while let SolveResult::Satisfied(value) = slv.solve() {
+			models.push(read(&value));
+			let no_good = lits
+				.iter()
+				.map(|&l| if value.value(l) { !l } else { l })
+				.collect_vec();
+			if slv.add_clause(no_good).is_err() {
+				break;
+			}
+		}
+		models
+	}
+
 	/// Everything the test-suite macros need in scope where they expand.
 	///
 	/// The macros are invoked from other modules, so any path written inside
@@ -858,7 +847,7 @@ pub(crate) mod tests {
 			helpers::tests::{
 				all_binary_solutions, assert_checker, assert_encoding, assert_solutions,
 				at_most_one_var, binary_literals, construct_terms, expect_file,
-				implication_chain_var,
+				implication_chain_var, models, models_over,
 			},
 			BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 		};
