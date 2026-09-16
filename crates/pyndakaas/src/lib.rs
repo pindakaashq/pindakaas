@@ -60,9 +60,9 @@ create_exception! {
 #[pymodule]
 mod pindakaas {
 	use std::{
+		cell::RefCell,
 		fmt::{self, Display},
 		num::NonZeroI32,
-		sync::Mutex,
 	};
 
 	use itertools::Itertools;
@@ -198,8 +198,9 @@ mod pindakaas {
 	struct LinEncoderWrapper {
 		/// Method chosen by the user.
 		method: Option<Encoder>,
-		/// Error message for an invalid choice.
-		error_message: Mutex<Option<PyErr>>,
+		/// The constraint form the choice turned out not to take, which is only
+		/// known once aggregation has said which form the constraint is.
+		unsupported: RefCell<Option<&'static str>>,
 	}
 
 	#[pyclass(from_py_object, unsendable)]
@@ -315,17 +316,14 @@ mod pindakaas {
 
 		match con {
 			ConstraintArg::BoolLin(lin) => {
-				let encoder = LinEncoderWrapper::new(enc);
-				let encoder = LinearEncoder::new(encoder);
+				let encoder = LinearEncoder::new(LinEncoderWrapper::new(enc));
 				encoder.encode_implied(db, &conditions, &lin.0)?;
-				let err = encoder
-					.variant_encoder()
-					.error_message
-					.lock()
-					.unwrap()
-					.take();
-				if let Some(err) = err {
-					return Err(err.into());
+				// Which form the constraint takes is only known once it has
+				// been aggregated, so an encoder that does not take that form
+				// is reported here, once that form has been encoded.
+				let unsupported = encoder.variant_encoder().unsupported.borrow_mut().take();
+				if let Some(con_ty) = unsupported {
+					return invalid_enc(con_ty, enc.unwrap());
 				}
 			}
 			ConstraintArg::Formula(f) => match enc.unwrap_or(Encoder::TSEITIN) {
@@ -753,18 +751,14 @@ mod pindakaas {
 		fn new(method: Option<Encoder>) -> Self {
 			Self {
 				method,
-				error_message: Mutex::new(None),
+				unsupported: RefCell::new(None),
 			}
 		}
 
-		fn set_err(&self, con_ty: &str, enc: Encoder) {
-			let _ = self
-				.error_message
-				.lock()
-				.unwrap()
-				.replace(InvalidEncoder::new_err(format!(
-					"Unable to encode object of type `{con_ty}' using {enc:?}"
-				)));
+		/// Record that the chosen encoder does not take this constraint form,
+		/// for the caller to raise once the encoding is done.
+		fn set_err(&self, con_ty: &'static str) {
+			let _ = self.unsupported.borrow_mut().replace(con_ty);
 		}
 	}
 
@@ -778,8 +772,8 @@ mod pindakaas {
 				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
 				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
-				enc => {
-					self.set_err("Cardinality", enc);
+				_ => {
+					self.set_err("Cardinality");
 					Ok(())
 				}
 			}
@@ -803,8 +797,8 @@ mod pindakaas {
 				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
 				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
-				enc => {
-					self.set_err("CardinalityOne", enc);
+				_ => {
+					self.set_err("CardinalityOne");
 					Ok(())
 				}
 			}
@@ -823,8 +817,8 @@ mod pindakaas {
 				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
 				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
-				enc => {
-					self.set_err("Count", enc);
+				_ => {
+					self.set_err("Count");
 					Ok(())
 				}
 			}
@@ -844,8 +838,8 @@ mod pindakaas {
 				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
 				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
-				enc => {
-					self.set_err("BoolLinear", enc);
+				_ => {
+					self.set_err("BoolLinear");
 					Ok(())
 				}
 			}
@@ -865,8 +859,8 @@ mod pindakaas {
 				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
 				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
-				enc => {
-					self.set_err("Linear", enc);
+				_ => {
+					self.set_err("Linear");
 					Ok(())
 				}
 			}

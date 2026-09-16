@@ -242,6 +242,24 @@ def test_asking_without_building_an_encoding():
     assert x.equals(f, 3, create=False).lit() is not None
 
 
+def test_an_order_encoding_settles_equality_at_the_ends():
+    """Taking the greatest value is reaching it, and the least is not passing it."""
+    from pindakaas.encoding import CNF
+
+    f = CNF()
+    x = f.new_int_var(range(0, 4))
+    assert x.at_least(f, 2).lit() is not None  # builds the order encoding
+    clauses = f.clauses()
+
+    # The order literals answer both ends without a direct encoding.
+    assert x.equals(f, 3, create=False).lit() is not None
+    assert x.equals(f, 0, create=False).lit() is not None
+    assert f.clauses() == clauses
+
+    # Anything between them still needs the direct encoding.
+    assert x.equals(f, 1, create=False) is None
+
+
 def test_a_single_value_domain_settles_equality():
     """One value and no other, so no encoding is needed to say which."""
     from pindakaas.encoding import CNF
