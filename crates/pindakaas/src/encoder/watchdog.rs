@@ -39,7 +39,7 @@ use crate::{
 		cardinality_one::CardinalityOne,
 		count::Count,
 		int_linear::{
-			decompose_setters, term_max, term_values, Decompose, DecomposeConfig,
+			decompose_setters, term_max, term_min, term_values, Decompose, DecomposeConfig,
 			NormalizedIntLinear, Term,
 		},
 		int_ternary::IntTernary,
@@ -187,15 +187,17 @@ impl WatchdogEncoder {
 		guard: Option<BoolVal>,
 		cons: &mut Vec<IntTernary>,
 	) -> Result<(), Unsatisfiable> {
-		if k < 0 {
-			// Nothing can be added to reach a negative bound, so only the
-			// guard can save the constraint.
+		let terms = terms.collect_vec();
+		if terms.iter().map(|t| term_min(t)).sum::<Coeff>() > k {
+			// The terms pass the bound however they fall, so only the guard can
+			// save the constraint.
 			return match guard {
 				Some(g) => db.add_clause([g]),
 				None => Err(Unsatisfiable),
 			};
 		}
-		let terms = terms.filter(|t| term_max(t) > 0).collect_vec();
+		// A term that adds nothing cannot help pass the bound either.
+		let terms = terms.into_iter().filter(|t| term_max(t) > 0).collect_vec();
 		let sum: Coeff = terms.iter().map(|t| term_max(t)).sum();
 		if sum <= k {
 			// The bound cannot be passed however the terms fall.
@@ -488,6 +490,28 @@ mod tests {
 			assert_eq!(cnf.num_clauses(), 0, "local: {local}");
 			assert_eq!(cnf.num_vars(), vars, "local: {local}");
 		}
+	}
+
+	/// A sum that passes its bound however its terms fall is unsatisfiable,
+	/// which is cheaper to say than to encode.
+	#[test]
+	fn a_sum_that_must_pass_its_bound_is_unsatisfiable() {
+		let mut cnf = Cnf::default();
+		let con = NormalizedIntLinear::new(
+			vec![
+				(
+					PosCoeff::new(1),
+					crate::decision::integer::IntVar::new(5..=6),
+				),
+				(
+					PosCoeff::new(1),
+					crate::decision::integer::IntVar::new(5..=6),
+				),
+			],
+			LimitComp::LessEq,
+			PosCoeff::new(3),
+		);
+		assert!(WatchdogEncoder::default().encode(&mut cnf, &con).is_err());
 	}
 
 	/// The point of the watchdog is that a coefficient costs its bit width

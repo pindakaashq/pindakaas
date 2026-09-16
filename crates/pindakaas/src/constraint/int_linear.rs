@@ -103,8 +103,9 @@ pub(crate) struct IntLinear {
 
 /// A linear constraint over integer variables as aggregation leaves it.
 ///
-/// Coefficients are positive, the comparator is `≤` or `=`, and the bound is
-/// nonnegative.
+/// Coefficients are positive, every term counts from zero, the comparator is
+/// `≤` or `=`, and the bound is nonnegative. An encoder may therefore read a
+/// term as what it adds to the sum, never as what it takes away.
 ///
 /// # Examples
 ///
@@ -433,16 +434,24 @@ impl NormalizedIntLinear {
 	}
 
 	/// Construct a normalised integer linear constraint.
+	///
+	/// # Panics
+	///
+	/// A term whose variable can take a negative value. Aggregation counts such
+	/// a term from its least value instead, moving what that is worth into the
+	/// bound, so that what a term adds to the sum is what the bound has left to
+	/// give.
 	pub fn new(
 		terms: impl IntoIterator<Item = (PosCoeff, IntVar)>,
 		cmp: LimitComp,
 		k: PosCoeff,
 	) -> Self {
-		Self {
-			terms: terms.into_iter().collect(),
-			cmp,
-			k,
-		}
+		let terms: Vec<(PosCoeff, IntVar)> = terms.into_iter().collect();
+		assert!(
+			terms.iter().all(|(_, x)| x.min() >= 0),
+			"a normalised constraint counts every term from zero"
+		);
+		Self { terms, cmp, k }
 	}
 
 	/// The terms as the plain [`Term`]s a decomposition works with.
@@ -453,5 +462,30 @@ impl NormalizedIntLinear {
 	/// Returns the sum's terms, each with a positive coefficient.
 	pub fn terms(&self) -> &[(PosCoeff, IntVar)] {
 		&self.terms
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use traced_test::test;
+
+	use crate::{
+		constraint::{
+			int_linear::NormalizedIntLinear,
+			linear::{LimitComp, PosCoeff},
+		},
+		decision::integer::IntVar,
+	};
+
+	/// Every encoder reads a term as what it adds to the sum, so a term that
+	/// could take it away is a constraint aggregation should have shifted.
+	#[test]
+	#[should_panic(expected = "counts every term from zero")]
+	fn a_term_reaching_below_zero_is_rejected() {
+		let _ = NormalizedIntLinear::new(
+			vec![(PosCoeff::new(1), IntVar::new(-1..=3))],
+			LimitComp::LessEq,
+			PosCoeff::new(3),
+		);
 	}
 }

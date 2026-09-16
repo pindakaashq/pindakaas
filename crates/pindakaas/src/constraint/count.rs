@@ -59,8 +59,15 @@ impl Count {
 		let mut terms = lit_terms(db, self.lits.iter().map(|&l| (l, PosCoeff::new(1))))?;
 		// Counting the bound from its far end turns its coefficient positive,
 		// and moves what it was worth into the constant.
-		let k = self.y.min() + self.y.max();
-		terms.push((PosCoeff::new(1), IntVar::mirrored(db, &self.y)?));
+		let mut k = self.y.min() + self.y.max();
+		let mut y = IntVar::mirrored(db, &self.y)?;
+		if y.min() < 0 {
+			// A normalised constraint counts every term from zero, and what the
+			// shift is worth goes to the bound.
+			k -= y.min();
+			y = IntVar::shifted(db, &y, -y.min())?;
+		}
+		terms.push((PosCoeff::new(1), y));
 		Ok(NormalizedIntLinear::new(terms, self.cmp, PosCoeff::new(k)))
 	}
 
@@ -117,6 +124,50 @@ mod tests {
 		solver::{cadical::Cadical, SolveResult, Solver},
 		ClauseDatabaseTools, Cnf, Encoder, Valuation,
 	};
+
+	/// A bound that can go negative is still counted from zero when the count
+	/// is read as a linear constraint.
+	#[test]
+	fn a_negative_bound_is_counted_from_zero() {
+		for cmp in [LimitComp::LessEq, LimitComp::Equal] {
+			let mut cnf = Cnf::default();
+			let lits = (0..2).map(|_| cnf.new_lit()).collect_vec();
+			let y = IntVar::new(-2..=2).with_label("y");
+			let con = Count::new(lits.clone(), cmp.clone(), y.clone());
+			TotalizerEncoder::default().encode(&mut cnf, &con).unwrap();
+
+			let mut seen = Vec::new();
+			let mut slv = Cadical::from(&cnf);
+			let vars = cnf.get_variables();
+			while let SolveResult::Satisfied(sol) = slv.solve() {
+				let n = lits.iter().filter(|&&l| sol.value(l)).count() as i64;
+				seen.push((n, y.value(&sol)));
+				let no_good = vars
+					.map(|v| {
+						let l = v.into();
+						if sol.value(l) {
+							!l
+						} else {
+							l
+						}
+					})
+					.collect_vec();
+				if slv.add_clause(no_good).is_err() {
+					break;
+				}
+			}
+			seen.sort_unstable();
+			seen.dedup();
+			let want = (0..=2)
+				.cartesian_product(-2..=2)
+				.filter(|&(n, v)| match cmp {
+					LimitComp::LessEq => n <= v,
+					LimitComp::Equal => n == v,
+				})
+				.collect_vec();
+			assert_eq!(seen, want, "{cmp:?} over a bound reaching below zero");
+		}
+	}
 
 	/// Every encoder of a count admits the same assignments, whether it states
 	/// the constraint outright or reads it as a linear one.
