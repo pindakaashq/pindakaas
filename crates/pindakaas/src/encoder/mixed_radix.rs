@@ -89,7 +89,7 @@ impl MixedRadixEncoder {
 			return Ok(x.clone());
 		}
 		let domain = sum_values(&(1, x.clone()), &(1, y.clone()), ub);
-		let z = self.new_int_var(db, domain, "s")?;
+		let z = self.new_int_var(domain, "s")?;
 		self.config.encoder().encode(
 			db,
 			&IntTernary::new(
@@ -245,15 +245,10 @@ impl MixedRadixEncoder {
 	}
 
 	/// An intermediate over `domain`, which has to hold a value.
-	fn new_int_var<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-		domain: RangeList<Coeff>,
-		label: &str,
-	) -> Result<IntVar, Unsatisfiable> {
+	fn new_int_var(&self, domain: RangeList<Coeff>, label: &str) -> Result<IntVar, Unsatisfiable> {
 		if domain.is_empty() {
-			db.contradiction()?;
-			unreachable!()
+			// Nothing the digits can stand for, which the caller reports.
+			return Err(Unsatisfiable);
 		}
 		Ok(self.config.intermediate(domain).with_label(label))
 	}
@@ -267,8 +262,9 @@ impl MixedRadixEncoder {
 		k: Coeff,
 	) -> Result {
 		let Some(ks) = Self::const_digits(base, digits.len(), k) else {
-			// `k` is past anything the digits can stand for.
-			return db.contradiction();
+			// `k` is past anything the digits can stand for, so the digits
+			// cannot come to it.
+			return Err(Unsatisfiable);
 		};
 		for (digit, k_j) in digits.iter().zip_eq(ks) {
 			let at_least = digit.lit_at_least(db, k_j)?;
@@ -291,7 +287,6 @@ impl MixedRadixEncoder {
 		}
 		let domain = x.domain();
 		let digit = self.new_int_var(
-			db,
 			domain
 				.iter()
 				.flatten()
@@ -300,7 +295,6 @@ impl MixedRadixEncoder {
 			"r",
 		)?;
 		let carry = self.new_int_var(
-			db,
 			domain
 				.iter()
 				.flatten()
@@ -359,7 +353,7 @@ impl MixedRadixEncoder {
 			.filter(|&v| v <= ub)
 			.map(|v| v..=v)
 			.collect();
-		let scaled = self.new_int_var(db, domain, "c")?;
+		let scaled = self.new_int_var(domain, "c")?;
 		self.config.encoder().encode(
 			db,
 			&IntTernary::new(
@@ -373,42 +367,14 @@ impl MixedRadixEncoder {
 	}
 }
 
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for MixedRadixEncoder {
-	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
-		let con = con.as_linear(db)?;
-		self.encode(db, &con)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for MixedRadixEncoder {
-	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
-		self.encode(db, &Cardinality::from(con.clone()))
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for MixedRadixEncoder {
-	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		let con = con.as_int_linear(db)?;
-		self.encode(db, &con)
-	}
-}
-
-impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for MixedRadixEncoder {
-	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
-		let con = con.as_int_linear(db)?;
-		self.encode(db, &con)
-	}
-}
-
-impl<Db> Encoder<Db, NormalizedIntLinear> for MixedRadixEncoder
-where
-	Db: ClauseDatabase + ?Sized,
-{
-	#[cfg_attr(
-		any(feature = "tracing", test),
-		tracing::instrument(name = "mixed_radix_encoder", skip_all, fields(constraint = format!("{con:?}")))
-	)]
-	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
+impl MixedRadixEncoder {
+	/// Encode `con` as the digits of its terms in the chosen base, carried
+	/// together up a balanced tree.
+	fn encode_digits<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		con: &NormalizedIntLinear,
+	) -> Result {
 		let k = con.k();
 		let base = match &self.base {
 			Some(base) => base.clone(),
@@ -448,6 +414,54 @@ where
 			LimitComp::LessEq => self.lex_leq(db, &root, &base, k),
 			LimitComp::Equal => self.pin(db, &root, &base, k),
 		}
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for MixedRadixEncoder {
+	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
+		let con = con.as_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for MixedRadixEncoder {
+	fn encode(&self, db: &mut Db, con: &CardinalityOne) -> Result {
+		self.encode(db, &Cardinality::from(con.clone()))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for MixedRadixEncoder {
+	fn encode(&self, db: &mut Db, con: &Count) -> Result {
+		let con = con.as_int_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for MixedRadixEncoder {
+	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
+		let con = con.as_int_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db> Encoder<Db, NormalizedIntLinear> for MixedRadixEncoder
+where
+	Db: ClauseDatabase + ?Sized,
+{
+	#[cfg_attr(
+		any(feature = "tracing", test),
+		tracing::instrument(name = "mixed_radix_encoder", skip_all, fields(constraint = format!("{con:?}")))
+	)]
+	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
+		if self.config.encoder().encode_if_short(db, con)? {
+			return Ok(());
+		}
+		// Digits that cannot hold a value are a constraint that cannot be met,
+		// which the database has to be told rather than only the caller.
+		let Ok(()) = self.encode_digits(db, con) else {
+			return db.contradiction();
+		};
+		Ok(())
 	}
 }
 

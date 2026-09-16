@@ -221,10 +221,8 @@ impl IntTernaryEncoder {
 		con: &NormalizedIntLinear,
 		decompose: &impl Decompose,
 	) -> Result {
-		// Two terms or fewer are already as small as a decomposition would
-		// leave them, whichever shape it decomposes into.
-		if let Some(addition) = con.as_ternary() {
-			return Encoder::encode(self, db, &addition);
+		if self.encode_if_short(db, con)? {
+			return Ok(());
 		}
 		// A decomposition that cannot be built is a constraint that cannot be
 		// met, which the database has to be told rather than only the caller.
@@ -233,6 +231,22 @@ impl IntTernaryEncoder {
 		};
 		cons.iter()
 			.try_for_each(|con| Encoder::encode(self, db, con))
+	}
+
+	/// Encode `con` as the single addition it is where it has two terms or
+	/// fewer, reporting whether it was one.
+	///
+	/// No decomposition can leave such a constraint smaller than this, so every
+	/// strategy asks before it starts.
+	pub(crate) fn encode_if_short<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		con: &NormalizedIntLinear,
+	) -> Result<bool, Unsatisfiable> {
+		match con.as_ternary() {
+			Some(addition) => Encoder::encode(self, db, &addition).map(|()| true),
+			None => Ok(false),
+		}
 	}
 
 	/// Create an encoder with the given configuration.
@@ -321,8 +335,8 @@ mod tests {
 	#[test]
 	fn a_constraint_of_two_terms_is_one_addition() {
 		use crate::constraint::int_linear::{
-			DecisionDiagramEncoder, NormalizedIntLinear, SequentialCounterEncoder,
-			TotalizerEncoder, WatchdogEncoder,
+			DecisionDiagramEncoder, MixedRadixEncoder, NormalizedIntLinear,
+			SequentialCounterEncoder, TotalizerEncoder, WatchdogEncoder,
 		};
 
 		let con = || {
@@ -357,6 +371,10 @@ mod tests {
 						.encode(cnf, con)
 						.unwrap()
 				}),
+			),
+			(
+				"mixed radix",
+				size(&|cnf, con| MixedRadixEncoder::default().encode(cnf, con).unwrap()),
 			),
 			(
 				"totalizer",
