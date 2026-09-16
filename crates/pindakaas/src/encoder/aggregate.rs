@@ -18,7 +18,7 @@ use crate::{
 		linear::{AdderEncoder, Comparator, LimitComp, LinVariant, Linear, PosCoeff},
 	},
 	decision::integer::IntVar,
-	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
+	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -165,10 +165,31 @@ impl LinAggregator {
 			}
 		}
 
-		if k < 0 {
+		// A term that can go below zero is counted from its least value
+		// instead, so that what it adds to the sum is what the bound has left
+		// to give. Without it a bound only a negative term can meet would look
+		// like a bound nothing can.
+		for (x, c) in &mut int_terms {
+			if x.min() < 0 {
+				k -= *c * x.min();
+				*x = IntVar::shifted(db, x, -x.min())?;
+			}
+		}
+
+		// What the sum can come to at its least and at its most, which is
+		// whether the constraint can be broken at all. A literal adds nothing
+		// when it does not hold, so only an integer term lifts the least.
+		let lhs_min: Coeff = int_terms.iter().map(|(x, c)| c * x.min()).sum();
+		let lhs_max: Coeff = int_terms.iter().map(|(x, c)| c * x.max()).sum::<Coeff>()
+			+ partition.iter().map(|&(_, coef)| *coef).sum::<Coeff>();
+		if lhs_min > k || (cmp == LimitComp::Equal && lhs_max < k) {
 			db.contradiction()?;
 			unreachable!();
 		}
+		if cmp == LimitComp::LessEq && lhs_max <= k {
+			return Ok(LinVariant::Trivial);
+		}
+		debug_assert!(k >= 0, "a bound the sum can meet is never negative");
 		if k == 0 && int_terms.is_empty() {
 			for (lit, _) in &partition {
 				db.add_clause([!*lit])?;
@@ -229,16 +250,10 @@ impl LinAggregator {
 		if int_terms.is_empty() {
 			let lhs_ub = PosCoeff::new(partition.iter().map(|&(_, coef)| *coef).sum());
 			match cmp {
-				LimitComp::LessEq => {
-					if lhs_ub <= k {
-						return Ok(LinVariant::Trivial);
-					}
-				}
+				// Anything the bound already allows was reported trivial
+				// before the terms were looked at.
+				LimitComp::LessEq => {}
 				LimitComp::Equal => {
-					if lhs_ub < k {
-						db.contradiction()?;
-						unreachable!();
-					}
 					if lhs_ub == k {
 						for (lit, _) in &partition {
 							db.add_clause([*lit])?;
@@ -559,6 +574,51 @@ mod tests {
 	}
 
 	/// Aggregate `con` and read the result back.
+	/// A term that reaches below zero can meet a bound below zero, which the
+	/// sum being counted from its least value is what makes visible.
+	#[test]
+	fn a_negative_bound_a_term_can_meet_is_not_unsatisfiable() {
+		let mut cnf = Cnf::default();
+		let x = crate::decision::integer::IntVar::new(-10..=0).with_label("x");
+		let con = Linear::new(x.clone() * 1, Comparator::LessEq, -5);
+		let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
+		else {
+			panic!("a constraint over an integer aggregates to a linear one");
+		};
+		// Counting from ten below zero leaves the bound five above it.
+		assert_eq!(con.k(), 5);
+		cnf.encode(
+			&con,
+			&crate::constraint::linear::DecisionDiagramEncoder::default(),
+		)
+		.unwrap();
+
+		let mut seen = Vec::new();
+		let mut slv = crate::solver::cadical::Cadical::from(&cnf);
+		let vars = cnf.get_variables();
+		while let crate::solver::SolveResult::Satisfied(value) =
+			crate::solver::Solver::solve(&mut slv)
+		{
+			seen.push(x.value(&value));
+			let no_good: Vec<Lit> = vars
+				.map(|v| {
+					let l = v.into();
+					if crate::Valuation::value(&value, l) {
+						!l
+					} else {
+						l
+					}
+				})
+				.collect();
+			if crate::ClauseDatabaseTools::add_clause(&mut slv, no_good).is_err() {
+				break;
+			}
+		}
+		seen.sort_unstable();
+		seen.dedup();
+		assert_eq!(seen, (-10..=-5).collect_vec());
+	}
+
 	fn aggregated(
 		db: &mut Cnf,
 		agg: &LinAggregator,
@@ -1083,5 +1143,32 @@ mod tests {
 		}
 		groups.sort();
 		groups
+	}
+
+	/// The bounds of the whole sum decide a constraint no assignment can break,
+	/// or one no assignment can meet, whether its terms are literals or not.
+	#[test]
+	fn the_bounds_of_a_sum_decide_a_constraint_nothing_can_break() {
+		let terms = || {
+			let (x, y) = (
+				crate::decision::integer::IntVar::new(0..=2),
+				crate::decision::integer::IntVar::new(1..=2),
+			);
+			x * 1 + y * 3
+		};
+		let mut cnf = Cnf::default();
+		let agg = LinAggregator::default();
+
+		// At most eight, which two and six already allow.
+		let trivial = Linear::new(terms(), Comparator::LessEq, 8);
+		assert_eq!(
+			aggregated(&mut cnf, &agg, &trivial).unwrap(),
+			Aggregated::Trivial
+		);
+		assert_eq!(cnf.num_clauses(), 0, "a trivial constraint costs nothing");
+
+		// Three at the least, which is more than two.
+		let unsatisfiable = Linear::new(terms(), Comparator::LessEq, 2);
+		assert!(aggregated(&mut cnf, &agg, &unsatisfiable).is_err());
 	}
 }
