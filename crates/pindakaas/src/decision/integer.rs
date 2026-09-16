@@ -65,6 +65,34 @@ pub(crate) struct DirectEncoding {
 	x: Literals<Lit>,
 }
 
+/// What a variable's existing encodings answer, of the questions
+/// [`IntVar`] otherwise answers by creating one.
+///
+/// A question the domain settles is answered whatever has been encoded, and
+/// anything else needs a view that speaks about it: an order view for a bound,
+/// a direct view for a value, and either of them for a value at the ends of the
+/// domain. Where nothing does, the answer is `None`, and asking [`IntVar`]
+/// itself creates what it takes.
+///
+/// # Examples
+///
+/// ```rust
+/// use pindakaas::{decision::integer::IntVar, BoolVal, Cnf};
+///
+/// let mut cnf = Cnf::default();
+/// let x = IntVar::new(0..=4);
+/// // The domain says this much without any encoding.
+/// assert!(matches!(x.encoded().at_least(0), Some(BoolVal::Const(true))));
+/// assert!(x.encoded().at_least(2).is_none());
+///
+/// // Asking for it builds the order encoding, which then answers.
+/// let _ = x.at_least(&mut cnf, 2)?;
+/// assert!(x.encoded().at_least(2).is_some());
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct EncodedViews<'a>(&'a IntVar);
+
 /// An integer decision variable with Boolean views created on demand.
 ///
 /// Cloning shares the variable; it does not copy it. See the [module
@@ -463,6 +491,54 @@ impl DirectEncoding {
 	}
 }
 
+impl EncodedViews<'_> {
+	/// Whether the variable is at least `v`, or `None` where no encoding says.
+	pub fn at_least(&self, v: Coeff) -> Option<BoolVal> {
+		let state = self.0 .0.borrow();
+		if v <= *state.domain.min().unwrap() {
+			Some(BoolVal::Const(true))
+		} else if v > *state.domain.max().unwrap() {
+			Some(BoolVal::Const(false))
+		} else {
+			state
+				.order
+				.as_ref()
+				.map(|order| order.lit_at_least(&state.domain, v))
+		}
+	}
+
+	/// Whether the variable is at most `v`, or `None` where no encoding says.
+	pub fn at_most(&self, v: Coeff) -> Option<BoolVal> {
+		self.at_least(v + 1).map(|lit| !lit)
+	}
+
+	/// Whether the variable takes `v`, or `None` where no encoding says.
+	pub fn equals(&self, v: Coeff) -> Option<BoolVal> {
+		let (min, max) = {
+			let state = self.0 .0.borrow();
+			if !state.domain.contains(&v) {
+				return Some(BoolVal::Const(false));
+			} else if state.domain.card().unwrap() == 1 {
+				return Some(BoolVal::Const(true));
+			} else if let Some(direct) = state.direct.as_ref() {
+				return Some(direct.lit_equals(&state.domain, v));
+			} else if state.order.is_none() {
+				return None;
+			}
+			(*state.domain.min().unwrap(), *state.domain.max().unwrap())
+		};
+		// Only where the order encoding is the one already there, since
+		// otherwise the direct encoding answers in one literal anyway.
+		if v == max {
+			self.at_least(v)
+		} else if v == min {
+			self.at_most(v)
+		} else {
+			None
+		}
+	}
+}
+
 impl IntVar {
 	/// The variable as a weighted sum of literals, plus what it is worth when
 	/// none of them hold.
@@ -490,6 +566,63 @@ impl IntVar {
 		// costs least to make.
 		let bin = self.binary_encoding(db)?;
 		Ok(bin.as_weighted())
+	}
+
+	/// Returns a [`BoolVal`] indicating whether the variable is at least `v`.
+	///
+	/// The answer is a constant where the domain settles it, and otherwise one
+	/// literal of the order encoding, which is created if the variable has not
+	/// been asked for one before.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when creating or channelling the order encoding
+	/// contradicts the database.
+	pub fn at_least<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		v: Coeff,
+	) -> Result<BoolVal, Unsatisfiable> {
+		if let Some(lit) = self.encoded().at_least(v) {
+			return Ok(lit);
+		}
+		let order = self.order_encoding(db)?;
+		let state = self.0.borrow();
+		Ok(order.lit_at_least(&state.domain, v))
+	}
+
+	/// Returns a [`BoolVal`] indicating whether the variable is at most `v`,
+	/// which is whether it fails to reach the value after it.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] under the conditions documented by
+	/// [`IntVar::at_least`].
+	pub fn at_most<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		v: Coeff,
+	) -> Result<BoolVal, Unsatisfiable> {
+		Ok(!self.at_least(db, v + 1)?)
+	}
+
+	#[cfg(test)]
+	/// Returns [`BoolVal`]s representing the variable's bits, least significant
+	/// first, together with the minimum value when all bits are zero.
+	///
+	/// A bit is a constant where the domain leaves it no choice. The binary
+	/// encoding is created if the variable has not been asked for one before.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when creating, constraining, or channelling the binary
+	/// encoding contradicts the database.
+	pub(crate) fn binary_bits<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result<(Vec<BoolVal>, Coeff), Unsatisfiable> {
+		let binary = self.binary_encoding(db)?;
+		Ok((binary.to_vec(), binary.min()))
 	}
 
 	/// The binary encoding of the variable, created if this is the first
@@ -685,9 +818,50 @@ impl IntVar {
 		Ok(dir)
 	}
 
+	/// The steps of a sequential decomposition over the direct encoding, which
+	/// pin a value where [`IntVar::order_steps`] bounds it.
+	pub(crate) fn direct_steps<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		geq: bool,
+	) -> Result<Vec<(Coeff, BoolVal)>, Unsatisfiable> {
+		let direct = self.direct_encoding(db)?;
+		let state = self.0.borrow();
+		// Collected, for the reason given on [`IntVar::order_steps`].
+		Ok(direct.iter(&state.domain, geq).collect())
+	}
+
+	/// Walks the direct encoding, pairing every value of the domain with a
+	/// [`BoolVal`] indicating whether the variable takes it.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when creating or channelling the direct encoding
+	/// contradicts the database.
+	pub(crate) fn direct_walk<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result<impl Iterator<Item = (Coeff, BoolVal)>, Unsatisfiable> {
+		if self.card() == 1 {
+			return Ok(vec![(self.min(), BoolVal::Const(true))].into_iter());
+		}
+		let direct = self.direct_encoding(db)?;
+		let state = self.0.borrow();
+		Ok(direct
+			.walk(&state.domain)
+			.map(|(v, l)| (v, BoolVal::Lit(l)))
+			.collect_vec()
+			.into_iter())
+	}
+
 	/// Returns the variable's domain.
 	pub fn domain(&self) -> RangeList<Coeff> {
 		self.0.borrow().domain.clone()
+	}
+
+	/// What the variable's existing encodings answer, without creating one.
+	pub fn encoded(&self) -> EncodedViews<'_> {
+		EncodedViews(self)
 	}
 
 	/// Automatic domain constraints for newly created views.
@@ -706,6 +880,29 @@ impl IntVar {
 		);
 		self.0.borrow_mut().add_consistency = enforce;
 		self
+	}
+
+	/// Whether the variable takes `v`, as a literal or settled constant.
+	///
+	/// An existing order view answers at domain endpoints. Otherwise a direct
+	/// view is created if needed; channelling costs clauses proportional to the
+	/// domain size.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when creating or channelling the required encoding
+	/// contradicts the database.
+	pub fn equals<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		v: Coeff,
+	) -> Result<BoolVal, Unsatisfiable> {
+		if let Some(lit) = self.encoded().equals(v) {
+			return Ok(lit);
+		}
+		let direct = self.direct_encoding(db)?;
+		let state = self.0.borrow();
+		Ok(direct.lit_equals(&state.domain, v))
 	}
 
 	/// A variable on existing bits of `value - min`, least significant first.
@@ -814,8 +1011,7 @@ impl IntVar {
 		Ok(x)
 	}
 
-	/// Creates a variable from what its order encoding says value by value,
-	/// which is what [`IntVar::lit_order_walk`] gives.
+	/// Creates a variable from what its order encoding says value by value.
 	///
 	/// Each pair is a value and whether the variable reaches it, least value
 	/// first. A settled pair is domain rather than encoding: one that always
@@ -866,7 +1062,7 @@ impl IntVar {
 		x: &IntVar,
 	) -> Result<Self, Unsatisfiable> {
 		let walk = (0..=(x.max() / 2))
-			.map(|w| Ok((w, x.lit_at_least(db, 2 * w)?)))
+			.map(|w| Ok((w, x.at_least(db, 2 * w)?)))
 			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
 		Ok(Self::from_order_walk(db, walk)?.with_label(format_args!("{}/2", x.label())))
 	}
@@ -979,188 +1175,6 @@ impl IntVar {
 		return String::new();
 	}
 
-	/// Returns a [`BoolVal`] indicating whether the variable is at least `v`.
-	///
-	/// The answer is a constant where the domain settles it, and otherwise one
-	/// literal of the order encoding, which is created if the variable has not
-	/// been asked for one before.
-	///
-	/// # Errors
-	///
-	/// [`Unsatisfiable`] when creating or channelling the order encoding
-	/// contradicts the database.
-	pub fn lit_at_least<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-		v: Coeff,
-	) -> Result<BoolVal, Unsatisfiable> {
-		{
-			let state = self.0.borrow();
-			if v <= *state.domain.min().unwrap() {
-				return Ok(BoolVal::Const(true));
-			} else if v > *state.domain.max().unwrap() {
-				return Ok(BoolVal::Const(false));
-			} else if let Some(order) = state.order.as_ref() {
-				return Ok(order.lit_at_least(&state.domain, v));
-			}
-		}
-		let order = self.order_encoding(db)?;
-		let state = self.0.borrow();
-		Ok(order.lit_at_least(&state.domain, v))
-	}
-
-	/// Returns a [`BoolVal`] indicating whether the variable is at most `v`,
-	/// which is whether it fails to reach the value after it.
-	///
-	/// # Errors
-	///
-	/// [`Unsatisfiable`] under the conditions documented by
-	/// [`IntVar::lit_at_least`].
-	pub fn lit_at_most<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-		v: Coeff,
-	) -> Result<BoolVal, Unsatisfiable> {
-		Ok(!self.lit_at_least(db, v + 1)?)
-	}
-
-	/// Returns [`BoolVal`]s representing the variable's bits, least significant
-	/// first, together with the minimum value when all bits are zero.
-	///
-	/// A bit is a constant where the domain leaves it no choice. The binary
-	/// encoding is created if the variable has not been asked for one before.
-	///
-	/// # Errors
-	///
-	/// [`Unsatisfiable`] when creating, constraining, or channelling the binary
-	/// encoding contradicts the database.
-	pub fn lit_binary_bits<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-	) -> Result<(Vec<BoolVal>, Coeff), Unsatisfiable> {
-		let binary = self.binary_encoding(db)?;
-		Ok((binary.to_vec(), binary.min()))
-	}
-
-	/// The steps of a sequential decomposition over the direct encoding, which
-	/// pin a value where [`IntVar::lit_order_steps`] bounds it.
-	pub(crate) fn lit_direct_steps<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-		geq: bool,
-	) -> Result<Vec<(Coeff, BoolVal)>, Unsatisfiable> {
-		let direct = self.direct_encoding(db)?;
-		let state = self.0.borrow();
-		// Collected, for the reason given on [`IntVar::lit_order_steps`].
-		Ok(direct.iter(&state.domain, geq).collect())
-	}
-
-	/// Walks the direct encoding, pairing every value of the domain with a
-	/// [`BoolVal`] indicating whether the variable takes it.
-	///
-	/// # Errors
-	///
-	/// [`Unsatisfiable`] when creating or channelling the direct encoding
-	/// contradicts the database.
-	pub fn lit_direct_walk<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-	) -> Result<impl Iterator<Item = (Coeff, BoolVal)>, Unsatisfiable> {
-		if self.card() == 1 {
-			return Ok(vec![(self.min(), BoolVal::Const(true))].into_iter());
-		}
-		let direct = self.direct_encoding(db)?;
-		let state = self.0.borrow();
-		Ok(direct
-			.walk(&state.domain)
-			.map(|(v, l)| (v, BoolVal::Lit(l)))
-			.collect_vec()
-			.into_iter())
-	}
-
-	/// Whether the variable takes `v`, as a literal or settled constant.
-	///
-	/// An existing order view answers at domain endpoints. Otherwise a direct
-	/// view is created if needed; channelling costs clauses proportional to the
-	/// domain size.
-	///
-	/// # Errors
-	///
-	/// [`Unsatisfiable`] when creating or channelling the required encoding
-	/// contradicts the database.
-	pub fn lit_equals<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-		v: Coeff,
-	) -> Result<BoolVal, Unsatisfiable> {
-		{
-			let state = self.0.borrow();
-			if !state.domain.contains(&v) {
-				return Ok(BoolVal::Const(false));
-			} else if state.domain.card().unwrap() == 1 {
-				return Ok(BoolVal::Const(true));
-			} else if let Some(direct) = state.direct.as_ref() {
-				return Ok(direct.lit_equals(&state.domain, v));
-			}
-			// Only where the order encoding is the one already there, since
-			// otherwise the direct encoding answers in one literal anyway.
-			if state.order.is_some() {
-				if v == *state.domain.max().unwrap() {
-					drop(state);
-					return self.lit_at_least(db, v);
-				} else if v == *state.domain.min().unwrap() {
-					drop(state);
-					return self.lit_at_most(db, v);
-				}
-			}
-		}
-		let direct = self.direct_encoding(db)?;
-		let state = self.0.borrow();
-		Ok(direct.lit_equals(&state.domain, v))
-	}
-
-	/// The steps of a sequential decomposition over the order encoding.
-	///
-	/// Each step is a domain value paired with the clause that holds unless the
-	/// variable has reached it, so that whatever the constraint then demands
-	/// can be disjoined onto that clause.
-	pub(crate) fn lit_order_steps<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-		geq: bool,
-	) -> Result<Vec<(Coeff, BoolVal)>, Unsatisfiable> {
-		let order = self.order_encoding(db)?;
-		let state = self.0.borrow();
-		// Collect before returning: a live borrow would prevent a constraint
-		// from mentioning the same variable twice.
-		Ok(order.iter(&state.domain, geq).collect())
-	}
-
-	/// Walks the order encoding, pairing every value of the domain with
-	/// the [`BoolVal`] indicating whether the variable is at least it.
-	///
-	/// This is [`IntVar::lit_at_least`] over the whole domain, and creates the
-	/// order encoding for the same reason.
-	///
-	/// # Errors
-	///
-	/// [`Unsatisfiable`] when creating or channelling the order encoding
-	/// contradicts the database.
-	pub fn lit_order_walk<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-	) -> Result<impl Iterator<Item = (Coeff, BoolVal)>, Unsatisfiable> {
-		let order = self.order_encoding(db)?;
-		let state = self.0.borrow();
-		Ok(state
-			.domain
-			.iter()
-			.flatten()
-			.map(|v| (v, order.lit_at_least(&state.domain, v)))
-			.collect_vec()
-			.into_iter())
-	}
-
 	/// Returns the greatest value the variable can take.
 	pub fn max(&self) -> Coeff {
 		*self.0.borrow().domain.max().unwrap()
@@ -1192,7 +1206,7 @@ impl IntVar {
 			.iter()
 			.flatten()
 			.rev()
-			.map(|v| Ok((min + max - v, x.lit_at_most(db, v)?)))
+			.map(|v| Ok((min + max - v, x.at_most(db, v)?)))
 			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
 		Self::from_order_walk(db, walk)
 	}
@@ -1269,6 +1283,49 @@ impl IntVar {
 
 		self.install_order(db, ord.clone(), None)?;
 		Ok(ord)
+	}
+
+	/// The steps of a sequential decomposition over the order encoding.
+	///
+	/// Each step is a domain value paired with the clause that holds unless the
+	/// variable has reached it, so that whatever the constraint then demands
+	/// can be disjoined onto that clause.
+	pub(crate) fn order_steps<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		geq: bool,
+	) -> Result<Vec<(Coeff, BoolVal)>, Unsatisfiable> {
+		let order = self.order_encoding(db)?;
+		let state = self.0.borrow();
+		// Collect before returning: a live borrow would prevent a constraint
+		// from mentioning the same variable twice.
+		Ok(order.iter(&state.domain, geq).collect())
+	}
+
+	#[cfg(test)]
+	/// Walks the order encoding, pairing every value of the domain with
+	/// the [`BoolVal`] indicating whether the variable is at least it.
+	///
+	/// This is [`IntVar::at_least`] over the whole domain, and creates the
+	/// order encoding for the same reason.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when creating or channelling the order encoding
+	/// contradicts the database.
+	pub(crate) fn order_walk<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result<impl Iterator<Item = (Coeff, BoolVal)>, Unsatisfiable> {
+		let order = self.order_encoding(db)?;
+		let state = self.0.borrow();
+		Ok(state
+			.domain
+			.iter()
+			.flatten()
+			.map(|v| (v, order.lit_at_least(&state.domain, v)))
+			.collect_vec()
+			.into_iter())
 	}
 
 	/// Whether the variable is better held in binary than in order form.
@@ -1386,7 +1443,7 @@ impl IntVar {
 			.domain()
 			.iter()
 			.flatten()
-			.map(|v| Ok((v + k, x.lit_at_least(db, v)?)))
+			.map(|v| Ok((v + k, x.at_least(db, v)?)))
 			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
 		Ok(Self::from_order_walk(db, walk)?.with_label(format_args!("{}+{k}", x.label())))
 	}
@@ -1773,7 +1830,7 @@ pub(crate) mod tests {
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(0..=3).with_label("x");
 		let walk = (-2..=6)
-			.map(|v| (v, x.lit_equals(&mut cnf, v).unwrap()))
+			.map(|v| (v, x.equals(&mut cnf, v).unwrap()))
 			.collect_vec();
 
 		let vars_before = cnf.num_vars();
@@ -1812,20 +1869,14 @@ pub(crate) mod tests {
 			let mut cnf = Cnf::default();
 			let x = IntVar::new(domain.clone());
 
-			assert_eq!(x.lit_at_least(&mut cnf, min).unwrap(), BoolVal::Const(true));
+			assert_eq!(x.at_least(&mut cnf, min).unwrap(), BoolVal::Const(true));
 			assert_eq!(
-				x.lit_at_least(&mut cnf, max + 1).unwrap(),
+				x.at_least(&mut cnf, max + 1).unwrap(),
 				BoolVal::Const(false)
 			);
-			assert_eq!(x.lit_at_most(&mut cnf, max).unwrap(), BoolVal::Const(true));
-			assert_eq!(
-				x.lit_at_most(&mut cnf, min - 1).unwrap(),
-				BoolVal::Const(false)
-			);
-			assert_eq!(
-				x.lit_equals(&mut cnf, max + 1).unwrap(),
-				BoolVal::Const(false)
-			);
+			assert_eq!(x.at_most(&mut cnf, max).unwrap(), BoolVal::Const(true));
+			assert_eq!(x.at_most(&mut cnf, min - 1).unwrap(), BoolVal::Const(false));
+			assert_eq!(x.equals(&mut cnf, max + 1).unwrap(), BoolVal::Const(false));
 			assert_eq!(
 				cnf.num_vars(),
 				0,
@@ -1994,18 +2045,18 @@ pub(crate) mod tests {
 			let mut cnf = Cnf::default();
 			let x = IntVar::new(k..=k).enforce_consistency(true);
 
-			assert_eq!(x.lit_at_least(&mut cnf, k).unwrap(), BoolVal::Const(true));
-			assert_eq!(x.lit_at_most(&mut cnf, k).unwrap(), BoolVal::Const(true));
-			assert_eq!(x.lit_equals(&mut cnf, k).unwrap(), BoolVal::Const(true));
+			assert_eq!(x.at_least(&mut cnf, k).unwrap(), BoolVal::Const(true));
+			assert_eq!(x.at_most(&mut cnf, k).unwrap(), BoolVal::Const(true));
+			assert_eq!(x.equals(&mut cnf, k).unwrap(), BoolVal::Const(true));
 			assert_eq!(
-				x.lit_order_walk(&mut cnf).unwrap().collect_vec(),
+				x.order_walk(&mut cnf).unwrap().collect_vec(),
 				vec![(k, BoolVal::Const(true))]
 			);
 			assert_eq!(
-				x.lit_direct_walk(&mut cnf).unwrap().collect_vec(),
+				x.direct_walk(&mut cnf).unwrap().collect_vec(),
 				vec![(k, BoolVal::Const(true))]
 			);
-			assert_eq!(x.lit_binary_bits(&mut cnf).unwrap(), (Vec::new(), k));
+			assert_eq!(x.binary_bits(&mut cnf).unwrap(), (Vec::new(), k));
 			assert_eq!(x.value(&|_: Lit| false), k);
 
 			assert_eq!(
@@ -2021,7 +2072,7 @@ pub(crate) mod tests {
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(0..=3).with_label("x");
 		let walk = (-2..=6)
-			.map(|v| (v, x.lit_at_least(&mut cnf, v).unwrap()))
+			.map(|v| (v, x.at_least(&mut cnf, v).unwrap()))
 			.collect_vec();
 		assert_eq!(
 			walk.iter()
@@ -2218,11 +2269,11 @@ pub(crate) mod tests {
 			let (min, max) = (values[0], values[values.len() - 1]);
 			let mut cnf = Cnf::default();
 			let x = IntVar::new(domain.clone());
-			let _ = x.lit_at_least(&mut cnf, values[1]).unwrap();
+			let _ = x.at_least(&mut cnf, values[1]).unwrap();
 
 			let vars_before = cnf.num_vars();
-			let is_min = x.lit_equals(&mut cnf, min).unwrap();
-			let is_max = x.lit_equals(&mut cnf, max).unwrap();
+			let is_min = x.equals(&mut cnf, min).unwrap();
+			let is_max = x.equals(&mut cnf, max).unwrap();
 			assert_eq!(
 				cnf.num_vars(),
 				vars_before,
@@ -2342,9 +2393,9 @@ pub(crate) mod tests {
 			let mut cnf = Cnf::default();
 			let x = IntVar::new(domain.clone());
 
-			let reaches = x.lit_order_walk(&mut cnf).unwrap().collect_vec();
-			let takes = x.lit_direct_walk(&mut cnf).unwrap().collect_vec();
-			let (bits, min) = x.lit_binary_bits(&mut cnf).unwrap();
+			let reaches = x.order_walk(&mut cnf).unwrap().collect_vec();
+			let takes = x.direct_walk(&mut cnf).unwrap().collect_vec();
+			let (bits, min) = x.binary_bits(&mut cnf).unwrap();
 			assert_eq!(reaches.len(), values.len());
 			assert_eq!(takes.len(), values.len());
 

@@ -263,7 +263,7 @@ impl Decompose for DecisionDiagramEncoder {
 							(_, Some(of)) => layers
 								.last()
 								.expect("only a layer with one after it shares")
-								.lit_at_least(db, of)?,
+								.at_least(db, of)?,
 							(_, None) => BoolVal::Lit(new_named_lit!(db, format!("y{i}≥{val}"))),
 						},
 					))

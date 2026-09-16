@@ -234,12 +234,7 @@ impl MixedRadixEncoder {
 		let pairs = digits
 			.iter()
 			.zip_eq(ks)
-			.map(|(digit, k_j)| {
-				Ok((
-					digit.lit_at_least(db, k_j)?,
-					digit.lit_at_least(db, k_j + 1)?,
-				))
-			})
+			.map(|(digit, k_j)| Ok((digit.at_least(db, k_j)?, digit.at_least(db, k_j + 1)?)))
 			.collect::<Result<Vec<(BoolVal, BoolVal)>, Unsatisfiable>>()?;
 		lex_leq(db, &pairs)
 	}
@@ -267,9 +262,9 @@ impl MixedRadixEncoder {
 			return Err(Unsatisfiable);
 		};
 		for (digit, k_j) in digits.iter().zip_eq(ks) {
-			let at_least = digit.lit_at_least(db, k_j)?;
+			let at_least = digit.at_least(db, k_j)?;
 			db.add_clause([at_least])?;
-			let greater = digit.lit_at_least(db, k_j + 1)?;
+			let greater = digit.at_least(db, k_j + 1)?;
 			db.add_clause([!greater])?;
 		}
 		Ok(())

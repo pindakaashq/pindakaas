@@ -105,7 +105,7 @@ impl WatchdogEncoder {
 		};
 		// The values are of the term, so dividing out the coefficient gives
 		// back the value of the variable that reaches them.
-		let takes = |db: &mut Db, v: Coeff| term.1.lit_equals(db, v / term.0);
+		let takes = |db: &mut Db, v: Coeff| term.1.equals(db, v / term.0);
 		let digit = if rest.is_empty() {
 			takes(db, first)?
 		} else {
@@ -263,7 +263,7 @@ impl WatchdogEncoder {
 			// guard is the only other way out of.
 			let top = carried.expect("a watchdog has at least one digit");
 			let m = total >> p;
-			let within = top.lit_at_most(db, m - 1)?;
+			let within = top.at_most(db, m - 1)?;
 			db.add_clause([g, within])?;
 		}
 		Ok(())
@@ -285,7 +285,7 @@ impl WatchdogEncoder {
 				if v <= 0 {
 					continue;
 				}
-				let guard = !term.1.lit_equals(db, v / term.0)?;
+				let guard = !term.1.equals(db, v / term.0)?;
 				let rest = terms
 					.iter()
 					.enumerate()

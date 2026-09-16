@@ -82,7 +82,7 @@ mod pindakaas {
 		},
 		decision::integer::IntVar as BaseIntVar,
 		BoolVal as BaseBoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as EncoderTrait,
-		IntervalIterator, Lit as BaseLit, RangeList, VarRange as BaseVarRange, Wcnf,
+		Lit as BaseLit, RangeList, VarRange as BaseVarRange, Wcnf,
 	};
 	use pyo3::{exceptions::PyValueError, prelude::*, types::PyIterator};
 
@@ -601,15 +601,12 @@ mod pindakaas {
 			value: i64,
 			create: bool,
 		) -> Result<Option<BoolVal>> {
-			// Below the bottom of the domain or above its top the answer is a
-			// constant, and only what lies between needs the encoding.
-			let settled = value <= self.0.min() || value > self.0.max();
-			if !create && !settled && !self.0.has_order_encoding() {
-				return Ok(None);
+			if !create {
+				// What the domain or an existing view settles, Rust answers
+				// without creating anything.
+				return Ok(self.0.encoded().at_least(value).map(BoolVal));
 			}
-			Ok(Some(BoolVal(
-				self.0.lit_at_least(&mut PyDbWrapper(db), value)?,
-			)))
+			Ok(Some(BoolVal(self.0.at_least(&mut PyDbWrapper(db), value)?)))
 		}
 
 		/// Returns the literal for the variable reaching at most `value`.
@@ -633,13 +630,12 @@ mod pindakaas {
 			value: i64,
 			create: bool,
 		) -> Result<Option<BoolVal>> {
-			let settled = value < self.0.min() || value >= self.0.max();
-			if !create && !settled && !self.0.has_order_encoding() {
-				return Ok(None);
+			if !create {
+				// What the domain or an existing view settles, Rust answers
+				// without creating anything.
+				return Ok(self.0.encoded().at_most(value).map(BoolVal));
 			}
-			Ok(Some(BoolVal(
-				self.0.lit_at_most(&mut PyDbWrapper(db), value)?,
-			)))
+			Ok(Some(BoolVal(self.0.at_most(&mut PyDbWrapper(db), value)?)))
 		}
 
 		/// Returns the number of values the variable can take.
@@ -683,15 +679,12 @@ mod pindakaas {
 			value: i64,
 			create: bool,
 		) -> Result<Option<BoolVal>> {
-			// A value the variable cannot take, or the only one it can, is
-			// settled by the domain rather than by any encoding.
-			let settled = !self.0.domain().contains(&value) || self.0.card() == 1;
-			if !create && !settled && !self.0.has_direct_encoding() {
-				return Ok(None);
+			if !create {
+				// What the domain or an existing view settles, Rust answers
+				// without creating anything.
+				return Ok(self.0.encoded().equals(value).map(BoolVal));
 			}
-			Ok(Some(BoolVal(
-				self.0.lit_equals(&mut PyDbWrapper(db), value)?,
-			)))
+			Ok(Some(BoolVal(self.0.equals(&mut PyDbWrapper(db), value)?)))
 		}
 
 		/// Returns the greatest value the variable can take.

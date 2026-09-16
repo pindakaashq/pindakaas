@@ -107,7 +107,7 @@
 //!         pindakaas::constraint::linear::TotalizerEncoder,
 //!     >::default(),
 //! )?;
-//! let x_at_least_four = x.lit_at_least(&mut cnf, 4)?;
+//! let x_at_least_four = x.at_least(&mut cnf, 4)?;
 //! cnf.add_clause([x_at_least_four])?;
 //! # Ok::<(), pindakaas::Unsatisfiable>(())
 //! ```

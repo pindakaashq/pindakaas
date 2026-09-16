@@ -86,8 +86,8 @@ impl SortingNetworkEncoder {
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		let (x, y) = (x.lit_at_least(db, c)?, y.lit_at_least(db, c + 1)?);
-		let (z1, z2) = (z.lit_at_least(db, c + c)?, z.lit_at_least(db, c + c + 1)?);
+		let (x, y) = (x.at_least(db, c)?, y.at_least(db, c + 1)?);
+		let (z1, z2) = (z.at_least(db, c + c)?, z.at_least(db, c + c + 1)?);
 
 		db.add_clause([!x, z1])?;
 		db.add_clause([!y, z1])?;

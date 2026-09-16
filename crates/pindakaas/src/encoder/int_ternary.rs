@@ -98,8 +98,8 @@ impl Encoded<'_> {
 		// Dividing by a negative coefficient turns the comparison around.
 		let cmp = if self.c >= 0 { cmp } else { cmp.reverse() };
 		out.push(match cmp {
-			Comparator::LessEq => self.x.lit_at_most(db, div_floor(k, self.c))?,
-			Comparator::GreaterEq => self.x.lit_at_least(db, div_ceil(k, self.c))?,
+			Comparator::LessEq => self.x.at_most(db, div_floor(k, self.c))?,
+			Comparator::GreaterEq => self.x.at_least(db, div_ceil(k, self.c))?,
 			Comparator::Equal => unreachable!("an equality is split before it is encoded"),
 		});
 		Ok(())
@@ -141,7 +141,7 @@ impl Encoded<'_> {
 		// What a direct encoding pins `bounded` to does not depend on what is
 		// left of the bound, so it is read once rather than once per step.
 		let pins = if bounded.x.has_direct_encoding() {
-			bounded.x.lit_direct_walk(db)?.collect()
+			bounded.x.direct_walk(db)?.collect()
 		} else {
 			Vec::new()
 		};
@@ -196,9 +196,9 @@ impl Encoded<'_> {
 		Ok((
 			term.c,
 			if term.x.has_direct_encoding() {
-				term.x.lit_direct_steps(db, geq)?
+				term.x.direct_steps(db, geq)?
 			} else {
-				term.x.lit_order_steps(db, geq)?
+				term.x.order_steps(db, geq)?
 			},
 		))
 	}
