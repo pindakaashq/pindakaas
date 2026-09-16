@@ -29,7 +29,7 @@
 //! literals were freshly made — ask for the clauses with [`IntVar::constrain`].
 
 use std::{
-	cell::RefCell,
+	cell::{Ref, RefCell},
 	fmt::{self, Display},
 	iter::once,
 	ops::Bound,
@@ -854,9 +854,15 @@ impl IntVar {
 			.into_iter())
 	}
 
-	/// Returns the variable's domain.
-	pub fn domain(&self) -> RangeList<Coeff> {
-		self.0.borrow().domain.clone()
+	/// Returns the values the variable can take, borrowed from the variable.
+	///
+	/// # Panics
+	///
+	/// Creating an encoding of this variable while the borrow is alive, since
+	/// the domain is read through the same cell the encodings are kept in.
+	/// Clone the domain where it has to outlive the call.
+	pub fn domain(&self) -> Ref<'_, RangeList<Coeff>> {
+		Ref::map(self.0.borrow(), |state| &state.domain)
 	}
 
 	/// What the variable's existing encodings answer, without creating one.
@@ -1201,11 +1207,9 @@ impl IntVar {
 		x: &IntVar,
 	) -> Result<Self, Unsatisfiable> {
 		let (min, max) = (x.min(), x.max());
-		let walk = x
-			.domain()
-			.iter()
-			.flatten()
-			.rev()
+		let values = x.domain().iter().flatten().rev().collect_vec();
+		let walk = values
+			.into_iter()
 			.map(|v| Ok((min + max - v, x.at_most(db, v)?)))
 			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
 		Self::from_order_walk(db, walk)
@@ -1439,10 +1443,9 @@ impl IntVar {
 		x: &IntVar,
 		k: Coeff,
 	) -> Result<Self, Unsatisfiable> {
-		let walk = x
-			.domain()
-			.iter()
-			.flatten()
+		let values = x.domain().iter().flatten().collect_vec();
+		let walk = values
+			.into_iter()
 			.map(|v| Ok((v + k, x.at_least(db, v)?)))
 			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
 		Ok(Self::from_order_walk(db, walk)?.with_label(format_args!("{}+{k}", x.label())))
@@ -1841,8 +1844,8 @@ pub(crate) mod tests {
 			"the walk was all of x's literals, so y needs none of its own"
 		);
 		assert_eq!(
-			y.domain(),
-			x.domain(),
+			*y.domain(),
+			*x.domain(),
 			"the values never taken are not values"
 		);
 		assert_eq!(
@@ -1857,7 +1860,7 @@ pub(crate) mod tests {
 			[(1, BoolVal::Const(false)), (4, BoolVal::Const(true))],
 		)
 		.unwrap();
-		assert_eq!(k.domain(), RangeList::from(4..=4));
+		assert_eq!(*k.domain(), RangeList::from(4..=4));
 		assert_eq!((cnf.num_vars(), cnf.num_clauses()), (0, 0));
 	}
 
@@ -2090,7 +2093,7 @@ pub(crate) mod tests {
 			vars_before,
 			"the walk was all of x's literals, so y needs none of its own"
 		);
-		assert_eq!(y.domain(), x.domain(), "the settled ends are not values");
+		assert_eq!(*y.domain(), *x.domain(), "the settled ends are not values");
 
 		assert_eq!(
 			all_values(&cnf, &|v| vec![x.value(v), y.value(v)]),
