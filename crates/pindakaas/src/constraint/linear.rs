@@ -232,7 +232,8 @@ impl LinExp {
 		})
 	}
 
-	pub(crate) fn value<F: Valuation + ?Sized>(&self, sol: &F) -> Result<Coeff> {
+	/// What the expression comes to under an assignment.
+	pub(crate) fn value<F: Valuation + ?Sized>(&self, sol: &F) -> Coeff {
 		let mut total = self.add;
 		for term in &self.terms {
 			total += match term {
@@ -241,7 +242,7 @@ impl LinExp {
 				LinTerm::Int(x, c) => c * x.value(sol),
 			};
 		}
-		Ok(total * self.mult)
+		total * self.mult
 	}
 }
 
@@ -471,7 +472,7 @@ impl Linear {
 
 impl Checker for Linear {
 	fn check<F: Valuation + ?Sized>(&self, value: &F) -> Result<()> {
-		let lhs = self.exp.value(value)?;
+		let lhs = self.exp.value(value);
 		if match self.cmp {
 			Comparator::LessEq => lhs <= self.k,
 			Comparator::Equal => lhs == self.k,
