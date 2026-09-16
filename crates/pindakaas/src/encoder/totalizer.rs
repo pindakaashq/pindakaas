@@ -77,10 +77,6 @@ impl Decompose for TotalizerEncoder {
 		_db: &mut Db,
 		con: &NormalizedIntLinear,
 	) -> Result<Vec<IntTernary>, Unsatisfiable> {
-		// Two terms or fewer are already as small as the tree would make them.
-		if let Some(addition) = con.as_ternary() {
-			return Ok(vec![addition]);
-		}
 		let (cmp, k) = (Comparator::from(con.cmp()), con.k());
 		let mut cons = Vec::new();
 		// Heuristic: start from the narrowest, so the wide terms meet late and

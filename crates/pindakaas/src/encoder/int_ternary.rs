@@ -221,6 +221,11 @@ impl IntTernaryEncoder {
 		con: &NormalizedIntLinear,
 		decompose: &impl Decompose,
 	) -> Result {
+		// Two terms or fewer are already as small as a decomposition would
+		// leave them, whichever shape it decomposes into.
+		if let Some(addition) = con.as_ternary() {
+			return Encoder::encode(self, db, &addition);
+		}
 		// A decomposition that cannot be built is a constraint that cannot be
 		// met, which the database has to be told rather than only the caller.
 		let Ok(cons) = decompose.decompose(db, con) else {
@@ -309,6 +314,65 @@ mod tests {
 		solver::{cadical::Cadical, SolveResult, Solver},
 		ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Valuation,
 	};
+
+	/// A constraint of two terms is the addition the decomposers would have to
+	/// build anyway, so each of them leaves it to this encoder rather than
+	/// paying for a decomposition of its own.
+	#[test]
+	fn a_constraint_of_two_terms_is_one_addition() {
+		use crate::constraint::int_linear::{
+			DecisionDiagramEncoder, NormalizedIntLinear, SequentialCounterEncoder,
+			TotalizerEncoder, WatchdogEncoder,
+		};
+
+		let con = || {
+			NormalizedIntLinear::new(
+				vec![
+					(PosCoeff::new(2), IntVar::new(0..=5)),
+					(PosCoeff::new(3), IntVar::new(0..=5)),
+				],
+				LimitComp::LessEq,
+				PosCoeff::new(10),
+			)
+		};
+		let size = |enc: &dyn Fn(&mut Cnf, &NormalizedIntLinear)| {
+			let mut cnf = Cnf::default();
+			enc(&mut cnf, &con());
+			(cnf.num_vars(), cnf.num_clauses())
+		};
+
+		let addition = size(&|cnf, con| {
+			let addition = con.as_ternary().expect("two terms are one addition");
+			IntTernaryEncoder::default().encode(cnf, &addition).unwrap();
+		});
+		for (name, encoded) in [
+			(
+				"diagram",
+				size(&|cnf, con| DecisionDiagramEncoder::default().encode(cnf, con).unwrap()),
+			),
+			(
+				"sequential counter",
+				size(&|cnf, con| {
+					SequentialCounterEncoder::default()
+						.encode(cnf, con)
+						.unwrap()
+				}),
+			),
+			(
+				"totalizer",
+				size(&|cnf, con| TotalizerEncoder::default().encode(cnf, con).unwrap()),
+			),
+			(
+				"watchdog",
+				size(&|cnf, con| WatchdogEncoder::default().encode(cnf, con).unwrap()),
+			),
+		] {
+			assert_eq!(
+				encoded, addition,
+				"the {name} decomposition costs more than the addition it comes to"
+			);
+		}
+	}
 
 	#[test]
 	fn a_constraint_without_terms_compares_zero() {
