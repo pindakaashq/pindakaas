@@ -104,7 +104,7 @@ impl LinAggregator {
 	{
 		let mut k = lin.k - lin.exp.add * lin.exp.mult;
 		let mut agg = FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), FxBuildHasher);
-		for (lit, coef) in lin.exp.terms() {
+		for (lit, coef) in lin.exp.bool_terms() {
 			let entry = agg.entry(lit.var()).or_insert(0);
 			let mut coef = coef * lin.exp.mult;
 			if lit.is_negated() {

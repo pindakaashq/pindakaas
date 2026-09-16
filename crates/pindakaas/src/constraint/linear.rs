@@ -184,6 +184,15 @@ impl Display for LimitComp {
 }
 
 impl LinExp {
+	/// Boolean terms only, excluding the additive constant and outer
+	/// multiplier.
+	pub fn bool_terms(&self) -> impl Iterator<Item = (Lit, Coeff)> + '_ {
+		self.terms.iter().filter_map(|t| match t {
+			LinTerm::Bool(l, c) => Some((*l, *c)),
+			LinTerm::Int(..) => None,
+		})
+	}
+
 	/// Construct a pseudo-Boolean sum from parallel coefficient and literal
 	/// slices.
 	///
@@ -220,15 +229,6 @@ impl LinExp {
 		self.terms.iter().filter_map(|t| match t {
 			LinTerm::Int(x, c) => Some((x, *c)),
 			LinTerm::Bool(..) => None,
-		})
-	}
-
-	/// Boolean terms only, excluding the additive constant and outer
-	/// multiplier.
-	pub fn terms(&self) -> impl Iterator<Item = (Lit, Coeff)> + '_ {
-		self.terms.iter().filter_map(|t| match t {
-			LinTerm::Bool(l, c) => Some((*l, *c)),
-			LinTerm::Int(..) => None,
 		})
 	}
 
