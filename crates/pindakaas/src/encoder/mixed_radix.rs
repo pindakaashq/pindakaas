@@ -280,23 +280,10 @@ impl MixedRadixEncoder {
 		if x.max() < base {
 			return Ok((x.clone(), IntVar::new(0..=0)));
 		}
-		let domain = x.domain();
-		let digit = self.new_int_var(
-			domain
-				.iter()
-				.flatten()
-				.map(|v| v % base..=v % base)
-				.collect(),
-			"r",
-		)?;
-		let carry = self.new_int_var(
-			domain
-				.iter()
-				.flatten()
-				.map(|v| v / base..=v / base)
-				.collect(),
-			"q",
-		)?;
+		// Encoding the split propagates into `x`, so it must not stay borrowed.
+		let values = x.domain().iter().flatten().collect_vec();
+		let digit = self.new_int_var(values.iter().map(|v| v % base..=v % base).collect(), "r")?;
+		let carry = self.new_int_var(values.iter().map(|v| v / base..=v / base).collect(), "q")?;
 		// The radix is the carry's coefficient, so nothing has to be scaled.
 		self.config.encoder().encode(
 			db,
