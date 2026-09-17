@@ -962,31 +962,42 @@ impl IntVar {
 	/// Construct a variable from `(value, takes_value)` pairs.
 	///
 	/// A constant true fixes the domain; constant false entries are dropped.
-	/// Literals are trusted as in [`Self::from_direct_encoding`].
+	/// Literals are trusted as in [`Self::from_direct_encoding`]. The pairs may
+	/// come in any order.
 	///
 	/// # Errors
 	///
 	/// [`Unsatisfiable`] when the walk contains no possible value or its
 	/// literals cannot be channelled to an existing encoding.
+	///
+	/// # Panics
+	///
+	/// When a value is given more than one literal. Distinct literals worth
+	/// the same, such as choices of equal weight, are not a direct encoding.
 	pub fn from_direct_walk<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		walk: impl IntoIterator<Item = (Coeff, BoolVal)>,
 	) -> Result<Self, Unsatisfiable> {
-		let (mut values, mut literals) = (Vec::new(), Vec::new());
+		let mut pairs = Vec::new();
 		for (v, takes) in walk {
 			match takes {
 				BoolVal::Const(true) => return Ok(Self::new(v..=v)),
 				BoolVal::Const(false) => {}
-				BoolVal::Lit(l) => {
-					values.push(v);
-					literals.push(l);
-				}
+				BoolVal::Lit(l) => pairs.push((v, l)),
 			}
 		}
-		if values.is_empty() {
+		if pairs.is_empty() {
 			db.contradiction()?;
 		}
-		let domain = RangeList::from_elements(values);
+		pairs.sort_by_key(|&(v, _)| v);
+		if let Some(w) = pairs.windows(2).find(|w| w[0].0 == w[1].0) {
+			panic!(
+				"a direct walk has one literal per value, but {} has more",
+				w[0].0
+			);
+		}
+		let (values, literals): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
+		let domain = RangeList::from_sorted_elements(values);
 		Self::from_direct_encoding(db, domain, &literals)
 	}
 
@@ -1861,6 +1872,27 @@ pub(crate) mod tests {
 		.unwrap();
 		assert_eq!(*k.domain(), RangeList::from(4..=4));
 		assert_eq!((cnf.num_vars(), cnf.num_clauses()), (0, 0));
+	}
+
+	#[test]
+	#[should_panic(expected = "one literal per value")]
+	fn a_direct_walk_takes_each_value_once() {
+		let mut cnf = Cnf::default();
+		let (a, b) = (cnf.new_lit(), cnf.new_lit());
+		let _ = IntVar::from_direct_walk(&mut cnf, [(1, a.into()), (1, b.into())]);
+	}
+
+	#[test]
+	fn a_direct_walk_takes_its_values_in_any_order() {
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(0..=2);
+		let walk = [2, 0, 1].map(|v| (v, x.equals(&mut cnf, v).unwrap()));
+		let y = IntVar::from_direct_walk(&mut cnf, walk).unwrap();
+		assert_eq!(
+			all_values(&cnf, &|v| vec![x.value(v), y.value(v)]),
+			(0..=2).map(|d| vec![d, d]).collect_vec(),
+			"each literal stands for the value it came with"
+		);
 	}
 
 	#[test]

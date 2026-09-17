@@ -28,7 +28,7 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use common::{coefficients, encode, Coeff, CARD_ENCODERS, ENCODERS};
+use common::{coefficients, distinct_coefficients, encode, Coeff, CARD_ENCODERS, ENCODERS};
 use pindakaas::{
 	constraint::{
 		cardinality_one::{CardinalityOne, PairwiseEncoder},
@@ -149,7 +149,7 @@ fn knapsack(enc: &str) -> Result<Cnf, Unsatisfiable> {
 			&mut cnf,
 			&CardinalityOne::new(lits.clone(), LimitComp::Equal),
 		)?;
-		let ws = coefficients(CHOICES, 60, 20 + g as u64);
+		let ws = distinct_coefficients(CHOICES, 60, 20 + g as u64);
 		// Heuristic: profit tracks weight, so cheap items are also poor ones
 		// and the choice is a real trade-off rather than a dominated one.
 		let ps: Vec<Coeff> = ws.iter().map(|w| w * 3 / 2 + 1).collect();

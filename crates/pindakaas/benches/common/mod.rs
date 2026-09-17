@@ -1,6 +1,7 @@
 //! What the cost and the quality harness both need: the coefficient type the
 //! library does not export, the list of encoders, and a way to run one by name.
 
+use itertools::Itertools;
 use pindakaas::{
 	constraint::linear::{
 		AdderEncoder, DecisionDiagramEncoder, Linear, LinearEncoder, MixedRadixEncoder,
@@ -35,6 +36,17 @@ pub(crate) fn coefficients(n: usize, max: Coeff, seed: u64) -> Vec<Coeff> {
 			((state >> 33) % max as u64) as Coeff + 1
 		})
 		.collect()
+}
+
+/// [`coefficients`] without repeats, for weights a direct walk takes as values.
+pub(crate) fn distinct_coefficients(n: usize, max: Coeff, seed: u64) -> Vec<Coeff> {
+	let distinct = coefficients(16 * n, max, seed)
+		.into_iter()
+		.unique()
+		.take(n)
+		.collect_vec();
+	assert_eq!(distinct.len(), n, "{n} distinct draws from 1..={max}");
+	distinct
 }
 
 /// Encode `con` with the encoder named, whichever shape aggregation leaves.

@@ -20,7 +20,7 @@ mod common;
 
 use std::fmt::{self, Display};
 
-use common::{coefficients, encode, Coeff, CARD_ENCODERS, ENCODERS};
+use common::{coefficients, distinct_coefficients, encode, Coeff, CARD_ENCODERS, ENCODERS};
 use divan::{counter::ItemsCount, Bencher};
 use pindakaas::{
 	constraint::{
@@ -174,7 +174,9 @@ fn shapes() -> Vec<Shape> {
 		k: reachable_bound(&wide),
 		terms: Terms::Lits(wide),
 	});
-	let groups: Vec<Vec<Coeff>> = (0..6).map(|g| coefficients(4, 12, 10 + g)).collect();
+	let groups: Vec<Vec<Coeff>> = (0..6)
+		.map(|g| distinct_coefficients(4, 12, 10 + g))
+		.collect();
 	// A group contributes one of its weights, so a bound the sum reaches is a
 	// choice from each of them.
 	let k = groups.iter().map(|g| g[g.len() / 2]).sum::<Coeff>();
