@@ -70,7 +70,9 @@ mod pindakaas {
 		constraint::{
 			bool_linear::NormalizedBoolLinear,
 			cardinality::Cardinality,
-			cardinality_one::{BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder},
+			cardinality_one::{
+				BitwiseEncoder, CardinalityOne, LadderEncoder, PairwiseEncoder, ProductEncoder,
+			},
 			count::{Count, SortingNetworkEncoder},
 			int_linear::NormalizedIntLinear,
 			linear::{
@@ -161,6 +163,8 @@ mod pindakaas {
 		MIXED_RADIX,
 		/// Pairwise at-most-one clauses, without auxiliary variables.
 		PAIRWISE,
+		/// Recursive product at-most-one encoding.
+		PRODUCT,
 		/// Running totals for Boolean linear constraints.
 		SEQUENTIAL_COUNTER,
 		/// A comparator network for cardinality and at-most-one constraints.
@@ -792,6 +796,7 @@ mod pindakaas {
 				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
 				Encoder::LADDER => LadderEncoder::default().encode(db, con),
 				Encoder::PAIRWISE => PairwiseEncoder::default().encode(db, con),
+				Encoder::PRODUCT => ProductEncoder::default().encode(db, con),
 				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
 				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
 				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),

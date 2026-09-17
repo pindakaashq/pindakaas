@@ -74,7 +74,12 @@ LINEAR = [
     Encoder.WATCHDOG,
 ]
 COUNTING = LINEAR + [Encoder.SORTING_NETWORK]
-AT_MOST_ONE = COUNTING + [Encoder.BITWISE, Encoder.LADDER, Encoder.PAIRWISE]
+AT_MOST_ONE = COUNTING + [
+    Encoder.BITWISE,
+    Encoder.LADDER,
+    Encoder.PAIRWISE,
+    Encoder.PRODUCT,
+]
 
 
 @pytest.mark.parametrize("encoder", LINEAR)
