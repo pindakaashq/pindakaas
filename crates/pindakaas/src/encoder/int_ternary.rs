@@ -12,7 +12,7 @@ use crate::{
 	constraint::{
 		int_linear::{encode_addition, Decompose, IntLinear, NormalizedIntLinear, Term},
 		int_ternary::IntTernary,
-		linear::Comparator,
+		linear::{Comparator, LimitComp},
 	},
 	decision::integer::IntVar,
 	helpers::{div_ceil, div_floor},
@@ -221,7 +221,7 @@ impl IntTernaryEncoder {
 		con: &NormalizedIntLinear,
 		decompose: &impl Decompose,
 	) -> Result {
-		if self.encode_if_short(db, con)? {
+		if self.encode_undecomposed(db, con)? {
 			return Ok(());
 		}
 		// A decomposition that cannot be built is a constraint that cannot be
@@ -233,16 +233,29 @@ impl IntTernaryEncoder {
 			.try_for_each(|con| Encoder::encode(self, db, con))
 	}
 
-	/// Encode `con` as the single addition it is where it has two terms or
-	/// fewer, reporting whether it was one.
+	/// Encode `con` where it needs no decomposition, reporting whether it did.
 	///
-	/// No decomposition can leave such a constraint smaller than this, so every
-	/// strategy asks before it starts.
-	pub(crate) fn encode_if_short<Db: ClauseDatabase + ?Sized>(
+	/// A constraint its bounds already decide takes no clauses when nothing can
+	/// break it, and is a contradiction when nothing can meet it. One of two
+	/// terms or fewer is the single addition any decomposition would leave.
+	/// Every strategy asks before it starts, whether the constraint came
+	/// through aggregation or was handed to the encoder directly.
+	pub(crate) fn encode_undecomposed<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
 		con: &NormalizedIntLinear,
 	) -> Result<bool, Unsatisfiable> {
+		let k = con.k();
+		// Every term counts from zero, so the least and greatest the sum comes
+		// to are its terms at their least and greatest.
+		let least: Coeff = con.terms().iter().map(|(c, x)| **c * x.min()).sum();
+		let most: Coeff = con.terms().iter().map(|(c, x)| **c * x.max()).sum();
+		if least > k || (con.cmp() == LimitComp::Equal && most < k) {
+			db.contradiction()?;
+		}
+		if con.cmp() == LimitComp::LessEq && most <= k {
+			return Ok(true);
+		}
 		match con.as_ternary() {
 			Some(addition) => Encoder::encode(self, db, &addition).map(|()| true),
 			None => Ok(false),
@@ -327,6 +340,62 @@ mod tests {
 		helpers::tests::{at_most_one_var, models, models_over},
 		ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit,
 	};
+
+	/// A constraint its bounds decide needs no decomposition, whichever
+	/// strategy is asked and however the constraint reached it.
+	#[test]
+	fn a_constraint_its_bounds_decide_is_not_decomposed() {
+		use crate::constraint::int_linear::{
+			DecisionDiagramEncoder, MixedRadixEncoder, NormalizedIntLinear,
+			SequentialCounterEncoder, TotalizerEncoder, WatchdogEncoder,
+		};
+
+		// Three terms, so the short-constraint path does not decide it.
+		let con = |least, k| {
+			NormalizedIntLinear::new(
+				(0..3).map(|_| (PosCoeff::new(1), IntVar::new(least..=2))),
+				LimitComp::LessEq,
+				PosCoeff::new(k),
+			)
+		};
+		let encoders: [(
+			&str,
+			&dyn Fn(&mut Cnf, &NormalizedIntLinear) -> crate::Result,
+		); 5] = [
+			("diagram", &|cnf, con| {
+				DecisionDiagramEncoder::default().encode(cnf, con)
+			}),
+			("mixed radix", &|cnf, con| {
+				MixedRadixEncoder::default().encode(cnf, con)
+			}),
+			("sequential counter", &|cnf, con| {
+				SequentialCounterEncoder::default().encode(cnf, con)
+			}),
+			("totalizer", &|cnf, con| {
+				TotalizerEncoder::default().encode(cnf, con)
+			}),
+			("watchdog", &|cnf, con| {
+				WatchdogEncoder::default().encode(cnf, con)
+			}),
+		];
+		for (name, encode) in encoders {
+			// Six at the most, which the bound allows many times over. The
+			// diagram used to build layers here it asserts cannot overlap.
+			let mut cnf = Cnf::default();
+			encode(&mut cnf, &con(0, 99)).unwrap();
+			assert_eq!(
+				(cnf.num_vars(), cnf.num_clauses()),
+				(0, 0),
+				"{name} encoded a constraint nothing can break"
+			);
+			// Three at the least, which is already past the bound.
+			let mut cnf = Cnf::default();
+			assert!(
+				encode(&mut cnf, &con(1, 2)).is_err(),
+				"{name} met a constraint nothing can meet"
+			);
+		}
+	}
 
 	/// A constraint of two terms is the addition the decomposers would have to
 	/// build anyway, so each of them leaves it to this encoder rather than

@@ -448,7 +448,7 @@ where
 		tracing::instrument(name = "mixed_radix_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		if self.config.encoder().encode_if_short(db, con)? {
+		if self.config.encoder().encode_undecomposed(db, con)? {
 			return Ok(());
 		}
 		// Digits that cannot hold a value are a constraint that cannot be met,
