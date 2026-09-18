@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3](https://github.com/pindakaashq/pindakaas/compare/pindakaas-kissat-v0.2.2...pindakaas-kissat-v0.2.3) - 2026-09-18
+
+### Fixed
+
+- C robustness issues
+
+### Other
+
+- cargo +nightly item-sort
+- clarify encoding APIs and expand library documentation
+- drop `Term` as a type and fix the constant in aggregation
+
 ## [0.2.2](https://github.com/pindakaashq/pindakaas/compare/pindakaas-kissat-v0.2.1...pindakaas-kissat-v0.2.2) - 2026-02-21
 
 ### Added

@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.5.1...pyndakaas-v0.6.0) - 2026-09-18
+
+### Added
+
+- expose the product at-most-one encoding to Python
+- [**breaking**] encode an aggregated constraint with a single encoder
+- [**breaking**] add the polynomial watchdog encoding
+- add generalized n-level modulo totalizer encoding
+- ask an integer variable for the literals of its values
+- create and constrain integer variables from Python
+- write linear expressions over integers as well as literals
+- aggregate linear constraints into integer ones
+- add product encoding for at-most-one constraints
+
+### Fixed
+
+- read updated WCNF format
+- encode a count with any of the linear encodings
+- read the ends of a variable range from the range itself
+- C robustness issues
+
+### Other
+
+- report an unsupported encoder without a lock
+- [**breaking**] one handle for what a variable has already encoded
+- cargo +nightly item-sort
+- cargo +nightly fmt
+- tighten Rust and Python API documentation
+- clarify encoding APIs and expand library documentation
+- name the linear constraint module for what it holds
+- cut the documentation back and fill in what was missing
+- drop `Term` as a type and fix the constant in aggregation
+- move the cardinality constraint in beside the others
+- separate the integer encoder from the constraint it takes
+- give each linear encoding its own module
+- give each at-most-one encoding its own module
+- separate the Tseitin encoding from the formulas it encodes
+- put the aggregator where the encoders are
+- move the integer decisions in beside the Boolean ones
+- *(pyndakaas)* build a single abi3 wheel per platform
+- update itertools from 0.14 to 0.15
+- *(deps)* update pyo3 requirement from 0.28.3 to 0.29.0
+
 ## [0.5.1](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.5.0...pyndakaas-v0.5.1) - 2026-06-09
 
 ### Other
