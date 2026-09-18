@@ -144,7 +144,7 @@ def test_wcnf():
     f.add_clause([x, y])
     f.add_weighted_clause([x], 1)
     f.add_weighted_clause([y], 2)
-    assert f.to_dimacs() == "p wcnf 2 3 4\n4 1 2 0\n1 1 0\n2 2 0\n"
+    assert f.to_dimacs() == "h 1 2 0\n1 1 0\n2 2 0\n"
 
 
 def test_conditions():

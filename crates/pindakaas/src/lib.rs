@@ -243,7 +243,6 @@ pub mod trace;
 
 use std::{
 	cell::RefCell,
-	cmp::Ordering,
 	error::Error,
 	fmt::{self, Display},
 	fs::File,
@@ -459,11 +458,6 @@ struct CnfIterator<'a> {
 /// Coefficient representation shared by constraints and expressions.
 pub(crate) type Coeff = i64;
 
-enum Dimacs {
-	Cnf(Cnf),
-	Wcnf(Wcnf),
-}
-
 /// The central trait, implemented by every encoding algorithm.
 ///
 /// A type implements it once per constraint it can encode, so which encoders
@@ -611,94 +605,119 @@ fn clause_buffer() -> impl DerefMut<Target = Vec<Lit>> {
 
 /// Internal function used to parse a file in the (weighted) DIMACS format.
 ///
-/// This function is used by `Cnf::from_str` and `Wcnf::from_str`.
-fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Dimacs, io::Error> {
+/// This function is used by [`Cnf::from_file`] and [`Wcnf::from_file`].
+///
+/// A clause is literals ending in a zero, which may run over more than one
+/// line. A weighted clause states first what failing it costs: either the
+/// weight, or `h` where nothing may fail it. The older format instead gives
+/// every clause a weight and says in its header which weight is out of reach.
+/// A header is read where there is one, and the variables are counted from the
+/// clauses either way.
+fn parse_dimacs_file<const WEIGHTED: bool>(path: &Path) -> Result<Wcnf, io::Error> {
 	let file = File::open(path)?;
-	let mut had_header = false;
-
 	let mut wcnf = Wcnf::default();
+	let invalid = |what: &str| io::Error::new(io::ErrorKind::InvalidInput, what);
 
-	let mut cl: Vec<Lit> = Vec::new();
+	// The weight an older header says is out of reach, where it stated one.
 	let mut top: Option<Coeff> = None;
+	// The literals of the clause being read, and what failing it costs, once
+	// its first line has been seen.
+	let mut clause: Vec<Lit> = Vec::new();
+	let mut weight: Option<Coeff> = None;
+	let mut started = false;
+	// The variables a header promised, against the ones the clauses mention.
+	let mut vars = 0;
 
 	for line in BufReader::new(file).lines() {
-		match line {
-			Ok(line) if line.is_empty() || line.starts_with('c') => (),
-			Ok(line) if had_header => {
-				for seg in line.split(' ') {
-					if WEIGHTED {
-						if let Ok(weight) = seg.parse::<Coeff>() {
-							wcnf.weights.push(match weight.cmp(&top.unwrap()) {
-								Ordering::Less => Some(weight),
-								Ordering::Equal => None,
-								Ordering::Greater => panic!(
-								"Found weight weight {weight} greater than top {top:?} from header"
-							),
-							});
-						} else {
-							panic!("Cannot parse line {line}");
-						}
+		let line = line?;
+		let line = line.trim();
+		if line.is_empty() || line.starts_with('c') {
+			continue;
+		}
+		let mut fields = line.split_whitespace();
+		if line.starts_with('p') {
+			let header: Vec<&str> = fields.collect();
+			let (v, c) =
+				match (WEIGHTED, &header[..]) {
+					(false, ["p", "cnf", v, c]) | (true, ["p", "wcnf", v, c]) => (v, c),
+					// Only the older weighted format states a top weight.
+					(true, ["p", "wcnf", v, c, t]) => {
+						top = Some(
+							t.parse()
+								.map_err(|_| invalid("unable to parse top weight"))?,
+						);
+						(v, c)
 					}
-
-					if let Ok(lit) = seg.parse::<i32>() {
-						if lit == 0 {
-							wcnf.add_clause(cl.drain(..)).unwrap();
-						} else {
-							cl.push(Lit(NonZeroI32::new(lit).unwrap()));
-						}
+					(false, _) => {
+						return Err(invalid(
+							"expected DIMACS CNF header formatted \"p cnf {variables} {clauses}\"",
+						))
 					}
-				}
-			}
-			// parse header, expected format: "p cnf {num_var} {num_clauses}" or "p wcnf {num_var}
-			// {num_clauses} {top}"
-			Ok(line) => {
-				let vec: Vec<&str> = line.split_whitespace().collect();
-				if !WEIGHTED && (vec.len() != 4 || vec[0..2] != ["p", "cnf"]) {
-					return Err(io::Error::new(
-						io::ErrorKind::InvalidInput,
-						"expected DIMACS CNF header formatted \"p cnf {variables} {clauses}\"",
-					));
-				} else if WEIGHTED && (vec.len() != 4 || vec[0..2] != ["p", "wcnf"]) {
-					return Err(io::Error::new(
-						io::ErrorKind::InvalidInput,
-						"expected DIMACS WCNF header formatted \"p wcnf {variables} {clauses} {top}\"",
-					));
-				}
-				wcnf.cnf.nvar = VarFactory {
-					next_var: Some(Var(vec[2].parse::<NonZeroI32>().map_err(|_| {
-						io::Error::new(
-							io::ErrorKind::InvalidInput,
-							"unable to parse number of variables",
-						)
-					})?)),
+					(true, _) => return Err(invalid(
+						"expected DIMACS WCNF header formatted \"p wcnf {variables} {clauses}\" \
+						 or \"p wcnf {variables} {clauses} {top}\"",
+					)),
 				};
-				let num_clauses: usize = vec[3].parse().map_err(|_| {
-					io::Error::new(
-						io::ErrorKind::InvalidInput,
-						"unable to parse number of clauses",
-					)
-				})?;
-
-				wcnf.cnf.lits.reserve(num_clauses);
-				wcnf.cnf.size.reserve(num_clauses);
-
-				if WEIGHTED {
-					top = Some(vec[4].parse().map_err(|_| {
-						io::Error::new(io::ErrorKind::InvalidInput, "unable to parse top weight")
-					})?);
-				}
-
-				had_header = true;
+			vars = v
+				.parse()
+				.map_err(|_| invalid("unable to parse number of variables"))?;
+			// The clause count is no more than how much room to make.
+			if let Ok(clauses) = c.parse() {
+				wcnf.cnf.lits.reserve(clauses);
+				wcnf.cnf.size.reserve(clauses);
+				wcnf.weights.reserve(clauses);
 			}
-			Err(e) => return Err(e),
+			continue;
+		}
+
+		// What a weighted clause costs comes before its literals, and only on
+		// the line the clause starts on.
+		if WEIGHTED && !started {
+			let field = fields
+				.next()
+				.ok_or_else(|| invalid("a weighted clause states what failing it costs"))?;
+			weight = if field == "h" {
+				None
+			} else {
+				let stated: Coeff = field
+					.parse()
+					.map_err(|_| invalid("unable to parse the weight of a clause"))?;
+				// In the older format the top weight is what "hard" is written
+				// as.
+				match top {
+					Some(top) if stated >= top => None,
+					_ => Some(stated),
+				}
+			};
+			started = true;
+		}
+
+		for field in fields {
+			let lit: i32 = field
+				.parse()
+				.map_err(|_| invalid("a clause is literals ending in a zero"))?;
+			let Some(lit) = NonZeroI32::new(lit) else {
+				// A zero ends the clause, whatever line it began on.
+				match weight {
+					None => wcnf.add_clause(clause.drain(..)),
+					Some(weight) => wcnf.add_weighted_clause(clause.drain(..), weight),
+				}
+				.map_err(|Unsatisfiable| invalid("the formula holds an empty clause"))?;
+				started = false;
+				continue;
+			};
+			vars = vars.max(lit.get().unsigned_abs());
+			clause.push(Lit(lit));
 		}
 	}
-
-	if WEIGHTED {
-		Ok(Dimacs::Wcnf(wcnf))
-	} else {
-		Ok(Dimacs::Cnf(wcnf.cnf))
+	if !clause.is_empty() {
+		return Err(invalid("the last clause is not ended by a zero"));
 	}
+
+	// However many the header promised, the formula is over the variables its
+	// clauses mention; reading a clause emits none of its own.
+	let _ = wcnf.new_var_range(vars as usize);
+	Ok(wcnf)
 }
 
 impl Cnf {
@@ -706,16 +725,10 @@ impl Cnf {
 	///
 	/// # Errors
 	///
-	/// An I/O error for unreadable input or a malformed header.
-	///
-	/// # Panics
-	///
-	/// Malformed clause data may currently panic instead of returning an error.
+	/// An I/O error for unreadable input, a malformed header, or a clause that
+	/// is not literals ending in a zero.
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-		match parse_dimacs_file::<false>(path)? {
-			Dimacs::Cnf(cnf) => Ok(cnf),
-			_ => unreachable!(),
-		}
+		Ok(parse_dimacs_file::<false>(path)?.cnf)
 	}
 
 	#[cfg(test)]
@@ -874,19 +887,16 @@ impl Wcnf {
 
 	/// Parses a weighted CNF formula from WCNF input.
 	///
+	/// Both formats of the MaxSAT evaluations are read: the older one, whose
+	/// header states the weight standing for a hard clause, and the one since
+	/// 2022, which has no header and writes `h` for a hard clause.
+	///
 	/// # Errors
 	///
-	/// An I/O error for unreadable input or a malformed header.
-	///
-	/// # Panics
-	///
-	/// WCNF header and clause parsing currently contain unchecked assumptions;
-	/// syntactically plausible input can panic.
+	/// An I/O error for unreadable input, a malformed header, or a clause that
+	/// is not literals ending in a zero.
 	pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-		match parse_dimacs_file::<true>(path)? {
-			Dimacs::Wcnf(wcnf) => Ok(wcnf),
-			_ => unreachable!(),
-		}
+		parse_dimacs_file::<true>(path)
 	}
 
 	/// Iterates over clauses and their weights in insertion order.
@@ -909,7 +919,9 @@ impl Wcnf {
 		self.cnf.num_vars()
 	}
 
-	/// Writes the formula to `path` in WCNF format.
+	/// Writes the formula to `path` in the WCNF format of the MaxSAT
+	/// evaluations since 2022, which has no header and writes `h` for a hard
+	/// clause.
 	///
 	/// Each line of `comment` is prefixed with the DIMACS comment marker.
 	///
@@ -948,20 +960,20 @@ impl ClauseDatabase for Wcnf {
 }
 
 impl Display for Wcnf {
+	/// Writes the formula in the WCNF format of the MaxSAT evaluations since
+	/// 2022: no header, and every clause stating first what failing it costs,
+	/// which is `h` where nothing may fail it.
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let num_var = &self.cnf.nvar.num_emitted_vars();
-		let num_clauses = self.cnf.size.len();
-		let top = self.weights.iter().flatten().fold(1, |a, b| a + *b);
-		writeln!(f, "p wcnf {num_var} {num_clauses} {top}")?;
 		let mut start = 0;
 		for (size, weight) in self.cnf.size.iter().zip(self.weights.iter()) {
-			let cl = self.cnf.lits.iter().skip(start).take(*size);
-			let weight = weight.unwrap_or(top);
-			write!(f, "{weight} ")?;
-			for lit in cl {
-				write!(f, "{} ", lit.0)?;
+			match weight {
+				None => write!(f, "h")?,
+				Some(weight) => write!(f, "{weight}")?,
 			}
-			writeln!(f, "0")?;
+			for lit in self.cnf.lits.iter().skip(start).take(*size) {
+				write!(f, " {}", lit.0)?;
+			}
+			writeln!(f, " 0")?;
 			start += size;
 		}
 		Ok(())
@@ -982,9 +994,71 @@ thread_local! {
 
 #[cfg(test)]
 mod tests {
-	use std::num::NonZeroI32;
+	use std::{env, fs, num::NonZeroI32, path::Path};
 
-	use crate::{solver::VarFactory, Lit, Var};
+	use crate::{solver::VarFactory, Cnf, Lit, Var, Wcnf};
+
+	#[test]
+	fn a_clause_may_run_over_more_than_one_line() {
+		let cnf = read_back("wrapped.cnf", "p cnf 3 2\n1 -2\n3 0\n-1 0\n", |path| {
+			Cnf::from_file(path).unwrap()
+		});
+
+		assert_eq!(cnf.num_vars(), 3);
+		assert_eq!(cnf.num_clauses(), 2);
+		assert_eq!(cnf.iter().next().unwrap().len(), 3);
+	}
+
+	#[test]
+	fn a_malformed_clause_is_an_error() {
+		let outcome = read_back("malformed.cnf", "p cnf 1 1\nnot a clause 0\n", |path| {
+			Cnf::from_file(path)
+		});
+
+		assert!(outcome.is_err());
+	}
+
+	/// Write `text` to a file of the test's own, and read it back as `read`
+	/// does.
+	fn read_back<T>(name: &str, text: &str, read: impl FnOnce(&Path) -> T) -> T {
+		let path = env::temp_dir().join(format!("pindakaas-{name}"));
+		fs::write(&path, text).unwrap();
+		let value = read(&path);
+		fs::remove_file(&path).unwrap();
+		value
+	}
+
+	#[test]
+	fn the_weighted_format_with_a_header_reads_its_top_weight() {
+		let text = "p wcnf 2 4 10\n10 1 2 0\n10 -1 -2 0\n3 1 0\n5 -2 0\n";
+		let wcnf = read_back("header.wcnf", text, |path| Wcnf::from_file(path).unwrap());
+
+		// The clauses of the top weight are the hard ones.
+		let weights: Vec<_> = wcnf.iter().map(|(_, weight)| *weight).collect();
+		assert_eq!(weights, [None, None, Some(3), Some(5)]);
+		assert_eq!(wcnf.num_vars(), 2);
+	}
+
+	#[test]
+	fn the_weighted_format_without_a_header_writes_hard_clauses_as_h() {
+		let text = "c a comment\nh 1 2 0\nh -1 -2 0\n3 1 0\n5 -2 0\n";
+		let wcnf = read_back("plain.wcnf", text, |path| Wcnf::from_file(path).unwrap());
+
+		let weights: Vec<_> = wcnf.iter().map(|(_, weight)| *weight).collect();
+		assert_eq!(weights, [None, None, Some(3), Some(5)]);
+		assert_eq!(wcnf.num_vars(), 2);
+		assert_eq!(wcnf.iter().next().unwrap().0.len(), 2);
+	}
+
+	#[test]
+	fn the_weighted_format_written_is_the_one_read() {
+		let text = "h 1 2 0\nh -1 -2 0\n3 1 0\n5 -2 0\n";
+		let wcnf = read_back("round-trip.wcnf", text, |path| {
+			Wcnf::from_file(path).unwrap()
+		});
+
+		assert_eq!(wcnf.to_string(), text);
+	}
 
 	#[test]
 	fn var_range() {
