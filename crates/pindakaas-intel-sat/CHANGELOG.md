@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/pindakaashq/pindakaas/compare/pindakaas-intel-sat-v0.2.0...pindakaas-intel-sat-v0.2.1) - 2026-09-18
+
+### Fixed
+
+- C robustness issues
+
+### Other
+
+- cargo +nightly item-sort
+- clarify encoding APIs and expand library documentation
+
 ## [0.2.0](https://github.com/pindakaashq/pindakaas/compare/pindakaas-intel-sat-v0.1.0...pindakaas-intel-sat-v0.2.0) - 2025-09-25
 
 ### Added
