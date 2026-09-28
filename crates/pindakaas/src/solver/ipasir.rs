@@ -393,7 +393,8 @@ where
 				_methods: PhantomData,
 			}),
 			_ => {
-				debug_assert_eq!(res, 0); // According to spec should be 0, unknown
+				debug_assert_eq!(res, 0); // According to spec should be 0,
+										  // unknown
 				SolveResult::Unknown
 			}
 		}
@@ -587,7 +588,8 @@ impl<Impl: IpasirSolverMethods> Valuation for IpasirValuation<Impl> {
 			_ if ret == var => !lit.is_negated(),
 			_ if ret == -var => lit.is_negated(),
 			_ => {
-				debug_assert_eq!(ret, 0); // zero according to spec, both value are valid
+				debug_assert_eq!(ret, 0); // zero according to spec, both value
+										  // are valid
 				false
 			}
 		}

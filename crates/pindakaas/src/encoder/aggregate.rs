@@ -176,10 +176,19 @@ impl LinAggregator {
 			}
 		}
 
-		// What the sum can come to at its least and at its most, which is
-		// whether the constraint can be broken at all. A literal adds nothing
-		// when it does not hold, so only an integer term lifts the least.
+		// Only integer terms add to the least the sum can be.
 		let lhs_min: Coeff = int_terms.iter().map(|(x, c)| c * x.min()).sum();
+
+		// A literal worth more than the bound minus the integers never holds.
+		partition.retain(|&(lit, coef)| {
+			if *coef > k - lhs_min {
+				db.add_clause([!lit]).unwrap();
+				false
+			} else {
+				true
+			}
+		});
+
 		let lhs_max: Coeff = int_terms.iter().map(|(x, c)| c * x.max()).sum::<Coeff>()
 			+ partition.iter().map(|&(_, coef)| *coef).sum::<Coeff>();
 		if lhs_min > k || (cmp == LimitComp::Equal && lhs_max < k) {
@@ -197,18 +206,6 @@ impl LinAggregator {
 			return Ok(LinVariant::Trivial);
 		}
 		let mut k = PosCoeff::new(k);
-
-		// A literal worth more than the bound can never hold.
-		if int_terms.is_empty() {
-			partition.retain(|&(lit, coef)| {
-				if coef > k {
-					db.add_clause([!lit]).unwrap();
-					false
-				} else {
-					true
-				}
-			});
-		}
 
 		// The sum only lands on multiples of what divides every coefficient.
 		{
@@ -1086,6 +1083,43 @@ mod tests {
 			assert_eq!(count.y.min(), 0);
 			assert_eq!(count.y.max(), 3);
 		}
+	}
+
+	#[test]
+	fn literals_the_bound_rules_out_leave_nothing_to_encode() {
+		let mut cnf = Cnf::default();
+		let (a, b) = cnf.new_lits();
+		// Ruling out both literals settles `2a + 3b ≤ 1`.
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&LinAggregator::default(),
+				&Linear::new(LinExp::from_slices(&[2, 3], &[a, b]), Comparator::LessEq, 1)
+			),
+			Ok(Aggregated::Trivial)
+		);
+		assert_eq!(cnf.num_clauses(), 2);
+
+		// `x ≥ 2` leaves `3a` no room under 4.
+		let mut cnf = Cnf::default();
+		let a = cnf.new_lit();
+		let x = crate::decision::integer::IntVar::new(2..=5).with_label("x");
+		let _ = LinAggregator::default()
+			.aggregate(&mut cnf, &Linear::new(a * 3 + x, Comparator::LessEq, 4))
+			.unwrap();
+		assert_eq!(cnf.iter().collect_vec(), [[!a]]);
+
+		// Nothing is left to meet `= 1`.
+		let mut cnf = Cnf::default();
+		let (a, b) = cnf.new_lits();
+		assert_eq!(
+			aggregated(
+				&mut cnf,
+				&LinAggregator::default(),
+				&Linear::new(LinExp::from_slices(&[2, 3], &[a, b]), Comparator::Equal, 1)
+			),
+			Err(Unsatisfiable)
+		);
 	}
 
 	/// Groups in a settled order, neither the grouping nor what is in one

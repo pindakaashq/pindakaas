@@ -277,7 +277,8 @@ impl Subscriber for Tracer {
 		let mut stack = self.stack.lock().unwrap();
 		let indent = stack.len() - 1;
 		let visitor = stack.last_mut().unwrap();
-		assert_eq!(&visitor.ident, span); // FIXME: Deal with out of order execution
+		assert_eq!(&visitor.ident, span); // FIXME: Deal with out of order
+										  // execution
 		assert_eq!(visitor.start, None); // FIXME: Deal with re-entrant spans
 		visitor.start = Some(Instant::now());
 		let constraint = if let Some(cons) = &visitor.constraint {
@@ -333,7 +334,8 @@ impl Subscriber for Tracer {
 	fn exit(&self, span: &Id) {
 		let mut stack = self.stack.lock().unwrap();
 		let visitor = stack.pop().unwrap();
-		assert_eq!(&visitor.ident, span); // FIXME: Deal with out of order execution
+		assert_eq!(&visitor.ident, span); // FIXME: Deal with out of order
+										  // execution
 		if let Some(start) = visitor.start {
 			let dur = Instant::now() - start;
 			self.indented_output(

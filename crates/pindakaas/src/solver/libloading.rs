@@ -227,7 +227,8 @@ impl Valuation for IpasirSol<'_> {
 			_ if val == lit => true,
 			_ if val == -lit => false,
 			_ => {
-				debug_assert_eq!(val, 0); // zero according to spec, both value are valid
+				debug_assert_eq!(val, 0); // zero according to spec, both value
+										  // are valid
 				false
 			}
 		}
@@ -335,7 +336,8 @@ impl Solver for IpasirSolver<'_> {
 			10 => SolveResult::Satisfied(self.sol_obj()), // 10 -> Sat
 			20 => SolveResult::Unsatisfiable(self.failed_obj()), // 20 -> Unsat
 			_ => {
-				debug_assert_eq!(res, 0); // According to spec should be 0, unknown
+				debug_assert_eq!(res, 0); // According to spec should be 0,
+										  // unknown
 				SolveResult::Unknown
 			}
 		}
