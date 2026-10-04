@@ -138,7 +138,7 @@
 //! | [`SequentialCounterEncoder`](encoder::sequential_counter::SequentialCounterEncoder) | int, bool, card, amo, count | Sequential counter, SWC, GSWC [^sinz][^holldobler][^bofill] | GAC |
 //! | [`MixedRadixEncoder`](encoder::mixed_radix::MixedRadixEncoder) | int, bool, card, amo, count | MTO, GMTO [^ogawa][^zha][^bofill] | neither GAC nor CC |
 //! | [`WatchdogEncoder`](encoder::watchdog::WatchdogEncoder) | int, bool, card, amo, count | GPW/GGPW (global), LPW/GLPW (local) [^bailleux2009][^bofill] | CC / GAC |
-//! | [`SortingNetworkEncoder`](encoder::sorting_network::SortingNetworkEncoder) | card, amo, count | Cardinality network [^asin][^batcher] | GAC |
+//! | [`SortingNetworkEncoder`](encoder::sorting_network::SortingNetworkEncoder) | int, bool, card, amo, count | Cardinality network [^asin][^batcher] | GAC on unit weights |
 //! | [`PairwiseEncoder`](encoder::pairwise::PairwiseEncoder) | amo | Pairwise/binomial | GAC |
 //! | [`BitwiseEncoder`](encoder::bitwise::BitwiseEncoder) | amo | Bitwise/binary [^frisch] | weak propagation |
 //! | [`LadderEncoder`](encoder::ladder::LadderEncoder) | amo | Ladder/regular [^gent][^ansotegui] | not classified |

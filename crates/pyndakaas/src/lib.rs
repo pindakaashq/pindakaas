@@ -167,7 +167,7 @@ mod pindakaas {
 		PRODUCT,
 		/// Running totals for Boolean linear constraints.
 		SEQUENTIAL_COUNTER,
-		/// A comparator network for cardinality and at-most-one constraints.
+		/// A comparator network for Boolean linear constraints.
 		SORTING_NETWORK,
 		/// A balanced tree of partial sums for Boolean linear constraints.
 		TOTALIZER,
@@ -842,6 +842,7 @@ mod pindakaas {
 				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
 				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
 				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
+				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
 				_ => {
 					self.set_err("BoolLinear");
@@ -863,6 +864,7 @@ mod pindakaas {
 				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
 				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
 				Encoder::MIXED_RADIX => MixedRadixEncoder::default().encode(db, con),
+				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
 				Encoder::TOTALIZER => TotalizerEncoder::default().encode(db, con),
 				_ => {
 					self.set_err("Linear");

@@ -1,4 +1,5 @@
-//! Counting literals through a network of comparators.
+//! Counting literals, or adding up weighted terms, through a network of
+//! comparators.
 //!
 //! Each merge is either stated outright or halved and recursed on — see
 //! [`SortingNetworkStrategy`] — and the leaves become ternary integer
@@ -6,7 +7,12 @@
 //! use, which is what makes this the cardinality network of Asín et al. [^1]
 //! rather than a full sorter; the merges between them are not truncated.
 //!
-//! Domain consistent [^1].
+//! A weighted term enters as the integer it is: a literal worth `w` is a
+//! variable over `{0, w}`, which the merges add up like any other. What a merge
+//! comes to is kept as every value up to the bound, so the network grows with
+//! the bound rather than with the number of terms.
+//!
+//! Domain consistent on unit weights [^1].
 //!
 //! [^1]: R. Asín, R. Nieuwenhuis, A. Oliveras, E. Rodríguez-Carbonell,
 //! "Cardinality Networks: a theoretical and empirical study", Constraints
@@ -18,9 +24,11 @@ use rustc_hash::FxHashMap;
 
 use crate::{
 	constraint::{
+		bool_linear::NormalizedBoolLinear,
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
+		int_linear::NormalizedIntLinear,
 		int_ternary::{IntTernary, IntTernaryEncoder},
 		linear::LimitComp,
 	},
@@ -167,6 +175,26 @@ impl SortingNetworkEncoder {
 			.with_label(label)
 	}
 
+	/// The term `c·x` as a variable of its own.
+	///
+	/// Its literals are `x`'s, each standing for `c` times the value, so
+	/// scaling costs nothing.
+	fn scaled<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		c: Coeff,
+		x: &IntVar,
+	) -> Result<IntVar, Unsatisfiable> {
+		if c == 1 {
+			return Ok(x.clone());
+		}
+		let values = x.domain().iter().flatten().collect::<Vec<_>>();
+		let walk = values
+			.into_iter()
+			.map(|v| Ok((c * v, x.at_least(db, v)?)))
+			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
+		Ok(IntVar::from_order_walk(db, walk)?.with_label(format_args!("{c}·{}", x.label())))
+	}
+
 	/// The base case, `x{0,1} + y{0,1} ≷ z{0,1,2}`.
 	fn smerge<Db>(&self, db: &mut Db, x: &IntVar, y: &IntVar, cmp: &LimitComp, z: &IntVar) -> Result
 	where
@@ -178,7 +206,7 @@ impl SortingNetworkEncoder {
 		self.comp(db, x, &y, cmp, &z, 1)
 	}
 
-	/// Sort `xs` into a variable counting how many of them hold, up to `max`.
+	/// Sort `xs` into a variable for what they come to together, up to `max`.
 	fn sort<Db>(
 		&self,
 		db: &mut Db,
@@ -201,33 +229,34 @@ impl SortingNetworkEncoder {
 		})
 	}
 
-	/// Constrain `y` to count how many of `xs` hold.
+	/// Constrain `y` to be what `xs` come to together.
 	fn sorted<Db>(&self, db: &mut Db, xs: &[IntVar], cmp: &LimitComp, y: &IntVar) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		debug_assert!(xs.iter().all(|x| x.max() == 1));
 		match xs {
 			[] => Ok(()),
 			[x] => {
 				let zero = IntVar::new(0..=0).with_label("0");
 				self.ternary(db, x, &zero, cmp, y)
 			}
-			[x1, x2] if y.max() <= 2 => self.smerge(db, x1, x2, cmp, y),
+			[x1, x2] if x1.max() == 1 && x2.max() == 1 && y.max() <= 2 => {
+				self.smerge(db, x1, x2, cmp, y)
+			}
 			xs => {
 				let n = xs.len() / 2;
 				let y1 = self.sort(
 					db,
 					&xs[..n],
 					cmp,
-					min(n as Coeff, y.max()),
+					min(xs[..n].iter().map(IntVar::max).sum(), y.max()),
 					String::from("y1"),
 				)?;
 				let y2 = self.sort(
 					db,
 					&xs[n..],
 					cmp,
-					min((xs.len() - n) as Coeff, y.max()),
+					min(xs[n..].iter().map(IntVar::max).sum(), y.max()),
 					String::from("y2"),
 				)?;
 				match (y1, y2) {
@@ -343,6 +372,29 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SortingNetworkEncoder {
 			.collect::<Result<Vec<_>, _>>()?;
 
 		self.sorted(db, &xs, &count.cmp, &count.y)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for SortingNetworkEncoder {
+	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
+		let con = con.as_int_linear(db)?;
+		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedIntLinear> for SortingNetworkEncoder {
+	#[cfg_attr(
+		any(feature = "tracing", test),
+		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = format!("{con:?}")))
+	)]
+	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
+		let xs = con
+			.terms
+			.iter()
+			.map(|(c, x)| Self::scaled(db, **c, x))
+			.collect::<Result<Vec<_>, _>>()?;
+		let y = IntVar::new(*con.k..=*con.k).with_label("k");
+		self.sorted(db, &xs, &con.cmp, &y)
 	}
 }
 
@@ -562,10 +614,11 @@ mod tests {
 		constraint::{
 			cardinality::Cardinality,
 			count::{Count, SortingNetworkEncoder, SortingNetworkStrategy},
+			int_linear::NormalizedIntLinear,
 			linear::{LimitComp, PosCoeff},
 		},
 		decision::integer::IntVar,
-		helpers::tests::{assert_solutions, expect_file, models},
+		helpers::tests::{assert_solutions, expect_file, linear_test_suite, models, models_over},
 		ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Var, VarRange,
 	};
 
@@ -883,6 +936,68 @@ mod tests {
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_5_sorted_eq.sol"]);
 	}
+
+	#[test]
+	fn weighted_integers_add_up_to_the_bound() {
+		const K: Coeff = 9;
+		for strategy in [
+			SortingNetworkStrategy::Direct,
+			SortingNetworkStrategy::Recursive,
+			SortingNetworkStrategy::Mixed(10),
+		] {
+			for cmp in [LimitComp::LessEq, LimitComp::Equal] {
+				let mut cnf = Cnf::default();
+				// The terms are read from their own literals, since a model
+				// for each way the network's literals can fall is too many.
+				let mut lits = Vec::new();
+				let terms = [(2, 3), (3, 2), (5, 1), (1, 4)].map(|(c, ub)| {
+					let order = cnf.new_var_range(ub as usize).iter_lits().collect_vec();
+					for (&below, &above) in order.iter().tuple_windows() {
+						cnf.add_clause([!above, below]).unwrap();
+					}
+					lits.extend(&order);
+					let x = IntVar::from_order_encoding(&mut cnf, 0..=ub, &order).unwrap();
+					(PosCoeff::new(c), x)
+				});
+				get_sorted_encoder(strategy.clone())
+					.encode(
+						&mut cnf,
+						&NormalizedIntLinear::new(terms.clone(), cmp, PosCoeff::new(K)),
+					)
+					.unwrap();
+
+				let mut seen = models_over(&cnf, &lits, |value| {
+					terms.iter().map(|(_, x)| x.value(value)).collect_vec()
+				});
+				seen.sort_unstable();
+
+				let allowed = terms
+					.iter()
+					.map(|(_, x)| x.min()..=x.max())
+					.multi_cartesian_product()
+					.filter(|values| {
+						let sum: Coeff = values.iter().zip(&terms).map(|(v, (c, _))| v * **c).sum();
+						match cmp {
+							LimitComp::LessEq => sum <= K,
+							LimitComp::Equal => sum == K,
+						}
+					})
+					.sorted()
+					.collect_vec();
+				assert_eq!(seen, allowed, "{strategy:?} {cmp:?}");
+			}
+		}
+	}
+
+	linear_test_suite!(sorting_network_linear, SortingNetworkEncoder::default());
+	linear_test_suite!(
+		sorting_network_linear_direct,
+		SortingNetworkEncoder::default().with_strategy(SortingNetworkStrategy::Direct)
+	);
+	linear_test_suite!(
+		sorting_network_linear_recursive,
+		SortingNetworkEncoder::default().with_strategy(SortingNetworkStrategy::Recursive)
+	);
 
 	mod eq_direct {
 		sorted_card_test_suite!(

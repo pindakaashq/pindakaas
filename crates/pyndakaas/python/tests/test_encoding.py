@@ -70,11 +70,11 @@ LINEAR = [
     Encoder.DECISION_DIAGRAM,
     Encoder.MIXED_RADIX,
     Encoder.SEQUENTIAL_COUNTER,
+    Encoder.SORTING_NETWORK,
     Encoder.TOTALIZER,
     Encoder.WATCHDOG,
 ]
-COUNTING = LINEAR + [Encoder.SORTING_NETWORK]
-AT_MOST_ONE = COUNTING + [
+AT_MOST_ONE = LINEAR + [
     Encoder.BITWISE,
     Encoder.LADDER,
     Encoder.PAIRWISE,
@@ -89,7 +89,7 @@ def test_every_linear_encoder_takes_a_weighted_sum(encoder):
     f.add_encoding(x * 2 + y * 3 + z * 4 <= 5, encoder=encoder)
 
 
-@pytest.mark.parametrize("encoder", COUNTING)
+@pytest.mark.parametrize("encoder", LINEAR)
 def test_every_counting_encoder_takes_a_cardinality_constraint(encoder):
     f = CNF()
     x, y, z = f.new_vars(3)

@@ -50,8 +50,8 @@ use rangelist::RangeList;
 
 pub use crate::encoder::{
 	decision_diagram::DecisionDiagramEncoder, mixed_radix::MixedRadixEncoder,
-	sequential_counter::SequentialCounterEncoder, totalizer::TotalizerEncoder,
-	watchdog::WatchdogEncoder,
+	sequential_counter::SequentialCounterEncoder, sorting_network::SortingNetworkEncoder,
+	totalizer::TotalizerEncoder, watchdog::WatchdogEncoder,
 };
 use crate::{
 	constraint::{
