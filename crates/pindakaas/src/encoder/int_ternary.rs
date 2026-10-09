@@ -138,6 +138,8 @@ impl Encoded<'_> {
 		};
 		let (outer_c, outer_steps) = Self::guards(db, outer, cmp)?;
 		let (inner_c, inner_steps) = Self::guards(db, inner, cmp)?;
+		let inner_ordered = inner.is_none_or(|term| !term.x.has_direct_encoding());
+		let outer_ordered = outer.is_none_or(|term| !term.x.has_direct_encoding());
 		// What a direct encoding pins `bounded` to does not depend on what is
 		// left of the bound, so it is read once rather than once per step.
 		let pins = if bounded.x.has_direct_encoding() {
@@ -155,16 +157,17 @@ impl Encoded<'_> {
 			for &(w, inner_guard) in &inner_steps {
 				units.clear();
 				bounded.bound_into(db, cmp, left - inner_c * w, &pins, &mut units)?;
-				// A step asking of the terms below exactly what the one before
-				// it asked is already covered by that one, which happens often.
-				if have_units && units == last_units {
+				// Order thresholds imply earlier thresholds, so an identical
+				// consequence is already covered. Direct value indicators are
+				// disjoint and must each retain their implication.
+				if inner_ordered && have_units && units == last_units {
 					continue;
 				}
 				clauses.extend(units.iter().map(|&lit| (inner_guard, lit)));
 				mem::swap(&mut units, &mut last_units);
 				have_units = true;
 			}
-			if have_clauses && clauses == last_clauses {
+			if outer_ordered && have_clauses && clauses == last_clauses {
 				continue;
 			}
 			for &(inner_guard, lit) in &clauses {
@@ -818,6 +821,49 @@ mod tests {
 			})
 			.sorted()
 			.collect()
+	}
+
+	#[test]
+	fn direct_and_order_views_admit_exactly_the_solutions() {
+		let doms = vec![RangeList::from_elements([-2, 0, 3]); 3];
+		for direct in 0..8 {
+			for coeffs in [[1, 1, -1], [2, -3, -1], [-2, 3, -5]] {
+				for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
+					let mut cnf = Cnf::default();
+					let xs = doms
+						.iter()
+						.enumerate()
+						.map(|(i, domain)| {
+							let x = IntVar::new(domain.clone()).enforce_consistency(true);
+							if direct & (1 << i) != 0 {
+								let _ = x.direct_encoding(&mut cnf).unwrap();
+							} else {
+								let _ = x.order_encoding(&mut cnf).unwrap();
+							}
+							x
+						})
+						.collect_vec();
+					let terms = coeffs
+						.iter()
+						.zip(&xs)
+						.map(|(&c, x)| (c, x.clone()))
+						.collect();
+					IntTernaryEncoder::default()
+						.encode(&mut cnf, &ternary(terms, cmp, 0))
+						.unwrap();
+					let mut seen = models(&cnf, |value| {
+						xs.iter().map(|x| x.value(value)).collect_vec()
+					});
+					seen.sort();
+					seen.dedup();
+					assert_eq!(
+						seen,
+						brute_force(&coeffs, &doms, cmp, 0),
+						"{coeffs:?} {cmp:?} 0 over {doms:?} (direct mask: {direct})"
+					);
+				}
+			}
+		}
 	}
 
 	#[test]
