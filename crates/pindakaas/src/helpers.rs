@@ -626,11 +626,14 @@ pub(crate) mod tests {
 	use rustc_hash::FxHashMap;
 
 	use crate::{
-		constraint::linear::PosCoeff,
+		constraint::{
+			cardinality_one::{CardinalityOne, PairwiseEncoder},
+			linear::{LimitComp, LinExp, PosCoeff},
+		},
 		decision::integer::IntVar,
 		helpers::binary_value,
 		solver::{cadical::Cadical, SolveResult, Solver},
-		BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Lit, Result,
+		BoolVal, Checker, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Result,
 		Unsatisfiable, Valuation,
 	};
 
@@ -765,6 +768,31 @@ pub(crate) mod tests {
 			.collect()
 	}
 
+	/// The sum of integers read on supplied direct literals, with the literal
+	/// that fixes each to its value at the given position.
+	///
+	/// Exactly one literal of each variable holds, which is stated pairwise.
+	pub(crate) fn direct_view_sum(
+		cnf: &mut Cnf,
+		views: &[(&[Coeff], usize)],
+	) -> (LinExp, Vec<Lit>) {
+		let mut sum = LinExp::default();
+		let mut fixing = Vec::new();
+		for &(values, fixed) in views {
+			let lits = values.iter().map(|_| cnf.new_lit()).collect_vec();
+			PairwiseEncoder::default()
+				.encode(cnf, &CardinalityOne::new(lits.clone(), LimitComp::Equal))
+				.unwrap();
+			let walk = values
+				.iter()
+				.copied()
+				.zip(lits.iter().copied().map(BoolVal::Lit));
+			sum += LinExp::from(IntVar::from_direct_walk(cnf, walk).unwrap());
+			fixing.push(lits[fixed]);
+		}
+		(sum, fixing)
+	}
+
 	/// The integer a group of terms that each imply the one before stands for.
 	///
 	/// The implications are taken on trust: they are what makes the group a
@@ -846,7 +874,7 @@ pub(crate) mod tests {
 			},
 			helpers::tests::{
 				all_binary_solutions, assert_checker, assert_encoding, assert_solutions,
-				at_most_one_var, binary_literals, construct_terms, expect_file,
+				at_most_one_var, binary_literals, construct_terms, direct_view_sum, expect_file,
 				implication_chain_var, models, models_over,
 			},
 			BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,

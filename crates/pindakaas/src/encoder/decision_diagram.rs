@@ -365,6 +365,29 @@ mod tests {
 		);
 	}
 
+	#[test]
+	fn supplied_direct_views_reject_a_sum_above_the_bound() {
+		let mut cnf = Cnf::default();
+		// Fixed to 4 + 9 + 3 = 16.
+		let (sum, fixing) = direct_view_sum(
+			&mut cnf,
+			&[(&[0, 4, 6, 8], 1), (&[0, 6, 9, 12], 2), (&[0, 2, 3, 4], 2)],
+		);
+		let constraint = LinAggregator::default()
+			.aggregate(&mut cnf, &Linear::new(sum, Comparator::LessEq, 13))
+			.unwrap();
+		DecisionDiagramEncoder::default()
+			.encode(&mut cnf, &constraint)
+			.unwrap();
+		for &lit in &fixing {
+			cnf.add_clause([lit]).unwrap();
+		}
+		assert!(
+			models_over(&cnf, &fixing, |_| ()).is_empty(),
+			"the decision diagram must reject 4 + 9 + 3 <= 13"
+		);
+	}
+
 	card1_test_suite! {
 		decision_diagram_encoder_card1, DecisionDiagramEncoder::default()
 	}
