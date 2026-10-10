@@ -834,6 +834,27 @@ mod tests {
 	}
 
 	#[test]
+	fn coefficients_decompose_into_shifts_and_adders() {
+		let domain = RangeList::from(0..=7);
+		for c in [
+			1, 2, 3, 5, 7, 9, 11, 15, 23, 45, 99, 101, 127, 255, 341, 569, 1023,
+		] {
+			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
+				// Around each value the product can take, and just off it.
+				for k in (0..=7).flat_map(|v: Coeff| [c * v - 1, c * v, c * v + 1]) {
+					let (solutions, xs) =
+						solutions_with(&[c], std::slice::from_ref(&domain), cmp, k, false, Some(0));
+					assert_eq!(
+						solutions,
+						brute_force(&[c], std::slice::from_ref(&domain), cmp, k),
+						"{c}·x {cmp:?} {k}"
+					);
+				}
+			}
+		}
+	}
+
+	#[test]
 	fn direct_and_order_views_admit_exactly_the_solutions() {
 		let doms = vec![RangeList::from_elements([-2, 0, 3, 4]); 3];
 		for direct in 0..8 {
@@ -857,27 +878,6 @@ mod tests {
 						solutions_over(cnf, &IntTernaryEncoder::default(), &coeffs, &xs, cmp, 0),
 						brute_force(&coeffs, &doms, cmp, 0),
 						"{coeffs:?} {cmp:?} 0 over {doms:?} (direct mask: {direct})"
-					);
-				}
-			}
-		}
-	}
-
-	#[test]
-	fn coefficients_decompose_into_shifts_and_adders() {
-		let domain = RangeList::from(0..=7);
-		for c in [
-			1, 2, 3, 5, 7, 9, 11, 15, 23, 45, 99, 101, 127, 255, 341, 569, 1023,
-		] {
-			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
-				// Around each value the product can take, and just off it.
-				for k in (0..=7).flat_map(|v: Coeff| [c * v - 1, c * v, c * v + 1]) {
-					let (solutions, xs) =
-						solutions_with(&[c], std::slice::from_ref(&domain), cmp, k, false, Some(0));
-					assert_eq!(
-						solutions,
-						brute_force(&[c], std::slice::from_ref(&domain), cmp, k),
-						"{c}·x {cmp:?} {k}"
 					);
 				}
 			}
