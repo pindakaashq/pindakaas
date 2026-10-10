@@ -138,8 +138,8 @@ impl Encoded<'_> {
 		};
 		let (outer_c, outer_steps) = Self::guards(db, outer, cmp)?;
 		let (inner_c, inner_steps) = Self::guards(db, inner, cmp)?;
-		let inner_ordered = inner.is_none_or(|term| !term.x.has_direct_encoding());
-		let outer_ordered = outer.is_none_or(|term| !term.x.has_direct_encoding());
+		let outer_direct = outer.is_some_and(|t| t.x.has_direct_encoding());
+		let inner_direct = inner.is_some_and(|t| t.x.has_direct_encoding());
 		// What a direct encoding pins `bounded` to does not depend on what is
 		// left of the bound, so it is read once rather than once per step.
 		let pins = if bounded.x.has_direct_encoding() {
@@ -157,23 +157,29 @@ impl Encoded<'_> {
 			for &(w, inner_guard) in &inner_steps {
 				units.clear();
 				bounded.bound_into(db, cmp, left - inner_c * w, &pins, &mut units)?;
-				// Order thresholds imply earlier thresholds, so an identical
-				// consequence is already covered. Direct value indicators are
-				// disjoint and must each retain their implication.
-				if inner_ordered && have_units && units == last_units {
+				// A step asking of the terms below exactly what a step that
+				// covers it asked adds nothing, which happens often.
+				if have_units && units == last_units {
 					continue;
 				}
 				clauses.extend(units.iter().map(|&lit| (inner_guard, lit)));
-				mem::swap(&mut units, &mut last_units);
+				// An order guard holds whenever the one before it does, so each
+				// step covers the next. Direct guards exclude each other, so
+				// only the first step, which has no guard, covers the others.
+				if !inner_direct || !have_units {
+					mem::swap(&mut units, &mut last_units);
+				}
 				have_units = true;
 			}
-			if outer_ordered && have_clauses && clauses == last_clauses {
+			if have_clauses && clauses == last_clauses {
 				continue;
 			}
 			for &(inner_guard, lit) in &clauses {
 				db.add_clause([outer_guard, inner_guard, lit])?;
 			}
-			mem::swap(&mut clauses, &mut last_clauses);
+			if !outer_direct || !have_clauses {
+				mem::swap(&mut clauses, &mut last_clauses);
+			}
 			have_clauses = true;
 		}
 		Ok(())
