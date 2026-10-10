@@ -146,50 +146,29 @@ mod tests {
 
 	#[test]
 	fn supplied_direct_views_reject_a_nonzero_equality_sum() {
-		use crate::decision::integer::IntVar;
-
 		let mut cnf = Cnf::default();
-		let mut expression = LinExp::default();
-		let mut selected = Vec::new();
-		// Preserve the term order that exposes the sequential-counter failure.
-		for (values, index) in [
-			((0..=4).collect_vec(), 0),
-			((0..=10).collect_vec(), 8),
-			((-3..=0).collect_vec(), 2),
-			((-3..=0).collect_vec(), 2),
-		] {
-			let lits = values.iter().map(|_| cnf.new_lit()).collect_vec();
-			PairwiseEncoder::default()
-				.encode(
-					&mut cnf,
-					&CardinalityOne::new(lits.clone(), LimitComp::Equal),
-				)
-				.unwrap();
-			let variable = IntVar::from_direct_walk(
-				&mut cnf,
-				values
-					.into_iter()
-					.zip(lits.iter().copied().map(BoolVal::Lit)),
-			)
-			.unwrap();
-			expression += variable * 1;
-			selected.push(lits[index]);
-		}
-		let constraint = Linear::new(expression, Comparator::Equal, 0);
+		// Fixed to 0 + 8 - 1 - 1 = 6.
+		let (sum, fixing) = direct_view_sum(
+			&mut cnf,
+			&[
+				(&[0, 1, 2, 3, 4], 0),
+				(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 8),
+				(&[-3, -2, -1, 0], 2),
+				(&[-3, -2, -1, 0], 2),
+			],
+		);
 		let constraint = LinAggregator::default()
-			.aggregate(&mut cnf, &constraint)
+			.aggregate(&mut cnf, &Linear::new(sum, Comparator::Equal, 0))
 			.unwrap();
 		SequentialCounterEncoder::default()
 			.encode(&mut cnf, &constraint)
 			.unwrap();
-
-		// Exactly-one views fixed to 0 + 8 - 1 - 1 = 6 cannot sum to zero.
-		for &literal in &selected {
-			cnf.add_clause([literal]).unwrap();
+		for &lit in &fixing {
+			cnf.add_clause([lit]).unwrap();
 		}
 		assert!(
-			models_over(&cnf, &selected, |_| ()).is_empty(),
-			"the sequential-counter encoding must reject 0 + 8 - 1 - 1 = 0"
+			models_over(&cnf, &fixing, |_| ()).is_empty(),
+			"the sequential counter must reject 0 + 8 - 1 - 1 = 0"
 		);
 	}
 

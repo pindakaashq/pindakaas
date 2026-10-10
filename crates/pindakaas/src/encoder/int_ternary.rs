@@ -136,10 +136,8 @@ impl Encoded<'_> {
 				db.add_clause(empty::<BoolVal>())
 			};
 		};
-		let (outer_c, outer_steps) = Self::guards(db, outer, cmp)?;
-		let (inner_c, inner_steps) = Self::guards(db, inner, cmp)?;
-		let outer_direct = outer.is_some_and(|t| t.x.has_direct_encoding());
-		let inner_direct = inner.is_some_and(|t| t.x.has_direct_encoding());
+		let (outer_direct, outer_steps) = Self::guards(db, outer, cmp)?;
+		let (inner_direct, inner_steps) = Self::guards(db, inner, cmp)?;
 		// What a direct encoding pins `bounded` to does not depend on what is
 		// left of the bound, so it is read once rather than once per step.
 		let pins = if bounded.x.has_direct_encoding() {
@@ -151,12 +149,12 @@ impl Encoded<'_> {
 		let (mut clauses, mut last_clauses, mut have_clauses) = (Vec::new(), Vec::new(), false);
 
 		for &(v, outer_guard) in &outer_steps {
-			let left = k - outer_c * v;
+			let left = k - v;
 			clauses.clear();
 			let mut have_units = false;
 			for &(w, inner_guard) in &inner_steps {
 				units.clear();
-				bounded.bound_into(db, cmp, left - inner_c * w, &pins, &mut units)?;
+				bounded.bound_into(db, cmp, left - w, &pins, &mut units)?;
 				// A step asking of the terms below exactly what a step that
 				// covers it asked adds nothing, which happens often.
 				if have_units && units == last_units {
@@ -177,6 +175,7 @@ impl Encoded<'_> {
 			for &(inner_guard, lit) in &clauses {
 				db.add_clause([outer_guard, inner_guard, lit])?;
 			}
+			// As for the inner guard.
 			if !outer_direct || !have_clauses {
 				mem::swap(&mut clauses, &mut last_clauses);
 			}
@@ -185,31 +184,36 @@ impl Encoded<'_> {
 		Ok(())
 	}
 
-	/// The values a guard term is walked over, with its coefficient, taken
-	/// from whichever side pushes the sum towards breaking the constraint.
+	/// What a guard term adds to the sum at each value it is walked over,
+	/// taken from whichever side pushes the sum towards breaking the
+	/// constraint. The flag says whether the guards are direct literals.
 	///
-	/// A loop with no term to guard on gets one step: a false literal against
-	/// a coefficient of zero. `add_clause` drops a false literal, so that
-	/// leaves the clause as it was and the bound where it was.
+	/// A loop with no term to guard on gets one step: a false literal that
+	/// adds zero. `add_clause` drops a false literal, so that leaves the
+	/// clause as it was and the bound where it was.
 	fn guards<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		term: Option<Encoded>,
 		cmp: Comparator,
-	) -> Result<(Coeff, Vec<(Coeff, BoolVal)>), Unsatisfiable> {
+	) -> Result<(bool, Vec<(Coeff, BoolVal)>), Unsatisfiable> {
 		let Some(term) = term else {
-			return Ok((0, vec![(0, BoolVal::Const(false))]));
+			return Ok((false, vec![(0, BoolVal::Const(false))]));
 		};
 		let geq = (term.c >= 0) == matches!(cmp, Comparator::LessEq);
 		// A variable a group of terms arrived on is read on the direct
 		// literals it came with; any other on its order encoding.
-		Ok((
-			term.c,
-			if term.x.has_direct_encoding() {
-				term.x.direct_steps(db, geq)?
-			} else {
-				term.x.order_steps(db, geq)?
-			},
-		))
+		let direct = term.x.has_direct_encoding();
+		let mut steps = if direct {
+			term.x.direct_steps(db, geq)?
+		} else {
+			term.x.order_steps(db, geq)?
+		};
+		// The first step is the one `emit` takes to cover the others.
+		debug_assert_eq!(steps[0].1, BoolVal::Const(false));
+		for (v, _) in &mut steps {
+			*v *= term.c;
+		}
+		Ok((direct, steps))
 	}
 }
 
@@ -831,7 +835,7 @@ mod tests {
 
 	#[test]
 	fn direct_and_order_views_admit_exactly_the_solutions() {
-		let doms = vec![RangeList::from_elements([-2, 0, 3]); 3];
+		let doms = vec![RangeList::from_elements([-2, 0, 3, 4]); 3];
 		for direct in 0..8 {
 			for coeffs in [[1, 1, -1], [2, -3, -1], [-2, 3, -5]] {
 				for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
@@ -849,21 +853,8 @@ mod tests {
 							x
 						})
 						.collect_vec();
-					let terms = coeffs
-						.iter()
-						.zip(&xs)
-						.map(|(&c, x)| (c, x.clone()))
-						.collect();
-					IntTernaryEncoder::default()
-						.encode(&mut cnf, &ternary(terms, cmp, 0))
-						.unwrap();
-					let mut seen = models(&cnf, |value| {
-						xs.iter().map(|x| x.value(value)).collect_vec()
-					});
-					seen.sort();
-					seen.dedup();
 					assert_eq!(
-						seen,
+						solutions_over(cnf, &IntTernaryEncoder::default(), &coeffs, &xs, cmp, 0),
 						brute_force(&coeffs, &doms, cmp, 0),
 						"{coeffs:?} {cmp:?} 0 over {doms:?} (direct mask: {direct})"
 					);
@@ -984,6 +975,34 @@ mod tests {
 		solutions_with(coeffs, doms, cmp, k, propagate, None).0
 	}
 
+	/// As [`solutions_of`], over variables that keep the views they have in
+	/// `cnf`.
+	fn solutions_over(
+		mut cnf: Cnf,
+		enc: &IntTernaryEncoder,
+		coeffs: &[Coeff],
+		xs: &[IntVar],
+		cmp: Comparator,
+		k: Coeff,
+	) -> Vec<Vec<Coeff>> {
+		let terms = coeffs
+			.iter()
+			.zip(xs)
+			.map(|(&c, x)| (c, x.clone()))
+			.collect_vec();
+		if enc.encode(&mut cnf, &ternary(terms, cmp, k)).is_err() {
+			return Vec::new();
+		}
+		// Each model is ruled out in turn, so an assignment reachable
+		// more than one way is seen more than once.
+		let mut solutions = models(&cnf, |value| {
+			xs.iter().map(|x| x.value(value)).collect_vec()
+		});
+		solutions.sort();
+		solutions.dedup();
+		solutions
+	}
+
 	/// As [`solutions_of`], choosing how the variables are encoded.
 	fn solutions_with(
 		coeffs: &[Coeff],
@@ -993,31 +1012,16 @@ mod tests {
 		propagate: bool,
 		cutoff: Option<Coeff>,
 	) -> (Vec<Vec<Coeff>>, Vec<IntVar>) {
-		let mut cnf = Cnf::default();
 		let enc = IntTernaryEncoder::with_config(IntTernaryConfig { propagate, cutoff });
 		let xs = doms
 			.iter()
 			.enumerate()
 			.map(|(i, domain)| IntVar::new(domain.clone()).with_label(format_args!("x{i}")))
 			.collect_vec();
-		let terms = coeffs
-			.iter()
-			.zip(&xs)
-			.map(|(&c, x)| (c, x.clone()))
-			.collect_vec();
-
-		let con = ternary(terms, cmp, k);
-		if enc.encode(&mut cnf, &con).is_err() {
-			return (Vec::new(), xs);
-		}
-		// Each model is ruled out in turn, so an assignment reachable
-		// more than one way is seen more than once.
-		let mut solutions = models(&cnf, |value| {
-			xs.iter().map(|x| x.value(value)).collect_vec()
-		});
-		solutions.sort();
-		solutions.dedup();
-		(solutions, xs)
+		(
+			solutions_over(Cnf::default(), &enc, coeffs, &xs, cmp, k),
+			xs,
+		)
 	}
 
 	/// `Σ cᵢ·xᵢ ≷ k` as the ternary constraint the encoder takes.

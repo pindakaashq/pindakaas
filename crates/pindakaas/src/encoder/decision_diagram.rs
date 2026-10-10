@@ -337,45 +337,24 @@ mod tests {
 
 	#[test]
 	fn supplied_direct_views_reject_a_sum_above_the_bound() {
-		use crate::decision::integer::IntVar;
-
 		let mut cnf = Cnf::default();
-		let mut expression = LinExp::default();
-		let mut selected = Vec::new();
-		for (values, index) in [([0, 4, 6, 8], 1), ([0, 6, 9, 12], 2), ([0, 2, 3, 4], 2)] {
-			let lits = values.iter().map(|_| cnf.new_lit()).collect_vec();
-			PairwiseEncoder::default()
-				.encode(
-					&mut cnf,
-					&CardinalityOne::new(lits.clone(), LimitComp::Equal),
-				)
-				.unwrap();
-			let variable = IntVar::from_direct_walk(
-				&mut cnf,
-				values
-					.into_iter()
-					.zip(lits.iter().copied().map(BoolVal::Lit)),
-			)
-			.unwrap();
-			expression += variable * 1;
-			selected.push(lits[index]);
-		}
-		let constraint = Linear::new(expression, Comparator::LessEq, 13);
+		// Fixed to 4 + 9 + 3 = 16.
+		let (sum, fixing) = direct_view_sum(
+			&mut cnf,
+			&[(&[0, 4, 6, 8], 1), (&[0, 6, 9, 12], 2), (&[0, 2, 3, 4], 2)],
+		);
 		let constraint = LinAggregator::default()
-			.aggregate(&mut cnf, &constraint)
+			.aggregate(&mut cnf, &Linear::new(sum, Comparator::LessEq, 13))
 			.unwrap();
 		DecisionDiagramEncoder::default()
 			.encode(&mut cnf, &constraint)
 			.unwrap();
-
-		// The supplied views are exactly-one. Fix their contributions to 4 + 9 + 3 =
-		// 16.
-		for &literal in &selected {
-			cnf.add_clause([literal]).unwrap();
+		for &lit in &fixing {
+			cnf.add_clause([lit]).unwrap();
 		}
 		assert!(
-			models_over(&cnf, &selected, |_| ()).is_empty(),
-			"the BDD encoding must reject 4 + 9 + 3 <= 13"
+			models_over(&cnf, &fixing, |_| ()).is_empty(),
+			"the decision diagram must reject 4 + 9 + 3 <= 13"
 		);
 	}
 
