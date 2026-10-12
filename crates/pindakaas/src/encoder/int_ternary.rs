@@ -296,12 +296,12 @@ impl IntTernaryEncoder {
 	}
 }
 
-/// Encoding a constraint fixes the literals of the variables it mentions, and
-/// so also fixes their domains. A constraint encoded later can still narrow a
-/// variable that no constraint has reached yet, but not one that is already
-/// encoded, which makes the result depend on the order the constraints are
-/// given in. Every such result is correct; they differ only in how much was
-/// pruned before the literals were committed.
+/// Encoding a constraint gives the variables it mentions their literals. A
+/// constraint encoded later can still narrow such a variable, which fixes the
+/// literals of the values it loses, but an earlier constraint has already
+/// walked them, so the result depends on the order the constraints are given
+/// in. Every such result is correct; they differ only in how much was pruned
+/// before the clauses were written.
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder {
 	#[cfg_attr(
 		any(feature = "tracing", test),
@@ -312,7 +312,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder 
 		// constant, which is the form both arms below want.
 		let con = &IntLinear::from(con);
 		if self.config.propagate {
-			con.propagate()?;
+			con.propagate(db)?;
 		}
 		let terms = &con.terms;
 		let binary = |t: &Term| t.1.prefers_binary(self.config.cutoff);
@@ -367,6 +367,43 @@ mod tests {
 		helpers::tests::{at_most_one_var, models, models_over},
 		ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit,
 	};
+
+	#[test]
+	fn a_bound_narrows_a_variable_that_has_literals() {
+		for (view, order, direct, binary) in [
+			("order", true, false, false),
+			("direct", false, true, false),
+			("both", true, true, false),
+			("binary", false, false, true),
+		] {
+			let mut cnf = Cnf::default();
+			let x = IntVar::new(0..=7).enforce_consistency(true);
+			if order {
+				let _ = x.order_encoding(&mut cnf).unwrap();
+			}
+			if direct {
+				let _ = x.direct_encoding(&mut cnf).unwrap();
+			}
+			if binary {
+				let _ = x.binary_encoding(&mut cnf).unwrap();
+			}
+			let enc = IntTernaryEncoder::default();
+			let mut bound = |cmp, k, left: std::ops::RangeInclusive<Coeff>| {
+				enc.encode(&mut cnf, &ternary(vec![(1, x.clone())], cmp, k))
+					.unwrap();
+				// Binary bits count through every value, so the domain stays.
+				let domain = if binary { 0..=7 } else { left.clone() };
+				assert_eq!(*x.domain(), RangeList::from(domain), "{view} {cmp:?} {k}");
+				let mut seen = models(&cnf, |value| x.value(value));
+				seen.sort();
+				seen.dedup();
+				assert_eq!(seen, left.collect_vec(), "{view} {cmp:?} {k}");
+			};
+			bound(Comparator::LessEq, 5, 0..=5);
+			bound(Comparator::GreaterEq, 2, 2..=5);
+			bound(Comparator::Equal, 3, 3..=3);
+		}
+	}
 
 	/// A constraint its bounds decide needs no decomposition, whichever
 	/// strategy is asked and however the constraint reached it.

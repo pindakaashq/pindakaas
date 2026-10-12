@@ -337,9 +337,9 @@ impl IntLinear {
 	/// Narrow the domains of the variables of `con` to the values that can
 	/// still take part in a solution, up to a fixpoint.
 	///
-	/// A variable that is already encoded is left alone: its literals are
-	/// committed and the values they stand for cannot be taken back.
-	pub(crate) fn propagate(&self) -> Result {
+	/// A variable that is already encoded fixes the literals of the values it
+	/// loses, see [`IntVar::narrow`].
+	pub(crate) fn propagate<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		for cmp in self.cmp.split() {
 			loop {
 				let mut changed = false;
@@ -357,18 +357,12 @@ impl IntLinear {
 						})
 						.sum();
 					let slack = self.k - others;
-					if term.1.is_committed() {
-						continue;
-					}
 					// `c·x ≷ slack`, turned around when `c` is negative.
 					let cmp = if term.0 >= 0 { cmp } else { cmp.reverse() };
 					changed |= match cmp {
-						Comparator::LessEq => term.1.set_max(div_floor(slack, term.0)),
-						_ => term.1.set_min(div_ceil(slack, term.0)),
+						Comparator::LessEq => term.1.set_max(db, div_floor(slack, term.0))?,
+						_ => term.1.set_min(db, div_ceil(slack, term.0))?,
 					};
-					if term.1.domain().is_empty() {
-						return Err(Unsatisfiable);
-					}
 				}
 				if !changed {
 					break;

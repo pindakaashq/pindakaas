@@ -23,7 +23,7 @@
    pb-small   ==   adder       7       27        78
    pb-small   == diagram      10       21        45
    pb-small   ==     seq      23       62       141
-   pb-small   ==    tree      19       55       130
+   pb-small   ==    tree      19       54       127
    pb-small   ==   radix      43      124       271
    pb-small   ==    wdog      41       90       196
    pb-small   ==  wdog-l     136      287       640
@@ -35,9 +35,9 @@
      pb-mid   <=    wdog      55      129       300
      pb-mid   <=  wdog-l     224      562      1317
      pb-mid   ==   adder      22      116       386
-     pb-mid   == diagram      12       25        53
+     pb-mid   == diagram      12       24        50
      pb-mid   ==     seq      60      183       425
-     pb-mid   ==    tree      25       67       155
+     pb-mid   ==    tree      25       67       154
      pb-mid   ==   radix     111      337       756
      pb-mid   ==    wdog     109      273       625
      pb-mid   ==  wdog-l     477     1170      2715
@@ -50,8 +50,8 @@
     pb-wide   <=  wdog-l      98      156       341
     pb-wide   ==   adder       7        7         7
     pb-wide   == diagram       7        7         7
-    pb-wide   ==     seq     127      357       826
-    pb-wide   ==    tree      35       85       195
+    pb-wide   ==     seq     127      357       825
+    pb-wide   ==    tree      35       85       194
     pb-wide   ==   radix      29       59       113
     pb-wide   ==    wdog      39       74       155
     pb-wide   ==  wdog-l     174      306       663
@@ -63,9 +63,9 @@
  pb-coprime   <=    wdog      57      133       313
  pb-coprime   <=  wdog-l     259      583      1342
  pb-coprime   ==   adder      24      130       431
- pb-coprime   == diagram      10       17        33
- pb-coprime   ==     seq      97      307       716
- pb-coprime   ==    tree      30       73       168
+ pb-coprime   == diagram      10       16        30
+ pb-coprime   ==     seq      97      307       715
+ pb-coprime   ==    tree      30       73       167
  pb-coprime   ==   radix     122      366       819
  pb-coprime   ==    wdog     112      283       653
  pb-coprime   ==  wdog-l     473     1089      2498

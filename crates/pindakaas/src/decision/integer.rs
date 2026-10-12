@@ -1171,16 +1171,6 @@ impl IntVar {
 		self.reconcile(db)
 	}
 
-	/// Whether the variable's literals are settled, so that its domain can no
-	/// longer move.
-	///
-	/// A variable holding any encoding is settled: its literals are out in the
-	/// world, and dropping a value would leave nothing to say it cannot hold.
-	pub(crate) fn is_committed(&self) -> bool {
-		let state = self.0.borrow();
-		state.order.is_some() || state.binary.is_some() || state.direct.is_some()
-	}
-
 	/// The label of the variable, which is empty unless tracing is enabled —
 	/// nothing else has a use for one, so nothing else pays to store it. Use
 	/// the [`Display`] implementation to name a variable in a message, which
@@ -1224,6 +1214,57 @@ impl IntVar {
 			.map(|v| Ok((min + max - v, x.at_most(db, v)?)))
 			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
 		Self::from_order_walk(db, walk)
+	}
+
+	/// Drop the values outside `min..=max` from the domain, reporting whether
+	/// any went.
+	///
+	/// Order and direct literals of a dropped value are fixed by a unit clause
+	/// and leave the variable, so nothing walks them again. A variable with a
+	/// binary encoding is left as it is, since its bits count from the domain
+	/// minimum.
+	///
+	/// # Errors
+	///
+	/// [`Unsatisfiable`] when no value is left, or when a unit clause
+	/// contradicts the database.
+	fn narrow<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		min: Coeff,
+		max: Coeff,
+	) -> Result<bool, Unsatisfiable> {
+		let mut state = self.0.borrow_mut();
+		let state = &mut *state;
+		let (lb, ub) = (*state.domain.min().unwrap(), *state.domain.max().unwrap());
+		if min > ub || max < lb {
+			return Err(Unsatisfiable);
+		} else if (min <= lb && max >= ub) || state.binary.is_some() {
+			return Ok(false);
+		}
+		let before = state.domain.clone();
+		state.domain.tighten_min(min.max(lb));
+		let below = before.card().unwrap() - state.domain.card().unwrap();
+		state.domain.tighten_max(max.min(ub));
+		let above = before.card().unwrap() - below - state.domain.card().unwrap();
+		if let Some(direct) = state.direct.as_mut() {
+			let kept = below..direct.x.len() - above;
+			for (i, lit) in direct.x.iter().enumerate() {
+				if !kept.contains(&i) {
+					db.add_clause([!lit])?;
+				}
+			}
+			direct.x.trim(below, above);
+		}
+		if let Some(order) = state.order.as_mut() {
+			// Order literals imply each other, so a unit clause at each end
+			// settles the rest.
+			let (min, max) = (*state.domain.min().unwrap(), *state.domain.max().unwrap());
+			db.add_clause([order.lit_at_least(&before, min)])?;
+			db.add_clause([order.lit_at_most(&before, max)])?;
+			order.x.trim(below, above);
+		}
+		Ok(below + above > 0)
 	}
 
 	/// Whether an encoding being created has to be held to the domain itself.
@@ -1409,33 +1450,25 @@ impl IntVar {
 	}
 
 	/// Drop the values above `v` from the domain, reporting whether any went.
-	pub(crate) fn set_max(&self, v: Coeff) -> bool {
-		debug_assert!(
-			!self.is_committed(),
-			"the domain of {} cannot move once it is encoded",
-			self.label()
-		);
-		let mut state = self.0.borrow_mut();
-		if v >= *state.domain.max().unwrap() {
-			return false;
-		}
-		state.domain.tighten_max(v);
-		true
+	///
+	/// See [`IntVar::narrow`] for what becomes of the literals.
+	pub(crate) fn set_max<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		v: Coeff,
+	) -> Result<bool, Unsatisfiable> {
+		self.narrow(db, Coeff::MIN, v)
 	}
 
 	/// Drop the values below `v` from the domain, reporting whether any went.
-	pub(crate) fn set_min(&self, v: Coeff) -> bool {
-		debug_assert!(
-			!self.is_committed(),
-			"the domain of {} cannot move once it is encoded",
-			self.label()
-		);
-		let mut state = self.0.borrow_mut();
-		if v <= *state.domain.min().unwrap() {
-			return false;
-		}
-		state.domain.tighten_min(v);
-		true
+	///
+	/// See [`IntVar::narrow`] for what becomes of the literals.
+	pub(crate) fn set_min<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		v: Coeff,
+	) -> Result<bool, Unsatisfiable> {
+		self.narrow(db, v, Coeff::MAX)
 	}
 
 	/// Remember the bits of `c·(x − min)`, so that the next constraint to scale
@@ -1602,6 +1635,14 @@ impl<T: Copy + From<Var>> Literals<T> {
 	/// The literals as a slice, materialising a range into one.
 	pub(crate) fn to_vec(&self) -> Vec<T> {
 		self.iter().collect()
+	}
+
+	/// Drop `below` literals from the front and `above` from the back.
+	fn trim(&mut self, below: usize, above: usize) {
+		let mut x = self.to_vec();
+		x.truncate(x.len() - above);
+		let _ = x.drain(..below);
+		*self = Literals::Explicit(x);
 	}
 }
 
