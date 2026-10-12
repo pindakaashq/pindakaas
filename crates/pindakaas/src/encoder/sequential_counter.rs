@@ -140,7 +140,37 @@ where
 
 #[cfg(test)]
 mod tests {
+	use traced_test::test;
+
 	use crate::helpers::tests::{linear_test_suite, prelude::*};
+
+	#[test]
+	fn supplied_direct_views_reject_a_nonzero_equality_sum() {
+		let mut cnf = Cnf::default();
+		// Fixed to 0 + 8 - 1 - 1 = 6.
+		let (sum, fixing) = direct_view_sum(
+			&mut cnf,
+			&[
+				(&[0, 1, 2, 3, 4], 0),
+				(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 8),
+				(&[-3, -2, -1, 0], 2),
+				(&[-3, -2, -1, 0], 2),
+			],
+		);
+		let constraint = LinAggregator::default()
+			.aggregate(&mut cnf, &Linear::new(sum, Comparator::Equal, 0))
+			.unwrap();
+		SequentialCounterEncoder::default()
+			.encode(&mut cnf, &constraint)
+			.unwrap();
+		for &lit in &fixing {
+			cnf.add_clause([lit]).unwrap();
+		}
+		assert!(
+			models_over(&cnf, &fixing, |_| ()).is_empty(),
+			"the sequential counter must reject 0 + 8 - 1 - 1 = 0"
+		);
+	}
 
 	card1_test_suite! {
 		sequential_counter_encoder_card1, SequentialCounterEncoder::default()
