@@ -15,8 +15,6 @@ pub mod kissat;
 pub mod libloading;
 #[cfg(feature = "external-propagation")]
 pub mod propagation;
-#[cfg(feature = "splr")]
-pub mod splr;
 
 use std::num::NonZeroI32;
 

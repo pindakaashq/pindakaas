@@ -34,7 +34,7 @@
 //! ```
 //!
 //! Solver backends are feature-gated. CaDiCaL is enabled by default; Kissat,
-//! Intel SAT, SPLR, and runtime-loaded IPASIR libraries are available through
+//! Intel SAT, and runtime-loaded IPASIR libraries are available through
 //! their corresponding features.
 //!
 //! # Propositional formulas
