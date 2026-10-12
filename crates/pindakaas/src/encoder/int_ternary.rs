@@ -78,10 +78,10 @@ impl Encoded<'_> {
 		db: &mut Db,
 		cmp: Comparator,
 		k: Coeff,
-		pins: &[(Coeff, BoolVal)],
+		pins: Option<&[(Coeff, BoolVal)]>,
 		out: &mut Vec<BoolVal>,
 	) -> Result {
-		if self.x.has_direct_encoding() {
+		if let Some(pins) = pins {
 			// The value already includes the coefficient sign, so the
 			// comparison does not need reversing.
 			for &(d, takes) in pins {
@@ -103,6 +103,13 @@ impl Encoded<'_> {
 			Comparator::Equal => unreachable!("an equality is split before it is encoded"),
 		});
 		Ok(())
+	}
+
+	/// Whether the term is read on its direct literals: only when it has no
+	/// order encoding, which says a bound in one literal and guards in fewer
+	/// clauses.
+	fn direct(&self) -> bool {
+		self.x.has_direct_encoding() && !self.x.has_order_encoding()
 	}
 
 	/// Add the clauses for `outer + inner + bounded ≷ k` to `db`.
@@ -140,10 +147,10 @@ impl Encoded<'_> {
 		let (inner_direct, inner_steps) = Self::guards(db, inner, cmp)?;
 		// What a direct encoding pins `bounded` to does not depend on what is
 		// left of the bound, so it is read once rather than once per step.
-		let pins = if bounded.x.has_direct_encoding() {
-			bounded.x.direct_walk(db)?.collect()
+		let pins: Option<Vec<_>> = if bounded.direct() {
+			Some(bounded.x.direct_walk(db)?.collect())
 		} else {
-			Vec::new()
+			None
 		};
 		let (mut units, mut last_units) = (Vec::new(), Vec::new());
 		let (mut clauses, mut last_clauses, mut have_clauses) = (Vec::new(), Vec::new(), false);
@@ -154,7 +161,7 @@ impl Encoded<'_> {
 			let mut have_units = false;
 			for &(w, inner_guard) in &inner_steps {
 				units.clear();
-				bounded.bound_into(db, cmp, left - w, &pins, &mut units)?;
+				bounded.bound_into(db, cmp, left - w, pins.as_deref(), &mut units)?;
 				// A step asking of the terms below exactly what a step that
 				// covers it asked adds nothing, which happens often.
 				if have_units && units == last_units {
@@ -200,9 +207,7 @@ impl Encoded<'_> {
 			return Ok((false, vec![(0, BoolVal::Const(false))]));
 		};
 		let geq = (term.c >= 0) == matches!(cmp, Comparator::LessEq);
-		// A variable a group of terms arrived on is read on the direct
-		// literals it came with; any other on its order encoding.
-		let direct = term.x.has_direct_encoding();
+		let direct = term.direct();
 		let mut steps = if direct {
 			term.x.direct_steps(db, geq)?
 		} else {
@@ -321,6 +326,15 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder 
 		for t in terms {
 			if !t.1.has_direct_encoding() {
 				let _ = t.1.order_encoding(db)?;
+			}
+		}
+		// A guarded last term also wants an order view, which states each
+		// bound the guards ask for in one literal. Not for two values: one
+		// direct literal is such a bound already, and channelling would cost
+		// a literal and four clauses.
+		if let [_, .., last] = terms.as_slice() {
+			if last.1.card() > 2 {
+				let _ = last.1.order_encoding(db)?;
 			}
 		}
 		// The clauses end in the last term and are guarded by the ones before
@@ -601,6 +615,29 @@ mod tests {
 	}
 
 	#[test]
+	fn a_guarded_last_term_is_read_on_an_order_view() {
+		// Two values are already a bound in one literal.
+		for (hi, order) in [(1, false), (3, true), (7, true)] {
+			let doms = vec![RangeList::from(0..=hi); 3];
+			let coeffs = [1, 2, -3];
+			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
+				let mut cnf = Cnf::default();
+				let xs = doms
+					.iter()
+					.map(|d| IntVar::new(d.clone()).enforce_consistency(true))
+					.collect_vec();
+				let _ = xs[2].direct_encoding(&mut cnf).unwrap();
+				assert_eq!(
+					solutions_over(cnf, &IntTernaryEncoder::default(), &coeffs, &xs, cmp, 0),
+					brute_force(&coeffs, &doms, cmp, 0),
+					"{coeffs:?} {cmp:?} 0 over {doms:?}"
+				);
+				assert_eq!(xs[2].has_order_encoding(), order, "{cmp:?} over 0..={hi}");
+			}
+		}
+	}
+
+	#[test]
 	fn a_product_is_built_once() {
 		// The same coefficient over the same variable, in two constraints. The
 		// second should cost nothing beyond its own bound.
@@ -685,6 +722,30 @@ mod tests {
 				}
 			}
 		}
+	}
+
+	#[test]
+	fn a_term_with_both_views_is_read_on_its_order_encoding() {
+		let size = |both: bool| {
+			let mut cnf = Cnf::default();
+			let terms = [1, 1, -1]
+				.into_iter()
+				.map(|c| {
+					let x = IntVar::new(0..=5).enforce_consistency(true);
+					let _ = x.order_encoding(&mut cnf).unwrap();
+					if both {
+						let _ = x.direct_encoding(&mut cnf).unwrap();
+					}
+					(c, x)
+				})
+				.collect_vec();
+			let before = cnf.num_clauses();
+			IntTernaryEncoder::default()
+				.encode(&mut cnf, &ternary(terms, Comparator::LessEq, 0))
+				.unwrap();
+			cnf.num_clauses() - before
+		};
+		assert_eq!(size(true), size(false));
 	}
 
 	#[test]
@@ -857,7 +918,8 @@ mod tests {
 	#[test]
 	fn direct_and_order_views_admit_exactly_the_solutions() {
 		let doms = vec![RangeList::from_elements([-2, 0, 3, 4]); 3];
-		for direct in 0..8 {
+		// Every variable in turn has an order view, a direct view, or both.
+		for views in 0..27 {
 			for coeffs in [[1, 1, -1], [2, -3, -1], [-2, 3, -5]] {
 				for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
 					let mut cnf = Cnf::default();
@@ -866,9 +928,11 @@ mod tests {
 						.enumerate()
 						.map(|(i, domain)| {
 							let x = IntVar::new(domain.clone()).enforce_consistency(true);
-							if direct & (1 << i) != 0 {
+							let view = views / 3_i32.pow(i as u32) % 3;
+							if view != 0 {
 								let _ = x.direct_encoding(&mut cnf).unwrap();
-							} else {
+							}
+							if view != 1 {
 								let _ = x.order_encoding(&mut cnf).unwrap();
 							}
 							x
@@ -877,7 +941,7 @@ mod tests {
 					assert_eq!(
 						solutions_over(cnf, &IntTernaryEncoder::default(), &coeffs, &xs, cmp, 0),
 						brute_force(&coeffs, &doms, cmp, 0),
-						"{coeffs:?} {cmp:?} 0 over {doms:?} (direct mask: {direct})"
+						"{coeffs:?} {cmp:?} 0 over {doms:?} (views: {views})"
 					);
 				}
 			}
