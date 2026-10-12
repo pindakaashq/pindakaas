@@ -1,8 +1,9 @@
 //! `x + y ≷ z` over integer terms, and the encoder for it.
 //!
-//! Every decomposition strategy in [`int_linear`](super::int_linear) breaks a
-//! longer constraint into these, so this is the one shape that is encoded
-//! directly rather than broken up further.
+//! Every decomposition strategy in
+//! [`int_linear`](crate::constraint::int_linear) breaks a longer constraint
+//! into these, so this is the one shape that is encoded directly rather than
+//! broken up further.
 
 use crate::constraint::{
 	int_linear::{term_negated, IntLinear, Term},
@@ -14,9 +15,9 @@ pub use crate::encoder::int_ternary::{IntTernaryConfig, IntTernaryEncoder};
 ///
 /// Decompositions differ in the shape of their intermediate sums, but all emit
 /// this same step. Unlike
-/// [`NormalizedIntLinear`](super::int_linear::NormalizedIntLinear), `z` remains
-/// on the other side of the comparison; moving it would require a reversed view
-/// of the variable.
+/// [`NormalizedIntLinear`](crate::constraint::int_linear::NormalizedIntLinear),
+/// `z` remains on the other side of the comparison; moving it would require a
+/// reversed view of the variable.
 #[derive(Clone, Debug)]
 pub struct IntTernary {
 	pub(crate) x: Term,

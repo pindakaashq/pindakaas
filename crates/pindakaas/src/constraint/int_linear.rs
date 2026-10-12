@@ -93,7 +93,7 @@ pub(crate) struct DecomposeConfig {
 /// The working form behind aggregation and the encoders: an [`IntTernary`] is
 /// read as one to be walked, and a [`NormalizedIntLinear`] is one whose
 /// coefficients have been made positive. Callers state constraints as a
-/// [`Linear`](super::linear::Linear) and aggregate.
+/// [`Linear`](crate::constraint::linear::Linear) and aggregate.
 #[derive(Clone, Debug)]
 pub(crate) struct IntLinear {
 	pub(crate) terms: Vec<Term>,

@@ -486,7 +486,8 @@ impl fmt::Debug for Cadical {
 }
 
 mod ffi {
-	//! Proof-event trampolines for [`super::ProofTracer`].
+	//! Proof-event trampolines for
+	//! [`ProofTracer`](crate::solver::cadical::ProofTracer).
 	//!
 	//! `data` must come from `Rc::as_ptr` for the registered `Rc<RefCell<P>>`;
 	//! the solver keeps it alive while connected. The concrete `P` must match

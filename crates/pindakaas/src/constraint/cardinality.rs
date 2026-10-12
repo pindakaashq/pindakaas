@@ -1,8 +1,8 @@
 //! The constraint that at most, or exactly, `k` of a set of literals hold.
 //!
 //! Every term counts for one, which is what separates it from a general
-//! [`Linear`](super::linear::Linear) and what lets the encoders below
-//! count rather than add.
+//! [`Linear`](crate::constraint::linear::Linear) and what lets the encoders
+//! below count rather than add.
 
 use rustc_hash::FxHashSet;
 

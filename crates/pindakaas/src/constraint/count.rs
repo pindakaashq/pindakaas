@@ -114,11 +114,13 @@ mod tests {
 	use itertools::Itertools;
 	use traced_test::test;
 
-	use super::{Count, SortingNetworkEncoder};
 	use crate::{
-		constraint::linear::{
-			AdderEncoder, DecisionDiagramEncoder, LimitComp, MixedRadixEncoder,
-			SequentialCounterEncoder, TotalizerEncoder,
+		constraint::{
+			count::{Count, SortingNetworkEncoder},
+			linear::{
+				AdderEncoder, DecisionDiagramEncoder, LimitComp, MixedRadixEncoder,
+				SequentialCounterEncoder, TotalizerEncoder,
+			},
 		},
 		decision::integer::IntVar,
 		helpers::tests::{models, models_over},

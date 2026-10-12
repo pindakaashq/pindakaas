@@ -1,7 +1,7 @@
 //! A linear constraint over literals alone, `Σ cᵢ·litᵢ ≷ k`.
 //!
-//! What a [`Linear`](super::linear::Linear) mentioning no integer variable
-//! aggregates to. The same shape as a
+//! What a [`Linear`](crate::constraint::linear::Linear) mentioning no integer
+//! variable aggregates to. The same shape as a
 //! [`NormalizedIntLinear`], but left in
 //! the literals it was written in, so that an encoder working in them is not
 //! handed integers to take apart again.

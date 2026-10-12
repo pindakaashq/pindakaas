@@ -1278,7 +1278,7 @@ mod pindakaas {
 		};
 
 		use crate::{
-			pindakaas::{encode_constraint, ConstraintArg, Encoder, Lit, VarRange},
+			pindakaas::{encode_constraint, ClauseArg, ConstraintArg, Encoder, Lit, VarRange},
 			Result,
 		};
 
@@ -1471,9 +1471,9 @@ mod pindakaas {
 
 		impl<S: ClauseDatabase> SolverImpl<S> {
 			fn add_clause(&mut self, clause: Bound<'_, PyIterator>) -> Result {
-				let clause: Vec<super::ClauseArg> = clause
+				let clause: Vec<ClauseArg> = clause
 					.into_iter()
-					.map(|any| any.and_then(|lit| lit.extract::<super::ClauseArg>()))
+					.map(|any| any.and_then(|lit| lit.extract::<ClauseArg>()))
 					.try_collect()?;
 				self.solver_mut()?
 					.add_clause(clause.into_iter().map(BaseBoolVal::from))?;
