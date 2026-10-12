@@ -413,7 +413,7 @@ impl AdderEncoder {
 	/// Encode `Σ cᵢ·litᵢ + constant ≷ k` over the literals themselves.
 	fn encode_weighted<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
-		terms: Vec<(Lit, Coeff)>,
+		mut terms: Vec<(Lit, Coeff)>,
 		constant: Coeff,
 		cmp: LimitComp,
 		k: Coeff,
@@ -429,6 +429,15 @@ impl AdderEncoder {
 				.try_for_each(|(lit, _)| db.add_clause([!lit]));
 		}
 		let rhs = PosCoeff::new(rhs);
+
+		// A literal worth more than the bound never holds, and the columns
+		// below stop at the bound's last bit.
+		for &(lit, coef) in &terms {
+			if coef > *rhs {
+				db.add_clause([!lit])?;
+			}
+		}
+		terms.retain(|&(_, coef)| coef <= *rhs);
 
 		let mut k = as_binary(rhs, None);
 		let bits = k.len();
@@ -628,8 +637,29 @@ mod tests {
 
 	use crate::{
 		decision::integer::IntVar,
-		helpers::tests::{linear_test_suite, prelude::*},
+		helpers::tests::{linear_test_suite, models, prelude::*},
 	};
+
+	#[test]
+	fn a_bit_worth_more_than_the_bound_is_ruled_out() {
+		// The top bit of `x` is worth 128, which is past the bound's own bits.
+		for cmp in [LimitComp::LessEq, LimitComp::Equal] {
+			let mut cnf = Cnf::default();
+			let x = IntVar::new(RangeList::from(0..=138));
+			let con = NormalizedIntLinear::new(
+				vec![(PosCoeff::new(1), x.clone())],
+				cmp.clone(),
+				PosCoeff::new(113),
+			);
+			AdderEncoder::default().encode(&mut cnf, &con).unwrap();
+			let values = models(&cnf, |model| x.value(model));
+			assert!(!values.is_empty());
+			for value in values {
+				assert!(value <= 113, "{value} is past the bound");
+				assert!(cmp == LimitComp::LessEq || value == 113);
+			}
+		}
+	}
 
 	#[test]
 	fn a_dense_coefficient_is_synthesised_rather_than_carried() {
