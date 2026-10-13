@@ -12,10 +12,13 @@ use crate::{
 	constraint::{
 		bool_linear::NormalizedBoolLinear,
 		cardinality::Cardinality,
-		cardinality_one::{BitwiseEncoder, CardinalityOne},
+		cardinality_one::{CardinalityOne, ProductEncoder},
 		count::{Count, SortingNetworkEncoder},
 		int_linear::{lit_terms, NormalizedIntLinear},
-		linear::{AdderEncoder, Comparator, LimitComp, LinVariant, Linear, PosCoeff},
+		linear::{
+			Comparator, LimitComp, LinVariant, Linear, MixedRadixEncoder, PosCoeff,
+			TotalizerEncoder,
+		},
 	},
 	decision::integer::IntVar,
 	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
@@ -45,11 +48,11 @@ pub struct LinearEncoder<Enc = StaticLinEncoder> {
 /// to [`LinearEncoder`] directly.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct StaticLinEncoder<
-	LinEnc = AdderEncoder,
-	BoolLinEnc = AdderEncoder,
-	CardEnc = SortingNetworkEncoder,
-	Card1Enc = BitwiseEncoder,
-	CountEnc = SortingNetworkEncoder,
+	LinEnc = MixedRadixEncoder,
+	BoolLinEnc = TotalizerEncoder,
+	CardEnc = TotalizerEncoder,
+	Card1Enc = ProductEncoder,
+	CountEnc = TotalizerEncoder,
 > {
 	lin_enc: LinEnc,
 	bool_lin_enc: BoolLinEnc,

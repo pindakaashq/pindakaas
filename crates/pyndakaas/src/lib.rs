@@ -768,7 +768,7 @@ mod pindakaas {
 
 	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, Cardinality> for LinEncoderWrapper {
 		fn encode(&self, db: &mut Db, con: &Cardinality) -> Result<(), pindakaas::Unsatisfiable> {
-			match self.method.unwrap_or(Encoder::ADDER) {
+			match self.method.unwrap_or(Encoder::TOTALIZER) {
 				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
 				Encoder::ADDER => AdderEncoder::default().encode(db, con),
 				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
@@ -790,7 +790,7 @@ mod pindakaas {
 			db: &mut Db,
 			con: &CardinalityOne,
 		) -> Result<(), pindakaas::Unsatisfiable> {
-			match self.method.unwrap_or(Encoder::BITWISE) {
+			match self.method.unwrap_or(Encoder::PRODUCT) {
 				Encoder::BITWISE => BitwiseEncoder::default().encode(db, con),
 				Encoder::ADDER => AdderEncoder::default().encode(db, con),
 				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
@@ -812,7 +812,7 @@ mod pindakaas {
 
 	impl<Db: ClauseDatabase + ?Sized> EncoderTrait<Db, Count> for LinEncoderWrapper {
 		fn encode(&self, db: &mut Db, con: &Count) -> Result<(), pindakaas::Unsatisfiable> {
-			match self.method.unwrap_or(Encoder::SORTING_NETWORK) {
+			match self.method.unwrap_or(Encoder::TOTALIZER) {
 				// A sorting network states a count directly; the linear
 				// encoders read it as the linear constraint it is.
 				Encoder::SORTING_NETWORK => SortingNetworkEncoder::default().encode(db, con),
@@ -836,7 +836,7 @@ mod pindakaas {
 			db: &mut Db,
 			con: &NormalizedBoolLinear,
 		) -> Result<(), pindakaas::Unsatisfiable> {
-			match self.method.unwrap_or(Encoder::ADDER) {
+			match self.method.unwrap_or(Encoder::TOTALIZER) {
 				Encoder::ADDER => AdderEncoder::default().encode(db, con),
 				Encoder::DECISION_DIAGRAM => DecisionDiagramEncoder::default().encode(db, con),
 				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
@@ -858,7 +858,7 @@ mod pindakaas {
 			db: &mut Db,
 			con: &NormalizedIntLinear,
 		) -> Result<(), pindakaas::Unsatisfiable> {
-			match self.method.unwrap_or(Encoder::ADDER) {
+			match self.method.unwrap_or(Encoder::MIXED_RADIX) {
 				Encoder::ADDER => AdderEncoder::default().encode(db, con),
 				Encoder::WATCHDOG => WatchdogEncoder::default().encode(db, con),
 				Encoder::SEQUENTIAL_COUNTER => SequentialCounterEncoder::default().encode(db, con),
