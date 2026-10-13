@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.5.1...pyndakaas-v0.6.0) - 2026-10-13
+
+### Added
+
+- Integer variables: `IntVar` and `Domain`, created with `ClauseDatabase.new_int_var` or on existing literals with `int_var_from_order_literals`, `int_var_from_direct_literals`, and `int_var_from_binary_literals`.
+- Linear expressions and constraints over integer variables as well as literals.
+- `Encoder.WATCHDOG`, `Encoder.MIXED_RADIX`, and `Encoder.PRODUCT`.
+- `Encoder.SORTING_NETWORK` now takes weighted linear constraints.
+- `ClauseDatabase.add_clause` accepts constant Boolean values.
+
+### Changed
+
+- [**breaking**] `Encoder.SORTED_WEIGHT_COUNTER` is now `Encoder.SEQUENTIAL_COUNTER`.
+- [**breaking**] The default encoders change: pseudo-Boolean, cardinality, and count constraints take the totalizer, integer linear constraints take mixed radix, and at-most-one constraints take the product encoding.
+- Build a single abi3 wheel per platform for CPython 3.9 and later. PyPy installs from the source distribution.
+- Update pyo3 from 0.28.3 to 0.29.0.
+
+### Fixed
+
+- Read the updated WCNF format, including hard clauses marked `h` in a file without a header.
+- An encoder that allocates a variable range through a database written in Python no longer panics.
+
 ## [0.5.1](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.5.0...pyndakaas-v0.5.1) - 2026-06-09
 
 ### Other

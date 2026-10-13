@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.5.1...pindakaas-v0.6.0) - 2026-10-13
+
+### Added
+
+- Integer variables: an `IntVar` owns its domain and holds up to three channelled Boolean encodings (direct, order, and binary), created on demand. `IntVar::from_*_encoding` and `with_*_encoding` build a variable on literals the caller already has.
+- Linear constraints over integer variables: a `LinExp` mixes literals and `IntVar`s, and every linear encoder takes integer terms.
+- `Count`, a constraint that counts literals into an integer variable, taken by every linear encoder.
+- `WatchdogEncoder`, the polynomial watchdog encoding in its global and local forms.
+- `MixedRadixEncoder`, the generalized n-level modulo totalizer encoding.
+- `ProductEncoder`, the product encoding for at-most-one constraints.
+- `SortingNetworkEncoder` now takes weighted linear constraints as well as cardinality constraints.
+- Linear aggregation divides the coefficients by their greatest common divisor, and uses the declared bounds of binary encodings.
+- The crate documentation tabulates every encoder, the constraints it takes, and the published encodings it covers.
+
+### Changed
+
+- [**breaking**] The public items move into the `constraint`, `decision`, and `encoder` modules, with one module per constraint and per encoding.
+- [**breaking**] Encoders are named after their mechanism: `BddEncoder` is now `DecisionDiagramEncoder`, and `SwcEncoder` is now `SequentialCounterEncoder`.
+- [**breaking**] `BoolLinear`, `BoolLinExp`, `BoolLinAggregator`, and `BoolLinVariant` are now `Linear`, `LinExp`, `LinAggregator`, and `LinVariant`.
+- [**breaking**] `LinearEncoder` takes a single encoder: `LinearEncoder::<TotalizerEncoder>` works directly, `new` takes only the encoder, and `StaticLinEncoder` is only needed to mix encoders.
+- [**breaking**] The default encoders change: pseudo-Boolean, cardinality, and count constraints take the totalizer, integer linear constraints take mixed radix, and at-most-one constraints take the product encoding.
+- [**breaking**] `LinExp::terms` is now `LinExp::bool_terms`, and `LinExp::value` returns the value instead of a `Result`.
+- [**breaking**] Learn and terminate callbacks must be `Send`.
+- [**breaking**] *(external-propagation)* Propagators write clauses into a solver-owned `ClauseBuilder` instead of returning a `Vec`. `add_reason` is now `explain_propagation`, `add_external_clause` is now `provide_clause`, `PropagatorDefinition` and `ProofTracerDefinition` are now `PropagatorConfig` and `ProofTracerConfig`, and `check_solution` takes a borrowed `Solution`.
+- `LadderEncoder` no longer creates literals for the fixed ends of the ladder.
+- The `from_*` encoding constructors check their literal counts with `assert!` instead of `debug_assert!`.
+
+### Removed
+
+- [**breaking**] Remove the SPLR solver.
+- [**breaking**] Remove `Consistency`; `with_propagation` takes a `bool` instead.
+- [**breaking**] Remove `LinExp::add_constant`, `LinExp::add_lit`, `Linear::set_cmp`, and `DerefMut for PosCoeff`.
+
+### Fixed
+
+- Read the updated WCNF format, including hard clauses marked `h` in a file without a header.
+- An `=` constraint over a group of mutually exclusive terms no longer loses solutions with the decision diagram, sequential counter, and totalizer encoders.
+- Linear aggregation scales the constant of an expression by its multiplier.
+- Callback pointers stay valid when the solver moves the boxed closure.
+
 ## [0.5.1](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.5.0...pindakaas-v0.5.1) - 2026-06-09
 
 ### Added
