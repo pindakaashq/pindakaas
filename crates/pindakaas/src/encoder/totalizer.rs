@@ -30,14 +30,14 @@ use crate::{
 		cardinality_one::CardinalityOne,
 		count::Count,
 		int_linear::{
-			decompose_setters, sum_values, term_max, term_min, Decompose, DecomposeConfig,
-			NormalizedIntLinear,
+			decompose_setters, lit_terms, sum_values, term_max, term_min, Decompose,
+			DecomposeConfig, NormalizedIntLinear, Term,
 		},
 		int_ternary::IntTernary,
-		linear::Comparator,
+		linear::{Comparator, PosCoeff},
 	},
 	helpers::fold_pairwise,
-	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
+	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
 
 /// A balanced tree of partial sums (totalizer, GTE, or GGT).
@@ -65,6 +65,35 @@ pub struct TotalizerEncoder {
 }
 
 impl TotalizerEncoder {
+	/// Sum `leaves` up a balanced binary tree whose top is `root`, with no
+	/// intermediate reaching past `most`.
+	fn tree(
+		&self,
+		leaves: Vec<Term>,
+		cmp: Comparator,
+		most: Coeff,
+		root: &Term,
+	) -> Result<Vec<IntTernary>, Unsatisfiable> {
+		let mut cons = Vec::new();
+		let _ = fold_pairwise(leaves, |i, at_root, left, right| {
+			if at_root {
+				cons.push(IntTernary::new(left, right, cmp, root.clone()));
+				return Ok(root.clone());
+			}
+			let domain = sum_values(&left, &right, most);
+			if domain.is_empty() {
+				return Err(Unsatisfiable);
+			}
+			let parent = self
+				.config
+				.intermediate(domain)
+				.with_label(format_args!("t{i}"));
+			cons.push(IntTernary::new(left, right, cmp, (1, parent.clone())));
+			Ok((1, parent))
+		})?;
+		Ok(cons)
+	}
+
 	decompose_setters!();
 }
 
@@ -77,32 +106,18 @@ impl Decompose for TotalizerEncoder {
 		_db: &mut Db,
 		con: &NormalizedIntLinear,
 	) -> Result<Vec<IntTernary>, Unsatisfiable> {
-		let (cmp, k) = (Comparator::from(con.cmp()), con.k());
-		let mut cons = Vec::new();
+		let k = con.k();
 		// Heuristic: start from the narrowest, so the wide terms meet late and
 		// the intermediates below them stay small.
 		let leaves = con
 			.signed_terms()
 			.sorted_by_key(|t| term_max(t) - term_min(t))
 			.collect_vec();
-
-		let _ = fold_pairwise(leaves, |i, at_root, left, right| {
-			let domain: RangeList<Coeff> = if at_root {
-				RangeList::from(k..=k)
-			} else {
-				sum_values(&left, &right, k)
-			};
-			if domain.is_empty() {
-				return Err(Unsatisfiable);
-			}
-			let parent = self
-				.config
-				.intermediate(domain)
-				.with_label(format_args!("t{i}"));
-			cons.push(IntTernary::new(left, right, cmp, (1, parent.clone())));
-			Ok((1, parent))
-		})?;
-		Ok(cons)
+		let root = self
+			.config
+			.intermediate(RangeList::from(k..=k))
+			.with_label("t0");
+		self.tree(leaves, con.cmp().into(), k, &(1, root))
 	}
 }
 
@@ -121,8 +136,22 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for TotalizerEncod
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for TotalizerEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		let con = con.as_int_linear(db)?;
-		self.encode(db, &con)
+		if con.lits.len() < 2 {
+			// A tree needs two leaves to put the count on top of.
+			let con = con.as_int_linear(db)?;
+			return self.encode(db, &con);
+		}
+		// The count is the top of the tree rather than one more term in it,
+		// which would widen every intermediate above where it joins.
+		let leaves = lit_terms(db, con.lits.iter().map(|&l| (l, PosCoeff::new(1))))?
+			.into_iter()
+			.map(|(c, x)| (*c, x))
+			.collect_vec();
+		let Ok(cons) = self.tree(leaves, con.cmp.into(), con.y.max(), &(1, con.y.clone())) else {
+			return db.contradiction();
+		};
+		let encoder = self.config.encoder();
+		cons.iter().try_for_each(|con| encoder.encode(db, con))
 	}
 }
 
@@ -148,7 +177,67 @@ where
 
 #[cfg(test)]
 mod tests {
-	use crate::helpers::tests::{linear_test_suite, prelude::*};
+	use itertools::iproduct;
+	use rangelist::RangeList;
+
+	use crate::{
+		constraint::count::Count,
+		decision::integer::IntVar,
+		helpers::tests::{linear_test_suite, models, prelude::*},
+	};
+
+	#[test]
+	fn a_count_is_the_top_of_its_tree() {
+		// As one more term the count joined at the bottom of the tree for an
+		// odd number of literals, and 15 of them cost more than 16.
+		let mut vars = Vec::new();
+		for n in [15, 16] {
+			let mut cnf = Cnf::default();
+			let lits = (0..n).map(|_| cnf.new_lit()).collect_vec();
+			let con = Count::new(lits, LimitComp::Equal, IntVar::new(0..=n));
+			TotalizerEncoder::default().encode(&mut cnf, &con).unwrap();
+			vars.push(cnf.num_vars());
+		}
+		assert!(vars[0] < vars[1], "{vars:?}");
+	}
+
+	#[test]
+	fn a_count_on_top_admits_what_the_constraint_does() {
+		let domains = [
+			RangeList::from(0..=5),
+			RangeList::from(2..=3),
+			RangeList::from(-1..=9),
+			RangeList::from_elements([0, 2, 5]),
+		];
+		for (n, domain, cmp) in
+			iproduct!([2, 3, 4, 5], domains, [LimitComp::LessEq, LimitComp::Equal])
+		{
+			let mut cnf = Cnf::default();
+			let lits = (0..n).map(|_| cnf.new_lit()).collect_vec();
+			let y = IntVar::new(domain.clone());
+			let con = Count::new(lits.clone(), cmp, y.clone());
+			// A count no value of the bound can meet is a contradiction.
+			let encoded = TotalizerEncoder::default().encode(&mut cnf, &con);
+			let mut seen = match encoded {
+				Ok(()) => models(&cnf, |sol| {
+					(
+						lits.iter().filter(|&&l| sol.value(l)).count() as Coeff,
+						y.value(sol),
+					)
+				}),
+				Err(_) => Vec::new(),
+			};
+			seen.sort_unstable();
+			seen.dedup();
+			let want = iproduct!(0..=n as Coeff, domain.iter().flatten())
+				.filter(|&(count, v)| match cmp {
+					LimitComp::LessEq => count <= v,
+					LimitComp::Equal => count == v,
+				})
+				.collect_vec();
+			assert_eq!(seen, want, "{n} literals {cmp:?} a bound in {domain:?}");
+		}
+	}
 
 	card1_test_suite! {
 		totalizer_encoder_card1, TotalizerEncoder::default()
