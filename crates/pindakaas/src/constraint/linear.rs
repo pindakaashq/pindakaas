@@ -605,6 +605,9 @@ mod tests {
 		);
 		assert_lean_linear(&LinearEncoder::<TotalizerEncoder>::default(), coefs, cmp, k);
 		assert_lean_linear(&LinearEncoder::<WatchdogEncoder>::default(), coefs, cmp, k);
+		let mut sorting = WatchdogEncoder::default();
+		let _ = sorting.with_sorting_networks(true);
+		assert_lean_linear(&LinearEncoder::new(sorting), coefs, cmp, k);
 	}
 
 	#[test]

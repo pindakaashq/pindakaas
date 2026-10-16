@@ -21,12 +21,20 @@
 //! the literals under it is the generalized watchdog of Bofill et al. [^2], so
 //! GGPW and GLPW are what the general case already does.
 //!
+//! Counting each digit with a sorting network rather than a totalizer is the
+//! binary merge of Manthey et al. [^3]. See
+//! [`WatchdogEncoder::with_sorting_networks`].
+//!
 //! [^1]: O. Bailleux, Y. Boufkhad, O. Roussel, "New Encodings of Pseudo-Boolean
 //! Constraints into CNF", SAT 2009, LNCS 5584, 181–194.
 //!
 //! [^2]: M. Bofill, J. Coll, P. Nightingale, J. Suy, F. Ulrich-Oltean, M.
 //! Villaret, "SAT encodings for pseudo-Boolean constraints together with
 //! at-most-one constraints", Artificial Intelligence 302 (2022) 103604.
+//!
+//! [^3]: N. Manthey, T. Philipp, P. Steinke, "A More Compact Translation of
+//! Pseudo-Boolean Constraints into CNF Such That Generalized Arc Consistency
+//! Is Maintained", KI 2014, LNCS 8736, 123–134.
 
 use std::cmp::min;
 
@@ -46,6 +54,7 @@ use crate::{
 		linear::{Comparator, LimitComp},
 	},
 	decision::integer::IntVar,
+	encoder::sorting_network::SortingNetworkEncoder,
 	helpers::new_named_lit,
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
@@ -78,6 +87,7 @@ use crate::{
 pub struct WatchdogEncoder {
 	config: DecomposeConfig,
 	local: bool,
+	sorting_networks: bool,
 }
 
 impl WatchdogEncoder {
@@ -120,6 +130,33 @@ impl WatchdogEncoder {
 			db,
 			[(0, BoolVal::Const(true)), (1, digit)],
 		)?))
+	}
+
+	/// Count `leaves` into one variable, held to `cap`, with a sorting network.
+	///
+	/// What [`Self::totalize`] does, but the network states the count in
+	/// clauses of its own rather than as ternary constraints.
+	fn sort<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		network: &SortingNetworkEncoder,
+		leaves: Vec<IntVar>,
+		cap: Coeff,
+		label: &str,
+	) -> Result<IntVar, Unsatisfiable> {
+		let lb = leaves.iter().map(IntVar::min).sum::<Coeff>();
+		let ub = min(leaves.iter().map(IntVar::max).sum::<Coeff>(), cap);
+		if lb > ub {
+			return Err(Unsatisfiable);
+		}
+		if let [leaf] = &leaves[..] {
+			if leaf.max() <= cap {
+				return Ok(leaf.clone());
+			}
+		}
+		let count = self.config.intermediate(lb..=ub).with_label(label);
+		network.sorted(db, &leaves, &LimitComp::LessEq, &count)?;
+		Ok(count)
 	}
 
 	/// Count `leaves` into one variable, held to `cap`.
@@ -185,6 +222,7 @@ impl WatchdogEncoder {
 		terms: impl Iterator<Item = &'a Term>,
 		k: Coeff,
 		guard: Option<BoolVal>,
+		network: Option<&SortingNetworkEncoder>,
 		cons: &mut Vec<IntTernary>,
 	) -> Result<(), Unsatisfiable> {
 		let terms = terms.collect_vec();
@@ -233,7 +271,10 @@ impl WatchdogEncoder {
 					leaves.push(digit);
 				}
 			}
-			let count = self.totalize(leaves, cap, &format!("b{r}"), cons)?;
+			let count = match network {
+				Some(network) => self.sort(db, network, leaves, cap, &format!("b{r}"))?,
+				None => self.totalize(leaves, cap, &format!("b{r}"), cons)?,
+			};
 			carried = Some(match carried {
 				None => count,
 				Some(below) => {
@@ -248,12 +289,17 @@ impl WatchdogEncoder {
 						.config
 						.intermediate(lb..=ub)
 						.with_label(format_args!("s{r}"));
-					cons.push(IntTernary::new(
-						(1, count),
-						(1, half),
-						Comparator::LessEq,
-						(1, sum.clone()),
-					));
+					match network {
+						Some(network) => {
+							network.merge(db, &count, &half, &LimitComp::LessEq, &sum)?;
+						}
+						None => cons.push(IntTernary::new(
+							(1, count),
+							(1, half),
+							Comparator::LessEq,
+							(1, sum.clone()),
+						)),
+					}
 					sum
 				}
 			});
@@ -277,8 +323,14 @@ impl WatchdogEncoder {
 		k: Coeff,
 		cons: &mut Vec<IntTernary>,
 	) -> Result<(), Unsatisfiable> {
+		let network = self.sorting_networks.then(|| {
+			let mut network = SortingNetworkEncoder::default();
+			let _ = network.with_consistency(self.config.consistency);
+			network
+		});
+		let network = network.as_ref();
 		if !self.local {
-			return self.watchdog(db, terms.iter(), k, None, cons);
+			return self.watchdog(db, terms.iter(), k, None, network, cons);
 		}
 		for (i, term) in terms.iter().enumerate() {
 			for v in term_values(term) {
@@ -291,7 +343,7 @@ impl WatchdogEncoder {
 					.enumerate()
 					.filter(|&(j, _)| j != i)
 					.map(|(_, t)| t);
-				self.watchdog(db, rest, k - v, Some(guard), cons)?;
+				self.watchdog(db, rest, k - v, Some(guard), network, cons)?;
 			}
 		}
 		Ok(())
@@ -305,6 +357,16 @@ impl WatchdogEncoder {
 	/// cutoffs can weaken it.
 	pub fn with_local(&mut self, b: bool) -> &mut Self {
 		self.local = b;
+		self
+	}
+
+	/// Count each digit with a sorting network rather than a totalizer;
+	/// disabled by default.
+	///
+	/// This is the binary merge of PBLib. The counts are order encoded,
+	/// whatever [`Self::with_cutoff`] says.
+	pub fn with_sorting_networks(&mut self, b: bool) -> &mut Self {
+		self.sorting_networks = b;
 		self
 	}
 
@@ -385,9 +447,10 @@ where
 
 #[cfg(test)]
 mod tests {
+	use rangelist::RangeList;
 	use traced_test::test;
 
-	use crate::helpers::tests::{linear_test_suite, prelude::*};
+	use crate::helpers::tests::{brute_force, linear_test_suite, prelude::*};
 
 	/// Two values of one term setting the same digit need a literal standing
 	/// for the digit, implied by each of them. Only the implication is stated,
@@ -494,6 +557,53 @@ mod tests {
 		assert!(WatchdogEncoder::default().encode(&mut cnf, &con).is_err());
 	}
 
+	/// Under every partial assignment of `lits`, unit propagation on `cnf`
+	/// detects that no solution in `expected` extends it, and in the local
+	/// form also removes every value no such solution takes.
+	fn assert_propagates(cnf: &Cnf, lits: &[Lit], expected: &[Vec<bool>], local: bool, at: &str) {
+		for partial in (0..lits.len())
+			.map(|_| [None, Some(false), Some(true)])
+			.multi_cartesian_product()
+		{
+			let assumed = lits
+				.iter()
+				.zip(&partial)
+				.filter_map(|(&l, v)| v.map(|v| if v { l } else { !l }))
+				.collect_vec();
+			let extends = |xs: &&Vec<bool>| {
+				partial
+					.iter()
+					.zip(xs.iter())
+					.all(|(p, &x)| p.is_none_or(|p| p == x))
+			};
+			let support = expected.iter().filter(extends).collect_vec();
+			let Some(value) = unit_propagate(cnf, &assumed) else {
+				assert!(
+					support.is_empty(),
+					"{at} under {partial:?}: a false conflict"
+				);
+				continue;
+			};
+			assert!(
+				!support.is_empty() || local,
+				"{at} under {partial:?}: no conflict"
+			);
+			if !local || support.is_empty() {
+				continue;
+			}
+			for (i, &l) in lits.iter().enumerate() {
+				for v in [false, true] {
+					let supported = support.iter().any(|xs| xs[i] == v);
+					let removed = value[i32::from(l.var()) as usize] == Some(!v);
+					assert!(
+						supported || removed,
+						"{at} under {partial:?}: x{i} = {v} is not removed"
+					);
+				}
+			}
+		}
+	}
+
 	/// The point of the watchdog is that a coefficient costs its bit width
 	/// rather than its magnitude, so guard against a change that would make it
 	/// pointless.
@@ -531,6 +641,97 @@ mod tests {
 		);
 	}
 
+	/// Over every small sum of weighted literals and every bound, the sorting
+	/// networks admit exactly the solutions of the constraint. Under every
+	/// partial assignment of a `≤`, unit propagation detects a dead end in the
+	/// global form and removes every unsupported value in the local form.
+	#[test]
+	fn sorting_networks_admit_exactly_the_solutions_and_propagate() {
+		let shapes = [1, 2, 3, 5, 6, 7]
+			.into_iter()
+			.combinations_with_replacement(3)
+			.chain([1, 3, 4, 6].into_iter().combinations_with_replacement(4));
+		for coeffs in shapes {
+			let sum: Coeff = coeffs.iter().sum();
+			// Without propagation, the counts are built over the full domains.
+			for ((k, cmp), (local, propagate)) in (0..=sum)
+				.cartesian_product([LimitComp::LessEq, LimitComp::Equal])
+				.cartesian_product([(false, true), (true, true), (false, false)])
+			{
+				let at = format!("{coeffs:?} {cmp:?} {k} local: {local} propagate: {propagate}");
+				let mut cnf = Cnf::default();
+				let lits = cnf.new_var_range(coeffs.len()).iter_lits().collect_vec();
+				let terms = lits
+					.iter()
+					.copied()
+					.zip(coeffs.iter().copied())
+					.collect_vec();
+				let con = NormalizedIntLinear::new(
+					construct_terms(&mut cnf, &terms),
+					cmp,
+					PosCoeff::new(k),
+				);
+				let bools = vec![RangeList::from(0..=1); coeffs.len()];
+				let expected = brute_force(&coeffs, &bools, cmp.into(), k)
+					.into_iter()
+					.map(|xs| xs.into_iter().map(|x| x == 1).collect_vec())
+					.collect_vec();
+
+				let mut enc = WatchdogEncoder::default();
+				let _ = enc
+					.with_sorting_networks(true)
+					.with_local(local)
+					.with_propagation(propagate);
+				if enc.encode(&mut cnf, &con).is_err() {
+					assert!(
+						expected.is_empty(),
+						"{at}: refused a satisfiable constraint"
+					);
+					continue;
+				}
+				let mut seen = models_over(&cnf, &lits, |v| {
+					lits.iter().map(|&l| v.value(l)).collect_vec()
+				});
+				seen.sort();
+				assert_eq!(seen, expected, "{at}");
+				if cmp == LimitComp::LessEq {
+					assert_propagates(&cnf, &lits, &expected, local, &at);
+				}
+			}
+		}
+	}
+
+	/// What unit propagation makes of `cnf` under `assumed`: the value of each
+	/// variable it fixes, by index, or `None` on a conflict.
+	fn unit_propagate(cnf: &Cnf, assumed: &[Lit]) -> Option<Vec<Option<bool>>> {
+		let mut value = vec![None; cnf.num_vars() + 1];
+		let index = |l: Lit| i32::from(l.var()) as usize;
+		for &l in assumed {
+			value[index(l)] = Some(!l.is_negated());
+		}
+		loop {
+			let mut changed = false;
+			'clauses: for clause in cnf.iter() {
+				// The one literal left open, if no more than one is.
+				let mut open = None;
+				for &l in clause {
+					match value[index(l)].map(|v| v != l.is_negated()) {
+						Some(true) => continue 'clauses,
+						Some(false) => {}
+						None if open.is_some() => continue 'clauses,
+						None => open = Some(l),
+					}
+				}
+				let l = open?;
+				value[index(l)] = Some(!l.is_negated());
+				changed = true;
+			}
+			if !changed {
+				return Some(value);
+			}
+		}
+	}
+
 	card1_test_suite! {
 		watchdog_encoder_card1, WatchdogEncoder::default()
 	}
@@ -551,5 +752,25 @@ mod tests {
 	linear_test_suite!(
 		watchdog_encoder_binary,
 		WatchdogEncoder::default().with_cutoff(Some(0))
+	);
+	card1_test_suite! {
+		watchdog_encoder_sorting_networks_card1,
+		WatchdogEncoder::default().with_sorting_networks(true)
+	}
+	linear_test_suite!(
+		watchdog_encoder_sorting_networks,
+		WatchdogEncoder::default().with_sorting_networks(true)
+	);
+	linear_test_suite!(
+		watchdog_encoder_sorting_networks_binary,
+		WatchdogEncoder::default()
+			.with_sorting_networks(true)
+			.with_cutoff(Some(0))
+	);
+	linear_test_suite!(
+		watchdog_encoder_sorting_networks_local,
+		WatchdogEncoder::default()
+			.with_sorting_networks(true)
+			.with_local(true)
 	);
 }

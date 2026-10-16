@@ -137,7 +137,7 @@
 //! | [`TotalizerEncoder`](encoder::totalizer::TotalizerEncoder) | int, bool, card, amo, count | Totalizer, GTE, GGT [^bailleux2003][^joshi][^bofill] | GAC |
 //! | [`SequentialCounterEncoder`](encoder::sequential_counter::SequentialCounterEncoder) | int, bool, card, amo, count | Sequential counter, SWC, GSWC [^sinz][^holldobler][^bofill] | GAC |
 //! | [`MixedRadixEncoder`](encoder::mixed_radix::MixedRadixEncoder) | int, bool, card, amo, count | MTO, GMTO [^ogawa][^zha][^bofill] | neither GAC nor CC |
-//! | [`WatchdogEncoder`](encoder::watchdog::WatchdogEncoder) | int, bool, card, amo, count | GPW/GGPW (global), LPW/GLPW (local) [^bailleux2009][^bofill] | CC / GAC |
+//! | [`WatchdogEncoder`](encoder::watchdog::WatchdogEncoder) | int, bool, card, amo, count | GPW/GGPW (global), LPW/GLPW (local) [^bailleux2009][^bofill], binary merge [^manthey] | CC / GAC |
 //! | [`SortingNetworkEncoder`](encoder::sorting_network::SortingNetworkEncoder) | int, bool, card, amo, count | Cardinality network [^asin][^batcher] | GAC on unit weights |
 //! | [`PairwiseEncoder`](encoder::pairwise::PairwiseEncoder) | amo | Pairwise/binomial | GAC |
 //! | [`BitwiseEncoder`](encoder::bitwise::BitwiseEncoder) | amo | Bitwise/binary [^frisch] | weak propagation |
@@ -203,6 +203,10 @@
 //!
 //! [^joshi]: S. Joshi, R. Martins, V. Manquinho, "Generalized Totalizer
 //! Encoding for Pseudo-Boolean Constraints", CP 2015, LNCS 9255, 200–209.
+//!
+//! [^manthey]: N. Manthey, T. Philipp, P. Steinke, "A More Compact Translation
+//! of Pseudo-Boolean Constraints into CNF Such That Generalized Arc Consistency
+//! Is Maintained", KI 2014, LNCS 8736, 123–134.
 //!
 //! [^ogawa]: T. Ogawa, Y. Liu, R. Hasegawa, M. Koshimura, H. Fujita, "Modulo
 //! Based CNF Encoding of Cardinality Constraints and Its Application to MaxSAT
