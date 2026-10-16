@@ -1,3 +1,4 @@
+from itertools import product
 from typing import Iterable
 
 import pytest
@@ -11,6 +12,7 @@ from pindakaas import (
     Unsatisfiable,
 )
 from pindakaas.encoding import VarRange
+from pindakaas.solver import CaDiCaL, Status
 
 
 class CustomDB(ClauseDatabase):
@@ -101,6 +103,118 @@ def test_every_at_most_one_encoder_takes_an_at_most_one_constraint(encoder):
     f = CNF()
     x, y, z = f.new_vars(3)
     f.add_encoding(x + y + z <= 1, encoder=encoder)
+
+
+# The options that change the clauses on the shapes below. `cutoff`,
+# `consistency`, and `propagation` leave them as they are, in Rust as well.
+CHANGING = [
+    (Encoder.MIXED_RADIX, {"base": [3, 2]}),
+    (Encoder.WATCHDOG, {"local": True}),
+    (Encoder.WATCHDOG, {"sorting_networks": True}),
+    (Encoder.SORTING_NETWORK, {"strategy": "recursive"}),
+    (Encoder.PRODUCT, {"pairwise_cutoff": 2}),
+]
+
+# Every option each encoder takes, with a value other than its default.
+OPTIONS = [
+    *product(
+        [
+            Encoder.DECISION_DIAGRAM,
+            Encoder.MIXED_RADIX,
+            Encoder.SEQUENTIAL_COUNTER,
+            Encoder.TOTALIZER,
+            Encoder.WATCHDOG,
+        ],
+        [{"consistency": True}, {"cutoff": 0}, {"propagation": False}],
+    ),
+    *CHANGING,
+    (Encoder.WATCHDOG, {"local": True, "sorting_networks": True}),
+    (Encoder.SORTING_NETWORK, {"consistency": True}),
+    (Encoder.SORTING_NETWORK, {"strategy": "direct"}),
+    (Encoder.SORTING_NETWORK, {"strategy": "mixed"}),
+]
+
+
+def weighted_sum(db, encoder, extra=0):
+    """Literals and a sum over them the encoder takes, with its bound."""
+    if encoder == Encoder.PRODUCT:
+        coeffs, k = [1] * (5 + extra), 1
+    else:
+        coeffs, k = [2, 3, 5, 4, 6, 2, 3, 5, 4][: 5 + extra], 9 + extra
+    xs = list(db.new_vars(len(coeffs)))
+    expr = sum((x * c for x, c in zip(xs[1:], coeffs[1:])), xs[0] * coeffs[0])
+    return xs, coeffs, expr, k
+
+
+@pytest.mark.parametrize("encoder, options", OPTIONS)
+@pytest.mark.parametrize("equality", [False, True])
+def test_options_keep_every_solution(encoder, options, equality):
+    """Each assignment of the terms is a model exactly if it meets the bound."""
+    slv = CaDiCaL()
+    xs, coeffs, expr, k = weighted_sum(slv, encoder)
+    slv.add_encoding(expr == k if equality else expr <= k, encoder, **options)
+    for values in product([False, True], repeat=len(xs)):
+        total = sum(c for c, v in zip(coeffs, values) if v)
+        expected = total == k if equality else total <= k
+        assumptions = [x if v else ~x for x, v in zip(xs, values)]
+        with slv.solve(assumptions=assumptions) as result:
+            assert (result.status == Status.SATISFIED) == expected, values
+
+
+@pytest.mark.parametrize("db", [CNF, CustomDB])
+@pytest.mark.parametrize("encoder, options", CHANGING)
+def test_options_change_the_encoding(db, encoder, options):
+    def clauses(**options):
+        f = db()
+        _, _, expr, k = weighted_sum(f, encoder, extra=4)
+        f.add_encoding(expr <= k, encoder, **options)
+        return f.to_dimacs() if isinstance(f, CNF) else f.clauses
+
+    assert clauses(**options) != clauses()
+
+
+def test_an_option_is_checked_when_aggregation_settles_the_constraint():
+    """A bound no assignment reaches needs no encoder, but the options are read."""
+    f = CNF()
+    x, y = f.new_vars(2)
+    with pytest.raises(InvalidEncoder, match="sorting_network"):
+        f.add_encoding(x + y <= 2, Encoder.WATCHDOG, sorting_network=True)
+
+
+def test_options_reach_the_default_encoder():
+    """The totalizer is the default for a weighted sum, and takes `cutoff`."""
+    f = CNF()
+    x, y, z = f.new_vars(3)
+    f.add_encoding(x * 2 + y * 3 + z * 4 <= 5, cutoff=0)
+    with pytest.raises(InvalidEncoder, match="TOTALIZER"):
+        f.add_encoding(x * 2 + y * 3 + z * 4 <= 5, local=True)
+
+
+@pytest.mark.parametrize("encoder", AT_MOST_ONE + [Encoder.TSEITIN])
+def test_an_option_the_encoder_does_not_take_is_invalid(encoder):
+    f = CNF()
+    x, y, z = f.new_vars(3)
+    con = x & y if encoder == Encoder.TSEITIN else x + y + z <= 1
+    with pytest.raises(InvalidEncoder, match="sorting_network"):
+        f.add_encoding(con, encoder, sorting_network=True)
+    assert f.clauses() == []
+
+
+@pytest.mark.parametrize(
+    "encoder, options",
+    [
+        (Encoder.MIXED_RADIX, {"base": []}),
+        (Encoder.MIXED_RADIX, {"base": [3, 1]}),
+        (Encoder.PRODUCT, {"pairwise_cutoff": 1}),
+        (Encoder.PRODUCT, {"pairwise_cutoff": -1}),
+        (Encoder.SORTING_NETWORK, {"strategy": "bubble"}),
+    ],
+)
+def test_an_invalid_option_value_is_refused(encoder, options):
+    f = CNF()
+    x, y, z = f.new_vars(3)
+    with pytest.raises(ValueError):
+        f.add_encoding(x + y + z <= 1, encoder, **options)
 
 
 def test_encode_bool_lin_default():

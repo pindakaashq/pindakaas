@@ -95,19 +95,54 @@ class ClauseDatabase(ABC):
         constraint: Constraint,
         encoder: Optional[Encoder] = None,
         conditions: Optional[Iterable[Lit]] = None,
+        **options,
     ):
         """Clauses encoding a constraint, optionally under conditions.
+
+        Options configure the encoder that runs, which is the default for the
+        constraint when ``encoder`` is omitted. An option that is not given
+        keeps its default. The Rust encoders document the options in full.
+
+        - :attr:`Encoder.DECISION_DIAGRAM`, :attr:`Encoder.MIXED_RADIX`,
+          :attr:`Encoder.SEQUENTIAL_COUNTER`, :attr:`Encoder.TOTALIZER`, and
+          :attr:`Encoder.WATCHDOG` take:
+
+          - ``consistency`` (bool): add consistency clauses for new
+            intermediate variables.
+          - ``cutoff`` (int or None): the domain size from which a new
+            variable prefers a binary encoding. Binary arithmetic can weaken
+            propagation.
+          - ``propagation`` (bool): narrow the domains to the bounds the
+            constraint implies.
+
+        - :attr:`Encoder.MIXED_RADIX` also takes ``base`` (list of int or
+          None): the radices, each at least two, of which the last repeats.
+        - :attr:`Encoder.WATCHDOG` also takes:
+
+          - ``local`` (bool): use one watchdog per term value, which is domain
+            consistent, rather than one for the whole constraint.
+          - ``sorting_networks`` (bool): count with sorting networks rather
+            than totalizers, which is PBLib's binary merge.
+
+        - :attr:`Encoder.SORTING_NETWORK` takes ``consistency`` (bool) and
+          ``strategy`` (``"direct"``, ``"recursive"``, or ``"mixed"``): how
+          two sorted halves are merged.
+        - :attr:`Encoder.PRODUCT` takes ``pairwise_cutoff`` (int, at least
+          two): the largest group encoded pairwise.
+        - The other encoders take no options.
 
         Args:
             constraint: Formula or constraint to encode.
             encoder: Encoding algorithm, or its default when omitted.
             conditions: Literals whose conjunction implies the constraint.
+            ``**options``: Options for the encoder.
 
         Raises:
-            InvalidEncoder: The encoder does not accept this constraint type.
+            InvalidEncoder: The encoder does not take the constraint or an option.
+            ValueError: An option has a value the encoder cannot use.
             Unsatisfiable: The encoding makes the database inconsistent.
         """
-        _wrap_encode_constraint(self, constraint, encoder, conditions)
+        _wrap_encode_constraint(self, constraint, encoder, conditions, options)
 
     def new_var(self):
         """Allocates one previously unused positive literal."""
@@ -249,8 +284,9 @@ class CNF(ClauseDatabase):
         constraint: Constraint,
         encoder: Optional[Encoder] = None,
         conditions: Optional[Iterable[Lit]] = None,
+        **options,
     ):
-        return self._inner.add_encoding(constraint, encoder, conditions)
+        return self._inner.add_encoding(constraint, encoder, conditions, options)
 
     def clauses(self) -> Iterable[list[Lit]]:
         """Stored clauses in insertion order.

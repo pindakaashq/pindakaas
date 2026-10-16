@@ -118,8 +118,9 @@ class CaDiCaL(Solver):
         constraint: Constraint,
         encoder: Optional[Encoder] = None,
         conditions: Optional[Iterable[Lit]] = None,
+        **options,
     ):
-        return self._inner.add_encoding(constraint, encoder, conditions)
+        return self._inner.add_encoding(constraint, encoder, conditions, options)
 
     def new_var_range(self, n: int):
         return self._inner.new_var_range(n)
@@ -155,8 +156,9 @@ class Kissat(Solver):
         constraint: Constraint,
         encoder: Optional[Encoder] = None,
         conditions: Optional[Iterable[Lit]] = None,
+        **options,
     ):
-        return self._inner.add_encoding(constraint, encoder, conditions)
+        return self._inner.add_encoding(constraint, encoder, conditions, options)
 
     def new_var_range(self, n: int):
         return self._inner.new_var_range(n)
