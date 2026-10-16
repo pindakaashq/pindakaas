@@ -250,7 +250,6 @@ class CNF(ClauseDatabase):
         encoder: Optional[Encoder] = None,
         conditions: Optional[Iterable[Lit]] = None,
     ):
-        conditions = list(conditions) if conditions is not None else []
         return self._inner.add_encoding(constraint, encoder, conditions)
 
     def clauses(self) -> Iterable[list[Lit]]:

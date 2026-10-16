@@ -175,6 +175,20 @@ def test_custom_db():
     ]
 
 
+def test_custom_db_without_conditions():
+    f = CustomDB()
+    x, y = f.new_vars(2)
+    f.add_encoding(x ^ y)
+    assert f.clauses == [[1, 2], [-1, -2]]
+
+
+def test_custom_db_conditions_from_a_generator():
+    f = CustomDB()
+    x, y, p = f.new_vars(3)
+    f.add_encoding(x ^ y, conditions=(lit for lit in [p]))
+    assert f.clauses == [[-3, 1, 2], [-3, -1, -2]]
+
+
 def test_literals_from_an_int_var_make_a_nogood():
     """A clause over the literals of integers rules an assignment out."""
     from pindakaas.solver import CaDiCaL, Status

@@ -132,6 +132,10 @@ mod pindakaas {
 		Lit(Lit),
 	}
 
+	/// Literals whose conjunction implies a constraint, read from any Python
+	/// iterable.
+	struct Conditions(Vec<BaseLit>);
+
 	#[derive(FromPyObject)]
 	/// Argument capture for types that represent constraint that can be encoded
 	/// into a CNF formula.
@@ -238,7 +242,7 @@ mod pindakaas {
 		obj: &Bound<'_, PyAny>,
 		con: ConstraintArg,
 		enc: Option<Encoder>,
-		conditions: Vec<Lit>,
+		conditions: Option<Conditions>,
 	) -> Result {
 		encode_constraint(&mut PyDbWrapper(obj), con, enc, conditions)
 	}
@@ -305,7 +309,7 @@ mod pindakaas {
 		db: &mut Db,
 		con: ConstraintArg,
 		enc: Option<Encoder>,
-		conditions: Vec<Lit>,
+		conditions: Option<Conditions>,
 	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
@@ -316,7 +320,7 @@ mod pindakaas {
 			))
 			.into())
 		};
-		let conditions: Vec<_> = conditions.into_iter().map(|l| l.0).collect();
+		let conditions = conditions.map_or_else(Vec::new, |c| c.0);
 
 		match con {
 			ConstraintArg::BoolLin(lin) => {
@@ -422,7 +426,7 @@ mod pindakaas {
 			&mut self,
 			con: ConstraintArg,
 			enc: Option<Encoder>,
-			conditions: Vec<Lit>,
+			conditions: Option<Conditions>,
 		) -> Result {
 			encode_constraint(&mut self.0, con, enc, conditions)
 		}
@@ -450,6 +454,17 @@ mod pindakaas {
 
 		fn variables(&self) -> VarRange {
 			VarRange(self.0.variables())
+		}
+	}
+
+	impl<'a, 'py> FromPyObject<'a, 'py> for Conditions {
+		type Error = PyErr;
+
+		fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+			obj.try_iter()?
+				.map(|lit| Ok(lit?.extract::<Lit>()?.0))
+				.collect::<PyResult<_>>()
+				.map(Self)
 		}
 	}
 
@@ -1171,7 +1186,7 @@ mod pindakaas {
 			&mut self,
 			con: ConstraintArg,
 			enc: Option<Encoder>,
-			conditions: Vec<Lit>,
+			conditions: Option<Conditions>,
 		) -> Result {
 			encode_constraint(&mut self.0, con, enc, conditions)
 		}
@@ -1278,7 +1293,9 @@ mod pindakaas {
 		};
 
 		use crate::{
-			pindakaas::{encode_constraint, ClauseArg, ConstraintArg, Encoder, Lit, VarRange},
+			pindakaas::{
+				encode_constraint, ClauseArg, Conditions, ConstraintArg, Encoder, Lit, VarRange,
+			},
 			Result,
 		};
 
@@ -1371,7 +1388,7 @@ mod pindakaas {
 				&mut self,
 				con: ConstraintArg,
 				enc: Option<Encoder>,
-				conditions: Vec<Lit>,
+				conditions: Option<Conditions>,
 			) -> Result {
 				self.0.add_encoding(con, enc, conditions)
 			}
@@ -1417,7 +1434,7 @@ mod pindakaas {
 				&mut self,
 				con: ConstraintArg,
 				enc: Option<Encoder>,
-				conditions: Vec<Lit>,
+				conditions: Option<Conditions>,
 			) -> Result {
 				self.0.add_encoding(con, enc, conditions)
 			}
@@ -1484,7 +1501,7 @@ mod pindakaas {
 				&mut self,
 				con: ConstraintArg,
 				enc: Option<Encoder>,
-				conditions: Vec<Lit>,
+				conditions: Option<Conditions>,
 			) -> Result {
 				encode_constraint(self.solver_mut()?, con, enc, conditions)
 			}
