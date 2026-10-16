@@ -115,7 +115,14 @@ impl SortingNetworkEncoder {
 	/// once any of the three is fixed, the constraint is stated outright. The
 	/// two inputs are checked alike even though the corpus only exercises the
 	/// first: the alternative to a redundant check here is a hang.
-	fn merge<Db>(&self, db: &mut Db, x: &IntVar, y: &IntVar, cmp: &LimitComp, z: &IntVar) -> Result
+	pub(crate) fn merge<Db>(
+		&self,
+		db: &mut Db,
+		x: &IntVar,
+		y: &IntVar,
+		cmp: &LimitComp,
+		z: &IntVar,
+	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
@@ -230,7 +237,13 @@ impl SortingNetworkEncoder {
 	}
 
 	/// Constrain `y` to be what `xs` come to together.
-	fn sorted<Db>(&self, db: &mut Db, xs: &[IntVar], cmp: &LimitComp, y: &IntVar) -> Result
+	pub(crate) fn sorted<Db>(
+		&self,
+		db: &mut Db,
+		xs: &[IntVar],
+		cmp: &LimitComp,
+		y: &IntVar,
+	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
@@ -619,7 +632,7 @@ mod tests {
 		},
 		decision::integer::IntVar,
 		helpers::tests::{assert_solutions, expect_file, linear_test_suite, models, models_over},
-		ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Var, VarRange,
+		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Var, VarRange,
 	};
 
 	/// The smallest case where a merge intermediate reaches one past the
@@ -659,6 +672,59 @@ mod tests {
 			.sorted()
 			.collect_vec();
 		assert_eq!(seen, allowed);
+	}
+
+	/// The watchdog merges counts that start above zero, such as a padding
+	/// digit plus a term, so every strategy must handle a nonzero minimum.
+	#[test]
+	fn a_merge_of_counts_that_start_above_zero_bounds_their_sum() {
+		for strategy in [
+			SortingNetworkStrategy::Direct,
+			SortingNetworkStrategy::Recursive,
+			SortingNetworkStrategy::Mixed(10),
+		] {
+			for ((x_min, x_max), (y_min, y_max), cap) in [
+				((1, 3), (0, 4), 5),
+				((1, 8), (0, 8), 9),
+				((2, 6), (1, 5), 8),
+				((1, 4), (1, 4), 8),
+			] {
+				let mut cnf = Cnf::default();
+				let x = IntVar::new(x_min..=x_max);
+				let y = IntVar::new(y_min..=y_max);
+				let z = IntVar::new(x_min + y_min..=cap);
+				get_sorted_encoder(strategy.clone())
+					.merge(&mut cnf, &x, &y, &LimitComp::LessEq, &z)
+					.unwrap();
+				// A model for each way the network's own literals fall is too
+				// many, so the models are read on the order literals alone.
+				let mut lits = Vec::new();
+				for v in [&x, &y, &z] {
+					for value in v.min() + 1..=v.max() {
+						if let BoolVal::Lit(l) = v.at_least(&mut cnf, value).unwrap() {
+							lits.push(l);
+						}
+					}
+				}
+
+				let mut seen = models_over(&cnf, &lits, |value| {
+					[&x, &y, &z].map(|v| v.value(value)).to_vec()
+				});
+				seen.sort_unstable();
+				// `z` stands for at least `x + y`, within its domain.
+				let allowed = [&x, &y, &z]
+					.iter()
+					.map(|v| v.min()..=v.max())
+					.multi_cartesian_product()
+					.filter(|v| v[0] + v[1] <= v[2])
+					.sorted()
+					.collect_vec();
+				assert_eq!(
+					seen, allowed,
+					"{strategy:?} x {x_min}..={x_max} y {y_min}..={y_max} cap {cap}"
+				);
+			}
+		}
 	}
 
 	fn get_sorted_encoder(strategy: SortingNetworkStrategy) -> SortingNetworkEncoder {

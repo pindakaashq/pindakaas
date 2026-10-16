@@ -14,12 +14,13 @@ use pindakaas::{
 /// [`SortingNetworkEncoder`] only takes a cardinality constraint, so it joins
 /// the others on the shapes that aggregate to one.
 pub(crate) const CARD_ENCODERS: &[&str] = &[
-	"adder", "diagram", "seq", "tree", "radix", "wdog", "wdog-l", "sort",
+	"adder", "diagram", "seq", "tree", "radix", "wdog", "wdog-l", "wdog-s", "sort",
 ];
 
 /// Encoders that take a linear constraint whatever its coefficients are.
-pub(crate) const ENCODERS: &[&str] =
-	&["adder", "diagram", "seq", "tree", "radix", "wdog", "wdog-l"];
+pub(crate) const ENCODERS: &[&str] = &[
+	"adder", "diagram", "seq", "tree", "radix", "wdog", "wdog-l", "wdog-s",
+];
 
 /// Coefficient type of the library, which does not export the alias it uses.
 pub(crate) type Coeff = i64;
@@ -63,6 +64,11 @@ pub(crate) fn encode(name: &str, cnf: &mut Cnf, con: &Linear) -> Result<(), Unsa
 			// than named separately.
 			let mut enc = WatchdogEncoder::default();
 			let _ = enc.with_local(true);
+			LinearEncoder::new(enc).encode(cnf, con)
+		}
+		"wdog-s" => {
+			let mut enc = WatchdogEncoder::default();
+			let _ = enc.with_sorting_networks(true);
 			LinearEncoder::new(enc).encode(cnf, con)
 		}
 		"sort" => LinearEncoder::<
