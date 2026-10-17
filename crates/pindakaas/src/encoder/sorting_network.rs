@@ -239,12 +239,10 @@ impl SortingNetworkEncoder {
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
+		let zero = || IntVar::new(0..=0).with_label("0");
 		match xs {
-			[] => Ok(()),
-			[x] => {
-				let zero = IntVar::new(0..=0).with_label("0");
-				self.ternary(db, x, &zero, cmp, y)
-			}
+			[] => self.ternary(db, &zero(), &zero(), cmp, y),
+			[x] => self.ternary(db, x, &zero(), cmp, y),
 			[x1, x2] if x1.max() == 1 && x2.max() == 1 && y.max() <= 2 => {
 				self.smerge(db, x1, x2, cmp, y)
 			}
@@ -373,7 +371,10 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SortingNetworkEncoder {
 					.map(|v| v.with_label(format_args!("x_{}", i + 1)))
 			})
 			.collect::<Result<Vec<_>, _>>()?;
-
+		// The network only states the counts the literals reach, so a bound
+		// below zero is ruled out here.
+		let reached = count.y.at_least(db, 0)?;
+		db.add_clause([reached])?;
 		self.sorted(db, &xs, &count.cmp, &count.y)
 	}
 }
@@ -611,56 +612,31 @@ mod tests {
 	use std::num::NonZeroI32;
 
 	use itertools::{iproduct, Itertools};
+	use rangelist::RangeList;
 	use traced_test::test;
 
 	use crate::{
 		constraint::{
-			cardinality::Cardinality,
 			count::{Count, SortingNetworkEncoder, SortingNetworkStrategy},
 			int_linear::NormalizedIntLinear,
 			linear::{LimitComp, PosCoeff},
 		},
 		decision::integer::IntVar,
-		helpers::tests::{assert_solutions, expect_file, linear_test_suite, models, models_over},
+		helpers::tests::{
+			assert_count_admits, assert_solutions, expect_file, linear_test_suite, models,
+			models_over,
+		},
 		ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Unsatisfiable, Var, VarRange,
 	};
 
-	/// Seven literals at a bound of three: both halves and the bound are the
-	/// same odd number, so the ceiling half of the last merge reaches past its
-	/// cap of `c/2 + 1`.
-	///
-	/// The cap can only lose assignments, never admit extra ones, so the
-	/// assertion is that every assignment the constraint allows is still a
-	/// model — checking the models satisfy the constraint would not see it.
 	#[test]
-	fn a_merge_intermediate_is_capped_without_losing_assignments() {
-		const N: usize = 7;
-		const K: Coeff = 3;
-		let mut cnf = Cnf::default();
-		let lits = cnf.new_var_range(N).iter_lits().collect_vec();
-		get_sorted_encoder(SortingNetworkStrategy::Recursive)
-			.encode(
-				&mut cnf,
-				&Cardinality {
-					lits: lits.clone(),
-					cmp: LimitComp::LessEq,
-					k: PosCoeff::new(K),
-				},
-			)
-			.unwrap();
+	fn a_direct_count_at_most_admits_what_the_constraint_does() {
+		assert_counts_admit(SortingNetworkStrategy::Direct, LimitComp::LessEq);
+	}
 
-		let mut seen = models(&cnf, |value| {
-			lits.iter().map(|&l| value.value(l)).collect_vec()
-		});
-		seen.sort_unstable();
-		seen.dedup();
-
-		let allowed = (0..(1 << N))
-			.map(|m: u32| (0..N).map(|i| m >> i & 1 == 1).collect_vec())
-			.filter(|a| a.iter().filter(|holds| **holds).count() as Coeff <= K)
-			.sorted()
-			.collect_vec();
-		assert_eq!(seen, allowed);
+	#[test]
+	fn a_direct_count_equal_admits_what_the_constraint_does() {
+		assert_counts_admit(SortingNetworkStrategy::Direct, LimitComp::Equal);
 	}
 
 	/// Halves that start past their caps are inputs whose least values already
@@ -683,6 +659,26 @@ mod tests {
 	}
 
 	#[test]
+	fn a_mixed_count_at_most_admits_what_the_constraint_does() {
+		assert_counts_admit(SortingNetworkStrategy::Mixed(10), LimitComp::LessEq);
+	}
+
+	#[test]
+	fn a_mixed_count_equal_admits_what_the_constraint_does() {
+		assert_counts_admit(SortingNetworkStrategy::Mixed(10), LimitComp::Equal);
+	}
+
+	#[test]
+	fn a_recursive_count_at_most_admits_what_the_constraint_does() {
+		assert_counts_admit(SortingNetworkStrategy::Recursive, LimitComp::LessEq);
+	}
+
+	#[test]
+	fn a_recursive_count_equal_admits_what_the_constraint_does() {
+		assert_counts_admit(SortingNetworkStrategy::Recursive, LimitComp::Equal);
+	}
+
+	#[test]
 	fn an_at_most_merge_half_holds_only_values_within_the_bound() {
 		assert_merge_halves_within_the_bound(LimitComp::LessEq);
 	}
@@ -690,6 +686,24 @@ mod tests {
 	#[test]
 	fn an_equal_merge_half_holds_only_values_within_the_bound() {
 		assert_merge_halves_within_the_bound(LimitComp::Equal);
+	}
+
+	/// Assert that a count of up to seven literals admits exactly what its
+	/// bound does, at every bound from below nothing to past the literals.
+	fn assert_counts_admit(strategy: SortingNetworkStrategy, cmp: LimitComp) {
+		for n in 0..=7 {
+			let mut domains = (0..=n + 1).map(|k| RangeList::from(k..=k)).collect_vec();
+			domains.extend([
+				RangeList::from(0..=n),
+				RangeList::from(2..=n + 2),
+				RangeList::from(-1..=1),
+				RangeList::from(-2..=-1),
+			]);
+			for domain in domains {
+				let encoder = get_sorted_encoder(strategy.clone());
+				assert_count_admits(n as usize, domain, cmp, |cnf, con| encoder.encode(cnf, con));
+			}
+		}
 	}
 
 	/// Assert that a recursive merge into `z ≤ c` gives each half no value
