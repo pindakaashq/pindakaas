@@ -153,13 +153,18 @@ impl SortingNetworkEncoder {
 					let (x_up, y_up) = (IntVar::shifted(db, x, 1)?, IntVar::shifted(db, y, 1)?);
 					let (x_ceil, y_ceil) = (IntVar::halved(db, &x_up)?, IntVar::halved(db, &y_up)?);
 
-					let z_floor = self.sum_var(&x_floor, &y_floor, c);
+					// The halves add up to `z ≤ c` and differ by two at most:
+					// the floor half is at most `c/2`, the ceiling `c/2 + 1`.
+					let (Some(z_floor), Some(z_ceil)) = (
+						self.sum_var(&x_floor, &y_floor, c / 2),
+						self.sum_var(&x_ceil, &y_ceil, c / 2 + 1),
+					) else {
+						return db.contradiction();
+					};
 					self.merge(db, &x_floor, &y_floor, cmp, &z_floor)?;
-
-					let z_ceil = self.sum_var(&x_ceil, &y_ceil, c);
 					self.merge(db, &x_ceil, &y_ceil, cmp, &z_ceil)?;
 
-					(0..=c).try_for_each(|c| self.comp(db, &z_floor, &z_ceil, cmp, z, c))
+					(0..=c / 2).try_for_each(|i| self.comp(db, &z_floor, &z_ceil, cmp, z, i))
 				}
 			}
 			SortingNetworkStrategy::Mixed(_) => {
@@ -267,17 +272,15 @@ impl SortingNetworkEncoder {
 		}
 	}
 
-	/// A variable over what `x` and `y` can come to together, up to `ub`.
-	///
-	/// The halves a merge is split into are capped at the bound above them,
-	/// but halving rounds up on one side, so what the two ceilings come to can
-	/// be one past the bound — whenever both inputs and the bound are the same
-	/// odd number. Nothing below reads that value, so dropping it costs
-	/// nothing and saves a few percent of the merge.
-	fn sum_var(&self, x: &IntVar, y: &IntVar, ub: Coeff) -> IntVar {
-		IntVar::new((x.min() + y.min())..=min(x.max() + y.max(), ub))
-			.enforce_consistency(self.add_consistency)
-			.with_label(format_args!("{}+{}", x.label(), y.label()))
+	/// A variable over what `x` and `y` can come to together, up to `ub`, or
+	/// `None` when they cannot stay within it.
+	fn sum_var(&self, x: &IntVar, y: &IntVar, ub: Coeff) -> Option<IntVar> {
+		let (lb, ub) = (x.min() + y.min(), min(x.max() + y.max(), ub));
+		(lb <= ub).then(|| {
+			IntVar::new(lb..=ub)
+				.enforce_consistency(self.add_consistency)
+				.with_label(format_args!("{}+{}", x.label(), y.label()))
+		})
 	}
 
 	/// Encode `x + y ≷ z` as the linear constraint it is.
@@ -607,7 +610,7 @@ mod tests {
 
 	use std::num::NonZeroI32;
 
-	use itertools::Itertools;
+	use itertools::{iproduct, Itertools};
 	use traced_test::test;
 
 	use crate::{
@@ -619,13 +622,12 @@ mod tests {
 		},
 		decision::integer::IntVar,
 		helpers::tests::{assert_solutions, expect_file, linear_test_suite, models, models_over},
-		ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Var, VarRange,
+		ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Unsatisfiable, Var, VarRange,
 	};
 
-	/// The smallest case where a merge intermediate reaches one past the
-	/// bound, and so the only one that tells the cap in [`sum_var`] from its
-	/// absence: both halves and the bound have to be the same odd number,
-	/// which needs seven literals at a bound of three.
+	/// Seven literals at a bound of three: both halves and the bound are the
+	/// same odd number, so the ceiling half of the last merge reaches past its
+	/// cap of `c/2 + 1`.
 	///
 	/// The cap can only lose assignments, never admit extra ones, so the
 	/// assertion is that every assignment the constraint allows is still a
@@ -659,6 +661,67 @@ mod tests {
 			.sorted()
 			.collect_vec();
 		assert_eq!(seen, allowed);
+	}
+
+	/// Halves that start past their caps are inputs whose least values already
+	/// pass the bound.
+	#[test]
+	fn a_merge_past_the_bound_is_a_contradiction() {
+		let mut cnf = Cnf::default();
+		let (x, y, z) = (IntVar::new(3..=5), IntVar::new(3..=5), IntVar::new(0..=4));
+		assert_eq!(
+			get_sorted_encoder(SortingNetworkStrategy::Recursive).merged(
+				&mut cnf,
+				&x,
+				&y,
+				&LimitComp::LessEq,
+				&z
+			),
+			Err(Unsatisfiable)
+		);
+		assert!(models(&cnf, |_| ()).is_empty());
+	}
+
+	#[test]
+	fn an_at_most_merge_half_holds_only_values_within_the_bound() {
+		assert_merge_halves_within_the_bound(LimitComp::LessEq);
+	}
+
+	#[test]
+	fn an_equal_merge_half_holds_only_values_within_the_bound() {
+		assert_merge_halves_within_the_bound(LimitComp::Equal);
+	}
+
+	/// Assert that a recursive merge into `z ≤ c` gives each half no value
+	/// that already puts `z` past `c`.
+	///
+	/// A half with such a value has a literal no model can set, which the
+	/// comparators then rule out one unit clause at a time.
+	fn assert_merge_halves_within_the_bound(cmp: LimitComp) {
+		for (a, b) in iproduct!(1..=9, 1..=9) {
+			for c in 1..a + b {
+				let mut cnf = Cnf::default();
+				let x = IntVar::new(0..=a);
+				let y = IntVar::new(0..=b);
+				let z = IntVar::new(0..=c);
+				for v in [&x, &y, &z] {
+					let _ = v.order_encoding(&mut cnf).unwrap();
+				}
+				let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
+				get_sorted_encoder(SortingNetworkStrategy::Recursive)
+					.merged(&mut cnf, &x, &y, &cmp, &z)
+					.unwrap();
+				// A unit on an input is the bound itself, as `x` past `c` is.
+				let dead = cnf
+					.iter()
+					.skip(clauses)
+					.filter(|clause| {
+						clause.len() == 1 && i32::from(clause[0].var()) as usize > vars
+					})
+					.count();
+				assert_eq!(dead, 0, "merging 0..={a} and 0..={b} into 0..={c}");
+			}
+		}
 	}
 
 	fn get_sorted_encoder(strategy: SortingNetworkStrategy) -> SortingNetworkEncoder {
