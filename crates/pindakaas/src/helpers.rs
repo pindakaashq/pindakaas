@@ -628,6 +628,7 @@ pub(crate) mod tests {
 	use crate::{
 		constraint::{
 			cardinality_one::{CardinalityOne, PairwiseEncoder},
+			count::Count,
 			linear::{LimitComp, LinExp, PosCoeff},
 		},
 		decision::integer::IntVar,
@@ -653,6 +654,49 @@ pub(crate) mod tests {
 		let _ = models(formula, |value| {
 			assert_eq!(checker.check(value), Ok(()));
 		});
+	}
+
+	/// Assert that `encode` makes a count of `n` literals against a bound over
+	/// `domain` admit exactly the pairs of count and bound the constraint does.
+	///
+	/// The bound is order encoded first, so that the models can be projected
+	/// onto the literals and the bound rather than told apart by aux. An
+	/// encoder that reads the bound in another form is not tested as it is.
+	pub(crate) fn assert_count_admits(
+		n: usize,
+		domain: RangeList<Coeff>,
+		cmp: LimitComp,
+		encode: impl FnOnce(&mut Cnf, &Count) -> Result,
+	) {
+		let mut cnf = Cnf::default();
+		let lits = cnf.new_var_range(n).iter_lits().collect_vec();
+		let y = IntVar::new(domain.clone());
+		let _ = y.order_encoding(&mut cnf).unwrap();
+		let shown = cnf.get_variables().map(Lit::from).collect_vec();
+		let con = Count::new(lits.clone(), cmp, y.clone());
+		// A count no value of the bound can meet is a contradiction, which the
+		// database is told as well as the caller.
+		let encoded = encode(&mut cnf, &con);
+		let mut seen = models_over(&cnf, &shown, |sol| {
+			(
+				lits.iter().filter(|&&l| sol.value(l)).count() as Coeff,
+				y.value(sol),
+			)
+		});
+		seen.sort_unstable();
+		seen.dedup();
+		let want = (0..=n as Coeff)
+			.cartesian_product(domain.iter().flatten())
+			.filter(|&(count, v)| match cmp {
+				LimitComp::LessEq => count <= v,
+				LimitComp::Equal => count == v,
+			})
+			.collect_vec();
+		assert_eq!(seen, want, "{n} literals {cmp:?} a bound in {domain:?}");
+		assert!(
+			encoded.is_ok() || want.is_empty(),
+			"{n} literals {cmp:?} a bound in {domain:?} is satisfiable"
+		);
 	}
 
 	/// Simple helper function to assert the generated formula against an expect

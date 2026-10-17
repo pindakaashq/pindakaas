@@ -183,7 +183,7 @@ mod tests {
 	use crate::{
 		constraint::count::Count,
 		decision::integer::IntVar,
-		helpers::tests::{linear_test_suite, models, prelude::*},
+		helpers::tests::{assert_count_admits, linear_test_suite, prelude::*},
 	};
 
 	#[test]
@@ -212,30 +212,9 @@ mod tests {
 		for (n, domain, cmp) in
 			iproduct!([2, 3, 4, 5], domains, [LimitComp::LessEq, LimitComp::Equal])
 		{
-			let mut cnf = Cnf::default();
-			let lits = (0..n).map(|_| cnf.new_lit()).collect_vec();
-			let y = IntVar::new(domain.clone());
-			let con = Count::new(lits.clone(), cmp, y.clone());
-			// A count no value of the bound can meet is a contradiction.
-			let encoded = TotalizerEncoder::default().encode(&mut cnf, &con);
-			let mut seen = match encoded {
-				Ok(()) => models(&cnf, |sol| {
-					(
-						lits.iter().filter(|&&l| sol.value(l)).count() as Coeff,
-						y.value(sol),
-					)
-				}),
-				Err(_) => Vec::new(),
-			};
-			seen.sort_unstable();
-			seen.dedup();
-			let want = iproduct!(0..=n as Coeff, domain.iter().flatten())
-				.filter(|&(count, v)| match cmp {
-					LimitComp::LessEq => count <= v,
-					LimitComp::Equal => count == v,
-				})
-				.collect_vec();
-			assert_eq!(seen, want, "{n} literals {cmp:?} a bound in {domain:?}");
+			assert_count_admits(n, domain, cmp, |cnf, con| {
+				TotalizerEncoder::default().encode(cnf, con)
+			});
 		}
 	}
 

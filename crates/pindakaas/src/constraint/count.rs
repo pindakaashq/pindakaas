@@ -112,6 +112,7 @@ impl Checker for Count {
 #[cfg(test)]
 mod tests {
 	use itertools::Itertools;
+	use rangelist::RangeList;
 	use traced_test::test;
 
 	use crate::{
@@ -123,7 +124,7 @@ mod tests {
 			},
 		},
 		decision::integer::IntVar,
-		helpers::tests::{models, models_over},
+		helpers::tests::{assert_count_admits, models_over},
 		ClauseDatabaseTools, Cnf, Encoder,
 	};
 
@@ -132,26 +133,9 @@ mod tests {
 	#[test]
 	fn a_negative_bound_is_counted_from_zero() {
 		for cmp in [LimitComp::LessEq, LimitComp::Equal] {
-			let mut cnf = Cnf::default();
-			let lits = (0..2).map(|_| cnf.new_lit()).collect_vec();
-			let y = IntVar::new(-2..=2).with_label("y");
-			let con = Count::new(lits.clone(), cmp.clone(), y.clone());
-			TotalizerEncoder::default().encode(&mut cnf, &con).unwrap();
-
-			let mut seen = models(&cnf, |sol| {
-				let n = lits.iter().filter(|&&l| sol.value(l)).count() as i64;
-				(n, y.value(sol))
+			assert_count_admits(2, RangeList::from(-2..=2), cmp, |cnf, con| {
+				TotalizerEncoder::default().encode(cnf, con)
 			});
-			seen.sort_unstable();
-			seen.dedup();
-			let want = (0..=2)
-				.cartesian_product(-2..=2)
-				.filter(|&(n, v)| match cmp {
-					LimitComp::LessEq => n <= v,
-					LimitComp::Equal => n == v,
-				})
-				.collect_vec();
-			assert_eq!(seen, want, "{cmp:?} over a bound reaching below zero");
 		}
 	}
 
