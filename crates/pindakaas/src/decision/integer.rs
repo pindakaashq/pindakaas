@@ -1238,6 +1238,9 @@ impl IntVar {
 		let state = &mut *state;
 		let (lb, ub) = (*state.domain.min().unwrap(), *state.domain.max().unwrap());
 		if min > ub || max < lb {
+			// No value is left, which the database is told as well as the
+			// caller.
+			db.contradiction()?;
 			return Err(Unsatisfiable);
 		} else if (min <= lb && max >= ub) || state.binary.is_some() {
 			return Ok(false);

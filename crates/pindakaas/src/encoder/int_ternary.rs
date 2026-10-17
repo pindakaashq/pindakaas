@@ -405,6 +405,17 @@ mod tests {
 		}
 	}
 
+	/// A constraint that propagation finds no value for leaves the database
+	/// unsatisfiable, not only the caller told so.
+	#[test]
+	fn a_bound_that_empties_a_domain_is_a_contradiction() {
+		let mut cnf = Cnf::default();
+		let (x, y, z) = (IntVar::new(0..=1), IntVar::new(0..=1), IntVar::new(3..=4));
+		let con = IntTernary::new((1, x), (1, y), Comparator::Equal, (1, z));
+		assert!(IntTernaryEncoder::default().encode(&mut cnf, &con).is_err());
+		assert!(models(&cnf, |_| ()).is_empty());
+	}
+
 	/// A constraint its bounds decide needs no decomposition, whichever
 	/// strategy is asked and however the constraint reached it.
 	#[test]
