@@ -42,7 +42,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
 	constraint::linear::{Comparator, PosCoeff},
-	helpers::{as_binary, bit, new_named_var_range},
+	helpers::{as_binary, bit, new_named_lit, new_named_var_range},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable, Var, VarRange,
 };
 
@@ -410,6 +410,10 @@ impl DirectEncoding {
 
 	/// Restrict the encoding to holding for exactly one value.
 	pub(crate) fn consistent<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
+		if self.lit_single().is_some() {
+			// A literal and its negation already hold for exactly one value.
+			return Ok(());
+		}
 		db.add_clause(self.x.iter())?;
 		for (i, a) in self.x.iter().enumerate() {
 			for b in self.x.iter().skip(i + 1) {
@@ -465,6 +469,13 @@ impl DirectEncoding {
 			None => BoolVal::Const(false),
 			Some(pos) => BoolVal::Lit(self.x.get(pos).unwrap()),
 		}
+	}
+
+	/// The literal for the larger of two values, where the literal for the
+	/// smaller is its negation.
+	pub(crate) fn lit_single(&self) -> Option<Lit> {
+		let (a, b) = (self.x.get(0)?, self.x.get(1)?);
+		(self.x.len() == 2 && a == !b).then_some(b)
 	}
 
 	/// The value represented under an assignment.
@@ -797,18 +808,37 @@ impl IntVar {
 		if let Some(dir) = self.0.borrow().direct.as_ref() {
 			return Ok(dir.clone());
 		}
+		let shared = self
+			.0
+			.borrow()
+			.order
+			.as_ref()
+			.and_then(OrderEncoding::lit_single);
+		if let Some(lit) = shared {
+			// The order literal of a two-valued variable already says which
+			// value it takes.
+			let dir = DirectEncoding::from_literals(&self.0.borrow().domain, vec![!lit, lit]);
+			self.install_direct(db, dir.clone(), Some(Comparator::Equal))?;
+			return Ok(dir);
+		}
 		let domain = self.0.borrow().domain.clone();
 		let vals = || domain.iter().flatten();
 		debug_assert!(
 			vals().count() > 1,
 			"a variable with one value is that value, which no literal has to say"
 		);
-		let dir = DirectEncoding {
-			x: Literals::Range(new_named_var_range!(db, vals().count(), |i| format!(
-				"{}={}",
-				self.label(),
-				vals().nth(i).unwrap()
-			))),
+		let dir = if vals().count() == 2 {
+			// A literal and its negation hold for exactly one of two values.
+			let lit = new_named_lit!(db, format!("{}={}", self.label(), domain.max().unwrap()));
+			DirectEncoding::from_literals(&domain, vec![!lit, lit])
+		} else {
+			DirectEncoding {
+				x: Literals::Range(new_named_var_range!(db, vals().count(), |i| format!(
+					"{}={}",
+					self.label(),
+					vals().nth(i).unwrap()
+				))),
+			}
 		};
 		if self.needs_constraining() {
 			dir.consistent(db)?;
@@ -1024,7 +1054,7 @@ impl IntVar {
 			let state = x.0.borrow();
 			OrderEncoding::from_literals(&state.domain, literals.to_vec())
 		};
-		x.install_order(db, order, None)?;
+		x.install_order(db, order, [None; 2])?;
 		Ok(x)
 	}
 
@@ -1147,13 +1177,14 @@ impl IntVar {
 
 	/// Give the variable an order encoding it does not have yet.
 	///
-	/// `already_channelled` says how this encoding is known to stand to the
-	/// others already, so that this does not tie again what is tied.
+	/// `already_channelled` says how the binary and the direct encoding are
+	/// known to stand to this one already, so that this does not tie again what
+	/// is tied.
 	fn install_order<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
 		order: OrderEncoding,
-		already_channelled: Option<Comparator>,
+		already_channelled: [Option<Comparator>; 2],
 	) -> Result {
 		{
 			let mut state = self.0.borrow_mut();
@@ -1163,9 +1194,7 @@ impl IntVar {
 				self.label()
 			);
 			state.order = Some(order);
-			// The order encoding is the go-between, so what is said of it is
-			// said of both pairs.
-			state.channelled = [already_channelled; 2];
+			state.channelled = already_channelled;
 			state.lead = state.lead.or(Some(Lead::Order));
 		}
 		self.reconcile(db)
@@ -1250,21 +1279,29 @@ impl IntVar {
 		let below = before.card().unwrap() - state.domain.card().unwrap();
 		state.domain.tighten_max(max.min(ub));
 		let above = before.card().unwrap() - below - state.domain.card().unwrap();
+		let mut units = Vec::new();
 		if let Some(direct) = state.direct.as_mut() {
 			let kept = below..direct.x.len() - above;
 			for (i, lit) in direct.x.iter().enumerate() {
 				if !kept.contains(&i) {
 					db.add_clause([!lit])?;
+					units.push(BoolVal::Lit(!lit));
 				}
 			}
 			direct.x.trim(below, above);
 		}
 		if let Some(order) = state.order.as_mut() {
 			// Order literals imply each other, so a unit clause at each end
-			// settles the rest.
+			// settles the rest, unless the direct encoding shares the literal.
 			let (min, max) = (*state.domain.min().unwrap(), *state.domain.max().unwrap());
-			db.add_clause([order.lit_at_least(&before, min)])?;
-			db.add_clause([order.lit_at_most(&before, max)])?;
+			for unit in [
+				order.lit_at_least(&before, min),
+				order.lit_at_most(&before, max),
+			] {
+				if !units.contains(&unit) {
+					db.add_clause([unit])?;
+				}
+			}
 			order.x.trim(below, above);
 		}
 		Ok(below + above > 0)
@@ -1334,13 +1371,26 @@ impl IntVar {
 			return Ok(ord.clone());
 		}
 		let domain = self.0.borrow().domain.clone();
+		// Only where the direct literals are each other's negation does the
+		// second say the variable reaches its larger value without a channel.
+		let shared = self
+			.0
+			.borrow()
+			.direct
+			.as_ref()
+			.and_then(DirectEncoding::lit_single);
+		if let Some(lit) = shared {
+			let ord = OrderEncoding::from_literals(&domain, vec![lit]);
+			self.install_order(db, ord.clone(), [None, Some(Comparator::Equal)])?;
+			return Ok(ord);
+		}
 		let ord = OrderEncoding::new(db, &domain, &self.label());
 		// Not optional like the other two: without the chain the
 		// literals describe no value, so there is nothing to channel.
 		ord.consistent(db)?;
 		self.0.borrow_mut().constrained = true;
 
-		self.install_order(db, ord.clone(), None)?;
+		self.install_order(db, ord.clone(), [None; 2])?;
 		Ok(ord)
 	}
 
@@ -1594,7 +1644,9 @@ impl IntVar {
 			let state = self.0.borrow();
 			OrderEncoding::from_literals(&state.domain, literals.to_vec())
 		};
-		self.install_order(db, order, already_channelled)
+		// The order encoding is the go-between, so what is said of it is said
+		// of both pairs.
+		self.install_order(db, order, [already_channelled; 2])
 	}
 }
 
@@ -2026,6 +2078,27 @@ pub(crate) mod tests {
 	}
 
 	#[test]
+	fn a_two_valued_direct_encoding_is_one_literal() {
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(RangeList::from_elements([0, 5])).enforce_consistency(true);
+		let direct = x.direct_encoding(&mut cnf).unwrap();
+		assert_eq!(
+			(cnf.num_vars(), cnf.num_clauses()),
+			(1, 0),
+			"one literal and its negation say which of two values is taken"
+		);
+		let _ = x.order_encoding(&mut cnf).unwrap();
+		assert_eq!(
+			(cnf.num_vars(), cnf.num_clauses()),
+			(1, 0),
+			"the order view shares it"
+		);
+		let domain = RangeList::from_elements([0, 5]);
+		let read = move |v: &dyn Valuation| vec![direct.value(&domain, v)];
+		assert_eq!(all_values(&cnf, &read), vec![vec![0], vec![5]]);
+	}
+
+	#[test]
 	fn a_two_valued_variable_shares_its_literal() {
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(RangeList::from_elements([0, 5]))
@@ -2041,6 +2114,23 @@ pub(crate) mod tests {
 			(cnf.num_vars(), cnf.num_clauses()),
 			(vars, clauses),
 			"a two-valued variable should not pay for a second encoding"
+		);
+	}
+
+	#[test]
+	fn a_two_valued_variable_shares_its_literal_between_order_and_direct() {
+		let mut cnf = Cnf::default();
+		let lit = cnf.new_lit();
+		let domain = RangeList::from_elements([0, 5]);
+		let x = IntVar::from_direct_encoding(&mut cnf, domain.clone(), &[!lit, lit]).unwrap();
+		assert_eq!(x.at_least(&mut cnf, 5).unwrap(), BoolVal::Lit(lit));
+		let y = IntVar::from_order_encoding(&mut cnf, domain.clone(), &[lit]).unwrap();
+		let direct = y.direct_encoding(&mut cnf).unwrap();
+		assert_eq!(direct.lit_equals(&domain, 0), BoolVal::Lit(!lit));
+		assert_eq!(
+			(cnf.num_vars(), cnf.num_clauses()),
+			(1, 0),
+			"the literal already says both, so neither view should cost anything"
 		);
 	}
 
@@ -2388,6 +2478,20 @@ pub(crate) mod tests {
 	}
 
 	#[test]
+	fn constraining_a_literal_and_its_negation_costs_nothing() {
+		let mut cnf = Cnf::default();
+		let lit = cnf.new_lit();
+		let domain = RangeList::from_elements([0, 5]);
+		let x = IntVar::from_direct_encoding(&mut cnf, domain, &[!lit, lit]).unwrap();
+		x.constrain(&mut cnf).unwrap();
+		assert_eq!(
+			cnf.num_clauses(),
+			0,
+			"exactly one of a literal and its negation holds without a clause"
+		);
+	}
+
+	#[test]
 	fn constraining_the_lead_holds_the_variable_to_its_domain() {
 		let domain = RangeList::from_elements([0, 1, 3]);
 		let expected = || domain.iter().flatten().map(|d| vec![d]).collect_vec();
@@ -2525,6 +2629,21 @@ pub(crate) mod tests {
 			.collect();
 		// Representable values are {0, 1, 4, 5}; only 4 and 5 are at least 2.
 		assert_eq!(solutions, vec![4, 5]);
+	}
+
+	#[test]
+	fn narrowing_a_shared_literal_fixes_it_once() {
+		let mut cnf = Cnf::default();
+		let lit = cnf.new_lit();
+		let domain = RangeList::from_elements([0, 5]);
+		let x = IntVar::from_direct_encoding(&mut cnf, domain, &[!lit, lit]).unwrap();
+		let _ = x.at_least(&mut cnf, 5).unwrap();
+		assert!(x.set_max(&mut cnf, 0).unwrap());
+		assert_eq!(
+			cnf.iter().collect_vec(),
+			vec![&[!lit][..]],
+			"the order and direct encodings share the literal, so one unit fixes it"
+		);
 	}
 
 	#[test]

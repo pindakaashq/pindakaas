@@ -335,8 +335,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder 
 		}
 		// A guarded last term also wants an order view, which states each
 		// bound the guards ask for in one literal. Not for two values: one
-		// direct literal is such a bound already, and channelling would cost
-		// a literal and four clauses.
+		// direct literal is such a bound already.
 		if let [_, .., last] = terms.as_slice() {
 			if last.1.card() > 2 {
 				let _ = last.1.order_encoding(db)?;
