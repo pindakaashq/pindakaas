@@ -1211,6 +1211,52 @@ impl IntVar {
 		return String::new();
 	}
 
+	/// The variable `f(x)` on the order literals of `x`, with `x` held to the
+	/// values that `f` maps to at most `max`, or `None` where `f` neither rises
+	/// nor falls over the domain of `x`.
+	///
+	/// It reaches an image where `x` reaches the first value mapping to it, or
+	/// for a falling `f`, where `x` stays at most the last such value.
+	///
+	/// # Panics
+	///
+	/// When a falling `f` maps a value past `max`: only a rising `f` is
+	/// bounded.
+	pub(crate) fn mapped<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		x: &IntVar,
+		f: impl Fn(Coeff) -> Coeff,
+		max: Coeff,
+	) -> Result<Option<Self>, Unsatisfiable> {
+		let values = x.domain().iter().flatten().collect_vec();
+		let images = values.iter().map(|&v| f(v)).collect_vec();
+		let rising = images.iter().tuple_windows().all(|(a, b)| a <= b);
+		if !rising && !images.iter().tuple_windows().all(|(a, b)| a >= b) {
+			return Ok(None);
+		}
+		if let Some(i) = images.iter().position(|&w| w > max) {
+			assert!(rising, "only a rising view is bounded");
+			let beyond = x.at_least(db, values[i])?;
+			db.add_clause([!beyond])?;
+		}
+		let mut walk: Vec<(Coeff, BoolVal)> = Vec::with_capacity(values.len());
+		for i in 0..values.len() {
+			let i = if rising { i } else { values.len() - 1 - i };
+			if images[i] > max {
+				break;
+			} else if walk.last().is_some_and(|&(w, _)| w == images[i]) {
+				continue;
+			}
+			let reaches = if rising {
+				x.at_least(db, values[i])?
+			} else {
+				x.at_most(db, values[i])?
+			};
+			walk.push((images[i], reaches));
+		}
+		Self::from_order_walk(db, walk).map(Some)
+	}
+
 	/// Returns the greatest value the variable can take.
 	pub fn max(&self) -> Coeff {
 		*self.0.borrow().domain.max().unwrap()
@@ -1237,12 +1283,7 @@ impl IntVar {
 		x: &IntVar,
 	) -> Result<Self, Unsatisfiable> {
 		let (min, max) = (x.min(), x.max());
-		let values = x.domain().iter().flatten().rev().collect_vec();
-		let walk = values
-			.into_iter()
-			.map(|v| Ok((min + max - v, x.at_most(db, v)?)))
-			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
-		Self::from_order_walk(db, walk)
+		Ok(Self::mapped(db, x, |v| min + max - v, Coeff::MAX)?.expect("a mirror falls"))
 	}
 
 	/// Drop the values outside `min..=max` from the domain, reporting whether
@@ -1540,12 +1581,8 @@ impl IntVar {
 		x: &IntVar,
 		k: Coeff,
 	) -> Result<Self, Unsatisfiable> {
-		let values = x.domain().iter().flatten().collect_vec();
-		let walk = values
-			.into_iter()
-			.map(|v| Ok((v + k, x.at_least(db, v)?)))
-			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
-		Ok(Self::from_order_walk(db, walk)?.with_label(format_args!("{}+{k}", x.label())))
+		let shifted = Self::mapped(db, x, |v| v + k, Coeff::MAX)?.expect("a shift rises");
+		Ok(shifted.with_label(format_args!("{}+{k}", x.label())))
 	}
 
 	/// The value read from the variable's leading encoding.

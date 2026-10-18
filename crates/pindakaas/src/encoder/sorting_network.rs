@@ -192,12 +192,8 @@ impl SortingNetworkEncoder {
 		if c == 1 {
 			return Ok(x.clone());
 		}
-		let values = x.domain().iter().flatten().collect::<Vec<_>>();
-		let walk = values
-			.into_iter()
-			.map(|v| Ok((c * v, x.at_least(db, v)?)))
-			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
-		Ok(IntVar::from_order_walk(db, walk)?.with_label(format_args!("{c}·{}", x.label())))
+		let scaled = IntVar::mapped(db, x, |v| c * v, Coeff::MAX)?.expect("a positive scale rises");
+		Ok(scaled.with_label(format_args!("{c}·{}", x.label())))
 	}
 
 	/// The base case, `x{0,1} + y{0,1} ≷ z{0,1,2}`.
