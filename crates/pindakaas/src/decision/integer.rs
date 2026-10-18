@@ -203,19 +203,34 @@ where
 /// The digits are least significant first, each given as the pair of conditions
 /// that it is at least, and that it exceeds, the digit of the constant. The
 /// number exceeds the constant exactly where some digit does while every more
-/// significant one is at least the constant's.
+/// significant one is at least the constant's. The clauses of the `stated`
+/// most significant digits are left out, for a caller that has said them
+/// already.
 #[cfg_attr(
 	any(feature = "tracing", test),
 	tracing::instrument(name = "lex_lesseq", skip_all)
 )]
-pub(crate) fn lex_leq<Db>(db: &mut Db, digits: &[(BoolVal, BoolVal)]) -> Result
+pub(crate) fn lex_leq<Db>(db: &mut Db, digits: &[(BoolVal, BoolVal)], stated: usize) -> Result
 where
 	Db: ClauseDatabase + ?Sized,
 {
-	for (i, &(_, greater)) in digits.iter().enumerate() {
-		db.add_clause(
-			once(!greater).chain(digits[i + 1..].iter().map(|&(at_least, _)| !at_least)),
-		)?;
+	let len = digits.len().saturating_sub(stated);
+	for (i, &(_, greater)) in digits.iter().enumerate().take(len) {
+		if greater == BoolVal::Const(false) {
+			// The digit cannot exceed the constant's, so the clause holds.
+			continue;
+		}
+		// Digits can share literals: a later clause, whose tail is part of
+		// this one, says the same where its first literal is here or drops.
+		let rest = &digits[i + 1..];
+		let subsumed = rest.iter().any(|&(_, later)| {
+			later == BoolVal::Const(true)
+				|| later == greater
+				|| rest.iter().any(|&(at_least, _)| at_least == later)
+		});
+		if !subsumed {
+			db.add_clause(once(!greater).chain(rest.iter().map(|&(at_least, _)| !at_least)))?;
+		}
 	}
 	Ok(())
 }
@@ -1198,6 +1213,12 @@ impl IntVar {
 			state.lead = state.lead.or(Some(Lead::Order));
 		}
 		self.reconcile(db)
+	}
+
+	/// Whether `other` is this variable rather than another with the same
+	/// domain and encodings.
+	pub(crate) fn is(&self, other: &IntVar) -> bool {
+		Rc::ptr_eq(&self.0, &other.0)
 	}
 
 	/// The label of the variable, which is empty unless tracing is enabled —

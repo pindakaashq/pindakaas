@@ -22,7 +22,7 @@
 //! Villaret, "SAT encodings for pseudo-Boolean constraints together with
 //! at-most-one constraints", Artificial Intelligence 302 (2022) 103604.
 
-use std::cmp::min;
+use std::cmp::{max, min};
 
 use itertools::Itertools;
 use rangelist::RangeList;
@@ -219,24 +219,35 @@ impl MixedRadixEncoder {
 		x.card() == 1 && x.min() == 0
 	}
 
-	/// Constrain the value `digits` stands for to be at most `k`.
+	/// Constrain the value `digits` stands for to be at most `k`, leaving out
+	/// the clauses of the `stated` most significant digits, and give back how
+	/// many of them have their clauses said afterwards.
 	fn lex_leq<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
 		digits: &[IntVar],
 		base: &[Coeff],
 		k: Coeff,
-	) -> Result {
+		most: Coeff,
+		stated: usize,
+	) -> Result<usize, Unsatisfiable> {
+		if most <= k {
+			// Digits that cannot pass `k` would only be told what their splits
+			// already say.
+			return Ok(stated);
+		}
 		let Some(ks) = Self::const_digits(base, digits.len(), k) else {
 			// `k` is past anything the digits can stand for.
-			return Ok(());
+			return Ok(digits.len());
 		};
+
 		let pairs = digits
 			.iter()
 			.zip_eq(ks)
 			.map(|(digit, k_j)| Ok((digit.at_least(db, k_j)?, digit.at_least(db, k_j + 1)?)))
 			.collect::<Result<Vec<(BoolVal, BoolVal)>, Unsatisfiable>>()?;
-		lex_leq(db, &pairs)
+		lex_leq(db, &pairs, stated)?;
+		Ok(digits.len())
 	}
 
 	/// An intermediate over `domain`, which has to hold a value.
@@ -282,8 +293,18 @@ impl MixedRadixEncoder {
 		}
 		// Encoding the split propagates into `x`, so it must not stay borrowed.
 		let values = x.domain().iter().flatten().collect_vec();
+		// The carry rises with `x` and the digit may rise or fall with it,
+		// which makes each a view on the order literals of `x`.
+		let carry = if !x.prefers_binary(self.config.cutoff) {
+			let carry = IntVar::mapped(db, x, |v| v / base, Coeff::MAX)?.expect("a carry rises");
+			if let Some(digit) = IntVar::mapped(db, x, |v| v % base, Coeff::MAX)? {
+				return Ok((digit, carry));
+			}
+			carry
+		} else {
+			self.new_int_var(values.iter().map(|v| v / base..=v / base).collect(), "q")?
+		};
 		let digit = self.new_int_var(values.iter().map(|v| v % base..=v % base).collect(), "r")?;
-		let carry = self.new_int_var(values.iter().map(|v| v / base..=v / base).collect(), "q")?;
 		// The radix is the carry's coefficient, so nothing has to be scaled.
 		self.config.encoder().encode(
 			db,
@@ -326,6 +347,9 @@ impl MixedRadixEncoder {
 		let (c, x) = term;
 		if *c == 1 {
 			return Ok(x.clone());
+		}
+		if !x.prefers_binary(self.config.cutoff) {
+			return Ok(IntVar::mapped(db, x, |v| v * c, ub)?.expect("a positive scale rises"));
 		}
 		let domain = x
 			.domain()
@@ -376,24 +400,46 @@ impl MixedRadixEncoder {
 
 		// Positive coefficients make any partial sum past `k` infeasible.
 		let mut layer = Vec::with_capacity(con.terms().len());
+		// Each node is kept with the most its value can come to, which is at
+		// most `k` once it is bounded, and with how many of its most
+		// significant digits already have their clauses of `lex_leq` said.
 		for x in xs {
-			let ub = min(term_max(&x), k);
-			let leaf = self.scaled(db, &x, ub)?;
+			let most = term_max(&x);
+			let leaf = self.scaled(db, &x, min(most, k))?;
 			let digits = self.digits(db, &leaf, &base)?;
-			self.lex_leq(db, &digits, &base, k)?;
-			layer.push((digits, ub));
+			let stated = self.lex_leq(db, &digits, &base, k, most, 0)?;
+			layer.push((digits, most, stated));
 		}
 
-		let root = fold_pairwise(layer, |_, _, x, y| {
-			let ub = min(x.1 + y.1, k);
-			let digits = self.add_nodes(db, &x.0, &y.0, &base, ub)?;
-			self.lex_leq(db, &digits, &base, k)?;
-			Ok::<_, Unsatisfiable>((digits, ub))
+		let (root, most, stated) = fold_pairwise(layer, |_, at_root, x, y| {
+			let most = min(x.1, k).saturating_add(min(y.1, k));
+			let digits = self.add_nodes(db, &x.0, &y.0, &base, min(most, k))?;
+			// A carry out of the top is split from a sum that `add_nodes` holds
+			// to its bound, which says the clause of the two top digits.
+			let mut stated = if digits.len() > max(x.0.len(), y.0.len()) {
+				2
+			} else {
+				0
+			};
+			// Digits a child passes up unchanged keep what was said about them.
+			for child in [&x, &y] {
+				if child.0.len() == digits.len() {
+					let shared = (digits.iter().rev())
+						.zip(child.0.iter().rev())
+						.take_while(|(digit, of_child)| digit.is(of_child))
+						.count();
+					stated = max(stated, min(shared, child.2));
+				}
+			}
+			// Pinning the root says more than bounding it.
+			if !at_root {
+				stated = self.lex_leq(db, &digits, &base, k, most, stated)?;
+			}
+			Ok::<_, Unsatisfiable>((digits, most, stated))
 		})?
-		.map(|(digits, _)| digits)
 		.unwrap_or_default();
 		match con.cmp() {
-			LimitComp::LessEq => self.lex_leq(db, &root, &base, k),
+			LimitComp::LessEq => self.lex_leq(db, &root, &base, k, most, stated).map(|_| ()),
 			LimitComp::Equal => self.pin(db, &root, &base, k),
 		}
 	}
@@ -452,6 +498,36 @@ mod tests {
 	use crate::helpers::tests::{linear_test_suite, prelude::*};
 
 	#[test]
+	fn a_scaled_literal_is_read_on_the_literal_itself() {
+		assert_lean_linear(
+			&LinearEncoder::<MixedRadixEncoder>::default(),
+			&[1, 2, 3],
+			Comparator::LessEq,
+			3,
+		);
+	}
+
+	#[test]
+	fn digits_on_one_literal_are_bounded_once() {
+		assert_lean_linear(
+			&LinearEncoder::<MixedRadixEncoder>::default(),
+			&[5, 6, 6],
+			Comparator::GreaterEq,
+			11,
+		);
+	}
+
+	#[test]
+	fn digits_passed_up_unchanged_are_bounded_once() {
+		assert_lean_linear(
+			&LinearEncoder::<MixedRadixEncoder>::default(),
+			&[4, 1, 4, 2, 4],
+			Comparator::LessEq,
+			8,
+		);
+	}
+
+	#[test]
 	fn greedy_base_divides_the_coefficients() {
 		let base =
 			|coefs: &[Coeff], k| MixedRadixEncoder::greedy_base(coefs.to_vec(), coefs.len(), k);
@@ -501,6 +577,16 @@ mod tests {
 			"expected fewer clauses than the totalizer, got {} instead of {}",
 			gmto.num_clauses(),
 			gt.num_clauses()
+		);
+	}
+
+	#[test]
+	fn the_root_is_bounded_once() {
+		assert_lean_linear(
+			&LinearEncoder::<MixedRadixEncoder>::default(),
+			&[1, 4, 4, 5],
+			Comparator::LessEq,
+			11,
 		);
 	}
 
