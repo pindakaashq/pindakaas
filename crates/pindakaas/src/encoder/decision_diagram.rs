@@ -40,7 +40,7 @@ use crate::{
 	},
 	decision::integer::IntVar,
 	helpers::new_named_lit,
-	BoolVal, ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -269,12 +269,16 @@ impl Decompose for DecisionDiagramEncoder {
 					))
 				})
 				.collect::<Result<Vec<_>, Unsatisfiable>>()?;
+			// A layer orders its own literals. A shared literal is the next
+			// layer's to order, and the step to it implies one from above.
+			for (j, ((_, below), (_, above))) in walk.iter().tuple_windows().enumerate() {
+				if j > 0 && layer[j].1.is_none() {
+					db.add_clause([!*above, *below])?;
+				}
+			}
 			let y = IntVar::from_order_walk(db, walk)?
 				.enforce_consistency(self.config.consistency)
 				.with_label(format_args!("y{i}"));
-			// A total that only this layer tells apart gets a literal of its
-			// own, which nothing else orders against the rest.
-			y.constrain(db)?;
 			layers.push(y);
 		}
 		layers.reverse();
@@ -334,6 +338,16 @@ mod tests {
 	use traced_test::test;
 
 	use crate::helpers::tests::{linear_test_suite, prelude::*};
+
+	#[test]
+	fn a_shared_literal_is_ordered_by_the_next_layer() {
+		assert_lean_linear(
+			&LinearEncoder::<DecisionDiagramEncoder>::default(),
+			&[5, 2, 4, 1],
+			Comparator::GreaterEq,
+			6,
+		);
+	}
 
 	#[test]
 	fn diagram_layers_share_the_literals_they_agree_on() {
