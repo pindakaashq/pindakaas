@@ -110,7 +110,9 @@ impl DecisionDiagramEncoder {
 			.map(|((lb_margin, ub_margin), (lb, ub))| {
 				match cmp {
 					Comparator::LessEq => vec![
-						(lb_margin > lb).then_some((0..(lb_margin + 1), DiagramNode::Val)),
+						// The least reachable total can already be the most that
+						// still accepts, as a bound of zero on the last layer is.
+						(lb_margin >= lb).then_some((0..(lb_margin + 1), DiagramNode::Val)),
 						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, DiagramNode::Gap)),
 					],
 					_ => vec![
@@ -337,7 +339,10 @@ where
 mod tests {
 	use traced_test::test;
 
-	use crate::helpers::tests::{linear_test_suite, prelude::*};
+	use crate::{
+		decision::integer::IntVar,
+		helpers::tests::{linear_test_suite, prelude::*},
+	};
 
 	#[test]
 	fn a_shared_literal_is_ordered_by_the_next_layer() {
@@ -376,6 +381,27 @@ mod tests {
 			cnf.num_vars(),
 			4,
 			"the three terms and the one total the layers still tell apart"
+		);
+	}
+
+	#[test]
+	fn every_small_integer_constraint_has_exactly_its_solutions() {
+		assert_exact_on_small_int_linear(&LinearEncoder::<DecisionDiagramEncoder>::default());
+	}
+
+	#[test]
+	fn integers_that_must_all_be_zero() {
+		// Aggregation leaves a bound of zero on integers to the encoder, which
+		// then has nothing but the zero total to accept.
+		let mut cnf = Cnf::default();
+		let xs = (0..3).map(|_| IntVar::new(0..=1)).collect_vec();
+		let sum = xs.iter().fold(LinExp::default(), |sum, x| sum + x.clone());
+		LinearEncoder::<DecisionDiagramEncoder>::default()
+			.encode(&mut cnf, &Linear::new(sum, Comparator::LessEq, 0))
+			.unwrap();
+		assert_eq!(
+			models(&cnf, |v| xs.iter().map(|x| x.value(v)).collect_vec()),
+			vec![vec![0, 0, 0]]
 		);
 	}
 

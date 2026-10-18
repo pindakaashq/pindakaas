@@ -528,6 +528,11 @@ mod tests {
 	}
 
 	#[test]
+	fn every_small_integer_constraint_has_exactly_its_solutions() {
+		assert_exact_on_small_int_linear(&LinearEncoder::<MixedRadixEncoder>::default());
+	}
+
+	#[test]
 	fn greedy_base_divides_the_coefficients() {
 		let base =
 			|coefs: &[Coeff], k| MixedRadixEncoder::greedy_base(coefs.to_vec(), coefs.len(), k);

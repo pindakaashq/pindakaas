@@ -985,6 +985,11 @@ mod tests {
 	}
 
 	#[test]
+	fn every_small_integer_constraint_has_exactly_its_solutions() {
+		assert_exact_on_small_int_linear(&LinearEncoder::<AdderEncoder>::default());
+	}
+
+	#[test]
 	fn ripple_carry_adder_computes_the_sum() {
 		for (x_bits, y_bits) in [(1, 1), (2, 2), (3, 1)] {
 			let mut cnf = Cnf::default();

@@ -706,6 +706,58 @@ pub(crate) mod tests {
 	}
 
 	/// Check that `encoder` admits exactly the solutions of every constraint
+	/// `Σ cᵢ·xᵢ ≷ k` over up to three integers, each over a small domain, one
+	/// with a hole and one not starting at zero, with coefficients 1 and 2.
+	pub(crate) fn assert_exact_on_small_int_linear<E>(encoder: &E)
+	where
+		E: Encoder<Cnf, Linear>,
+	{
+		let domains: [&[Coeff]; 3] = [&[0, 1], &[0, 2, 3], &[1, 3]];
+		for len in 1..=3 {
+			// The sum is the same in any order, and every variable is fresh.
+			for terms in domains
+				.iter()
+				.cartesian_product([1, 2])
+				.combinations_with_replacement(len)
+			{
+				let doms = terms
+					.iter()
+					.map(|(d, _)| RangeList::from_elements(d.iter().copied()))
+					.collect_vec();
+				let coefs = terms.iter().map(|&(_, c)| c).collect_vec();
+				let most: Coeff = terms.iter().map(|(d, c)| c * d.last().unwrap()).sum();
+				for k in 0..=most + 1 {
+					for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
+						let mut cnf = Cnf::default();
+						let xs = doms.iter().map(|d| IntVar::new(d.clone())).collect_vec();
+						let exp = (xs.iter().zip(&terms))
+							.fold(LinExp::default(), |exp, (x, (_, c))| exp + x.clone() * *c);
+						let con = Linear::new(exp, cmp, k);
+						let encoded = encoder.encode(&mut cnf, &con);
+						for x in &xs {
+							let _ = x.order_encoding(&mut cnf);
+						}
+						let found = models(&cnf, |v| xs.iter().map(|x| x.value(v)).collect_vec())
+							.into_iter()
+							.sorted()
+							.dedup()
+							.collect_vec();
+						let expected = brute_force(&coefs, &doms, cmp, k);
+						assert_eq!(found, expected, "{terms:?} {cmp:?} {k}");
+						// A contradiction is told to the database, which then
+						// has no models, as well as to
+						// the caller.
+						assert!(
+							encoded.is_ok() || expected.is_empty(),
+							"{terms:?} {cmp:?} {k}"
+						);
+					}
+				}
+			}
+		}
+	}
+
+	/// Check that `encoder` admits exactly the solutions of every constraint
 	/// `Σ cᵢ·xᵢ ≷ k` over up to `n` literals with coefficients up to `max`.
 	pub(crate) fn assert_exact_on_small_linear<E>(encoder: &E, n: usize, max: Coeff)
 	where
@@ -1035,9 +1087,9 @@ pub(crate) mod tests {
 			},
 			helpers::tests::{
 				all_binary_solutions, assert_checker, assert_encoding,
-				assert_exact_on_small_linear, assert_lean_linear, assert_solutions,
-				at_most_one_var, binary_literals, construct_terms, direct_view_sum, expect_file,
-				implication_chain_var, models, models_over,
+				assert_exact_on_small_int_linear, assert_exact_on_small_linear, assert_lean_linear,
+				assert_solutions, at_most_one_var, binary_literals, construct_terms,
+				direct_view_sum, expect_file, implication_chain_var, models, models_over,
 			},
 			BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 		};
