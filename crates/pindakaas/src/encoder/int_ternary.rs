@@ -180,6 +180,11 @@ impl Encoded<'_> {
 				continue;
 			}
 			for &(inner_guard, lit) in &clauses {
+				// Terms can share literals, and a clause with a literal and its
+				// negation always holds.
+				if lit == !outer_guard || lit == !inner_guard || inner_guard == !outer_guard {
+					continue;
+				}
 				db.add_clause([outer_guard, inner_guard, lit])?;
 			}
 			// As for the inner guard.
@@ -364,7 +369,7 @@ mod tests {
 			linear::{Comparator, LimitComp, PosCoeff},
 		},
 		decision::integer::IntVar,
-		helpers::tests::{at_most_one_var, models, models_over},
+		helpers::tests::{at_most_one_var, brute_force, models, models_over},
 		ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit,
 	};
 
@@ -918,28 +923,6 @@ mod tests {
 				}
 			}
 		}
-	}
-
-	/// Every assignment over `doms` that satisfies `Σ cᵢ·xᵢ ≷ k`.
-	fn brute_force(
-		coeffs: &[Coeff],
-		doms: &[RangeList<Coeff>],
-		cmp: Comparator,
-		k: Coeff,
-	) -> Vec<Vec<Coeff>> {
-		doms.iter()
-			.map(|d| d.iter().flatten().collect_vec())
-			.multi_cartesian_product()
-			.filter(|assign| {
-				let sum: Coeff = coeffs.iter().zip(assign).map(|(c, v)| c * v).sum();
-				match cmp {
-					Comparator::LessEq => sum <= k,
-					Comparator::Equal => sum == k,
-					Comparator::GreaterEq => sum >= k,
-				}
-			})
-			.sorted()
-			.collect()
 	}
 
 	#[test]

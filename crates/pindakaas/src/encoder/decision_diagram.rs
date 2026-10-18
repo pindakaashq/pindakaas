@@ -366,6 +366,16 @@ mod tests {
 	}
 
 	#[test]
+	fn layers_sharing_a_literal_emit_no_tautology() {
+		assert_lean_linear(
+			&LinearEncoder::<DecisionDiagramEncoder>::default(),
+			&[1, 2, 3],
+			Comparator::LessEq,
+			3,
+		);
+	}
+
+	#[test]
 	fn supplied_direct_views_reject_a_sum_above_the_bound() {
 		let mut cnf = Cnf::default();
 		// Fixed to 4 + 9 + 3 = 16.

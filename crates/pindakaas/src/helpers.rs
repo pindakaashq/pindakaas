@@ -623,13 +623,13 @@ pub(crate) mod tests {
 	use itertools::Itertools;
 	pub(crate) use linear_test_suite;
 	use rangelist::RangeList;
-	use rustc_hash::FxHashMap;
+	use rustc_hash::{FxHashMap, FxHashSet};
 
 	use crate::{
 		constraint::{
 			cardinality_one::{CardinalityOne, PairwiseEncoder},
 			count::Count,
-			linear::{LimitComp, LinExp, PosCoeff},
+			linear::{Comparator, LimitComp, LinExp, Linear, PosCoeff},
 		},
 		decision::integer::IntVar,
 		helpers::binary_value,
@@ -703,6 +703,63 @@ pub(crate) mod tests {
 	/// block.
 	pub(crate) fn assert_encoding(formula: &impl Display, expect: &ExpectFile) {
 		expect.assert_eq(&formula.to_string());
+	}
+
+	/// Encode `Σ coefs·lits ≷ k` on fresh literals with `encoder`, checking
+	/// that the clauses admit exactly its solutions and say nothing twice.
+	pub(crate) fn assert_lean_linear<E>(encoder: &E, coefs: &[Coeff], cmp: Comparator, k: Coeff)
+	where
+		E: Encoder<Cnf, Linear>,
+	{
+		let mut cnf = Cnf::default();
+		let lits = cnf.new_var_range(coefs.len()).iter_lits().collect_vec();
+		let con = Linear::new(LinExp::from_slices(coefs, &lits), cmp, k);
+		encoder.encode(&mut cnf, &con).unwrap();
+		assert_no_redundant_clauses(&cnf, &lits);
+		let expected = count_solutions(coefs, cmp, k);
+		assert_eq!(
+			models_over(&cnf, &lits, |_| ()).len(),
+			expected,
+			"a solution is missing or one too many is admitted"
+		);
+		assert_checker(&cnf, &con);
+	}
+
+	/// Check that `cnf` has no clause that always holds, no clause twice, and
+	/// no variable beyond `inputs` that only copies another literal.
+	pub(crate) fn assert_no_redundant_clauses(cnf: &Cnf, inputs: &[Lit]) {
+		let is_input = |l: i32| inputs.iter().any(|&i| i32::from(i).abs() == l.abs());
+		let clauses = cnf
+			.iter()
+			.map(|c| {
+				c.iter()
+					.map(|&l| i32::from(l))
+					.sorted()
+					.dedup()
+					.collect_vec()
+			})
+			.collect_vec();
+		for c in &clauses {
+			assert!(
+				!c.iter().any(|l| c.contains(&-l)),
+				"the clause {c:?} always holds"
+			);
+		}
+		let unique: FxHashSet<_> = clauses.iter().collect();
+		assert_eq!(unique.len(), clauses.len(), "a clause is emitted twice");
+		// Two inputs can be equivalent because the constraint says so.
+		for c in clauses
+			.iter()
+			.filter(|c| c.len() == 2 && !(is_input(c[0]) && is_input(c[1])))
+		{
+			let negated = vec![-c[1], -c[0]];
+			assert!(
+				!unique.contains(&negated),
+				"{} and {} are the same, so one only copies the other",
+				-c[0],
+				c[1]
+			);
+		}
 	}
 
 	/// Helper functions to ensure that the possible solutions of a formula,
@@ -793,6 +850,28 @@ pub(crate) mod tests {
 		(0..bits).map(|_| BoolVal::Lit(cnf.new_lit())).collect()
 	}
 
+	/// Every assignment over `doms` that satisfies `Σ cᵢ·xᵢ ≷ k`.
+	pub(crate) fn brute_force(
+		coeffs: &[Coeff],
+		doms: &[RangeList<Coeff>],
+		cmp: Comparator,
+		k: Coeff,
+	) -> Vec<Vec<Coeff>> {
+		doms.iter()
+			.map(|d| d.iter().flatten().collect_vec())
+			.multi_cartesian_product()
+			.filter(|assign| {
+				let sum: Coeff = coeffs.iter().zip(assign).map(|(c, v)| c * v).sum();
+				match cmp {
+					Comparator::LessEq => sum <= k,
+					Comparator::Equal => sum == k,
+					Comparator::GreaterEq => sum >= k,
+				}
+			})
+			.sorted()
+			.collect()
+	}
+
 	/// A term that nothing else constrains is an integer worth its coefficient
 	/// when its literal holds, which is a group of one.
 	pub(crate) fn construct_terms<L: Into<Lit> + Clone>(
@@ -810,6 +889,11 @@ pub(crate) mod tests {
 				)
 			})
 			.collect()
+	}
+
+	/// The number of assignments to literals that satisfy `Σ coefs·lits ≷ k`.
+	fn count_solutions(coefs: &[Coeff], cmp: Comparator, k: Coeff) -> usize {
+		brute_force(coefs, &vec![RangeList::from(0..=1); coefs.len()], cmp, k).len()
 	}
 
 	/// The sum of integers read on supplied direct literals, with the literal
@@ -917,9 +1001,9 @@ pub(crate) mod tests {
 				},
 			},
 			helpers::tests::{
-				all_binary_solutions, assert_checker, assert_encoding, assert_solutions,
-				at_most_one_var, binary_literals, construct_terms, direct_view_sum, expect_file,
-				implication_chain_var, models, models_over,
+				all_binary_solutions, assert_checker, assert_encoding, assert_lean_linear,
+				assert_solutions, at_most_one_var, binary_literals, construct_terms,
+				direct_view_sum, expect_file, implication_chain_var, models, models_over,
 			},
 			BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 		};
