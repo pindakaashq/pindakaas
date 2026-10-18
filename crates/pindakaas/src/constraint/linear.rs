@@ -575,6 +575,39 @@ mod tests {
 	}
 
 	#[test]
+	fn no_linear_encoder_emits_a_redundant_clause() {
+		// The constraint the redundant clauses were reported on.
+		let (coefs, cmp, k) = (&[1, 2, 3], Comparator::LessEq, 3);
+		assert_lean_linear(&LinearEncoder::<AdderEncoder>::default(), coefs, cmp, k);
+		assert_lean_linear(
+			&LinearEncoder::<DecisionDiagramEncoder>::default(),
+			coefs,
+			cmp,
+			k,
+		);
+		assert_lean_linear(
+			&LinearEncoder::<MixedRadixEncoder>::default(),
+			coefs,
+			cmp,
+			k,
+		);
+		assert_lean_linear(
+			&LinearEncoder::<SequentialCounterEncoder>::default(),
+			coefs,
+			cmp,
+			k,
+		);
+		assert_lean_linear(
+			&LinearEncoder::<SortingNetworkEncoder>::default(),
+			coefs,
+			cmp,
+			k,
+		);
+		assert_lean_linear(&LinearEncoder::<TotalizerEncoder>::default(), coefs, cmp, k);
+		assert_lean_linear(&LinearEncoder::<WatchdogEncoder>::default(), coefs, cmp, k);
+	}
+
+	#[test]
 	fn pb_encode() {
 		let mut cnf = Cnf::default();
 		let vars = cnf.new_var_range(4).iter_lits().collect_vec();
