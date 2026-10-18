@@ -86,7 +86,11 @@ mod pindakaas {
 		BoolVal as BaseBoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder as EncoderTrait,
 		Lit as BaseLit, RangeList, VarRange as BaseVarRange, Wcnf,
 	};
-	use pyo3::{exceptions::PyValueError, prelude::*, types::PyIterator};
+	use pyo3::{
+		exceptions::PyValueError,
+		prelude::*,
+		types::{PyBytes, PyIterator},
+	};
 
 	#[pymodule_export]
 	use crate::InvalidEncoder;
@@ -300,6 +304,32 @@ mod pindakaas {
 		Ok(IntVar(x))
 	}
 
+	/// The clauses from `clauses` as native-endian `i32` DIMACS literals, with
+	/// a `0` after each clause, written straight into a new `bytes` object.
+	/// `clauses` is called twice: once to size the object, once to fill it.
+	fn clauses_to_bytes<'py, 'c, I>(
+		py: Python<'py>,
+		clauses: impl Fn() -> I,
+	) -> PyResult<Bound<'py, PyBytes>>
+	where
+		I: Iterator<Item = &'c [BaseLit]>,
+	{
+		const N: usize = size_of::<i32>();
+		let len = clauses().map(|c| (c.len() + 1) * N).sum();
+		PyBytes::new_with(py, len, |buf| {
+			let mut out = buf.as_chunks_mut::<N>().0.iter_mut();
+			for c in clauses() {
+				for &lit in c {
+					*out.next().expect("sized above") = i32::from(lit).to_ne_bytes();
+				}
+				// `new_with` fills the object with zeros, so this ends the
+				// clause.
+				let _ = out.next().expect("sized above");
+			}
+			Ok(())
+		})
+	}
+
 	/// Internal function to help with the encoding of a constraint given an
 	/// optional encoder.
 	///
@@ -436,6 +466,24 @@ mod pindakaas {
 				.iter()
 				.map(|c| c.iter().map(|&lit| Lit(lit)).collect())
 				.collect()
+		}
+
+		/// The clauses as lists of DIMACS integers, without creating a `Lit`
+		/// object for each literal.
+		#[pyo3(name = "_clauses_as_int")]
+		fn clauses_as_int(&self) -> Vec<Vec<i32>> {
+			self.0
+				.iter()
+				.map(|c| c.iter().map(|&lit| lit.into()).collect())
+				.collect()
+		}
+
+		/// The clauses as one buffer of native-endian `i32` DIMACS literals,
+		/// with a `0` after each clause. It creates no Python object per
+		/// clause or literal.
+		#[pyo3(name = "_clauses_buffer")]
+		fn clauses_buffer<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+			clauses_to_bytes(py, || self.0.iter())
 		}
 
 		#[new]
@@ -1207,6 +1255,26 @@ mod pindakaas {
 				.filter(|(_, w)| w.is_none())
 				.map(|(c, _)| c.iter().map(|&lit| Lit(lit)).collect_vec())
 				.collect()
+		}
+
+		/// The hard clauses as lists of DIMACS integers, without creating a
+		/// `Lit` object for each literal.
+		#[pyo3(name = "_clauses_as_int")]
+		fn clauses_as_int(&self) -> Vec<Vec<i32>> {
+			self.0
+				.iter()
+				.filter(|(_, w)| w.is_none())
+				.map(|(c, _)| c.iter().map(|&lit| lit.into()).collect())
+				.collect()
+		}
+
+		/// The hard clauses as one buffer of native-endian `i32` DIMACS
+		/// literals, with a `0` after each clause.
+		#[pyo3(name = "_clauses_buffer")]
+		fn clauses_buffer<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+			clauses_to_bytes(py, || {
+				self.0.iter().filter(|(_, w)| w.is_none()).map(|(c, _)| c)
+			})
 		}
 
 		#[new]

@@ -260,6 +260,23 @@ class CNF(ClauseDatabase):
         """
         return self._inner.clauses()
 
+    def _clauses_as_int(self) -> list[list[int]]:
+        """Stored clauses in insertion order, as DIMACS integers.
+
+        Faster than `clauses` for callers that need integers, as it creates
+        no `Lit` objects. `WCNF` returns only the hard clauses.
+        """
+        return self._inner._clauses_as_int()
+
+    def _clauses_buffer(self) -> bytes:
+        """Stored clauses as native-endian 32-bit DIMACS literals, with a 0
+        after each clause.
+
+        Creates no Python object per clause or literal. Read it with
+        ``memoryview(buf).cast("i")``.
+        """
+        return self._inner._clauses_buffer()
+
     def new_var_range(self, n: int) -> VarRange:
         return self._inner.new_var_range(n)
 
