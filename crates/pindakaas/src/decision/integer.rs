@@ -186,15 +186,14 @@ pub(crate) fn lex_geq_const<Db>(db: &mut Db, x: &[BoolVal], k: PosCoeff, bits: u
 where
 	Db: ClauseDatabase + ?Sized,
 {
-	let k = as_binary(k, Some(bits as u32));
-	// A one bit of `k` needs the same bit of `x` set, or a higher bit of
-	// `x` set where `k` had none.
-	for i in 0..bits {
-		if k[i] {
-			db.add_clause((i..bits).filter(|&j| j == i || !k[j]).map(|j| bit(x, j)))?;
-		}
-	}
-	Ok(())
+	// `x` is at least `k` exactly where its complement is at most `k`'s.
+	let complement = (0..bits).map(|j| !bit(x, j)).collect_vec();
+	let ones = if bits >= Coeff::BITS as usize - 1 {
+		Coeff::MAX
+	} else {
+		(1 << bits) - 1
+	};
+	lex_leq_const(db, &complement, PosCoeff::new(ones - *k), bits)
 }
 
 /// Constrain a number held as digits in a mixed radix base to be at most a
@@ -244,15 +243,21 @@ pub(crate) fn lex_leq_const<Db>(db: &mut Db, x: &[BoolVal], k: PosCoeff, bits: u
 where
 	Db: ClauseDatabase + ?Sized,
 {
-	let k = as_binary(k, Some(bits as u32));
-	// A zero bit of `k` needs the same bit of `x` clear, or a higher bit of
-	// `x` clear where `k` had one.
-	for i in 0..bits {
-		if !k[i] {
-			db.add_clause((i..bits).filter(|&j| j == i || k[j]).map(|j| !bit(x, j)))?;
-		}
-	}
-	Ok(())
+	// In base two a bit is at least `k`'s where `k`'s is zero, and exceeds it
+	// where `k`'s is zero and it is set.
+	let pairs = as_binary(k, Some(bits as u32))
+		.into_iter()
+		.enumerate()
+		.map(|(j, set)| {
+			let x_j = bit(x, j);
+			if set {
+				(x_j, BoolVal::Const(false))
+			} else {
+				(BoolVal::Const(true), x_j)
+			}
+		})
+		.collect_vec();
+	lex_leq(db, &pairs, 0)
 }
 
 impl BinaryEncoding {

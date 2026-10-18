@@ -17,7 +17,10 @@
 //! SAT", Journal on Satisfiability, Boolean Modeling and Computation 2 (2006)
 //! 1–26.
 
-use std::{cmp::max, num::NonZero};
+use std::{
+	cmp::{max, min},
+	num::NonZero,
+};
 
 use itertools::Itertools;
 
@@ -410,6 +413,60 @@ impl AdderEncoder {
 }
 
 impl AdderEncoder {
+	/// Carry the first of `inputs` that [`Self::carry_into`] can place into
+	/// column `c`, reporting whether one was.
+	fn carry_either<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		bucket: &mut [Vec<Lit>],
+		c: usize,
+		inputs: &[BoolVal],
+	) -> Result<bool> {
+		for &input in inputs {
+			if let BoolVal::Lit(x) = input {
+				if Self::carry_into(db, bucket, c, x)? {
+					return Ok(true);
+				}
+			}
+		}
+		Ok(false)
+	}
+
+	/// Carry `x` into column `c`, reporting whether it could be placed.
+	///
+	/// A column holding `x` already doubles it into the next, and a carry past
+	/// the top would put the sum past the bound, so `x` is then false.
+	fn carry_into<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		bucket: &mut [Vec<Lit>],
+		c: usize,
+		x: Lit,
+	) -> Result<bool> {
+		let Some(rest) = Self::carry_to(bucket, c, x) else {
+			return Ok(false);
+		};
+		let end = min(rest, bucket.len());
+		for column in &mut bucket[c..end] {
+			let at = column.iter().position(|&y| y == x).unwrap();
+			let _ = column.remove(at);
+		}
+		if rest < bucket.len() {
+			bucket[rest].push(x);
+		} else {
+			db.add_clause([!x])?;
+		}
+		Ok(true)
+	}
+
+	/// The column that a carry of `x` into column `c` comes to rest in, or
+	/// `None` where it meets `¬x`, whose sum with `x` is a constant the columns
+	/// cannot hold.
+	fn carry_to(bucket: &[Vec<Lit>], mut c: usize, x: Lit) -> Option<usize> {
+		while c < bucket.len() && bucket[c].contains(&x) {
+			c += 1;
+		}
+		(c >= bucket.len() || !bucket[c].contains(&!x)).then_some(c)
+	}
+
 	/// Encode `Σ cᵢ·litᵢ + constant ≷ k` over the literals themselves.
 	fn encode_weighted<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
@@ -458,6 +515,10 @@ impl AdderEncoder {
 		// Under `=` each bit is forced directly, which saves a literal; under
 		// `≤` the sums stay in the buckets for the comparison below.
 		let mut sum = vec![None; bits];
+		// Under `=` a column with a known sum fixes the parity of its inputs,
+		// and inputs whose parity is already fixed need no second circuit.
+		let mut forced: Vec<Lit> = Vec::new();
+		let mut fixed: Vec<(Vec<Lit>, bool)> = Vec::new();
 		for b in 0..bits {
 			match bucket[b].len() {
 				0 => {
@@ -468,7 +529,11 @@ impl AdderEncoder {
 				1 => {
 					let x = bucket[b].pop().unwrap();
 					if cmp == LimitComp::Equal {
-						db.add_clause([if k[b] { x } else { !x }])?;
+						let unit = if k[b] { x } else { !x };
+						if !forced.contains(&unit) {
+							db.add_clause([unit])?;
+							forced.push(unit);
+						}
 					} else {
 						sum[b] = Some(x);
 					}
@@ -476,22 +541,44 @@ impl AdderEncoder {
 				_ => {
 					while bucket[b].len() >= 2 {
 						let last = bucket[b].len() <= 3;
-						let lits = if last {
+						let group = if last {
 							bucket[b].split_off(0)
 						} else {
 							let i = bucket[b].len() - 3;
 							bucket[b].split_off(i)
 						};
-						debug_assert!(lits.len() == 3 || lits.len() == 2);
-						let lits = lits.into_iter().map(BoolVal::Lit).collect_vec();
+						debug_assert!(group.len() == 3 || group.len() == 2);
+						let lits = group.iter().copied().map(BoolVal::Lit).collect_vec();
 
 						if last && cmp == LimitComp::Equal {
 							// The result is known, so no literal is needed.
-							let _ = Self::sum_circuit(
+							let inputs = group
+								.into_iter()
+								.sorted_by_key(|&l| i32::from(l))
+								.collect_vec();
+							let key = (inputs, k[b]);
+							if !fixed.contains(&key) {
+								let _ = Self::sum_circuit(
+									db,
+									&lits,
+									Some(BoolVal::Const(k[b])),
+									String::new(),
+								)?;
+								fixed.push(key);
+							}
+						} else if cmp == LimitComp::Equal
+							&& bucket[b].len() == 1
+							&& (k[b] || Self::carry_to(&bucket, b + 1, bucket[b][0]).is_some())
+						{
+							// The known parity makes this sum the last input or
+							// its negation.
+							Self::output_other_input(
 								db,
+								&mut bucket,
+								b,
+								k[b],
 								&lits,
-								Some(BoolVal::Const(k[b])),
-								String::new(),
+								Self::sum_circuit,
 							)?;
 						} else if cmp != LimitComp::LessEq || !last || b >= first_zero {
 							// Only bits above the first zero of `k` can matter.
@@ -515,17 +602,19 @@ impl AdderEncoder {
 							bucket[b].push(sum);
 						}
 
-						if b + 1 >= bits {
+						// Under `=` two inputs of known sum differ and carry
+						// nothing, or agree and carry either one.
+						let known = last && cmp == LimitComp::Equal && lits.len() == 2;
+						if known && (k[b] || Self::carry_either(db, &mut bucket, b + 1, &lits)?) {
+							// Nothing is left to carry.
+						} else if b + 1 >= bits {
 							// A carry here would put the sum past `k`.
-							if lits.len() == 2 && cmp == LimitComp::Equal {
-							} else {
-								let _ = Self::carry_circuit(
-									db,
-									&lits,
-									Some(BoolVal::Const(false)),
-									String::new(),
-								)?;
-							}
+							let _ = Self::carry_circuit(
+								db,
+								&lits,
+								Some(BoolVal::Const(false)),
+								String::new(),
+							)?;
 						} else if last && cmp == LimitComp::Equal && bucket[b + 1].is_empty() {
 							// The result is known, so no literal is needed.
 							let _ = Self::carry_circuit(
@@ -533,6 +622,25 @@ impl AdderEncoder {
 								&lits,
 								Some(BoolVal::Const(k[b + 1])),
 								String::new(),
+							)?;
+							k[b + 1] = false;
+						} else if last
+							&& cmp == LimitComp::Equal
+							&& bucket[b + 1].len() == 1
+							// A carry on the variable of one of its own inputs gives
+							// clauses that hold or repeat.
+							&& !lits.iter().any(|l| matches!(l, BoolVal::Lit(x) if x.var() == bucket[b + 1][0].var()))
+							&& (k[b + 1] || Self::carry_to(&bucket, b + 2, bucket[b + 1][0]).is_some())
+						{
+							// The next column's known sum makes this carry
+							// its one other input or that input's negation.
+							Self::output_other_input(
+								db,
+								&mut bucket,
+								b + 1,
+								k[b + 1],
+								&lits,
+								Self::carry_circuit,
 							)?;
 							k[b + 1] = false;
 						} else {
@@ -574,6 +682,33 @@ impl AdderEncoder {
 				.map(|&l| l.map_or(BoolVal::Const(false), BoolVal::Lit))
 				.collect_vec();
 			lex_leq_const(db, &sum, rhs, bits)?;
+		}
+		Ok(())
+	}
+
+	/// Give `circuit` over `lits` the output that column `c`'s known sum `k_c`
+	/// makes its one other input `y`, or `¬y`, carrying `y` on where the two
+	/// come to `2·y`.
+	///
+	/// The caller checks that [`Self::carry_into`] can place `y`.
+	fn output_other_input<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		bucket: &mut [Vec<Lit>],
+		c: usize,
+		k_c: bool,
+		lits: &[BoolVal],
+		circuit: fn(&mut Db, &[BoolVal], Option<BoolVal>, String) -> Result<BoolVal>,
+	) -> Result {
+		let y = bucket[c].pop().unwrap();
+		let _ = circuit(
+			db,
+			lits,
+			Some(BoolVal::Lit(if k_c { !y } else { y })),
+			String::new(),
+		)?;
+		if !k_c {
+			let placed = Self::carry_into(db, bucket, c + 1, y)?;
+			debug_assert!(placed, "the caller checks that it can be");
 		}
 		Ok(())
 	}
@@ -662,6 +797,61 @@ mod tests {
 	}
 
 	#[test]
+	fn a_carried_input_already_in_the_next_column_moves_up() {
+		assert_lean_linear(
+			&LinearEncoder::<AdderEncoder>::default(),
+			&[4, 4, 4, 3, 3],
+			Comparator::Equal,
+			14,
+		);
+	}
+
+	#[test]
+	fn a_carry_into_a_column_of_one_input_is_that_input() {
+		assert_lean_linear(
+			&LinearEncoder::<AdderEncoder>::default(),
+			&[1, 1, 1, 2],
+			Comparator::Equal,
+			3,
+		);
+	}
+
+	#[test]
+	fn a_carry_is_never_one_of_its_own_inputs() {
+		let mut cnf = Cnf::default();
+		let lits = cnf.new_var_range(3).iter_lits().collect_vec();
+		let con = Linear::new(LinExp::from_slices(&[3, 5, 5], &lits), Comparator::Equal, 5);
+		LinearEncoder::<AdderEncoder>::default()
+			.encode(&mut cnf, &con)
+			.unwrap();
+		assert!(
+			cnf.iter().all(|c| !c.iter().any(|&l| c.contains(&!l))),
+			"a carry circuit whose output is one of its inputs has clauses that always hold"
+		);
+		assert_checker(&cnf, &con);
+	}
+
+	#[test]
+	fn a_column_of_two_equal_inputs_carries_one_of_them() {
+		assert_lean_linear(
+			&LinearEncoder::<AdderEncoder>::default(),
+			&[3, 4, 4, 1],
+			Comparator::Equal,
+			5,
+		);
+	}
+
+	#[test]
+	fn a_column_of_two_inputs_with_odd_sum_carries_nothing() {
+		assert_lean_linear(
+			&LinearEncoder::<AdderEncoder>::default(),
+			&[5, 4, 1],
+			Comparator::Equal,
+			9,
+		);
+	}
+
+	#[test]
 	fn a_dense_coefficient_is_synthesised_rather_than_carried() {
 		// `255·x` is eight partial products for the columns to carry, and one
 		// subtraction to build outright.
@@ -690,6 +880,26 @@ mod tests {
 			);
 		}
 		expect_file!("linear/coefficients.size").assert_eq(&table);
+	}
+
+	#[test]
+	fn a_literal_alone_in_two_buckets_is_forced_once() {
+		assert_lean_linear(
+			&LinearEncoder::<AdderEncoder>::default(),
+			&[6, 1],
+			Comparator::Equal,
+			6,
+		);
+	}
+
+	#[test]
+	fn a_literal_on_two_zero_bits_of_the_bound_is_bounded_once() {
+		assert_lean_linear(
+			&LinearEncoder::<AdderEncoder>::default(),
+			&[4, 3, 4],
+			Comparator::LessEq,
+			4,
+		);
 	}
 
 	#[test]
@@ -757,6 +967,21 @@ mod tests {
 			}),
 			"a variable held only in order form would have to be channelled"
 		);
+	}
+
+	#[test]
+	fn columns_with_the_same_inputs_fix_their_parity_once() {
+		assert_lean_linear(
+			&LinearEncoder::<AdderEncoder>::default(),
+			&[1, 6, 6],
+			Comparator::Equal,
+			6,
+		);
+	}
+
+	#[test]
+	fn every_small_constraint_has_exactly_its_solutions() {
+		assert_exact_on_small_linear(&LinearEncoder::<AdderEncoder>::default(), 4, 4);
 	}
 
 	#[test]

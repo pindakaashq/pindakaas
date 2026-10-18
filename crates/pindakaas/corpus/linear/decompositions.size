@@ -6,7 +6,7 @@
     card-10   <=   radix      47      155       367
     card-10   <=    wdog      42       93       216
     card-10   <=  wdog-l     370      980      2320
-    card-10   ==   adder      22       87       295
+    card-10   ==   adder      18       72       254
     card-10   == diagram      35      116       272
     card-10   ==     seq      45      159       373
     card-10   ==    tree      33      118       284
@@ -34,7 +34,7 @@
      pb-mid   <=   radix      75      256       597
      pb-mid   <=    wdog      55      129       300
      pb-mid   <=  wdog-l     224      562      1317
-     pb-mid   ==   adder      22      116       386
+     pb-mid   ==   adder      16       96       334
      pb-mid   == diagram      12       24        50
      pb-mid   ==     seq      60      183       425
      pb-mid   ==    tree      25       67       154
@@ -62,7 +62,7 @@
  pb-coprime   <=   radix      81      277       647
  pb-coprime   <=    wdog      57      133       313
  pb-coprime   <=  wdog-l     259      583      1342
- pb-coprime   ==   adder      24      130       431
+ pb-coprime   ==   adder      14       87       298
  pb-coprime   == diagram      10       16        30
  pb-coprime   ==     seq      97      307       715
  pb-coprime   ==    tree      30       73       167

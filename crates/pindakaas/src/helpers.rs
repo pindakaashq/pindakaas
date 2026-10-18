@@ -705,6 +705,39 @@ pub(crate) mod tests {
 		expect.assert_eq(&formula.to_string());
 	}
 
+	/// Check that `encoder` admits exactly the solutions of every constraint
+	/// `Σ cᵢ·xᵢ ≷ k` over up to `n` literals with coefficients up to `max`.
+	pub(crate) fn assert_exact_on_small_linear<E>(encoder: &E, n: usize, max: Coeff)
+	where
+		E: Encoder<Cnf, Linear>,
+	{
+		for len in 1..=n {
+			for coefs in (0..len).map(|_| 1..=max).multi_cartesian_product() {
+				if !coefs.iter().tuple_windows().all(|(a, b)| a <= b) {
+					continue;
+				}
+				for k in 0..=coefs.iter().sum() {
+					for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
+						let mut cnf = Cnf::default();
+						let lits = cnf.new_var_range(len).iter_lits().collect_vec();
+						let con = Linear::new(LinExp::from_slices(&coefs, &lits), cmp, k);
+						let encoded = encoder.encode(&mut cnf, &con);
+						let expected = count_solutions(&coefs, cmp, k);
+						assert_eq!(
+							models_over(&cnf, &lits, |_| ()).len(),
+							expected,
+							"{coefs:?} {cmp:?} {k}"
+						);
+						// A contradiction is told to the database, which then
+						// has no models, as well as to
+						// the caller.
+						assert!(encoded.is_ok() || expected == 0, "{coefs:?} {cmp:?} {k}");
+					}
+				}
+			}
+		}
+	}
+
 	/// Encode `Σ coefs·lits ≷ k` on fresh literals with `encoder`, checking
 	/// that the clauses admit exactly its solutions and say nothing twice.
 	pub(crate) fn assert_lean_linear<E>(encoder: &E, coefs: &[Coeff], cmp: Comparator, k: Coeff)
@@ -1001,9 +1034,10 @@ pub(crate) mod tests {
 				},
 			},
 			helpers::tests::{
-				all_binary_solutions, assert_checker, assert_encoding, assert_lean_linear,
-				assert_solutions, at_most_one_var, binary_literals, construct_terms,
-				direct_view_sum, expect_file, implication_chain_var, models, models_over,
+				all_binary_solutions, assert_checker, assert_encoding,
+				assert_exact_on_small_linear, assert_lean_linear, assert_solutions,
+				at_most_one_var, binary_literals, construct_terms, direct_view_sum, expect_file,
+				implication_chain_var, models, models_over,
 			},
 			BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 		};
