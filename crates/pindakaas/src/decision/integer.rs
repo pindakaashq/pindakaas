@@ -110,8 +110,12 @@ struct IntVarState {
 	#[cfg(any(feature = "tracing", test))]
 	label: String,
 	/// Whether the encodings are restricted to the domain. The order encoding
-	/// is exact by construction, so this only concerns the binary one.
+	/// is exact by construction unless it has no consistency constraint, so
+	/// this only concerns the binary one.
 	add_consistency: bool,
+	/// Whether the order encoding gets its consistency constraint, which only
+	/// the merges of a sorting network do without.
+	order_consistency: bool,
 	order: Option<OrderEncoding>,
 	binary: Option<BinaryEncoding>,
 	direct: Option<DirectEncoding>,
@@ -597,6 +601,17 @@ impl IntVar {
 		// costs least to make.
 		let bin = self.binary_encoding(db)?;
 		Ok(bin.as_weighted())
+	}
+
+	/// Refuse another encoding for a variable without its order consistency
+	/// constraint, since channelling would read its one-sided literals as a
+	/// value.
+	fn assert_order_consistency(&self, encoding: &str) {
+		assert!(
+			self.0.borrow().order_consistency,
+			"{} has no order consistency constraint, so it cannot take a {encoding} encoding",
+			self.label()
+		);
 	}
 
 	/// Returns a [`BoolVal`] indicating whether the variable is at least `v`.
@@ -1131,7 +1146,9 @@ impl IntVar {
 		let walk = (0..=(x.max() / 2))
 			.map(|w| Ok((w, x.at_least(db, 2 * w)?)))
 			.collect::<Result<Vec<_>, Unsatisfiable>>()?;
-		Ok(Self::from_order_walk(db, walk)?.with_label(format_args!("{}/2", x.label())))
+		Ok(Self::from_order_walk(db, walk)?
+			.inherit_order_consistency(x)
+			.with_label(format_args!("{}/2", x.label())))
 	}
 
 	/// Reports whether the variable has a binary encoding.
@@ -1149,6 +1166,14 @@ impl IntVar {
 		self.0.borrow().order.is_some()
 	}
 
+	/// A view on the literals of `x`, which has no order consistency
+	/// constraint where `x` has none.
+	pub(crate) fn inherit_order_consistency(self, x: &IntVar) -> Self {
+		let order_consistency = x.0.borrow().order_consistency;
+		self.0.borrow_mut().order_consistency &= order_consistency;
+		self
+	}
+
 	/// Give the variable a binary encoding it does not have yet.
 	///
 	/// See [`IntVar::with_order_encoding`] for `already_channelled`.
@@ -1158,6 +1183,7 @@ impl IntVar {
 		binary: BinaryEncoding,
 		already_channelled: Option<Comparator>,
 	) -> Result {
+		self.assert_order_consistency("binary");
 		{
 			let mut state = self.0.borrow_mut();
 			debug_assert!(
@@ -1181,6 +1207,7 @@ impl IntVar {
 		direct: DirectEncoding,
 		already_channelled: Option<Comparator>,
 	) -> Result {
+		self.assert_order_consistency("direct");
 		{
 			let mut state = self.0.borrow_mut();
 			debug_assert!(
@@ -1260,6 +1287,12 @@ impl IntVar {
 		if !rising && !images.iter().tuple_windows().all(|(a, b)| a >= b) {
 			return Ok(None);
 		}
+		// A falling view negates the literals of `x`, which turns a literal
+		// that can hold spuriously into one that can fail to.
+		assert!(
+			rising || x.0.borrow().order_consistency,
+			"a falling view of {x} needs its order consistency"
+		);
 		if let Some(i) = images.iter().position(|&w| w > max) {
 			assert!(rising, "only a rising view is bounded");
 			let beyond = x.at_least(db, values[i])?;
@@ -1280,7 +1313,10 @@ impl IntVar {
 			};
 			walk.push((images[i], reaches));
 		}
-		Self::from_order_walk(db, walk).map(Some)
+		// A view reads the literals of `x`, and so their order consistency.
+		Ok(Some(
+			Self::from_order_walk(db, walk)?.inherit_order_consistency(x),
+		))
 	}
 
 	/// Returns the greatest value the variable can take.
@@ -1418,6 +1454,7 @@ impl IntVar {
 			#[cfg(any(feature = "tracing", test))]
 			label: String::new(),
 			add_consistency: true,
+			order_consistency: true,
 			order: None,
 			binary: None,
 			direct: None,
@@ -1452,10 +1489,12 @@ impl IntVar {
 			return Ok(ord);
 		}
 		let ord = OrderEncoding::new(db, &domain, &self.label());
-		// Not optional like the other two: without the chain the
-		// literals describe no value, so there is nothing to channel.
-		ord.consistent(db)?;
-		self.0.borrow_mut().constrained = true;
+		// Without it the literals describe no value, which only a variable
+		// the merges of a sorting network read can do without.
+		if self.0.borrow().order_consistency {
+			ord.consistent(db)?;
+			self.0.borrow_mut().constrained = true;
+		}
 
 		self.install_order(db, ord.clone(), [None; 2])?;
 		Ok(ord)
@@ -1710,6 +1749,22 @@ impl IntVar {
 		// The order encoding is the go-between, so what is said of it is said
 		// of both pairs.
 		self.install_order(db, order, [already_channelled; 2])
+	}
+
+	/// Leaves the consistency constraint out of the order encoding, for a sum
+	/// that only the merges of a sorting network read.
+	///
+	/// Each literal then holds whenever the sum reaches its value, and may hold
+	/// when it does not. A clause that reads a literal as a condition only
+	/// gets stricter for it, but the variable can take no other encoding.
+	pub(crate) fn without_order_consistency(self) -> Self {
+		debug_assert!(
+			!self.has_order_encoding(),
+			"the order encoding of {} is already made, so this would say nothing",
+			self.label()
+		);
+		self.0.borrow_mut().order_consistency = false;
+		self
 	}
 }
 
@@ -2296,6 +2351,39 @@ pub(crate) mod tests {
 				"the constant {k} cost literals or clauses"
 			);
 		}
+	}
+
+	/// See [`a_variable_without_order_consistency_takes_no_direct_encoding`].
+	#[test]
+	#[should_panic(expected = "has no order consistency constraint")]
+	fn a_variable_without_order_consistency_takes_no_binary_encoding() {
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(0..=3).without_order_consistency();
+		let _ = x.order_encoding(&mut cnf).unwrap();
+		let _ = x.binary_encoding(&mut cnf);
+	}
+
+	/// A variable without its order consistency constraint has literals that
+	/// describe no value, so channelling another encoding to them is refused.
+	#[test]
+	#[should_panic(expected = "has no order consistency constraint")]
+	fn a_variable_without_order_consistency_takes_no_direct_encoding() {
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(0..=3).without_order_consistency();
+		let _ = x.order_encoding(&mut cnf).unwrap();
+		let _ = x.direct_encoding(&mut cnf);
+	}
+
+	/// A view on the literals of a variable without order consistency has none
+	/// either.
+	#[test]
+	#[should_panic(expected = "has no order consistency constraint")]
+	fn a_view_without_order_consistency_takes_no_direct_encoding() {
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(0..=7).without_order_consistency();
+		let up = IntVar::shifted(&mut cnf, &x, 1).unwrap();
+		let half = IntVar::halved(&mut cnf, &up).unwrap();
+		let _ = half.direct_encoding(&mut cnf);
 	}
 
 	#[test]

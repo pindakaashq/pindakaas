@@ -129,6 +129,7 @@ OPTIONS = [
     ),
     *CHANGING,
     (Encoder.WATCHDOG, {"local": True, "sorting_networks": True}),
+    (Encoder.WATCHDOG, {"consistency": True, "sorting_networks": True}),
     (Encoder.SORTING_NETWORK, {"consistency": True}),
     (Encoder.SORTING_NETWORK, {"strategy": "direct"}),
     (Encoder.SORTING_NETWORK, {"strategy": "mixed"}),

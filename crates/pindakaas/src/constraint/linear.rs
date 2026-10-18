@@ -662,7 +662,9 @@ mod tests {
 		);
 		for (name, coeffs, k) in cases {
 			for cmp in [Comparator::LessEq, Comparator::Equal] {
-				for enc in ["adder", "diagram", "seq", "tree", "radix", "wdog", "wdog-l"] {
+				for enc in [
+					"adder", "diagram", "seq", "tree", "radix", "wdog", "wdog-l", "wdog-s", "sort",
+				] {
 					let mut cnf = Cnf::default();
 					let vars = cnf.new_var_range(coeffs.len()).iter_lits().collect_vec();
 					let con = Linear::new(LinExp::from_slices(coeffs, &vars), cmp.clone(), k);
@@ -684,6 +686,14 @@ mod tests {
 							let mut enc = WatchdogEncoder::default();
 							let _ = enc.with_local(true);
 							LinearEncoder::new(enc).encode(&mut cnf, &con)
+						}
+						"wdog-s" => {
+							let mut enc = WatchdogEncoder::default();
+							let _ = enc.with_sorting_networks(true);
+							LinearEncoder::new(enc).encode(&mut cnf, &con)
+						}
+						"sort" => {
+							LinearEncoder::<SortingNetworkEncoder>::default().encode(&mut cnf, &con)
 						}
 						_ => LinearEncoder::<MixedRadixEncoder>::default().encode(&mut cnf, &con),
 					};

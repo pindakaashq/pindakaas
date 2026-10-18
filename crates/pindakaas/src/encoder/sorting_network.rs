@@ -18,7 +18,7 @@
 //! "Cardinality Networks: a theoretical and empirical study", Constraints
 //! 16(2) (2011) 195–221.
 
-use std::{cmp::min, hash, mem, sync::Mutex};
+use std::{cmp::min, fmt::Display, hash, mem, ops::RangeInclusive, sync::Mutex};
 
 use rustc_hash::FxHashMap;
 
@@ -81,6 +81,13 @@ pub enum SortingNetworkStrategy {
 type StrategyCache = FxHashMap<(u128, u128, u128), (SortingNetworkStrategy, (u128, u128))>;
 
 impl SortingNetworkEncoder {
+	/// A variable over what `x` and `y` can come to together, up to `ub`, or
+	/// `None` when they cannot stay within it.
+	fn capped_sum(&self, x: &IntVar, y: &IntVar, ub: Coeff) -> Option<IntVar> {
+		let (lb, ub) = (x.min() + y.min(), min(x.max() + y.max(), ub));
+		(lb <= ub).then(|| self.sum([x, y], lb..=ub, format_args!("{}+{}", x.label(), y.label())))
+	}
+
 	/// One step of a merge: what `x` and `y` reach between them, `z` reaches.
 	fn comp<Db>(
 		&self,
@@ -163,8 +170,8 @@ impl SortingNetworkEncoder {
 					// The halves add up to `z ≤ c` and differ by two at most:
 					// the floor half is at most `c/2`, the ceiling `c/2 + 1`.
 					let (Some(z_floor), Some(z_ceil)) = (
-						self.sum_var(&x_floor, &y_floor, c / 2),
-						self.sum_var(&x_ceil, &y_ceil, c / 2 + 1),
+						self.capped_sum(&x_floor, &y_floor, c / 2),
+						self.capped_sum(&x_ceil, &y_ceil, c / 2 + 1),
 					) else {
 						return db.contradiction();
 					};
@@ -178,13 +185,6 @@ impl SortingNetworkEncoder {
 				unreachable!("a strategy is settled before it is used")
 			}
 		}
-	}
-
-	/// A variable over `0..=max`.
-	fn next_int_var(&self, max: Coeff, label: String) -> IntVar {
-		IntVar::new(0..=max)
-			.enforce_consistency(self.add_consistency)
-			.with_label(label)
 	}
 
 	/// The term `c·x` as a variable of its own.
@@ -230,7 +230,7 @@ impl SortingNetworkEncoder {
 			[] => None,
 			[x] => Some(x.clone()),
 			xs => {
-				let y = self.next_int_var(max, label);
+				let y = self.sum(xs, 0..=max, label);
 				self.sorted(db, xs, cmp, &y)?;
 				Some(y)
 			}
@@ -279,15 +279,26 @@ impl SortingNetworkEncoder {
 		}
 	}
 
-	/// A variable over what `x` and `y` can come to together, up to `ub`, or
-	/// `None` when they cannot stay within it.
-	fn sum_var(&self, x: &IntVar, y: &IntVar, ub: Coeff) -> Option<IntVar> {
-		let (lb, ub) = (x.min() + y.min(), min(x.max() + y.max(), ub));
-		(lb <= ub).then(|| {
-			IntVar::new(lb..=ub)
-				.enforce_consistency(self.add_consistency)
-				.with_label(format_args!("{}+{}", x.label(), y.label()))
-		})
+	/// A variable over `domain` for what `addends` come to together.
+	///
+	/// Without consistency, the order consistency constraint is left out when
+	/// no addend skips a value, since the merges then state every value the
+	/// sum reaches.
+	pub(crate) fn sum<'a>(
+		&self,
+		addends: impl IntoIterator<Item = &'a IntVar>,
+		domain: RangeInclusive<Coeff>,
+		label: impl Display,
+	) -> IntVar {
+		let contiguous = |x: &IntVar| x.card() as Coeff == x.max() - x.min() + 1;
+		let sum = IntVar::new(domain)
+			.enforce_consistency(self.add_consistency)
+			.with_label(label);
+		if self.add_consistency || !addends.into_iter().all(contiguous) {
+			sum
+		} else {
+			sum.without_order_consistency()
+		}
 	}
 
 	/// Encode `x + y ≷ z` as the linear constraint it is.
@@ -314,7 +325,11 @@ impl SortingNetworkEncoder {
 	}
 
 	/// Configures whether intermediate variables are constrained independently
-	/// of the merge.
+	/// of the merges; disabled by default.
+	///
+	/// Disabled, a sum whose addends skip no value has no order consistency
+	/// constraint. Enabled, the network is larger, but on a pigeonhole instance
+	/// CaDiCaL needed a half to a fifth of the conflicts.
 	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
 		self
@@ -632,10 +647,10 @@ mod tests {
 		},
 		decision::integer::IntVar,
 		helpers::tests::{
-			assert_count_admits, assert_solutions, expect_file, linear_test_suite, models,
-			models_over,
+			assert_count_admits, assert_solutions, brute_force, expect_file, linear_test_suite,
+			models, models_over,
 		},
-		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Unsatisfiable, Var,
+		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable, Var,
 		VarRange,
 	};
 
@@ -671,16 +686,7 @@ mod tests {
 				get_sorted_encoder(strategy.clone())
 					.merge(&mut cnf, &x, &y, &LimitComp::LessEq, &z)
 					.unwrap();
-				// A model for each way the network's own literals fall is too
-				// many, so the models are read on the order literals alone.
-				let mut lits = Vec::new();
-				for v in [&x, &y, &z] {
-					for value in v.min() + 1..=v.max() {
-						if let BoolVal::Lit(l) = v.at_least(&mut cnf, value).unwrap() {
-							lits.push(l);
-						}
-					}
-				}
+				let lits = order_literals(&mut cnf, [&x, &y, &z]);
 
 				let mut seen = models_over(&cnf, &lits, |value| {
 					[&x, &y, &z].map(|v| v.value(value)).to_vec()
@@ -808,6 +814,61 @@ mod tests {
 		}
 	}
 
+	/// Without consistency, a sum leaves out its order consistency constraint
+	/// only when no addend skips a value, so integers with and without holes
+	/// in their domains, starting at zero and above it, must all add up to
+	/// exactly the bound either way.
+	#[test]
+	fn integers_with_and_without_holes_add_up_to_the_bound() {
+		let domains: [&[Coeff]; 4] = [&[0, 1, 2, 3], &[1, 2, 3], &[0, 2, 3], &[0, 1, 3, 4]];
+		for (strategy, consistency) in [
+			SortingNetworkStrategy::Direct,
+			SortingNetworkStrategy::Recursive,
+			SortingNetworkStrategy::Mixed(10),
+		]
+		.into_iter()
+		.cartesian_product([true, false])
+		{
+			for (cmp, k) in [LimitComp::LessEq, LimitComp::Equal]
+				.into_iter()
+				.cartesian_product(4..=8)
+			{
+				for doms in domains.iter().combinations_with_replacement(3) {
+					let mut cnf = Cnf::default();
+					let terms = doms
+						.iter()
+						.map(|d| {
+							let x = IntVar::new(RangeList::from_sorted_elements(d.to_vec()));
+							let _ = x.order_encoding(&mut cnf).unwrap();
+							(PosCoeff::new(1), x)
+						})
+						.collect_vec();
+					let lits = order_literals(&mut cnf, terms.iter().map(|(_, x)| x));
+					let con = NormalizedIntLinear::new(terms.clone(), cmp, PosCoeff::new(k));
+					let mut enc = get_sorted_encoder(strategy.clone());
+					let _ = enc.with_consistency(consistency);
+					if enc.encode(&mut cnf, &con).is_err() {
+						continue;
+					}
+
+					let mut seen = models_over(&cnf, &lits, |value| {
+						terms.iter().map(|(_, x)| x.value(value)).collect_vec()
+					});
+					seen.sort_unstable();
+					let ranges = doms
+						.iter()
+						.map(|d| RangeList::from_sorted_elements(d.to_vec()))
+						.collect_vec();
+					let allowed = brute_force(&[1; 3], &ranges, cmp.into(), k);
+					assert_eq!(
+						seen, allowed,
+						"{strategy:?} consistency {consistency} {cmp:?} {k} over {doms:?}"
+					);
+				}
+			}
+		}
+	}
+
 	#[test]
 	fn merged_2_eq() {
 		let mut cnf = Cnf::default();
@@ -829,6 +890,23 @@ mod tests {
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_2_merged_eq.sol"]);
+	}
+
+	/// The order literals of `vars`, to read models on: one for each way the
+	/// network's own literals fall would be too many.
+	fn order_literals<'a>(cnf: &mut Cnf, vars: impl IntoIterator<Item = &'a IntVar>) -> Vec<Lit> {
+		vars.into_iter()
+			.flat_map(|x| {
+				let values = x.domain().iter().flatten().skip(1).collect_vec();
+				values
+					.into_iter()
+					.filter_map(|v| match x.at_least(cnf, v).unwrap() {
+						BoolVal::Lit(l) => Some(l),
+						BoolVal::Const(_) => None,
+					})
+					.collect_vec()
+			})
+			.collect()
 	}
 
 	#[test]
@@ -1138,6 +1216,21 @@ mod tests {
 		sorting_network_linear_recursive,
 		SortingNetworkEncoder::default().with_strategy(SortingNetworkStrategy::Recursive)
 	);
+	linear_test_suite!(
+		sorting_network_linear_consistency,
+		SortingNetworkEncoder::default().with_consistency(true)
+	);
+
+	mod eq_consistency {
+		sorted_card_test_suite!(
+			{
+				let mut e = SortingNetworkEncoder::default();
+				let _ = e.with_consistency(true);
+				e
+			},
+			LimitComp::Equal
+		);
+	}
 
 	mod eq_direct {
 		sorted_card_test_suite!(
@@ -1158,6 +1251,17 @@ mod tests {
 				e
 			},
 			LimitComp::Equal
+		);
+	}
+
+	mod le_consistency {
+		sorted_card_test_suite!(
+			{
+				let mut e = SortingNetworkEncoder::default();
+				let _ = e.with_consistency(true);
+				e
+			},
+			LimitComp::LessEq
 		);
 	}
 

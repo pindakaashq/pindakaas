@@ -6,6 +6,8 @@
     card-10   <=   radix      47      155       367
     card-10   <=    wdog      42       93       216
     card-10   <=  wdog-l     370      980      2320
+    card-10   <=  wdog-s      39       69       168
+    card-10   <=    sort      34       49       118
     card-10   ==   adder      18       72       254
     card-10   == diagram      35      116       272
     card-10   ==     seq      45      159       373
@@ -13,6 +15,8 @@
     card-10   ==   radix      47      157       369
     card-10   ==    wdog      74      186       432
     card-10   ==  wdog-l     730     1960      4640
+    card-10   ==  wdog-s      68      138       336
+    card-10   ==    sort      34       98       236
    pb-small   <=   adder      11       45       156
    pb-small   <= diagram      10       11        25
    pb-small   <=     seq      37       75       165
@@ -20,6 +24,8 @@
    pb-small   <=   radix      29       91       209
    pb-small   <=    wdog      23       41        92
    pb-small   <=  wdog-l      67      136       307
+   pb-small   <=  wdog-s      24       35        81
+   pb-small   <=    sort      24       40        86
    pb-small   ==   adder       7       27        78
    pb-small   == diagram      10       21        45
    pb-small   ==     seq      23       62       141
@@ -27,6 +33,8 @@
    pb-small   ==   radix      29       92       207
    pb-small   ==    wdog      36       70       156
    pb-small   ==  wdog-l     131      267       600
+   pb-small   ==  wdog-s      36       57       131
+   pb-small   ==    sort      24       63       141
      pb-mid   <=   adder      27      134       460
      pb-mid   <= diagram      15       24        55
      pb-mid   <=     seq     106      239       532
@@ -34,6 +42,8 @@
      pb-mid   <=   radix      75      256       597
      pb-mid   <=    wdog      55      129       300
      pb-mid   <=  wdog-l     224      562      1317
+     pb-mid   <=  wdog-s      52       99       242
+     pb-mid   <=    sort      64      122       266
      pb-mid   ==   adder      16       96       334
      pb-mid   == diagram      12       24        50
      pb-mid   ==     seq      60      183       425
@@ -41,6 +51,8 @@
      pb-mid   ==   radix      75      258       594
      pb-mid   ==    wdog     103      249       577
      pb-mid   ==  wdog-l     471     1146      2667
+     pb-mid   ==  wdog-s      95      188       459
+     pb-mid   ==    sort      64      189       429
     pb-wide   <=   adder       7        4        10
     pb-wide   <= diagram      10        7        16
     pb-wide   <=     seq     427     1064      2416
@@ -48,6 +60,8 @@
     pb-wide   <=   radix       7        4        10
     pb-wide   <=    wdog      22       27        59
     pb-wide   <=  wdog-l      98      156       341
+    pb-wide   <=  wdog-s      22       22        49
+    pb-wide   <=    sort     255     2778      7833
     pb-wide   ==   adder       7        7         7
     pb-wide   == diagram       7        7         7
     pb-wide   ==     seq     127      357       825
@@ -55,6 +69,8 @@
     pb-wide   ==   radix       7        9        11
     pb-wide   ==    wdog      32       46        99
     pb-wide   ==  wdog-l     167      278       607
+    pb-wide   ==  wdog-s      32       38        83
+    pb-wide   ==    sort     255     5285     15173
  pb-coprime   <=   adder      30      151       518
  pb-coprime   <= diagram      12       12        29
  pb-coprime   <=     seq     206      489      1102
@@ -62,6 +78,8 @@
  pb-coprime   <=   radix      81      277       647
  pb-coprime   <=    wdog      57      133       313
  pb-coprime   <=  wdog-l     259      583      1342
+ pb-coprime   <=  wdog-s      59      106       261
+ pb-coprime   <=    sort     103      200       443
  pb-coprime   ==   adder      14       87       298
  pb-coprime   == diagram      10       16        30
  pb-coprime   ==     seq      97      307       715
@@ -69,3 +87,5 @@
  pb-coprime   ==   radix      81      280       644
  pb-coprime   ==    wdog     106      259       605
  pb-coprime   ==  wdog-l     467     1065      2450
+ pb-coprime   ==  wdog-s     110      209       509
+ pb-coprime   ==    sort     103      307       700

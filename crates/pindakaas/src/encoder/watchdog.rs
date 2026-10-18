@@ -36,7 +36,7 @@
 //! Pseudo-Boolean Constraints into CNF Such That Generalized Arc Consistency
 //! Is Maintained", KI 2014, LNCS 8736, 123–134.
 
-use std::cmp::min;
+use std::{cmp::min, fmt::Display};
 
 use itertools::Itertools;
 
@@ -137,25 +137,24 @@ impl WatchdogEncoder {
 	/// What [`Self::totalize`] does, but the network states the count in
 	/// clauses of its own rather than as ternary constraints.
 	fn sort<Db: ClauseDatabase + ?Sized>(
-		&self,
 		db: &mut Db,
 		network: &SortingNetworkEncoder,
-		leaves: Vec<IntVar>,
+		leaves: &[IntVar],
 		cap: Coeff,
-		label: &str,
+		label: impl Display,
 	) -> Result<IntVar, Unsatisfiable> {
 		let lb = leaves.iter().map(IntVar::min).sum::<Coeff>();
 		let ub = min(leaves.iter().map(IntVar::max).sum::<Coeff>(), cap);
 		if lb > ub {
 			return Err(Unsatisfiable);
 		}
-		if let [leaf] = &leaves[..] {
+		if let [leaf] = leaves {
 			if leaf.max() <= cap {
 				return Ok(leaf.clone());
 			}
 		}
-		let count = self.config.intermediate(lb..=ub).with_label(label);
-		network.sorted(db, &leaves, &LimitComp::LessEq, &count)?;
+		let count = network.sum(leaves, lb..=ub, label);
+		network.sorted(db, leaves, &LimitComp::LessEq, &count)?;
 		Ok(count)
 	}
 
@@ -272,7 +271,7 @@ impl WatchdogEncoder {
 				}
 			}
 			let count = match network {
-				Some(network) => self.sort(db, network, leaves, cap, &format!("b{r}"))?,
+				Some(network) => Self::sort(db, network, &leaves, cap, format_args!("b{r}"))?,
 				None => self.totalize(leaves, cap, &format!("b{r}"), cons)?,
 			};
 			carried = Some(match carried {
@@ -285,22 +284,26 @@ impl WatchdogEncoder {
 					if lb > ub {
 						return Err(Unsatisfiable);
 					}
-					let sum = self
-						.config
-						.intermediate(lb..=ub)
-						.with_label(format_args!("s{r}"));
 					match network {
 						Some(network) => {
+							let sum = network.sum([&count, &half], lb..=ub, format_args!("s{r}"));
 							network.merge(db, &count, &half, &LimitComp::LessEq, &sum)?;
+							sum
 						}
-						None => cons.push(IntTernary::new(
-							(1, count),
-							(1, half),
-							Comparator::LessEq,
-							(1, sum.clone()),
-						)),
+						None => {
+							let sum = self
+								.config
+								.intermediate(lb..=ub)
+								.with_label(format_args!("s{r}"));
+							cons.push(IntTernary::new(
+								(1, count),
+								(1, half),
+								Comparator::LessEq,
+								(1, sum.clone()),
+							));
+							sum
+						}
 					}
-					sum
 				}
 			});
 		}
@@ -364,7 +367,8 @@ impl WatchdogEncoder {
 	/// disabled by default.
 	///
 	/// This is the binary merge of PBLib. The counts are order encoded,
-	/// whatever [`Self::with_cutoff`] says.
+	/// whatever [`Self::with_cutoff`] says, and as in PBLib they have no
+	/// consistency constraint unless [`Self::with_consistency`] asks for one.
 	pub fn with_sorting_networks(&mut self, b: bool) -> &mut Self {
 		self.sorting_networks = b;
 		self
@@ -604,6 +608,28 @@ mod tests {
 		}
 	}
 
+	/// Consistency gives the sums of the sorting networks their order
+	/// consistency constraint.
+	#[test]
+	fn consistency_constrains_the_sums_of_the_networks() {
+		let size = |consistency: bool| {
+			let mut cnf = Cnf::default();
+			let vars = cnf.new_var_range(10).iter_lits().collect_vec();
+			let con = Linear::new(LinExp::from_slices(&[1; 10], &vars), Comparator::LessEq, 5);
+			let mut enc = WatchdogEncoder::default();
+			let _ = enc
+				.with_sorting_networks(true)
+				.with_consistency(consistency);
+			LinearEncoder::new(enc).encode(&mut cnf, &con).unwrap();
+			cnf.num_clauses()
+		};
+		let (with, without) = (size(true), size(false));
+		assert!(
+			with > without,
+			"expected consistency to add clauses, got {with} with it and {without} without"
+		);
+	}
+
 	/// The point of the watchdog is that a coefficient costs its bit width
 	/// rather than its magnitude, so guard against a change that would make it
 	/// pointless.
@@ -766,6 +792,12 @@ mod tests {
 		WatchdogEncoder::default()
 			.with_sorting_networks(true)
 			.with_cutoff(Some(0))
+	);
+	linear_test_suite!(
+		watchdog_encoder_sorting_networks_consistency,
+		WatchdogEncoder::default()
+			.with_sorting_networks(true)
+			.with_consistency(true)
 	);
 	linear_test_suite!(
 		watchdog_encoder_sorting_networks_local,

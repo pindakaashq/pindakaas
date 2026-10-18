@@ -122,11 +122,18 @@ class ClauseDatabase(ABC):
           - ``local`` (bool): use one watchdog per term value, which is domain
             consistent, rather than one for the whole constraint.
           - ``sorting_networks`` (bool): count with sorting networks rather
-            than totalizers, which is PBLib's binary merge.
+            than totalizers, which is PBLib's binary merge. As in PBLib, the
+            counts have no consistency constraint unless ``consistency`` is
+            set, but the constraint can save the solver conflicts.
 
-        - :attr:`Encoder.SORTING_NETWORK` takes ``consistency`` (bool) and
-          ``strategy`` (``"direct"``, ``"recursive"``, or ``"mixed"``): how
-          two sorted halves are merged.
+        - :attr:`Encoder.SORTING_NETWORK` takes:
+
+          - ``consistency`` (bool): keep the consistency constraint of the
+            intermediate sums. The network is larger, but the constraint can
+            save the solver conflicts.
+          - ``strategy`` (``"direct"``, ``"recursive"``, or ``"mixed"``): how
+            two sorted halves are merged.
+
         - :attr:`Encoder.PRODUCT` takes ``pairwise_cutoff`` (int, at least
           two): the largest group encoded pairwise.
         - The other encoders take no options.

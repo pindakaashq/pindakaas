@@ -14,7 +14,8 @@ macro_rules! decompose_setters {
 		/// views.
 		///
 		/// Disabled by default. Enables standalone binary and direct consistency
-		/// clauses; order-encoding implication chains remain mandatory.
+		/// clauses. The consistency constraint of an order encoding is kept
+		/// either way, except where an encoder documents otherwise.
 		pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 			self.config.consistency = b;
 			self
