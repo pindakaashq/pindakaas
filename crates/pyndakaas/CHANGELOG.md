@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.6.0...pyndakaas-v0.6.1) - 2026-10-19
+
+### Added
+
+- `add_encoding` takes encoder options as keyword arguments, such as `strategy` for `Encoder.SORTING_NETWORK` and `sorting_networks` for `Encoder.WATCHDOG`. An option the encoder does not take raises `InvalidEncoder`.
+
+### Changed
+
+- `Encoder.SORTING_NETWORK` leaves the order consistency constraint out of intermediate sums by default, which makes the network smaller. `consistency=True` keeps it.
+
+### Fixed
+
+- A custom `ClauseDatabase` raised a `TypeError` when `add_encoding` was called without conditions, or with a generator of literals.
+- The encoding fixes of pindakaas 0.6.1 apply, among them `Unsatisfiable` instead of a `PanicException` for a constraint that its bounds rule out, such as `-x <= 0` with `x` in {-2, -1}.
+
 ## [0.6.0](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.5.1...pyndakaas-v0.6.0) - 2026-10-13
 
 ### Added

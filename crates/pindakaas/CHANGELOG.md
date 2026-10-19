@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.6.0...pindakaas-v0.6.1) - 2026-10-19
+
+### Added
+
+- `WatchdogEncoder::with_sorting_networks` counts each digit with a sorting network, which is PBLib's binary merge.
+
+### Changed
+
+- `SortingNetworkEncoder` leaves the order consistency constraint out of an intermediate sum by default where its merges already state every value, which makes the network smaller. `with_consistency(true)` keeps it.
+- The adder, decision diagram, mixed radix, and sorting network encoders emit fewer clauses and variables, and no clause that always holds. A two-valued integer shares one literal between its encodings.
+
+### Fixed
+
+- A linear constraint that its bounds rule out, such as `-x <= 0` with `x` in {-2, -1}, panicked with most encoders instead of returning `Unsatisfiable`. So did a `Count` whose bound stays below zero.
+- `SortingNetworkEncoder` admitted a count whose bound is below zero, or panicked on it, and left the bound free in a count over no literals.
+- `SortingNetworkEncoder` panicked in debug builds on some weighted constraints whose terms reach past the bound.
+- `BitwiseEncoder` failed on an at-most-one over no literals: it panicked in debug builds and tried to allocate a huge signal range in release builds.
+- `DecisionDiagramEncoder` failed on a sum of integers bounded by zero, such as `x + y + z <= 0`.
+- When propagation emptied a domain, encoding returned `Unsatisfiable` without adding the empty clause, so the formula stayed satisfiable.
+- Aggregation panicked when the database refused a clause, instead of returning `Unsatisfiable`.
+
 ## [0.6.0](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.5.1...pindakaas-v0.6.0) - 2026-10-13
 
 ### Added

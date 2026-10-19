@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2](https://github.com/pindakaashq/pindakaas/compare/pindakaas-cadical-v0.4.1...pindakaas-cadical-v0.4.2) - 2026-10-19
+
+### Changed
+
+- The crate metadata no longer repeats the repository as its homepage.
+
 ## [0.4.1](https://github.com/pindakaashq/pindakaas/compare/pindakaas-cadical-v0.4.0...pindakaas-cadical-v0.4.1) - 2026-10-13
 
 ### Changed

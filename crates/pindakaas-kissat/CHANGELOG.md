@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4](https://github.com/pindakaashq/pindakaas/compare/pindakaas-kissat-v0.2.3...pindakaas-kissat-v0.2.4) - 2026-10-19
+
+### Changed
+
+- The crate metadata no longer repeats the repository as its homepage.
+
 ## [0.2.3](https://github.com/pindakaashq/pindakaas/compare/pindakaas-kissat-v0.2.2...pindakaas-kissat-v0.2.3) - 2026-10-13
 
 ### Fixed
