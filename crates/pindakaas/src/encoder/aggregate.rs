@@ -14,7 +14,7 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::{CardinalityOne, ProductEncoder},
 		count::{Count, SortingNetworkEncoder},
-		int_linear::{lit_terms, NormalizedIntLinear},
+		int_linear::{lit_terms, term_max, term_min, NormalizedIntLinear},
 		linear::{
 			Comparator, LimitComp, LinVariant, Linear, MixedRadixEncoder, PosCoeff,
 			TotalizerEncoder,
@@ -128,7 +128,7 @@ impl LinAggregator {
 			if lin.cmp == Comparator::GreaterEq {
 				c = -c;
 			}
-			int_terms.push((x.clone(), c));
+			int_terms.push((c, x.clone()));
 		}
 
 		let cmp = match lin.cmp {
@@ -150,37 +150,8 @@ impl LinAggregator {
 			.filter(|&(_, coef)| *coef != 0)
 			.collect();
 
-		// Recognise counts before mirroring hides the bound variable.
-		if let [(y, -1)] = &int_terms[..] {
-			if k == 0 && partition.iter().all(|&(_, coef)| *coef == 1) {
-				let lits = partition.iter().map(|&(lit, _)| lit).collect();
-				return Ok(LinVariant::Count(Count::new(lits, cmp, y.clone())));
-			}
-		}
-
-		// A coefficient is made positive by counting the variable from the far
-		// end, which is a view on it rather than a variable of its own.
-		for (x, c) in &mut int_terms {
-			if *c < 0 {
-				k -= *c * (x.min() + x.max());
-				*c = -*c;
-				*x = IntVar::mirrored(db, x)?;
-			}
-		}
-
-		// A term that can go below zero is counted from its least value
-		// instead, so that what it adds to the sum is what the bound has left
-		// to give. Without it a bound only a negative term can meet would look
-		// like a bound nothing can.
-		for (x, c) in &mut int_terms {
-			if x.min() < 0 {
-				k -= *c * x.min();
-				*x = IntVar::shifted(db, x, -x.min())?;
-			}
-		}
-
 		// Only integer terms add to the least the sum can be.
-		let lhs_min: Coeff = int_terms.iter().map(|(x, c)| c * x.min()).sum();
+		let lhs_min: Coeff = int_terms.iter().map(term_min).sum();
 
 		// A literal worth more than the bound minus the integers never holds.
 		partition.retain(|&(lit, coef)| {
@@ -192,7 +163,8 @@ impl LinAggregator {
 			}
 		});
 
-		let lhs_max: Coeff = int_terms.iter().map(|(x, c)| c * x.max()).sum::<Coeff>()
+		// A constraint its bounds decide reaches no encoder.
+		let lhs_max: Coeff = int_terms.iter().map(term_max).sum::<Coeff>()
 			+ partition.iter().map(|&(_, coef)| *coef).sum::<Coeff>();
 		if lhs_min > k || (cmp == LimitComp::Equal && lhs_max < k) {
 			db.contradiction()?;
@@ -200,6 +172,33 @@ impl LinAggregator {
 		}
 		if cmp == LimitComp::LessEq && lhs_max <= k {
 			return Ok(LinVariant::Trivial);
+		}
+
+		// Recognise counts before mirroring hides the bound variable.
+		if let [(-1, y)] = &int_terms[..] {
+			if k == 0 && partition.iter().all(|&(_, coef)| *coef == 1) {
+				let lits = partition.iter().map(|&(lit, _)| lit).collect();
+				return Ok(LinVariant::Count(Count::new(lits, cmp, y.clone())));
+			}
+		}
+
+		// A coefficient is made positive by counting the variable from the far
+		// end, which is a view on it rather than a variable of its own.
+		for (c, x) in &mut int_terms {
+			if *c < 0 {
+				k -= *c * (x.min() + x.max());
+				*c = -*c;
+				*x = IntVar::mirrored(db, x)?;
+			}
+		}
+
+		// A normalised constraint counts every term from zero, so a term that
+		// can go below zero is counted from its least value instead.
+		for (c, x) in &mut int_terms {
+			if x.min() < 0 {
+				k -= *c * x.min();
+				*x = IntVar::shifted(db, x, -x.min())?;
+			}
 		}
 		debug_assert!(k >= 0, "a bound the sum can meet is never negative");
 		if k == 0 && int_terms.is_empty() {
@@ -215,7 +214,7 @@ impl LinAggregator {
 			let mut iter = partition
 				.iter()
 				.map(|&(_, coef)| *coef)
-				.chain(int_terms.iter().map(|&(_, c)| c));
+				.chain(int_terms.iter().map(|&(c, _)| c));
 			if let Some(mut divisor) = iter.next() {
 				for coef in iter {
 					let mut other = coef;
@@ -236,7 +235,7 @@ impl LinAggregator {
 					for (_, coef) in &mut partition {
 						*coef = PosCoeff::new(**coef / divisor);
 					}
-					for (_, c) in &mut int_terms {
+					for (c, _) in &mut int_terms {
 						*c /= divisor;
 					}
 					// Rounding down is sound for `≤` for the same reason.
@@ -308,7 +307,7 @@ impl LinAggregator {
 					self.sorted_encoder
 						.encode(db, &Count::new(lits, cmp, y.clone()))
 						.unwrap();
-					int_terms.push((y, *coef));
+					int_terms.push((*coef, y));
 				} else {
 					kept.extend(lits.into_iter().map(|lit| (lit, coef)));
 				}
@@ -326,7 +325,7 @@ impl LinAggregator {
 		}
 
 		let mut terms = lit_terms(db, partition)?;
-		terms.extend(int_terms.into_iter().map(|(x, c)| (PosCoeff::new(c), x)));
+		terms.extend(int_terms.into_iter().map(|(c, x)| (PosCoeff::new(c), x)));
 		Ok(LinVariant::Linear(NormalizedIntLinear::new(terms, cmp, k)))
 	}
 	/// Pre-aggregation of at least `n` equal-coefficient literals by
@@ -567,9 +566,40 @@ mod tests {
 		}
 	}
 
-	/// Aggregate `con` and read the result back.
-	/// A term that reaches below zero can meet a bound below zero, which the
-	/// sum being counted from its least value is what makes visible.
+	/// A count is checked against its bounds like any other constraint before
+	/// it reaches an encoder.
+	#[test]
+	fn a_count_its_bounds_decide_reaches_no_encoder() {
+		use crate::decision::integer::IntVar;
+
+		for (n, domain, cmp, want) in [
+			// No count reaches a bound below zero.
+			(0, -2..=-1, Comparator::LessEq, None),
+			(2, -2..=-1, Comparator::LessEq, None),
+			(2, -2..=-1, Comparator::Equal, None),
+			// Two literals never count to three.
+			(2, 3..=4, Comparator::Equal, None),
+			// Two literals always count to at most two.
+			(2, 2..=4, Comparator::LessEq, Some(Aggregated::Trivial)),
+		] {
+			let mut cnf = Cnf::default();
+			let lits = cnf.new_var_range(n).iter_lits().collect_vec();
+			let y = IntVar::new(domain.clone());
+			let exp = LinExp::from_slices(&vec![1; n], &lits) - LinExp::from(y);
+			let con = Linear::new(exp, cmp.clone(), 0);
+			let got = aggregated(&mut cnf, &LinAggregator::default(), &con).ok();
+			assert_eq!(got, want, "{n} literals {cmp:?} {domain:?}");
+			if want.is_none() {
+				assert!(
+					models(&cnf, |_| ()).is_empty(),
+					"{n} literals {cmp:?} {domain:?}"
+				);
+			}
+		}
+	}
+
+	/// A bound below zero that a term reaching below zero can meet is
+	/// satisfiable.
 	#[test]
 	fn a_negative_bound_a_term_can_meet_is_not_unsatisfiable() {
 		let mut cnf = Cnf::default();
@@ -593,6 +623,7 @@ mod tests {
 		assert_eq!(seen, (-10..=-5).collect_vec());
 	}
 
+	/// Aggregate `con` and read the result back.
 	fn aggregated(
 		db: &mut Cnf,
 		agg: &LinAggregator,
@@ -1086,6 +1117,10 @@ mod tests {
 			assert_eq!(count.y.min(), 0);
 			assert_eq!(count.y.max(), 3);
 		}
+		// The encoder chooses how to read the bound, so recognising the count
+		// gives it no literals.
+		assert_eq!((cnf.num_vars(), cnf.num_clauses()), (3, 0));
+		assert!(!y.has_order_encoding());
 	}
 
 	#[test]
