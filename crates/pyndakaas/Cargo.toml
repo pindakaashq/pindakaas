@@ -6,7 +6,6 @@ edition = "2021"
 
 authors.workspace = true
 license.workspace = true
-homepage.workspace = true
 categories.workspace = true
 keywords.workspace = true
 repository.workspace = true
