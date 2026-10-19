@@ -611,6 +611,17 @@ pub(crate) mod tests {
 						);
 					}
 				}
+
+				#[test]
+				fn a_count_below_zero_is_a_contradiction() {
+					for (n, domain, cmp) in iproduct!(
+						0..=2,
+						[RangeList::from(-1..=-1), RangeList::from(-3..=-1)],
+						[LimitComp::LessEq, LimitComp::Equal]
+					) {
+						assert_count_admits(n, domain, cmp, |cnf, con| $encoder.encode(cnf, con));
+					}
+				}
 			}
 		};
 	}
@@ -1097,7 +1108,8 @@ pub(crate) mod tests {
 	/// Naming them here instead means a module can move without four macro
 	/// bodies having to hear about it.
 	pub(crate) mod prelude {
-		pub(crate) use itertools::Itertools;
+		pub(crate) use itertools::{iproduct, Itertools};
+		pub(crate) use rangelist::RangeList;
 
 		pub(crate) use crate::{
 			constraint::{
@@ -1112,7 +1124,7 @@ pub(crate) mod tests {
 				},
 			},
 			helpers::tests::{
-				all_binary_solutions, assert_checker, assert_encoding,
+				all_binary_solutions, assert_checker, assert_count_admits, assert_encoding,
 				assert_exact_on_small_int_linear, assert_exact_on_small_linear, assert_lean_linear,
 				assert_solutions, at_most_one_var, binary_literals, construct_terms,
 				direct_view_sum, expect_file, implication_chain_var, models, models_over,

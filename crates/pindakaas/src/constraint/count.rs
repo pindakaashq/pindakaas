@@ -12,7 +12,7 @@ use crate::{
 		linear::{LimitComp, PosCoeff},
 	},
 	decision::integer::IntVar,
-	Checker, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation,
+	Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable, Valuation,
 };
 
 /// Which encoders take a [`Count`], which rustdoc lists on the trait but the
@@ -56,6 +56,11 @@ impl Count {
 		&self,
 		db: &mut Db,
 	) -> Result<NormalizedIntLinear, Unsatisfiable> {
+		// No count reaches a negative value.
+		if self.y.max() < 0 {
+			db.contradiction()?;
+			unreachable!();
+		}
 		let mut terms = lit_terms(db, self.lits.iter().map(|&l| (l, PosCoeff::new(1))))?;
 		// Counting the bound from its far end turns its coefficient positive,
 		// and moves what it was worth into the constant.
