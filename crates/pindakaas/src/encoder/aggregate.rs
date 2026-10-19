@@ -154,14 +154,13 @@ impl LinAggregator {
 		let lhs_min: Coeff = int_terms.iter().map(term_min).sum();
 
 		// A literal worth more than the bound minus the integers never holds.
-		partition.retain(|&(lit, coef)| {
-			if *coef > k - lhs_min {
-				db.add_clause([!lit]).unwrap();
-				false
-			} else {
-				true
+		let left = k - lhs_min;
+		for &(lit, coef) in &partition {
+			if *coef > left {
+				db.add_clause([!lit])?;
 			}
-		});
+		}
+		partition.retain(|&(_, coef)| *coef <= left);
 
 		// A constraint its bounds decide reaches no encoder.
 		let lhs_max: Coeff = int_terms.iter().map(term_max).sum::<Coeff>()
@@ -305,8 +304,7 @@ impl LinAggregator {
 					// to gain by leaving them to the network below.
 					let _ = y.order_encoding(db)?;
 					self.sorted_encoder
-						.encode(db, &Count::new(lits, cmp, y.clone()))
-						.unwrap();
+						.encode(db, &Count::new(lits, cmp, y.clone()))?;
 					int_terms.push((*coef, y));
 				} else {
 					kept.extend(lits.into_iter().map(|lit| (lit, coef)));
@@ -621,6 +619,51 @@ mod tests {
 		seen.sort_unstable();
 		seen.dedup();
 		assert_eq!(seen, (-10..=-5).collect_vec());
+	}
+
+	/// A database may refuse a clause that aggregation adds, which is a
+	/// contradiction for the caller rather than a panic.
+	#[test]
+	fn a_refused_clause_is_a_contradiction() {
+		/// Refuses every clause that mentions `refused`.
+		struct Refusing {
+			cnf: Cnf,
+			refused: Lit,
+		}
+		impl ClauseDatabase for Refusing {
+			fn add_clause_from_slice(&mut self, clause: &[Lit]) -> crate::Result {
+				if clause.contains(&self.refused) {
+					return Err(Unsatisfiable);
+				}
+				self.cnf.add_clause_from_slice(clause)
+			}
+
+			fn new_var_range(&mut self, len: usize) -> crate::VarRange {
+				self.cnf.new_var_range(len)
+			}
+		}
+
+		let mut sorting = LinAggregator::default();
+		let _ = sorting.sort_same_coefficients(SortingNetworkEncoder::default(), 2);
+		for (coefs, k, agg) in [
+			// `a` is worth more than the bound, so it never holds.
+			(&[3, 1, 1, 2][..], 2, LinAggregator::default()),
+			// `a`, `b`, and `c` are worth the same, so a network counts them.
+			(&[1, 1, 1, 2], 3, sorting),
+		] {
+			let mut cnf = Cnf::default();
+			let lits = cnf.new_var_range(coefs.len()).iter_lits().collect_vec();
+			let mut db = Refusing {
+				cnf,
+				refused: !lits[0],
+			};
+			let con = Linear::new(LinExp::from_slices(coefs, &lits), Comparator::LessEq, k);
+			assert_eq!(
+				agg.aggregate(&mut db, &con).err(),
+				Some(Unsatisfiable),
+				"{con}"
+			);
+		}
 	}
 
 	/// Aggregate `con` and read the result back.
