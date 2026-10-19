@@ -276,24 +276,6 @@ def test_wcnf_clauses_as_int_are_hard():
     assert f._clauses_as_int() == [[-1, 2]]
 
 
-def test_clauses_buffer():
-    f = CNF()
-    x, y, z = f.new_vars(3)
-    f.add_clause([x, ~y])
-    f.add_encoding(2 * x + 3 * y + 4 * z <= 5)
-    flat = [lit for c in f._clauses_as_int() for lit in c + [0]]
-    assert memoryview(f._clauses_buffer()).cast("i").tolist() == flat
-    assert flat[:3] == [1, -2, 0]
-
-
-def test_wcnf_clauses_buffer_is_hard():
-    f = WCNF()
-    x, y = f.new_vars(2)
-    f.add_clause([~x, y])
-    f.add_weighted_clause([x], 1)
-    assert memoryview(f._clauses_buffer()).cast("i").tolist() == [-1, 2, 0]
-
-
 def test_conditions():
     f = CNF()
     x, y, p = f.new_vars(3)

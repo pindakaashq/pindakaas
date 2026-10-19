@@ -311,15 +311,6 @@ class CNF(ClauseDatabase):
         """
         return self._inner._clauses_as_int()
 
-    def _clauses_buffer(self) -> bytes:
-        """Stored clauses as native-endian 32-bit DIMACS literals, with a 0
-        after each clause.
-
-        Creates no Python object per clause or literal. Read it with
-        ``memoryview(buf).cast("i")``.
-        """
-        return self._inner._clauses_buffer()
-
     def new_var_range(self, n: int) -> VarRange:
         return self._inner.new_var_range(n)
 
