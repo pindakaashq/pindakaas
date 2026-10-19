@@ -19,10 +19,10 @@ jobs:
         with:
           submodules: true
       - name: Install Rust toolchain
-        uses: moonrepo/setup-rust@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           cache: false
-          channel: ${{ env.RUST_COV_CHANNEL }}
+          toolchain: ${{ env.RUST_COV_CHANNEL }}
       - name: cargo install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Generate code coverage
@@ -41,10 +41,10 @@ jobs:
         with:
           submodules: true
       - name: Install Rust toolchain
-        uses: moonrepo/setup-rust@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           cache: false
-          channel: ${{ env.RUST_COV_CHANNEL }}
+          toolchain: ${{ env.RUST_COV_CHANNEL }}
       - name: Run cargo test
         run: cargo test -p pindakaas --features cadical,external-propagation,tracing,kissat
         if: matrix.os == 'windows-latest'
@@ -58,10 +58,10 @@ jobs:
         with:
           submodules: true
       - name: Install Rust toolchain and clippy
-        uses: moonrepo/setup-rust@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
-          channel: ${{ env.RUST_CHANNEL }}
           components: clippy
+          toolchain: ${{ env.RUST_CHANNEL }}
       - name: Run clippy
         run: cargo clippy --tests -- -D warnings
       - name: Run clippy with all features
