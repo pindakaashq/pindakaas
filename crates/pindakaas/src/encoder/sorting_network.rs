@@ -282,7 +282,8 @@ impl SortingNetworkEncoder {
 	/// A variable over `domain` for what `addends` come to together.
 	///
 	/// Without consistency, the order consistency constraint is left out when
-	/// no addend skips a value, since the merges then state every value the
+	/// no addend skips a value or is read on direct literals that say less
+	/// than its order literals, since the merges then state every value the
 	/// sum reaches.
 	pub(crate) fn sum<'a>(
 		&self,
@@ -290,11 +291,15 @@ impl SortingNetworkEncoder {
 		domain: RangeInclusive<Coeff>,
 		label: impl Display,
 	) -> IntVar {
-		let contiguous = |x: &IntVar| x.card() as Coeff == x.max() - x.min() + 1;
+		// The network creates no direct encodings, so an addend read on its
+		// order literals now still is when merged.
+		let states_every_value = |x: &IntVar| {
+			x.card() as Coeff == x.max() - x.min() + 1 && (x.card() <= 2 || !x.is_read_directly())
+		};
 		let sum = IntVar::new(domain)
 			.enforce_consistency(self.add_consistency)
 			.with_label(label);
-		if self.add_consistency || !addends.into_iter().all(contiguous) {
+		if self.add_consistency || !addends.into_iter().all(states_every_value) {
 			sum
 		} else {
 			sum.without_order_consistency()
@@ -327,8 +332,9 @@ impl SortingNetworkEncoder {
 	/// Configures whether intermediate variables are constrained independently
 	/// of the merges; disabled by default.
 	///
-	/// Disabled, a sum whose addends skip no value has no order consistency
-	/// constraint. Enabled, the network is larger, but on a pigeonhole instance
+	/// Disabled, a sum has no order consistency constraint unless an addend
+	/// skips a value, or is read on its direct literals and has more than two
+	/// values. Enabled, the network is larger, but on a pigeonhole instance
 	/// CaDiCaL needed a half to a fifth of the conflicts.
 	pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 		self.add_consistency = b;
@@ -642,17 +648,71 @@ mod tests {
 	use crate::{
 		constraint::{
 			count::{Count, SortingNetworkEncoder, SortingNetworkStrategy},
-			int_linear::NormalizedIntLinear,
+			int_linear::{lit_terms, NormalizedIntLinear},
 			linear::{LimitComp, PosCoeff},
 		},
 		decision::integer::IntVar,
 		helpers::tests::{
-			assert_count_admits, assert_solutions, brute_force, expect_file, linear_test_suite,
-			models, models_over,
+			assert_count_admits, assert_solutions, brute_force, encoded_var, expect_file,
+			linear_test_suite, models, models_over,
 		},
 		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable, Var,
 		VarRange,
 	};
+
+	/// A direct guard says that its addend takes a value, not that it reaches
+	/// every value below it, so a sum it adds to keeps its order consistency.
+	#[test]
+	fn a_direct_addend_bounds_a_sum_without_consistency() {
+		// Three values are the fewest for which a direct literal says less
+		// than an order literal does.
+		let values: [&[Coeff]; 2] = [&[0, 1, 2], &[0, 1, 2, 3]];
+		for (strategy, cmp, w, (d1, d2), values) in itertools::iproduct!(
+			[
+				SortingNetworkStrategy::Direct,
+				SortingNetworkStrategy::Recursive,
+				SortingNetworkStrategy::Mixed(10),
+			],
+			[LimitComp::LessEq, LimitComp::Equal],
+			// A direct value loses only the sum's literals between it and the
+			// other addend, which a weight of `K` asks for with three values.
+			[3, 8, 9],
+			[(true, false), (false, true), (true, true)],
+			values
+		) {
+			const K: Coeff = 9;
+			let mut cnf = Cnf::default();
+			let mut lits = Vec::new();
+			let x1 = encoded_var(&mut cnf, values, d1, &mut lits);
+			let x2 = encoded_var(&mut cnf, values, d2, &mut lits);
+			let b = cnf.new_lit();
+			lits.push(b);
+			// The weighted literal comes first, as the aggregator leaves it.
+			let mut terms = lit_terms(&mut cnf, [(b, PosCoeff::new(w))]).unwrap();
+			terms.extend([x1.clone(), x2.clone()].map(|x| (PosCoeff::new(1), x)));
+			let encoded = get_sorted_encoder(strategy.clone()).encode(
+				&mut cnf,
+				&NormalizedIntLinear::new(terms, cmp, PosCoeff::new(K)),
+			);
+
+			let mut seen = models_over(&cnf, &lits, |value| {
+				vec![
+					x1.value(value),
+					x2.value(value),
+					Coeff::from(value.value(b)),
+				]
+			});
+			seen.sort_unstable();
+			let domain = RangeList::from_sorted_elements(values.to_vec());
+			let doms = [domain.clone(), domain, RangeList::from(0..=1)];
+			let allowed = brute_force(&[1, 1, w], &doms, cmp.into(), K);
+			assert_eq!(
+				seen, allowed,
+				"{strategy:?} {cmp:?} {w} {values:?} direct {d1} {d2}"
+			);
+			assert!(encoded.is_ok() || allowed.is_empty());
+		}
+	}
 
 	#[test]
 	fn a_direct_count_at_most_admits_what_the_constraint_does() {
@@ -662,6 +722,34 @@ mod tests {
 	#[test]
 	fn a_direct_count_equal_admits_what_the_constraint_does() {
 		assert_counts_admit(SortingNetworkStrategy::Direct, LimitComp::Equal);
+	}
+
+	/// A literal read on its direct encoding says what its order encoding
+	/// does, so the sums it adds to cost no more than for an order literal.
+	#[test]
+	fn a_direct_literal_costs_what_an_order_literal_does() {
+		for (coefs, k) in [(&[2, 1, 1][..], 2), (&[3, 1, 1, 1, 1], 4)] {
+			let [direct, order] = [true, false].map(|direct| {
+				let mut cnf = Cnf::default();
+				let lits = cnf.new_var_range(coefs.len()).iter_lits().collect_vec();
+				let terms = if direct {
+					let weighted = lits.iter().zip(coefs).map(|(&l, &c)| (l, PosCoeff::new(c)));
+					lit_terms(&mut cnf, weighted).unwrap()
+				} else {
+					let to_term = |(&l, &c)| {
+						let x = IntVar::from_order_encoding(&mut cnf, 0..=1, &[l]).unwrap();
+						(PosCoeff::new(c), x)
+					};
+					lits.iter().zip(coefs).map(to_term).collect_vec()
+				};
+				let con = NormalizedIntLinear::new(terms, LimitComp::LessEq, PosCoeff::new(k));
+				SortingNetworkEncoder::default()
+					.encode(&mut cnf, &con)
+					.unwrap();
+				(cnf.num_vars(), cnf.num_clauses())
+			});
+			assert_eq!(direct, order, "{coefs:?} {k}");
+		}
 	}
 
 	/// The watchdog merges counts that start above zero, such as a padding
@@ -708,8 +796,6 @@ mod tests {
 		}
 	}
 
-	/// Halves that start past their caps are inputs whose least values already
-	/// pass the bound.
 	#[test]
 	fn a_merge_past_the_bound_is_a_contradiction() {
 		let mut cnf = Cnf::default();
@@ -815,9 +901,9 @@ mod tests {
 	}
 
 	/// Without consistency, a sum leaves out its order consistency constraint
-	/// only when no addend skips a value, so integers with and without holes
-	/// in their domains, starting at zero and above it, must all add up to
-	/// exactly the bound either way.
+	/// only when no addend skips a value, so order-encoded integers with and
+	/// without holes in their domains, starting at zero and above it, must
+	/// all add up to exactly the bound either way.
 	#[test]
 	fn integers_with_and_without_holes_add_up_to_the_bound() {
 		let domains: [&[Coeff]; 4] = [&[0, 1, 2, 3], &[1, 2, 3], &[0, 2, 3], &[0, 1, 3, 4]];

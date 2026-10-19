@@ -1006,6 +1006,32 @@ pub(crate) mod tests {
 		(sum, fixing)
 	}
 
+	/// An integer over `values`, held in a direct or an order encoding on fresh
+	/// literals that are appended to `lits`, with its consistency clauses.
+	pub(crate) fn encoded_var(
+		cnf: &mut Cnf,
+		values: &[Coeff],
+		direct: bool,
+		lits: &mut Vec<Lit>,
+	) -> IntVar {
+		let n = if direct {
+			values.len()
+		} else {
+			values.len() - 1
+		};
+		let own = cnf.new_var_range(n).iter_lits().collect_vec();
+		let domain = RangeList::from_sorted_elements(values.to_vec());
+		let x = if direct {
+			IntVar::from_direct_encoding(cnf, domain, &own)
+		} else {
+			IntVar::from_order_encoding(cnf, domain, &own)
+		}
+		.unwrap();
+		x.constrain(cnf).unwrap();
+		lits.extend(own);
+		x
+	}
+
 	/// The integer a group of terms that each imply the one before stands for.
 	///
 	/// The implications are taken on trust: they are what makes the group a
