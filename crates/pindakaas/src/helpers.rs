@@ -613,6 +613,11 @@ pub(crate) mod tests {
 				}
 
 				#[test]
+				fn exact_on_encoded_integers() {
+					assert_exact_on_encoded_int_linear(&LinearEncoder::new($encoder.clone()));
+				}
+
+				#[test]
 				fn a_count_below_zero_is_a_contradiction() {
 					for (n, domain, cmp) in iproduct!(
 						0..=2,
@@ -631,7 +636,7 @@ pub(crate) mod tests {
 	#[cfg(test)]
 	pub(crate) use expect_file;
 	use expect_test::ExpectFile;
-	use itertools::Itertools;
+	use itertools::{iproduct, Itertools};
 	pub(crate) use linear_test_suite;
 	use rangelist::RangeList;
 	use rustc_hash::{FxHashMap, FxHashSet};
@@ -714,6 +719,66 @@ pub(crate) mod tests {
 	/// block.
 	pub(crate) fn assert_encoding(formula: &impl Display, expect: &ExpectFile) {
 		expect.assert_eq(&formula.to_string());
+	}
+
+	/// Check that `encoder` admits exactly the solutions of every constraint
+	/// `Σ cᵢ·xᵢ + w·b ≷ k` over up to two integers and a literal `b`.
+	///
+	/// Each integer already holds a direct or an order encoding on literals the
+	/// test owns, and its domain can be negative or have a hole. Coefficients
+	/// can be negative, and `≥` negates the weight `w`.
+	pub(crate) fn assert_exact_on_encoded_int_linear<E>(encoder: &E)
+	where
+		E: Encoder<Cnf, Linear>,
+	{
+		let domains: [&[Coeff]; 3] = [&[-2, -1], &[-1, 0, 2], &[0, 1, 2, 3]];
+		// A negative coefficient counts its variable from the far end, so -2
+		// also stands for a positive coefficient above one.
+		let ints = iproduct!(domains, [-2, 1], [false, true]).collect_vec();
+		let shapes = (1..=2).flat_map(|len| ints.iter().combinations_with_replacement(len));
+		for terms in shapes {
+			// A weight of zero leaves the literal free. The `≥` cases negate
+			// every term, which covers negative weights.
+			for w in [0, 8] {
+				let coefs = terms.iter().map(|&&(_, c, _)| c).chain([w]).collect_vec();
+				let doms = terms
+					.iter()
+					.map(|(d, _, _)| RangeList::from_sorted_elements(d.to_vec()))
+					.chain([RangeList::from(0..=1)])
+					.collect_vec();
+				let (least, most) = coefs.iter().zip(&doms).fold((0, 0), |(l, m), (c, d)| {
+					let (a, b) = (c * d.min().unwrap(), c * d.max().unwrap());
+					(l + a.min(b), m + a.max(b))
+				});
+				for (k, cmp) in iproduct!(
+					least - 1..=most + 1,
+					[Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq]
+				) {
+					let mut cnf = Cnf::default();
+					let mut lits = Vec::new();
+					let xs = terms
+						.iter()
+						.map(|&&(d, _, direct)| encoded_var(&mut cnf, d, direct, &mut lits))
+						.collect_vec();
+					let b = cnf.new_lit();
+					lits.push(b);
+					let exp = xs
+						.iter()
+						.zip(&coefs)
+						.fold(b * w, |exp, (x, &c)| exp + x.clone() * c);
+					let con = Linear::new(exp, cmp, k);
+					let encoded = encoder.encode(&mut cnf, &con);
+					let mut found = models_over(&cnf, &lits, |v| {
+						let values = xs.iter().map(|x| x.value(v));
+						values.chain([Coeff::from(v.value(b))]).collect_vec()
+					});
+					found.sort();
+					let expected = brute_force(&coefs, &doms, cmp, k);
+					assert_eq!(found, expected, "{con}");
+					assert!(encoded.is_ok() || expected.is_empty(), "{con}");
+				}
+			}
+		}
 	}
 
 	/// Check that `encoder` admits exactly the solutions of every constraint
@@ -1125,9 +1190,10 @@ pub(crate) mod tests {
 			},
 			helpers::tests::{
 				all_binary_solutions, assert_checker, assert_count_admits, assert_encoding,
-				assert_exact_on_small_int_linear, assert_exact_on_small_linear, assert_lean_linear,
-				assert_solutions, at_most_one_var, binary_literals, construct_terms,
-				direct_view_sum, expect_file, implication_chain_var, models, models_over,
+				assert_exact_on_encoded_int_linear, assert_exact_on_small_int_linear,
+				assert_exact_on_small_linear, assert_lean_linear, assert_solutions,
+				at_most_one_var, binary_literals, construct_terms, direct_view_sum, expect_file,
+				implication_chain_var, models, models_over,
 			},
 			BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 		};

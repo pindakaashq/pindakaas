@@ -646,6 +646,13 @@ mod tests {
 		assert_checker(&db, &con);
 	}
 
+	/// The encoders the default dispatches to have this check in their test
+	/// suites, the dispatch itself only here.
+	#[test]
+	fn the_default_encoder_is_exact_on_encoded_integers() {
+		assert_exact_on_encoded_int_linear(&LinearEncoder::<StaticLinEncoder>::default());
+	}
+
 	#[test]
 	fn what_the_decompositions_cost() {
 		// Solution goldens cannot detect increases in encoding size.
