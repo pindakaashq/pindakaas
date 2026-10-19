@@ -15,7 +15,10 @@ macro_rules! decompose_setters {
 		///
 		/// Disabled by default. Enables standalone binary and direct consistency
 		/// clauses. The consistency constraint of an order encoding is kept
-		/// either way, except where an encoder documents otherwise.
+		/// either way, except for the sums of the sorting networks that
+		/// [`WatchdogEncoder::with_sorting_networks`] counts with.
+		///
+		/// [`WatchdogEncoder::with_sorting_networks`]: crate::encoder::watchdog::WatchdogEncoder::with_sorting_networks
 		pub fn with_consistency(&mut self, b: bool) -> &mut Self {
 			self.config.consistency = b;
 			self

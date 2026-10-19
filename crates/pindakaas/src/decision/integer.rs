@@ -938,7 +938,8 @@ impl IntVar {
 	/// Automatic domain constraints for newly created views.
 	///
 	/// Enabled by [`Self::new`]. Disabling it skips standalone binary and
-	/// direct consistency clauses; order chains remain mandatory. Set this
+	/// direct consistency clauses, but not the consistency constraint of an
+	/// order encoding the library creates. Set this
 	/// before requesting a view: it does not retrofit existing views. Use
 	/// [`Self::constrain`] to constrain supplied literals. The `from_*`
 	/// constructors disable it because their literals are assumed to be
