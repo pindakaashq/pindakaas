@@ -43,7 +43,9 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for BitwiseEncoder
 	)]
 	fn encode(&self, db: &mut Db, card1: &CardinalityOne) -> Result {
 		let size = card1.lits.len();
-		let bits = BinaryEncoding::required_bits((size - 1) as Coeff);
+		// No literals take no signals, and an exactly-one is then the empty
+		// at-least-one clause.
+		let bits = BinaryEncoding::required_bits(size.saturating_sub(1) as Coeff);
 
 		if card1.cmp == LimitComp::Equal {
 			at_least_one_clause(db, card1)?;

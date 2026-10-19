@@ -105,6 +105,27 @@ pub(crate) mod tests {
 				use crate::helpers::tests::prelude::*;
 
 				const LARGE_N: usize = 50;
+
+				/// At most one of no literals always holds, and exactly one of
+				/// them never does.
+				#[test]
+				fn no_literals() {
+					let mut cnf = Cnf::default();
+					let at_most = CardinalityOne {
+						lits: Vec::new(),
+						cmp: LimitComp::LessEq,
+					};
+					assert_eq!($encoder.encode(&mut cnf, &at_most), Ok(()));
+					assert!(!models(&cnf, |_| ()).is_empty());
+
+					let exactly = CardinalityOne {
+						lits: Vec::new(),
+						cmp: LimitComp::Equal,
+					};
+					assert_eq!($encoder.encode(&mut cnf, &exactly), Err(Unsatisfiable));
+					assert!(models(&cnf, |_| ()).is_empty());
+				}
+
 				#[test]
 				fn amo_pair() {
 					let mut cnf = Cnf::default();
