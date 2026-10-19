@@ -501,11 +501,17 @@ impl SortingNetworkStrategy {
 		let lambda_fn = |(v, c): (u128, u128), lambda: u32| -> u128 { (v * lambda as u128) + c };
 
 		let dir_cost = Self::direct_cost(a, b, c);
-		let rec_cost = Self::recursive_cost(cache, a, b, c, lambda);
-		let ret = if lambda_fn(dir_cost, lambda) < lambda_fn(rec_cost, lambda) {
+		// `merge` states a merge into a cap of zero outright, and halving it
+		// again would leave the recursive cost a cap below zero.
+		let ret = if c == 0 && (a > 0 || b > 1) {
 			(SortingNetworkStrategy::Direct, dir_cost)
 		} else {
-			(SortingNetworkStrategy::Recursive, rec_cost)
+			let rec_cost = Self::recursive_cost(cache, a, b, c, lambda);
+			if lambda_fn(dir_cost, lambda) < lambda_fn(rec_cost, lambda) {
+				(SortingNetworkStrategy::Direct, dir_cost)
+			} else {
+				(SortingNetworkStrategy::Recursive, rec_cost)
+			}
 		};
 
 		let _ = cache.insert(key, ret.clone());
@@ -652,6 +658,7 @@ mod tests {
 			linear::{LimitComp, PosCoeff},
 		},
 		decision::integer::IntVar,
+		encoder::sorting_network::StrategyCache,
 		helpers::tests::{
 			assert_count_admits, assert_solutions, brute_force, encoded_var, expect_file,
 			linear_test_suite, models, models_over,
@@ -752,6 +759,24 @@ mod tests {
 		}
 	}
 
+	/// A merge into a cap of zero is stated outright, which is the cheaper
+	/// way, so the mixed strategy picks it too.
+	#[test]
+	fn a_merge_into_a_cap_of_zero_costs_what_the_direct_one_does() {
+		let [direct, mixed] = [
+			SortingNetworkStrategy::Direct,
+			SortingNetworkStrategy::Mixed(10),
+		]
+		.map(|strategy| {
+			let mut cnf = Cnf::default();
+			let terms = [0..=3, 0..=3].map(|d| (PosCoeff::new(1), IntVar::new(d)));
+			let con = NormalizedIntLinear::new(terms.to_vec(), LimitComp::LessEq, PosCoeff::new(0));
+			get_sorted_encoder(strategy).encode(&mut cnf, &con).unwrap();
+			(cnf.num_vars(), cnf.num_clauses())
+		});
+		assert_eq!(mixed, direct);
+	}
+
 	/// The watchdog merges counts that start above zero, such as a padding
 	/// digit plus a term, so every strategy must handle a nonzero minimum.
 	#[test]
@@ -793,6 +818,16 @@ mod tests {
 					"{strategy:?} x {x_min}..={x_max} y {y_min}..={y_max} cap {cap}"
 				);
 			}
+		}
+	}
+
+	/// The cost model prices a merge whose inputs reach past its cap, which
+	/// halving can bring down to a cap of zero.
+	#[test]
+	fn a_merge_past_its_cap_has_a_cost() {
+		let mut cache = StrategyCache::default();
+		for (a, b, c) in itertools::iproduct!(0..=12, 0..=12, 0..=12) {
+			let _ = SortingNetworkStrategy::mixed_cost(&mut cache, a, b, c, 10);
 		}
 	}
 
