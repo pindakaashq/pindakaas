@@ -9,7 +9,6 @@ on:
 
 env:
   RUST_CHANNEL: "stable"
-  RUST_COV_CHANNEL: "nightly"
 
 jobs:
   test-coverage:
@@ -22,7 +21,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           cache: false
-          toolchain: ${{ env.RUST_COV_CHANNEL }}
+          toolchain: ${{ env.RUST_CHANNEL }}
       - name: cargo install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Generate code coverage
@@ -44,7 +43,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           cache: false
-          toolchain: ${{ env.RUST_COV_CHANNEL }}
+          toolchain: ${{ env.RUST_CHANNEL }}
       - name: Run cargo test
         run: cargo test -p pindakaas --features cadical,external-propagation,tracing,kissat
         if: matrix.os == 'windows-latest'

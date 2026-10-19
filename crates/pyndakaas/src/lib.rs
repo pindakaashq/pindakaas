@@ -108,12 +108,12 @@ mod pindakaas {
 		Lit(Lit),
 	}
 
-	#[pyclass(from_py_object, unsendable)]
+	#[pyclass(frozen, from_py_object, unsendable)]
 	#[derive(Clone, Debug)]
 	/// A Boolean linear constraint, also known as a pseudo-Boolean constraint.
 	struct BoolLinCon(BaseBoolLinCon);
 
-	#[pyclass(from_py_object)]
+	#[pyclass(frozen, from_py_object)]
 	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 	/// A Boolean literal, or a constant where the answer is already settled.
 	///
@@ -123,7 +123,7 @@ mod pindakaas {
 	/// checking which it is.
 	struct BoolVal(BaseBoolVal);
 
-	#[pyclass(skip_from_py_object)]
+	#[pyclass]
 	#[derive(Clone, Debug, Default)]
 	/// The internal representation of a CNF formula.
 	struct CNFInner(Cnf);
@@ -151,7 +151,7 @@ mod pindakaas {
 	}
 
 	#[expect(non_camel_case_types, reason = "match python naming convention")]
-	#[pyclass(eq, eq_int, from_py_object)]
+	#[pyclass(eq, eq_int, frozen, from_py_object)]
 	#[derive(Clone, Copy, Debug, PartialEq)]
 	/// Encoding algorithm.
 	///
@@ -185,7 +185,7 @@ mod pindakaas {
 		WATCHDOG,
 	}
 
-	#[pyclass(from_py_object)]
+	#[pyclass(frozen, from_py_object)]
 	#[derive(Clone, Debug)]
 	/// A propositional logic formula.
 	struct Formula(BaseFormula<BaseBoolVal>);
@@ -198,7 +198,7 @@ mod pindakaas {
 		Lit(Lit),
 	}
 
-	#[pyclass(from_py_object, unsendable)]
+	#[pyclass(frozen, from_py_object, unsendable)]
 	#[derive(Clone, Debug)]
 	/// An integer decision variable.
 	///
@@ -225,19 +225,19 @@ mod pindakaas {
 	/// side, the expression can be turned into a :class:`BoolLinCon`.
 	struct LinExp(BaseBoolLinExp);
 
-	#[pyclass(from_py_object)]
+	#[pyclass(frozen, from_py_object)]
 	#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 	/// A Boolean literal, representing a Boolean variable or its negation.
 	struct Lit(BaseLit);
 
 	struct PyDbWrapper<'a>(&'a Bound<'a, PyAny>);
 
-	#[pyclass(skip_from_py_object)]
+	#[pyclass]
 	#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 	/// Representation of a continuous range of variables.
 	struct VarRange(BaseVarRange);
 
-	#[pyclass(skip_from_py_object)]
+	#[pyclass]
 	#[derive(Clone, Debug, Default)]
 	/// The internal representation of a CNF formula where clauses have optional
 	/// associated weights.
@@ -480,6 +480,12 @@ mod pindakaas {
 	}
 
 	impl<'a, 'py> FromPyObject<'a, 'py> for Conditions {
+		#[cfg(feature = "experimental-inspect")]
+		const INPUT_TYPE: pyo3::inspect::PyStaticExpr = pyo3::type_hint_subscript!(
+			pyo3::type_hint_identifier!("collections.abc", "Iterable"),
+			<Lit as FromPyObject<'a, 'py>>::INPUT_TYPE
+		);
+
 		type Error = PyErr;
 
 		fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
@@ -1656,7 +1662,7 @@ mod pindakaas {
 			Unknown,
 		}
 
-		#[pyclass(eq, eq_int, skip_from_py_object)]
+		#[pyclass(eq, eq_int, frozen)]
 		#[derive(Clone, Copy, Debug, PartialEq)]
 		/// The resulting status of solving a problem.
 		enum Status {
@@ -1666,16 +1672,6 @@ mod pindakaas {
 			UNSATISFIABLE,
 			/// The solving process was interrupted before a result was found.
 			UNKNOWN,
-		}
-
-		/// Hack: workaround for https://github.com/PyO3/pyo3/issues/759
-		#[pymodule_init]
-		fn init(module: &Bound<'_, PyModule>) -> PyResult<()> {
-			module
-				.py()
-				.import("sys")?
-				.getattr("modules")?
-				.set_item("pindakaas.pindakaas.solver", module)
 		}
 
 		#[pymethods]
