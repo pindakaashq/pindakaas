@@ -105,13 +105,6 @@ impl Encoded<'_> {
 		Ok(())
 	}
 
-	/// Whether the term is read on its direct literals: only when it has no
-	/// order encoding, which says a bound in one literal and guards in fewer
-	/// clauses.
-	fn direct(&self) -> bool {
-		self.x.has_direct_encoding() && !self.x.has_order_encoding()
-	}
-
 	/// Add the clauses for `outer + inner + bounded ≷ k` to `db`.
 	///
 	/// `bounded` is the term every clause ends in; `inner` and `outer` are the
@@ -147,7 +140,7 @@ impl Encoded<'_> {
 		let (inner_direct, inner_steps) = Self::guards(db, inner, cmp)?;
 		// What a direct encoding pins `bounded` to does not depend on what is
 		// left of the bound, so it is read once rather than once per step.
-		let pins: Option<Vec<_>> = if bounded.direct() {
+		let pins: Option<Vec<_>> = if bounded.x.is_read_directly() {
 			Some(bounded.x.direct_walk(db)?.collect())
 		} else {
 			None
@@ -212,7 +205,7 @@ impl Encoded<'_> {
 			return Ok((false, vec![(0, BoolVal::Const(false))]));
 		};
 		let geq = (term.c >= 0) == matches!(cmp, Comparator::LessEq);
-		let direct = term.direct();
+		let direct = term.x.is_read_directly();
 		let mut steps = if direct {
 			term.x.direct_steps(db, geq)?
 		} else {

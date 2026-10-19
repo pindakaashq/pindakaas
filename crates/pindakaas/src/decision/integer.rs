@@ -1253,6 +1253,15 @@ impl IntVar {
 		Rc::ptr_eq(&self.0, &other.0)
 	}
 
+	/// Whether [`IntTernaryEncoder`] reads this variable on its direct
+	/// literals, which it does only when it has no order encoding: an order
+	/// literal says a bound in one literal, and guards in fewer clauses.
+	///
+	/// [`IntTernaryEncoder`]: crate::constraint::int_ternary::IntTernaryEncoder
+	pub(crate) fn is_read_directly(&self) -> bool {
+		self.has_direct_encoding() && !self.has_order_encoding()
+	}
+
 	/// The label of the variable, which is empty unless tracing is enabled —
 	/// nothing else has a use for one, so nothing else pays to store it. Use
 	/// the [`Display`] implementation to name a variable in a message, which
