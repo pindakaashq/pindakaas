@@ -7,7 +7,9 @@ from typing import ContextManager, Iterable, Iterator, Optional
 
 from .encoding import ClauseDatabase, Constraint
 from .pindakaas import Encoder, Lit
-from .pindakaas.solver import CaDiCaLInner, KissatInner, Status
+from .pindakaas import solver as _native
+
+Status = _native.Status
 
 
 class Result(ABC):
@@ -96,11 +98,11 @@ class Solver(ClauseDatabase):
 class CaDiCaL(Solver):
     """The `CaDiCaL <https://github.com/arminbiere/cadical>`_ SAT solver."""
 
-    _inner: CaDiCaLInner
+    _inner: _native.CaDiCaLInner
 
     def __init__(self):
         """A fresh solver with no clauses."""
-        self._inner = CaDiCaLInner()
+        self._inner = _native.CaDiCaLInner()
 
     def _set_time_limit(self, limit: Optional[timedelta]):
         return self._inner.set_time_limit(limit)
@@ -135,10 +137,10 @@ class Kissat(Solver):
     Nonempty assumptions raise ``NotImplementedError``.
     """
 
-    _inner: KissatInner
+    _inner: _native.KissatInner
 
     def __init__(self):
-        self._inner = KissatInner()
+        self._inner = _native.KissatInner()
 
     def _set_time_limit(self, limit: Optional[timedelta]):
         return self._inner.set_time_limit(limit)

@@ -17,7 +17,11 @@ crate-type = ["cdylib"]
 [dependencies]
 itertools = "0.15"
 pindakaas = { version = "0.6.1", path = "../pindakaas", features = ["kissat"] }
-pyo3 = { version = "0.29.0", features = ["abi3-py39"] }
+pyo3 = { version = "0.30.1", features = ["abi3-py39"] }
+
+[features]
+# Embed the type information that `maturin --generate-stubs` reads.
+experimental-inspect = ["pyo3/experimental-inspect"]
 
 [lints]
 workspace = true
