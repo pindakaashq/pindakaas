@@ -200,12 +200,22 @@ mod pindakaas {
 
 	#[pyclass(frozen, from_py_object, unsendable)]
 	#[derive(Clone, Debug)]
-	/// An integer decision variable.
+	/// An integer decision variable, or a view of one.
 	///
 	/// The variable holds whichever Boolean encodings the constraints it
 	/// appears in turn out to need, and channels between them where more than
 	/// one is called for. Nothing is encoded until it is used.
+	///
+	/// Arithmetic with an integer gives a view of the same variable, see the
+	/// Rust documentation of `IntVar`.
 	struct IntVar(BaseIntVar);
+
+	#[derive(IntoPyObject)]
+	/// The result of arithmetic on an :class:`IntVar`.
+	enum IntVarArithmetic {
+		IntVar(IntVar),
+		LinExp(LinExp),
+	}
 
 	struct LinEncoderWrapper<'py> {
 		/// Method chosen by the user.
@@ -610,8 +620,13 @@ mod pindakaas {
 
 	#[pymethods]
 	impl IntVar {
-		fn __add__(&self, other: BoolLinArg) -> LinExp {
-			self.as_bool_lin_exp().__add__(other)
+		/// The view `x + k` where `other` is an integer `k`, and the expression
+		/// `x + other` otherwise.
+		fn __add__(&self, other: BoolLinArg) -> IntVarArithmetic {
+			match other {
+				BoolLinArg::Int(k) => IntVarArithmetic::IntVar(Self(self.0.clone() + k)),
+				other => IntVarArithmetic::LinExp(self.as_bool_lin_exp().__add__(other)),
+			}
 		}
 
 		fn __eq__(&self, other: i64) -> BoolLinCon {
@@ -634,28 +649,48 @@ mod pindakaas {
 			self.as_bool_lin_exp().__lt__(other)
 		}
 
-		fn __mul__(&self, other: i64) -> LinExp {
-			LinExp(self.0.clone() * other)
+		/// The view `c·x`, or the constant zero where `c` is zero.
+		fn __mul__(&self, other: i64) -> Self {
+			Self(self.0.clone() * other)
 		}
 
-		fn __neg__(&self) -> LinExp {
-			self.__mul__(-1)
+		/// The view `-x`.
+		fn __neg__(&self) -> Self {
+			Self(-self.0.clone())
 		}
 
-		fn __radd__(&self, other: BoolLinArg) -> LinExp {
+		fn __radd__(&self, other: BoolLinArg) -> IntVarArithmetic {
 			self.__add__(other)
 		}
 
-		fn __rmul__(&self, other: i64) -> LinExp {
+		fn __rmul__(&self, other: i64) -> Self {
 			self.__mul__(other)
+		}
+
+		/// The view `k - x` where `other` is an integer `k`, and the
+		/// expression `other - x` otherwise.
+		fn __rsub__(&self, other: BoolLinArg) -> IntVarArithmetic {
+			match other {
+				BoolLinArg::Int(k) => IntVarArithmetic::IntVar(Self(-self.0.clone() + k)),
+				other => IntVarArithmetic::LinExp(
+					other
+						.as_bool_lin_exp()
+						.__sub__(BoolLinArg::IntVar(self.clone())),
+				),
+			}
 		}
 
 		fn __str__(&self) -> String {
 			format!("{}", self.0)
 		}
 
-		fn __sub__(&self, other: BoolLinArg) -> LinExp {
-			self.as_bool_lin_exp().__sub__(other)
+		/// The view `x - k` where `other` is an integer `k`, and the expression
+		/// `x - other` otherwise.
+		fn __sub__(&self, other: BoolLinArg) -> IntVarArithmetic {
+			match other {
+				BoolLinArg::Int(k) => IntVarArithmetic::IntVar(Self(self.0.clone() - k)),
+				other => IntVarArithmetic::LinExp(self.as_bool_lin_exp().__sub__(other)),
+			}
 		}
 
 		/// Returns the literal for the variable reaching at least `value`.
@@ -999,7 +1034,8 @@ mod pindakaas {
 						"recursive" => {
 							let _ = enc.with_strategy(SortingNetworkStrategy::Recursive);
 						}
-						// The default strategy is the mixed one, with its own weight.
+						// The default strategy is the mixed one, with its own
+						// weight.
 						"mixed" => {}
 						other => {
 							return Err(PyValueError::new_err(format!(

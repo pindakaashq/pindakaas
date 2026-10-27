@@ -6,7 +6,7 @@
 //! broken up further.
 
 use crate::constraint::{
-	int_linear::{term_negated, IntLinear, Term},
+	int_linear::{IntLinear, Term},
 	linear::Comparator,
 };
 pub use crate::encoder::int_ternary::{IntTernaryConfig, IntTernaryEncoder};
@@ -31,16 +31,11 @@ impl From<&IntTernary> for IntLinear {
 	/// with the constant rather than among the terms.
 	fn from(con: &IntTernary) -> Self {
 		let (mut terms, mut k) = (Vec::new(), 0);
-		for (term, adds) in [(&con.x, true), (&con.y, true), (&con.z, false)] {
+		for (term, sign) in [(&con.x, 1), (&con.y, 1), (&con.z, -1)] {
 			if term.1.card() == 1 {
-				let worth = term.0 * term.1.min();
-				k += if adds { -worth } else { worth };
+				k -= sign * term.0 * term.1.min();
 			} else {
-				terms.push(if adds {
-					term.clone()
-				} else {
-					term_negated(term)
-				});
+				terms.push((sign * term.0, term.1.clone()));
 			}
 		}
 		Self::new(terms, con.cmp, k)

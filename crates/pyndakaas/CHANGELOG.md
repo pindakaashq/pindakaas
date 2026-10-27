@@ -11,9 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Type stubs for the compiled module, and a `py.typed` marker.
 - Wheels for free-threaded CPython 3.14.
+- `IntVar` supports subtraction from the left, as in `5 - x`.
 
 ### Changed
 
+- [**breaking**] Arithmetic of an `IntVar` with an integer gives an `IntVar`, a view of the same variable.
 - Update pyo3 from 0.29.0 to 0.30.1.
 
 ## [0.6.1](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.6.0...pyndakaas-v0.6.1) - 2026-10-19

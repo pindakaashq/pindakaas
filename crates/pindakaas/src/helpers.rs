@@ -687,7 +687,7 @@ pub(crate) mod tests {
 		let mut cnf = Cnf::default();
 		let lits = cnf.new_var_range(n).iter_lits().collect_vec();
 		let y = IntVar::new(domain.clone());
-		let _ = y.order_encoding(&mut cnf).unwrap();
+		y.require_order_encoding(&mut cnf).unwrap();
 		let shown = cnf.get_variables().map(Lit::from).collect_vec();
 		let con = Count::new(lits.clone(), cmp, y.clone());
 		// A count no value of the bound can meet is a contradiction, which the
@@ -811,7 +811,7 @@ pub(crate) mod tests {
 						let con = Linear::new(exp, cmp, k);
 						let encoded = encoder.encode(&mut cnf, &con);
 						for x in &xs {
-							let _ = x.order_encoding(&mut cnf);
+							let _ = x.require_order_encoding(&mut cnf);
 						}
 						let found = models(&cnf, |v| xs.iter().map(|x| x.value(v)).collect_vec())
 							.into_iter()

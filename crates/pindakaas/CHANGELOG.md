@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Arithmetic of an `IntVar` with a constant (`x + k`, `k + x`, `x - k`, `x * c`, `c * x`, and `-x`) gives a view of the same variable, see `decision::integer`. `with_order_encoding` and `with_direct_encoding` read their literals over the values of a view.
+- `x + y` and `x - y` of two `IntVar`s, or of an `IntVar` and a `LinExp`, give a `LinExp`.
+- `Linear::new` takes anything that converts into a `LinExp`, such as an `IntVar`.
+
+### Changed
+
+- [**breaking**] `IntVar::domain` returns the domain by value instead of borrowed.
+- [**breaking**] `IntVar * Coeff` gives an `IntVar` instead of a `LinExp`.
+- [**breaking**] `IntVar::mirrored` is removed: write `-x + (x.min() + x.max())`.
+- [**breaking**] `NormalizedIntLinear::terms` returns an iterator instead of a slice, and `NormalizedIntLinear::new` panics on a term whose least value is not zero.
+
 ## [0.6.1](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.6.0...pindakaas-v0.6.1) - 2026-10-19
 
 ### Added

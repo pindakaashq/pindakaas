@@ -215,3 +215,44 @@ def test_int_var_unsatisfiable():
 def test_int_var_from_the_wrong_literals(build):
     with pytest.raises(ValueError):
         build(CNF())
+
+
+def test_arithmetic_with_an_integer_is_a_view_of_the_variable():
+    f = CNF()
+    x = f.new_int_var(range(0, 5))
+    y = 5 - x * 2
+    assert isinstance(y, IntVar) and isinstance(-x, IntVar)
+    assert isinstance(x + 1, IntVar) and isinstance(1 + x, IntVar)
+    assert isinstance(x - 1, IntVar)
+    assert (y.min(), y.max(), y.card()) == (-3, 5, 5)
+    assert list(f.variables()) == [], "a view costs no literal"
+    # `y ≥ 0` is `x ≤ 2`, and `-x ≥ -1` is `x ≤ 1`: literals of `x` itself.
+    assert int(y.at_least(f, 0).lit()) == int(x.at_most(f, 2).lit())
+    assert int((-x).at_least(f, -1).lit()) == -int(x.at_least(f, 2).lit())
+    assert solutions(f, x, y, -x + 4) == [(v, 5 - 2 * v, 4 - v) for v in range(5)]
+
+
+def test_a_variable_times_zero_is_the_constant_zero():
+    f = CNF()
+    x = f.new_int_var(range(1, 4))
+    zero = x * 0
+    assert (zero.min(), zero.max()) == (0, 0)
+
+
+def test_a_constraint_over_a_view_constrains_its_variable():
+    f = CNF()
+    x = f.new_int_var(range(0, 5))
+    f += (x + 3) * 2 <= 10
+    assert solutions(f, x) == [(0,), (1,), (2,)]
+
+
+def test_arithmetic_with_anything_else_is_an_expression():
+    f = CNF()
+    x, y = f.new_int_var(range(0, 2)), f.new_int_var(range(0, 2))
+    a = f.new_var()
+    assert not isinstance(x + y, IntVar)
+    assert not isinstance(x - y, IntVar)
+    assert not isinstance(x + a, IntVar)
+    assert not isinstance(a - x, IntVar)
+    f += a - x + y * 2 >= 2
+    assert solutions(f, x, y) == [(0, 1), (1, 1)]

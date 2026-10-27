@@ -398,7 +398,7 @@ impl Decompose for WatchdogEncoder {
 			let mut mirrored = Vec::with_capacity(terms.len());
 			for (c, x) in &terms {
 				k += c * (x.min() + x.max());
-				mirrored.push((*c, IntVar::mirrored(db, x)?));
+				mirrored.push((*c, x.mirrored()));
 			}
 			if k < 0 {
 				return Err(Unsatisfiable);
@@ -539,23 +539,23 @@ mod tests {
 		}
 	}
 
-	/// A sum that passes its bound however its terms fall is unsatisfiable,
-	/// which is cheaper to say than to encode.
+	/// A sum that falls short of its bound however its terms fall is
+	/// unsatisfiable, which is cheaper to say than to encode.
 	#[test]
-	fn a_sum_that_must_pass_its_bound_is_unsatisfiable() {
+	fn a_sum_that_cannot_reach_its_bound_is_unsatisfiable() {
 		let mut cnf = Cnf::default();
 		let con = NormalizedIntLinear::new(
 			vec![
 				(
 					PosCoeff::new(1),
-					crate::decision::integer::IntVar::new(5..=6),
+					crate::decision::integer::IntVar::new(0..=1),
 				),
 				(
 					PosCoeff::new(1),
-					crate::decision::integer::IntVar::new(5..=6),
+					crate::decision::integer::IntVar::new(0..=1),
 				),
 			],
-			LimitComp::LessEq,
+			LimitComp::Equal,
 			PosCoeff::new(3),
 		);
 		assert!(WatchdogEncoder::default().encode(&mut cnf, &con).is_err());

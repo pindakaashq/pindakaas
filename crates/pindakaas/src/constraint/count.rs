@@ -62,17 +62,10 @@ impl Count {
 			unreachable!();
 		}
 		let mut terms = lit_terms(db, self.lits.iter().map(|&l| (l, PosCoeff::new(1))))?;
-		// Counting the bound from its far end turns its coefficient positive,
-		// and moves what it was worth into the constant.
-		let mut k = self.y.min() + self.y.max();
-		let mut y = IntVar::mirrored(db, &self.y)?;
-		if y.min() < 0 {
-			// A normalised constraint counts every term from zero, and what the
-			// shift is worth goes to the bound.
-			k -= y.min();
-			y = IntVar::shifted(db, &y, -y.min())?;
-		}
-		terms.push((PosCoeff::new(1), y));
+		// Counting the bound down from its greatest value turns its coefficient
+		// positive and starts it at zero, as a normalised term has to.
+		let k = self.y.max();
+		terms.push((PosCoeff::new(1), -self.y.clone() + k));
 		Ok(NormalizedIntLinear::new(terms, self.cmp, PosCoeff::new(k)))
 	}
 
@@ -116,21 +109,19 @@ impl Checker for Count {
 
 #[cfg(test)]
 mod tests {
-	use itertools::Itertools;
 	use rangelist::RangeList;
 	use traced_test::test;
 
 	use crate::{
 		constraint::{
-			count::{Count, SortingNetworkEncoder},
+			count::SortingNetworkEncoder,
 			linear::{
 				AdderEncoder, DecisionDiagramEncoder, LimitComp, MixedRadixEncoder,
 				SequentialCounterEncoder, TotalizerEncoder,
 			},
 		},
-		decision::integer::IntVar,
-		helpers::tests::{assert_count_admits, models_over},
-		ClauseDatabaseTools, Cnf, Encoder,
+		helpers::tests::assert_count_admits,
+		Encoder,
 	};
 
 	/// A bound that can go negative is still counted from zero when the count
@@ -144,47 +135,25 @@ mod tests {
 		}
 	}
 
-	/// Every encoder of a count admits the same assignments, whether it states
-	/// the constraint outright or reads it as a linear one.
+	/// Every encoder of a count admits exactly the assignments the count does,
+	/// whether it states the constraint outright or reads it as a linear one.
 	#[test]
 	fn every_encoder_admits_the_same_counts() {
 		for cmp in [LimitComp::LessEq, LimitComp::Equal] {
-			let mut want: Option<Vec<(usize, i64)>> = None;
-			for name in ["sorted", "adder", "bdd", "swc", "gt", "mgto"] {
-				let mut cnf = Cnf::default();
-				let lits = (0..3).map(|_| cnf.new_lit()).collect_vec();
-				let y = IntVar::new(0..=2).with_label("y");
-				let con = Count::new(lits.clone(), cmp.clone(), y.clone());
-				match name {
-					"sorted" => SortingNetworkEncoder::default().encode(&mut cnf, &con),
-					"adder" => AdderEncoder::default().encode(&mut cnf, &con),
-					"bdd" => DecisionDiagramEncoder::default().encode(&mut cnf, &con),
-					"swc" => SequentialCounterEncoder::default().encode(&mut cnf, &con),
-					"gt" => TotalizerEncoder::default().encode(&mut cnf, &con),
-					_ => MixedRadixEncoder::default().encode(&mut cnf, &con),
-				}
-				.unwrap();
-
-				let mut seen = models_over(&cnf, &lits, |sol| {
-					let n = lits.iter().filter(|&&l| sol.value(l)).count();
-					(n, y.value(sol))
-				});
-				seen.sort_unstable();
-				seen.dedup();
-				match &want {
-					None => {
-						assert!(!seen.is_empty(), "{name} {cmp:?} admits something");
-						for &(n, v) in &seen {
-							match cmp {
-								LimitComp::Equal => assert_eq!(n as i64, v, "{name}: {n} vs {v}"),
-								LimitComp::LessEq => assert!(n as i64 <= v, "{name}: {n} vs {v}"),
-							}
-						}
-						want = Some(seen);
-					}
-					Some(want) => {
-						assert_eq!(&seen, want, "{name} {cmp:?} differs from the network")
-					}
+			for domain in [
+				RangeList::from(0..=2),
+				RangeList::from(1..=3),
+				RangeList::from_elements([-1, 1, 3]),
+			] {
+				for name in ["sorted", "adder", "bdd", "swc", "gt", "mgto"] {
+					assert_count_admits(3, domain.clone(), cmp, |cnf, con| match name {
+						"sorted" => SortingNetworkEncoder::default().encode(cnf, con),
+						"adder" => AdderEncoder::default().encode(cnf, con),
+						"bdd" => DecisionDiagramEncoder::default().encode(cnf, con),
+						"swc" => SequentialCounterEncoder::default().encode(cnf, con),
+						"gt" => TotalizerEncoder::default().encode(cnf, con),
+						_ => MixedRadixEncoder::default().encode(cnf, con),
+					});
 				}
 			}
 		}

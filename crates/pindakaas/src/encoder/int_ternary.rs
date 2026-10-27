@@ -264,8 +264,8 @@ impl IntTernaryEncoder {
 		let k = con.k();
 		// Every term counts from zero, so the least and greatest the sum comes
 		// to are its terms at their least and greatest.
-		let least: Coeff = con.terms().iter().map(|(c, x)| **c * x.min()).sum();
-		let most: Coeff = con.terms().iter().map(|(c, x)| **c * x.max()).sum();
+		let least: Coeff = con.terms().map(|(c, x)| *c * x.min()).sum();
+		let most: Coeff = con.terms().map(|(c, x)| *c * x.max()).sum();
 		if least > k || (con.cmp() == LimitComp::Equal && most < k) {
 			db.contradiction()?;
 		}
@@ -323,7 +323,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder 
 		// Every variable needs a view so a solution can report its value.
 		for t in terms {
 			if !t.1.has_direct_encoding() {
-				let _ = t.1.order_encoding(db)?;
+				t.1.require_order_encoding(db)?;
 			}
 		}
 		// A guarded last term also wants an order view, which states each
@@ -331,7 +331,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder 
 		// direct literal is such a bound already.
 		if let [_, .., last] = terms.as_slice() {
 			if last.1.card() > 2 {
-				let _ = last.1.order_encoding(db)?;
+				last.1.require_order_encoding(db)?;
 			}
 		}
 		// The clauses end in the last term and are guarded by the ones before
@@ -349,7 +349,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder 
 
 #[cfg(test)]
 mod tests {
-	use itertools::Itertools;
+	use itertools::{iproduct, Itertools};
 	use rangelist::RangeList;
 	use traced_test::test;
 
@@ -362,7 +362,7 @@ mod tests {
 		},
 		decision::integer::IntVar,
 		helpers::tests::{at_most_one_var, brute_force, models, models_over},
-		ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit,
+		BoolVal, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit,
 	};
 
 	#[test]
@@ -376,13 +376,13 @@ mod tests {
 			let mut cnf = Cnf::default();
 			let x = IntVar::new(0..=7).enforce_consistency(true);
 			if order {
-				let _ = x.order_encoding(&mut cnf).unwrap();
+				x.require_order_encoding(&mut cnf).unwrap();
 			}
 			if direct {
-				let _ = x.direct_encoding(&mut cnf).unwrap();
+				x.require_direct_encoding(&mut cnf).unwrap();
 			}
 			if binary {
-				let _ = x.binary_encoding(&mut cnf).unwrap();
+				x.require_binary_encoding(&mut cnf).unwrap();
 			}
 			let enc = IntTernaryEncoder::default();
 			let mut bound = |cmp, k, left: std::ops::RangeInclusive<Coeff>| {
@@ -390,7 +390,7 @@ mod tests {
 					.unwrap();
 				// Binary bits count through every value, so the domain stays.
 				let domain = if binary { 0..=7 } else { left.clone() };
-				assert_eq!(*x.domain(), RangeList::from(domain), "{view} {cmp:?} {k}");
+				assert_eq!(x.domain(), RangeList::from(domain), "{view} {cmp:?} {k}");
 				let mut seen = models(&cnf, |value| x.value(value));
 				seen.sort();
 				seen.dedup();
@@ -423,10 +423,10 @@ mod tests {
 		};
 
 		// Three terms, so the short-constraint path does not decide it.
-		let con = |least, k| {
+		let con = |cmp, k| {
 			NormalizedIntLinear::new(
-				(0..3).map(|_| (PosCoeff::new(1), IntVar::new(least..=2))),
-				LimitComp::LessEq,
+				(0..3).map(|_| (PosCoeff::new(1), IntVar::new(0..=2))),
+				cmp,
 				PosCoeff::new(k),
 			)
 		};
@@ -454,16 +454,16 @@ mod tests {
 			// Six at the most, which the bound allows many times over. The
 			// diagram used to build layers here it asserts cannot overlap.
 			let mut cnf = Cnf::default();
-			encode(&mut cnf, &con(0, 99)).unwrap();
+			encode(&mut cnf, &con(LimitComp::LessEq, 99)).unwrap();
 			assert_eq!(
 				(cnf.num_vars(), cnf.num_clauses()),
 				(0, 0),
 				"{name} encoded a constraint nothing can break"
 			);
-			// Three at the least, which is already past the bound.
+			// Six at the most, which falls short of the bound.
 			let mut cnf = Cnf::default();
 			assert!(
-				encode(&mut cnf, &con(1, 2)).is_err(),
+				encode(&mut cnf, &con(LimitComp::Equal, 7)).is_err(),
 				"{name} met a constraint nothing can meet"
 			);
 		}
@@ -671,7 +671,7 @@ mod tests {
 					.iter()
 					.map(|d| IntVar::new(d.clone()).enforce_consistency(true))
 					.collect_vec();
-				let _ = xs[2].direct_encoding(&mut cnf).unwrap();
+				xs[2].require_direct_encoding(&mut cnf).unwrap();
 				assert_eq!(
 					solutions_over(cnf, &IntTernaryEncoder::default(), &coeffs, &xs, cmp, 0),
 					brute_force(&coeffs, &doms, cmp, 0),
@@ -777,9 +777,9 @@ mod tests {
 				.into_iter()
 				.map(|c| {
 					let x = IntVar::new(0..=5).enforce_consistency(true);
-					let _ = x.order_encoding(&mut cnf).unwrap();
+					x.require_order_encoding(&mut cnf).unwrap();
 					if both {
-						let _ = x.direct_encoding(&mut cnf).unwrap();
+						x.require_direct_encoding(&mut cnf).unwrap();
 					}
 					(c, x)
 				})
@@ -834,6 +834,33 @@ mod tests {
 		);
 	}
 
+	/// Bits given to a variable may count from below its least value, and the
+	/// addition has to count from where they do.
+	#[test]
+	fn an_addition_counts_from_where_the_bits_do() {
+		let enc = IntTernaryEncoder::with_config(IntTernaryConfig {
+			propagate: false,
+			cutoff: Some(0),
+		});
+		let mut cnf = Cnf::default();
+		let bits = (0..2).map(|_| BoolVal::Lit(cnf.new_lit())).collect_vec();
+		let x = IntVar::from_binary_encoding(&mut cnf, 2..=3, &bits, 0).unwrap();
+		x.constrain(&mut cnf).unwrap();
+		let (y, z) = (IntVar::new(0..=1), IntVar::new(2..=4));
+		let con = IntTernary::new(
+			(1, x.clone()),
+			(1, y.clone()),
+			Comparator::Equal,
+			(1, z.clone()),
+		);
+		enc.encode(&mut cnf, &con).unwrap();
+		let mut seen = models(&cnf, |v| vec![x.value(v), y.value(v), z.value(v)]);
+		seen.sort();
+		seen.dedup();
+		let doms = [&x, &y, &z].map(|v| v.domain());
+		assert_eq!(seen, brute_force(&[1, 1, -1], &doms, Comparator::Equal, 0));
+	}
+
 	#[test]
 	fn an_addition_lines_up_with_the_bound_of_its_result() {
 		let from = |lb: Coeff| RangeList::from(lb..=(lb + 3));
@@ -844,6 +871,41 @@ mod tests {
 				brute_force(&[1, 1, -1], &doms, Comparator::Equal, 0),
 				"x+y=z over lower bounds {lx}, {ly}, {lz}"
 			);
+		}
+	}
+
+	/// The adder takes `x + y ≷ z + k` and counts `k`.
+	#[test]
+	fn an_addition_with_a_constant_is_added_with_it() {
+		let enc = IntTernaryEncoder::with_config(IntTernaryConfig {
+			propagate: false,
+			cutoff: Some(0),
+		});
+		for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
+			// A sum that starts at one is out of line with the inputs, which
+			// the adder cannot say, so it is walked instead.
+			for (off, start) in iproduct!([-3, 2, 5], [0, 1]) {
+				let mut cnf = Cnf::default();
+				let (x, y) = (IntVar::new(0..=9), IntVar::new(0..=9));
+				let z = IntVar::new((start - off)..=(18 - off));
+				let con =
+					IntTernary::new((1, x.clone()), (1, y.clone()), cmp, (1, z.clone() + off));
+				enc.encode(&mut cnf, &con).unwrap();
+				assert_eq!(
+					[&x, &y, &z].iter().all(|v| !v.has_order_encoding()),
+					start == 0,
+					"{cmp:?} {off:+} from {start} is added only where it lines up"
+				);
+				let mut seen = models(&cnf, |v| vec![x.value(v), y.value(v), z.value(v)]);
+				seen.sort();
+				seen.dedup();
+				let doms = [&x, &y, &z].map(|v| v.domain());
+				assert_eq!(
+					seen,
+					brute_force(&[1, 1, -1], &doms, cmp, off),
+					"x + y {cmp:?} z{off:+}"
+				);
+			}
 		}
 	}
 
@@ -953,10 +1015,10 @@ mod tests {
 							let x = IntVar::new(domain.clone()).enforce_consistency(true);
 							let view = views / 3_i32.pow(i as u32) % 3;
 							if view != 0 {
-								let _ = x.direct_encoding(&mut cnf).unwrap();
+								x.require_direct_encoding(&mut cnf).unwrap();
 							}
 							if view != 1 {
-								let _ = x.order_encoding(&mut cnf).unwrap();
+								x.require_order_encoding(&mut cnf).unwrap();
 							}
 							x
 						})

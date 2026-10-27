@@ -27,12 +27,22 @@
 //! structure that has constrained them already, and saying it twice costs
 //! clauses for nothing. Where it does not hold — most often because some of the
 //! literals were freshly made — ask for the clauses with [`IntVar::constrain`].
+//!
+//! # Views
+//!
+//! An [`IntVar`] is an affine view `scale·x + offset` of a variable `x`, and
+//! arithmetic with a constant gives another view of `x` without a clause or a
+//! literal. Every view shares the domain and the encodings of `x`: narrowing a
+//! view narrows `x`, and an encoding asked for through a view is created on
+//! `x`. Arithmetic panics where the scale, the offset, or a value of the view
+//! overflows a coefficient.
 
 use std::{
-	cell::{Ref, RefCell},
+	cell::RefCell,
+	cmp::{max, min},
 	fmt::{self, Display},
 	iter::once,
-	ops::Bound,
+	ops::{Add, Bound, Mul, Neg, Sub},
 	rc::Rc,
 };
 
@@ -42,7 +52,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
 	constraint::linear::{Comparator, PosCoeff},
-	helpers::{as_binary, bit, new_named_lit, new_named_var_range},
+	helpers::{as_binary, bit, div_ceil, div_floor, new_named_lit, new_named_var_range},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable, Var, VarRange,
 };
 
@@ -93,12 +103,34 @@ pub(crate) struct DirectEncoding {
 #[derive(Clone, Copy, Debug)]
 pub struct EncodedViews<'a>(&'a IntVar);
 
-/// An integer decision variable with Boolean views created on demand.
+/// An integer decision variable with Boolean views created on demand, or an
+/// affine view `scale·x + offset` of one.
 ///
 /// Cloning shares the variable; it does not copy it. See the [module
-/// documentation](self) for channelling and existing-literal contracts.
+/// documentation](self) for views, channelling, and existing-literal
+/// contracts.
+///
+/// # Examples
+///
+/// ```rust
+/// use pindakaas::{decision::integer::IntVar, Cnf};
+///
+/// let mut cnf = Cnf::default();
+/// let x = IntVar::new(0..=4);
+/// let y = -x.clone() * 2 + 5;
+/// assert_eq!((y.min(), y.max()), (-3, 5));
+/// // `y ≥ 0` is `x ≤ 2`, which is one literal of `x`.
+/// assert_eq!(y.at_least(&mut cnf, 0)?, x.at_most(&mut cnf, 2)?);
+/// # Ok::<(), pindakaas::Unsatisfiable>(())
+/// ```
 #[derive(Clone, Debug)]
-pub struct IntVar(Rc<RefCell<IntVarState>>);
+pub struct IntVar {
+	state: Rc<RefCell<IntVarState>>,
+	/// What the variable is multiplied by, which is never zero.
+	scale: Coeff,
+	/// What is added to the scaled variable.
+	offset: Coeff,
+}
 
 /// Everything about a variable that can change after it is created.
 #[derive(Debug)]
@@ -179,6 +211,13 @@ pub(crate) enum Literals<T> {
 #[derive(Clone, Debug)]
 pub(crate) struct OrderEncoding {
 	x: Literals<Lit>,
+}
+
+/// The view `x + shift` of a variable.
+#[derive(Clone, Debug)]
+pub(crate) struct ShiftedVar {
+	state: Rc<RefCell<IntVarState>>,
+	shift: Coeff,
 }
 
 /// Uses lexicographic constraint to constrain x:B >= k
@@ -414,6 +453,22 @@ impl BinaryEncoding {
 	}
 }
 
+impl Add<IntVar> for Coeff {
+	type Output = IntVar;
+
+	fn add(self, rhs: IntVar) -> Self::Output {
+		rhs + self
+	}
+}
+
+impl Mul<IntVar> for Coeff {
+	type Output = IntVar;
+
+	fn mul(self, rhs: IntVar) -> Self::Output {
+		rhs * self
+	}
+}
+
 impl DirectEncoding {
 	/// The encoding as a weighted sum of literals, plus what it is worth when
 	/// none of them hold.
@@ -529,7 +584,30 @@ impl DirectEncoding {
 impl EncodedViews<'_> {
 	/// Whether the variable is at least `v`, or `None` where no encoding says.
 	pub fn at_least(&self, v: Coeff) -> Option<BoolVal> {
-		let state = self.0 .0.borrow();
+		// Mapping a value far outside the view onto the variable can overflow.
+		if v <= self.0.min() {
+			return Some(BoolVal::Const(true));
+		} else if v > self.0.max() {
+			return Some(BoolVal::Const(false));
+		}
+		let (v, negated) = self.0.at_least_of_base(v);
+		let lit = self.base_at_least(v)?;
+		Some(if negated { !lit } else { lit })
+	}
+
+	/// Whether the variable is at most `v`, or `None` where no encoding says.
+	pub fn at_most(&self, v: Coeff) -> Option<BoolVal> {
+		// `v + 1` overflows at the greatest coefficient.
+		if v >= self.0.max() {
+			return Some(BoolVal::Const(true));
+		}
+		self.at_least(v + 1).map(|lit| !lit)
+	}
+
+	/// Whether the variable itself is at least `v`, or `None` where no
+	/// encoding says.
+	fn base_at_least(&self, v: Coeff) -> Option<BoolVal> {
+		let state = self.0.state.borrow();
 		if v <= *state.domain.min().unwrap() {
 			Some(BoolVal::Const(true))
 		} else if v > *state.domain.max().unwrap() {
@@ -542,15 +620,11 @@ impl EncodedViews<'_> {
 		}
 	}
 
-	/// Whether the variable is at most `v`, or `None` where no encoding says.
-	pub fn at_most(&self, v: Coeff) -> Option<BoolVal> {
-		self.at_least(v + 1).map(|lit| !lit)
-	}
-
-	/// Whether the variable takes `v`, or `None` where no encoding says.
-	pub fn equals(&self, v: Coeff) -> Option<BoolVal> {
+	/// Whether the variable itself takes `v`, or `None` where no encoding
+	/// says.
+	fn base_equals(&self, v: Coeff) -> Option<BoolVal> {
 		let (min, max) = {
-			let state = self.0 .0.borrow();
+			let state = self.0.state.borrow();
 			if !state.domain.contains(&v) {
 				return Some(BoolVal::Const(false));
 			} else if state.domain.card().unwrap() == 1 {
@@ -565,42 +639,95 @@ impl EncodedViews<'_> {
 		// Only where the order encoding is the one already there, since
 		// otherwise the direct encoding answers in one literal anyway.
 		if v == max {
-			self.at_least(v)
+			self.base_at_least(v)
 		} else if v == min {
-			self.at_most(v)
+			self.base_at_least(v + 1).map(|lit| !lit)
 		} else {
 			None
+		}
+	}
+
+	/// Whether the variable takes `v`, or `None` where no encoding says.
+	pub fn equals(&self, v: Coeff) -> Option<BoolVal> {
+		if v < self.0.min() || v > self.0.max() {
+			return Some(BoolVal::Const(false));
+		}
+		match self.0.equals_of_base(v) {
+			// A value the view steps over is never taken.
+			None => Some(BoolVal::Const(false)),
+			Some(v) => self.base_equals(v),
 		}
 	}
 }
 
 impl IntVar {
+	/// The view `a·self + b` for a nonzero `a`, see the [module
+	/// documentation](self) for when it panics. A falling view needs the
+	/// variable's order consistency constraint.
+	fn affine(&self, a: Coeff, b: Coeff) -> Self {
+		debug_assert_ne!(a, 0, "a view scaled by zero is a constant, not a view");
+		// See `mapped` for why a falling view needs order consistency.
+		debug_assert!(
+			a > 0 || self.state.borrow().order_consistency,
+			"a falling view of {self} needs its order consistency"
+		);
+		let (lb, ub) = self.base_ends();
+		let checked = || {
+			let scale = a.checked_mul(self.scale)?;
+			let offset = a.checked_mul(self.offset)?.checked_add(b)?;
+			// The ends of the domain bound every value of the view.
+			for v in [lb, ub] {
+				let _ = scale.checked_mul(v)?.checked_add(offset)?;
+			}
+			Some((scale, offset))
+		};
+		let Some((scale, offset)) = checked() else {
+			panic!("the view {a}·({self}){b:+} overflows a coefficient");
+		};
+		Self {
+			state: Rc::clone(&self.state),
+			scale,
+			offset,
+		}
+	}
+
 	/// The variable as a weighted sum of literals, plus what it is worth when
 	/// none of them hold.
 	///
 	/// Read through whichever encoding it has, so that a constraint wanting
 	/// literals rather than integers gets the ones already standing for it.
+	/// Through a view, each weight is multiplied by its scale.
 	pub(crate) fn as_weighted<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
 	) -> Result<(Vec<(Lit, Coeff)>, Coeff), Unsatisfiable> {
-		{
-			let state = self.0.borrow();
+		let encoded = {
+			let state = self.state.borrow();
 			match (
 				state.direct.as_ref(),
 				state.order.as_ref(),
 				state.binary.as_ref(),
 			) {
-				(.., Some(bin)) => return Ok(bin.as_weighted()),
-				(Some(dir), ..) => return Ok(dir.as_weighted(&state.domain)),
-				(_, Some(ord), _) => return Ok(ord.as_weighted(&state.domain)),
-				_ => {}
+				(.., Some(bin)) => Some(bin.as_weighted()),
+				(Some(dir), ..) => Some(dir.as_weighted(&state.domain)),
+				(_, Some(ord), _) => Some(ord.as_weighted(&state.domain)),
+				_ => None,
 			}
+		};
+		let (lits, constant) = match encoded {
+			Some(weighted) => weighted,
+			// Nothing has been asked of it yet. The binary encoding is the one
+			// that costs least to make.
+			None => self.binary_encoding(db)?.as_weighted(),
+		};
+		if self.is_base() {
+			return Ok((lits, constant));
 		}
-		// Nothing has been asked of it yet. The binary encoding is the one that
-		// costs least to make.
-		let bin = self.binary_encoding(db)?;
-		Ok(bin.as_weighted())
+		let lits = lits
+			.into_iter()
+			.map(|(lit, weight)| (lit, weight * self.scale))
+			.collect();
+		Ok((lits, self.through(constant)))
 	}
 
 	/// Refuse another encoding for a variable without its order consistency
@@ -608,7 +735,7 @@ impl IntVar {
 	/// value.
 	fn assert_order_consistency(&self, encoding: &str) {
 		assert!(
-			self.0.borrow().order_consistency,
+			self.state.borrow().order_consistency,
 			"{} has no order consistency constraint, so it cannot take a {encoding} encoding",
 			self.label()
 		);
@@ -632,9 +759,20 @@ impl IntVar {
 		if let Some(lit) = self.encoded().at_least(v) {
 			return Ok(lit);
 		}
+		let (v, negated) = self.at_least_of_base(v);
 		let order = self.order_encoding(db)?;
-		let state = self.0.borrow();
-		Ok(order.lit_at_least(&state.domain, v))
+		let lit = order.lit_at_least(&self.state.borrow().domain, v);
+		Ok(if negated { !lit } else { lit })
+	}
+
+	/// The value `b` of the variable itself such that `self ≥ v` is `x ≥ b`, or
+	/// `¬(x ≥ b)` where the flag is set.
+	fn at_least_of_base(&self, v: Coeff) -> (Coeff, bool) {
+		if self.scale > 0 {
+			(div_ceil(v - self.offset, self.scale), false)
+		} else {
+			(div_floor(v - self.offset, self.scale) + 1, true)
+		}
 	}
 
 	/// Returns a [`BoolVal`] indicating whether the variable is at most `v`,
@@ -649,12 +787,48 @@ impl IntVar {
 		db: &mut Db,
 		v: Coeff,
 	) -> Result<BoolVal, Unsatisfiable> {
+		// `v + 1` overflows at the greatest coefficient.
+		if v >= self.max() {
+			return Ok(BoolVal::Const(true));
+		}
 		Ok(!self.at_least(db, v + 1)?)
 	}
 
-	#[cfg(test)]
-	/// Returns [`BoolVal`]s representing the variable's bits, least significant
-	/// first, together with the minimum value when all bits are zero.
+	/// The variable the view is on.
+	pub(crate) fn base(&self) -> IntVar {
+		IntVar {
+			state: Rc::clone(&self.state),
+			scale: 1,
+			offset: 0,
+		}
+	}
+
+	/// The least and the greatest value of the variable itself.
+	fn base_ends(&self) -> (Coeff, Coeff) {
+		let state = self.state.borrow();
+		(*state.domain.min().unwrap(), *state.domain.max().unwrap())
+	}
+
+	/// The label of the variable itself, which its literals are named after.
+	fn base_label(&self) -> String {
+		#[cfg(any(feature = "tracing", test))]
+		return self.state.borrow().label.clone();
+		#[cfg(not(any(feature = "tracing", test)))]
+		return String::new();
+	}
+
+	/// The term `c·self` as `(c·scale, x, c·offset)`: a term over the variable
+	/// itself, and a constant.
+	pub(crate) fn base_term(&self, c: Coeff) -> (Coeff, IntVar, Coeff) {
+		let (Some(scale), Some(offset)) = (c.checked_mul(self.scale), c.checked_mul(self.offset))
+		else {
+			panic!("the term {c}·({self}) overflows a coefficient");
+		};
+		(scale, self.base(), offset)
+	}
+
+	/// The bits of the binary encoding, least significant first, with `weight`
+	/// and `constant` such that the view is `weight·Σ 2ⁱ·bitᵢ + constant`.
 	///
 	/// A bit is a constant where the domain leaves it no choice. The binary
 	/// encoding is created if the variable has not been asked for one before.
@@ -666,24 +840,21 @@ impl IntVar {
 	pub(crate) fn binary_bits<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
-	) -> Result<(Vec<BoolVal>, Coeff), Unsatisfiable> {
+	) -> Result<(Vec<BoolVal>, Coeff, Coeff), Unsatisfiable> {
 		let binary = self.binary_encoding(db)?;
-		Ok((binary.to_vec(), binary.min()))
+		Ok((binary.to_vec(), self.scale, self.through(binary.min())))
 	}
 
-	/// The binary encoding of the variable, created if this is the first
-	/// request for it.
-	pub(crate) fn binary_encoding<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-	) -> Result<BinaryEncoding> {
-		if let Some(bin) = self.0.borrow().binary.as_ref() {
+	/// The binary encoding of the variable itself, over its own domain,
+	/// created if this is the first request for it.
+	fn binary_encoding<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result<BinaryEncoding> {
+		if let Some(bin) = self.state.borrow().binary.as_ref() {
 			return Ok(bin.clone());
 		}
 		// Take what is needed out of the variable before touching the database,
 		// so that no borrow is held while clauses are emitted.
 		let (domain, view) = {
-			let state = self.0.borrow();
+			let state = self.state.borrow();
 			let view = state
 				.order
 				.as_ref()
@@ -698,10 +869,10 @@ impl IntVar {
 		let bin = match view {
 			Some(bin) => bin,
 			None => {
-				let bin = BinaryEncoding::new(db, &domain, &self.label());
+				let bin = BinaryEncoding::new(db, &domain, &self.base_label());
 				if self.needs_constraining() {
 					bin.consistent(db, &domain)?;
-					self.0.borrow_mut().constrained = true;
+					self.state.borrow_mut().constrained = true;
 				}
 				bin
 			}
@@ -714,9 +885,18 @@ impl IntVar {
 		Ok(bin)
 	}
 
+	/// What the view is worth when every bit of the binary encoding is zero,
+	/// whether or not the encoding exists yet.
+	pub(crate) fn binary_least(&self) -> Coeff {
+		match self.state.borrow().binary.as_ref() {
+			Some(bin) => self.through(bin.min()),
+			None => self.through(self.base_ends().0),
+		}
+	}
+
 	/// Returns the number of values in the domain.
 	pub fn card(&self) -> usize {
-		self.0.borrow().domain.card().unwrap()
+		self.state.borrow().domain.card().unwrap()
 	}
 
 	/// Constrain the order and binary encodings to represent the same value.
@@ -729,7 +909,7 @@ impl IntVar {
 	/// their bounds resolve to constants.
 	fn channel<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		let (domain, ord, bin) = {
-			let mut state = self.0.borrow_mut();
+			let mut state = self.state.borrow_mut();
 			match (state.order.as_ref(), state.binary.as_ref()) {
 				(Some(ord), Some(bin)) if state.channelled[0] != Some(Comparator::Equal) => {
 					let all = (state.domain.clone(), ord.clone(), bin.clone());
@@ -764,7 +944,7 @@ impl IntVar {
 	/// clause each per value.
 	fn channel_direct<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		let (ord, dir, domain) = {
-			let mut state = self.0.borrow_mut();
+			let mut state = self.state.borrow_mut();
 			match (state.order.as_ref(), state.direct.as_ref()) {
 				(Some(ord), Some(dir)) if state.channelled[1] != Some(Comparator::Equal) => {
 					let all = (ord.clone(), dir.clone(), state.domain.clone());
@@ -789,7 +969,7 @@ impl IntVar {
 
 	/// Check that bits given for this variable can hold its domain and no more.
 	fn check_bits(&self, bits: &[BoolVal], min: Coeff) {
-		let domain = &self.0.borrow().domain;
+		let domain = &self.state.borrow().domain;
 		assert!(
 			min <= *domain.min().unwrap(),
 			"a binary encoding counts up from {min}, which is past the domain it is for"
@@ -813,7 +993,7 @@ impl IntVar {
 	/// database.
 	pub fn constrain<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		let (lead, order, direct, binary, domain) = {
-			let mut state = self.0.borrow_mut();
+			let mut state = self.state.borrow_mut();
 			if state.constrained {
 				return Ok(());
 			}
@@ -834,17 +1014,14 @@ impl IntVar {
 		}
 	}
 
-	/// The direct encoding of the variable, created if this is the first
-	/// request for it.
-	pub(crate) fn direct_encoding<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-	) -> Result<DirectEncoding> {
-		if let Some(dir) = self.0.borrow().direct.as_ref() {
+	/// The direct encoding of the variable itself, over its own domain, created
+	/// if this is the first request for it.
+	fn direct_encoding<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result<DirectEncoding> {
+		if let Some(dir) = self.state.borrow().direct.as_ref() {
 			return Ok(dir.clone());
 		}
 		let shared = self
-			.0
+			.state
 			.borrow()
 			.order
 			.as_ref()
@@ -852,11 +1029,11 @@ impl IntVar {
 		if let Some(lit) = shared {
 			// The order literal of a two-valued variable already says which
 			// value it takes.
-			let dir = DirectEncoding::from_literals(&self.0.borrow().domain, vec![!lit, lit]);
+			let dir = DirectEncoding::from_literals(&self.state.borrow().domain, vec![!lit, lit]);
 			self.install_direct(db, dir.clone(), Some(Comparator::Equal))?;
 			return Ok(dir);
 		}
-		let domain = self.0.borrow().domain.clone();
+		let domain = self.state.borrow().domain.clone();
 		let vals = || domain.iter().flatten();
 		debug_assert!(
 			vals().count() > 1,
@@ -864,20 +1041,23 @@ impl IntVar {
 		);
 		let dir = if vals().count() == 2 {
 			// A literal and its negation hold for exactly one of two values.
-			let lit = new_named_lit!(db, format!("{}={}", self.label(), domain.max().unwrap()));
+			let lit = new_named_lit!(
+				db,
+				format!("{}={}", self.base_label(), domain.max().unwrap())
+			);
 			DirectEncoding::from_literals(&domain, vec![!lit, lit])
 		} else {
 			DirectEncoding {
 				x: Literals::Range(new_named_var_range!(db, vals().count(), |i| format!(
 					"{}={}",
-					self.label(),
+					self.base_label(),
 					vals().nth(i).unwrap()
 				))),
 			}
 		};
 		if self.needs_constraining() {
 			dir.consistent(db)?;
-			self.0.borrow_mut().constrained = true;
+			self.state.borrow_mut().constrained = true;
 		}
 		self.install_direct(db, dir.clone(), None)?;
 		Ok(dir)
@@ -891,9 +1071,12 @@ impl IntVar {
 		geq: bool,
 	) -> Result<Vec<(Coeff, BoolVal)>, Unsatisfiable> {
 		let direct = self.direct_encoding(db)?;
-		let state = self.0.borrow();
+		let state = self.state.borrow();
 		// Collected, for the reason given on [`IntVar::order_steps`].
-		Ok(direct.iter(&state.domain, geq).collect())
+		Ok(direct
+			.iter(&state.domain, geq == (self.scale > 0))
+			.map(|(v, guard)| (self.through(v), guard))
+			.collect())
 	}
 
 	/// Walks the direct encoding, pairing every value of the domain with a
@@ -911,23 +1094,43 @@ impl IntVar {
 			return Ok(vec![(self.min(), BoolVal::Const(true))].into_iter());
 		}
 		let direct = self.direct_encoding(db)?;
-		let state = self.0.borrow();
+		let state = self.state.borrow();
 		Ok(direct
 			.walk(&state.domain)
-			.map(|(v, l)| (v, BoolVal::Lit(l)))
+			.map(|(v, l)| (self.through(v), BoolVal::Lit(l)))
 			.collect_vec()
 			.into_iter())
 	}
 
-	/// Returns the values the variable can take, borrowed from the variable.
-	///
-	/// # Panics
-	///
-	/// Creating an encoding of this variable while the borrow is alive, since
-	/// the domain is read through the same cell the encodings are kept in.
-	/// Clone the domain where it has to outlive the call.
-	pub fn domain(&self) -> Ref<'_, RangeList<Coeff>> {
-		Ref::map(self.0.borrow(), |state| &state.domain)
+	/// Returns the values the variable can take.
+	pub fn domain(&self) -> RangeList<Coeff> {
+		let state = self.state.borrow();
+		if self.is_base() {
+			return state.domain.clone();
+		}
+		let mut ranges = if self.scale.abs() == 1 {
+			state
+				.domain
+				.iter()
+				.map(|range| {
+					let (a, b) = (self.through(*range.start()), self.through(*range.end()));
+					min(a, b)..=max(a, b)
+				})
+				.collect_vec()
+		} else {
+			// A scale past one spaces the values out, so each is its own range.
+			state
+				.domain
+				.iter()
+				.flatten()
+				.map(|v| self.through(v)..=self.through(v))
+				.collect_vec()
+		};
+		if self.scale < 0 {
+			// A view that falls runs the values the other way round.
+			ranges.reverse();
+		}
+		RangeList::from_sorted_ranges(ranges)
 	}
 
 	/// What the variable's existing encodings answer, without creating one.
@@ -950,7 +1153,7 @@ impl IntVar {
 			"the binary encoding of {} is already made, so this would say nothing",
 			self.label()
 		);
-		self.0.borrow_mut().add_consistency = enforce;
+		self.state.borrow_mut().add_consistency = enforce;
 		self
 	}
 
@@ -972,9 +1175,19 @@ impl IntVar {
 		if let Some(lit) = self.encoded().equals(v) {
 			return Ok(lit);
 		}
+		let v = self
+			.equals_of_base(v)
+			.expect("a value the view steps over is settled by the domain");
 		let direct = self.direct_encoding(db)?;
-		let state = self.0.borrow();
+		let state = self.state.borrow();
 		Ok(direct.lit_equals(&state.domain, v))
+	}
+
+	/// The value of the variable itself that `self = v` asks about, or `None`
+	/// where the view steps over `v`.
+	fn equals_of_base(&self, v: Coeff) -> Option<Coeff> {
+		let v = v - self.offset;
+		(v % self.scale == 0).then(|| v / self.scale)
 	}
 
 	/// A variable on existing bits of `value - min`, least significant first.
@@ -1020,7 +1233,7 @@ impl IntVar {
 		literals: &[Lit],
 	) -> Result<Self, Unsatisfiable> {
 		let x = Self::new(domain).enforce_consistency(false);
-		let direct = DirectEncoding::from_literals(&x.0.borrow().domain, literals.to_vec());
+		let direct = DirectEncoding::from_literals(&x.state.borrow().domain, literals.to_vec());
 		x.install_direct(db, direct, None)?;
 		Ok(x)
 	}
@@ -1087,7 +1300,7 @@ impl IntVar {
 	) -> Result<Self, Unsatisfiable> {
 		let x = Self::new(domain).enforce_consistency(false);
 		let order = {
-			let state = x.0.borrow();
+			let state = x.state.borrow();
 			OrderEncoding::from_literals(&state.domain, literals.to_vec())
 		};
 		x.install_order(db, order, [None; 2])?;
@@ -1154,24 +1367,24 @@ impl IntVar {
 
 	/// Reports whether the variable has a binary encoding.
 	pub fn has_binary_encoding(&self) -> bool {
-		self.0.borrow().binary.is_some()
+		self.state.borrow().binary.is_some()
 	}
 
 	/// Whether a direct encoding exists.
 	pub fn has_direct_encoding(&self) -> bool {
-		self.0.borrow().direct.is_some()
+		self.state.borrow().direct.is_some()
 	}
 
 	/// Reports whether the variable has an order encoding.
 	pub fn has_order_encoding(&self) -> bool {
-		self.0.borrow().order.is_some()
+		self.state.borrow().order.is_some()
 	}
 
 	/// A view on the literals of `x`, which has no order consistency
 	/// constraint where `x` has none.
 	pub(crate) fn inherit_order_consistency(self, x: &IntVar) -> Self {
-		let order_consistency = x.0.borrow().order_consistency;
-		self.0.borrow_mut().order_consistency &= order_consistency;
+		let order_consistency = x.state.borrow().order_consistency;
+		self.state.borrow_mut().order_consistency &= order_consistency;
 		self
 	}
 
@@ -1186,7 +1399,7 @@ impl IntVar {
 	) -> Result {
 		self.assert_order_consistency("binary");
 		{
-			let mut state = self.0.borrow_mut();
+			let mut state = self.state.borrow_mut();
 			debug_assert!(
 				state.binary.is_none(),
 				"{} is already binary encoded",
@@ -1210,7 +1423,7 @@ impl IntVar {
 	) -> Result {
 		self.assert_order_consistency("direct");
 		{
-			let mut state = self.0.borrow_mut();
+			let mut state = self.state.borrow_mut();
 			debug_assert!(
 				state.direct.is_none(),
 				"{} is already directly encoded",
@@ -1235,7 +1448,7 @@ impl IntVar {
 		already_channelled: [Option<Comparator>; 2],
 	) -> Result {
 		{
-			let mut state = self.0.borrow_mut();
+			let mut state = self.state.borrow_mut();
 			debug_assert!(
 				state.order.is_none(),
 				"{} is already order encoded",
@@ -1248,10 +1461,34 @@ impl IntVar {
 		self.reconcile(db)
 	}
 
-	/// Whether `other` is this variable rather than another with the same
-	/// domain and encodings.
+	/// The view as `scale·(x + shift)`, for a view whose scale divides its
+	/// offset, as it does where its least value is zero.
+	pub(crate) fn into_scaled_shift(self) -> (Coeff, ShiftedVar) {
+		debug_assert_eq!(
+			self.offset % self.scale,
+			0,
+			"{self} is not a multiple of its variable plus a constant"
+		);
+		let shift = self.offset / self.scale;
+		(
+			self.scale,
+			ShiftedVar {
+				state: self.state,
+				shift,
+			},
+		)
+	}
+
+	/// Whether `other` is the same view of the same variable.
 	pub(crate) fn is(&self, other: &IntVar) -> bool {
-		Rc::ptr_eq(&self.0, &other.0)
+		Rc::ptr_eq(&self.state, &other.state)
+			&& self.scale == other.scale
+			&& self.offset == other.offset
+	}
+
+	/// Whether this handle is the variable itself rather than a view of it.
+	fn is_base(&self) -> bool {
+		self.scale == 1 && self.offset == 0
 	}
 
 	/// Whether [`IntTernaryEncoder`] reads this variable on its direct
@@ -1264,14 +1501,15 @@ impl IntVar {
 	}
 
 	/// The label of the variable, which is empty unless tracing is enabled —
-	/// nothing else has a use for one, so nothing else pays to store it. Use
-	/// the [`Display`] implementation to name a variable in a message, which
-	/// falls back to its domain.
+	/// nothing else has a use for one, so nothing else pays to store it. A
+	/// view adds its arithmetic, as in `2·x-3`. Use the [`Display`]
+	/// implementation to name a variable in a message, which falls back to its
+	/// address.
 	pub fn label(&self) -> String {
-		#[cfg(any(feature = "tracing", test))]
-		return self.0.borrow().label.clone();
-		#[cfg(not(any(feature = "tracing", test)))]
-		return String::new();
+		match self.base_label() {
+			label if label.is_empty() => label,
+			label => self.view_of(&label),
+		}
 	}
 
 	/// The variable `f(x)` on the order literals of `x`, with `x` held to the
@@ -1300,7 +1538,7 @@ impl IntVar {
 		// A falling view negates the literals of `x`, which turns a literal
 		// that can hold spuriously into one that can fail to.
 		assert!(
-			rising || x.0.borrow().order_consistency,
+			rising || x.state.borrow().order_consistency,
 			"a falling view of {x} needs its order consistency"
 		);
 		if let Some(i) = images.iter().position(|&w| w > max) {
@@ -1331,35 +1569,24 @@ impl IntVar {
 
 	/// Returns the greatest value the variable can take.
 	pub fn max(&self) -> Coeff {
-		*self.0.borrow().domain.max().unwrap()
+		let (a, b) = self.through_ends();
+		max(a, b)
 	}
 
 	/// Returns the least value the variable can take.
 	pub fn min(&self) -> Coeff {
-		*self.0.borrow().domain.min().unwrap()
+		let (a, b) = self.through_ends();
+		min(a, b)
 	}
 
-	/// Creates the variable `min + max − x`, which counts the same domain from
-	/// the other end.
-	///
-	/// Its literals are `x`'s: reaching a value from below is `x` failing to
-	/// reach past the value that mirrors it. A term with a negative coefficient
-	/// is turned around this way, since `c·x` is `c·(min + max) − c·x'`.
-	///
-	/// # Errors
-	///
-	/// [`Unsatisfiable`] when creating or channelling the required order view
-	/// contradicts the database.
-	pub fn mirrored<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		x: &IntVar,
-	) -> Result<Self, Unsatisfiable> {
-		let (min, max) = (x.min(), x.max());
-		Ok(Self::mapped(db, x, |v| min + max - v, Coeff::MAX)?.expect("a mirror falls"))
+	/// The view `min + max − x`, which counts the same domain from the other
+	/// end.
+	pub(crate) fn mirrored(&self) -> IntVar {
+		-self.clone() + (self.min() + self.max())
 	}
 
-	/// Drop the values outside `min..=max` from the domain, reporting whether
-	/// any went.
+	/// Drop the values of the variable itself outside `min..=max`, with `None`
+	/// for a side without a bound, reporting whether any went.
 	///
 	/// Order and direct literals of a dropped value are fixed by a unit clause
 	/// and leave the variable, so nothing walks them again. A variable with a
@@ -1373,24 +1600,25 @@ impl IntVar {
 	fn narrow<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
-		min: Coeff,
-		max: Coeff,
+		min: Option<Coeff>,
+		max: Option<Coeff>,
 	) -> Result<bool, Unsatisfiable> {
-		let mut state = self.0.borrow_mut();
+		let mut state = self.state.borrow_mut();
 		let state = &mut *state;
 		let (lb, ub) = (*state.domain.min().unwrap(), *state.domain.max().unwrap());
+		let (min, max) = (min.map_or(lb, |v| v.max(lb)), max.map_or(ub, |v| v.min(ub)));
 		if min > ub || max < lb {
 			// No value is left, which the database is told as well as the
 			// caller.
 			db.contradiction()?;
 			return Err(Unsatisfiable);
-		} else if (min <= lb && max >= ub) || state.binary.is_some() {
+		} else if (min == lb && max == ub) || state.binary.is_some() {
 			return Ok(false);
 		}
 		let before = state.domain.clone();
-		state.domain.tighten_min(min.max(lb));
+		state.domain.tighten_min(min);
 		let below = before.card().unwrap() - state.domain.card().unwrap();
-		state.domain.tighten_max(max.min(ub));
+		state.domain.tighten_max(max);
 		let above = before.card().unwrap() - below - state.domain.card().unwrap();
 		let mut units = Vec::new();
 		if let Some(direct) = state.direct.as_mut() {
@@ -1420,6 +1648,31 @@ impl IntVar {
 		Ok(below + above > 0)
 	}
 
+	/// Narrow the domain to the values where `self ≥ v` is `holds`, reporting
+	/// whether any went.
+	fn narrow_at_least<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		v: Coeff,
+		holds: bool,
+	) -> Result<bool, Unsatisfiable> {
+		// Mapping a value past the view onto the variable can overflow.
+		let (min, max) = (self.min(), self.max());
+		if v <= min || v > max {
+			if (v <= min) == holds {
+				return Ok(false);
+			}
+			db.contradiction()?;
+			return Err(Unsatisfiable);
+		}
+		let (b, negated) = self.at_least_of_base(v);
+		if holds != negated {
+			self.narrow(db, Some(b), None)
+		} else {
+			self.narrow(db, None, Some(b - 1))
+		}
+	}
+
 	/// Whether an encoding being created has to be held to the domain itself.
 	///
 	/// It does when it is the variable's first, and does not when it is not:
@@ -1427,7 +1680,7 @@ impl IntVar {
 	/// that already holds a value of the domain, whether by clauses here or by
 	/// the promise a caller made about its literals.
 	fn needs_constraining(&self) -> bool {
-		let state = self.0.borrow();
+		let state = self.state.borrow();
 		state.add_consistency
 			&& !state.constrained
 			&& state.order.is_none()
@@ -1459,36 +1712,37 @@ impl IntVar {
 	pub fn new(domain: impl Into<RangeList<Coeff>>) -> Self {
 		let domain = domain.into();
 		debug_assert!(!domain.is_empty(), "an integer variable needs a domain");
-		Self(Rc::new(RefCell::new(IntVarState {
-			domain,
-			#[cfg(any(feature = "tracing", test))]
-			label: String::new(),
-			add_consistency: true,
-			order_consistency: true,
-			order: None,
-			binary: None,
-			direct: None,
-			channelled: [None; 2],
-			constrained: false,
-			products: FxHashMap::default(),
-			lead: None,
-		})))
+		Self {
+			state: Rc::new(RefCell::new(IntVarState {
+				domain,
+				#[cfg(any(feature = "tracing", test))]
+				label: String::new(),
+				add_consistency: true,
+				order_consistency: true,
+				order: None,
+				binary: None,
+				direct: None,
+				channelled: [None; 2],
+				constrained: false,
+				products: FxHashMap::default(),
+				lead: None,
+			})),
+			scale: 1,
+			offset: 0,
+		}
 	}
 
-	/// The order encoding of the variable, created if this is the first request
-	/// for it.
-	pub(crate) fn order_encoding<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-	) -> Result<OrderEncoding> {
-		if let Some(ord) = self.0.borrow().order.as_ref() {
+	/// The order encoding of the variable itself, over its own domain, created
+	/// if this is the first request for it.
+	fn order_encoding<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result<OrderEncoding> {
+		if let Some(ord) = self.state.borrow().order.as_ref() {
 			return Ok(ord.clone());
 		}
-		let domain = self.0.borrow().domain.clone();
+		let domain = self.state.borrow().domain.clone();
 		// Only where the direct literals are each other's negation does the
 		// second say the variable reaches its larger value without a channel.
 		let shared = self
-			.0
+			.state
 			.borrow()
 			.direct
 			.as_ref()
@@ -1498,12 +1752,12 @@ impl IntVar {
 			self.install_order(db, ord.clone(), [None, Some(Comparator::Equal)])?;
 			return Ok(ord);
 		}
-		let ord = OrderEncoding::new(db, &domain, &self.label());
+		let ord = OrderEncoding::new(db, &domain, &self.base_label());
 		// Without it the literals describe no value, which only a variable
 		// the merges of a sorting network read can do without.
-		if self.0.borrow().order_consistency {
+		if self.state.borrow().order_consistency {
 			ord.consistent(db)?;
-			self.0.borrow_mut().constrained = true;
+			self.state.borrow_mut().constrained = true;
 		}
 
 		self.install_order(db, ord.clone(), [None; 2])?;
@@ -1521,10 +1775,13 @@ impl IntVar {
 		geq: bool,
 	) -> Result<Vec<(Coeff, BoolVal)>, Unsatisfiable> {
 		let order = self.order_encoding(db)?;
-		let state = self.0.borrow();
+		let state = self.state.borrow();
 		// Collect before returning: a live borrow would prevent a constraint
 		// from mentioning the same variable twice.
-		Ok(order.iter(&state.domain, geq).collect())
+		Ok(order
+			.iter(&state.domain, geq == (self.scale > 0))
+			.map(|(v, guard)| (self.through(v), guard))
+			.collect())
 	}
 
 	#[cfg(test)]
@@ -1542,14 +1799,12 @@ impl IntVar {
 		&self,
 		db: &mut Db,
 	) -> Result<impl Iterator<Item = (Coeff, BoolVal)>, Unsatisfiable> {
-		let order = self.order_encoding(db)?;
-		let state = self.0.borrow();
-		Ok(state
-			.domain
+		let domain = self.domain();
+		Ok(domain
 			.iter()
 			.flatten()
-			.map(|v| (v, order.lit_at_least(&state.domain, v)))
-			.collect_vec()
+			.map(|v| Ok((v, self.at_least(db, v)?)))
+			.collect::<Result<Vec<_>, Unsatisfiable>>()?
 			.into_iter())
 	}
 
@@ -1560,7 +1815,7 @@ impl IntVar {
 	/// held in binary once its domain grows past `cutoff`, and always in order
 	/// form when there is no cutoff.
 	pub(crate) fn prefers_binary(&self, cutoff: Option<Coeff>) -> bool {
-		let state = self.0.borrow();
+		let state = self.state.borrow();
 		match (state.binary.is_some(), state.order.is_some(), cutoff) {
 			(true, _, _) => true,
 			(_, true, _) => false,
@@ -1570,14 +1825,18 @@ impl IntVar {
 		}
 	}
 
-	/// The bits of `c·(x − min)`, where they have already been built.
+	/// The bits of `c·(x − min)` for a positive `c` where they are built, with
+	/// `min` what the binary encoding counts from. Only the variable itself
+	/// keeps products, see [`IntVar::base_term`].
 	pub(crate) fn product(&self, c: Coeff) -> Option<Vec<BoolVal>> {
+		debug_assert!(self.is_base(), "a product is kept by the variable itself");
+		let state = self.state.borrow();
 		// The bits of `1·x` are the binary encoding itself, so there is nothing
 		// to remember separately.
 		if c == 1 {
-			return self.0.borrow().binary.as_ref().map(BinaryEncoding::to_vec);
+			return state.binary.as_ref().map(BinaryEncoding::to_vec);
 		}
-		self.0.borrow().products.get(&c).cloned()
+		state.products.get(&c).cloned()
 	}
 
 	/// Tie together whatever encodings the variable now has, so that every view
@@ -1589,7 +1848,7 @@ impl IntVar {
 	/// price of reading it two ways at once.
 	fn reconcile<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result {
 		let (has_order_encoding, others) = {
-			let state = self.0.borrow();
+			let state = self.state.borrow();
 			(
 				state.order.is_some(),
 				usize::from(state.binary.is_some()) + usize::from(state.direct.is_some()),
@@ -1607,7 +1866,7 @@ impl IntVar {
 		self.channel_direct(db)?;
 		// Binary is cheapest to read, but can lead only when channelled
 		// equally.
-		let mut state = self.0.borrow_mut();
+		let mut state = self.state.borrow_mut();
 		let equal = [
 			state.channelled[0] == Some(Comparator::Equal),
 			state.channelled[1] == Some(Comparator::Equal),
@@ -1618,6 +1877,32 @@ impl IntVar {
 		Ok(())
 	}
 
+	#[cfg(test)]
+	/// Give the variable a binary encoding, if it has none yet.
+	pub(crate) fn require_binary_encoding<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result {
+		self.binary_encoding(db).map(drop)
+	}
+
+	#[cfg(test)]
+	/// Give the variable a direct encoding, if it has none yet.
+	pub(crate) fn require_direct_encoding<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result {
+		self.direct_encoding(db).map(drop)
+	}
+
+	/// Give the variable an order encoding, if it has none yet.
+	pub(crate) fn require_order_encoding<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+	) -> Result {
+		self.order_encoding(db).map(drop)
+	}
+
 	/// Drop the values above `v` from the domain, reporting whether any went.
 	///
 	/// See [`IntVar::narrow`] for what becomes of the literals.
@@ -1626,7 +1911,11 @@ impl IntVar {
 		db: &mut Db,
 		v: Coeff,
 	) -> Result<bool, Unsatisfiable> {
-		self.narrow(db, Coeff::MIN, v)
+		// `v + 1` overflows at the greatest coefficient.
+		if v >= self.max() {
+			return Ok(false);
+		}
+		self.narrow_at_least(db, v + 1, false)
 	}
 
 	/// Drop the values below `v` from the domain, reporting whether any went.
@@ -1637,27 +1926,27 @@ impl IntVar {
 		db: &mut Db,
 		v: Coeff,
 	) -> Result<bool, Unsatisfiable> {
-		self.narrow(db, v, Coeff::MAX)
+		self.narrow_at_least(db, v, true)
 	}
 
 	/// Remember the bits of `c·(x − min)`, so that the next constraint to scale
-	/// the variable by `c` finds them.
+	/// the variable by `c` finds them. See [`IntVar::product`].
 	pub(crate) fn set_product(&self, c: Coeff, bits: Vec<BoolVal>) {
-		debug_assert_ne!(c, 1);
-		let _ = self.0.borrow_mut().products.insert(c, bits);
+		debug_assert!(self.is_base(), "a product is kept by the variable itself");
+		debug_assert!(c > 1, "the bits of `x` are the encoding itself");
+		let _ = self.state.borrow_mut().products.insert(c, bits);
 	}
 
-	/// The variable `x + k`, which reaches `v` exactly when `x` reaches
-	/// `v - k`.
-	///
-	/// Its literals are `x`'s, the domain having only moved along.
-	pub(crate) fn shifted<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		x: &IntVar,
-		k: Coeff,
-	) -> Result<Self, Unsatisfiable> {
-		let shifted = Self::mapped(db, x, |v| v + k, Coeff::MAX)?.expect("a shift rises");
-		Ok(shifted.with_label(format_args!("{}+{k}", x.label())))
+	/// What the view makes of the value `v` of the variable itself.
+	fn through(&self, v: Coeff) -> Coeff {
+		self.scale * v + self.offset
+	}
+
+	/// What the view makes of the least and the greatest value of the
+	/// variable itself, in that order.
+	fn through_ends(&self) -> (Coeff, Coeff) {
+		let (lb, ub) = self.base_ends();
+		(self.through(lb), self.through(ub))
 	}
 
 	/// The value read from the variable's leading encoding.
@@ -1666,29 +1955,54 @@ impl IntVar {
 	/// the assignment. The variable and its views must belong to the model's
 	/// database; querying a value does not create an encoding.
 	pub fn value<F: crate::Valuation + ?Sized>(&self, value: &F) -> Coeff {
-		let state = self.0.borrow();
+		let state = self.state.borrow();
 		// Only the leading encoding is known to say what the variable is worth.
 		// Another may merely bound it, if what ties them is one-directional.
-		match state.lead {
+		let v = match state.lead {
 			Some(Lead::Binary) => state.binary.as_ref().unwrap().value(value),
 			Some(Lead::Order) => state.order.as_ref().unwrap().value(&state.domain, value),
 			Some(Lead::Direct) => state.direct.as_ref().unwrap().value(&state.domain, value),
 			None => *state.domain.min().unwrap(),
-		}
+		};
+		self.through(v)
+	}
+
+	/// An identity of the variable the view is on, shared by all its views.
+	pub(crate) fn variable_id(&self) -> usize {
+		Rc::as_ptr(&self.state) as *const () as usize
+	}
+
+	/// The name of the view, given the name `base` of the variable itself.
+	fn view_of(&self, base: &str) -> String {
+		let scale = match self.scale {
+			1 => String::new(),
+			-1 => "-".to_owned(),
+			c => format!("{c}·"),
+		};
+		let offset = match self.offset {
+			0 => String::new(),
+			k => format!("{k:+}"),
+		};
+		format!("{scale}{base}{offset}")
 	}
 
 	/// An additional binary view on existing bits.
 	///
 	/// The binary view must not exist yet; bits and offset follow
-	/// [`Self::from_binary_encoding`]. `already_channelled`
-	/// records a caller-established relation to the order view: `Equal` skips
-	/// that channel; inequalities do not replace equality and are strengthened.
-	/// `None` adds missing channels, including an order view if needed.
+	/// [`Self::from_binary_encoding`], with the offset a value of the view.
+	/// `already_channelled` records a caller-established relation to the order
+	/// view: `Equal` skips that channel; inequalities do not replace equality
+	/// and are strengthened. `None` adds missing channels, including an order
+	/// view if needed.
 	///
 	/// # Errors
 	///
 	/// [`Unsatisfiable`] when the missing channel or binary consistency clauses
 	/// contradict the database.
+	///
+	/// # Panics
+	///
+	/// When the view is not of the form `x + k`.
 	pub fn with_binary_encoding<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -1696,6 +2010,11 @@ impl IntVar {
 		min: Coeff,
 		already_channelled: Option<Comparator>,
 	) -> Result {
+		assert_eq!(
+			self.scale, 1,
+			"bits can be given only to a view `x + k`, not to {self}"
+		);
+		let min = min - self.offset;
 		self.check_bits(bits, min);
 		let binary = BinaryEncoding::from_bits(bits.to_vec(), min);
 		self.install_binary(db, binary, already_channelled)
@@ -1704,8 +2023,9 @@ impl IntVar {
 	/// An additional direct view on existing literals.
 	///
 	/// The variable must not already have this view. Literal semantics and
-	/// trust requirements match [`Self::from_direct_encoding`]. See
-	/// [`Self::with_binary_encoding`] for `already_channelled`.
+	/// trust requirements match [`Self::from_direct_encoding`], over the values
+	/// of the view in order. See [`Self::with_binary_encoding`] for
+	/// `already_channelled`.
 	///
 	/// # Errors
 	///
@@ -1717,7 +2037,12 @@ impl IntVar {
 		literals: &[Lit],
 		already_channelled: Option<Comparator>,
 	) -> Result {
-		let direct = DirectEncoding::from_literals(&self.0.borrow().domain, literals.to_vec());
+		let literals = if self.scale < 0 {
+			literals.iter().rev().copied().collect()
+		} else {
+			literals.to_vec()
+		};
+		let direct = DirectEncoding::from_literals(&self.state.borrow().domain, literals);
 		self.install_direct(db, direct, already_channelled)
 	}
 
@@ -1725,11 +2050,12 @@ impl IntVar {
 	/// after it.
 	///
 	/// Nothing is kept and the name is never read unless tracing is enabled,
-	/// so a name passed as `format_args!` is never even formatted.
+	/// so a name passed as `format_args!` is never even formatted. Through a
+	/// view, it names the variable the view is on.
 	pub fn with_label(self, label: impl Display) -> Self {
 		#[cfg(any(feature = "tracing", test))]
 		{
-			self.0.borrow_mut().label = label.to_string();
+			self.state.borrow_mut().label = label.to_string();
 		}
 		#[cfg(not(any(feature = "tracing", test)))]
 		let _ = label;
@@ -1739,8 +2065,9 @@ impl IntVar {
 	/// An additional order view on existing literals.
 	///
 	/// The variable must not already have this view. Literal semantics and
-	/// trust requirements match [`Self::from_order_encoding`]. See
-	/// [`Self::with_binary_encoding`] for `already_channelled`.
+	/// trust requirements match [`Self::from_order_encoding`], over the values
+	/// of the view in order. See [`Self::with_binary_encoding`] for
+	/// `already_channelled`.
 	///
 	/// # Errors
 	///
@@ -1752,9 +2079,14 @@ impl IntVar {
 		literals: &[Lit],
 		already_channelled: Option<Comparator>,
 	) -> Result {
+		let literals = if self.scale < 0 {
+			literals.iter().rev().map(|&l| !l).collect()
+		} else {
+			literals.to_vec()
+		};
 		let order = {
-			let state = self.0.borrow();
-			OrderEncoding::from_literals(&state.domain, literals.to_vec())
+			let state = self.state.borrow();
+			OrderEncoding::from_literals(&state.domain, literals)
 		};
 		// The order encoding is the go-between, so what is said of it is said
 		// of both pairs.
@@ -1773,20 +2105,65 @@ impl IntVar {
 			"the order encoding of {} is already made, so this would say nothing",
 			self.label()
 		);
-		self.0.borrow_mut().order_consistency = false;
+		self.state.borrow_mut().order_consistency = false;
 		self
 	}
 }
 
+impl Add<Coeff> for IntVar {
+	type Output = IntVar;
+
+	/// The view `x + k`.
+	fn add(self, rhs: Coeff) -> Self::Output {
+		self.affine(1, rhs)
+	}
+}
+
 impl Display for IntVar {
-	/// The tracing label, or an address-based identifier when unlabelled.
+	/// The tracing label, or an address-based identifier when unlabelled, with
+	/// the view's arithmetic.
 	///
 	/// The fallback distinguishes shared handles only within a run.
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self.label() {
-			label if label.is_empty() => write!(f, "y@{:p}", Rc::as_ptr(&self.0)),
-			label => write!(f, "{label}"),
+		let base = match self.base_label() {
+			label if label.is_empty() => format!("y@{:p}", Rc::as_ptr(&self.state)),
+			label => label,
+		};
+		write!(f, "{}", self.view_of(&base))
+	}
+}
+
+impl Mul<Coeff> for IntVar {
+	type Output = IntVar;
+
+	/// The view `c·x`, or a new constant zero where `c` is zero.
+	fn mul(self, rhs: Coeff) -> Self::Output {
+		if rhs == 0 {
+			IntVar::new(0..=0)
+		} else {
+			self.affine(rhs, 0)
 		}
+	}
+}
+
+impl Neg for IntVar {
+	type Output = IntVar;
+
+	/// The view `-x`.
+	fn neg(self) -> Self::Output {
+		self.affine(-1, 0)
+	}
+}
+
+impl Sub<Coeff> for IntVar {
+	type Output = IntVar;
+
+	/// The view `x - k`.
+	fn sub(self, rhs: Coeff) -> Self::Output {
+		let k = rhs
+			.checked_neg()
+			.unwrap_or_else(|| panic!("the view {self}-{rhs} overflows a coefficient"));
+		self.affine(1, k)
 	}
 }
 
@@ -1954,9 +2331,23 @@ impl OrderEncoding {
 	}
 }
 
+impl ShiftedVar {
+	/// The view `sign·(x + shift)`, where `sign` is `1` or `-1`.
+	pub(crate) fn signed(&self, sign: Coeff) -> IntVar {
+		debug_assert!(sign == 1 || sign == -1, "a sign is one or minus one");
+		IntVar {
+			state: Rc::clone(&self.state),
+			scale: sign,
+			offset: sign * self.shift,
+		}
+	}
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
-	use itertools::Itertools;
+	use std::rc::Rc;
+
+	use itertools::{iproduct, Itertools};
 	use rangelist::RangeList;
 	use traced_test::test;
 
@@ -1967,7 +2358,7 @@ pub(crate) mod tests {
 			binary_value,
 			tests::{all_binary_solutions, binary_literals, expect_file, models},
 		},
-		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Lit, Valuation,
+		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Lit, Unsatisfiable, Valuation,
 	};
 
 	#[test]
@@ -1988,7 +2379,7 @@ pub(crate) mod tests {
 			.collect_vec();
 		x.with_binary_encoding(&mut cnf, &bits, 0, None).unwrap();
 		assert_eq!(
-			x.0.borrow().lead,
+			x.state.borrow().lead,
 			Some(Lead::Binary),
 			"the cheapest of the three to read"
 		);
@@ -2001,7 +2392,7 @@ pub(crate) mod tests {
 			"the binary encoding's one hole, and nothing for the other two"
 		);
 		let read = {
-			let (d, state) = (domain.clone(), x.0.borrow());
+			let (d, state) = (domain.clone(), x.state.borrow());
 			let (order, direct, binary) = (
 				state.order.clone().unwrap(),
 				state.direct.clone().unwrap(),
@@ -2078,8 +2469,8 @@ pub(crate) mod tests {
 			"the walk was all of x's literals, so y needs none of its own"
 		);
 		assert_eq!(
-			*y.domain(),
-			*x.domain(),
+			y.domain(),
+			x.domain(),
 			"the values never taken are not values"
 		);
 		assert_eq!(
@@ -2094,7 +2485,7 @@ pub(crate) mod tests {
 			[(1, BoolVal::Const(false)), (4, BoolVal::Const(true))],
 		)
 		.unwrap();
-		assert_eq!(*k.domain(), RangeList::from(4..=4));
+		assert_eq!(k.domain(), RangeList::from(4..=4));
 		assert_eq!((cnf.num_vars(), cnf.num_clauses()), (0, 0));
 	}
 
@@ -2117,6 +2508,15 @@ pub(crate) mod tests {
 			(0..=2).map(|d| vec![d, d]).collect_vec(),
 			"each literal stands for the value it came with"
 		);
+	}
+
+	/// A view that falls negates the order literals, which only means the
+	/// opposite bound where the literals have their consistency constraint.
+	#[test]
+	#[cfg(debug_assertions)]
+	#[should_panic(expected = "needs its order consistency")]
+	fn a_falling_view_needs_order_consistency() {
+		let _ = -IntVar::new(0..=3).without_order_consistency();
 	}
 
 	#[test]
@@ -2194,7 +2594,7 @@ pub(crate) mod tests {
 		);
 
 		let read = {
-			let (d, state) = (domain.clone(), x.0.borrow());
+			let (d, state) = (domain.clone(), x.state.borrow());
 			let (order, direct) = (state.order.clone().unwrap(), state.direct.clone().unwrap());
 			move |v: &dyn Valuation| vec![order.value(&d, v), direct.value(&d, v)]
 		};
@@ -2336,6 +2736,14 @@ pub(crate) mod tests {
 	}
 
 	#[test]
+	fn a_variable_times_zero_is_the_constant_zero() {
+		let x = IntVar::new(1..=3);
+		let zero = x.clone() * 0 + 4;
+		assert_eq!(zero.domain(), RangeList::from(4..=4));
+		assert!(!Rc::ptr_eq(&zero.state, &x.state), "a constant of its own");
+	}
+
+	#[test]
 	fn a_variable_with_one_value_costs_nothing() {
 		for k in [-3, 0, 7] {
 			let mut cnf = Cnf::default();
@@ -2352,7 +2760,7 @@ pub(crate) mod tests {
 				x.direct_walk(&mut cnf).unwrap().collect_vec(),
 				vec![(k, BoolVal::Const(true))]
 			);
-			assert_eq!(x.binary_bits(&mut cnf).unwrap(), (Vec::new(), k));
+			assert_eq!(x.binary_bits(&mut cnf).unwrap(), (Vec::new(), 1, k));
 			assert_eq!(x.value(&|_: Lit| false), k);
 
 			assert_eq!(
@@ -2384,6 +2792,209 @@ pub(crate) mod tests {
 		let _ = x.direct_encoding(&mut cnf);
 	}
 
+	#[test]
+	fn a_view_answers_with_the_literals_of_its_variable() {
+		for domain in test_domains() {
+			let values = domain.iter().flatten().collect_vec();
+			for (a, b) in iproduct!([-3, -2, -1, 1, 2, 3], [-5, 0, 4]) {
+				let mut cnf = Cnf::default();
+				let x = IntVar::new(domain.clone()).with_label("x");
+				let y = x.clone() * a + b;
+				let asked = (y.min() - 2..=y.max() + 2)
+					.map(|v| {
+						(
+							v,
+							y.at_least(&mut cnf, v).unwrap(),
+							y.at_most(&mut cnf, v).unwrap(),
+							y.equals(&mut cnf, v).unwrap(),
+						)
+					})
+					.collect_vec();
+				// Two values are told apart by the one order literal, which the
+				// direct encoding would only share.
+				assert!(
+					x.has_order_encoding() && (x.has_direct_encoding() || values.len() == 2),
+					"the view asked its variable for the encodings"
+				);
+				// Asked again, nothing is created: every answer was one of the
+				// variable's literals.
+				let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
+				for &(v, ..) in &asked {
+					let _ = y.at_least(&mut cnf, v).unwrap();
+					let _ = y.equals(&mut cnf, v).unwrap();
+				}
+				assert_eq!((cnf.num_vars(), cnf.num_clauses()), (vars, clauses));
+
+				let mut seen = models(&cnf, |sol| {
+					let (xv, yv) = (x.value(sol), y.value(sol));
+					assert_eq!(yv, a * xv + b, "{a}·x{b:+} at x = {xv}");
+					for &(v, at_least, at_most, equals) in &asked {
+						let view = format!("{a}·x{b:+} at x = {xv} against {v}");
+						assert_eq!(holds(at_least, sol), yv >= v, "at least, {view}");
+						assert_eq!(holds(at_most, sol), yv <= v, "at most, {view}");
+						assert_eq!(holds(equals, sol), yv == v, "equals, {view}");
+					}
+					xv
+				});
+				seen.sort_unstable();
+				seen.dedup();
+				assert_eq!(
+					seen, values,
+					"the variable keeps exactly its domain under {a}·x{b:+}"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn a_view_at_the_edge_of_the_coefficients_narrows_without_overflow() {
+		for (y, past) in [
+			(IntVar::new(0..=Coeff::MAX) - 5, Coeff::MAX - 4),
+			(-IntVar::new((Coeff::MIN + 1)..=0) - 5, Coeff::MAX - 4),
+		] {
+			let mut cnf = Cnf::default();
+			assert_eq!(y.set_min(&mut cnf, past), Err(Unsatisfiable), "{y}");
+			assert_eq!(y.set_max(&mut cnf, y.min() - 1), Err(Unsatisfiable), "{y}");
+		}
+	}
+
+	#[test]
+	fn a_view_costs_nothing_and_maps_the_domain() {
+		for domain in test_domains() {
+			let values = domain.iter().flatten().collect_vec();
+			for (a, b) in iproduct!([-3, -1, 1, 2], [-5, 0, 4]) {
+				let mut cnf = Cnf::default();
+				let x = IntVar::new(domain.clone()).with_label("x");
+				let y = x.clone() * a + b;
+				let mapped = values.iter().map(|&v| a * v + b).sorted().collect_vec();
+				assert_eq!(
+					y.domain(),
+					RangeList::from_sorted_elements(mapped.iter().copied()),
+					"{a}·x{b:+} over {domain}"
+				);
+				assert_eq!(
+					(y.min(), y.max(), y.card()),
+					(mapped[0], mapped[mapped.len() - 1], values.len())
+				);
+				assert!(
+					!y.has_order_encoding() && !y.has_direct_encoding() && !y.has_binary_encoding(),
+					"a view of an unencoded variable is unencoded"
+				);
+				// A question the domain settles is settled through the view.
+				assert_eq!(y.at_least(&mut cnf, y.min()).unwrap(), BoolVal::Const(true));
+				assert_eq!(
+					y.at_most(&mut cnf, y.min() - 1).unwrap(),
+					BoolVal::Const(false)
+				);
+				if a.abs() > 1 {
+					let skipped = y.min() + 1;
+					assert_eq!(y.equals(&mut cnf, skipped).unwrap(), BoolVal::Const(false));
+				}
+				assert_eq!((cnf.num_vars(), cnf.num_clauses()), (0, 0), "{a}·x{b:+}");
+
+				// The operators compose into one view of the same variable.
+				let (min, max) = (y.min(), y.max());
+				assert!((-(-y.clone())).is(&y));
+				assert!((y.clone() + 7 - 7).is(&y));
+				assert!((y.clone() * -2 + 3).is(&(-(y.clone() * 2) + 3)));
+				assert_eq!(
+					(y.clone() * -2).domain(),
+					RangeList::from_sorted_elements(mapped.iter().rev().map(|v| -2 * v))
+				);
+				assert_eq!(
+					(-y.clone() + (min + max)).value(&|_: Lit| false),
+					min + max - y.value(&|_: Lit| false)
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn a_view_is_labelled_by_its_arithmetic() {
+		let x = IntVar::new(0..=9).with_label("x");
+		assert_eq!((x.clone() + 3).label(), "x+3");
+		assert_eq!((x.clone() - 3).label(), "x-3");
+		assert_eq!((x.clone() * 2).label(), "2·x");
+		assert_eq!((-x.clone()).label(), "-x");
+		assert_eq!((-x.clone() + 9).label(), "-x+9");
+		assert_eq!(((x.clone() + 3) * -2 + 1).label(), "-2·x-5");
+		assert_eq!((x.clone() * 1 + 0).label(), "x");
+		assert_eq!((IntVar::new(0..=1) * 2 + 1).label(), "", "unlabelled");
+		assert!(
+			(x.clone() * 1 + 0).is(&x),
+			"the same view of the same variable"
+		);
+		assert!(!(x.clone() + 1).is(&x), "a different view");
+	}
+
+	/// A bound far outside a view is settled by the view's own bounds, before
+	/// mapping it onto the variable could overflow.
+	#[test]
+	fn a_view_settles_extreme_bounds_without_overflow() {
+		for (a, b) in [(1, 5), (-1, 5), (3, -7), (-3, Coeff::MAX - 20)] {
+			let mut cnf = Cnf::default();
+			let x = IntVar::new(0..=4);
+			let y = x.clone() * a + b;
+			let view = format!("{a}·x{b:+}");
+			assert_eq!(
+				y.encoded().at_least(Coeff::MIN),
+				Some(BoolVal::Const(true)),
+				"{view}"
+			);
+			assert_eq!(
+				y.encoded().at_least(Coeff::MAX),
+				Some(BoolVal::Const(false)),
+				"{view}"
+			);
+			assert_eq!(
+				y.encoded().equals(Coeff::MIN),
+				Some(BoolVal::Const(false)),
+				"{view}"
+			);
+			assert_eq!(
+				y.encoded().equals(Coeff::MAX),
+				Some(BoolVal::Const(false)),
+				"{view}"
+			);
+			for (v, at_most) in [(Coeff::MAX, true), (Coeff::MIN, false)] {
+				let settled = Some(BoolVal::Const(at_most));
+				assert_eq!(y.encoded().at_most(v), settled, "{view}");
+				assert_eq!(y.at_most(&mut cnf, v).ok(), settled, "{view}");
+			}
+			assert_eq!(y.set_min(&mut cnf, Coeff::MIN), Ok(false), "{view}");
+			assert_eq!(y.set_max(&mut cnf, Coeff::MAX), Ok(false), "{view}");
+			assert_eq!(
+				y.set_min(&mut cnf, Coeff::MAX),
+				Err(Unsatisfiable),
+				"{view}"
+			);
+			let mut cnf = Cnf::default();
+			assert_eq!(
+				y.set_max(&mut cnf, Coeff::MIN),
+				Err(Unsatisfiable),
+				"{view}"
+			);
+		}
+	}
+
+	#[test]
+	#[should_panic(expected = "overflows a coefficient")]
+	fn a_view_shifted_past_the_least_coefficient_is_refused() {
+		let _ = IntVar::new(0..=3) - Coeff::MIN;
+	}
+
+	#[test]
+	#[should_panic(expected = "overflows a coefficient")]
+	fn a_view_that_overflows_is_refused() {
+		let _ = IntVar::new(0..=3) * Coeff::MAX * 2;
+	}
+
+	#[test]
+	#[should_panic(expected = "overflows a coefficient")]
+	fn a_view_whose_values_overflow_is_refused() {
+		let _ = IntVar::new(0..=Coeff::MAX / 2) * 4;
+	}
+
 	/// A view on the literals of a variable without order consistency has none
 	/// either.
 	#[test]
@@ -2391,7 +3002,7 @@ pub(crate) mod tests {
 	fn a_view_without_order_consistency_takes_no_direct_encoding() {
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(0..=7).without_order_consistency();
-		let up = IntVar::shifted(&mut cnf, &x, 1).unwrap();
+		let up = (x.clone() + 1);
 		let half = IntVar::halved(&mut cnf, &up).unwrap();
 		let _ = half.direct_encoding(&mut cnf);
 	}
@@ -2419,7 +3030,7 @@ pub(crate) mod tests {
 			vars_before,
 			"the walk was all of x's literals, so y needs none of its own"
 		);
-		assert_eq!(*y.domain(), *x.domain(), "the settled ends are not values");
+		assert_eq!(y.domain(), x.domain(), "the settled ends are not values");
 
 		assert_eq!(
 			all_values(&cnf, &|v| vec![x.value(v), y.value(v)]),
@@ -2491,6 +3102,36 @@ pub(crate) mod tests {
 	}
 
 	#[test]
+	fn an_encoding_asked_through_a_view_is_the_variable_s() {
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(RangeList::from_elements([0, 1, 3])).with_label("x");
+		let y = x.clone() + 3;
+		y.require_order_encoding(&mut cnf).unwrap();
+		assert!(x.has_order_encoding() && y.has_order_encoding());
+		let clauses = cnf.num_clauses();
+		// `y = 4` is `x = 1`, which wants the direct encoding of `x`.
+		let _ = y.equals(&mut cnf, 4).unwrap();
+		assert!(x.has_direct_encoding());
+		assert!(
+			cnf.num_clauses() > clauses,
+			"the direct encoding is channelled to the order encoding"
+		);
+		let vars = cnf.num_vars();
+		let z = y.mirrored();
+		// `9 − y ≥ 5` is `y ≤ 4`, which is a literal there already.
+		assert_eq!(
+			z.at_least(&mut cnf, 5).unwrap(),
+			y.at_most(&mut cnf, 4).unwrap()
+		);
+		assert_eq!(cnf.num_vars(), vars);
+		assert_eq!(
+			all_values(&cnf, &|v| vec![x.value(v), y.value(v), z.value(v)]),
+			vec![vec![0, 3, 6], vec![1, 4, 5], vec![3, 6, 3]],
+			"every view reads the one variable"
+		);
+	}
+
+	#[test]
 	fn an_encoding_given_later_is_tied_to_the_one_already_there() {
 		// The literals are the caller's, so nothing but the channel says the
 		// two views agree — which is what `channel` is there to ask for.
@@ -2510,7 +3151,7 @@ pub(crate) mod tests {
 			let read = {
 				let d = domain.clone();
 				let (ord, bin) = {
-					let state = x.0.borrow();
+					let state = x.state.borrow();
 					(state.order.clone().unwrap(), state.binary.clone().unwrap())
 				};
 				move |v: &dyn Valuation| vec![ord.value(&d, v), bin.value(v)]
@@ -2533,7 +3174,7 @@ pub(crate) mod tests {
 			let read = {
 				let d = domain.clone();
 				let (ord, dir) = {
-					let state = x.0.borrow();
+					let state = x.state.borrow();
 					(state.order.clone().unwrap(), state.direct.clone().unwrap())
 				};
 				move |v: &dyn Valuation| vec![ord.value(&d, v), dir.value(&d, v)]
@@ -2571,10 +3212,6 @@ pub(crate) mod tests {
 
 	#[test]
 	fn an_end_of_the_domain_is_taken_by_reaching_it() {
-		let holds = |b: BoolVal, v: &dyn Valuation| match b {
-			BoolVal::Const(c) => c,
-			BoolVal::Lit(l) => v.value(l),
-		};
 		for domain in test_domains() {
 			let values: Vec<Coeff> = domain.iter().flatten().collect();
 			let (min, max) = (values[0], values[values.len() - 1]);
@@ -2607,6 +3244,15 @@ pub(crate) mod tests {
 				"the ends of {domain:?}"
 			);
 		}
+	}
+
+	#[test]
+	#[should_panic(expected = "only to a view `x + k`")]
+	fn bits_are_not_given_through_a_scaled_view() {
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(0..=3);
+		let bits = binary_literals(&mut cnf, 2);
+		let _ = (x.clone() * 2).with_binary_encoding(&mut cnf, &bits, 0, None);
 	}
 
 	#[test]
@@ -2709,10 +3355,6 @@ pub(crate) mod tests {
 
 	#[test]
 	fn every_way_of_reading_a_variable_agrees() {
-		let holds = |b: &BoolVal, v: &dyn Valuation| match b {
-			BoolVal::Const(c) => *c,
-			BoolVal::Lit(l) => v.value(*l),
-		};
 		for domain in test_domains() {
 			let values: Vec<Coeff> = domain.iter().flatten().collect();
 			let mut cnf = Cnf::default();
@@ -2720,7 +3362,7 @@ pub(crate) mod tests {
 
 			let reaches = x.order_walk(&mut cnf).unwrap().collect_vec();
 			let takes = x.direct_walk(&mut cnf).unwrap().collect_vec();
-			let (bits, min) = x.binary_bits(&mut cnf).unwrap();
+			let (bits, _, min) = x.binary_bits(&mut cnf).unwrap();
 			assert_eq!(reaches.len(), values.len());
 			assert_eq!(takes.len(), values.len());
 
@@ -2728,13 +3370,13 @@ pub(crate) mod tests {
 				vec![
 					reaches
 						.iter()
-						.filter(|(_, b)| holds(b, v))
+						.filter(|&&(_, b)| holds(b, v))
 						.map(|&(d, _)| d)
 						.max()
 						.expect("the variable reaches its lowest value"),
 					takes
 						.iter()
-						.find(|(_, b)| holds(b, v))
+						.find(|&&(_, b)| holds(b, v))
 						.expect("the variable takes some value")
 						.0,
 					min + binary_value(&bits, v),
@@ -2745,6 +3387,14 @@ pub(crate) mod tests {
 				values.iter().map(|&d| vec![d; 3]).collect_vec(),
 				"reaching, taking and the bits over {domain:?}"
 			);
+		}
+	}
+
+	/// Whether `b` holds under the assignment `v`.
+	fn holds(b: BoolVal, v: &dyn Valuation) -> bool {
+		match b {
+			BoolVal::Const(c) => c,
+			BoolVal::Lit(l) => v.value(l),
 		}
 	}
 
@@ -2793,6 +3443,55 @@ pub(crate) mod tests {
 	}
 
 	#[test]
+	fn literals_given_through_a_view_are_read_the_way_the_view_runs() {
+		let domain = RangeList::from_elements([0, 1, 3]);
+		let expected = vec![vec![0, 3], vec![1, 2], vec![3, 0]];
+
+		// `lits[0]` is `y ≥ 2`, which is `x ≤ 1`, and `lits[1]` is `y ≥ 3`,
+		// which is `x ≤ 0`.
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(domain.clone());
+		let y = x.mirrored();
+		let lits = cnf.new_var_range(2).iter_lits().collect_vec();
+		y.with_order_encoding(&mut cnf, &lits, None).unwrap();
+		assert_eq!(y.at_least(&mut cnf, 2).unwrap(), BoolVal::Lit(lits[0]));
+		assert_eq!(x.at_least(&mut cnf, 3).unwrap(), BoolVal::Lit(!lits[0]));
+		assert_eq!(x.at_least(&mut cnf, 1).unwrap(), BoolVal::Lit(!lits[1]));
+		y.constrain(&mut cnf).unwrap();
+		assert_eq!(
+			all_values(&cnf, &|v| vec![x.value(v), y.value(v)]),
+			expected
+		);
+
+		// `lits[i]` is `y` taking the `i`'th of its values, from the least.
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(domain.clone());
+		let y = x.mirrored();
+		let lits = cnf.new_var_range(3).iter_lits().collect_vec();
+		y.with_direct_encoding(&mut cnf, &lits, None).unwrap();
+		assert_eq!(y.equals(&mut cnf, 0).unwrap(), BoolVal::Lit(lits[0]));
+		assert_eq!(x.equals(&mut cnf, 3).unwrap(), BoolVal::Lit(lits[0]));
+		assert_eq!(x.equals(&mut cnf, 0).unwrap(), BoolVal::Lit(lits[2]));
+		y.constrain(&mut cnf).unwrap();
+		assert_eq!(
+			all_values(&cnf, &|v| vec![x.value(v), y.value(v)]),
+			expected
+		);
+
+		// Bits count up from the least value of the view they are given to.
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(domain.clone());
+		let y = x.clone() + 5;
+		let bits = binary_literals(&mut cnf, 2);
+		y.with_binary_encoding(&mut cnf, &bits, 5, None).unwrap();
+		y.constrain(&mut cnf).unwrap();
+		assert_eq!(
+			all_values(&cnf, &|v| vec![x.value(v), y.value(v)]),
+			vec![vec![0, 5], vec![1, 6], vec![3, 8]]
+		);
+	}
+
+	#[test]
 	fn narrowing_a_shared_literal_fixes_it_once() {
 		let mut cnf = Cnf::default();
 		let lit = cnf.new_lit();
@@ -2805,6 +3504,35 @@ pub(crate) mod tests {
 			vec![&[!lit][..]],
 			"the order and direct encodings share the literal, so one unit fixes it"
 		);
+	}
+
+	#[test]
+	fn narrowing_a_view_narrows_its_variable_and_every_other_view() {
+		let mut cnf = Cnf::default();
+		let x = IntVar::new(0..=9).with_label("x");
+		let (y, z) = (x.clone() * 2 + 1, x.mirrored());
+		x.require_order_encoding(&mut cnf).unwrap();
+		// `2x + 1 ≤ 10` is `x ≤ 4`.
+		assert!(y.set_max(&mut cnf, 10).unwrap());
+		assert_eq!(x.domain(), RangeList::from(0..=4));
+		assert_eq!(y.domain(), RangeList::from_sorted_elements([1, 3, 5, 7, 9]));
+		assert_eq!(z.domain(), RangeList::from(5..=9));
+		// `9 − x ≤ 7` is `x ≥ 2`.
+		assert!(z.set_max(&mut cnf, 7).unwrap());
+		assert_eq!(x.domain(), RangeList::from(2..=4));
+		assert_eq!((y.min(), y.max(), z.min(), z.max()), (5, 9, 5, 7));
+		// A bound the view meets already changes nothing, and one between two
+		// of its values rounds in.
+		assert!(!y.set_min(&mut cnf, 4).unwrap());
+		assert!(y.set_min(&mut cnf, 6).unwrap());
+		assert_eq!(x.domain(), RangeList::from(3..=4));
+		assert_eq!(
+			all_values(&cnf, &|v| vec![x.value(v), y.value(v), z.value(v)]),
+			vec![vec![3, 7, 6], vec![4, 9, 5]],
+			"the units fixed the literals of the values that went"
+		);
+		// `9 − x ≥ 7` is `x ≤ 2`, of which nothing is left.
+		assert_eq!(z.set_min(&mut cnf, 7), Err(Unsatisfiable));
 	}
 
 	#[test]
@@ -2835,6 +3563,49 @@ pub(crate) mod tests {
 		}
 	}
 
+	#[test]
+	fn steps_through_a_view_guard_on_the_values_of_the_view() {
+		for domain in test_domains() {
+			for (a, b, geq, direct) in
+				iproduct!([-2, -1, 1, 2], [-3, 0, 4], [true, false], [false, true])
+			{
+				let mut cnf = Cnf::default();
+				let x = IntVar::new(domain.clone()).with_label("x");
+				let y = x.clone() * a + b;
+				let steps = if direct {
+					y.direct_steps(&mut cnf, geq).unwrap()
+				} else {
+					y.order_steps(&mut cnf, geq).unwrap()
+				};
+				let case = format!("{a}·x{b:+} geq {geq} direct {direct}");
+				// The values of the view, from the end the walk starts at.
+				let mut values = y.domain().iter().flatten().collect_vec();
+				if !geq {
+					values.reverse();
+				}
+				assert_eq!(
+					steps.iter().map(|&(w, _)| w).collect_vec(),
+					values,
+					"{case}"
+				);
+				assert_eq!(steps[0].1, BoolVal::Const(false), "{case}");
+				let _ = models(&cnf, |sol| {
+					let yv = y.value(sol);
+					for &(w, guard) in &steps[1..] {
+						// A guard holds unless the view has reached its value:
+						// taken it, or come to it from the side walked from.
+						let reached = match (direct, geq) {
+							(true, _) => yv == w,
+							(false, true) => yv >= w,
+							(false, false) => yv <= w,
+						};
+						assert_eq!(holds(guard, sol), !reached, "{case} at {yv} against {w}");
+					}
+				});
+			}
+		}
+	}
+
 	/// A handful of domains covering the shapes an encoding has to survive: a
 	/// contiguous one, holes, negative values, a power-of-two span that fills
 	/// the bits exactly, and a two-valued one.
@@ -2854,18 +3625,26 @@ pub(crate) mod tests {
 	fn the_value_is_read_from_the_encoding_that_leads() {
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(0..=3);
-		assert_eq!(x.0.borrow().lead, None, "nothing has been asked of it yet");
+		assert_eq!(
+			x.state.borrow().lead,
+			None,
+			"nothing has been asked of it yet"
+		);
 		let _ = x.direct_encoding(&mut cnf).unwrap();
-		assert_eq!(x.0.borrow().lead, Some(Lead::Direct), "the first encoding");
+		assert_eq!(
+			x.state.borrow().lead,
+			Some(Lead::Direct),
+			"the first encoding"
+		);
 		let _ = x.order_encoding(&mut cnf).unwrap();
 		assert_eq!(
-			x.0.borrow().lead,
+			x.state.borrow().lead,
 			Some(Lead::Direct),
 			"the order encoding is no cheaper to read, so the lead stays put"
 		);
 		let _ = x.binary_encoding(&mut cnf).unwrap();
 		assert_eq!(
-			x.0.borrow().lead,
+			x.state.borrow().lead,
 			Some(Lead::Binary),
 			"equal to the order encoding, which is equal to the direct one"
 		);

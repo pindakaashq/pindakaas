@@ -177,21 +177,21 @@ measures the detection rather than the encoding.
     pb-wide-40   ==  wdog-l   22216   101567    264548      4.14 ms     24.54M
     pb-wide-40   ==  wdog-s     527     2022      5481    119.60 µs     16.91M
        amo-6x4   <=   adder      81      556      1959     10.45 µs     53.21M
-       amo-6x4   <= diagram      51      229       565     11.41 µs     20.07M
-       amo-6x4   <=     seq     155      582      1441     11.95 µs     48.70M
-       amo-6x4   <=    tree      56      228       581      8.12 µs     28.06M
-       amo-6x4   <=   radix     138      523      1214     59.24 µs      8.83M
-       amo-6x4   <=    wdog     110      322       756     20.41 µs     15.78M
-       amo-6x4   <=  wdog-l    2237     6127     14331    386.30 µs     15.86M
-       amo-6x4   <=  wdog-s     105      253       618     19.95 µs     12.68M
+       amo-6x4   <= diagram      46      214       532     12.12 µs     17.66M
+       amo-6x4   <=     seq     110      424      1049     10.54 µs     40.23M
+       amo-6x4   <=    tree      53      223       568      9.17 µs     24.33M
+       amo-6x4   <=   radix     114      433      1004     56.04 µs      7.73M
+       amo-6x4   <=    wdog      82      227       524     17.91 µs     12.67M
+       amo-6x4   <=  wdog-l    1379     3657      8567    277.20 µs     13.19M
+       amo-6x4   <=  wdog-s      76      174       418     14.79 µs     11.76M
        amo-6x4   ==   adder      68      514      1816      9.75 µs     52.72M
-       amo-6x4   == diagram      50      384       968     16.37 µs     23.46M
-       amo-6x4   ==     seq     100      680      1767     17.12 µs     39.72M
-       amo-6x4   ==    tree      56      404      1058     12.99 µs     31.10M
-       amo-6x4   ==   radix     138      526      1212     55.37 µs      9.50M
-       amo-6x4   ==    wdog     262      776      1800     43.95 µs     17.66M
-       amo-6x4   ==  wdog-l    4508    12334     28810    776.50 µs     15.88M
-       amo-6x4   ==  wdog-s     252      638      1524     42.99 µs     14.84M
+       amo-6x4   == diagram      46      366       932     17.70 µs     20.68M
+       amo-6x4   ==     seq      94      637      1656     17.95 µs     35.49M
+       amo-6x4   ==    tree      53      393      1032     14.54 µs     27.03M
+       amo-6x4   ==   radix     114      436      1003     56.54 µs      7.71M
+       amo-6x4   ==    wdog     159      438      1012     34.91 µs     12.55M
+       amo-6x4   ==  wdog-l    2630     6919     16196    540.40 µs     12.80M
+       amo-6x4   ==  wdog-s     146      333       802     29.04 µs     11.47M
       int-6x40   <=   adder      92      413      1445      9.50 µs     43.48M
       int-6x40   <= diagram     600    10669     30938    267.30 µs     39.91M
       int-6x40   <=     seq     840    17629     51178    260.90 µs     67.57M
@@ -205,9 +205,9 @@ measures the detection rather than the encoding.
       int-6x40   ==     seq     720    27430     80459    429.90 µs     63.81M
       int-6x40   ==    tree     600    22311     65421    328.70 µs     67.88M
       int-6x40   ==   radix     436     1365      3377    123.70 µs     11.03M
-      int-6x40   ==    wdog    1096     8760     18606    137.40 µs     63.76M
-      int-6x40   ==  wdog-l   80052   439452    957006     18.34 ms     23.96M
-      int-6x40   ==  wdog-s    1086     8546     18178    137.90 µs     61.97M
+      int-6x40   ==    wdog     610     7074     14766    115.50 µs     61.25M
+      int-6x40   ==  wdog-l   79566   437766    953166     18.09 ms     24.20M
+      int-6x40   ==  wdog-s     600     6860     14338    103.80 µs     66.09M
          pb-n8   <=   adder      19      119       401      2.92 µs     40.81M
          pb-n8   <= diagram      13       38        85      7.37 µs      5.15M
          pb-n8   <=     seq      63      156       344      6.46 µs     24.16M

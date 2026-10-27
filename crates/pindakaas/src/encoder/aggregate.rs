@@ -5,6 +5,8 @@
 //! variable. Integer terms bypass simplifications that assume zero is
 //! reachable.
 
+use std::collections::hash_map::Entry;
+
 use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
@@ -122,14 +124,32 @@ impl LinAggregator {
 			k = -k;
 		}
 
-		let mut int_terms = Vec::new();
+		// An expression holds each view as a term over its variable, so views
+		// of one variable merge too.
+		let mut int_terms: Vec<(Coeff, IntVar)> = Vec::new();
+		let mut position: FxHashMap<usize, usize> =
+			FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), FxBuildHasher);
 		for (x, c) in lin.exp.int_terms() {
 			let mut c = c * lin.exp.mult;
 			if lin.cmp == Comparator::GreaterEq {
 				c = -c;
 			}
-			int_terms.push((c, x.clone()));
+			let (c, x, offset) = x.base_term(c);
+			k -= offset;
+			match position.entry(x.variable_id()) {
+				Entry::Occupied(at) => {
+					let merged = &mut int_terms[*at.get()].0;
+					*merged = merged
+						.checked_add(c)
+						.expect("merging terms over one variable overflows a coefficient");
+				}
+				Entry::Vacant(at) => {
+					let _ = at.insert(int_terms.len());
+					int_terms.push((c, x));
+				}
+			}
 		}
+		int_terms.retain(|&(c, _)| c != 0);
 
 		let cmp = match lin.cmp {
 			Comparator::LessEq | Comparator::GreaterEq => LimitComp::LessEq,
@@ -187,16 +207,15 @@ impl LinAggregator {
 			if *c < 0 {
 				k -= *c * (x.min() + x.max());
 				*c = -*c;
-				*x = IntVar::mirrored(db, x)?;
+				*x = x.mirrored();
 			}
 		}
 
-		// A normalised constraint counts every term from zero, so a term that
-		// can go below zero is counted from its least value instead.
+		// A normalised constraint counts every term from zero.
 		for (c, x) in &mut int_terms {
-			if x.min() < 0 {
+			if x.min() != 0 {
 				k -= *c * x.min();
-				*x = IntVar::shifted(db, x, -x.min())?;
+				*x = x.clone() - x.min();
 			}
 		}
 		debug_assert!(k >= 0, "a bound the sum can meet is never negative");
@@ -302,7 +321,7 @@ impl LinAggregator {
 					let y = IntVar::new(0..=(*k / *coef)).with_label("s");
 					// Its literals are wanted either way, so there is nothing
 					// to gain by leaving them to the network below.
-					let _ = y.order_encoding(db)?;
+					y.require_order_encoding(db)?;
 					self.sorted_encoder
 						.encode(db, &Count::new(lits, cmp, y.clone()))?;
 					int_terms.push((*coef, y));
@@ -524,6 +543,59 @@ mod tests {
 			panic!("nothing being chosen satisfies it");
 		};
 		assert!(!value.value(a) && y.value(&value) == 0);
+	}
+
+	/// A constraint over views admits exactly what the arithmetic says of the
+	/// variables.
+	#[test]
+	fn a_constraint_over_views_is_one_over_their_variables() {
+		use rangelist::RangeList;
+
+		use crate::{
+			constraint::linear::LinTerm, decision::integer::IntVar, helpers::tests::brute_force,
+		};
+
+		let x = IntVar::new(0..=4).with_label("x");
+		let exp = LinExp::from(-x.clone() * 2 + 3);
+		assert_eq!(exp.add, 3);
+		assert!(
+			matches!(&exp.terms[..], [LinTerm::Int(v, -2)] if v.label() == "x"),
+			"the term is over x itself: {exp}"
+		);
+
+		let doms = [RangeList::from(0..=4), RangeList::from_elements([-1, 2, 3])];
+		for (a, b, c, d) in [(1, 0, 1, 0), (-2, 3, 1, -1), (3, -2, -1, 4)] {
+			for cmp in [Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq] {
+				for k in -8..=12 {
+					let mut cnf = Cnf::default();
+					let (x, y) = (IntVar::new(doms[0].clone()), IntVar::new(doms[1].clone()));
+					let exp = (x.clone() * a + b) + (y.clone() * c + d);
+					let con = Linear::new(exp, cmp, k);
+					if cnf
+						.encode(&con, &LinearEncoder::<DecisionDiagramEncoder>::default())
+						.is_err()
+					{
+						assert!(
+							brute_force(&[a, c], &doms, cmp, k - b - d).is_empty(),
+							"{a}·x{b:+} + {c}·y{d:+} {cmp:?} {k}"
+						);
+						continue;
+					}
+					// A constraint the bounds decide encodes nothing, and the
+					// variables still have to be read.
+					x.require_order_encoding(&mut cnf).unwrap();
+					y.require_order_encoding(&mut cnf).unwrap();
+					let mut seen = models(&cnf, |v| vec![x.value(v), y.value(v)]);
+					seen.sort_unstable();
+					seen.dedup();
+					assert_eq!(
+						seen,
+						brute_force(&[a, c], &doms, cmp, k - b - d),
+						"{a}·x{b:+} + {c}·y{d:+} {cmp:?} {k}"
+					);
+				}
+			}
+		}
 	}
 
 	#[test]
@@ -1211,6 +1283,41 @@ mod tests {
 		}
 		groups.sort();
 		groups
+	}
+
+	/// Terms over one variable merge, whatever their views, and terms that
+	/// cancel leave none.
+	#[test]
+	fn terms_over_one_variable_are_merged() {
+		use crate::decision::integer::IntVar;
+
+		let x = IntVar::new(0..=3).with_label("x");
+		let y = IntVar::new(0..=3).with_label("y");
+		let mut cnf = Cnf::default();
+		let exp = x.clone() + (x.clone() * 2 + 1) + y.clone() - (y.clone() + 2);
+		let LinVariant::Linear(con) = LinAggregator::default()
+			.aggregate(&mut cnf, &Linear::new(exp, Comparator::LessEq, 7))
+			.unwrap()
+		else {
+			panic!("3·x - 1 ≤ 7 is a linear constraint over x alone");
+		};
+		let terms = con.terms().collect_vec();
+		assert_eq!(terms.len(), 1, "y cancels, and x is one term");
+		// `3·x ≤ 7 - 1 + 2`, divided by the coefficient.
+		assert_eq!((*terms[0].0, con.k()), (1, 2));
+		assert_eq!(cnf.num_clauses(), 0);
+
+		// A falling view merges with a rising one, into `2·x + 3 ≤ 7`.
+		let mut cnf = Cnf::default();
+		let exp = (x.clone() * 3) + (-x.clone() + 3);
+		let LinVariant::Linear(con) = LinAggregator::default()
+			.aggregate(&mut cnf, &Linear::new(exp, Comparator::LessEq, 7))
+			.unwrap()
+		else {
+			panic!("2·x + 3 ≤ 7 is a linear constraint over x alone");
+		};
+		let terms = con.terms().collect_vec();
+		assert_eq!((terms.len(), *terms[0].0, con.k()), (1, 1, 2));
 	}
 
 	/// The bounds of the whole sum decide a constraint no assignment can break,

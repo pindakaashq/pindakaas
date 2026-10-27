@@ -110,8 +110,9 @@ impl DecisionDiagramEncoder {
 			.map(|((lb_margin, ub_margin), (lb, ub))| {
 				match cmp {
 					Comparator::LessEq => vec![
-						// The least reachable total can already be the most that
-						// still accepts, as a bound of zero on the last layer is.
+						// The least reachable total can already be the most
+						// that still accepts, as a bound of zero on the last
+						// layer is.
 						(lb_margin >= lb).then_some((0..(lb_margin + 1), DiagramNode::Val)),
 						(ub_margin <= ub).then_some(((ub_margin + 1)..inf, DiagramNode::Gap)),
 					],

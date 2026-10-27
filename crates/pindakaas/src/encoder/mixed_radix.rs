@@ -349,6 +349,10 @@ impl MixedRadixEncoder {
 			return Ok(x.clone());
 		}
 		if !x.prefers_binary(self.config.cutoff) {
+			// Capping a view would narrow `x` itself, also outside a condition.
+			if c * x.max() <= ub {
+				return Ok(x.clone() * *c);
+			}
 			return Ok(IntVar::mapped(db, x, |v| v * c, ub)?.expect("a positive scale rises"));
 		}
 		let domain = x
@@ -496,6 +500,56 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::helpers::tests::{linear_test_suite, prelude::*};
+
+	/// A scaled leaf the bound cuts short is a variable of its own, so the
+	/// bound reaches the variable it scales only where the conditions hold.
+	#[test]
+	fn a_conditional_bound_leaves_a_scaled_variable_its_domain() {
+		use rangelist::RangeList;
+
+		use crate::{decision::integer::IntVar, helpers::tests::brute_force};
+
+		// Three terms, since two are a single addition with no leaves.
+		let doms = [0..=4, 0..=2, 0..=1].map(RangeList::from);
+		for (coeffs, k) in [([3, 2, 1], 6), ([2, 3, 1], 9), ([5, 1, 2], 12)] {
+			let mut cnf = Cnf::default();
+			let r = cnf.new_lit();
+			let xs = doms.clone().map(IntVar::new);
+			let exp =
+				xs[0].clone() * coeffs[0] + xs[1].clone() * coeffs[1] + xs[2].clone() * coeffs[2];
+			let con = Linear::new(exp, Comparator::LessEq, k);
+			cnf.encode_implied(&[r], &con, &LinearEncoder::<MixedRadixEncoder>::default())
+				.unwrap();
+			// Projected onto the condition and the variables' own literals,
+			// since the digits add too many auxiliary literals to enumerate.
+			let mut shown = vec![r];
+			for (x, d) in xs.iter().zip(&doms) {
+				assert_eq!(
+					&x.domain(),
+					d,
+					"{coeffs:?} ≤ {k} narrowed a domain under a condition"
+				);
+				for v in d.iter().flatten().skip(1) {
+					if let BoolVal::Lit(l) = x.at_least(&mut cnf, v).unwrap() {
+						shown.push(l);
+					}
+				}
+			}
+			let mut seen = models_over(&cnf, &shown, |v| {
+				(v.value(r), xs.iter().map(|x| x.value(v)).collect_vec())
+			});
+			seen.sort_unstable();
+			seen.dedup();
+			let all = brute_force(&[0; 3], &doms, Comparator::LessEq, 0);
+			let holds = brute_force(&coeffs, &doms, Comparator::LessEq, k);
+			let expected = all
+				.into_iter()
+				.map(|a| (false, a))
+				.chain(holds.into_iter().map(|a| (true, a)))
+				.collect_vec();
+			assert_eq!(seen, expected, "{coeffs:?} ≤ {k}");
+		}
+	}
 
 	#[test]
 	fn a_scaled_literal_is_read_on_the_literal_itself() {

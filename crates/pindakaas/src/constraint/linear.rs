@@ -164,14 +164,35 @@ impl From<LimitComp> for Comparator {
 	}
 }
 
-impl Mul<Coeff> for IntVar {
+impl Add<IntVar> for IntVar {
 	type Output = LinExp;
 
-	fn mul(self, rhs: Coeff) -> Self::Output {
-		LinExp {
-			terms: vec![LinTerm::Int(self, rhs)],
-			..Default::default()
-		}
+	fn add(self, rhs: IntVar) -> Self::Output {
+		LinExp::from(self) + rhs
+	}
+}
+
+impl Add<LinExp> for IntVar {
+	type Output = LinExp;
+
+	fn add(self, rhs: LinExp) -> Self::Output {
+		LinExp::from(self) + rhs
+	}
+}
+
+impl Sub<IntVar> for IntVar {
+	type Output = LinExp;
+
+	fn sub(self, rhs: IntVar) -> Self::Output {
+		LinExp::from(self) - rhs
+	}
+}
+
+impl Sub<LinExp> for IntVar {
+	type Output = LinExp;
+
+	fn sub(self, rhs: LinExp) -> Self::Output {
+		LinExp::from(self) - rhs
 	}
 }
 
@@ -292,7 +313,7 @@ impl AddAssign for LinExp {
 
 impl AddAssign<Coeff> for LinExp {
 	fn add_assign(&mut self, rhs: Coeff) {
-		self.add += rhs;
+		*self += LinExp::from(rhs);
 	}
 }
 
@@ -343,9 +364,13 @@ impl From<Coeff> for LinExp {
 }
 
 impl From<IntVar> for LinExp {
+	/// The variable as a term. A view `scale·x + offset` becomes the term
+	/// `scale·x` and the constant `offset`.
 	fn from(x: IntVar) -> Self {
+		let (c, x, offset) = x.base_term(1);
 		Self {
-			terms: vec![LinTerm::Int(x, 1)],
+			terms: vec![LinTerm::Int(x, c)],
+			add: offset,
 			..Default::default()
 		}
 	}
@@ -402,6 +427,14 @@ impl Sub for LinExp {
 	}
 }
 
+impl Sub<IntVar> for LinExp {
+	type Output = LinExp;
+
+	fn sub(self, rhs: IntVar) -> Self::Output {
+		self - LinExp::from(rhs)
+	}
+}
+
 impl SubAssign for LinExp {
 	fn sub_assign(&mut self, rhs: Self) {
 		self.add_assign(-rhs);
@@ -447,8 +480,12 @@ impl Linear {
 	/// # let _ = constraint;
 	/// # Ok::<(), pindakaas::Unsatisfiable>(())
 	/// ```
-	pub fn new(exp: LinExp, cmp: Comparator, k: Coeff) -> Self {
-		Self { exp, cmp, k }
+	pub fn new(exp: impl Into<LinExp>, cmp: Comparator, k: Coeff) -> Self {
+		Self {
+			exp: exp.into(),
+			cmp,
+			k,
+		}
 	}
 
 	#[cfg(any(feature = "tracing", test))]
@@ -533,6 +570,29 @@ mod tests {
 	use traced_test::test;
 
 	use crate::helpers::tests::prelude::*;
+
+	/// A constant added after a multiplier is not multiplied by it.
+	#[test]
+	fn a_constant_added_after_a_multiplier_stays_as_it_is() {
+		let mut cnf = Cnf::default();
+		let (a, b) = cnf.new_lits();
+		let read = |exp: &LinExp, va: bool, vb: bool| {
+			exp.value(&|l: Lit| {
+				if l == a {
+					va
+				} else if l == b {
+					vb
+				} else {
+					false
+				}
+			})
+		};
+		for (va, vb) in [(false, false), (false, true), (true, false), (true, true)] {
+			let (x, y) = (Coeff::from(va), Coeff::from(vb));
+			assert_eq!(read(&(-(a + b) + 3), va, vb), 3 - x - y);
+			assert_eq!(read(&((a + b) * 2 + 1), va, vb), 2 * (x + y) + 1);
+		}
+	}
 
 	#[test]
 	fn encoders() {

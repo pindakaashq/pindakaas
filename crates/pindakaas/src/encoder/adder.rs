@@ -30,7 +30,7 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
-		int_linear::{NormalizedIntLinear, Term},
+		int_linear::NormalizedIntLinear,
 		linear::{LimitComp, PosCoeff},
 		propositional_logic::{Formula, TseitinEncoder},
 	},
@@ -170,40 +170,41 @@ impl AdderEncoder {
 		(lits, trues)
 	}
 
-	/// The bits of the term's product, where forming it outright beats letting
-	/// the columns carry the coefficient, and `None` where it does not.
+	/// The bits of `c·x` for a positive `c`, or `None` where carrying `c` in
+	/// the columns costs less.
 	fn product_bits<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
-		t: &Term,
+		x: &IntVar,
+		c: Coeff,
 	) -> Result<Option<Vec<BoolVal>>, Unsatisfiable> {
 		// Reading it in binary is free where that view exists, and costs a
 		// channel where it does not.
-		if !t.1.has_binary_encoding() && (t.1.has_order_encoding() || t.1.has_direct_encoding()) {
+		if !x.has_binary_encoding() && (x.has_order_encoding() || x.has_direct_encoding()) {
 			return Ok(None);
 		}
-		if let Some(bits) = t.1.product(t.0) {
+		if let Some(bits) = x.product(c) {
 			return Ok(Some(bits));
 		}
-		let Ok(c) = u32::try_from(t.0) else {
+		let Ok(c32) = u32::try_from(c) else {
 			return Ok(None);
 		};
-		let Some(width) = NonZero::new(BinaryEncoding::required_bits(t.1.max() - t.1.min()) as u32)
+		let Some(width) = NonZero::new(BinaryEncoding::required_bits(x.max() - x.min()) as u32)
 		else {
 			return Ok(None);
 		};
 		// Heuristic: below four set bits the partial products barely overlap,
 		// so the columns carry them for almost nothing.
-		if c.count_ones() < 4 {
+		if c32.count_ones() < 4 {
 			return Ok(None);
 		}
 		// Heuristic: one clause per column, against the adders SCM would need;
 		// form the product only where it comes out ahead.
-		let columns = (c.count_ones() * width.get()).saturating_sub(c.ilog2() + 1);
-		let plan = ScmSolution::synthesize(c, ScmObjective::MinAdders(width));
+		let columns = (c32.count_ones() * width.get()).saturating_sub(c32.ilog2() + 1);
+		let plan = ScmSolution::synthesize(c32, ScmObjective::MinAdders(width));
 		if plan.cost >= columns {
 			return Ok(None);
 		}
-		Ok(Some(Self::scaled_bits(db, &t.1, t.0, plan)?))
+		Ok(Some(Self::scaled_bits(db, x, c, plan)?))
 	}
 
 	/// Ripple-carry adder over the binary encodings `xs` and `ys`.
@@ -262,7 +263,7 @@ impl AdderEncoder {
 				.expect("the plan builds every product before it is used")
 		};
 
-		let input = x.binary_encoding(db)?.to_vec();
+		let (input, _, _) = x.binary_bits(db)?;
 		let width = NonZero::new(input.len() as u32)
 			.expect("a variable of one value is not scaled by a plan");
 
@@ -392,20 +393,30 @@ impl AdderEncoder {
 		let mut weighted = Vec::new();
 		let mut constant = 0;
 		for (c, x) in con.terms() {
-			let t = (**c, x.clone());
-			if let Some(bits) = Self::product_bits(db, &t)? {
-				// The product's bits count up from the variable's least value.
-				let (lits, offset) = BinaryEncoding::from_bits(bits, t.0 * t.1.min()).as_weighted();
-				weighted.extend(lits);
-				constant += offset;
-			} else {
-				let (lits, offset) = t.1.as_weighted(db)?;
-				weighted.extend(
-					lits.into_iter()
-						.map(|(l, w)| (l, t.0 * w))
-						.filter(|&(_, w)| w != 0),
-				);
-				constant += t.0 * offset;
+			let (c, x, offset) = x.base_term(*c);
+			constant += offset;
+			let (lits, worth, scale) = match Self::product_bits(db, &x, c.abs())? {
+				Some(bits) => {
+					let least = x.binary_least();
+					let (lits, worth) =
+						BinaryEncoding::from_bits(bits, c.abs() * least).as_weighted();
+					(lits, worth, c.signum())
+				}
+				None => {
+					let (lits, worth) = x.as_weighted(db)?;
+					(lits, worth, c)
+				}
+			};
+			constant += scale * worth;
+			for (lit, weight) in lits {
+				match scale * weight {
+					0 => {}
+					weight if weight > 0 => weighted.push((lit, weight)),
+					weight => {
+						weighted.push((!lit, -weight));
+						constant += weight;
+					}
+				}
 			}
 		}
 		Ok((weighted, constant))
@@ -772,7 +783,7 @@ mod tests {
 
 	use crate::{
 		decision::integer::IntVar,
-		helpers::tests::{linear_test_suite, models, prelude::*},
+		helpers::tests::{brute_force, linear_test_suite, models, prelude::*},
 	};
 
 	#[test]
@@ -930,6 +941,47 @@ mod tests {
 	}
 
 	#[test]
+	fn a_term_that_takes_away_negates_the_product_it_adds() {
+		// `≥` reaches the adder as negated coefficients. Coprime coefficients
+		// keep aggregation from dividing them.
+		let doms = [RangeList::from(0..=15), RangeList::from(0..=15)];
+		for (coeffs, cmp, k, products) in [
+			([255, 254], Comparator::LessEq, 2800, [255, 254]),
+			([255, 254], Comparator::GreaterEq, 2800, [255, 254]),
+			([255, 254], Comparator::Equal, 2800, [255, 254]),
+			([255, -254], Comparator::LessEq, 100, [255, 254]),
+		] {
+			let mut cnf = Cnf::default();
+			let (x, y) = (
+				IntVar::new(doms[0].clone()).with_label("x"),
+				IntVar::new(doms[1].clone()).with_label("y"),
+			);
+			let exp = x.clone() * coeffs[0] + y.clone() * coeffs[1];
+			LinearEncoder::<AdderEncoder>::default()
+				.encode(&mut cnf, &Linear::new(exp, cmp, k))
+				.unwrap();
+			for (v, product) in [&x, &y].into_iter().zip(products) {
+				assert!(
+					v.has_binary_encoding() && !v.has_order_encoding(),
+					"the adder reads a variable in binary, never in order form"
+				);
+				assert!(
+					v.product(product).is_some(),
+					"{coeffs:?} {cmp:?} {k} builds {product}·{v}"
+				);
+			}
+			let mut seen = models(&cnf, |value| vec![x.value(value), y.value(value)]);
+			seen.sort_unstable();
+			seen.dedup();
+			assert_eq!(
+				seen,
+				brute_force(&coeffs, &doms, cmp, k),
+				"{coeffs:?} {cmp:?} {k}"
+			);
+		}
+	}
+
+	#[test]
 	fn a_view_the_variable_has_is_not_a_reason_to_decline() {
 		// What matters is whether the binary view has to be *made*, not whether
 		// some other view happens to exist alongside it.
@@ -950,20 +1002,20 @@ mod tests {
 		assert!(built(&|_, _| {}), "a variable with no view yet");
 		assert!(
 			built(&|cnf, x| {
-				let _ = x.binary_encoding(cnf).unwrap();
+				x.require_binary_encoding(cnf).unwrap();
 			}),
 			"a variable already in binary"
 		);
 		assert!(
 			built(&|cnf, x| {
-				let _ = x.binary_encoding(cnf).unwrap();
-				let _ = x.order_encoding(cnf).unwrap();
+				x.require_binary_encoding(cnf).unwrap();
+				x.require_order_encoding(cnf).unwrap();
 			}),
 			"a variable in binary, whatever else it also has"
 		);
 		assert!(
 			!built(&|cnf, x| {
-				let _ = x.order_encoding(cnf).unwrap();
+				x.require_order_encoding(cnf).unwrap();
 			}),
 			"a variable held only in order form would have to be channelled"
 		);

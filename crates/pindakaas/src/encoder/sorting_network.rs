@@ -164,7 +164,7 @@ impl SortingNetworkEncoder {
 					self.smerge(db, x, y, cmp, z)
 				} else {
 					let (x_floor, y_floor) = (IntVar::halved(db, x)?, IntVar::halved(db, y)?);
-					let (x_up, y_up) = (IntVar::shifted(db, x, 1)?, IntVar::shifted(db, y, 1)?);
+					let (x_up, y_up) = (x.clone() + 1, y.clone() + 1);
 					let (x_ceil, y_ceil) = (IntVar::halved(db, &x_up)?, IntVar::halved(db, &y_up)?);
 
 					// The halves add up to `z ≤ c` and differ by two at most:
@@ -187,22 +187,6 @@ impl SortingNetworkEncoder {
 		}
 	}
 
-	/// The term `c·x` as a variable of its own.
-	///
-	/// Its literals are `x`'s, each standing for `c` times the value, so
-	/// scaling costs nothing.
-	fn scaled<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		c: Coeff,
-		x: &IntVar,
-	) -> Result<IntVar, Unsatisfiable> {
-		if c == 1 {
-			return Ok(x.clone());
-		}
-		let scaled = IntVar::mapped(db, x, |v| c * v, Coeff::MAX)?.expect("a positive scale rises");
-		Ok(scaled.with_label(format_args!("{c}·{}", x.label())))
-	}
-
 	/// The base case, `x{0,1} + y{0,1} ≷ z{0,1,2}`.
 	fn smerge<Db>(&self, db: &mut Db, x: &IntVar, y: &IntVar, cmp: &LimitComp, z: &IntVar) -> Result
 	where
@@ -210,7 +194,7 @@ impl SortingNetworkEncoder {
 	{
 		// `y` stands in for the half that rounds up, so both sides move along
 		// by one to meet it.
-		let (y, z) = (IntVar::shifted(db, y, 1)?, IntVar::shifted(db, z, 1)?);
+		let (y, z) = (y.clone() + 1, z.clone() + 1);
 		self.comp(db, x, &y, cmp, &z, 1)
 	}
 
@@ -422,11 +406,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedIntLinear> for SortingNe
 		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		let xs = con
-			.terms
-			.iter()
-			.map(|(c, x)| Self::scaled(db, **c, x))
-			.collect::<Result<Vec<_>, _>>()?;
+		let xs = con.terms().map(|(c, x)| x * *c).collect::<Vec<_>>();
 		let y = IntVar::new(*con.k..=*con.k).with_label("k");
 		self.sorted(db, &xs, &con.cmp, &y)
 	}
@@ -909,7 +889,7 @@ mod tests {
 				let y = IntVar::new(0..=b);
 				let z = IntVar::new(0..=c);
 				for v in [&x, &y, &z] {
-					let _ = v.order_encoding(&mut cnf).unwrap();
+					v.require_order_encoding(&mut cnf).unwrap();
 				}
 				let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
 				get_sorted_encoder(SortingNetworkStrategy::Recursive)
@@ -960,12 +940,19 @@ mod tests {
 						.iter()
 						.map(|d| {
 							let x = IntVar::new(RangeList::from_sorted_elements(d.to_vec()));
-							let _ = x.order_encoding(&mut cnf).unwrap();
+							x.require_order_encoding(&mut cnf).unwrap();
 							(PosCoeff::new(1), x)
 						})
 						.collect_vec();
 					let lits = order_literals(&mut cnf, terms.iter().map(|(_, x)| x));
-					let con = NormalizedIntLinear::new(terms.clone(), cmp, PosCoeff::new(k));
+					// A normalised term counts from zero, and its least value
+					// moves into the bound.
+					let least: Coeff = terms.iter().map(|(_, x)| x.min()).sum();
+					if k < least {
+						continue;
+					}
+					let counted = terms.iter().map(|(c, x)| (*c, x.clone() - x.min()));
+					let con = NormalizedIntLinear::new(counted, cmp, PosCoeff::new(k - least));
 					let mut enc = get_sorted_encoder(strategy.clone());
 					let _ = enc.with_consistency(consistency);
 					if enc.encode(&mut cnf, &con).is_err() {
@@ -994,12 +981,12 @@ mod tests {
 	fn merged_2_eq() {
 		let mut cnf = Cnf::default();
 		let x = IntVar::new(0..=1).with_label("x");
-		let _ = x.order_encoding(&mut cnf).unwrap();
+		x.require_order_encoding(&mut cnf).unwrap();
 		let y = IntVar::new(0..=1).with_label("y");
 		// Materialise before the variable range is captured below.
-		let _ = y.order_encoding(&mut cnf).unwrap();
+		y.require_order_encoding(&mut cnf).unwrap();
 		let z = IntVar::new(0..=2).with_label("z");
-		let _ = z.order_encoding(&mut cnf).unwrap();
+		z.require_order_encoding(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -1036,7 +1023,7 @@ mod tests {
 		let a = cnf.new_lit();
 		let y = IntVar::new(0..=1).with_label("y");
 		// Materialise before the variable range is captured below.
-		let _ = y.order_encoding(&mut cnf).unwrap();
+		y.require_order_encoding(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -1058,7 +1045,7 @@ mod tests {
 		let b = cnf.new_lit();
 		let y = IntVar::new(0..=2).with_label("y");
 		// Materialise before the variable range is captured below.
-		let _ = y.order_encoding(&mut cnf).unwrap();
+		y.require_order_encoding(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -1084,7 +1071,7 @@ mod tests {
 		let c = cnf.new_lit();
 		let y = IntVar::new(0..=2).with_label("y");
 		// Materialise before the variable range is captured below.
-		let _ = y.order_encoding(&mut cnf).unwrap();
+		y.require_order_encoding(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -1110,7 +1097,7 @@ mod tests {
 		let c = cnf.new_lit();
 		let y = IntVar::new(0..=3).with_label("y");
 		// Materialise before the variable range is captured below.
-		let _ = y.order_encoding(&mut cnf).unwrap();
+		y.require_order_encoding(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -1134,7 +1121,7 @@ mod tests {
 		let lits = cnf.new_var_range(4).iter_lits().collect_vec();
 		let y = IntVar::new(0..=2).with_label("y");
 		// Materialise before the variable range is captured below.
-		let _ = y.order_encoding(&mut cnf).unwrap();
+		y.require_order_encoding(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -1158,7 +1145,7 @@ mod tests {
 		let lits = cnf.new_var_range(4).iter_lits().collect_vec();
 		let y = IntVar::new(0..=3).with_label("y");
 		// Materialise before the variable range is captured below.
-		let _ = y.order_encoding(&mut cnf).unwrap();
+		y.require_order_encoding(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -1182,7 +1169,7 @@ mod tests {
 		let lits = cnf.new_var_range(4).iter_lits().collect_vec();
 		let y = IntVar::new(0..=4).with_label("y");
 		// Materialise before the variable range is captured below.
-		let _ = y.order_encoding(&mut cnf).unwrap();
+		y.require_order_encoding(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -1206,7 +1193,7 @@ mod tests {
 		let lits = cnf.new_var_range(5).iter_lits().map(|l| !l).collect_vec();
 		let y = IntVar::new(0..=1).with_label("y");
 		// Materialise before the variable range is captured below.
-		let _ = y.order_encoding(&mut cnf).unwrap();
+		y.require_order_encoding(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -1234,7 +1221,7 @@ mod tests {
 		let lits = cnf.new_var_range(5).iter_lits().collect_vec();
 		let y = IntVar::new(0..=3).with_label("y");
 		// Materialise before the variable range is captured below.
-		let _ = y.order_encoding(&mut cnf).unwrap();
+		y.require_order_encoding(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
@@ -1258,7 +1245,7 @@ mod tests {
 		let lits = cnf.new_var_range(5).iter_lits().collect_vec();
 		let y = IntVar::new(0..=5).with_label("y");
 		// Materialise before the variable range is captured below.
-		let _ = y.order_encoding(&mut cnf).unwrap();
+		y.require_order_encoding(&mut cnf).unwrap();
 		let vars = VarRange::new(
 			Var(NonZeroI32::new(1).unwrap()),
 			cnf.nvar.next_var.unwrap().prev_var().unwrap(),
