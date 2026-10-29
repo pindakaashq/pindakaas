@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [**breaking**] `IntVar * Coeff` gives an `IntVar` instead of a `LinExp`.
 - [**breaking**] `IntVar::mirrored` is removed: write `-x + (x.min() + x.max())`.
 - [**breaking**] `NormalizedIntLinear::terms` returns an iterator instead of a slice, and `NormalizedIntLinear::new` panics on a term whose least value is not zero.
+- [**breaking**] `LinAggregator::aggregate` takes no database and returns an `Aggregation`: the clauses a linear constraint implies on its own, the counts it sorts literals into, and the specialised form of the rest.
+- [**breaking**] `LinAggregator::sort_same_coefficients` takes only the minimum number of literals. `LinearEncoder` encodes the counts with its variant encoder, as `LinVariant::Count`.
+- [**breaking**] `IntVar::from_binary_encoding`, `IntVar::from_direct_encoding`, and `IntVar::from_order_encoding` no longer take a database argument and return an unwrapped `IntVar`.
 
 ## [0.6.1](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.6.0...pindakaas-v0.6.1) - 2026-10-19
 

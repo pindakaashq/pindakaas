@@ -17,7 +17,7 @@ use crate::{
 		int_linear::{lit_terms, NormalizedIntLinear},
 		linear::{Comparator, LimitComp, PosCoeff},
 	},
-	Checker, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable, Valuation,
+	Checker, Coeff, Lit, Result, Unsatisfiable, Valuation,
 };
 
 /// Every encoder that takes a cardinality or an at-most-one constraint.
@@ -30,7 +30,7 @@ const _: () = {
 		constraint::linear::{
 			AdderEncoder, DecisionDiagramEncoder, SequentialCounterEncoder, TotalizerEncoder,
 		},
-		Cnf, Encoder,
+		ClauseDatabase, Cnf, Encoder,
 	};
 
 	const fn takes<Db: ClauseDatabase + ?Sized, C, E: Encoder<Db, C>>() {}
@@ -63,12 +63,9 @@ impl Cardinality {
 	///
 	/// Its terms all count for one and none of them constrains another, so each
 	/// is an integer worth one or nothing.
-	pub(crate) fn as_linear<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-	) -> Result<NormalizedIntLinear, Unsatisfiable> {
-		let terms = lit_terms(db, self.lits.iter().map(|&l| (l, PosCoeff::new(1))))?;
-		Ok(NormalizedIntLinear::new(terms, self.cmp, self.k))
+	pub(crate) fn as_linear(&self) -> NormalizedIntLinear {
+		let terms = lit_terms(self.lits.iter().map(|&l| (l, PosCoeff::new(1))));
+		NormalizedIntLinear::new(terms, self.cmp, self.k)
 	}
 
 	/// Get the comparator of the cardinality constraint.

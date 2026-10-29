@@ -12,7 +12,7 @@ use crate::{
 		int_linear::{lit_terms, NormalizedIntLinear},
 		linear::{LimitComp, PosCoeff},
 	},
-	ClauseDatabase, Coeff, Lit, Result, Unsatisfiable,
+	Coeff, Lit,
 };
 
 /// A linear constraint over literals alone, as aggregation leaves it.
@@ -30,12 +30,9 @@ impl NormalizedBoolLinear {
 	///
 	/// Only for an encoder that works in integers; one that works in literals
 	/// should take this constraint as it stands.
-	pub(crate) fn as_int_linear<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-	) -> Result<NormalizedIntLinear, Unsatisfiable> {
-		let terms = lit_terms(db, self.terms.iter().copied())?;
-		Ok(NormalizedIntLinear::new(terms, self.cmp, self.k))
+	pub(crate) fn as_int_linear(&self) -> NormalizedIntLinear {
+		let terms = lit_terms(self.terms.iter().copied());
+		NormalizedIntLinear::new(terms, self.cmp, self.k)
 	}
 
 	/// Returns the constraint's comparator, which is never `≥`.

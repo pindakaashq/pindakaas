@@ -204,7 +204,7 @@ class ClauseDatabase(ABC):
                 f"an order encoding of {card} values takes "
                 f"{card - 1} literals, but {len(literals)} were given"
             )
-        return _wrap_int_var_from_order_literals(self, domain, literals)
+        return _wrap_int_var_from_order_literals(domain, literals)
 
     def int_var_from_direct_literals(
         self, domain: Domain, literals: Iterable[Lit]
@@ -230,7 +230,7 @@ class ClauseDatabase(ABC):
                 f"a direct encoding of {card} values takes as many "
                 f"literals, but {len(literals)} were given"
             )
-        return _wrap_int_var_from_direct_literals(self, domain, literals)
+        return _wrap_int_var_from_direct_literals(domain, literals)
 
     def int_var_from_binary_literals(
         self, domain: Domain, bits: Iterable[Lit], counts_from: int = 0
@@ -260,7 +260,7 @@ class ClauseDatabase(ABC):
                 f"reaching {greatest} from {counts_from} takes {needed} bits, "
                 f"but {len(bits)} were given"
             )
-        return _wrap_int_var_from_binary_literals(self, domain, bits, counts_from)
+        return _wrap_int_var_from_binary_literals(domain, bits, counts_from)
 
     @abstractmethod
     def new_var_range(self, n: int) -> VarRange:

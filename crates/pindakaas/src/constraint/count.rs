@@ -61,7 +61,7 @@ impl Count {
 			db.contradiction()?;
 			unreachable!();
 		}
-		let mut terms = lit_terms(db, self.lits.iter().map(|&l| (l, PosCoeff::new(1))))?;
+		let mut terms = lit_terms(self.lits.iter().map(|&l| (l, PosCoeff::new(1))));
 		// Counting the bound down from its greatest value turns its coefficient
 		// positive and starts it at zero, as a normalised term has to.
 		let k = self.y.max();

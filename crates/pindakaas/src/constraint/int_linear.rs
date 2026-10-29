@@ -124,7 +124,9 @@ pub(crate) struct IntLinear {
 /// let x = IntVar::new(0..=5);
 /// let con = Linear::new(x.clone() * -2 + 7, Comparator::GreaterEq, 1);
 ///
-/// let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut f, &con)? else {
+/// let (clauses, counts, variant) = LinAggregator::default().aggregate(&con)?.into_parts();
+/// debug_assert!(clauses.is_empty() && counts.is_empty(), "the sum implies nothing else");
+/// let LinVariant::Linear(con) = variant else {
 ///     panic!("a constraint over an integer aggregates to a linear one");
 /// };
 /// // Whatever it was written as, the types now say it is `≤` over positive
@@ -181,16 +183,15 @@ pub(crate) fn encode_addition<Db: ClauseDatabase + ?Sized>(
 
 /// Each literal as a term worth its coefficient when it holds and nothing
 /// when it does not, which is a direct encoding of the two values already.
-pub(crate) fn lit_terms<Db: ClauseDatabase + ?Sized>(
-	db: &mut Db,
+pub(crate) fn lit_terms(
 	lits: impl IntoIterator<Item = (Lit, PosCoeff)>,
-) -> Result<Vec<(PosCoeff, IntVar)>, Unsatisfiable> {
+) -> Vec<(PosCoeff, IntVar)> {
 	lits.into_iter()
 		.enumerate()
 		.map(|(i, (lit, coef))| {
 			let domain = RangeList::from_elements([0, *coef]);
-			IntVar::from_direct_encoding(db, domain, &[!lit, lit])
-				.map(|x| (PosCoeff::new(1), x.with_label(format_args!("x{i}"))))
+			let x = IntVar::from_direct_encoding(domain, &[!lit, lit]);
+			(PosCoeff::new(1), x.with_label(format_args!("x{i}")))
 		})
 		.collect()
 }

@@ -844,7 +844,7 @@ mod tests {
 		});
 		let mut cnf = Cnf::default();
 		let bits = (0..2).map(|_| BoolVal::Lit(cnf.new_lit())).collect_vec();
-		let x = IntVar::from_binary_encoding(&mut cnf, 2..=3, &bits, 0).unwrap();
+		let x = IntVar::from_binary_encoding(2..=3, &bits, 0);
 		x.constrain(&mut cnf).unwrap();
 		let (y, z) = (IntVar::new(0..=1), IntVar::new(2..=4));
 		let con = IntTernary::new(

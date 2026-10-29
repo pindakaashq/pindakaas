@@ -77,7 +77,9 @@ use crate::{
 /// # let mut f = Cnf::default();
 /// # let (x, y) = (IntVar::new(0..=5), IntVar::new(0..=5));
 /// let con = Linear::new(x * 2 + y * 3, Comparator::LessEq, 10);
-/// let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut f, &con)? else {
+/// let (clauses, counts, variant) = LinAggregator::default().aggregate(&con)?.into_parts();
+/// debug_assert!(clauses.is_empty() && counts.is_empty(), "the sum implies nothing else");
+/// let LinVariant::Linear(con) = variant else {
 ///     panic!("a sum of integer terms is a linear constraint");
 /// };
 /// WatchdogEncoder::default().encode(&mut f, &con)?;
@@ -411,7 +413,7 @@ impl Decompose for WatchdogEncoder {
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for WatchdogEncoder {
 	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
-		let con = con.as_linear(db)?;
+		let con = con.as_linear();
 		self.encode(db, &con)
 	}
 }
@@ -431,7 +433,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for WatchdogEncoder {
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for WatchdogEncoder {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
-		let con = con.as_int_linear(db)?;
+		let con = con.as_int_linear();
 		self.encode(db, &con)
 	}
 }

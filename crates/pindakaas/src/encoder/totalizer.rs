@@ -53,7 +53,9 @@ use crate::{
 /// # let mut f = Cnf::default();
 /// # let (x, y) = (IntVar::new(0..=5), IntVar::new(0..=5));
 /// let con = Linear::new(x * 2 + y * 3, Comparator::LessEq, 10);
-/// let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut f, &con)? else {
+/// let (clauses, counts, variant) = LinAggregator::default().aggregate(&con)?.into_parts();
+/// debug_assert!(clauses.is_empty() && counts.is_empty(), "the sum implies nothing else");
+/// let LinVariant::Linear(con) = variant else {
 ///     panic!("a sum of integer terms is a linear constraint");
 /// };
 /// TotalizerEncoder::default().encode(&mut f, &con)?;
@@ -123,7 +125,7 @@ impl Decompose for TotalizerEncoder {
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Cardinality> for TotalizerEncoder {
 	fn encode(&self, db: &mut Db, con: &Cardinality) -> Result {
-		let con = con.as_linear(db)?;
+		let con = con.as_linear();
 		self.encode(db, &con)
 	}
 }
@@ -143,7 +145,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for TotalizerEncoder {
 		}
 		// The count is the top of the tree rather than one more term in it,
 		// which would widen every intermediate above where it joins.
-		let leaves = lit_terms(db, con.lits.iter().map(|&l| (l, PosCoeff::new(1))))?
+		let leaves = lit_terms(con.lits.iter().map(|&l| (l, PosCoeff::new(1))))
 			.into_iter()
 			.map(|(c, x)| (*c, x))
 			.collect_vec();
@@ -157,7 +159,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for TotalizerEncoder {
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for TotalizerEncoder {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
-		let con = con.as_int_linear(db)?;
+		let con = con.as_int_linear();
 		self.encode(db, &con)
 	}
 }

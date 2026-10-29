@@ -16,7 +16,7 @@ use itertools::Itertools;
 
 pub use crate::encoder::{
 	adder::AdderEncoder,
-	aggregate::{LinAggregator, LinearEncoder, StaticLinEncoder},
+	aggregate::{Aggregation, LinAggregator, LinearEncoder, StaticLinEncoder},
 	decision_diagram::DecisionDiagramEncoder,
 	mixed_radix::MixedRadixEncoder,
 	sequential_counter::SequentialCounterEncoder,
@@ -694,7 +694,7 @@ mod tests {
 		let mut db = Cnf::default();
 		let vars = db.new_var_range(5).iter_lits().collect_vec();
 		let mut agg = LinAggregator::default();
-		let _ = agg.sort_same_coefficients(SortingNetworkEncoder::default(), 3);
+		let _ = agg.sort_same_coefficients(3);
 		let mut encoder = LinearEncoder::<StaticLinEncoder<TotalizerEncoder>>::default();
 		let _ = encoder.with_linear_aggregator(agg);
 		let con = Linear::new(
@@ -704,6 +704,20 @@ mod tests {
 		);
 		encoder.encode(&mut db, &con).unwrap();
 		assert_checker(&db, &con);
+	}
+
+	/// Literals that share a coefficient are counted into an integer by the
+	/// encoder of counts, which must keep every solution.
+	#[test]
+	fn sorted_literals_admit_exactly_the_solutions() {
+		let mut agg = LinAggregator::default();
+		let _ = agg.sort_same_coefficients(2);
+		let mut encoder = LinearEncoder::<StaticLinEncoder>::default();
+		let _ = encoder.with_linear_aggregator(agg.clone());
+		assert_exact_on_small_linear(&encoder, 4, 3);
+		let mut encoder = LinearEncoder::new(SortingNetworkEncoder::default());
+		let _ = encoder.with_linear_aggregator(agg);
+		assert_exact_on_small_linear(&encoder, 4, 3);
 	}
 
 	/// The encoders the default dispatches to have this check in their test

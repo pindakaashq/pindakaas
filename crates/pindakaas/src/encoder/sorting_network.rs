@@ -381,10 +381,9 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SortingNetworkEncoder {
 			.iter()
 			.enumerate()
 			.map(|(i, &x)| {
-				IntVar::from_order_encoding(db, 0..=1, &[x])
-					.map(|v| v.with_label(format_args!("x_{}", i + 1)))
+				IntVar::from_order_encoding(0..=1, &[x]).with_label(format_args!("x_{}", i + 1))
 			})
-			.collect::<Result<Vec<_>, _>>()?;
+			.collect::<Vec<_>>();
 		// The network only states the counts the literals reach, so a bound
 		// below zero is ruled out here.
 		let reached = count.y.at_least(db, 0)?;
@@ -395,7 +394,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SortingNetworkEncoder {
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedBoolLinear> for SortingNetworkEncoder {
 	fn encode(&self, db: &mut Db, con: &NormalizedBoolLinear) -> Result {
-		let con = con.as_int_linear(db)?;
+		let con = con.as_int_linear();
 		self.encode(db, &con)
 	}
 }
@@ -675,7 +674,7 @@ mod tests {
 			let b = cnf.new_lit();
 			lits.push(b);
 			// The weighted literal comes first, as the aggregator leaves it.
-			let mut terms = lit_terms(&mut cnf, [(b, PosCoeff::new(w))]).unwrap();
+			let mut terms = lit_terms([(b, PosCoeff::new(w))]);
 			terms.extend([x1.clone(), x2.clone()].map(|x| (PosCoeff::new(1), x)));
 			let encoded = get_sorted_encoder(strategy.clone()).encode(
 				&mut cnf,
@@ -721,10 +720,10 @@ mod tests {
 				let lits = cnf.new_var_range(coefs.len()).iter_lits().collect_vec();
 				let terms = if direct {
 					let weighted = lits.iter().zip(coefs).map(|(&l, &c)| (l, PosCoeff::new(c)));
-					lit_terms(&mut cnf, weighted).unwrap()
+					lit_terms(weighted)
 				} else {
 					let to_term = |(&l, &c)| {
-						let x = IntVar::from_order_encoding(&mut cnf, 0..=1, &[l]).unwrap();
+						let x = IntVar::from_order_encoding(0..=1, &[l]);
 						(PosCoeff::new(c), x)
 					};
 					lits.iter().zip(coefs).map(to_term).collect_vec()
@@ -1282,7 +1281,7 @@ mod tests {
 						cnf.add_clause([!above, below]).unwrap();
 					}
 					lits.extend(&order);
-					let x = IntVar::from_order_encoding(&mut cnf, 0..=ub, &order).unwrap();
+					let x = IntVar::from_order_encoding(0..=ub, &order);
 					(PosCoeff::new(c), x)
 				});
 				get_sorted_encoder(strategy.clone())

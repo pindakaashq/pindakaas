@@ -1196,22 +1196,15 @@ impl IntVar {
 	/// represent `domain.max() - min`. Bits may be constants and must already
 	/// respect domain bounds and holes. Use [`Self::constrain`] to enforce
 	/// them.
-	///
-	/// # Errors
-	///
-	/// [`Unsatisfiable`] when channelling this view to an existing encoding
-	/// contradicts the database.
-	pub fn from_binary_encoding<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
+	pub fn from_binary_encoding(
 		domain: impl Into<RangeList<Coeff>>,
 		bits: &[BoolVal],
 		min: Coeff,
-	) -> Result<Self, Unsatisfiable> {
+	) -> Self {
 		let x = Self::new(domain).enforce_consistency(false);
 		x.check_bits(bits, min);
-		let binary = BinaryEncoding::from_bits(bits.to_vec(), min);
-		x.install_binary(db, binary, None)?;
-		Ok(x)
+		x.set_binary(BinaryEncoding::from_bits(bits.to_vec(), min), None);
+		x
 	}
 
 	/// Creates a variable held in a direct encoding on literals that already
@@ -1222,20 +1215,11 @@ impl IntVar {
 	/// means exactly one of them holding. That is taken on trust and not
 	/// emitted; see [`IntVar::constrain`] where it needs saying, though it is
 	/// worth avoiding, the clauses for it being quadratic in the domain.
-	///
-	/// # Errors
-	///
-	/// [`Unsatisfiable`] when channelling this view to an existing encoding
-	/// contradicts the database.
-	pub fn from_direct_encoding<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		domain: impl Into<RangeList<Coeff>>,
-		literals: &[Lit],
-	) -> Result<Self, Unsatisfiable> {
+	pub fn from_direct_encoding(domain: impl Into<RangeList<Coeff>>, literals: &[Lit]) -> Self {
 		let x = Self::new(domain).enforce_consistency(false);
 		let direct = DirectEncoding::from_literals(&x.state.borrow().domain, literals.to_vec());
-		x.install_direct(db, direct, None)?;
-		Ok(x)
+		x.set_direct(direct, None);
+		x
 	}
 
 	/// Construct a variable from `(value, takes_value)` pairs.
@@ -1246,8 +1230,7 @@ impl IntVar {
 	///
 	/// # Errors
 	///
-	/// [`Unsatisfiable`] when the walk contains no possible value or its
-	/// literals cannot be channelled to an existing encoding.
+	/// [`Unsatisfiable`] when the walk contains no possible value.
 	///
 	/// # Panics
 	///
@@ -1277,7 +1260,7 @@ impl IntVar {
 		}
 		let (values, literals): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
 		let domain = RangeList::from_sorted_elements(values);
-		Self::from_direct_encoding(db, domain, &literals)
+		Ok(Self::from_direct_encoding(domain, &literals))
 	}
 
 	/// Creates a variable held in an order encoding on literals that already
@@ -1288,23 +1271,11 @@ impl IntVar {
 	/// `i + 1`'th of them — which means each of them implying the one before.
 	/// That chain is taken on trust and not emitted; see [`IntVar::constrain`]
 	/// where it needs saying.
-	///
-	/// # Errors
-	///
-	/// [`Unsatisfiable`] when channelling this view to an existing encoding
-	/// contradicts the database.
-	pub fn from_order_encoding<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		domain: impl Into<RangeList<Coeff>>,
-		literals: &[Lit],
-	) -> Result<Self, Unsatisfiable> {
+	pub fn from_order_encoding(domain: impl Into<RangeList<Coeff>>, literals: &[Lit]) -> Self {
 		let x = Self::new(domain).enforce_consistency(false);
-		let order = {
-			let state = x.state.borrow();
-			OrderEncoding::from_literals(&state.domain, literals.to_vec())
-		};
-		x.install_order(db, order, [None; 2])?;
-		Ok(x)
+		let order = OrderEncoding::from_literals(&x.state.borrow().domain, literals.to_vec());
+		x.set_order(order, [None; 2]);
+		x
 	}
 
 	/// Creates a variable from what its order encoding says value by value.
@@ -1317,8 +1288,7 @@ impl IntVar {
 	///
 	/// # Errors
 	///
-	/// [`Unsatisfiable`] when the walk contains no reachable value or its
-	/// literals cannot be channelled to an existing encoding.
+	/// [`Unsatisfiable`] when the walk contains no reachable value.
 	pub fn from_order_walk<Db: ClauseDatabase + ?Sized>(
 		db: &mut Db,
 		walk: impl IntoIterator<Item = (Coeff, BoolVal)>,
@@ -1346,7 +1316,7 @@ impl IntVar {
 			db.contradiction()?;
 		}
 		let domain = RangeList::from_elements(values);
-		Self::from_order_encoding(db, domain, &literals)
+		Ok(Self::from_order_encoding(domain, &literals))
 	}
 
 	/// The variable `⌊x / 2⌋`, which reaches `w` exactly when `x` reaches
@@ -1397,18 +1367,7 @@ impl IntVar {
 		binary: BinaryEncoding,
 		already_channelled: Option<Comparator>,
 	) -> Result {
-		self.assert_order_consistency("binary");
-		{
-			let mut state = self.state.borrow_mut();
-			debug_assert!(
-				state.binary.is_none(),
-				"{} is already binary encoded",
-				self.label()
-			);
-			state.binary = Some(binary);
-			state.channelled[0] = already_channelled;
-			state.lead = state.lead.or(Some(Lead::Binary));
-		}
+		self.set_binary(binary, already_channelled);
 		self.reconcile(db)
 	}
 
@@ -1421,18 +1380,7 @@ impl IntVar {
 		direct: DirectEncoding,
 		already_channelled: Option<Comparator>,
 	) -> Result {
-		self.assert_order_consistency("direct");
-		{
-			let mut state = self.state.borrow_mut();
-			debug_assert!(
-				state.direct.is_none(),
-				"{} is already directly encoded",
-				self.label()
-			);
-			state.direct = Some(direct);
-			state.channelled[1] = already_channelled;
-			state.lead = state.lead.or(Some(Lead::Direct));
-		}
+		self.set_direct(direct, already_channelled);
 		self.reconcile(db)
 	}
 
@@ -1447,17 +1395,7 @@ impl IntVar {
 		order: OrderEncoding,
 		already_channelled: [Option<Comparator>; 2],
 	) -> Result {
-		{
-			let mut state = self.state.borrow_mut();
-			debug_assert!(
-				state.order.is_none(),
-				"{} is already order encoded",
-				self.label()
-			);
-			state.order = Some(order);
-			state.channelled = already_channelled;
-			state.lead = state.lead.or(Some(Lead::Order));
-		}
+		self.set_order(order, already_channelled);
 		self.reconcile(db)
 	}
 
@@ -1903,6 +1841,36 @@ impl IntVar {
 		self.order_encoding(db).map(drop)
 	}
 
+	/// Record a binary encoding the variable does not have yet, leaving the
+	/// channelling to the caller.
+	fn set_binary(&self, binary: BinaryEncoding, already_channelled: Option<Comparator>) {
+		self.assert_order_consistency("binary");
+		let mut state = self.state.borrow_mut();
+		debug_assert!(
+			state.binary.is_none(),
+			"{} is already binary encoded",
+			self.label()
+		);
+		state.binary = Some(binary);
+		state.channelled[0] = already_channelled;
+		state.lead = state.lead.or(Some(Lead::Binary));
+	}
+
+	/// Record a direct encoding the variable does not have yet, leaving the
+	/// channelling to the caller.
+	fn set_direct(&self, direct: DirectEncoding, already_channelled: Option<Comparator>) {
+		self.assert_order_consistency("direct");
+		let mut state = self.state.borrow_mut();
+		debug_assert!(
+			state.direct.is_none(),
+			"{} is already directly encoded",
+			self.label()
+		);
+		state.direct = Some(direct);
+		state.channelled[1] = already_channelled;
+		state.lead = state.lead.or(Some(Lead::Direct));
+	}
+
 	/// Drop the values above `v` from the domain, reporting whether any went.
 	///
 	/// See [`IntVar::narrow`] for what becomes of the literals.
@@ -1927,6 +1895,20 @@ impl IntVar {
 		v: Coeff,
 	) -> Result<bool, Unsatisfiable> {
 		self.narrow_at_least(db, v, true)
+	}
+
+	/// Record an order encoding the variable does not have yet, leaving the
+	/// channelling to the caller.
+	fn set_order(&self, order: OrderEncoding, already_channelled: [Option<Comparator>; 2]) {
+		let mut state = self.state.borrow_mut();
+		debug_assert!(
+			state.order.is_none(),
+			"{} is already order encoded",
+			self.label()
+		);
+		state.order = Some(order);
+		state.channelled = already_channelled;
+		state.lead = state.lead.or(Some(Lead::Order));
 	}
 
 	/// Remember the bits of `c·(x − min)`, so that the next constraint to scale
@@ -2368,7 +2350,7 @@ pub(crate) mod tests {
 		let domain = RangeList::from_elements([0, 1, 3]);
 		let mut cnf = Cnf::default();
 		let order_lits = cnf.new_var_range(2).iter_lits().collect_vec();
-		let x = IntVar::from_order_encoding(&mut cnf, domain.clone(), &order_lits).unwrap();
+		let x = IntVar::from_order_encoding(domain.clone(), &order_lits);
 		let direct_lits = cnf.new_var_range(3).iter_lits().collect_vec();
 		x.with_direct_encoding(&mut cnf, &direct_lits, None)
 			.unwrap();
@@ -2414,9 +2396,7 @@ pub(crate) mod tests {
 		let found: Vec<_> = (0..2).map(|_| cnf.new_lit()).collect();
 		let vars_before = cnf.num_vars();
 
-		let x = IntVar::from_order_encoding(&mut cnf, domain.clone(), &found)
-			.unwrap()
-			.with_label("x");
+		let x = IntVar::from_order_encoding(domain.clone(), &found).with_label("x");
 		let ord = x.order_encoding(&mut cnf).unwrap();
 		assert_eq!(
 			cnf.num_vars(),
@@ -2580,7 +2560,7 @@ pub(crate) mod tests {
 		let domain = RangeList::from_elements([0, 1, 3]);
 		let mut cnf = Cnf::default();
 		let order_lits = cnf.new_var_range(2).iter_lits().collect_vec();
-		let x = IntVar::from_order_encoding(&mut cnf, domain.clone(), &order_lits).unwrap();
+		let x = IntVar::from_order_encoding(domain.clone(), &order_lits);
 		let direct_lits = cnf.new_var_range(3).iter_lits().collect_vec();
 		x.with_direct_encoding(&mut cnf, &direct_lits, None)
 			.unwrap();
@@ -2650,9 +2630,9 @@ pub(crate) mod tests {
 		let mut cnf = Cnf::default();
 		let lit = cnf.new_lit();
 		let domain = RangeList::from_elements([0, 5]);
-		let x = IntVar::from_direct_encoding(&mut cnf, domain.clone(), &[!lit, lit]).unwrap();
+		let x = IntVar::from_direct_encoding(domain.clone(), &[!lit, lit]);
 		assert_eq!(x.at_least(&mut cnf, 5).unwrap(), BoolVal::Lit(lit));
-		let y = IntVar::from_order_encoding(&mut cnf, domain.clone(), &[lit]).unwrap();
+		let y = IntVar::from_order_encoding(domain.clone(), &[lit]);
 		let direct = y.direct_encoding(&mut cnf).unwrap();
 		assert_eq!(direct.lit_equals(&domain, 0), BoolVal::Lit(!lit));
 		assert_eq!(
@@ -2672,7 +2652,7 @@ pub(crate) mod tests {
 				.new_var_range(values.len() - 1)
 				.iter_lits()
 				.collect_vec();
-			let x = IntVar::from_order_encoding(&mut cnf, domain.clone(), &lits).unwrap();
+			let x = IntVar::from_order_encoding(domain.clone(), &lits);
 			x.constrain(&mut cnf).unwrap();
 			assert_eq!(
 				all_values(&cnf, &|v| vec![x.value(v)]),
@@ -2682,7 +2662,7 @@ pub(crate) mod tests {
 
 			let mut cnf = Cnf::default();
 			let lits = cnf.new_var_range(values.len()).iter_lits().collect_vec();
-			let x = IntVar::from_direct_encoding(&mut cnf, domain.clone(), &lits).unwrap();
+			let x = IntVar::from_direct_encoding(domain.clone(), &lits);
 			x.constrain(&mut cnf).unwrap();
 			assert_eq!(
 				all_values(&cnf, &|v| vec![x.value(v)]),
@@ -2693,7 +2673,7 @@ pub(crate) mod tests {
 			let mut cnf = Cnf::default();
 			let (min, max) = (values[0], values[values.len() - 1]);
 			let bits = binary_literals(&mut cnf, BinaryEncoding::required_bits(max - min));
-			let x = IntVar::from_binary_encoding(&mut cnf, domain.clone(), &bits, min).unwrap();
+			let x = IntVar::from_binary_encoding(domain.clone(), &bits, min);
 			x.constrain(&mut cnf).unwrap();
 			assert_eq!(
 				all_values(&cnf, &|v| vec![x.value(v)]),
@@ -3144,7 +3124,7 @@ pub(crate) mod tests {
 				.new_var_range(values.len() - 1)
 				.iter_lits()
 				.collect_vec();
-			let x = IntVar::from_order_encoding(&mut cnf, domain.clone(), &lits).unwrap();
+			let x = IntVar::from_order_encoding(domain.clone(), &lits);
 			x.constrain(&mut cnf).unwrap();
 			let bits = binary_literals(&mut cnf, BinaryEncoding::required_bits(max - min));
 			x.with_binary_encoding(&mut cnf, &bits, min, None).unwrap();
@@ -3164,7 +3144,7 @@ pub(crate) mod tests {
 
 			let mut cnf = Cnf::default();
 			let lits = cnf.new_var_range(values.len()).iter_lits().collect_vec();
-			let x = IntVar::from_direct_encoding(&mut cnf, domain.clone(), &lits).unwrap();
+			let x = IntVar::from_direct_encoding(domain.clone(), &lits);
 			x.constrain(&mut cnf).unwrap();
 			let ord_lits = cnf
 				.new_var_range(values.len() - 1)
@@ -3289,7 +3269,7 @@ pub(crate) mod tests {
 		let mut cnf = Cnf::default();
 		let lit = cnf.new_lit();
 		let domain = RangeList::from_elements([0, 5]);
-		let x = IntVar::from_direct_encoding(&mut cnf, domain, &[!lit, lit]).unwrap();
+		let x = IntVar::from_direct_encoding(domain, &[!lit, lit]);
 		x.constrain(&mut cnf).unwrap();
 		assert_eq!(
 			cnf.num_clauses(),
@@ -3305,7 +3285,7 @@ pub(crate) mod tests {
 
 		let mut cnf = Cnf::default();
 		let lits = cnf.new_var_range(2).iter_lits().collect_vec();
-		let x = IntVar::from_order_encoding(&mut cnf, domain.clone(), &lits).unwrap();
+		let x = IntVar::from_order_encoding(domain.clone(), &lits);
 		x.constrain(&mut cnf).unwrap();
 		assert_eq!(
 			all_values(&cnf, &|v: &dyn Valuation| vec![x.value(v)]),
@@ -3314,7 +3294,7 @@ pub(crate) mod tests {
 
 		let mut cnf = Cnf::default();
 		let lits = cnf.new_var_range(3).iter_lits().collect_vec();
-		let x = IntVar::from_direct_encoding(&mut cnf, domain.clone(), &lits).unwrap();
+		let x = IntVar::from_direct_encoding(domain.clone(), &lits);
 		x.constrain(&mut cnf).unwrap();
 		assert_eq!(
 			all_values(&cnf, &|v: &dyn Valuation| vec![x.value(v)]),
@@ -3328,7 +3308,7 @@ pub(crate) mod tests {
 			.iter_lits()
 			.map(BoolVal::Lit)
 			.collect_vec();
-		let x = IntVar::from_binary_encoding(&mut cnf, domain.clone(), &bits, 0).unwrap();
+		let x = IntVar::from_binary_encoding(domain.clone(), &bits, 0);
 		x.constrain(&mut cnf).unwrap();
 		assert_eq!(
 			all_values(&cnf, &|v: &dyn Valuation| vec![x.value(v)]),
@@ -3496,7 +3476,7 @@ pub(crate) mod tests {
 		let mut cnf = Cnf::default();
 		let lit = cnf.new_lit();
 		let domain = RangeList::from_elements([0, 5]);
-		let x = IntVar::from_direct_encoding(&mut cnf, domain, &[!lit, lit]).unwrap();
+		let x = IntVar::from_direct_encoding(domain, &[!lit, lit]);
 		let _ = x.at_least(&mut cnf, 5).unwrap();
 		assert!(x.set_max(&mut cnf, 0).unwrap());
 		assert_eq!(
@@ -3542,7 +3522,7 @@ pub(crate) mod tests {
 		let build = |already_channelled| {
 			let mut cnf = Cnf::default();
 			let order_lits = cnf.new_var_range(2).iter_lits().collect_vec();
-			let x = IntVar::from_order_encoding(&mut cnf, domain.clone(), &order_lits).unwrap();
+			let x = IntVar::from_order_encoding(domain.clone(), &order_lits);
 			let direct_lits = cnf.new_var_range(3).iter_lits().collect_vec();
 			x.with_direct_encoding(&mut cnf, &direct_lits, already_channelled)
 				.unwrap();

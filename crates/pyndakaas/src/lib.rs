@@ -267,54 +267,32 @@ mod pindakaas {
 	#[pyfunction]
 	/// Create an integer variable held in the binary encoding it was found on.
 	fn _wrap_int_var_from_binary_literals(
-		obj: &Bound<'_, PyAny>,
 		domain: Vec<(i64, i64)>,
 		bits: Vec<Lit>,
 		counts_from: i64,
-	) -> Result<IntVar> {
+	) -> IntVar {
 		let bits = bits
 			.into_iter()
 			.map(|l| BaseBoolVal::Lit(l.0))
 			.collect_vec();
-		let x = BaseIntVar::from_binary_encoding(
-			&mut PyDbWrapper(obj),
-			int_var_domain(domain),
-			&bits,
-			counts_from,
-		)?;
-		Ok(IntVar(x))
+		let x = BaseIntVar::from_binary_encoding(int_var_domain(domain), &bits, counts_from);
+		IntVar(x)
 	}
 
 	#[pyfunction]
 	/// Create an integer variable held in the direct encoding it was found on.
-	fn _wrap_int_var_from_direct_literals(
-		obj: &Bound<'_, PyAny>,
-		domain: Vec<(i64, i64)>,
-		literals: Vec<Lit>,
-	) -> Result<IntVar> {
+	fn _wrap_int_var_from_direct_literals(domain: Vec<(i64, i64)>, literals: Vec<Lit>) -> IntVar {
 		let literals = literals.into_iter().map(|l| l.0).collect_vec();
-		let x = BaseIntVar::from_direct_encoding(
-			&mut PyDbWrapper(obj),
-			int_var_domain(domain),
-			&literals,
-		)?;
-		Ok(IntVar(x))
+		let x = BaseIntVar::from_direct_encoding(int_var_domain(domain), &literals);
+		IntVar(x)
 	}
 
 	#[pyfunction]
 	/// Create an integer variable held in the order encoding it was found on.
-	fn _wrap_int_var_from_order_literals(
-		obj: &Bound<'_, PyAny>,
-		domain: Vec<(i64, i64)>,
-		literals: Vec<Lit>,
-	) -> Result<IntVar> {
+	fn _wrap_int_var_from_order_literals(domain: Vec<(i64, i64)>, literals: Vec<Lit>) -> IntVar {
 		let literals = literals.into_iter().map(|l| l.0).collect_vec();
-		let x = BaseIntVar::from_order_encoding(
-			&mut PyDbWrapper(obj),
-			int_var_domain(domain),
-			&literals,
-		)?;
-		Ok(IntVar(x))
+		let x = BaseIntVar::from_order_encoding(int_var_domain(domain), &literals);
+		IntVar(x)
 	}
 
 	/// Internal function to help with the encoding of a constraint given an

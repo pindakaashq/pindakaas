@@ -564,15 +564,13 @@ pub(crate) mod tests {
 							(
 								PosCoeff::new(1),
 								implication_chain_var(
-									&mut cnf,
 									&[
 										(a, PosCoeff::new(2)),
 										(b, PosCoeff::new(3)),
 										(c, PosCoeff::new(4)),
 									],
 									"x0",
-								)
-								.unwrap(),
+								),
 							),
 							(
 								PosCoeff::new(1),
@@ -1098,11 +1096,10 @@ pub(crate) mod tests {
 		let own = cnf.new_var_range(n).iter_lits().collect_vec();
 		let domain = RangeList::from_sorted_elements(values.to_vec());
 		let x = if direct {
-			IntVar::from_direct_encoding(cnf, domain, &own)
+			IntVar::from_direct_encoding(domain, &own)
 		} else {
-			IntVar::from_order_encoding(cnf, domain, &own)
-		}
-		.unwrap();
+			IntVar::from_order_encoding(domain, &own)
+		};
 		x.constrain(cnf).unwrap();
 		lits.extend(own);
 		x
@@ -1113,11 +1110,7 @@ pub(crate) mod tests {
 	/// The implications are taken on trust: they are what makes the group a
 	/// chain, and the running sums it counts through are read straight off its
 	/// literals. See [`IntVar::constrain`] where they need saying.
-	pub(crate) fn implication_chain_var<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		terms: &[(Lit, PosCoeff)],
-		label: &str,
-	) -> Result<IntVar, Unsatisfiable> {
+	pub(crate) fn implication_chain_var(terms: &[(Lit, PosCoeff)], label: &str) -> IntVar {
 		let mut acc = 0;
 		let (totals, lits): (Vec<_>, Vec<_>) = terms
 			.iter()
@@ -1129,7 +1122,7 @@ pub(crate) mod tests {
 		// Coefficients are positive, so the running sums climb and the
 		// domain has one value per term, plus the zero none reaches.
 		let domain = RangeList::from_elements(once(0).chain(totals));
-		Ok(IntVar::from_order_encoding(db, domain, &lits)?.with_label(label))
+		IntVar::from_order_encoding(domain, &lits).with_label(label)
 	}
 
 	/// Every model of `cnf`, as what `read` takes from each.
@@ -1188,6 +1181,7 @@ pub(crate) mod tests {
 					SequentialCounterEncoder, StaticLinEncoder, TotalizerEncoder, WatchdogEncoder,
 				},
 			},
+			encoder::aggregate::Aggregation,
 			helpers::tests::{
 				all_binary_solutions, assert_checker, assert_count_admits, assert_encoding,
 				assert_exact_on_encoded_int_linear, assert_exact_on_small_int_linear,

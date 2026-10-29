@@ -15,7 +15,7 @@ use crate::{
 		bool_linear::NormalizedBoolLinear,
 		cardinality::Cardinality,
 		cardinality_one::{CardinalityOne, ProductEncoder},
-		count::{Count, SortingNetworkEncoder},
+		count::Count,
 		int_linear::{lit_terms, term_max, term_min, NormalizedIntLinear},
 		linear::{
 			Comparator, LimitComp, LinVariant, Linear, MixedRadixEncoder, PosCoeff,
@@ -23,13 +23,23 @@ use crate::{
 		},
 	},
 	decision::integer::IntVar,
-	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
+	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
+
+/// A [`Linear`] constraint taken apart by [`LinAggregator::aggregate`].
+///
+/// The constraint holds exactly where every clause, every count, and the
+/// variant do.
+#[derive(Debug)]
+pub struct Aggregation {
+	pub(crate) clauses: Vec<Vec<Lit>>,
+	pub(crate) counts: Vec<Count>,
+	pub(crate) variant: LinVariant,
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 /// Normalisation and specialisation of a general [`Linear`] constraint.
 pub struct LinAggregator {
-	sorted_encoder: SortingNetworkEncoder,
 	sort_same_coefficients: usize,
 }
 
@@ -63,6 +73,46 @@ pub struct StaticLinEncoder<
 	count_enc: CountEnc,
 }
 
+impl Aggregation {
+	/// Returns the clauses the constraint implies on its own.
+	pub fn clauses(&self) -> &[Vec<Lit>] {
+		&self.clauses
+	}
+
+	/// Returns the counts of literals into the integers the variant uses.
+	pub fn counts(&self) -> &[Count] {
+		&self.counts
+	}
+
+	/// Returns the variant, for a test whose constraint implies no clause and
+	/// sorts no count.
+	#[cfg(test)]
+	pub(crate) fn into_lone_variant(self) -> LinVariant {
+		debug_assert!(self.clauses.is_empty(), "{:?}", self.clauses);
+		debug_assert!(self.counts.is_empty(), "{:?}", self.counts);
+		self.variant
+	}
+
+	/// Returns the clauses, the counts, and the variant.
+	pub fn into_parts(self) -> (Vec<Vec<Lit>>, Vec<Count>, LinVariant) {
+		(self.clauses, self.counts, self.variant)
+	}
+
+	/// The constraint as `clauses` and what `variant` leaves, with no counts.
+	fn new(clauses: Vec<Vec<Lit>>, variant: LinVariant) -> Self {
+		Self {
+			clauses,
+			counts: Vec::new(),
+			variant,
+		}
+	}
+
+	/// Returns the specialised form of what is left of the constraint.
+	pub fn variant(&self) -> &LinVariant {
+		&self.variant
+	}
+}
+
 /// Anything that encodes every shape aggregation produces encodes the
 /// aggregated constraint itself, which is what [`LinearEncoder`] asks for.
 impl<Db, Enc> Encoder<Db, LinVariant> for Enc
@@ -91,22 +141,20 @@ impl LinAggregator {
 		any(feature = "tracing", test),
 		tracing::instrument(name = "aggregator", skip_all, fields(constraint = lin.trace_print()))
 	)]
-	/// Normalise a [`Linear`] constraint and work out which of the
-	/// specialised forms it is, with its terms grouped by whatever relates
-	/// them.
+	/// Normalise a [`Linear`] constraint and take it apart into the clauses it
+	/// implies on its own, the counts it sorts literals into, and the
+	/// specialised form of what is left.
 	///
-	/// Coefficients here are post-aggregation values: repeated variables,
-	/// negated literals, constants, and the expression multiplier have already
-	/// been combined.
+	/// Coefficients in the result are post-aggregation values: repeated
+	/// variables, negated literals, constants, and the expression multiplier
+	/// have already been combined.
 	///
 	/// # Errors
 	///
-	/// [`crate::Unsatisfiable`] when normalisation proves the constraint
-	/// inconsistent or emitting a simplifying clause fails.
-	pub fn aggregate<Db>(&self, db: &mut Db, lin: &Linear) -> Result<LinVariant>
-	where
-		Db: ClauseDatabase + ?Sized,
-	{
+	/// [`Unsatisfiable`] when normalisation proves the constraint
+	/// inconsistent.
+	pub fn aggregate(&self, lin: &Linear) -> Result<Aggregation> {
+		let mut clauses = Vec::new();
 		let mut k = lin.k - lin.exp.add * lin.exp.mult;
 		let mut agg = FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), FxBuildHasher);
 		for (lit, coef) in lin.exp.bool_terms() {
@@ -124,8 +172,8 @@ impl LinAggregator {
 			k = -k;
 		}
 
-		// An expression holds each view as a term over its variable, so views
-		// of one variable merge too.
+		// An expression holds each view as a term over its variable, so
+		// views of one variable merge too.
 		let mut int_terms: Vec<(Coeff, IntVar)> = Vec::new();
 		let mut position: FxHashMap<usize, usize> =
 			FxHashMap::with_capacity_and_hasher(lin.exp.terms.len(), FxBuildHasher);
@@ -173,11 +221,15 @@ impl LinAggregator {
 		// Only integer terms add to the least the sum can be.
 		let lhs_min: Coeff = int_terms.iter().map(term_min).sum();
 
-		// A literal worth more than the bound minus the integers never holds.
+		if lhs_min > k {
+			return Err(Unsatisfiable);
+		}
+		// A literal worth more than the bound minus the integers never
+		// holds.
 		let left = k - lhs_min;
 		for &(lit, coef) in &partition {
 			if *coef > left {
-				db.add_clause([!lit])?;
+				clauses.push(vec![!lit]);
 			}
 		}
 		partition.retain(|&(_, coef)| *coef <= left);
@@ -185,24 +237,26 @@ impl LinAggregator {
 		// A constraint its bounds decide reaches no encoder.
 		let lhs_max: Coeff = int_terms.iter().map(term_max).sum::<Coeff>()
 			+ partition.iter().map(|&(_, coef)| *coef).sum::<Coeff>();
-		if lhs_min > k || (cmp == LimitComp::Equal && lhs_max < k) {
-			db.contradiction()?;
-			unreachable!();
+		if cmp == LimitComp::Equal && lhs_max < k {
+			return Err(Unsatisfiable);
 		}
 		if cmp == LimitComp::LessEq && lhs_max <= k {
-			return Ok(LinVariant::Trivial);
+			return Ok(Aggregation::new(clauses, LinVariant::Trivial));
 		}
 
 		// Recognise counts before mirroring hides the bound variable.
 		if let [(-1, y)] = &int_terms[..] {
 			if k == 0 && partition.iter().all(|&(_, coef)| *coef == 1) {
 				let lits = partition.iter().map(|&(lit, _)| lit).collect();
-				return Ok(LinVariant::Count(Count::new(lits, cmp, y.clone())));
+				return Ok(Aggregation::new(
+					clauses,
+					LinVariant::Count(Count::new(lits, cmp, y.clone())),
+				));
 			}
 		}
 
-		// A coefficient is made positive by counting the variable from the far
-		// end, which is a view on it rather than a variable of its own.
+		// A coefficient is made positive by counting the variable from the
+		// far end, which is a view on it rather than a variable of its own.
 		for (c, x) in &mut int_terms {
 			if *c < 0 {
 				k -= *c * (x.min() + x.max());
@@ -221,13 +275,14 @@ impl LinAggregator {
 		debug_assert!(k >= 0, "a bound the sum can meet is never negative");
 		if k == 0 && int_terms.is_empty() {
 			for (lit, _) in &partition {
-				db.add_clause([!*lit])?;
+				clauses.push(vec![!*lit]);
 			}
-			return Ok(LinVariant::Trivial);
+			return Ok(Aggregation::new(clauses, LinVariant::Trivial));
 		}
 		let mut k = PosCoeff::new(k);
 
-		// The sum only lands on multiples of what divides every coefficient.
+		// The sum only lands on multiples of what divides every
+		// coefficient.
 		{
 			let mut iter = partition
 				.iter()
@@ -244,11 +299,10 @@ impl LinAggregator {
 					}
 				}
 				if divisor > 1 {
-					// An equality that does not sit on one of those multiples
-					// is unsatisfiable.
+					// An equality that does not sit on one of those
+					// multiples is unsatisfiable.
 					if cmp == LimitComp::Equal && *k % divisor != 0 {
-						db.contradiction()?;
-						unreachable!();
+						return Err(Unsatisfiable);
 					}
 					for (_, coef) in &mut partition {
 						*coef = PosCoeff::new(**coef / divisor);
@@ -273,9 +327,9 @@ impl LinAggregator {
 				LimitComp::Equal => {
 					if lhs_ub == k {
 						for (lit, _) in &partition {
-							db.add_clause([*lit])?;
+							clauses.push(vec![*lit]);
 						}
-						return Ok(LinVariant::Trivial);
+						return Ok(Aggregation::new(clauses, LinVariant::Trivial));
 					}
 				}
 			}
@@ -285,31 +339,39 @@ impl LinAggregator {
 			if partition.iter().all(|&(_, coef)| *coef == 1) {
 				let lits = partition.iter().map(|&(lit, _)| lit).collect_vec();
 				if *k == 1 {
-					return Ok(LinVariant::CardinalityOne(CardinalityOne { lits, cmp }));
+					return Ok(Aggregation::new(
+						clauses,
+						LinVariant::CardinalityOne(CardinalityOne { lits, cmp }),
+					));
 				}
 				// At most n-1 out of n is at least one of them being false.
 				if lits.len() == (*k + 1) as usize {
 					let neg = lits.iter().map(|&l| !l);
-					db.add_clause(neg.clone())?;
-					return Ok(if cmp == LimitComp::LessEq {
+					clauses.push(neg.clone().collect());
+					let variant = if cmp == LimitComp::LessEq {
 						LinVariant::Trivial
 					} else {
 						LinVariant::CardinalityOne(CardinalityOne {
 							lits: neg.collect_vec(),
 							cmp: LimitComp::LessEq,
 						})
-					});
+					};
+					return Ok(Aggregation::new(clauses, variant));
 				}
-				return Ok(LinVariant::Cardinality(Cardinality { lits, cmp, k }));
+				return Ok(Aggregation::new(
+					clauses,
+					LinVariant::Cardinality(Cardinality { lits, cmp, k }),
+				));
 			}
 		}
 
+		let mut counts = Vec::new();
 		// Literals that count for the same are worth sorting first, so that
 		// what they come to together is one integer rather than one each.
 		if self.sort_same_coefficients >= 2 {
 			let mut kept = Vec::new();
-			// Sorted, since a hash map hands its keys back in whatever order
-			// it likes and the encoding has to be the same every run.
+			// Sorted, since a hash map hands its keys back in whatever
+			// order it likes and the encoding has to be the same every run.
 			for (coef, lits) in partition
 				.into_iter()
 				.map(|(lit, coef)| (coef, lit))
@@ -319,11 +381,7 @@ impl LinAggregator {
 			{
 				if lits.len() >= self.sort_same_coefficients {
 					let y = IntVar::new(0..=(*k / *coef)).with_label("s");
-					// Its literals are wanted either way, so there is nothing
-					// to gain by leaving them to the network below.
-					y.require_order_encoding(db)?;
-					self.sorted_encoder
-						.encode(db, &Count::new(lits, cmp, y.clone()))?;
+					counts.push(Count::new(lits, cmp, y.clone()));
 					int_terms.push((*coef, y));
 				} else {
 					kept.extend(lits.into_iter().map(|lit| (lit, coef)));
@@ -336,25 +394,29 @@ impl LinAggregator {
 		// Keep Boolean terms as literals to avoid creating and unpacking
 		// integers.
 		if int_terms.is_empty() {
-			return Ok(LinVariant::BoolLinear(NormalizedBoolLinear::new(
-				partition, cmp, k,
-			)));
+			let variant = LinVariant::BoolLinear(NormalizedBoolLinear::new(partition, cmp, k));
+			return Ok(Aggregation {
+				clauses,
+				counts,
+				variant,
+			});
 		}
 
-		let mut terms = lit_terms(db, partition)?;
+		let mut terms = lit_terms(partition);
 		terms.extend(int_terms.into_iter().map(|(c, x)| (PosCoeff::new(c), x)));
-		Ok(LinVariant::Linear(NormalizedIntLinear::new(terms, cmp, k)))
+		let variant = LinVariant::Linear(NormalizedIntLinear::new(terms, cmp, k));
+		Ok(Aggregation {
+			clauses,
+			counts,
+			variant,
+		})
 	}
-	/// Pre-aggregation of at least `n` equal-coefficient literals by
-	/// `sorted_encoder`.
+
+	/// Count at least `n` literals with the same coefficient into one
+	/// integer, returned as a [`Count`] in the [`Aggregation`].
 	///
 	/// Zero disables the transformation, as in the default configuration.
-	pub fn sort_same_coefficients(
-		&mut self,
-		sorted_encoder: SortingNetworkEncoder,
-		n: usize,
-	) -> &mut Self {
-		self.sorted_encoder = sorted_encoder;
+	pub fn sort_same_coefficients(&mut self, n: usize) -> &mut Self {
 		self.sort_same_coefficients = n;
 		self
 	}
@@ -391,7 +453,20 @@ where
 		tracing::instrument(name = "linear_encoder", skip_all, fields(constraint = lin.trace_print()))
 	)]
 	fn encode(&self, db: &mut Db, lin: &Linear) -> Result {
-		let variant = self.agg.aggregate(db, lin)?;
+		let Ok(Aggregation {
+			clauses,
+			counts,
+			variant,
+		}) = self.agg.aggregate(lin)
+		else {
+			return db.contradiction();
+		};
+		for clause in clauses {
+			db.add_clause_from_slice(&clause)?;
+		}
+		for count in counts {
+			self.enc.encode(db, &LinVariant::Count(count))?;
+		}
 		self.enc.encode(db, &variant)
 	}
 }
@@ -500,8 +575,6 @@ where
 
 #[cfg(test)]
 mod tests {
-	use std::num::NonZeroI32;
-
 	use traced_test::test;
 
 	use crate::helpers::tests::prelude::*;
@@ -528,8 +601,17 @@ mod tests {
 		let a = cnf.new_lit();
 		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
 		let con = Linear::new(a * 2 + y.clone() * 3, Comparator::LessEq, 0);
-		let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
-		else {
+		let (clauses, counts, variant) = LinAggregator::default()
+			.aggregate(&con)
+			.unwrap()
+			.into_parts();
+		// `2a` alone passes the bound.
+		assert_eq!(clauses, [vec![!a]]);
+		debug_assert!(counts.is_empty());
+		for clause in clauses {
+			cnf.add_clause(clause).unwrap();
+		}
+		let LinVariant::Linear(con) = variant else {
 			panic!("a literal and an integer make a linear constraint");
 		};
 		cnf.encode(&con, &AdderEncoder::default()).unwrap();
@@ -613,8 +695,10 @@ mod tests {
 			let y = IntVar::new(0..=2).with_label("y");
 			let exp = LinExp::from_slices(&[1; 3], &lits) - LinExp::from(y.clone());
 			let con = Linear::new(exp, cmp, 0);
-			let LinVariant::Count(count) =
-				LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
+			let LinVariant::Count(count) = LinAggregator::default()
+				.aggregate(&con)
+				.map(Aggregation::into_lone_variant)
+				.unwrap()
 			else {
 				panic!("literals against an integer are a count");
 			};
@@ -659,12 +743,6 @@ mod tests {
 			let con = Linear::new(exp, cmp.clone(), 0);
 			let got = aggregated(&mut cnf, &LinAggregator::default(), &con).ok();
 			assert_eq!(got, want, "{n} literals {cmp:?} {domain:?}");
-			if want.is_none() {
-				assert!(
-					models(&cnf, |_| ()).is_empty(),
-					"{n} literals {cmp:?} {domain:?}"
-				);
-			}
 		}
 	}
 
@@ -675,7 +753,10 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let x = crate::decision::integer::IntVar::new(-10..=0).with_label("x");
 		let con = Linear::new(x.clone() * 1, Comparator::LessEq, -5);
-		let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
+		let LinVariant::Linear(con) = LinAggregator::default()
+			.aggregate(&con)
+			.map(Aggregation::into_lone_variant)
+			.unwrap()
 		else {
 			panic!("a constraint over an integer aggregates to a linear one");
 		};
@@ -693,8 +774,8 @@ mod tests {
 		assert_eq!(seen, (-10..=-5).collect_vec());
 	}
 
-	/// A database may refuse a clause that aggregation adds, which is a
-	/// contradiction for the caller rather than a panic.
+	/// A database may refuse a clause that aggregation implies, which is a
+	/// contradiction for the encoder rather than a panic.
 	#[test]
 	fn a_refused_clause_is_a_contradiction() {
 		/// Refuses every clause that mentions `refused`.
@@ -716,7 +797,7 @@ mod tests {
 		}
 
 		let mut sorting = LinAggregator::default();
-		let _ = sorting.sort_same_coefficients(SortingNetworkEncoder::default(), 2);
+		let _ = sorting.sort_same_coefficients(2);
 		for (coefs, k, agg) in [
 			// `a` is worth more than the bound, so it never holds.
 			(&[3, 1, 1, 2][..], 2, LinAggregator::default()),
@@ -730,21 +811,29 @@ mod tests {
 				refused: !lits[0],
 			};
 			let con = Linear::new(LinExp::from_slices(coefs, &lits), Comparator::LessEq, k);
+			let mut encoder = LinearEncoder::new(TotalizerEncoder::default());
+			let _ = encoder.with_linear_aggregator(agg);
 			assert_eq!(
-				agg.aggregate(&mut db, &con).err(),
+				encoder.encode(&mut db, &con).err(),
 				Some(Unsatisfiable),
 				"{con}"
 			);
 		}
 	}
 
-	/// Aggregate `con` and read the result back.
+	/// Aggregate `con` and read back the variant it leaves, adding the clauses
+	/// it implies to `db` for the test to count.
 	fn aggregated(
 		db: &mut Cnf,
 		agg: &LinAggregator,
 		con: &Linear,
 	) -> Result<Aggregated, Unsatisfiable> {
-		Ok(match agg.aggregate(db, con)? {
+		let (clauses, counts, variant) = agg.aggregate(con)?.into_parts();
+		for clause in clauses {
+			db.add_clause(clause)?;
+		}
+		debug_assert!(counts.is_empty());
+		Ok(match variant {
 			LinVariant::Linear(lin) => {
 				let (cmp, k) = (lin.cmp(), lin.k());
 				Aggregated::Linear(sorted_weights(lin.grouped_weights(db)?), cmp, k)
@@ -776,22 +865,14 @@ mod tests {
 	fn aggregator_at_least_one_negated() {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
-		assert_eq!(
-			aggregated(
-				&mut cnf,
-				&LinAggregator::default(),
-				&Linear::new(
-					LinExp::from_slices(&[1, 1, 1, 1], &[a, b, c, d]),
-					Comparator::LessEq,
-					3
-				)
-			),
-			Ok(Aggregated::Trivial)
+		let con = Linear::new(
+			LinExp::from_slices(&[1, 1, 1, 1], &[a, b, c, d]),
+			Comparator::LessEq,
+			3,
 		);
-		assert_encoding(
-			&cnf,
-			&expect_file!["linear/aggregator/test_at_least_one_negated.cnf"],
-		);
+		let aggregation = LinAggregator::default().aggregate(&con).unwrap();
+		assert_eq!(aggregation.clauses(), [vec![!a, !b, !c, !d]]);
+		assert!(matches!(aggregation.variant(), LinVariant::Trivial));
 
 		let mut cnf = Cnf::default();
 		let (a, b, c) = cnf.new_lits();
@@ -1013,30 +1094,18 @@ mod tests {
 	fn aggregator_sort_same_coefficients() {
 		let mut cnf = Cnf::default();
 		let (a, b, c, d) = cnf.new_lits();
-
+		let con = Linear::new(
+			LinExp::from_slices(&[3, 3, 5, 3], &[a, b, d, c]),
+			Comparator::LessEq,
+			10,
+		);
+		let aggregation = LinAggregator::default()
+			.sort_same_coefficients(2)
+			.aggregate(&con)
+			.unwrap();
 		assert_eq!(
-			aggregated(
-				&mut cnf,
-				LinAggregator::default()
-					.sort_same_coefficients(SortingNetworkEncoder::default(), 2),
-				&Linear::new(
-					LinExp::from_slices(&[3, 3, 5, 3], &[a, b, d, c]),
-					Comparator::LessEq,
-					10
-				)
-			),
-			Ok(Aggregated::Linear(
-				sorted_weights(vec![
-					vec![
-						(Lit(NonZeroI32::new(5).unwrap()), 3),
-						(Lit(NonZeroI32::new(6).unwrap()), 3),
-						(Lit(NonZeroI32::new(7).unwrap()), 3)
-					],
-					vec![(d, 5)],
-				]),
-				LimitComp::LessEq,
-				10
-			))
+			read_sorted(&aggregation),
+			(vec![a, b, c], 3, vec![(1, 5, false), (3, 3, true)])
 		);
 	}
 
@@ -1044,28 +1113,19 @@ mod tests {
 	fn aggregator_sort_same_coefficients_using_minimal_chain() {
 		let mut cnf = Cnf::default();
 		let vars = cnf.new_var_range(5).iter_lits().collect_vec();
+		let con = Linear::new(
+			LinExp::from_slices(&[5, 5, 5, 5, 4], &vars),
+			Comparator::LessEq,
+			12,
+		);
+		let aggregation = LinAggregator::default()
+			.sort_same_coefficients(2)
+			.aggregate(&con)
+			.unwrap();
+		// Two of the four already pass the bound, so the count stops at two.
 		assert_eq!(
-			aggregated(
-				&mut cnf,
-				LinAggregator::default()
-					.sort_same_coefficients(SortingNetworkEncoder::default(), 2),
-				&Linear::new(
-					LinExp::from_slices(&[5, 5, 5, 5, 4], &vars),
-					Comparator::LessEq,
-					12 // only need 2 to sort
-				)
-			),
-			Ok(Aggregated::Linear(
-				sorted_weights(vec![
-					vec![(*vars.last().unwrap(), 4)],
-					vec![
-						(Lit(NonZeroI32::new(6).unwrap()), 5),
-						(Lit(NonZeroI32::new(7).unwrap()), 5)
-					],
-				]),
-				LimitComp::LessEq,
-				12
-			))
+			read_sorted(&aggregation),
+			(vars[..4].to_vec(), 2, vec![(1, 4, false), (5, 2, true)])
 		);
 	}
 
@@ -1148,7 +1208,10 @@ mod tests {
 		let y = crate::decision::integer::IntVar::new(0..=3).with_label("y");
 
 		let con = Linear::new(a * 3 + y.clone() * 5, Comparator::LessEq, 11);
-		let LinVariant::Linear(con) = LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
+		let LinVariant::Linear(con) = LinAggregator::default()
+			.aggregate(&con)
+			.map(Aggregation::into_lone_variant)
+			.unwrap()
 		else {
 			panic!("a literal and an integer make a linear constraint");
 		};
@@ -1173,12 +1236,12 @@ mod tests {
 	fn constant_matches_the_equivalent_shifted_constraint() {
 		use crate::decision::integer::IntVar;
 
-		let k_of = |exp, cmp, k| {
-			let mut db = Cnf::default();
-			match LinAggregator::default().aggregate(&mut db, &Linear::new(exp, cmp, k)) {
-				Ok(LinVariant::Linear(lin)) => Some(lin.k()),
-				_ => None,
-			}
+		let k_of = |exp, cmp, k| match LinAggregator::default()
+			.aggregate(&Linear::new(exp, cmp, k))
+			.map(Aggregation::into_lone_variant)
+		{
+			Ok(LinVariant::Linear(lin)) => Some(lin.k()),
+			_ => None,
 		};
 		let x = IntVar::new(0..=5);
 		for (cmp, k) in [(Comparator::LessEq, 6), (Comparator::GreaterEq, -6)] {
@@ -1222,8 +1285,10 @@ mod tests {
 				0,
 			),
 		] {
-			let LinVariant::Count(count) =
-				LinAggregator::default().aggregate(&mut cnf, &con).unwrap()
+			let LinVariant::Count(count) = LinAggregator::default()
+				.aggregate(&con)
+				.map(Aggregation::into_lone_variant)
+				.unwrap()
 			else {
 				panic!("literals against an integer are a count");
 			};
@@ -1232,9 +1297,7 @@ mod tests {
 			assert_eq!(count.y.min(), 0);
 			assert_eq!(count.y.max(), 3);
 		}
-		// The encoder chooses how to read the bound, so recognising the count
-		// gives it no literals.
-		assert_eq!((cnf.num_vars(), cnf.num_clauses()), (3, 0));
+		// The encoder chooses how to read the bound.
 		assert!(!y.has_order_encoding());
 	}
 
@@ -1257,10 +1320,10 @@ mod tests {
 		let mut cnf = Cnf::default();
 		let a = cnf.new_lit();
 		let x = crate::decision::integer::IntVar::new(2..=5).with_label("x");
-		let _ = LinAggregator::default()
-			.aggregate(&mut cnf, &Linear::new(a * 3 + x, Comparator::LessEq, 4))
+		let aggregation = LinAggregator::default()
+			.aggregate(&Linear::new(a * 3 + x, Comparator::LessEq, 4))
 			.unwrap();
-		assert_eq!(cnf.iter().collect_vec(), [[!a]]);
+		assert_eq!(aggregation.clauses(), [vec![!a]]);
 
 		// Nothing is left to meet `= 1`.
 		let mut cnf = Cnf::default();
@@ -1273,6 +1336,25 @@ mod tests {
 			),
 			Err(Unsatisfiable)
 		);
+	}
+
+	/// The literals of the one count, its greatest value, and each term of the
+	/// linear variant as its coefficient, its greatest value, and whether it is
+	/// the count.
+	fn read_sorted(aggregation: &Aggregation) -> (Vec<Lit>, Coeff, Vec<(Coeff, Coeff, bool)>) {
+		let [count] = aggregation.counts() else {
+			panic!("one group of literals is worth sorting");
+		};
+		assert_eq!(count.cmp, LimitComp::LessEq);
+		let LinVariant::Linear(lin) = aggregation.variant() else {
+			panic!("the count joins the rest as an integer");
+		};
+		let terms = lin
+			.terms()
+			.map(|(c, x)| (*c, x.max(), x.is(&count.y)))
+			.sorted()
+			.collect_vec();
+		(count.lits.clone(), count.y.max(), terms)
 	}
 
 	/// Groups in a settled order, neither the grouping nor what is in one
@@ -1293,25 +1375,24 @@ mod tests {
 
 		let x = IntVar::new(0..=3).with_label("x");
 		let y = IntVar::new(0..=3).with_label("y");
-		let mut cnf = Cnf::default();
 		let exp = x.clone() + (x.clone() * 2 + 1) + y.clone() - (y.clone() + 2);
-		let LinVariant::Linear(con) = LinAggregator::default()
-			.aggregate(&mut cnf, &Linear::new(exp, Comparator::LessEq, 7))
-			.unwrap()
-		else {
+		let aggregation = LinAggregator::default()
+			.aggregate(&Linear::new(exp, Comparator::LessEq, 7))
+			.unwrap();
+		assert!(aggregation.clauses().is_empty());
+		let LinVariant::Linear(con) = aggregation.into_lone_variant() else {
 			panic!("3·x - 1 ≤ 7 is a linear constraint over x alone");
 		};
 		let terms = con.terms().collect_vec();
 		assert_eq!(terms.len(), 1, "y cancels, and x is one term");
 		// `3·x ≤ 7 - 1 + 2`, divided by the coefficient.
 		assert_eq!((*terms[0].0, con.k()), (1, 2));
-		assert_eq!(cnf.num_clauses(), 0);
 
 		// A falling view merges with a rising one, into `2·x + 3 ≤ 7`.
-		let mut cnf = Cnf::default();
 		let exp = (x.clone() * 3) + (-x.clone() + 3);
 		let LinVariant::Linear(con) = LinAggregator::default()
-			.aggregate(&mut cnf, &Linear::new(exp, Comparator::LessEq, 7))
+			.aggregate(&Linear::new(exp, Comparator::LessEq, 7))
+			.map(Aggregation::into_lone_variant)
 			.unwrap()
 		else {
 			panic!("2·x + 3 ≤ 7 is a linear constraint over x alone");
@@ -1340,7 +1421,10 @@ mod tests {
 			aggregated(&mut cnf, &agg, &trivial).unwrap(),
 			Aggregated::Trivial
 		);
-		assert_eq!(cnf.num_clauses(), 0, "a trivial constraint costs nothing");
+		assert!(
+			agg.aggregate(&trivial).unwrap().clauses().is_empty(),
+			"a trivial constraint costs nothing"
+		);
 
 		// Three at the least, which is more than two.
 		let unsatisfiable = Linear::new(terms(), Comparator::LessEq, 2);
