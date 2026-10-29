@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.6.1...pyndakaas-v0.7.0) - 2026-10-29
+
+### Added
+
+- [**breaking**] return the clauses and counts of an aggregation instead of adding them
+- [**breaking**] make every IntVar handle an affine view of its variable
+
+### Other
+
+- *(pyndakaas)* update pyo3 to 0.30.1 and ship type stubs
+
 ### Added
 
 - Type stubs for the compiled module, and a `py.typed` marker.

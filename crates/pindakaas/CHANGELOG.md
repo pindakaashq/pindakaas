@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.6.1...pindakaas-v0.7.0) - 2026-10-29
+
+### Added
+
+- [**breaking**] return the clauses and counts of an aggregation instead of adding them
+- [**breaking**] make every IntVar handle an affine view of its variable
+
 ### Added
 
 - Arithmetic of an `IntVar` with a constant (`x + k`, `k + x`, `x - k`, `x * c`, `c * x`, and `-x`) gives a view of the same variable, see `decision::integer`. `with_order_encoding` and `with_direct_encoding` read their literals over the values of a view.

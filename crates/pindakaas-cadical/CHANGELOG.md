@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3](https://github.com/pindakaashq/pindakaas/compare/pindakaas-cadical-v0.4.2...pindakaas-cadical-v0.4.3) - 2026-10-29
+
+### Other
+
+- *(pyndakaas)* update pyo3 to 0.30.1 and ship type stubs
+
 ## [0.4.2](https://github.com/pindakaashq/pindakaas/compare/pindakaas-cadical-v0.4.1...pindakaas-cadical-v0.4.2) - 2026-10-19
 
 ### Changed
