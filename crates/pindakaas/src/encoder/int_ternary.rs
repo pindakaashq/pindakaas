@@ -8,16 +8,35 @@
 
 use std::{iter::empty, mem};
 
+use itertools::Itertools;
+
 use crate::{
 	constraint::{
+		implied::{Conditioned, Implied},
 		int_linear::{encode_addition, Decompose, IntLinear, NormalizedIntLinear, Term},
 		int_ternary::IntTernary,
 		linear::{Comparator, LimitComp},
 	},
 	decision::integer::IntVar,
 	helpers::{div_ceil, div_floor},
-	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
+
+/// What a clause of the walk adds for the condition, besides its guards and
+/// literal: nothing on the plain path, the negated condition, or false where
+/// the clause defines.
+trait ConditionLiteral: Copy + Eq {
+	/// Whether a clause can take a literal, so that the walk asks whether its
+	/// bound overflows. A constant, so the plain walk compiles without asking.
+	const CONDITIONAL: bool;
+
+	/// The condition literal of a clause whose bound `overflows`, under
+	/// `condition`.
+	fn for_clause(condition: Option<Conditioned>, overflows: bool) -> Self;
+
+	/// The literal this adds to its clause, if any.
+	fn literal(self) -> Option<BoolVal>;
+}
 
 /// A term of a constraint, together with the view of its variable the walk
 /// will guard on.
@@ -70,17 +89,68 @@ pub struct IntTernaryEncoder {
 	config: IntTernaryConfig,
 }
 
+/// The clauses of `left + right + result ≷ k`, which bound `result` for each
+/// pair of values of `left` and `right`.
+///
+/// A loop per operand rather than a recursion: an [`IntTernary`] has three
+/// terms and folds any constant among them into `k`, so there are never more
+/// than two operands, and `result` always yields unit clauses. A clause is
+/// therefore one guard per loop and one literal, which lets each loop reuse its
+/// buffers across its steps where a recursion allocates a clause list per step.
+///
+/// Under a `condition`, the clauses it names take the negated condition.
+#[derive(Clone, Copy, Debug)]
+struct Walk<'a> {
+	left: Option<Encoded<'a>>,
+	right: Option<Encoded<'a>>,
+	result: Option<Encoded<'a>>,
+	cmp: Comparator,
+	k: Coeff,
+	/// Whether the constraint is an equality, so that a bound between two
+	/// values of `result` is one it cannot meet.
+	exact: bool,
+	condition: Option<Conditioned>,
+}
+
+impl ConditionLiteral for () {
+	const CONDITIONAL: bool = false;
+
+	fn for_clause(_: Option<Conditioned>, _: bool) -> Self {}
+
+	fn literal(self) -> Option<BoolVal> {
+		None
+	}
+}
+
+impl ConditionLiteral for BoolVal {
+	const CONDITIONAL: bool = true;
+
+	fn for_clause(condition: Option<Conditioned>, overflows: bool) -> Self {
+		Conditioned::negated(condition, overflows)
+	}
+
+	fn literal(self) -> Option<BoolVal> {
+		Some(self)
+	}
+}
+
 impl Encoded<'_> {
 	/// The literals of the unit clauses for `c·x ≷ k`, nothing below this term
 	/// being left to give.
-	fn bound_into<Db: ClauseDatabase + ?Sized>(
+	///
+	/// With `check_overflow`, also whether no value of the term meets the
+	/// bound. Where it says the term is exact, as under an equality, a bound
+	/// that falls between its values is one no value meets either. Only a walk
+	/// whose clauses `R` can condition asks.
+	fn bound_into<Db: ClauseDatabase + ?Sized, R: ConditionLiteral>(
 		&self,
 		db: &mut Db,
 		cmp: Comparator,
 		k: Coeff,
 		pins: Option<&[(Coeff, BoolVal)]>,
+		check_overflow: Option<bool>,
 		out: &mut Vec<BoolVal>,
-	) -> Result {
+	) -> Result<bool, Unsatisfiable> {
 		if let Some(pins) = pins {
 			// The value already includes the coefficient sign, so the
 			// comparison does not need reversing.
@@ -93,100 +163,26 @@ impl Encoded<'_> {
 					out.push(!takes);
 				}
 			}
-			return Ok(());
+			return Ok(R::CONDITIONAL && check_overflow.is_some() && out.len() == pins.len());
 		}
 		// Dividing by a negative coefficient turns the comparison around.
 		let cmp = if self.c >= 0 { cmp } else { cmp.reverse() };
-		out.push(match cmp {
-			Comparator::LessEq => self.x.at_most(db, div_floor(k, self.c))?,
-			Comparator::GreaterEq => self.x.at_least(db, div_ceil(k, self.c))?,
+		let (unit, bound) = match cmp {
+			Comparator::LessEq => {
+				let bound = div_floor(k, self.c);
+				(self.x.at_most(db, bound)?, bound)
+			}
+			Comparator::GreaterEq => {
+				let bound = div_ceil(k, self.c);
+				(self.x.at_least(db, bound)?, bound)
+			}
 			Comparator::Equal => unreachable!("an equality is split before it is encoded"),
-		});
-		Ok(())
-	}
-
-	/// Add the clauses for `outer + inner + bounded ≷ k` to `db`.
-	///
-	/// `bounded` is the term every clause ends in; `inner` and `outer` are the
-	/// terms whose values guard it, `outer` outermost. A loop per guard rather
-	/// than a recursion: an [`IntTernary`] has three terms and folds any
-	/// constant among them into `k`, so there are never more than two guards,
-	/// and `bounded` always yields unit clauses. A clause is therefore one
-	/// guard per loop and one literal, which lets each loop reuse its buffers
-	/// across its steps where a recursion allocates a clause list per step.
-	fn emit<Db: ClauseDatabase + ?Sized>(
-		db: &mut Db,
-		bounded: Option<Encoded>,
-		inner: Option<Encoded>,
-		outer: Option<Encoded>,
-		cmp: Comparator,
-		k: Coeff,
-	) -> Result {
-		let Some(bounded) = bounded else {
-			// Nothing left to give, so the empty sum either satisfies what
-			// remains of the constraint or nothing can.
-			let holds = match cmp {
-				Comparator::LessEq => 0 <= k,
-				Comparator::GreaterEq => 0 >= k,
-				Comparator::Equal => unreachable!("an equality is split before it is encoded"),
-			};
-			return if holds {
-				Ok(())
-			} else {
-				db.add_clause(empty::<BoolVal>())
-			};
 		};
-		let (outer_direct, outer_steps) = Self::guards(db, outer, cmp)?;
-		let (inner_direct, inner_steps) = Self::guards(db, inner, cmp)?;
-		// What a direct encoding pins `bounded` to does not depend on what is
-		// left of the bound, so it is read once rather than once per step.
-		let pins: Option<Vec<_>> = if bounded.x.is_read_directly() {
-			Some(bounded.x.direct_walk(db)?.collect())
-		} else {
-			None
-		};
-		let (mut units, mut last_units) = (Vec::new(), Vec::new());
-		let (mut clauses, mut last_clauses, mut have_clauses) = (Vec::new(), Vec::new(), false);
-
-		for &(v, outer_guard) in &outer_steps {
-			let left = k - v;
-			clauses.clear();
-			let mut have_units = false;
-			for &(w, inner_guard) in &inner_steps {
-				units.clear();
-				bounded.bound_into(db, cmp, left - w, pins.as_deref(), &mut units)?;
-				// A step asking of the terms below exactly what a step that
-				// covers it asked adds nothing, which happens often.
-				if have_units && units == last_units {
-					continue;
-				}
-				clauses.extend(units.iter().map(|&lit| (inner_guard, lit)));
-				// An order guard holds whenever the one before it does, so each
-				// step covers the next. Direct guards exclude each other, so
-				// only the first step, which has no guard, covers the others.
-				if !inner_direct || !have_units {
-					mem::swap(&mut units, &mut last_units);
-				}
-				have_units = true;
-			}
-			if have_clauses && clauses == last_clauses {
-				continue;
-			}
-			for &(inner_guard, lit) in &clauses {
-				// Terms can share literals, and a clause with a literal and its
-				// negation always holds.
-				if lit == !outer_guard || lit == !inner_guard || inner_guard == !outer_guard {
-					continue;
-				}
-				db.add_clause([outer_guard, inner_guard, lit])?;
-			}
-			// As for the inner guard.
-			if !outer_direct || !have_clauses {
-				mem::swap(&mut clauses, &mut last_clauses);
-			}
-			have_clauses = true;
-		}
-		Ok(())
+		out.push(unit);
+		Ok(R::CONDITIONAL
+			&& check_overflow.is_some_and(|exact| {
+				unit == BoolVal::Const(false) || (exact && !self.x.contains(bound))
+			}))
 	}
 
 	/// What a guard term adds to the sum at each value it is walked over,
@@ -230,23 +226,141 @@ impl Default for IntTernaryConfig {
 }
 
 impl IntTernaryEncoder {
+	/// Encode `con`, under a condition on the clauses `condition` names.
+	///
+	/// A domain is narrowed only without a condition, since what the
+	/// constraint implies holds only where the condition does.
+	// Inlined so that the plain encoding, whose condition is a constant `None`,
+	// compiles without the checks on it (measured: 1.6% of the instructions).
+	#[inline(always)]
+	pub(crate) fn encode_conditioned<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		con: &IntTernary,
+		condition: Option<Conditioned>,
+	) -> Result {
+		// A last term of one value joins the constant, which leaves the clauses
+		// bounding a term the piece does not define.
+		let condition = match condition {
+			Some(Conditioned::Overflow(r)) if con.z.1.card() == 1 => Some(Conditioned::All(r)),
+			condition => condition,
+		};
+		// `z` crosses the comparison and a term of one value joins the
+		// constant, which is the form both arms below want.
+		let con = &IntLinear::from(con);
+		if self.config.propagate && condition.is_none() {
+			con.propagate(db)?;
+		}
+		let terms = &con.terms;
+		let binary = |t: &Term| t.1.prefers_binary(self.config.cutoff);
+
+		if let Some((x, y, z)) = con.as_addition() {
+			if [x, y, z].iter().all(|t| binary(t)) && Self::worth_adding(con.cmp, x, y) {
+				return encode_addition(db, x, y, con.cmp, z, condition.map(Conditioned::literal));
+			}
+		}
+		// Every variable needs a view so a solution can report its value.
+		for t in terms {
+			if !t.1.has_direct_encoding() {
+				t.1.require_order_encoding(db)?;
+			}
+		}
+		// A guarded last term also wants an order view, which states each
+		// bound the guards ask for in one literal. Not for two values: one
+		// direct literal is such a bound already.
+		if let [_, .., last] = terms.as_slice() {
+			if last.1.card() > 2 {
+				last.1.require_order_encoding(db)?;
+			}
+		}
+		// The clauses end in the last term and are guarded by the ones before
+		// it, so the terms are read from the back.
+		let mut encoded = terms.iter().rev().map(|t| Encoded { c: t.0, x: &t.1 });
+		let (result, right, left) = (encoded.next(), encoded.next(), encoded.next());
+		debug_assert!(encoded.next().is_none());
+
+		let exact = con.cmp == Comparator::Equal;
+		for cmp in con.cmp.split() {
+			Walk {
+				left,
+				right,
+				result,
+				cmp,
+				k: con.k,
+				exact,
+				condition,
+			}
+			.emit(db)?;
+		}
+		Ok(())
+	}
+
 	/// Break `con` apart and encode each piece.
 	pub(crate) fn encode_decomposed<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
 		con: &NormalizedIntLinear,
 		decompose: &impl Decompose,
+		condition: Option<Lit>,
 	) -> Result {
-		if self.encode_undecomposed(db, con)? {
+		if self.encode_undecomposed(db, con, condition)? {
 			return Ok(());
 		}
 		// A decomposition that cannot be built is a constraint that cannot be
 		// met, which the database has to be told rather than only the caller.
-		let Ok(cons) = decompose.decompose(db, con) else {
+		let Ok(pieces) = decompose.decompose(db, con) else {
 			return db.contradiction();
 		};
-		cons.iter()
-			.try_for_each(|con| Encoder::encode(self, db, con))
+		self.encode_pieces_of(db, con, &pieces, condition)
+	}
+
+	/// Encode the pieces of a decomposition.
+	///
+	/// Under a `condition`, a piece whose last term `is_given` states the
+	/// constraint, and every other piece defines its last term.
+	pub(crate) fn encode_pieces<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		pieces: &[IntTernary],
+		condition: Option<Lit>,
+		is_given: impl Fn(&IntVar) -> bool,
+	) -> Result {
+		pieces.iter().try_for_each(|piece| {
+			let condition = condition.map(|r| {
+				if is_given(&piece.z.1) {
+					Conditioned::All(r)
+				} else {
+					Conditioned::Overflow(r)
+				}
+			});
+			self.encode_conditioned(db, piece, condition)
+		})
+	}
+
+	/// Encode the pieces of a decomposition of `con`.
+	///
+	/// Under a `condition`, a piece that ends in a variable of `con` states
+	/// the constraint, and every other piece defines its last term.
+	pub(crate) fn encode_pieces_of<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		con: &NormalizedIntLinear,
+		pieces: &[IntTernary],
+		condition: Option<Lit>,
+	) -> Result {
+		// The constraint's own variables are given, so a piece that ends in one
+		// states the constraint rather than defining an intermediate.
+		let given = match condition {
+			Some(_) => con
+				.terms()
+				.map(|(_, x)| x.variable_id())
+				.sorted_unstable()
+				.collect(),
+			None => Vec::new(),
+		};
+		self.encode_pieces(db, pieces, condition, |z| {
+			given.binary_search(&z.variable_id()).is_ok()
+		})
 	}
 
 	/// Encode `con` where it needs no decomposition, reporting whether it did.
@@ -260,6 +374,7 @@ impl IntTernaryEncoder {
 		&self,
 		db: &mut Db,
 		con: &NormalizedIntLinear,
+		condition: Option<Lit>,
 	) -> Result<bool, Unsatisfiable> {
 		let k = con.k();
 		// Every term counts from zero, so the least and greatest the sum comes
@@ -273,7 +388,9 @@ impl IntTernaryEncoder {
 			return Ok(true);
 		}
 		match con.as_ternary() {
-			Some(addition) => Encoder::encode(self, db, &addition).map(|()| true),
+			Some(addition) => self
+				.encode_conditioned(db, &addition, condition.map(Conditioned::All))
+				.map(|()| true),
 			None => Ok(false),
 		}
 	}
@@ -294,6 +411,14 @@ impl IntTernaryEncoder {
 	}
 }
 
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<IntTernary, Lit>> for IntTernaryEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<IntTernary, Lit>) -> Result {
+		con.encode_with(db, |db, con, r| {
+			self.encode_conditioned(db, con, Some(Conditioned::All(r)))
+		})
+	}
+}
+
 /// Encoding a constraint gives the variables it mentions their literals. A
 /// constraint encoded later can still narrow such a variable, which fixes the
 /// literals of the values it loses, but an earlier constraint has already
@@ -306,42 +431,112 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, IntTernary> for IntTernaryEncoder 
 		tracing::instrument(name = "int_ternary_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &IntTernary) -> Result {
-		// `z` crosses the comparison and a term of one value joins the
-		// constant, which is the form both arms below want.
-		let con = &IntLinear::from(con);
-		if self.config.propagate {
-			con.propagate(db)?;
-		}
-		let terms = &con.terms;
-		let binary = |t: &Term| t.1.prefers_binary(self.config.cutoff);
+		self.encode_conditioned(db, con, None)
+	}
+}
 
-		if let Some((x, y, z)) = con.as_addition() {
-			if [x, y, z].iter().all(|t| binary(t)) && Self::worth_adding(con.cmp, x, y) {
-				return encode_addition(db, x, y, con.cmp, z);
-			}
+impl Walk<'_> {
+	/// Add the clauses to `db`.
+	///
+	/// Without a condition the walk carries no condition literal per clause,
+	/// which keeps the plain path as fast as it was.
+	fn emit<Db: ClauseDatabase + ?Sized>(self, db: &mut Db) -> Result {
+		match self.condition {
+			None => self.walk::<_, ()>(db),
+			Some(_) => self.walk::<_, BoolVal>(db),
 		}
-		// Every variable needs a view so a solution can report its value.
-		for t in terms {
-			if !t.1.has_direct_encoding() {
-				t.1.require_order_encoding(db)?;
-			}
-		}
-		// A guarded last term also wants an order view, which states each
-		// bound the guards ask for in one literal. Not for two values: one
-		// direct literal is such a bound already.
-		if let [_, .., last] = terms.as_slice() {
-			if last.1.card() > 2 {
-				last.1.require_order_encoding(db)?;
-			}
-		}
-		// The clauses end in the last term and are guarded by the ones before
-		// it, so the terms are read from the back.
-		let mut encoded = terms.iter().rev().map(|t| Encoded { c: t.0, x: &t.1 });
-		let (bounded, inner, outer) = (encoded.next(), encoded.next(), encoded.next());
-		debug_assert!(encoded.next().is_none());
+	}
 
-		for cmp in con.cmp.split() {
-			Encoded::emit(db, bounded, inner, outer, cmp, con.k)?;
+	/// [`Self::emit`], with each clause carrying an `R` that says what it adds
+	/// for the condition.
+	fn walk<Db: ClauseDatabase + ?Sized, R: ConditionLiteral>(self, db: &mut Db) -> Result {
+		let Self {
+			left,
+			right,
+			result,
+			cmp,
+			k,
+			exact,
+			condition,
+		} = self;
+		let Some(result) = result else {
+			// Nothing left to give, so the empty sum either satisfies what
+			// remains of the constraint or nothing can.
+			let holds = match cmp {
+				Comparator::LessEq => 0 <= k,
+				Comparator::GreaterEq => 0 >= k,
+				Comparator::Equal => unreachable!("an equality is split before it is encoded"),
+			};
+			return match (holds, condition) {
+				(true, _) => Ok(()),
+				(false, None) => db.add_clause(empty::<BoolVal>()),
+				(false, Some(condition)) => db.add_clause([!condition.literal()]),
+			};
+		};
+		// Only an overflow guard depends on the step, so only it asks.
+		let check_overflow = matches!(condition, Some(Conditioned::Overflow(_))).then_some(exact);
+		let (left_direct, left_steps) = Encoded::guards(db, left, cmp)?;
+		let (right_direct, right_steps) = Encoded::guards(db, right, cmp)?;
+		// What a direct encoding pins `result` to does not depend on what is
+		// left of the bound, so it is read once rather than once per step.
+		let pins: Option<Vec<_>> = if result.x.is_read_directly() {
+			Some(result.x.direct_walk(db)?.collect())
+		} else {
+			None
+		};
+		let (mut units, mut last_units) = (Vec::new(), Vec::new());
+		let mut last_negated = R::for_clause(None, false);
+		let (mut clauses, mut last_clauses, mut have_clauses) = (Vec::new(), Vec::new(), false);
+
+		for &(v, left_guard) in &left_steps {
+			let remaining = k - v;
+			clauses.clear();
+			let mut have_units = false;
+			for &(w, right_guard) in &right_steps {
+				units.clear();
+				let overflows = result.bound_into::<_, R>(
+					db,
+					cmp,
+					remaining - w,
+					pins.as_deref(),
+					check_overflow,
+					&mut units,
+				)?;
+				let negated = R::for_clause(condition, overflows);
+				// A step asking of the terms below exactly what a step that
+				// covers it asked, under the same condition, adds nothing.
+				if have_units && units == last_units && negated == last_negated {
+					continue;
+				}
+				clauses.extend(units.iter().map(|&lit| (right_guard, lit, negated)));
+				// An order guard holds whenever the one before it does, so each
+				// step covers the next. Direct guards exclude each other, so
+				// only the first step, which has no guard, covers the others.
+				if !right_direct || !have_units {
+					mem::swap(&mut units, &mut last_units);
+					last_negated = negated;
+				}
+				have_units = true;
+			}
+			if have_clauses && clauses == last_clauses {
+				continue;
+			}
+			for &(right_guard, lit, negated) in &clauses {
+				// Terms can share literals, and a clause with a literal and its
+				// negation always holds.
+				if lit == !left_guard || lit == !right_guard || right_guard == !left_guard {
+					continue;
+				}
+				match negated.literal() {
+					None => db.add_clause([left_guard, right_guard, lit])?,
+					Some(negated) => db.add_clause([left_guard, right_guard, lit, negated])?,
+				}
+			}
+			// As for the right guard.
+			if !left_direct || !have_clauses {
+				mem::swap(&mut clauses, &mut last_clauses);
+			}
+			have_clauses = true;
 		}
 		Ok(())
 	}
@@ -356,6 +551,7 @@ mod tests {
 	use crate::{
 		constraint::{
 			cardinality_one::{CardinalityOne, PairwiseEncoder},
+			implied::Conditioned,
 			int_linear::Term,
 			int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 			linear::{Comparator, LimitComp, PosCoeff},
@@ -555,6 +751,46 @@ mod tests {
 				"0 {cmp:?} {k} should be {holds}"
 			);
 		}
+	}
+
+	/// A piece that defines its last term states every bound that does not
+	/// overflow whatever the condition, also where a covering step's bound fell
+	/// in a hole of the last term and took the condition.
+	#[test]
+	fn a_defining_piece_keeps_the_bounds_that_do_not_overflow() {
+		let mut cnf = Cnf::default();
+		let r = cnf.new_lit();
+		let x = IntVar::new(0..=1);
+		let y = IntVar::new(0..=1);
+		let z = IntVar::new(RangeList::from_elements([0, 2, 3]));
+		for v in [&x, &y, &z] {
+			v.require_order_encoding(&mut cnf).unwrap();
+		}
+		let shown = cnf.get_variables().map(Lit::from).collect_vec();
+		let con = IntTernary::new(
+			(1, x.clone()),
+			(1, y.clone()),
+			Comparator::Equal,
+			(1, z.clone()),
+		);
+		IntTernaryEncoder::default()
+			.encode_conditioned(&mut cnf, &con, Some(Conditioned::Overflow(r)))
+			.unwrap();
+		let mut seen = models_over(&cnf, &shown, |v| {
+			(v.value(r), x.value(v), y.value(v), z.value(v))
+		});
+		seen.sort_unstable();
+		seen.dedup();
+		// Where the sum is 1, which `z` cannot take, both its bounds overflow,
+		// but `z ≤ 2` does not.
+		let free = [(0, 1, 0), (0, 1, 2), (1, 0, 0), (1, 0, 2)];
+		let mut want = [(0, 0, 0), (1, 1, 2)]
+			.iter()
+			.flat_map(|&(a, b, c)| [(false, a, b, c), (true, a, b, c)])
+			.chain(free.iter().map(|&(a, b, c)| (false, a, b, c)))
+			.collect_vec();
+		want.sort_unstable();
+		assert_eq!(seen, want);
 	}
 
 	#[test]

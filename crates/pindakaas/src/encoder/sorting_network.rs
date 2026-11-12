@@ -28,12 +28,13 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
+		implied::{Conditioned, Implied},
 		int_linear::NormalizedIntLinear,
 		int_ternary::{IntTernary, IntTernaryEncoder},
 		linear::LimitComp,
 	},
 	decision::integer::IntVar,
-	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
 
 #[derive(Debug)]
@@ -89,6 +90,10 @@ impl SortingNetworkEncoder {
 	}
 
 	/// One step of a merge: what `x` and `y` reach between them, `z` reaches.
+	#[expect(
+		clippy::too_many_arguments,
+		reason = "a comparator is three variables, its bound, and its condition"
+	)]
 	fn comp<Db>(
 		&self,
 		db: &mut Db,
@@ -97,22 +102,63 @@ impl SortingNetworkEncoder {
 		cmp: &LimitComp,
 		z: &IntVar,
 		c: Coeff,
+		condition: Option<Conditioned>,
 	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
 		let (x, y) = (x.at_least(db, c)?, y.at_least(db, c + 1)?);
 		let (z1, z2) = (z.at_least(db, c + c)?, z.at_least(db, c + c + 1)?);
+		let negated = |z: BoolVal| Conditioned::negated(condition, matches!(z, BoolVal::Const(_)));
 
-		db.add_clause([!x, z1])?;
-		db.add_clause([!y, z1])?;
-		db.add_clause([!x, !y, z2])?;
+		db.add_clause([!x, z1, negated(z1)])?;
+		db.add_clause([!y, z1, negated(z1)])?;
+		db.add_clause([!x, !y, z2, negated(z2)])?;
 		if cmp == &LimitComp::Equal {
-			db.add_clause([x, !z2])?;
-			db.add_clause([y, !z2])?;
-			db.add_clause([x, y, !z1])?;
+			db.add_clause([x, !z2, negated(z2)])?;
+			db.add_clause([y, !z2, negated(z2)])?;
+			db.add_clause([x, y, !z1, negated(z1)])?;
 		}
 		Ok(())
+	}
+
+	/// Encode `count`, under a condition on the clauses `condition` names.
+	pub(crate) fn encode_count<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		count: &Count,
+		condition: Option<Conditioned>,
+	) -> Result {
+		let xs = count
+			.lits
+			.iter()
+			.enumerate()
+			.map(|(i, &x)| {
+				IntVar::from_order_encoding(0..=1, &[x]).with_label(format_args!("x_{}", i + 1))
+			})
+			.collect::<Vec<_>>();
+		// The network only states the counts the literals reach, so a bound
+		// below zero is ruled out here.
+		let reached = count.y.at_least(db, 0)?;
+		db.add_clause([reached, Conditioned::negated(condition, true)])?;
+		if reached == BoolVal::Const(false) {
+			// The clause above has falsified the condition, and a network has
+			// no counts to make.
+			return Ok(());
+		}
+		self.sorted(db, &xs, &count.cmp, &count.y, condition)
+	}
+
+	/// Encode `con`, under a condition on the clauses `condition` names.
+	fn encode_linear<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		con: &NormalizedIntLinear,
+		condition: Option<Conditioned>,
+	) -> Result {
+		let xs = con.terms().map(|(c, x)| x * *c).collect::<Vec<_>>();
+		let y = IntVar::new(*con.k..=*con.k).with_label("k");
+		self.sorted(db, &xs, &con.cmp, &y, condition)
 	}
 
 	/// Constrain `z` to be what `x` and `y` come to together.
@@ -122,6 +168,8 @@ impl SortingNetworkEncoder {
 	/// once any of the three is fixed, the constraint is stated outright. The
 	/// two inputs are checked alike even though the corpus only exercises the
 	/// first: the alternative to a redundant check here is a hang.
+	///
+	/// Under a `condition`, the clauses it names take the negated condition.
 	pub(crate) fn merge<Db>(
 		&self,
 		db: &mut Db,
@@ -129,20 +177,29 @@ impl SortingNetworkEncoder {
 		y: &IntVar,
 		cmp: &LimitComp,
 		z: &IntVar,
+		condition: Option<Conditioned>,
 	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
 		if x.card() == 1 || y.card() == 1 || z.card() == 1 {
-			self.ternary(db, x, y, cmp, z)
+			self.ternary(db, x, y, cmp, z, condition)
 		} else {
-			self.merged(db, x, y, cmp, z)
+			self.merged(db, x, y, cmp, z, condition)
 		}
 	}
 
 	/// Merge `x` and `y` into `z` a bit at a time, or state the addition
 	/// outright where that is cheaper.
-	fn merged<Db>(&self, db: &mut Db, x: &IntVar, y: &IntVar, cmp: &LimitComp, z: &IntVar) -> Result
+	fn merged<Db>(
+		&self,
+		db: &mut Db,
+		x: &IntVar,
+		y: &IntVar,
+		cmp: &LimitComp,
+		z: &IntVar,
+		condition: Option<Conditioned>,
+	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
@@ -156,12 +213,12 @@ impl SortingNetworkEncoder {
 		};
 
 		match strat {
-			SortingNetworkStrategy::Direct => self.ternary(db, x, y, cmp, z),
+			SortingNetworkStrategy::Direct => self.ternary(db, x, y, cmp, z, condition),
 			SortingNetworkStrategy::Recursive => {
 				if a == 0 && b == 0 {
 					Ok(())
 				} else if a == 1 && b == 1 && c <= 2 {
-					self.smerge(db, x, y, cmp, z)
+					self.smerge(db, x, y, cmp, z, condition)
 				} else {
 					let (x_floor, y_floor) = (IntVar::halved(db, x)?, IntVar::halved(db, y)?);
 					let (x_up, y_up) = (x.clone() + 1, y.clone() + 1);
@@ -175,10 +232,12 @@ impl SortingNetworkEncoder {
 					) else {
 						return db.contradiction();
 					};
-					self.merge(db, &x_floor, &y_floor, cmp, &z_floor)?;
-					self.merge(db, &x_ceil, &y_ceil, cmp, &z_ceil)?;
+					let halves = condition.map(Conditioned::defining);
+					self.merge(db, &x_floor, &y_floor, cmp, &z_floor, halves)?;
+					self.merge(db, &x_ceil, &y_ceil, cmp, &z_ceil, halves)?;
 
-					(0..=c / 2).try_for_each(|i| self.comp(db, &z_floor, &z_ceil, cmp, z, i))
+					(0..=c / 2)
+						.try_for_each(|i| self.comp(db, &z_floor, &z_ceil, cmp, z, i, condition))
 				}
 			}
 			SortingNetworkStrategy::Mixed(_) => {
@@ -188,14 +247,22 @@ impl SortingNetworkEncoder {
 	}
 
 	/// The base case, `x{0,1} + y{0,1} ≷ z{0,1,2}`.
-	fn smerge<Db>(&self, db: &mut Db, x: &IntVar, y: &IntVar, cmp: &LimitComp, z: &IntVar) -> Result
+	fn smerge<Db>(
+		&self,
+		db: &mut Db,
+		x: &IntVar,
+		y: &IntVar,
+		cmp: &LimitComp,
+		z: &IntVar,
+		condition: Option<Conditioned>,
+	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
 		// `y` stands in for the half that rounds up, so both sides move along
 		// by one to meet it.
 		let (y, z) = (y.clone() + 1, z.clone() + 1);
-		self.comp(db, x, &y, cmp, &z, 1)
+		self.comp(db, x, &y, cmp, &z, 1, condition)
 	}
 
 	/// Sort `xs` into a variable for what they come to together, up to `max`.
@@ -206,6 +273,7 @@ impl SortingNetworkEncoder {
 		cmp: &LimitComp,
 		max: Coeff,
 		label: String,
+		condition: Option<Conditioned>,
 	) -> Result<Option<IntVar>, Unsatisfiable>
 	where
 		Db: ClauseDatabase + ?Sized,
@@ -215,29 +283,33 @@ impl SortingNetworkEncoder {
 			[x] => Some(x.clone()),
 			xs => {
 				let y = self.sum(xs, 0..=max, label);
-				self.sorted(db, xs, cmp, &y)?;
+				self.sorted(db, xs, cmp, &y, condition.map(Conditioned::defining))?;
 				Some(y)
 			}
 		})
 	}
 
 	/// Constrain `y` to be what `xs` come to together.
+	///
+	/// Under a `condition`, the clauses it names take the negated condition,
+	/// and the sums the network makes on the way are defined without it.
 	pub(crate) fn sorted<Db>(
 		&self,
 		db: &mut Db,
 		xs: &[IntVar],
 		cmp: &LimitComp,
 		y: &IntVar,
+		condition: Option<Conditioned>,
 	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
 		let zero = || IntVar::new(0..=0).with_label("0");
 		match xs {
-			[] => self.ternary(db, &zero(), &zero(), cmp, y),
-			[x] => self.ternary(db, x, &zero(), cmp, y),
+			[] => self.ternary(db, &zero(), &zero(), cmp, y, condition),
+			[x] => self.ternary(db, x, &zero(), cmp, y, condition),
 			[x1, x2] if x1.max() == 1 && x2.max() == 1 && y.max() <= 2 => {
-				self.smerge(db, x1, x2, cmp, y)
+				self.smerge(db, x1, x2, cmp, y, condition)
 			}
 			xs => {
 				let n = xs.len() / 2;
@@ -247,6 +319,7 @@ impl SortingNetworkEncoder {
 					cmp,
 					min(xs[..n].iter().map(IntVar::max).sum(), y.max()),
 					String::from("y1"),
+					condition,
 				)?;
 				let y2 = self.sort(
 					db,
@@ -254,9 +327,10 @@ impl SortingNetworkEncoder {
 					cmp,
 					min(xs[n..].iter().map(IntVar::max).sum(), y.max()),
 					String::from("y2"),
+					condition,
 				)?;
 				match (y1, y2) {
-					(Some(y1), Some(y2)) => self.merged(db, &y1, &y2, cmp, y),
+					(Some(y1), Some(y2)) => self.merged(db, &y1, &y2, cmp, y, condition),
 					_ => Ok(()),
 				}
 			}
@@ -298,11 +372,12 @@ impl SortingNetworkEncoder {
 		y: &IntVar,
 		cmp: &LimitComp,
 		z: &IntVar,
+		condition: Option<Conditioned>,
 	) -> Result
 	where
 		Db: ClauseDatabase + ?Sized,
 	{
-		IntTernaryEncoder::default().encode(
+		IntTernaryEncoder::default().encode_conditioned(
 			db,
 			&IntTernary::new(
 				(1, x.clone()),
@@ -310,6 +385,7 @@ impl SortingNetworkEncoder {
 				(*cmp).into(),
 				(1, z.clone()),
 			),
+			condition,
 		)
 	}
 
@@ -362,9 +438,7 @@ where
 		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = card.trace_print()))
 	)]
 	fn encode(&self, db: &mut Db, card: &Cardinality) -> Result {
-		let k: Coeff = card.rhs();
-		let y = IntVar::new(k..=k).with_label("k");
-		self.encode(db, &Count::new(card.lits.clone(), card.cmp, y))
+		self.encode(db, &card.as_count())
 	}
 }
 
@@ -376,19 +450,50 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for SortingNetwork
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SortingNetworkEncoder {
 	fn encode(&self, db: &mut Db, count: &Count) -> Result {
-		let xs = count
-			.lits
-			.iter()
-			.enumerate()
-			.map(|(i, &x)| {
-				IntVar::from_order_encoding(0..=1, &[x]).with_label(format_args!("x_{}", i + 1))
-			})
-			.collect::<Vec<_>>();
-		// The network only states the counts the literals reach, so a bound
-		// below zero is ruled out here.
-		let reached = count.y.at_least(db, 0)?;
-		db.add_clause([reached])?;
-		self.sorted(db, &xs, &count.cmp, &count.y)
+		self.encode_count(db, count, None)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<Cardinality, Lit>> for SortingNetworkEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<Cardinality, Lit>) -> Result {
+		let count = con.constraint().as_count();
+		self.encode(db, &Implied::new(con.condition(), count))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<CardinalityOne, Lit>>
+	for SortingNetworkEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<CardinalityOne, Lit>) -> Result {
+		let card = Cardinality::from(con.constraint().clone());
+		self.encode(db, &Implied::new(con.condition(), card))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<Count, Lit>> for SortingNetworkEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<Count, Lit>) -> Result {
+		con.encode_with(db, |db, con, r| {
+			self.encode_count(db, con, Some(Conditioned::All(r)))
+		})
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<NormalizedBoolLinear, Lit>>
+	for SortingNetworkEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedBoolLinear, Lit>) -> Result {
+		let linear = con.constraint().as_int_linear();
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<NormalizedIntLinear, Lit>>
+	for SortingNetworkEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedIntLinear, Lit>) -> Result {
+		con.encode_with(db, |db, con, r| {
+			self.encode_linear(db, con, Some(Conditioned::All(r)))
+		})
 	}
 }
 
@@ -405,9 +510,7 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, NormalizedIntLinear> for SortingNe
 		tracing::instrument(name = "sorting_network_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		let xs = con.terms().map(|(c, x)| x * *c).collect::<Vec<_>>();
-		let y = IntVar::new(*con.k..=*con.k).with_label("k");
-		self.sorted(db, &xs, &con.cmp, &y)
+		self.encode_linear(db, con, None)
 	}
 }
 
@@ -776,7 +879,7 @@ mod tests {
 				let y = IntVar::new(y_min..=y_max);
 				let z = IntVar::new(x_min + y_min..=cap);
 				get_sorted_encoder(strategy.clone())
-					.merge(&mut cnf, &x, &y, &LimitComp::LessEq, &z)
+					.merge(&mut cnf, &x, &y, &LimitComp::LessEq, &z, None)
 					.unwrap();
 				let lits = order_literals(&mut cnf, [&x, &y, &z]);
 
@@ -820,7 +923,8 @@ mod tests {
 				&x,
 				&y,
 				&LimitComp::LessEq,
-				&z
+				&z,
+				None
 			),
 			Err(Unsatisfiable)
 		);
@@ -892,7 +996,7 @@ mod tests {
 				}
 				let (vars, clauses) = (cnf.num_vars(), cnf.num_clauses());
 				get_sorted_encoder(SortingNetworkStrategy::Recursive)
-					.merged(&mut cnf, &x, &y, &cmp, &z)
+					.merged(&mut cnf, &x, &y, &cmp, &z, None)
 					.unwrap();
 				// A unit on an input is the bound itself, as `x` past `c` is.
 				let dead = cnf
@@ -993,7 +1097,7 @@ mod tests {
 		.iter_lits()
 		.collect_vec();
 		get_sorted_encoder(SortingNetworkStrategy::Recursive)
-			.merge(&mut cnf, &x, &y, &LimitComp::Equal, &z)
+			.merge(&mut cnf, &x, &y, &LimitComp::Equal, &z, None)
 			.unwrap();
 
 		assert_solutions(&cnf, vars, &expect_file!["sorted/test_2_merged_eq.sol"]);

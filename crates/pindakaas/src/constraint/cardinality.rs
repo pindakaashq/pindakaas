@@ -14,9 +14,11 @@ pub use crate::encoder::{
 use crate::{
 	constraint::{
 		cardinality_one::CardinalityOne,
+		count::Count,
 		int_linear::{lit_terms, NormalizedIntLinear},
 		linear::{Comparator, LimitComp, PosCoeff},
 	},
+	decision::integer::IntVar,
 	Checker, Coeff, Lit, Result, Unsatisfiable, Valuation,
 };
 
@@ -59,6 +61,17 @@ pub struct Cardinality {
 }
 
 impl Cardinality {
+	/// Read the constraint as a count against its bound, a variable of one
+	/// value.
+	pub(crate) fn as_count(&self) -> Count {
+		let k = *self.k;
+		Count::new(
+			self.lits.clone(),
+			self.cmp,
+			IntVar::new(k..=k).with_label("k"),
+		)
+	}
+
 	/// Read the constraint as the linear constraint it is.
 	///
 	/// Its terms all count for one and none of them constrains another, so each

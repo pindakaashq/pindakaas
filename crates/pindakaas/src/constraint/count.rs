@@ -12,7 +12,7 @@ use crate::{
 		linear::{LimitComp, PosCoeff},
 	},
 	decision::integer::IntVar,
-	Checker, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable, Valuation,
+	Checker, Coeff, Lit, Result, Unsatisfiable, Valuation,
 };
 
 /// Which encoders take a [`Count`], which rustdoc lists on the trait but the
@@ -24,7 +24,7 @@ const _: () = {
 			AdderEncoder, DecisionDiagramEncoder, MixedRadixEncoder, SequentialCounterEncoder,
 			TotalizerEncoder, WatchdogEncoder,
 		},
-		Cnf, Encoder,
+		ClauseDatabase, Cnf, Encoder,
 	};
 
 	const fn takes<Db: ClauseDatabase + ?Sized, C, E: Encoder<Db, C>>() {}
@@ -46,29 +46,6 @@ pub struct Count {
 }
 
 impl Count {
-	/// Read the constraint as the integer linear constraint it is.
-	///
-	/// A literal is an integer worth one when it holds, and the bound counts
-	/// the other way, which is a view on it rather than a variable of its own.
-	/// Only for an encoder that works in integer terms; a sorting network
-	/// states the constraint as it stands.
-	pub(crate) fn as_int_linear<Db: ClauseDatabase + ?Sized>(
-		&self,
-		db: &mut Db,
-	) -> Result<NormalizedIntLinear, Unsatisfiable> {
-		// No count reaches a negative value.
-		if self.y.max() < 0 {
-			db.contradiction()?;
-			unreachable!();
-		}
-		let mut terms = lit_terms(self.lits.iter().map(|&l| (l, PosCoeff::new(1))));
-		// Counting the bound down from its greatest value turns its coefficient
-		// positive and starts it at zero, as a normalised term has to.
-		let k = self.y.max();
-		terms.push((PosCoeff::new(1), -self.y.clone() + k));
-		Ok(NormalizedIntLinear::new(terms, self.cmp, PosCoeff::new(k)))
-	}
-
 	/// Construct a constraint that `lits` add up to `y`, or to at most `y`.
 	///
 	/// # Examples
@@ -104,6 +81,27 @@ impl Checker for Count {
 		} else {
 			Err(Unsatisfiable)
 		}
+	}
+}
+
+/// Read a count as the integer linear constraint it is, which fails where the
+/// bound is below zero, a value no count reaches.
+///
+/// A literal is an integer worth one when it holds, and the bound counts the
+/// other way, which is a view on it rather than a variable of its own.
+impl TryFrom<&Count> for NormalizedIntLinear {
+	type Error = Unsatisfiable;
+
+	fn try_from(count: &Count) -> Result<Self, Unsatisfiable> {
+		if count.y.max() < 0 {
+			return Err(Unsatisfiable);
+		}
+		let mut terms = lit_terms(count.lits.iter().map(|&l| (l, PosCoeff::new(1))));
+		// Counting the bound down from its greatest value turns its coefficient
+		// positive and starts it at zero, as a normalised term has to.
+		let k = count.y.max();
+		terms.push((PosCoeff::new(1), -count.y.clone() + k));
+		Ok(NormalizedIntLinear::new(terms, count.cmp, PosCoeff::new(k)))
 	}
 }
 

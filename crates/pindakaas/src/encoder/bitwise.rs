@@ -12,10 +12,11 @@ use itertools::Itertools;
 use crate::{
 	constraint::{
 		cardinality_one::{at_least_one_clause, CardinalityOne},
+		implied::{ConditionalClauses, Implied},
 		linear::LimitComp,
 	},
 	decision::integer::BinaryEncoding,
-	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result,
+	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result,
 };
 
 /// Binary-index at-most-one encoding.
@@ -64,5 +65,14 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for BitwiseEncoder
 		}
 
 		Ok(())
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<CardinalityOne, Lit>> for BitwiseEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<CardinalityOne, Lit>) -> Result {
+		// Every clause states the constraint or defines a literal of its own.
+		con.encode_with(db, |db, con, r| {
+			self.encode(&mut ConditionalClauses::new(db, r), con)
+		})
 	}
 }

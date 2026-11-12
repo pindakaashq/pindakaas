@@ -276,17 +276,17 @@ def test_wcnf_clauses_as_int_are_hard():
     assert f._clauses_as_int() == [[-1, 2]]
 
 
-def test_conditions():
+def test_an_implied_formula():
     f = CNF()
     x, y, p = f.new_vars(3)
-    f.add_encoding(x ^ y, conditions=[p])
+    f.add_encoding((x ^ y).implied_by(p))
     assert f.to_dimacs() == "p cnf 3 2\n-3 1 2 0\n-3 -1 -2 0\n"
 
 
-def test_add_unsat_with_conditions():
+def test_an_unsatisfiable_implied_constraint_negates_its_condition():
     f = CNF()
     x, y, p = f.new_vars(3)
-    f.add_encoding(x + y >= 5, conditions=[p])
+    f.add_encoding((x + y >= 5).implied_by(p))
     assert f.to_dimacs() == "p cnf 3 1\n-3 0\n"
 
 
@@ -300,25 +300,27 @@ def test_custom_db():
         Lit.from_raw(4),
     ]
 
-    f.add_encoding(x ^ y, conditions=[p])
+    f.add_encoding((x ^ y).implied_by(p))
     assert f.clauses == [
         [-4, 2, 3],
         [-4, -2, -3],
     ]
 
 
-def test_custom_db_without_conditions():
+def test_custom_db_without_a_condition():
     f = CustomDB()
     x, y = f.new_vars(2)
     f.add_encoding(x ^ y)
     assert f.clauses == [[1, 2], [-1, -2]]
 
 
-def test_custom_db_conditions_from_a_generator():
-    f = CustomDB()
-    x, y, p = f.new_vars(3)
-    f.add_encoding(x ^ y, conditions=(lit for lit in [p]))
-    assert f.clauses == [[-3, 1, 2], [-3, -1, -2]]
+def test_a_constant_condition_settles_an_implied_constraint():
+    f = CNF()
+    x, y = f.new_vars(2)
+    f.add_encoding((x + y <= 1).implied_by(False))
+    assert f.clauses() == []
+    f.add_encoding((x + y <= 1).implied_by(True))
+    assert f.to_dimacs() == "p cnf 2 1\n-1 -2 0\n"
 
 
 def test_literals_from_an_int_var_make_a_nogood():

@@ -12,11 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Type stubs for the compiled module, and a `py.typed` marker.
 - Wheels for free-threaded CPython 3.14.
 - `IntVar` supports subtraction from the left, as in `5 - x`.
+- `implied_by` on a linear constraint gives the constraint that holds only where a literal does, as in `f.add_encoding((x + y <= 1).implied_by(r))`. On a `Formula` it gives the formula `r → f`.
 
 ### Changed
 
 - [**breaking**] Arithmetic of an `IntVar` with an integer gives an `IntVar`, a view of the same variable.
+- [**breaking**] `add_encoding` no longer takes `conditions`: use `implied_by`. For a conjunction of conditions, imply by a fresh literal `r` and add the clause `¬p ∨ ¬q ∨ r`.
 - Update pyo3 from 0.29.0 to 0.30.1.
+
+### Fixed
+
+- The fix to implied linear constraints of pindakaas applies.
 
 ## [0.6.1](https://github.com/pindakaashq/pindakaas/compare/pyndakaas-v0.6.0...pyndakaas-v0.6.1) - 2026-10-19
 

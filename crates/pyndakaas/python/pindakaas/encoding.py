@@ -6,6 +6,7 @@ from .pindakaas import (
     CNFInner,
     Encoder,
     Formula,
+    Implied,
     IntVar,
     Lit,
     VarRange,
@@ -16,7 +17,7 @@ from .pindakaas import (
     _wrap_int_var_from_order_literals,
 )
 
-Constraint = Formula
+Constraint = Union[Formula, Implied]
 
 Domain = Union[range, Iterable[int], Iterable[range]]
 """The values an integer variable can take.
@@ -94,10 +95,9 @@ class ClauseDatabase(ABC):
         self,
         constraint: Constraint,
         encoder: Optional[Encoder] = None,
-        conditions: Optional[Iterable[Lit]] = None,
         **options,
     ):
-        """Clauses encoding a constraint, optionally under conditions.
+        """Clauses encoding a constraint.
 
         Options configure the encoder that runs, which is the default for the
         constraint when ``encoder`` is omitted. An option that is not given
@@ -139,9 +139,9 @@ class ClauseDatabase(ABC):
         - The other encoders take no options.
 
         Args:
-            constraint: Formula or constraint to encode.
+            constraint: Formula or constraint to encode. Its ``implied_by``
+                method gives a constraint that holds only where a literal does.
             encoder: Encoding algorithm, or its default when omitted.
-            conditions: Literals whose conjunction implies the constraint.
             ``**options``: Options for the encoder.
 
         Raises:
@@ -149,7 +149,7 @@ class ClauseDatabase(ABC):
             ValueError: An option has a value the encoder cannot use.
             Unsatisfiable: The encoding makes the database inconsistent.
         """
-        _wrap_encode_constraint(self, constraint, encoder, conditions, options)
+        _wrap_encode_constraint(self, constraint, encoder, options)
 
     def new_var(self):
         """Allocates one previously unused positive literal."""
@@ -290,10 +290,9 @@ class CNF(ClauseDatabase):
         self,
         constraint: Constraint,
         encoder: Optional[Encoder] = None,
-        conditions: Optional[Iterable[Lit]] = None,
         **options,
     ):
-        return self._inner.add_encoding(constraint, encoder, conditions, options)
+        return self._inner.add_encoding(constraint, encoder, options)
 
     def clauses(self) -> Iterable[list[Lit]]:
         """Stored clauses in insertion order.

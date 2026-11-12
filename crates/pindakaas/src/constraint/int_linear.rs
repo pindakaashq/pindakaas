@@ -59,6 +59,7 @@ pub use crate::encoder::{
 };
 use crate::{
 	constraint::{
+		implied::ConditionalClauses,
 		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 		linear::{Comparator, LimitComp, PosCoeff},
 	},
@@ -146,13 +147,42 @@ pub struct NormalizedIntLinear {
 /// An integer variable scaled by a coefficient.
 pub(crate) type Term = (Coeff, IntVar);
 
+/// Constrain `xs + ys ≷ zs` over bits with ripple-carry adders.
+fn add_bits<Db: ClauseDatabase + ?Sized>(
+	db: &mut Db,
+	xs: &[BoolVal],
+	ys: &[BoolVal],
+	cmp: Comparator,
+	zs: &[BoolVal],
+) -> Result {
+	if cmp == Comparator::Equal {
+		let _ = AdderEncoder::ripple_carry_adder(db, xs, ys, None, Some(zs))?;
+		return Ok(());
+	}
+	// `x + y ≤ z` is `x + y + s = z` for a free slack, and the adder driving
+	// the bits above `z` to zero is what rules out an overflow.
+	let sum = AdderEncoder::ripple_carry_adder(db, xs, ys, None, None)?;
+	let slack: Vec<BoolVal> = (0..zs.len().max(sum.len()))
+		.map(|_| BoolVal::Lit(new_named_lit!(db, "s")))
+		.collect();
+	let (lhs, total) = match cmp {
+		Comparator::LessEq => (&sum[..], zs),
+		_ => (zs, &sum[..]),
+	};
+	let _ = AdderEncoder::ripple_carry_adder(db, lhs, &slack, None, Some(total))?;
+	Ok(())
+}
+
 /// Encode `x + y = z` with a ripple-carry adder over the binary encodings.
+///
+/// Under a `condition`, every clause of the adder takes the negated condition.
 pub(crate) fn encode_addition<Db: ClauseDatabase + ?Sized>(
 	db: &mut Db,
 	x: &Term,
 	y: &Term,
 	cmp: Comparator,
 	z: &Term,
+	condition: Option<Lit>,
 ) -> Result {
 	let bits = |db: &mut Db, t: &Term| -> Result<Vec<BoolVal>> {
 		let (bits, weight, _) = t.1.binary_bits(db)?;
@@ -163,22 +193,10 @@ pub(crate) fn encode_addition<Db: ClauseDatabase + ?Sized>(
 		Ok(bits)
 	};
 	let (xs, ys, zs) = (bits(db, x)?, bits(db, y)?, bits(db, z)?);
-	if cmp == Comparator::Equal {
-		let _ = AdderEncoder::ripple_carry_adder(db, &xs, &ys, None, Some(&zs))?;
-		return Ok(());
+	match condition {
+		Some(r) => add_bits(&mut ConditionalClauses::new(db, r), &xs, &ys, cmp, &zs),
+		None => add_bits(db, &xs, &ys, cmp, &zs),
 	}
-	// `x + y ≤ z` is `x + y + s = z` for a free slack, and the adder driving
-	// the bits above `z` to zero is what rules out an overflow.
-	let sum = AdderEncoder::ripple_carry_adder(db, &xs, &ys, None, None)?;
-	let slack: Vec<BoolVal> = (0..zs.len().max(sum.len()))
-		.map(|_| BoolVal::Lit(new_named_lit!(db, "s")))
-		.collect();
-	let (lhs, total) = match cmp {
-		Comparator::LessEq => (&sum, &zs),
-		_ => (&zs, &sum),
-	};
-	let _ = AdderEncoder::ripple_carry_adder(db, lhs, &slack, None, Some(total))?;
-	Ok(())
 }
 
 /// Each literal as a term worth its coefficient when it holds and nothing
