@@ -106,6 +106,11 @@ pub(crate) mod tests {
 
 				const LARGE_N: usize = 50;
 
+				#[test]
+				fn implied_admits_exactly_its_solutions() {
+					assert_implied_amo_admits(|cnf, con| $encoder.encode(cnf, con));
+				}
+
 				/// At most one of no literals always holds, and exactly one of
 				/// them never does.
 				#[test]
@@ -807,5 +812,9 @@ pub(crate) mod tests {
 	card1_test_suite! {
 			product_encoder,
 			crate::constraint::cardinality_one::ProductEncoder::default()
+	}
+	card1_test_suite! {
+			product_encoder_recursive,
+			crate::constraint::cardinality_one::ProductEncoder::default().with_pairwise_cutoff(2)
 	}
 }

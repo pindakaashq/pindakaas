@@ -9,9 +9,10 @@ use itertools::Itertools;
 use crate::{
 	constraint::{
 		cardinality_one::{at_least_one_clause, CardinalityOne},
+		implied::{ConditionalClauses, Implied},
 		linear::LimitComp,
 	},
-	ClauseDatabase, ClauseDatabaseTools, Encoder, Result,
+	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit, Result,
 };
 
 /// At-most-one encoding with one binary clause per pair and no auxiliaries.
@@ -45,5 +46,14 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for PairwiseEncode
 			db.add_clause([!a, !b])?;
 		}
 		Ok(())
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<CardinalityOne, Lit>> for PairwiseEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<CardinalityOne, Lit>) -> Result {
+		// Every clause states the constraint or defines a literal of its own.
+		con.encode_with(db, |db, con, r| {
+			self.encode(&mut ConditionalClauses::new(db, r), con)
+		})
 	}
 }

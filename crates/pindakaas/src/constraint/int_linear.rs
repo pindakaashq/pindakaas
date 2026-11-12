@@ -59,13 +59,14 @@ pub use crate::encoder::{
 };
 use crate::{
 	constraint::{
+		implied::unless,
 		int_ternary::{IntTernary, IntTernaryConfig, IntTernaryEncoder},
 		linear::{Comparator, LimitComp, PosCoeff},
 	},
 	decision::integer::{IntVar, ShiftedVar},
 	encoder::adder::AdderEncoder,
 	helpers::{div_ceil, div_floor, new_named_lit},
-	BoolVal, ClauseDatabase, Coeff, Lit, Result, Unsatisfiable,
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Lit, Result, Unsatisfiable,
 };
 
 /// A decomposition into ternary constraints, leaving Boolean views to the
@@ -146,13 +147,41 @@ pub struct NormalizedIntLinear {
 /// An integer variable scaled by a coefficient.
 pub(crate) type Term = (Coeff, IntVar);
 
+/// Constrain `xs + ys ≷ zs` over bits with a ripple-carry adder.
+///
+/// Under a `condition`, only the clauses that state the constraint take its
+/// negation: the bits of the sum and the carries define themselves.
+fn add_bits<Db: ClauseDatabase + ?Sized>(
+	db: &mut Db,
+	xs: &[BoolVal],
+	ys: &[BoolVal],
+	cmp: Comparator,
+	zs: &[BoolVal],
+	condition: Option<Lit>,
+) -> Result {
+	if cmp == Comparator::Equal {
+		let _ = AdderEncoder::ripple_carry_adder(db, xs, ys, None, Some(zs), condition)?;
+		return Ok(());
+	}
+	// The adder is wide enough for any sum, so only the comparison bounds it.
+	let sum = AdderEncoder::ripple_carry_adder(db, xs, ys, None, None, None)?;
+	match cmp {
+		Comparator::LessEq => lex_leq_bits(db, &sum, zs, condition),
+		_ => lex_leq_bits(db, zs, &sum, condition),
+	}
+}
+
 /// Encode `x + y = z` with a ripple-carry adder over the binary encodings.
+///
+/// Under a `condition`, only the clauses that state the constraint take its
+/// negation.
 pub(crate) fn encode_addition<Db: ClauseDatabase + ?Sized>(
 	db: &mut Db,
 	x: &Term,
 	y: &Term,
 	cmp: Comparator,
 	z: &Term,
+	condition: Option<Lit>,
 ) -> Result {
 	let bits = |db: &mut Db, t: &Term| -> Result<Vec<BoolVal>> {
 		let (bits, weight, _) = t.1.binary_bits(db)?;
@@ -163,21 +192,45 @@ pub(crate) fn encode_addition<Db: ClauseDatabase + ?Sized>(
 		Ok(bits)
 	};
 	let (xs, ys, zs) = (bits(db, x)?, bits(db, y)?, bits(db, z)?);
-	if cmp == Comparator::Equal {
-		let _ = AdderEncoder::ripple_carry_adder(db, &xs, &ys, None, Some(&zs))?;
-		return Ok(());
+	add_bits(db, &xs, &ys, cmp, &zs, condition)
+}
+
+/// Constrain `xs ≤ ys`, both binary and least significant bit first.
+///
+/// Each bit is at most its partner where every bit above agrees, which a
+/// fresh literal per bit tracks. A literal is only forced to hold, which
+/// constrains nothing it is not asked to, so only the comparisons take the
+/// negated `condition`.
+fn lex_leq_bits<Db: ClauseDatabase + ?Sized>(
+	db: &mut Db,
+	xs: &[BoolVal],
+	ys: &[BoolVal],
+	condition: Option<Lit>,
+) -> Result {
+	let bit = |bits: &[BoolVal], i: usize| bits.get(i).copied().unwrap_or(BoolVal::Const(false));
+	let negated = unless(condition);
+	// Whether every bit above the current one is the same in both.
+	let mut agree = BoolVal::Const(true);
+	for i in (0..xs.len().max(ys.len())).rev() {
+		let (x, y) = (bit(xs, i), bit(ys, i));
+		db.add_clause([!agree, !x, y, negated])?;
+		agree = match (x, y) {
+			_ if i == 0 => break,
+			_ if x == y => agree,
+			_ if x == !y => BoolVal::Const(false),
+			(BoolVal::Const(_), BoolVal::Const(_)) => BoolVal::Const(false),
+			_ => {
+				let next =
+					BoolVal::Lit(new_named_lit!(db, crate::trace::subscripted_name("eq", i)));
+				db.add_clause([!agree, x, y, next])?;
+				db.add_clause([!agree, !x, !y, next])?;
+				next
+			}
+		};
+		if agree == BoolVal::Const(false) {
+			break;
+		}
 	}
-	// `x + y ≤ z` is `x + y + s = z` for a free slack, and the adder driving
-	// the bits above `z` to zero is what rules out an overflow.
-	let sum = AdderEncoder::ripple_carry_adder(db, &xs, &ys, None, None)?;
-	let slack: Vec<BoolVal> = (0..zs.len().max(sum.len()))
-		.map(|_| BoolVal::Lit(new_named_lit!(db, "s")))
-		.collect();
-	let (lhs, total) = match cmp {
-		Comparator::LessEq => (&sum, &zs),
-		_ => (&zs, &sum),
-	};
-	let _ = AdderEncoder::ripple_carry_adder(db, lhs, &slack, None, Some(total))?;
 	Ok(())
 }
 
@@ -287,6 +340,21 @@ impl Default for DecomposeConfig {
 }
 
 impl IntLinear {
+	/// Whether `z` of the addition `x + y ≷ z + k` can take every value it is
+	/// asked to, so that the adder constrains nothing but `z`.
+	pub(crate) fn addition_fits(&self, x: &Term, y: &Term, z: &Term) -> bool {
+		let least = x.1.min() + y.1.min() - self.k;
+		let most = x.1.max() + y.1.max() - self.k;
+		match self.cmp {
+			Comparator::LessEq => z.1.max() >= most,
+			Comparator::GreaterEq => z.1.min() <= least,
+			Comparator::Equal => {
+				let gapless = z.1.card() as Coeff == z.1.max() - z.1.min() + 1;
+				gapless && z.1.min() <= least && z.1.max() >= most
+			}
+		}
+	}
+
 	/// The constraint as `x + y ≷ z + k`, when compatible with a ripple-carry
 	/// adder.
 	pub(crate) fn as_addition(&self) -> Option<(&Term, &Term, &Term)> {
@@ -482,17 +550,56 @@ impl NormalizedIntLinear {
 
 #[cfg(test)]
 mod tests {
+	use itertools::{iproduct, Itertools};
 	use traced_test::test;
 
 	use crate::{
 		constraint::{
-			int_linear::NormalizedIntLinear,
+			int_linear::{lex_leq_bits, NormalizedIntLinear},
 			linear::{LimitComp, PosCoeff},
 		},
 		decision::integer::IntVar,
-		helpers::tests::models,
-		Cnf,
+		encoder::adder::AdderEncoder,
+		helpers::tests::{models, models_over},
+		BoolVal, ClauseDatabaseTools, Cnf, Coeff, Lit, Valuation,
 	};
+
+	/// Under its condition, the adder holds the sum to the given bits, and
+	/// where the condition is false the carries are still defined, so each
+	/// assignment of the inputs and the sum has one model.
+	#[test]
+	fn a_conditional_adder_conditions_only_the_sum() {
+		for (n, m, w) in [(1, 1, 1), (1, 2, 2), (2, 2, 3), (2, 3, 3)] {
+			let mut cnf = Cnf::default();
+			let r = cnf.new_lit();
+			let mut fresh = |k| (0..k).map(|_| BoolVal::Lit(cnf.new_lit())).collect_vec();
+			let (xs, ys, zs) = (fresh(n), fresh(m), fresh(w));
+			let _ = AdderEncoder::ripple_carry_adder(&mut cnf, &xs, &ys, None, Some(&zs), Some(r))
+				.unwrap();
+			let all = cnf.get_variables().map(Lit::from).collect_vec();
+			let seen = models_over(&cnf, &all, |sol| {
+				(
+					sol.value(r),
+					value(&xs, sol),
+					value(&ys, sol),
+					value(&zs, sol),
+				)
+			});
+			let unconditioned = seen.iter().filter(|s| !s.0).count();
+			assert_eq!(unconditioned, 1 << (n + m + w), "{n} + {m} = {w} bits");
+			let mut conditioned = seen
+				.iter()
+				.filter(|s| s.0)
+				.map(|s| (s.1, s.2, s.3))
+				.collect_vec();
+			conditioned.sort_unstable();
+			let want = iproduct!(0..1 << n, 0..1 << m)
+				.filter(|&(x, y)| x + y < 1 << w)
+				.map(|(x, y)| (x, y, x + y))
+				.collect_vec();
+			assert_eq!(conditioned, want, "{n} + {m} = {w} bits");
+		}
+	}
 
 	/// A term comes back as a positive coefficient over a view that counts from
 	/// zero, worth the same at every value.
@@ -558,5 +665,87 @@ mod tests {
 			PosCoeff::new(1),
 		);
 		assert_eq!(con.terms().len(), 1);
+	}
+
+	/// Two numbers compare exactly, whatever their bits are: fresh, fixed,
+	/// shared, or each other's negation, and of whatever width.
+	#[test]
+	fn bits_compare_exactly_under_a_condition() {
+		// A bit of `ys` beyond these kinds reads a bit of `xs`, as itself (3)
+		// or negated (4).
+		for (n, m) in iproduct!(0..=3, 0..=3) {
+			for kinds in (0..n + m)
+				.map(|i| if i < n { 0..3 } else { 0..5 })
+				.multi_cartesian_product()
+			{
+				if (n..n + m).any(|i| kinds[i] >= 3 && i - n >= n) {
+					continue;
+				}
+				for conditioned in [false, true] {
+					let mut cnf = Cnf::default();
+					let r = cnf.new_lit();
+					let mut base = vec![r];
+					let mut make = |kind: usize, other: Option<BoolVal>, cnf: &mut Cnf| match kind {
+						0 => {
+							let l = cnf.new_lit();
+							base.push(l);
+							BoolVal::Lit(l)
+						}
+						1 => BoolVal::Const(false),
+						2 => BoolVal::Const(true),
+						3 => other.unwrap(),
+						_ => !other.unwrap(),
+					};
+					let xs = (0..n).map(|i| make(kinds[i], None, &mut cnf)).collect_vec();
+					let ys = (0..m)
+						.map(|i| make(kinds[n + i], xs.get(i).copied(), &mut cnf))
+						.collect_vec();
+					let condition = conditioned.then_some(r);
+					let encoded = lex_leq_bits(&mut cnf, &xs, &ys, condition);
+					let mut seen = models_over(&cnf, &base, |sol| {
+						base.iter().map(|&l| sol.value(l)).collect_vec()
+					});
+					seen.sort();
+					seen.dedup();
+					let want = (0..base.len())
+						.map(|_| [false, true])
+						.multi_cartesian_product()
+						.filter(|a| {
+							let sol = |l: Lit| a[base.iter().position(|&b| b == l).unwrap()];
+							let read = |bits: &[BoolVal]| -> Coeff {
+								bits.iter()
+									.enumerate()
+									.map(|(i, &b)| {
+										let v = match b {
+											BoolVal::Const(v) => v,
+											BoolVal::Lit(l) if base.contains(&l) => sol(l),
+											BoolVal::Lit(l) => !sol(!l),
+										};
+										Coeff::from(v) << i
+									})
+									.sum()
+							};
+							(conditioned && !a[0]) || read(&xs) <= read(&ys)
+						})
+						.collect_vec();
+					assert_eq!(seen, want, "{xs:?} ≤ {ys:?} under {condition:?}");
+					assert!(encoded.is_ok() || want.is_empty(), "{xs:?} ≤ {ys:?}");
+				}
+			}
+		}
+	}
+
+	/// The value of `bits`, least significant first.
+	fn value(bits: &[BoolVal], sol: &dyn Valuation) -> Coeff {
+		bits.iter()
+			.enumerate()
+			.map(|(i, &b)| {
+				let v = match b {
+					BoolVal::Lit(l) => sol.value(l),
+					BoolVal::Const(v) => v,
+				};
+				Coeff::from(v) << i
+			})
+			.sum()
 	}
 }

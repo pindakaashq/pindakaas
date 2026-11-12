@@ -1014,6 +1014,15 @@ impl IntVar {
 		}
 	}
 
+	/// Whether the variable can take `v`.
+	pub(crate) fn contains(&self, v: Coeff) -> bool {
+		if v < self.min() || v > self.max() {
+			return false;
+		}
+		self.equals_of_base(v)
+			.is_some_and(|b| self.state.borrow().domain.contains(&b))
+	}
+
 	/// The direct encoding of the variable itself, over its own domain, created
 	/// if this is the first request for it.
 	fn direct_encoding<Db: ClauseDatabase + ?Sized>(&self, db: &mut Db) -> Result<DirectEncoding> {
@@ -1450,9 +1459,9 @@ impl IntVar {
 		}
 	}
 
-	/// The variable `f(x)` on the order literals of `x`, with `x` held to the
-	/// values that `f` maps to at most `max`, or `None` where `f` neither rises
-	/// nor falls over the domain of `x`.
+	/// The variable `f(x)` on the order literals of `x`, over the values that
+	/// `f` maps to at most `max`, or `None` where `f` neither rises nor falls
+	/// over the domain of `x`. The caller holds `x` to those values.
 	///
 	/// It reaches an image where `x` reaches the first value mapping to it, or
 	/// for a falling `f`, where `x` stays at most the last such value.
@@ -1479,11 +1488,10 @@ impl IntVar {
 			rising || x.state.borrow().order_consistency,
 			"a falling view of {x} needs its order consistency"
 		);
-		if let Some(i) = images.iter().position(|&w| w > max) {
-			assert!(rising, "only a rising view is bounded");
-			let beyond = x.at_least(db, values[i])?;
-			db.add_clause([!beyond])?;
-		}
+		assert!(
+			rising || images.iter().all(|&w| w <= max),
+			"only a rising view is bounded"
+		);
 		let mut walk: Vec<(Coeff, BoolVal)> = Vec::with_capacity(values.len());
 		for i in 0..values.len() {
 			let i = if rising { i } else { values.len() - 1 - i };

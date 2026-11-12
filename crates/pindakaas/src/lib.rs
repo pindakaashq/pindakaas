@@ -112,6 +112,15 @@
 //! # Ok::<(), pindakaas::Unsatisfiable>(())
 //! ```
 //!
+//! `Linear::implied_by` gives an [`Implied`](constraint::implied::Implied)
+//! constraint for [`LinearEncoder`](constraint::linear::LinearEncoder), which
+//! holds only where a literal does. Its encoders add the
+//! negated literal only to the clauses that state the constraint, so the
+//! encodings of an `IntVar` it shares with other constraints hold either way.
+//! Every linear and at-most-one encoder in the table below also takes the forms
+//! it lists implied by a literal. `Formula::implied_by` gives the formula
+//! `r → f`.
+//!
 //! # Choosing an encoder
 //!
 //! Aggregation turns a constraint into a specialised form before encoding.
@@ -361,20 +370,6 @@ pub trait ClauseDatabaseTools: ClauseDatabase {
 		encoder.encode(self, constraint)
 	}
 
-	/// Encodes `conditions -> constraint` by guarding every emitted clause.
-	///
-	/// # Errors
-	///
-	/// [`Unsatisfiable`] when the guarded clauses make the database
-	/// inconsistent.
-	fn encode_implied<C, E>(&mut self, conditions: &[Lit], constraint: &C, encoder: &E) -> Result
-	where
-		C: ?Sized,
-		E: Encoder<Self, C> + ?Sized + for<'a> Encoder<dyn ClauseDatabase + 'a, C>,
-	{
-		encoder.encode_implied(self, conditions, constraint)
-	}
-
 	/// Allocates a fresh Boolean variable as a positive literal.
 	fn new_lit(&mut self) -> Lit {
 		self.new_var().into()
@@ -476,74 +471,6 @@ pub trait Encoder<Db: ClauseDatabase + ?Sized, Constraint: ?Sized> {
 	/// what `db` already holds. Clauses may already have been emitted, so a
 	/// database that returns this is no longer usable for anything else.
 	fn encode(&self, db: &mut Db, con: &Constraint) -> Result;
-
-	/// Encode the implied constraint `conditions -> constraint`.
-	///
-	/// Clauses emitted while encoding are guarded with the condition literals.
-	/// If encoding returns [`Unsatisfiable`], the conditions are forced to be
-	/// false.
-	fn encode_implied(&self, db: &mut Db, conditions: &[Lit], con: &Constraint) -> Result
-	where
-		Self: for<'a> Encoder<dyn ClauseDatabase + 'a, Constraint>,
-	{
-		if conditions.is_empty() {
-			return self.encode(db, con);
-		}
-
-		struct ClauseBuffer<'a, Db: ClauseDatabase + ?Sized> {
-			db: &'a mut Db,
-			lits: Vec<Lit>,
-			size: Vec<usize>,
-		}
-
-		impl<Db: ClauseDatabase + ?Sized> ClauseDatabase for ClauseBuffer<'_, Db> {
-			fn add_clause_from_slice(&mut self, clause: &[Lit]) -> Result {
-				let start = self.lits.len();
-				self.lits.extend_from_slice(clause);
-				let len = self.lits.len() - start;
-				self.size.push(len);
-				if len == 0 {
-					Err(Unsatisfiable)
-				} else {
-					Ok(())
-				}
-			}
-
-			fn new_var_range(&mut self, len: usize) -> VarRange {
-				self.db.new_var_range(len)
-			}
-		}
-
-		let (result, lits, sizes) = {
-			let mut cdb = ClauseBuffer {
-				db,
-				lits: Vec::new(),
-				size: Vec::new(),
-			};
-			let result = {
-				let cdb_dyn: &mut (dyn ClauseDatabase + '_) = &mut cdb;
-				self.encode(cdb_dyn, con)
-			};
-			(result, cdb.lits, cdb.size)
-		};
-
-		let conditions: Vec<_> = conditions.iter().map(|&l| !l).collect();
-		let (lits, sizes) = match result {
-			Ok(()) => (lits, sizes),
-			Err(Unsatisfiable) => return db.add_clause_from_slice(&conditions),
-		};
-
-		let mut index = 0;
-		let mut clause = Vec::with_capacity(conditions.len());
-		for size in sizes {
-			clause.clear();
-			clause.extend_from_slice(&conditions);
-			clause.extend_from_slice(&lits[index..index + size]);
-			db.add_clause_from_slice(&clause)?;
-			index += size;
-		}
-		Ok(())
-	}
 }
 
 /// Encoding result with [`Unsatisfiable`] as its default error.

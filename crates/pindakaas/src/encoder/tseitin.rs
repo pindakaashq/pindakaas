@@ -157,6 +157,154 @@ fn bind<Db: ClauseDatabase + ?Sized>(
 	})
 }
 
+impl TseitinEncoder {
+	/// Encode `condition → f` where every literal of `conditions` holds.
+	fn encode_implied_by<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		condition: Lit,
+		f: &Formula<Lit>,
+		conditions: &mut Vec<Lit>,
+	) -> Result {
+		conditions.push(condition);
+		let result = self.encode_under(db, f, conditions);
+		let _ = conditions.pop();
+		result
+	}
+
+	/// Encode `f` where every literal of `conditions` holds, as a clause that
+	/// states it holding unless one of them is false.
+	///
+	/// Only the clauses that state `f` take the negated conditions; the clauses
+	/// [`bind`] adds define fresh literals and hold whatever the conditions
+	/// are. A contradiction under conditions falsifies one of them.
+	fn encode_under<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		f: &Formula<Lit>,
+		conditions: &mut Vec<Lit>,
+	) -> Result {
+		match f {
+			Formula::Atom(l) => Self::state(db, conditions, [*l]),
+			Formula::Not(f) => match f.as_ref() {
+				&Formula::Atom(l) => Self::state(db, conditions, [!l]),
+				Formula::Not(f) => self.encode_under(db, f.as_ref(), conditions),
+				Formula::And(sub) => {
+					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
+					self.encode_under(db, &Formula::Or(neg_sub), conditions)
+				}
+				Formula::Or(sub) => {
+					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
+					self.encode_under(db, &Formula::And(neg_sub), conditions)
+				}
+				Formula::Implies(x, y) => {
+					self.encode_under(db, x.as_ref(), conditions)?;
+					self.encode_under(db, &!y.as_ref().clone(), conditions)
+				}
+				Formula::IfThenElse { cond, then, els } => {
+					let name = bind(cond, db, None)?;
+					let neg_then: Formula<Lit> = !*then.clone();
+					self.encode_implied_by(db, name, &neg_then, conditions)?;
+					let neg_els: Formula<Lit> = !*els.clone();
+					self.encode_implied_by(db, !name, &neg_els, conditions)
+				}
+				Formula::Equiv(sub) if sub.len() == 2 => {
+					self.encode_under(db, &Formula::Xor(sub.clone()), conditions)
+				}
+				Formula::Xor(sub) if sub.len() == 2 => {
+					self.encode_under(db, &Formula::Equiv(sub.clone()), conditions)
+				}
+				Formula::Xor(sub) if sub.len() % 2 != 0 => {
+					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
+					self.encode_under(db, &Formula::Xor(neg_sub), conditions)
+				}
+				_ => {
+					let l = bind(f, db, None)?;
+					Self::state(db, conditions, [!l])
+				}
+			},
+			Formula::And(sub) => {
+				for f in sub {
+					self.encode_under(db, f, conditions)?;
+				}
+				Ok(())
+			}
+			Formula::Or(sub) => {
+				let lits = sub
+					.iter()
+					.map(|f| bind(f, db, None))
+					.collect::<Result<Vec<_>, _>>()?;
+				Self::state(db, conditions, lits)
+			}
+			Formula::Implies(left, right) => {
+				let x = bind(left, db, None)?;
+				self.encode_implied_by(db, x, right.as_ref(), conditions)
+			}
+			Formula::Equiv(sub) => {
+				match sub.len() {
+					0 => return Ok(()),
+					1 => return self.encode_under(db, &sub[0], conditions),
+					_ if conditions.is_empty() => {
+						let mut name = sub.iter().find_map(|f| {
+							if let Formula::Atom(l) = f {
+								Some(*l)
+							} else {
+								None
+							}
+						});
+						for f in sub.iter() {
+							name = Some(bind(f, db, name)?);
+						}
+					}
+					_ => {
+						// One shared name would state the equivalence in a
+						// definition, so each side is bound on its own.
+						let lits = sub
+							.iter()
+							.map(|f| bind(f, db, None))
+							.collect::<Result<Vec<_>, _>>()?;
+						for &l in &lits[1..] {
+							Self::state(db, conditions, [!lits[0], l])?;
+							Self::state(db, conditions, [lits[0], !l])?;
+						}
+					}
+				}
+				Ok(())
+			}
+			Formula::Xor(sub) => match sub.len() {
+				0 => Self::state(db, conditions, []),
+				1 => self.encode_under(db, &sub[0], conditions),
+				_ => {
+					let mut sub = sub.clone();
+					let b = sub.pop().map(|f| bind(&f, db, None)).unwrap()?;
+					let a = if sub.len() > 1 {
+						bind(&Formula::Xor(sub), db, None)
+					} else {
+						sub.pop().map(|f| bind(&f, db, None)).unwrap()
+					}?;
+					Self::state(db, conditions, [a, b])?;
+					Self::state(db, conditions, [!a, !b])
+				}
+			},
+			Formula::IfThenElse { cond, then, els } => {
+				let name = bind(cond, db, None)?;
+				self.encode_implied_by(db, name, then.as_ref(), conditions)?;
+				self.encode_implied_by(db, !name, els.as_ref(), conditions)
+			}
+		}
+	}
+
+	/// Add `clause` where every literal of `conditions` holds, which without
+	/// conditions is a contradiction where `clause` is empty.
+	fn state<Db: ClauseDatabase + ?Sized>(
+		db: &mut Db,
+		conditions: &[Lit],
+		clause: impl IntoIterator<Item = Lit>,
+	) -> Result {
+		db.add_clause(conditions.iter().map(|&c| !c).chain(clause))
+	}
+}
+
 impl<Db> Encoder<Db, Formula<BoolVal>> for TseitinEncoder
 where
 	Db: ClauseDatabase + ?Sized,
@@ -178,108 +326,6 @@ where
 	Db: ClauseDatabase + ?Sized,
 {
 	fn encode(&self, db: &mut Db, f: &Formula<Lit>) -> Result {
-		match f {
-			Formula::Atom(l) => db.add_clause([*l]),
-			Formula::Not(f) => match f.as_ref() {
-				&Formula::Atom(l) => db.add_clause([!l]),
-				Formula::Not(f) => self.encode(db, f.as_ref()),
-				Formula::And(sub) => {
-					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
-					self.encode(db, &Formula::Or(neg_sub))
-				}
-				Formula::Or(sub) => {
-					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
-					self.encode(db, &Formula::And(neg_sub))
-				}
-				Formula::Implies(x, y) => {
-					self.encode(db, x.as_ref())?;
-					self.encode(db, &!y.as_ref().clone())
-				}
-				Formula::IfThenElse { cond, then, els } => {
-					let name = bind(cond, db, None)?;
-					let neg_then: Formula<Lit> = !*then.clone();
-					db.encode_implied(&[name], &neg_then, self)?;
-					let neg_els: Formula<Lit> = !*els.clone();
-					db.encode_implied(&[!name], &neg_els, self)
-				}
-				Formula::Equiv(sub) if sub.len() == 2 => {
-					self.encode(db, &Formula::Xor(sub.clone()))
-				}
-				Formula::Xor(sub) if sub.len() == 2 => {
-					self.encode(db, &Formula::Equiv(sub.clone()))
-				}
-				Formula::Xor(sub) if sub.len() % 2 != 0 => {
-					let neg_sub = sub.iter().map(|f| !(f.clone())).collect();
-					self.encode(db, &Formula::Xor(neg_sub))
-				}
-				_ => {
-					let l = bind(f, db, None)?;
-					db.add_clause([!l])
-				}
-			},
-			Formula::And(sub) => {
-				for f in sub {
-					self.encode(db, f)?;
-				}
-				Ok(())
-			}
-			Formula::Or(sub) => {
-				if sub.is_empty() {
-					db.contradiction()?;
-					unreachable!();
-				}
-				let lits = sub
-					.iter()
-					.map(|f| bind(f, db, None))
-					.collect::<Result<Vec<_>, _>>()?;
-				db.add_clause(lits)
-			}
-			Formula::Implies(left, right) => {
-				let x = bind(left, db, None)?;
-				db.encode_implied(&[x], right.as_ref(), self)
-			}
-			Formula::Equiv(sub) => {
-				match sub.len() {
-					0 => return Ok(()),
-					1 => return self.encode(db, &sub[0]),
-					_ => {
-						let mut name = sub.iter().find_map(|f| {
-							if let Formula::Atom(l) = f {
-								Some(*l)
-							} else {
-								None
-							}
-						});
-						for f in sub.iter() {
-							name = Some(bind(f, db, name)?);
-						}
-					}
-				}
-				Ok(())
-			}
-			Formula::Xor(sub) => match sub.len() {
-				0 => {
-					db.contradiction()?;
-					unreachable!()
-				}
-				1 => self.encode(db, &sub[0]),
-				_ => {
-					let mut sub = sub.clone();
-					let b = sub.pop().map(|f| bind(&f, db, None)).unwrap()?;
-					let a = if sub.len() > 1 {
-						bind(&Formula::Xor(sub), db, None)
-					} else {
-						sub.pop().map(|f| bind(&f, db, None)).unwrap()
-					}?;
-					db.add_clause([a, b])?;
-					db.add_clause([!a, !b])
-				}
-			},
-			Formula::IfThenElse { cond, then, els } => {
-				let name = bind(cond, db, None)?;
-				db.encode_implied(&[name], then.as_ref(), self)?;
-				db.encode_implied(&[!name], els.as_ref(), self)
-			}
-		}
+		self.encode_under(db, f, &mut Vec::new())
 	}
 }

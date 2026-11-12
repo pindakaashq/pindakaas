@@ -45,6 +45,11 @@ pub enum Formula<Base> {
 }
 
 impl<Base> Formula<Base> {
+	/// The formula `condition → self`.
+	pub fn implied_by(self, condition: impl Into<Base>) -> Self {
+		Formula::Implies(Box::new(Formula::Atom(condition.into())), Box::new(self))
+	}
+
 	/// Simplify the formula by constant-folding atoms with an atom resolver.
 	///
 	/// `Err(value)` marks an atom as known; `Ok(atom)` replaces it in the
@@ -557,8 +562,107 @@ mod tests {
 		constraint::propositional_logic::{Formula, TseitinEncoder},
 		helpers::tests::{assert_encoding, assert_solutions, expect_file},
 		solver::{cadical::Cadical, SolveResult, Solver},
-		ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Valuation,
+		BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Encoder, Lit, Valuation,
 	};
+
+	#[test]
+	fn a_constant_formula_settles_its_condition() {
+		for (value, expected) in [(false, vec![vec![-1]]), (true, vec![])] {
+			let mut cnf = Cnf::default();
+			let r = cnf.new_lit();
+			let f = Formula::Atom(BoolVal::Const(value)) | Formula::Atom(BoolVal::Const(false));
+			TseitinEncoder.encode(&mut cnf, &f.implied_by(r)).unwrap();
+			let clauses = cnf
+				.iter()
+				.map(|c| c.iter().map(|&l| i32::from(l)).collect_vec())
+				.collect_vec();
+			assert_eq!(clauses, expected, "a formula that is always {value}");
+		}
+	}
+
+	/// Every formula of a few connectives over three literals, implied by a
+	/// literal, admits exactly the assignments where the literal is false or
+	/// the formula holds, with no restriction left where the literal is false.
+	#[test]
+	fn an_implied_formula_admits_exactly_its_solutions() {
+		use crate::helpers::tests::models_over;
+
+		fn holds(f: &Formula<Lit>, value: &dyn Fn(Lit) -> bool) -> bool {
+			match f {
+				Formula::Atom(l) => value(*l),
+				Formula::Not(f) => !holds(f, value),
+				Formula::And(sub) => sub.iter().all(|f| holds(f, value)),
+				Formula::Or(sub) => sub.iter().any(|f| holds(f, value)),
+				Formula::Implies(x, y) => !holds(x, value) || holds(y, value),
+				Formula::Equiv(sub) => sub.iter().map(|f| holds(f, value)).all_equal(),
+				Formula::Xor(sub) => sub.iter().filter(|f| holds(f, value)).count() % 2 == 1,
+				Formula::IfThenElse { cond, then, els } => {
+					if holds(cond, value) {
+						holds(then, value)
+					} else {
+						holds(els, value)
+					}
+				}
+			}
+		}
+
+		let mut cnf = Cnf::default();
+		let (a, b, c) = cnf.new_lits();
+		let atom = |l: Lit| Formula::Atom(l);
+		let leaves = [
+			atom(a),
+			atom(b),
+			atom(c),
+			!atom(a),
+			atom(a) & atom(b),
+			atom(b) | atom(c),
+		];
+		let mut formulas = Vec::new();
+		for (x, y) in leaves.iter().cartesian_product(&leaves) {
+			let (x, y) = (x.clone(), y.clone());
+			formulas.extend([
+				x.clone() & y.clone(),
+				x.clone() | y.clone(),
+				x.clone() ^ y.clone(),
+				Formula::Equiv(vec![x.clone(), y.clone()]),
+				Formula::Equiv(vec![x.clone(), y.clone(), atom(c)]),
+				Formula::Xor(vec![x.clone(), y.clone(), atom(c)]),
+				Formula::Implies(Box::new(x.clone()), Box::new(y.clone())),
+				Formula::IfThenElse {
+					cond: Box::new(atom(c)),
+					then: Box::new(x.clone()),
+					els: Box::new(y.clone()),
+				},
+			]);
+		}
+		formulas.extend(formulas.iter().map(|f| !f.clone()).collect_vec());
+		formulas.extend([
+			Formula::Or(Vec::new()),
+			Formula::Xor(Vec::new()),
+			Formula::And(Vec::new()),
+		]);
+		for f in formulas {
+			let mut cnf = cnf.clone();
+			let r = cnf.new_lit();
+			let shown = [r, a, b, c];
+			TseitinEncoder
+				.encode(&mut cnf, &f.clone().implied_by(r))
+				.unwrap();
+			let mut seen = models_over(&cnf, &shown, |sol| shown.map(|l| sol.value(l)));
+			seen.sort_unstable();
+			let want = (0..4)
+				.map(|_| [false, true])
+				.multi_cartesian_product()
+				.map(|v| [v[0], v[1], v[2], v[3]])
+				.filter(|v| {
+					let value = |l: Lit| v[shown.iter().position(|&s| s == l).unwrap()];
+					!v[0] || holds(&f, &value)
+				})
+				.sorted_unstable()
+				.collect_vec();
+			assert_eq!(seen, want, "{f}");
+		}
+	}
 
 	#[test]
 	fn encode_prop_and() {
@@ -901,13 +1005,8 @@ mod tests {
 	fn issue_175_implied_unsat() {
 		let mut cnf = Cadical::default();
 		let a = cnf.new_lit();
-		TseitinEncoder
-			.encode_implied(
-				&mut cnf,
-				&[a],
-				&Formula::Implies(Box::new(Formula::Atom(a)), Box::new(Formula::Xor(vec![]))),
-			)
-			.unwrap();
+		let f = Formula::Implies(Box::new(Formula::Atom(a)), Box::new(Formula::Xor(vec![])));
+		TseitinEncoder.encode(&mut cnf, &f.implied_by(a)).unwrap();
 
 		let SolveResult::Satisfied(sol) = cnf.solve() else {
 			panic!("Expected a solution");

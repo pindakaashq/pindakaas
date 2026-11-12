@@ -25,11 +25,12 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
+		implied::Implied,
 		int_linear::{decompose_setters, Decompose, DecomposeConfig, NormalizedIntLinear},
 		int_ternary::IntTernary,
 		linear::Comparator,
 	},
-	ClauseDatabase, Coeff, Encoder, Result, Unsatisfiable,
+	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
 
 /// A chain of running totals (sequential counter, SWC, or GSWC).
@@ -115,8 +116,58 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for SequentialCoun
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for SequentialCounterEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		let con = con.as_int_linear(db)?;
+		let Ok(con) = NormalizedIntLinear::try_from(con) else {
+			return db.contradiction();
+		};
 		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<Cardinality, Lit>>
+	for SequentialCounterEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<Cardinality, Lit>) -> Result {
+		let linear = con.constraint().as_linear();
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<CardinalityOne, Lit>>
+	for SequentialCounterEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<CardinalityOne, Lit>) -> Result {
+		let card = Cardinality::from(con.constraint().clone());
+		self.encode(db, &Implied::new(con.condition(), card))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<Count, Lit>> for SequentialCounterEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<Count, Lit>) -> Result {
+		// A bound no count reaches falsifies the condition, not the database.
+		let Ok(linear) = NormalizedIntLinear::try_from(con.constraint()) else {
+			return db.add_clause([!con.condition()]);
+		};
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<NormalizedBoolLinear, Lit>>
+	for SequentialCounterEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedBoolLinear, Lit>) -> Result {
+		let linear = con.constraint().as_int_linear();
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<NormalizedIntLinear, Lit>>
+	for SequentialCounterEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedIntLinear, Lit>) -> Result {
+		let encoder = self.config.encoder();
+		con.encode_with(db, |db, con, r| {
+			encoder.encode_decomposed(db, con, self, Some(r))
+		})
 	}
 }
 
@@ -136,7 +187,7 @@ where
 		tracing::instrument(name = "sequential_counter_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		self.config.encoder().encode_decomposed(db, con, self)
+		self.config.encoder().encode_decomposed(db, con, self, None)
 	}
 }
 
