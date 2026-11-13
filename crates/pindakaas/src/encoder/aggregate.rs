@@ -5,7 +5,7 @@
 //! variable. Integer terms bypass simplifications that assume zero is
 //! reachable.
 
-use std::collections::hash_map::Entry;
+use std::{collections::hash_map::Entry, iter::once};
 
 use itertools::Itertools;
 use rustc_hash::{FxBuildHasher, FxHashMap};
@@ -16,6 +16,7 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::{CardinalityOne, ProductEncoder},
 		count::Count,
+		implied::Implied,
 		int_linear::{lit_terms, term_max, term_min, NormalizedIntLinear},
 		linear::{
 			Comparator, LimitComp, LinVariant, Linear, MixedRadixEncoder, PosCoeff,
@@ -23,7 +24,7 @@ use crate::{
 		},
 	},
 	decision::integer::IntVar,
-	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
 
 /// A [`Linear`] constraint taken apart by [`LinAggregator::aggregate`].
@@ -443,6 +444,49 @@ impl<Enc> LinearEncoder<Enc> {
 	}
 }
 
+impl<Db, Enc> Encoder<Db, Implied<Linear>> for LinearEncoder<Enc>
+where
+	Db: ClauseDatabase + ?Sized,
+	Enc: Encoder<Db, LinVariant>
+		+ Encoder<Db, Implied<NormalizedIntLinear, Lit>>
+		+ Encoder<Db, Implied<NormalizedBoolLinear, Lit>>
+		+ Encoder<Db, Implied<Cardinality, Lit>>
+		+ Encoder<Db, Implied<CardinalityOne, Lit>>
+		+ Encoder<Db, Implied<Count, Lit>>,
+{
+	fn encode(&self, db: &mut Db, con: &Implied<Linear>) -> Result {
+		let r = match con.condition() {
+			BoolVal::Const(false) => return Ok(()),
+			BoolVal::Const(true) => return self.encode(db, con.constraint()),
+			BoolVal::Lit(r) => r,
+		};
+		let Ok(Aggregation {
+			clauses,
+			counts,
+			variant,
+		}) = self.agg.aggregate(con.constraint())
+		else {
+			return db.add_clause([!r]);
+		};
+		for clause in clauses {
+			db.add_clause(once(!r).chain(clause))?;
+		}
+		// The integer a count defines is the constraint's own, so it is free
+		// where the condition is false.
+		for count in counts {
+			self.enc.encode(db, &Implied::new(r, count))?;
+		}
+		match variant {
+			LinVariant::BoolLinear(lin) => self.enc.encode(db, &Implied::new(r, lin)),
+			LinVariant::Linear(lin) => self.enc.encode(db, &Implied::new(r, lin)),
+			LinVariant::Cardinality(card) => self.enc.encode(db, &Implied::new(r, card)),
+			LinVariant::CardinalityOne(amo) => self.enc.encode(db, &Implied::new(r, amo)),
+			LinVariant::Count(count) => self.enc.encode(db, &Implied::new(r, count)),
+			LinVariant::Trivial => Ok(()),
+		}
+	}
+}
+
 impl<Db, Enc> Encoder<Db, Linear> for LinearEncoder<Enc>
 where
 	Db: ClauseDatabase + ?Sized,
@@ -551,6 +595,63 @@ where
 	}
 }
 
+impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc> Encoder<Db, Implied<Cardinality, Lit>>
+	for StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+where
+	Db: ClauseDatabase + ?Sized,
+	CardEnc: Encoder<Db, Implied<Cardinality, Lit>>,
+{
+	fn encode(&self, db: &mut Db, con: &Implied<Cardinality, Lit>) -> Result {
+		self.card_enc.encode(db, con)
+	}
+}
+
+impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc> Encoder<Db, Implied<CardinalityOne, Lit>>
+	for StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+where
+	Db: ClauseDatabase + ?Sized,
+	AmoEnc: Encoder<Db, Implied<CardinalityOne, Lit>>,
+{
+	fn encode(&self, db: &mut Db, con: &Implied<CardinalityOne, Lit>) -> Result {
+		self.amo_enc.encode(db, con)
+	}
+}
+
+impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc> Encoder<Db, Implied<Count, Lit>>
+	for StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+where
+	Db: ClauseDatabase + ?Sized,
+	CountEnc: Encoder<Db, Implied<Count, Lit>>,
+{
+	fn encode(&self, db: &mut Db, con: &Implied<Count, Lit>) -> Result {
+		self.count_enc.encode(db, con)
+	}
+}
+
+impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+	Encoder<Db, Implied<NormalizedBoolLinear, Lit>>
+	for StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+where
+	Db: ClauseDatabase + ?Sized,
+	BoolLinEnc: Encoder<Db, Implied<NormalizedBoolLinear, Lit>>,
+{
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedBoolLinear, Lit>) -> Result {
+		self.bool_lin_enc.encode(db, con)
+	}
+}
+
+impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+	Encoder<Db, Implied<NormalizedIntLinear, Lit>>
+	for StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
+where
+	Db: ClauseDatabase + ?Sized,
+	LinEnc: Encoder<Db, Implied<NormalizedIntLinear, Lit>>,
+{
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedIntLinear, Lit>) -> Result {
+		self.lin_enc.encode(db, con)
+	}
+}
+
 impl<Db, LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc> Encoder<Db, NormalizedBoolLinear>
 	for StaticLinEncoder<LinEnc, BoolLinEnc, CardEnc, AmoEnc, CountEnc>
 where
@@ -625,6 +726,23 @@ mod tests {
 			panic!("nothing being chosen satisfies it");
 		};
 		assert!(!value.value(a) && y.value(&value) == 0);
+	}
+
+	#[test]
+	fn a_condition_leaves_every_domain_alone() {
+		use rangelist::RangeList;
+
+		use crate::decision::integer::IntVar;
+
+		let mut cnf = Cnf::default();
+		let r = cnf.new_lit();
+		let (x, y) = (IntVar::new(0..=5), IntVar::new(0..=5));
+		let con = Linear::new(x.clone() + y.clone(), Comparator::LessEq, 3);
+		LinearEncoder::<TotalizerEncoder>::default()
+			.encode(&mut cnf, &con.implied_by(r))
+			.unwrap();
+		assert_eq!(x.domain(), RangeList::from(0..=5));
+		assert_eq!(y.domain(), RangeList::from(0..=5));
 	}
 
 	/// A constraint over views admits exactly what the arithmetic says of the
@@ -819,6 +937,48 @@ mod tests {
 				"{con}"
 			);
 		}
+	}
+
+	/// An encoding a variable gets while a constraint is encoded under a
+	/// condition is defined without it, so the variable reads the same on
+	/// every encoding whatever the condition is.
+	#[test]
+	fn a_view_made_under_a_condition_is_defined_without_it() {
+		use crate::{
+			constraint::{
+				implied::Implied,
+				int_ternary::{IntTernary, IntTernaryEncoder},
+			},
+			decision::integer::IntVar,
+		};
+
+		let mut cnf = Cnf::default();
+		let r = cnf.new_lit();
+		let (x, y, z) = (IntVar::new(0..=3), IntVar::new(0..=3), IntVar::new(0..=3));
+		x.require_direct_encoding(&mut cnf).unwrap();
+		// The bounded term is read on its order view, which `x` has yet to get.
+		let con = IntTernary::new((1, y), (1, z), Comparator::LessEq, (1, x.clone()));
+		IntTernaryEncoder::default()
+			.encode(&mut cnf, &Implied::new(r, con))
+			.unwrap();
+		assert!(x.has_order_encoding(), "the walk asked for the order view");
+		let reads = (0..=3)
+			.map(|v| {
+				(
+					x.encoded().equals(v).unwrap(),
+					x.encoded().at_least(v).unwrap(),
+				)
+			})
+			.collect_vec();
+		let holds = |b: BoolVal, v: &dyn crate::Valuation| match b {
+			BoolVal::Const(c) => c,
+			BoolVal::Lit(l) => v.value(l),
+		};
+		let _ = models(&cnf, |v| {
+			let taken = reads.iter().position(|&(eq, _)| holds(eq, v)).unwrap();
+			let reached = reads.iter().filter(|&&(_, ge)| holds(ge, v)).count() - 1;
+			assert_eq!(taken, reached, "the views of x agree whatever r is");
+		});
 	}
 
 	/// Aggregate `con` and read back the variant it leaves, adding the clauses
@@ -1228,6 +1388,18 @@ mod tests {
 				"every model of the encoding satisfies the constraint"
 			);
 		});
+	}
+
+	/// Sorting same coefficients into a count still admits exactly `r → C`:
+	/// only the count's overflow takes the condition, since the count defines
+	/// the integer the constraint is left with.
+	#[test]
+	fn an_implied_constraint_sorts_same_coefficients_under_its_condition() {
+		let mut agg = LinAggregator::default();
+		let _ = agg.sort_same_coefficients(2);
+		let mut encoder = LinearEncoder::new(TotalizerEncoder::default());
+		let _ = encoder.with_linear_aggregator(agg);
+		assert_exact_on_small_implied_linear(&encoder);
 	}
 
 	/// The constant of an expression is scaled by its multiplier and flips

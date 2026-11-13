@@ -208,6 +208,29 @@ pub(crate) mod tests {
 				use crate::helpers::tests::prelude::*;
 
 				#[test]
+				fn implied_constraints_admit_exactly_their_solutions() {
+					assert_exact_on_small_implied_linear(&LinearEncoder::new($encoder.clone()));
+				}
+
+				#[test]
+				fn implied_counts_admit_exactly_their_solutions() {
+					let domains = [
+						RangeList::from(-2..=-1),
+						RangeList::from(0..=4),
+						RangeList::from(2..=3),
+						RangeList::from(4..=5),
+						RangeList::from_elements([0, 2, 5]),
+					];
+					for (n, domain, cmp) in
+						iproduct!([0, 1, 2, 3], domains, [LimitComp::LessEq, LimitComp::Equal])
+					{
+						assert_implied_count_admits(n, domain, cmp, |cnf, con| {
+							$encoder.encode(cnf, con)
+						});
+					}
+				}
+
+				#[test]
 				fn small_le_1() {
 					let mut cnf = Cnf::default();
 					let a = cnf.new_lit();
@@ -643,6 +666,7 @@ pub(crate) mod tests {
 		constraint::{
 			cardinality_one::{CardinalityOne, PairwiseEncoder},
 			count::Count,
+			implied::Implied,
 			linear::{Comparator, LimitComp, LinExp, Linear, PosCoeff},
 		},
 		decision::integer::IntVar,
@@ -682,35 +706,7 @@ pub(crate) mod tests {
 		cmp: LimitComp,
 		encode: impl FnOnce(&mut Cnf, &Count) -> Result,
 	) {
-		let mut cnf = Cnf::default();
-		let lits = cnf.new_var_range(n).iter_lits().collect_vec();
-		let y = IntVar::new(domain.clone());
-		y.require_order_encoding(&mut cnf).unwrap();
-		let shown = cnf.get_variables().map(Lit::from).collect_vec();
-		let con = Count::new(lits.clone(), cmp, y.clone());
-		// A count no value of the bound can meet is a contradiction, which the
-		// database is told as well as the caller.
-		let encoded = encode(&mut cnf, &con);
-		let mut seen = models_over(&cnf, &shown, |sol| {
-			(
-				lits.iter().filter(|&&l| sol.value(l)).count() as Coeff,
-				y.value(sol),
-			)
-		});
-		seen.sort_unstable();
-		seen.dedup();
-		let want = (0..=n as Coeff)
-			.cartesian_product(domain.iter().flatten())
-			.filter(|&(count, v)| match cmp {
-				LimitComp::LessEq => count <= v,
-				LimitComp::Equal => count == v,
-			})
-			.collect_vec();
-		assert_eq!(seen, want, "{n} literals {cmp:?} a bound in {domain:?}");
-		assert!(
-			encoded.is_ok() || want.is_empty(),
-			"{n} literals {cmp:?} a bound in {domain:?} is satisfiable"
-		);
+		count_admits(n, domain, cmp, false, |cnf, _, con| encode(cnf, &con));
 	}
 
 	/// Simple helper function to assert the generated formula against an expect
@@ -774,6 +770,104 @@ pub(crate) mod tests {
 					let expected = brute_force(&coefs, &doms, cmp, k);
 					assert_eq!(found, expected, "{con}");
 					assert!(encoded.is_ok() || expected.is_empty(), "{con}");
+				}
+			}
+		}
+	}
+
+	/// Check that `encoder` admits exactly the solutions of `r → Σ cᵢ·tᵢ ≷ k`
+	/// for small constraints over literals and over integers: every
+	/// assignment where `r` is false, and the constraint's solutions where it
+	/// is true.
+	pub(crate) fn assert_exact_on_small_implied_linear<E>(encoder: &E)
+	where
+		E: Encoder<Cnf, Implied<Linear>>,
+	{
+		for len in 1..=3 {
+			for coefs in (0..len).map(|_| 1..=3).multi_cartesian_product() {
+				if !coefs.iter().tuple_windows().all(|(a, b)| a <= b) {
+					continue;
+				}
+				for (k, cmp) in iproduct!(
+					-1..=coefs.iter().sum::<Coeff>() + 1,
+					[Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq]
+				) {
+					let mut cnf = Cnf::default();
+					let r = cnf.new_lit();
+					let lits = cnf.new_var_range(len).iter_lits().collect_vec();
+					let con = Linear::new(LinExp::from_slices(&coefs, &lits), cmp, k).implied_by(r);
+					encoder.encode(&mut cnf, &con).unwrap();
+					let shown = once(r).chain(lits.iter().copied()).collect_vec();
+					let mut seen = models_over(&cnf, &shown, |v| {
+						shown.iter().map(|&l| v.value(l)).collect_vec()
+					});
+					seen.sort();
+					let bits = vec![RangeList::from(0..=1); len];
+					let expected = (0..len)
+						.map(|_| [false, true])
+						.multi_cartesian_product()
+						.map(|a| once(false).chain(a).collect_vec())
+						.chain(
+							brute_force(&coefs, &bits, cmp, k)
+								.into_iter()
+								.map(|a| once(true).chain(a.iter().map(|&v| v == 1)).collect()),
+						)
+						.sorted()
+						.collect_vec();
+					assert_eq!(seen, expected, "r → {coefs:?} {cmp:?} {k}");
+				}
+			}
+		}
+		let domains: [&[Coeff]; 3] = [&[0, 1], &[0, 2, 3], &[1, 3]];
+		for len in 1..=3 {
+			for terms in domains
+				.iter()
+				.cartesian_product([1, -2])
+				.combinations_with_replacement(len)
+			{
+				let doms = terms
+					.iter()
+					.map(|(d, _)| RangeList::from_elements(d.iter().copied()))
+					.collect_vec();
+				let coefs = terms.iter().map(|&(_, c)| c).collect_vec();
+				for (k, cmp) in iproduct!(
+					-3..=4,
+					[Comparator::LessEq, Comparator::Equal, Comparator::GreaterEq]
+				) {
+					let mut cnf = Cnf::default();
+					let r = cnf.new_lit();
+					let xs = doms.iter().map(|d| IntVar::new(d.clone())).collect_vec();
+					let exp = (xs.iter().zip(&coefs))
+						.fold(LinExp::default(), |exp, (x, &c)| exp + x.clone() * c);
+					encoder
+						.encode(&mut cnf, &Linear::new(exp, cmp, k).implied_by(r))
+						.unwrap();
+					let mut shown = vec![r];
+					for x in &xs {
+						for v in x.domain().iter().flatten().skip(1) {
+							if let BoolVal::Lit(l) = x.at_least(&mut cnf, v).unwrap() {
+								shown.push(l);
+							}
+						}
+					}
+					let mut seen = models_over(&cnf, &shown, |v| {
+						(v.value(r), xs.iter().map(|x| x.value(v)).collect_vec())
+					});
+					seen.sort();
+					seen.dedup();
+					let mut expected = doms
+						.iter()
+						.map(|d| d.iter().flatten().collect_vec())
+						.multi_cartesian_product()
+						.map(|a| (false, a))
+						.chain(
+							brute_force(&coefs, &doms, cmp, k)
+								.into_iter()
+								.map(|a| (true, a)),
+						)
+						.collect_vec();
+					expected.sort();
+					assert_eq!(seen, expected, "r → {terms:?} {cmp:?} {k}");
 				}
 			}
 		}
@@ -862,6 +956,56 @@ pub(crate) mod tests {
 				}
 			}
 		}
+	}
+
+	/// Assert that `encode` admits exactly the assignments of `r → amo` for an
+	/// at-most-one or exactly-one constraint over up to four literals.
+	pub(crate) fn assert_implied_amo_admits(
+		encode: impl Fn(&mut Cnf, &Implied<CardinalityOne, Lit>) -> Result,
+	) {
+		for (n, cmp) in iproduct!(0..=4, [LimitComp::LessEq, LimitComp::Equal]) {
+			let mut cnf = Cnf::default();
+			let r = cnf.new_lit();
+			let lits = cnf.new_var_range(n).iter_lits().collect_vec();
+			let shown = cnf.get_variables().map(Lit::from).collect_vec();
+			let con = CardinalityOne {
+				lits: lits.clone(),
+				cmp,
+			};
+			encode(&mut cnf, &Implied::new(r, con)).unwrap();
+			let mut seen = models_over(&cnf, &shown, |sol| {
+				shown.iter().map(|&l| sol.value(l)).collect_vec()
+			});
+			seen.sort_unstable();
+			let mut want = (0..shown.len())
+				.map(|_| [false, true])
+				.multi_cartesian_product()
+				.filter(|values| {
+					let count = values[1..].iter().filter(|&&v| v).count();
+					!values[0]
+						|| match cmp {
+							LimitComp::LessEq => count <= 1,
+							LimitComp::Equal => count == 1,
+						}
+				})
+				.collect_vec();
+			want.sort_unstable();
+			assert_eq!(seen, want, "r → {cmp:?} one of {n} literals");
+		}
+	}
+
+	/// Assert that `encode` admits exactly the assignments of `r → count`, for
+	/// counts of `n` literals against a bound in `domain`, and that a count no
+	/// bound meets only falsifies `r`.
+	pub(crate) fn assert_implied_count_admits(
+		n: usize,
+		domain: RangeList<Coeff>,
+		cmp: LimitComp,
+		encode: impl FnOnce(&mut Cnf, &Implied<Count, Lit>) -> Result,
+	) {
+		count_admits(n, domain, cmp, true, |cnf, r, con| {
+			encode(cnf, &Implied::new(r.unwrap(), con))
+		});
 	}
 
 	/// Encode `Σ coefs·lits ≷ k` on fresh literals with `encoder`, checking
@@ -1050,6 +1194,61 @@ pub(crate) mod tests {
 			.collect()
 	}
 
+	/// The check behind [`assert_count_admits`] and
+	/// [`assert_implied_count_admits`], with a condition `r` if `conditioned`.
+	fn count_admits(
+		n: usize,
+		domain: RangeList<Coeff>,
+		cmp: LimitComp,
+		conditioned: bool,
+		encode: impl FnOnce(&mut Cnf, Option<Lit>, Count) -> Result,
+	) {
+		let mut cnf = Cnf::default();
+		let r = conditioned.then(|| cnf.new_lit());
+		let lits = cnf.new_var_range(n).iter_lits().collect_vec();
+		let y = IntVar::new(domain.clone());
+		y.require_order_encoding(&mut cnf).unwrap();
+		let shown = cnf.get_variables().map(Lit::from).collect_vec();
+		let con = Count::new(lits.clone(), cmp, y.clone());
+		// A count no value of the bound can meet is a contradiction the
+		// database is told of, or under a condition one that only falsifies it.
+		let encoded = encode(&mut cnf, r, con);
+		let mut seen = models_over(&cnf, &shown, |sol| {
+			(
+				r.is_none_or(|r| sol.value(r)),
+				lits.iter().filter(|&&l| sol.value(l)).count() as Coeff,
+				y.value(sol),
+			)
+		});
+		seen.sort_unstable();
+		seen.dedup();
+		let conditions: &[bool] = if conditioned { &[false, true] } else { &[true] };
+		let want = iproduct!(
+			conditions.iter().copied(),
+			0..=n as Coeff,
+			domain.iter().flatten()
+		)
+		.filter(|&(holds, count, v)| {
+			!holds
+				|| match cmp {
+					LimitComp::LessEq => count <= v,
+					LimitComp::Equal => count == v,
+				}
+		})
+		.collect_vec();
+		let name = format!("{n} literals {cmp:?} a bound in {domain:?}");
+		assert_eq!(
+			seen,
+			want,
+			"{}{name}",
+			if conditioned { "r → " } else { "" }
+		);
+		assert!(
+			encoded.is_ok() || (!conditioned && want.is_empty()),
+			"{name} is satisfiable"
+		);
+	}
+
 	/// The number of assignments to literals that satisfy `Σ coefs·lits ≷ k`.
 	fn count_solutions(coefs: &[Coeff], cmp: Comparator, k: Coeff) -> usize {
 		brute_force(coefs, &vec![RangeList::from(0..=1); coefs.len()], cmp, k).len()
@@ -1184,10 +1383,11 @@ pub(crate) mod tests {
 			encoder::aggregate::Aggregation,
 			helpers::tests::{
 				all_binary_solutions, assert_checker, assert_count_admits, assert_encoding,
-				assert_exact_on_encoded_int_linear, assert_exact_on_small_int_linear,
-				assert_exact_on_small_linear, assert_lean_linear, assert_solutions,
-				at_most_one_var, binary_literals, construct_terms, direct_view_sum, expect_file,
-				implication_chain_var, models, models_over,
+				assert_exact_on_encoded_int_linear, assert_exact_on_small_implied_linear,
+				assert_exact_on_small_int_linear, assert_exact_on_small_linear,
+				assert_implied_amo_admits, assert_implied_count_admits, assert_lean_linear,
+				assert_solutions, at_most_one_var, binary_literals, construct_terms,
+				direct_view_sum, expect_file, implication_chain_var, models, models_over,
 			},
 			BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Coeff, Encoder, Lit, Unsatisfiable,
 		};

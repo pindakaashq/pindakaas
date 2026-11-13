@@ -29,6 +29,7 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
+		implied::Implied,
 		int_linear::{
 			decompose_setters, lit_terms, sum_values, term_max, term_min, Decompose,
 			DecomposeConfig, NormalizedIntLinear, Term,
@@ -37,7 +38,7 @@ use crate::{
 		linear::{Comparator, PosCoeff},
 	},
 	helpers::fold_pairwise,
-	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
+	ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
 
 /// A balanced tree of partial sums (totalizer, GTE, or GGT).
@@ -67,6 +68,38 @@ pub struct TotalizerEncoder {
 }
 
 impl TotalizerEncoder {
+	/// Encode `con`, with the negated `condition` on the clauses that state it.
+	fn encode_count<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		con: &Count,
+		condition: Option<Lit>,
+	) -> Result {
+		let encoder = self.config.encoder();
+		if con.lits.len() < 2 {
+			// A tree needs two leaves to put the count on top of.
+			let Ok(linear) = NormalizedIntLinear::try_from(con) else {
+				return db.contradiction();
+			};
+			return encoder.encode_decomposed(db, &linear, self, condition);
+		}
+		// The count is the top of the tree rather than one more term in it,
+		// which would widen every intermediate above where it joins.
+		let leaves = lit_terms(con.lits.iter().map(|&l| (l, PosCoeff::new(1))))
+			.into_iter()
+			.map(|(c, x)| (*c, x))
+			.collect_vec();
+		let Ok(pieces) = self.tree(leaves, con.cmp.into(), con.y.max(), &(1, con.y.clone())) else {
+			return db.contradiction();
+		};
+		match condition {
+			None => pieces
+				.iter()
+				.try_for_each(|piece| encoder.encode(db, piece)),
+			Some(_) => encoder.encode_pieces(db, &pieces, condition, |z| z.is(&con.y)),
+		}
+	}
+
 	/// Sum `leaves` up a balanced binary tree whose top is `root`, with no
 	/// intermediate reaching past `most`.
 	fn tree(
@@ -138,22 +171,47 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for TotalizerEncod
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for TotalizerEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		if con.lits.len() < 2 {
-			// A tree needs two leaves to put the count on top of.
-			let con = con.as_int_linear(db)?;
-			return self.encode(db, &con);
-		}
-		// The count is the top of the tree rather than one more term in it,
-		// which would widen every intermediate above where it joins.
-		let leaves = lit_terms(con.lits.iter().map(|&l| (l, PosCoeff::new(1))))
-			.into_iter()
-			.map(|(c, x)| (*c, x))
-			.collect_vec();
-		let Ok(cons) = self.tree(leaves, con.cmp.into(), con.y.max(), &(1, con.y.clone())) else {
-			return db.contradiction();
-		};
+		self.encode_count(db, con, None)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<Cardinality, Lit>> for TotalizerEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<Cardinality, Lit>) -> Result {
+		let linear = con.constraint().as_linear();
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<CardinalityOne, Lit>> for TotalizerEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<CardinalityOne, Lit>) -> Result {
+		let card = Cardinality::from(con.constraint().clone());
+		self.encode(db, &Implied::new(con.condition(), card))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<Count, Lit>> for TotalizerEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<Count, Lit>) -> Result {
+		con.encode_with(db, |db, con, r| self.encode_count(db, con, Some(r)))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<NormalizedBoolLinear, Lit>>
+	for TotalizerEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedBoolLinear, Lit>) -> Result {
+		let linear = con.constraint().as_int_linear();
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<NormalizedIntLinear, Lit>>
+	for TotalizerEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedIntLinear, Lit>) -> Result {
 		let encoder = self.config.encoder();
-		cons.iter().try_for_each(|con| encoder.encode(db, con))
+		con.encode_with(db, |db, con, r| {
+			encoder.encode_decomposed(db, con, self, Some(r))
+		})
 	}
 }
 
@@ -173,7 +231,7 @@ where
 		tracing::instrument(name = "totalizer_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		self.config.encoder().encode_decomposed(db, con, self)
+		self.config.encoder().encode_decomposed(db, con, self, None)
 	}
 }
 

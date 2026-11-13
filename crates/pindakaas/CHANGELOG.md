@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Arithmetic of an `IntVar` with a constant (`x + k`, `k + x`, `x - k`, `x * c`, `c * x`, and `-x`) gives a view of the same variable, see `decision::integer`. `with_order_encoding` and `with_direct_encoding` read their literals over the values of a view.
 - `x + y` and `x - y` of two `IntVar`s, or of an `IntVar` and a `LinExp`, give a `LinExp`.
 - `Linear::new` takes anything that converts into a `LinExp`, such as an `IntVar`.
+- `Implied`, the constraint `r → C`, made with `Linear::implied_by` and encoded by `LinearEncoder`. Every linear and at-most-one encoder encodes the normalized forms implied by a literal, and adds `¬r` only to the clauses that state the constraint.
+- `Formula::implied_by` gives the formula `r → f`.
+- `NormalizedIntLinear` implements `TryFrom<&Count>`, which fails where the bound is below zero.
 
 ### Changed
 
@@ -19,9 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [**breaking**] `IntVar * Coeff` gives an `IntVar` instead of a `LinExp`.
 - [**breaking**] `IntVar::mirrored` is removed: write `-x + (x.min() + x.max())`.
 - [**breaking**] `NormalizedIntLinear::terms` returns an iterator instead of a slice, and `NormalizedIntLinear::new` panics on a term whose least value is not zero.
+- [**breaking**] `Encoder::encode_implied` and `ClauseDatabaseTools::encode_implied` are removed: encode `Implied` instead.
 - [**breaking**] `LinAggregator::aggregate` takes no database and returns an `Aggregation`: the clauses a linear constraint implies on its own, the counts it sorts literals into, and the specialised form of the rest.
 - [**breaking**] `LinAggregator::sort_same_coefficients` takes only the minimum number of literals. `LinearEncoder` encodes the counts with its variant encoder, as `LinVariant::Count`.
 - [**breaking**] `IntVar::from_binary_encoding`, `IntVar::from_direct_encoding`, and `IntVar::from_order_encoding` no longer take a database argument and return an unwrapped `IntVar`.
+- `TseitinEncoder` adds the condition of an implication or if-then-else only to the clauses that state its consequence, not to the clauses that define its sub-formulas.
+
+### Fixed
+
+- An implied linear constraint no longer adds the condition to the clauses that define an `IntVar` encoding, nor narrows a domain under it. Either could remove solutions of other constraints over the same variables where the condition is false.
 
 ## [0.6.1](https://github.com/pindakaashq/pindakaas/compare/pindakaas-v0.6.0...pindakaas-v0.6.1) - 2026-10-19
 

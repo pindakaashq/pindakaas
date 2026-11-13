@@ -46,6 +46,7 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
+		implied::{negated, Conditioned, Implied},
 		int_linear::{
 			decompose_setters, term_max, term_min, term_values, Decompose, DecomposeConfig,
 			NormalizedIntLinear, Term,
@@ -56,7 +57,7 @@ use crate::{
 	decision::integer::IntVar,
 	encoder::sorting_network::SortingNetworkEncoder,
 	helpers::new_named_lit,
-	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
 
 /// A polynomial watchdog (GPW globally, LPW locally).
@@ -93,6 +94,40 @@ pub struct WatchdogEncoder {
 }
 
 impl WatchdogEncoder {
+	/// Bucket the terms by the digits of what they are worth, and carry.
+	///
+	/// Under a `condition`, the clauses of the sorting networks that state the
+	/// constraint take its negation.
+	///
+	/// An equality is two watchdogs: one over the terms as they stand, and one
+	/// over each of them counted from the far end, which is the same
+	/// constraint the other way round.
+	fn decompose_under<Db: ClauseDatabase + ?Sized>(
+		&self,
+		db: &mut Db,
+		con: &NormalizedIntLinear,
+		condition: Option<Lit>,
+	) -> Result<Vec<IntTernary>, Unsatisfiable> {
+		let terms = con.signed_terms().collect_vec();
+		let mut cons = Vec::new();
+		self.watchdogs(db, &terms, con.k(), &mut cons, condition)?;
+		if con.cmp() == LimitComp::Equal {
+			// `Σ c·x ≥ k` is `Σ c·x' ≤ Σ c·(min + max) − k` over the mirrored
+			// terms, which is a view on their literals.
+			let mut k = -con.k();
+			let mut mirrored = Vec::with_capacity(terms.len());
+			for (c, x) in &terms {
+				k += c * (x.min() + x.max());
+				mirrored.push((*c, x.mirrored()));
+			}
+			if k < 0 {
+				return Err(Unsatisfiable);
+			}
+			self.watchdogs(db, &mirrored, k, &mut cons, condition)?;
+		}
+		Ok(cons)
+	}
+
 	/// A variable over `0..=1` saying whether `2ʳ` is part of what the term is
 	/// worth, given the values the term can take.
 	///
@@ -144,6 +179,7 @@ impl WatchdogEncoder {
 		leaves: &[IntVar],
 		cap: Coeff,
 		label: impl Display,
+		condition: Option<Lit>,
 	) -> Result<IntVar, Unsatisfiable> {
 		let lb = leaves.iter().map(IntVar::min).sum::<Coeff>();
 		let ub = min(leaves.iter().map(IntVar::max).sum::<Coeff>(), cap);
@@ -156,7 +192,8 @@ impl WatchdogEncoder {
 			}
 		}
 		let count = network.sum(leaves, lb..=ub, label);
-		network.sorted(db, leaves, &LimitComp::LessEq, &count)?;
+		let defining = condition.map(Conditioned::Overflow);
+		network.sorted(db, leaves, &LimitComp::LessEq, &count, defining)?;
 		Ok(count)
 	}
 
@@ -217,6 +254,10 @@ impl WatchdogEncoder {
 	/// the bound leaves them, since a count past that is a sum that has already
 	/// broken it; under one they are left alone and only the top count is
 	/// spoken about, in a clause the guard can satisfy instead.
+	#[expect(
+		clippy::too_many_arguments,
+		reason = "the condition joins arguments that each shape the watchdog"
+	)]
 	fn watchdog<'a, Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -225,13 +266,15 @@ impl WatchdogEncoder {
 		guard: Option<BoolVal>,
 		network: Option<&SortingNetworkEncoder>,
 		cons: &mut Vec<IntTernary>,
+		condition: Option<Lit>,
 	) -> Result<(), Unsatisfiable> {
+		let negated = negated(condition);
 		let terms = terms.collect_vec();
 		if terms.iter().map(|t| term_min(t)).sum::<Coeff>() > k {
 			// The terms pass the bound however they fall, so only the guard can
 			// save the constraint.
 			return match guard {
-				Some(g) => db.add_clause([g]),
+				Some(g) => db.add_clause([g, negated]),
 				None => Err(Unsatisfiable),
 			};
 		}
@@ -273,7 +316,9 @@ impl WatchdogEncoder {
 				}
 			}
 			let count = match network {
-				Some(network) => Self::sort(db, network, &leaves, cap, format_args!("b{r}"))?,
+				Some(network) => {
+					Self::sort(db, network, &leaves, cap, format_args!("b{r}"), condition)?
+				}
 				None => self.totalize(leaves, cap, &format!("b{r}"), cons)?,
 			};
 			carried = Some(match carried {
@@ -289,7 +334,8 @@ impl WatchdogEncoder {
 					match network {
 						Some(network) => {
 							let sum = network.sum([&count, &half], lb..=ub, format_args!("s{r}"));
-							network.merge(db, &count, &half, &LimitComp::LessEq, &sum)?;
+							let defining = condition.map(Conditioned::Overflow);
+							network.merge(db, &count, &half, &LimitComp::LessEq, &sum, defining)?;
 							sum
 						}
 						None => {
@@ -315,7 +361,7 @@ impl WatchdogEncoder {
 			let top = carried.expect("a watchdog has at least one digit");
 			let m = total >> p;
 			let within = top.at_most(db, m - 1)?;
-			db.add_clause([g, within])?;
+			db.add_clause([g, within, negated])?;
 		}
 		Ok(())
 	}
@@ -327,6 +373,7 @@ impl WatchdogEncoder {
 		terms: &[Term],
 		k: Coeff,
 		cons: &mut Vec<IntTernary>,
+		condition: Option<Lit>,
 	) -> Result<(), Unsatisfiable> {
 		let network = self.sorting_networks.then(|| {
 			let mut network = SortingNetworkEncoder::default();
@@ -335,7 +382,7 @@ impl WatchdogEncoder {
 		});
 		let network = network.as_ref();
 		if !self.local {
-			return self.watchdog(db, terms.iter(), k, None, network, cons);
+			return self.watchdog(db, terms.iter(), k, None, network, cons, condition);
 		}
 		for (i, term) in terms.iter().enumerate() {
 			for v in term_values(term) {
@@ -348,7 +395,7 @@ impl WatchdogEncoder {
 					.enumerate()
 					.filter(|&(j, _)| j != i)
 					.map(|(_, t)| t);
-				self.watchdog(db, rest, k - v, Some(guard), network, cons)?;
+				self.watchdog(db, rest, k - v, Some(guard), network, cons, condition)?;
 			}
 		}
 		Ok(())
@@ -380,34 +427,12 @@ impl WatchdogEncoder {
 }
 
 impl Decompose for WatchdogEncoder {
-	/// Bucket the terms by the digits of what they are worth, and carry.
-	///
-	/// An equality is two watchdogs: one over the terms as they stand, and one
-	/// over each of them counted from the far end, which is the same
-	/// constraint the other way round.
 	fn decompose<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
 		con: &NormalizedIntLinear,
 	) -> Result<Vec<IntTernary>, Unsatisfiable> {
-		let terms = con.signed_terms().collect_vec();
-		let mut cons = Vec::new();
-		self.watchdogs(db, &terms, con.k(), &mut cons)?;
-		if con.cmp() == LimitComp::Equal {
-			// `Σ c·x ≥ k` is `Σ c·x' ≤ Σ c·(min + max) − k` over the mirrored
-			// terms, which is a view on their literals.
-			let mut k = -con.k();
-			let mut mirrored = Vec::with_capacity(terms.len());
-			for (c, x) in &terms {
-				k += c * (x.min() + x.max());
-				mirrored.push((*c, x.mirrored()));
-			}
-			if k < 0 {
-				return Err(Unsatisfiable);
-			}
-			self.watchdogs(db, &mirrored, k, &mut cons)?;
-		}
-		Ok(cons)
+		self.decompose_under(db, con, None)
 	}
 }
 
@@ -426,8 +451,62 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for WatchdogEncode
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for WatchdogEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		let con = con.as_int_linear(db)?;
+		let Ok(con) = NormalizedIntLinear::try_from(con) else {
+			return db.contradiction();
+		};
 		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<Cardinality, Lit>> for WatchdogEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<Cardinality, Lit>) -> Result {
+		let linear = con.constraint().as_linear();
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<CardinalityOne, Lit>> for WatchdogEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<CardinalityOne, Lit>) -> Result {
+		let card = Cardinality::from(con.constraint().clone());
+		self.encode(db, &Implied::new(con.condition(), card))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<Count, Lit>> for WatchdogEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<Count, Lit>) -> Result {
+		// A bound no count reaches falsifies the condition, not the database.
+		let Ok(linear) = NormalizedIntLinear::try_from(con.constraint()) else {
+			return db.add_clause([!con.condition()]);
+		};
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<NormalizedBoolLinear, Lit>>
+	for WatchdogEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedBoolLinear, Lit>) -> Result {
+		let linear = con.constraint().as_int_linear();
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<NormalizedIntLinear, Lit>>
+	for WatchdogEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedIntLinear, Lit>) -> Result {
+		let encoder = self.config.encoder();
+		con.encode_with(db, |db, con, r| {
+			if encoder.encode_undecomposed(db, con, Some(r))? {
+				return Ok(());
+			}
+			// The sorting networks state the constraint as they are built, so
+			// the condition goes into the decomposition itself.
+			let Ok(pieces) = self.decompose_under(db, con, Some(r)) else {
+				return db.contradiction();
+			};
+			encoder.encode_pieces_of(db, con, &pieces, Some(r))
+		})
 	}
 }
 
@@ -447,7 +526,7 @@ where
 		tracing::instrument(name = "watchdog_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		self.config.encoder().encode_decomposed(db, con, self)
+		self.config.encoder().encode_decomposed(db, con, self, None)
 	}
 }
 

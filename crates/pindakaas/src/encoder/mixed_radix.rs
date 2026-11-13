@@ -33,6 +33,7 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
+		implied::{negated, ConditionalClauses, Conditioned, Implied},
 		int_linear::{
 			decompose_setters, sum_values, term_max, term_values, DecomposeConfig,
 			NormalizedIntLinear,
@@ -41,8 +42,8 @@ use crate::{
 		linear::{Comparator, LimitComp},
 	},
 	decision::integer::{lex_leq, IntVar},
-	helpers::fold_pairwise,
-	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Result, Unsatisfiable,
+	helpers::{div_floor, fold_pairwise},
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Coeff, Encoder, Lit, Result, Unsatisfiable,
 };
 
 /// A tree of partial sums in mixed radix (MTO or GMTO).
@@ -83,6 +84,7 @@ impl MixedRadixEncoder {
 		x: &IntVar,
 		y: &IntVar,
 		ub: Coeff,
+		condition: Option<Lit>,
 	) -> Result<IntVar, Unsatisfiable> {
 		// Adding zero asks for no clauses, as long as it cannot pass `ub`.
 		if Self::is_zero(x) && y.max() <= ub {
@@ -92,7 +94,7 @@ impl MixedRadixEncoder {
 		}
 		let domain = sum_values(&(1, x.clone()), &(1, y.clone()), ub);
 		let z = self.new_int_var(domain, "s")?;
-		self.config.encoder().encode(
+		self.config.encoder().encode_conditioned(
 			db,
 			&IntTernary::new(
 				(1, x.clone()),
@@ -100,6 +102,7 @@ impl MixedRadixEncoder {
 				Comparator::Equal,
 				(1, z.clone()),
 			),
+			condition.map(Conditioned::Overflow),
 		)?;
 		Ok(z)
 	}
@@ -113,6 +116,7 @@ impl MixedRadixEncoder {
 		y: &[IntVar],
 		base: &[Coeff],
 		ub: Coeff,
+		condition: Option<Lit>,
 	) -> Result<Vec<IntVar>, Unsatisfiable> {
 		let zero = IntVar::new(0..=0);
 		let len = x.len().max(y.len());
@@ -125,14 +129,15 @@ impl MixedRadixEncoder {
 			let b = Self::base_at(base, j);
 			let x_j = x.get(j).unwrap_or(&zero);
 			let y_j = y.get(j).unwrap_or(&zero);
-			let w = self.add_eq(db, x_j, &carry, min(b, pos_ub))?;
+			let w = self.add_eq(db, x_j, &carry, min(b, pos_ub), condition)?;
 			let s = self.add_eq(
 				db,
 				&w,
 				y_j,
 				min(b.saturating_mul(2).saturating_sub(1), pos_ub),
+				condition,
 			)?;
-			let (digit, next) = self.split(db, &s, b)?;
+			let (digit, next) = self.split(db, &s, b, condition)?;
 			digits.push(digit);
 			carry = next;
 			pos_ub /= b;
@@ -172,11 +177,13 @@ impl MixedRadixEncoder {
 		db: &mut Db,
 		x: &IntVar,
 		base: &[Coeff],
+		condition: Option<Lit>,
 	) -> Result<Vec<IntVar>, Unsatisfiable> {
 		let mut digits = Vec::new();
 		let mut rem = x.clone();
 		while rem.max() >= Self::base_at(base, digits.len()) {
-			let (digit, carry) = self.split(db, &rem, Self::base_at(base, digits.len()))?;
+			let (digit, carry) =
+				self.split(db, &rem, Self::base_at(base, digits.len()), condition)?;
 			digits.push(digit);
 			rem = carry;
 		}
@@ -224,6 +231,10 @@ impl MixedRadixEncoder {
 	/// Constrain the value `digits` stands for to be at most `k`, leaving out
 	/// the clauses of the `stated` most significant digits, and give back how
 	/// many of them have their clauses said afterwards.
+	#[expect(
+		clippy::too_many_arguments,
+		reason = "the condition joins arguments that each describe the bound"
+	)]
 	fn lex_leq<Db: ClauseDatabase + ?Sized>(
 		&self,
 		db: &mut Db,
@@ -232,6 +243,7 @@ impl MixedRadixEncoder {
 		k: Coeff,
 		most: Coeff,
 		stated: usize,
+		condition: Option<Lit>,
 	) -> Result<usize, Unsatisfiable> {
 		if most <= k {
 			// Digits that cannot pass `k` would only be told what their splits
@@ -248,7 +260,10 @@ impl MixedRadixEncoder {
 			.zip_eq(ks)
 			.map(|(digit, k_j)| Ok((digit.at_least(db, k_j)?, digit.at_least(db, k_j + 1)?)))
 			.collect::<Result<Vec<(BoolVal, BoolVal)>, Unsatisfiable>>()?;
-		lex_leq(db, &pairs, stated)?;
+		match condition {
+			Some(r) => lex_leq(&mut ConditionalClauses::new(db, r), &pairs, stated)?,
+			None => lex_leq(db, &pairs, stated)?,
+		}
 		Ok(digits.len())
 	}
 
@@ -268,17 +283,19 @@ impl MixedRadixEncoder {
 		digits: &[IntVar],
 		base: &[Coeff],
 		k: Coeff,
+		condition: Option<Lit>,
 	) -> Result {
 		let Some(ks) = Self::const_digits(base, digits.len(), k) else {
 			// `k` is past anything the digits can stand for, so the digits
 			// cannot come to it.
 			return Err(Unsatisfiable);
 		};
+		let negated = negated(condition);
 		for (digit, k_j) in digits.iter().zip_eq(ks) {
 			let at_least = digit.at_least(db, k_j)?;
-			db.add_clause([at_least])?;
+			db.add_clause([at_least, negated])?;
 			let greater = digit.at_least(db, k_j + 1)?;
-			db.add_clause([!greater])?;
+			db.add_clause([!greater, negated])?;
 		}
 		Ok(())
 	}
@@ -289,6 +306,7 @@ impl MixedRadixEncoder {
 		db: &mut Db,
 		x: &IntVar,
 		base: Coeff,
+		condition: Option<Lit>,
 	) -> Result<(IntVar, IntVar), Unsatisfiable> {
 		if x.max() < base {
 			return Ok((x.clone(), IntVar::new(0..=0)));
@@ -308,7 +326,7 @@ impl MixedRadixEncoder {
 		};
 		let digit = self.new_int_var(values.iter().map(|v| v % base..=v % base).collect(), "r")?;
 		// The radix is the carry's coefficient, so nothing has to be scaled.
-		self.config.encoder().encode(
+		self.config.encoder().encode_conditioned(
 			db,
 			&IntTernary::new(
 				(1, digit.clone()),
@@ -316,6 +334,7 @@ impl MixedRadixEncoder {
 				Comparator::Equal,
 				(1, x.clone()),
 			),
+			condition.map(Conditioned::Overflow),
 		)?;
 		Ok((digit, carry))
 	}
@@ -345,6 +364,7 @@ impl MixedRadixEncoder {
 		db: &mut Db,
 		term: &(Coeff, IntVar),
 		ub: Coeff,
+		condition: Option<Lit>,
 	) -> Result<IntVar, Unsatisfiable> {
 		let (c, x) = term;
 		if *c == 1 {
@@ -355,6 +375,10 @@ impl MixedRadixEncoder {
 			if c * x.max() <= ub {
 				return Ok(x.clone() * *c);
 			}
+			// The bound leaves no room for the values past it, where the
+			// condition holds.
+			let within = x.at_most(db, div_floor(ub, *c))?;
+			db.add_clause([within, negated(condition)])?;
 			return Ok(IntVar::mapped(db, x, |v| v * c, ub)?.expect("a positive scale rises"));
 		}
 		let domain = x
@@ -366,7 +390,7 @@ impl MixedRadixEncoder {
 			.map(|v| v..=v)
 			.collect();
 		let scaled = self.new_int_var(domain, "c")?;
-		self.config.encoder().encode(
+		self.config.encoder().encode_conditioned(
 			db,
 			&IntTernary::new(
 				(*c, x.clone()),
@@ -374,6 +398,7 @@ impl MixedRadixEncoder {
 				Comparator::Equal,
 				(1, scaled.clone()),
 			),
+			condition.map(Conditioned::Overflow),
 		)?;
 		Ok(scaled)
 	}
@@ -386,6 +411,7 @@ impl MixedRadixEncoder {
 		&self,
 		db: &mut Db,
 		con: &NormalizedIntLinear,
+		condition: Option<Lit>,
 	) -> Result {
 		let k = con.k();
 		let base = match &self.base {
@@ -411,15 +437,15 @@ impl MixedRadixEncoder {
 		// significant digits already have their clauses of `lex_leq` said.
 		for x in xs {
 			let most = term_max(&x);
-			let leaf = self.scaled(db, &x, min(most, k))?;
-			let digits = self.digits(db, &leaf, &base)?;
-			let stated = self.lex_leq(db, &digits, &base, k, most, 0)?;
+			let leaf = self.scaled(db, &x, min(most, k), condition)?;
+			let digits = self.digits(db, &leaf, &base, condition)?;
+			let stated = self.lex_leq(db, &digits, &base, k, most, 0, condition)?;
 			layer.push((digits, most, stated));
 		}
 
 		let (root, most, stated) = fold_pairwise(layer, |_, at_root, x, y| {
 			let most = min(x.1, k).saturating_add(min(y.1, k));
-			let digits = self.add_nodes(db, &x.0, &y.0, &base, min(most, k))?;
+			let digits = self.add_nodes(db, &x.0, &y.0, &base, min(most, k), condition)?;
 			// A carry out of the top is split from a sum that `add_nodes` holds
 			// to its bound, which says the clause of the two top digits.
 			let mut stated = if digits.len() > max(x.0.len(), y.0.len()) {
@@ -439,14 +465,16 @@ impl MixedRadixEncoder {
 			}
 			// Pinning the root says more than bounding it.
 			if !at_root {
-				stated = self.lex_leq(db, &digits, &base, k, most, stated)?;
+				stated = self.lex_leq(db, &digits, &base, k, most, stated, condition)?;
 			}
 			Ok::<_, Unsatisfiable>((digits, most, stated))
 		})?
 		.unwrap_or_default();
 		match con.cmp() {
-			LimitComp::LessEq => self.lex_leq(db, &root, &base, k, most, stated).map(|_| ()),
-			LimitComp::Equal => self.pin(db, &root, &base, k),
+			LimitComp::LessEq => self
+				.lex_leq(db, &root, &base, k, most, stated, condition)
+				.map(|_| ()),
+			LimitComp::Equal => self.pin(db, &root, &base, k, condition),
 		}
 	}
 }
@@ -466,8 +494,60 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for MixedRadixEnco
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for MixedRadixEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		let con = con.as_int_linear(db)?;
+		let Ok(con) = NormalizedIntLinear::try_from(con) else {
+			return db.contradiction();
+		};
 		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<Cardinality, Lit>> for MixedRadixEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<Cardinality, Lit>) -> Result {
+		let linear = con.constraint().as_linear();
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<CardinalityOne, Lit>> for MixedRadixEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<CardinalityOne, Lit>) -> Result {
+		let card = Cardinality::from(con.constraint().clone());
+		self.encode(db, &Implied::new(con.condition(), card))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<Count, Lit>> for MixedRadixEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<Count, Lit>) -> Result {
+		// A bound no count reaches falsifies the condition, not the database.
+		let Ok(linear) = NormalizedIntLinear::try_from(con.constraint()) else {
+			return db.add_clause([!con.condition()]);
+		};
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<NormalizedBoolLinear, Lit>>
+	for MixedRadixEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedBoolLinear, Lit>) -> Result {
+		let linear = con.constraint().as_int_linear();
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<NormalizedIntLinear, Lit>>
+	for MixedRadixEncoder
+{
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedIntLinear, Lit>) -> Result {
+		con.encode_with(db, |db, con, r| {
+			if self
+				.config
+				.encoder()
+				.encode_undecomposed(db, con, Some(r))?
+			{
+				return Ok(());
+			}
+			self.encode_digits(db, con, Some(r))
+		})
 	}
 }
 
@@ -487,12 +567,12 @@ where
 		tracing::instrument(name = "mixed_radix_encoder", skip_all, fields(constraint = format!("{con:?}")))
 	)]
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
-		if self.config.encoder().encode_undecomposed(db, con)? {
+		if self.config.encoder().encode_undecomposed(db, con, None)? {
 			return Ok(());
 		}
 		// Digits that cannot hold a value are a constraint that cannot be met,
 		// which the database has to be told rather than only the caller.
-		let Ok(()) = self.encode_digits(db, con) else {
+		let Ok(()) = self.encode_digits(db, con, None) else {
 			return db.contradiction();
 		};
 		Ok(())
@@ -520,7 +600,8 @@ mod tests {
 			let exp =
 				xs[0].clone() * coeffs[0] + xs[1].clone() * coeffs[1] + xs[2].clone() * coeffs[2];
 			let con = Linear::new(exp, Comparator::LessEq, k);
-			cnf.encode_implied(&[r], &con, &LinearEncoder::<MixedRadixEncoder>::default())
+			LinearEncoder::<MixedRadixEncoder>::default()
+				.encode(&mut cnf, &con.implied_by(r))
 				.unwrap();
 			// Projected onto the condition and the variables' own literals,
 			// since the digits add too many auxiliary literals to enumerate.

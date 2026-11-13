@@ -30,6 +30,7 @@ use crate::{
 		cardinality::Cardinality,
 		cardinality_one::CardinalityOne,
 		count::Count,
+		implied::{negated, ConditionalClauses, Implied},
 		int_linear::NormalizedIntLinear,
 		linear::{LimitComp, PosCoeff},
 		propositional_logic::{Formula, TseitinEncoder},
@@ -487,7 +488,10 @@ impl AdderEncoder {
 		constant: Coeff,
 		cmp: LimitComp,
 		k: Coeff,
+		condition: Option<Lit>,
 	) -> Result {
+		// Only what the sum comes to states the constraint; a column's fresh
+		// sum and carry literals define themselves.
 		let rhs = k - constant;
 		if rhs < 0 {
 			return db.contradiction();
@@ -496,7 +500,7 @@ impl AdderEncoder {
 			// Every coefficient is positive, so a sum of zero fixes them all.
 			return terms
 				.into_iter()
-				.try_for_each(|(lit, _)| db.add_clause([!lit]));
+				.try_for_each(|(lit, _)| db.add_clause([BoolVal::Lit(!lit), negated(condition)]));
 		}
 		let rhs = PosCoeff::new(rhs);
 
@@ -504,7 +508,7 @@ impl AdderEncoder {
 		// below stop at the bound's last bit.
 		for &(lit, coef) in &terms {
 			if coef > *rhs {
-				db.add_clause([!lit])?;
+				db.add_clause([BoolVal::Lit(!lit), negated(condition)])?;
 			}
 		}
 		terms.retain(|&(_, coef)| coef <= *rhs);
@@ -544,7 +548,7 @@ impl AdderEncoder {
 					if cmp == LimitComp::Equal {
 						let unit = if k[b] { x } else { !x };
 						if !forced.contains(&unit) {
-							db.add_clause([unit])?;
+							db.add_clause([BoolVal::Lit(unit), negated(condition)])?;
 							forced.push(unit);
 						}
 					} else {
@@ -572,7 +576,7 @@ impl AdderEncoder {
 							let key = (inputs, k[b]);
 							if !fixed.contains(&key) {
 								let _ = Self::sum_circuit(
-									db,
+									&mut ConditionalClauses::optional(db, condition),
 									&lits,
 									Some(BoolVal::Const(k[b])),
 									String::new(),
@@ -586,7 +590,7 @@ impl AdderEncoder {
 							// The known parity makes this sum the last input or
 							// its negation.
 							Self::output_other_input(
-								db,
+								&mut ConditionalClauses::optional(db, condition),
 								&mut bucket,
 								b,
 								k[b],
@@ -618,12 +622,19 @@ impl AdderEncoder {
 						// Under `=` two inputs of known sum differ and carry
 						// nothing, or agree and carry either one.
 						let known = last && cmp == LimitComp::Equal && lits.len() == 2;
-						if known && (k[b] || Self::carry_either(db, &mut bucket, b + 1, &lits)?) {
+						if known
+							&& (k[b]
+								|| Self::carry_either(
+									&mut ConditionalClauses::optional(db, condition),
+									&mut bucket,
+									b + 1,
+									&lits,
+								)?) {
 							// Nothing is left to carry.
 						} else if b + 1 >= bits {
 							// A carry here would put the sum past `k`.
 							let _ = Self::carry_circuit(
-								db,
+								&mut ConditionalClauses::optional(db, condition),
 								&lits,
 								Some(BoolVal::Const(false)),
 								String::new(),
@@ -631,7 +642,7 @@ impl AdderEncoder {
 						} else if last && cmp == LimitComp::Equal && bucket[b + 1].is_empty() {
 							// The result is known, so no literal is needed.
 							let _ = Self::carry_circuit(
-								db,
+								&mut ConditionalClauses::optional(db, condition),
 								&lits,
 								Some(BoolVal::Const(k[b + 1])),
 								String::new(),
@@ -648,7 +659,7 @@ impl AdderEncoder {
 							// The next column's known sum makes this carry
 							// its one other input or that input's negation.
 							Self::output_other_input(
-								db,
+								&mut ConditionalClauses::optional(db, condition),
 								&mut bucket,
 								b + 1,
 								k[b + 1],
@@ -694,7 +705,12 @@ impl AdderEncoder {
 				.iter()
 				.map(|&l| l.map_or(BoolVal::Const(false), BoolVal::Lit))
 				.collect_vec();
-			lex_leq_const(db, &sum, rhs, bits)?;
+			lex_leq_const(
+				&mut ConditionalClauses::optional(db, condition),
+				&sum,
+				rhs,
+				bits,
+			)?;
 		}
 		Ok(())
 	}
@@ -742,8 +758,54 @@ impl<Db: ClauseDatabase + ?Sized> Encoder<Db, CardinalityOne> for AdderEncoder {
 
 impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Count> for AdderEncoder {
 	fn encode(&self, db: &mut Db, con: &Count) -> Result {
-		let con = con.as_int_linear(db)?;
+		let Ok(con) = NormalizedIntLinear::try_from(con) else {
+			return db.contradiction();
+		};
 		self.encode(db, &con)
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<Cardinality, Lit>> for AdderEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<Cardinality, Lit>) -> Result {
+		let linear = con.constraint().as_linear();
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<CardinalityOne, Lit>> for AdderEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<CardinalityOne, Lit>) -> Result {
+		let card = Cardinality::from(con.constraint().clone());
+		self.encode(db, &Implied::new(con.condition(), card))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<Count, Lit>> for AdderEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<Count, Lit>) -> Result {
+		// A bound no count reaches falsifies the condition, not the database.
+		let Ok(linear) = NormalizedIntLinear::try_from(con.constraint()) else {
+			return db.add_clause([!con.condition()]);
+		};
+		self.encode(db, &Implied::new(con.condition(), linear))
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<NormalizedBoolLinear, Lit>> for AdderEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedBoolLinear, Lit>) -> Result {
+		con.encode_with(db, |db, con, r| {
+			let terms = con.terms().iter().map(|&(lit, c)| (lit, *c)).collect_vec();
+			Self::encode_weighted(db, terms, 0, con.cmp(), con.k(), Some(r))
+		})
+	}
+}
+
+impl<Db: ClauseDatabase + ?Sized> Encoder<Db, Implied<NormalizedIntLinear, Lit>> for AdderEncoder {
+	fn encode(&self, db: &mut Db, con: &Implied<NormalizedIntLinear, Lit>) -> Result {
+		con.encode_with(db, |db, con, r| {
+			// Products and binary encodings are shared, so only the sum takes
+			// the condition.
+			let (terms, constant) = Self::weighted_literals(db, con)?;
+			Self::encode_weighted(db, terms, constant, con.cmp(), con.k(), Some(r))
+		})
 	}
 }
 
@@ -759,7 +821,7 @@ where
 		// Already the weighted literals the sum is built from, so there is no
 		// integer to read them back out of.
 		let terms = con.terms().iter().map(|&(lit, c)| (lit, *c)).collect_vec();
-		Self::encode_weighted(db, terms, 0, con.cmp(), con.k())
+		Self::encode_weighted(db, terms, 0, con.cmp(), con.k(), None)
 	}
 }
 
@@ -774,7 +836,7 @@ where
 	fn encode(&self, db: &mut Db, con: &NormalizedIntLinear) -> Result {
 		// Adding bit by bit has no use for how the terms are grouped.
 		let (terms, constant) = Self::weighted_literals(db, con)?;
-		Self::encode_weighted(db, terms, constant, con.cmp(), con.k())
+		Self::encode_weighted(db, terms, constant, con.cmp(), con.k(), None)
 	}
 }
 

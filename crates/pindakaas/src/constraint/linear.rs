@@ -27,10 +27,11 @@ pub use crate::encoder::{
 use crate::{
 	constraint::{
 		bool_linear::NormalizedBoolLinear, cardinality::Cardinality,
-		cardinality_one::CardinalityOne, count::Count, int_linear::NormalizedIntLinear,
+		cardinality_one::CardinalityOne, count::Count, implied::Implied,
+		int_linear::NormalizedIntLinear,
 	},
 	decision::integer::IntVar,
-	Checker, Coeff, Lit, Result, Unsatisfiable, Valuation,
+	BoolVal, Checker, Coeff, Lit, Result, Unsatisfiable, Valuation,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -464,6 +465,11 @@ impl LinTerm {
 }
 
 impl Linear {
+	/// The constraint `condition → self`.
+	pub fn implied_by(self, condition: impl Into<BoolVal>) -> Implied<Self> {
+		Implied::new(condition.into(), self)
+	}
+
 	/// Construct the constraint `exp ≷ k`, without normalisation or
 	/// aggregation.
 	///
