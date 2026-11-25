@@ -199,7 +199,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pindakaas"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "divan",
  "expect-test",
@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "pindakaas-cadical"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "cc",
 ]
@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "pyndakaas"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "itertools",
  "pindakaas",
